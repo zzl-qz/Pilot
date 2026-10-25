@@ -1,5 +1,7 @@
 package com.pilot.core.loop;
 
+import com.pilot.core.approval.ApprovalBroker;
+import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.ToolCompleted;
@@ -11,9 +13,11 @@ import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PermissionResult;
 import com.pilot.core.permission.PolicyPermissionGate;
+import com.pilot.core.tool.ProducesCheck;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.WritesFiles;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayDeque;
@@ -130,6 +134,71 @@ class AgentLoopTest {
     }
 
     @Test
+    void reportsChangedFilesAndChecksOnCompletion() {
+        var tool = new WritingTool("edit_file", "a.txt", "mvn -q test → exit 0");
+        var client = new ScriptedModelClient(
+                new ModelResponse("", List.of(new ToolCall("call_1", "edit_file", Map.of("path", "a.txt")))),
+                new ModelResponse("改好了，测试通过。", List.of()));
+        var loop = new AgentLoop(client, registry(tool), new PolicyPermissionGate(PermissionMode.AUTO), config(8, 3));
+
+        loop.run("改一下 a.txt", List.of(), events::add);
+
+        RunCompleted completed = (RunCompleted) events.stream()
+                .filter(event -> event instanceof RunCompleted).findFirst().orElseThrow();
+        assertEquals(List.of("a.txt"), completed.changedFiles());
+        assertEquals(List.of("mvn -q test → exit 0"), completed.checks());
+    }
+
+    @Test
+    void deniedWriteDoesNotCountAsChange() {
+        var tool = new WritingTool("edit_file", "a.txt", "mvn -q test → exit 0");
+        var client = new ScriptedModelClient(
+                new ModelResponse("", List.of(new ToolCall("call_1", "edit_file", Map.of("path", "a.txt")))),
+                new ModelResponse("没改成。", List.of()));
+        var loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
+
+        loop.run("改一下 a.txt", List.of(), events::add);
+
+        RunCompleted completed = (RunCompleted) events.stream()
+                .filter(event -> event instanceof RunCompleted).findFirst().orElseThrow();
+        assertTrue(completed.changedFiles().isEmpty(), completed.changedFiles().toString());
+        assertTrue(completed.checks().isEmpty(), completed.checks().toString());
+    }
+
+    @Test
+    void cancellationStopsBeforeCallingModel() {
+        var client = new ScriptedModelClient(new ModelResponse("不该被调用", List.of()));
+        var loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(),
+                config(8, 3), () -> true);
+
+        AgentLoop.Result result = loop.run("你好", List.of(), events::add);
+
+        assertEquals("CANCELLED", result.failureCode());
+        assertTrue(client.requests.isEmpty(), "取消后不应再请求模型");
+        assertTrue(events.stream().anyMatch(event -> event instanceof RunFailed failed
+                && failed.code().equals("CANCELLED")));
+    }
+
+    @Test
+    void compactsLargeToolOutputBeforeNextRequest() {
+        var tool = new CountingTool("read_file", "x".repeat(20_000));
+        var client = new ScriptedModelClient(
+                new ModelResponse("", List.of(new ToolCall("call_1", "read_file", Map.of("path", "big.txt")))),
+                new ModelResponse("读完了", List.of()));
+        System.setProperty("pilot.context.max-chars", "2000");
+        try {
+            var loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
+            loop.run("读大文件", List.of(), events::add);
+        } finally {
+            System.clearProperty("pilot.context.max-chars");
+        }
+
+        List<Message> secondRequest = client.requests.get(1);
+        String toolResult = secondRequest.getLast().content();
+        assertTrue(toolResult.startsWith("[工具输出已省略"), toolResult);
+    }
+
+    @Test
     void unknownToolIsReportedToModel() {
         var client = new ScriptedModelClient(
                 new ModelResponse("", List.of(new ToolCall("call_1", "drop_database", Map.of()))),
@@ -197,6 +266,54 @@ class AgentLoopTest {
                 throw new IllegalStateException("脚本已用完");
             }
             return next;
+        }
+    }
+
+    /** 模拟写文件 + 命令验证工具：用于断言 changedFiles / checks 汇总。 */
+    private static final class WritingTool implements Tool, WritesFiles, ProducesCheck {
+        private final String name;
+        private final String path;
+        private final String check;
+
+        private WritingTool(String name, String path, String check) {
+            this.name = name;
+            this.path = path;
+            this.check = check;
+        }
+
+        @Override
+        public String name() {
+            return name;
+        }
+
+        @Override
+        public String description() {
+            return "测试用写工具";
+        }
+
+        @Override
+        public Map<String, Object> parameters() {
+            return Map.of("type", "object");
+        }
+
+        @Override
+        public boolean readOnly() {
+            return false;
+        }
+
+        @Override
+        public String execute(Map<String, Object> args) {
+            return "已修改 " + path;
+        }
+
+        @Override
+        public String changedPath(ToolCall call) {
+            return path;
+        }
+
+        @Override
+        public String checkSummary(ToolCall call, String result) {
+            return check;
         }
     }
 

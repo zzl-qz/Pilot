@@ -21,4 +21,16 @@
         <module>pilot-server</module>
         <module>pilot-web</module>
     </modules>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- sqlite-jdbc 通过 System.load 加载本地库，JDK 24 起需要显式授权 -->
+                    <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

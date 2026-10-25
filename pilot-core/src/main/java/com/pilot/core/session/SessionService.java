@@ -8,7 +8,6 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -19,38 +18,69 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 /**
- * 内存版会话服务：保存会话、运行与事件序列，并向订阅者推送事件。
+ * 会话服务：负责 id 生成、状态推进与事件订阅，数据读写委托给 {@link SessionRepository}。
  *
- * <p>存储与推送都在会话级锁内完成，因此订阅者收到的事件顺序与 {@code sequence} 一致；
- * 订阅时先回放游标之后的历史事件，再注册监听，保证不丢事件、不重复。
- * 进程重启后数据丢失，这是 Sprint 1 的预期限制。
+ * <p>同一会话的「追加事件 + 推送订阅者」在同一把会话锁内完成，因此订阅者收到的事件顺序与
+ * {@code sequence} 一致；订阅时先回放游标之后的历史事件，再注册监听，保证不丢不重。
  */
 public final class SessionService {
     private static final Logger log = LoggerFactory.getLogger(SessionService.class);
 
     private final Clock clock;
-    private final ConcurrentMap<String, SessionState> sessions = new ConcurrentHashMap<>();
+    private final SessionRepository repository;
+    private final ConcurrentMap<String, CopyOnWriteArrayList<Consumer<EventEnvelope>>> subscribers =
+            new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Object> locks = new ConcurrentHashMap<>();
 
     public SessionService() {
-        this(Clock.systemUTC());
+        this(Clock.systemUTC(), new InMemorySessionRepository());
     }
 
     public SessionService(Clock clock) {
+        this(clock, new InMemorySessionRepository());
+    }
+
+    public SessionService(Clock clock, SessionRepository repository) {
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        this.repository = Objects.requireNonNull(repository, "repository must not be null");
     }
 
     public Session createSession(String title) {
+        return createSession(title, null);
+    }
+
+    /**
+     * @param workspace 会话绑定的工作区绝对路径；{@code null} 表示沿用服务端默认工作区
+     */
+    public Session createSession(String title, String workspace) {
         if (title == null || title.isBlank()) {
             throw new IllegalArgumentException("title must not be blank");
         }
-        var state = new SessionState("ses_" + UUID.randomUUID(), title.strip(), clock.instant());
-        sessions.put(state.id, state);
-        return state.snapshot();
+        String normalizedWorkspace = workspace == null || workspace.isBlank() ? null : workspace.strip();
+        return repository.create("ses_" + UUID.randomUUID(), title.strip(), normalizedWorkspace, clock.instant());
     }
 
     public Optional<Session> find(String sessionId) {
-        SessionState state = sessionId == null ? null : sessions.get(sessionId);
-        return state == null ? Optional.empty() : Optional.of(state.snapshot());
+        return sessionId == null ? Optional.empty() : repository.find(sessionId);
+    }
+
+    /** 按创建时间倒序返回全部会话。 */
+    public List<Session> list() {
+        return repository.list();
+    }
+
+    public boolean rename(String sessionId, String title) {
+        if (title == null || title.isBlank()) {
+            throw new IllegalArgumentException("title must not be blank");
+        }
+        return repository.rename(sessionId, title.strip());
+    }
+
+    /** 删除会话：先摘掉订阅者再删数据，避免删除后仍有推送。 */
+    public boolean delete(String sessionId) {
+        subscribers.remove(sessionId);
+        locks.remove(sessionId);
+        return repository.delete(sessionId);
     }
 
     /** 记录一次用户消息并开启新运行：立即写入 {@code run.started} 事件。 */
@@ -58,10 +88,9 @@ public final class SessionService {
         if (content == null || content.isBlank()) {
             throw new IllegalArgumentException("content must not be blank");
         }
-        SessionState state = require(sessionId);
         String runId = "run_" + UUID.randomUUID();
         Instant startedAt = clock.instant();
-        publish(state, runId, new RunStarted(content.strip()));
+        publish(sessionId, runId, new RunStarted(content.strip()));
         return new Run(runId, sessionId, startedAt);
     }
 
@@ -69,29 +98,31 @@ public final class SessionService {
     public EventEnvelope publish(String sessionId, String runId, SessionEvent event) {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(event, "event must not be null");
-        return publish(require(sessionId), runId, event);
+        Object lock = lockFor(sessionId);
+        synchronized (lock) {
+            Session current = repository.find(sessionId).orElseThrow(() -> new NoSuchSessionException(sessionId));
+            SessionStatus status = nextStatus(current.status(), event);
+            EventEnvelope envelope = repository.append(sessionId, runId, clock.instant(), event, status);
+            for (Consumer<EventEnvelope> subscriber : listeners(sessionId)) {
+                try {
+                    subscriber.accept(envelope);
+                } catch (RuntimeException e) {
+                    listeners(sessionId).remove(subscriber);
+                    log.warn("Dropped session subscriber for {} after delivery failure", sessionId, e);
+                }
+            }
+            return envelope;
+        }
     }
 
     /** 返回会话的全部事件快照，按序号升序。 */
     public List<EventEnvelope> events(String sessionId) {
-        SessionState state = require(sessionId);
-        synchronized (state) {
-            return List.copyOf(state.events);
-        }
+        return repository.events(sessionId);
     }
 
     /** 返回序号大于 {@code afterSequence} 的事件，用于断线重连。 */
     public List<EventEnvelope> eventsAfter(String sessionId, long afterSequence) {
-        SessionState state = require(sessionId);
-        synchronized (state) {
-            var result = new ArrayList<EventEnvelope>();
-            for (EventEnvelope envelope : state.events) {
-                if (envelope.sequence() > afterSequence) {
-                    result.add(envelope);
-                }
-            }
-            return List.copyOf(result);
-        }
+        return repository.eventsAfter(sessionId, afterSequence);
     }
 
     /**
@@ -101,41 +132,26 @@ public final class SessionService {
      */
     public EventSubscription subscribe(String sessionId, long afterSequence, Consumer<EventEnvelope> listener) {
         Objects.requireNonNull(listener, "listener must not be null");
-        SessionState state = require(sessionId);
-        synchronized (state) {
-            for (EventEnvelope envelope : state.events) {
-                if (envelope.sequence() > afterSequence) {
-                    listener.accept(envelope);
-                }
+        Object lock = lockFor(sessionId);
+        synchronized (lock) {
+            if (repository.find(sessionId).isEmpty()) {
+                throw new NoSuchSessionException(sessionId);
             }
-            state.subscribers.add(listener);
+            for (EventEnvelope envelope : repository.eventsAfter(sessionId, afterSequence)) {
+                listener.accept(envelope);
+            }
+            listeners(sessionId).add(listener);
         }
-        return () -> state.subscribers.remove(listener);
+        return () -> listeners(sessionId).remove(listener);
     }
 
-    private EventEnvelope publish(SessionState state, String runId, SessionEvent event) {
-        synchronized (state) {
-            var envelope = EventEnvelope.of(++state.sequence, clock.instant(), state.id, runId, event);
-            state.events.add(envelope);
-            state.status = nextStatus(state.status, event);
-            for (Consumer<EventEnvelope> subscriber : state.subscribers) {
-                try {
-                    subscriber.accept(envelope);
-                } catch (RuntimeException e) {
-                    state.subscribers.remove(subscriber);
-                    log.warn("Dropped session subscriber for {} after delivery failure", state.id, e);
-                }
-            }
-            return envelope;
-        }
+    private Object lockFor(String sessionId) {
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        return locks.computeIfAbsent(sessionId, key -> new Object());
     }
 
-    private SessionState require(String sessionId) {
-        SessionState state = sessionId == null ? null : sessions.get(sessionId);
-        if (state == null) {
-            throw new NoSuchSessionException(sessionId);
-        }
-        return state;
+    private CopyOnWriteArrayList<Consumer<EventEnvelope>> listeners(String sessionId) {
+        return subscribers.computeIfAbsent(sessionId, key -> new CopyOnWriteArrayList<>());
     }
 
     private static SessionStatus nextStatus(SessionStatus current, SessionEvent event) {
@@ -147,27 +163,5 @@ public final class SessionService {
             case RUN_FAILED -> SessionStatus.FAILED;
             default -> current;
         };
-    }
-
-    private static final class SessionState {
-        private final String id;
-        private final String title;
-        private final Instant createdAt;
-        private final List<EventEnvelope> events = new ArrayList<>();
-        private final CopyOnWriteArrayList<Consumer<EventEnvelope>> subscribers = new CopyOnWriteArrayList<>();
-        private SessionStatus status = SessionStatus.CREATED;
-        private long sequence;
-
-        private SessionState(String id, String title, Instant createdAt) {
-            this.id = id;
-            this.title = title;
-            this.createdAt = createdAt;
-        }
-
-        private Session snapshot() {
-            synchronized (this) {
-                return new Session(id, title, createdAt, status);
-            }
-        }
     }
 }

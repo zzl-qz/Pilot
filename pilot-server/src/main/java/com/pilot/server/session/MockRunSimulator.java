@@ -19,6 +19,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -33,14 +35,18 @@ public class MockRunSimulator implements RunStarter {
     private static final Logger log = LoggerFactory.getLogger(MockRunSimulator.class);
 
     private final SessionService sessions;
+    private final RunRegistry registry;
     private final boolean enabled;
     private final long stepDelayMs;
     private final ScheduledExecutorService scheduler;
+    private final Set<String> activeRuns = ConcurrentHashMap.newKeySet();
+    private final Set<String> cancelledRuns = ConcurrentHashMap.newKeySet();
 
-    public MockRunSimulator(SessionService sessions,
+    public MockRunSimulator(SessionService sessions, RunRegistry registry,
                             @Value("${pilot.mock.enabled:true}") boolean enabled,
                             @Value("${pilot.mock.step-delay-ms:250}") long stepDelayMs) {
         this.sessions = sessions;
+        this.registry = registry;
         this.enabled = enabled;
         this.stepDelayMs = Math.max(1L, stepDelayMs);
         this.scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -56,14 +62,41 @@ public class MockRunSimulator implements RunStarter {
             return;
         }
         List<SessionEvent> steps = input.strip().startsWith("/fail") ? failure(input) : success(input);
+        activeRuns.add(runId);
+        cancelledRuns.remove(runId);
+        registry.register(runId, sessionId);
         scheduleNext(sessionId, runId, steps, 0);
+    }
+
+    @Override
+    public java.util.Optional<String> activeRun(String sessionId) {
+        return registry.activeRun(sessionId);
+    }
+
+    @Override
+    public boolean cancel(String runId) {
+        if (!activeRuns.remove(runId)) {
+            return false;
+        }
+        cancelledRuns.add(runId);
+        registry.unregister(runId);
+        return true;
     }
 
     private void scheduleNext(String sessionId, String runId, List<SessionEvent> steps, int index) {
         if (index >= steps.size()) {
+            activeRuns.remove(runId);
+            cancelledRuns.remove(runId);
+            registry.unregister(runId);
             return;
         }
         scheduler.schedule(() -> {
+            if (cancelledRuns.remove(runId)) {
+                activeRuns.remove(runId);
+                registry.unregister(runId);
+                publish(sessionId, runId, new RunFailed("CANCELLED", "运行已被用户取消。", false));
+                return;
+            }
             try {
                 sessions.publish(sessionId, runId, steps.get(index));
             } catch (RuntimeException e) {
@@ -72,6 +105,14 @@ public class MockRunSimulator implements RunStarter {
             }
             scheduleNext(sessionId, runId, steps, index + 1);
         }, stepDelayMs, TimeUnit.MILLISECONDS);
+    }
+
+    private void publish(String sessionId, String runId, SessionEvent event) {
+        try {
+            sessions.publish(sessionId, runId, event);
+        } catch (RuntimeException e) {
+            log.warn("Mock event {} could not be published for session {}", event.type().wireName(), sessionId, e);
+        }
     }
 
     private static List<SessionEvent> success(String input) {

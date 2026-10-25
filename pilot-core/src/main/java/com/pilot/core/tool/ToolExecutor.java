@@ -25,7 +25,11 @@ import java.util.stream.Collectors;
  * 审批在这里阻塞 Agent 线程，不轮询；超时由 {@link ApprovalBroker} 以拒绝结束。
  */
 public final class ToolExecutor {
-    public record Outcome(String toolName, String result) {
+    /**
+     * @param changedPath 写工具实际改动的文件（展示用相对路径），未改动为 {@code null}
+     * @param check       验证类工具产生的一行结果摘要，例如 {@code mvn -q test → exit 0}
+     */
+    public record Outcome(String toolName, String result, String changedPath, String check) {
     }
 
     private final ToolRegistry tools;
@@ -54,9 +58,24 @@ public final class ToolExecutor {
             result = executeTool(call, tool.get(), argsSummary, events);
         }
 
+        String changedPath = null;
+        String check = null;
+        if (tool.isPresent() && succeeded(result)) {
+            if (tool.get() instanceof WritesFiles writes) {
+                changedPath = writes.changedPath(call);
+            }
+            if (tool.get() instanceof ProducesCheck produces) {
+                check = produces.checkSummary(call, result);
+            }
+        }
+
         long latencyMs = Math.max(0L, (System.nanoTime() - startedAt) / 1_000_000L);
         events.accept(new ToolCompleted(call.callId(), ToolSupport.oneLine(result, 120), latencyMs));
-        return new Outcome(call.name(), result);
+        return new Outcome(call.name(), result, changedPath, check);
+    }
+
+    private static boolean succeeded(String result) {
+        return result != null && !result.startsWith("ERROR");
     }
 
     private String executeTool(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events) {

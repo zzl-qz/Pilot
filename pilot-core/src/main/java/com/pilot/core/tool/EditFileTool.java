@@ -13,13 +13,19 @@ import java.util.Map;
  * 精确文本替换。old_string 必须唯一命中，否则返回结构化错误让模型补充上下文后重试。
  * 这是 Coding Agent 与普通文本替换的关键区别：绝不自动选择第一处匹配。
  */
-public final class EditFileTool implements Tool {
+public final class EditFileTool implements Tool, WritesFiles {
     private static final long MAX_BYTES = 512 * 1024;
 
     private final PathValidator paths;
+    private final SnapshotSink snapshots;
 
     public EditFileTool(PathValidator paths) {
-        this.paths = paths;
+        this(paths, SnapshotSink.none());
+    }
+
+    public EditFileTool(PathValidator paths, SnapshotSink snapshots) {
+        this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
+        this.snapshots = java.util.Objects.requireNonNull(snapshots, "snapshots must not be null");
     }
 
     @Override
@@ -107,11 +113,25 @@ public final class EditFileTool implements Tool {
             }
 
             String updated = content.substring(0, index) + replacement + content.substring(index + search.length());
+            snapshots.beforeWrite(file);
             Files.writeString(file, updated, StandardCharsets.UTF_8);
             return "已修改 " + paths.display(file) + "：替换 1 处（"
                     + lineCount(search) + " 行 → " + lineCount(replacement) + " 行）";
         } catch (IOException e) {
             return "ERROR: 写入失败: " + e.getMessage();
+        }
+    }
+
+    @Override
+    public String changedPath(ToolCall call) {
+        String rawPath = ToolSupport.stringArg(call == null ? null : call.args(), "path");
+        if (rawPath == null) {
+            return null;
+        }
+        try {
+            return paths.display(paths.resolve(rawPath));
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 

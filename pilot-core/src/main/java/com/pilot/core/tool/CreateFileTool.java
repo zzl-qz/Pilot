@@ -10,11 +10,17 @@ import java.util.List;
 import java.util.Map;
 
 /** 在工作区内创建新文件，父目录自动创建；已存在的文件不覆盖，要求模型改用 edit_file。 */
-public final class CreateFileTool implements Tool {
+public final class CreateFileTool implements Tool, WritesFiles {
     private final PathValidator paths;
+    private final SnapshotSink snapshots;
 
     public CreateFileTool(PathValidator paths) {
-        this.paths = paths;
+        this(paths, SnapshotSink.none());
+    }
+
+    public CreateFileTool(PathValidator paths, SnapshotSink snapshots) {
+        this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
+        this.snapshots = java.util.Objects.requireNonNull(snapshots, "snapshots must not be null");
     }
 
     @Override
@@ -70,12 +76,26 @@ public final class CreateFileTool implements Tool {
 
         try {
             Files.createDirectories(file.getParent());
+            snapshots.beforeWrite(file);
             Files.writeString(file, content, StandardCharsets.UTF_8);
             int bytes = content.getBytes(StandardCharsets.UTF_8).length;
             return "已创建 " + paths.display(file) + "（" + bytes + " 字节，"
                     + (int) content.lines().count() + " 行）";
         } catch (IOException e) {
             return "ERROR: 创建失败: " + e.getMessage();
+        }
+    }
+
+    @Override
+    public String changedPath(ToolCall call) {
+        String rawPath = ToolSupport.stringArg(call == null ? null : call.args(), "path");
+        if (rawPath == null) {
+            return null;
+        }
+        try {
+            return paths.display(paths.resolve(rawPath));
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 }

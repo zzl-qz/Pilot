@@ -15,6 +15,7 @@ import com.pilot.core.tool.ToolSupport;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -32,10 +33,11 @@ import java.util.stream.Collectors;
 public final class AgentLoop {
     public static final String DEFAULT_SYSTEM_PROMPT = """
             你是 Pilot，一个在本地工作区中工作的编码代理。
-            你可以使用提供的工具查看文件、搜索文本，并在用户授权后修改文件。
-            所有路径都必须使用工作区内的相对路径。
+            你可以使用提供的工具查看文件、搜索文本，并在用户授权后修改文件、执行受限命令。
+            所有路径都必须使用工作区内的相对路径，命令在工作区根目录执行。
             先获取事实再回答，不要编造未读取过的文件内容。
             修改文件时优先用 edit_file，并保证 old_string 唯一；文件不存在时用 create_file。
+            改完代码后尽量用 run_command 运行相关的构建或测试来验证，并在结论中说明执行了什么命令、结果如何。
             完成任务后用简洁的中文给出结论，必要处引用文件路径与行号。
             """;
 
@@ -69,27 +71,37 @@ public final class AgentLoop {
         }
     }
 
+    private static final int DEFAULT_CONTEXT_LIMIT = 120_000;
+    private static final int MIN_COMPACTABLE_CHARS = 400;
+
     private final ModelClient client;
     private final ToolRegistry tools;
     private final ToolExecutor toolExecutor;
     private final Config config;
+    private final Cancellation cancellation;
 
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate) {
-        this(client, tools, permissionGate, ApprovalBroker.denyAll(), Config.defaults());
+        this(client, tools, permissionGate, ApprovalBroker.denyAll(), Config.defaults(), Cancellation.none());
     }
 
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate, Config config) {
-        this(client, tools, permissionGate, ApprovalBroker.denyAll(), config);
+        this(client, tools, permissionGate, ApprovalBroker.denyAll(), config, Cancellation.none());
     }
 
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
                      ApprovalBroker approvals, Config config) {
+        this(client, tools, permissionGate, approvals, config, Cancellation.none());
+    }
+
+    public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
+                     ApprovalBroker approvals, Config config, Cancellation cancellation) {
         this.client = Objects.requireNonNull(client, "client must not be null");
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.toolExecutor = new ToolExecutor(tools,
                 Objects.requireNonNull(permissionGate, "permissionGate must not be null"),
                 Objects.requireNonNull(approvals, "approvals must not be null"));
         this.config = Objects.requireNonNull(config, "config must not be null");
+        this.cancellation = Objects.requireNonNull(cancellation, "cancellation must not be null");
     }
 
     public Result run(String userInput, List<Message> history, Consumer<SessionEvent> events) {
@@ -106,8 +118,15 @@ public final class AgentLoop {
 
         String lastSignature = null;
         int repeated = 0;
+        var changedFiles = new LinkedHashSet<String>();
+        var checks = new ArrayList<String>();
 
         for (int step = 1; step <= config.maxSteps(); step++) {
+            if (cancellation.cancelled()) {
+                return cancel(messages, events);
+            }
+            compact(messages, contextLimit());
+
             ModelResponse response;
             try {
                 response = client.chat(List.copyOf(messages), tools.definitions());
@@ -126,7 +145,7 @@ public final class AgentLoop {
             if (calls.isEmpty()) {
                 messages.add(Message.assistant(content, List.of()));
                 String summary = content.isBlank() ? "任务完成（模型未返回文本）" : content;
-                events.accept(new RunCompleted(summary, List.of(), List.of()));
+                events.accept(new RunCompleted(summary, List.copyOf(changedFiles), List.copyOf(checks)));
                 return new Result(content, null, conversation(messages));
             }
 
@@ -146,13 +165,77 @@ public final class AgentLoop {
             }
 
             for (ToolCall call : calls) {
-                String result = toolExecutor.execute(call, events).result();
-                messages.add(Message.tool(call.callId(), result));
+                if (cancellation.cancelled()) {
+                    return cancel(messages, events);
+                }
+                ToolExecutor.Outcome outcome = toolExecutor.execute(call, events);
+                if (outcome.changedPath() != null) {
+                    changedFiles.add(outcome.changedPath());
+                }
+                if (outcome.check() != null) {
+                    checks.add(outcome.check());
+                }
+                messages.add(Message.tool(call.callId(), outcome.result()));
             }
         }
 
         events.accept(new RunFailed("MAX_STEPS", "达到最大步数 " + config.maxSteps() + "，任务未完成。", true));
         return new Result(null, "MAX_STEPS", conversation(messages));
+    }
+
+    private Result cancel(List<Message> messages, Consumer<SessionEvent> events) {
+        events.accept(new RunFailed("CANCELLED", "运行已被用户取消。", false));
+        return new Result(null, "CANCELLED", conversation(messages));
+    }
+
+    private static int contextLimit() {
+        String override = System.getProperty("pilot.context.max-chars");
+        if (override != null) {
+            try {
+                int value = Integer.parseInt(override.trim());
+                if (value > 0) {
+                    return value;
+                }
+            } catch (NumberFormatException ignored) {
+                // 回落默认预算
+            }
+        }
+        return DEFAULT_CONTEXT_LIMIT;
+    }
+
+    /**
+     * 上下文预算：把过大的工具输出替换为占位符，保留 system / user / assistant 与全部调用结构，
+     * 因此不会破坏模型协议。优先压缩最长的输出，保证少量替换就能回到预算内。
+     */
+    private static void compact(List<Message> messages, int limit) {
+        int total = 0;
+        for (Message message : messages) {
+            total += message.content().length();
+        }
+        if (total <= limit) {
+            return;
+        }
+
+        record Candidate(int index, int length) {
+        }
+        var candidates = new ArrayList<Candidate>();
+        for (int i = 1; i < messages.size(); i++) {
+            Message message = messages.get(i);
+            if ("tool".equals(message.role()) && message.content().length() >= MIN_COMPACTABLE_CHARS) {
+                candidates.add(new Candidate(i, message.content().length()));
+            }
+        }
+        candidates.sort(Comparator.comparingInt(Candidate::length).reversed());
+
+        for (Candidate candidate : candidates) {
+            if (total <= limit) {
+                break;
+            }
+            Message message = messages.get(candidate.index());
+            String placeholder = "[工具输出已省略 " + candidate.length() + " 字符，需要时请重新调用工具]";
+            messages.set(candidate.index(), Message.tool(message.toolCallId(), placeholder));
+            total -= candidate.length() - placeholder.length();
+        }
     }
 
     private static List<Message> conversation(List<Message> messages) {

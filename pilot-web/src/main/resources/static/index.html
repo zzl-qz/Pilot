@@ -52,6 +52,10 @@
           <span id="crumb-title">新任务</span>
         </div>
         <div class="topbar-right">
+          <button id="workspace-chip" class="chip chip-btn mono" type="button" hidden title="切换工作区">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.2 1.6h4.8A1.5 1.5 0 0 1 14 6.1v5.4A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
+            <span id="workspace-name">工作区</span>
+          </button>
           <span id="session-chip" class="chip mono" hidden></span>
           <span id="run-state" class="run-state state-idle">空闲</span>
           <button id="toggle-activity" class="icon-btn" type="button" aria-label="切换活动面板" aria-pressed="true" title="活动面板 (Ctrl B)">
@@ -60,7 +64,10 @@
         </div>
       </header>
 
-      <p id="notice" class="notice" hidden></p>
+      <div id="notice" class="notice" hidden>
+        <span id="notice-text"></span>
+        <button id="notice-close" class="notice-close" type="button" aria-label="关闭提示">✕</button>
+      </div>
 
       <div class="stage">
         <section class="thread-pane" aria-label="对话">
@@ -96,17 +103,27 @@
                   <span id="perm-chip" class="perm-chip" hidden>READ_ONLY</span>
                   <span class="composer-hint"><kbd>Enter</kbd> 发送 <span class="sep">·</span> <kbd>Shift</kbd><kbd>Enter</kbd> 换行</span>
                 </span>
-                <button id="send" class="send" type="submit" disabled aria-label="发送" title="发送">
-                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.8M4.6 7.2 8 3.8l3.4 3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
-                </button>
+                <div class="composer-actions">
+                  <button id="stop" class="send stop" type="button" hidden aria-label="停止" title="停止本次运行">
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.6" fill="currentColor"/></svg>
+                  </button>
+                  <button id="send" class="send" type="submit" disabled aria-label="发送" title="发送">
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.8M4.6 7.2 8 3.8l3.4 3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
         </section>
 
-        <aside id="activity" class="activity" aria-label="活动">
+        <aside id="activity" class="activity" aria-label="活动与变更">
           <div class="activity-head">
-            <h2>活动</h2>
+            <div class="tabs" id="panel-tabs" role="tablist" aria-label="面板切换">
+              <button class="tab is-on" type="button" data-tab="activity" role="tab" aria-selected="true">活动</button>
+              <button class="tab" type="button" data-tab="changes" role="tab" aria-selected="false">
+                变更<span id="change-count" class="tab-count" hidden>0</span>
+              </button>
+            </div>
             <div class="filters" id="filters" role="tablist" aria-label="事件过滤">
               <button class="filter is-on" type="button" data-filter="all" aria-selected="true">全部</button>
               <button class="filter" type="button" data-filter="tool" aria-selected="false">工具</button>
@@ -114,11 +131,55 @@
               <button class="filter" type="button" data-filter="run" aria-selected="false">运行</button>
             </div>
           </div>
-          <p id="timeline-empty" class="timeline-empty">连接后这里会按序号显示 run / tool / approval 事件。</p>
-          <ol id="timeline" class="timeline" aria-live="polite"></ol>
+
+          <div id="panel-activity" class="panel-body">
+            <p id="timeline-empty" class="timeline-empty">连接后这里会按序号显示 run / tool / approval 事件。</p>
+            <ol id="timeline" class="timeline" aria-live="polite"></ol>
+          </div>
+
+          <div id="panel-changes" class="panel-body" hidden>
+            <div class="changes-bar">
+              <span id="changes-state" class="changes-state">尚未加载</span>
+              <button id="changes-rollback" class="btn btn-danger btn-sm" type="button" hidden title="把本次运行改过的文件还原到运行前">回滚本次运行</button>
+              <button id="changes-refresh" class="icon-btn" type="button" title="刷新变更" aria-label="刷新变更">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.6V5.4h-2.8" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
+            <div id="run-changes" class="run-changes" hidden></div>
+            <ul id="change-files" class="change-files"></ul>
+            <pre id="change-diff" class="change-diff"></pre>
+          </div>
         </aside>
       </div>
     </main>
+  </div>
+
+  <div id="picker" class="modal" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-label="选择工作区">
+      <header class="modal-head">
+        <div>
+          <h2>选择工作区</h2>
+          <p class="modal-sub">Pilot 只能读写你选中的这个目录，所有工具路径都被限制在它内部。</p>
+        </div>
+        <button id="picker-close" class="icon-btn" type="button" aria-label="关闭">✕</button>
+      </header>
+      <div class="picker-body">
+        <aside class="picker-roots" id="picker-roots"></aside>
+        <div class="picker-main">
+          <div class="picker-pathbar">
+            <button id="picker-up" class="icon-btn" type="button" title="上一级" aria-label="上一级">↑</button>
+            <input id="picker-path" class="picker-path mono" spellcheck="false" aria-label="当前路径">
+            <button id="picker-go" class="btn" type="button">前往</button>
+          </div>
+          <ul id="picker-list" class="picker-list" role="listbox"></ul>
+          <p id="picker-error" class="picker-error" hidden></p>
+        </div>
+      </div>
+      <footer class="modal-foot">
+        <span id="picker-selected" class="picker-selected mono"></span>
+        <button id="picker-confirm" class="btn btn-primary" type="button">在此工作区开始</button>
+      </footer>
+    </div>
   </div>
 
   <div id="palette" class="palette" hidden>

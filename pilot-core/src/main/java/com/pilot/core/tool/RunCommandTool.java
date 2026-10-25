@@ -1,0 +1,393 @@
+package com.pilot.core.tool;
+
+import com.pilot.core.workspace.PathValidator;
+
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
+
+/**
+ * 在工作区内执行受限命令，用于构建与测试验证。
+ *
+ * <p>安全边界：
+ * <ul>
+ *   <li>只允许白名单可执行文件，不接受绝对路径或带目录的命令；</li>
+ *   <li>不经过 shell，禁止 {@code & | ; < > ^ `$(} 等元字符，避免串联命令；</li>
+ *   <li>{@code git} 只允许只读子命令（status/diff/log/show/branch/…）；</li>
+ *   <li>强制超时、输出上限，并对疑似密钥的环境变量值做脱敏。</li>
+ * </ul>
+ *
+ * <p>该工具不是只读工具，因此 {@code READ_ONLY} 模式一律拒绝、{@code ASK} 模式逐次审批。
+ */
+public final class RunCommandTool implements Tool, ProducesCheck {
+    private static final Set<String> ALLOWED_EXECUTABLES = Set.of(
+            "mvn", "mvnw", "gradle", "gradlew", "git", "java", "javac",
+            "node", "npm", "pnpm", "python", "python3", "pytest", "dotnet", "go", "cargo", "rustc", "tsc");
+
+    private static final Set<String> GIT_READONLY = Set.of(
+            "status", "diff", "log", "show", "branch", "rev-parse", "ls-files", "describe", "blame", "remote");
+
+    private static final Pattern SHELL_META = Pattern.compile("[&|;<>^`\\n\\r]|\\$\\(");
+    private static final Pattern SECRET_KEY = Pattern.compile("(?i)(key|token|secret|password|credential|passwd)");
+    private static final Pattern EXIT_CODE = Pattern.compile("^退出码: (-?\\d+)", Pattern.MULTILINE);
+
+    private static final int MAX_TOKENS = 64;
+    private static final int MAX_OUTPUT_CHARS = 12_000;
+    private static final int HEAD_CHARS = 4_000;
+    private static final long DEFAULT_TIMEOUT_MS = 120_000L;
+    private static final long MAX_TIMEOUT_MS = 600_000L;
+    private static final Charset GBK = Charset.forName("GBK");
+
+    private final PathValidator paths;
+
+    public RunCommandTool(PathValidator paths) {
+        this.paths = Objects.requireNonNull(paths, "paths must not be null");
+    }
+
+    @Override
+    public String name() {
+        return "run_command";
+    }
+
+    @Override
+    public String description() {
+        return "在工作区根目录执行一条受限命令并返回退出码与输出，主要用于构建和测试验证。"
+                + "只允许 " + String.join("/", ALLOWED_EXECUTABLES.stream().sorted().toList()) + " 等白名单程序，"
+                + "不支持管道、重定向和命令串联；git 仅允许 " + String.join("/", GIT_READONLY.stream().sorted().toList())
+                + " 等只读子命令。超时默认 120 秒。";
+    }
+
+    @Override
+    public Map<String, Object> parameters() {
+        return Map.of(
+                "type", "object",
+                "properties", Map.of(
+                        "command", Map.of("type", "string",
+                                "description", "完整命令，例如 \"mvn -q test\" 或 \"git status --porcelain\""),
+                        "timeoutSeconds", Map.of("type", "integer",
+                                "description", "超时秒数，默认 120，最大 600")),
+                "required", List.of("command"),
+                "additionalProperties", false);
+    }
+
+    @Override
+    public boolean readOnly() {
+        return false;
+    }
+
+    @Override
+    public String execute(Map<String, Object> args) {
+        String raw = ToolSupport.stringArg(args, "command");
+        if (raw == null) {
+            return "ERROR: 缺少参数 command";
+        }
+        if (SHELL_META.matcher(raw).find()) {
+            return "ERROR: 命令包含不允许的 shell 元字符（& | ; < > ^ ` $( 或换行），请一次只执行一条命令。";
+        }
+
+        List<String> tokens = tokenize(raw);
+        if (tokens.isEmpty()) {
+            return "ERROR: 命令为空";
+        }
+        if (tokens.size() > MAX_TOKENS) {
+            return "ERROR: 参数过多（上限 " + MAX_TOKENS + " 个）";
+        }
+
+        String executable = tokens.get(0).toLowerCase(Locale.ROOT);
+        if (executable.contains("/") || executable.contains("\\")) {
+            return "ERROR: 只接受白名单内的裸命令名，不接受路径: " + tokens.get(0);
+        }
+        if (!ALLOWED_EXECUTABLES.contains(executable)) {
+            return "ERROR: 命令不在白名单内: " + tokens.get(0)
+                    + "。可用: " + String.join(", ", ALLOWED_EXECUTABLES.stream().sorted().toList());
+        }
+        if ("git".equals(executable)) {
+            String sub = tokens.size() > 1 ? tokens.get(1).toLowerCase(Locale.ROOT) : "";
+            if (!GIT_READONLY.contains(sub)) {
+                return "ERROR: git 只允许只读子命令: " + String.join(", ", GIT_READONLY.stream().sorted().toList())
+                        + "；提交与推送请由用户手动完成。";
+            }
+        }
+
+        List<String> command = withWrapper(tokens);
+        long timeoutMs = timeout(args);
+        return run(command, tokens, timeoutMs);
+    }
+
+    @Override
+    public String checkSummary(ToolCall call, String result) {
+        if (result == null || result.startsWith("ERROR")) {
+            return null;
+        }
+        String command = call == null || call.args() == null ? "" : String.valueOf(call.args().getOrDefault("command", ""));
+        var matcher = EXIT_CODE.matcher(result);
+        if (!matcher.find()) {
+            return null;
+        }
+        return ToolSupport.oneLine(command, 90) + " → exit " + matcher.group(1);
+    }
+
+    private String run(List<String> command, List<String> displayTokens, long timeoutMs) {
+        Path workdir = paths.root();
+        long startedAt = System.nanoTime();
+        ProcessBuilder builder = new ProcessBuilder(command);
+        builder.directory(workdir.toFile());
+        builder.redirectErrorStream(true);
+
+        Process process;
+        try {
+            process = builder.start();
+        } catch (IOException e) {
+            return "ERROR: 无法启动命令 " + String.join(" ", displayTokens) + "：" + e.getMessage();
+        }
+        try {
+            process.getOutputStream().close();
+        } catch (IOException ignored) {
+            // stdin 关闭失败不影响执行
+        }
+
+        CompletableFuture<byte[]> output = CompletableFuture.supplyAsync(() -> readAll(process));
+        boolean finished;
+        try {
+            finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            process.destroyForcibly();
+            return "ERROR: 命令执行被中断";
+        }
+        if (!finished) {
+            process.destroyForcibly();
+            try {
+                process.waitFor(2, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        String text = decode(await(output));
+        long latencyMs = Math.max(0L, (System.nanoTime() - startedAt) / 1_000_000L);
+        String rendered = render(String.join(" ", displayTokens), command,
+                finished ? exitCode(process) : -1, latencyMs, text);
+        return finished ? rendered : "ERROR: 命令超时（" + (timeoutMs / 1000) + " 秒）已被终止\n" + rendered;
+    }
+
+    private static String render(String displayCommand, List<String> actual, int exitCode,
+                                 long latencyMs, String output) {
+        StringBuilder out = new StringBuilder()
+                .append("命令: ").append(displayCommand).append('\n')
+                .append("退出码: ").append(exitCode).append('\n')
+                .append("耗时: ").append(latencyMs).append(" ms\n");
+        if (!actual.isEmpty() && !displayCommand.equals(String.join(" ", actual))) {
+            out.append("实际执行: ").append(String.join(" ", actual)).append('\n');
+        }
+        out.append("输出:\n").append(truncate(redact(output)));
+        while (!out.isEmpty() && out.charAt(out.length() - 1) == '\n') {
+            out.setLength(out.length() - 1);
+        }
+        return out.toString();
+    }
+
+    /** 优先使用工作区里的构建 wrapper；否则在 PATH 上解析真实可执行文件（Windows 上是 .cmd）。 */
+    private List<String> withWrapper(List<String> tokens) {
+        String head = tokens.get(0).toLowerCase(Locale.ROOT);
+        List<String> command = new ArrayList<>();
+        Path wrapper = null;
+        if ("mvn".equals(head)) {
+            wrapper = findWrapper("mvnw");
+        } else if ("gradle".equals(head)) {
+            wrapper = findWrapper("gradlew");
+        }
+        if (wrapper != null) {
+            command.add(wrapper.toAbsolutePath().toString());
+        } else {
+            Path resolved = resolveOnPath(tokens.get(0));
+            command.add(resolved == null ? tokens.get(0) : resolved.toAbsolutePath().toString());
+        }
+        command.addAll(tokens.subList(1, tokens.size()));
+        return needsShell(command.get(0)) ? withShell(command) : command;
+    }
+
+    private static boolean needsShell(String executable) {
+        String lower = executable.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".cmd") || lower.endsWith(".bat");
+    }
+
+    private static List<String> withShell(List<String> command) {
+        List<String> wrapped = new ArrayList<>(command.size() + 2);
+        wrapped.add("cmd.exe");
+        wrapped.add("/c");
+        wrapped.addAll(command);
+        return wrapped;
+    }
+
+    /** 在 PATH 中查找可执行文件；Windows 需要补全 .exe/.cmd/.bat 后缀。 */
+    static Path resolveOnPath(String name) {
+        String pathEnv = System.getenv("PATH");
+        if (pathEnv == null || pathEnv.isBlank()) {
+            return null;
+        }
+        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        // Windows 上只看带后缀的文件：Maven 的 bin 目录同时有 Unix 脚本 mvn 和 mvn.cmd，
+        // 直接执行 Unix 脚本会报 "不是有效的 Win32 应用程序"
+        List<String> extensions = windows ? List.of(".exe", ".cmd", ".bat") : List.of("");
+        for (String dir : pathEnv.split(java.io.File.pathSeparator)) {
+            if (dir == null || dir.isBlank()) {
+                continue;
+            }
+            for (String extension : extensions) {
+                try {
+                    Path candidate = Path.of(dir.trim(), name + extension);
+                    if (Files.isRegularFile(candidate)) {
+                        return candidate;
+                    }
+                } catch (RuntimeException ignored) {
+                    // 跳过非法 PATH 项
+                }
+            }
+        }
+        return null;
+    }
+
+    private Path findWrapper(String baseName) {
+        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        List<String> names = windows
+                ? List.of(baseName + ".cmd", baseName + ".bat")
+                : List.of(baseName);
+        for (String name : names) {
+            Path candidate = paths.root().resolve(name);
+            if (Files.isRegularFile(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static long timeout(Map<String, Object> args) {
+        Object value = args == null ? null : args.get("timeoutSeconds");
+        long seconds = DEFAULT_TIMEOUT_MS / 1000;
+        if (value instanceof Number number) {
+            seconds = number.longValue();
+        } else if (value != null) {
+            try {
+                seconds = Long.parseLong(value.toString().trim());
+            } catch (NumberFormatException ignored) {
+                seconds = DEFAULT_TIMEOUT_MS / 1000;
+            }
+        }
+        long millis = seconds * 1000L;
+        if (millis <= 0) {
+            return DEFAULT_TIMEOUT_MS;
+        }
+        return Math.min(millis, MAX_TIMEOUT_MS);
+    }
+
+    /** 支持单双引号的最小分词器：不展开变量，不做通配符。 */
+    static List<String> tokenize(String raw) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        char quote = 0;
+        boolean hasToken = false;
+        for (int i = 0; i < raw.length(); i++) {
+            char ch = raw.charAt(i);
+            if (quote != 0) {
+                if (ch == quote) {
+                    quote = 0;
+                } else {
+                    current.append(ch);
+                }
+                continue;
+            }
+            if (ch == '"' || ch == '\'') {
+                quote = ch;
+                hasToken = true;
+                continue;
+            }
+            if (Character.isWhitespace(ch)) {
+                if (hasToken) {
+                    tokens.add(current.toString());
+                    current.setLength(0);
+                    hasToken = false;
+                }
+                continue;
+            }
+            current.append(ch);
+            hasToken = true;
+        }
+        if (hasToken) {
+            tokens.add(current.toString());
+        }
+        return tokens;
+    }
+
+    private static byte[] readAll(Process process) {
+        try (var stream = process.getInputStream()) {
+            return stream.readAllBytes();
+        } catch (IOException e) {
+            return new byte[0];
+        }
+    }
+
+    private static byte[] await(CompletableFuture<byte[]> future) {
+        try {
+            return future.get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            future.cancel(true);
+            return new byte[0];
+        }
+    }
+
+    private static int exitCode(Process process) {
+        try {
+            return process.exitValue();
+        } catch (IllegalThreadStateException e) {
+            return -1;
+        }
+    }
+
+    /** 优先按 UTF-8 严格解码；失败时回退 GBK（Windows 中文控制台常见）。 */
+    static String decode(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return "";
+        }
+        try {
+            var decoder = StandardCharsets.UTF_8.newDecoder();
+            return decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+        } catch (java.nio.charset.CharacterCodingException e) {
+            return new String(bytes, GBK);
+        }
+    }
+
+    private static String redact(String text) {
+        String result = text;
+        for (Map.Entry<String, String> entry : System.getenv().entrySet()) {
+            String value = entry.getValue();
+            if (value == null || value.length() < 8 || !SECRET_KEY.matcher(entry.getKey()).find()) {
+                continue;
+            }
+            if (result.contains(value)) {
+                result = result.replace(value, "***");
+            }
+        }
+        return result;
+    }
+
+    private static String truncate(String text) {
+        if (text.length() <= MAX_OUTPUT_CHARS) {
+            return text;
+        }
+        String head = text.substring(0, HEAD_CHARS);
+        String tail = text.substring(text.length() - (MAX_OUTPUT_CHARS - HEAD_CHARS));
+        return head + "\n… 输出已截断（共 " + text.length() + " 字符）…\n" + tail;
+    }
+}

@@ -5,6 +5,7 @@ import com.pilot.core.event.RunStarted;
 import com.pilot.core.session.Run;
 import com.pilot.core.session.SessionService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -12,6 +13,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.ObjectMapper;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -22,7 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = {"pilot.mock.enabled=false", "pilot.agent.mode=mock"})
+@SpringBootTest(properties = {"pilot.mock.enabled=false", "pilot.agent.mode=mock", "pilot.store=memory"})
 @AutoConfigureMockMvc
 class SessionApiTest {
     @Autowired
@@ -33,6 +38,9 @@ class SessionApiTest {
 
     @Autowired
     private SessionService sessions;
+
+    @TempDir
+    Path workspace;
 
     @Test
     void createSessionAndSendMessageReturnIds() throws Exception {
@@ -49,6 +57,45 @@ class SessionApiTest {
         assertEquals(1, events.size());
         assertEquals("run.started", events.get(0).type());
         assertEquals("修复边界条件", ((RunStarted) events.get(0).payload()).input());
+    }
+
+    @Test
+    void createsSessionWithSelectedWorkspace() throws Exception {
+        String body = mvc.perform(post("/api/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("title", "选目录", "workspace", workspace.toString()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workspace").isNotEmpty())
+                .andReturn().getResponse().getContentAsString();
+
+        String sessionId = json.readTree(body).get("sessionId").asText();
+        assertEquals(workspace.toRealPath().toString(), json.readTree(body).get("workspace").asText());
+        assertEquals(workspace.toRealPath().toString(), sessions.find(sessionId).orElseThrow().workspace());
+    }
+
+    @Test
+    void rejectsMissingWorkspaceDirectory() throws Exception {
+        String missing = workspace.resolve("does-not-exist").toString();
+        mvc.perform(post("/api/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("title", "坏目录", "workspace", missing))))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void browsesLocalDirectories() throws Exception {
+        Files.createDirectory(workspace.resolve("child-project"));
+
+        mvc.perform(get("/api/workspaces/browse").param("path", workspace.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.directories[0].name").value("child-project"))
+                .andExpect(jsonPath("$.gitRepository").value(false));
+    }
+
+    @Test
+    void rejectsRollbackWithoutSnapshot() throws Exception {
+        mvc.perform(post("/api/runs/{runId}/rollback", "run_missing"))
+                .andExpect(status().isNotFound());
     }
 
     @Test

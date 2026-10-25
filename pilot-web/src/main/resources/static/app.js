@@ -16,6 +16,7 @@ const el = {
   modeBadge: document.querySelector('#mode-badge'),
   permChip: document.querySelector('#perm-chip'),
   workspaceChip: document.querySelector('#workspace-chip'),
+  workspaceName: document.querySelector('#workspace-name'),
   sessionChip: document.querySelector('#session-chip'),
   connection: document.querySelector('#connection'),
   connectionText: document.querySelector('#connection-text'),
@@ -24,6 +25,8 @@ const el = {
   sessionEmpty: document.querySelector('#session-empty'),
   crumbTitle: document.querySelector('#crumb-title'),
   notice: document.querySelector('#notice'),
+  noticeText: document.querySelector('#notice-text'),
+  noticeClose: document.querySelector('#notice-close'),
   runState: document.querySelector('#run-state'),
   messages: document.querySelector('#messages'),
   emptyState: document.querySelector('#empty-state'),
@@ -32,19 +35,51 @@ const el = {
   toggleActivity: document.querySelector('#toggle-activity'),
   activity: document.querySelector('#activity'),
   filters: document.querySelector('#filters'),
+  panelTabs: document.querySelector('#panel-tabs'),
+  panelActivity: document.querySelector('#panel-activity'),
+  panelChanges: document.querySelector('#panel-changes'),
+  changeCount: document.querySelector('#change-count'),
+  changesState: document.querySelector('#changes-state'),
+  changesRefresh: document.querySelector('#changes-refresh'),
+  changesRollback: document.querySelector('#changes-rollback'),
+  runChanges: document.querySelector('#run-changes'),
+  changeFiles: document.querySelector('#change-files'),
+  changeDiff: document.querySelector('#change-diff'),
   timeline: document.querySelector('#timeline'),
   timelineEmpty: document.querySelector('#timeline-empty'),
   composer: document.querySelector('#composer'),
   input: document.querySelector('#input'),
   send: document.querySelector('#send'),
+  stop: document.querySelector('#stop'),
   palette: document.querySelector('#palette'),
   paletteInput: document.querySelector('#palette-input'),
-  paletteList: document.querySelector('#palette-list')
+  paletteList: document.querySelector('#palette-list'),
+  picker: document.querySelector('#picker'),
+  pickerClose: document.querySelector('#picker-close'),
+  pickerRoots: document.querySelector('#picker-roots'),
+  pickerUp: document.querySelector('#picker-up'),
+  pickerPath: document.querySelector('#picker-path'),
+  pickerGo: document.querySelector('#picker-go'),
+  pickerList: document.querySelector('#picker-list'),
+  pickerError: document.querySelector('#picker-error'),
+  pickerSelected: document.querySelector('#picker-selected'),
+  pickerConfirm: document.querySelector('#picker-confirm')
 };
+
+const LAST_WORKSPACE_KEY = 'pilot.workspace';
 
 const state = {
   sessionId: null,
   sessionTitle: '',
+  workspace: null,
+  runId: null,
+  lastRunId: null,
+  agentMode: null,
+  changedFiles: [],
+  composerEnabled: false,
+  streamCard: null,
+  streamText: '',
+  renderQueued: false,
   sessions: [],
   source: null,
   running: false,
@@ -56,13 +91,18 @@ const state = {
   pendingApprovals: new Map(),
   activityCount: 0,
   filter: 'all',
+  tab: 'activity',
+  pickerPath: '',
+  pickerParent: null,
+  pickerSelection: '',
   paletteIndex: 0,
   paletteItems: []
 };
 
 const COMMANDS = [
-  { label: '新任务', hint: 'Ctrl N', run: () => startSession() },
-  { label: '切换活动面板', hint: 'Ctrl B', run: () => toggleActivity() },
+  { label: '新任务（选择工作区）', hint: 'Ctrl N', run: () => openPicker() },
+  { label: '切换活动/变更面板', hint: 'Ctrl B', run: () => toggleActivity() },
+  { label: '刷新变更', hint: '', run: () => selectTab('changes') },
   { label: '复制会话 ID', hint: '', run: copySessionId },
   { label: '清空当前视图', hint: '', run: () => resetView() },
   { label: '重新连接事件流', hint: '', run: () => reconnect() }
@@ -71,12 +111,32 @@ const COMMANDS = [
 init();
 
 function init() {
-  el.newSession.addEventListener('click', () => startSession());
+  el.newSession.addEventListener('click', () => openPicker());
+  el.workspaceChip.addEventListener('click', () => openPicker());
+  el.sessionChip.addEventListener('click', copySessionId);
   el.sidebarToggle.addEventListener('click', toggleSidebar);
   el.scrim.addEventListener('click', closeOverlays);
   el.toggleActivity.addEventListener('click', toggleActivity);
   el.filters.addEventListener('click', onFilterClick);
   el.prompts.addEventListener('click', onPromptClick);
+  el.panelTabs.addEventListener('click', onTabClick);
+  el.changesRefresh.addEventListener('click', () => loadChanges());
+  el.changesRollback.addEventListener('click', rollbackRun);
+  el.stop.addEventListener('click', cancelRun);
+  el.noticeClose.addEventListener('click', hideNotice);
+  el.pickerClose.addEventListener('click', closePicker);
+  el.pickerUp.addEventListener('click', pickerUp);
+  el.pickerGo.addEventListener('click', () => browseTo(el.pickerPath.value.trim()));
+  el.pickerPath.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      browseTo(el.pickerPath.value.trim());
+    }
+  });
+  el.pickerConfirm.addEventListener('click', confirmPicker);
+  el.picker.addEventListener('click', (event) => {
+    if (event.target === el.picker) closePicker();
+  });
   el.paletteInput.addEventListener('input', () => renderPalette(el.paletteInput.value));
   el.paletteInput.addEventListener('keydown', onPaletteKeydown);
   el.palette.addEventListener('click', (event) => {
@@ -86,7 +146,19 @@ function init() {
   window.addEventListener('resize', syncScrim);
   bindComposer();
   loadHealth();
-  startSession();
+  restoreLastSession();
+}
+
+/** 优先用上次的工作区直接开会话；没有记录时先让用户选目录。 */
+function restoreLastSession() {
+  const last = localStorage.getItem(LAST_WORKSPACE_KEY);
+  setComposerEnabled(false);
+  setRunState('idle', '待选择工作区');
+  if (last) {
+    startSession(last);
+  } else {
+    openPicker({ firstRun: true });
+  }
 }
 
 /* ---------- 健康检查 ---------- */
@@ -99,17 +171,13 @@ async function loadHealth() {
     }
     const health = await response.json();
     const real = health.agentMode === 'real';
+    state.agentMode = health.agentMode;
+    syncComposer();
     el.modeBadge.textContent = real ? `真实模型 · ${health.model}` : 'Mock 剧本模式';
     el.modeBadge.className = 'mode-chip ' + (real ? 'is-real' : 'is-mock');
     el.modeBadge.title = real
       ? `可用工具：${(health.tools || []).join('、') || '无'}`
       : '未调用大模型，事件由内置剧本产生';
-
-    if (health.workspace) {
-      el.workspaceChip.textContent = health.workspace;
-      el.workspaceChip.title = health.workspace;
-      el.workspaceChip.hidden = false;
-    }
 
     if (health.permissionMode) {
       const mode = String(health.permissionMode).toUpperCase();
@@ -135,7 +203,13 @@ async function loadHealth() {
 
 /* ---------- 会话 ---------- */
 
-async function startSession() {
+async function startSession(workspace) {
+  const target = workspace || state.workspace || localStorage.getItem(LAST_WORKSPACE_KEY);
+  if (!target) {
+    openPicker({ firstRun: true });
+    return;
+  }
+
   closeStream();
   resetView();
   setComposerEnabled(false);
@@ -146,36 +220,58 @@ async function startSession() {
     const response = await fetch('/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: '新任务' })
+      body: JSON.stringify({ title: '新任务', workspace: target })
     });
     if (!response.ok) {
-      throw new Error('HTTP ' + response.status);
+      throw new Error(response.status === 400 ? '工作区不可用，请重新选择目录' : 'HTTP ' + response.status);
     }
     const session = await response.json();
     const title = session.title || '新任务';
-    state.sessions.unshift({ id: session.sessionId, title, createdAt: session.createdAt });
-    activate(session.sessionId, title);
+    const resolvedWorkspace = session.workspace || target;
+    state.sessions.unshift({ id: session.sessionId, title, workspace: resolvedWorkspace, createdAt: session.createdAt });
+    localStorage.setItem(LAST_WORKSPACE_KEY, resolvedWorkspace);
+    activate(session.sessionId, title, resolvedWorkspace);
     renderSessions();
   } catch (error) {
     setConnection('error', '创建失败');
     showNotice('创建会话失败：' + error.message);
-    console.error(error);
+    openPicker();
   }
 }
 
-function activate(sessionId, title) {
+function activate(sessionId, title, workspace) {
   closeStream();
   state.sessionId = sessionId;
   state.sessionTitle = title || '新任务';
+  state.workspace = workspace || state.workspace;
   state.pendingInputs = [];
   el.crumbTitle.textContent = state.sessionTitle;
   el.sessionChip.textContent = sessionId.slice(0, 8);
-  el.sessionChip.title = sessionId;
+  el.sessionChip.title = sessionId + '\n点击复制会话 ID';
   el.sessionChip.hidden = false;
+  renderWorkspace();
   renderSessions();
   setConnection('pending', '连接中');
   connect(0);
   setComposerEnabled(true);
+}
+
+function renderWorkspace() {
+  if (!state.workspace) {
+    el.workspaceChip.hidden = true;
+    return;
+  }
+  el.workspaceName.textContent = folderName(state.workspace);
+  el.workspaceChip.title = state.workspace + '\n点击选择其他目录（会新建会话）';
+  el.workspaceChip.hidden = false;
+}
+
+function folderName(path) {
+  if (!path) {
+    return '';
+  }
+  const parts = String(path).split(/[\\/]+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : path;
 }
 
 function renameSessionIfDefault(content) {
@@ -200,7 +296,7 @@ function activateSession(sessionId) {
   }
   resetView();
   setRunState('idle', '空闲');
-  activate(sessionId, found.title);
+  activate(sessionId, found.title, found.workspace);
   closeSidebar();
 }
 
@@ -211,7 +307,7 @@ function renderSessions() {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'session-item' + (session.id === state.sessionId ? ' is-active' : '');
-    button.title = session.title;
+    button.title = session.workspace ? `${session.title}\n${session.workspace}` : session.title;
     button.addEventListener('click', () => activateSession(session.id));
 
     const dot = document.createElement('span');
@@ -221,6 +317,12 @@ function renderSessions() {
     text.textContent = session.title;
 
     button.append(dot, text);
+    if (session.workspace) {
+      const folder = document.createElement('span');
+      folder.className = 'session-folder';
+      folder.textContent = folderName(session.workspace);
+      button.append(folder);
+    }
     item.append(button);
     el.sessionList.append(item);
   }
@@ -285,7 +387,7 @@ function handleEvent(event) {
     case 'run.started': {
       state.running = true;
       setRunState('running', '运行中');
-      setComposerEnabled(false);
+      syncComposer();
       clearThinking();
       const input = event.payload.input || '';
       if (state.pendingInputs[0] === input) {
@@ -300,13 +402,7 @@ function handleEvent(event) {
 
     case 'assistant.delta':
       appendDelta(event.payload.text);
-      record(event, {
-        kind: 'run',
-        tone: 'text',
-        status: '增量',
-        title: null,
-        detail: preview(event.payload.text, 90)
-      });
+      recordDelta(event, event.payload.text);
       break;
 
     case 'tool.started': {
@@ -392,6 +488,9 @@ function handleEvent(event) {
 
     case 'run.completed': {
       state.running = false;
+      state.lastRunId = state.runId || state.lastRunId;
+      state.runId = null;
+      state.changedFiles = event.payload.changedFiles || [];
       setRunState('done', '已完成');
       setComposerEnabled(true);
       clearThinking();
@@ -411,20 +510,24 @@ function handleEvent(event) {
         detail: event.payload.summary,
         foot: extras.join(' · ')
       });
+      refreshChanges();
       break;
     }
 
     case 'run.failed': {
+      const cancelled = event.payload.code === 'CANCELLED';
       state.running = false;
-      setRunState('error', '失败');
+      state.lastRunId = state.runId || state.lastRunId;
+      state.runId = null;
+      setRunState(cancelled ? 'idle' : 'error', cancelled ? '已取消' : '失败');
       setComposerEnabled(true);
       clearThinking();
       finishReply(true);
       record(event, {
         kind: 'run',
-        tone: 'error',
-        status: event.payload.retryable ? '可重试' : '失败',
-        title: `运行失败 · ${event.payload.code}`,
+        tone: cancelled ? 'warn' : 'error',
+        status: cancelled ? '已取消' : (event.payload.retryable ? '可重试' : '失败'),
+        title: `运行${cancelled ? '取消' : '失败'} · ${event.payload.code}`,
         detail: event.payload.message
       });
       break;
@@ -504,7 +607,26 @@ function appendDelta(text) {
     startReply();
   }
   state.replyText += text;
-  state.reply.replaceChildren(renderRich(state.replyText));
+  scheduleReplyRender();
+}
+
+/** 流式时每帧最多重绘一次，避免长回答的 O(n²) 重排。 */
+function scheduleReplyRender() {
+  if (state.renderQueued) {
+    return;
+  }
+  state.renderQueued = true;
+  requestAnimationFrame(() => {
+    state.renderQueued = false;
+    if (!state.reply) {
+      return;
+    }
+    const stick = isNearBottom(el.messages);
+    state.reply.replaceChildren(renderMarkdown(state.replyText));
+    if (stick) {
+      scrollThread();
+    }
+  });
 }
 
 function finishReply(failed) {
@@ -655,7 +777,33 @@ async function resolveApproval(callId, approved, scope) {
 
 /* ---------- 活动面板 ---------- */
 
+const MAX_TIMELINE_EVENTS = 300;
+
+/** 同一次运行里连续的 assistant.delta 合并到一张卡片，避免长任务把面板刷爆。 */
+function recordDelta(event, text) {
+  if (state.streamCard && state.streamCard.isConnected) {
+    state.streamText += text;
+    const detail = state.streamCard.querySelector('.event-detail');
+    if (detail) {
+      detail.textContent = preview(state.streamText, 160);
+    }
+    return;
+  }
+  state.streamText = text;
+  state.streamCard = record(event, {
+    kind: 'run',
+    tone: 'text',
+    status: '增量',
+    title: null,
+    detail: preview(text, 160)
+  });
+}
+
 function record(event, { kind, tone, status, title, detail, foot, actions, callId }) {
+  if (event.type !== 'assistant.delta') {
+    state.streamCard = null;
+    state.streamText = '';
+  }
   state.activityCount += 1;
 
   const item = document.createElement('li');
@@ -713,6 +861,9 @@ function record(event, { kind, tone, status, title, detail, foot, actions, callI
   }
 
   el.timeline.append(item);
+  while (el.timeline.children.length > MAX_TIMELINE_EVENTS) {
+    el.timeline.firstElementChild.remove();
+  }
   el.timelineEmpty.hidden = true;
   el.toggleActivity.title = `活动面板 · ${state.activityCount} 条事件 (Ctrl B)`;
 
@@ -762,6 +913,359 @@ function isNarrow() {
   return window.matchMedia('(max-width: 960px)').matches;
 }
 
+/* ---------- 活动 / 变更 面板 ---------- */
+
+function onTabClick(event) {
+  const tab = event.target.closest('.tab');
+  if (!tab) {
+    return;
+  }
+  selectTab(tab.dataset.tab);
+}
+
+function selectTab(tab) {
+  state.tab = tab;
+  for (const item of el.panelTabs.querySelectorAll('.tab')) {
+    const on = item.dataset.tab === tab;
+    item.classList.toggle('is-on', on);
+    item.setAttribute('aria-selected', String(on));
+  }
+  el.panelActivity.hidden = tab !== 'activity';
+  el.panelChanges.hidden = tab !== 'changes';
+  el.filters.hidden = tab !== 'activity';
+  if (tab === 'changes') {
+    loadChanges();
+  }
+}
+
+function resetChanges() {
+  el.changeCount.hidden = true;
+  el.changeCount.textContent = '0';
+  el.changesState.textContent = '尚未加载';
+  el.changesState.className = 'changes-state';
+  el.changeFiles.replaceChildren();
+  el.changeDiff.replaceChildren();
+  el.runChanges.replaceChildren();
+  el.runChanges.hidden = true;
+}
+
+function refreshChanges() {
+  if (!state.sessionId) {
+    return;
+  }
+  loadChanges({ silent: state.tab !== 'changes' });
+}
+
+async function loadChanges(options = {}) {
+  if (!state.sessionId) {
+    return;
+  }
+  const silent = options.silent === true;
+  if (!silent) {
+    el.changesState.textContent = '读取中…';
+    el.changesState.className = 'changes-state';
+  }
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/diff`);
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    renderChanges(await response.json(), silent);
+  } catch (error) {
+    if (!silent) {
+      el.changesState.textContent = '读取失败：' + error.message;
+      el.changesState.className = 'changes-state is-error';
+    }
+  }
+}
+
+function renderChanges(report, silent) {
+  const files = report.files || [];
+  el.changeCount.textContent = String(files.length);
+  el.changeCount.hidden = files.length === 0;
+  if (silent) {
+    return;
+  }
+  renderRunChanges();
+
+  el.changeFiles.replaceChildren();
+  el.changeDiff.replaceChildren();
+
+  if (!report.gitRepository) {
+    el.changesState.textContent = '当前工作区不是 git 仓库';
+    el.changesState.className = 'changes-state';
+    el.changeDiff.append(changeHint('没有 git 仓库，无法生成 diff。在该目录执行 git init 后即可审阅改动。'));
+    return;
+  }
+
+  el.changesState.textContent = files.length ? `${files.length} 个文件有改动` : '工作区干净';
+  el.changesState.className = 'changes-state';
+
+  for (const file of files) {
+    const li = document.createElement('li');
+    li.className = 'change-file';
+    const status = document.createElement('span');
+    status.className = 'change-status is-' + statusKind(file.status);
+    status.textContent = file.status;
+    const path = document.createElement('span');
+    path.className = 'change-path';
+    path.textContent = file.path;
+    path.title = file.path;
+    li.append(status, path);
+    el.changeFiles.append(li);
+  }
+
+  if (!report.diff) {
+    el.changeDiff.append(changeHint(files.length
+      ? '这些改动没有可显示的 diff（新增文件或仅暂存）。'
+      : '没有未暂存的改动。'));
+    return;
+  }
+  renderDiff(report.diff);
+  if (report.truncated) {
+    el.changeDiff.append(changeHint('diff 过大，已截断。'));
+  }
+}
+
+/** 只展示本次运行写过的文件，避免和仓库里的历史改动混在一起。 */
+function renderRunChanges() {
+  const files = state.changedFiles || [];
+  el.runChanges.replaceChildren();
+  if (!files.length) {
+    el.runChanges.hidden = true;
+    return;
+  }
+  el.runChanges.hidden = false;
+
+  const label = document.createElement('span');
+  label.className = 'run-changes-label';
+  label.textContent = `本次运行改动 ${files.length} 个`;
+  el.runChanges.append(label);
+
+  files.slice(0, 6).forEach((path) => {
+    const chip = document.createElement('span');
+    chip.className = 'run-chip';
+    chip.textContent = folderName(path);
+    chip.title = path;
+    el.runChanges.append(chip);
+  });
+  if (files.length > 6) {
+    const more = document.createElement('span');
+    more.className = 'run-changes-label';
+    more.textContent = `+${files.length - 6}`;
+    el.runChanges.append(more);
+  }
+}
+
+function statusKind(status) {
+  if (status === '??' || status === 'A') {
+    return 'added';
+  }
+  if (status === 'D') {
+    return 'deleted';
+  }
+  return 'modified';
+}
+
+function renderDiff(text) {
+  const lines = String(text).split('\n');
+  const limit = 4000;
+  const fragment = document.createDocumentFragment();
+  lines.slice(0, limit).forEach((line) => {
+    const span = document.createElement('span');
+    span.className = 'line ' + diffClass(line);
+    span.textContent = line.length ? line : ' ';
+    fragment.append(span);
+  });
+  if (lines.length > limit) {
+    const more = document.createElement('span');
+    more.className = 'line meta';
+    more.textContent = `… 还有 ${lines.length - limit} 行未显示`;
+    fragment.append(more);
+  }
+  el.changeDiff.append(fragment);
+}
+
+function diffClass(line) {
+  if (line.startsWith('@@')) {
+    return 'hunk';
+  }
+  if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff --git') || line.startsWith('index ')) {
+    return 'meta';
+  }
+  if (line.startsWith('+')) {
+    return 'add';
+  }
+  if (line.startsWith('-')) {
+    return 'del';
+  }
+  return 'ctx';
+}
+
+function changeHint(text) {
+  const node = document.createElement('div');
+  node.className = 'change-empty';
+  node.textContent = text;
+  return node;
+}
+
+/* ---------- 工作区选择 ---------- */
+
+async function openPicker(options = {}) {
+  el.picker.hidden = false;
+  el.pickerError.hidden = true;
+  el.pickerConfirm.disabled = true;
+  await loadRoots();
+  const start = state.workspace || localStorage.getItem(LAST_WORKSPACE_KEY) || '';
+  await browseTo(start);
+  if (options.firstRun && !state.pickerSelection) {
+    el.pickerSelected.textContent = '尚未选择目录';
+  }
+}
+
+function closePicker() {
+  el.picker.hidden = true;
+}
+
+async function loadRoots() {
+  try {
+    const response = await fetch('/api/workspaces/roots');
+    if (!response.ok) {
+      return;
+    }
+    const roots = await response.json();
+    el.pickerRoots.replaceChildren();
+    for (const root of roots) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'root-item';
+      button.textContent = root.label;
+      button.title = root.path;
+      button.addEventListener('click', () => browseTo(root.path));
+      el.pickerRoots.append(button);
+    }
+  } catch (error) {
+    console.warn('[roots]', error);
+  }
+}
+
+async function browseTo(path) {
+  el.pickerError.hidden = true;
+  try {
+    const query = path ? '?path=' + encodeURIComponent(path) : '';
+    const response = await fetch('/api/workspaces/browse' + query);
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const data = await response.json();
+    state.pickerPath = data.path;
+    state.pickerParent = data.parent;
+    state.pickerSelection = data.path;
+    el.pickerPath.value = data.path;
+    renderPickerList(data);
+    updatePickerSelection();
+  } catch (error) {
+    el.pickerError.textContent = error.message;
+    el.pickerError.hidden = false;
+  }
+}
+
+async function describeError(response) {
+  try {
+    const body = await response.json();
+    if (body && body.message) {
+      return body.message;
+    }
+  } catch (ignored) {
+    // 忽略非 JSON 错误体
+  }
+  if (response.status === 404) {
+    return '没有找到对应的运行或快照';
+  }
+  return response.status === 400 ? '目录不可访问' : 'HTTP ' + response.status;
+}
+
+function renderPickerList(data) {
+  el.pickerList.replaceChildren();
+  const directories = data.directories || [];
+  if (!directories.length) {
+    const empty = document.createElement('li');
+    empty.className = 'dir-item';
+    empty.textContent = '（没有子目录，可以直接选择当前目录）';
+    empty.style.cursor = 'default';
+    empty.style.color = 'var(--dim)';
+    el.pickerList.append(empty);
+    return;
+  }
+  for (const dir of directories) {
+    const item = document.createElement('li');
+    item.className = 'dir-item';
+    item.dataset.path = dir.path;
+
+    const name = document.createElement('span');
+    name.className = 'dir-name';
+    name.textContent = dir.name;
+
+    const enter = document.createElement('button');
+    enter.type = 'button';
+    enter.className = 'dir-enter';
+    enter.textContent = '进入';
+    enter.addEventListener('click', (event) => {
+      event.stopPropagation();
+      browseTo(dir.path);
+    });
+
+    item.append(name, enter);
+    item.addEventListener('click', () => {
+      state.pickerSelection = dir.path;
+      updatePickerSelection();
+    });
+    item.addEventListener('dblclick', () => browseTo(dir.path));
+    el.pickerList.append(item);
+  }
+}
+
+function updatePickerSelection() {
+  el.pickerSelected.textContent = state.pickerSelection || '尚未选择目录';
+  el.pickerConfirm.disabled = !state.pickerSelection;
+  for (const item of el.pickerList.querySelectorAll('.dir-item')) {
+    item.classList.toggle('is-on', item.dataset.path === state.pickerSelection);
+  }
+  const roots = [...el.pickerRoots.querySelectorAll('.root-item')];
+  let best = null;
+  for (const root of roots) {
+    if (isUnder(state.pickerPath, root.title) && (!best || root.title.length > best.title.length)) {
+      best = root;
+    }
+  }
+  roots.forEach((root) => root.classList.toggle('is-on', root === best));
+}
+
+function isUnder(path, root) {
+  if (!path || !root) {
+    return false;
+  }
+  const normalize = (value) => value.toLowerCase().replace(/\//g, '\\');
+  const target = normalize(path);
+  const base = normalize(root);
+  return target === base || target.startsWith(base.endsWith('\\') ? base : base + '\\');
+}
+
+function pickerUp() {
+  if (state.pickerParent) {
+    browseTo(state.pickerParent);
+  }
+}
+
+function confirmPicker() {
+  const target = state.pickerSelection;
+  if (!target) {
+    return;
+  }
+  closePicker();
+  startSession(target);
+}
+
 /* ---------- 输入 ---------- */
 
 function bindComposer() {
@@ -798,7 +1302,10 @@ async function sendMessage(event) {
   el.input.value = '';
   autoGrow();
   state.running = true;
-  setComposerEnabled(false);
+  state.runId = null;
+  state.lastRunId = null;
+  state.changedFiles = [];
+  syncComposer();
   setRunState('running', '发送中');
   scrollThread();
 
@@ -811,12 +1318,65 @@ async function sendMessage(event) {
     if (!response.ok) {
       throw new Error('HTTP ' + response.status);
     }
+    const started = await response.json();
+    state.runId = started.runId || null;
+    syncComposer();
   } catch (error) {
     state.running = false;
     state.pendingInputs.pop();
-    setComposerEnabled(true);
+    syncComposer();
     setRunState('error', '发送失败');
     showNotice('发送失败：' + error.message);
+  }
+}
+
+async function cancelRun() {
+  if (!state.runId) {
+    showNotice('运行刚开始，请稍后再试。');
+    return;
+  }
+  el.stop.disabled = true;
+  try {
+    const response = await fetch(`/api/runs/${encodeURIComponent(state.runId)}/cancel`, { method: 'POST' });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    showNotice('已请求取消，当前步骤结束后停止。');
+  } catch (error) {
+    showNotice('取消失败：' + error.message);
+  } finally {
+    el.stop.disabled = false;
+  }
+}
+
+async function rollbackRun() {
+  if (!state.lastRunId) {
+    return;
+  }
+  const confirmed = window.confirm('把本次运行改过的文件还原到运行前？新建的文件会被删除。');
+  if (!confirmed) {
+    return;
+  }
+  el.changesRollback.disabled = true;
+  try {
+    const response = await fetch(`/api/runs/${encodeURIComponent(state.lastRunId)}/rollback`, { method: 'POST' });
+    if (response.status === 404) {
+      showNotice('这次运行没有产生文件改动，无需回滚。');
+      return;
+    }
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const report = await response.json();
+    const failed = (report.failed || []).length;
+    showNotice(`已回滚：还原 ${(report.restored || []).length} 个、删除 ${(report.deleted || []).length} 个`
+      + (failed ? `、失败 ${failed} 个` : ''));
+    loadChanges();
+  } catch (error) {
+    showNotice('回滚失败：' + error.message);
+  } finally {
+    el.changesRollback.disabled = false;
+    syncComposer();
   }
 }
 
@@ -914,7 +1474,7 @@ function onGlobalKeydown(event) {
   }
   if (mod && event.key.toLowerCase() === 'n') {
     event.preventDefault();
-    startSession();
+    openPicker();
     return;
   }
   if (mod && event.key.toLowerCase() === 'b') {
@@ -923,7 +1483,9 @@ function onGlobalKeydown(event) {
     return;
   }
   if (event.key === 'Escape') {
-    if (!el.palette.hidden) {
+    if (!el.picker.hidden) {
+      closePicker();
+    } else if (!el.palette.hidden) {
       closePalette();
     } else {
       closeOverlays();
@@ -968,7 +1530,21 @@ function closeOverlays() {
 /* ---------- 视图状态 ---------- */
 
 function setComposerEnabled(enabled) {
-  el.send.disabled = !enabled;
+  state.composerEnabled = enabled;
+  syncComposer();
+}
+
+/** 输入区：空闲显示发送，运行中只显示停止，结束后按需显示回滚。 */
+function syncComposer() {
+  const running = state.running;
+  el.stop.hidden = !running;
+  el.send.hidden = running;
+  el.send.disabled = !state.composerEnabled;
+  if (!running) {
+    el.stop.disabled = false;
+  }
+  // mock 模式没有真实写入，也就没有快照可回滚
+  el.changesRollback.hidden = !(state.lastRunId && !running && state.agentMode === 'real');
 }
 
 function setConnection(kind, label) {
@@ -982,7 +1558,7 @@ function setRunState(kind, label) {
 }
 
 function showNotice(message) {
-  el.notice.textContent = message;
+  el.noticeText.textContent = message;
   el.notice.hidden = false;
 }
 
@@ -997,6 +1573,12 @@ function resetView() {
   state.reply = null;
   state.replyText = '';
   state.running = false;
+  state.runId = null;
+  state.lastRunId = null;
+  state.changedFiles = [];
+  state.streamCard = null;
+  state.streamText = '';
+  syncComposer();
   el.messages.replaceChildren(el.emptyState);
   el.emptyState.hidden = false;
   el.messages.classList.add('is-empty');
@@ -1005,6 +1587,7 @@ function resetView() {
   state.activityCount = 0;
   el.toggleActivity.title = '活动面板 (Ctrl B)';
   renderApprovalDock();
+  resetChanges();
 }
 
 function hideEmptyState() {
@@ -1034,52 +1617,283 @@ function button(label, className, onClick) {
   return node;
 }
 
-function renderRich(text) {
+const FENCE_PATTERN = /^\s{0,3}(`{3,}|~{3,})\s*([\w+#.-]*)\s*$/;
+const HEADING_PATTERN = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
+const RULE_PATTERN = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/;
+const QUOTE_PATTERN = /^\s{0,3}>\s?/;
+const LIST_PATTERN = /^\s{0,3}([-*+]|\d+[.)])\s+(.*)$/;
+const TABLE_DIVIDER = /^:?-{2,}:?$/;
+
+/**
+ * 把模型返回的 Markdown 渲染成 DOM。只构造节点、不拼 innerHTML，天然免疫 HTML 注入。
+ * 支持：围栏代码块、标题、表格、引用、有序/无序列表、分隔线、粗体/斜体/删除线/行内代码/链接。
+ * 流式期间未闭合的代码围栏会一直按代码渲染，避免逐字闪烁。
+ */
+function renderMarkdown(text) {
   const fragment = document.createDocumentFragment();
-  const chunks = String(text).split('```');
-  chunks.forEach((chunk, index) => {
-    if (index % 2 === 1) {
-      const lines = chunk.replace(/^\n/, '').split('\n');
-      if (lines.length > 1 && /^[\w+#.-]{0,24}$/.test(lines[0].trim())) {
-        lines.shift();
-      }
-      const pre = document.createElement('pre');
-      const code = document.createElement('code');
-      code.textContent = lines.join('\n').replace(/\n+$/, '');
-      pre.append(code);
-      fragment.append(pre);
-    } else if (chunk.trim()) {
-      fragment.append(inlineNodes(chunk));
-    }
-  });
+  for (const node of markdownBlocks(String(text).replace(/\r\n/g, '\n').split('\n'))) {
+    fragment.append(node);
+  }
   return fragment;
 }
 
-function inlineNodes(chunk) {
-  const paragraph = document.createElement('p');
-  const pattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+function markdownBlocks(lines) {
+  const nodes = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
+
+    const fence = line.match(FENCE_PATTERN);
+    if (fence) {
+      const marker = fence[1][0];
+      const length = fence[1].length;
+      const language = fence[2] || '';
+      i++;
+      const code = [];
+      while (i < lines.length) {
+        const closing = lines[i].match(/^\s{0,3}(`{3,}|~{3,})\s*$/);
+        if (closing && closing[1][0] === marker && closing[1].length >= length) {
+          i++;
+          break;
+        }
+        code.push(lines[i]);
+        i++;
+      }
+      nodes.push(codeBlock(code.join('\n'), language));
+      continue;
+    }
+
+    if (RULE_PATTERN.test(line)) {
+      nodes.push(document.createElement('hr'));
+      i++;
+      continue;
+    }
+
+    const heading = line.match(HEADING_PATTERN);
+    if (heading) {
+      const node = document.createElement('h' + heading[1].length);
+      node.append(inlineFragment(heading[2]));
+      nodes.push(node);
+      i++;
+      continue;
+    }
+
+    if (isTableStart(lines, i)) {
+      const table = buildTable(lines, i);
+      nodes.push(table.node);
+      i = table.next;
+      continue;
+    }
+
+    if (QUOTE_PATTERN.test(line)) {
+      const quoted = [];
+      while (i < lines.length && QUOTE_PATTERN.test(lines[i])) {
+        quoted.push(lines[i].replace(QUOTE_PATTERN, ''));
+        i++;
+      }
+      const blockquote = document.createElement('blockquote');
+      for (const node of markdownBlocks(quoted)) {
+        blockquote.append(node);
+      }
+      nodes.push(blockquote);
+      continue;
+    }
+
+    if (LIST_PATTERN.test(line)) {
+      const list = buildList(lines, i);
+      nodes.push(list.node);
+      i = list.next;
+      continue;
+    }
+
+    const paragraph = [];
+    while (i < lines.length) {
+      const current = lines[i];
+      if (!current.trim()) {
+        break;
+      }
+      if (FENCE_PATTERN.test(current) || RULE_PATTERN.test(current)
+          || HEADING_PATTERN.test(current) || QUOTE_PATTERN.test(current)
+          || LIST_PATTERN.test(current) || isTableStart(lines, i)) {
+        break;
+      }
+      paragraph.push(current.trim());
+      i++;
+    }
+    if (!paragraph.length) {
+      i++;
+      continue;
+    }
+    const node = document.createElement('p');
+    paragraph.forEach((part, index) => {
+      if (index) {
+        node.append(document.createElement('br'));
+      }
+      node.append(inlineFragment(part));
+    });
+    nodes.push(node);
+  }
+
+  return nodes;
+}
+
+function codeBlock(code, language) {
+  const pre = document.createElement('pre');
+  const el = document.createElement('code');
+  if (language) {
+    el.dataset.lang = language;
+  }
+  el.textContent = code.replace(/\n+$/, '');
+  pre.append(el);
+  return pre;
+}
+
+function splitRow(line) {
+  let value = line.trim();
+  if (value.startsWith('|')) {
+    value = value.slice(1);
+  }
+  if (value.endsWith('|')) {
+    value = value.slice(0, -1);
+  }
+  return value.split('|').map((cell) => cell.trim());
+}
+
+function isTableStart(lines, index) {
+  const header = lines[index];
+  if (!header || !header.includes('|')) {
+    return false;
+  }
+  const divider = lines[index + 1];
+  if (!divider || !divider.includes('-')) {
+    return false;
+  }
+  const cells = splitRow(divider);
+  return cells.length > 0 && cells.every((cell) => TABLE_DIVIDER.test(cell.replace(/\s/g, '')));
+}
+
+function buildTable(lines, start) {
+  const header = splitRow(lines[start]);
+  const aligns = splitRow(lines[start + 1]).map((cell) => {
+    const value = cell.replace(/\s/g, '');
+    if (value.startsWith(':') && value.endsWith(':')) {
+      return 'center';
+    }
+    if (value.endsWith(':')) {
+      return 'right';
+    }
+    return '';
+  });
+
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  header.forEach((cell, index) => {
+    const th = document.createElement('th');
+    if (aligns[index]) {
+      th.style.textAlign = aligns[index];
+    }
+    th.append(inlineFragment(cell));
+    headRow.append(th);
+  });
+  thead.append(headRow);
+  table.append(thead);
+
+  const tbody = document.createElement('tbody');
+  let i = start + 2;
+  while (i < lines.length && lines[i].trim() && lines[i].includes('|')) {
+    const cells = splitRow(lines[i]);
+    const row = document.createElement('tr');
+    header.forEach((ignored, index) => {
+      const td = document.createElement('td');
+      if (aligns[index]) {
+        td.style.textAlign = aligns[index];
+      }
+      td.append(inlineFragment(cells[index] || ''));
+      row.append(td);
+    });
+    tbody.append(row);
+    i++;
+  }
+  table.append(tbody);
+  return { node: table, next: i };
+}
+
+function buildList(lines, start) {
+  const ordered = /^\s{0,3}\d/.test(lines[start]);
+  const list = document.createElement(ordered ? 'ol' : 'ul');
+  let i = start;
+  while (i < lines.length) {
+    const item = lines[i].match(LIST_PATTERN);
+    if (!item) {
+      break;
+    }
+    if (/^\s{0,3}\d/.test(lines[i]) !== ordered) {
+      break;
+    }
+    const li = document.createElement('li');
+    li.append(inlineFragment(item[2]));
+    list.append(li);
+    i++;
+  }
+  return { node: list, next: i };
+}
+
+function inlineFragment(text) {
+  const fragment = document.createDocumentFragment();
+  const pattern = /(`[^`\n]+`|\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*[^*\n]+\*|\[[^\]\n]+\]\([^)\s]+\))/g;
   let last = 0;
   let match;
-  while ((match = pattern.exec(chunk)) !== null) {
+  while ((match = pattern.exec(text)) !== null) {
     if (match.index > last) {
-      paragraph.append(document.createTextNode(chunk.slice(last, match.index)));
+      fragment.append(document.createTextNode(text.slice(last, match.index)));
     }
-    const token = match[1];
-    if (token.startsWith('**')) {
-      const strong = document.createElement('strong');
-      strong.textContent = token.slice(2, -2);
-      paragraph.append(strong);
-    } else {
-      const code = document.createElement('code');
-      code.textContent = token.slice(1, -1);
-      paragraph.append(code);
-    }
-    last = match.index + token.length;
+    fragment.append(inlineToken(match[0]));
+    last = match.index + match[0].length;
   }
-  if (last < chunk.length) {
-    paragraph.append(document.createTextNode(chunk.slice(last)));
+  if (last < text.length) {
+    fragment.append(document.createTextNode(text.slice(last)));
   }
-  return paragraph;
+  return fragment;
+}
+
+function inlineToken(token) {
+  if (token.startsWith('`')) {
+    const code = document.createElement('code');
+    code.textContent = token.slice(1, -1);
+    return code;
+  }
+  if (token.startsWith('**')) {
+    const strong = document.createElement('strong');
+    strong.append(inlineFragment(token.slice(2, -2)));
+    return strong;
+  }
+  if (token.startsWith('~~')) {
+    const del = document.createElement('del');
+    del.textContent = token.slice(2, -2);
+    return del;
+  }
+  if (token.startsWith('*')) {
+    const em = document.createElement('em');
+    em.textContent = token.slice(1, -1);
+    return em;
+  }
+  const link = token.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
+  if (link && /^https?:\/\//i.test(link[2])) {
+    const anchor = document.createElement('a');
+    anchor.href = link[2];
+    anchor.textContent = link[1];
+    anchor.target = '_blank';
+    anchor.rel = 'noreferrer noopener';
+    return anchor;
+  }
+  return document.createTextNode(token);
 }
 
 function formatTime(value) {
