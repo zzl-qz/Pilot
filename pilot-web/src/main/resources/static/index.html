@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pilot</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Pilot</h1>
+      <p id="status" class="status">准备中…</p>
+    </header>
+    <div class="layout">
+      <section class="panel">
+        <h2>对话</h2>
+        <section id="messages" aria-live="polite" aria-label="对话"></section>
+        <form id="chat-form">
+          <label class="visually-hidden" for="message">输入消息</label>
+          <input id="message" name="message" autocomplete="off" placeholder="输入任务，例如：解释一下 AgentLoop 的调用链" required>
+          <button type="submit" disabled>发送</button>
+        </form>
+      </section>
+      <section class="panel">
+        <h2>事件流 <span class="hint">SSE</span></h2>
+        <ol id="timeline" aria-live="polite" aria-label="事件流"></ol>
+      </section>
+    </div>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+:root { font: 16px/1.5 system-ui, sans-serif; color: #1f2328; background: #f2f4f7; }
+body { margin: 0; }
+main { width: min(1120px, calc(100% - 32px)); margin: 32px auto; }
+header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+h1 { margin: 0; font-size: 1.4rem; }
+h2 { margin: 0 0 10px; font-size: 0.85rem; font-weight: 600; letter-spacing: 0.04em; color: #57606a; text-transform: uppercase; }
+.status { margin: 0; font-size: 0.85rem; color: #57606a; }
+.hint { padding: 0 6px; border-radius: 999px; background: #eef1f4; color: #57606a; font-size: 0.7rem; }
+.layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; }
+.panel { display: flex; flex-direction: column; padding: 16px; background: #fff; border: 1px solid #d8dee4; border-radius: 10px; }
+#messages { flex: 1; min-height: 45vh; max-height: 62vh; overflow-y: auto; }
+#timeline { flex: 1; min-height: 45vh; max-height: 62vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; font: 13px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.message { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px 12px; border-radius: 8px; }
+.user { margin: 6px 0 6px 15%; background: #e8f0fe; }
+.assistant { margin: 6px 15% 6px 0; background: #f2f4f7; }
+.event { display: grid; grid-template-columns: 38px 128px minmax(0, 1fr); gap: 8px; padding: 6px 0; border-bottom: 1px dashed #eaeef2; }
+.event .seq { color: #8c959f; }
+.event .type { color: #0969da; }
+.event .detail { overflow-wrap: anywhere; color: #1f2328; }
+.event.run-failed .type { color: #cf222e; }
+.event.run-completed .type { color: #1a7f37; }
+.event.approval-required .type { color: #9a6700; }
+form { display: flex; gap: 8px; margin-top: 12px; }
+input { flex: 1; min-width: 0; padding: 11px 12px; border: 1px solid #bdc1c6; border-radius: 8px; font: inherit; }
+button { padding: 0 20px; border: 0; border-radius: 8px; color: #fff; background: #1a73e8; font: inherit; cursor: pointer; }
+button:disabled { background: #b6c2cf; cursor: not-allowed; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } }
