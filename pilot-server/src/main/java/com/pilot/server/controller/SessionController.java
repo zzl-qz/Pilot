@@ -2,6 +2,7 @@ package com.pilot.server.controller;
 
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunStarted;
+import com.pilot.core.session.EventSubscription;
 import com.pilot.core.session.Run;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
@@ -27,10 +28,12 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 @RestController
 @RequestMapping("/api/sessions")
@@ -157,15 +160,31 @@ public class SessionController {
         requireSession(id);
         long cursor = after != null ? after : lastEventId != null ? lastEventId : 0L;
         var emitter = new SseEmitter(0L);
+        var closed = new AtomicBoolean(false);
+        var subscription = new AtomicReference<EventSubscription>();
+
+        // 浏览器刷新、切换会话或关页面都会让连接失效；这属于正常生命周期，
+        // 不能把写入失败当成异常抛给上层，否则每个事件都会刷一份堆栈。
+        Consumer<EventEnvelope> listener = envelope -> {
+            if (closed.get()) {
+                return;
+            }
+            if (!send(emitter, envelope)) {
+                closeQuietly(closed, subscription, emitter);
+            }
+        };
+
         try {
             emitter.send(SseEmitter.event().comment("stream open: session=" + id + ", after=" + cursor));
-            var subscription = sessions.subscribe(id, cursor, envelope -> send(emitter, envelope));
-            emitter.onCompletion(subscription::close);
-            emitter.onTimeout(subscription::close);
-            emitter.onError(error -> subscription.close());
-        } catch (IOException e) {
-            emitter.completeWithError(e);
-        } catch (RuntimeException e) {
+            EventSubscription created = sessions.subscribe(id, cursor, listener);
+            subscription.set(created);
+            if (closed.get()) {
+                created.close();
+            }
+            emitter.onCompletion(() -> closeQuietly(closed, subscription, null));
+            emitter.onTimeout(() -> closeQuietly(closed, subscription, null));
+            emitter.onError(error -> closeQuietly(closed, subscription, null));
+        } catch (IOException | RuntimeException e) {
             emitter.completeWithError(e);
         }
         return ResponseEntity.ok()
@@ -174,14 +193,35 @@ public class SessionController {
                 .body(emitter);
     }
 
-    private void send(SseEmitter emitter, EventEnvelope envelope) {
+    /** @return {@code false} 表示客户端已经断开，调用方应停止推送并注销订阅 */
+    private boolean send(SseEmitter emitter, EventEnvelope envelope) {
         try {
             emitter.send(SseEmitter.event()
                     .id(Long.toString(envelope.sequence()))
                     .name(envelope.type())
                     .data(objectMapper.writeValueAsString(envelope)));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            return true;
+        } catch (IOException | IllegalStateException e) {
+            // ClientAbortException / AsyncRequestNotUsableException：对端已关闭，静默收尾
+            return false;
+        }
+    }
+
+    private static void closeQuietly(AtomicBoolean closed, AtomicReference<EventSubscription> subscription,
+                                     SseEmitter emitter) {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+        EventSubscription current = subscription.get();
+        if (current != null) {
+            current.close();
+        }
+        if (emitter != null) {
+            try {
+                emitter.complete();
+            } catch (RuntimeException ignored) {
+                // 连接已经不可用，complete 失败无需处理
+            }
         }
     }
 

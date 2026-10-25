@@ -107,8 +107,9 @@ public final class SessionService {
                 try {
                     subscriber.accept(envelope);
                 } catch (RuntimeException e) {
+                    // 订阅者通常是已断开的 SSE 连接，属于正常情况：摘掉即可，不必打印堆栈
                     listeners(sessionId).remove(subscriber);
-                    log.warn("Dropped session subscriber for {} after delivery failure", sessionId, e);
+                    log.debug("Dropped session subscriber for {}: {}", sessionId, e.toString());
                 }
             }
             return envelope;
@@ -161,6 +162,7 @@ public final class SessionService {
             case APPROVAL_RESOLVED -> SessionStatus.RUNNING;
             case RUN_COMPLETED -> SessionStatus.COMPLETED;
             case RUN_FAILED -> SessionStatus.FAILED;
+            case RUN_CANCELLED -> SessionStatus.CANCELLED;
             default -> current;
         };
     }
