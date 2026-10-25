@@ -45,12 +45,45 @@ class RunCommandToolTest {
     }
 
     @Test
-    void rejectsGitWriteSubcommands() {
+    void rejectsDangerousGitWriteSubcommands() {
         var tool = tool();
 
-        String result = tool.execute(Map.of("command", "git commit -m test"));
+        for (String command : List.of("git push origin main", "git reset --hard HEAD", "git clean -fd")) {
+            String result = tool.execute(Map.of("command", command));
+            assertTrue(result.startsWith("ERROR: git 只允许只读子命令与 add/commit"), result);
+        }
+    }
 
-        assertTrue(result.startsWith("ERROR: git 只允许只读子命令"), result);
+    @Test
+    void requiresCommitMessage() {
+        var tool = tool();
+
+        String result = tool.execute(Map.of("command", "git commit"));
+
+        assertTrue(result.startsWith("ERROR: git commit 必须带 -m"), result);
+    }
+
+    @Test
+    void rejectsGitWriteOutsideWorkspace() {
+        var tool = tool();
+
+        String result = tool.execute(Map.of("command", "git add ../outside.txt"));
+
+        assertTrue(result.startsWith("ERROR: git add 只允许工作区内的相对路径"), result);
+    }
+
+    /** mvnw 本身也要映射到工作区 wrapper，而不是去 PATH 里找一个不存在的 mvnw。 */
+    @Test
+    void mapsMvnwToWorkspaceWrapper() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win"));
+        java.nio.file.Files.writeString(workspace.resolve("mvnw.cmd"), "@echo wrapper-ok %1\r\n");
+        var tool = tool();
+
+        String result = tool.execute(Map.of("command", "mvnw -v", "timeoutSeconds", 60));
+
+        assertTrue(result.contains("wrapper-ok"), result);
+        assertFalse(result.contains("ERROR: 无法启动命令"), result);
     }
 
     @Test

@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>只允许白名单可执行文件，不接受绝对路径或带目录的命令；</li>
  *   <li>不经过 shell，禁止 {@code & | ; < > ^ `$(} 等元字符，避免串联命令；</li>
- *   <li>{@code git} 只允许只读子命令（status/diff/log/show/branch/…）；</li>
+ *   <li>{@code git} 允许只读子命令与 {@code add}/{@code commit}，其余写操作需人工执行；</li>
  *   <li>强制超时、输出上限，并对疑似密钥的环境变量值做脱敏。</li>
  * </ul>
  *
@@ -38,6 +38,12 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     private static final Set<String> GIT_READONLY = Set.of(
             "status", "diff", "log", "show", "branch", "rev-parse", "ls-files", "describe", "blame", "remote");
+
+    /**
+     * 允许的写操作只有暂存与提交：两者都能用工作区快照或 {@code git revert} 恢复。
+     * push / reset / clean / checkout 等会改写远端或不可逆地丢文件，仍要求人工执行。
+     */
+    private static final Set<String> GIT_WRITE = Set.of("add", "commit");
 
     private static final Pattern SHELL_META = Pattern.compile("[&|;<>^`\\n\\r]|\\$\\(");
     private static final Pattern SECRET_KEY = Pattern.compile("(?i)(key|token|secret|password|credential|passwd)");
@@ -65,8 +71,10 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     public String description() {
         return "在工作区根目录执行一条受限命令并返回退出码与输出，主要用于构建和测试验证。"
                 + "只允许 " + String.join("/", ALLOWED_EXECUTABLES.stream().sorted().toList()) + " 等白名单程序，"
-                + "不支持管道、重定向和命令串联；git 仅允许 " + String.join("/", GIT_READONLY.stream().sorted().toList())
-                + " 等只读子命令。超时默认 120 秒。";
+                + "不支持管道、重定向和命令串联；git 允许 "
+                + String.join("/", GIT_READONLY.stream().sorted().toList())
+                + " 等只读子命令，以及 git add / git commit -m \"说明\"；"
+                + "push/reset/clean/checkout 等需要用户手动执行。超时默认 120 秒。";
     }
 
     @Override
@@ -115,15 +123,53 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         if ("git".equals(executable)) {
             String sub = tokens.size() > 1 ? tokens.get(1).toLowerCase(Locale.ROOT) : "";
-            if (!GIT_READONLY.contains(sub)) {
-                return "ERROR: git 只允许只读子命令: " + String.join(", ", GIT_READONLY.stream().sorted().toList())
-                        + "；提交与推送请由用户手动完成。";
+            if (GIT_READONLY.contains(sub)) {
+                // 只读子命令直接放行
+            } else if (GIT_WRITE.contains(sub)) {
+                String problem = checkGitWrite(tokens, sub);
+                if (problem != null) {
+                    return "ERROR: " + problem;
+                }
+            } else {
+                return "ERROR: git 只允许只读子命令与 add/commit: "
+                        + String.join(", ", GIT_READONLY.stream().sorted().toList())
+                        + "，以及 add/commit；push/reset/clean/checkout 等仍需人工执行。";
             }
         }
 
         List<String> command = withWrapper(tokens);
         long timeoutMs = timeout(args);
         return run(command, tokens, timeoutMs);
+    }
+
+    /** 提交必须自带消息（否则会拉起编辑器卡到超时），且只允许操作工作区内的相对路径。 */
+    private static String checkGitWrite(List<String> tokens, String sub) {
+        boolean hasMessage = tokens.stream().anyMatch(token ->
+                token.equals("-m") || token.equals("--message") || token.startsWith("--message=")
+                        || token.equals("-F") || token.equals("--file"));
+        if ("commit".equals(sub) && !hasMessage) {
+            return "git commit 必须带 -m \"提交说明\"，否则会打开编辑器并卡住";
+        }
+        boolean skipNext = false;
+        for (String token : tokens.subList(2, tokens.size())) {
+            if (skipNext) {
+                skipNext = false;
+                continue;
+            }
+            if (token.equals("-m") || token.equals("--message") || token.equals("-F") || token.equals("--file")) {
+                skipNext = true;
+                continue;
+            }
+            if (token.startsWith("-")) {
+                continue;
+            }
+            boolean absolute = token.startsWith("/") || token.startsWith("\\")
+                    || token.matches("^[A-Za-z]:.*");
+            if (absolute || token.contains("..")) {
+                return "git " + sub + " 只允许工作区内的相对路径: " + token;
+            }
+        }
+        return null;
     }
 
     @Override
@@ -227,9 +273,10 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         String head = tokens.get(0).toLowerCase(Locale.ROOT);
         List<String> command = new ArrayList<>();
         Path wrapper = null;
-        if ("mvn".equals(head)) {
+        // mvnw/gradlew 本身也映射到工作区 wrapper：直接按名字查 PATH 是找不到的
+        if ("mvn".equals(head) || "mvnw".equals(head)) {
             wrapper = findWrapper("mvnw");
-        } else if ("gradle".equals(head)) {
+        } else if ("gradle".equals(head) || "gradlew".equals(head)) {
             wrapper = findWrapper("gradlew");
         }
         if (wrapper != null) {
