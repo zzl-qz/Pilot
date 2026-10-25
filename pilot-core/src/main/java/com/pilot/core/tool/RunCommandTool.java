@@ -2,6 +2,7 @@ package com.pilot.core.tool;
 
 import com.pilot.core.workspace.PathValidator;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -144,6 +145,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(workdir.toFile());
         builder.redirectErrorStream(true);
+        useCurrentJdk(builder.environment());
 
         Process process;
         try {
@@ -180,6 +182,28 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         String rendered = render(String.join(" ", displayTokens), command,
                 finished ? exitCode(process) : -1, latencyMs, text);
         return finished ? rendered : "ERROR: 命令超时（" + (timeoutMs / 1000) + " 秒）已被终止\n" + rendered;
+    }
+
+    /**
+     * 子进程继承服务进程的环境变量，其中 {@code JAVA_HOME} 可能指向更老的 JDK
+     * （例如系统默认 17），导致 {@code mvn test} 无法加载本项目编译出的 Java 24 字节码。
+     *
+     * <p>Pilot 自己必然运行在项目要求的 JDK 上，因此把 {@code JAVA_HOME} 与 PATH 首项
+     * 都指向当前运行时的 JDK，保证构建命令看到的是同一个 Java。
+     */
+    private static void useCurrentJdk(Map<String, String> env) {
+        String javaHome = System.getProperty("java.home");
+        if (javaHome == null || javaHome.isBlank()) {
+            return;
+        }
+        Path bin = Path.of(javaHome, "bin");
+        env.put("JAVA_HOME", javaHome);
+        String pathKey = env.keySet().stream()
+                .filter(key -> key.equalsIgnoreCase("PATH"))
+                .findFirst()
+                .orElse("PATH");
+        String current = env.getOrDefault(pathKey, "");
+        env.put(pathKey, current.isBlank() ? bin.toString() : bin + File.pathSeparator + current);
     }
 
     private static String render(String displayCommand, List<String> actual, int exitCode,
@@ -233,7 +257,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     /** 在 PATH 中查找可执行文件；Windows 需要补全 .exe/.cmd/.bat 后缀。 */
     static Path resolveOnPath(String name) {
-        String pathEnv = System.getenv("PATH");
+        String pathEnv = effectivePath();
         if (pathEnv == null || pathEnv.isBlank()) {
             return null;
         }
@@ -257,6 +281,17 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             }
         }
         return null;
+    }
+
+    /** PATH 前面拼上当前运行时的 JDK，避免解析到系统默认的旧 java。 */
+    private static String effectivePath() {
+        String base = System.getenv("PATH");
+        String javaHome = System.getProperty("java.home");
+        if (javaHome == null || javaHome.isBlank()) {
+            return base;
+        }
+        String bin = Path.of(javaHome, "bin").toString();
+        return base == null || base.isBlank() ? bin : bin + File.pathSeparator + base;
     }
 
     private Path findWrapper(String baseName) {

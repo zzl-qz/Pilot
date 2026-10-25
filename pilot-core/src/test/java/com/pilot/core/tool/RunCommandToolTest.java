@@ -82,6 +82,16 @@ class RunCommandToolTest {
         assertTrue(result.contains("退出码: 0"), result);
     }
 
+    /** 子进程不能沿用系统默认的旧 JDK，否则 mvn test 加载不了 Java 24 的字节码。 */
+    @Test
+    void childProcessUsesTheSameJdkAsPilot() {
+        var tool = tool();
+
+        String result = tool.execute(Map.of("command", "java -XshowSettings:properties -version", "timeoutSeconds", 60));
+
+        assertTrue(result.contains("java.home = " + System.getProperty("java.home")), result);
+    }
+
     @Test
     void reportsCheckSummaryOnlyForSuccessfulRuns() {
         var call = new ToolCall("call_1", "run_command", Map.of("command", "mvn -q test"));
