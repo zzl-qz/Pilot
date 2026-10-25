@@ -1,5 +1,6 @@
 package com.pilot.server.session;
 
+import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.loop.AgentLoop;
@@ -36,18 +37,20 @@ public class AgentRunService implements RunStarter {
     private final ModelClient modelClient;
     private final ToolRegistry tools;
     private final PermissionGate permissionGate;
+    private final ApprovalBroker approvals;
     private final AgentProperties properties;
     private final ModelProperties modelProperties;
     private final ExecutorService executor;
     private final ConcurrentMap<String, List<Message>> conversations = new ConcurrentHashMap<>();
 
     public AgentRunService(SessionService sessions, ModelClient modelClient, ToolRegistry tools,
-                           PermissionGate permissionGate, AgentProperties properties,
-                           ModelProperties modelProperties) {
+                           PermissionGate permissionGate, ApprovalBroker approvals,
+                           AgentProperties properties, ModelProperties modelProperties) {
         this.sessions = sessions;
         this.modelClient = modelClient;
         this.tools = tools;
         this.permissionGate = permissionGate;
+        this.approvals = approvals;
         this.properties = properties;
         this.modelProperties = modelProperties;
         this.executor = Executors.newFixedThreadPool(2, runnable -> {
@@ -66,7 +69,7 @@ public class AgentRunService implements RunStarter {
         List<Message> history = conversations.getOrDefault(sessionId, List.of());
         var config = new AgentLoop.Config(properties.maxSteps(), properties.repeatedToolCallLimit(),
                 AgentLoop.DEFAULT_SYSTEM_PROMPT);
-        var loop = new AgentLoop(modelClient, tools, permissionGate, config);
+        var loop = new AgentLoop(modelClient, tools, permissionGate, approvals, config);
         try {
             AgentLoop.Result result = loop.run(input, history, event -> publish(sessionId, runId, event));
             conversations.put(sessionId, result.conversation());

@@ -1,0 +1,69 @@
+- generic [ref=f3e2]:
+  - complementary "会话导航" [ref=f3e3]:
+    - generic [ref=f3e4]:
+      - generic [aria-hidden] [ref=f3e5]: P
+      - generic [ref=f3e6]:
+        - strong [ref=f3e7]: Pilot
+        - generic [ref=f3e8]: 本地编码代理
+    - button "新任务 Ctrl N" [ref=f3e9] [cursor=pointer]:
+      - generic [ref=f3e12]: 新任务
+      - generic [ref=f3e13]: Ctrl N
+    - navigation "会话列表" [ref=f3e14]:
+      - paragraph [ref=f3e15]: 会话
+      - list [ref=f3e16]
+      - paragraph [ref=f3e17]: 还没有会话，点上面「新任务」开始。
+    - generic [ref=f3e18]:
+      - status [ref=f3e19]:
+        - generic [ref=f3e21]: 创建会话
+      - paragraph [ref=f3e22]: Mock 剧本模式
+      - paragraph [ref=f3e23]: e:\Pilot
+  - main [ref=f3e24]:
+    - generic [ref=f3e25]:
+      - generic [ref=f3e26]:
+        - generic [ref=f3e27]: Pilot
+        - generic [ref=f3e28]: /
+        - generic [ref=f3e29]: 新任务
+      - generic [ref=f3e30]:
+        - generic [ref=f3e31]: 空闲
+        - button "切换活动面板" [pressed] [ref=f3e32] [cursor=pointer]
+    - paragraph [ref=f3e35]: 当前为 Mock 模式：事件由内置剧本产生，没有调用大模型。设置 PILOT_AGENT_MODE=real 和 PILOT_MODEL_API_KEY 后重启即可接入真实模型。
+    - generic [ref=f3e36]:
+      - region "对话" [ref=f3e37]:
+        - generic [ref=f3e39]:
+          - generic [aria-hidden] [ref=f3e40]: P
+          - heading "今天让 Pilot 做什么？" [level=1] [ref=f3e41]
+          - paragraph [ref=f3e42]: 在本地工作区里读代码、跑工具、改文件。能做什么由上面的权限模式决定。
+          - generic [ref=f3e43]:
+            - button "分析项目结构 读取 pom.xml 说明模块与版本" [ref=f3e44] [cursor=pointer]:
+              - generic [ref=f3e45]: 分析项目结构
+              - generic [ref=f3e46]: 读取 pom.xml 说明模块与版本
+            - button "盘点源码 列出 Java 文件并统计包结构" [ref=f3e47] [cursor=pointer]:
+              - generic [ref=f3e48]: 盘点源码
+              - generic [ref=f3e49]: 列出 Java 文件并统计包结构
+            - button "收集 TODO 搜索注释并整理成清单" [ref=f3e50] [cursor=pointer]:
+              - generic [ref=f3e51]: 收集 TODO
+              - generic [ref=f3e52]: 搜索注释并整理成清单
+        - generic [ref=f3e54]:
+          - generic [ref=f3e55]: 输入任务
+          - textbox "输入任务" [ref=f3e56]:
+            - /placeholder: 描述任务，Enter 发送，Shift + Enter 换行
+          - generic [ref=f3e57]:
+            - generic [ref=f3e58]:
+              - generic "只读模式：写入与命令一律拒绝" [ref=f3e59]: READ_ONLY
+              - generic [ref=f3e60]:
+                - generic [ref=f3e61]: Enter
+                - text: 发送 ·
+                - generic [ref=f3e62]: Shift
+                - generic [ref=f3e63]: Enter
+                - text: 换行
+            - button "发送" [disabled] [ref=f3e64]
+      - complementary "活动" [ref=f3e67]:
+        - generic [ref=f3e68]:
+          - heading "活动" [level=2] [ref=f3e69]
+          - tablist "事件过滤" [ref=f3e70]:
+            - button "全部" [ref=f3e71] [cursor=pointer]
+            - button "工具" [ref=f3e72] [cursor=pointer]
+            - button "审批" [ref=f3e73] [cursor=pointer]
+            - button "运行" [ref=f3e74] [cursor=pointer]
+        - paragraph [ref=f3e75]: 连接后这里会按序号显示 run / tool / approval 事件。
+        - list [ref=f3e76]

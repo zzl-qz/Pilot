@@ -1,0 +1,71 @@
+- generic [ref=f2e2]:
+  - complementary "会话导航" [ref=f2e3]:
+    - generic [ref=f2e4]:
+      - generic [aria-hidden] [ref=f2e5]: P
+      - generic [ref=f2e6]:
+        - strong [ref=f2e7]: Pilot
+        - generic [ref=f2e8]: 本地编码代理
+    - button "新任务 Ctrl N" [ref=f2e9] [cursor=pointer]:
+      - generic [ref=f2e12]: 新任务
+      - generic [ref=f2e13]: Ctrl N
+    - navigation "会话列表" [ref=f2e14]:
+      - paragraph [ref=f2e15]: 会话
+      - list [ref=f2e16]:
+        - listitem [ref=f2e17]:
+          - button "新任务" [ref=f2e18] [cursor=pointer]
+    - generic [ref=f2e21]:
+      - status [ref=f2e22]:
+        - generic [ref=f2e24]: 已连接
+      - paragraph [ref=f2e25]: Mock 剧本模式
+      - paragraph [ref=f2e26]: e:\Pilot
+  - main [ref=f2e27]:
+    - generic [ref=f2e28]:
+      - generic [ref=f2e29]:
+        - generic [ref=f2e30]: Pilot
+        - generic [ref=f2e31]: /
+        - generic [ref=f2e32]: 新任务
+      - generic [ref=f2e33]:
+        - generic "ses_05720a5e-24d3-41c4-8ce1-9666479b39a6" [ref=f2e34]: ses_0572
+        - generic [ref=f2e35]: 空闲
+        - button "切换活动面板" [pressed] [ref=f2e36] [cursor=pointer]
+    - paragraph [ref=f2e39]: 当前为 Mock 模式：事件由内置剧本产生，没有调用大模型。设置 PILOT_AGENT_MODE=real 和 PILOT_MODEL_API_KEY 后重启即可接入真实模型。
+    - generic [ref=f2e40]:
+      - region "对话" [ref=f2e41]:
+        - generic [ref=f2e43]:
+          - generic [aria-hidden] [ref=f2e44]: P
+          - heading "今天让 Pilot 做什么？" [level=1] [ref=f2e45]
+          - paragraph [ref=f2e46]: 在本地工作区里读代码、跑工具、改文件。能做什么由上面的权限模式决定。
+          - generic [ref=f2e47]:
+            - button "分析项目结构 读取 pom.xml 说明模块与版本" [ref=f2e48] [cursor=pointer]:
+              - generic [ref=f2e49]: 分析项目结构
+              - generic [ref=f2e50]: 读取 pom.xml 说明模块与版本
+            - button "盘点源码 列出 Java 文件并统计包结构" [ref=f2e51] [cursor=pointer]:
+              - generic [ref=f2e52]: 盘点源码
+              - generic [ref=f2e53]: 列出 Java 文件并统计包结构
+            - button "收集 TODO 搜索注释并整理成清单" [ref=f2e54] [cursor=pointer]:
+              - generic [ref=f2e55]: 收集 TODO
+              - generic [ref=f2e56]: 搜索注释并整理成清单
+        - generic [ref=f2e58]:
+          - generic [ref=f2e59]: 输入任务
+          - textbox "输入任务" [ref=f2e60]:
+            - /placeholder: 描述任务，Enter 发送，Shift + Enter 换行
+          - generic [ref=f2e61]:
+            - generic [ref=f2e62]:
+              - generic "只读模式：写入与命令一律拒绝" [ref=f2e63]: READ_ONLY
+              - generic [ref=f2e64]:
+                - generic [ref=f2e65]: Enter
+                - text: 发送 ·
+                - generic [ref=f2e66]: Shift
+                - generic [ref=f2e67]: Enter
+                - text: 换行
+            - button "发送" [ref=f2e68] [cursor=pointer]
+      - complementary "活动" [ref=f2e71]:
+        - generic [ref=f2e72]:
+          - heading "活动" [level=2] [ref=f2e73]
+          - tablist "事件过滤" [ref=f2e74]:
+            - button "全部" [ref=f2e75] [cursor=pointer]
+            - button "工具" [ref=f2e76] [cursor=pointer]
+            - button "审批" [ref=f2e77] [cursor=pointer]
+            - button "运行" [ref=f2e78] [cursor=pointer]
+        - list [ref=f2e79]
+        - paragraph [ref=f2e80]: 连接后这里会按序号显示 run / tool / approval 事件。

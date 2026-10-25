@@ -1,26 +1,22 @@
 package com.pilot.core.loop;
 
+import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.SessionEvent;
-import com.pilot.core.event.ToolCompleted;
-import com.pilot.core.event.ToolStarted;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.permission.PermissionGate;
-import com.pilot.core.permission.PermissionResult;
-import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolCall;
+import com.pilot.core.tool.ToolExecutor;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolSupport;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -30,13 +26,16 @@ import java.util.stream.Collectors;
  * <p>循环本身不关心会话：它只把协议事件交给 {@code events} 回调，
  * 由接入层补上 sessionId / runId 并写入 {@code SessionService}。
  *
- * <p>本类有可变状态，一次运行请创建一个实例；运行应放到独立线程。
+ * <p>工具权限、审批挂起与执行细节在 {@link ToolExecutor}。
+ * 本类有可变状态，一次运行请创建一个实例；运行应放到独立线程。
  */
 public final class AgentLoop {
     public static final String DEFAULT_SYSTEM_PROMPT = """
             你是 Pilot，一个在本地工作区中工作的编码代理。
-            你可以使用提供的只读工具查看文件与搜索文本，所有路径都必须使用工作区内的相对路径。
+            你可以使用提供的工具查看文件、搜索文本，并在用户授权后修改文件。
+            所有路径都必须使用工作区内的相对路径。
             先获取事实再回答，不要编造未读取过的文件内容。
+            修改文件时优先用 edit_file，并保证 old_string 唯一；文件不存在时用 create_file。
             完成任务后用简洁的中文给出结论，必要处引用文件路径与行号。
             """;
 
@@ -72,17 +71,24 @@ public final class AgentLoop {
 
     private final ModelClient client;
     private final ToolRegistry tools;
-    private final PermissionGate permissionGate;
+    private final ToolExecutor toolExecutor;
     private final Config config;
 
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate) {
-        this(client, tools, permissionGate, Config.defaults());
+        this(client, tools, permissionGate, ApprovalBroker.denyAll(), Config.defaults());
     }
 
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate, Config config) {
+        this(client, tools, permissionGate, ApprovalBroker.denyAll(), config);
+    }
+
+    public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
+                     ApprovalBroker approvals, Config config) {
         this.client = Objects.requireNonNull(client, "client must not be null");
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
-        this.permissionGate = Objects.requireNonNull(permissionGate, "permissionGate must not be null");
+        this.toolExecutor = new ToolExecutor(tools,
+                Objects.requireNonNull(permissionGate, "permissionGate must not be null"),
+                Objects.requireNonNull(approvals, "approvals must not be null"));
         this.config = Objects.requireNonNull(config, "config must not be null");
     }
 
@@ -140,7 +146,8 @@ public final class AgentLoop {
             }
 
             for (ToolCall call : calls) {
-                messages.add(Message.tool(call.callId(), execute(call, events)));
+                String result = toolExecutor.execute(call, events).result();
+                messages.add(Message.tool(call.callId(), result));
             }
         }
 
@@ -148,58 +155,8 @@ public final class AgentLoop {
         return new Result(null, "MAX_STEPS", conversation(messages));
     }
 
-    private String execute(ToolCall call, Consumer<SessionEvent> events) {
-        events.accept(new ToolStarted(call.callId(), call.name(), summarizeArgs(call)));
-        long startedAt = System.nanoTime();
-
-        String outcome;
-        Optional<Tool> maybeTool = tools.find(call.name());
-        if (maybeTool.isEmpty()) {
-            outcome = "ERROR: 未知工具 " + call.name() + "，可用工具: " + availableNames();
-        } else {
-            Tool tool = maybeTool.get();
-            PermissionResult permission = permissionGate.check(call, tool);
-            outcome = switch (permission.decision()) {
-                case ALLOW -> runTool(tool, call);
-                case DENY -> "ERROR: 权限拒绝：" + permission.reason();
-                case ASK -> "ERROR: 审批流程尚未接入，已拒绝执行 " + tool.name() + "。";
-            };
-        }
-
-        long latencyMs = Math.max(0L, (System.nanoTime() - startedAt) / 1_000_000L);
-        events.accept(new ToolCompleted(call.callId(), ToolSupport.oneLine(outcome, 120), latencyMs));
-        return outcome;
-    }
-
-    private static String runTool(Tool tool, ToolCall call) {
-        try {
-            Map<String, Object> args = call.args() == null ? Map.of() : call.args();
-            String result = tool.execute(args);
-            return result == null ? "" : result;
-        } catch (RuntimeException e) {
-            String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            return "ERROR: 工具执行失败：" + reason;
-        }
-    }
-
-    private String availableNames() {
-        List<String> names = tools.tools().stream().map(Tool::name).toList();
-        return names.isEmpty() ? "(无)" : String.join(", ", names);
-    }
-
     private static List<Message> conversation(List<Message> messages) {
         return List.copyOf(messages.subList(1, messages.size()));
-    }
-
-    private static String summarizeArgs(ToolCall call) {
-        Map<String, Object> args = call.args() == null ? Map.of() : call.args();
-        for (String key : List.of("path", "pattern")) {
-            Object value = args.get(key);
-            if (value != null) {
-                return ToolSupport.oneLine(key + "=" + value, 120);
-            }
-        }
-        return ToolSupport.oneLine(canonical(args), 120);
     }
 
     private static String signature(List<ToolCall> calls) {
@@ -210,7 +167,7 @@ public final class AgentLoop {
 
     /** 参数规范化：Map 按 key 排序，保证同样的调用得到同样的签名。 */
     private static String canonical(Object value) {
-        if (value instanceof Map<?, ?> map) {
+        if (value instanceof java.util.Map<?, ?> map) {
             return map.entrySet().stream()
                     .sorted(Comparator.comparing(entry -> String.valueOf(entry.getKey())))
                     .map(entry -> entry.getKey() + "=" + canonical(entry.getValue()))

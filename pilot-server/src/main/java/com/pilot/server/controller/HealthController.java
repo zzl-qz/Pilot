@@ -32,8 +32,10 @@ public class HealthController {
         List<String> tools = registry == null
                 ? List.of()
                 : registry.tools().stream().map(Tool::name).toList();
-        return new HealthResponse("ok", agentProperties.mode(), modelProperties.model(), tools);
+        return new HealthResponse("ok", agentProperties.mode(), modelProperties.model(), tools,
+                agentProperties.permissionMode().name(), agentProperties.workspace());
     }
 
-    public record HealthResponse(String status, String agentMode, String model, List<String> tools) { }
+    public record HealthResponse(String status, String agentMode, String model, List<String> tools,
+                                String permissionMode, String workspace) { }
 }

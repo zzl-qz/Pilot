@@ -8,8 +8,9 @@ import com.pilot.core.model.ModelClientException;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.permission.PermissionGate;
+import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PermissionResult;
-import com.pilot.core.permission.ReadOnlyPermissionGate;
+import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolRegistry;
@@ -36,7 +37,7 @@ class AgentLoopTest {
         var client = new ScriptedModelClient(
                 new ModelResponse("", List.of(new ToolCall("call_1", "list_dir", Map.of("path", ".")))),
                 new ModelResponse("工作区有 a.txt 和 src 目录。", List.of()));
-        var loop = new AgentLoop(client, registry(tool), new ReadOnlyPermissionGate(), config(8, 3));
+        var loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
 
         AgentLoop.Result result = loop.run("列出目录", List.of(), events::add);
 
@@ -58,7 +59,7 @@ class AgentLoopTest {
     void sendsSystemPromptUserInputAndToolDefinitions() {
         var tool = new CountingTool("read_file", "content");
         var client = new ScriptedModelClient(new ModelResponse("不需要工具", List.of()));
-        var loop = new AgentLoop(client, registry(tool), new ReadOnlyPermissionGate(), config(8, 3));
+        var loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
 
         loop.run("读 pom.xml", List.of(), events::add);
 
@@ -79,7 +80,7 @@ class AgentLoopTest {
                 new ModelResponse("", List.of(call)),
                 new ModelResponse("", List.of(call)),
                 new ModelResponse("不该走到这里", List.of()));
-        var loop = new AgentLoop(client, registry(tool), new ReadOnlyPermissionGate(), config(8, 3));
+        var loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
 
         AgentLoop.Result result = loop.run("读 pom.xml", List.of(), events::add);
 
@@ -98,7 +99,7 @@ class AgentLoopTest {
                 new ModelResponse("", List.of(new ToolCall("call_1", "read_file", Map.of("path", "a")))),
                 new ModelResponse("", List.of(new ToolCall("call_2", "read_file", Map.of("path", "b")))),
                 new ModelResponse("done", List.of()));
-        var loop = new AgentLoop(client, registry(tool), new ReadOnlyPermissionGate(), config(2, 3));
+        var loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(2, 3));
 
         AgentLoop.Result result = loop.run("读两个文件", List.of(), events::add);
 
@@ -133,7 +134,7 @@ class AgentLoopTest {
         var client = new ScriptedModelClient(
                 new ModelResponse("", List.of(new ToolCall("call_1", "drop_database", Map.of()))),
                 new ModelResponse("工具不存在。", List.of()));
-        var loop = new AgentLoop(client, registry(), new ReadOnlyPermissionGate(), config(8, 3));
+        var loop = new AgentLoop(client, registry(), readOnlyGate(), config(8, 3));
 
         AgentLoop.Result result = loop.run("删库", List.of(), events::add);
 
@@ -147,7 +148,7 @@ class AgentLoopTest {
         ModelClient failing = (messages, tools) -> {
             throw new ModelClientException("HTTP 503");
         };
-        var loop = new AgentLoop(failing, registry(), new ReadOnlyPermissionGate(), config(8, 3));
+        var loop = new AgentLoop(failing, registry(), readOnlyGate(), config(8, 3));
 
         AgentLoop.Result result = loop.run("你好", List.of(), events::add);
 
@@ -164,6 +165,10 @@ class AgentLoopTest {
 
     private static AgentLoop.Config config(int maxSteps, int repeatedLimit) {
         return new AgentLoop.Config(maxSteps, repeatedLimit, "你是测试代理");
+    }
+
+    private static PolicyPermissionGate readOnlyGate() {
+        return new PolicyPermissionGate(PermissionMode.READ_ONLY);
     }
 
     private static ToolRegistry registry(Tool... tools) {

@@ -3,63 +3,135 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
   <title>Pilot · 本地编码代理</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Ctext x='16' y='22' font-family='system-ui' font-size='18' font-weight='700' fill='white' text-anchor='middle'%3EP%3C/text%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230d1117'/%3E%3Cpath d='M11 23V9h6.2a4.8 4.8 0 0 1 0 9.6H14' stroke='%236ea8ff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="app">
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true">P</span>
-        <div class="brand-text">
-          <h1>Pilot</h1>
-          <p>本地编码代理 · 事件驱动</p>
-        </div>
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar" aria-label="会话导航">
+      <div class="sidebar-head">
+        <span class="logo" aria-hidden="true">P</span>
+        <span class="logo-text">
+          <strong>Pilot</strong>
+          <small>本地编码代理</small>
+        </span>
       </div>
-      <div class="topbar-meta">
-        <span id="mode-badge" class="badge badge-muted">连接中</span>
-        <span id="session-chip" class="badge badge-mono" hidden></span>
-        <span id="connection" class="badge badge-muted">
+
+      <button id="new-session" class="new-task" type="button">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>新任务</span>
+        <kbd>Ctrl N</kbd>
+      </button>
+
+      <nav class="nav" aria-label="会话列表">
+        <p class="nav-label">会话</p>
+        <ul id="session-list" class="session-list"></ul>
+        <p id="session-empty" class="nav-empty">还没有会话，点上面「新任务」开始。</p>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div id="connection" class="conn" role="status">
           <span class="dot" aria-hidden="true"></span>
           <span id="connection-text">未连接</span>
-        </span>
-        <button id="new-session" class="ghost" type="button">新建会话</button>
+        </div>
+        <p id="mode-badge" class="mode-chip">连接中</p>
+        <p id="workspace-chip" class="workspace-chip mono" hidden></p>
       </div>
-    </header>
+    </aside>
 
-    <p id="notice" class="notice" hidden></p>
-
-    <main class="layout">
-      <section class="panel chat-panel" aria-label="对话">
-        <div class="panel-head">
-          <h2>对话</h2>
-          <span id="run-state" class="state state-idle">空闲</span>
+    <main class="main">
+      <header class="topbar">
+        <button id="sidebar-toggle" class="icon-btn menu-btn" type="button" aria-label="切换侧栏">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+        <div class="crumbs">
+          <span class="crumb-root">Pilot</span>
+          <span class="crumb-sep">/</span>
+          <span id="crumb-title">新任务</span>
         </div>
-        <div id="messages" class="messages is-empty" aria-live="polite">
-          <div class="empty" id="empty-state">
-            <span class="empty-mark" aria-hidden="true"></span>
-            <p class="empty-title">开始一个只读任务</p>
-            <p class="empty-hint">例如：读取 pom.xml，告诉我项目用的 Spring Boot 版本。</p>
+        <div class="topbar-right">
+          <span id="session-chip" class="chip mono" hidden></span>
+          <span id="run-state" class="run-state state-idle">空闲</span>
+          <button id="toggle-activity" class="icon-btn" type="button" aria-label="切换活动面板" aria-pressed="true" title="活动面板 (Ctrl B)">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11zM5.5 6.5h5M5.5 9.5h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <p id="notice" class="notice" hidden></p>
+
+      <div class="stage">
+        <section class="thread-pane" aria-label="对话">
+          <div id="messages" class="thread is-empty" aria-live="polite">
+            <div class="empty" id="empty-state">
+              <span class="empty-logo" aria-hidden="true">P</span>
+              <h1>今天让 Pilot 做什么？</h1>
+              <p class="empty-sub">在本地工作区里读代码、跑工具、改文件。能做什么由上面的权限模式决定。</p>
+              <div class="prompts" id="prompts">
+                <button type="button" data-prompt="读取 pom.xml，告诉我这个项目有哪些模块、用什么 Java 版本。">
+                  <span class="prompt-title">分析项目结构</span>
+                  <span class="prompt-sub">读取 pom.xml 说明模块与版本</span>
+                </button>
+                <button type="button" data-prompt="列出工作区里所有的 Java 文件，并统计每个包的类数量。">
+                  <span class="prompt-title">盘点源码</span>
+                  <span class="prompt-sub">列出 Java 文件并统计包结构</span>
+                </button>
+                <button type="button" data-prompt="搜索代码里所有 TODO 注释，按文件整理成清单。">
+                  <span class="prompt-title">收集 TODO</span>
+                  <span class="prompt-sub">搜索注释并整理成清单</span>
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-        <form id="composer" class="composer">
-          <label class="visually-hidden" for="input">输入任务</label>
-          <textarea id="input" rows="1" placeholder="描述任务，Enter 发送，Shift + Enter 换行"></textarea>
-          <button id="send" type="submit" disabled>发送</button>
-        </form>
-      </section>
 
-      <aside class="panel events-panel" aria-label="事件流">
-        <div class="panel-head">
-          <h2>事件流</h2>
-          <span class="hint">SSE</span>
-        </div>
-        <ol id="timeline" class="timeline" aria-live="polite"></ol>
-        <p id="timeline-empty" class="timeline-empty">连接后这里会按序号显示 run / tool / approval 事件。</p>
-      </aside>
+          <div class="composer-wrap">
+            <div id="approval-dock" class="approval" hidden></div>
+            <form id="composer" class="composer">
+              <label class="visually-hidden" for="input">输入任务</label>
+              <textarea id="input" rows="1" placeholder="描述任务，Enter 发送，Shift + Enter 换行"></textarea>
+              <div class="composer-bar">
+                <span class="composer-left">
+                  <span id="perm-chip" class="perm-chip" hidden>READ_ONLY</span>
+                  <span class="composer-hint"><kbd>Enter</kbd> 发送 <span class="sep">·</span> <kbd>Shift</kbd><kbd>Enter</kbd> 换行</span>
+                </span>
+                <button id="send" class="send" type="submit" disabled aria-label="发送" title="发送">
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.8M4.6 7.2 8 3.8l3.4 3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <aside id="activity" class="activity" aria-label="活动">
+          <div class="activity-head">
+            <h2>活动</h2>
+            <div class="filters" id="filters" role="tablist" aria-label="事件过滤">
+              <button class="filter is-on" type="button" data-filter="all" aria-selected="true">全部</button>
+              <button class="filter" type="button" data-filter="tool" aria-selected="false">工具</button>
+              <button class="filter" type="button" data-filter="approval" aria-selected="false">审批</button>
+              <button class="filter" type="button" data-filter="run" aria-selected="false">运行</button>
+            </div>
+          </div>
+          <p id="timeline-empty" class="timeline-empty">连接后这里会按序号显示 run / tool / approval 事件。</p>
+          <ol id="timeline" class="timeline" aria-live="polite"></ol>
+        </aside>
+      </div>
     </main>
   </div>
+
+  <div id="palette" class="palette" hidden>
+    <div class="palette-box" role="dialog" aria-modal="true" aria-label="命令面板">
+      <input id="palette-input" class="palette-input" type="text" autocomplete="off"
+             placeholder="搜索命令，例如「新任务」" aria-label="命令搜索">
+      <ul id="palette-list" class="palette-list" role="listbox"></ul>
+      <p class="palette-foot"><kbd>↑</kbd><kbd>↓</kbd> 选择 <span class="sep">·</span> <kbd>Enter</kbd> 执行 <span class="sep">·</span> <kbd>Esc</kbd> 关闭</p>
+    </div>
+  </div>
+
+  <div id="scrim" class="scrim" hidden></div>
+
   <script src="/app.js"></script>
 </body>
 </html>
