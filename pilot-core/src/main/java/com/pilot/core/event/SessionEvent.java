@@ -6,7 +6,7 @@ package com.pilot.core.event;
  */
 public sealed interface SessionEvent
         permits RunStarted, AssistantDelta, ToolStarted, ApprovalRequired,
-                ApprovalResolved, ToolCompleted, RunFailed, RunCompleted {
+                ApprovalResolved, ToolCompleted, RunFailed, RunCompleted, RunCancelled {
 
     EventType type();
 }

@@ -5,6 +5,7 @@ import com.pilot.core.event.ApprovalRequired;
 import com.pilot.core.event.ApprovalResolved;
 import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.EventEnvelope;
+import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import org.junit.jupiter.api.Test;
 
@@ -69,6 +70,18 @@ class SessionServiceTest {
 
         sessions.publish(session.id(), run.runId(), new RunCompleted("完成", List.of(), List.of()));
         assertEquals(SessionStatus.COMPLETED, sessions.find(session.id()).orElseThrow().status());
+    }
+
+    @Test
+    void cancellationHasItsOwnEventAndTerminalSessionStatus() {
+        Session session = sessions.createSession("取消测试");
+        Run run = sessions.sendMessage(session.id(), "开始任务");
+
+        EventEnvelope envelope = sessions.publish(session.id(), run.runId(), new RunCancelled("用户取消"));
+
+        assertEquals("run.cancelled", envelope.type());
+        assertEquals(SessionStatus.CANCELLED, sessions.find(session.id()).orElseThrow().status());
+        assertTrue(sessions.find(session.id()).orElseThrow().status().terminal());
     }
 
     @Test

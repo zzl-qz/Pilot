@@ -11,6 +11,7 @@ public enum EventType {
     APPROVAL_RESOLVED("approval.resolved"),
     TOOL_COMPLETED("tool.completed"),
     RUN_FAILED("run.failed"),
+    RUN_CANCELLED("run.cancelled"),
     RUN_COMPLETED("run.completed");
 
     private final String wireName;

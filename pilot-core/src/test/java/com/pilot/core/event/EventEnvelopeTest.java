@@ -25,6 +25,7 @@ class EventEnvelopeTest {
         assertEquals("ses_1", node.get("sessionId").asText());
         assertEquals("run_1", node.get("runId").asText());
         assertEquals("你好", node.get("payload").get("text").asText());
+        assertEquals(1, node.get("version").asInt());
     }
 
     @Test
@@ -40,6 +41,15 @@ class EventEnvelopeTest {
         assertThrows(IllegalArgumentException.class, () -> new EventEnvelope(
                 0, Instant.parse("2026-10-25T10:15:30Z"), "run.started", "ses_1", "run_1",
                 new RunStarted("hi")));
+    }
+
+    @Test
+    void rejectsUnsupportedVersionAndMismatchedType() {
+        var timestamp = Instant.parse("2026-10-25T10:15:30Z");
+        assertThrows(IllegalArgumentException.class, () -> new EventEnvelope(
+                1, timestamp, "run.started", "ses_1", "run_1", new RunStarted("hi"), 0));
+        assertThrows(IllegalArgumentException.class, () -> new EventEnvelope(
+                1, timestamp, "assistant.delta", "ses_1", "run_1", new RunStarted("hi"), 1));
     }
 
     @Test

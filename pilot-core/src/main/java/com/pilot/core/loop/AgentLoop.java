@@ -2,6 +2,7 @@ package com.pilot.core.loop;
 
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.AssistantDelta;
+import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.SessionEvent;
@@ -189,7 +190,7 @@ public final class AgentLoop {
     }
 
     private Result cancel(List<Message> messages, Consumer<SessionEvent> events) {
-        events.accept(new RunFailed("CANCELLED", "运行已被用户取消。", false));
+        events.accept(new RunCancelled("运行已被用户取消。"));
         return new Result(null, "CANCELLED", conversation(messages));
     }
 

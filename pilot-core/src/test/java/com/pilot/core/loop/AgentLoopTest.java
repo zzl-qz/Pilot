@@ -1,6 +1,7 @@
 package com.pilot.core.loop;
 
 import com.pilot.core.approval.ApprovalBroker;
+import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.SessionEvent;
@@ -175,8 +176,7 @@ class AgentLoopTest {
 
         assertEquals("CANCELLED", result.failureCode());
         assertTrue(client.requests.isEmpty(), "取消后不应再请求模型");
-        assertTrue(events.stream().anyMatch(event -> event instanceof RunFailed failed
-                && failed.code().equals("CANCELLED")));
+        assertTrue(events.stream().anyMatch(event -> event instanceof RunCancelled));
     }
 
     @Test
