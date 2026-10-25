@@ -35,6 +35,18 @@ const el = {
   approvalDock: document.querySelector('#approval-dock'),
   toggleActivity: document.querySelector('#toggle-activity'),
   activity: document.querySelector('#activity'),
+  railToggle: document.querySelector('#rail-toggle'),
+  sessionCount: document.querySelector('#session-count'),
+  tree: document.querySelector('#file-tree'),
+  treeEmpty: document.querySelector('#tree-empty'),
+  treeRefresh: document.querySelector('#tree-refresh'),
+  panelPreview: document.querySelector('#panel-preview'),
+  previewPath: document.querySelector('#preview-path'),
+  previewBody: document.querySelector('#preview-body'),
+  previewRefresh: document.querySelector('#preview-refresh'),
+  refMenu: document.querySelector('#ref-menu'),
+  gutterLeft: document.querySelector('#gutter-left'),
+  gutterRight: document.querySelector('#gutter-right'),
   filters: document.querySelector('#filters'),
   panelTabs: document.querySelector('#panel-tabs'),
   panelActivity: document.querySelector('#panel-activity'),
@@ -97,6 +109,10 @@ const state = {
   replyText: '',
   toolRows: new Map(),
   pendingInputs: [],
+  previewPath: null,
+  refKind: null,
+  refItems: [],
+  refIndex: 0,
   pendingApprovals: new Map(),
   activityCount: 0,
   filter: 'all',
@@ -130,6 +146,13 @@ function init() {
   el.workspaceChip.addEventListener('click', () => openPicker());
   el.sessionChip.addEventListener('click', copySessionId);
   el.sidebarToggle.addEventListener('click', toggleSidebar);
+  el.railToggle.addEventListener('click', toggleSidebar);
+  el.treeRefresh.addEventListener('click', () => loadTree(''));
+  el.previewRefresh.addEventListener('click', () => {
+    if (state.previewPath) {
+      openPreview(state.previewPath);
+    }
+  });
   el.scrim.addEventListener('click', closeOverlays);
   el.toggleActivity.addEventListener('click', toggleActivity);
   el.filters.addEventListener('click', onFilterClick);
@@ -160,6 +183,7 @@ function init() {
   document.addEventListener('keydown', onGlobalKeydown);
   window.addEventListener('resize', syncScrim);
   bindComposer();
+  initWorkbench();
   loadHealth();
   restoreLastSession();
 }
@@ -379,6 +403,10 @@ async function activate(sessionId, title, workspace) {
   }
   connect(0);
   setComposerEnabled(true);
+  state.previewPath = null;
+  el.previewPath.textContent = '未选择文件';
+  el.previewBody.textContent = '在左侧文件树里点一个文件，或从「变更」里点开 diff 文件。';
+  loadTree('');
 }
 
 /** 断线/刷新后校准运行状态：服务端还有活跃 run 就恢复计时与停止按钮。 */
@@ -478,6 +506,7 @@ function renderSessions() {
     el.sessionList.append(item);
   }
   el.sessionEmpty.hidden = state.sessions.length > 0;
+  el.sessionCount.textContent = String(state.sessions.length);
 }
 
 async function copySessionId() {  if (!state.sessionId) {
@@ -1102,11 +1131,12 @@ function toggleActivity() {
     visible = !el.activity.classList.toggle('is-hidden');
   }
   el.toggleActivity.setAttribute('aria-pressed', String(visible));
+  el.app.classList.toggle('inspector-collapsed', !visible);
   syncScrim();
   if (visible) {
-    el.timeline.scrollTop = el.timeline.scrollHeight;
+  el.timeline.scrollTop = el.timeline.scrollHeight;
   }
-}
+  }
 
 function isNarrow() {
   return window.matchMedia('(max-width: 960px)').matches;
@@ -1131,6 +1161,7 @@ function selectTab(tab) {
   }
   el.panelActivity.hidden = tab !== 'activity';
   el.panelChanges.hidden = tab !== 'changes';
+  el.panelPreview.hidden = tab !== 'preview';
   el.filters.hidden = tab !== 'activity';
   if (tab === 'changes') {
     loadChanges();
@@ -1189,6 +1220,7 @@ function renderChanges(report, silent) {
 
   el.changeFiles.replaceChildren();
   el.changeDiff.replaceChildren();
+  refreshChangeMarkers(files);
 
   if (!report.gitRepository) {
     el.changesState.textContent = '当前工作区不是 git 仓库';
@@ -1209,8 +1241,9 @@ function renderChanges(report, silent) {
     const path = document.createElement('span');
     path.className = 'change-path';
     path.textContent = file.path;
-    path.title = file.path;
+    path.title = file.path + '（点击预览）';
     li.append(status, path);
+    li.addEventListener('click', () => openPreview(file.path));
     el.changeFiles.append(li);
   }
 
@@ -1266,39 +1299,104 @@ function statusKind(status) {
   return 'modified';
 }
 
-function renderDiff(text) {
-  const lines = String(text).split('\n');
-  const limit = 4000;
-  const fragment = document.createDocumentFragment();
-  lines.slice(0, limit).forEach((line) => {
-    const span = document.createElement('span');
-    span.className = 'line ' + diffClass(line);
-    span.textContent = line.length ? line : ' ';
-    fragment.append(span);
-  });
-  if (lines.length > limit) {
-    const more = document.createElement('span');
-    more.className = 'line meta';
-    more.textContent = `… 还有 ${lines.length - limit} 行未显示`;
-    fragment.append(more);
+/** 把 unified diff 拆成「文件 → 行」两级结构，供折叠面板渲染。 */
+function parseDiff(text) {
+  const files = [];
+  let current = null;
+  let oldLine = 0;
+  let newLine = 0;
+  for (const line of String(text).split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      const match = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+      current = { path: match ? match[2] : line, lines: [], added: 0, removed: 0 };
+      files.push(current);
+      continue;
+    }
+    if (!current) {
+      continue;
+    }
+    if (line.startsWith('@@')) {
+      const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      if (hunk) {
+        oldLine = Number(hunk[1]);
+        newLine = Number(hunk[2]);
+      }
+      current.lines.push({ kind: 'hunk', text: line, old: '', next: '' });
+      continue;
+    }
+    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('index ')
+        || line.startsWith('new file') || line.startsWith('deleted file') || line.startsWith('similarity')) {
+      current.lines.push({ kind: 'meta', text: line, old: '', next: '' });
+      continue;
+    }
+    if (line.startsWith('+')) {
+      current.added++;
+      current.lines.push({ kind: 'add', text: line.slice(1), old: '', next: newLine++ });
+    } else if (line.startsWith('-')) {
+      current.removed++;
+      current.lines.push({ kind: 'del', text: line.slice(1), old: oldLine++, next: '' });
+    } else {
+      current.lines.push({ kind: 'ctx', text: line.slice(1), old: oldLine++, next: newLine++ });
+    }
   }
-  el.changeDiff.append(fragment);
+  return files;
 }
 
-function diffClass(line) {
-  if (line.startsWith('@@')) {
-    return 'hunk';
+function renderDiff(text) {
+  const files = parseDiff(text);
+  if (!files.length) {
+    el.changeDiff.append(changeHint('diff 为空。'));
+    return;
   }
-  if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff --git') || line.startsWith('index ')) {
-    return 'meta';
+  const changed = new Set((state.changedFiles || []).map(normalizePath));
+  for (const file of files) {
+    const details = document.createElement('details');
+    details.className = 'diff-file';
+    if (changed.has(normalizePath(file.path)) || files.length <= 3) {
+      details.open = true;
+    }
+    const summary = document.createElement('summary');
+    const path = document.createElement('span');
+    path.className = 'diff-path';
+    path.textContent = file.path;
+    path.title = file.path;
+    const stat = document.createElement('span');
+    stat.className = 'diff-stat';
+    const add = document.createElement('span');
+    add.className = 'add';
+    add.textContent = '+' + file.added;
+    const del = document.createElement('span');
+    del.className = 'del';
+    del.textContent = ' −' + file.removed;
+    stat.append(add, document.createTextNode(' '), del);
+    summary.append(path, stat);
+    details.append(summary);
+
+    const body = document.createElement('div');
+    body.className = 'diff-lines';
+    for (const line of file.lines) {
+      const row = document.createElement('div');
+      row.className = 'diff-line is-' + line.kind;
+      const no = document.createElement('span');
+      no.className = 'n';
+      no.textContent = line.old !== '' ? String(line.old) : (line.next !== '' ? String(line.next) : '');
+      const code = document.createElement('code');
+      code.textContent = line.text === '' ? ' ' : line.text;
+      row.append(no, code);
+      body.append(row);
+    }
+    details.append(body);
+    details.addEventListener('toggle', () => {
+      if (details.open) {
+        state.previewPath = file.path;
+      }
+    });
+    el.changeDiff.append(details);
   }
-  if (line.startsWith('+')) {
-    return 'add';
-  }
-  if (line.startsWith('-')) {
-    return 'del';
-  }
-  return 'ctx';
+}
+
+function normalizePath(path) {
+  return String(path || '').replace(/\\/g, '/').replace(/^\.\//, '');
 }
 
 function changeHint(text) {
@@ -1468,9 +1566,12 @@ function confirmPicker() {
 /* ---------- 输入 ---------- */
 
 function bindComposer() {
-  el.input.addEventListener('input', autoGrow);
   el.input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    if (onComposerKeydown(event)) {
+      return;
+    }
+    const submit = (event.ctrlKey || event.metaKey) && event.key === 'Enter';
+    if ((event.key === 'Enter' && !event.shiftKey && !event.isComposing) || submit) {
       event.preventDefault();
       el.composer.requestSubmit();
     }
@@ -1724,7 +1825,7 @@ function onGlobalKeydown(event) {
     openPicker();
     return;
   }
-  if (mod && event.key.toLowerCase() === 'b') {
+  if (mod && (event.key.toLowerCase() === 'b' || event.key.toLowerCase() === 'j')) {
     event.preventDefault();
     toggleActivity();
     return;
@@ -1908,6 +2009,294 @@ function scrollThread() {
 
 function isNearBottom(node, slack = 140) {
   return node.scrollHeight - node.scrollTop - node.clientHeight < slack;
+}
+
+/* ---------- 工作台：文件树 / 预览 / 分栏 / @ 引用 ---------- */
+
+const QUICK_COMMANDS = [
+  { name: '/test', hint: '跑全量测试', text: '运行 mvnw -o test，汇总失败用例与原因，不要改动代码。' },
+  { name: '/fix', hint: '修最近一次失败', text: '读取最近一次失败的测试或编译错误，定位根因并直接修改代码，改完重新运行验证。' },
+  { name: '/run', hint: '跑指定模块', text: '运行 mvnw -o -pl pilot-core test，并把失败点整理出来。' },
+  { name: '/review', hint: '审阅未提交改动', text: '审阅当前工作区未提交的改动，按风险从高到低列出问题与建议。' },
+  { name: '/explain', hint: '解释当前文件', text: '解释当前打开文件的核心逻辑、调用链和潜在风险。' }
+];
+
+function initWorkbench() {
+  setupGutter(el.gutterLeft, '--sidebar-w', 210, 460, false);
+  setupGutter(el.gutterRight, '--activity-w', 300, 720, true);
+  el.input.addEventListener('input', onComposerInput);
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.composer-wrap')) {
+      hideRefMenu();
+    }
+  });
+}
+
+/** 拖动分栏：左栏按鼠标 X 定位，右栏按到右边缘的距离定位。 */
+function setupGutter(node, variable, min, max, fromRight) {
+  if (!node) {
+    return;
+  }
+  node.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    node.setPointerCapture(event.pointerId);
+    node.classList.add('is-dragging');
+    document.body.style.cursor = 'col-resize';
+    const move = (moveEvent) => {
+      const raw = fromRight ? window.innerWidth - moveEvent.clientX : moveEvent.clientX;
+      const value = Math.max(min, Math.min(max, raw));
+      document.documentElement.style.setProperty(variable, value + 'px');
+    };
+    const stop = () => {
+      node.classList.remove('is-dragging');
+      document.body.style.cursor = '';
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+  });
+}
+
+async function loadTree(path = '', container = el.tree) {
+  if (!state.sessionId) {
+    return;
+  }
+  if (container === el.tree) {
+    el.treeEmpty.hidden = true;
+    container.replaceChildren(treeHint('读取中…'));
+  }
+  try {
+    const data = await fetchTree(path);
+    container.replaceChildren();
+    renderTreeEntries(data.entries || [], container);
+    if (container === el.tree) {
+      refreshChangeMarkers(state.changedFiles || []);
+      if (!(data.entries || []).length) {
+        container.replaceChildren(treeHint('工作区是空的。'));
+      }
+    }
+  } catch (error) {
+    container.replaceChildren(treeHint('读取失败：' + error.message));
+  }
+}
+
+async function fetchTree(path) {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/files?path=${encodeURIComponent(path)}`);
+  if (!response.ok) {
+    throw new Error(await describeError(response));
+  }
+  return response.json();
+}
+
+function treeHint(text) {
+  const node = document.createElement('p');
+  node.className = 'tree-hint';
+  node.textContent = text;
+  return node;
+}
+
+function renderTreeEntries(entries, container) {
+  for (const entry of entries) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'tree-row';
+    row.dataset.path = normalizePath(entry.path);
+    row.dataset.dir = String(entry.directory);
+    row.title = entry.path;
+
+    const caret = document.createElement('span');
+    caret.className = 'tree-caret';
+    caret.textContent = entry.directory ? '▸' : '';
+    const name = document.createElement('span');
+    name.className = 'tree-name';
+    name.textContent = entry.name;
+
+    row.append(caret, name);
+
+    if (entry.directory) {
+      const children = document.createElement('div');
+      children.className = 'tree-children';
+      children.hidden = true;
+      row.addEventListener('click', () => {
+        children.hidden = !children.hidden;
+        caret.textContent = children.hidden ? '▸' : '▾';
+        if (!children.hidden && !children.dataset.loaded) {
+          children.dataset.loaded = '1';
+          loadTree(entry.path, children);
+        }
+      });
+      container.append(row, children);
+    } else {
+      caret.textContent = '·';
+      caret.style.visibility = 'hidden';
+      row.addEventListener('click', () => openPreview(entry.path, row));
+      container.append(row);
+    }
+  }
+}
+
+async function openPreview(path, row) {
+  if (!state.sessionId) {
+    return;
+  }
+  state.previewPath = path;
+  selectTab('preview');
+  el.previewPath.textContent = path;
+  el.previewPath.title = path;
+  el.previewBody.textContent = '读取中…';
+  highlightTree(path, row);
+  try {
+    const response = await fetch(
+      `/api/sessions/${encodeURIComponent(state.sessionId)}/file?path=${encodeURIComponent(path)}`);
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const data = await response.json();
+    if (data.binary) {
+      el.previewBody.textContent = '（二进制文件，无法预览）';
+    } else if (data.truncated) {
+      el.previewBody.textContent = '（文件超过 512 KB，未加载预览）';
+    } else {
+      el.previewBody.textContent = data.content && data.content.length ? data.content : '（空文件）';
+    }
+  } catch (error) {
+    el.previewBody.textContent = '读取失败：' + error.message;
+  }
+}
+
+function highlightTree(path, row) {
+  const target = normalizePath(path);
+  for (const item of el.tree.querySelectorAll('.tree-row.is-active')) {
+    item.classList.remove('is-active');
+  }
+  const found = row || [...el.tree.querySelectorAll('.tree-row')]
+    .find((item) => item.dataset.path === target && item.dataset.dir !== 'true');
+  if (found) {
+    found.classList.add('is-active');
+  }
+}
+
+/** 变更面板加载后，在文件树里给改动过的文件打点。 */
+function refreshChangeMarkers(files) {
+  const changed = new Set((files || []).map((file) => normalizePath(typeof file === 'string' ? file : file.path)));
+  for (const row of el.tree.querySelectorAll('.tree-row')) {
+    row.classList.toggle('is-changed', changed.has(row.dataset.path));
+  }
+}
+
+/* ---------- 输入框：@ 引用与 / 快捷指令 ---------- */
+
+function onComposerInput() {
+  autoGrow();
+  const caret = el.input.selectionStart;
+  const before = el.input.value.slice(0, caret);
+  const fileMatch = /(^|\s)@([\w./-]*)$/.exec(before);
+  const commandMatch = /^\/([\w-]*)$/.exec(before);
+  if (fileMatch) {
+    showRefMenu('file', fileMatch[2]);
+  } else if (commandMatch) {
+    showRefMenu('command', commandMatch[1]);
+  } else {
+    hideRefMenu();
+  }
+}
+
+function showRefMenu(kind, query) {
+  const items = kind === 'command'
+    ? QUICK_COMMANDS.filter((item) => item.name.includes(query))
+    : treeFiles().filter((path) => path.toLowerCase().includes(String(query).toLowerCase())).slice(0, 40);
+
+  el.refMenu.replaceChildren();
+  state.refItems = items;
+  state.refKind = kind;
+  state.refIndex = 0;
+  if (!items.length) {
+    hideRefMenu();
+    return;
+  }
+  const title = document.createElement('p');
+  title.className = 'ref-title';
+  title.textContent = kind === 'command' ? '快捷指令' : '引用文件';
+  el.refMenu.append(title);
+
+  items.forEach((item, index) => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'ref-item' + (index === 0 ? ' is-on' : '');
+    const label = document.createElement('span');
+    const desc = document.createElement('span');
+    desc.className = 'ref-desc';
+    if (kind === 'command') {
+      label.textContent = item.name;
+      desc.textContent = item.hint;
+    } else {
+      label.className = 'mono';
+      label.textContent = item;
+      desc.textContent = '文件';
+    }
+    row.append(label, desc);
+    row.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      applyRef(item);
+    });
+    el.refMenu.append(row);
+  });
+  el.refMenu.hidden = false;
+}
+
+function hideRefMenu() {
+  el.refMenu.hidden = true;
+  state.refItems = [];
+}
+
+function treeFiles() {
+  return [...el.tree.querySelectorAll('.tree-row')]
+    .filter((row) => row.dataset.dir === 'false')
+    .map((row) => row.dataset.path);
+}
+
+function applyRef(item) {
+  const value = el.input.value;
+  const caret = el.input.selectionStart;
+  const before = value.slice(0, caret);
+  const after = value.slice(caret);
+  const kind = state.refKind;
+  if (kind === 'command') {
+    el.input.value = item.text + after.replace(/^\s*/, ' ');
+  } else {
+    const replaced = before.replace(/@([\w./-]*)$/, '@' + item + ' ');
+    el.input.value = replaced + after;
+  }
+  hideRefMenu();
+  autoGrow();
+  el.input.focus();
+  el.input.setSelectionRange(el.input.value.length, el.input.value.length);
+}
+
+function onComposerKeydown(event) {
+  if (!el.refMenu.hidden && state.refItems && state.refItems.length) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const delta = event.key === 'ArrowDown' ? 1 : -1;
+      state.refIndex = (state.refIndex + delta + state.refItems.length) % state.refItems.length;
+      [...el.refMenu.querySelectorAll('.ref-item')].forEach((row, index) => {
+        row.classList.toggle('is-on', index === state.refIndex);
+      });
+      return true;
+    }
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      applyRef(state.refItems[state.refIndex]);
+      return true;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      hideRefMenu();
+      return true;
+    }
+  }
+  return false;
 }
 
 /* ---------- 工具函数 ---------- */
