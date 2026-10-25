@@ -15,6 +15,7 @@ const el = {
   scrim: document.querySelector('#scrim'),
   modeBadge: document.querySelector('#mode-badge'),
   permChip: document.querySelector('#perm-chip'),
+  permMenu: document.querySelector('#perm-menu'),
   workspaceChip: document.querySelector('#workspace-chip'),
   workspaceName: document.querySelector('#workspace-name'),
   sessionChip: document.querySelector('#session-chip'),
@@ -67,6 +68,9 @@ const el = {
 };
 
 const LAST_WORKSPACE_KEY = 'pilot.workspace';
+const LAST_SESSION_KEY = 'pilot.session';
+/** 超过这个秒数没有新事件，就提示「可能卡住」，让用户知道还能停止。 */
+const STALL_SECONDS = 75;
 
 const state = {
   sessionId: null,
@@ -74,7 +78,12 @@ const state = {
   workspace: null,
   runId: null,
   lastRunId: null,
+  runStartedAt: null,
+  lastEventAt: null,
+  clock: null,
+  cursor: 0,
   agentMode: null,
+  permissionMode: null,
   changedFiles: [],
   composerEnabled: false,
   streamCard: null,
@@ -112,6 +121,12 @@ init();
 
 function init() {
   el.newSession.addEventListener('click', () => openPicker());
+  el.permChip.addEventListener('click', () => togglePermissionMenu());
+  document.addEventListener('click', (event) => {
+    if (!el.permMenu.hidden && !event.target.closest('.perm-picker')) {
+      togglePermissionMenu(false);
+    }
+  });
   el.workspaceChip.addEventListener('click', () => openPicker());
   el.sessionChip.addEventListener('click', copySessionId);
   el.sidebarToggle.addEventListener('click', toggleSidebar);
@@ -149,15 +164,50 @@ function init() {
   restoreLastSession();
 }
 
-/** 优先用上次的工作区直接开会话；没有记录时先让用户选目录。 */
-function restoreLastSession() {
-  const last = localStorage.getItem(LAST_WORKSPACE_KEY);
+/**
+ * 刷新后优先恢复上次打开的会话。
+ *
+ * <p>会话和事件都在服务端，界面只需要重新拉一次列表并回放事件，不再每次刷新都新建会话。
+ * 只有一条历史都没有时，才退回「按上次工作区新建」或首次选择目录。
+ */
+async function restoreLastSession() {
   setComposerEnabled(false);
-  setRunState('idle', '待选择工作区');
-  if (last) {
-    startSession(last);
+  setRunState('idle', '加载历史');
+  const sessions = await loadSessions();
+  const lastId = localStorage.getItem(LAST_SESSION_KEY);
+  const target = sessions.find((item) => item.id === lastId) || sessions[0];
+  if (target) {
+    activate(target.id, target.title, target.workspace);
+    return;
+  }
+  const lastWorkspace = localStorage.getItem(LAST_WORKSPACE_KEY);
+  if (lastWorkspace) {
+    startSession(lastWorkspace);
   } else {
     openPicker({ firstRun: true });
+  }
+}
+
+async function loadSessions() {
+  try {
+    const response = await fetch('/api/sessions');
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    const list = await response.json();
+    state.sessions = list.map((item) => ({
+      id: item.sessionId,
+      title: item.title || '未命名会话',
+      workspace: item.workspace,
+      createdAt: item.createdAt,
+      status: item.status
+    }));
+    renderSessions();
+    return state.sessions;
+  } catch (error) {
+    console.warn('[sessions]', error);
+    showNotice('读取会话列表失败：' + error.message);
+    return [];
   }
 }
 
@@ -180,15 +230,7 @@ async function loadHealth() {
       : '未调用大模型，事件由内置剧本产生';
 
     if (health.permissionMode) {
-      const mode = String(health.permissionMode).toUpperCase();
-      el.permChip.textContent = mode;
-      el.permChip.className = 'perm-chip is-' + mode.toLowerCase().replace(/_/g, '');
-      el.permChip.title = {
-        READ_ONLY: '只读模式：写入与命令一律拒绝',
-        ASK: '询问模式：写入与命令需你批准',
-        AUTO: '自动模式：已注册工具直接放行'
-      }[mode] || mode;
-      el.permChip.hidden = false;
+      applyPermissionMode(health.permissionMode);
     }
 
     if (real) {
@@ -198,6 +240,75 @@ async function loadHealth() {
     }
   } catch (error) {
     console.warn('[health]', error);
+  }
+}
+
+/* ---------- 权限模式 ---------- */
+
+const PERMISSION_MODES = [
+  { mode: 'READ_ONLY', label: 'READ_ONLY', hint: '只读：写入与命令一律拒绝' },
+  { mode: 'ASK', label: 'ASK', hint: '逐次批准：每次写入和命令都要确认' },
+  { mode: 'AUTO_EDIT', label: '自动改', hint: '改文件直接生效，命令仍需批准；改完看 diff，可回滚' },
+  { mode: 'AUTO', label: 'AUTO', hint: '全部放行：写入与命令都不再打断' }
+];
+
+function applyPermissionMode(mode) {
+  const value = String(mode || '').toUpperCase();
+  const found = PERMISSION_MODES.find((item) => item.mode === value);
+  state.permissionMode = value;
+  el.permChip.textContent = found ? found.label : value;
+  el.permChip.className = 'perm-chip is-' + value.toLowerCase().replace(/_/g, '');
+  el.permChip.title = (found ? found.hint : value) + ' · 点击切换';
+  el.permChip.hidden = false;
+  renderPermissionMenu();
+}
+
+function togglePermissionMenu(force) {
+  const open = force === undefined ? el.permMenu.hidden : force;
+  el.permMenu.hidden = !open;
+  el.permChip.setAttribute('aria-expanded', String(open));
+  if (open) {
+    renderPermissionMenu();
+  }
+}
+
+function renderPermissionMenu() {
+  el.permMenu.replaceChildren();
+  for (const item of PERMISSION_MODES) {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.setAttribute('role', 'menuitem');
+    option.className = 'perm-option' + (item.mode === state.permissionMode ? ' is-active' : '');
+    const label = document.createElement('strong');
+    label.textContent = item.label;
+    const hint = document.createElement('span');
+    hint.textContent = item.hint;
+    option.append(label, hint);
+    option.addEventListener('click', () => choosePermission(item.mode));
+    el.permMenu.append(option);
+  }
+}
+
+/** 运行时切换：服务端立即生效，重启后回到配置文件里的初始值。 */
+async function choosePermission(mode) {
+  togglePermissionMenu(false);
+  if (mode === state.permissionMode) {
+    return;
+  }
+  try {
+    const response = await fetch('/api/settings/permission-mode', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode })
+    });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const data = await response.json();
+    applyPermissionMode(data.permissionMode);
+    showNotice('权限已切换为「' + el.permChip.textContent + '」，对后续工具调用立即生效。');
+  } catch (error) {
+    showNotice('切换权限失败：' + error.message);
   }
 }
 
@@ -228,7 +339,13 @@ async function startSession(workspace) {
     const session = await response.json();
     const title = session.title || '新任务';
     const resolvedWorkspace = session.workspace || target;
-    state.sessions.unshift({ id: session.sessionId, title, workspace: resolvedWorkspace, createdAt: session.createdAt });
+    state.sessions.unshift({
+      id: session.sessionId,
+      title,
+      workspace: resolvedWorkspace,
+      createdAt: session.createdAt,
+      status: session.status
+    });
     localStorage.setItem(LAST_WORKSPACE_KEY, resolvedWorkspace);
     activate(session.sessionId, title, resolvedWorkspace);
     renderSessions();
@@ -239,12 +356,14 @@ async function startSession(workspace) {
   }
 }
 
-function activate(sessionId, title, workspace) {
+async function activate(sessionId, title, workspace) {
   closeStream();
+  stopRunClock();
   state.sessionId = sessionId;
   state.sessionTitle = title || '新任务';
   state.workspace = workspace || state.workspace;
   state.pendingInputs = [];
+  localStorage.setItem(LAST_SESSION_KEY, sessionId);
   el.crumbTitle.textContent = state.sessionTitle;
   el.sessionChip.textContent = sessionId.slice(0, 8);
   el.sessionChip.title = sessionId + '\n点击复制会话 ID';
@@ -252,8 +371,40 @@ function activate(sessionId, title, workspace) {
   renderWorkspace();
   renderSessions();
   setConnection('pending', '连接中');
+  // 先问服务端这个会话是否还在跑，再回放事件：回放不会覆盖掉「运行中」，
+  // 而已经结束的运行会在回放里收到终态事件，把状态纠正回来。
+  await calibrateRun(sessionId);
+  if (state.sessionId !== sessionId) {
+    return;
+  }
   connect(0);
   setComposerEnabled(true);
+}
+
+/** 断线/刷新后校准运行状态：服务端还有活跃 run 就恢复计时与停止按钮。 */
+async function calibrateRun(sessionId) {
+  state.running = false;
+  state.runId = null;
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/runs/active`);
+    if (!response.ok) {
+      return;
+    }
+    const data = await response.json();
+    if (!data.runId || state.sessionId !== sessionId) {
+      syncComposer();
+      return;
+    }
+    state.running = true;
+    state.runId = data.runId;
+    state.lastRunId = data.runId;
+    startRunClock(Date.now());
+    showThinking();
+    setComposerEnabled(false);
+    markSessionStatus('RUNNING');
+  } catch (error) {
+    console.warn('[active]', error);
+  }
 }
 
 function renderWorkspace() {
@@ -311,7 +462,7 @@ function renderSessions() {
     button.addEventListener('click', () => activateSession(session.id));
 
     const dot = document.createElement('span');
-    dot.className = 'dot';
+    dot.className = 'dot' + (session.status ? ' is-' + String(session.status).toLowerCase() : '');
     const text = document.createElement('span');
     text.className = 'session-title';
     text.textContent = session.title;
@@ -344,8 +495,8 @@ async function copySessionId() {  if (!state.sessionId) {
 /* ---------- 事件流 ---------- */
 
 function connect(cursor) {
-  const suffix = cursor ? `?after=${cursor}` : '';
-  const source = new EventSource(`/api/sessions/${encodeURIComponent(state.sessionId)}/events${suffix}`);
+  const from = Number.isFinite(cursor) ? cursor : 0;
+  const source = new EventSource(`/api/sessions/${encodeURIComponent(state.sessionId)}/events?after=${from}`);
   state.source = source;
   for (const type of EVENT_TYPES) {
     source.addEventListener(type, (message) => {
@@ -356,8 +507,18 @@ function connect(cursor) {
       }
     });
   }
+  const session = state.sessionId;
   source.onopen = () => setConnection('ok', '已连接');
-  source.onerror = () => setConnection('error', '重连中');
+  source.onerror = () => {
+    // 接管自动重连：带着已渲染的游标续订，避免从 0 重新回放
+    setConnection('error', '重连中');
+    closeStream();
+    setTimeout(() => {
+      if (state.sessionId === session) {
+        connect(state.cursor);
+      }
+    }, 1500);
+  };
 }
 
 function reconnect() {
@@ -366,7 +527,7 @@ function reconnect() {
   }
   closeStream();
   setConnection('pending', '重连中');
-  connect(0);
+  connect(state.cursor);
 }
 
 function closeStream() {
@@ -377,7 +538,14 @@ function closeStream() {
 }
 
 function handleEvent(event) {
-  console.log('[SSE]', event.type, event);
+  // 同一事件可能被旧连接重复推送，按 sequence 去重，避免历史消息叠加渲染
+  if (typeof event.sequence === 'number') {
+    if (event.sequence <= state.cursor) {
+      return;
+    }
+    state.cursor = event.sequence;
+  }
+  state.lastEventAt = Date.now();
   hideEmptyState();
 
   const stick = isNearBottom(el.messages);
@@ -386,7 +554,9 @@ function handleEvent(event) {
   switch (event.type) {
     case 'run.started': {
       state.running = true;
-      setRunState('running', '运行中');
+      state.runId = event.runId || state.runId;
+      startRunClock(Date.now());
+      markSessionStatus('RUNNING');
       syncComposer();
       clearThinking();
       const input = event.payload.input || '';
@@ -488,7 +658,9 @@ function handleEvent(event) {
 
     case 'run.completed': {
       state.running = false;
-      state.lastRunId = state.runId || state.lastRunId;
+      stopRunClock();
+      markSessionStatus('COMPLETED');
+      state.lastRunId = event.runId || state.runId || state.lastRunId;
       state.runId = null;
       state.changedFiles = event.payload.changedFiles || [];
       setRunState('done', '已完成');
@@ -515,20 +687,27 @@ function handleEvent(event) {
     }
 
     case 'run.failed': {
-      const cancelled = event.payload.code === 'CANCELLED';
+      const code = String(event.payload.code || '');
+      const cancelled = code === 'CANCELLED';
+      // 步数触顶不是失败：历史对话已保留，继续跑即可
+      const paused = code === 'MAX_STEPS';
       state.running = false;
-      state.lastRunId = state.runId || state.lastRunId;
+      stopRunClock();
+      markSessionStatus(cancelled ? 'CANCELLED' : paused ? 'PAUSED' : 'FAILED');
+      state.lastRunId = event.runId || state.runId || state.lastRunId;
       state.runId = null;
-      setRunState(cancelled ? 'idle' : 'error', cancelled ? '已取消' : '失败');
+      setRunState(paused ? 'warn' : cancelled ? 'idle' : 'error',
+        paused ? '已暂停' : cancelled ? '已取消' : '失败');
       setComposerEnabled(true);
       clearThinking();
-      finishReply(true);
+      finishReply(!paused);
       record(event, {
         kind: 'run',
-        tone: cancelled ? 'warn' : 'error',
-        status: cancelled ? '已取消' : (event.payload.retryable ? '可重试' : '失败'),
-        title: `运行${cancelled ? '取消' : '失败'} · ${event.payload.code}`,
-        detail: event.payload.message
+        tone: paused || cancelled ? 'warn' : 'error',
+        status: paused ? '可继续' : cancelled ? '已取消' : (event.payload.retryable ? '可重试' : '失败'),
+        title: paused ? `本轮已暂停 · ${code}` : `运行${cancelled ? '取消' : '失败'} · ${code}`,
+        detail: event.payload.message,
+        resumable: paused
       });
       break;
     }
@@ -607,6 +786,10 @@ function appendDelta(text) {
     startReply();
   }
   state.replyText += text;
+  // 文本同时挂在气泡自身上：run.completed 可能在同一帧到达并把 state.reply 置空，
+  // 若只依赖 state.replyText，最后一帧的 rAF 会因为 state.reply === null 直接放弃渲染，
+  // 于是界面上只剩一个空的「Pilot」气泡。
+  state.reply.dataset.text = state.replyText;
   scheduleReplyRender();
 }
 
@@ -616,13 +799,18 @@ function scheduleReplyRender() {
     return;
   }
   state.renderQueued = true;
+  const bubble = state.reply;
   requestAnimationFrame(() => {
     state.renderQueued = false;
-    if (!state.reply) {
+    if (!bubble) {
+      return;
+    }
+    const text = bubble.dataset.text || '';
+    if (!text) {
       return;
     }
     const stick = isNearBottom(el.messages);
-    state.reply.replaceChildren(renderMarkdown(state.replyText));
+    bubble.replaceChildren(renderMarkdown(text));
     if (stick) {
       scrollThread();
     }
@@ -631,12 +819,17 @@ function scheduleReplyRender() {
 
 function finishReply(failed) {
   clearThinking();
-  if (!state.reply) {
+  const bubble = state.reply;
+  if (!bubble) {
     return;
   }
-  if (!state.replyText) {
-    state.reply.classList.add('is-muted');
-    state.reply.textContent = failed ? '（本轮没有返回文本）' : '（本轮只调用了工具，没有文本输出）';
+  // 收尾时同步渲染一次：即使最后一帧的 requestAnimationFrame 还没执行也不会丢内容
+  const text = state.replyText || bubble.dataset.text || '';
+  if (text) {
+    bubble.replaceChildren(renderMarkdown(text));
+  } else {
+    bubble.classList.add('is-muted');
+    bubble.textContent = failed ? '（本轮没有返回文本）' : '（本轮只调用了工具，没有文本输出）';
   }
   state.reply = null;
   state.replyText = '';
@@ -799,7 +992,7 @@ function recordDelta(event, text) {
   });
 }
 
-function record(event, { kind, tone, status, title, detail, foot, actions, callId }) {
+function record(event, { kind, tone, status, title, detail, foot, actions, callId, resumable }) {
   if (event.type !== 'assistant.delta') {
     state.streamCard = null;
     state.streamText = '';
@@ -857,6 +1050,12 @@ function record(event, { kind, tone, status, title, detail, foot, actions, callI
       button('批准', 'btn btn-primary', () => resolveApproval(callId, true, box)),
       button('拒绝', 'btn btn-danger', () => resolveApproval(callId, false, box))
     );
+    item.append(box);
+  }
+  if (resumable) {
+    const box = document.createElement('div');
+    box.className = 'approval-actions';
+    box.append(button('继续执行', 'btn btn-primary', () => continueRun(box)));
     item.append(box);
   }
 
@@ -1292,6 +1491,16 @@ function onPromptClick(event) {
 async function sendMessage(event) {
   event.preventDefault();
   const content = el.input.value.trim();
+  if (!content) {
+    return;
+  }
+  el.input.value = '';
+  autoGrow();
+  await submitMessage(content);
+}
+
+/** 提交一条用户消息并启动运行；输入框与「继续」按钮共用。 */
+async function submitMessage(content) {
   if (!content || !state.sessionId || state.running) {
     return;
   }
@@ -1299,8 +1508,6 @@ async function sendMessage(event) {
   appendUserMessage(content);
   state.pendingInputs.push(content);
   renameSessionIfDefault(content);
-  el.input.value = '';
-  autoGrow();
   state.running = true;
   state.runId = null;
   state.lastRunId = null;
@@ -1332,7 +1539,11 @@ async function sendMessage(event) {
 
 async function cancelRun() {
   if (!state.runId) {
-    showNotice('运行刚开始，请稍后再试。');
+    // 刷新后本地可能还没拿到 runId，向服务端确认一次再决定能不能停
+    await refreshActiveRun();
+  }
+  if (!state.runId) {
+    showNotice('当前没有正在运行的任务。');
     return;
   }
   el.stop.disabled = true;
@@ -1346,6 +1557,42 @@ async function cancelRun() {
     showNotice('取消失败：' + error.message);
   } finally {
     el.stop.disabled = false;
+  }
+}
+
+/** 步数触顶后继续：对话历史在服务端，发一条「继续」即可接着做。 */
+async function continueRun(box) {
+  if (state.running) {
+    return;
+  }
+  const buttons = [...box.querySelectorAll('button')];
+  buttons.forEach((item) => { item.disabled = true; });
+  await submitMessage('继续');
+  if (!state.running) {
+    buttons.forEach((item) => { item.disabled = false; });
+  }
+}
+
+async function refreshActiveRun() {
+  if (!state.sessionId) {
+    return null;
+  }
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/runs/active`);
+    if (!response.ok) {
+      return null;
+    }
+    const data = await response.json();
+    if (data.runId) {
+      state.runId = data.runId;
+      state.running = true;
+      startRunClock(Date.now());
+      syncComposer();
+    }
+    return data.runId || null;
+  } catch (error) {
+    console.warn('[active]', error);
+    return null;
   }
 }
 
@@ -1483,6 +1730,10 @@ function onGlobalKeydown(event) {
     return;
   }
   if (event.key === 'Escape') {
+    if (!el.permMenu.hidden) {
+      togglePermissionMenu(false);
+      return;
+    }
     if (!el.picker.hidden) {
       closePicker();
     } else if (!el.palette.hidden) {
@@ -1557,6 +1808,57 @@ function setRunState(kind, label) {
   el.runState.textContent = label;
 }
 
+function markSessionStatus(status) {
+  const found = state.sessions.find((item) => item.id === state.sessionId);
+  if (found && found.status !== status) {
+    found.status = status;
+    renderSessions();
+  }
+}
+
+/** 运行计时：让「卡住」和「还在跑」在界面上可区分。 */
+function startRunClock(startedAt) {
+  state.runStartedAt = startedAt || Date.now();
+  state.lastEventAt = Date.now();
+  stopRunClock();
+  state.clock = setInterval(tickRunClock, 1000);
+  tickRunClock();
+}
+
+function stopRunClock() {
+  if (state.clock) {
+    clearInterval(state.clock);
+    state.clock = null;
+  }
+  state.runStartedAt = null;
+}
+
+function tickRunClock() {
+  if (!state.running) {
+    stopRunClock();
+    return;
+  }
+  const elapsed = elapsedText(Date.now() - (state.runStartedAt || Date.now()));
+  const idle = Math.max(0, Math.round((Date.now() - (state.lastEventAt || Date.now())) / 1000));
+  if (idle >= STALL_SECONDS) {
+    setRunState('warn', `运行中 · ${elapsed} · ${idle}s 无新事件`);
+  } else {
+    setRunState('running', `运行中 · ${elapsed}`);
+  }
+}
+
+function elapsedText(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  if (total < 60) {
+    return total + 's';
+  }
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) {
+    return `${minutes}m${String(total % 60).padStart(2, '0')}s`;
+  }
+  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}m`;
+}
+
 function showNotice(message) {
   el.noticeText.textContent = message;
   el.notice.hidden = false;
@@ -1568,6 +1870,8 @@ function hideNotice() {
 
 function resetView() {
   clearThinking();
+  stopRunClock();
+  state.cursor = 0;
   state.toolRows.clear();
   state.pendingApprovals.clear();
   state.reply = null;

@@ -100,7 +100,11 @@
               <textarea id="input" rows="1" placeholder="描述任务，Enter 发送，Shift + Enter 换行"></textarea>
               <div class="composer-bar">
                 <span class="composer-left">
-                  <span id="perm-chip" class="perm-chip" hidden>READ_ONLY</span>
+                  <span class="perm-picker">
+                    <button id="perm-chip" class="perm-chip" type="button" hidden
+                            aria-haspopup="menu" aria-expanded="false" title="切换权限模式">READ_ONLY</button>
+                    <div id="perm-menu" class="perm-menu" role="menu" hidden></div>
+                  </span>
                   <span class="composer-hint"><kbd>Enter</kbd> 发送 <span class="sep">·</span> <kbd>Shift</kbd><kbd>Enter</kbd> 换行</span>
                 </span>
                 <div class="composer-actions">

@@ -1,14 +1,12 @@
 package com.pilot.server.config;
 
-import com.pilot.core.permission.PermissionGate;
-import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.workspace.WorkspaceToolFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/** real 模式下的权限装配；工具集按会话工作区由 {@link WorkspaceToolFactory} 构建。 */
+/** real 模式下的工具装配；工具集按会话工作区由 {@link WorkspaceToolFactory} 构建。 */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "pilot.agent", name = "mode", havingValue = "real")
 public class AgentConfiguration {
@@ -16,10 +14,5 @@ public class AgentConfiguration {
     @Bean
     ToolRegistry toolRegistry(WorkspaceToolFactory factory) {
         return factory.defaultRegistry();
-    }
-
-    @Bean
-    PermissionGate permissionGate(AgentProperties properties) {
-        return new PolicyPermissionGate(properties.permissionMode());
     }
 }

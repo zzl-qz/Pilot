@@ -4,6 +4,7 @@ import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.ModelProperties;
+import com.pilot.server.config.PermissionSettings;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -17,12 +18,14 @@ import java.util.List;
 public class HealthController {
     private final AgentProperties agentProperties;
     private final ModelProperties modelProperties;
+    private final PermissionSettings permissionSettings;
     private final ObjectProvider<ToolRegistry> toolRegistry;
 
     public HealthController(AgentProperties agentProperties, ModelProperties modelProperties,
-                            ObjectProvider<ToolRegistry> toolRegistry) {
+                            PermissionSettings permissionSettings, ObjectProvider<ToolRegistry> toolRegistry) {
         this.agentProperties = agentProperties;
         this.modelProperties = modelProperties;
+        this.permissionSettings = permissionSettings;
         this.toolRegistry = toolRegistry;
     }
 
@@ -33,7 +36,7 @@ public class HealthController {
                 ? List.of()
                 : registry.tools().stream().map(Tool::name).toList();
         return new HealthResponse("ok", agentProperties.mode(), modelProperties.model(), tools,
-                agentProperties.permissionMode().name(), agentProperties.workspace());
+                permissionSettings.mode().name(), agentProperties.workspace());
     }
 
     public record HealthResponse(String status, String agentMode, String model, List<String> tools,

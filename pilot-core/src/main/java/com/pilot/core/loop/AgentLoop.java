@@ -55,8 +55,12 @@ public final class AgentLoop {
             }
         }
 
+        /**
+         * 默认步数只作为保险丝：真正约束模型的是上下文预算（{@code compact}）与
+         * 重复工具调用检测，触顶后对话历史仍会保留，可以继续下一轮。
+         */
         public static Config defaults() {
-            return new Config(8, 3, DEFAULT_SYSTEM_PROMPT);
+            return new Config(120, 3, DEFAULT_SYSTEM_PROMPT);
         }
     }
 
@@ -179,7 +183,8 @@ public final class AgentLoop {
             }
         }
 
-        events.accept(new RunFailed("MAX_STEPS", "达到最大步数 " + config.maxSteps() + "，任务未完成。", true));
+        events.accept(new RunFailed("MAX_STEPS",
+                "已达到本轮步数上限 " + config.maxSteps() + "，历史已保留，可以继续执行。", true));
         return new Result(null, "MAX_STEPS", conversation(messages));
     }
 

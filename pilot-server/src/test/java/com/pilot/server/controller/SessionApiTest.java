@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -57,6 +58,55 @@ class SessionApiTest {
         assertEquals(1, events.size());
         assertEquals("run.started", events.get(0).type());
         assertEquals("修复边界条件", ((RunStarted) events.get(0).payload()).input());
+    }
+
+    /** 刷新页面后前端靠这个接口恢复历史会话，不能只返回当前进程内新建的会话。 */
+    @Test
+    void listsSessionsForHistoryRestore() throws Exception {
+        String sessionId = createSession();
+
+        mvc.perform(get("/api/sessions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].sessionId").isNotEmpty())
+                .andExpect(jsonPath("$[0].status").isNotEmpty());
+
+        String body = mvc.perform(get("/api/sessions"))
+                .andReturn().getResponse().getContentAsString();
+        assertTrue(body.contains(sessionId), body);
+    }
+
+    /** 权限档位要能在运行时切换，改完立刻反映到 health，不需要重启。 */
+    @Test
+    void switchesPermissionModeAtRuntime() throws Exception {
+        try {
+            mvc.perform(put("/api/settings/permission-mode")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"mode\":\"AUTO_EDIT\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.permissionMode").value("AUTO_EDIT"));
+
+            mvc.perform(get("/api/health"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.permissionMode").value("AUTO_EDIT"));
+
+            mvc.perform(get("/api/settings"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.permissionMode").value("AUTO_EDIT"))
+                    .andExpect(jsonPath("$.permissionModes").isArray());
+        } finally {
+            mvc.perform(put("/api/settings/permission-mode")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"mode\":\"READ_ONLY\"}"))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Test
+    void rejectsUnknownPermissionMode() throws Exception {
+        mvc.perform(put("/api/settings/permission-mode")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"mode\":\"ROOT\"}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

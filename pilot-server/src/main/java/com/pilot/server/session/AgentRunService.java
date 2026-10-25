@@ -67,7 +67,7 @@ public class AgentRunService implements RunStarter {
         this.snapshots = snapshots;
         this.registry = registry;
         this.runRepository = runRepository;
-        this.executor = Executors.newFixedThreadPool(2, runnable -> {
+        this.executor = Executors.newFixedThreadPool(properties.runThreads(), runnable -> {
             Thread thread = new Thread(runnable, "pilot-agent-run");
             thread.setDaemon(true);
             return thread;

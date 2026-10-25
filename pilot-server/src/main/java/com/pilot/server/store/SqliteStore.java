@@ -47,6 +47,11 @@ public final class SqliteStore {
                 started_at TEXT NOT NULL,
                 finished_at TEXT
             )""",
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )""",
             "CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, sequence)",
             "CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session_id, status)"
     };

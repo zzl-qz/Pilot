@@ -4,8 +4,11 @@ import com.pilot.core.session.InMemorySessionRepository;
 import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.SessionRepository;
 import com.pilot.server.store.EventCodec;
+import com.pilot.server.store.InMemorySettingsStore;
 import com.pilot.server.store.JdbcRunRepository;
 import com.pilot.server.store.JdbcSessionRepository;
+import com.pilot.server.store.JdbcSettingsStore;
+import com.pilot.server.store.SettingsStore;
 import com.pilot.server.store.SqliteStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,6 +60,18 @@ public class StoreConfiguration {
     @ConditionalOnProperty(name = "pilot.store", havingValue = "memory")
     RunRepository noopRunRepository() {
         return RunRepository.noop();
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "pilot.store", havingValue = "sqlite", matchIfMissing = true)
+    SettingsStore jdbcSettingsStore(SqliteStore store) {
+        return new JdbcSettingsStore(store);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "pilot.store", havingValue = "memory")
+    SettingsStore inMemorySettingsStore() {
+        return new InMemorySettingsStore();
     }
 
     /** 进程重启后，库里遗留的 RUNNING 记录不可能再继续，统一标记为中断。 */
