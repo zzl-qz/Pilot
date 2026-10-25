@@ -75,6 +75,30 @@ class SessionApiTest {
         assertTrue(body.contains(sessionId), body);
     }
 
+    /** 首屏只回放尾部一页，向上翻页用 before 游标。 */
+    @Test
+    void pagesHistoryFromTheTail() throws Exception {
+        String sessionId = createSession();
+        for (int i = 0; i < 5; i++) {
+            sessions.publish(sessionId, "run_hist", new AssistantDelta("片段" + i));
+        }
+
+        mvc.perform(get("/api/sessions/{id}/history", sessionId).param("limit", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(5))
+                .andExpect(jsonPath("$.hasMore").value(true))
+                .andExpect(jsonPath("$.events.length()").value(2))
+                .andExpect(jsonPath("$.events[1].sequence").value(5));
+
+        mvc.perform(get("/api/sessions/{id}/history", sessionId)
+                        .param("limit", "2")
+                        .param("before", "4"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.events[0].sequence").value(2))
+                .andExpect(jsonPath("$.events[1].sequence").value(3))
+                .andExpect(jsonPath("$.hasMore").value(true));
+    }
+
     /** 权限档位要能在运行时切换，改完立刻反映到 health，不需要重启。 */
     @Test
     void switchesPermissionModeAtRuntime() throws Exception {

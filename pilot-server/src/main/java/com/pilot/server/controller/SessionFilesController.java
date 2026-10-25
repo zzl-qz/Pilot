@@ -33,8 +33,10 @@ import java.util.Set;
 @RestController
 @RequestMapping("/api/sessions")
 public class SessionFilesController {
-    private static final Set<String> NOISY = Set.of(
-            ".git", ".gradle", ".idea", ".vscode", "node_modules", "target", "build", "dist", "out", ".next");
+    /** 构建产物与运行期噪音目录，不进文件树。 */
+    private static final Set<String> NOISY = Set.copyOf(List.of(
+            ".git", ".gradle", ".idea", ".vscode", "node_modules", "target", "build", "dist", "out", ".next",
+            ".playwright-cli", ".pilot", "logs"));
     private static final int MAX_ENTRIES = 400;
     private static final int MAX_PREVIEW_BYTES = 512 * 1024;
 
@@ -58,7 +60,7 @@ public class SessionFilesController {
         boolean truncated = false;
         try (var stream = Files.list(directory)) {
             List<Path> children = stream
-                    .filter(child -> !NOISY.contains(name(child)))
+                    .filter(child -> !NOISY.contains(name(child).toLowerCase(Locale.ROOT)))
                     .sorted(Comparator
                             .comparing((Path child) -> !Files.isDirectory(child))
                             .thenComparing(child -> name(child).toLowerCase(Locale.ROOT)))

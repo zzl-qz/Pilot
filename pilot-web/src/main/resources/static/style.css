@@ -1828,6 +1828,46 @@ kbd {
 .diff-file { max-width: 100%; }
 .diff-lines { overscroll-behavior-x: contain; }
 
+/* ---------- 密度与信息层级 ---------- */
+
+/* 消息区更紧凑：热门 agent 的对话是一行一行读，不是卡片堆 */
+.thread { gap: 12px; padding-top: 18px; }
+.msg { gap: 4px; }
+.msg-assistant .bubble { font-size: 13.5px; line-height: 1.72; }
+.msg-assistant .who { font-size: 11px; }
+
+.tool-row { margin: 1px 0; }
+.tool-row > button { padding: 5px 9px; gap: 7px; }
+.tool-icon {
+  flex: none;
+  width: 15px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-align: center;
+}
+.tool-row:hover .tool-icon { color: var(--accent); }
+.tool-status { width: 13px; font-size: 10px; }
+.tool-name { font-size: 12px; }
+.tool-args { font-size: 11.5px; }
+.tool-meta { font-size: 10.5px; }
+
+.history-more {
+  align-self: center;
+  margin: 2px 0 10px;
+  padding: 5px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.history-more:hover { border-color: var(--accent-line); color: var(--accent); }
+.history-more:disabled { opacity: 0.6; cursor: default; }
+
 @media (max-width: 960px) {
   .gutter { display: none; }
 }

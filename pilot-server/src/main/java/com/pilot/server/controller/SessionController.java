@@ -153,6 +153,35 @@ public class SessionController {
      * SSE 事件流（服务端 → 客户端单向推送）。
      * 支持 {@code Last-Event-ID} 请求头或 {@code after} 查询参数作为游标，用于断线重连。
      */
+    /**
+     * 历史事件分页：界面首屏只取尾部一页，避免长会话一次性回放上千条事件。
+     *
+     * @param before 只返回序号小于它的历史，便于向上翻页
+     */
+    @GetMapping("/{id}/history")
+    public HistoryResponse history(@PathVariable String id,
+                                   @RequestParam(name = "limit", defaultValue = "60") int limit,
+                                   @RequestParam(name = "before", required = false) Long before) {
+        requireSession(id);
+        int capped = Math.max(1, Math.min(limit, 500));
+        List<EventEnvelope> all = sessions.events(id);
+        int end = all.size();
+        if (before != null) {
+            end = 0;
+            while (end < all.size() && all.get(end).sequence() < before) {
+                end++;
+            }
+        }
+        int start = Math.max(0, end - capped);
+        return new HistoryResponse(List.copyOf(all.subList(start, end)), start > 0, all.size());
+    }
+
+    /**
+     * @param hasMore 是否还有更早的事件
+     * @param total   该会话的事件总数
+     */
+    public record HistoryResponse(List<EventEnvelope> events, boolean hasMore, int total) { }
+
     @GetMapping(value = "/{id}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<SseEmitter> events(@PathVariable String id,
                                              @RequestParam(name = "after", required = false) Long after,

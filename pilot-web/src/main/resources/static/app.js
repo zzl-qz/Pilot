@@ -96,6 +96,9 @@ const state = {
   cursor: 0,
   agentMode: null,
   permissionMode: null,
+  historyLimit: 60,
+  historyHasMore: false,
+  replaying: false,
   changedFiles: [],
   composerEnabled: false,
   streamCard: null,
@@ -397,11 +400,17 @@ async function activate(sessionId, title, workspace) {
   setConnection('pending', '连接中');
   // 先问服务端这个会话是否还在跑，再回放事件：回放不会覆盖掉「运行中」，
   // 而已经结束的运行会在回放里收到终态事件，把状态纠正回来。
+  // 先按页拉取尾部历史（长会话不再一次性回放上千条事件），再从游标接上实时流
+  state.historyLimit = 60;
+  await loadHistory();
+  if (state.sessionId !== sessionId) {
+    return;
+  }
   await calibrateRun(sessionId);
   if (state.sessionId !== sessionId) {
     return;
   }
-  connect(0);
+  connect(state.cursor);
   setComposerEnabled(true);
   state.previewPath = null;
   el.previewPath.textContent = '未选择文件';
@@ -521,6 +530,76 @@ async function copySessionId() {  if (!state.sessionId) {
   }
 }
 
+/* ---------- 历史分页 ---------- */
+
+/**
+ * 只渲染尾部一页历史，再挂上实时流。
+ * 长会话（几百上千条事件）不再在首屏逐条建 DOM，这是刷新慢的主要原因。
+ */
+async function loadHistory({ keepViewport = false } = {}) {
+  if (!state.sessionId) {
+    return;
+  }
+  const sessionId = state.sessionId;
+  let data;
+  try {
+    const response = await fetch(
+      `/api/sessions/${encodeURIComponent(sessionId)}/history?limit=${state.historyLimit}`);
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    data = await response.json();
+  } catch (error) {
+    showNotice('读取历史失败：' + error.message);
+    return;
+  }
+  if (state.sessionId !== sessionId) {
+    return;
+  }
+
+  // 加载更早的消息时，锚点 = 视口底端距离内容末尾的距离，重排后据此还原滚动位置
+  const anchor = keepViewport ? el.messages.scrollHeight - el.messages.scrollTop : 0;
+
+  resetView();
+  state.pendingInputs = [];
+  state.historyHasMore = data.hasMore === true;
+  state.replaying = true;
+  for (const event of data.events || []) {
+    handleEvent(event);
+  }
+  state.replaying = false;
+  if (state.reply && !state.running) {
+    finishReply(false);
+  }
+  renderHistoryMore();
+  if (keepViewport) {
+    el.messages.scrollTop = Math.max(0, el.messages.scrollHeight - anchor);
+  } else {
+    scrollThread();
+  }
+}
+
+function renderHistoryMore() {
+  const existing = el.messages.querySelector('.history-more');
+  if (existing) {
+    existing.remove();
+  }
+  if (!state.historyHasMore) {
+    return;
+  }
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'history-more';
+  more.textContent = '加载更早的消息';
+  more.addEventListener('click', async () => {
+    more.disabled = true;
+    more.textContent = '加载中…';
+    state.historyLimit += 80;
+    await loadHistory({ keepViewport: true });
+  });
+  el.messages.prepend(more);
+}
+
 /* ---------- 事件流 ---------- */
 
 function connect(cursor) {
@@ -577,8 +656,8 @@ function handleEvent(event) {
   state.lastEventAt = Date.now();
   hideEmptyState();
 
-  const stick = isNearBottom(el.messages);
-  const stickTimeline = isNearBottom(el.timeline);
+  const stick = state.replaying ? false : isNearBottom(el.messages);
+  const stickTimeline = state.replaying ? false : isNearBottom(el.timeline);
 
   switch (event.type) {
     case 'run.started': {
@@ -819,7 +898,9 @@ function appendDelta(text) {
   // 若只依赖 state.replyText，最后一帧的 rAF 会因为 state.reply === null 直接放弃渲染，
   // 于是界面上只剩一个空的「Pilot」气泡。
   state.reply.dataset.text = state.replyText;
-  scheduleReplyRender();
+  if (!state.replaying) {
+    scheduleReplyRender();
+  }
 }
 
 /** 流式时每帧最多重绘一次，避免长回答的 O(n²) 重排。 */
@@ -877,6 +958,16 @@ function appendUserMessage(text) {
   hideEmptyState();
 }
 
+/** 工具类型 → 单字符图标，让一屏内能快速扫出「读 / 写 / 命令」。 */
+const TOOL_ICONS = {
+  read_file: 'R',
+  list_dir: 'D',
+  search_text: 'S',
+  edit_file: 'E',
+  create_file: '+',
+  run_command: '$'
+};
+
 function addToolRow(callId, name, args) {
   const existing = state.toolRows.get(callId);
   if (existing) {
@@ -893,6 +984,10 @@ function addToolRow(callId, name, args) {
   status.className = 'tool-status';
   status.textContent = '…';
 
+  const icon = document.createElement('span');
+  icon.className = 'tool-icon';
+  icon.textContent = TOOL_ICONS[name] || '·';
+
   const nameEl = document.createElement('span');
   nameEl.className = 'tool-name';
   nameEl.textContent = name || 'tool';
@@ -905,7 +1000,7 @@ function addToolRow(callId, name, args) {
   metaEl.className = 'tool-meta';
   metaEl.textContent = '';
 
-  button.append(status, nameEl, argsEl, metaEl);
+  button.append(status, icon, nameEl, argsEl, metaEl);
 
   const body = document.createElement('div');
   body.className = 'tool-body';
@@ -916,7 +1011,9 @@ function addToolRow(callId, name, args) {
 
   row.append(button, body);
   el.messages.append(row);
-  scrollThread();
+  if (!state.replaying) {
+    scrollThread();
+  }
 
   const handle = {
     element: row,
