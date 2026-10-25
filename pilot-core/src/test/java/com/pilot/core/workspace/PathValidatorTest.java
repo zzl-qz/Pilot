@@ -51,6 +51,23 @@ class PathValidatorTest {
     }
 
     @Test
+    void rejectsNonexistentChildBehindExternalSymlink() throws IOException {
+        Path outside = workspace.getParent().resolve("outside-target");
+        Files.createDirectories(outside);
+        Path link = workspace.resolve("external-link");
+        try {
+            Files.createSymbolicLink(link, outside);
+        } catch (UnsupportedOperationException | IOException | SecurityException e) {
+            // 当前系统/权限不支持符号链接时不阻断其余路径测试。
+            return;
+        }
+
+        var validator = new PathValidator(workspace);
+        assertThrows(WorkspaceViolationException.class,
+                () -> validator.resolve("external-link/new-file.txt"));
+    }
+
+    @Test
     void rejectsBlankPath() {
         var validator = new PathValidator(workspace);
 

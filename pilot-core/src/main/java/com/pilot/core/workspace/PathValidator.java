@@ -54,18 +54,29 @@ public final class PathValidator {
         if (!candidate.startsWith(root)) {
             throw new WorkspaceViolationException("路径超出工作区: " + value);
         }
-        if (Files.exists(candidate)) {
-            try {
-                Path real = candidate.toRealPath();
-                if (!real.startsWith(root)) {
-                    throw new WorkspaceViolationException("路径超出工作区（符号链接）: " + value);
-                }
-                return real;
-            } catch (IOException e) {
-                throw new UncheckedIOException("cannot resolve path: " + value, e);
-            }
+        // 校验从候选路径向上最近的现存祖先的真实路径，避免通过“工作区内符号链接/新建子路径”越界。
+        // 例如 workspace/link 指向外部目录时，workspace/link/new.txt 本身尚不存在，仍须拒绝。
+        Path existing = candidate;
+        while (existing != null && !Files.exists(existing)) {
+            existing = existing.getParent();
         }
-        return candidate;
+        if (existing == null) {
+            throw new WorkspaceViolationException("无法验证工作区路径: " + value);
+        }
+        try {
+            Path realExisting = existing.toRealPath();
+            if (!realExisting.startsWith(root)) {
+                throw new WorkspaceViolationException("路径超出工作区（符号链接）: " + value);
+            }
+            Path suffix = existing.relativize(candidate);
+            Path resolved = realExisting.resolve(suffix).normalize();
+            if (!resolved.startsWith(root)) {
+                throw new WorkspaceViolationException("路径超出工作区: " + value);
+            }
+            return resolved;
+        } catch (IOException e) {
+            throw new UncheckedIOException("cannot resolve path: " + value, e);
+        }
     }
 
     /** 用于事件的展示形式：工作区内返回相对路径，统一使用 {@code /}。 */
