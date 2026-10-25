@@ -5,7 +5,7 @@ import com.pilot.core.session.Run;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
-import com.pilot.server.session.MockRunSimulator;
+import com.pilot.server.session.RunStarter;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -31,12 +31,12 @@ public class SessionController {
     private static final String DEFAULT_TITLE = "未命名会话";
 
     private final SessionService sessions;
-    private final MockRunSimulator mockRun;
+    private final RunStarter runStarter;
     private final ObjectMapper objectMapper;
 
-    public SessionController(SessionService sessions, MockRunSimulator mockRun, ObjectMapper objectMapper) {
+    public SessionController(SessionService sessions, RunStarter runStarter, ObjectMapper objectMapper) {
         this.sessions = sessions;
-        this.mockRun = mockRun;
+        this.runStarter = runStarter;
         this.objectMapper = objectMapper;
     }
 
@@ -62,7 +62,7 @@ public class SessionController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
         }
         Run run = sessions.sendMessage(id, request.content());
-        mockRun.play(id, run.runId(), request.content());
+        runStarter.start(id, run.runId(), request.content());
         return new MessageResponse(id, run.runId());
     }
 

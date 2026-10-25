@@ -22,7 +22,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = "pilot.mock.enabled=false")
+@SpringBootTest(properties = {"pilot.mock.enabled=false", "pilot.agent.mode=mock"})
 @AutoConfigureMockMvc
 class SessionApiTest {
     @Autowired

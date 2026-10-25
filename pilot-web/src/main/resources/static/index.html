@@ -3,31 +3,63 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Pilot</title>
+  <title>Pilot · 本地编码代理</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Ctext x='16' y='22' font-family='system-ui' font-size='18' font-weight='700' fill='white' text-anchor='middle'%3EP%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <main>
-    <header>
-      <h1>Pilot</h1>
-      <p id="status" class="status">准备中…</p>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">P</span>
+        <div class="brand-text">
+          <h1>Pilot</h1>
+          <p>本地编码代理 · 事件驱动</p>
+        </div>
+      </div>
+      <div class="topbar-meta">
+        <span id="mode-badge" class="badge badge-muted">连接中</span>
+        <span id="session-chip" class="badge badge-mono" hidden></span>
+        <span id="connection" class="badge badge-muted">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="connection-text">未连接</span>
+        </span>
+        <button id="new-session" class="ghost" type="button">新建会话</button>
+      </div>
     </header>
-    <div class="layout">
-      <section class="panel">
-        <h2>对话</h2>
-        <section id="messages" aria-live="polite" aria-label="对话"></section>
-        <form id="chat-form">
-          <label class="visually-hidden" for="message">输入消息</label>
-          <input id="message" name="message" autocomplete="off" placeholder="输入任务，例如：解释一下 AgentLoop 的调用链" required>
-          <button type="submit" disabled>发送</button>
+
+    <p id="notice" class="notice" hidden></p>
+
+    <main class="layout">
+      <section class="panel chat-panel" aria-label="对话">
+        <div class="panel-head">
+          <h2>对话</h2>
+          <span id="run-state" class="state state-idle">空闲</span>
+        </div>
+        <div id="messages" class="messages is-empty" aria-live="polite">
+          <div class="empty" id="empty-state">
+            <span class="empty-mark" aria-hidden="true"></span>
+            <p class="empty-title">开始一个只读任务</p>
+            <p class="empty-hint">例如：读取 pom.xml，告诉我项目用的 Spring Boot 版本。</p>
+          </div>
+        </div>
+        <form id="composer" class="composer">
+          <label class="visually-hidden" for="input">输入任务</label>
+          <textarea id="input" rows="1" placeholder="描述任务，Enter 发送，Shift + Enter 换行"></textarea>
+          <button id="send" type="submit" disabled>发送</button>
         </form>
       </section>
-      <section class="panel">
-        <h2>事件流 <span class="hint">SSE</span></h2>
-        <ol id="timeline" aria-live="polite" aria-label="事件流"></ol>
-      </section>
-    </div>
-  </main>
+
+      <aside class="panel events-panel" aria-label="事件流">
+        <div class="panel-head">
+          <h2>事件流</h2>
+          <span class="hint">SSE</span>
+        </div>
+        <ol id="timeline" class="timeline" aria-live="polite"></ol>
+        <p id="timeline-empty" class="timeline-empty">连接后这里会按序号显示 run / tool / approval 事件。</p>
+      </aside>
+    </main>
+  </div>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -10,10 +10,12 @@ import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.event.ToolStarted;
 import com.pilot.core.session.SessionService;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -26,7 +28,8 @@ import java.util.concurrent.TimeUnit;
  * 用于验证 SSE 协议与前端接收链路。Sprint 2 起由真实 AgentLoop 取代。
  */
 @Component
-public class MockRunSimulator {
+@ConditionalOnProperty(prefix = "pilot.agent", name = "mode", havingValue = "mock", matchIfMissing = true)
+public class MockRunSimulator implements RunStarter {
     private static final Logger log = LoggerFactory.getLogger(MockRunSimulator.class);
 
     private final SessionService sessions;
@@ -47,7 +50,8 @@ public class MockRunSimulator {
         });
     }
 
-    public void play(String sessionId, String runId, String input) {
+    @Override
+    public void start(String sessionId, String runId, String input) {
         if (!enabled) {
             return;
         }
@@ -99,6 +103,13 @@ public class MockRunSimulator {
     private static String abbreviate(String input) {
         String text = input.strip().replaceAll("\\s+", " ");
         return text.length() <= 30 ? text : text.substring(0, 30) + "…";
+    }
+
+    @PostConstruct
+    void logMode() {
+        if (enabled) {
+            log.info("Mock 模式：事件由内置剧本产生，未调用真实模型（设置 pilot.agent.mode=real 切换）");
+        }
     }
 
     @PreDestroy
