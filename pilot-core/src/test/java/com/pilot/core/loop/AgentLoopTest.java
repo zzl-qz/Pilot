@@ -197,7 +197,7 @@ class AgentLoopTest {
 
         List<Message> secondRequest = client.requests.get(1);
         String toolResult = secondRequest.getLast().content();
-        assertTrue(toolResult.startsWith("[工具输出已省略"), toolResult);
+        assertTrue(toolResult.startsWith("[旧工具输出已清理"), toolResult);
     }
 
     @Test

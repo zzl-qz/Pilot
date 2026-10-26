@@ -105,7 +105,12 @@ public final class AgentLoop {
     }
 
     private static final int DEFAULT_CONTEXT_LIMIT = 120_000;
-    private static final int MIN_COMPACTABLE_CHARS = 400;
+    /** 旧工具输出换占位符的起点（预算占比）。 */
+    private static final double PRUNE_RATIO = 0.45;
+    /** 窗口内超长工具输出首尾截断的起点。 */
+    private static final double TRUNCATE_RATIO = 0.60;
+    /** 摘要也压不下去时，超过这个水位就硬裁剪。 */
+    private static final double DROP_RATIO = 0.95;
     /** 达到预算该比例即预压缩一次；超过强制档时允许多压几轮。 */
     /** 计划未完成时默认自动催模型继续的次数上限。 */
     private static final int DEFAULT_MAX_PLAN_CONTINUES = 3;
@@ -366,33 +371,46 @@ public final class AgentLoop {
     }
 
     /**
-     * 上下文预算：优先把较早的历史折叠成交接摘要；摘要不可用时退回「长工具输出换占位符」。
-     * 两条路径都不破坏 system / user / assistant / tool_call 的结构。
+     * 上下文预算，按代价从低到高分四层，前两层与最后一层都不花模型调用：
+     * <ol>
+     *   <li>旧工具输出换占位符（45% 起）</li>
+     *   <li>窗口内超长工具输出首尾截断（60% 起）</li>
+     *   <li>折叠成交接摘要（70% 起，85% 以上允许多压几轮，压不动就退避）</li>
+     *   <li>硬裁剪最旧的组（95% 起）</li>
+     * </ol>
      */
     private void compact(List<Message> messages, int limit, Consumer<SessionEvent> events) {
         int tokenBudget = Math.max(1, limit / 4);
         int tokens = ContextCompactor.estimateTokens(messages);
+
+        // 第一、二层不花模型调用，只是把「已经读过的内容」压缩成占位符与头尾
+        if (tokens >= tokenBudget * PRUNE_RATIO) {
+            ContextCompactor.pruneToolOutputs(messages, limit);
+        }
+        if (tokens >= tokenBudget * TRUNCATE_RATIO) {
+            ContextCompactor.truncateLongToolOutputs(messages);
+        }
+
+        tokens = ContextCompactor.estimateTokens(messages);
         if (tokens < tokenBudget * PRE_COMPACT_RATIO) {
             compactBackoffUntil = 0;
+            dropIfOverBudget(messages, limit);
             return;
         }
 
-        // 上一次压缩白跑了一趟模型：在上下文再涨 5% 之前别再试，否则每一步都要多花一次摘要调用
+        // 上一次摘要白跑了一趟模型：上下文再涨 5% 之前别再试
         int current = ContextCompactor.totalChars(messages);
         if (compactBackoffUntil > 0 && current < compactBackoffUntil) {
-            if (current > limit) {
-                truncateToolOutputs(messages, limit, current);
-            }
+            dropIfOverBudget(messages, limit);
             return;
         }
 
-        // 70% 预压缩一次；85% 以上允许多压几轮，直到回落到 70% 以下
         int rounds = tokens >= tokenBudget * FORCE_COMPACT_RATIO ? MAX_COMPACT_ROUNDS : 1;
         int targetChars = (int) (tokenBudget * PRE_COMPACT_RATIO) * 4;
         boolean reduced = false;
         for (int round = 0; round < rounds; round++) {
             ContextCompactor.Outcome outcome = compactor.compact(messages, targetChars);
-            if (!outcome.compacted() || outcome.charactersAfter() >= outcome.charactersBefore()) {
+            if (!outcome.compacted()) {
                 break;
             }
             reduced = true;
@@ -405,33 +423,12 @@ public final class AgentLoop {
 
         int total = ContextCompactor.totalChars(messages);
         compactBackoffUntil = reduced ? 0 : (int) (total * 1.05) + 1;
-        // 摘要压不动时退回截断，保证上下文不会无限增长
-        if (total > limit) {
-            truncateToolOutputs(messages, limit, total);
-        }
+        dropIfOverBudget(messages, limit);
     }
 
-    private static void truncateToolOutputs(List<Message> messages, int limit, int total) {
-
-        record Candidate(int index, int length) {
-        }
-        var candidates = new ArrayList<Candidate>();
-        for (int i = 1; i < messages.size(); i++) {
-            Message message = messages.get(i);
-            if ("tool".equals(message.role()) && message.content().length() >= MIN_COMPACTABLE_CHARS) {
-                candidates.add(new Candidate(i, message.content().length()));
-            }
-        }
-        candidates.sort(Comparator.comparingInt(Candidate::length).reversed());
-
-        for (Candidate candidate : candidates) {
-            if (total <= limit) {
-                break;
-            }
-            Message message = messages.get(candidate.index());
-            String placeholder = "[工具输出已省略 " + candidate.length() + " 字符，需要时请重新调用工具]";
-            messages.set(candidate.index(), Message.tool(message.toolCallId(), placeholder));
-            total -= candidate.length() - placeholder.length();
+    private static void dropIfOverBudget(List<Message> messages, int limit) {
+        if (ContextCompactor.totalChars(messages) > limit * DROP_RATIO) {
+            ContextCompactor.dropOldestGroups(messages, limit);
         }
     }
 
