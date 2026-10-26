@@ -3,7 +3,7 @@ package com.pilot.server.controller;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.config.AgentProperties;
-import com.pilot.server.config.ModelProperties;
+import com.pilot.server.config.ModelSettings;
 import com.pilot.server.config.PermissionSettings;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,14 +17,14 @@ import java.util.List;
 @RequestMapping("/api/health")
 public class HealthController {
     private final AgentProperties agentProperties;
-    private final ModelProperties modelProperties;
+    private final ModelSettings modelSettings;
     private final PermissionSettings permissionSettings;
     private final ObjectProvider<ToolRegistry> toolRegistry;
 
-    public HealthController(AgentProperties agentProperties, ModelProperties modelProperties,
+    public HealthController(AgentProperties agentProperties, ModelSettings modelSettings,
                             PermissionSettings permissionSettings, ObjectProvider<ToolRegistry> toolRegistry) {
         this.agentProperties = agentProperties;
-        this.modelProperties = modelProperties;
+        this.modelSettings = modelSettings;
         this.permissionSettings = permissionSettings;
         this.toolRegistry = toolRegistry;
     }
@@ -35,7 +35,7 @@ public class HealthController {
         List<String> tools = registry == null
                 ? List.of()
                 : registry.tools().stream().map(Tool::name).toList();
-        return new HealthResponse("ok", agentProperties.mode(), modelProperties.model(), tools,
+        return new HealthResponse("ok", agentProperties.mode(), modelSettings.snapshot().model(), tools,
                 permissionSettings.mode().name(), agentProperties.workspace());
     }
 

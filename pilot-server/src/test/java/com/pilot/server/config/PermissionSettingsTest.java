@@ -47,6 +47,6 @@ class PermissionSettingsTest {
     }
 
     private static AgentProperties properties(PermissionMode mode) {
-        return new AgentProperties("real", "E:\\work", mode, 120, 3, 300, 4);
+        return new AgentProperties("real", "E:\\work", mode, 120, 3, 300, 4, 3);
     }
 }

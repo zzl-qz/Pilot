@@ -1,5 +1,6 @@
 package com.pilot.core.model;
 
+import com.pilot.core.loop.Attachment;
 import com.pilot.core.loop.Message;
 import com.pilot.core.tool.ToolCall;
 import com.sun.net.httpserver.HttpServer;
@@ -12,6 +13,8 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -98,6 +101,36 @@ class OpenAiCompatibleModelClientTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void sendsImageAttachmentAsMultimodalParts() throws IOException {
+        Path image = Files.createTempFile("pilot-attach", ".png");
+        Files.write(image, new byte[]{(byte) 0x89, 'P', 'N', 'G'});
+        var captured = new AtomicReference<String>();
+        HttpServer server = startServer(captured, 200, """
+                {"choices":[{"message":{"role":"assistant","content":"看到了"}}]}
+                """);
+        server.start();
+        try {
+            client(server).chat(List.of(Message.user("看这张截图",
+                    List.of(new Attachment("shot.png", "image/png", image.toString())))), List.of());
+
+            JsonNode content = json.readTree(captured.get()).get("messages").get(0).get("content");
+            assertTrue(content.isArray(), "带图片的用户消息应折叠成多模态数组");
+            assertEquals("text", content.get(0).get("type").asText());
+            assertEquals("image_url", content.get(1).get("type").asText());
+            assertTrue(content.get(1).get("image_url").get("url").asText()
+                    .startsWith("data:image/png;base64,"));
+        } finally {
+            server.stop(0);
+            Files.deleteIfExists(image);
+        }
+    }
+
+    @Test
+    void keepsPlainTextWhenNoImageAttachment() {
+        assertEquals("hi", OpenAiCompatibleModelClient.contentFor(Message.user("hi")));
     }
 
     @Test

@@ -22,6 +22,15 @@ const el = {
   modeBadge: document.querySelector('#mode-badge'),
   permChip: document.querySelector('#perm-chip'),
   permMenu: document.querySelector('#perm-menu'),
+  modelChip: document.querySelector('#model-chip'),
+  modelMenu: document.querySelector('#model-menu'),
+  modelOptions: document.querySelector('#model-options'),
+  modelName: document.querySelector('#model-name'),
+  modelEndpoint: document.querySelector('#model-endpoint'),
+  modelKey: document.querySelector('#model-key'),
+  modelHint: document.querySelector('#model-hint'),
+  modelSave: document.querySelector('#model-save'),
+  attachments: document.querySelector('#attachments'),
   workspaceChip: document.querySelector('#workspace-chip'),
   workspaceName: document.querySelector('#workspace-name'),
   sessionChip: document.querySelector('#session-chip'),
@@ -69,7 +78,6 @@ const el = {
   composer: document.querySelector('#composer'),
   input: document.querySelector('#input'),
   send: document.querySelector('#send'),
-  stop: document.querySelector('#stop'),
   palette: document.querySelector('#palette'),
   paletteInput: document.querySelector('#palette-input'),
   paletteList: document.querySelector('#palette-list'),
@@ -118,6 +126,8 @@ const state = {
   replyText: '',
   toolRows: new Map(),
   pendingInputs: [],
+  attachments: [],
+  modelOptions: [],
   previewPath: null,
   refKind: null,
   refItems: [],
@@ -147,9 +157,15 @@ init();
 function init() {
   el.newSession.addEventListener('click', () => openPicker());
   el.permChip.addEventListener('click', () => togglePermissionMenu());
+  el.modelChip.addEventListener('click', () => toggleModelMenu());
+  el.modelSave.addEventListener('click', saveModel);
+  el.input.addEventListener('paste', onPasteAttachments);
   document.addEventListener('click', (event) => {
     if (!el.permMenu.hidden && !event.target.closest('.perm-picker')) {
       togglePermissionMenu(false);
+    }
+    if (!el.modelMenu.hidden && !event.target.closest('.perm-picker')) {
+      toggleModelMenu(false);
     }
   });
   el.workspaceChip.addEventListener('click', () => openPicker());
@@ -169,7 +185,7 @@ function init() {
   el.panelTabs.addEventListener('click', onTabClick);
   el.changesRefresh.addEventListener('click', () => loadChanges());
   el.changesRollback.addEventListener('click', rollbackRun);
-  el.stop.addEventListener('click', cancelRun);
+  el.send.addEventListener('click', onSendButtonClick);
   el.noticeClose.addEventListener('click', hideNotice);
   el.pickerClose.addEventListener('click', closePicker);
   el.pickerUp.addEventListener('click', pickerUp);
@@ -271,6 +287,7 @@ async function loadHealth() {
     } else {
       showNotice('当前为 Mock 模式：事件由内置剧本产生，没有调用大模型。设置 PILOT_AGENT_MODE=real 和 PILOT_MODEL_API_KEY 后重启即可接入真实模型。');
     }
+    await loadSettings();
   } catch (error) {
     console.warn('[health]', error);
   }
@@ -343,6 +360,211 @@ async function choosePermission(mode) {
   } catch (error) {
     showNotice('切换权限失败：' + error.message);
   }
+}
+
+/* ---------- 模型设置 ---------- */
+
+async function loadSettings() {
+  try {
+    const response = await fetch('/api/settings');
+    if (!response.ok) {
+      return;
+    }
+    applyModelSettings(await response.json());
+  } catch (error) {
+    console.warn('[settings]', error);
+  }
+}
+
+function applyModelSettings(data) {
+  if (!data) {
+    return;
+  }
+  if (data.model) {
+    el.modelChip.textContent = data.model;
+    el.modelChip.hidden = false;
+  }
+  el.modelName.value = data.model || '';
+  el.modelEndpoint.value = data.modelEndpoint || '';
+  el.modelKey.value = '';
+  el.modelHint.textContent = data.modelApiKeySet
+    ? `API Key 已配置（${data.modelApiKeyMasked || '••••'}），留空表示不修改`
+    : 'API Key 未配置，填入后即可调用真实模型';
+  el.modelChip.title = `模型：${data.model || '未设置'} · 点击切换`;
+  state.modelOptions = Array.isArray(data.modelOptions) ? data.modelOptions.slice() : [];
+  renderModelOptions(data.model);
+}
+
+/** 下拉里给出候选模型，点击即切换；当前模型排在最前面。 */
+function renderModelOptions(current) {
+  el.modelOptions.replaceChildren();
+  const names = [];
+  if (current) {
+    names.push(current);
+  }
+  for (const name of state.modelOptions) {
+    if (name && !names.includes(name)) {
+      names.push(name);
+    }
+  }
+  for (const name of names) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'model-option' + (name === current ? ' is-active' : '');
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', String(name === current));
+    item.textContent = name;
+    item.addEventListener('click', () => saveModel(name));
+    el.modelOptions.append(item);
+  }
+}
+
+function toggleModelMenu(force) {
+  const open = force === undefined ? el.modelMenu.hidden : force;
+  el.modelMenu.hidden = !open;
+  el.modelChip.setAttribute('aria-expanded', String(open));
+  if (open) {
+    el.modelKey.value = '';
+    el.modelName.focus();
+  }
+}
+
+async function saveModel(override) {
+  // 点下拉项时直接切换；点「保存」按钮时用输入框里的值
+  const model = (typeof override === 'string' ? override : el.modelName.value).trim();
+  if (!model) {
+    showNotice('请选择或填写模型名。');
+    return;
+  }
+  el.modelSave.disabled = true;
+  try {
+    const response = await fetch('/api/settings/model', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        endpoint: el.modelEndpoint.value.trim(),
+        apiKey: el.modelKey.value.trim()
+      })
+    });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const data = await response.json();
+    applyModelSettings(data);
+    toggleModelMenu(false);
+    showNotice(`模型已切换为「${data.model}」，下一次请求即生效。`);
+  } catch (error) {
+    showNotice('保存模型配置失败：' + error.message);
+  } finally {
+    el.modelSave.disabled = false;
+  }
+}
+
+/* ---------- 附件 ---------- */
+
+const MAX_ATTACHMENTS = 5;
+const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+
+/** 粘贴时优先取剪贴板里的文件（截图、复制的文件），纯文本粘贴保持原样。 */
+function onPasteAttachments(event) {
+  const data = event.clipboardData;
+  if (!data) {
+    return;
+  }
+  const files = [...(data.files || [])];
+  if (!files.length) {
+    for (const item of data.items || []) {
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file) {
+          files.push(file);
+        }
+      }
+    }
+  }
+  if (!files.length) {
+    return;
+  }
+  event.preventDefault();
+  addAttachments(files);
+}
+
+async function addAttachments(files) {
+  for (const file of files) {
+    if (state.attachments.length >= MAX_ATTACHMENTS) {
+      showNotice(`一次最多附加 ${MAX_ATTACHMENTS} 个文件。`);
+      break;
+    }
+    const name = file.name || `paste-${Date.now()}.png`;
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      showNotice(`「${name}」超过 2 MB，已跳过。`);
+      continue;
+    }
+    const mimeType = file.type || guessMime(name);
+    try {
+      state.attachments.push({ name, mimeType, dataBase64: await readAsDataUrl(file) });
+    } catch (error) {
+      showNotice('读取附件失败：' + error.message);
+    }
+  }
+  renderAttachments();
+  syncComposer();
+}
+
+function setAttachments(list) {
+  state.attachments = (list || []).slice();
+  renderAttachments();
+  syncComposer();
+}
+
+function renderAttachments() {
+  el.attachments.replaceChildren();
+  el.attachments.hidden = state.attachments.length === 0;
+  state.attachments.forEach((item, index) => {
+    const chip = document.createElement('span');
+    chip.className = 'attachment-chip';
+    const name = document.createElement('span');
+    name.className = 'attachment-name';
+    name.textContent = item.name;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'attachment-remove';
+    remove.title = '移除附件';
+    remove.textContent = '×';
+    remove.addEventListener('click', () => {
+      state.attachments.splice(index, 1);
+      renderAttachments();
+      syncComposer();
+    });
+    chip.append(name, remove);
+    el.attachments.append(chip);
+  });
+}
+
+function attachmentSummary(list) {
+  const names = (list || []).map((item) => item.name).join('、');
+  return names ? `（附带文件：${names}）` : '（附件）';
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function guessMime(name) {
+  const lower = String(name || '').toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.json')) return 'application/json';
+  // 类型未知时交给服务端嗅探：文本内联，二进制落盘后只给路径
+  return 'application/octet-stream';
 }
 
 /* ---------- 会话 ---------- */
@@ -426,6 +648,7 @@ async function activate(sessionId, title, workspace) {
 
 /** 断线/刷新后校准运行状态：服务端还有活跃 run 就恢复计时与停止按钮。 */
 async function calibrateRun(sessionId) {
+  const wasRunning = state.running;
   state.running = false;
   state.runId = null;
   try {
@@ -435,6 +658,13 @@ async function calibrateRun(sessionId) {
     }
     const data = await response.json();
     if (!data.runId || state.sessionId !== sessionId) {
+      // 服务端已经没有活跃 run：清掉回放残留的「正在处理」气泡，否则界面会一直显示在跑
+      clearThinking();
+      if (wasRunning) {
+        stopRunClock();
+        finishReply(false);
+        setRunState('idle', '空闲');
+      }
       syncComposer();
       return;
     }
@@ -778,7 +1008,13 @@ function handleEvent(event) {
       state.lastRunId = event.runId || state.runId || state.lastRunId;
       state.runId = null;
       state.changedFiles = event.payload.changedFiles || [];
-      setRunState('done', '已完成');
+      // 「运行结束」≠「任务做完」：计划还有 pending 项时如实标成未完成
+      const openSteps = Array.isArray(event.payload.openSteps) ? event.payload.openSteps : [];
+      const planTotal = Number(event.payload.planTotal || 0);
+      const planDone = Number(event.payload.planDone || 0);
+      const planOpen = openSteps.length > 0;
+      const progress = planTotal ? ` · 计划 ${planDone}/${planTotal}` : '';
+      setRunState(planOpen ? 'warn' : 'done', (planOpen ? '本轮结束' : '已完成') + progress);
       setComposerEnabled(true);
       clearThinking();
       finishReply(false);
@@ -789,13 +1025,24 @@ function handleEvent(event) {
       if (event.payload.checks && event.payload.checks.length) {
         extras.push('检查：' + event.payload.checks.join('、'));
       }
+      if (planOpen) {
+        extras.push('剩余：' + openSteps.join('、'));
+      }
       record(event, {
         kind: 'run',
-        tone: 'ok',
-        status: '完成',
-        title: '运行完成',
+        tone: planOpen ? 'warn' : 'ok',
+        status: planOpen ? '未完成' : '完成',
+        title: (planOpen ? '本轮结束' : '运行完成') + progress,
         detail: event.payload.summary,
-        foot: extras.join(' · ')
+        foot: extras.join(' · '),
+        resumable: planOpen
+      });
+      appendTurnResult({
+        tone: planOpen ? 'warn' : 'ok',
+        title: (planOpen ? `本轮结束 · 还有 ${openSteps.length} 项没做` : '本轮已完成') + progress,
+        openSteps,
+        changedFiles: event.payload.changedFiles || [],
+        resumable: planOpen
       });
       refreshChanges();
       break;
@@ -815,8 +1062,17 @@ function handleEvent(event) {
       break;
     }
     case 'run.continued': {
-      showNotice(`自动继续 ${event.payload.attempt}/${event.payload.maxAttempts}：${event.payload.reason || ''}`);
+      const attempt = Number(event.payload.attempt || 1);
+      const max = Number(event.payload.maxAttempts || 0);
+      showNotice(`自动继续 ${attempt}/${max}：${event.payload.reason || ''}`);
       setRunState('running', '自动继续中');
+      record(event, {
+        kind: 'run',
+        tone: 'ok',
+        status: max ? `${attempt}/${max}` : '继续',
+        title: '计划未完成，自动继续',
+        detail: event.payload.reason
+      });
       break;
     }
     case 'subagent.started': {
@@ -832,23 +1088,32 @@ function handleEvent(event) {
       const cancelled = code === 'CANCELLED';
       // 步数触顶不是失败：历史对话已保留，继续跑即可
       const paused = code === 'MAX_STEPS';
+      // 服务重启导致的中断：不是任务本身失败，同样可以继续
+      const interrupted = code === 'INTERRUPTED';
+      const resumable = paused || interrupted;
       state.running = false;
       stopRunClock();
-      markSessionStatus(cancelled ? 'CANCELLED' : paused ? 'PAUSED' : 'FAILED');
+      markSessionStatus(cancelled ? 'CANCELLED' : paused ? 'PAUSED' : interrupted ? 'INTERRUPTED' : 'FAILED');
       state.lastRunId = event.runId || state.runId || state.lastRunId;
       state.runId = null;
-      setRunState(paused ? 'warn' : cancelled ? 'idle' : 'error',
-        paused ? '已暂停' : cancelled ? '已取消' : '失败');
+      setRunState(resumable ? 'warn' : cancelled ? 'idle' : 'error',
+        paused ? '已暂停' : interrupted ? '已中断' : cancelled ? '已取消' : '失败');
       setComposerEnabled(true);
       clearThinking();
-      finishReply(!paused);
+      finishReply(!resumable);
       record(event, {
         kind: 'run',
-        tone: paused || cancelled ? 'warn' : 'error',
-        status: paused ? '可继续' : cancelled ? '已取消' : (event.payload.retryable ? '可重试' : '失败'),
-        title: paused ? `本轮已暂停 · ${code}` : `运行${cancelled ? '取消' : '失败'} · ${code}`,
+        tone: resumable || cancelled ? 'warn' : 'error',
+        status: paused ? '可继续' : interrupted ? '已中断' : cancelled ? '已取消' : (event.payload.retryable ? '可重试' : '失败'),
+        title: paused ? `本轮已暂停 · ${code}` : interrupted ? `运行已中断 · ${code}` : `运行${cancelled ? '取消' : '失败'} · ${code}`,
         detail: event.payload.message,
-        resumable: paused
+        resumable
+      });
+      appendTurnResult({
+        tone: cancelled || resumable ? 'warn' : 'error',
+        title: paused ? '本轮已暂停' : interrupted ? '运行已中断' : cancelled ? '本轮已取消' : '运行失败',
+        detail: event.payload.message,
+        resumable
       });
       break;
     }
@@ -884,6 +1149,61 @@ function appendCompaction(payload) {
   card.append(head, body);
   el.messages.append(card);
   hideEmptyState();
+}
+
+/**
+ * 每轮结束在对话流里留一条结论：干完了没有、还剩什么、改了哪些文件。
+ * 没有这一条时，用户只能凭最后一条工具卡片猜本轮是结束了还是卡住了。
+ */
+function appendTurnResult({ tone, title, detail, openSteps, changedFiles, resumable }) {
+  const card = document.createElement('article');
+  card.className = 'turn-card is-' + (tone || 'ok');
+
+  const head = document.createElement('div');
+  head.className = 'turn-head';
+  const mark = document.createElement('span');
+  mark.className = 'turn-mark';
+  mark.textContent = tone === 'ok' ? '✓' : tone === 'warn' ? '!' : '×';
+  const label = document.createElement('strong');
+  label.textContent = title || '本轮结束';
+  head.append(mark, label);
+  card.append(head);
+
+  if (detail) {
+    const note = document.createElement('p');
+    note.className = 'turn-note';
+    note.textContent = detail;
+    card.append(note);
+  }
+
+  if (openSteps && openSteps.length) {
+    const list = document.createElement('ul');
+    list.className = 'turn-open';
+    for (const step of openSteps) {
+      const item = document.createElement('li');
+      item.textContent = step;
+      list.append(item);
+    }
+    card.append(list);
+  }
+
+  if (changedFiles && changedFiles.length) {
+    const foot = document.createElement('p');
+    foot.className = 'turn-foot';
+    foot.textContent = '变更：' + changedFiles.join('、');
+    card.append(foot);
+  }
+
+  if (resumable) {
+    const actions = document.createElement('div');
+    actions.className = 'turn-actions';
+    actions.append(button('继续执行', 'btn btn-primary', () => continueRun(card)));
+    card.append(actions);
+  }
+
+  el.messages.append(card);
+  hideEmptyState();
+  scrollThread();
 }
 
 function fmtChars(value) {
@@ -1814,6 +2134,14 @@ function bindComposer() {
     }
   });
   el.composer.addEventListener('submit', sendMessage);
+  // 模型设置里的输入框在表单内：回车不能触发发消息，改为保存
+  el.modelMenu.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') {
+      return;
+    }
+    event.preventDefault();
+    saveModel();
+  });
 }
 
 function onPromptClick(event) {
@@ -1829,23 +2157,26 @@ function onPromptClick(event) {
 async function sendMessage(event) {
   event.preventDefault();
   const content = el.input.value.trim();
-  if (!content) {
+  const attachments = state.attachments.slice();
+  if (!content && !attachments.length) {
     return;
   }
   el.input.value = '';
   autoGrow();
-  await submitMessage(content);
+  setAttachments([]);
+  // 只有附件没有文字时也要有正文，服务端和模型都需要一句话说明
+  await submitMessage(content || attachmentSummary(attachments), attachments);
 }
 
 /** 提交一条用户消息并启动运行；输入框与「继续」按钮共用。 */
-async function submitMessage(content) {
-  if (!content || !state.sessionId) {
+async function submitMessage(content, attachments = []) {
+  if ((!content && !attachments.length) || !state.sessionId) {
     return;
   }
 
   // 运行中发送不再拦截：服务端会把它排进当前 run 的下一轮
   const wasRunning = state.running;
-  appendUserMessage(content);
+  appendUserMessage(content || attachmentSummary(attachments));
   state.pendingInputs.push(content);
   if (!wasRunning) {
     renameSessionIfDefault(content);
@@ -1864,7 +2195,14 @@ async function submitMessage(content) {
     const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content })
+      body: JSON.stringify({
+        content,
+        attachments: attachments.map((item) => ({
+          name: item.name,
+          mimeType: item.mimeType,
+          dataBase64: item.dataBase64
+        }))
+      })
     });
     if (response.status === 202) {
       // 已入队，等 run.steered 事件确认被消费
@@ -1882,9 +2220,21 @@ async function submitMessage(content) {
       state.pendingInputs.pop();
       syncComposer();
       setRunState('error', '发送失败');
+    } else if (attachments.length) {
+      // 运行中追加图片会被服务端拒绝，把附件放回输入区，避免白丢
+      setAttachments(attachments);
     }
     showNotice('发送失败：' + error.message);
   }
+}
+
+/** 单按钮：运行中点击等于停止，空闲时等于发送（Enter 仍走表单提交，保留运行中追加指令）。 */
+function onSendButtonClick() {
+  if (state.running) {
+    cancelRun();
+    return;
+  }
+  el.composer.requestSubmit();
 }
 
 async function cancelRun() {
@@ -1896,7 +2246,7 @@ async function cancelRun() {
     showNotice('当前没有正在运行的任务。');
     return;
   }
-  el.stop.disabled = true;
+  el.send.disabled = true;
   try {
     const response = await fetch(`/api/runs/${encodeURIComponent(state.runId)}/cancel`, { method: 'POST' });
     if (!response.ok) {
@@ -1906,7 +2256,7 @@ async function cancelRun() {
   } catch (error) {
     showNotice('取消失败：' + error.message);
   } finally {
-    el.stop.disabled = false;
+    el.send.disabled = false;
   }
 }
 
@@ -2101,6 +2451,10 @@ function onGlobalKeydown(event) {
       togglePermissionMenu(false);
       return;
     }
+    if (!el.modelMenu.hidden) {
+      toggleModelMenu(false);
+      return;
+    }
     if (!el.picker.hidden) {
       closePicker();
     } else if (!el.palette.hidden) {
@@ -2152,16 +2506,14 @@ function setComposerEnabled(enabled) {
   syncComposer();
 }
 
-/** 输入区：空闲显示发送，运行中只显示停止，结束后按需显示回滚。 */
+/** 输入区：单按钮，空闲是发送、运行中变停止；结束后按需显示回滚。 */
 function syncComposer() {
   const running = state.running;
-  el.stop.hidden = !running;
-  // 运行中也可以发送：服务端会把它排进当前 run 的下一轮
-  el.send.hidden = false;
-  el.send.disabled = !state.composerEnabled;
-  if (!running) {
-    el.stop.disabled = false;
-  }
+  el.send.classList.toggle('is-running', running);
+  el.send.setAttribute('aria-label', running ? '停止' : '发送');
+  el.send.title = running ? '停止本次运行' : '发送 (Ctrl Enter)';
+  // 运行中按钮必须可点：此时它是唯一的停止入口
+  el.send.disabled = running ? false : !state.composerEnabled;
   // mock 模式没有真实写入，也就没有快照可回滚
   el.changesRollback.hidden = !(state.lastRunId && !running && state.agentMode === 'real');
 }

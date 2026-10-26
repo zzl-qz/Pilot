@@ -1,6 +1,7 @@
 package com.pilot.core.session;
 
 import com.pilot.core.event.EventEnvelope;
+import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.SessionEvent;
 import org.slf4j.Logger;
@@ -161,9 +162,15 @@ public final class SessionService {
             case APPROVAL_REQUIRED -> SessionStatus.WAITING_APPROVAL;
             case APPROVAL_RESOLVED -> SessionStatus.RUNNING;
             case RUN_COMPLETED -> SessionStatus.COMPLETED;
-            case RUN_FAILED -> SessionStatus.FAILED;
+            // 进程重启导致的中断和真正的失败要分开：前者可继续，不该显示成「失败」
+            case RUN_FAILED -> isInterrupted(event) ? SessionStatus.INTERRUPTED : SessionStatus.FAILED;
             case RUN_CANCELLED -> SessionStatus.CANCELLED;
             default -> current;
         };
+    }
+
+    /** {@code run.failed} 的 code 为 INTERRUPTED 表示运行不是自己结束的（服务重启）。 */
+    private static boolean isInterrupted(SessionEvent event) {
+        return event instanceof RunFailed failed && "INTERRUPTED".equals(failed.code());
     }
 }

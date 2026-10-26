@@ -1,5 +1,6 @@
 package com.pilot.core.model;
 
+import com.pilot.core.loop.Attachment;
 import com.pilot.core.loop.Message;
 import com.pilot.core.tool.ToolCall;
 import tools.jackson.databind.JsonNode;
@@ -11,8 +12,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -140,12 +144,40 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                             "arguments", objectMapper.writeValueAsString(
                                     call.args() == null ? Map.of() : call.args())))).toList());
         } else {
-            payload.put("content", message.content());
+            payload.put("content", contentFor(message));
         }
         if (message.toolCallId() != null && !message.toolCallId().isBlank()) {
             payload.put("tool_call_id", message.toolCallId());
         }
         return payload;
+    }
+
+    /**
+     * 带图片附件的 user 消息按多模态数组发送；其余情况保持纯文本，
+     * 避免给不支持多模态的兼容端点发送数组。
+     */
+    static Object contentFor(Message message) {
+        var images = message.attachments().stream().filter(Attachment::image).toList();
+        if (images.isEmpty()) {
+            return message.content();
+        }
+        var parts = new ArrayList<Map<String, Object>>();
+        if (!message.content().isBlank()) {
+            parts.add(Map.of("type", "text", "text", message.content()));
+        }
+        for (Attachment image : images) {
+            parts.add(Map.of("type", "image_url", "image_url", Map.of("url", dataUrl(image))));
+        }
+        return parts;
+    }
+
+    private static String dataUrl(Attachment image) {
+        try {
+            byte[] bytes = Files.readAllBytes(Path.of(image.path()));
+            return "data:" + image.mimeType() + ";base64," + Base64.getEncoder().encodeToString(bytes);
+        } catch (IOException e) {
+            throw new ModelClientException("读取图片附件失败：" + image.name(), e);
+        }
     }
 
     private Map<String, Object> toolPayload(ToolDefinition tool) {

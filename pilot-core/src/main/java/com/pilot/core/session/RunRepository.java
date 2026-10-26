@@ -1,6 +1,7 @@
 package com.pilot.core.session;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * 运行记录端口：记录每次运行的开始/结束，用于断线后的状态校准，
@@ -16,9 +17,12 @@ public interface RunRepository {
      * 把仍处于 RUNNING 的记录标记为中断（进程重启后调用），
      * 避免界面把已经死掉的运行显示成「正在运行」。
      *
-     * @return 被标记的记录数
+     * <p>返回被标记的运行本身就是调用方需要的信息：只有 runId + sessionId 齐了，
+     * 才能在会话事件流里补上终态，把会话状态一起收敛掉。
+     *
+     * @return 被标记的运行
      */
-    int markInterrupted(Instant at);
+    List<InterruptedRun> markInterrupted(Instant at);
 
     static RunRepository noop() {
         return new RunRepository() {
@@ -31,8 +35,8 @@ public interface RunRepository {
             }
 
             @Override
-            public int markInterrupted(Instant at) {
-                return 0;
+            public List<InterruptedRun> markInterrupted(Instant at) {
+                return List.of();
             }
         };
     }

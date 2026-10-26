@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <title>Pilot · 本地编码代理</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230d1117'/%3E%3Cpath d='M11 23V9h6.2a4.8 4.8 0 0 1 0 9.6H14' stroke='%236ea8ff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/style.css?v=7">
+  <link rel="stylesheet" href="/style.css?v=8">
 </head>
 <body>
 <div class="app" id="app">
@@ -57,11 +57,6 @@
         <span class="dot" aria-hidden="true"></span>
         <span id="connection-text">未连接</span>
       </div>
-      <span class="perm-picker">
-        <button id="perm-chip" class="perm-chip" type="button" hidden
-                aria-haspopup="menu" aria-expanded="false" title="切换权限模式">READ_ONLY</button>
-        <div id="perm-menu" class="perm-menu" role="menu" hidden></div>
-      </span>
       <button id="workspace-chip" class="workspace-chip mono" type="button" hidden title="切换工作区"></button>
     </div>
   </aside>
@@ -129,12 +124,44 @@
       <div class="composer-wrap">
         <div id="approval-dock" class="approval" hidden></div>
         <div id="ref-menu" class="ref-menu" hidden></div>
+        <div id="attachments" class="attachments" hidden></div>
         <form id="composer" class="composer">
           <label class="visually-hidden" for="input">输入任务</label>
           <textarea id="input" rows="1" spellcheck="false"
                     placeholder="描述任务，Enter 发送，Shift + Enter 换行，@ 引用文件，/ 快捷指令"></textarea>
           <div class="composer-bar">
             <span class="composer-left">
+              <span class="composer-chips">
+                <span class="perm-picker">
+                  <button id="perm-chip" class="perm-chip" type="button" hidden
+                          aria-haspopup="menu" aria-expanded="false" title="切换权限模式">READ_ONLY</button>
+                  <div id="perm-menu" class="perm-menu" role="menu" hidden></div>
+                </span>
+                <span class="perm-picker">
+                  <button id="model-chip" class="perm-chip model-chip" type="button" hidden
+                          aria-haspopup="dialog" aria-expanded="false" title="选择模型">model</button>
+                  <div id="model-menu" class="perm-menu model-menu" role="dialog" aria-label="模型设置" hidden>
+                    <p class="model-title">模型</p>
+                    <div id="model-options" class="model-options" role="listbox"></div>
+                    <label class="model-row">
+                      <span>自定义模型</span>
+                      <input id="model-name" type="text" spellcheck="false" placeholder="gpt-4o-mini">
+                    </label>
+                    <label class="model-row">
+                      <span>端点</span>
+                      <input id="model-endpoint" type="text" spellcheck="false" placeholder="https://api.openai.com/v1">
+                    </label>
+                    <label class="model-row">
+                      <span>API Key</span>
+                      <input id="model-key" type="password" spellcheck="false" placeholder="留空表示不修改">
+                    </label>
+                    <p id="model-hint" class="model-hint"></p>
+                    <div class="model-actions">
+                      <button id="model-save" class="btn btn-primary btn-sm" type="button">保存</button>
+                    </div>
+                  </div>
+                </span>
+              </span>
               <span class="composer-hint">
                 <kbd>Enter</kbd> 发送
                 <span class="sep">·</span>
@@ -144,11 +171,10 @@
               </span>
             </span>
             <div class="composer-actions">
-              <button id="stop" class="send stop" type="button" hidden aria-label="停止" title="停止本次运行">
-                <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.6" fill="currentColor"/></svg>
-              </button>
-              <button id="send" class="send" type="submit" disabled aria-label="发送" title="发送 (Ctrl Enter)">
-                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.8M4.6 7.2 8 3.8l3.4 3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+              <!-- 单按钮：空闲是发送，运行中同一位置变成停止 -->
+              <button id="send" class="send" type="button" disabled aria-label="发送" title="发送 (Ctrl Enter)">
+                <svg class="icon-send" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.8M4.6 7.2 8 3.8l3.4 3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                <svg class="icon-stop" viewBox="0 0 16 16" aria-hidden="true"><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.6" fill="currentColor"/></svg>
               </button>
             </div>
           </div>
@@ -247,6 +273,6 @@
 
 <div id="scrim" class="scrim" hidden></div>
 
-<script src="/app.js?v=7"></script>
+<script src="/app.js?v=9"></script>
 </body>
 </html>

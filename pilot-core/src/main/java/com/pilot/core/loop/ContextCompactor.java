@@ -100,8 +100,17 @@ public final class ContextCompactor {
         }
 
         int covered = end - 1;
+        String head = header(covered);
+        int foldedChars = 0;
+        for (Message message : messages.subList(1, end)) {
+            foldedChars += message.content().length();
+        }
+        // 摘要不比被折叠的原文短（常见于「只折叠 1 条」）：省不下预算，只会丢信息，直接不动历史
+        if (before - foldedChars + head.length() + summary.length() >= before) {
+            return Outcome.none(before);
+        }
         messages.subList(1, end).clear();
-        messages.add(1, Message.user(header(covered) + summary));
+        messages.add(1, Message.user(head + summary));
         return new Outcome(covered, before, totalChars(messages), summary);
     }
 

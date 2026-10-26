@@ -3,6 +3,7 @@ package com.pilot.core.loop;
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.RunContinued;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.ToolCompleted;
@@ -14,6 +15,7 @@ import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PermissionResult;
 import com.pilot.core.permission.PolicyPermissionGate;
+import com.pilot.core.plan.PlanItem;
 import com.pilot.core.tool.ProducesCheck;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolCall;
@@ -282,6 +284,102 @@ class AgentLoopTest {
 
     private static AgentLoop.Config config(int maxSteps, int repeatedLimit) {
         return new AgentLoop.Config(maxSteps, repeatedLimit, "你是测试代理");
+    }
+
+    /** 关闭自动续跑时，模型提前收尾必须把差距交给界面，别让人以为干完了。 */
+    @Test
+    void reportsOpenPlanStepsWhenModelStopsEarly() {
+        var client = new ScriptedModelClient(new ModelResponse("先做到这里。", List.of()));
+        var plan = List.of(
+                new PlanItem("检查分支状态", PlanItem.COMPLETED),
+                new PlanItem("跑回归测试", PlanItem.PENDING));
+        var loop = new AgentLoop(client, registry(new CountingTool("list_dir", "a.txt")), readOnlyGate(),
+                new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 0));
+
+        loop.run("继续", List.of(), events::add);
+
+        RunCompleted completed = events.stream()
+                .filter(RunCompleted.class::isInstance)
+                .map(RunCompleted.class::cast)
+                .findFirst()
+                .orElseThrow();
+        assertTrue(completed.planOpen(), "还有 pending 项时不能算做完");
+        assertEquals(1, completed.planDone().intValue());
+        assertEquals(2, completed.planTotal().intValue());
+        assertEquals(List.of("跑回归测试"), completed.openSteps());
+    }
+
+    @Test
+    void reportsPlainCompletionWhenPlanIsDone() {
+        var client = new ScriptedModelClient(new ModelResponse("全部完成。", List.of()));
+        var plan = List.of(new PlanItem("跑回归测试", PlanItem.COMPLETED));
+        var loop = new AgentLoop(client, registry(new CountingTool("list_dir", "a.txt")), readOnlyGate(),
+                new AgentLoop.Config(8, 3, "你是测试代理", () -> plan));
+
+        loop.run("继续", List.of(), events::add);
+
+        RunCompleted completed = events.stream()
+                .filter(RunCompleted.class::isInstance)
+                .map(RunCompleted.class::cast)
+                .findFirst()
+                .orElseThrow();
+        assertFalse(completed.planOpen());
+        assertEquals(1, completed.planDone().intValue());
+        assertEquals(1, completed.planTotal().intValue());
+    }
+
+    /** 计划没做完时不该停下来等用户，应该自动催一轮继续，直到计划标记完成。 */
+    @Test
+    void continuesAutomaticallyWhilePlanHasOpenSteps() {
+        var client = new ScriptedModelClient(
+                new ModelResponse("先做到这里。", List.of()),
+                new ModelResponse("全部做完了。", List.of()));
+        var round = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.function.Supplier<List<PlanItem>> plan = () -> round.getAndIncrement() == 0
+                ? List.of(new PlanItem("检查分支状态", PlanItem.COMPLETED),
+                          new PlanItem("跑回归测试", PlanItem.PENDING))
+                : List.of(new PlanItem("检查分支状态", PlanItem.COMPLETED),
+                          new PlanItem("跑回归测试", PlanItem.COMPLETED));
+        var loop = new AgentLoop(client, registry(new CountingTool("list_dir", "a.txt")), readOnlyGate(),
+                new AgentLoop.Config(8, 3, "你是测试代理", plan, 3));
+
+        loop.run("继续", List.of(), events::add);
+
+        assertEquals(1, events.stream().filter(RunContinued.class::isInstance).count(),
+                "应自动提示模型继续一次");
+        assertEquals(2, client.requests.size(), "模型应被调用两轮");
+        RunCompleted completed = events.stream()
+                .filter(RunCompleted.class::isInstance)
+                .map(RunCompleted.class::cast)
+                .findFirst()
+                .orElseThrow();
+        assertFalse(completed.planOpen(), "第二轮计划已全部完成");
+        // 继续提示要真的送进下一轮上下文，否则模型不知道还要做什么
+        String secondRound = client.requests.get(1).get(client.requests.get(1).size() - 1).content();
+        assertTrue(secondRound.contains("跑回归测试"), secondRound);
+        assertTrue(secondRound.contains("自动继续"), secondRound);
+    }
+
+    /** 模型死活不改计划时必须停手，把未完成项交回界面，不能无限催。 */
+    @Test
+    void stopsAfterAutoContinueLimit() {
+        var client = new ScriptedModelClient(
+                new ModelResponse("做到这里。", List.of()),
+                new ModelResponse("还是做到这里。", List.of()));
+        var plan = List.of(new PlanItem("跑回归测试", PlanItem.PENDING));
+        var loop = new AgentLoop(client, registry(new CountingTool("list_dir", "a.txt")), readOnlyGate(),
+                new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 1));
+
+        loop.run("继续", List.of(), events::add);
+
+        assertEquals(1, events.stream().filter(RunContinued.class::isInstance).count());
+        RunCompleted completed = events.stream()
+                .filter(RunCompleted.class::isInstance)
+                .map(RunCompleted.class::cast)
+                .findFirst()
+                .orElseThrow();
+        assertTrue(completed.planOpen(), "到达上限后仍未完成，要如实标出来");
+        assertEquals(List.of("跑回归测试"), completed.openSteps());
     }
 
     private static PolicyPermissionGate readOnlyGate() {

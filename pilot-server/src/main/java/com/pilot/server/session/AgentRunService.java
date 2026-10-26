@@ -4,6 +4,7 @@ import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.loop.AgentLoop;
+import com.pilot.core.loop.Attachment;
 import com.pilot.core.loop.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.permission.PermissionGate;
@@ -17,7 +18,7 @@ import com.pilot.core.tool.ToolRegistry;
 import tools.jackson.databind.ObjectMapper;
 import com.pilot.core.trace.JsonlTraceRecorder;
 import com.pilot.server.config.AgentProperties;
-import com.pilot.server.config.ModelProperties;
+import com.pilot.server.config.ModelSettings;
 import com.pilot.server.workspace.RunSnapshotService;
 import com.pilot.server.workspace.WorkspaceToolFactory;
 import jakarta.annotation.PostConstruct;
@@ -57,7 +58,7 @@ public class AgentRunService implements RunStarter {
     private final PermissionGate permissionGate;
     private final ApprovalBroker approvals;
     private final AgentProperties properties;
-    private final ModelProperties modelProperties;
+    private final ModelSettings modelSettings;
     private final RunSnapshotService snapshots;
     private final RunRegistry registry;
     private final com.pilot.core.session.RunRepository runRepository;
@@ -72,7 +73,7 @@ public class AgentRunService implements RunStarter {
 
     public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
                            PermissionGate permissionGate, ApprovalBroker approvals,
-                           AgentProperties properties, ModelProperties modelProperties,
+                           AgentProperties properties, ModelSettings modelSettings,
                            RunSnapshotService snapshots, RunRegistry registry,
                            com.pilot.core.session.RunRepository runRepository,
                            ConversationRepository conversations,
@@ -85,7 +86,7 @@ public class AgentRunService implements RunStarter {
         this.permissionGate = permissionGate;
         this.approvals = approvals;
         this.properties = properties;
-        this.modelProperties = modelProperties;
+        this.modelSettings = modelSettings;
         this.snapshots = snapshots;
         this.registry = registry;
         this.runRepository = runRepository;
@@ -99,13 +100,18 @@ public class AgentRunService implements RunStarter {
 
     @Override
     public void start(String sessionId, String runId, String input) {
-        launch(sessionId, runId, input, false);
+        launch(sessionId, runId, input, List.of(), false);
+    }
+
+    @Override
+    public void start(String sessionId, String runId, String input, List<Attachment> attachments) {
+        launch(sessionId, runId, input, attachments == null ? List.of() : attachments, false);
     }
 
     /** 续跑：不追加用户消息，用落盘的记忆接着跑。 */
     @Override
     public void resume(String sessionId, String runId) {
-        launch(sessionId, runId, null, true);
+        launch(sessionId, runId, null, List.of(), true);
     }
 
     @Override
@@ -128,7 +134,8 @@ public class AgentRunService implements RunStarter {
         return queue == null ? null : queue.poll();
     }
 
-    private void launch(String sessionId, String runId, String input, boolean continuation) {
+    private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
+                        boolean continuation) {
         var handle = new RunHandle();
         runs.put(runId, handle);
         registry.register(runId, sessionId);
@@ -136,7 +143,7 @@ public class AgentRunService implements RunStarter {
         handle.future = executor.submit(() -> {
             String status = "FAILED";
             try {
-                status = execute(sessionId, runId, input, handle, continuation);
+                status = execute(sessionId, runId, input, attachments, handle, continuation);
             } finally {
                 registry.unregister(runId);
                 runRepository.finished(runId, status, java.time.Instant.now());
@@ -182,7 +189,7 @@ public class AgentRunService implements RunStarter {
         autoContinueSignature.put(sessionId, signature);
         String runId = "run_" + java.util.UUID.randomUUID();
         publish(sessionId, runId, new RunContinued(attempt, MAX_AUTO_CONTINUE, "步数触顶，按未完成计划继续"));
-        launch(sessionId, runId, null, true);
+        launch(sessionId, runId, null, List.of(), true);
     }
 
     @Override
@@ -250,7 +257,8 @@ public class AgentRunService implements RunStarter {
         return brief.toString();
     }
 
-    private String execute(String sessionId, String runId, String input, RunHandle handle, boolean continuation) {
+    private String execute(String sessionId, String runId, String input, List<Attachment> attachments,
+                           RunHandle handle, boolean continuation) {
         List<Message> history = conversations.load(sessionId);
         String workspace = sessions.find(sessionId).map(Session::workspace).orElse(null);
         PlanSink planSink = (items, explanation) -> {
@@ -265,7 +273,11 @@ public class AgentRunService implements RunStarter {
         Consumer<SessionEvent> sink = event -> publish(sessionId, runId, event);
         Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
         var config = new AgentLoop.Config(properties.maxSteps(), properties.repeatedToolCallLimit(),
-                AgentLoop.DEFAULT_SYSTEM_PROMPT + planBrief(sessionId));
+                AgentLoop.DEFAULT_SYSTEM_PROMPT + planBrief(sessionId),
+                // 收尾时读一次计划，把「本轮是否真的做完」一并写进 run.completed
+                () -> plans.load(sessionId),
+                // 计划没做完时自动继续，而不是停下来等用户点「继续执行」
+                properties.maxPlanContinues());
         // 子代理与父代理共用工具集（其中不含 spawn_agent，避免递归派生）
         tools.register(new SpawnAgentTool(modelClient, tools, permissionGate, approvals, config,
                 () -> conversations.load(sessionId), sink, handle.cancelled::get));
@@ -280,7 +292,7 @@ public class AgentRunService implements RunStarter {
         try {
             AgentLoop.Result result = continuation
                     ? loop.resume(history, sink, checkpoint)
-                    : loop.run(input, history, sink, checkpoint);
+                    : loop.run(input, attachments, history, sink, checkpoint);
             conversations.save(sessionId, result.conversation());
             log.info("Agent run {} completed: failureCode={}, messages={}, workspace={}", runId, result.failureCode(),
                     result.conversation().size(), workspace == null ? properties.workspace() : workspace);
@@ -313,11 +325,13 @@ public class AgentRunService implements RunStarter {
 
     @PostConstruct
     void logConfiguration() {
-        if (modelProperties.apiKey() == null || modelProperties.apiKey().isBlank()) {
-            log.warn("pilot.agent.mode=real，但 pilot.model.api-key 为空，模型请求会失败；请设置环境变量 PILOT_MODEL_API_KEY");
+        ModelSettings.Snapshot snapshot = modelSettings.snapshot();
+        if (!snapshot.hasApiKey()) {
+            log.warn("pilot.agent.mode=real，但模型 API Key 未配置，模型请求会失败；"
+                    + "可在界面「模型设置」里填写，或设置环境变量 PILOT_MODEL_API_KEY");
         } else {
             log.info("真实模型模式：model={} endpoint={} workspace={}",
-                    modelProperties.model(), modelProperties.endpoint(), properties.workspace());
+                    snapshot.model(), snapshot.endpoint(), properties.workspace());
         }
     }
 

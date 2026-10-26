@@ -11,6 +11,7 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
 import com.pilot.server.config.AgentProperties;
+import com.pilot.server.session.AttachmentService;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.workspace.WorkspaceService;
 import org.springframework.http.HttpStatus;
@@ -50,12 +51,15 @@ public class SessionController {
     private final AgentProperties agentProperties;
     private final PlanRepository plans;
     private final ConversationRepository conversations;
+    private final AttachmentService attachments;
 
     public SessionController(SessionService sessions, RunStarter runStarter, ObjectMapper objectMapper,
                              WorkspaceService workspaces, AgentProperties agentProperties,
-                             PlanRepository plans, ConversationRepository conversations) {
+                             PlanRepository plans, ConversationRepository conversations,
+                             AttachmentService attachments) {
         this.sessions = sessions;
         this.runStarter = runStarter;
+        this.attachments = attachments;
         this.objectMapper = objectMapper;
         this.workspaces = workspaces;
         this.agentProperties = agentProperties;
@@ -180,17 +184,29 @@ public class SessionController {
     @PostMapping("/{id}/messages")
     public ResponseEntity<MessageResponse> sendMessage(@PathVariable String id, @RequestBody MessageRequest request) {
         requireSession(id);
-        if (request == null || request.content() == null || request.content().isBlank()) {
+        boolean hasAttachments = request != null && request.attachments() != null && !request.attachments().isEmpty();
+        if (request == null || ((request.content() == null || request.content().isBlank()) && !hasAttachments)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
         }
-        // 运行中追加：入队交给当前 run 在下一轮消费，不新开 run
+        // 运行中只接受纯文本追加；先检查状态，避免被拒绝的附件请求产生文件副作用。
         String activeRun = runStarter.activeRun(id).orElse(null);
-        if (activeRun != null && runStarter.steer(id, request.content())) {
-            return ResponseEntity.accepted().body(new MessageResponse(id, activeRun));
+        if (activeRun != null && hasAttachments) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "运行中不能追加附件，请等本轮结束后再发");
         }
-        Run run = sessions.sendMessage(id, request.content());
-        runStarter.start(id, run.runId(), request.content());
-        return ResponseEntity.ok(new MessageResponse(id, run.runId()));
+        AttachmentService.Prepared prepared;
+        try {
+            prepared = attachments.prepare(id, request.content(), request.attachments());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+        if (activeRun != null) {
+            if (runStarter.steer(id, prepared.content())) {
+                return ResponseEntity.accepted().body(new MessageResponse(id, activeRun));
+            }
+        }
+        Run run = sessions.sendMessage(id, prepared.content());
+        runStarter.start(id, run.runId(), prepared.content(), prepared.attachments());
+        return ResponseEntity.ok().body(new MessageResponse(id, run.runId()));
     }
 
     /**
@@ -307,7 +323,7 @@ public class SessionController {
 
     public record RenameRequest(String title) { }
 
-    public record MessageRequest(String content) { }
+    public record MessageRequest(String content, List<AttachmentService.Inbound> attachments) { }
 
     public record MessageResponse(String sessionId, String runId) { }
 

@@ -15,11 +15,12 @@ import java.nio.file.Path;
  * @param repeatedToolCallLimit 连续相同工具调用达到该次数即中断
  * @param approvalTimeoutSeconds 审批等待超时（秒），超时按拒绝处理
  * @param runThreads            同时执行的 run 数，单个 run 卡住时不影响其他会话
+ * @param maxPlanContinues      模型提前收尾但计划未完成时，自动催它继续的最大次数；0 表示不自动继续
  */
 @ConfigurationProperties(prefix = "pilot.agent")
 public record AgentProperties(String mode, String workspace, PermissionMode permissionMode,
                               int maxSteps, int repeatedToolCallLimit, int approvalTimeoutSeconds,
-                              int runThreads) {
+                              int runThreads, int maxPlanContinues) {
     public AgentProperties {
         mode = mode == null || mode.isBlank() ? "mock" : mode.strip();
         workspace = workspace == null || workspace.isBlank()
@@ -30,5 +31,6 @@ public record AgentProperties(String mode, String workspace, PermissionMode perm
         repeatedToolCallLimit = repeatedToolCallLimit < 1 ? 3 : repeatedToolCallLimit;
         approvalTimeoutSeconds = approvalTimeoutSeconds < 1 ? 300 : approvalTimeoutSeconds;
         runThreads = runThreads < 1 ? 4 : Math.min(runThreads, 16);
+        maxPlanContinues = maxPlanContinues < 0 ? 0 : Math.min(maxPlanContinues, 10);
     }
 }

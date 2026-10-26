@@ -55,7 +55,7 @@ class SessionEventsTest {
     @Test
     void runCompleted() {
         assertSerialized(new RunCompleted("完成", List.of("AgentLoop.java"), List.of("mvn test")), "run.completed", """
-                {"summary":"完成","changedFiles":["AgentLoop.java"],"checks":["mvn test"]}""");
+                {"summary":"完成","changedFiles":["AgentLoop.java"],"checks":["mvn test"],"planDone":0,"planTotal":0,"openSteps":[]}""");
     }
 
     private void assertSerialized(SessionEvent event, String expectedType, String expectedJson) {

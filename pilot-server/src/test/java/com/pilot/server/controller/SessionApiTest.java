@@ -4,10 +4,16 @@ import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.session.Run;
 import com.pilot.core.session.SessionService;
+import com.pilot.server.session.RunStarter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -16,7 +22,10 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -31,6 +40,40 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {"pilot.mock.enabled=false", "pilot.agent.mode=mock", "pilot.store=memory"})
 @AutoConfigureMockMvc
 class SessionApiTest {
+    private static final Path ATTACHMENT_ROOT = Path.of(System.getProperty("java.io.tmpdir"),
+            "pilot-session-api-" + java.util.UUID.randomUUID());
+
+    @TestConfiguration
+    static class TestConfig {
+        @Bean
+        @Primary
+        TestRunStarter testRunStarter() {
+            return new TestRunStarter();
+        }
+    }
+
+    static class TestRunStarter implements RunStarter {
+        private final AtomicBoolean running = new AtomicBoolean();
+
+        @Override
+        public void start(String sessionId, String runId, String input) {
+        }
+
+        @Override
+        public Optional<String> activeRun(String sessionId) {
+            return running.get() ? Optional.of("run_active") : Optional.empty();
+        }
+
+        @Override
+        public boolean steer(String sessionId, String text) {
+            return running.get();
+        }
+    }
+    @DynamicPropertySource
+    static void attachmentProperties(DynamicPropertyRegistry registry) {
+        registry.add("pilot.attachments.dir", () -> ATTACHMENT_ROOT.toString());
+    }
+
     @Autowired
     private MockMvc mvc;
 
@@ -39,6 +82,9 @@ class SessionApiTest {
 
     @Autowired
     private SessionService sessions;
+
+    @Autowired
+    private TestRunStarter runStarter;
 
     @TempDir
     Path workspace;
@@ -73,6 +119,36 @@ class SessionApiTest {
         String body = mvc.perform(get("/api/sessions"))
                 .andReturn().getResponse().getContentAsString();
         assertTrue(body.contains(sessionId), body);
+    }
+
+    @Test
+    void rejectsAttachmentsDuringActiveRunWithoutPersistingThemAndQueuesText() throws Exception {
+        String sessionId = createSession();
+        Path attachmentRoot = ATTACHMENT_ROOT.resolve(sessionId);
+        runStarter.running.set(true);
+        try {
+            String attachment = json.writeValueAsString(Map.of(
+                    "content", "检查这个文件",
+                    "attachments", List.of(Map.of(
+                            "name", "payload.bin",
+                            "mimeType", "application/octet-stream",
+                            "dataBase64", "AQIDBA=="))));
+            mvc.perform(post("/api/sessions/{id}/messages", sessionId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(attachment))
+                    .andExpect(status().isConflict());
+
+            assertFalse(Files.exists(attachmentRoot), "冲突响应前不应创建附件目录或文件");
+
+            mvc.perform(post("/api/sessions/{id}/messages", sessionId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"content\":\"补充说明\"}"))
+                    .andExpect(status().isAccepted())
+                    .andExpect(jsonPath("$.sessionId").value(sessionId))
+                    .andExpect(jsonPath("$.runId").value("run_active"));
+        } finally {
+            runStarter.running.set(false);
+        }
     }
 
     /** 首屏只回放尾部一页，向上翻页用 before 游标。 */

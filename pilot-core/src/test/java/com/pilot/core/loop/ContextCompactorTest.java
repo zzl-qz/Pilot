@@ -39,6 +39,19 @@ class ContextCompactorTest {
     }
 
     @Test
+    void keepsHistoryWhenSummaryIsNotShorter() {
+        var messages = history(8, 400);
+        // 摘要比被折叠的原文还长：省不下预算，只会丢信息，应当放弃这次压缩
+        var compactor = new ContextCompactor(summarizing("摘要".repeat(2000)), 6);
+        int before = messages.size();
+
+        ContextCompactor.Outcome outcome = compactor.compact(messages, 300);
+
+        assertFalse(outcome.compacted(), "没有收益的压缩不应改动历史");
+        assertEquals(before, messages.size());
+    }
+
+    @Test
     void keepsHistoryWhenSummaryFails() {
         var messages = history(8, 400);
         ModelClient failing = (request, tools) -> {

@@ -1,6 +1,7 @@
 package com.pilot.server.controller;
 
 import com.pilot.core.permission.PermissionMode;
+import com.pilot.server.config.ModelSettings;
 import com.pilot.server.config.PermissionSettings;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,17 +15,20 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * 运行时设置：目前只有权限档位。
+ * 运行时设置：权限档位与模型配置。
  *
- * <p>切换后立即对后续工具调用生效，不需要重启服务；进程重启会回到配置文件里的初始值。
+ * <p>两者都立即对后续请求生效并落盘，不需要重启服务；
+ * API Key 只返回「是否已配置」和掩码，不回传明文。
  */
 @RestController
 @RequestMapping("/api/settings")
 public class SettingsController {
     private final PermissionSettings permissions;
+    private final ModelSettings models;
 
-    public SettingsController(PermissionSettings permissions) {
+    public SettingsController(PermissionSettings permissions, ModelSettings models) {
         this.permissions = permissions;
+        this.models = models;
     }
 
     @GetMapping
@@ -47,12 +51,41 @@ public class SettingsController {
         return current();
     }
 
-    private SettingsResponse current() {
-        return new SettingsResponse(permissions.mode().name(),
-                Arrays.stream(PermissionMode.values()).map(Enum::name).toList());
+    /**
+     * 修改模型配置：字段留空表示保持原值，因此只改模型名时不必重填端点与 Key。
+     * 保存后下一次模型调用即生效。
+     */
+    @PutMapping("/model")
+    public SettingsResponse updateModel(@RequestBody(required = false) ModelRequest request) {
+        if (request == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请求体不能为空");
+        }
+        try {
+            models.update(request.endpoint(), request.model(), request.apiKey());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+        return current();
     }
 
-    public record SettingsResponse(String permissionMode, List<String> permissionModes) { }
+    private SettingsResponse current() {
+        ModelSettings.Snapshot snapshot = models.snapshot();
+        return new SettingsResponse(
+                permissions.mode().name(),
+                Arrays.stream(PermissionMode.values()).map(Enum::name).toList(),
+                snapshot.model(),
+                snapshot.endpoint(),
+                snapshot.hasApiKey(),
+                snapshot.maskedApiKey(),
+                models.options());
+    }
+
+    public record SettingsResponse(String permissionMode, List<String> permissionModes,
+                                   String model, String modelEndpoint,
+                                   boolean modelApiKeySet, String modelApiKeyMasked,
+                                   List<String> modelOptions) { }
 
     public record PermissionRequest(String mode) { }
+
+    public record ModelRequest(String endpoint, String model, String apiKey) { }
 }

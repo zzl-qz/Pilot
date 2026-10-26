@@ -13,14 +13,19 @@ import java.time.Duration;
 
 @Configuration(proxyBeanMethods = false)
 public class ModelClientConfiguration {
+    /**
+     * 返回的是可热切换的代理：真正构造 {@link OpenAiCompatibleModelClient} 的时机推迟到首次调用，
+     * 并在模型配置变化时重建，因此改模型 / 端点 / API Key 不需要重启。
+     */
     @Bean
-    ModelClient modelClient(ModelProperties properties, ObjectMapper objectMapper,
+    ModelClient modelClient(ModelSettings settings, ObjectMapper objectMapper,
                             @Value("${pilot.model.timeout-seconds:90}") long timeoutSeconds) {
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
-        return new OpenAiCompatibleModelClient(httpClient, objectMapper,
-                URI.create(properties.endpoint()), properties.apiKey(), properties.model(),
-                Duration.ofSeconds(Math.max(5, timeoutSeconds)));
+        Duration timeout = Duration.ofSeconds(Math.max(5, timeoutSeconds));
+        return new ModelClientProvider(settings, snapshot -> new OpenAiCompatibleModelClient(
+                httpClient, objectMapper, URI.create(snapshot.endpoint()), snapshot.apiKey(),
+                snapshot.model(), timeout));
     }
 }

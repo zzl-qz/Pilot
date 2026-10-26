@@ -10,7 +10,9 @@ import tools.jackson.databind.json.JsonMapper;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 新增事件必须能完整往返，否则历史回放会 500。 */
 class EventCodecNewEventsTest {
@@ -62,6 +64,27 @@ class EventCodecNewEventsTest {
 
         assertEquals(started, roundTrip("subagent.started", started));
         assertEquals(finished, roundTrip("subagent.finished", finished));
+    }
+
+    @Test
+    void roundTripsRunCompletedPlanProgress() {
+        var event = new com.pilot.core.event.RunCompleted("做到一半", List.of("A.java"), List.of("mvn test"),
+                2, 5, List.of("跑回归测试"));
+
+        assertEquals(event, roundTrip("run.completed", event));
+    }
+
+    /** 老库里没有 planDone / planTotal / openSteps，必须按 0 / 空解码，否则整条会话的 SSE 回放会 500。 */
+    @Test
+    void decodesLegacyRunCompletedWithoutPlanFields() {
+        SessionEvent decoded = codec.decode("run.completed",
+                "{\"summary\":\"完成\",\"changedFiles\":[\"A.java\"],\"checks\":[]}");
+
+        var completed = assertInstanceOf(com.pilot.core.event.RunCompleted.class, decoded);
+        assertEquals(0, completed.planDone().intValue());
+        assertEquals(0, completed.planTotal().intValue());
+        assertTrue(completed.openSteps().isEmpty());
+        assertFalse(completed.planOpen());
     }
 
     @Test

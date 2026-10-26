@@ -1,5 +1,8 @@
 package com.pilot.server.session;
 
+import com.pilot.core.loop.Attachment;
+
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -8,6 +11,14 @@ import java.util.Optional;
  */
 public interface RunStarter {
     void start(String sessionId, String runId, String input);
+
+    /**
+     * 带附件的启动。默认实现忽略附件，保证 mock 与测试实现不被拖累；
+     * 真实实现（{@code AgentRunService}）会把它挂到本次用户消息上。
+     */
+    default void start(String sessionId, String runId, String input, List<Attachment> attachments) {
+        start(sessionId, runId, input);
+    }
 
     /**
      * 请求取消一次运行。

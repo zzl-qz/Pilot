@@ -17,6 +17,7 @@ import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.event.ToolStarted;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -56,6 +57,10 @@ public class EventCodec {
             case "run.failed" -> RunFailed.class;
             default -> throw new IllegalArgumentException("未知事件类型: " + type);
         };
-        return mapper.readValue(payload, target);
+        // 历史事件不会带上后来新增的字段：Jackson 3 默认对原生类型字段缺省即报错，
+        // 这里按 reader 放宽，让老事件继续能读，而不是整条会话的 SSE 回放直接 500
+        return mapper.readerFor(target)
+                .without(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
+                .readValue(payload);
     }
 }

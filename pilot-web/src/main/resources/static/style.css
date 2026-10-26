@@ -197,6 +197,7 @@ kbd {
 .session-item .dot.is-running { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
 .session-item .dot.is-waiting_approval { background: var(--warn); }
 .session-item .dot.is-paused { background: var(--warn); }
+.session-item .dot.is-interrupted { background: var(--warn); }
 .session-item .dot.is-failed { background: var(--err); }
 
 .session-folder {
@@ -842,6 +843,84 @@ kbd {
 }
 .perm-menu[hidden] { display: none; }
 
+/* 输入区左下的权限 / 模型选择 */
+.composer-chips { display: flex; align-items: center; gap: 6px; }
+.model-chip { font-family: var(--mono); }
+
+/* 模型设置弹层 */
+.model-menu {
+  gap: 8px;
+  padding: 10px;
+  width: 300px;
+  max-height: min(70vh, 460px);
+  overflow-y: auto;
+}
+.model-title { margin: 0; color: var(--dim); font-size: 10.5px; letter-spacing: 0.04em; }
+.model-options { display: flex; flex-direction: column; gap: 2px; }
+.model-option {
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.model-option:hover { background: var(--panel-2); color: var(--ink); }
+.model-option.is-active { background: var(--accent-soft); color: var(--ink); }
+.model-row { display: grid; gap: 4px; font-size: 11px; color: var(--muted); }
+.model-row input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.model-row input:focus { outline: none; border-color: var(--accent-line); }
+.model-hint { margin: 0; color: var(--dim); font-size: 10.5px; line-height: 1.5; }
+.model-actions { display: flex; justify-content: flex-end; }
+.btn-sm { padding: 4px 10px; font-size: 11px; }
+
+/* 附件：粘贴后的待发送清单 */
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px 6px;
+}
+.attachments[hidden] { display: none; }
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 3px 6px 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+}
+.attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-remove {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.attachment-remove:hover { background: rgba(255, 111, 111, 0.16); color: var(--err); }
+
 .perm-option {
   display: flex;
   flex-direction: column;
@@ -876,15 +955,19 @@ kbd {
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
 }
-.send svg { width: 15px; height: 15px; }
+.send svg { width: 15px; height: 15px; grid-area: 1 / 1; }
+.send .icon-stop { display: none; }
 .send:hover:not(:disabled) { background: rgba(110, 168, 255, 0.24); }
 
-.send.stop {
+/* 运行中同一个按钮变成停止，不再并排两个按钮 */
+.send.is-running {
   border-color: rgba(255, 111, 111, 0.4);
   background: rgba(255, 111, 111, 0.12);
   color: #ff9c9c;
 }
-.send.stop:hover:not(:disabled) { background: rgba(255, 111, 111, 0.2); }
+.send.is-running:hover:not(:disabled) { background: rgba(255, 111, 111, 0.2); }
+.send.is-running .icon-send { display: none; }
+.send.is-running .icon-stop { display: block; }
 
 .btn-sm { height: 24px; padding: 0 9px; font-size: 11px; border-radius: 6px; }
 .send:disabled {
@@ -1881,6 +1964,41 @@ kbd {
 }
 .ctx-head { cursor: pointer; user-select: none; }
 .ctx-head:hover { color: var(--accent); }
+
+/* 每轮结束的结论卡：一眼看出干完没有、还剩什么 */
+.turn-card {
+  align-self: stretch;
+  display: grid;
+  gap: 6px;
+  margin: 4px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--ok);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.turn-card.is-warn { border-left-color: var(--warn); }
+.turn-card.is-error { border-left-color: var(--err); }
+.turn-head { display: flex; align-items: center; gap: 8px; color: var(--text, inherit); }
+.turn-mark {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 50%;
+  background: rgba(62, 207, 142, 0.16);
+  color: var(--ok);
+  font-size: 10px;
+}
+.turn-card.is-warn .turn-mark { background: rgba(255, 187, 89, 0.16); color: var(--warn); }
+.turn-card.is-error .turn-mark { background: rgba(255, 111, 111, 0.16); color: var(--err); }
+.turn-note { margin: 0; word-break: break-word; }
+.turn-open { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.turn-foot { margin: 0; color: var(--dim); }
+.turn-actions { display: flex; gap: 8px; }
 /* 子代理：左侧细线标记，默认收起，展开看结论 */
 .subagent-card {
   align-self: stretch;

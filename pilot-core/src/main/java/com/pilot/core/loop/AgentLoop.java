@@ -6,11 +6,13 @@ import com.pilot.core.event.ContextCompacted;
 import com.pilot.core.event.RunSteered;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.RunContinued;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.permission.PermissionGate;
+import com.pilot.core.plan.PlanItem;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolExecutor;
 import com.pilot.core.tool.ToolRegistry;
@@ -45,12 +47,18 @@ public final class AgentLoop {
             改完代码后尽量用 run_command 运行相关的构建或测试来验证，并在结论中说明执行了什么命令、结果如何。
             多步任务（预计需要 3 次以上工具调用）先调用 update_plan 列出全部步骤，每完成一步立即更新状态；
             同一时间只保留一个 in_progress，全部做完后把所有步骤置为 completed。
+            计划里还有未完成项时不要输出总结或收尾，直接继续做；确实被外部条件阻塞时，说明原因并如实更新计划状态。
             上下文被压缩时，摘要里会带上目标与待办，继续按摘要推进，不要重复已完成的工作。
             完成任务后用简洁的中文给出结论，必要处引用文件路径与行号。
             """;
 
-    /** @param repeatedToolCallLimit 连续相同工具调用达到该次数即中断（含第一次） */
-    public record Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt) {
+    /**
+     * @param repeatedToolCallLimit 连续相同工具调用达到该次数即中断（含第一次）
+     * @param plan                  当前计划快照，收尾时用来判断「任务是否真的做完」；默认无计划
+     * @param maxPlanContinues      计划还有未完成项时自动催模型继续的次数上限；0 表示不自动继续
+     */
+    public record Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt,
+                         Supplier<List<PlanItem>> plan, int maxPlanContinues) {
         public Config {
             if (maxSteps < 1) {
                 throw new IllegalArgumentException("maxSteps must be >= 1");
@@ -61,6 +69,19 @@ public final class AgentLoop {
             if (systemPrompt == null || systemPrompt.isBlank()) {
                 throw new IllegalArgumentException("systemPrompt must not be blank");
             }
+            if (maxPlanContinues < 0) {
+                throw new IllegalArgumentException("maxPlanContinues must be >= 0");
+            }
+            plan = plan == null ? List::of : plan;
+        }
+
+        public Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt,
+                      Supplier<List<PlanItem>> plan) {
+            this(maxSteps, repeatedToolCallLimit, systemPrompt, plan, DEFAULT_MAX_PLAN_CONTINUES);
+        }
+
+        public Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt) {
+            this(maxSteps, repeatedToolCallLimit, systemPrompt, List::of, DEFAULT_MAX_PLAN_CONTINUES);
         }
 
         /**
@@ -86,6 +107,9 @@ public final class AgentLoop {
     private static final int DEFAULT_CONTEXT_LIMIT = 120_000;
     private static final int MIN_COMPACTABLE_CHARS = 400;
     /** 达到预算该比例即预压缩一次；超过强制档时允许多压几轮。 */
+    /** 计划未完成时默认自动催模型继续的次数上限。 */
+    private static final int DEFAULT_MAX_PLAN_CONTINUES = 3;
+
     private static final double PRE_COMPACT_RATIO = 0.70;
     private static final double FORCE_COMPACT_RATIO = 0.85;
     private static final int MAX_COMPACT_ROUNDS = 3;
@@ -98,6 +122,8 @@ public final class AgentLoop {
     private final Cancellation cancellation;
     private final Supplier<String> pendingInput;
     private final TraceRecorder traceRecorder;
+    /** 上次压缩没有实际收益时的上下文大小；涨过这个水位之前不再尝试，避免每步白跑一次摘要。 */
+    private int compactBackoffUntil;
 
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate) {
         this(client, tools, permissionGate, ApprovalBroker.denyAll(), Config.defaults(), Cancellation.none());
@@ -151,13 +177,21 @@ public final class AgentLoop {
      */
     public Result run(String userInput, List<Message> history, Consumer<SessionEvent> events,
                       Consumer<List<Message>> checkpoint) {
+        return run(userInput, List.of(), history, events, checkpoint);
+    }
+
+    /**
+     * @param attachments 随本条用户消息提交的附件（图片等），由模型客户端在发送时编码
+     */
+    public Result run(String userInput, List<Attachment> attachments, List<Message> history,
+                      Consumer<SessionEvent> events, Consumer<List<Message>> checkpoint) {
         Objects.requireNonNull(events, "events must not be null");
         Objects.requireNonNull(checkpoint, "checkpoint must not be null");
         if (userInput == null || userInput.isBlank()) {
             throw new IllegalArgumentException("userInput must not be blank");
         }
         List<Message> messages = seed(history);
-        messages.add(Message.user(userInput.strip()));
+        messages.add(Message.user(userInput.strip(), attachments == null ? List.of() : attachments));
         return loop(messages, events, checkpoint);
     }
 
@@ -186,6 +220,7 @@ public final class AgentLoop {
                         Consumer<List<Message>> checkpoint) {
         String lastSignature = null;
         int repeated = 0;
+        int planContinues = 0;
         var changedFiles = new LinkedHashSet<String>();
         var checks = new ArrayList<String>();
 
@@ -221,7 +256,24 @@ public final class AgentLoop {
                 if (calls.isEmpty()) {
                     messages.add(Message.assistant(content, List.of()));
                     String summary = content.isBlank() ? "任务完成（模型未返回文本）" : content;
-                    events.accept(new RunCompleted(summary, List.copyOf(changedFiles), List.copyOf(checks)));
+                    List<PlanItem> plan = planSnapshot();
+                    int done = (int) plan.stream().filter(PlanItem::done).count();
+                    List<String> openSteps = plan.stream()
+                            .filter(item -> !item.done())
+                            .map(PlanItem::step)
+                            .toList();
+                    // 计划没做完就自动催一轮，别停下来问用户；到达上限才收尾，把差距交回界面
+                    if (!openSteps.isEmpty() && planContinues < config.maxPlanContinues()) {
+                        planContinues++;
+                        messages.add(Message.user(continuePrompt(openSteps)));
+                        events.accept(new RunContinued(planContinues, config.maxPlanContinues(),
+                                "计划还有 " + openSteps.size() + " 项未完成，自动继续"));
+                        safeCheckpoint(checkpoint, messages);
+                        continue;
+                    }
+                    // 模型给出纯文本就收尾，但计划没做完≠任务完成，把差距如实交给客户端
+                    events.accept(new RunCompleted(summary, List.copyOf(changedFiles), List.copyOf(checks),
+                            done, plan.size(), openSteps));
                     return new Result(content, null, conversation(messages));
                 }
 
@@ -273,6 +325,26 @@ public final class AgentLoop {
         }
     }
 
+    /** 自动续跑时给模型的提醒：说清还剩什么，并要求它别再用总结收尾。 */
+    private static String continuePrompt(List<String> openSteps) {
+        var prompt = new StringBuilder("[自动继续] 计划里还有未完成项，请直接继续执行，不要只用总结回复：\n");
+        for (String step : openSteps) {
+            prompt.append("- ").append(step).append('\n');
+        }
+        prompt.append("全部做完后用 update_plan 把对应项标记为 completed。");
+        return prompt.toString();
+    }
+
+    /** 计划快照读失败不应影响收尾：退化成「无计划」，仅少一条完成度信息。 */
+    private List<PlanItem> planSnapshot() {
+        try {
+            List<PlanItem> plan = config.plan().get();
+            return plan == null ? List.of() : plan;
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+    }
+
     private Result cancel(List<Message> messages, Consumer<SessionEvent> events) {
         events.accept(new RunCancelled("运行已被用户取消。"));
         return new Result(null, "CANCELLED", conversation(messages));
@@ -301,17 +373,29 @@ public final class AgentLoop {
         int tokenBudget = Math.max(1, limit / 4);
         int tokens = ContextCompactor.estimateTokens(messages);
         if (tokens < tokenBudget * PRE_COMPACT_RATIO) {
+            compactBackoffUntil = 0;
+            return;
+        }
+
+        // 上一次压缩白跑了一趟模型：在上下文再涨 5% 之前别再试，否则每一步都要多花一次摘要调用
+        int current = ContextCompactor.totalChars(messages);
+        if (compactBackoffUntil > 0 && current < compactBackoffUntil) {
+            if (current > limit) {
+                truncateToolOutputs(messages, limit, current);
+            }
             return;
         }
 
         // 70% 预压缩一次；85% 以上允许多压几轮，直到回落到 70% 以下
         int rounds = tokens >= tokenBudget * FORCE_COMPACT_RATIO ? MAX_COMPACT_ROUNDS : 1;
         int targetChars = (int) (tokenBudget * PRE_COMPACT_RATIO) * 4;
+        boolean reduced = false;
         for (int round = 0; round < rounds; round++) {
             ContextCompactor.Outcome outcome = compactor.compact(messages, targetChars);
-            if (!outcome.compacted()) {
+            if (!outcome.compacted() || outcome.charactersAfter() >= outcome.charactersBefore()) {
                 break;
             }
+            reduced = true;
             events.accept(new ContextCompacted(outcome.coveredMessages(), outcome.charactersBefore(),
                     outcome.charactersAfter(), outcome.summary()));
             if (ContextCompactor.estimateTokens(messages) < tokenBudget * PRE_COMPACT_RATIO) {
@@ -319,8 +403,9 @@ public final class AgentLoop {
             }
         }
 
-        // 摘要压不动时退回截断，保证上下文不会无限增长
         int total = ContextCompactor.totalChars(messages);
+        compactBackoffUntil = reduced ? 0 : (int) (total * 1.05) + 1;
+        // 摘要压不动时退回截断，保证上下文不会无限增长
         if (total > limit) {
             truncateToolOutputs(messages, limit, total);
         }
