@@ -19,6 +19,7 @@ import tools.jackson.databind.ObjectMapper;
 import com.pilot.core.trace.JsonlTraceRecorder;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.ModelSettings;
+import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.workspace.RunSnapshotService;
 import com.pilot.server.workspace.WorkspaceToolFactory;
 import jakarta.annotation.PostConstruct;
@@ -70,6 +71,7 @@ public class AgentRunService implements RunStarter {
     private final ConcurrentMap<String, Integer> autoContinueAttempts = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> autoContinueSignature = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
+    private final PilotDataDir dataDir;
 
     public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
                            PermissionGate permissionGate, ApprovalBroker approvals,
@@ -77,7 +79,8 @@ public class AgentRunService implements RunStarter {
                            RunSnapshotService snapshots, RunRegistry registry,
                            com.pilot.core.session.RunRepository runRepository,
                            ConversationRepository conversations,
-                           com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper) {
+                           com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper,
+                           PilotDataDir dataDir) {
         this.sessions = sessions;
         this.conversations = conversations;
         this.plans = plans;
@@ -91,6 +94,7 @@ public class AgentRunService implements RunStarter {
         this.registry = registry;
         this.runRepository = runRepository;
         this.objectMapper = objectMapper;
+        this.dataDir = dataDir;
         this.executor = Executors.newFixedThreadPool(properties.runThreads(), runnable -> {
             Thread thread = new Thread(runnable, "pilot-agent-run");
             thread.setDaemon(true);
@@ -281,10 +285,9 @@ public class AgentRunService implements RunStarter {
         // 子代理与父代理共用工具集（其中不含 spawn_agent，避免递归派生）
         tools.register(new SpawnAgentTool(modelClient, tools, permissionGate, approvals, config,
                 () -> conversations.load(sessionId), sink, handle.cancelled::get));
-        // 与会话数据库、快照保持一致，统一落在 ~/.pilot 下
+        // 与会话数据库、快照保持一致，统一落在数据目录（默认项目下的 .pilot）
         var traceRecorder = new JsonlTraceRecorder(
-                java.nio.file.Path.of(System.getProperty("user.home", "."), ".pilot", "traces", sessionId + ".jsonl"),
-                objectMapper);
+                dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
         var loop = new AgentLoop(modelClient, tools, permissionGate, approvals, config, handle.cancelled::get,
                 () -> pollSteer(sessionId), traceRecorder);
 

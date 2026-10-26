@@ -1,6 +1,7 @@
 package com.pilot.server.workspace;
 
 import com.pilot.core.tool.SnapshotSink;
+import com.pilot.server.config.PilotDataDir;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -33,8 +34,8 @@ public class RunSnapshotService implements SnapshotSink {
     private final ThreadLocal<Context> current = new ThreadLocal<>();
 
     @org.springframework.beans.factory.annotation.Autowired
-    public RunSnapshotService(ObjectMapper mapper) {
-        this(mapper, Path.of(System.getProperty("user.home", "."), ".pilot", "snapshots"));
+    public RunSnapshotService(ObjectMapper mapper, PilotDataDir dataDir) {
+        this(mapper, dataDir.file("snapshots"));
     }
 
     RunSnapshotService(ObjectMapper mapper, Path root) {

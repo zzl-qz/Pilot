@@ -25,7 +25,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.nio.file.Path;
 
 /**
- * 存储装配：{@code pilot.store=sqlite}（默认，落盘到 ~/.pilot/pilot.db）或 {@code memory}（进程内）。
+ * 存储装配：{@code pilot.store=sqlite}（默认，落盘到项目下的 {@code .pilot/pilot.db}）或 {@code memory}（进程内）。
  * 测试使用 memory，避免污染本地数据库。
  */
 @Configuration(proxyBeanMethods = false)
@@ -33,9 +33,9 @@ public class StoreConfiguration {
 
     @Bean
     @ConditionalOnProperty(name = "pilot.store", havingValue = "sqlite", matchIfMissing = true)
-    SqliteStore sqliteStore(@Value("${pilot.store.path:}") String configured) {
+    SqliteStore sqliteStore(PilotDataDir data, @Value("${pilot.store.path:}") String configured) {
         Path path = configured == null || configured.isBlank()
-                ? Path.of(System.getProperty("user.home", "."), ".pilot", "pilot.db")
+                ? data.file("pilot.db")
                 : Path.of(configured);
         return new SqliteStore(path);
     }

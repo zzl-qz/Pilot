@@ -1,6 +1,7 @@
 package com.pilot.server.session;
 
 import com.pilot.core.loop.Attachment;
+import com.pilot.server.config.PilotDataDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -51,9 +52,9 @@ public class AttachmentService {
     private final Path root;
 
     @Autowired
-    public AttachmentService(@Value("${pilot.attachments.dir:}") String configured) {
+    public AttachmentService(@Value("${pilot.attachments.dir:}") String configured, PilotDataDir dataDir) {
         this(configured == null || configured.isBlank()
-                ? Path.of(System.getProperty("user.home", "."), ".pilot", "attachments")
+                ? dataDir.file("attachments")
                 : Path.of(configured));
     }
 
