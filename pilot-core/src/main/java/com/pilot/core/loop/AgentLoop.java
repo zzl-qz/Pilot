@@ -15,6 +15,7 @@ import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolExecutor;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolSupport;
+import com.pilot.core.trace.TraceRecorder;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -84,6 +85,10 @@ public final class AgentLoop {
 
     private static final int DEFAULT_CONTEXT_LIMIT = 120_000;
     private static final int MIN_COMPACTABLE_CHARS = 400;
+    /** 达到预算该比例即预压缩一次；超过强制档时允许多压几轮。 */
+    private static final double PRE_COMPACT_RATIO = 0.70;
+    private static final double FORCE_COMPACT_RATIO = 0.85;
+    private static final int MAX_COMPACT_ROUNDS = 3;
 
     private final ModelClient client;
     private final ToolRegistry tools;
@@ -92,6 +97,7 @@ public final class AgentLoop {
     private final Config config;
     private final Cancellation cancellation;
     private final Supplier<String> pendingInput;
+    private final TraceRecorder traceRecorder;
 
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate) {
         this(client, tools, permissionGate, ApprovalBroker.denyAll(), Config.defaults(), Cancellation.none());
@@ -117,13 +123,21 @@ public final class AgentLoop {
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
                      ApprovalBroker approvals, Config config, Cancellation cancellation,
                      Supplier<String> pendingInput) {
+        this(client, tools, permissionGate, approvals, config, cancellation, pendingInput,
+                (call, result, latencyMs) -> { });
+    }
+
+    public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
+                     ApprovalBroker approvals, Config config, Cancellation cancellation,
+                     Supplier<String> pendingInput, TraceRecorder traceRecorder) {
         this.pendingInput = Objects.requireNonNull(pendingInput, "pendingInput must not be null");
+        this.traceRecorder = Objects.requireNonNull(traceRecorder, "traceRecorder must not be null");
         this.client = Objects.requireNonNull(client, "client must not be null");
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.compactor = new ContextCompactor(client);
         this.toolExecutor = new ToolExecutor(tools,
                 Objects.requireNonNull(permissionGate, "permissionGate must not be null"),
-                Objects.requireNonNull(approvals, "approvals must not be null"));
+                Objects.requireNonNull(approvals, "approvals must not be null"), traceRecorder);
         this.config = Objects.requireNonNull(config, "config must not be null");
         this.cancellation = Objects.requireNonNull(cancellation, "cancellation must not be null");
     }
@@ -284,14 +298,31 @@ public final class AgentLoop {
      * 两条路径都不破坏 system / user / assistant / tool_call 的结构。
      */
     private void compact(List<Message> messages, int limit, Consumer<SessionEvent> events) {
-        ContextCompactor.Outcome outcome = compactor.compact(messages, limit);
-        if (outcome.compacted()) {
-            events.accept(new ContextCompacted(outcome.coveredMessages(), outcome.charactersBefore(),
-                    outcome.charactersAfter(), outcome.summary()));
+        int tokenBudget = Math.max(1, limit / 4);
+        int tokens = ContextCompactor.estimateTokens(messages);
+        if (tokens < tokenBudget * PRE_COMPACT_RATIO) {
             return;
         }
-        if (outcome.charactersBefore() > limit) {
-            truncateToolOutputs(messages, limit, outcome.charactersBefore());
+
+        // 70% 预压缩一次；85% 以上允许多压几轮，直到回落到 70% 以下
+        int rounds = tokens >= tokenBudget * FORCE_COMPACT_RATIO ? MAX_COMPACT_ROUNDS : 1;
+        int targetChars = (int) (tokenBudget * PRE_COMPACT_RATIO) * 4;
+        for (int round = 0; round < rounds; round++) {
+            ContextCompactor.Outcome outcome = compactor.compact(messages, targetChars);
+            if (!outcome.compacted()) {
+                break;
+            }
+            events.accept(new ContextCompacted(outcome.coveredMessages(), outcome.charactersBefore(),
+                    outcome.charactersAfter(), outcome.summary()));
+            if (ContextCompactor.estimateTokens(messages) < tokenBudget * PRE_COMPACT_RATIO) {
+                break;
+            }
+        }
+
+        // 摘要压不动时退回截断，保证上下文不会无限增长
+        int total = ContextCompactor.totalChars(messages);
+        if (total > limit) {
+            truncateToolOutputs(messages, limit, total);
         }
     }
 

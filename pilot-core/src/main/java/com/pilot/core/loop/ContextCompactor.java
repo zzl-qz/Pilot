@@ -105,6 +105,11 @@ public final class ContextCompactor {
         return new Outcome(covered, before, totalChars(messages), summary);
     }
 
+    /** 简化 token 估算：每 4 个字符约 1 token，向上取整。 */
+    public static int estimateTokens(List<Message> messages) {
+        return (totalChars(messages) + 3) / 4;
+    }
+
     /** 只保留最长的工具输出做兜底截断时用得到。 */
     public static int totalChars(List<Message> messages) {
         int total = 0;

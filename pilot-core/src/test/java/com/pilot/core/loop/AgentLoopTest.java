@@ -249,6 +249,33 @@ class AgentLoopTest {
                 "追加的指令应作为 user 消息进入下一轮请求");
     }
 
+    /** 跨过 70% 预算就该在采样前压缩，而不是等到爆掉。 */
+    @Test
+    void compactsBeforeSamplingWhenBudgetCrossesSoftLimit() {
+        String previous = System.getProperty("pilot.context.max-chars");
+        System.setProperty("pilot.context.max-chars", "4000");
+        try {
+            var history = new ArrayList<Message>();
+            for (int i = 0; i < 12; i++) {
+                history.add(Message.user("第 " + i + " 轮：" + "y".repeat(300)));
+            }
+            var client = new ScriptedModelClient(
+                    new ModelResponse("## 目标\n继续任务", List.of()),
+                    new ModelResponse("完成", List.of()));
+            var loop = new AgentLoop(client, registry(new CountingTool("list_dir", "")), readOnlyGate(), config(4, 3));
+
+            loop.run("继续任务", history, events::add);
+
+            assertTrue(eventTypes().contains("context.compacted"), "超过软阈值应先压缩再采样");
+        } finally {
+            if (previous == null) {
+                System.clearProperty("pilot.context.max-chars");
+            } else {
+                System.setProperty("pilot.context.max-chars", previous);
+            }
+        }
+    }
+
     private List<String> eventTypes() {
         return events.stream().map(event -> event.type().wireName()).toList();
     }

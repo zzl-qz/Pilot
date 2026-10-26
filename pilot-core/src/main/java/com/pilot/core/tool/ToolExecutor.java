@@ -35,11 +35,18 @@ public final class ToolExecutor {
     private final ToolRegistry tools;
     private final PermissionGate permissionGate;
     private final ApprovalBroker approvals;
+    private final com.pilot.core.trace.TraceRecorder traceRecorder;
 
     public ToolExecutor(ToolRegistry tools, PermissionGate permissionGate, ApprovalBroker approvals) {
+        this(tools, permissionGate, approvals, (call, result, latencyMs) -> { });
+    }
+
+    public ToolExecutor(ToolRegistry tools, PermissionGate permissionGate, ApprovalBroker approvals,
+                        com.pilot.core.trace.TraceRecorder traceRecorder) {
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.permissionGate = Objects.requireNonNull(permissionGate, "permissionGate must not be null");
         this.approvals = Objects.requireNonNull(approvals, "approvals must not be null");
+        this.traceRecorder = Objects.requireNonNull(traceRecorder, "traceRecorder must not be null");
     }
 
     public Outcome execute(ToolCall call, Consumer<SessionEvent> events) {
@@ -70,6 +77,11 @@ public final class ToolExecutor {
         }
 
         long latencyMs = Math.max(0L, (System.nanoTime() - startedAt) / 1_000_000L);
+        try {
+            traceRecorder.record(call, result, latencyMs);
+        } catch (RuntimeException ignored) {
+            // Trace 写入故障不能阻断代理工具执行。
+        }
         events.accept(new ToolCompleted(call.callId(), ToolSupport.oneLine(result, 120), latencyMs));
         return new Outcome(call.name(), result, changedPath, check);
     }
