@@ -1868,6 +1868,91 @@ kbd {
 .history-more:hover { border-color: var(--accent-line); color: var(--accent); }
 .history-more:disabled { opacity: 0.6; cursor: default; }
 
+/* 上下文压缩卡片：默认折叠，避免摘要把对话撑长 */
+.ctx-card {
+  align-self: stretch;
+  margin: 2px 0;
+  padding: 6px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.ctx-head { cursor: pointer; user-select: none; }
+.ctx-head:hover { color: var(--accent); }
+/* 子代理：左侧细线标记，默认收起，展开看结论 */
+.subagent-card {
+  align-self: stretch;
+  margin: 2px 0;
+  padding: 5px 10px;
+  border-left: 2px solid var(--line);
+  border-radius: 0 6px 6px 0;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.subagent-head { cursor: pointer; user-select: none; }
+.subagent-head:hover { color: var(--accent); }
+.subagent-body {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  max-height: 240px;
+  overflow: auto;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text, inherit);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.subagent-card.is-failed { border-left-color: #e06c75; }
+.subagent-card.is-failed .subagent-head { color: #e06c75; }
+
+/* 任务计划：贴在对话末尾，完成项划线，进行中高亮 */
+.plan-card {
+  align-self: stretch;
+  margin: 2px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 12px;
+}
+.plan-title {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.plan-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.plan-item { color: var(--text, inherit); }
+.plan-item.is-pending { color: var(--muted); }
+.plan-item.is-in_progress { color: var(--accent); font-weight: 550; }
+.plan-item.is-completed { color: var(--dim); text-decoration: line-through; }
+
+.ctx-body {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.24);
+  color: var(--text, inherit);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 960px) {
   .gutter { display: none; }
 }

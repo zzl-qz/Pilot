@@ -2,6 +2,8 @@ package com.pilot.core.loop;
 
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.AssistantDelta;
+import com.pilot.core.event.ContextCompacted;
+import com.pilot.core.event.RunSteered;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
@@ -20,6 +22,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -39,6 +42,9 @@ public final class AgentLoop {
             先获取事实再回答，不要编造未读取过的文件内容。
             修改文件时优先用 edit_file，并保证 old_string 唯一；文件不存在时用 create_file。
             改完代码后尽量用 run_command 运行相关的构建或测试来验证，并在结论中说明执行了什么命令、结果如何。
+            多步任务（预计需要 3 次以上工具调用）先调用 update_plan 列出全部步骤，每完成一步立即更新状态；
+            同一时间只保留一个 in_progress，全部做完后把所有步骤置为 completed。
+            上下文被压缩时，摘要里会带上目标与待办，继续按摘要推进，不要重复已完成的工作。
             完成任务后用简洁的中文给出结论，必要处引用文件路径与行号。
             """;
 
@@ -81,9 +87,11 @@ public final class AgentLoop {
 
     private final ModelClient client;
     private final ToolRegistry tools;
+    private final ContextCompactor compactor;
     private final ToolExecutor toolExecutor;
     private final Config config;
     private final Cancellation cancellation;
+    private final Supplier<String> pendingInput;
 
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate) {
         this(client, tools, permissionGate, ApprovalBroker.denyAll(), Config.defaults(), Cancellation.none());
@@ -100,8 +108,19 @@ public final class AgentLoop {
 
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
                      ApprovalBroker approvals, Config config, Cancellation cancellation) {
+        this(client, tools, permissionGate, approvals, config, cancellation, () -> null);
+    }
+
+    /**
+     * @param pendingInput 每轮采样前拉取一次运行中追加的用户输入；返回 null 表示没有
+     */
+    public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
+                     ApprovalBroker approvals, Config config, Cancellation cancellation,
+                     Supplier<String> pendingInput) {
+        this.pendingInput = Objects.requireNonNull(pendingInput, "pendingInput must not be null");
         this.client = Objects.requireNonNull(client, "client must not be null");
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
+        this.compactor = new ContextCompactor(client);
         this.toolExecutor = new ToolExecutor(tools,
                 Objects.requireNonNull(permissionGate, "permissionGate must not be null"),
                 Objects.requireNonNull(approvals, "approvals must not be null"));
@@ -110,83 +129,134 @@ public final class AgentLoop {
     }
 
     public Result run(String userInput, List<Message> history, Consumer<SessionEvent> events) {
+        return run(userInput, history, events, messages -> { });
+    }
+
+    /**
+     * @param checkpoint 每步结束后的记忆快照，用于把对话落盘（进程重启后仍可续跑）
+     */
+    public Result run(String userInput, List<Message> history, Consumer<SessionEvent> events,
+                      Consumer<List<Message>> checkpoint) {
         Objects.requireNonNull(events, "events must not be null");
+        Objects.requireNonNull(checkpoint, "checkpoint must not be null");
         if (userInput == null || userInput.isBlank()) {
             throw new IllegalArgumentException("userInput must not be blank");
         }
+        List<Message> messages = seed(history);
+        messages.add(Message.user(userInput.strip()));
+        return loop(messages, events, checkpoint);
+    }
+
+    /** 续跑：不追加用户消息，直接用已有记忆继续，服务「跑一半」之后的恢复。 */
+    public Result resume(List<Message> history, Consumer<SessionEvent> events,
+                         Consumer<List<Message>> checkpoint) {
+        Objects.requireNonNull(events, "events must not be null");
+        Objects.requireNonNull(checkpoint, "checkpoint must not be null");
+        List<Message> messages = seed(history);
+        if (messages.size() <= 1) {
+            throw new IllegalArgumentException("history is empty, nothing to resume");
+        }
+        return loop(messages, events, checkpoint);
+    }
+
+    private List<Message> seed(List<Message> history) {
         List<Message> messages = new ArrayList<>();
         messages.add(Message.system(config.systemPrompt()));
         if (history != null) {
             messages.addAll(history);
         }
-        messages.add(Message.user(userInput.strip()));
+        return messages;
+    }
 
+    private Result loop(List<Message> messages, Consumer<SessionEvent> events,
+                        Consumer<List<Message>> checkpoint) {
         String lastSignature = null;
         int repeated = 0;
         var changedFiles = new LinkedHashSet<String>();
         var checks = new ArrayList<String>();
 
-        for (int step = 1; step <= config.maxSteps(); step++) {
-            if (cancellation.cancelled()) {
-                return cancel(messages, events);
-            }
-            compact(messages, contextLimit());
-
-            ModelResponse response;
-            try {
-                response = client.chat(List.copyOf(messages), tools.definitions());
-            } catch (RuntimeException e) {
-                String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                events.accept(new RunFailed("MODEL_ERROR", "模型调用失败：" + ToolSupport.oneLine(reason, 300), true));
-                return new Result(null, "MODEL_ERROR", conversation(messages));
-            }
-
-            String content = response.content() == null ? "" : response.content();
-            if (!content.isBlank()) {
-                events.accept(new AssistantDelta(content));
-            }
-            List<ToolCall> calls = response.toolCalls() == null ? List.of() : response.toolCalls();
-
-            if (calls.isEmpty()) {
-                messages.add(Message.assistant(content, List.of()));
-                String summary = content.isBlank() ? "任务完成（模型未返回文本）" : content;
-                events.accept(new RunCompleted(summary, List.copyOf(changedFiles), List.copyOf(checks)));
-                return new Result(content, null, conversation(messages));
-            }
-
-            messages.add(Message.assistant(content, calls));
-
-            String signature = signature(calls);
-            if (signature.equals(lastSignature)) {
-                repeated++;
-            } else {
-                lastSignature = signature;
-                repeated = 1;
-            }
-            if (repeated >= config.repeatedToolCallLimit()) {
-                String detail = "模型连续 " + repeated + " 次请求相同的工具调用，已中断以避免死循环。";
-                events.accept(new RunFailed("REPEATED_TOOL_CALL", detail, false));
-                return new Result(null, "REPEATED_TOOL_CALL", conversation(messages));
-            }
-
-            for (ToolCall call : calls) {
+        try {
+            for (int step = 1; step <= config.maxSteps(); step++) {
                 if (cancellation.cancelled()) {
                     return cancel(messages, events);
                 }
-                ToolExecutor.Outcome outcome = toolExecutor.execute(call, events);
-                if (outcome.changedPath() != null) {
-                    changedFiles.add(outcome.changedPath());
-                }
-                if (outcome.check() != null) {
-                    checks.add(outcome.check());
-                }
-                messages.add(Message.tool(call.callId(), outcome.result()));
-            }
-        }
+                compact(messages, contextLimit(), events);
 
-        events.accept(new RunFailed("MAX_STEPS",
-                "已达到本轮步数上限 " + config.maxSteps() + "，历史已保留，可以继续执行。", true));
-        return new Result(null, "MAX_STEPS", conversation(messages));
+                // 运行中追加的指令：不新开 run，直接进下一轮
+                String steered = pendingInput.get();
+                if (steered != null && !steered.isBlank()) {
+                    messages.add(Message.user(steered.strip()));
+                    events.accept(new RunSteered(steered));
+                }
+
+                ModelResponse response;
+                try {
+                    response = client.chat(List.copyOf(messages), tools.definitions());
+                } catch (RuntimeException e) {
+                    String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                    events.accept(new RunFailed("MODEL_ERROR", "模型调用失败：" + ToolSupport.oneLine(reason, 300), true));
+                    return new Result(null, "MODEL_ERROR", conversation(messages));
+                }
+
+                String content = response.content() == null ? "" : response.content();
+                if (!content.isBlank()) {
+                    events.accept(new AssistantDelta(content));
+                }
+                List<ToolCall> calls = response.toolCalls() == null ? List.of() : response.toolCalls();
+
+                if (calls.isEmpty()) {
+                    messages.add(Message.assistant(content, List.of()));
+                    String summary = content.isBlank() ? "任务完成（模型未返回文本）" : content;
+                    events.accept(new RunCompleted(summary, List.copyOf(changedFiles), List.copyOf(checks)));
+                    return new Result(content, null, conversation(messages));
+                }
+
+                messages.add(Message.assistant(content, calls));
+
+                String signature = signature(calls);
+                if (signature.equals(lastSignature)) {
+                    repeated++;
+                } else {
+                    lastSignature = signature;
+                    repeated = 1;
+                }
+                if (repeated >= config.repeatedToolCallLimit()) {
+                    String detail = "模型连续 " + repeated + " 次请求相同的工具调用，已中断以避免死循环。";
+                    events.accept(new RunFailed("REPEATED_TOOL_CALL", detail, false));
+                    return new Result(null, "REPEATED_TOOL_CALL", conversation(messages));
+                }
+
+                for (ToolCall call : calls) {
+                    if (cancellation.cancelled()) {
+                        return cancel(messages, events);
+                    }
+                    ToolExecutor.Outcome outcome = toolExecutor.execute(call, events);
+                    if (outcome.changedPath() != null) {
+                        changedFiles.add(outcome.changedPath());
+                    }
+                    if (outcome.check() != null) {
+                        checks.add(outcome.check());
+                    }
+                    messages.add(Message.tool(call.callId(), outcome.result()));
+                }
+                // 每步落盘，进程被打断时最多丢当前这一步
+                safeCheckpoint(checkpoint, messages);
+            }
+
+            events.accept(new RunFailed("MAX_STEPS",
+                    "已达到本轮步数上限 " + config.maxSteps() + "，历史已保留，可以继续执行。", true));
+            return new Result(null, "MAX_STEPS", conversation(messages));
+        } finally {
+            safeCheckpoint(checkpoint, messages);
+        }
+    }
+
+    private static void safeCheckpoint(Consumer<List<Message>> checkpoint, List<Message> messages) {
+        try {
+            checkpoint.accept(conversation(messages));
+        } catch (RuntimeException ignored) {
+            // 记忆落盘失败不应中断本次运行
+        }
     }
 
     private Result cancel(List<Message> messages, Consumer<SessionEvent> events) {
@@ -210,17 +280,22 @@ public final class AgentLoop {
     }
 
     /**
-     * 上下文预算：把过大的工具输出替换为占位符，保留 system / user / assistant 与全部调用结构，
-     * 因此不会破坏模型协议。优先压缩最长的输出，保证少量替换就能回到预算内。
+     * 上下文预算：优先把较早的历史折叠成交接摘要；摘要不可用时退回「长工具输出换占位符」。
+     * 两条路径都不破坏 system / user / assistant / tool_call 的结构。
      */
-    private static void compact(List<Message> messages, int limit) {
-        int total = 0;
-        for (Message message : messages) {
-            total += message.content().length();
-        }
-        if (total <= limit) {
+    private void compact(List<Message> messages, int limit, Consumer<SessionEvent> events) {
+        ContextCompactor.Outcome outcome = compactor.compact(messages, limit);
+        if (outcome.compacted()) {
+            events.accept(new ContextCompacted(outcome.coveredMessages(), outcome.charactersBefore(),
+                    outcome.charactersAfter(), outcome.summary()));
             return;
         }
+        if (outcome.charactersBefore() > limit) {
+            truncateToolOutputs(messages, limit, outcome.charactersBefore());
+        }
+    }
+
+    private static void truncateToolOutputs(List<Message> messages, int limit, int total) {
 
         record Candidate(int index, int length) {
         }

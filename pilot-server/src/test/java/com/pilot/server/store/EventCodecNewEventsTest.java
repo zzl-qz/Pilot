@@ -1,0 +1,81 @@
+package com.pilot.server.store;
+
+import com.pilot.core.event.ContextCompacted;
+import com.pilot.core.event.PlanUpdated;
+import com.pilot.core.event.RunCancelled;
+import com.pilot.core.event.SessionEvent;
+import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+
+/** 新增事件必须能完整往返，否则历史回放会 500。 */
+class EventCodecNewEventsTest {
+    private final EventCodec codec = new EventCodec(JsonMapper.builder().build());
+
+    @Test
+    void roundTripsContextCompacted() {
+        var event = new ContextCompacted(4, 12_000, 3_000, "## 目标\n完成 P0-1");
+
+        SessionEvent decoded = roundTrip("context.compacted", event);
+
+        assertEquals(event, decoded);
+    }
+
+    @Test
+    void roundTripsPlanUpdated() {
+        var event = new PlanUpdated(
+                List.of(new PlanUpdated.PlanItemPayload("读代码", "completed"),
+                        new PlanUpdated.PlanItemPayload("写实现", "in_progress")),
+                "开始第二步");
+
+        SessionEvent decoded = roundTrip("plan.updated", event);
+
+        assertEquals(event, decoded);
+    }
+
+    @Test
+    void roundTripsRunSteered() {
+        var event = new com.pilot.core.event.RunSteered("只改 A 模块");
+
+        SessionEvent decoded = roundTrip("run.steered", event);
+
+        assertEquals(event, decoded);
+    }
+
+    @Test
+    void roundTripsRunContinued() {
+        var event = new com.pilot.core.event.RunContinued(2, 3, "步数触顶");
+
+        SessionEvent decoded = roundTrip("run.continued", event);
+
+        assertEquals(event, decoded);
+    }
+
+    @Test
+    void roundTripsSubagentEvents() {
+        var started = new com.pilot.core.event.SubagentStarted("agent_1", "盘点入口类");
+        var finished = new com.pilot.core.event.SubagentFinished("agent_1", "有 3 个入口", true);
+
+        assertEquals(started, roundTrip("subagent.started", started));
+        assertEquals(finished, roundTrip("subagent.finished", finished));
+    }
+
+    @Test
+    void roundTripsRunCancelled() {
+        var event = new RunCancelled("用户取消");
+
+        SessionEvent decoded = roundTrip("run.cancelled", event);
+
+        assertInstanceOf(RunCancelled.class, decoded);
+        assertEquals(event, decoded);
+    }
+
+    private SessionEvent roundTrip(String type, SessionEvent event) {
+        String json = codec.encode(event);
+        return codec.decode(type, json);
+    }
+}

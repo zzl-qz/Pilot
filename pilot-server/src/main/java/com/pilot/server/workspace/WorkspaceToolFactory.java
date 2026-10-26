@@ -1,5 +1,6 @@
 package com.pilot.server.workspace;
 
+import com.pilot.core.plan.PlanSink;
 import com.pilot.core.tool.CreateFileTool;
 import com.pilot.core.tool.EditFileTool;
 import com.pilot.core.tool.ListDirTool;
@@ -8,6 +9,7 @@ import com.pilot.core.tool.RunCommandTool;
 import com.pilot.core.tool.SearchTool;
 import com.pilot.core.tool.SnapshotSink;
 import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.UpdatePlanTool;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.AgentProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -40,7 +42,17 @@ public class WorkspaceToolFactory {
     public ToolRegistry registryFor(String workspace) {
         Path root = resolve(workspace);
         String key = root.toString().toLowerCase(Locale.ROOT);
-        return cache.computeIfAbsent(key, ignored -> create(root));
+        return cache.computeIfAbsent(key, ignored -> create(root, null));
+    }
+
+    /**
+     * 会话级工具集：额外注册 {@code update_plan}（以及调用方随后追加的 spawn_agent）。
+     *
+     * <p>刻意不缓存：工具实例会捕获本次 run 的事件出口，复用上一轮的工具会把事件发到旧的 run 上。
+     * 每次运行新建 7 个无状态对象，开销可以忽略。
+     */
+    public ToolRegistry registryFor(String workspace, PlanSink planSink) {
+        return create(resolve(workspace), planSink);
     }
 
     public ToolRegistry defaultRegistry() {
@@ -52,7 +64,7 @@ public class WorkspaceToolFactory {
         return Path.of(target).toAbsolutePath().normalize();
     }
 
-    private ToolRegistry create(Path root) {
+    private ToolRegistry create(Path root, PlanSink planSink) {
         var validator = new PathValidator(root);
         var registry = new ToolRegistry();
         registry.register(new ReadFileTool(validator));
@@ -61,6 +73,9 @@ public class WorkspaceToolFactory {
         registry.register(new EditFileTool(validator, snapshots));
         registry.register(new CreateFileTool(validator, snapshots));
         registry.register(new RunCommandTool(validator));
+        if (planSink != null) {
+            registry.register(new UpdatePlanTool(planSink));
+        }
         return registry;
     }
 }

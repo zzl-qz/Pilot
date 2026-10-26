@@ -212,6 +212,26 @@ class SessionApiTest {
         assertTrue(body.contains("event:assistant.delta"), body);
     }
 
+    /** 计划清单刷新后要能恢复，空计划返回空数组而不是 404。 */
+    @Test
+    void returnsEmptyPlanForFreshSession() throws Exception {
+        String sessionId = createSession();
+
+        mvc.perform(get("/api/sessions/{id}/plan", sessionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.plan").isArray())
+                .andExpect(jsonPath("$.plan.length()").value(0));
+    }
+
+    /** 没有对话记忆时不能续跑，要明确返回冲突而不是静默开一个空 run。 */
+    @Test
+    void rejectsContinueWithoutConversation() throws Exception {
+        String sessionId = createSession();
+
+        mvc.perform(post("/api/sessions/{id}/continue", sessionId))
+                .andExpect(status().isConflict());
+    }
+
     private String createSession() throws Exception {
         String body = mvc.perform(post("/api/sessions")
                         .contentType(MediaType.APPLICATION_JSON)

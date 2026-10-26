@@ -5,8 +5,9 @@ package com.pilot.core.event;
  * 信封上的 {@code type} 字段由该枚举的线上名称决定。
  */
 public sealed interface SessionEvent
-        permits RunStarted, AssistantDelta, ToolStarted, ApprovalRequired,
-                ApprovalResolved, ToolCompleted, RunFailed, RunCompleted, RunCancelled {
+        permits RunStarted, AssistantDelta, ContextCompacted, PlanUpdated, RunSteered, RunContinued,
+                SubagentStarted, SubagentFinished, ToolStarted, ApprovalRequired, ApprovalResolved,
+                ToolCompleted, RunFailed, RunCompleted, RunCancelled {
 
     EventType type();
 }

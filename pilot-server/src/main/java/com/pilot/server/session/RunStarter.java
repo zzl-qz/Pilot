@@ -30,4 +30,26 @@ public interface RunStarter {
     default void regenerate(String sessionId, String runId, String input) {
         start(sessionId, runId, input);
     }
+
+    /**
+     * 续跑：不追加用户消息，直接用已经落盘的对话记忆继续。
+     * 与 {@link #regenerate} 的区别是它不改变历史语义，只恢复被中断的那一轮。
+     */
+    default void resume(String sessionId, String runId) {
+        start(sessionId, runId, "继续上一次未完成的任务");
+    }
+
+    /** 该会话是否存在可续跑的记忆。 */
+    default boolean resumable(String sessionId) {
+        return false;
+    }
+
+    /**
+     * 运行中追加输入：入队等下一轮消费，不新开 run。
+     *
+     * @return false 表示当前没有活动运行，调用方应按普通消息处理
+     */
+    default boolean steer(String sessionId, String text) {
+        return false;
+    }
 }

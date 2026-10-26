@@ -6,6 +6,12 @@ package com.pilot.core.event;
 public enum EventType {
     RUN_STARTED("run.started"),
     ASSISTANT_DELTA("assistant.delta"),
+    CONTEXT_COMPACTED("context.compacted"),
+    PLAN_UPDATED("plan.updated"),
+    RUN_STEERED("run.steered"),
+    RUN_CONTINUED("run.continued"),
+    SUBAGENT_STARTED("subagent.started"),
+    SUBAGENT_FINISHED("subagent.finished"),
     TOOL_STARTED("tool.started"),
     APPROVAL_REQUIRED("approval.required"),
     APPROVAL_RESOLVED("approval.resolved"),

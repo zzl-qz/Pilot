@@ -1,6 +1,12 @@
 const EVENT_TYPES = [
   'run.started',
   'assistant.delta',
+  'context.compacted',
+  'plan.updated',
+  'run.steered',
+  'run.continued',
+  'subagent.started',
+  'subagent.finished',
   'tool.started',
   'approval.required',
   'approval.resolved',
@@ -571,6 +577,7 @@ async function loadHistory({ keepViewport = false } = {}) {
   if (state.reply && !state.running) {
     finishReply(false);
   }
+  await loadPlan();
   renderHistoryMore();
   if (keepViewport) {
     el.messages.scrollTop = Math.max(0, el.messages.scrollHeight - anchor);
@@ -794,6 +801,32 @@ function handleEvent(event) {
       break;
     }
 
+    case 'context.compacted': {
+      appendCompaction(event.payload);
+      break;
+    }
+    case 'plan.updated': {
+      renderPlan(event.payload);
+      break;
+    }
+    case 'run.steered': {
+      showNotice('已追加指令：' + (event.payload.input || ''));
+      setRunState('running', '已收到补充指令');
+      break;
+    }
+    case 'run.continued': {
+      showNotice(`自动继续 ${event.payload.attempt}/${event.payload.maxAttempts}：${event.payload.reason || ''}`);
+      setRunState('running', '自动继续中');
+      break;
+    }
+    case 'subagent.started': {
+      appendSubagent(event.payload);
+      break;
+    }
+    case 'subagent.finished': {
+      finishSubagent(event.payload);
+      break;
+    }
     case 'run.failed': {
       const code = String(event.payload.code || '');
       const cancelled = code === 'CANCELLED';
@@ -833,6 +866,113 @@ function handleEvent(event) {
 }
 
 /* ---------- 对话渲染 ---------- */
+
+/** 上下文压缩：在对话流里留一条可展开的交接摘要，让「记忆断层」有迹可查。 */
+function appendCompaction(payload) {
+  const card = document.createElement('details');
+  card.className = 'ctx-card';
+
+  const head = document.createElement('summary');
+  head.className = 'ctx-head';
+  head.textContent = `上下文已压缩 · 折叠 ${payload.coveredMessages || 0} 条较早消息 · `
+    + `${fmtChars(payload.charactersBefore)} → ${fmtChars(payload.charactersAfter)}`;
+
+  const body = document.createElement('pre');
+  body.className = 'ctx-body';
+  body.textContent = payload.summary || '（摘要为空）';
+
+  card.append(head, body);
+  el.messages.append(card);
+  hideEmptyState();
+}
+
+function fmtChars(value) {
+  const n = Number(value || 0);
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k 字符` : `${n} 字符`;
+}
+
+/** 子代理：一条折叠卡片，展开可看它回传的结论。 */
+function appendSubagent(payload) {
+  const card = document.createElement('details');
+  card.className = 'subagent-card';
+  card.dataset.agentId = payload.agentId || '';
+
+  const head = document.createElement('summary');
+  head.className = 'subagent-head';
+  head.textContent = `子任务：${payload.task || ''}`;
+
+  const body = document.createElement('pre');
+  body.className = 'subagent-body';
+  body.textContent = '执行中…';
+
+  card.append(head, body);
+  el.messages.append(card);
+  hideEmptyState();
+}
+
+function finishSubagent(payload) {
+  const id = payload.agentId || '';
+  const card = el.messages.querySelector(`.subagent-card[data-agent-id="${CSS.escape(id)}"]`);
+  if (!card) {
+    return;
+  }
+  card.classList.toggle('is-failed', payload.ok === false);
+  const body = card.querySelector('.subagent-body');
+  if (body) {
+    body.textContent = payload.summary || (payload.ok === false ? '子代理失败' : '完成');
+  }
+}
+
+/** 任务计划：整表重绘，只保留一个卡片并跟在最新消息后面。 */
+function renderPlan(payload) {
+  const items = Array.isArray(payload && payload.plan) ? payload.plan : [];
+  let card = el.messages.querySelector('.plan-card');
+  if (!card) {
+    card = document.createElement('aside');
+    card.className = 'plan-card';
+    const title = document.createElement('div');
+    title.className = 'plan-title';
+    title.textContent = '任务计划';
+    const list = document.createElement('ol');
+    list.className = 'plan-list';
+    card.append(title, list);
+  }
+  if (!items.length) {
+    card.remove();
+    return;
+  }
+
+  const list = card.querySelector('.plan-list');
+  list.replaceChildren();
+  for (const item of items) {
+    const li = document.createElement('li');
+    li.className = `plan-item is-${item.status || 'pending'}`;
+    li.textContent = item.step || '';
+    list.append(li);
+  }
+  // 移到末尾，让计划跟着最新进度走
+  el.messages.append(card);
+  hideEmptyState();
+}
+
+/** 刷新后从服务端恢复计划清单（事件已重放的那份会覆盖这一份）。 */
+async function loadPlan() {
+  if (!state.sessionId) {
+    return;
+  }
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/plan`);
+    if (!response.ok) {
+      return;
+    }
+    const data = await response.json();
+    if (Array.isArray(data.plan) && data.plan.length) {
+      renderPlan(data);
+    }
+  } catch (error) {
+    // 计划恢复失败不影响对话
+  }
+}
 
 function showThinking() {
   clearThinking();
@@ -1699,19 +1839,25 @@ async function sendMessage(event) {
 
 /** 提交一条用户消息并启动运行；输入框与「继续」按钮共用。 */
 async function submitMessage(content) {
-  if (!content || !state.sessionId || state.running) {
+  if (!content || !state.sessionId) {
     return;
   }
 
+  // 运行中发送不再拦截：服务端会把它排进当前 run 的下一轮
+  const wasRunning = state.running;
   appendUserMessage(content);
   state.pendingInputs.push(content);
-  renameSessionIfDefault(content);
-  state.running = true;
-  state.runId = null;
-  state.lastRunId = null;
-  state.changedFiles = [];
+  if (!wasRunning) {
+    renameSessionIfDefault(content);
+    state.running = true;
+    state.runId = null;
+    state.lastRunId = null;
+    state.changedFiles = [];
+    setRunState('running', '发送中');
+  } else {
+    setRunState('running', '已排队');
+  }
   syncComposer();
-  setRunState('running', '发送中');
   scrollThread();
 
   try {
@@ -1720,6 +1866,10 @@ async function submitMessage(content) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content })
     });
+    if (response.status === 202) {
+      // 已入队，等 run.steered 事件确认被消费
+      return;
+    }
     if (!response.ok) {
       throw new Error('HTTP ' + response.status);
     }
@@ -1727,10 +1877,12 @@ async function submitMessage(content) {
     state.runId = started.runId || null;
     syncComposer();
   } catch (error) {
-    state.running = false;
-    state.pendingInputs.pop();
-    syncComposer();
-    setRunState('error', '发送失败');
+    if (!wasRunning) {
+      state.running = false;
+      state.pendingInputs.pop();
+      syncComposer();
+      setRunState('error', '发送失败');
+    }
     showNotice('发送失败：' + error.message);
   }
 }
@@ -1758,15 +1910,32 @@ async function cancelRun() {
   }
 }
 
-/** 步数触顶后继续：对话历史在服务端，发一条「继续」即可接着做。 */
+/**
+ * 继续上一次未完成的任务：走 /continue，不伪造「继续」这条用户消息，
+ * 服务端用已经落盘的对话记忆接着跑，进程重启过也能接上。
+ */
 async function continueRun(box) {
-  if (state.running) {
+  if (state.running || !state.sessionId) {
     return;
   }
   const buttons = [...box.querySelectorAll('button')];
   buttons.forEach((item) => { item.disabled = true; });
-  await submitMessage('继续');
-  if (!state.running) {
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/continue`, {
+      method: 'POST'
+    });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const data = await response.json();
+    state.runId = data.runId || state.runId;
+    state.lastRunId = data.runId || state.lastRunId;
+    state.running = true;
+    startRunClock(Date.now());
+    setRunState('run', '运行中');
+    syncComposer();
+  } catch (error) {
+    showNotice('继续失败：' + error.message);
     buttons.forEach((item) => { item.disabled = false; });
   }
 }
@@ -1987,7 +2156,8 @@ function setComposerEnabled(enabled) {
 function syncComposer() {
   const running = state.running;
   el.stop.hidden = !running;
-  el.send.hidden = running;
+  // 运行中也可以发送：服务端会把它排进当前 run 的下一轮
+  el.send.hidden = false;
   el.send.disabled = !state.composerEnabled;
   if (!running) {
     el.stop.disabled = false;

@@ -228,6 +228,27 @@ class AgentLoopTest {
         assertTrue(failed.retryable());
     }
 
+    /** 运行中追加的指令应在下一轮采样前进入历史，并且不新开 run。 */
+    @Test
+    void injectsSteeredInputBeforeNextStep() {
+        var tool = new CountingTool("list_dir", "a.txt");
+        var client = new ScriptedModelClient(
+                new ModelResponse("先看看", List.of(new ToolCall("call_1", "list_dir", Map.of("path", ".")))),
+                new ModelResponse("完成", List.of()));
+        Deque<String> inbox = new ArrayDeque<>(List.of("只改 A 模块，别动 B"));
+        var loop = new AgentLoop(client, registry(tool), readOnlyGate(), ApprovalBroker.denyAll(),
+                config(8, 3), Cancellation.none(), inbox::poll);
+
+        AgentLoop.Result result = loop.run("整理代码", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertTrue(eventTypes().contains("run.steered"));
+        List<Message> secondRequest = client.requests.get(1);
+        assertTrue(secondRequest.stream().anyMatch(message -> "user".equals(message.role())
+                        && message.content().contains("只改 A 模块")),
+                "追加的指令应作为 user 消息进入下一轮请求");
+    }
+
     private List<String> eventTypes() {
         return events.stream().map(event -> event.type().wireName()).toList();
     }

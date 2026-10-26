@@ -2,7 +2,10 @@ package com.pilot.server.controller;
 
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunStarted;
+import com.pilot.core.plan.PlanItem;
 import com.pilot.core.session.EventSubscription;
+import com.pilot.core.session.ConversationRepository;
+import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.Run;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
@@ -45,14 +48,19 @@ public class SessionController {
     private final ObjectMapper objectMapper;
     private final WorkspaceService workspaces;
     private final AgentProperties agentProperties;
+    private final PlanRepository plans;
+    private final ConversationRepository conversations;
 
     public SessionController(SessionService sessions, RunStarter runStarter, ObjectMapper objectMapper,
-                             WorkspaceService workspaces, AgentProperties agentProperties) {
+                             WorkspaceService workspaces, AgentProperties agentProperties,
+                             PlanRepository plans, ConversationRepository conversations) {
         this.sessions = sessions;
         this.runStarter = runStarter;
         this.objectMapper = objectMapper;
         this.workspaces = workspaces;
         this.agentProperties = agentProperties;
+        this.plans = plans;
+        this.conversations = conversations;
     }
 
     @PostMapping
@@ -104,6 +112,8 @@ public class SessionController {
         if (!sessions.delete(id)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id);
         }
+        conversations.delete(id);
+        plans.delete(id);
         return ResponseEntity.noContent().build();
     }
 
@@ -128,6 +138,35 @@ public class SessionController {
         return new MessageResponse(id, runId);
     }
 
+    /**
+     * 继续上一次被中断的运行：不追加用户消息，直接恢复已落盘的对话记忆。
+     * 与 regenerate 的区别是不改写历史语义。
+     */
+    @PostMapping("/{id}/continue")
+    public MessageResponse continueRun(@PathVariable String id) {
+        requireSession(id);
+        if (runStarter.activeRun(id).isPresent()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行");
+        }
+        if (!runStarter.resumable(id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "没有可继续的对话记忆");
+        }
+        String runId = "run_" + UUID.randomUUID();
+        sessions.publish(id, runId, new RunStarted("（继续上一次未完成的任务）"));
+        runStarter.resume(id, runId);
+        return new MessageResponse(id, runId);
+    }
+
+    /** 当前计划清单：前端刷新后据此恢复 checklist。 */
+    @GetMapping("/{id}/plan")
+    public PlanResponse plan(@PathVariable String id) {
+        requireSession(id);
+        return new PlanResponse(plans.load(id));
+    }
+
+    public record PlanResponse(List<PlanItem> plan) {
+    }
+
     private String lastUserInput(String sessionId) {
         List<EventEnvelope> events = sessions.events(sessionId);
         for (int i = events.size() - 1; i >= 0; i--) {
@@ -139,14 +178,19 @@ public class SessionController {
     }
 
     @PostMapping("/{id}/messages")
-    public MessageResponse sendMessage(@PathVariable String id, @RequestBody MessageRequest request) {
+    public ResponseEntity<MessageResponse> sendMessage(@PathVariable String id, @RequestBody MessageRequest request) {
         requireSession(id);
         if (request == null || request.content() == null || request.content().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
         }
+        // 运行中追加：入队交给当前 run 在下一轮消费，不新开 run
+        String activeRun = runStarter.activeRun(id).orElse(null);
+        if (activeRun != null && runStarter.steer(id, request.content())) {
+            return ResponseEntity.accepted().body(new MessageResponse(id, activeRun));
+        }
         Run run = sessions.sendMessage(id, request.content());
         runStarter.start(id, run.runId(), request.content());
-        return new MessageResponse(id, run.runId());
+        return ResponseEntity.ok(new MessageResponse(id, run.runId()));
     }
 
     /**

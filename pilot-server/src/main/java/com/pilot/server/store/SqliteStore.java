@@ -52,6 +52,25 @@ public final class SqliteStore {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             )""",
+            """
+            CREATE TABLE IF NOT EXISTS conversation_messages (
+                session_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                tool_calls TEXT,
+                tool_call_id TEXT,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (session_id, seq)
+            )""",
+            """
+            CREATE TABLE IF NOT EXISTS plan_items (
+                session_id TEXT NOT NULL,
+                ord INTEGER NOT NULL,
+                step TEXT NOT NULL,
+                status TEXT NOT NULL,
+                PRIMARY KEY (session_id, ord)
+            )""",
             "CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, sequence)",
             "CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session_id, status)"
     };
