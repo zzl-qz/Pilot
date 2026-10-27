@@ -125,13 +125,17 @@ class RunCommandToolTest {
         assertTrue(result.contains("java.home = " + System.getProperty("java.home")), result);
     }
 
+    /** 失败和超时同样要留一行结果：否则「跑过但挂了」在收尾门和界面上都看不见。 */
     @Test
-    void reportsCheckSummaryOnlyForSuccessfulRuns() {
+    void reportsCheckSummaryForSuccessAndFailure() {
         var call = new ToolCall("call_1", "run_command", Map.of("command", "mvn -q test"));
         var tool = tool();
 
         assertEquals("mvn -q test → exit 0", tool.checkSummary(call, "命令: mvn -q test\n退出码: 0\n耗时: 12 ms"));
-        assertNull(tool.checkSummary(call, "ERROR: 命令超时"));
+        assertEquals("mvn -q test → exit 1", tool.checkSummary(call, "命令: mvn -q test\n退出码: 1\n耗时: 12 ms"));
+        String timeout = tool.checkSummary(call, "ERROR: 命令超时（120 秒）已被终止");
+        assertTrue(timeout != null && timeout.contains("超时"), String.valueOf(timeout));
+        assertNull(tool.checkSummary(call, null));
     }
 
     @Test

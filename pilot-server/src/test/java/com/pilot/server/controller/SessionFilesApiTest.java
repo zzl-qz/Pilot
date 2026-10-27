@@ -59,6 +59,35 @@ class SessionFilesApiTest {
     }
 
     @Test
+    void listsEveryFileRecursivelyForMentions() throws Exception {
+        Files.createDirectories(workspace.resolve("pilot-core/src"));
+        Files.createDirectories(workspace.resolve("node_modules/lib"));
+        Files.writeString(workspace.resolve("pom.xml"), "<project/>");
+        Files.writeString(workspace.resolve("pilot-core/src/App.java"), "class App {}");
+        Files.writeString(workspace.resolve("node_modules/lib/index.js"), "export {};");
+        String sessionId = createSession();
+
+        mvc.perform(get("/api/sessions/{id}/files/flat", sessionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.files.length()").value(2))
+                .andExpect(jsonPath("$.files[0]").value("pilot-core/src/App.java"))
+                .andExpect(jsonPath("$.files[1]").value("pom.xml"))
+                .andExpect(jsonPath("$.truncated").value(false));
+    }
+
+    @Test
+    void truncatesFlatListWhenLimitIsReached() throws Exception {
+        Files.writeString(workspace.resolve("a.txt"), "a");
+        Files.writeString(workspace.resolve("b.txt"), "b");
+        String sessionId = createSession();
+
+        mvc.perform(get("/api/sessions/{id}/files/flat", sessionId).param("limit", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.files.length()").value(1))
+                .andExpect(jsonPath("$.truncated").value(true));
+    }
+
+    @Test
     void previewsTextFileContent() throws Exception {
         Files.writeString(workspace.resolve("a.txt"), "第一行\n第二行\n");
         String sessionId = createSession();

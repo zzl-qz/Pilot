@@ -3,10 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="light dark">
   <title>Pilot · 本地编码代理</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230d1117'/%3E%3Cpath d='M11 23V9h6.2a4.8 4.8 0 0 1 0 9.6H14' stroke='%236ea8ff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/style.css?v=13">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23090b11'/%3E%3Cpath d='M11 23V9h6.2a4.8 4.8 0 0 1 0 9.6H14' stroke='%237b8cff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <script>
+    // 首屏前先落主题与强调色，避免默认值闪一下
+    try {
+      var mode = localStorage.getItem('pilot.theme') || 'light';
+      var dark = mode === 'dark'
+        || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      document.documentElement.dataset.themeMode = mode;
+      document.documentElement.dataset.accent = localStorage.getItem('pilot.accent') || 'blue';
+    } catch (error) {
+      document.documentElement.dataset.theme = 'light';
+      document.documentElement.dataset.accent = 'blue';
+    }
+  </script>
+  <link rel="stylesheet" href="/style.css?v=21">
 </head>
 <body>
 <div class="app" id="app">
@@ -76,6 +90,13 @@
       <div class="topbar-right">
         <span id="session-chip" class="chip mono" hidden></span>
         <span id="run-state" class="run-state state-idle">空闲</span>
+        <button id="settings-open" class="icon-btn" type="button" aria-label="设置" title="设置 (Ctrl + ,)">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h3.2M9.4 4.5h4.1M2.5 8h4.2M10.1 8h3.4M2.5 11.5h2.2M8 11.5h5.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="7.7" cy="4.5" r="1.5" stroke="currentColor" stroke-width="1.4" fill="none"/><circle cx="8.4" cy="8" r="1.5" stroke="currentColor" stroke-width="1.4" fill="none"/><circle cx="6.3" cy="11.5" r="1.5" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
+        </button>
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="切换明暗主题" title="切换明暗主题">
+          <svg class="icon-sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.1" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M8 1.6v1.3M8 13.1v1.3M1.6 8h1.3M13.1 8h1.3M3.5 3.5l.9.9M11.6 11.6l.9.9M12.5 3.5l-.9.9M4.4 11.6l-.9.9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <svg class="icon-moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 9.8A5.4 5.4 0 0 1 6.2 3a5.4 5.4 0 1 0 6.8 6.8Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/></svg>
+        </button>
         <button id="toggle-activity" class="icon-btn" type="button" aria-label="切换右侧面板" aria-pressed="true" title="右侧面板 (Ctrl J)">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11zM9.5 3.5v9" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/></svg>
         </button>
@@ -212,15 +233,31 @@
 
     <div id="panel-changes" class="panel-body" hidden>
       <div class="changes-bar">
-        <span id="changes-state" class="changes-state">尚未加载</span>
-        <button id="changes-rollback" class="btn btn-danger btn-sm" type="button" hidden title="把本次运行改过的文件还原到运行前">回滚本次运行</button>
-        <button id="changes-refresh" class="icon-btn icon-btn-sm" type="button" title="刷新变更" aria-label="刷新变更">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.6V5.4h-2.8" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
+        <div class="changes-meta">
+          <span id="changes-state" class="changes-state">尚未加载</span>
+          <span id="changes-totals" class="changes-totals" hidden></span>
+        </div>
+        <div class="changes-actions">
+          <button id="changes-rollback" class="btn btn-danger btn-sm" type="button" hidden title="把本次运行改过的文件还原到运行前">回滚</button>
+          <button id="changes-refresh" class="icon-btn icon-btn-sm" type="button" title="刷新变更" aria-label="刷新变更">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.6V5.4h-2.8" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
       </div>
       <div id="run-changes" class="run-changes" hidden></div>
-      <ul id="change-files" class="change-files"></ul>
-      <div id="change-diff" class="change-diff"></div>
+      <div class="changes-body">
+        <ul id="change-files" class="change-files" role="listbox" aria-label="改动文件"></ul>
+        <section class="change-view">
+          <div id="change-view-bar" class="change-view-bar" hidden>
+            <span id="change-view-path" class="change-view-path mono"></span>
+            <span id="change-view-stat" class="change-view-stat" aria-live="polite"></span>
+            <button id="change-view-preview" class="icon-btn icon-btn-sm" type="button" title="在「预览」中打开整个文件" aria-label="在预览中打开">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 3.5H3.5v9h9V9.8M9.4 3.5h3.1v3.1M12.4 3.6 7.6 8.4" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+          <div id="change-diff" class="change-diff"></div>
+        </section>
+      </div>
     </div>
 
     <div id="panel-preview" class="panel-body" hidden>
@@ -274,9 +311,87 @@
   </div>
 </div>
 
+<div id="settings" class="modal" hidden>
+  <div class="modal-box settings-box" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <header class="modal-head">
+      <div>
+        <h2 id="settings-title">设置</h2>
+        <p class="modal-sub">外观偏好存在本机浏览器，模型与权限由服务端保存并立即生效。</p>
+      </div>
+      <button id="settings-close" class="icon-btn" type="button" aria-label="关闭设置">✕</button>
+    </header>
+    <div class="settings-body">
+      <nav id="settings-nav" class="settings-nav" aria-label="设置分区">
+        <button class="settings-tab is-on" type="button" data-section="appearance">外观</button>
+        <button class="settings-tab" type="button" data-section="model">模型</button>
+        <button class="settings-tab" type="button" data-section="permission">权限</button>
+        <button class="settings-tab" type="button" data-section="keys">快捷键</button>
+        <button class="settings-tab" type="button" data-section="about">关于</button>
+      </nav>
+      <div class="settings-panes">
+        <section class="settings-pane" data-section="appearance">
+          <h3 class="settings-title">主题</h3>
+          <p class="settings-hint">选择界面明暗；「跟随系统」会随操作系统外观自动切换。</p>
+          <div id="theme-options" class="theme-options" role="radiogroup" aria-label="主题"></div>
+          <h3 class="settings-title">强调色</h3>
+          <p class="settings-hint">用于按钮、选中态和运行状态的高亮色。</p>
+          <div id="accent-options" class="accent-options" role="radiogroup" aria-label="强调色"></div>
+        </section>
+
+        <section class="settings-pane" data-section="model" hidden>
+          <h3 class="settings-title">模型</h3>
+          <p class="settings-hint">留空表示保持当前值，保存后下一次模型请求生效。</p>
+          <div id="settings-model-options" class="settings-model-options" role="listbox" aria-label="候选模型"></div>
+          <label class="settings-field"><span>模型</span><input id="settings-model-name" type="text" spellcheck="false" placeholder="gpt-5.1"></label>
+          <label class="settings-field"><span>端点</span><input id="settings-model-endpoint" type="text" spellcheck="false" placeholder="https://api.openai.com/v1"></label>
+          <label class="settings-field"><span>API Key</span><input id="settings-model-key" type="password" spellcheck="false" placeholder="留空保持当前密钥"></label>
+          <p id="settings-model-hint" class="settings-status" role="status" aria-live="polite"></p>
+          <div class="settings-actions">
+            <label class="settings-check"><input id="settings-model-clear-key" type="checkbox"> 清除已保存密钥</label>
+            <button id="settings-model-save" class="btn btn-primary" type="button">保存模型</button>
+          </div>
+        </section>
+
+        <section class="settings-pane" data-section="permission" hidden>
+          <h3 class="settings-title">权限模式</h3>
+          <p class="settings-hint">决定工具能做什么：从只读到全放行，切换后立即生效。</p>
+          <div id="permission-options" class="permission-options" role="radiogroup" aria-label="权限模式"></div>
+          <p id="settings-permission-hint" class="settings-status" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="settings-pane" data-section="keys" hidden>
+          <h3 class="settings-title">快捷键</h3>
+          <dl class="settings-keys">
+            <div><dt>新任务 / 选择工作区</dt><dd><kbd>Ctrl</kbd><kbd>N</kbd></dd></div>
+            <div><dt>命令面板</dt><dd><kbd>Ctrl</kbd><kbd>K</kbd></dd></div>
+            <div><dt>右侧审阅面板</dt><dd><kbd>Ctrl</kbd><kbd>B</kbd></dd></div>
+            <div><dt>设置</dt><dd><kbd>Ctrl</kbd><kbd>,</kbd></dd></div>
+            <div><dt>发送</dt><dd><kbd>Enter</kbd></dd></div>
+            <div><dt>换行</dt><dd><kbd>Shift</kbd><kbd>Enter</kbd></dd></div>
+            <div><dt>引用文件 / 快捷指令</dt><dd><kbd>@</kbd> <kbd>/</kbd></dd></div>
+            <div><dt>关闭浮层 / 中断</dt><dd><kbd>Esc</kbd></dd></div>
+          </dl>
+        </section>
+
+        <section class="settings-pane" data-section="about" hidden>
+          <h3 class="settings-title">关于</h3>
+          <dl class="settings-about">
+            <div><dt>产品</dt><dd>Pilot · 本地编码代理</dd></div>
+            <div><dt>当前工作区</dt><dd id="settings-about-workspace" class="mono">未选择</dd></div>
+            <div><dt>后端连接</dt><dd id="settings-about-connection">未连接</dd></div>
+            <div><dt>当前模型</dt><dd id="settings-about-model">未设置</dd></div>
+            <div><dt>权限模式</dt><dd id="settings-about-permission">-</dd></div>
+          </dl>
+          <p class="settings-hint">界面配置存于浏览器 localStorage；模型与权限保存在服务端，重启后依然有效。</p>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="scrim" class="scrim" hidden></div>
 
 <div id="drop-veil" class="drop-veil" hidden>松开以添加文件</div>
-<script type="module" src="/app.js?v=16"></script>
+<script type="module" src="/app.js?v=23"></script>
 </body>
 </html>

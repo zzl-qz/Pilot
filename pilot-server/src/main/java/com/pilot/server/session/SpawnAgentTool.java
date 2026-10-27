@@ -8,6 +8,7 @@ import com.pilot.core.loop.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.permission.PermissionGate;
+import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 
@@ -28,6 +29,7 @@ import java.util.function.Supplier;
  */
 public final class SpawnAgentTool implements Tool {
     private static final int MAX_SUMMARY_CHARS = 4_000;
+    private static final PromptLibrary PROMPTS = PromptLibrary.standard();
 
     private final ModelClient client;
     private final ToolRegistry tools;
@@ -59,11 +61,7 @@ public final class SpawnAgentTool implements Tool {
 
     @Override
     public String description() {
-        return """
-                派一个子代理去做一件边界清晰的子任务（例如「盘点哪些文件调用了 X」「只读审查某个模块」）。
-                子代理有自己的上下文，只把最终结论返回给你，中间读过的文件不会占用你的上下文。
-                适合信息量大但结论很短的探索；需要连续改文件的实现类工作请自己做，不要派出去。
-                """;
+        return promptDescription();
     }
 
     @Override
@@ -102,8 +100,7 @@ public final class SpawnAgentTool implements Tool {
         try {
             var loop = new AgentLoop(client, tools, permissionGate, approvals, config, cancelled::getAsBoolean);
             List<Message> context = inherit ? history.get() : List.of();
-            String prompt = "子任务（由父代理派发）：" + task
-                    + "\n只完成这件事，不要在结论里复述过程，给出可执行的结论、涉及的文件与行号。";
+            String prompt = PROMPTS.render("subagent/task", Map.of("task", task)).strip();
             AgentLoop.Result result = loop.run(prompt, context, events);
             if (result.failed()) {
                 String reason = "子代理未完成：" + result.failureCode();

@@ -33,9 +33,7 @@ public final class ReadFileTool implements Tool {
 
     @Override
     public String description() {
-        return "读取工作区内文本文件的一段内容，返回带行号的内容。路径必须是工作区内的相对路径。"
-                + "start_line 默认 1；正数从开头数，负数从末尾数，-1 是最后一行。"
-                + "line_count 默认 200，最多 2000。一次不要读太多，后面还有内容时结果会给出下一行行号。";
+        return promptDescription();
     }
 
     @Override

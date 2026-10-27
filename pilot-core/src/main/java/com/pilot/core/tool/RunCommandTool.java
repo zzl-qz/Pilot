@@ -1,5 +1,6 @@
 package com.pilot.core.tool;
 
+import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.workspace.PathValidator;
 
 import java.io.File;
@@ -69,12 +70,10 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     @Override
     public String description() {
-        return "在工作区根目录执行一条受限命令并返回退出码与输出，主要用于构建和测试验证。"
-                + "只允许 " + String.join("/", ALLOWED_EXECUTABLES.stream().sorted().toList()) + " 等白名单程序，"
-                + "不支持管道、重定向和命令串联；git 允许 "
-                + String.join("/", GIT_READONLY.stream().sorted().toList())
-                + " 等只读子命令，以及 git add / git commit -m \"说明\"；"
-                + "push/reset/clean/checkout 等需要用户手动执行。超时默认 120 秒。";
+        return PromptLibrary.standard().render("tools/run_command", Map.of(
+                "executables", String.join("/", ALLOWED_EXECUTABLES.stream().sorted().toList()),
+                "gitReadonly", String.join("/", GIT_READONLY.stream().sorted().toList()),
+                "gitWrite", String.join("/", GIT_WRITE.stream().sorted().toList()))).strip();
     }
 
     @Override
@@ -174,15 +173,19 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     @Override
     public String checkSummary(ToolCall call, String result) {
-        if (result == null || result.startsWith("ERROR")) {
+        if (result == null) {
             return null;
         }
         String command = call == null || call.args() == null ? "" : String.valueOf(call.args().getOrDefault("command", ""));
         var matcher = EXIT_CODE.matcher(result);
-        if (!matcher.find()) {
-            return null;
+        if (matcher.find()) {
+            return ToolSupport.oneLine(command, 90) + " → exit " + matcher.group(1);
         }
-        return ToolSupport.oneLine(command, 90) + " → exit " + matcher.group(1);
+        // 超时、启动失败没有退出码，但同样是「验证没通过」，要留在记录里
+        if (result.startsWith("ERROR")) {
+            return ToolSupport.oneLine(command, 90) + " → " + ToolSupport.oneLine(result, 80);
+        }
+        return null;
     }
 
     private String run(List<String> command, List<String> displayTokens, long timeoutMs) {

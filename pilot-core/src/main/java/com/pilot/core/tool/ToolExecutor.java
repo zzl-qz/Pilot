@@ -67,10 +67,11 @@ public final class ToolExecutor {
 
         String changedPath = null;
         String check = null;
-        if (tool.isPresent() && succeeded(result)) {
-            if (tool.get() instanceof WritesFiles writes) {
+        if (tool.isPresent() && !blocked(result)) {
+            if (succeeded(result) && tool.get() instanceof WritesFiles writes) {
                 changedPath = writes.changedPath(call);
             }
+            // 失败和超时也要留下验证记录：否则「跑过但挂了」在收尾门和界面上都看不见
             if (tool.get() instanceof ProducesCheck produces) {
                 check = produces.checkSummary(call, result);
             }
@@ -88,6 +89,12 @@ public final class ToolExecutor {
 
     private static boolean succeeded(String result) {
         return result != null && !result.startsWith("ERROR");
+    }
+
+    /** 权限拒绝 / 用户拒绝属于「没执行」，既不算改动也不算验证结果。 */
+    private static boolean blocked(String result) {
+        return result != null
+                && (result.startsWith("ERROR: 权限拒绝") || result.startsWith("ERROR: 用户拒绝"));
     }
 
     private String executeTool(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events) {

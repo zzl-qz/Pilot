@@ -13,6 +13,7 @@ import com.pilot.core.event.PlanUpdated;
 import com.pilot.core.event.RunContinued;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.plan.PlanSink;
+import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
@@ -30,17 +31,25 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * 在独立线程上执行 {@link AgentLoop}，把循环产生的事件写入会话。
@@ -53,6 +62,18 @@ import java.util.function.Consumer;
 public class AgentRunService implements RunStarter {
     private static final Logger log = LoggerFactory.getLogger(AgentRunService.class);
     private static final int MAX_AUTO_CONTINUE = 3;
+    /** 提示词正文在 {@code prompts/} 资源里，这里只做变量注入与拼接。 */
+    private static final PromptLibrary PROMPTS = PromptLibrary.standard();
+    /** 项目约定文件，按优先级取第一个存在的。 */
+    private static final List<String> CONVENTION_FILES = List.of("PILOT.md", "AGENTS.md", "CLAUDE.md");
+    private static final int MAX_CONVENTION_CHARS = 8_000;
+    /** 仓库快照：顶层条目与未提交改动都限行，避免 system 被大仓库撑爆。 */
+    private static final int MAX_TREE_ENTRIES = 30;
+    private static final int MAX_GIT_CHANGES = 12;
+    private static final long GIT_TIMEOUT_MS = 2_000L;
+    private static final Set<String> IGNORED_ENTRIES = Set.of(
+            ".git", ".pilot", ".idea", ".vscode", ".gradle", ".venv", "__pycache__",
+            "node_modules", "target", "build", "dist", "out");
 
     private final SessionService sessions;
     private final ModelClient modelClient;
@@ -350,9 +371,196 @@ public class AgentRunService implements RunStarter {
     }
 
     /**
-     * 把未完成的计划注入 system：压缩会折叠历史，但每轮重新注入的计划不会丢，
-     * 这也是 Claude Code 要求把长期约束放 CLAUDE.md 的同款思路。
+     * 组装本轮 system：正文全部来自 {@code prompts/} 资源，这里只注入环境与当前计划。
+     *
+     * <p>计划每轮重新注入：压缩会折叠历史，但 system 是重建的，长期约束不会丢
+     * （与 Claude Code 把约束放 CLAUDE.md 的思路一致）。
      */
+    private String systemPrompt(String sessionId, String workspace) {
+        String prompt = PROMPTS.system(PromptLibrary.environment(workspace));
+        String repository = repositoryBrief(workspace);
+        if (!repository.isEmpty()) {
+            prompt = prompt + "\n\n" + repository;
+        }
+        String rules = projectRules(workspace);
+        if (!rules.isEmpty()) {
+            prompt = prompt + "\n\n" + rules;
+        }
+        String plan = planBrief(sessionId);
+        return plan.isEmpty() ? prompt : prompt + "\n\n" + plan;
+    }
+
+    /**
+     * 仓库现状快照：顶层结构、git 分支与未提交改动、构建方式。
+     *
+     * <p>顶级 agent 都会把这几项注入上下文，模型不用从零摸索，也不会覆盖用户手上的未提交改动。
+     * 每轮只做一次目录列举 + 一次带超时的 {@code git status}，读不到就降级，不影响运行。
+     */
+    private String repositoryBrief(String workspace) {
+        Path root;
+        try {
+            root = toolFactory.resolve(workspace);
+        } catch (RuntimeException e) {
+            return "";
+        }
+        if (!Files.isDirectory(root)) {
+            return "";
+        }
+        try {
+            return PROMPTS.render("system/repository", Map.of(
+                    "tree", workspaceTree(root),
+                    "git", gitState(root),
+                    "build", buildHint(root))).strip();
+        } catch (RuntimeException e) {
+            log.debug("生成仓库摘要失败", e);
+            return "";
+        }
+    }
+
+    private static String workspaceTree(Path root) {
+        try (var entries = Files.list(root)) {
+            List<String> names = entries
+                    .map(path -> {
+                        String name = path.getFileName().toString();
+                        return Files.isDirectory(path) ? name + "/" : name;
+                    })
+                    .filter(name -> !IGNORED_ENTRIES.contains(name.endsWith("/")
+                            ? name.substring(0, name.length() - 1)
+                            : name))
+                    .sorted()
+                    .limit(MAX_TREE_ENTRIES + 1L)
+                    .toList();
+            if (names.isEmpty()) {
+                return "（空目录）";
+            }
+            boolean truncated = names.size() > MAX_TREE_ENTRIES;
+            String listed = String.join("\n", names.stream()
+                    .limit(MAX_TREE_ENTRIES)
+                    .map(name -> "- " + name)
+                    .toList());
+            return truncated ? listed + "\n- …（其余条目省略）" : listed;
+        } catch (IOException e) {
+            return "（读取目录失败）";
+        }
+    }
+
+    private static String gitState(Path root) {
+        if (!Files.isDirectory(root.resolve(".git"))) {
+            return "不是 git 仓库";
+        }
+        String branch = branchName(root);
+        String status = runGit(root, "status", "--porcelain=v1", "-uall");
+        if (status == null) {
+            return "分支 `" + branch + "`（无法读取未提交改动）";
+        }
+        List<String> lines = status.lines().filter(line -> !line.isBlank()).toList();
+        if (lines.isEmpty()) {
+            return "分支 `" + branch + "`，工作区干净";
+        }
+        String listed = lines.stream()
+                .limit(MAX_GIT_CHANGES)
+                .map(line -> "- " + line.strip())
+                .collect(Collectors.joining("\n"));
+        String more = lines.size() > MAX_GIT_CHANGES
+                ? "\n- …（还有 " + (lines.size() - MAX_GIT_CHANGES) + " 个）"
+                : "";
+        return "分支 `" + branch + "`，有 " + lines.size() + " 个文件未提交：\n" + listed + more;
+    }
+
+    private static String branchName(Path root) {
+        try {
+            String head = Files.readString(root.resolve(".git").resolve("HEAD"), StandardCharsets.UTF_8).strip();
+            String prefix = "ref: refs/heads/";
+            if (head.startsWith(prefix)) {
+                return head.substring(prefix.length());
+            }
+            return head.isEmpty() ? "unknown" : "detached@" + head.substring(0, Math.min(7, head.length()));
+        } catch (IOException e) {
+            return "unknown";
+        }
+    }
+
+    private static String runGit(Path root, String... args) {
+        List<String> command = new ArrayList<>();
+        command.add("git");
+        command.add("--no-pager");
+        command.addAll(List.of(args));
+        ProcessBuilder builder = new ProcessBuilder(command);
+        builder.directory(root.toFile());
+        builder.redirectErrorStream(true);
+        builder.environment().put("GIT_OPTIONAL_LOCKS", "0");
+        try {
+            Process process = builder.start();
+            if (!process.waitFor(GIT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                process.destroyForcibly();
+                return null;
+            }
+            return new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
+    private static String buildHint(Path root) {
+        if (Files.isRegularFile(root.resolve("pom.xml"))) {
+            return "Maven 项目：优先用工作区的 `mvnw`（Windows 是 `mvnw.cmd`），不要依赖系统 maven";
+        }
+        if (Files.isRegularFile(root.resolve("build.gradle")) || Files.isRegularFile(root.resolve("build.gradle.kts"))) {
+            return "Gradle 项目：用工作区的 `gradlew`";
+        }
+        if (Files.isRegularFile(root.resolve("package.json"))) {
+            return "Node 项目：先看 package.json 的 scripts，再跑 `npm test` / `npm run build` 这类脚本";
+        }
+        if (Files.isRegularFile(root.resolve("pyproject.toml"))
+                || Files.isRegularFile(root.resolve("requirements.txt"))) {
+            return "Python 项目：用 `pytest` 或项目里声明的命令";
+        }
+        if (Files.isRegularFile(root.resolve("Cargo.toml"))) {
+            return "Rust 项目：`cargo test` / `cargo build`";
+        }
+        if (Files.isRegularFile(root.resolve("go.mod"))) {
+            return "Go 项目：`go build ./...` / `go test ./...`";
+        }
+        return "未识别到构建文件，改动后按项目实际情况验证";
+    }
+
+    /**
+     * 把工作区里的项目约定注入 system：项目规范应该跟着仓库走，而不是写死在代码里。
+     * 目前只读根目录的 {@code PILOT.md} / {@code AGENTS.md} / {@code CLAUDE.md}，取第一个存在的。
+     */
+    private String projectRules(String workspace) {
+        Path root;
+        try {
+            root = toolFactory.resolve(workspace);
+        } catch (RuntimeException e) {
+            return "";
+        }
+        for (String name : CONVENTION_FILES) {
+            Path file = root.resolve(name);
+            if (!Files.isRegularFile(file)) {
+                continue;
+            }
+            try {
+                String rules = Files.readString(file, StandardCharsets.UTF_8).strip();
+                if (rules.isEmpty()) {
+                    continue;
+                }
+                if (rules.length() > MAX_CONVENTION_CHARS) {
+                    rules = rules.substring(0, MAX_CONVENTION_CHARS) + "\n…（约定文件过长，已截断）";
+                }
+                return PROMPTS.render("system/project-rules",
+                        Map.of("source", name, "rules", rules)).strip();
+            } catch (IOException e) {
+                log.warn("读取项目约定文件失败：{}", file, e);
+                return "";
+            }
+        }
+        return "";
+    }
+
     private String planBrief(String sessionId) {
         var items = plans.load(sessionId);
         if (items.isEmpty()) {
@@ -360,13 +568,12 @@ public class AgentRunService implements RunStarter {
         }
         var open = items.stream().filter(item -> !item.done()).toList();
         if (open.isEmpty()) {
-            return "\n\n当前计划已全部完成；若用户提出新需求，重新 update_plan。";
+            return PROMPTS.render("system/plan-done", Map.of()).strip();
         }
-        var brief = new StringBuilder("\n\n当前任务计划（未完成项，按顺序推进）：");
-        for (var item : open) {
-            brief.append("\n- [").append(item.status()).append("] ").append(item.step());
-        }
-        return brief.toString();
+        String list = open.stream()
+                .map(item -> "- [" + item.status() + "] " + item.step())
+                .collect(Collectors.joining("\n"));
+        return PROMPTS.render("system/plan-context", Map.of("planItems", list)).strip();
     }
 
     private String execute(String sessionId, String runId, String input, List<Attachment> attachments,
@@ -385,11 +592,12 @@ public class AgentRunService implements RunStarter {
         Consumer<SessionEvent> sink = event -> publish(sessionId, runId, event);
         Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
         var config = new AgentLoop.Config(properties.maxSteps(), properties.repeatedToolCallLimit(),
-                AgentLoop.DEFAULT_SYSTEM_PROMPT + planBrief(sessionId),
+                systemPrompt(sessionId, workspace),
                 // 收尾时读一次计划，把「本轮是否真的做完」一并写进 run.completed
                 () -> plans.load(sessionId),
                 // 计划没做完时自动继续，而不是停下来等用户点「继续执行」
-                properties.maxPlanContinues());
+                properties.maxPlanContinues(),
+                properties.contextMaxChars());
         // 子代理与父代理共用工具集（其中不含 spawn_agent，避免递归派生）
         tools.register(new SpawnAgentTool(modelClient, tools, permissionGate, approvals, config,
                 () -> conversations.load(sessionId), sink, handle.cancelled::get));

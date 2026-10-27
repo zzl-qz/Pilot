@@ -30,7 +30,7 @@ public final class CreateFileTool implements Tool, WritesFiles {
 
     @Override
     public String description() {
-        return "在工作区内创建一个新的文本文件，父目录会自动创建。文件已存在时会报错，请改用 edit_file。";
+        return promptDescription();
     }
 
     @Override

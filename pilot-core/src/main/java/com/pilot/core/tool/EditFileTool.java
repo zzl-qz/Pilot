@@ -35,9 +35,7 @@ public final class EditFileTool implements Tool, WritesFiles {
 
     @Override
     public String description() {
-        return "把工作区内文本文件中的 old_string 精确替换为 new_string。"
-                + "old_string 必须在文件中唯一出现；匹配到多处会报错，需要提供更多上下文。"
-                + "较大的文本文件也可以改，上限 32MB。";
+        return promptDescription();
     }
 
     @Override

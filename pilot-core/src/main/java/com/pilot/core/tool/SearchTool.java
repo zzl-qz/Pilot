@@ -41,8 +41,7 @@ public final class SearchTool implements Tool {
 
     @Override
     public String description() {
-        return "在工作区文件中按正则搜索，返回 路径:行号: 内容。可用 glob 限定文件类型，例如 *.java。"
-                + "会跳过 target、node_modules 这类目录。";
+        return promptDescription();
     }
 
     @Override

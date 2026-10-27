@@ -45,6 +45,8 @@ pilot:
     max-steps: ${PILOT_AGENT_MAX_STEPS:120}
     # 计划没做完就收尾时，自动催模型再做几轮。设成 0 会每写完一段就停下来问
     max-plan-continues: ${PILOT_AGENT_MAX_PLAN_CONTINUES:8}
+    # 上下文预算（字符估算）。太小会频繁压缩、丢细节；128k 窗口的模型可以开到 300000 左右
+    context-max-chars: ${PILOT_AGENT_CONTEXT_MAX_CHARS:120000}
     repeated-tool-call-limit: 3
     # READ_ONLY 拒绝写入；ASK 逐次批准；AUTO_EDIT 写入直接生效、命令仍批准；AUTO 全部放行
     permission-mode: ${PILOT_PERMISSION_MODE:READ_ONLY}

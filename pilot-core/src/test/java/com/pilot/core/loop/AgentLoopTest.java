@@ -143,7 +143,8 @@ class AgentLoopTest {
         var tool = new WritingTool("edit_file", "a.txt", "mvn -q test → exit 0");
         var client = new ScriptedModelClient(
                 new ModelResponse("", List.of(new ToolCall("call_1", "edit_file", Map.of("path", "a.txt")))),
-                new ModelResponse("改好了，测试通过。", List.of()));
+                new ModelResponse("改好了，测试通过。", List.of()),
+                new ModelResponse("核对完毕，目标已完成。", List.of()));
         var loop = new AgentLoop(client, registry(tool), new PolicyPermissionGate(PermissionMode.AUTO), config(8, 3));
 
         loop.run("改一下 a.txt", List.of(), events::add);
@@ -152,6 +153,52 @@ class AgentLoopTest {
                 .filter(event -> event instanceof RunCompleted).findFirst().orElseThrow();
         assertEquals(List.of("a.txt"), completed.changedFiles());
         assertEquals(List.of("mvn -q test → exit 0"), completed.checks());
+        // 有文件改动时，收尾前会先自审一轮
+        assertEquals(3, client.requests.size());
+        assertTrue(lastContent(client.requests.get(2)).contains("收尾前自查"));
+    }
+
+    /** 改了代码却没验证就想收尾：先被推回一轮，跑通构建后才允许结束。 */
+    @Test
+    void asksForVerificationBeforeCompletingCodeChange() {
+        var write = new WritingTool("edit_file", "src/main/java/A.java", null);
+        var run = new WritingTool("run_command", null, "mvn -q test → exit 0");
+        var client = new ScriptedModelClient(
+                new ModelResponse("", List.of(new ToolCall("call_1", "edit_file",
+                        Map.of("path", "src/main/java/A.java")))),
+                new ModelResponse("改完了。", List.of()),
+                new ModelResponse("", List.of(new ToolCall("call_2", "run_command",
+                        Map.of("command", "mvn -q test")))),
+                new ModelResponse("测试通过。", List.of()),
+                new ModelResponse("核对完毕，完成。", List.of()));
+        var loop = new AgentLoop(client, registry(write, run),
+                new PolicyPermissionGate(PermissionMode.AUTO), config(12, 3));
+
+        AgentLoop.Result result = loop.run("修一下 A", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals(5, client.requests.size(), "验证一轮 + 自审一轮");
+        assertTrue(lastContent(client.requests.get(2)).contains("收尾前验证"));
+        assertTrue(lastContent(client.requests.get(4)).contains("收尾前自查"));
+        assertEquals(2, events.stream().filter(RunContinued.class::isInstance).count());
+    }
+
+    /** 只改文档不强制跑构建，但同样要自审一轮。 */
+    @Test
+    void docOnlyChangeSkipsVerification() {
+        var write = new WritingTool("edit_file", "README.md", null);
+        var client = new ScriptedModelClient(
+                new ModelResponse("", List.of(new ToolCall("call_1", "edit_file", Map.of("path", "README.md")))),
+                new ModelResponse("文档更新完。", List.of()),
+                new ModelResponse("核对完毕。", List.of()));
+        var loop = new AgentLoop(client, registry(write),
+                new PolicyPermissionGate(PermissionMode.AUTO), config(8, 3));
+
+        loop.run("更新 README", List.of(), events::add);
+
+        assertEquals(3, client.requests.size());
+        assertTrue(lastContent(client.requests.get(2)).contains("收尾前自查"));
+        assertFalse(lastContent(client.requests.get(2)).contains("收尾前验证"));
     }
 
     @Test
@@ -456,8 +503,78 @@ class AgentLoopTest {
         assertEquals(List.of("跑回归测试"), completed.openSteps());
     }
 
+    /** 只读但属于「分析 / 梳理」的请求：工具用得太少时先自查一轮，别读两个文件就下结论。 */
+    @Test
+    void reviewsReadOnlyResearchBeforeAnswering() {
+        var tool = new CountingTool("read_file", "内容");
+        var client = new ScriptedModelClient(
+                new ModelResponse("", List.of(new ToolCall("call_1", "read_file", Map.of("path", "A.java")))),
+                new ModelResponse("", List.of(new ToolCall("call_2", "read_file", Map.of("path", "B.java")))),
+                new ModelResponse("调用链是 A → B。", List.of()),
+                new ModelResponse("补充确认后：A → B → C。", List.of()));
+        var loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
+
+        AgentLoop.Result result = loop.run("分析一下这个模块的调用链", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals(4, client.requests.size(), "回答前应有一轮自查");
+        String review = lastContent(client.requests.get(3));
+        assertTrue(review.contains("收尾前自查"), review);
+        assertTrue(review.contains("A.java") && review.contains("B.java"), review);
+        assertEquals(1, events.stream().filter(RunContinued.class::isInstance).count());
+    }
+
+    /** 失败的验证也要记录，且不能算「已验证」：会继续被推回要求验证。 */
+    @Test
+    void failedVerificationIsRecordedAndDoesNotUnlockCompletion() {
+        var write = new WritingTool("edit_file", "src/A.java", null);
+        var failing = new WritingTool("run_command", null, "mvn -q test → exit 1");
+        var client = new ScriptedModelClient(
+                new ModelResponse("", List.of(new ToolCall("call_1", "edit_file",
+                        Map.of("path", "src/A.java")))),
+                new ModelResponse("", List.of(new ToolCall("call_2", "run_command",
+                        Map.of("command", "mvn -q test")))),
+                new ModelResponse("测试挂了，先这样。", List.of()),
+                new ModelResponse("还是挂着。", List.of()),
+                new ModelResponse("确认完成。", List.of()),
+                new ModelResponse("真的完成。", List.of()));
+        var loop = new AgentLoop(client, registry(write, failing),
+                new PolicyPermissionGate(PermissionMode.AUTO), config(12, 3));
+
+        loop.run("修一下 A", List.of(), events::add);
+
+        RunCompleted completed = (RunCompleted) events.stream()
+                .filter(event -> event instanceof RunCompleted).findFirst().orElseThrow();
+        assertEquals(List.of("mvn -q test → exit 1"), completed.checks());
+        assertEquals(6, client.requests.size(), "两次催验证 + 一次自审");
+        assertTrue(lastContent(client.requests.get(3)).contains("收尾前验证"));
+        assertTrue(lastContent(client.requests.get(5)).contains("收尾前自查"));
+        assertEquals(3, events.stream().filter(RunContinued.class::isInstance).count());
+    }
+
+    /** 权限拒绝属于「没执行」，不能当成验证结果写进 checks。 */
+    @Test
+    void deniedCommandDoesNotRecordCheck() {
+        var run = new WritingTool("run_command", null, "mvn -q test → exit 0");
+        var client = new ScriptedModelClient(
+                new ModelResponse("", List.of(new ToolCall("call_1", "run_command",
+                        Map.of("command", "mvn -q test")))),
+                new ModelResponse("没跑成。", List.of()));
+        var loop = new AgentLoop(client, registry(run), readOnlyGate(), config(8, 3));
+
+        loop.run("跑测试", List.of(), events::add);
+
+        RunCompleted completed = (RunCompleted) events.stream()
+                .filter(event -> event instanceof RunCompleted).findFirst().orElseThrow();
+        assertTrue(completed.checks().isEmpty(), completed.checks().toString());
+    }
+
     private static PolicyPermissionGate readOnlyGate() {
         return new PolicyPermissionGate(PermissionMode.READ_ONLY);
+    }
+
+    private static String lastContent(List<Message> messages) {
+        return String.valueOf(messages.get(messages.size() - 1).content());
     }
 
     private static ToolRegistry registry(Tool... tools) {

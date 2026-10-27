@@ -10,6 +10,7 @@ import {
   filterPaletteActions,
   filterQuickCommands
 } from './lib/commands.js';
+import { rankFileMatches } from './lib/mention.js';
 
 const EVENT_TYPES = [
   'run.started',
@@ -60,6 +61,7 @@ const el = {
   noticeText: document.querySelector('#notice-text'),
   noticeClose: document.querySelector('#notice-close'),
   runState: document.querySelector('#run-state'),
+  themeToggle: document.querySelector('#theme-toggle'),
   messages: document.querySelector('#messages'),
   emptyState: document.querySelector('#empty-state'),
   prompts: document.querySelector('#prompts'),
@@ -90,6 +92,30 @@ const el = {
   runChanges: document.querySelector('#run-changes'),
   changeFiles: document.querySelector('#change-files'),
   changeDiff: document.querySelector('#change-diff'),
+  changesTotals: document.querySelector('#changes-totals'),
+  changeViewBar: document.querySelector('#change-view-bar'),
+  changeViewPath: document.querySelector('#change-view-path'),
+  changeViewStat: document.querySelector('#change-view-stat'),
+  changeViewPreview: document.querySelector('#change-view-preview'),
+  settings: document.querySelector('#settings'),
+  settingsOpen: document.querySelector('#settings-open'),
+  settingsClose: document.querySelector('#settings-close'),
+  settingsNav: document.querySelector('#settings-nav'),
+  themeOptions: document.querySelector('#theme-options'),
+  accentOptions: document.querySelector('#accent-options'),
+  settingsModelOptions: document.querySelector('#settings-model-options'),
+  settingsModelName: document.querySelector('#settings-model-name'),
+  settingsModelEndpoint: document.querySelector('#settings-model-endpoint'),
+  settingsModelKey: document.querySelector('#settings-model-key'),
+  settingsModelClearKey: document.querySelector('#settings-model-clear-key'),
+  settingsModelSave: document.querySelector('#settings-model-save'),
+  settingsModelHint: document.querySelector('#settings-model-hint'),
+  permissionOptions: document.querySelector('#permission-options'),
+  settingsPermissionHint: document.querySelector('#settings-permission-hint'),
+  aboutWorkspace: document.querySelector('#settings-about-workspace'),
+  aboutConnection: document.querySelector('#settings-about-connection'),
+  aboutModel: document.querySelector('#settings-about-model'),
+  aboutPermission: document.querySelector('#settings-about-permission'),
   timeline: document.querySelector('#timeline'),
   timelineEmpty: document.querySelector('#timeline-empty'),
   composer: document.querySelector('#composer'),
@@ -159,6 +185,16 @@ const state = {
   modelOptions: [],
   modelApiKeySet: false,
   modelApiKeyMasked: '',
+  /** 外观偏好：light / dark / system，真正生效的是解析后的 light/dark */
+  themeMode: 'light',
+  accent: 'blue',
+  /** /api/settings 的最近一次响应，设置面板和关于页共用 */
+  settingsData: null,
+  settingsSection: 'appearance',
+  changeFiles: [],
+  changeDiffByPath: new Map(),
+  changeSelected: null,
+  changeReport: null,
   previewPath: null,
   refKind: null,
   refItems: [],
@@ -177,15 +213,144 @@ const state = {
 const COMMAND_ACTIONS = {
   'new-session': () => openPicker(),
   'toggle-activity': () => toggleActivity(),
+  'open-settings': () => openSettings(),
   'refresh-changes': () => selectTab('changes'),
   'copy-session-id': copySessionId,
   'reset-view': () => resetView(),
   reconnect: () => reconnect()
 };
 
+const THEME_KEY = 'pilot.theme';
+const ACCENT_KEY = 'pilot.accent';
+
+const THEME_MODES = [
+  { mode: 'light', label: '浅色', hint: '始终亮色' },
+  { mode: 'dark', label: '深色', hint: '始终暗色' },
+  { mode: 'system', label: '跟随系统', hint: '随系统切换' }
+];
+
+const ACCENTS = [
+  { name: 'blue', label: '靛蓝' },
+  { name: 'violet', label: '紫罗兰' },
+  { name: 'green', label: '松绿' },
+  { name: 'amber', label: '琥珀' },
+  { name: 'rose', label: '玫红' }
+];
+
+const PERMISSION_TITLES = {
+  READ_ONLY: '只读',
+  ASK: '逐次批准',
+  AUTO_EDIT: '自动改文件',
+  AUTO: '完全放行'
+};
+
 init();
 
+/** 隐私模式下读不了 localStorage，退回默认值。 */
+function readStored(key, fallback) {
+  try {
+    return localStorage.getItem(key) || fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function writeStored(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (error) {
+    // 隐私模式下写不了 localStorage，不影响本次切换
+  }
+}
+
+function prefersDarkTheme() {
+  return Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+}
+
+/** 偏好可以是 light / dark / system，落到 DOM 上的只有 light / dark。 */
+function resolveTheme(mode) {
+  if (mode === 'system') {
+    return prefersDarkTheme() ? 'dark' : 'light';
+  }
+  return mode === 'dark' ? 'dark' : 'light';
+}
+
+/** 主题只切换 CSS 变量，不需要重绘任何组件；顺便记住上次选择。 */
+function applyTheme(mode, options = {}) {
+  const next = THEME_MODES.some((item) => item.mode === mode) ? mode : 'light';
+  const resolved = resolveTheme(next);
+  state.themeMode = next;
+  document.documentElement.dataset.theme = resolved;
+  document.documentElement.dataset.themeMode = next;
+  if (options.persist !== false) {
+    writeStored(THEME_KEY, next);
+  }
+  el.themeToggle.setAttribute('aria-pressed', String(resolved === 'dark'));
+  el.themeToggle.title = resolved === 'dark'
+    ? '切换到亮色（设置里可以跟随系统）'
+    : '切换到暗色（设置里可以跟随系统）';
+  renderThemeOptions();
+}
+
+function applyAccent(name, options = {}) {
+  const next = ACCENTS.some((item) => item.name === name) ? name : 'blue';
+  state.accent = next;
+  document.documentElement.dataset.accent = next;
+  if (options.persist !== false) {
+    writeStored(ACCENT_KEY, next);
+  }
+  renderAccentOptions();
+}
+
+/** 顶栏按钮只负责明暗切换；要「跟随系统」去设置面板。 */
+function toggleTheme() {
+  applyTheme(resolveTheme(state.themeMode) === 'dark' ? 'light' : 'dark');
+}
+
+/** 选了「跟随系统」时，系统主题变化要实时跟着换。 */
+function bindThemeMedia() {
+  if (!window.matchMedia) {
+    return;
+  }
+  const query = window.matchMedia('(prefers-color-scheme: dark)');
+  const onChange = () => {
+    if (state.themeMode === 'system') {
+      applyTheme('system', { persist: false });
+    }
+  };
+  if (query.addEventListener) {
+    query.addEventListener('change', onChange);
+  } else if (query.addListener) {
+    query.addListener(onChange);
+  }
+}
+
 function init() {
+  applyTheme(readStored(THEME_KEY, 'light'), { persist: false });
+  applyAccent(readStored(ACCENT_KEY, 'blue'), { persist: false });
+  bindThemeMedia();
+  el.themeToggle.addEventListener('click', toggleTheme);
+  el.settingsOpen.addEventListener('click', () => openSettings());
+  el.settingsClose.addEventListener('click', closeSettings);
+  el.settings.addEventListener('click', (event) => {
+    if (event.target === el.settings) {
+      closeSettings();
+    }
+  });
+  el.settingsNav.addEventListener('click', (event) => {
+    const tab = event.target.closest('.settings-tab');
+    if (tab) {
+      showSettingsSection(tab.dataset.section);
+    }
+  });
+  el.settingsModelSave.addEventListener('click', saveModelFromSettings);
+  el.settingsModelClearKey.addEventListener('change', onSettingsClearKeyToggle);
+  el.changeFiles.addEventListener('keydown', onChangeListKeydown);
+  el.changeViewPreview.addEventListener('click', () => {
+    if (state.changeSelected) {
+      openPreview(state.changeSelected);
+    }
+  });
   el.newSession.addEventListener('click', () => openPicker());
   el.permChip.addEventListener('click', () => togglePermissionMenu());
   el.modelChip.addEventListener('click', () => toggleModelMenu());
@@ -329,6 +494,10 @@ function applyPermissionMode(mode) {
   el.permChip.title = (found ? found.hint : value) + ' · 点击切换';
   el.permChip.hidden = false;
   renderPermissionMenu();
+  renderPermissionOptions();
+  if (el.aboutPermission) {
+    el.aboutPermission.textContent = el.permChip.textContent;
+  }
 }
 
 function togglePermissionMenu(force) {
@@ -361,6 +530,7 @@ function renderPermissionMenu() {
 async function choosePermission(mode) {
   togglePermissionMenu(false);
   if (mode === state.permissionMode) {
+    renderPermissionOptions();
     return;
   }
   try {
@@ -374,9 +544,12 @@ async function choosePermission(mode) {
     }
     const data = await response.json();
     applyPermissionMode(data.permissionMode);
-    showNotice('权限已切换为「' + el.permChip.textContent + '」，对后续工具调用立即生效。');
+    const text = '权限已切换为「' + el.permChip.textContent + '」，对后续工具调用立即生效。';
+    showNotice(text);
+    setSettingsStatus(el.settingsPermissionHint, text, 'ok');
   } catch (error) {
     showNotice('切换权限失败：' + error.message);
+    setSettingsStatus(el.settingsPermissionHint, '切换失败：' + error.message, 'error');
   }
 }
 
@@ -398,6 +571,7 @@ function applyModelSettings(data) {
   if (!data) {
     return;
   }
+  state.settingsData = data;
   if (data.model) {
     el.modelChip.textContent = data.model;
     el.modelChip.hidden = false;
@@ -414,6 +588,9 @@ function applyModelSettings(data) {
   el.modelChip.title = `模型：${data.model || '未设置'} · 点击切换`;
   state.modelOptions = Array.isArray(data.modelOptions) ? data.modelOptions.slice() : [];
   renderModelOptions(data.model);
+  // 设置面板里的模型区保持同一份数据，否则两个入口会各说各话
+  renderSettingsModel(data);
+  renderAbout();
 }
 
 /** 模型面板里的状态行：保存成功/失败直接写在这里，不只闪一下顶部提示。 */
@@ -479,21 +656,50 @@ function toggleModelMenu(force) {
 
 async function saveModel(override) {
   // 点下拉项时直接切换；点「保存」按钮时用输入框里的值
-  const model = (typeof override === 'string' ? override : el.modelName.value).trim();
-  if (!model) {
-    setModelHint('请选择或填写模型名。', 'error');
-    showNotice('请选择或填写模型名。');
-    return;
-  }
-  const payload = buildModelUpdate({
-    model,
+  await submitModel({
+    model: (typeof override === 'string' ? override : el.modelName.value).trim(),
     endpoint: el.modelEndpoint.value,
     apiKey: el.modelKey.value,
-    clearKey: el.modelClearKey.checked
+    clearKey: el.modelClearKey.checked,
+    hint: setModelHint,
+    button: el.modelSave,
+    onSaved: () => {
+      // 保存成功就收起面板。结果在顶部提示里，和权限菜单点完即关一样。
+      // 失败时不关，错误留在面板里，改完端点或 Key 可以再试。
+      toggleModelMenu(false);
+      el.modelChip.focus();
+    }
+  });
+}
+
+function saveModelFromSettings() {
+  submitModel({
+    model: el.settingsModelName.value.trim(),
+    endpoint: el.settingsModelEndpoint.value,
+    apiKey: el.settingsModelKey.value,
+    clearKey: el.settingsModelClearKey.checked,
+    hint: (text, tone) => setSettingsStatus(el.settingsModelHint, text, tone),
+    button: el.settingsModelSave,
+    onSaved: renderAbout
+  });
+}
+
+/** 模型菜单和设置面板共用同一套保存流程，只是把提示写到各自的容器里。 */
+async function submitModel(source) {
+  if (!source.model) {
+    source.hint('请选择或填写模型名。', 'error');
+    showNotice('请选择或填写模型名。');
+    return false;
+  }
+  const payload = buildModelUpdate({
+    model: source.model,
+    endpoint: source.endpoint,
+    apiKey: source.apiKey,
+    clearKey: source.clearKey
   });
   const keyChanged = !payload.clearApiKey && Boolean(payload.apiKey);
-  el.modelSave.disabled = true;
-  setModelHint('保存中…', 'idle');
+  source.button.disabled = true;
+  source.hint('保存中…', 'idle');
   try {
     const response = await fetch('/api/settings/model', {
       method: 'PUT',
@@ -505,18 +711,201 @@ async function saveModel(override) {
     }
     const data = await response.json();
     applyModelSettings(data);
-    // 保存成功就收起面板。结果在顶部提示里，和权限菜单点完即关一样。
-    // 失败时不关，错误留在面板里，改完端点或 Key 可以再试。
     showNotice(describeModelSaved(data, { clearKey: payload.clearApiKey, keyChanged }));
-    toggleModelMenu(false);
-    el.modelChip.focus();
+    source.onSaved?.();
+    return true;
   } catch (error) {
     // 失败时面板不关：错误留在原来的位置，用户可以直接改端点/Key 再试
-    setModelHint('保存失败：' + error.message, 'error');
+    source.hint('保存失败：' + error.message, 'error');
     showNotice('保存模型配置失败：' + error.message);
+    return false;
   } finally {
-    el.modelSave.disabled = false;
+    source.button.disabled = false;
   }
+}
+
+/* ---------- 设置面板 ---------- */
+
+function setSettingsStatus(node, text, tone) {
+  if (!node) {
+    return;
+  }
+  node.textContent = text || '';
+  node.className = 'settings-status' + (tone && tone !== 'idle' ? ' is-' + tone : '');
+}
+
+function openSettings(section) {
+  el.settings.hidden = false;
+  renderSettings(section);
+  el.settingsClose.focus();
+}
+
+function closeSettings() {
+  el.settings.hidden = true;
+  el.settingsOpen.focus();
+}
+
+function renderSettings(section) {
+  showSettingsSection(section || state.settingsSection || 'appearance');
+  renderThemeOptions();
+  renderAccentOptions();
+  renderPermissionOptions();
+  renderSettingsModel(state.settingsData);
+  renderAbout();
+}
+
+function showSettingsSection(section) {
+  state.settingsSection = section;
+  for (const tab of el.settingsNav.querySelectorAll('.settings-tab')) {
+    const on = tab.dataset.section === section;
+    tab.classList.toggle('is-on', on);
+    tab.setAttribute('aria-selected', String(on));
+  }
+  for (const pane of el.settings.querySelectorAll('.settings-pane')) {
+    pane.hidden = pane.dataset.section !== section;
+  }
+}
+
+function renderThemeOptions() {
+  if (!el.themeOptions) {
+    return;
+  }
+  el.themeOptions.replaceChildren();
+  for (const item of THEME_MODES) {
+    const on = state.themeMode === item.mode;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'theme-card' + (on ? ' is-on' : '');
+    button.setAttribute('role', 'radio');
+    button.setAttribute('aria-checked', String(on));
+    // 一张小预览：顶栏 + 内容区两块，三种主题各画各的
+    const preview = document.createElement('span');
+    preview.className = 'theme-preview is-' + item.mode;
+    preview.append(document.createElement('span'), document.createElement('span'));
+    const label = document.createElement('span');
+    label.className = 'theme-card-label';
+    label.textContent = item.label;
+    const hint = document.createElement('span');
+    hint.className = 'theme-card-hint';
+    hint.textContent = item.hint;
+    button.append(preview, label, hint);
+    button.title = item.hint;
+    button.addEventListener('click', () => applyTheme(item.mode));
+    el.themeOptions.append(button);
+  }
+}
+
+function renderAccentOptions() {
+  if (!el.accentOptions) {
+    return;
+  }
+  el.accentOptions.replaceChildren();
+  for (const item of ACCENTS) {
+    const on = state.accent === item.name;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'accent-dot is-' + item.name + (on ? ' is-on' : '');
+    button.setAttribute('role', 'radio');
+    button.setAttribute('aria-checked', String(on));
+    button.setAttribute('aria-label', item.label);
+    button.title = item.label;
+    button.addEventListener('click', () => applyAccent(item.name));
+    el.accentOptions.append(button);
+  }
+}
+
+function renderPermissionOptions() {
+  if (!el.permissionOptions) {
+    return;
+  }
+  el.permissionOptions.replaceChildren();
+  for (const item of PERMISSION_MODES) {
+    const on = state.permissionMode === item.mode;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'perm-card' + (on ? ' is-on' : '');
+    button.setAttribute('role', 'radio');
+    button.setAttribute('aria-checked', String(on));
+    const head = document.createElement('span');
+    head.className = 'perm-card-head';
+    const title = document.createElement('strong');
+    title.textContent = PERMISSION_TITLES[item.mode] || item.label;
+    const code = document.createElement('span');
+    code.className = 'perm-card-code';
+    code.textContent = item.label;
+    head.append(title, code);
+    const hint = document.createElement('span');
+    hint.className = 'perm-card-hint';
+    hint.textContent = item.hint;
+    button.append(head, hint);
+    button.addEventListener('click', () => choosePermission(item.mode));
+    el.permissionOptions.append(button);
+  }
+}
+
+function renderSettingsModel(data) {
+  if (!el.settingsModelName) {
+    return;
+  }
+  const model = (data && data.model) || el.modelName.value || '';
+  el.settingsModelName.value = model;
+  el.settingsModelEndpoint.value = (data && data.modelEndpoint) || el.modelEndpoint.value || '';
+  el.settingsModelKey.value = '';
+  el.settingsModelKey.disabled = false;
+  el.settingsModelClearKey.checked = false;
+  el.settingsModelClearKey.disabled = !state.modelApiKeySet;
+  renderSettingsModelOptions(model);
+  setSettingsStatus(el.settingsModelHint, idleModelHint(), 'idle');
+}
+
+/** 候选模型做成可点的胶囊：点一下只填进输入框，点「保存模型」才提交。 */
+function renderSettingsModelOptions(current) {
+  if (!el.settingsModelOptions) {
+    return;
+  }
+  const names = [];
+  if (current) {
+    names.push(current);
+  }
+  for (const name of state.modelOptions) {
+    if (name && !names.includes(name)) {
+      names.push(name);
+    }
+  }
+  el.settingsModelOptions.replaceChildren();
+  for (const name of names) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'settings-model-chip' + (name === current ? ' is-on' : '');
+    chip.textContent = name;
+    chip.addEventListener('click', () => {
+      el.settingsModelName.value = name;
+      renderSettingsModelOptions(name);
+    });
+    el.settingsModelOptions.append(chip);
+  }
+}
+
+function onSettingsClearKeyToggle() {
+  const clear = el.settingsModelClearKey.checked;
+  el.settingsModelKey.disabled = clear;
+  if (clear) {
+    el.settingsModelKey.value = '';
+    setSettingsStatus(el.settingsModelHint, '保存后会删除已保存的 API Key，重新填写前模型调用会失败。', 'warn');
+  } else {
+    setSettingsStatus(el.settingsModelHint, idleModelHint(), 'idle');
+  }
+}
+
+function renderAbout() {
+  if (!el.aboutWorkspace) {
+    return;
+  }
+  el.aboutWorkspace.textContent = state.workspace || '未选择';
+  el.aboutWorkspace.title = state.workspace || '';
+  el.aboutConnection.textContent = el.connectionText.textContent || '未连接';
+  el.aboutModel.textContent = (state.settingsData && state.settingsData.model) || '未设置';
+  el.aboutPermission.textContent = el.permChip.textContent || '-';
 }
 
 /* ---------- 附件 ---------- */
@@ -752,6 +1141,10 @@ async function activate(sessionId, title, workspace) {
   closeStream();
   stopRunClock();
   state.sessionId = sessionId;
+  // 换了会话，@ 补全的文件索引必须重取，否则会短暂列出上一个工作区的文件
+  state.fileIndex = [];
+  state.fileIndexSession = null;
+  state.fileIndexFailedAt = 0;
   loadInputHistory(sessionId);
   state.sessionTitle = title || '新任务';
   state.workspace = workspace || state.workspace;
@@ -1673,32 +2066,61 @@ function finishSubagent(payload) {
 }
 
 /** 任务计划：整表重绘，只保留一个卡片并跟在最新消息后面。 */
+const PLAN_STATUS_LABEL = { pending: '等待', in_progress: '进行中', completed: '完成' };
+
 function renderPlan(payload) {
   const items = Array.isArray(payload && payload.plan) ? payload.plan : [];
   let card = el.messages.querySelector('.plan-card');
   if (!card) {
     card = document.createElement('aside');
     card.className = 'plan-card';
+
+    const head = document.createElement('div');
+    head.className = 'plan-head';
     const title = document.createElement('div');
     title.className = 'plan-title';
     title.textContent = '任务计划';
+    const count = document.createElement('span');
+    count.className = 'plan-count';
+    head.append(title, count);
+
+    const bar = document.createElement('div');
+    bar.className = 'plan-bar';
+    bar.append(document.createElement('i'));
+
     const list = document.createElement('ol');
     list.className = 'plan-list';
-    card.append(title, list);
+    card.append(head, bar, list);
   }
   if (!items.length) {
     card.remove();
     return;
   }
 
+  // 进度条按完成数走，和标题右边的 4/6 对齐，一眼知道还剩多少
+  const done = items.filter((item) => item.status === 'completed').length;
+  const total = items.length;
+  card.querySelector('.plan-count').textContent = `${done}/${total}`;
+  card.querySelector('.plan-bar i').style.width = `${total ? Math.round((done / total) * 100) : 0}%`;
+
   const list = card.querySelector('.plan-list');
   list.replaceChildren();
-  for (const item of items) {
+  items.forEach((item, index) => {
+    const status = item.status || 'pending';
     const li = document.createElement('li');
-    li.className = `plan-item is-${item.status || 'pending'}`;
-    li.textContent = item.step || '';
+    li.className = `plan-item is-${status}`;
+    const num = document.createElement('span');
+    num.className = 'plan-index';
+    num.textContent = String(index + 1).padStart(2, '0');
+    const text = document.createElement('span');
+    text.className = 'plan-text';
+    text.textContent = item.step || '';
+    const pill = document.createElement('span');
+    pill.className = 'plan-status';
+    pill.textContent = PLAN_STATUS_LABEL[status] || '等待';
+    li.append(num, text, pill);
     list.append(li);
-  }
+  });
   // 计划跟在这一轮前面。操作和结论在外壳里，结论仍是这一轮的最后一段
   const shell = state.turnShell && state.turnShell.shell.isConnected ? state.turnShell.shell : null;
   if (shell) {
@@ -2438,10 +2860,18 @@ function resetChanges() {
   el.changeCount.textContent = '0';
   el.changesState.textContent = '尚未加载';
   el.changesState.className = 'changes-state';
+  el.changesState.title = '';
+  el.changesTotals.hidden = true;
+  el.changesTotals.replaceChildren();
+  el.changeViewBar.hidden = true;
   el.changeFiles.replaceChildren();
   el.changeDiff.replaceChildren();
   el.runChanges.replaceChildren();
   el.runChanges.hidden = true;
+  state.changeFiles = [];
+  state.changeDiffByPath = new Map();
+  state.changeSelected = null;
+  state.changeReport = null;
 }
 
 function refreshChanges() {
@@ -2475,56 +2905,238 @@ async function loadChanges(options = {}) {
 }
 
 function renderChanges(report, silent) {
-  const files = report.files || [];
+  const files = Array.isArray(report.files) ? report.files.slice() : [];
+  state.changeReport = report;
   el.changeCount.textContent = String(files.length);
   el.changeCount.hidden = files.length === 0;
+  renderChangeTotals(files);
+  refreshChangeMarkers(files);
+
   if (silent) {
+    // 后台刷新只更新计数：用户正在看的文件和滚动位置别乱跳
     return;
   }
-  renderRunChanges();
-
-  el.changeFiles.replaceChildren();
-  el.changeDiff.replaceChildren();
-  refreshChangeMarkers(files);
 
   if (!report.gitRepository) {
     el.changesState.textContent = '当前工作区不是 git 仓库';
     el.changesState.className = 'changes-state';
-    el.changeDiff.append(changeHint('没有 git 仓库，无法生成 diff。在该目录执行 git init 后即可审阅改动。'));
+    el.changesState.title = '';
+    state.changeFiles = [];
+    state.changeDiffByPath = new Map();
+    state.changeSelected = null;
+    el.changeFiles.replaceChildren();
+    el.changeViewBar.hidden = true;
+    el.changeDiff.replaceChildren(changeHint('没有 git 仓库，无法生成 diff。在该目录执行 git init 后即可审阅改动。'));
     return;
   }
+
+  const parsed = report.diff ? parseDiff(report.diff) : [];
+  state.changeDiffByPath = new Map(parsed.map((file) => [normalizePath(file.path), file]));
+  state.changeFiles = sortChangeFiles(files);
 
   el.changesState.textContent = files.length ? `${files.length} 个文件有改动` : '工作区干净';
   el.changesState.className = 'changes-state';
+  el.changesState.title = report.truncated ? 'diff 过大，已截断；个别文件的明细可能缺失' : '';
 
-  for (const file of files) {
-    const li = document.createElement('li');
-    li.className = 'change-file';
-    const status = document.createElement('span');
-    status.className = 'change-status is-' + statusKind(file.status);
-    status.textContent = file.status;
-    const path = document.createElement('span');
-    path.className = 'change-path';
-    path.textContent = file.path;
-    path.title = file.path + '（点击预览）';
-    li.append(status, path);
-    li.addEventListener('click', () => openPreview(file.path));
-    el.changeFiles.append(li);
-  }
+  renderRunChanges();
+  renderChangeList();
 
-  if (!report.diff) {
-    el.changeDiff.append(changeHint(files.length
-      ? '这些改动没有可显示的 diff（新增文件或仅暂存）。'
-      : '没有未暂存的改动。'));
+  if (!files.length) {
+    el.changeViewBar.hidden = true;
+    el.changeDiff.replaceChildren(changeHint('没有未暂存的改动。'));
     return;
   }
-  renderDiff(report.diff);
-  if (report.truncated) {
-    el.changeDiff.append(changeHint('diff 过大，已截断。'));
+  selectChangeFile(pickDefaultChangeFile());
+}
+
+/** 本次运行改过的文件排最前，其余按路径排序，和 git status 的阅读顺序接近。 */
+function sortChangeFiles(files) {
+  const runOrder = new Map((state.changedFiles || []).map((path, index) => [normalizePath(path), index]));
+  return files.slice().sort((a, b) => {
+    const left = runOrder.has(normalizePath(a.path)) ? runOrder.get(normalizePath(a.path)) : Number.MAX_SAFE_INTEGER;
+    const right = runOrder.has(normalizePath(b.path)) ? runOrder.get(normalizePath(b.path)) : Number.MAX_SAFE_INTEGER;
+    if (left !== right) {
+      return left - right;
+    }
+    return String(a.path).localeCompare(String(b.path));
+  });
+}
+
+/** 刷新后尽量停在原文件上；第一次打开就选本次运行改过的第一个。 */
+function pickDefaultChangeFile() {
+  const previous = state.changeSelected;
+  if (previous && state.changeFiles.some((file) => normalizePath(file.path) === normalizePath(previous))) {
+    return previous;
+  }
+  const runPaths = new Set((state.changedFiles || []).map(normalizePath));
+  const run = state.changeFiles.find((file) => runPaths.has(normalizePath(file.path)));
+  return (run || state.changeFiles[0]).path;
+}
+
+function renderChangeTotals(files) {
+  const added = files.reduce((sum, file) => sum + Number(file.added || 0), 0);
+  const removed = files.reduce((sum, file) => sum + Number(file.removed || 0), 0);
+  el.changesTotals.replaceChildren();
+  if (!files.length) {
+    el.changesTotals.hidden = true;
+    return;
+  }
+  el.changesTotals.hidden = false;
+  const add = document.createElement('span');
+  add.className = 'add';
+  add.textContent = '+' + added;
+  const del = document.createElement('span');
+  del.className = 'del';
+  del.textContent = '−' + removed;
+  el.changesTotals.append(add, del);
+}
+
+function renderChangeList() {
+  el.changeFiles.replaceChildren();
+  for (const file of state.changeFiles) {
+    el.changeFiles.append(changeRow(file));
   }
 }
 
-/** 只展示本次运行写过的文件，避免和仓库里的历史改动混在一起。 */
+/** 一行文件：状态字母 + 文件名（目录淡化） + 增删行数。 */
+function changeRow(file) {
+  const path = normalizePath(file.path);
+  const cut = path.lastIndexOf('/');
+  const name = cut < 0 ? path : path.slice(cut + 1);
+  const dir = cut < 0 ? '' : path.slice(0, cut);
+
+  const row = document.createElement('li');
+  row.className = 'change-row';
+  row.dataset.path = file.path;
+  row.tabIndex = -1;
+  row.setAttribute('role', 'option');
+  row.setAttribute('aria-selected', 'false');
+  row.title = file.path;
+
+  const status = document.createElement('span');
+  status.className = 'change-status is-' + statusKind(file.status);
+  status.textContent = (String(file.status || 'M').trim().slice(0, 1) || 'M');
+
+  const main = document.createElement('span');
+  main.className = 'change-row-main';
+  const nameEl = document.createElement('span');
+  nameEl.className = 'change-row-name';
+  nameEl.textContent = name;
+  main.append(nameEl);
+  if (dir) {
+    const dirEl = document.createElement('span');
+    dirEl.className = 'change-row-dir';
+    dirEl.textContent = dir;
+    main.append(dirEl);
+  }
+
+  row.append(status, main);
+  const stat = changeStatNode(file);
+  if (stat) {
+    row.append(stat);
+  }
+  row.addEventListener('click', () => selectChangeFile(file.path));
+  return row;
+}
+
+function changeStatNode(file) {
+  const added = Number(file.added || 0);
+  const removed = Number(file.removed || 0);
+  if (!added && !removed) {
+    return null;
+  }
+  const stat = document.createElement('span');
+  stat.className = 'change-row-stat';
+  const add = document.createElement('span');
+  add.className = 'add';
+  add.textContent = '+' + added;
+  const del = document.createElement('span');
+  del.className = 'del';
+  del.textContent = '−' + removed;
+  stat.append(add, del);
+  return stat;
+}
+
+/** 选中一个文件：列表高亮 + 顶部文件头 + 只渲染这个文件的 diff。 */
+function selectChangeFile(path, options = {}) {
+  const target = normalizePath(path);
+  const file = state.changeFiles.find((item) => normalizePath(item.path) === target) || null;
+  state.changeSelected = file ? file.path : null;
+
+  for (const row of el.changeFiles.querySelectorAll('.change-row')) {
+    const on = row.dataset.path === file?.path;
+    row.classList.toggle('is-active', on);
+    row.setAttribute('aria-selected', String(on));
+    row.tabIndex = on ? 0 : -1;
+    if (on && options.scroll !== false) {
+      row.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  if (!file) {
+    el.changeViewBar.hidden = true;
+    el.changeDiff.replaceChildren(changeHint('在左侧选一个文件查看它的改动。'));
+    return;
+  }
+
+  el.changeViewBar.hidden = false;
+  el.changeViewPath.textContent = file.path;
+  el.changeViewPath.title = file.path;
+  el.changeViewStat.replaceChildren();
+  const stat = changeStatNode(file);
+  if (stat) {
+    el.changeViewStat.append(...stat.childNodes);
+  }
+  state.previewPath = file.path;
+  renderSingleFileDiff(file);
+}
+
+function renderSingleFileDiff(file) {
+  const parsed = state.changeDiffByPath.get(normalizePath(file.path));
+  el.changeDiff.scrollTop = 0;
+  el.changeDiff.scrollLeft = 0;
+  el.changeDiff.replaceChildren();
+
+  if (!parsed || !parsed.lines.length) {
+    el.changeDiff.append(changeHint(file.status === '??' || file.status === 'A'
+      ? '新增文件没有可对比的旧内容，点右上角去「预览」看完整文件。'
+      : '这个文件没有可显示的文本 diff（二进制、仅重命名，或 diff 被截断）。'));
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const line of parsed.lines) {
+    fragment.append(diffLineRow(line));
+  }
+  el.changeDiff.append(fragment);
+}
+
+/** 文件列表的键盘导航：↑↓ Home End，选中即渲染对应 diff。 */
+function onChangeListKeydown(event) {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    return;
+  }
+  const rows = [...el.changeFiles.querySelectorAll('.change-row')];
+  if (!rows.length) {
+    return;
+  }
+  event.preventDefault();
+  const index = rows.findIndex((row) => row.dataset.path === state.changeSelected);
+  let next = index < 0 ? 0 : index;
+  if (event.key === 'ArrowDown') {
+    next = Math.min(rows.length - 1, next + 1);
+  } else if (event.key === 'ArrowUp') {
+    next = Math.max(0, next - 1);
+  } else if (event.key === 'Home') {
+    next = 0;
+  } else {
+    next = rows.length - 1;
+  }
+  selectChangeFile(rows[next].dataset.path);
+  rows[next].focus();
+}
+
+/** 只展示本次运行写过的文件，避免和仓库里的历史改动混在一起；点一下直接看 diff。 */
 function renderRunChanges() {
   const files = state.changedFiles || [];
   el.runChanges.replaceChildren();
@@ -2536,20 +3148,31 @@ function renderRunChanges() {
 
   const label = document.createElement('span');
   label.className = 'run-changes-label';
-  label.textContent = `本次运行改动 ${files.length} 个`;
+  label.textContent = `本次运行 ${files.length} 个`;
   el.runChanges.append(label);
 
-  files.slice(0, 6).forEach((path) => {
-    const chip = document.createElement('span');
-    chip.className = 'run-chip';
+  const known = new Set(state.changeFiles.map((file) => normalizePath(file.path)));
+  const visible = files.slice(0, 8);
+  for (const path of visible) {
+    const present = known.has(normalizePath(path));
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'run-chip' + (present ? '' : ' is-missing');
     chip.textContent = folderName(path);
-    chip.title = path;
+    chip.title = present ? path + '\n点击查看 diff' : path + '\n不在未暂存的改动里';
+    chip.addEventListener('click', () => {
+      if (present) {
+        selectChangeFile(path);
+      } else {
+        showNotice('这个文件不在当前未暂存改动里，可能已提交或被忽略。');
+      }
+    });
     el.runChanges.append(chip);
-  });
-  if (files.length > 6) {
+  }
+  if (files.length > visible.length) {
     const more = document.createElement('span');
     more.className = 'run-changes-label';
-    more.textContent = `+${files.length - 6}`;
+    more.textContent = `+${files.length - visible.length}`;
     el.runChanges.append(more);
   }
 }
@@ -2564,61 +3187,24 @@ function statusKind(status) {
   return 'modified';
 }
 
-function renderDiff(text) {
-  const files = parseDiff(text);
-  if (!files.length) {
-    el.changeDiff.append(changeHint('diff 为空。'));
-    return;
-  }
-  const changed = new Set((state.changedFiles || []).map(normalizePath));
-  for (const file of files) {
-    const details = document.createElement('details');
-    details.className = 'diff-file';
-    if (changed.has(normalizePath(file.path)) || files.length <= 3) {
-      details.open = true;
-    }
-    const summary = document.createElement('summary');
-    const path = document.createElement('span');
-    path.className = 'diff-path';
-    path.textContent = file.path;
-    path.title = file.path;
-    const stat = document.createElement('span');
-    stat.className = 'diff-stat';
-    const add = document.createElement('span');
-    add.className = 'add';
-    add.textContent = '+' + file.added;
-    const del = document.createElement('span');
-    del.className = 'del';
-    del.textContent = ' −' + file.removed;
-    stat.append(add, document.createTextNode(' '), del);
-    summary.append(path, stat);
-    details.append(summary);
-
-    const body = document.createElement('div');
-    body.className = 'diff-lines';
-    for (const line of file.lines) {
-      body.append(diffLineRow(line));
-    }
-    details.append(body);
-    details.addEventListener('toggle', () => {
-      if (details.open) {
-        state.previewPath = file.path;
-      }
-    });
-    el.changeDiff.append(details);
-  }
-}
-
-/** 单行 diff：左侧行号，右侧代码；加/删/上下文由 kind 决定配色。 */
+/** 单行 diff：双行号（旧/新）+ 代码；加/删/上下文由 kind 决定配色。 */
 function diffLineRow(line) {
   const row = document.createElement('div');
   row.className = 'diff-line is-' + line.kind;
-  const no = document.createElement('span');
-  no.className = 'n';
-  no.textContent = line.old !== '' ? String(line.old) : (line.next !== '' ? String(line.next) : '');
+
+  const oldNo = document.createElement('span');
+  oldNo.className = 'n is-old';
+  oldNo.textContent = line.old === '' ? '' : String(line.old);
+  oldNo.setAttribute('aria-hidden', 'true');
+
+  const newNo = document.createElement('span');
+  newNo.className = 'n is-new';
+  newNo.textContent = line.next === '' ? '' : String(line.next);
+  newNo.setAttribute('aria-hidden', 'true');
+
   const code = document.createElement('code');
   code.textContent = line.text === '' ? ' ' : line.text;
-  row.append(no, code);
+  row.append(oldNo, newNo, code);
   return row;
 }
 
@@ -3173,6 +3759,11 @@ function onPaletteKeydown(event) {
 
 function onGlobalKeydown(event) {
   const mod = event.ctrlKey || event.metaKey;
+  if (mod && event.key === ',') {
+    event.preventDefault();
+    el.settings.hidden ? openSettings() : closeSettings();
+    return;
+  }
   if (mod && event.key.toLowerCase() === 'k') {
     event.preventDefault();
     el.palette.hidden ? openPalette() : closePalette();
@@ -3189,6 +3780,10 @@ function onGlobalKeydown(event) {
     return;
   }
   if (event.key === 'Escape') {
+    if (!el.settings.hidden) {
+      closeSettings();
+      return;
+    }
     if (!el.permMenu.hidden) {
       togglePermissionMenu(false);
       return;
@@ -3526,20 +4121,23 @@ async function loadTree(path = '', container = el.tree) {
   if (!state.sessionId) {
     return;
   }
-  if (container === el.tree) {
+  const isRoot = container === el.tree;
+  if (isRoot) {
     el.treeEmpty.hidden = true;
-    container.replaceChildren(treeHint('读取中…'));
   }
+  container.replaceChildren(treeHint('读取中…'));
   try {
     const data = await fetchTree(path);
+    const entries = Array.isArray(data.entries) ? data.entries : [];
     container.replaceChildren();
-    renderTreeEntries(data.entries || [], container);
-    if (container === el.tree) {
-      refreshChangeMarkers(state.changedFiles || []);
-      if (!(data.entries || []).length) {
-        container.replaceChildren(treeHint('工作区是空的。'));
-      }
+    renderTreeEntries(entries, container);
+    if (!entries.length) {
+      container.append(treeHint(path ? '空文件夹' : '工作区是空的。'));
+    } else if (data.truncated) {
+      container.append(treeHint('目录内容过多，只显示了一部分。'));
     }
+    // 懒加载展开出来的子项也要补上改动小黄点
+    refreshChangeMarkers(changeMarkerPaths());
   } catch (error) {
     container.replaceChildren(treeHint('读取失败：' + error.message));
   }
@@ -3560,42 +4158,116 @@ function treeHint(text) {
   return node;
 }
 
+/* 文件树图标：统一 16 格视图，颜色交给各自的状态类 */
+const TREE_SVG = {
+  chevron: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 3.8 10.4 8l-4.2 4.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  folder: '<svg class="icon-closed" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.3 4.1h3.9l1.2 1.5h6.3v6.7c0 .7-.6 1.3-1.3 1.3H3.6c-.7 0-1.3-.6-1.3-1.3V4.1Z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>'
+    + '<svg class="icon-open" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.3 12.6V4.1h3.9l1.2 1.5h5.4c.7 0 1.3.6 1.3 1.3v.7" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M2.3 12.6l1.6-5c.1-.4.5-.7.9-.7h8.2c.6 0 1 .6.9 1.2l-1.3 4.5H2.3Z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>',
+  md: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.9 2.6h5.3l3.1 3.1v7.7H3.9z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M8.9 2.7v3.1h3.1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.7 12V9.3l1.2 1.5 1.2-1.5V12" fill="none" stroke="currentColor" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  log: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.9 2.6h5.3l3.1 3.1v7.7H3.9z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M8.9 2.7v3.1h3.1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.9 8.4h4.2M5.9 10.4h4.2M5.9 12.4h2.4" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',
+  sql: '<svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="4.5" rx="4.1" ry="1.7" fill="none" stroke="currentColor" stroke-width="1.25"/><path d="M3.9 4.5v7c0 .95 1.84 1.7 4.1 1.7s4.1-.75 4.1-1.7v-7" fill="none" stroke="currentColor" stroke-width="1.25"/></svg>',
+  image: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.8" y="3.6" width="10.4" height="8.8" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.25"/><circle cx="6.2" cy="6.6" r="0.9" fill="currentColor"/><path d="M3.6 11.4 6.6 8.6l2.1 1.9 1.8-1.6 1.9 1.9" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>',
+  xml: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.9 4.6 2.9 8l3 3.4M10.1 4.6 13.1 8l-3 3.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  shell: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.8" y="3.6" width="10.4" height="8.8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.25"/><path d="M5.3 6.6 6.9 8l-1.6 1.4M8.4 9.9h2.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  java: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.3 6.3h5.9v3.1a2.95 2.95 0 0 1-2.95 2.9A2.95 2.95 0 0 1 4.3 9.4z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M10.2 7.3h1.1a1.5 1.5 0 0 1 0 3h-1.1" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M6 2.9c.5.6.5 1.1 0 1.7M8.2 2.9c.5.6.5 1.1 0 1.7" fill="none" stroke="currentColor" stroke-width="1.05" stroke-linecap="round"/></svg>',
+  code: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3.4h-.6A1.5 1.5 0 0 0 4.4 4.9v1.3c0 .9-.5 1.6-1.2 1.8.7.2 1.2.9 1.2 1.8V11a1.5 1.5 0 0 0 1.5 1.6h.6M9.5 3.4h.6A1.5 1.5 0 0 1 11.6 5v1.3c0 .9.5 1.6 1.2 1.8-.7.2-1.2.9-1.2 1.8V11a1.5 1.5 0 0 1-1.5 1.6h-.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  config: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.6" y="2.8" width="8.8" height="10.4" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.25"/><path d="M5.8 6.2h4.4M5.8 8.2h4.4M5.8 10.2h2.6" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',
+  style: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.4 3.6 4.3 12.4M9.6 3.6 8.5 12.4M3.2 6.4h9.4M2.8 9.6h9.4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+  text: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.6 4.2h8.8M3.6 8h8.8M3.6 11.8h5.4" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>',
+  file: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.2 2.6h5.1l3 3v7.8H4.2z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M9.2 2.7v3h2.9" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>'
+};
+
+const TREE_EXT_GROUPS = [
+  { cls: 'is-md', icon: 'md', exts: ['md', 'mdx', 'markdown'] },
+  { cls: 'is-sql', icon: 'sql', exts: ['sql', 'sqlite', 'db'] },
+  { cls: 'is-log', icon: 'log', exts: ['log', 'out'] },
+  { cls: 'is-image', icon: 'image', exts: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'] },
+  { cls: 'is-xml', icon: 'xml', exts: ['xml', 'xsd', 'xsl', 'xslt', 'plist'] },
+  { cls: 'is-shell', icon: 'shell', exts: ['sh', 'bash', 'zsh', 'fish', 'bat', 'cmd', 'ps1'] },
+  { cls: 'is-java', icon: 'java', exts: ['java'] },
+  { cls: 'is-code', icon: 'code', exts: ['js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'go', 'rs', 'kt', 'kts', 'c', 'h', 'cpp', 'hpp', 'cs', 'rb', 'php', 'swift', 'lua'] },
+  { cls: 'is-config', icon: 'config', exts: ['json', 'yml', 'yaml', 'toml', 'ini', 'conf', 'properties'] },
+  { cls: 'is-style', icon: 'style', exts: ['css', 'scss', 'less', 'sass'] },
+  { cls: 'is-text', icon: 'text', exts: ['txt', 'rst', 'csv', 'tsv'] }
+];
+
+/** 目录优先、同类按名称排；后端已排过一遍，这里保证前端行为稳定。 */
+function sortTreeEntries(entries) {
+  return entries.slice().sort((a, b) => {
+    if (Boolean(a.directory) !== Boolean(b.directory)) {
+      return a.directory ? -1 : 1;
+    }
+    return String(a.name).localeCompare(String(b.name), 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+  });
+}
+
+function treeIconNode(markup, extraClass) {
+  const span = document.createElement('span');
+  span.className = 'tree-icon' + (extraClass ? ' ' + extraClass : '');
+  span.innerHTML = markup;
+  return span;
+}
+
+function treeFileIconNode(name) {
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  const group = TREE_EXT_GROUPS.find((item) => item.exts.includes(ext));
+  return treeIconNode(TREE_SVG[group ? group.icon : 'file'], group ? group.cls : 'is-file');
+}
+
+function treeRow(entry) {
+  const directory = Boolean(entry.directory);
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'tree-row' + (directory ? ' is-dir' : '');
+  row.dataset.path = normalizePath(entry.path);
+  row.dataset.dir = String(directory);
+  row.title = entry.path;
+
+  const caret = document.createElement('span');
+  caret.className = 'tree-caret';
+  if (directory) {
+    caret.innerHTML = TREE_SVG.chevron;
+  }
+
+  const name = document.createElement('span');
+  name.className = 'tree-name';
+  name.textContent = entry.name;
+
+  row.append(caret, directory ? treeIconNode(TREE_SVG.folder, 'is-dir') : treeFileIconNode(entry.name), name);
+  return row;
+}
+
+function treeChildrenContainer(row, entry) {
+  const children = document.createElement('div');
+  children.className = 'tree-children';
+  children.hidden = true;
+  row.setAttribute('aria-expanded', 'false');
+  row.addEventListener('click', () => toggleTreeFolder(row, children, entry.path));
+  return children;
+}
+
+/** 展开即拉取子项；已加载过就直接切显隐，避免重复请求。 */
+function toggleTreeFolder(row, children, path) {
+  const open = !row.classList.contains('is-open');
+  row.classList.toggle('is-open', open);
+  row.setAttribute('aria-expanded', String(open));
+  children.hidden = !open;
+  if (!open || children.dataset.loaded === '1') {
+    return;
+  }
+  children.dataset.loaded = '1';
+  loadTree(path, children);
+}
+
 function renderTreeEntries(entries, container) {
-  for (const entry of entries) {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'tree-row';
-    row.dataset.path = normalizePath(entry.path);
-    row.dataset.dir = String(entry.directory);
-    row.title = entry.path;
-
-    const caret = document.createElement('span');
-    caret.className = 'tree-caret';
-    caret.textContent = entry.directory ? '▸' : '';
-    const name = document.createElement('span');
-    name.className = 'tree-name';
-    name.textContent = entry.name;
-
-    row.append(caret, name);
-
+  for (const entry of sortTreeEntries(entries)) {
+    const row = treeRow(entry);
+    container.append(row);
     if (entry.directory) {
-      const children = document.createElement('div');
-      children.className = 'tree-children';
-      children.hidden = true;
-      row.addEventListener('click', () => {
-        children.hidden = !children.hidden;
-        caret.textContent = children.hidden ? '▸' : '▾';
-        if (!children.hidden && !children.dataset.loaded) {
-          children.dataset.loaded = '1';
-          loadTree(entry.path, children);
-        }
-      });
-      container.append(row, children);
+      container.append(treeChildrenContainer(row, entry));
     } else {
-      caret.textContent = '·';
-      caret.style.visibility = 'hidden';
       row.addEventListener('click', () => openPreview(entry.path, row));
-      container.append(row);
     }
   }
 }
@@ -3641,6 +4313,15 @@ function highlightTree(path, row) {
   }
 }
 
+/** 改动点来源：优先用变更面板的完整 diff 清单，其次才是本轮运行改过的文件。 */
+function changeMarkerPaths() {
+  const report = state.changeReport;
+  if (report && Array.isArray(report.files) && report.files.length) {
+    return report.files;
+  }
+  return state.changedFiles || [];
+}
+
 /** 变更面板加载后，在文件树里给改动过的文件打点。 */
 function refreshChangeMarkers(files) {
   const changed = new Set((files || []).map((file) => normalizePath(typeof file === 'string' ? file : file.path)));
@@ -3655,7 +4336,8 @@ function onComposerInput() {
   autoGrow();
   const caret = el.input.selectionStart;
   const before = el.input.value.slice(0, caret);
-  const fileMatch = /(^|\s)@([\w./-]*)$/.exec(before);
+  // 路径里可能有中文、空格以外的任意字符；只按「空白之前」截断，@ 后不要求是 ASCII
+  const fileMatch = /(^|\s)@([^\s@]*)$/.exec(before);
   const commandMatch = /^\/([\w-]*)(?:\s+.*)?$/.exec(before);
   if (fileMatch) {
     showRefMenu('file', fileMatch[2]);
@@ -3681,7 +4363,9 @@ function showRefMenu(kind, query) {
   }
   const title = document.createElement('p');
   title.className = 'ref-title';
-  title.textContent = kind === 'command' ? '快捷指令' : '引用文件';
+  title.textContent = kind === 'command'
+    ? '快捷指令'
+    : (state.fileIndexLoading ? '引用文件（正在索引工作区…）' : '引用文件');
   el.refMenu.append(title);
 
   items.forEach((item, index) => {
@@ -3720,6 +4404,54 @@ function treeFiles() {
     .map((row) => row.dataset.path);
 }
 
+/** 有完整索引就用它，否则退回文件树里已加载的节点。 */
+function mentionCandidates() {
+  return state.fileIndex.length ? state.fileIndex : treeFiles();
+}
+
+/**
+ * 拉一份会话工作区的完整文件清单。
+ *
+ * <p>文件树是点开目录才加载的，只用 DOM 会让 @ 只能选到根目录那几个文件。
+ * 这里按会话缓存一次；失败后 10 秒内不重复请求，避免每敲一个字打一次接口。
+ */
+function ensureFileIndex() {
+  const sessionId = state.sessionId;
+  if (!sessionId) {
+    return;
+  }
+  if (state.fileIndexSession !== sessionId) {
+    state.fileIndex = [];
+    state.fileIndexSession = sessionId;
+    state.fileIndexFailedAt = 0;
+  }
+  if (state.fileIndex.length || state.fileIndexLoading) {
+    return;
+  }
+  if (Date.now() - state.fileIndexFailedAt < 10_000) {
+    return;
+  }
+  state.fileIndexLoading = true;
+  fetch(`/api/sessions/${encodeURIComponent(sessionId)}/files/flat`)
+    .then((response) => (response.ok ? response.json() : null))
+    .then((data) => {
+      if (!data || state.fileIndexSession !== sessionId) {
+        return;
+      }
+      state.fileIndex = Array.isArray(data.files) ? data.files : [];
+    })
+    .catch(() => {
+      state.fileIndexFailedAt = Date.now();
+    })
+    .finally(() => {
+      state.fileIndexLoading = false;
+      // 索引回来时菜单可能还开着，按当前输入重渲染
+      if (!el.refMenu.hidden && state.refKind === 'file' && state.sessionId === sessionId) {
+        onComposerInput();
+      }
+    });
+}
+
 function applyRef(item) {
   const value = el.input.value;
   const caret = el.input.selectionStart;
@@ -3746,9 +4478,12 @@ function onComposerKeydown(event) {
       event.preventDefault();
       const delta = event.key === 'ArrowDown' ? 1 : -1;
       state.refIndex = (state.refIndex + delta + state.refItems.length) % state.refItems.length;
-      [...el.refMenu.querySelectorAll('.ref-item')].forEach((row, index) => {
+      const rows = [...el.refMenu.querySelectorAll('.ref-item')];
+      rows.forEach((row, index) => {
         row.classList.toggle('is-on', index === state.refIndex);
       });
+      // 菜单只有 250px 高，选中项滚出可视区就看不见了
+      rows[state.refIndex]?.scrollIntoView({ block: 'nearest' });
       return true;
     }
     if (event.key === 'Enter' && !event.shiftKey) {

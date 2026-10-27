@@ -16,10 +16,15 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitOption;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -39,6 +44,10 @@ public class SessionFilesController {
             ".playwright-cli", ".pilot", "logs"));
     private static final int MAX_ENTRIES = 400;
     private static final int MAX_PREVIEW_BYTES = 512 * 1024;
+    /** @ 补全用的递归清单：默认 5000 个文件、12 层目录，超出就截断。 */
+    private static final int MAX_FLAT_ENTRIES = 5_000;
+    private static final int MAX_FLAT_LIMIT = 20_000;
+    private static final int MAX_FLAT_DEPTH = 12;
 
     private final SessionService sessions;
 
@@ -83,6 +92,60 @@ public class SessionFilesController {
 
         String parent = directory.equals(root) ? null : relative(root, directory.getParent());
         return new TreeResponse(relative(root, directory), parent, entries, truncated);
+    }
+
+    /**
+     * 一次返回工作区内的全部文件路径，给输入框的 {@code @} 补全用。
+     *
+     * <p>文件树是懒加载的，只看已展开的目录会漏掉大部分文件；这里递归走一遍，遇到
+     * {@code .git}、{@code node_modules} 这类目录整枝跳过（不进去枚举），避免大仓库扫一遍很慢。
+     */
+    @GetMapping("/{id}/files/flat")
+    public FlatResponse flat(@PathVariable String id,
+                             @RequestParam(name = "limit", required = false) Integer limit) {
+        PathValidator paths = paths(id);
+        Path root = paths.root();
+        int max = limit == null || limit < 1 ? MAX_FLAT_ENTRIES : Math.min(limit, MAX_FLAT_LIMIT);
+        List<String> files = new ArrayList<>();
+        boolean[] truncated = {false};
+        try {
+            Files.walkFileTree(root, EnumSet.noneOf(FileVisitOption.class), MAX_FLAT_DEPTH,
+                    new SimpleFileVisitor<>() {
+                        @Override
+                        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                            if (!dir.equals(root) && NOISY.contains(fileName(dir))) {
+                                return FileVisitResult.SKIP_SUBTREE;
+                            }
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                            if (!attrs.isRegularFile()) {
+                                return FileVisitResult.CONTINUE;
+                            }
+                            if (files.size() >= max) {
+                                truncated[0] = true;
+                                return FileVisitResult.TERMINATE;
+                            }
+                            files.add(relative(root, file));
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public FileVisitResult visitFileFailed(Path file, IOException e) {
+                            // 个别目录不可读不影响其余文件
+                            return FileVisitResult.CONTINUE;
+                        }
+                    });
+        } catch (IOException e) {
+            if (files.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "无法读取工作区文件", e);
+            }
+            truncated[0] = true;
+        }
+        files.sort(String.CASE_INSENSITIVE_ORDER);
+        return new FlatResponse(files, truncated[0]);
     }
 
     /** 只读预览；二进制或超大文件返回标记，不返回内容。 */
@@ -132,6 +195,12 @@ public class SessionFilesController {
         return fileName == null ? path.toString() : fileName.toString();
     }
 
+    /** 目录名统一小写后再和噪音目录比对。 */
+    private static String fileName(Path path) {
+        Path name = path.getFileName();
+        return name == null ? "" : name.toString().toLowerCase(Locale.ROOT);
+    }
+
     private static Long sizeOrNull(Path path) {
         try {
             return Files.size(path);
@@ -154,6 +223,8 @@ public class SessionFilesController {
     public record TreeResponse(String path, String parent, List<Entry> entries, boolean truncated) { }
 
     public record Entry(String name, String path, boolean directory, Long size) { }
+
+    public record FlatResponse(List<String> files, boolean truncated) { }
 
     public record FileResponse(String path, long size, boolean binary, boolean truncated, String content) {
         public FileResponse(String path, long size, boolean binary, boolean truncated) {

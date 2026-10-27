@@ -128,6 +128,42 @@ class ContextCompactorTest {
         }
     }
 
+    /** 双预算：字符还很空、但 token 已经吃紧时，也要按 token 压。 */
+    @Test
+    void compactsWhenTokenBudgetIsTheTighterOne() {
+        var messages = history(20, 3_000);
+        var compactor = new ContextCompactor(summarizing("摘要"), 2);
+
+        ContextCompactor.Outcome outcome = compactor.compact(messages, 100_000, 8_000);
+
+        assertTrue(outcome.compacted(), "token 预算更紧时应以 token 为准");
+        int tokens = ContextCompactor.estimateTokens(messages);
+        assertTrue(tokens < 8_000, "压缩后应落回 token 预算内，实际 " + tokens);
+    }
+
+    /** 压完要留出足够余量，否则再跑十几步就得压第二次。 */
+    @Test
+    void leavesHalfTheBudgetFreeAfterCompaction() {
+        var messages = history(20, 3_000);
+        var compactor = new ContextCompactor(summarizing("摘要"), 2);
+
+        ContextCompactor.Outcome outcome = compactor.compact(messages, 20_000, 20_000);
+
+        assertTrue(outcome.compacted());
+        assertTrue(ContextCompactor.totalChars(messages) <= 11_000,
+                "压缩后应降到目标的一半附近，实际 " + ContextCompactor.totalChars(messages));
+    }
+
+    /** 中文按 1 字符 1 token 估算，不能沿用「4 字符 1 token」把中文上下文算少。 */
+    @Test
+    void estimatesChineseTokensHigherThanAscii() {
+        var ascii = List.of(Message.user("a".repeat(100)));
+        var chinese = List.of(Message.user("中".repeat(100)));
+
+        assertEquals(25, ContextCompactor.estimateTokens(ascii));
+        assertEquals(100, ContextCompactor.estimateTokens(chinese));
+    }
+
     private static List<Message> history(int groups, int charsPerTool) {
         var messages = new ArrayList<Message>();
         messages.add(Message.system("sys"));

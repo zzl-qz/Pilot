@@ -1,6 +1,7 @@
 package com.pilot.core.loop;
 
 import com.pilot.core.model.ModelClient;
+import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.ToolCall;
 
 import java.util.ArrayList;
@@ -40,8 +41,13 @@ public final class ContextCompactor {
 
     /** 无论如何都要留下的最近组数，保证模型还能看到「刚才做了什么」。 */
     private static final int MIN_KEEP_GROUPS = 2;
-    /** 摘要后希望总量落到的位置：目标预算的 72%。 */
-    private static final double KEEP_RATIO = 0.72;
+    /**
+     * 摘要后希望总量落到的位置：目标预算的 50%。
+     *
+     * <p>留一半余量是刻意的：压到 70% 附近的话，模型再跑十几步就会重新越线，
+     * 长任务会出现「连着压两次」，既多花摘要调用，又把刚读到的细节抹掉。
+     */
+    private static final double KEEP_RATIO = 0.50;
     /** 压缩至少省下目标预算的 5%，否则不值得多调一次模型。 */
     private static final double MIN_GAIN_RATIO = 0.05;
     /** 摘要正文上限，约 1500 token。 */
@@ -62,18 +68,8 @@ public final class ContextCompactor {
     private static final int TOOL_SNIPPET_CHARS = 800;
     private static final int SUMMARY_INPUT_CHARS = 60_000;
 
-    static final String SUMMARY_PROMPT = """
-            你在为一个编码代理整理「上下文交接摘要」，供压缩之后的自己继续干活。
-            只输出摘要正文，不要解释、不要客套；总长度不超过 1200 字（约 60 行）。
-            固定使用以下小节，没有内容的写「无」：
-            1. 用户目标与验收标准
-            2. 约束与关键决策（含踩过的坑）
-            3. 已完成的工作（列出改动过的文件）
-            4. 进行中（当前做到哪一步）
-            5. 未完成的待办（按顺序）
-            6. 已执行的验证命令与结果
-            只写结论与事实，不要复述工具原始输出。信息必须来自给定记录，不要编造。
-            """;
+    /** 摘要提示词正文在 {@code prompts/compact/summary.md}。 */
+    static final String SUMMARY_PROMPT = PromptLibrary.standard().get("compact/summary");
 
     private final ModelClient client;
     private final int minKeepGroups;
@@ -96,41 +92,58 @@ public final class ContextCompactor {
     /**
      * 超出预算时把较早的对话折叠成一份限长摘要。
      *
-     * <p>保留范围由预算决定：从最新往回累计到目标预算的 72%，至少保留 {@code minKeepGroups} 组。
-     * 这样「组数少但单组巨大」时也能一次压到位，而不是每组只掉一点。
+     * <p>保留范围由预算决定：从最新往回累计，任一预算（字符 / token）超过目标的一半就停，
+     * 至少保留 {@code minKeepGroups} 组。这样「组数少但单组巨大」时也能一次压到位。
      *
      * @return {@code compacted() == false} 表示没动历史，调用方可以走截断 / 硬裁剪兜底
      */
     public Outcome compact(List<Message> messages, int limit) {
-        int before = totalChars(messages);
-        if (before <= limit) {
-            return Outcome.none(before);
+        return compact(messages, limit, limit);
+    }
+
+    /**
+     * 双预算版本：字符预算管英文，token 预算管中文（1 个汉字接近 1 token）。
+     *
+     * <p>只看字符会让中文会话在真正接近窗口上限前就被判为「还很空」；只看 token 又会
+     * 让英文会话过早压缩。两个预算同时卡，按更紧的那个走。
+     */
+    public Outcome compact(List<Message> messages, int targetChars, int targetTokens) {
+        int beforeChars = totalChars(messages);
+        int beforeTokens = estimateTokens(messages);
+        if (beforeChars <= targetChars && beforeTokens <= targetTokens) {
+            return Outcome.none(beforeChars);
         }
         List<int[]> groups = groups(messages);
         if (groups.size() <= minKeepGroups) {
-            return Outcome.none(before);
+            return Outcome.none(beforeChars);
         }
 
-        int reserve = Math.max(1, (int) (limit * KEEP_RATIO));
+        int reserveChars = Math.max(1, (int) (targetChars * KEEP_RATIO));
+        int reserveTokens = Math.max(1, (int) (targetTokens * KEEP_RATIO));
         int start = groups.size();
-        int kept = 0;
+        int keptChars = 0;
+        int keptTokens = 0;
         while (start > minKeepGroups) {
-            int size = chars(messages, groups.get(start - 1));
-            // 最新一组无论如何都留下，之后按预算决定还能保留多少
-            if (kept > 0 && kept + size > reserve) {
+            int[] group = groups.get(start - 1);
+            int sizeChars = chars(messages, group);
+            int sizeTokens = tokens(messages, group);
+            // 最新一组无论如何都留下，之后任一预算超了就停
+            if (keptChars > 0 && (keptChars + sizeChars > reserveChars
+                    || keptTokens + sizeTokens > reserveTokens)) {
                 break;
             }
-            kept += size;
+            keptChars += sizeChars;
+            keptTokens += sizeTokens;
             start--;
         }
         if (start >= groups.size()) {
-            return Outcome.none(before);
+            return Outcome.none(beforeChars);
         }
 
         int end = groups.get(start)[0];
         String transcript = transcript(messages, 1, end);
         if (transcript.isBlank()) {
-            return Outcome.none(before);
+            return Outcome.none(beforeChars);
         }
 
         String summary;
@@ -138,10 +151,10 @@ public final class ContextCompactor {
             summary = summarize(transcript);
         } catch (RuntimeException e) {
             // 摘要失败不能拖垮长任务：交给调用方的截断 / 硬裁剪兜底
-            return Outcome.none(before);
+            return Outcome.none(beforeChars);
         }
         if (summary.isBlank()) {
-            return Outcome.none(before);
+            return Outcome.none(beforeChars);
         }
         if (summary.length() > MAX_SUMMARY_CHARS) {
             summary = summary.substring(0, MAX_SUMMARY_CHARS) + "\n…（摘要过长已截断）";
@@ -149,15 +162,18 @@ public final class ContextCompactor {
 
         int covered = end - 1;
         String head = header(covered);
-        int foldedChars = chars(messages, new int[]{1, end});
-        int gain = foldedChars - head.length() - summary.length();
-        if (gain < Math.max(1_000, (int) (limit * MIN_GAIN_RATIO))) {
-            return Outcome.none(before);
+        String replacement = head + summary;
+        int foldedChars = chars(messages, 1, end);
+        int foldedTokens = tokens(messages, 1, end);
+        double charGain = (foldedChars - replacement.length()) / (double) Math.max(1, targetChars);
+        double tokenGain = (foldedTokens - estimateTokens(replacement)) / (double) Math.max(1, targetTokens);
+        if (Math.max(charGain, tokenGain) < MIN_GAIN_RATIO) {
+            return Outcome.none(beforeChars);
         }
 
         messages.subList(1, end).clear();
-        messages.add(1, Message.user(head + summary));
-        return new Outcome(covered, before, totalChars(messages), summary);
+        messages.add(1, Message.user(replacement));
+        return new Outcome(covered, beforeChars, totalChars(messages), summary);
     }
 
     /**
@@ -238,9 +254,32 @@ public final class ContextCompactor {
         return dropped;
     }
 
-    /** 简化 token 估算：每 4 个字符约 1 token，向上取整。 */
+    /**
+     * 估算 token：ASCII 按 4 字符 1 token，非 ASCII（中文等）按 1 字符 1 token。
+     *
+     * <p>纯 {@code chars / 4} 会显著低估中文上下文（一个汉字通常就接近一个 token），
+     * 压缩触发太晚，请求可能直接超出模型窗口。这里宁可保守。
+     */
     public static int estimateTokens(List<Message> messages) {
-        return (totalChars(messages) + 3) / 4;
+        int total = 0;
+        for (Message message : messages) {
+            total += estimateTokens(message.content());
+        }
+        return total;
+    }
+
+    /** 单段文本的 token 估算：ASCII 4 字符 1 个，非 ASCII 1 字符 1 个。 */
+    static int estimateTokens(String content) {
+        int ascii = 0;
+        int wide = 0;
+        for (int i = 0; i < content.length(); i++) {
+            if (content.charAt(i) < 0x80) {
+                ascii++;
+            } else {
+                wide++;
+            }
+        }
+        return (ascii + 3) / 4 + wide;
     }
 
     public static int totalChars(List<Message> messages) {
@@ -263,6 +302,18 @@ public final class ContextCompactor {
 
     private static int chars(List<Message> messages, int[] group) {
         return chars(messages, group[0], group[1]);
+    }
+
+    private static int tokens(List<Message> messages, int[] group) {
+        return tokens(messages, group[0], group[1]);
+    }
+
+    private static int tokens(List<Message> messages, int from, int to) {
+        int total = 0;
+        for (int i = from; i < to; i++) {
+            total += estimateTokens(messages.get(i).content());
+        }
+        return total;
     }
 
     private static int chars(List<Message> messages, int from, int to) {

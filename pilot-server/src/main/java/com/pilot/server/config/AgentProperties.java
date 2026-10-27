@@ -15,11 +15,12 @@ import java.nio.file.Path;
  * @param approvalTimeoutSeconds 审批等待超时（秒），超时按拒绝处理
  * @param runThreads            同时执行的 run 数，单个 run 卡住时不影响其他会话
  * @param maxPlanContinues      模型提前收尾但计划未完成时，自动催它继续的最大次数；不填默认 8，0 表示不自动继续
+ * @param contextMaxChars       上下文预算（字符估算）。太小会频繁压缩、丢细节，任务做得浅
  */
 @ConfigurationProperties(prefix = "pilot.agent")
 public record AgentProperties(String workspace, PermissionMode permissionMode,
                               int maxSteps, int repeatedToolCallLimit, int approvalTimeoutSeconds,
-                              int runThreads, Integer maxPlanContinues) {
+                              int runThreads, Integer maxPlanContinues, Integer contextMaxChars) {
     public AgentProperties {
         workspace = workspace == null || workspace.isBlank()
                 ? Path.of("").toAbsolutePath().normalize().toString()
@@ -31,5 +32,8 @@ public record AgentProperties(String workspace, PermissionMode permissionMode,
         runThreads = runThreads < 1 ? 4 : Math.min(runThreads, 16);
         int continues = maxPlanContinues == null ? 8 : maxPlanContinues;
         maxPlanContinues = continues < 0 ? 0 : Math.min(continues, 10);
+        contextMaxChars = contextMaxChars == null || contextMaxChars < 20_000
+                ? 120_000
+                : Math.min(contextMaxChars, 2_000_000);
     }
 }

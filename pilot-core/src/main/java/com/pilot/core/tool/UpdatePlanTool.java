@@ -30,11 +30,7 @@ public final class UpdatePlanTool implements Tool {
 
     @Override
     public String description() {
-        return """
-                更新任务计划（checklist）。多步任务开始前先列出全部步骤，之后每完成一步立即更新状态。
-                同一时间最多一个步骤处于 in_progress；全部完成时把所有步骤置为 completed。
-                只维护计划本身，不会修改任何文件。
-                """;
+        return promptDescription();
     }
 
     @Override

@@ -26,7 +26,7 @@ public final class ListDirTool implements Tool {
 
     @Override
     public String description() {
-        return "列出工作区内的目录内容。path 省略时列出工作区根目录；子目录以 / 结尾。";
+        return promptDescription();
     }
 
     @Override
