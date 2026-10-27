@@ -2,9 +2,13 @@ package com.pilot.server.store;
 
 import com.pilot.core.event.ApprovalRequired;
 import com.pilot.core.event.ApprovalResolved;
+import com.pilot.core.event.ArbitrationRequired;
+import com.pilot.core.event.ArbitrationResolved;
 import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.ContextCompacted;
 import com.pilot.core.event.PlanUpdated;
+import com.pilot.core.event.SandboxDiffReady;
+import com.pilot.core.event.TaskUpdated;
 import com.pilot.core.event.RunSteered;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunContinued;
@@ -50,6 +54,10 @@ public class EventCodec {
             case "run.retrying" -> RunRetrying.class;
             case "subagent.started" -> SubagentStarted.class;
             case "subagent.finished" -> SubagentFinished.class;
+            case "task.updated" -> TaskUpdated.class;
+            case "sandbox.diff" -> SandboxDiffReady.class;
+            case "arbitration.required" -> ArbitrationRequired.class;
+            case "arbitration.resolved" -> ArbitrationResolved.class;
             case "run.cancelled" -> RunCancelled.class;
             case "tool.started" -> ToolStarted.class;
             case "tool.completed" -> ToolCompleted.class;

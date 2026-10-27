@@ -8,7 +8,8 @@ public sealed interface SessionEvent
         permits RunStarted, AssistantDelta, AssistantPreview, ContextCompacted, PlanUpdated, RunSteered, RunContinued,
                 RunRetrying,
                 SubagentStarted, SubagentFinished, ToolStarted, ApprovalRequired, ApprovalResolved,
-                ToolCompleted, RunFailed, RunCompleted, RunCancelled {
+                ToolCompleted, RunFailed, RunCompleted, RunCancelled,
+                TaskUpdated, SandboxDiffReady, ArbitrationRequired, ArbitrationResolved {
 
     EventType type();
 }

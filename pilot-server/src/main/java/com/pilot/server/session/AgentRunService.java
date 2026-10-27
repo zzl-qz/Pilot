@@ -22,7 +22,10 @@ import tools.jackson.databind.ObjectMapper;
 import com.pilot.core.trace.JsonlTraceRecorder;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.ModelSettings;
+import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.multi.DispatchAgentsTool;
+import com.pilot.server.multi.MultiAgentService;
 import com.pilot.server.workspace.RunSnapshotService;
 import com.pilot.server.workspace.WorkspaceToolFactory;
 import jakarta.annotation.PostConstruct;
@@ -95,6 +98,8 @@ public class AgentRunService implements RunStarter {
     private final ConcurrentMap<String, String> autoContinueSignature = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
     private final PilotDataDir dataDir;
+    private final MultiAgentService multiAgent;
+    private final MultiAgentProperties multiProperties;
 
     public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
                            PermissionGate permissionGate, ApprovalBroker approvals,
@@ -103,7 +108,8 @@ public class AgentRunService implements RunStarter {
                            com.pilot.core.session.RunRepository runRepository,
                            ConversationRepository conversations,
                            com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper,
-                           PilotDataDir dataDir, com.pilot.server.store.QueuedMessageRepository queuedMessages) {
+                           PilotDataDir dataDir, com.pilot.server.store.QueuedMessageRepository queuedMessages,
+                           MultiAgentService multiAgent, MultiAgentProperties multiProperties) {
         this.sessions = sessions;
         this.conversations = conversations;
         this.plans = plans;
@@ -119,6 +125,8 @@ public class AgentRunService implements RunStarter {
         this.objectMapper = objectMapper;
         this.dataDir = dataDir;
         this.queuedMessages = queuedMessages;
+        this.multiAgent = multiAgent;
+        this.multiProperties = multiProperties;
         this.executor = Executors.newFixedThreadPool(properties.runThreads(), runnable -> {
             Thread thread = new Thread(runnable, "pilot-agent-run");
             thread.setDaemon(true);
@@ -601,6 +609,11 @@ public class AgentRunService implements RunStarter {
         // 子代理与父代理共用工具集（其中不含 spawn_agent，避免递归派生）
         tools.register(new SpawnAgentTool(modelClient, tools, permissionGate, approvals, config,
                 () -> conversations.load(sessionId), sink, handle.cancelled::get));
+        // 多智能体调度：父 Agent 只能派活，子 Agent 的改动一律进沙箱
+        if (multiProperties.enabled()) {
+            tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink,
+                    handle.cancelled::get));
+        }
         // 与会话数据库、快照保持一致，统一落在数据目录（默认项目下的 .pilot）
         var traceRecorder = new JsonlTraceRecorder(
                 dataDir.file("traces", sessionId + ".jsonl"), objectMapper);

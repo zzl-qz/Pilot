@@ -11,6 +11,7 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
 import com.pilot.server.config.AgentProperties;
+import com.pilot.server.multi.SandboxStore;
 import com.pilot.server.session.AttachmentService;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.workspace.WorkspaceService;
@@ -53,11 +54,12 @@ public class SessionController {
     private final PlanRepository plans;
     private final ConversationRepository conversations;
     private final AttachmentService attachments;
+    private final SandboxStore sandboxes;
 
     public SessionController(SessionService sessions, RunStarter runStarter, ObjectMapper objectMapper,
                              WorkspaceService workspaces, AgentProperties agentProperties,
                              PlanRepository plans, ConversationRepository conversations,
-                             AttachmentService attachments) {
+                             AttachmentService attachments, SandboxStore sandboxes) {
         this.sessions = sessions;
         this.runStarter = runStarter;
         this.attachments = attachments;
@@ -66,6 +68,7 @@ public class SessionController {
         this.agentProperties = agentProperties;
         this.plans = plans;
         this.conversations = conversations;
+        this.sandboxes = sandboxes;
     }
 
     @PostMapping
@@ -119,6 +122,8 @@ public class SessionController {
         }
         conversations.delete(id);
         plans.delete(id);
+        // 沙箱与任务看板跟着会话一起清掉，避免删除后仍能在接口里读到
+        sandboxes.reset(id);
         return ResponseEntity.noContent().build();
     }
 

@@ -10,6 +10,7 @@
 | 构建、测试、git 查询 | run_command |
 | 维护多步计划 | update_plan |
 | 信息量大但结论短的只读调研 | spawn_agent |
+| 多任务并行、需要独立沙箱与硬校验 | dispatch_agents |
 
 - 命令只能在工作区根目录用白名单程序执行，不支持管道、重定向和 `&&` 串联。需要组合信息时分开调用，或改用工具自身的能力。
 - 不要用命令做 read_file / search_text 能做的事（cat、grep、sed、find），也不要为了「看一眼」而跑命令。

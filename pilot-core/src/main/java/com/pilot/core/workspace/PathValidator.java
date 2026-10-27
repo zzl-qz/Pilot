@@ -1,5 +1,7 @@
 package com.pilot.core.workspace;
 
+import com.pilot.core.multi.AgentScope;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -14,11 +16,20 @@ import java.util.Objects;
  * 所有工具都必须经由本类解析路径，不能直接使用模型传入的字符串。
  *
  * <p>根目录在构造时取 real path，避免 Windows 8.3 短路径与长路径混用导致的前缀比较失败。
+ *
+ * <p>可选绑定 {@link AgentScope}：子 Agent 使用带白名单的校验器，越界路径在解析阶段就被拒绝，
+ * 而不是「能看见但不能读」——隔离必须由后端硬校验保证，提示词只是辅助。
  */
 public final class PathValidator {
     private final Path root;
+    private final AgentScope scope;
 
     public PathValidator(Path root) {
+        this(root, null);
+    }
+
+    /** @param scope 子 Agent 的文件白名单；{@code null} 表示不额外限制（仍受工作区根目录约束） */
+    public PathValidator(Path root, AgentScope scope) {
         Objects.requireNonNull(root, "root must not be null");
         Path absolute = root.toAbsolutePath().normalize();
         if (!Files.isDirectory(absolute)) {
@@ -29,10 +40,31 @@ public final class PathValidator {
         } catch (IOException e) {
             throw new UncheckedIOException("cannot resolve workspace root: " + absolute, e);
         }
+        this.scope = scope;
     }
 
     public Path root() {
         return root;
+    }
+
+    public AgentScope scope() {
+        return scope;
+    }
+
+    /** 路径是否在当前视图内，供目录列举、搜索这类批量读取工具过滤结果。 */
+    public boolean allows(Path path) {
+        if (scope == null) {
+            return true;
+        }
+        return scope.allowsPath(display(path));
+    }
+
+    /** 目录是否可见；白名单里有它的子路径时仍然允许列出，具体文件再逐条过滤。 */
+    public boolean allowsDirectory(Path path) {
+        if (scope == null) {
+            return true;
+        }
+        return scope.allowsDirectory(display(path));
     }
 
     /**
@@ -72,6 +104,11 @@ public final class PathValidator {
             Path resolved = realExisting.resolve(suffix).normalize();
             if (!resolved.startsWith(root)) {
                 throw new WorkspaceViolationException("路径超出工作区: " + value);
+            }
+            // 工作区根目录本身始终可解析（列目录时再按白名单过滤子项），其余路径按子 Agent 视图校验
+            String relative = display(resolved);
+            if (scope != null && !".".equals(relative) && !scope.allowsPath(relative)) {
+                throw new WorkspaceViolationException(scope.denialHint(relative));
             }
             return resolved;
         } catch (IOException e) {

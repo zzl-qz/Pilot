@@ -59,6 +59,8 @@ public final class ListDirTool implements Tool {
         }
         try (var stream = Files.list(dir)) {
             List<Path> entries = stream
+                    // 白名单之外的文件在子 Agent 眼里直接不存在，而不是「列出来但读不了」
+                    .filter(entry -> Files.isDirectory(entry) ? paths.allowsDirectory(entry) : paths.allows(entry))
                     .sorted(Comparator.comparing(path -> path.getFileName().toString()))
                     .toList();
             int limit = Math.min(entries.size(), MAX_ENTRIES);

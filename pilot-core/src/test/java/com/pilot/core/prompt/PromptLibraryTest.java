@@ -83,7 +83,7 @@ class PromptLibraryTest {
                 "gitWrite", "add/commit");
 
         for (String tool : List.of("read_file", "list_dir", "search_text", "edit_file",
-                "create_file", "run_command", "update_plan", "spawn_agent")) {
+                "create_file", "run_command", "update_plan", "spawn_agent", "dispatch_agents")) {
             String text = prompts.render("tools/" + tool, variables);
             assertFalse(text.isBlank(), tool);
             assertFalse(text.contains("{{"), tool + " 仍有未替换的变量");

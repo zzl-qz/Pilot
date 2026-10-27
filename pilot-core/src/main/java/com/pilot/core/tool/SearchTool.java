@@ -140,8 +140,12 @@ public final class SearchTool implements Tool {
                 if (second < 0) continue;
                 String file = line.substring(0, first);
                 String lineNumber = line.substring(first + 1, second);
-                String displayed = Files.isDirectory(base) ? paths.display(base.resolve(file)) : paths.display(base);
-                matches.add(formatMatch(displayed, lineNumber, line.substring(second + 1)));
+                Path matched = Files.isDirectory(base) ? base.resolve(file) : base;
+                // 命中结果也要按子 Agent 视图过滤：rg 会搜遍整棵树
+                if (!paths.allows(matched)) {
+                    continue;
+                }
+                matches.add(formatMatch(paths.display(matched), lineNumber, line.substring(second + 1)));
                 if (matches.size() > MAX_MATCHES) break;
             }
             return matches;
@@ -180,6 +184,7 @@ public final class SearchTool implements Tool {
         }
         try (var stream = Files.walk(base)) {
             return stream.filter(Files::isRegularFile)
+                    .filter(paths::allows)
                     .filter(path -> !inSkippedDirectory(base, path))
                     .filter(path -> glob == null || matchesGlob(base.relativize(path).toString().replace('\\', '/'), glob))
                     .sorted(Comparator.comparing(paths::display)).toList();

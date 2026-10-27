@@ -23,6 +23,7 @@ import java.util.regex.Pattern;
  * prompts/system/base.md            身份、边界、意图判定
  * prompts/system/workflow.md        调研、计划、编辑、验证
  * prompts/system/tools.md           工具选择策略
+ * prompts/system/orchestration.md   多智能体调度与仲裁规则
  * prompts/system/output.md          结论格式
  * prompts/system/repository.md      仓库快照（顶层结构 / git / 构建方式）
  * prompts/system/project-rules.md   项目约定（PILOT.md 等）
@@ -35,6 +36,8 @@ import java.util.regex.Pattern;
  * prompts/compact/summary.md        上下文压缩摘要
  * prompts/plan/continue.md          计划未完成时的自动继续（{{openSteps}}）
  * prompts/subagent/task.md          子代理任务说明（{{task}}）
+ * prompts/subagent/base.md          子 Agent 系统提示（{{taskId}} / {{scope}} / {{risk}}）
+ * prompts/subagent/job.md           子 Agent 的具体任务（{{title}} / {{goal}} / {{note}}）
  * </pre>
  *
  * <p>模板变量写作 {@code {{name}}}，渲染时缺失即抛异常（宁可当场失败，也不要给模型一段
@@ -49,9 +52,9 @@ public final class PromptLibrary {
     public static final String DIR_PROPERTY = "pilot.prompts.dir";
     public static final String DIR_ENV = "PILOT_PROMPTS_DIR";
 
-    /** 系统提示词的组装顺序：身份 → 流程 → 工具 → 输出。 */
-    private static final List<String> SYSTEM_SECTIONS =
-            List.of("system/base", "system/workflow", "system/tools", "system/output");
+    /** 系统提示词的组装顺序：身份 → 流程 → 工具 → 多智能体调度 → 输出。 */
+    private static final List<String> SYSTEM_SECTIONS = List.of(
+            "system/base", "system/workflow", "system/tools", "system/orchestration", "system/output");
 
     private static final String CLASSPATH_ROOT = "prompts/";
     private static final String SUFFIX = ".md";

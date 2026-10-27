@@ -201,8 +201,9 @@ public final class SessionService {
     private static SessionStatus nextStatus(SessionStatus current, SessionEvent event) {
         return switch (event.type()) {
             case RUN_STARTED -> SessionStatus.RUNNING;
-            case APPROVAL_REQUIRED -> SessionStatus.WAITING_APPROVAL;
-            case APPROVAL_RESOLVED -> SessionStatus.RUNNING;
+            // 分歧 / 冲突 / 校验失败与工具审批一样，都是「等人做决定」
+            case APPROVAL_REQUIRED, ARBITRATION_REQUIRED -> SessionStatus.WAITING_APPROVAL;
+            case APPROVAL_RESOLVED, ARBITRATION_RESOLVED -> SessionStatus.RUNNING;
             case RUN_COMPLETED -> SessionStatus.COMPLETED;
             // 进程重启导致的中断和真正的失败要分开：前者可继续，不该显示成「失败」
             case RUN_FAILED -> isInterrupted(event) ? SessionStatus.INTERRUPTED : SessionStatus.FAILED;

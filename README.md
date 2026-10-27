@@ -79,7 +79,7 @@ Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环
 
 上下文预算默认 120000，按「字符」和「token」两个口径取更满的一个：英文约 96k 字符、中文约 96k 字符（≈96k token）时触发压缩，压缩后回到预算的一半左右再继续。模型窗口够大时可以调高，例如 `PILOT_AGENT_CONTEXT_MAX_CHARS=300000` 或 `-Dpilot.context.max-chars=300000`。
 
-提示词不写在 Java 代码里，正文位于 `pilot-core/src/main/resources/prompts/`：`system/` 下是系统提示词的四段（身份与边界、工作流、工具策略、结论格式），另有计划注入、压缩摘要、自动继续与子代理任务模板。模板变量写作 `{{name}}`，缺失变量会直接报错。调提示词时可用 `PILOT_PROMPTS_DIR`（或系统属性 `pilot.prompts.dir`）指向一个外部目录，同名文件优先于打包资源，只覆盖其中一部分也可以，无需重新打包。
+提示词不写在 Java 代码里，正文位于 `pilot-core/src/main/resources/prompts/`：`system/` 下是系统提示词的五段（身份与边界、工作流、工具策略、多智能体调度、结论格式），另有计划注入、压缩摘要、自动继续、子代理任务模板，以及子 Agent 的三段式身份/任务模板（`subagent/base.md`、`subagent/job.md`）。模板变量写作 `{{name}}`，缺失变量会直接报错。调提示词时可用 `PILOT_PROMPTS_DIR`（或系统属性 `pilot.prompts.dir`）指向一个外部目录，同名文件优先于打包资源，只覆盖其中一部分也可以，无需重新打包。
 
 运行数据默认写入仓库根目录下的 `.pilot/`，可通过 `PILOT_DATA_DIR` 修改位置。该目录可能包含会话数据库、工作区快照和 trace；请按本机敏感数据管理，不要将密钥或私人会话数据提交到版本库。
 
@@ -93,8 +93,24 @@ Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环
 - `/api/approvals`：查看和处理待审批工具调用。
 - `/api/settings`：查看或更新模型与权限设置。
 - `/api/health`：服务健康状态。
+- `GET /api/sessions/{id}/multi`：多智能体任务看板、沙箱改动与待仲裁事项。
+- `POST /api/sessions/{id}/multi/sandboxes/{sandboxId}/accept|reject`：接受或拒绝某个子 Agent 的改动。
+- `POST /api/sessions/{id}/multi/arbitrations/{arbitrationId}/resolve`：记录人工仲裁结果。
 
 具体请求结构以 `pilot-server` 控制器实现为准；该列表是入口索引，不替代接口契约文档。
+
+## 多智能体调度
+
+父 Agent 通过 `dispatch_agents` 把任务 DAG 交给调度器，自己只负责拆解、归集与核对证据：
+
+- 星型拓扑：子 Agent 之间不通信，结论统一交回父 Agent；需要别的产出时由父 Agent 摘要转发。
+- 权限硬隔离：每个子任务带文件白名单（`AgentScope`），路径校验在 `PathValidator` 里拦截，白名单外的文件在子 Agent 视图里不存在，列举/搜索也会被过滤。
+- 变更沙箱：子 Agent 的 `edit_file` / `create_file` 只产出 unified diff 与目标内容，写入 `.pilot/multi/<session>/` 审计副本，真实工作区在用户点「接受变更」之前保持只读；接受时用内容指纹校验文件没有被别人改过。
+- 合并预检：同一文件的重叠改动、两个 Agent 新建同一文件都会标记为冲突，冲突不自动合并。
+- 硬校验：在 `git worktree` 出来的隔离副本上套用「工作区未提交改动 + 沙箱改动」，执行 `mvnw compile` / `mvnw test`（可用 `pilot.multi.verify-commands` 覆盖）。编译器与测试结果优先于任何 Agent 的判断。
+- 人工仲裁：结论不一致、变更冲突、硬校验失败都会发出 `arbitration.required`，父 Agent 停止推进，由用户选择方案或放弃。
+
+配置项在 `pilot.multi.*`：`enabled`、`max-parallel`、`max-attempts`（默认 3，即最多 2 次重试）、`max-steps`、`verify-timeout-seconds`、`verify-commands`。
 
 ## 测试与评估
 

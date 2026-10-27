@@ -1,11 +1,15 @@
 package com.pilot.server.workspace;
 
+import com.pilot.core.multi.AgentScope;
 import com.pilot.core.plan.PlanSink;
 import com.pilot.core.tool.CreateFileTool;
 import com.pilot.core.tool.EditFileTool;
 import com.pilot.core.tool.ListDirTool;
 import com.pilot.core.tool.ReadFileTool;
 import com.pilot.core.tool.RunCommandTool;
+import com.pilot.core.tool.SandboxCreateFileTool;
+import com.pilot.core.tool.SandboxEditFileTool;
+import com.pilot.core.tool.SandboxSink;
 import com.pilot.core.tool.SearchTool;
 import com.pilot.core.tool.SnapshotSink;
 import com.pilot.core.tool.ToolRegistry;
@@ -60,6 +64,39 @@ public class WorkspaceToolFactory {
     public Path resolve(String workspace) {
         String target = workspace == null || workspace.isBlank() ? properties.workspace() : workspace;
         return Path.of(target).toAbsolutePath().normalize();
+    }
+
+    /**
+     * 子 Agent 的工具集：文件视图按 {@link AgentScope} 裁剪，写工具替换为沙箱版。
+     *
+     * <p>只有真正注册进来的工具模型才看得见：白名单外的工具不是「拒绝调用」，而是根本不存在，
+     * 这样模型不会反复尝试越权。写工具即使注册，也只会把改动提交到沙箱。
+     *
+     * @param sandbox 改动出口；只读任务传 {@link SandboxSink#rejectAll()} 也不会被触发
+     */
+    public ToolRegistry registryForScope(String workspace, AgentScope scope, SandboxSink sandbox) {
+        AgentScope view = scope == null ? AgentScope.readOnly(java.util.List.of(), java.util.List.of()) : scope;
+        var validator = new PathValidator(resolve(workspace), view);
+        var registry = new ToolRegistry();
+        if (view.allowsTool("read_file")) {
+            registry.register(new ReadFileTool(validator));
+        }
+        if (view.allowsTool("list_dir")) {
+            registry.register(new ListDirTool(validator));
+        }
+        if (view.allowsTool("search_text")) {
+            registry.register(new SearchTool(validator));
+        }
+        if (view.allowsTool("run_command")) {
+            registry.register(new RunCommandTool(validator));
+        }
+        if (view.writable() && view.allowsTool("edit_file")) {
+            registry.register(new SandboxEditFileTool(validator, sandbox));
+        }
+        if (view.writable() && view.allowsTool("create_file")) {
+            registry.register(new SandboxCreateFileTool(validator, sandbox));
+        }
+        return registry;
     }
 
     private ToolRegistry create(Path root, PlanSink planSink) {

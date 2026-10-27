@@ -98,6 +98,22 @@ class EventCodecNewEventsTest {
     }
 
     @Test
+    void roundTripsMultiAgentEvents() {
+        var task = new com.pilot.core.event.TaskUpdated("T1", "agent_1", "改路径校验",
+                "done", "已完成");
+        var diff = new com.pilot.core.event.SandboxDiffReady("sbx_1", "agent_1", "T1",
+                "pilot-core/src/A.java", 3, 1);
+        var required = new com.pilot.core.event.ArbitrationRequired("arb_1", "dissent", "T1",
+                List.of("选用方案 A", "选用方案 B"), "报告正文");
+        var resolved = new com.pilot.core.event.ArbitrationResolved("arb_1", "选用方案 A");
+
+        assertEquals(task, roundTrip("task.updated", task));
+        assertEquals(diff, roundTrip("sandbox.diff", diff));
+        assertEquals(required, roundTrip("arbitration.required", required));
+        assertEquals(resolved, roundTrip("arbitration.resolved", resolved));
+    }
+
+    @Test
     void roundTripsRunCancelled() {
         var event = new RunCancelled("用户取消");
 

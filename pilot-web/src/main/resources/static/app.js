@@ -23,6 +23,10 @@ const EVENT_TYPES = [
   'run.retrying',
   'subagent.started',
   'subagent.finished',
+  'task.updated',
+  'sandbox.diff',
+  'arbitration.required',
+  'arbitration.resolved',
   'tool.started',
   'approval.required',
   'approval.resolved',
@@ -1667,6 +1671,54 @@ function handleEvent(event) {
       finishSubagent(event.payload);
       break;
     }
+    case 'task.updated': {
+      renderTaskBoard(event.payload);
+      record(event, {
+        kind: 'task',
+        tone: taskTone(event.payload.status),
+        status: TASK_STATUS_LABEL[event.payload.status] || event.payload.status,
+        title: [event.payload.taskId, event.payload.title].filter(Boolean).join(' '),
+        detail: [event.payload.agentId ? '@' + event.payload.agentId : '', event.payload.detail || '']
+          .filter(Boolean).join(' · ')
+      });
+      break;
+    }
+    case 'sandbox.diff': {
+      renderSandboxChange(event.payload);
+      record(event, {
+        kind: 'sandbox',
+        tone: 'warn',
+        status: '沙箱',
+        title: event.payload.path,
+        detail: `@${event.payload.agentId || '?'} · +${event.payload.added || 0} -${event.payload.removed || 0}`
+      });
+      break;
+    }
+    case 'arbitration.required': {
+      renderArbitration(event.payload);
+      // 只是提示状态，运行态仍由 run.started / run.completed 维护，避免提前把界面放回空闲
+      setRunState('warn', '待你裁决');
+      record(event, {
+        kind: 'arbitration',
+        tone: 'error',
+        status: '待仲裁',
+        title: event.payload.kind === 'conflict' ? '变更冲突' : event.payload.kind === 'verification'
+          ? '硬校验未通过' : '方案分歧',
+        detail: '需要你决定后才会继续'
+      });
+      break;
+    }
+    case 'arbitration.resolved': {
+      settleArbitration(event.payload);
+      record(event, {
+        kind: 'arbitration',
+        tone: 'ok',
+        status: '已裁决',
+        title: event.payload.choice || '',
+        detail: event.payload.arbitrationId
+      });
+      break;
+    }
     case 'run.cancelled': {
       state.running = false;
       state.modelRetryUntil = 0;
@@ -2062,6 +2114,284 @@ function finishSubagent(payload) {
   const body = card.querySelector('.subagent-body');
   if (body) {
     body.textContent = payload.summary || (payload.ok === false ? '子代理失败' : '完成');
+  }
+}
+
+/** 多智能体任务看板：同一 taskId 就地更新状态，不重复插卡片。 */
+const TASK_STATUS_LABEL = {
+  pending: '⏳等待',
+  running: '🔄运行中',
+  done: '✅完成',
+  dissent: '⚠️待仲裁',
+  conflict: '🔴冲突',
+  failed: '❌失败',
+  blocked: '⛔已阻断',
+  cancelled: '🚫已取消'
+};
+
+function taskTone(status) {
+  switch (status) {
+    case 'done': return 'ok';
+    case 'running': return 'run';
+    case 'failed':
+    case 'conflict': return 'error';
+    case 'dissent':
+    case 'blocked':
+    case 'cancelled': return 'warn';
+    default: return 'text';
+  }
+}
+
+function insertIntoThread(node) {
+  const shell = state.turnShell && state.turnShell.shell.isConnected ? state.turnShell.shell : null;
+  if (shell) {
+    shell.before(node);
+  } else {
+    el.messages.append(node);
+  }
+  hideEmptyState();
+}
+
+function renderTaskBoard(payload) {
+  const taskId = String(payload.taskId || '');
+  if (!taskId) {
+    return;
+  }
+  let card = el.messages.querySelector('.multi-card');
+  if (!card) {
+    card = document.createElement('aside');
+    card.className = 'multi-card';
+
+    const head = document.createElement('div');
+    head.className = 'multi-head';
+    const title = document.createElement('div');
+    title.className = 'multi-title';
+    title.textContent = '多智能体任务';
+    const count = document.createElement('span');
+    count.className = 'multi-count';
+    head.append(title, count);
+
+    const list = document.createElement('ul');
+    list.className = 'multi-list';
+    card.append(head, list);
+    insertIntoThread(card);
+  }
+
+  const list = card.querySelector('.multi-list');
+  let row = list.querySelector(`.multi-item[data-task-id="${CSS.escape(taskId)}"]`);
+  if (!row) {
+    row = document.createElement('li');
+    row.className = 'multi-item';
+    row.dataset.taskId = taskId;
+
+    const name = document.createElement('span');
+    name.className = 'multi-name';
+    const status = document.createElement('span');
+    status.className = 'multi-status';
+    const agent = document.createElement('span');
+    agent.className = 'multi-agent';
+    const detail = document.createElement('span');
+    detail.className = 'multi-detail';
+    row.append(name, status, agent, detail);
+    list.append(row);
+  }
+
+  const status = String(payload.status || 'pending');
+  row.dataset.status = status;
+  row.classList.toggle('is-done', status === 'done');
+  row.classList.toggle('is-failed', status === 'failed' || status === 'conflict');
+  row.classList.toggle('is-warn', status === 'dissent' || status === 'blocked' || status === 'cancelled');
+  row.querySelector('.multi-name').textContent = `${taskId} ${payload.title || ''}`.trim();
+  row.querySelector('.multi-status').textContent = TASK_STATUS_LABEL[status] || status;
+  row.querySelector('.multi-agent').textContent = payload.agentId ? `@${payload.agentId}` : '';
+  row.querySelector('.multi-detail').textContent = payload.detail || '';
+
+  const rows = Array.from(list.children);
+  const finished = rows.filter((item) => item.dataset.status === 'done').length;
+  card.querySelector('.multi-count').textContent = `${finished}/${rows.length}`;
+}
+
+/** 沙箱改动：标清「哪个子 Agent 改了哪个文件」，与真实 git 改动分开。 */
+function renderSandboxChange(payload) {
+  const path = String(payload.path || '');
+  if (!path) {
+    return;
+  }
+  let card = el.messages.querySelector('.sandbox-card');
+  if (!card) {
+    card = document.createElement('aside');
+    card.className = 'sandbox-card';
+    const head = document.createElement('div');
+    head.className = 'sandbox-head';
+    head.textContent = '沙箱改动（待你接受）';
+    const list = document.createElement('ul');
+    list.className = 'sandbox-list';
+    card.append(head, list);
+    insertIntoThread(card);
+  }
+  const key = `${payload.sandboxId || ''}|${path}`;
+  const list = card.querySelector('.sandbox-list');
+  let row = list.querySelector(`.sandbox-item[data-key="${CSS.escape(key)}"]`);
+  if (!row) {
+    row = document.createElement('li');
+    row.className = 'sandbox-item';
+    row.dataset.key = key;
+    row.append(document.createElement('span'), document.createElement('span'), document.createElement('span'));
+    list.append(row);
+  }
+  const [file, delta, owner] = row.children;
+  file.className = 'sandbox-file';
+  file.textContent = path;
+  delta.className = 'sandbox-delta';
+  delta.textContent = `+${payload.added || 0} -${payload.removed || 0}`;
+  owner.className = 'sandbox-owner';
+  owner.textContent = `@${payload.agentId || '?'}`;
+
+  renderSandboxActions(card, String(payload.sandboxId || ''), payload.taskId);
+}
+
+/** 每个沙箱单独接受 / 拒绝：支持单独回滚，不整体放行。 */
+function renderSandboxActions(card, sandboxId, taskId) {
+  if (!sandboxId) {
+    return;
+  }
+  let foot = card.querySelector('.sandbox-actions');
+  if (!foot) {
+    foot = document.createElement('div');
+    foot.className = 'sandbox-actions';
+    card.append(foot);
+  }
+  if (foot.querySelector(`.sandbox-group[data-sandbox="${CSS.escape(sandboxId)}"]`)) {
+    return;
+  }
+  const group = document.createElement('div');
+  group.className = 'sandbox-group';
+  group.dataset.sandbox = sandboxId;
+
+  const label = document.createElement('span');
+  label.className = 'sandbox-label';
+  label.textContent = `${taskId || ''} ${sandboxId}`.trim();
+
+  const accept = document.createElement('button');
+  accept.type = 'button';
+  accept.className = 'sandbox-btn is-accept';
+  accept.textContent = '接受变更';
+  accept.addEventListener('click', () => decideSandbox(group, sandboxId, 'accept'));
+
+  const reject = document.createElement('button');
+  reject.type = 'button';
+  reject.className = 'sandbox-btn';
+  reject.textContent = '拒绝';
+  reject.addEventListener('click', () => decideSandbox(group, sandboxId, 'reject'));
+
+  group.append(label, accept, reject);
+  foot.append(group);
+}
+
+async function decideSandbox(group, sandboxId, action) {
+  group.querySelectorAll('button').forEach((button) => {
+    button.disabled = true;
+  });
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/multi/sandboxes/${encodeURIComponent(sandboxId)}/${action}`, {
+      method: 'POST'
+    });
+    if (action === 'reject') {
+      group.classList.add('is-rejected');
+      showNotice(`已拒绝 ${sandboxId} 的改动`);
+      return;
+    }
+    const data = await response.json().catch(() => ({}));
+    if (data.ok) {
+      group.classList.add('is-accepted');
+      showNotice(`已接受 ${sandboxId}：写入 ${(data.written || []).length} 个文件`);
+    } else {
+      group.classList.add('is-rejected');
+      showNotice(`未能写入：${(data.failed && data.failed.join('；')) || data.message || '未知错误'}`);
+    }
+  } catch (error) {
+    showNotice(`操作失败：${error.message}`);
+  }
+}
+
+/** 仲裁卡：各方方案 + 证据 + 风险都在报告里，按钮只做「人来决定」。 */
+function renderArbitration(payload) {
+  const id = String(payload.arbitrationId || '');
+  if (!id || el.messages.querySelector(`.arb-card[data-arb-id="${CSS.escape(id)}"]`)) {
+    return;
+  }
+  const card = document.createElement('aside');
+  card.className = 'arb-card';
+  card.dataset.arbId = id;
+
+  const head = document.createElement('div');
+  head.className = 'arb-head';
+  head.textContent = payload.kind === 'conflict'
+    ? '🔴 变更冲突，等你裁决'
+    : payload.kind === 'verification' ? '❌ 硬校验未通过，等你裁决' : '⚠️ 方案分歧，等你裁决';
+
+  const body = document.createElement('pre');
+  body.className = 'arb-body';
+  body.textContent = payload.report || '';
+
+  const actions = document.createElement('div');
+  actions.className = 'arb-actions';
+  const options = Array.isArray(payload.options) ? payload.options : [];
+  options.forEach((option) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'arb-option';
+    button.textContent = option;
+    button.addEventListener('click', () => resolveArbitration(id, option));
+    actions.append(button);
+  });
+
+  const note = document.createElement('p');
+  note.className = 'arb-choice';
+  note.textContent = '你不选，任务及其下游不会继续。';
+
+  card.append(head, body, actions, note);
+  insertIntoThread(card);
+}
+
+async function resolveArbitration(arbitrationId, choice) {
+  const card = el.messages.querySelector(`.arb-card[data-arb-id="${CSS.escape(arbitrationId)}"]`);
+  if (card) {
+    card.classList.add('is-resolved');
+    card.querySelectorAll('.arb-option').forEach((button) => {
+      button.disabled = true;
+    });
+    const note = card.querySelector('.arb-choice');
+    if (note) {
+      note.textContent = `已选择：${choice}`;
+    }
+  }
+  try {
+    await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/multi/arbitrations/${encodeURIComponent(arbitrationId)}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ choice })
+    });
+  } catch (error) {
+    console.warn('[arbitration] 记录失败', error);
+  }
+  // 把决定交回对话，父 Agent 下一轮据此继续；不要在界面里替它推进
+  await submitMessage(`【仲裁结果】${choice}`);
+}
+
+function settleArbitration(payload) {
+  const id = String(payload.arbitrationId || '');
+  const card = id ? el.messages.querySelector(`.arb-card[data-arb-id="${CSS.escape(id)}"]`) : null;
+  if (!card) {
+    return;
+  }
+  card.classList.add('is-resolved');
+  card.querySelectorAll('.arb-option').forEach((button) => {
+    button.disabled = true;
+  });
+  const note = card.querySelector('.arb-choice');
+  if (note && payload.choice) {
+    note.textContent = `已选择：${payload.choice}`;
   }
 }
 
