@@ -12,6 +12,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -63,6 +65,26 @@ class RunSnapshotServiceTest {
         snapshots.beforeWrite(file);
 
         assertThrows(IllegalArgumentException.class, () -> snapshots.rollback("run_x"));
+    }
+
+    @Test
+    void exposesRecordedFilesForChangeReview() throws IOException {
+        Path existing = workspace.resolve("a.txt");
+        Files.writeString(existing, "origin");
+
+        snapshots.bind("run_meta", workspace);
+        snapshots.beforeWrite(existing);
+        snapshots.beforeWrite(workspace.resolve("dir/new.txt"));
+        snapshots.clear();
+
+        RunSnapshotService.SnapshotMeta meta = snapshots.meta("run_meta");
+
+        assertNotNull(meta);
+        assertEquals("run_meta", meta.runId());
+        assertEquals(List.of(
+                new RunSnapshotService.SnapshotEntry("a.txt", true),
+                new RunSnapshotService.SnapshotEntry("dir/new.txt", false)), meta.files());
+        assertNull(snapshots.meta("run_absent"), "没写过文件时没有元数据，交给上层按「无改动」处理");
     }
 
     @Test

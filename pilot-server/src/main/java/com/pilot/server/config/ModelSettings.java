@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 当前生效的模型配置（端点 / 模型名 / API Key）。
@@ -66,18 +67,27 @@ public class ModelSettings {
      * @throws IllegalArgumentException 端点不是合法的 http(s) 地址
      */
     public synchronized Snapshot update(String endpoint, String model, String apiKey) {
+        return update(endpoint, model, apiKey, false);
+    }
+
+    /**
+     * 局部更新并落盘。
+     *
+     * @param clearApiKey true 表示明确清除已保存的密钥（优先于 {@code apiKey}）；
+     *                    否则 {@code apiKey} 为空白时保留原值
+     */
+    public synchronized Snapshot update(String endpoint, String model, String apiKey, boolean clearApiKey) {
         Snapshot before = current;
         String nextEndpoint = blank(endpoint) ? before.endpoint() : endpoint.strip();
         String nextModel = blank(model) ? before.model() : model.strip();
-        String nextKey = blank(apiKey) ? before.apiKey() : apiKey.strip();
+        String nextKey = clearApiKey ? "" : blank(apiKey) ? before.apiKey() : apiKey.strip();
         requireHttpEndpoint(nextEndpoint);
 
         Snapshot next = new Snapshot(nextEndpoint, nextModel, nextKey);
-        store.save(KEY_ENDPOINT, next.endpoint());
-        store.save(KEY_MODEL, next.model());
-        if (!equals(next.apiKey(), before.apiKey())) {
-            store.save(KEY_API_KEY, next.apiKey());
-        }
+        store.saveAll(Map.of(
+                KEY_ENDPOINT, next.endpoint(),
+                KEY_MODEL, next.model(),
+                KEY_API_KEY, next.apiKey()));
         current = next;
         log.info("模型配置已更新：model={} endpoint={} apiKey={}",
                 next.model(), next.endpoint(), next.hasApiKey() ? "已配置" : "未配置");
@@ -112,9 +122,5 @@ public class ModelSettings {
 
     private static boolean blank(String value) {
         return value == null || value.isBlank();
-    }
-
-    private static boolean equals(String left, String right) {
-        return left == null ? right == null : left.equals(right);
     }
 }

@@ -883,7 +883,22 @@ kbd {
 }
 .model-row input:focus { outline: none; border-color: var(--accent-line); }
 .model-hint { margin: 0; color: var(--dim); font-size: 10.5px; line-height: 1.5; }
-.model-actions { display: flex; justify-content: flex-end; }
+/* 保存结果就地反馈：成功/失败/清除后果三种颜色，不用去顶上找提示 */
+.model-hint.is-ok { color: var(--ok); }
+.model-hint.is-error { color: var(--err); }
+.model-hint.is-warn { color: var(--warn); }
+.model-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.model-clear-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--dim);
+  font-size: 10.5px;
+  cursor: pointer;
+  user-select: none;
+}
+.model-clear-key input { accent-color: var(--err); }
+.model-row input:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-sm { padding: 4px 10px; font-size: 11px; }
 
 /* 附件：粘贴后的待发送清单 */
@@ -1996,9 +2011,40 @@ kbd {
 .turn-card.is-warn .turn-mark { background: rgba(255, 187, 89, 0.16); color: var(--warn); }
 .turn-card.is-error .turn-mark { background: rgba(255, 111, 111, 0.16); color: var(--err); }
 .turn-note { margin: 0; word-break: break-word; }
+/* 可行动的失败提示：例如「API Key 失效，去填一把新的」 */
+.turn-hint { margin: 0; color: var(--warn); word-break: break-word; }
+.turn-card.is-error .turn-hint { color: #ff9c9c; }
 .turn-open { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
 .turn-foot { margin: 0; color: var(--dim); }
 .turn-actions { display: flex; gap: 8px; }
+/* Codex 风格改动卡：默认只报文件数与增删行数，展开才看按文件的 diff */
+.turn-changes {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.02);
+}
+.turn-changes > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--dim);
+  font-size: 11.5px;
+}
+.turn-changes > summary::-webkit-details-marker { display: none; }
+.turn-changes > summary::before { content: '▸'; font-size: 9px; }
+.turn-changes[open] > summary::before { content: '▾'; }
+.turn-changes > summary:hover { color: var(--accent); }
+.turn-changes-stat { display: inline-flex; gap: 6px; font-family: var(--mono); font-size: 11px; }
+.turn-changes-stat .add { color: var(--ok); }
+.turn-changes-stat .del { color: var(--err); }
+.turn-changes-body { display: grid; gap: 4px; padding: 0 6px 6px; }
+.turn-changes-body .change-empty { padding: 4px 2px; text-align: left; font-size: 11.5px; }
+.run-change-row > summary { padding: 4px 6px; }
+.run-change-flat { padding: 4px 2px; color: var(--dim); word-break: break-all; }
+.turn-changes-actions { display: flex; justify-content: flex-end; }
 /* 子代理：左侧细线标记，默认收起，展开看结论 */
 .subagent-card {
   align-self: stretch;

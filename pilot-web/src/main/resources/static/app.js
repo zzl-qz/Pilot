@@ -1,3 +1,11 @@
+import { normalizePath, parseDiff } from './lib/diff.js';
+import {
+  buildModelUpdate,
+  classifyModelError,
+  describeModelSaved,
+  errorText
+} from './lib/model-settings.js';
+
 const EVENT_TYPES = [
   'run.started',
   'assistant.delta',
@@ -28,6 +36,7 @@ const el = {
   modelName: document.querySelector('#model-name'),
   modelEndpoint: document.querySelector('#model-endpoint'),
   modelKey: document.querySelector('#model-key'),
+ modelClearKey: document.querySelector('#model-clear-key'),
   modelHint: document.querySelector('#model-hint'),
   modelSave: document.querySelector('#model-save'),
   attachments: document.querySelector('#attachments'),
@@ -114,6 +123,8 @@ const state = {
   historyHasMore: false,
   replaying: false,
   changedFiles: [],
+  /** 当前这一轮里出现过的 runId：自动继续会换 run，改动要合并展示 */
+  turnRuns: [],
   composerEnabled: false,
   streamCard: null,
   streamText: '',
@@ -128,6 +139,8 @@ const state = {
   pendingInputs: [],
   attachments: [],
   modelOptions: [],
+  modelApiKeySet: false,
+  modelApiKeyMasked: '',
   previewPath: null,
   refKind: null,
   refItems: [],
@@ -159,6 +172,7 @@ function init() {
   el.permChip.addEventListener('click', () => togglePermissionMenu());
   el.modelChip.addEventListener('click', () => toggleModelMenu());
   el.modelSave.addEventListener('click', saveModel);
+  el.modelClearKey.addEventListener('change', onModelClearKeyToggle);
   el.input.addEventListener('paste', onPasteAttachments);
   document.addEventListener('click', (event) => {
     if (!el.permMenu.hidden && !event.target.closest('.perm-picker')) {
@@ -387,12 +401,39 @@ function applyModelSettings(data) {
   el.modelName.value = data.model || '';
   el.modelEndpoint.value = data.modelEndpoint || '';
   el.modelKey.value = '';
-  el.modelHint.textContent = data.modelApiKeySet
-    ? `API Key 已配置（${data.modelApiKeyMasked || '••••'}），留空表示不修改`
-    : 'API Key 未配置，填入后即可调用真实模型';
+  el.modelKey.disabled = false;
+  el.modelClearKey.checked = false;
+  el.modelClearKey.disabled = !data.modelApiKeySet;
+  state.modelApiKeySet = data.modelApiKeySet === true;
+  state.modelApiKeyMasked = data.modelApiKeyMasked || '';
+  setModelHint(idleModelHint(), 'idle');
   el.modelChip.title = `模型：${data.model || '未设置'} · 点击切换`;
   state.modelOptions = Array.isArray(data.modelOptions) ? data.modelOptions.slice() : [];
   renderModelOptions(data.model);
+}
+
+/** 模型面板里的状态行：保存成功/失败直接写在这里，不只闪一下顶部提示。 */
+function setModelHint(text, tone) {
+  el.modelHint.textContent = text || '';
+  el.modelHint.className = 'model-hint' + (tone && tone !== 'idle' ? ' is-' + tone : '');
+}
+
+function idleModelHint() {
+  return state.modelApiKeySet
+    ? `API Key 已配置（${state.modelApiKeyMasked || '••••'}）：留空保存会保持原密钥，勾选「清除」可移除。`
+    : 'API Key 未配置：填入后即可调用真实模型。';
+}
+
+/** 勾选「清除」就禁用输入框并说明后果，避免「填了 Key 又勾清除」的歧义。 */
+function onModelClearKeyToggle() {
+  const clear = el.modelClearKey.checked;
+  el.modelKey.disabled = clear;
+  if (clear) {
+    el.modelKey.value = '';
+    setModelHint('保存后会删除已保存的 API Key，直到重新填写前模型调用会失败。', 'warn');
+  } else {
+    setModelHint(idleModelHint(), 'idle');
+  }
 }
 
 /** 下拉里给出候选模型，点击即切换；当前模型排在最前面。 */
@@ -425,6 +466,9 @@ function toggleModelMenu(force) {
   el.modelChip.setAttribute('aria-expanded', String(open));
   if (open) {
     el.modelKey.value = '';
+    el.modelKey.disabled = false;
+    el.modelClearKey.checked = false;
+    setModelHint(idleModelHint(), 'idle');
     el.modelName.focus();
   }
 }
@@ -433,28 +477,37 @@ async function saveModel(override) {
   // 点下拉项时直接切换；点「保存」按钮时用输入框里的值
   const model = (typeof override === 'string' ? override : el.modelName.value).trim();
   if (!model) {
+    setModelHint('请选择或填写模型名。', 'error');
     showNotice('请选择或填写模型名。');
     return;
   }
+  const payload = buildModelUpdate({
+    model,
+    endpoint: el.modelEndpoint.value,
+    apiKey: el.modelKey.value,
+    clearKey: el.modelClearKey.checked
+  });
+  const keyChanged = !payload.clearApiKey && Boolean(payload.apiKey);
   el.modelSave.disabled = true;
+  setModelHint('保存中…', 'idle');
   try {
     const response = await fetch('/api/settings/model', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        endpoint: el.modelEndpoint.value.trim(),
-        apiKey: el.modelKey.value.trim()
-      })
+      body: JSON.stringify(payload)
     });
     if (!response.ok) {
       throw new Error(await describeError(response));
     }
     const data = await response.json();
     applyModelSettings(data);
-    toggleModelMenu(false);
-    showNotice(`模型已切换为「${data.model}」，下一次请求即生效。`);
+    // 保存成功后面板保持打开：既能看到服务端回写的状态，也能继续改
+    const message = describeModelSaved(data, { clearKey: payload.clearApiKey, keyChanged });
+    setModelHint(message, 'ok');
+    showNotice(message);
   } catch (error) {
+    // 失败时面板不关：错误留在原来的位置，用户可以直接改端点/Key 再试
+    setModelHint('保存失败：' + error.message, 'error');
     showNotice('保存模型配置失败：' + error.message);
   } finally {
     el.modelSave.disabled = false;
@@ -900,6 +953,7 @@ function handleEvent(event) {
     case 'run.started': {
       state.running = true;
       state.runId = event.runId || state.runId;
+      state.turnRuns = event.runId ? [event.runId] : [];
       startRunClock(Date.now());
       markSessionStatus('RUNNING');
       syncComposer();
@@ -1042,6 +1096,9 @@ function handleEvent(event) {
         title: (planOpen ? `本轮结束 · 还有 ${openSteps.length} 项没做` : '本轮已完成') + progress,
         openSteps,
         changedFiles: event.payload.changedFiles || [],
+        // 自动继续会换 runId，同一轮里写过的文件分散在多个快照中，合并后再取
+        runIds: state.turnRuns.length ? state.turnRuns.slice()
+          : (event.runId ? [event.runId] : [state.lastRunId]),
         resumable: planOpen
       });
       refreshChanges();
@@ -1062,6 +1119,9 @@ function handleEvent(event) {
       break;
     }
     case 'run.continued': {
+      if (event.runId && !state.turnRuns.includes(event.runId)) {
+        state.turnRuns.push(event.runId);
+      }
       const attempt = Number(event.payload.attempt || 1);
       const max = Number(event.payload.maxAttempts || 0);
       showNotice(`自动继续 ${attempt}/${max}：${event.payload.reason || ''}`);
@@ -1109,10 +1169,23 @@ function handleEvent(event) {
         detail: event.payload.message,
         resumable
       });
+      // 模型错误：把原始报错翻译成可行动的提示（401 去填 Key、404 查端点…）
+      const modelError = code === 'MODEL_ERROR' ? classifyModelError(event.payload.message) : null;
+      if (modelError && modelError.hint) {
+        showNotice(modelError.hint);
+      }
       appendTurnResult({
         tone: cancelled || resumable ? 'warn' : 'error',
         title: paused ? '本轮已暂停' : interrupted ? '运行已中断' : cancelled ? '本轮已取消' : '运行失败',
         detail: event.payload.message,
+        hint: modelError ? modelError.hint : '',
+        actionLabel: modelError && modelError.action === 'model-settings' ? '打开模型设置' : '',
+        onAction: (clickEvent) => {
+          // 阻止冒泡：document 上的「点外面就收起」会立刻把刚打开的面板关掉
+          clickEvent?.stopPropagation();
+          toggleModelMenu(true);
+          el.modelKey.focus();
+        },
         resumable
       });
       break;
@@ -1155,7 +1228,7 @@ function appendCompaction(payload) {
  * 每轮结束在对话流里留一条结论：干完了没有、还剩什么、改了哪些文件。
  * 没有这一条时，用户只能凭最后一条工具卡片猜本轮是结束了还是卡住了。
  */
-function appendTurnResult({ tone, title, detail, openSteps, changedFiles, resumable }) {
+function appendTurnResult({ tone, title, detail, openSteps, changedFiles, runIds, hint, actionLabel, onAction, resumable }) {
   const card = document.createElement('article');
   card.className = 'turn-card is-' + (tone || 'ok');
 
@@ -1187,23 +1260,224 @@ function appendTurnResult({ tone, title, detail, openSteps, changedFiles, resuma
     card.append(list);
   }
 
-  if (changedFiles && changedFiles.length) {
-    const foot = document.createElement('p');
-    foot.className = 'turn-foot';
-    foot.textContent = '变更：' + changedFiles.join('、');
-    card.append(foot);
+  if (hint) {
+    const tip = document.createElement('p');
+    tip.className = 'turn-hint';
+    tip.textContent = hint;
+    card.append(tip);
   }
 
+  if (changedFiles && changedFiles.length) {
+    card.append(runChangeDetails(runIds, changedFiles));
+  }
+
+  const actions = [];
   if (resumable) {
-    const actions = document.createElement('div');
-    actions.className = 'turn-actions';
-    actions.append(button('继续执行', 'btn btn-primary', () => continueRun(card)));
-    card.append(actions);
+    actions.push(button('继续执行', 'btn btn-primary', () => continueRun(card)));
+  }
+  if (actionLabel && typeof onAction === 'function') {
+    actions.push(button(actionLabel, 'btn btn-sm', onAction));
+  }
+  if (actions.length) {
+    const row = document.createElement('div');
+    row.className = 'turn-actions';
+    row.append(...actions);
+    card.append(row);
   }
 
   el.messages.append(card);
   hideEmptyState();
   scrollThread();
+}
+
+/**
+ * Codex 风格改动卡：默认收起，摘要只报「改了 N 个文件 +x −y」，
+ * 展开后按文件列状态与增删行数，再点单个文件才拉取并渲染 diff。
+ */
+function runChangeDetails(runIds, changedFiles) {
+  const paths = changedFiles.map(normalizePath);
+  const details = document.createElement('details');
+  details.className = 'turn-changes';
+
+  const head = document.createElement('summary');
+  head.className = 'turn-changes-head';
+  const label = document.createElement('span');
+  label.textContent = `改动 ${paths.length} 个文件`;
+  const stat = document.createElement('span');
+  stat.className = 'turn-changes-stat';
+  head.append(label, stat);
+
+  const body = document.createElement('div');
+  body.className = 'turn-changes-body';
+  details.append(head, body);
+
+  let started = false;
+  const start = () => {
+    if (started) {
+      return;
+    }
+    started = true;
+    loadRunChangeDetail(runIds, paths, stat, body);
+  };
+  details.addEventListener('toggle', () => {
+    if (details.open) {
+      start();
+    }
+  });
+  // 刚跑完的这一轮立刻取一次统计，摘要行才有 +x −y；回放历史时按需加载，避免一次打几十个请求
+  if (!state.replaying) {
+    start();
+  }
+  return details;
+}
+
+async function loadRunChangeDetail(runIds, paths, stat, body) {
+  const ids = (runIds || []).filter(Boolean);
+  body.replaceChildren(changeHint('读取改动中…'));
+  if (!ids.length) {
+    stat.textContent = '';
+    body.replaceChildren(runChangeFallback(paths));
+    return;
+  }
+  try {
+    const reports = await Promise.all(ids.map(async (runId) => {
+      const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/changes`);
+      if (!response.ok) {
+        throw new Error('HTTP ' + response.status);
+      }
+      return response.json();
+    }));
+    renderRunChangeDetail(mergeRunReports(reports), paths, stat, body);
+  } catch (error) {
+    stat.textContent = '';
+    body.replaceChildren(
+      changeHint('读取改动失败：' + error.message),
+      runChangeFallback(paths)
+    );
+  }
+}
+
+/**
+ * 合并一轮里多个 run 的改动：同一文件以最后一次运行的统计为准
+ * （最后一次的 diff 本身就是相对 HEAD 的完整改动，直接相加会重复计数）。
+ */
+function mergeRunReports(reports) {
+  const files = new Map();
+  let gitRepository = false;
+  let truncated = false;
+  for (const report of reports || []) {
+    gitRepository = gitRepository || report.gitRepository === true;
+    truncated = truncated || report.truncated === true;
+    for (const file of report.files || []) {
+      files.set(normalizePath(file.path), file);
+    }
+  }
+  const list = [...files.values()];
+  return {
+    gitRepository,
+    truncated,
+    files: list,
+    added: list.reduce((sum, file) => sum + Number(file.added || 0), 0),
+    removed: list.reduce((sum, file) => sum + Number(file.removed || 0), 0)
+  };
+}
+
+function renderRunChangeDetail(report, paths, stat, body) {
+  const files = Array.isArray(report.files) ? report.files : [];
+  const added = Number(report.added || 0);
+  const removed = Number(report.removed || 0);
+
+  stat.replaceChildren();
+  if (added || removed) {
+    const add = document.createElement('span');
+    add.className = 'add';
+    add.textContent = '+' + added;
+    const del = document.createElement('span');
+    del.className = 'del';
+    del.textContent = '−' + removed;
+    stat.append(add, document.createTextNode(' '), del);
+  }
+
+  body.replaceChildren();
+  if (!files.length) {
+    body.append(runChangeFallback(paths));
+    return;
+  }
+  if (!report.gitRepository) {
+    body.append(changeHint('工作区不是 git 仓库：只能列出本轮写过的文件，没有 diff。'));
+  }
+  for (const file of files) {
+    body.append(runChangeRow(file, report.gitRepository));
+  }
+  if (report.truncated) {
+    body.append(changeHint('改动过多，diff 已截断。'));
+  }
+  // 本轮清单只覆盖 Agent 的写文件工具；命令行改出来的文件要到「改动」面板看
+  const actions = document.createElement('div');
+  actions.className = 'turn-changes-actions';
+  actions.append(button('查看全部改动', 'btn btn-sm', () => selectTab('changes')));
+  body.append(actions);
+}
+
+/** 后端没有快照（老运行或快照已清理）时的兜底：只列文件名。 */
+function runChangeFallback(paths) {
+  const node = document.createElement('div');
+  node.className = 'run-change-flat';
+  node.textContent = paths.length ? paths.join('、') : '本次运行没有改动任何文件。';
+  return node;
+}
+
+function runChangeRow(file, gitRepository) {
+  const row = document.createElement('details');
+  row.className = 'diff-file run-change-row';
+
+  const summary = document.createElement('summary');
+  const status = document.createElement('span');
+  status.className = 'change-status is-' + statusKind(file.status || 'M');
+  status.textContent = file.status || 'M';
+  const path = document.createElement('span');
+  path.className = 'diff-path';
+  path.textContent = file.path;
+  path.title = file.path;
+  summary.append(status, path);
+
+  if (file.added || file.removed) {
+    const stat = document.createElement('span');
+    stat.className = 'diff-stat';
+    const add = document.createElement('span');
+    add.className = 'add';
+    add.textContent = '+' + Number(file.added || 0);
+    const del = document.createElement('span');
+    del.className = 'del';
+    del.textContent = ' −' + Number(file.removed || 0);
+    stat.append(add, del);
+    summary.append(stat);
+  }
+  row.append(summary);
+
+  if (!file.diff) {
+    path.title = file.path + (gitRepository ? '（无 diff）' : '（非 git 仓库）');
+    return row;
+  }
+
+  row.addEventListener('toggle', () => {
+    if (!row.open || row.dataset.rendered) {
+      return;
+    }
+    row.dataset.rendered = '1';
+    const body = document.createElement('div');
+    body.className = 'diff-lines';
+    const parsed = parseDiff(file.diff);
+    if (!parsed.length) {
+      body.append(changeHint('diff 为空。'));
+    } else {
+      for (const line of parsed[0].lines) {
+        body.append(diffLineRow(line));
+      }
+    }
+    row.append(body);
+  });
+  return row;
 }
 
 function fmtChars(value) {
@@ -1856,49 +2130,6 @@ function statusKind(status) {
   return 'modified';
 }
 
-/** 把 unified diff 拆成「文件 → 行」两级结构，供折叠面板渲染。 */
-function parseDiff(text) {
-  const files = [];
-  let current = null;
-  let oldLine = 0;
-  let newLine = 0;
-  for (const line of String(text).split('\n')) {
-    if (line.startsWith('diff --git ')) {
-      const match = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
-      current = { path: match ? match[2] : line, lines: [], added: 0, removed: 0 };
-      files.push(current);
-      continue;
-    }
-    if (!current) {
-      continue;
-    }
-    if (line.startsWith('@@')) {
-      const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-      if (hunk) {
-        oldLine = Number(hunk[1]);
-        newLine = Number(hunk[2]);
-      }
-      current.lines.push({ kind: 'hunk', text: line, old: '', next: '' });
-      continue;
-    }
-    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('index ')
-        || line.startsWith('new file') || line.startsWith('deleted file') || line.startsWith('similarity')) {
-      current.lines.push({ kind: 'meta', text: line, old: '', next: '' });
-      continue;
-    }
-    if (line.startsWith('+')) {
-      current.added++;
-      current.lines.push({ kind: 'add', text: line.slice(1), old: '', next: newLine++ });
-    } else if (line.startsWith('-')) {
-      current.removed++;
-      current.lines.push({ kind: 'del', text: line.slice(1), old: oldLine++, next: '' });
-    } else {
-      current.lines.push({ kind: 'ctx', text: line.slice(1), old: oldLine++, next: newLine++ });
-    }
-  }
-  return files;
-}
-
 function renderDiff(text) {
   const files = parseDiff(text);
   if (!files.length) {
@@ -1932,15 +2163,7 @@ function renderDiff(text) {
     const body = document.createElement('div');
     body.className = 'diff-lines';
     for (const line of file.lines) {
-      const row = document.createElement('div');
-      row.className = 'diff-line is-' + line.kind;
-      const no = document.createElement('span');
-      no.className = 'n';
-      no.textContent = line.old !== '' ? String(line.old) : (line.next !== '' ? String(line.next) : '');
-      const code = document.createElement('code');
-      code.textContent = line.text === '' ? ' ' : line.text;
-      row.append(no, code);
-      body.append(row);
+      body.append(diffLineRow(line));
     }
     details.append(body);
     details.addEventListener('toggle', () => {
@@ -1952,8 +2175,17 @@ function renderDiff(text) {
   }
 }
 
-function normalizePath(path) {
-  return String(path || '').replace(/\\/g, '/').replace(/^\.\//, '');
+/** 单行 diff：左侧行号，右侧代码；加/删/上下文由 kind 决定配色。 */
+function diffLineRow(line) {
+  const row = document.createElement('div');
+  row.className = 'diff-line is-' + line.kind;
+  const no = document.createElement('span');
+  no.className = 'n';
+  no.textContent = line.old !== '' ? String(line.old) : (line.next !== '' ? String(line.next) : '');
+  const code = document.createElement('code');
+  code.textContent = line.text === '' ? ' ' : line.text;
+  row.append(no, code);
+  return row;
 }
 
 function changeHint(text) {
@@ -2024,19 +2256,15 @@ async function browseTo(path) {
   }
 }
 
+/** 把错误响应翻译成一句人话：优先服务端给的 message/detail，其次 404 与状态码兜底。 */
 async function describeError(response) {
+  let body = null;
   try {
-    const body = await response.json();
-    if (body && body.message) {
-      return body.message;
-    }
+    body = await response.json();
   } catch (ignored) {
-    // 忽略非 JSON 错误体
+    // 非 JSON 错误体（例如网关返回的 HTML）
   }
-  if (response.status === 404) {
-    return '没有找到对应的运行或快照';
-  }
-  return response.status === 400 ? '目录不可访问' : 'HTTP ' + response.status;
+  return errorText(response, body);
 }
 
 function renderPickerList(data) {
@@ -2600,6 +2828,7 @@ function resetView() {
   state.runId = null;
   state.lastRunId = null;
   state.changedFiles = [];
+  state.turnRuns = [];
   state.streamCard = null;
   state.streamText = '';
   syncComposer();

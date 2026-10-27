@@ -92,17 +92,24 @@ public class RunSnapshotService implements SnapshotSink {
         persist(context);
     }
 
-    public RollbackReport rollback(String runId) {
-        Path directory = root.resolve(sanitize(runId));
-        Path metaFile = directory.resolve(META_FILE);
+    /** 读取某次运行写过的文件清单；没有写过文件（或快照已被清理）时返回 {@code null}。 */
+    public SnapshotMeta meta(String runId) {
+        Path metaFile = root.resolve(sanitize(runId)).resolve(META_FILE);
         if (!Files.isRegularFile(metaFile)) {
-            throw new IllegalArgumentException("没有该运行的回滚快照: " + runId);
+            return null;
         }
-        SnapshotMeta meta;
         try {
-            meta = mapper.readValue(Files.readString(metaFile), SnapshotMeta.class);
+            return mapper.readValue(Files.readString(metaFile), SnapshotMeta.class);
         } catch (IOException e) {
             throw new UncheckedIOException("读取快照元数据失败", e);
+        }
+    }
+
+    public RollbackReport rollback(String runId) {
+        Path directory = root.resolve(sanitize(runId));
+        SnapshotMeta meta = meta(runId);
+        if (meta == null) {
+            throw new IllegalArgumentException("没有该运行的回滚快照: " + runId);
         }
 
         Path workspace = Path.of(meta.workspace()).toAbsolutePath().normalize();

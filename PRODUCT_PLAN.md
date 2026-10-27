@@ -202,6 +202,9 @@ pilot-core    ── AgentLoop、消息、模型协议、工具、权限、追�
 - `POST /api/runs/{id}/cancel`：请求取消。
 - `GET /api/sessions/{id}`：读取会话状态和摘要。
 - `GET /api/sessions/{id}/diff`：读取变更审阅数据。
+- `GET /api/runs/{id}/changes`：读取本次运行改过的文件与逐文件 diff，供对话区展示。
+- `PUT /api/settings/model`：更新模型/端点/密钥；`apiKey` 留空表示保持，`clearApiKey=true` 表示明确清除。
+- `DELETE /api/settings/model/api-key`：明确的密钥清除动作（幂等），清除结果落盘并覆盖配置默认值。
 - `GET /api/health`：健康检查。
 
 当前 `/api/chat`、`/api/chat/stream`、`/api/approve` 是脚手架路由；MVP 实现时建议升级为显式会话和事件协议。

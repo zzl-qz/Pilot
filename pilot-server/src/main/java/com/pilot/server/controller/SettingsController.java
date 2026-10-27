@@ -4,6 +4,7 @@ import com.pilot.core.permission.PermissionMode;
 import com.pilot.server.config.ModelSettings;
 import com.pilot.server.config.PermissionSettings;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -61,10 +62,23 @@ public class SettingsController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请求体不能为空");
         }
         try {
-            models.update(request.endpoint(), request.model(), request.apiKey());
+            models.update(request.endpoint(), request.model(), request.apiKey(),
+                    Boolean.TRUE.equals(request.clearApiKey()));
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
+        return current();
+    }
+
+    /**
+     * 明确清除已保存的 API Key（幂等）。
+     *
+     * <p>与 PUT 里「apiKey 留空表示保持原值」区分开：清除是一个不会被误解的独立动作。
+     * 清除结果会落盘并覆盖配置文件/环境变量里的默认值，重启后也不会自动回填。
+     */
+    @DeleteMapping("/model/api-key")
+    public SettingsResponse clearModelApiKey() {
+        models.update(null, null, null, true);
         return current();
     }
 
@@ -87,5 +101,9 @@ public class SettingsController {
 
     public record PermissionRequest(String mode) { }
 
-    public record ModelRequest(String endpoint, String model, String apiKey) { }
+    /**
+     * Jackson 3 对「缺失字段 + 基本类型」会按 null 处理并报错，
+     * 所以 {@code clearApiKey} 用包装类型，缺省视为不清理。
+     */
+    public record ModelRequest(String endpoint, String model, String apiKey, Boolean clearApiKey) { }
 }

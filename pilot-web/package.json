@@ -1,0 +1,9 @@
+{
+  "name": "pilot-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test src/test/js",
+    "check": "node --check src/main/resources/static/app.js"
+  }
+}
