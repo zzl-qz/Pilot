@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-/** 运行状态：让前端能显示当前是 Mock 剧本还是真实模型，以及可用的只读工具。 */
+/** 运行状态：当前模型、权限档位和可用工具。 */
 @RestController
 @RequestMapping("/api/health")
 public class HealthController {
@@ -35,10 +35,10 @@ public class HealthController {
         List<String> tools = registry == null
                 ? List.of()
                 : registry.tools().stream().map(Tool::name).toList();
-        return new HealthResponse("ok", agentProperties.mode(), modelSettings.snapshot().model(), tools,
+        return new HealthResponse("ok", modelSettings.snapshot().model(), tools,
                 permissionSettings.mode().name(), agentProperties.workspace());
     }
 
-    public record HealthResponse(String status, String agentMode, String model, List<String> tools,
+    public record HealthResponse(String status, String model, List<String> tools,
                                 String permissionMode, String workspace) { }
 }

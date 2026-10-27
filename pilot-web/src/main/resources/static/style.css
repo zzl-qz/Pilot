@@ -111,7 +111,6 @@ kbd {
 
 .logo-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
 .logo-text strong { font-size: 14px; letter-spacing: 0.02em; }
-.logo-text small { color: var(--dim); font-size: 11px; }
 
 .new-task {
   display: flex;
@@ -245,21 +244,6 @@ kbd {
 .conn.is-ok .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(62, 207, 142, 0.15); }
 .conn.is-error .dot { background: var(--err); }
 .conn.is-pending .dot { background: var(--warn); animation: pulse 1.6s ease-in-out infinite; }
-
-.mode-chip {
-  align-self: flex-start;
-  max-width: 100%;
-  padding: 2px 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.mode-chip.is-real { border-color: rgba(62, 207, 142, 0.3); color: var(--ok); }
-.mode-chip.is-mock { border-color: rgba(242, 181, 68, 0.3); color: var(--warn); }
 
 .workspace-chip {
   color: var(--dim);
@@ -507,6 +491,96 @@ kbd {
   line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.msg-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.msg-edit-btn,
+.msg-action {
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.msg-edit-btn:hover,
+.msg-action:hover { color: var(--ink); }
+
+.msg-editor {
+  width: min(620px, 90%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.msg-editor textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  padding: 9px 13px;
+  border: 1px solid var(--accent);
+  border-radius: 14px 14px 4px 14px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.msg-editor-actions { display: flex; gap: 6px; }
+
+.message-queue {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.queue-title {
+  margin: 0 0 6px;
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.queue-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+.queue-item p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.queue-actions { display: flex; gap: 4px; flex: none; }
+
+.queue-item textarea {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
 }
 
 .msg-assistant .who {
@@ -901,7 +975,24 @@ kbd {
 .model-row input:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-sm { padding: 4px 10px; font-size: 11px; }
 
-/* 附件：粘贴后的待发送清单 */
+/* 把文件拖进页面时盖一层，避免浏览器直接打开文件 */
+.drop-veil {
+  position: fixed;
+  inset: 14px;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  border: 1.5px dashed var(--accent);
+  border-radius: 16px;
+  background: rgba(8, 12, 18, 0.72);
+  color: var(--ink);
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+.drop-veil[hidden] { display: none; }
+
+/* 附件：粘贴或拖入后的待发送清单 */
 .attachments {
   display: flex;
   flex-wrap: wrap;

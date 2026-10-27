@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -158,6 +159,81 @@ public class SessionController {
         String runId = "run_" + UUID.randomUUID();
         sessions.publish(id, runId, new RunStarted("（继续上一次未完成的任务）"));
         runStarter.resume(id, runId);
+        return new MessageResponse(id, runId);
+    }
+
+    /** 还没被当前运行消费的消息。空着表示没有在排队。 */
+    @GetMapping("/{id}/queue")
+    public QueueResponse queue(@PathVariable String id) {
+        requireSession(id);
+        return new QueueResponse(runStarter.queued(id));
+    }
+
+    /** 改队列里的某一句，下标从 0 开始。还没轮到的才能改。 */
+    @PutMapping("/{id}/queue/{index}")
+    public QueueResponse editQueued(@PathVariable String id, @PathVariable int index,
+                                    @RequestBody(required = false) QueueEditRequest request) {
+        requireSession(id);
+        if (request == null || request.content() == null || request.content().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
+        }
+        if (!runStarter.editQueued(id, index, request.content())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列里没有这一句");
+        }
+        return new QueueResponse(runStarter.queued(id));
+    }
+
+    @DeleteMapping("/{id}/queue/{index}")
+    public QueueResponse removeQueued(@PathVariable String id, @PathVariable int index) {
+        requireSession(id);
+        if (!runStarter.removeQueued(id, index)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列里没有这一句");
+        }
+        return new QueueResponse(runStarter.queued(id));
+    }
+
+    /**
+     * 改已经发出去的一句并重跑。这句以及它后面的回复都会拿掉，再用新内容开一轮。
+     * 运行中不能改，免得和正在跑的那轮打架；还没轮到的话去队列里改。
+     */
+    @PostMapping("/{id}/resend")
+    public MessageResponse resend(@PathVariable String id, @RequestBody(required = false) ResendRequest request) {
+        requireSession(id);
+        if (request == null || request.sequence() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sequence must not be null");
+        }
+        if (request.content() == null || request.content().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
+        }
+        if (runStarter.activeRun(id).isPresent()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "运行中不能改已经发出的消息");
+        }
+        List<EventEnvelope> events = sessions.events(id);
+        String original = null;
+        for (EventEnvelope event : events) {
+            if (event.sequence() == request.sequence() && event.payload() instanceof RunStarted started) {
+                original = started.input();
+                break;
+            }
+        }
+        if (original == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "只能改你发出去的那一句");
+        }
+        int occurrence = 0;
+        for (EventEnvelope event : events) {
+            if (event.sequence() > request.sequence()) {
+                break;
+            }
+            if (event.payload() instanceof RunStarted started && original.equals(started.input())) {
+                occurrence++;
+            }
+        }
+        String content = request.content().strip();
+        runStarter.rewindBeforeUserInput(id, occurrence, original);
+        sessions.dropEventsFrom(id, request.sequence());
+        String runId = "run_" + UUID.randomUUID();
+        sessions.publish(id, runId, new RunStarted(content));
+        runStarter.start(id, runId, content);
         return new MessageResponse(id, runId);
     }
 
@@ -324,6 +400,12 @@ public class SessionController {
     public record RenameRequest(String title) { }
 
     public record MessageRequest(String content, List<AttachmentService.Inbound> attachments) { }
+
+    public record ResendRequest(Long sequence, String content) { }
+
+    public record QueueEditRequest(String content) { }
+
+    public record QueueResponse(List<String> items) { }
 
     public record MessageResponse(String sessionId, String runId) { }
 

@@ -32,6 +32,14 @@ public interface SessionRepository {
     List<EventEnvelope> eventsAfter(String sessionId, long afterSequence);
 
     /**
+     * 删掉序号大于等于 {@code fromSequence} 的事件。
+     * 会话自己的序号计数器不动，后面新事件继续递增，避免和已经发出去的 SSE 游标撞号。
+     *
+     * @return 实际删掉的条数
+     */
+    int dropEventsFrom(String sessionId, long fromSequence);
+
+    /**
      * 追加事件。
      *
      * @param status 追加后的会话状态，由调用方根据事件类型计算

@@ -76,6 +76,16 @@ public final class InMemorySessionRepository implements SessionRepository {
     }
 
     @Override
+    public int dropEventsFrom(String sessionId, long fromSequence) {
+        State state = require(sessionId);
+        synchronized (state) {
+            int before = state.events.size();
+            state.events.removeIf(envelope -> envelope.sequence() >= fromSequence);
+            return before - state.events.size();
+        }
+    }
+
+    @Override
     public EventEnvelope append(String sessionId, String runId, Instant timestamp, SessionEvent event,
                                 SessionStatus status) {
         State state = require(sessionId);

@@ -27,7 +27,6 @@ const el = {
   app: document.querySelector('#app'),
   sidebarToggle: document.querySelector('#sidebar-toggle'),
   scrim: document.querySelector('#scrim'),
-  modeBadge: document.querySelector('#mode-badge'),
   permChip: document.querySelector('#perm-chip'),
   permMenu: document.querySelector('#perm-menu'),
   modelChip: document.querySelector('#model-chip'),
@@ -57,6 +56,7 @@ const el = {
   emptyState: document.querySelector('#empty-state'),
   prompts: document.querySelector('#prompts'),
   approvalDock: document.querySelector('#approval-dock'),
+  messageQueue: document.querySelector('#message-queue'),
   toggleActivity: document.querySelector('#toggle-activity'),
   activity: document.querySelector('#activity'),
   railToggle: document.querySelector('#rail-toggle'),
@@ -85,6 +85,7 @@ const el = {
   timeline: document.querySelector('#timeline'),
   timelineEmpty: document.querySelector('#timeline-empty'),
   composer: document.querySelector('#composer'),
+  dropVeil: document.querySelector('#drop-veil'),
   input: document.querySelector('#input'),
   send: document.querySelector('#send'),
   palette: document.querySelector('#palette'),
@@ -117,7 +118,6 @@ const state = {
   lastEventAt: null,
   clock: null,
   cursor: 0,
-  agentMode: null,
   permissionMode: null,
   historyLimit: 60,
   historyHasMore: false,
@@ -137,6 +137,7 @@ const state = {
   replyText: '',
   toolRows: new Map(),
   pendingInputs: [],
+  queue: [],
   attachments: [],
   modelOptions: [],
   modelApiKeySet: false,
@@ -174,6 +175,7 @@ function init() {
   el.modelSave.addEventListener('click', saveModel);
   el.modelClearKey.addEventListener('change', onModelClearKeyToggle);
   el.input.addEventListener('paste', onPasteAttachments);
+  bindFileDrop();
   document.addEventListener('click', (event) => {
     if (!el.permMenu.hidden && !event.target.closest('.perm-picker')) {
       togglePermissionMenu(false);
@@ -283,23 +285,8 @@ async function loadHealth() {
       return;
     }
     const health = await response.json();
-    const real = health.agentMode === 'real';
-    state.agentMode = health.agentMode;
-    syncComposer();
-    el.modeBadge.textContent = real ? `真实模型 · ${health.model}` : 'Mock 剧本模式';
-    el.modeBadge.className = 'mode-chip ' + (real ? 'is-real' : 'is-mock');
-    el.modeBadge.title = real
-      ? `可用工具：${(health.tools || []).join('、') || '无'}`
-      : '未调用大模型，事件由内置剧本产生';
-
     if (health.permissionMode) {
       applyPermissionMode(health.permissionMode);
-    }
-
-    if (real) {
-      hideNotice();
-    } else {
-      showNotice('当前为 Mock 模式：事件由内置剧本产生，没有调用大模型。设置 PILOT_AGENT_MODE=real 和 PILOT_MODEL_API_KEY 后重启即可接入真实模型。');
     }
     await loadSettings();
   } catch (error) {
@@ -501,10 +488,11 @@ async function saveModel(override) {
     }
     const data = await response.json();
     applyModelSettings(data);
-    // 保存成功后面板保持打开：既能看到服务端回写的状态，也能继续改
-    const message = describeModelSaved(data, { clearKey: payload.clearApiKey, keyChanged });
-    setModelHint(message, 'ok');
-    showNotice(message);
+    // 保存成功就收起面板。结果在顶部提示里，和权限菜单点完即关一样。
+    // 失败时不关，错误留在面板里，改完端点或 Key 可以再试。
+    showNotice(describeModelSaved(data, { clearKey: payload.clearApiKey, keyChanged }));
+    toggleModelMenu(false);
+    el.modelChip.focus();
   } catch (error) {
     // 失败时面板不关：错误留在原来的位置，用户可以直接改端点/Key 再试
     setModelHint('保存失败：' + error.message, 'error');
@@ -518,6 +506,85 @@ async function saveModel(override) {
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+
+/** 从系统拖文件进来。和粘贴走同一条附件队列，限制也一样：最多 5 个、单个 2 MB。 */
+function bindFileDrop() {
+  let depth = 0;
+  document.addEventListener('dragenter', (event) => {
+    if (!dragHasFiles(event)) {
+      return;
+    }
+    event.preventDefault();
+    depth += 1;
+    el.dropVeil.hidden = false;
+  });
+  document.addEventListener('dragover', (event) => {
+    if (!dragHasFiles(event)) {
+      return;
+    }
+    // 不拦这个，浏览器会把松开当成「打开文件」
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+  });
+  document.addEventListener('dragleave', (event) => {
+    if (!dragHasFiles(event)) {
+      return;
+    }
+    depth = Math.max(0, depth - 1);
+    if (depth === 0 || !event.relatedTarget) {
+      depth = 0;
+      el.dropVeil.hidden = true;
+    }
+  });
+  document.addEventListener('drop', (event) => {
+    if (!dragHasFiles(event)) {
+      return;
+    }
+    event.preventDefault();
+    depth = 0;
+    el.dropVeil.hidden = true;
+    const files = filesFromDrop(event.dataTransfer);
+    if (files.length) {
+      addAttachments(files);
+    }
+  });
+}
+
+function dragHasFiles(event) {
+  const types = event.dataTransfer && event.dataTransfer.types;
+  return !!types && [...types].includes('Files');
+}
+
+/** 文件夹不展开。左侧工作区已经能打开目录，这里只收具体文件。 */
+function filesFromDrop(dataTransfer) {
+  const files = [];
+  let sawDirectory = false;
+  const items = [...(dataTransfer.items || [])];
+  if (items.length) {
+    for (const item of items) {
+      if (item.kind !== 'file') {
+        continue;
+      }
+      const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
+      if (entry && entry.isDirectory) {
+        sawDirectory = true;
+        continue;
+      }
+      const file = item.getAsFile();
+      if (file) {
+        files.push(file);
+      }
+    }
+  } else {
+    files.push(...(dataTransfer.files || []));
+  }
+  if (sawDirectory) {
+    showNotice('文件夹先不收。把里面的文件拖进来，或用左侧工作区打开目录。');
+  }
+  return files;
+}
 
 /** 粘贴时优先取剪贴板里的文件（截图、复制的文件），纯文本粘贴保持原样。 */
 function onPasteAttachments(event) {
@@ -851,6 +918,8 @@ async function loadHistory({ keepViewport = false } = {}) {
 
   resetView();
   state.pendingInputs = [];
+  state.queue = [];
+  renderQueue();
   state.historyHasMore = data.hasMore === true;
   state.replaying = true;
   for (const event of data.events || []) {
@@ -867,6 +936,7 @@ async function loadHistory({ keepViewport = false } = {}) {
   } else {
     scrollThread();
   }
+  await loadQueue();
 }
 
 function renderHistoryMore() {
@@ -961,8 +1031,14 @@ function handleEvent(event) {
       const input = event.payload.input || '';
       if (state.pendingInputs[0] === input) {
         state.pendingInputs.shift();
+        stampLastUserMessage(event.sequence, input);
+      } else if (state.queue[0] === input) {
+        // 排队的下一句被自动开成新一轮，从队列拿掉，再画进对话
+        state.queue.shift();
+        renderQueue();
+        appendUserMessage(input, event.sequence);
       } else if (input) {
-        appendUserMessage(input);
+        appendUserMessage(input, event.sequence);
       }
       showThinking();
       record(event, { kind: 'run', tone: 'run', status: '开始', title: '运行开始', detail: input });
@@ -1114,7 +1190,16 @@ function handleEvent(event) {
       break;
     }
     case 'run.steered': {
-      showNotice('已追加指令：' + (event.payload.input || ''));
+      const steered = event.payload.input || '';
+      const index = state.queue.indexOf(steered);
+      if (index >= 0) {
+        state.queue.splice(index, 1);
+        renderQueue();
+      }
+      if (steered) {
+        appendUserMessage(steered);
+      }
+      showNotice('已追加指令：' + steered);
       setRunState('running', '已收到补充指令');
       break;
     }
@@ -1679,17 +1764,110 @@ function finishReply(failed) {
   state.replyText = '';
 }
 
-function appendUserMessage(text) {
+function appendUserMessage(text, sequence) {
   const wrapper = document.createElement('article');
   wrapper.className = 'msg msg-user';
+  wrapper.dataset.text = text;
+  if (sequence) {
+    wrapper.dataset.sequence = String(sequence);
+  }
 
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
   bubble.textContent = text;
 
-  wrapper.append(bubble);
+  const actions = document.createElement('div');
+  actions.className = 'msg-actions';
+  actions.append(button('编辑', 'msg-edit-btn', () => beginEditUserMessage(wrapper)));
+
+  wrapper.append(bubble, actions);
   el.messages.append(wrapper);
   hideEmptyState();
+}
+
+/** 乐观渲染时还没有序号，run.started 到达后补上，编辑才知道改的是哪一句。 */
+function stampLastUserMessage(sequence, text) {
+  const nodes = el.messages.querySelectorAll('.msg-user');
+  const last = nodes[nodes.length - 1];
+  if (!last || last.dataset.text !== text || !sequence) {
+    return;
+  }
+  last.dataset.sequence = String(sequence);
+}
+
+function beginEditUserMessage(wrapper) {
+  if (state.running) {
+    showNotice('这句已经发出去了。运行中要改的话，改输入框上方队列里还没轮到的那句。');
+    return;
+  }
+  const sequence = Number(wrapper.dataset.sequence);
+  if (!sequence) {
+    showNotice('这句是中途追加的，请改它所属的那条任务。');
+    return;
+  }
+  if (wrapper.querySelector('.msg-editor')) {
+    return;
+  }
+  const original = wrapper.dataset.text || '';
+  const editor = document.createElement('div');
+  editor.className = 'msg-editor';
+  const field = document.createElement('textarea');
+  field.value = original;
+  const actions = document.createElement('div');
+  actions.className = 'msg-editor-actions';
+  const cancel = button('取消', 'msg-action', () => restoreUserBubble(wrapper, original));
+  const send = button('发送', 'btn btn-primary btn-sm', () => resendUserMessage(wrapper, sequence, field.value));
+  actions.append(cancel, send);
+  editor.append(field, actions);
+  wrapper.querySelector('.bubble')?.remove();
+  wrapper.querySelector('.msg-actions')?.remove();
+  wrapper.append(editor);
+  field.focus();
+  field.setSelectionRange(field.value.length, field.value.length);
+}
+
+function restoreUserBubble(wrapper, text) {
+  wrapper.replaceChildren();
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = text;
+  const actions = document.createElement('div');
+  actions.className = 'msg-actions';
+  actions.append(button('编辑', 'msg-edit-btn', () => beginEditUserMessage(wrapper)));
+  wrapper.append(bubble, actions);
+}
+
+async function resendUserMessage(wrapper, sequence, content) {
+  const text = String(content || '').trim();
+  if (!text || !state.sessionId) {
+    return;
+  }
+  const send = wrapper.querySelector('.btn-primary');
+  if (send) {
+    send.disabled = true;
+  }
+  closeStream();
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/resend`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sequence, content: text })
+    });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    state.cursor = 0;
+    await loadHistory();
+    if (state.sessionId) {
+      connect(state.cursor);
+    }
+  } catch (error) {
+    showNotice('重发失败：' + error.message);
+    if (state.sessionId && !state.source) {
+      connect(state.cursor);
+    }
+    restoreUserBubble(wrapper, wrapper.dataset.text || text);
+  }
 }
 
 /** 工具类型 → 单字符图标，让一屏内能快速扫出「读 / 写 / 命令」。 */
@@ -2402,11 +2580,11 @@ async function submitMessage(content, attachments = []) {
     return;
   }
 
-  // 运行中发送不再拦截：服务端会把它排进当前 run 的下一轮
+  // 运行中不再直接插进对话：先排进队列，下一步才会被拿走，拿走之前可以改、可以删
   const wasRunning = state.running;
-  appendUserMessage(content || attachmentSummary(attachments));
-  state.pendingInputs.push(content);
   if (!wasRunning) {
+    appendUserMessage(content || attachmentSummary(attachments));
+    state.pendingInputs.push(content);
     renameSessionIfDefault(content);
     state.running = true;
     state.runId = null;
@@ -2414,6 +2592,8 @@ async function submitMessage(content, attachments = []) {
     state.changedFiles = [];
     setRunState('running', '发送中');
   } else {
+    state.queue.push(content);
+    renderQueue();
     setRunState('running', '已排队');
   }
   syncComposer();
@@ -2433,7 +2613,7 @@ async function submitMessage(content, attachments = []) {
       })
     });
     if (response.status === 202) {
-      // 已入队，等 run.steered 事件确认被消费
+      await loadQueue();
       return;
     }
     if (!response.ok) {
@@ -2448,7 +2628,14 @@ async function submitMessage(content, attachments = []) {
       state.pendingInputs.pop();
       syncComposer();
       setRunState('error', '发送失败');
-    } else if (attachments.length) {
+    } else {
+      const index = state.queue.lastIndexOf(content);
+      if (index >= 0) {
+        state.queue.splice(index, 1);
+        renderQueue();
+      }
+    }
+    if (wasRunning && attachments.length) {
       // 运行中追加图片会被服务端拒绝，把附件放回输入区，避免白丢
       setAttachments(attachments);
     }
@@ -2742,8 +2929,109 @@ function syncComposer() {
   el.send.title = running ? '停止本次运行' : '发送 (Ctrl Enter)';
   // 运行中按钮必须可点：此时它是唯一的停止入口
   el.send.disabled = running ? false : !state.composerEnabled;
-  // mock 模式没有真实写入，也就没有快照可回滚
-  el.changesRollback.hidden = !(state.lastRunId && !running && state.agentMode === 'real');
+  el.changesRollback.hidden = !(state.lastRunId && !running);
+  el.input.placeholder = running
+    ? '运行中。再写一句会排进上方队列，轮到之前可以改或删'
+    : '描述任务，Enter 发送，Shift + Enter 换行，@ 引用文件，/ 快捷指令';
+}
+
+async function loadQueue() {
+  if (!state.sessionId || !el.messageQueue) {
+    return;
+  }
+  const sessionId = state.sessionId;
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/queue`);
+    if (!response.ok || state.sessionId !== sessionId) {
+      return;
+    }
+    const data = await response.json();
+    state.queue = Array.isArray(data.items) ? data.items : [];
+    renderQueue();
+  } catch (error) {
+    console.warn('[queue]', error);
+  }
+}
+
+function renderQueue() {
+  if (!el.messageQueue) {
+    return;
+  }
+  const items = state.queue || [];
+  el.messageQueue.replaceChildren();
+  el.messageQueue.hidden = items.length === 0;
+  if (!items.length) {
+    return;
+  }
+  const title = document.createElement('p');
+  title.className = 'queue-title';
+  title.textContent = `排队 ${items.length} 句。下一步会带上；这轮先结束的话，自动接着跑。`;
+  el.messageQueue.append(title);
+  items.forEach((text, index) => {
+    const row = document.createElement('div');
+    row.className = 'queue-item';
+    const body = document.createElement('p');
+    body.textContent = text;
+    const actions = document.createElement('div');
+    actions.className = 'queue-actions';
+    actions.append(
+      button('改', 'btn btn-sm', () => editQueuedItem(index, row)),
+      button('移除', 'btn btn-sm', () => removeQueuedItem(index))
+    );
+    row.append(body, actions);
+    el.messageQueue.append(row);
+  });
+}
+
+function editQueuedItem(index, row) {
+  const current = state.queue[index] || '';
+  const field = document.createElement('textarea');
+  field.value = current;
+  const actions = document.createElement('div');
+  actions.className = 'queue-actions';
+  actions.append(
+    button('取消', 'btn btn-sm', () => renderQueue()),
+    button('保存', 'btn btn-primary btn-sm', async () => {
+      const text = field.value.trim();
+      if (!text) {
+        showNotice('排队的内容不能是空的，不想发就点移除。');
+        return;
+      }
+      try {
+        const response = await fetch(
+          `/api/sessions/${encodeURIComponent(state.sessionId)}/queue/${index}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: text })
+          });
+        if (!response.ok) {
+          throw new Error(await describeError(response));
+        }
+        const data = await response.json();
+        state.queue = Array.isArray(data.items) ? data.items : [];
+        renderQueue();
+      } catch (error) {
+        showNotice('改队列失败：' + error.message);
+      }
+    })
+  );
+  row.replaceChildren(field, actions);
+  field.focus();
+}
+
+async function removeQueuedItem(index) {
+  try {
+    const response = await fetch(
+      `/api/sessions/${encodeURIComponent(state.sessionId)}/queue/${index}`, { method: 'DELETE' });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const data = await response.json();
+    state.queue = Array.isArray(data.items) ? data.items : [];
+    renderQueue();
+  } catch (error) {
+    showNotice('移除失败：' + error.message);
+  }
 }
 
 function setConnection(kind, label) {

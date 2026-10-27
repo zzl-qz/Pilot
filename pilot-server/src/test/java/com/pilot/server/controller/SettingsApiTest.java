@@ -19,7 +19,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** 模型设置的对外契约：留空保持、明确清除、坏端点不落盘。 */
-@SpringBootTest(properties = {"pilot.mock.enabled=false", "pilot.agent.mode=mock", "pilot.store=memory"})
+@SpringBootTest(properties = "pilot.store=memory")
 @AutoConfigureMockMvc
 class SettingsApiTest {
     private static final Path DATA = Path.of(System.getProperty("java.io.tmpdir"), "pilot-settings-api-test");

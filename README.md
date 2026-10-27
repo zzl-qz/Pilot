@@ -23,10 +23,9 @@ pilot-core (AgentLoop、模型客户端、上下文压缩、工具注册/执行�
 ./mvnw -pl pilot-server -am spring-boot:run
 ```
 
-默认 profile 为 `local`，代理模式默认为 `mock`，权限默认为 `READ_ONLY`。默认 Web/API 地址为 `http://localhost:8080`。可用环境变量设置真实模型：
+默认 profile 为 `local`，权限默认为 `READ_ONLY`。默认 Web/API 地址为 `http://localhost:8080`。可用环境变量设置模型：
 
 ```sh
-PILOT_AGENT_MODE=real \
 PILOT_MODEL_API_KEY=你的密钥 \
 PILOT_MODEL_ENDPOINT=https://api.openai.com/v1/chat/completions \
 PILOT_MODEL_MODEL=gpt-4o-mini \
@@ -62,7 +61,7 @@ Sprint 6 可复现任务规格与任务矩阵、运行命令见 `evaluation/TASK
 
 ## 已知限制
 
-- 真实模型的质量、成功率和响应受模型/网络/提示词影响；mock 和单元测试不能证明真实端到端质量。
+- 模型的质量、成功率和响应受模型、网络和提示词影响；单元测试不能证明真实端到端质量。
 - token 预算采用字符估算，不是模型 tokenizer 的精确计数；压缩摘要可能丢失细节，需复读原文件核实。
 - ASK 依赖运行中的审批服务；等待超时按拒绝处理。不要把审批 UI 当作安全沙箱。
 - 运行时存储、文件写入、命令执行均有本地副作用；先备份并使用可丢弃工作区。

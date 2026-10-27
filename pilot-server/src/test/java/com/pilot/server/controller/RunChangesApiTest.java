@@ -18,7 +18,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** 对话区的「本轮改动」卡依赖这个接口：run 粒度、逐文件状态与 diff。 */
-@SpringBootTest(properties = {"pilot.mock.enabled=false", "pilot.agent.mode=mock", "pilot.store=memory"})
+@SpringBootTest(properties = "pilot.store=memory")
 @AutoConfigureMockMvc
 class RunChangesApiTest {
     private static final Path DATA = Path.of(System.getProperty("java.io.tmpdir"), "pilot-changes-api-test");

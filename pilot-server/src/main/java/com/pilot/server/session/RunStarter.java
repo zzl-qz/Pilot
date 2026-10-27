@@ -6,15 +6,14 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 一次运行的启动器。控制器只依赖该接口，具体实现由 {@code pilot.agent.mode} 决定：
- * mock 走离线剧本，real 走 {@code AgentLoop}。
+ * 一次运行的启动器。控制器只依赖这个接口，真正跑模型的是 {@code AgentRunService}。
  */
 public interface RunStarter {
     void start(String sessionId, String runId, String input);
 
     /**
-     * 带附件的启动。默认实现忽略附件，保证 mock 与测试实现不被拖累；
-     * 真实实现（{@code AgentRunService}）会把它挂到本次用户消息上。
+     * 带附件的启动。默认实现忽略附件，测试里的空实现不用处理附件。
+     * {@code AgentRunService} 会把附件挂到本次用户消息上。
      */
     default void start(String sessionId, String runId, String input, List<Attachment> attachments) {
         start(sessionId, runId, input);
@@ -62,5 +61,29 @@ public interface RunStarter {
      */
     default boolean steer(String sessionId, String text) {
         return false;
+    }
+
+    /** 还没被当前运行拿走的用户消息，按入队顺序。 */
+    default List<String> queued(String sessionId) {
+        return List.of();
+    }
+
+    /** 改队列里的某一句。下标从 0 开始。 */
+    default boolean editQueued(String sessionId, int index, String text) {
+        return false;
+    }
+
+    /** 从队列里拿掉某一句。下标从 0 开始。 */
+    default boolean removeQueued(String sessionId, int index) {
+        return false;
+    }
+
+    /**
+     * 编辑已发出的用户消息前，把对话记忆裁到这句之前。
+     *
+     * @param occurrence    这句原文在用户消息里是第几次出现，从 1 开始
+     * @param originalInput 改之前的原文，用来在记忆里定位
+     */
+    default void rewindBeforeUserInput(String sessionId, int occurrence, String originalInput) {
     }
 }

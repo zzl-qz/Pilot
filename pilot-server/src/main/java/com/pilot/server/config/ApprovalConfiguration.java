@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Configuration;
 
 import java.time.Duration;
 
-/** 审批注册表与运行模式无关，mock 模式下也可用于联调审批接口。 */
+/** 审批注册表。等待超时按拒绝处理。 */
 @Configuration(proxyBeanMethods = false)
 public class ApprovalConfiguration {
     @Bean

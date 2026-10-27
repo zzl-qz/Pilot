@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <title>Pilot · 本地编码代理</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230d1117'/%3E%3Cpath d='M11 23V9h6.2a4.8 4.8 0 0 1 0 9.6H14' stroke='%236ea8ff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/style.css?v=9">
+  <link rel="stylesheet" href="/style.css?v=12">
 </head>
 <body>
 <div class="app" id="app">
@@ -17,7 +17,6 @@
       <span class="logo" aria-hidden="true">P</span>
       <span class="logo-text">
         <strong>Pilot</strong>
-        <small id="mode-badge">连接中</small>
       </span>
       <button id="rail-toggle" class="icon-btn" type="button" title="收起侧栏 (Ctrl B)" aria-label="收起侧栏">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 4 5.5 8l4 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -122,6 +121,7 @@
       </div>
 
       <div class="composer-wrap">
+        <div id="message-queue" class="message-queue" hidden></div>
         <div id="approval-dock" class="approval" hidden></div>
         <div id="ref-menu" class="ref-menu" hidden></div>
         <div id="attachments" class="attachments" hidden></div>
@@ -165,6 +165,8 @@
               </span>
               <span class="composer-hint">
                 <kbd>Enter</kbd> 发送
+                <span class="sep">·</span>
+                拖入文件
                 <span class="sep">·</span>
                 <kbd>@</kbd> 文件
                 <span class="sep">·</span>
@@ -274,6 +276,7 @@
 
 <div id="scrim" class="scrim" hidden></div>
 
-<script type="module" src="/app.js?v=10"></script>
+<div id="drop-veil" class="drop-veil" hidden>松开以添加文件</div>
+<script type="module" src="/app.js?v=13"></script>
 </body>
 </html>

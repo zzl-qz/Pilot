@@ -128,6 +128,20 @@ public final class SessionService {
     }
 
     /**
+     * 从某条用户消息起重写对话时，把这条以及后面的事件删掉。
+     * 和 {@link #publish} 共用会话锁，避免删到一半又被追加。
+     */
+    public int dropEventsFrom(String sessionId, long fromSequence) {
+        Object lock = lockFor(sessionId);
+        synchronized (lock) {
+            if (repository.find(sessionId).isEmpty()) {
+                throw new NoSuchSessionException(sessionId);
+            }
+            return repository.dropEventsFrom(sessionId, fromSequence);
+        }
+    }
+
+    /**
      * 订阅会话事件：先按顺序回放 {@code afterSequence} 之后的历史事件，再接收后续新事件。
      *
      * @throws NoSuchSessionException 会话不存在

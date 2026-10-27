@@ -10,6 +10,7 @@ import com.pilot.core.model.ModelClient;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.event.PlanUpdated;
 import com.pilot.core.event.RunContinued;
+import com.pilot.core.event.RunStarted;
 import com.pilot.core.plan.PlanSink;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
@@ -26,13 +27,13 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -41,14 +42,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
- * real 模式：在独立线程上执行 {@link AgentLoop}，把循环产生的事件写入会话。
+ * 在独立线程上执行 {@link AgentLoop}，把循环产生的事件写入会话。
  *
  * <p>对话记忆通过 {@code ConversationRepository} 落盘（默认 SQLite），每步结束都会 checkpoint，
  * 因此进程重启后可以用 {@code /continue} 接着跑；计划通过 {@code PlanRepository} 保存，
  * 并在每次运行时重新注入 system，保证压缩之后计划仍然可见。
  */
 @Component
-@ConditionalOnProperty(prefix = "pilot.agent", name = "mode", havingValue = "real")
 public class AgentRunService implements RunStarter {
     private static final Logger log = LoggerFactory.getLogger(AgentRunService.class);
     private static final int MAX_AUTO_CONTINUE = 3;
@@ -67,7 +67,7 @@ public class AgentRunService implements RunStarter {
     private final ConversationRepository conversations;
     private final com.pilot.core.session.PlanRepository plans;
     private final ConcurrentMap<String, RunHandle> runs = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, BlockingQueue<String>> inboxes = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Deque<String>> inboxes = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Integer> autoContinueAttempts = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> autoContinueSignature = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
@@ -128,14 +128,106 @@ public class AgentRunService implements RunStarter {
         if (text == null || text.isBlank() || registry.activeRun(sessionId).isEmpty()) {
             return false;
         }
-        inboxes.computeIfAbsent(sessionId, key -> new LinkedBlockingQueue<>()).offer(text.strip());
+        Deque<String> queue = inbox(sessionId);
+        synchronized (queue) {
+            queue.offer(text.strip());
+        }
         return true;
+    }
+
+    @Override
+    public List<String> queued(String sessionId) {
+        Deque<String> queue = inboxes.get(sessionId);
+        if (queue == null) {
+            return List.of();
+        }
+        synchronized (queue) {
+            return List.copyOf(queue);
+        }
+    }
+
+    @Override
+    public boolean editQueued(String sessionId, int index, String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        Deque<String> queue = inboxes.get(sessionId);
+        if (queue == null) {
+            return false;
+        }
+        synchronized (queue) {
+            if (index < 0 || index >= queue.size()) {
+                return false;
+            }
+            var items = new ArrayList<>(queue);
+            items.set(index, text.strip());
+            queue.clear();
+            queue.addAll(items);
+            return true;
+        }
+    }
+
+    @Override
+    public boolean removeQueued(String sessionId, int index) {
+        Deque<String> queue = inboxes.get(sessionId);
+        if (queue == null) {
+            return false;
+        }
+        synchronized (queue) {
+            if (index < 0 || index >= queue.size()) {
+                return false;
+            }
+            var items = new ArrayList<>(queue);
+            items.remove(index);
+            queue.clear();
+            queue.addAll(items);
+            return true;
+        }
+    }
+
+    @Override
+    public void rewindBeforeUserInput(String sessionId, int occurrence, String originalInput) {
+        if (occurrence < 1 || originalInput == null) {
+            return;
+        }
+        List<Message> history = conversations.load(sessionId);
+        int seen = 0;
+        int cut = -1;
+        for (int i = 0; i < history.size(); i++) {
+            Message message = history.get(i);
+            if (!"user".equals(message.role())) {
+                continue;
+            }
+            String text = message.content() == null ? "" : message.content();
+            // 自动续跑塞进去的提示不是用户自己写的，不能拿来对位置
+            if (text.startsWith("[自动继续]") || !text.equals(originalInput)) {
+                continue;
+            }
+            seen++;
+            if (seen == occurrence) {
+                cut = i;
+                break;
+            }
+        }
+        if (cut >= 0) {
+            conversations.save(sessionId, history.subList(0, cut));
+        }
+        plans.delete(sessionId);
+    }
+
+    private Deque<String> inbox(String sessionId) {
+        return inboxes.computeIfAbsent(sessionId, key -> new ArrayDeque<>());
     }
 
     /** 每轮采样前拉一条用户追加的指令；没有就返回 null。 */
     private String pollSteer(String sessionId) {
-        var queue = inboxes.get(sessionId);
-        return queue == null ? null : queue.poll();
+        Deque<String> queue = inboxes.get(sessionId);
+        if (queue == null) {
+            return null;
+        }
+        synchronized (queue) {
+            return queue.poll();
+        }
     }
 
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
@@ -153,8 +245,24 @@ public class AgentRunService implements RunStarter {
                 runRepository.finished(runId, status, java.time.Instant.now());
                 runs.remove(runId, handle);
             }
-            maybeAutoContinue(sessionId, status);
+            if (!maybeAutoContinue(sessionId, status) && !"CANCELLED".equals(status)) {
+                drainQueue(sessionId);
+            }
         });
+    }
+
+    /** 这轮结束时队列里还有话，就按顺序自动开下一轮，不让用户再点一次发送。 */
+    private void drainQueue(String sessionId) {
+        if (registry.activeRun(sessionId).isPresent()) {
+            return;
+        }
+        String next = pollSteer(sessionId);
+        if (next == null || next.isBlank()) {
+            return;
+        }
+        String runId = "run_" + java.util.UUID.randomUUID();
+        sessions.publish(sessionId, runId, new RunStarted(next));
+        launch(sessionId, runId, next, List.of(), false);
     }
 
     /**
@@ -162,17 +270,17 @@ public class AgentRunService implements RunStarter {
      *
      * <p>两道刹车：最多连续 {@value #MAX_AUTO_CONTINUE} 次；计划状态连续两轮没有变化即视为卡住，停下等人工介入。
      */
-    private void maybeAutoContinue(String sessionId, String status) {
+    private boolean maybeAutoContinue(String sessionId, String status) {
         if (!"MAX_STEPS".equals(status)) {
             autoContinueAttempts.remove(sessionId);
             autoContinueSignature.remove(sessionId);
-            return;
+            return false;
         }
         var items = plans.load(sessionId);
         if (items.stream().allMatch(com.pilot.core.plan.PlanItem::done)) {
             autoContinueAttempts.remove(sessionId);
             autoContinueSignature.remove(sessionId);
-            return;
+            return false;
         }
 
         String signature = items.stream()
@@ -182,18 +290,19 @@ public class AgentRunService implements RunStarter {
             // 计划两轮没变，说明模型在原地打转
             autoContinueAttempts.remove(sessionId);
             autoContinueSignature.remove(sessionId);
-            return;
+            return false;
         }
         int attempt = autoContinueAttempts.merge(sessionId, 1, Integer::sum);
         if (attempt > MAX_AUTO_CONTINUE) {
             autoContinueAttempts.remove(sessionId);
-            return;
+            return false;
         }
 
         autoContinueSignature.put(sessionId, signature);
         String runId = "run_" + java.util.UUID.randomUUID();
         publish(sessionId, runId, new RunContinued(attempt, MAX_AUTO_CONTINUE, "步数触顶，按未完成计划继续"));
         launch(sessionId, runId, null, List.of(), true);
+        return true;
     }
 
     @Override
@@ -302,7 +411,12 @@ public class AgentRunService implements RunStarter {
             if (result.failureCode() == null) {
                 return "COMPLETED";
             }
-            return "CANCELLED".equals(result.failureCode()) ? "CANCELLED" : "FAILED";
+            // 步数触顶要单独返回，外层才会按未完成计划自动接下一轮。
+            // 以前一律收成 FAILED，自动继续的判断永远进不去。
+            if ("CANCELLED".equals(result.failureCode()) || "MAX_STEPS".equals(result.failureCode())) {
+                return result.failureCode();
+            }
+            return "FAILED";
         } catch (RuntimeException e) {
             log.error("Agent run {} failed unexpectedly", runId, e);
             String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
@@ -330,10 +444,10 @@ public class AgentRunService implements RunStarter {
     void logConfiguration() {
         ModelSettings.Snapshot snapshot = modelSettings.snapshot();
         if (!snapshot.hasApiKey()) {
-            log.warn("pilot.agent.mode=real，但模型 API Key 未配置，模型请求会失败；"
+            log.warn("模型 API Key 未配置，模型请求会失败；"
                     + "可在界面「模型设置」里填写，或设置环境变量 PILOT_MODEL_API_KEY");
         } else {
-            log.info("真实模型模式：model={} endpoint={} workspace={}",
+            log.info("模型已配置：model={} endpoint={} workspace={}",
                     snapshot.model(), snapshot.endpoint(), properties.workspace());
         }
     }

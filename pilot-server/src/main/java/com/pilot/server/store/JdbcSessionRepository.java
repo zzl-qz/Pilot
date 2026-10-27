@@ -124,6 +124,21 @@ public final class JdbcSessionRepository implements SessionRepository {
     }
 
     @Override
+    public int dropEventsFrom(String sessionId, long fromSequence) {
+        if (find(sessionId).isEmpty()) {
+            throw new NoSuchSessionException(sessionId);
+        }
+        String sql = "DELETE FROM events WHERE session_id = ? AND sequence >= ?";
+        try (Connection connection = store.open(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sessionId);
+            statement.setLong(2, fromSequence);
+            return statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("删除事件失败: " + sessionId, e);
+        }
+    }
+
+    @Override
     public EventEnvelope append(String sessionId, String runId, Instant timestamp, SessionEvent event,
                                 SessionStatus status) {
         SQLException last = null;

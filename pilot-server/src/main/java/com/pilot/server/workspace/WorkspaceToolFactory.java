@@ -12,7 +12,6 @@ import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.UpdatePlanTool;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.AgentProperties;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
@@ -27,7 +26,6 @@ import java.util.concurrent.ConcurrentMap;
  * 不能做成全局单例，否则会话会互相越界。构建结果按规范化路径缓存。
  */
 @Component
-@ConditionalOnProperty(prefix = "pilot.agent", name = "mode", havingValue = "real")
 public class WorkspaceToolFactory {
     private final AgentProperties properties;
     private final SnapshotSink snapshots;

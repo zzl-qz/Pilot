@@ -22,6 +22,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -30,6 +31,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -37,7 +39,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = {"pilot.mock.enabled=false", "pilot.agent.mode=mock", "pilot.store=memory"})
+@SpringBootTest(properties = "pilot.store=memory")
 @AutoConfigureMockMvc
 class SessionApiTest {
     private static final Path ATTACHMENT_ROOT = Path.of(System.getProperty("java.io.tmpdir"),
@@ -54,6 +56,12 @@ class SessionApiTest {
 
     static class TestRunStarter implements RunStarter {
         private final AtomicBoolean running = new AtomicBoolean();
+        private final List<String> queue = new ArrayList<>();
+
+        void setRunning(boolean value) {
+            running.set(value);
+            queue.clear();
+        }
 
         @Override
         public void start(String sessionId, String runId, String input) {
@@ -66,7 +74,34 @@ class SessionApiTest {
 
         @Override
         public boolean steer(String sessionId, String text) {
-            return running.get();
+            if (!running.get() || text == null || text.isBlank()) {
+                return false;
+            }
+            queue.add(text.strip());
+            return true;
+        }
+
+        @Override
+        public List<String> queued(String sessionId) {
+            return List.copyOf(queue);
+        }
+
+        @Override
+        public boolean editQueued(String sessionId, int index, String text) {
+            if (text == null || text.isBlank() || index < 0 || index >= queue.size()) {
+                return false;
+            }
+            queue.set(index, text.strip());
+            return true;
+        }
+
+        @Override
+        public boolean removeQueued(String sessionId, int index) {
+            if (index < 0 || index >= queue.size()) {
+                return false;
+            }
+            queue.remove(index);
+            return true;
         }
     }
     @DynamicPropertySource
@@ -297,6 +332,80 @@ class SessionApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.plan").isArray())
                 .andExpect(jsonPath("$.plan.length()").value(0));
+    }
+
+    /** 改已经发出去的一句：这句和后面的事件都删掉，再用新内容开一轮。 */
+    @Test
+    void resendsFromEditedUserMessage() throws Exception {
+        runStarter.setRunning(false);
+        String sessionId = createSession();
+        mvc.perform(post("/api/sessions/{id}/messages", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"第一句\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/sessions/{id}/messages", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"第二句\"}"))
+                .andExpect(status().isOk());
+
+        mvc.perform(post("/api/sessions/{id}/resend", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sequence\":1,\"content\":\"改过的第一句\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runId").isNotEmpty());
+
+        var events = sessions.events(sessionId);
+        assertEquals(1, events.size());
+        assertEquals("改过的第一句", ((RunStarted) events.get(0).payload()).input());
+    }
+
+    @Test
+    void rejectsResendWhileRunning() throws Exception {
+        String sessionId = createSession();
+        mvc.perform(post("/api/sessions/{id}/messages", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"第一句\"}"))
+                .andExpect(status().isOk());
+        runStarter.setRunning(true);
+        try {
+            mvc.perform(post("/api/sessions/{id}/resend", sessionId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"sequence\":1,\"content\":\"先别改\"}"))
+                    .andExpect(status().isConflict());
+            assertEquals(1, sessions.events(sessionId).size());
+        } finally {
+            runStarter.setRunning(false);
+        }
+    }
+
+    /** 运行中再发的话进队列，发出去之前可以改、可以删。 */
+    @Test
+    void queuesFollowUpUntilItIsEditedOrRemoved() throws Exception {
+        String sessionId = createSession();
+        runStarter.setRunning(true);
+        try {
+        mvc.perform(post("/api/sessions/{id}/messages", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"等会儿再做这个\"}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.runId").value("run_active"));
+
+        mvc.perform(get("/api/sessions/{id}/queue", sessionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0]").value("等会儿再做这个"));
+
+        mvc.perform(put("/api/sessions/{id}/queue/{index}", sessionId, 0)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"改成先列计划\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0]").value("改成先列计划"));
+
+        mvc.perform(delete("/api/sessions/{id}/queue/{index}", sessionId, 0))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(0));
+        } finally {
+            runStarter.setRunning(false);
+        }
     }
 
     /** 没有对话记忆时不能续跑，要明确返回冲突而不是静默开一个空 run。 */
