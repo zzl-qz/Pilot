@@ -100,6 +100,7 @@ public class AgentRunService implements RunStarter {
     private final PilotDataDir dataDir;
     private final MultiAgentService multiAgent;
     private final MultiAgentProperties multiProperties;
+    private final com.pilot.server.observability.RunMetrics metrics;
 
     public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
                            PermissionGate permissionGate, ApprovalBroker approvals,
@@ -109,7 +110,8 @@ public class AgentRunService implements RunStarter {
                            ConversationRepository conversations,
                            com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper,
                            PilotDataDir dataDir, com.pilot.server.store.QueuedMessageRepository queuedMessages,
-                           MultiAgentService multiAgent, MultiAgentProperties multiProperties) {
+                           MultiAgentService multiAgent, MultiAgentProperties multiProperties,
+                           com.pilot.server.observability.RunMetrics metrics) {
         this.sessions = sessions;
         this.conversations = conversations;
         this.plans = plans;
@@ -127,6 +129,7 @@ public class AgentRunService implements RunStarter {
         this.queuedMessages = queuedMessages;
         this.multiAgent = multiAgent;
         this.multiProperties = multiProperties;
+        this.metrics = metrics;
         this.executor = Executors.newFixedThreadPool(properties.runThreads(), runnable -> {
             Thread thread = new Thread(runnable, "pilot-agent-run");
             thread.setDaemon(true);
@@ -262,21 +265,66 @@ public class AgentRunService implements RunStarter {
         var handle = new RunHandle();
         runs.put(runId, handle);
         registry.register(runId, sessionId);
-        runRepository.started(runId, sessionId, java.time.Instant.now());
-        handle.future = executor.submit(() -> {
-            String status = "FAILED";
-            try {
-                status = execute(sessionId, runId, input, attachments, handle, continuation);
-            } finally {
-                runRepository.finished(runId, status, java.time.Instant.now());
-                runs.remove(runId, handle);
-            }
-            boolean continued = maybeAutoContinue(sessionId, status);
+        try {
+            runRepository.started(runId, sessionId, java.time.Instant.now());
+            handle.future = executor.submit(() -> runOnWorker(sessionId, runId, input, attachments, handle, continuation));
+        } catch (RuntimeException e) {
+            // 连启动都没成功：把刚占的槽位还回去，否则会话会一直显示「运行中」
+            runs.remove(runId, handle);
             registry.unregister(runId);
+            throw e;
+        }
+    }
+
+    /** 工作线程主体：无论怎么结束都要注销槽位，否则 /continue 会永久 409。 */
+    private void runOnWorker(String sessionId, String runId, String input, List<Attachment> attachments,
+                             RunHandle handle, boolean continuation) {
+        long startedAt = System.currentTimeMillis();
+        String status = "FAILED";
+        boolean continued = false;
+        try {
+            status = execute(sessionId, runId, input, attachments, handle, continuation);
+            continued = maybeAutoContinue(sessionId, status);
+        } catch (RuntimeException e) {
+            log.error("Run {} 收尾失败", runId, e);
+        } finally {
+            runs.remove(runId, handle);
+            // 两参 remove：自动续跑已经把槽位换成新 runId 时不会误删
+            registry.unregister(runId);
+            try {
+                runRepository.finished(runId, status, java.time.Instant.now());
+            } catch (RuntimeException e) {
+                log.warn("记录 run {} 结束状态失败", runId, e);
+            }
+            metrics.recordRun(status, System.currentTimeMillis() - startedAt);
             if (!continued && !"CANCELLED".equals(status)) {
                 drainQueue(sessionId);
             }
-        });
+        }
+    }
+
+    @Override
+    public java.util.Optional<String> claimRun(String sessionId) {
+        String runId = "run_" + java.util.UUID.randomUUID();
+        return registry.claim(runId, sessionId) ? java.util.Optional.of(runId) : java.util.Optional.empty();
+    }
+
+    @Override
+    public void abandon(String runId) {
+        registry.unregister(runId);
+    }
+
+    @Override
+    public void forget(String sessionId) {
+        registry.forget(sessionId);
+        inboxes.remove(sessionId);
+        autoContinueAttempts.remove(sessionId);
+        autoContinueSignature.remove(sessionId);
+        try {
+            queuedMessages.save(sessionId, List.of());
+        } catch (RuntimeException e) {
+            log.warn("清理会话 {} 的排队消息失败（会话可能已被删除）", sessionId, e);
+        }
     }
 
     /** 这轮结束时队列里还有话，就按顺序自动开下一轮，不让用户再点一次发送。 */
@@ -597,7 +645,11 @@ public class AgentRunService implements RunStarter {
                     explanation));
         };
         ToolRegistry tools = toolFactory.registryFor(workspace, planSink);
-        Consumer<SessionEvent> sink = event -> publish(sessionId, runId, event);
+        // 事件类型计数：压缩次数、工具调用量、失败码分布都从这里来
+        Consumer<SessionEvent> sink = event -> {
+            metrics.count("event." + event.type().wireName());
+            publish(sessionId, runId, event);
+        };
         Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
         var config = new AgentLoop.Config(properties.maxSteps(), properties.repeatedToolCallLimit(),
                 systemPrompt(sessionId, workspace),
@@ -605,7 +657,8 @@ public class AgentRunService implements RunStarter {
                 () -> plans.load(sessionId),
                 // 计划没做完时自动继续，而不是停下来等用户点「继续执行」
                 properties.maxPlanContinues(),
-                properties.contextMaxChars());
+                properties.contextMaxChars(),
+                properties.completionChecksEnabled());
         // 子代理与父代理共用工具集（其中不含 spawn_agent，避免递归派生）
         tools.register(new SpawnAgentTool(modelClient, tools, permissionGate, approvals, config,
                 () -> conversations.load(sessionId), sink, handle.cancelled::get));

@@ -121,6 +121,9 @@ class SessionApiTest {
     @Autowired
     private TestRunStarter runStarter;
 
+    @Autowired
+    private com.pilot.core.project.ProjectRepository projectRepository;
+
     @TempDir
     Path workspace;
 
@@ -208,6 +211,118 @@ class SessionApiTest {
                 .andExpect(jsonPath("$.events[0].sequence").value(2))
                 .andExpect(jsonPath("$.events[1].sequence").value(3))
                 .andExpect(jsonPath("$.hasMore").value(true));
+    }
+
+    /** 同一项目下不允许出现第二条空白对话；要求确认后可以「归档旧的再新建」。 */
+    @Test
+    void allowsOnlyOneBlankConversationPerProject() throws Exception {
+        Path folder = Files.createDirectories(ATTACHMENT_ROOT.resolve("prj-" + java.util.UUID.randomUUID()));
+        String projectId = "prj_" + java.util.UUID.randomUUID();
+        projectRepository.create(projectId, "测试项目", List.of(folder.toString()), java.time.Instant.now());
+
+        String first = mvc.perform(post("/api/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("title", "新对话", "projectId", projectId))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.projectId").value(projectId))
+                .andExpect(jsonPath("$.isBlank").value(true))
+                .andReturn().getResponse().getContentAsString();
+        String firstId = json.readTree(first).get("sessionId").asString();
+
+        // 第二条：没有确认归档 → 409，界面上据此弹窗
+        mvc.perform(post("/api/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("title", "新对话", "projectId", projectId))))
+                .andExpect(status().isConflict());
+
+        // 确认归档旧的再建：成功，且旧的那条变成 archived
+        String second = mvc.perform(post("/api/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("title", "新对话", "projectId", projectId,
+                                "replaceBlank", true))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String secondId = json.readTree(second).get("sessionId").asString();
+
+        assertFalse(secondId.equals(firstId), "应该创建一条新的空白对话");
+        assertTrue(sessions.find(firstId).orElseThrow().archived(), "旧的空白对话应被归档");
+        assertEquals(1, sessions.listByProject(projectId).stream()
+                .filter(session -> session.isBlank() && !session.archived()).count());
+    }
+
+    /** 发过第一条消息就不再是空白对话，否则它会被后来的「新建」当成可归档的空壳。 */
+    @Test
+    void blankFlagClearsAfterTheFirstMessage() throws Exception {
+        Path folder = Files.createDirectories(ATTACHMENT_ROOT.resolve("prj-" + java.util.UUID.randomUUID()));
+        String projectId = "prj_" + java.util.UUID.randomUUID();
+        projectRepository.create(projectId, "测试项目", List.of(folder.toString()), java.time.Instant.now());
+
+        String body = mvc.perform(post("/api/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("projectId", projectId))))
+                .andReturn().getResponse().getContentAsString();
+        String sessionId = json.readTree(body).get("sessionId").asString();
+        assertTrue(sessions.find(sessionId).orElseThrow().isBlank());
+
+        mvc.perform(post("/api/sessions/{id}/messages", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"你好\"}"))
+                .andExpect(status().isOk());
+
+        assertFalse(sessions.find(sessionId).orElseThrow().isBlank(), "发过消息就不是空白对话了");
+        // 空白位释放之后，可以再新建一条
+        mvc.perform(post("/api/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("projectId", projectId))))
+                .andExpect(status().isOk());
+    }
+
+    /** 归档的对话不进主列表的「活跃」集，但接口还能读到；取消归档可以恢复。 */
+    @Test
+    void archivesAndRestoresAConversation() throws Exception {
+        String sessionId = createSession();
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/api/sessions/{id}/archive", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"archived\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.archived").value(true));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/api/sessions/{id}/archive", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"archived\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.archived").value(false));
+    }
+
+    /** 项目下的对话只能在项目绑定的文件夹之间切换。 */
+    @Test
+    void onlySwitchesBetweenFoldersBoundToTheProject() throws Exception {
+        Path allowed = Files.createDirectories(ATTACHMENT_ROOT.resolve("prj-a-" + java.util.UUID.randomUUID()));
+        Path outside = Files.createDirectories(ATTACHMENT_ROOT.resolve("outside-" + java.util.UUID.randomUUID()));
+        String projectId = "prj_" + java.util.UUID.randomUUID();
+        projectRepository.create(projectId, "测试项目", List.of(allowed.toString()), java.time.Instant.now());
+
+        String body = mvc.perform(post("/api/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("projectId", projectId))))
+                .andReturn().getResponse().getContentAsString();
+        String sessionId = json.readTree(body).get("sessionId").asString();
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/api/sessions/{id}/workspace", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("workspace", outside.toString()))))
+                .andExpect(status().isBadRequest());
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/api/sessions/{id}/workspace", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("workspace", allowed.toString()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workspace").value(allowed.toString()));
     }
 
     /** 权限档位要能在运行时切换，改完立刻反映到 health，不需要重启。 */

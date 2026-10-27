@@ -6,11 +6,14 @@ Pilot 是一个以 Java 构建的本地 Coding Agent 原型。用户通过 Web �
 
 ## 功能概览
 
+- 项目制导航：先建项目，再在项目下新建对话；一个项目可以绑定多个文件夹，对话可在其中切换。
+- 空白对话在项目内唯一：同一项目最多一条「还没发过消息」的对话，再点新建会提示归档旧的或回到旧的；有历史的对话不限数量，可归档/恢复。
+- 项目记录建项目时的 git 基线（`baseCommit`），改文件夹只影响之后新建的对话，老对话保留自己的文件视图。
 - 多轮会话、运行历史、任务继续/重新生成与排队消息。
 - 通过 SSE 展示运行进度、工具调用和审批事件。
 - 本地工作区文件浏览、读取、搜索、修改及变更 diff。
 - 可配置的权限模式、命令审批、运行取消和变更回滚。
-- 收尾门：改了代码却没跑验证、有改动但没核对目标、只读调研调用太少就下结论时，自动推回一轮（`-Dpilot.completion.checks=false` 可关闭）。
+- 收尾门：改了代码却没跑验证、有改动但没核对目标、只读调研调用太少就下结论时，自动推回一轮（`pilot.agent.completion-checks=false` 或 `-Dpilot.completion.checks=false` 可关闭）。
 - 项目约定：工作区根目录的 `PILOT.md` / `AGENTS.md` / `CLAUDE.md` 会自动注入系统提示词（取第一个存在的）。
 - 仓库快照：每轮注入顶层结构、git 分支与未提交改动、识别到的构建方式，模型不用从零摸索。
 - OpenAI Chat Completions 兼容模型端点；无模型配置时可使用 Mock 模式体验界面流程。
@@ -83,13 +86,21 @@ Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环
 
 运行数据默认写入仓库根目录下的 `.pilot/`，可通过 `PILOT_DATA_DIR` 修改位置。该目录可能包含会话数据库、工作区快照和 trace；请按本机敏感数据管理，不要将密钥或私人会话数据提交到版本库。
 
+项目制改造之前创建的会话没有 `project_id`，会显示在侧栏的「未分组」下，数据不会被删除；老库启动时会自动补上 `project_id` 列。
+
+事件、快照和 trace 默认永久保留。设置 `PILOT_RETENTION_DAYS`（或 `pilot.retention.days`）为正数后，服务每天清理一次早于该天数的数据并收缩 WAL；会话本身不会被删除。写文件前的快照对单个文件有 8MB 上限，超过的文件不备份，回滚结果里会把它列为失败而不是静默删除。
+
 ## API 概览
 
 主要接口以 `/api` 为前缀：
 
-- `GET/POST /api/sessions`：列出或创建会话。
+- `GET/POST /api/projects`：列出或创建项目；`PATCH /api/projects/{id}` 改名，`PUT /api/projects/{id}/folders` 替换绑定文件夹，`DELETE /api/projects/{id}` 删除（默认连同对话）。
+- `GET/POST /api/sessions`：列出或创建会话（`?projectId=` 过滤，`projectId=none` 看未分组）。项目下已有空白对话时返回 409；带 `replaceBlank=true` 表示已确认归档旧空白对话。
+- `PATCH /api/sessions/{id}/workspace`：在项目绑定的文件夹之间切换该对话的工作区。
+- `PATCH /api/sessions/{id}/archive`：归档或恢复对话；归档只影响列表，历史与事件都保留。
 - `POST /api/sessions/{id}/messages`：向会话发送任务；`GET /api/sessions/{id}/events`：订阅 SSE 事件。
-- `GET /api/sessions/{id}/history`：读取历史；`GET /api/sessions/{id}/diff`：查看会话变更。
+- `GET /api/sessions/{id}/history`：读取历史（`limit` + `before` 游标分页，长会话只取尾部一页）；`GET /api/sessions/{id}/diff`：查看会话变更。
+- `GET /api/metrics`：进程内运行指标（运行数、状态分布、失败码、事件类型计数、平均耗时）。
 - `/api/approvals`：查看和处理待审批工具调用。
 - `/api/settings`：查看或更新模型与权限设置。
 - `/api/health`：服务健康状态。

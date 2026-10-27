@@ -28,6 +28,12 @@ import java.util.Set;
 public class RunSnapshotService implements SnapshotSink {
     private static final Logger log = LoggerFactory.getLogger(RunSnapshotService.class);
     private static final String META_FILE = "meta.json";
+    /**
+     * 超过这个大小的文件不做备份。整文件复制的代价是「每次运行 × 文件大小」，
+     * 十几 GB 的日志/产物备份一遍就能把磁盘吃满；跳过时仍记录条目，
+     * 回滚会把该文件报进 failed，而不是悄悄删掉它。
+     */
+    private static final long MAX_SNAPSHOT_BYTES = 8L * 1024 * 1024;
 
     private final ObjectMapper mapper;
     private final Path root;
@@ -80,10 +86,15 @@ public class RunSnapshotService implements SnapshotSink {
 
         boolean existed = Files.isRegularFile(absolute);
         if (existed) {
-            Path target = context.directory().resolve("files").resolve(relative);
             try {
-                Files.createDirectories(target.getParent());
-                Files.copy(absolute, target, StandardCopyOption.REPLACE_EXISTING);
+                long size = Files.size(absolute);
+                if (size > MAX_SNAPSHOT_BYTES) {
+                    log.warn("{} 有 {} 字节，超过快照上限，跳过备份；本次运行无法回滚这个文件", key, size);
+                } else {
+                    Path target = context.directory().resolve("files").resolve(relative);
+                    Files.createDirectories(target.getParent());
+                    Files.copy(absolute, target, StandardCopyOption.REPLACE_EXISTING);
+                }
             } catch (IOException e) {
                 throw new UncheckedIOException("备份 " + key + " 失败", e);
             }
@@ -142,6 +153,37 @@ public class RunSnapshotService implements SnapshotSink {
             }
         }
         return new RollbackReport(runId, workspace.toString(), restored, deleted, failed);
+    }
+
+    /** 删除最后修改时间早于 {@code cutoff} 的运行快照，返回删掉的运行数。 */
+    public int purgeOlderThan(java.time.Instant cutoff) {
+        if (!Files.isDirectory(root)) {
+            return 0;
+        }
+        int removed = 0;
+        try (var entries = Files.list(root)) {
+            for (Path directory : entries.filter(Files::isDirectory).toList()) {
+                try {
+                    if (Files.getLastModifiedTime(directory).toInstant().isBefore(cutoff)) {
+                        deleteRecursively(directory);
+                        removed++;
+                    }
+                } catch (IOException e) {
+                    log.warn("清理快照 {} 失败", directory, e);
+                }
+            }
+        } catch (IOException e) {
+            log.warn("遍历快照目录失败: {}", root, e);
+        }
+        return removed;
+    }
+
+    private static void deleteRecursively(Path directory) throws IOException {
+        try (var entries = Files.walk(directory)) {
+            for (Path path : entries.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
+        }
     }
 
     private void persist(Context context) {

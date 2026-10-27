@@ -53,7 +53,7 @@ class MultiAgentServiceTest {
     private MultiAgentService service(ModelClient client) throws IOException {
         Files.createDirectories(workspace.resolve("src"));
         Files.writeString(workspace.resolve("src/A.java"), "class A {}\n");
-        var agent = new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 300, 2, 1, 60_000);
+        var agent = new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 300, 2, 1, 60_000, true);
         var factory = new WorkspaceToolFactory(agent, SnapshotSink.none());
         var store = new SandboxStore(JsonMapper.builder().build(), new PilotDataDir(dataDir.toString()));
         var properties = new MultiAgentProperties(true, 2, 2, 8, 30, List.of());

@@ -24,6 +24,11 @@ public interface RunRepository {
      */
     List<InterruptedRun> markInterrupted(Instant at);
 
+    /** 删除会话时一并清掉运行记录，避免 runs 表只增不减。 */
+    default int deleteBySession(String sessionId) {
+        return 0;
+    }
+
     static RunRepository noop() {
         return new RunRepository() {
             @Override

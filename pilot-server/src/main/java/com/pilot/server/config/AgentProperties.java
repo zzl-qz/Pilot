@@ -16,11 +16,13 @@ import java.nio.file.Path;
  * @param runThreads            同时执行的 run 数，单个 run 卡住时不影响其他会话
  * @param maxPlanContinues      模型提前收尾但计划未完成时，自动催它继续的最大次数；不填默认 8，0 表示不自动继续
  * @param contextMaxChars       上下文预算（字符估算）。太小会频繁压缩、丢细节，任务做得浅
+ * @param completionChecks      收尾门：改了代码却没验证、有改动却没核对目标时是否推回一轮
  */
 @ConfigurationProperties(prefix = "pilot.agent")
 public record AgentProperties(String workspace, PermissionMode permissionMode,
                               int maxSteps, int repeatedToolCallLimit, int approvalTimeoutSeconds,
-                              int runThreads, Integer maxPlanContinues, Integer contextMaxChars) {
+                              int runThreads, Integer maxPlanContinues, Integer contextMaxChars,
+                              Boolean completionChecks) {
     public AgentProperties {
         workspace = workspace == null || workspace.isBlank()
                 ? Path.of("").toAbsolutePath().normalize().toString()
@@ -35,5 +37,15 @@ public record AgentProperties(String workspace, PermissionMode permissionMode,
         contextMaxChars = contextMaxChars == null || contextMaxChars < 20_000
                 ? 120_000
                 : Math.min(contextMaxChars, 2_000_000);
+        // 系统属性作为兜底，保留 `-Dpilot.completion.checks=false` 的老用法
+        String flag = System.getProperty("pilot.completion.checks");
+        if (completionChecks == null) {
+            completionChecks = flag == null || flag.isBlank() || !"false".equalsIgnoreCase(flag.strip());
+        }
+    }
+
+    /** 收尾门是否启用（{@code null} 视为启用）。 */
+    public boolean completionChecksEnabled() {
+        return completionChecks == null || completionChecks;
     }
 }

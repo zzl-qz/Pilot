@@ -95,6 +95,44 @@ class JdbcSessionRepositoryTest {
     }
 
     @Test
+    void pagesEventsFromTheTailWithoutLoadingEverything() {
+        repository.create("ses_1", "分页", null, Instant.now());
+        Instant now = Instant.parse("2026-01-01T00:00:00Z");
+        for (int i = 1; i <= 10; i++) {
+            repository.append("ses_1", "run_1", now.plusSeconds(i), new RunStarted("第 " + i + " 条"),
+                    SessionStatus.RUNNING);
+        }
+
+        assertEquals(10, repository.eventCount("ses_1"));
+
+        // 最新一页：序号 6..10，升序返回
+        List<EventEnvelope> latest = repository.eventsPage("ses_1", null, 5);
+        assertEquals(List.of(6L, 7L, 8L, 9L, 10L), latest.stream().map(EventEnvelope::sequence).toList());
+
+        // 往前翻：序号 1..5
+        List<EventEnvelope> earlier = repository.eventsPage("ses_1", 6L, 5);
+        assertEquals(List.of(1L, 2L, 3L, 4L, 5L), earlier.stream().map(EventEnvelope::sequence).toList());
+
+        // 已经到最早一条，前面没有更多
+        assertTrue(repository.eventsPage("ses_1", 1L, 5).isEmpty());
+        assertEquals(0, repository.eventCount("ses_missing"));
+    }
+
+    @Test
+    void deletingExpiredEventsKeepsSessions() {
+        SqliteStore store = new SqliteStore(database);
+        var repo = new JdbcSessionRepository(store, new EventCodec(JsonMapper.builder().build()));
+        repo.create("ses_1", "保留策略", null, Instant.parse("2020-01-01T00:00:00Z"));
+        repo.append("ses_1", "run_1", Instant.parse("2020-01-02T00:00:00Z"), new RunStarted("旧"),
+                SessionStatus.RUNNING);
+
+        assertEquals(1, store.deleteEventsBefore(Instant.parse("2021-01-01T00:00:00Z")));
+        assertEquals(0, repo.eventCount("ses_1"));
+        // 会话本身不能被清理掉，否则界面上的记录会凭空消失
+        assertTrue(repo.find("ses_1").isPresent());
+    }
+
+    @Test
     void appendingToUnknownSessionFails() {
         assertThrows(NoSuchSessionException.class, () -> repository.append("ses_missing", "run_1", Instant.now(),
                 new RunStarted("x"), SessionStatus.RUNNING));

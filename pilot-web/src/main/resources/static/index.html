@@ -20,7 +20,7 @@
       document.documentElement.dataset.accent = 'blue';
     }
   </script>
-  <link rel="stylesheet" href="/style.css?v=21">
+  <link rel="stylesheet" href="/style.css?v=22">
 </head>
 <body>
 <div class="app" id="app">
@@ -44,13 +44,16 @@
     </button>
 
     <div class="rail-scroll">
-      <section class="nav-block" aria-label="会话">
+      <section class="nav-block" aria-label="项目">
         <header class="nav-head">
-          <span>会话</span>
+          <span>项目</span>
           <span id="session-count" class="nav-count">0</span>
+          <button id="new-project" class="icon-btn icon-btn-sm" type="button" title="新建项目" aria-label="新建项目">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
         </header>
-        <ul id="session-list" class="session-list"></ul>
-        <p id="session-empty" class="nav-empty">还没有会话，点上面「新任务」开始。</p>
+        <ul id="session-list" class="session-list project-groups"></ul>
+        <p id="session-empty" class="nav-empty">还没有项目，点上面「新任务」新建一个。</p>
       </section>
 
       <section class="nav-block nav-files" aria-label="文件">
@@ -83,10 +86,11 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
       <div class="crumbs">
-        <span id="workspace-name" class="crumb-root mono">workspace</span>
+        <button id="workspace-name" class="crumb-root mono" type="button" title="切换该对话使用的文件夹">workspace</button>
         <span class="crumb-sep">/</span>
         <span id="crumb-title">新任务</span>
       </div>
+      <div id="folder-menu" class="perm-menu folder-menu" role="menu" hidden></div>
       <div class="topbar-right">
         <span id="session-chip" class="chip mono" hidden></span>
         <span id="run-state" class="run-state state-idle">空闲</span>
@@ -302,6 +306,32 @@
   </div>
 </div>
 
+<div id="project-modal" class="modal" hidden>
+  <div class="modal-box project-box" role="dialog" aria-modal="true" aria-label="项目">
+    <header class="modal-head">
+      <div>
+        <h2 id="project-modal-title">新建项目</h2>
+        <p class="modal-sub">项目用来归拢同一套代码下的对话，可以绑定多个文件夹；每个对话只用其中一个，随时可换。</p>
+      </div>
+      <button id="project-close" class="icon-btn" type="button" aria-label="关闭">✕</button>
+    </header>
+    <div class="project-body">
+      <label class="settings-field"><span>名称</span><input id="project-name" type="text" spellcheck="false" placeholder="例如 pilot-server"></label>
+      <div class="project-folders-head">
+        <span>文件夹</span>
+        <button id="project-add-folder" class="btn btn-sm" type="button">添加文件夹</button>
+      </div>
+      <ul id="project-folders" class="project-folders"></ul>
+      <p id="project-hint" class="settings-status" role="status" aria-live="polite"></p>
+    </div>
+    <footer class="modal-foot">
+      <button id="project-delete" class="btn btn-danger" type="button" hidden>删除项目</button>
+      <span class="project-foot-spacer"></span>
+      <button id="project-save" class="btn btn-primary" type="button">保存</button>
+    </footer>
+  </div>
+</div>
+
 <div id="palette" class="palette" hidden>
   <div class="palette-box" role="dialog" aria-modal="true" aria-label="命令面板">
     <input id="palette-input" class="palette-input" type="text" autocomplete="off"
@@ -392,6 +422,6 @@
 <div id="scrim" class="scrim" hidden></div>
 
 <div id="drop-veil" class="drop-veil" hidden>松开以添加文件</div>
-<script type="module" src="/app.js?v=23"></script>
+<script type="module" src="/app.js?v=24"></script>
 </body>
 </html>

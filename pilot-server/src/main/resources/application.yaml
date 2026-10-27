@@ -53,3 +53,7 @@ pilot:
     approval-timeout-seconds: 300
     # 同时能跑的任务数。一个任务卡住时，不要把后面的任务全堵死
     run-threads: ${PILOT_AGENT_RUN_THREADS:4}
+  # 运行期数据保留：事件、快照、trace 默认只增不减。设成正数后每天清理一次早于 N 天的数据，
+  # 0 表示关闭（保留全部）。会话本身不会被删。
+  retention:
+    days: ${PILOT_RETENTION_DAYS:0}

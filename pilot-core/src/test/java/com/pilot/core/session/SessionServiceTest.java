@@ -85,7 +85,7 @@ class SessionServiceTest {
     }
 
     @Test
-    void subscriberReceivesHistoryThenLiveEvents() {
+    void subscriberReceivesHistoryThenLiveEvents() throws InterruptedException {
         Session session = sessions.createSession("演示会话");
         Run run = sessions.sendMessage(session.id(), "你好");
         List<EventEnvelope> received = new CopyOnWriteArrayList<>();
@@ -93,12 +93,21 @@ class SessionServiceTest {
         EventSubscription subscription = sessions.subscribe(session.id(), 0, received::add);
         sessions.publish(session.id(), run.runId(), new AssistantDelta("世界"));
 
+        // 投递是异步的（慢客户端不能拖住发布线程），这里等它追上
+        awaitSize(received, 2);
         assertEquals(List.of(1L, 2L), received.stream().map(EventEnvelope::sequence).toList());
 
         subscription.close();
         sessions.publish(session.id(), run.runId(), new AssistantDelta("离线"));
 
         assertEquals(2, received.size());
+    }
+
+    private static void awaitSize(List<EventEnvelope> received, int expected) throws InterruptedException {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(3).toNanos();
+        while (received.size() < expected && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
     }
 
     @Test

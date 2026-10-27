@@ -3,15 +3,14 @@ package com.pilot.server.controller;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.plan.PlanItem;
+import com.pilot.core.project.Project;
+import com.pilot.core.project.ProjectRepository;
 import com.pilot.core.session.EventSubscription;
-import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.PlanRepository;
-import com.pilot.core.session.Run;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
 import com.pilot.server.config.AgentProperties;
-import com.pilot.server.multi.SandboxStore;
 import com.pilot.server.session.AttachmentService;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.workspace.WorkspaceService;
@@ -36,7 +35,10 @@ import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
-import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -45,6 +47,16 @@ import java.util.function.Consumer;
 @RequestMapping("/api/sessions")
 public class SessionController {
     private static final String DEFAULT_TITLE = "未命名会话";
+    /**
+     * SSE 心跳：空闲连接也要定期写一点东西，否则对端早已断开时服务端感知不到，
+     * 订阅者会一直挂在内存里。单线程足够，任务本身只是写一个注释帧。
+     */
+    private static final ScheduledExecutorService HEARTBEAT = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "pilot-sse-heartbeat");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private static final long HEARTBEAT_SECONDS = 20L;
 
     private final SessionService sessions;
     private final RunStarter runStarter;
@@ -52,14 +64,15 @@ public class SessionController {
     private final WorkspaceService workspaces;
     private final AgentProperties agentProperties;
     private final PlanRepository plans;
-    private final ConversationRepository conversations;
     private final AttachmentService attachments;
-    private final SandboxStore sandboxes;
+    private final ProjectRepository projects;
+    private final com.pilot.server.session.SessionCleanupService cleanup;
 
     public SessionController(SessionService sessions, RunStarter runStarter, ObjectMapper objectMapper,
                              WorkspaceService workspaces, AgentProperties agentProperties,
-                             PlanRepository plans, ConversationRepository conversations,
-                             AttachmentService attachments, SandboxStore sandboxes) {
+                             PlanRepository plans, AttachmentService attachments,
+                             ProjectRepository projects,
+                             com.pilot.server.session.SessionCleanupService cleanup) {
         this.sessions = sessions;
         this.runStarter = runStarter;
         this.attachments = attachments;
@@ -67,23 +80,69 @@ public class SessionController {
         this.workspaces = workspaces;
         this.agentProperties = agentProperties;
         this.plans = plans;
-        this.conversations = conversations;
-        this.sandboxes = sandboxes;
+        this.projects = projects;
+        this.cleanup = cleanup;
     }
 
+    /**
+     * 在项目下新建对话。
+     *
+     * <p>同一项目最多只有一条「未归档的空白对话」。已经有的话返回 409，
+     * 由界面问用户「归档旧的再新建」还是「回去用旧的」——不静默复用，
+     * 也不允许把空白对话堆起来（用户看不见的会话最难收拾）。
+     *
+     * @param replaceBlank 为 true 时表示用户已确认「归档旧空白对话并新建」
+     */
     @PostMapping
     public SessionResponse create(@RequestBody(required = false) CreateSessionRequest request) {
         String title = request == null || request.title() == null || request.title().isBlank()
                 ? DEFAULT_TITLE
                 : request.title();
-        Session session = sessions.createSession(title, workspaceOf(request));
+        String projectId = request == null ? null : blankToNull(request.projectId());
+        Project project = projectId == null ? null : requireProject(projectId);
+
+        if (project != null) {
+            var existingBlank = sessions.findBlank(projectId);
+            if (existingBlank.isPresent()) {
+                if (request == null || request.replaceBlank() == null || !request.replaceBlank()) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "该项目已有未使用的空白对话（" + existingBlank.get().id() + "），"
+                                    + "请先归档它再新建，或者直接回到那条对话。");
+                }
+                sessions.setArchived(existingBlank.get().id(), true);
+            }
+        }
+        Session session = sessions.createSession(title, workspaceOf(request, project), projectId, true);
         return SessionResponse.of(session, 0);
     }
 
-    /** 未指定工作区时沿用服务端默认值，保持既有调用方式可用。 */
-    private String workspaceOf(CreateSessionRequest request) {
-        String raw = request == null ? null : request.workspace();
-        if (raw == null || raw.isBlank()) {
+    /** 归档 / 取消归档：归档的对话不进主列表，但历史与事件都保留。 */
+    @PatchMapping("/{id}/archive")
+    public SessionResponse archive(@PathVariable String id, @RequestBody(required = false) ArchiveRequest request) {
+        requireSession(id);
+        boolean archived = request == null || request.archived() == null || request.archived();
+        sessions.setArchived(id, archived);
+        return SessionResponse.of(requireSession(id), countOf(id));
+    }
+
+    public record ArchiveRequest(Boolean archived) { }
+
+    /**
+     * 决定新对话的工作区。
+     *
+     * <p>属于项目时只能选项目绑定的文件夹（不传就用第一个），避免「项目绑 A、对话跑在 B」
+     * 这种在界面上看不出来的错位；不属于项目时保持旧行为，可以指定任意存在的目录。
+     */
+    private String workspaceOf(CreateSessionRequest request, Project project) {
+        String raw = request == null ? null : blankToNull(request.workspace());
+        if (project != null) {
+            String folder = raw == null ? project.primaryFolder() : insideProject(project, raw);
+            if (folder == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "项目还没有绑定文件夹，请先在项目设置里添加目录");
+            }
+            return folder;
+        }
+        if (raw == null) {
             return agentProperties.workspace();
         }
         try {
@@ -93,16 +152,80 @@ public class SessionController {
         }
     }
 
-    /** 会话列表（按创建时间倒序），供侧栏展示。eventCount 只在单条查询时统计。 */
-    @GetMapping
-    public List<SessionResponse> list() {
-        return sessions.list().stream().map(session -> SessionResponse.of(session, 0)).toList();
+    /** 把路径规范化为项目里登记的写法；不属于该项目时 400。 */
+    private String insideProject(Project project, String raw) {
+        java.nio.file.Path candidate;
+        try {
+            candidate = java.nio.file.Path.of(raw).toAbsolutePath().normalize();
+        } catch (RuntimeException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "路径不合法: " + raw);
+        }
+        for (String folder : project.folders()) {
+            if (java.nio.file.Path.of(folder).toAbsolutePath().normalize().equals(candidate)) {
+                return folder;
+            }
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "该目录不在项目绑定的文件夹里: " + raw);
     }
+
+    private Project requireProject(String projectId) {
+        return projects.find(projectId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project not found: " + projectId));
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.strip();
+    }
+
+    /**
+     * 会话列表（按创建时间倒序），供侧栏展示。
+     *
+     * @param projectId 只看某个项目；传 {@code none} 表示未分组的历史会话；不传表示全部
+     */
+    @GetMapping
+    public List<SessionResponse> list(@RequestParam(name = "projectId", required = false) String projectId) {
+        List<Session> source;
+        if (projectId == null) {
+            source = sessions.list();
+        } else if ("none".equals(projectId)) {
+            source = sessions.listByProject(null);
+        } else {
+            source = sessions.listByProject(projectId);
+        }
+        return source.stream().map(session -> SessionResponse.of(session, 0)).toList();
+    }
+
+    /**
+     * 切换对话当前使用的文件夹：只允许项目绑定的目录。
+     * 下一次运行才会用新目录，进行中的运行不受影响。
+     */
+    @PatchMapping("/{id}/workspace")
+    public SessionResponse switchWorkspace(@PathVariable String id,
+                                           @RequestBody(required = false) WorkspaceRequest request) {
+        Session session = requireSession(id);
+        if (request == null || request.workspace() == null || request.workspace().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "workspace must not be blank");
+        }
+        String target;
+        if (session.projectId() == null) {
+            try {
+                target = workspaces.requireDirectory(request.workspace()).toString();
+            } catch (IllegalArgumentException e) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+            }
+        } else {
+            target = insideProject(requireProject(session.projectId()), request.workspace());
+        }
+        sessions.moveToWorkspace(id, target);
+        return SessionResponse.of(requireSession(id), countOf(id));
+    }
+
+    public record WorkspaceRequest(String workspace) { }
 
     @GetMapping("/{id}")
     public SessionResponse get(@PathVariable String id) {
         Session session = requireSession(id);
-        return SessionResponse.of(session, sessions.events(id).size());
+        return SessionResponse.of(session, countOf(id));
     }
 
     @PatchMapping("/{id}")
@@ -112,18 +235,20 @@ public class SessionController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "title must not be blank");
         }
         sessions.rename(id, request.title());
-        return SessionResponse.of(requireSession(id), sessions.events(id).size());
+        return SessionResponse.of(requireSession(id), countOf(id));
+    }
+
+    /** 事件总数走存储层计数，不把整表事件读进内存再 size()。 */
+    private int countOf(String sessionId) {
+        long total = sessions.eventCount(sessionId);
+        return total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable String id) {
-        if (!sessions.delete(id)) {
+        if (!cleanup.delete(id)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id);
         }
-        conversations.delete(id);
-        plans.delete(id);
-        // 沙箱与任务看板跟着会话一起清掉，避免删除后仍能在接口里读到
-        sandboxes.reset(id);
         return ResponseEntity.noContent().build();
     }
 
@@ -142,9 +267,11 @@ public class SessionController {
         if (input == null) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "没有可重新生成的输入");
         }
-        String runId = "run_" + UUID.randomUUID();
-        sessions.publish(id, runId, new RunStarted(input));
-        runStarter.regenerate(id, runId, input);
+        String runId = claimRun(id);
+        launch(runId, () -> {
+            sessions.publish(id, runId, new RunStarted(input));
+            runStarter.regenerate(id, runId, input);
+        });
         return new MessageResponse(id, runId);
     }
 
@@ -155,16 +282,34 @@ public class SessionController {
     @PostMapping("/{id}/continue")
     public MessageResponse continueRun(@PathVariable String id) {
         requireSession(id);
-        if (runStarter.activeRun(id).isPresent()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行");
-        }
         if (!runStarter.resumable(id)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "没有可继续的对话记忆");
         }
-        String runId = "run_" + UUID.randomUUID();
-        sessions.publish(id, runId, new RunStarted("（继续上一次未完成的任务）"));
-        runStarter.resume(id, runId);
+        String runId = claimRun(id);
+        launch(runId, () -> {
+            sessions.publish(id, runId, new RunStarted("（继续上一次未完成的任务）"));
+            runStarter.resume(id, runId);
+        });
         return new MessageResponse(id, runId);
+    }
+
+    /**
+     * 抢占运行槽位。检查「有没有在跑」和真正启动之间不再是两步无锁操作，
+     * 并发请求只有一个能拿到槽位，其余返回 409。
+     */
+    private String claimRun(String sessionId) {
+        return runStarter.claimRun(sessionId).orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行"));
+    }
+
+    /** 启动失败（发布事件或注册运行抛异常）时把槽位还回去，避免会话被永久占住。 */
+    private void launch(String runId, Runnable starter) {
+        try {
+            starter.run();
+        } catch (RuntimeException e) {
+            runStarter.abandon(runId);
+            throw e;
+        }
     }
 
     /** 还没被当前运行消费的消息。空着表示没有在排队。 */
@@ -210,9 +355,6 @@ public class SessionController {
         if (request.content() == null || request.content().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
         }
-        if (runStarter.activeRun(id).isPresent()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "运行中不能改已经发出的消息");
-        }
         List<EventEnvelope> events = sessions.events(id);
         String original = null;
         for (EventEnvelope event : events) {
@@ -234,11 +376,15 @@ public class SessionController {
             }
         }
         String content = request.content().strip();
-        runStarter.rewindBeforeUserInput(id, occurrence, original);
-        sessions.dropEventsFrom(id, request.sequence());
-        String runId = "run_" + UUID.randomUUID();
-        sessions.publish(id, runId, new RunStarted(content));
-        runStarter.start(id, runId, content);
+        String originalInput = original;
+        int originalOccurrence = occurrence;
+        String runId = claimRun(id);
+        launch(runId, () -> {
+            runStarter.rewindBeforeUserInput(id, originalOccurrence, originalInput);
+            sessions.dropEventsFrom(id, request.sequence());
+            sessions.publish(id, runId, new RunStarted(content));
+            runStarter.start(id, runId, content);
+        });
         return new MessageResponse(id, runId);
     }
 
@@ -285,9 +431,20 @@ public class SessionController {
                 return ResponseEntity.accepted().body(new MessageResponse(id, activeRun));
             }
         }
-        Run run = sessions.sendMessage(id, prepared.content());
-        runStarter.start(id, run.runId(), prepared.content(), prepared.attachments());
-        return ResponseEntity.ok().body(new MessageResponse(id, run.runId()));
+        // 检查与启动之间可能刚好起了一个 run：抢占失败就退化成追加输入
+        String runId = runStarter.claimRun(id).orElse(null);
+        if (runId == null) {
+            if (runStarter.steer(id, prepared.content())) {
+                return ResponseEntity.accepted()
+                        .body(new MessageResponse(id, runStarter.activeRun(id).orElse(null)));
+            }
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行");
+        }
+        launch(runId, () -> {
+            sessions.publish(id, runId, new RunStarted(prepared.content()));
+            runStarter.start(id, runId, prepared.content(), prepared.attachments());
+        });
+        return ResponseEntity.ok().body(new MessageResponse(id, runId));
     }
 
     /**
@@ -305,16 +462,9 @@ public class SessionController {
                                    @RequestParam(name = "before", required = false) Long before) {
         requireSession(id);
         int capped = Math.max(1, Math.min(limit, 500));
-        List<EventEnvelope> all = sessions.events(id);
-        int end = all.size();
-        if (before != null) {
-            end = 0;
-            while (end < all.size() && all.get(end).sequence() < before) {
-                end++;
-            }
-        }
-        int start = Math.max(0, end - capped);
-        return new HistoryResponse(List.copyOf(all.subList(start, end)), start > 0, all.size());
+        List<EventEnvelope> page = sessions.eventsPage(id, before, capped);
+        boolean hasMore = !page.isEmpty() && page.get(0).sequence() > 1;
+        return new HistoryResponse(page, hasMore, countOf(id));
     }
 
     /**
@@ -332,6 +482,7 @@ public class SessionController {
         var emitter = new SseEmitter(0L);
         var closed = new AtomicBoolean(false);
         var subscription = new AtomicReference<EventSubscription>();
+        var heartbeat = new AtomicReference<ScheduledFuture<?>>();
 
         // 浏览器刷新、切换会话或关页面都会让连接失效；这属于正常生命周期，
         // 不能把写入失败当成异常抛给上层，否则每个事件都会刷一份堆栈。
@@ -340,20 +491,32 @@ public class SessionController {
                 return;
             }
             if (!send(emitter, envelope)) {
-                closeQuietly(closed, subscription, emitter);
+                closeQuietly(closed, subscription, heartbeat, emitter);
             }
         };
 
         try {
             emitter.send(SseEmitter.event().comment("stream open: session=" + id + ", after=" + cursor));
-            EventSubscription created = sessions.subscribe(id, cursor, listener);
-            subscription.set(created);
+            // 第四个参数：订阅被服务端摘掉（客户端积压太多）时，把底层连接一起关掉
+            subscription.set(sessions.subscribe(id, cursor, listener,
+                    () -> closeQuietly(closed, subscription, heartbeat, emitter)));
             if (closed.get()) {
-                created.close();
+                subscription.get().close();
             }
-            emitter.onCompletion(() -> closeQuietly(closed, subscription, null));
-            emitter.onTimeout(() -> closeQuietly(closed, subscription, null));
-            emitter.onError(error -> closeQuietly(closed, subscription, null));
+            emitter.onCompletion(() -> closeQuietly(closed, subscription, heartbeat, null));
+            emitter.onTimeout(() -> closeQuietly(closed, subscription, heartbeat, null));
+            emitter.onError(error -> closeQuietly(closed, subscription, heartbeat, null));
+            // 空闲连接也定期写注释帧：对端早已断开时，下一次写失败就能把订阅清掉
+            heartbeat.set(HEARTBEAT.scheduleAtFixedRate(() -> {
+                if (closed.get()) {
+                    return;
+                }
+                try {
+                    emitter.send(SseEmitter.event().comment("ping"));
+                } catch (Exception e) {
+                    closeQuietly(closed, subscription, heartbeat, emitter);
+                }
+            }, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS));
         } catch (IOException | RuntimeException e) {
             emitter.completeWithError(e);
         }
@@ -378,9 +541,13 @@ public class SessionController {
     }
 
     private static void closeQuietly(AtomicBoolean closed, AtomicReference<EventSubscription> subscription,
-                                     SseEmitter emitter) {
+                                     AtomicReference<ScheduledFuture<?>> heartbeat, SseEmitter emitter) {
         if (!closed.compareAndSet(false, true)) {
             return;
+        }
+        ScheduledFuture<?> beat = heartbeat.get();
+        if (beat != null) {
+            beat.cancel(false);
         }
         EventSubscription current = subscription.get();
         if (current != null) {
@@ -400,7 +567,7 @@ public class SessionController {
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
     }
 
-    public record CreateSessionRequest(String title, String workspace) { }
+    public record CreateSessionRequest(String title, String workspace, String projectId, Boolean replaceBlank) { }
 
     public record RenameRequest(String title) { }
 
@@ -417,10 +584,11 @@ public class SessionController {
     public record ActiveRunResponse(String sessionId, String runId) { }
 
     public record SessionResponse(String sessionId, String title, Instant createdAt, SessionStatus status,
-                                  String workspace, int eventCount) {
+                                  String workspace, String projectId, boolean isBlank, boolean archived,
+                                  int eventCount) {
         static SessionResponse of(Session session, int eventCount) {
             return new SessionResponse(session.id(), session.title(), session.createdAt(), session.status(),
-                    session.workspace(), eventCount);
+                    session.workspace(), session.projectId(), session.isBlank(), session.archived(), eventCount);
         }
     }
 }

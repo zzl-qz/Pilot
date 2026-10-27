@@ -26,6 +26,8 @@ public class ChangeService {
     private static final long MAX_UNTRACKED_BYTES = 512 * 1024;
     private static final int MAX_FILES = 500;
     private static final long TIMEOUT_SECONDS = 15;
+    /** 单个 git 命令最多收集这么多字节；超出部分读掉但不保留，避免堆被打爆。 */
+    private static final int MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
     public record FileChange(String status, String path) {
     }
@@ -440,6 +442,15 @@ public class ChangeService {
         return out.toString();
     }
 
+    /**
+     * 跑一个 git 子进程并收集输出。
+     *
+     * <p>边读边限量：{@code readAllBytes} 会先把整份输出读进内存再截断，仓库很大时
+     * 一次 {@code git diff} 就能把堆撑爆。超过上限后继续消费但不存储，避免管道写满卡死子进程。
+     *
+     * <p>超时由独立的看门狗线程负责杀进程：读流本身是阻塞的，只在读完之后再 {@code waitFor}
+     * 会让超时形同虚设。
+     */
     private static String exec(Path workspace, List<String> command) {
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(workspace.toFile());
@@ -447,19 +458,34 @@ public class ChangeService {
         try {
             Process process = builder.start();
             process.getOutputStream().close();
-            var output = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                try (var stream = process.getInputStream()) {
-                    return stream.readAllBytes();
-                } catch (IOException e) {
-                    return new byte[0];
+            var timedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
+            Thread watchdog = Thread.ofVirtual().name("pilot-git-watchdog").start(() -> {
+                try {
+                    if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                        timedOut.set(true);
+                        process.destroyForcibly();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 }
             });
-            if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                output.cancel(true);
+
+            var collected = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            try (var stream = process.getInputStream()) {
+                int read;
+                while ((read = stream.read(buffer)) > 0) {
+                    if (collected.size() < MAX_OUTPUT_BYTES) {
+                        collected.write(buffer, 0, Math.min(read, MAX_OUTPUT_BYTES - collected.size()));
+                    }
+                }
+            }
+            watchdog.interrupt();
+            process.waitFor(1, TimeUnit.SECONDS);
+            if (timedOut.get()) {
                 return "";
             }
-            return new String(output.join(), StandardCharsets.UTF_8);
+            return collected.toString(StandardCharsets.UTF_8);
         } catch (IOException e) {
             return "";
         } catch (InterruptedException e) {

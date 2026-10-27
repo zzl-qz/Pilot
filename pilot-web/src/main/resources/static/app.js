@@ -11,6 +11,35 @@ import {
   filterQuickCommands
 } from './lib/commands.js';
 import { rankFileMatches } from './lib/mention.js';
+import { mergeRunReports, sortChangeFiles, statusKind } from './lib/changes.js';
+import { applyRule, classifyRunFailure, planProgressLabel } from './lib/events.js';
+import { groupSessionsByProject, resolveFolders, samePath } from './lib/projects.js';
+
+/** 原生 fetch 别名：apiFetch 内部用它，避免自己调用自己。 */
+const NATIVE_FETCH = window.fetch.bind(window);
+/** 普通接口的默认超时。SSE 走 EventSource，不经过这里。 */
+const REQUEST_TIMEOUT_MS = 20000;
+
+/**
+ * 统一请求入口：带超时与取消。
+ *
+ * <p>后端卡住或网络断开时，裸 fetch 会一直挂着，界面停在「加载中」且没法重试；
+ * 这里用 AbortController 兜底，并把超时报成可读的提示。
+ */
+async function apiFetch(input, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await NATIVE_FETCH(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error && error.name === 'AbortError') {
+      throw new Error(`请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 const EVENT_TYPES = [
   'run.started',
@@ -138,7 +167,18 @@ const el = {
   pickerList: document.querySelector('#picker-list'),
   pickerError: document.querySelector('#picker-error'),
   pickerSelected: document.querySelector('#picker-selected'),
-  pickerConfirm: document.querySelector('#picker-confirm')
+  pickerConfirm: document.querySelector('#picker-confirm'),
+  newProject: document.querySelector('#new-project'),
+  projectModal: document.querySelector('#project-modal'),
+  projectModalTitle: document.querySelector('#project-modal-title'),
+  projectClose: document.querySelector('#project-close'),
+  projectName: document.querySelector('#project-name'),
+  projectAddFolder: document.querySelector('#project-add-folder'),
+  projectFolders: document.querySelector('#project-folders'),
+  projectHint: document.querySelector('#project-hint'),
+  projectSave: document.querySelector('#project-save'),
+  projectDelete: document.querySelector('#project-delete'),
+  folderMenu: document.querySelector('#folder-menu')
 };
 
 const LAST_WORKSPACE_KEY = 'pilot.workspace';
@@ -149,6 +189,14 @@ const STALL_SECONDS = 75;
 const state = {
   sessionId: null,
   sessionTitle: '',
+  /** 项目列表：{ id, name, folders, sessionCount } */
+  projects: [],
+  /** 当前项目；新建对话挂在它下面 */
+  currentProjectId: null,
+  /** 项目编辑弹窗里的临时状态：{ id, name, folders }，id 为空表示新建 */
+  projectEditor: null,
+  /** picker 被项目弹窗借用时的回调；为空表示「选完就开新对话」 */
+  pickerOnPick: null,
   workspace: null,
   runId: null,
   lastRunId: null,
@@ -158,9 +206,15 @@ const state = {
   modelRetryUntil: 0,
   clock: null,
   cursor: 0,
+  /** SSE 重连次数，用于指数退避与「第 N 次重连」提示 */
+  reconnectAttempt: 0,
+  reconnectTimer: null,
   permissionMode: null,
-  historyLimit: 60,
+  /** 每次向前翻页取多少条历史；翻页用 before 游标，不再从全量里切片 */
+  historyPageSize: 80,
   historyHasMore: false,
+  /** 当前已渲染的事件窗口（升序）。翻页时只把新一页并进来，避免重复拉取整段历史 */
+  windowEvents: [],
   replaying: false,
   changedFiles: [],
   /** 当前这一轮里出现过的 runId：自动继续会换 run，改动要合并展示 */
@@ -355,7 +409,24 @@ function init() {
       openPreview(state.changeSelected);
     }
   });
-  el.newSession.addEventListener('click', () => openPicker());
+  el.newSession.addEventListener('click', beginNewConversation);
+  el.newProject.addEventListener('click', () => openProjectModal());
+  el.projectClose.addEventListener('click', closeProjectModal);
+  el.projectAddFolder.addEventListener('click', addProjectFolder);
+  el.projectSave.addEventListener('click', saveProject);
+  el.projectDelete.addEventListener('click', deleteProject);
+  el.projectModal.addEventListener('click', (event) => {
+    if (event.target === el.projectModal) {
+      closeProjectModal();
+    }
+  });
+  el.projectName.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      saveProject();
+    }
+  });
+  el.workspaceName.addEventListener('click', toggleFolderMenu);
   el.permChip.addEventListener('click', () => togglePermissionMenu());
   el.modelChip.addEventListener('click', () => toggleModelMenu());
   el.modelSave.addEventListener('click', saveModel);
@@ -368,6 +439,10 @@ function init() {
     }
     if (!el.modelMenu.hidden && !event.target.closest('.perm-picker')) {
       toggleModelMenu(false);
+    }
+    if (!el.folderMenu.hidden && !event.target.closest('#folder-menu')
+        && !event.target.closest('#workspace-name')) {
+      el.folderMenu.hidden = true;
     }
   });
   el.workspaceChip.addEventListener('click', () => openPicker());
@@ -424,24 +499,56 @@ function init() {
 async function restoreLastSession() {
   setComposerEnabled(false);
   setRunState('idle', '加载历史');
+  // 先取项目再取会话：侧栏要按项目分组，顺序反了会先闪一下「未分组」
+  await loadProjects();
   const sessions = await loadSessions();
   const lastId = localStorage.getItem(LAST_SESSION_KEY);
-  const target = sessions.find((item) => item.id === lastId) || sessions[0];
-  if (target) {
-    activate(target.id, target.title, target.workspace);
+  const lastProject = projectById(readStored(LAST_PROJECT_KEY, '')) || state.projects[0];
+
+  // 上次打开的那条（未归档）优先；否则落到当前项目的空白对话——和 Codex 一样，
+  // 打开项目就停在「可以立刻说话」的那条上，而不是翻出一堆历史。
+  const remembered = sessions.find((item) => item.id === lastId && !item.archived);
+  if (remembered) {
+    activate(remembered.id, remembered.title, remembered.workspace);
     return;
   }
-  const lastWorkspace = localStorage.getItem(LAST_WORKSPACE_KEY);
-  if (lastWorkspace) {
-    startSession(lastWorkspace);
-  } else {
-    openPicker({ firstRun: true });
+  const blank = lastProject
+    ? sessions.find((item) => item.projectId === lastProject.id && item.isBlank && !item.archived)
+    : null;
+  if (blank) {
+    activate(blank.id, blank.title, blank.workspace);
+    return;
+  }
+  const first = sessions.find((item) => !item.archived);
+  if (first) {
+    activate(first.id, first.title, first.workspace);
+    return;
+  }
+  if (lastProject) {
+    newConversation(lastProject.id);
+    return;
+  }
+  openPicker({ firstRun: true });
+}
+
+async function loadProjects() {
+  try {
+    const response = await apiFetch('/api/projects');
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    state.projects = await response.json();
+    return state.projects;
+  } catch (error) {
+    console.warn('[projects]', error);
+    showNotice('读取项目列表失败：' + error.message);
+    return [];
   }
 }
 
 async function loadSessions() {
   try {
-    const response = await fetch('/api/sessions');
+    const response = await apiFetch('/api/sessions');
     if (!response.ok) {
       throw new Error('HTTP ' + response.status);
     }
@@ -450,6 +557,9 @@ async function loadSessions() {
       id: item.sessionId,
       title: item.title || '未命名会话',
       workspace: item.workspace,
+      projectId: item.projectId || null,
+      isBlank: item.isBlank === true,
+      archived: item.archived === true,
       createdAt: item.createdAt,
       status: item.status
     }));
@@ -462,11 +572,365 @@ async function loadSessions() {
   }
 }
 
+/* ---------- 项目 ---------- */
+
+const LAST_PROJECT_KEY = 'pilot.project';
+/** 折叠的项目：纯界面状态，刷新后恢复成展开。 */
+const collapsedProjects = new Set();
+
+function currentProject() {
+  return state.projects.find((project) => project.id === state.currentProjectId) || null;
+}
+
+/** 当前对话（或草稿）可用的文件夹列表；规则在 lib/projects.js 里单测。 */
+function availableFolders() {
+  return resolveFolders(currentProject(), state.workspace);
+}
+
+function projectById(id) {
+  return state.projects.find((project) => project.id === id) || null;
+}
+
+/** 「新任务」入口：有项目就在当前项目下开一个空白对话，没有项目就先建项目。 */
+function beginNewConversation() {
+  const project = currentProject() || state.projects[0];
+  if (!project) {
+    openProjectModal();
+    return;
+  }
+  newConversation(project.id);
+}
+
+/**
+ * 在项目下开一个空白对话。
+ *
+ * <p>空白对话会真的落库（后端有 isBlank 标记），但同一项目只允许一条：
+ * 已经有一条时后端返回 409，这里问用户「归档旧的再新建」还是「回去用旧的」。
+ * 这样侧栏不会堆出一串没说过话的空壳。
+ *
+ * @param options.replaceBlank 用户已确认归档旧空白对话
+ */
+async function newConversation(projectId, options = {}) {
+  const project = projectById(projectId);
+  if (!project) {
+    openProjectModal();
+    return;
+  }
+  if (!project.folders.length) {
+    showNotice('这个项目还没有绑定文件夹，先添加一个目录');
+    openProjectModal(project.id);
+    return;
+  }
+  try {
+    const response = await apiFetch('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: '新对话',
+        projectId: project.id,
+        workspace: options.workspace || project.folders[0],
+        replaceBlank: options.replaceBlank === true
+      })
+    });
+    if (response.status === 409) {
+      resolveBlankConflict(project);
+      return;
+    }
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const session = await response.json();
+    state.currentProjectId = project.id;
+    writeStored(LAST_PROJECT_KEY, project.id);
+    await activate(session.sessionId, session.title, session.workspace || project.folders[0]);
+    await Promise.all([loadSessions(), loadProjects()]);
+    el.input.focus();
+  } catch (error) {
+    showNotice('创建对话失败：' + error.message);
+  }
+}
+
+/** 已经有一条空白对话：让用户选「归档并新建」还是「去用旧的」，不静默处理。 */
+function resolveBlankConflict(project) {
+  const blank = state.sessions.find((session) => session.projectId === project.id
+    && session.isBlank && !session.archived);
+  if (!blank) {
+    showNotice('该项目已有未使用的空白对话，请先刷新列表');
+    loadSessions();
+    return;
+  }
+  const archiveAndCreate = window.confirm(
+    '「' + project.name + '」下已有一条还没发过消息的新对话。\n\n'
+    + '确定：归档它并新建一条\n取消：回到那条已有的空白对话');
+  if (archiveAndCreate) {
+    newConversation(project.id, { replaceBlank: true });
+    return;
+  }
+  activateSession(blank.id);
+}
+
+function toggleProject(projectId) {
+  if (!projectId) {
+    return;
+  }
+  if (collapsedProjects.has(projectId)) {
+    collapsedProjects.delete(projectId);
+  } else {
+    collapsedProjects.add(projectId);
+  }
+  renderSessions();
+}
+
+function openProjectModal(projectId) {
+  const project = projectId ? projectById(projectId) : null;
+  state.projectEditor = project
+    ? { id: project.id, name: project.name, folders: project.folders.slice() }
+    : { id: null, name: '', folders: [] };
+  el.projectModalTitle.textContent = project ? '项目设置' : '新建项目';
+  el.projectName.value = state.projectEditor.name;
+  el.projectDelete.hidden = !project;
+  // 基线只展示不修改：改文件夹不会回头影响已经开着的对话
+  el.projectHint.textContent = project && project.baseCommit
+    ? `基线 ${String(project.baseCommit).slice(0, 7)} · 修改文件夹只影响之后新建的对话`
+    : '';
+  el.projectHint.className = 'settings-status';
+  renderProjectFolders();
+  el.projectModal.hidden = false;
+  el.projectName.focus();
+}
+
+function closeProjectModal() {
+  el.projectModal.hidden = true;
+  state.projectEditor = null;
+}
+
+function renderProjectFolders() {
+  const editor = state.projectEditor;
+  el.projectFolders.replaceChildren();
+  if (!editor || !editor.folders.length) {
+    const empty = document.createElement('li');
+    empty.className = 'project-folder-empty';
+    empty.textContent = '还没有文件夹，点「添加文件夹」选一个目录。';
+    el.projectFolders.append(empty);
+    return;
+  }
+  for (const folder of editor.folders) {
+    const item = document.createElement('li');
+    item.className = 'project-folder';
+    const path = document.createElement('span');
+    path.className = 'project-folder-path mono';
+    path.textContent = folder;
+    path.title = folder;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'icon-btn icon-btn-sm';
+    remove.title = '移除';
+    remove.setAttribute('aria-label', '移除文件夹');
+    remove.textContent = '✕';
+    remove.addEventListener('click', () => {
+      state.projectEditor.folders = state.projectEditor.folders.filter((item2) => item2 !== folder);
+      renderProjectFolders();
+    });
+    item.append(path, remove);
+    el.projectFolders.append(item);
+  }
+}
+
+/** 借用目录选择器：选中的路径加进项目，不直接开对话。 */
+function addProjectFolder() {
+  if (!state.projectEditor) {
+    return;
+  }
+  el.projectModal.hidden = true;
+  openPicker({
+    onPick: (path) => {
+      if (!state.projectEditor) {
+        return;
+      }
+      if (state.projectEditor.folders.includes(path)) {
+        showNotice('这个文件夹已经在项目里了');
+      } else {
+        state.projectEditor.folders.push(path);
+      }
+      el.projectModal.hidden = false;
+      renderProjectFolders();
+    }
+  });
+}
+
+async function saveProject() {
+  const editor = state.projectEditor;
+  if (!editor) {
+    return;
+  }
+  const name = el.projectName.value.trim();
+  if (!name) {
+    setProjectHint('项目名称不能为空', true);
+    return;
+  }
+  if (!editor.folders.length) {
+    setProjectHint('至少添加一个文件夹', true);
+    return;
+  }
+  el.projectSave.disabled = true;
+  try {
+    if (editor.id) {
+      const renamed = await apiFetch(`/api/projects/${encodeURIComponent(editor.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      if (!renamed.ok) {
+        throw new Error(await describeError(renamed));
+      }
+      const updated = await apiFetch(`/api/projects/${encodeURIComponent(editor.id)}/folders`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folders: editor.folders })
+      });
+      if (!updated.ok) {
+        throw new Error(await describeError(updated));
+      }
+    } else {
+      const created = await apiFetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, folders: editor.folders })
+      });
+      if (!created.ok) {
+        throw new Error(await describeError(created));
+      }
+      const project = await created.json();
+      state.currentProjectId = project.id;
+      writeStored(LAST_PROJECT_KEY, project.id);
+    }
+    closeProjectModal();
+    await loadProjects();
+    renderSessions();
+    renderWorkspace();
+    // 新项目顺手开一条空白对话，省掉一次点击
+    if (!state.sessionId && state.currentProjectId) {
+      newConversation(state.currentProjectId);
+    }
+  } catch (error) {
+    setProjectHint('保存失败：' + error.message, true);
+  } finally {
+    el.projectSave.disabled = false;
+  }
+}
+
+async function deleteProject() {
+  const editor = state.projectEditor;
+  if (!editor || !editor.id) {
+    return;
+  }
+  const project = projectById(editor.id);
+  const count = project ? project.sessionCount : 0;
+  if (!window.confirm(`删除项目「${project ? project.name : ''}」？${count ? `\n它下面的 ${count} 个对话也会一起删除。` : ''}`)) {
+    return;
+  }
+  try {
+    const response = await apiFetch(`/api/projects/${encodeURIComponent(editor.id)}`, { method: 'DELETE' });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    closeProjectModal();
+    if (state.currentProjectId === editor.id) {
+      state.currentProjectId = null;
+    }
+    await loadProjects();
+    await loadSessions();
+    const next = state.projects[0];
+    if (!state.sessionId && next) {
+      newConversation(next.id);
+    }
+  } catch (error) {
+    setProjectHint('删除失败：' + error.message, true);
+  }
+}
+
+function setProjectHint(text, isError = false) {
+  el.projectHint.textContent = text;
+  el.projectHint.className = 'settings-status' + (isError ? ' is-error' : '');
+}
+
+/* ---------- 对话内切换文件夹 ---------- */
+
+function toggleFolderMenu() {
+  if (!el.folderMenu.hidden) {
+    el.folderMenu.hidden = true;
+    return;
+  }
+  const folders = availableFolders();
+  if (!folders.length) {
+    showNotice('当前没有可用的文件夹');
+    return;
+  }
+  if (folders.length === 1 && state.sessionId) {
+    showNotice('这个项目只绑定了一个文件夹，可在项目设置里添加');
+  }
+  el.folderMenu.replaceChildren();
+  const title = document.createElement('p');
+  title.className = 'model-title';
+  title.textContent = '对话使用的文件夹';
+  el.folderMenu.append(title);
+  for (const folder of folders) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'perm-item' + (folder === state.workspace ? ' is-on' : '');
+    const label = document.createElement('span');
+    label.className = 'mono';
+    label.textContent = folderName(folder);
+    label.title = folder;
+    const sub = document.createElement('small');
+    sub.textContent = folder;
+    item.append(label, sub);
+    item.addEventListener('click', () => {
+      el.folderMenu.hidden = true;
+      switchWorkspace(folder);
+    });
+    el.folderMenu.append(item);
+  }
+  el.folderMenu.hidden = false;
+}
+
+async function switchWorkspace(path) {
+  if (path === state.workspace) {
+    return;
+  }
+  if (!state.sessionId) {
+    return;
+  }
+  try {
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/workspace`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace: path })
+    });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const session = await response.json();
+    state.workspace = session.workspace || path;
+    writeStored(LAST_WORKSPACE_KEY, state.workspace);
+    const listed = state.sessions.find((item) => item.id === session.sessionId);
+    if (listed) {
+      listed.workspace = state.workspace;
+    }
+    renderWorkspace();
+    renderSessions();
+    loadTree('');
+    showNotice('已切换到 ' + folderName(state.workspace) + '，下一次运行生效');
+  } catch (error) {
+    showNotice('切换文件夹失败：' + error.message);
+  }
+}
+
 /* ---------- 健康检查 ---------- */
 
 async function loadHealth() {
   try {
-    const response = await fetch('/api/health');
+    const response = await apiFetch('/api/health');
     if (!response.ok) {
       return;
     }
@@ -538,7 +1002,7 @@ async function choosePermission(mode) {
     return;
   }
   try {
-    const response = await fetch('/api/settings/permission-mode', {
+    const response = await apiFetch('/api/settings/permission-mode', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode })
@@ -561,7 +1025,7 @@ async function choosePermission(mode) {
 
 async function loadSettings() {
   try {
-    const response = await fetch('/api/settings');
+    const response = await apiFetch('/api/settings');
     if (!response.ok) {
       return;
     }
@@ -622,8 +1086,8 @@ function onModelClearKeyToggle() {
 }
 
 /** 下拉里给出候选模型，点击即切换；当前模型排在最前面。 */
-function renderModelOptions(current) {
-  el.modelOptions.replaceChildren();
+/** 候选模型列表：当前模型排第一，其余去重保序。 */
+function modelCandidates(current) {
   const names = [];
   if (current) {
     names.push(current);
@@ -633,7 +1097,12 @@ function renderModelOptions(current) {
       names.push(name);
     }
   }
-  for (const name of names) {
+  return names;
+}
+
+function renderModelOptions(current) {
+  el.modelOptions.replaceChildren();
+  for (const name of modelCandidates(current)) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'model-option' + (name === current ? ' is-active' : '');
@@ -705,7 +1174,7 @@ async function submitModel(source) {
   source.button.disabled = true;
   source.hint('保存中…', 'idle');
   try {
-    const response = await fetch('/api/settings/model', {
+    const response = await apiFetch('/api/settings/model', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -867,17 +1336,8 @@ function renderSettingsModelOptions(current) {
   if (!el.settingsModelOptions) {
     return;
   }
-  const names = [];
-  if (current) {
-    names.push(current);
-  }
-  for (const name of state.modelOptions) {
-    if (name && !names.includes(name)) {
-      names.push(name);
-    }
-  }
   el.settingsModelOptions.replaceChildren();
-  for (const name of names) {
+  for (const name of modelCandidates(current)) {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'settings-model-chip' + (name === current ? ' is-on' : '');
@@ -1099,52 +1559,47 @@ function guessMime(name) {
 
 /* ---------- 会话 ---------- */
 
+/**
+ * 选完目录之后的入口：目录属于某个项目就在那个项目下开草稿，
+ * 不属于任何项目就顺手建一个新项目并把这个目录加进去。
+ */
 async function startSession(workspace) {
   const target = workspace || state.workspace || localStorage.getItem(LAST_WORKSPACE_KEY);
   if (!target) {
     openPicker({ firstRun: true });
     return;
   }
-
-  closeStream();
-  resetView();
-  setComposerEnabled(false);
-  setConnection('pending', '创建会话');
-  setRunState('idle', '空闲');
-
-  try {
-    const response = await fetch('/api/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: '新任务', workspace: target })
-    });
-    if (!response.ok) {
-      throw new Error(response.status === 400 ? '工作区不可用，请重新选择目录' : 'HTTP ' + response.status);
-    }
-    const session = await response.json();
-    const title = session.title || '新任务';
-    const resolvedWorkspace = session.workspace || target;
-    state.sessions.unshift({
-      id: session.sessionId,
-      title,
-      workspace: resolvedWorkspace,
-      createdAt: session.createdAt,
-      status: session.status
-    });
-    localStorage.setItem(LAST_WORKSPACE_KEY, resolvedWorkspace);
-    activate(session.sessionId, title, resolvedWorkspace);
-    renderSessions();
-  } catch (error) {
-    setConnection('error', '创建失败');
-    showNotice('创建会话失败：' + error.message);
-    openPicker();
+  writeStored(LAST_WORKSPACE_KEY, target);
+  const project = state.projects.find((item) => item.folders.some((folder) => samePath(folder, target)));
+  if (project) {
+    const chosen = project.folders.find((folder) => samePath(folder, target));
+    newConversation(project.id, { workspace: chosen });
+    return;
   }
+  // 不属于任何项目：把这次选中的目录直接变成一个项目，少一步确认
+  state.projectEditor = { id: null, name: folderName(target) || '新项目', folders: [target] };
+  el.projectModalTitle.textContent = '新建项目';
+  el.projectName.value = state.projectEditor.name;
+  el.projectDelete.hidden = true;
+  el.projectHint.textContent = '这个目录还没有归属项目，确认后会在它下面开一个新对话。';
+  el.projectHint.className = 'settings-status';
+  renderProjectFolders();
+  el.projectModal.hidden = false;
+  el.projectName.focus();
 }
+
+
 
 async function activate(sessionId, title, workspace) {
   closeStream();
+  state.reconnectAttempt = 0;
   stopRunClock();
   state.sessionId = sessionId;
+  const listed = state.sessions.find((item) => item.id === sessionId);
+  if (listed && listed.projectId) {
+    state.currentProjectId = listed.projectId;
+    writeStored(LAST_PROJECT_KEY, listed.projectId);
+  }
   // 换了会话，@ 补全的文件索引必须重取，否则会短暂列出上一个工作区的文件
   state.fileIndex = [];
   state.fileIndexSession = null;
@@ -1164,7 +1619,8 @@ async function activate(sessionId, title, workspace) {
   // 先问服务端这个会话是否还在跑，再回放事件：回放不会覆盖掉「运行中」，
   // 而已经结束的运行会在回放里收到终态事件，把状态纠正回来。
   // 先按页拉取尾部历史（长会话不再一次性回放上千条事件），再从游标接上实时流
-  state.historyLimit = 60;
+  state.historyHasMore = false;
+  state.windowEvents = [];
   await loadHistory();
   if (state.sessionId !== sessionId) {
     return;
@@ -1187,7 +1643,7 @@ async function calibrateRun(sessionId) {
   state.running = false;
   state.runId = null;
   try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/runs/active`);
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/runs/active`);
     if (!response.ok) {
       return;
     }
@@ -1218,10 +1674,15 @@ async function calibrateRun(sessionId) {
 function renderWorkspace() {
   if (!state.workspace) {
     el.workspaceChip.hidden = true;
+    el.workspaceName.textContent = 'workspace';
     return;
   }
-  el.workspaceName.textContent = folderName(state.workspace);
-  el.workspaceChip.title = state.workspace + '\n点击选择其他目录（会新建会话）';
+  const project = currentProject();
+  el.workspaceName.textContent = project ? `${project.name} / ${folderName(state.workspace)}` : folderName(state.workspace);
+  el.workspaceName.title = (project
+    ? `项目：${project.name}\n当前文件夹：${state.workspace}\n点击切换`
+    : state.workspace + '\n点击选择其他目录');
+  el.workspaceChip.title = state.workspace + '\n点击选择其他目录（会新建对话）';
   el.workspaceChip.hidden = false;
 }
 
@@ -1259,34 +1720,170 @@ function activateSession(sessionId) {
   closeSidebar();
 }
 
+/** 侧栏按项目分组渲染：项目头 + 空白对话（置顶）+ 历史对话 + 归档折叠区。 */
 function renderSessions() {
   el.sessionList.replaceChildren();
-  for (const session of state.sessions) {
-    const item = document.createElement('li');
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'session-item' + (session.id === state.sessionId ? ' is-active' : '');
-    button.title = session.workspace ? `${session.title}\n${session.workspace}` : session.title;
-    button.addEventListener('click', () => activateSession(session.id));
-
-    const dot = document.createElement('span');
-    dot.className = 'dot' + (session.status ? ' is-' + String(session.status).toLowerCase() : '');
-    const text = document.createElement('span');
-    text.className = 'session-title';
-    text.textContent = session.title;
-
-    button.append(dot, text);
-    if (session.workspace) {
-      const folder = document.createElement('span');
-      folder.className = 'session-folder';
-      folder.textContent = folderName(session.workspace);
-      button.append(folder);
-    }
-    item.append(button);
-    el.sessionList.append(item);
+  const groups = groupSessionsByProject(state.projects, state.sessions);
+  for (const group of groups) {
+    el.sessionList.append(projectGroupNode(group));
   }
-  el.sessionEmpty.hidden = state.sessions.length > 0;
-  el.sessionCount.textContent = String(state.sessions.length);
+  el.sessionEmpty.hidden = groups.length > 0;
+  // 计数只算还在用的：归档的不该出现在「几个对话」里
+  el.sessionCount.textContent = String(state.sessions.filter((session) => !session.archived).length);
+}
+
+function projectGroupNode({ project, blank, active, archived }) {
+  const item = document.createElement('li');
+  item.className = 'project-group';
+
+  const head = document.createElement('div');
+  head.className = 'project-head';
+
+  const name = document.createElement('button');
+  name.type = 'button';
+  name.className = 'project-name';
+  name.title = project.folders && project.folders.length ? project.folders.join('\n') : project.name;
+  const label = document.createElement('span');
+  label.className = 'project-label';
+  label.textContent = project.name;
+  const count = document.createElement('span');
+  count.className = 'project-count';
+  count.textContent = String(active.length + (blank ? 1 : 0));
+  name.append(label, count);
+  if (project.id) {
+    name.addEventListener('click', () => toggleProject(project.id));
+  }
+  head.append(name);
+
+  if (project.id) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'icon-btn icon-btn-sm';
+    add.title = '在此项目新建对话';
+    add.setAttribute('aria-label', '在此项目新建对话');
+    add.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+    add.addEventListener('click', (event) => {
+      event.stopPropagation();
+      newConversation(project.id);
+    });
+    const settings = document.createElement('button');
+    settings.type = 'button';
+    settings.className = 'icon-btn icon-btn-sm';
+    settings.title = '项目设置';
+    settings.setAttribute('aria-label', '项目设置');
+    settings.textContent = '⋯';
+    settings.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openProjectModal(project.id);
+    });
+    head.append(add, settings);
+  }
+  item.append(head);
+
+  const list = document.createElement('ul');
+  list.className = 'project-sessions';
+  const collapsed = project.id ? collapsedProjects.has(project.id) : false;
+  list.hidden = collapsed;
+
+  // 空白对话永远置顶，浅色显示「还没有消息」
+  if (blank) {
+    list.append(sessionItemNode(blank));
+  }
+  for (const session of active) {
+    list.append(sessionItemNode(session));
+  }
+  if (!list.children.length) {
+    if (!project.id) {
+      // 未分组组只在真有历史会话时才出现，这里不会走到
+      return item;
+    }
+    const empty = document.createElement('li');
+    empty.className = 'project-empty';
+    empty.textContent = '还没有对话';
+    list.append(empty);
+  }
+  item.append(list);
+  if (archived.length) {
+    item.append(archivedGroupNode(archived));
+  }
+  return item;
+}
+
+/** 归档区：默认收起，点开才显示，不占主列表的注意力。 */
+function archivedGroupNode(sessions) {
+  const details = document.createElement('details');
+  details.className = 'project-archived';
+  const summary = document.createElement('summary');
+  summary.textContent = `已归档 ${sessions.length}`;
+  const list = document.createElement('ul');
+  list.className = 'project-sessions';
+  for (const session of sessions) {
+    list.append(sessionItemNode(session));
+  }
+  details.append(summary, list);
+  return details;
+}
+
+function sessionItemNode(session) {
+  const item = document.createElement('li');
+  item.className = 'session-row';
+  const button = document.createElement('button');
+  button.type = 'button';
+  const blank = session.isBlank === true;
+  button.className = 'session-item'
+    + (session.id === state.sessionId ? ' is-active' : '')
+    + (blank ? ' is-blank' : '')
+    + (session.archived ? ' is-archived' : '');
+  button.title = blank
+    ? '新对话：还没有消息，发送第一条后自动变成历史对话'
+    : (session.workspace ? `${session.title}\n${session.workspace}` : session.title);
+  button.addEventListener('click', () => activateSession(session.id));
+
+  const dot = document.createElement('span');
+  dot.className = 'dot' + (session.status ? ' is-' + String(session.status).toLowerCase() : '');
+  const text = document.createElement('span');
+  text.className = 'session-title';
+  text.textContent = blank ? '新对话' : session.title;
+
+  button.append(dot, text);
+  if (session.workspace && !blank) {
+    const folder = document.createElement('span');
+    folder.className = 'session-folder';
+    folder.textContent = folderName(session.workspace);
+    button.append(folder);
+  }
+
+  const action = document.createElement('button');
+  action.type = 'button';
+  action.className = 'session-action';
+  action.title = session.archived ? '恢复到列表' : '归档（保留历史，从列表里收起）';
+  action.setAttribute('aria-label', action.title);
+  action.textContent = session.archived ? '↩' : '↓';
+  action.addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleArchive(session);
+  });
+
+  item.append(button, action);
+  return item;
+}
+
+/** 归档 / 恢复：只是从主列表收起，事件与对话记忆都保留。 */
+async function toggleArchive(session) {
+  try {
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(session.id)}/archive`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archived: !session.archived })
+    });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    await Promise.all([loadSessions(), loadProjects()]);
+    showNotice(session.archived ? '已恢复到列表' : '已归档，历史仍然保留');
+  } catch (error) {
+    showNotice('操作失败：' + error.message);
+  }
 }
 
 async function copySessionId() {  if (!state.sessionId) {
@@ -1314,8 +1911,8 @@ async function loadHistory({ keepViewport = false } = {}) {
   const sessionId = state.sessionId;
   let data;
   try {
-    const response = await fetch(
-      `/api/sessions/${encodeURIComponent(sessionId)}/history?limit=${state.historyLimit}`);
+    const response = await apiFetch(
+      `/api/sessions/${encodeURIComponent(sessionId)}/history?limit=${state.historyPageSize}`);
     if (!response.ok) {
       throw new Error(await describeError(response));
     }
@@ -1327,31 +1924,74 @@ async function loadHistory({ keepViewport = false } = {}) {
   if (state.sessionId !== sessionId) {
     return;
   }
+  renderHistoryWindow(data.events || [], data.hasMore === true, { keepViewport });
+  await loadPlan();
+  await loadQueue();
+}
 
-  // 加载更早的消息时，锚点 = 视口底端距离内容末尾的距离，重排后据此还原滚动位置
+/**
+ * 用给定的事件窗口重建消息区。
+ *
+ * <p>重建是同步的：翻页请求返回后到重放结束之间不会有实时事件插进来，
+ * 所以「旧页面 + 新一页」拼出来的顺序与游标都是连续的。
+ */
+function renderHistoryWindow(events, hasMore, { keepViewport = false } = {}) {
   const anchor = keepViewport ? el.messages.scrollHeight - el.messages.scrollTop : 0;
-
   resetView();
   state.pendingInputs = [];
   state.queue = [];
   renderQueue();
-  state.historyHasMore = data.hasMore === true;
+  state.historyHasMore = hasMore;
+  state.windowEvents = [];
   state.replaying = true;
-  for (const event of data.events || []) {
+  for (const event of events) {
     handleEvent(event);
   }
   state.replaying = false;
   if (state.reply && !state.running) {
     finishReply(false);
   }
-  await loadPlan();
   renderHistoryMore();
   if (keepViewport) {
     el.messages.scrollTop = Math.max(0, el.messages.scrollHeight - anchor);
   } else {
     scrollThread();
   }
-  await loadQueue();
+}
+
+/** 向前翻一页：只请求 before 之前的一页，再与当前窗口合并。 */
+async function loadEarlier() {
+  if (!state.sessionId || !state.windowEvents.length) {
+    return;
+  }
+  const before = state.windowEvents[0].sequence;
+  if (typeof before !== 'number') {
+    return;
+  }
+  const sessionId = state.sessionId;
+  let data;
+  try {
+    const response = await apiFetch(
+      `/api/sessions/${encodeURIComponent(sessionId)}/history?limit=${state.historyPageSize}&before=${before}`);
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    data = await response.json();
+  } catch (error) {
+    showNotice('加载更早的消息失败：' + error.message);
+    return;
+  }
+  if (state.sessionId !== sessionId) {
+    return;
+  }
+  const older = data.events || [];
+  if (!older.length) {
+    state.historyHasMore = false;
+    renderHistoryMore();
+    return;
+  }
+  // 只把这一页并到窗口前面：请求量是 O(一页)，不再是 O(已加载总数)
+  renderHistoryWindow([...older, ...state.windowEvents], data.hasMore === true, { keepViewport: true });
 }
 
 function renderHistoryMore() {
@@ -1369,13 +2009,15 @@ function renderHistoryMore() {
   more.addEventListener('click', async () => {
     more.disabled = true;
     more.textContent = '加载中…';
-    state.historyLimit += 80;
-    await loadHistory({ keepViewport: true });
+    await loadEarlier();
   });
   el.messages.prepend(more);
 }
 
 /* ---------- 事件流 ---------- */
+
+const RECONNECT_BASE_MS = 800;
+const RECONNECT_MAX_MS = 15000;
 
 function connect(cursor) {
   const from = Number.isFinite(cursor) ? cursor : 0;
@@ -1391,29 +2033,60 @@ function connect(cursor) {
     });
   }
   const session = state.sessionId;
-  source.onopen = () => setConnection('ok', '已连接');
+  source.onopen = () => {
+    state.reconnectAttempt = 0;
+    setConnection('ok', '已连接');
+  };
   source.onerror = () => {
     // 接管自动重连：带着已渲染的游标续订，避免从 0 重新回放
     setConnection('error', '重连中');
     closeStream();
-    setTimeout(() => {
-      if (state.sessionId === session) {
-        connect(state.cursor);
-      }
-    }, 1500);
+    scheduleReconnect(session);
   };
+}
+
+/**
+ * 指数退避 + 抖动：服务端长时间不可用时，1.5 秒死循环重连会给本机日志和线程
+ * 带来无意义的压力，也让用户看不出「已经重试了多久」。上限 15 秒，重连成功即归零。
+ */
+function scheduleReconnect(session) {
+  if (state.reconnectTimer) {
+    return;
+  }
+  const attempt = state.reconnectAttempt;
+  state.reconnectAttempt = attempt + 1;
+  const base = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(attempt, 5));
+  const delay = base + Math.round(base * 0.2 * Math.random());
+  state.reconnectTimer = setTimeout(() => {
+    state.reconnectTimer = null;
+    if (state.sessionId !== session) {
+      return;
+    }
+    setConnection('pending', attempt > 0 ? `重连中（第 ${attempt + 1} 次）` : '重连中');
+    connect(state.cursor);
+  }, delay);
 }
 
 function reconnect() {
   if (!state.sessionId) {
     return;
   }
+  clearReconnectTimer();
+  state.reconnectAttempt = 0;
   closeStream();
   setConnection('pending', '重连中');
   connect(state.cursor);
 }
 
+function clearReconnectTimer() {
+  if (state.reconnectTimer) {
+    clearTimeout(state.reconnectTimer);
+    state.reconnectTimer = null;
+  }
+}
+
 function closeStream() {
+  clearReconnectTimer();
   if (state.source) {
     state.source.close();
     state.source = null;
@@ -1422,16 +2095,21 @@ function closeStream() {
 
 function handleEvent(event) {
   // 预览沿用上一条已落库事件的序号，不能参与游标，否则会被当成重复事件丢掉
-  if (event.type === 'assistant.preview') {
+  if (event && event.type === 'assistant.preview') {
     showLivePreview(event.payload && event.payload.text);
     return;
   }
-  // 同一事件可能被旧连接重复推送，按 sequence 去重，避免历史消息叠加渲染
-  if (typeof event.sequence === 'number') {
-    if (event.sequence <= state.cursor) {
-      return;
+  // 同一事件可能被旧连接重复推送，按 sequence 去重；规则本身在 lib/events.js 里单测
+  const rule = applyRule(event, state.cursor);
+  if (!rule.apply) {
+    return;
+  }
+  if (rule.cursor !== state.cursor) {
+    state.cursor = rule.cursor;
+    // 实时事件也要进窗口，否则向前翻页重建时会丢掉这一段
+    if (!state.replaying) {
+      state.windowEvents.push(event);
     }
-    state.cursor = event.sequence;
   }
   state.lastEventAt = Date.now();
   hideEmptyState();
@@ -1439,354 +2117,9 @@ function handleEvent(event) {
   const stick = state.replaying ? false : isNearBottom(el.messages);
   const stickTimeline = state.replaying ? false : isNearBottom(el.timeline);
 
-  switch (event.type) {
-    case 'run.started': {
-      state.running = true;
-      state.runId = event.runId || state.runId;
-      state.turnRuns = event.runId ? [event.runId] : [];
-      startRunClock(Date.now());
-      markSessionStatus('RUNNING');
-      syncComposer();
-      clearThinking();
-      const input = event.payload.input || '';
-      if (state.pendingInputs[0] === input) {
-        state.pendingInputs.shift();
-        stampLastUserMessage(event.sequence, input);
-      } else if (state.queue[0] === input) {
-        // 排队的下一句被自动开成新一轮，从队列拿掉，再画进对话
-        state.queue.shift();
-        renderQueue();
-        appendUserMessage(input, event.sequence);
-      } else if (input) {
-        appendUserMessage(input, event.sequence);
-      }
-      // 新的一轮另起一组，避免操作和结论接在上一轮后面
-      beginTurnShell();
-      ensureTurnShell();
-      showThinking();
-      state.modelRetryUntil = 0;
-      record(event, { kind: 'run', tone: 'run', status: '开始', title: '运行开始', detail: input });
-      break;
-    }
-
-    case 'assistant.delta':
-      commitReply(event.payload.text);
-      recordDelta(event, event.payload.text);
-      break;
-
-    case 'tool.started': {
-      clearThinking();
-      const row = addToolRow(event.payload.callId, event.payload.name, event.payload.summary);
-      row.setStatus('run', '…');
-      state.toolRows.set(event.payload.callId, row);
-      showThinking();
-      record(event, {
-        kind: 'tool',
-        tone: 'tool',
-        status: '运行中',
-        title: `${event.payload.name} · ${event.payload.summary}`,
-        detail: null
-      });
-      break;
-    }
-
-    case 'tool.completed': {
-      const failed = String(event.payload.resultSummary || '').startsWith('ERROR');
-      const row = state.toolRows.get(event.payload.callId);
-      if (row) {
-        state.toolRows.delete(event.payload.callId);
-        row.setStatus(failed ? 'error' : 'ok', failed ? '✕' : '✓');
-        row.setMeta(`${event.payload.latencyMs} ms`);
-        row.setBody(event.payload.resultSummary);
-      }
-      record(event, {
-        kind: 'tool',
-        tone: failed ? 'error' : 'ok',
-        status: failed ? '失败' : '完成',
-        title: event.payload.callId,
-        detail: event.payload.resultSummary,
-        foot: `${event.payload.latencyMs} ms`
-      });
-      break;
-    }
-
-    case 'approval.required': {
-      clearThinking();
-      const row = addToolRow(event.payload.callId, event.payload.name, event.payload.argsSummary);
-      row.setStatus('wait', '!');
-      state.toolRows.set(event.payload.callId, row);
-      state.pendingApprovals.set(event.payload.callId, {
-        name: event.payload.name,
-        args: event.payload.argsSummary,
-        row
-      });
-      renderApprovalDock();
-      record(event, {
-        kind: 'approval',
-        tone: 'warn',
-        status: '待审批',
-        title: `${event.payload.name} · ${event.payload.argsSummary}`,
-        detail: '需要你批准后才能执行',
-        actions: true,
-        callId: event.payload.callId
-      });
-      break;
-    }
-
-    case 'approval.resolved': {
-      const approved = event.payload.decision === 'APPROVED';
-      const pending = state.pendingApprovals.get(event.payload.callId);
-      if (pending) {
-        state.pendingApprovals.delete(event.payload.callId);
-        pending.row.setStatus(approved ? 'run' : 'error', approved ? '…' : '✕');
-        pending.row.setMeta(approved ? '已批准' : '已拒绝');
-        if (!approved) {
-          state.toolRows.delete(event.payload.callId);
-        }
-      }
-      renderApprovalDock();
-      record(event, {
-        kind: 'approval',
-        tone: approved ? 'ok' : 'error',
-        status: approved ? '已批准' : '已拒绝',
-        title: event.payload.callId,
-        detail: null
-      });
-      break;
-    }
-
-    case 'run.completed': {
-      state.running = false;
-      state.modelRetryUntil = 0;
-      stopRunClock();
-      markSessionStatus('COMPLETED');
-      state.lastRunId = event.runId || state.runId || state.lastRunId;
-      state.runId = null;
-      state.changedFiles = event.payload.changedFiles || [];
-      // 「运行结束」≠「任务做完」：计划还有 pending 项时如实标成未完成
-      const openSteps = Array.isArray(event.payload.openSteps) ? event.payload.openSteps : [];
-      const planTotal = Number(event.payload.planTotal || 0);
-      const planDone = Number(event.payload.planDone || 0);
-      const planOpen = openSteps.length > 0;
-      const progress = planTotal ? ` · 计划 ${planDone}/${planTotal}` : '';
-      setRunState(planOpen ? 'warn' : 'done', (planOpen ? '本轮结束' : '已完成') + progress);
-      setComposerEnabled(true);
-      clearThinking();
-      finishReply(false);
-      const extras = [];
-      if (event.payload.changedFiles && event.payload.changedFiles.length) {
-        extras.push('变更：' + event.payload.changedFiles.join('、'));
-      }
-      if (event.payload.checks && event.payload.checks.length) {
-        extras.push('检查：' + event.payload.checks.join('、'));
-      }
-      if (planOpen) {
-        extras.push('剩余：' + openSteps.join('、'));
-      }
-      record(event, {
-        kind: 'run',
-        tone: planOpen ? 'warn' : 'ok',
-        status: planOpen ? '未完成' : '完成',
-        title: (planOpen ? '本轮结束' : '运行完成') + progress,
-        detail: event.payload.summary,
-        foot: extras.join(' · '),
-        resumable: planOpen
-      });
-      appendTurnResult({
-        tone: planOpen ? 'warn' : 'ok',
-        title: (planOpen ? `本轮结束 · 还有 ${openSteps.length} 项没做` : '本轮已完成') + progress,
-        openSteps,
-        changedFiles: event.payload.changedFiles || [],
-        // 自动继续会换 runId，同一轮里写过的文件分散在多个快照中，合并后再取
-        runIds: state.turnRuns.length ? state.turnRuns.slice()
-          : (event.runId ? [event.runId] : [state.lastRunId]),
-        resumable: planOpen
-      });
-      refreshChanges();
-      break;
-    }
-
-    case 'context.compacted': {
-      appendCompaction(event.payload);
-      break;
-    }
-    case 'plan.updated': {
-      renderPlan(event.payload);
-      break;
-    }
-    case 'run.steered': {
-      const steered = event.payload.input || '';
-      const index = state.queue.indexOf(steered);
-      if (index >= 0) {
-        state.queue.splice(index, 1);
-        renderQueue();
-      }
-      if (steered) {
-        appendUserMessage(steered);
-      }
-      showNotice('已追加指令：' + steered);
-      setRunState('running', '已收到补充指令');
-      break;
-    }
-    case 'run.retrying': {
-      rollbackLivePreview();
-      const delayMs = Number(event.payload.delayMs || 0);
-      const attempt = Number(event.payload.attempt || 1);
-      const seconds = Math.max(1, Math.round(delayMs / 1000));
-      state.modelRetryUntil = Date.now() + delayMs;
-      const reason = event.payload.reason || '模型请求失败';
-      showNotice(`模型暂时连不上，${seconds} 秒后再试（第 ${attempt} 次）。可以点停止。`);
-      setRunState('warn', `等待重试 · ${seconds}s`);
-      record(event, {
-        kind: 'run',
-        tone: 'warn',
-        status: `${seconds}s`,
-        title: `模型请求失败，第 ${attempt} 次重试`,
-        detail: reason
-      });
-      break;
-    }
-    case 'run.continued': {
-      if (event.runId && !state.turnRuns.includes(event.runId)) {
-        state.turnRuns.push(event.runId);
-      }
-      const attempt = Number(event.payload.attempt || 1);
-      const max = Number(event.payload.maxAttempts || 0);
-      showNotice(`自动继续 ${attempt}/${max}：${event.payload.reason || ''}`);
-      setRunState('running', '自动继续中');
-      record(event, {
-        kind: 'run',
-        tone: 'ok',
-        status: max ? `${attempt}/${max}` : '继续',
-        title: '计划未完成，自动继续',
-        detail: event.payload.reason
-      });
-      break;
-    }
-    case 'subagent.started': {
-      appendSubagent(event.payload);
-      break;
-    }
-    case 'subagent.finished': {
-      finishSubagent(event.payload);
-      break;
-    }
-    case 'task.updated': {
-      renderTaskBoard(event.payload);
-      record(event, {
-        kind: 'task',
-        tone: taskTone(event.payload.status),
-        status: TASK_STATUS_LABEL[event.payload.status] || event.payload.status,
-        title: [event.payload.taskId, event.payload.title].filter(Boolean).join(' '),
-        detail: [event.payload.agentId ? '@' + event.payload.agentId : '', event.payload.detail || '']
-          .filter(Boolean).join(' · ')
-      });
-      break;
-    }
-    case 'sandbox.diff': {
-      renderSandboxChange(event.payload);
-      record(event, {
-        kind: 'sandbox',
-        tone: 'warn',
-        status: '沙箱',
-        title: event.payload.path,
-        detail: `@${event.payload.agentId || '?'} · +${event.payload.added || 0} -${event.payload.removed || 0}`
-      });
-      break;
-    }
-    case 'arbitration.required': {
-      renderArbitration(event.payload);
-      // 只是提示状态，运行态仍由 run.started / run.completed 维护，避免提前把界面放回空闲
-      setRunState('warn', '待你裁决');
-      record(event, {
-        kind: 'arbitration',
-        tone: 'error',
-        status: '待仲裁',
-        title: event.payload.kind === 'conflict' ? '变更冲突' : event.payload.kind === 'verification'
-          ? '硬校验未通过' : '方案分歧',
-        detail: '需要你决定后才会继续'
-      });
-      break;
-    }
-    case 'arbitration.resolved': {
-      settleArbitration(event.payload);
-      record(event, {
-        kind: 'arbitration',
-        tone: 'ok',
-        status: '已裁决',
-        title: event.payload.choice || '',
-        detail: event.payload.arbitrationId
-      });
-      break;
-    }
-    case 'run.cancelled': {
-      state.running = false;
-      state.modelRetryUntil = 0;
-      stopRunClock();
-      markSessionStatus('CANCELLED');
-      state.lastRunId = event.runId || state.runId || state.lastRunId;
-      state.runId = null;
-      setRunState('idle', '已取消');
-      setComposerEnabled(true);
-      clearThinking();
-      finishReply(false);
-      record(event, {
-        kind: 'run',
-        tone: 'warn',
-        status: '已取消',
-        title: '运行已取消',
-        detail: event.payload.reason || ''
-      });
-      break;
-    }
-    case 'run.failed': {
-      state.modelRetryUntil = 0;
-      const code = String(event.payload.code || '');
-      const cancelled = code === 'CANCELLED';
-      // 步数触顶不是失败：历史对话已保留，继续跑即可
-      const paused = code === 'MAX_STEPS';
-      // 服务重启导致的中断：不是任务本身失败，同样可以继续
-      const interrupted = code === 'INTERRUPTED';
-      const resumable = paused || interrupted;
-      state.running = false;
-      stopRunClock();
-      markSessionStatus(cancelled ? 'CANCELLED' : paused ? 'PAUSED' : interrupted ? 'INTERRUPTED' : 'FAILED');
-      state.lastRunId = event.runId || state.runId || state.lastRunId;
-      state.runId = null;
-      setRunState(resumable ? 'warn' : cancelled ? 'idle' : 'error',
-        paused ? '已暂停' : interrupted ? '已中断' : cancelled ? '已取消' : '失败');
-      setComposerEnabled(true);
-      clearThinking();
-      finishReply(!resumable);
-      record(event, {
-        kind: 'run',
-        tone: resumable || cancelled ? 'warn' : 'error',
-        status: paused ? '可继续' : interrupted ? '已中断' : cancelled ? '已取消' : (event.payload.retryable ? '可重试' : '失败'),
-        title: paused ? `本轮已暂停 · ${code}` : interrupted ? `运行已中断 · ${code}` : `运行${cancelled ? '取消' : '失败'} · ${code}`,
-        detail: event.payload.message,
-        resumable
-      });
-      // 模型错误：把原始报错翻译成可行动的提示（401 去填 Key、404 查端点…）
-      const modelError = code === 'MODEL_ERROR' ? classifyModelError(event.payload.message) : null;
-      if (modelError && modelError.hint) {
-        showNotice(modelError.hint);
-      }
-      appendTurnResult({
-        tone: cancelled || resumable ? 'warn' : 'error',
-        title: paused ? '本轮已暂停' : interrupted ? '运行已中断' : cancelled ? '本轮已取消' : '运行失败',
-        detail: event.payload.message,
-        hint: modelError ? modelError.hint : '',
-        actionLabel: modelError && modelError.action === 'model-settings' ? '打开模型设置' : '',
-        onAction: (clickEvent) => {
-          // 阻止冒泡：document 上的「点外面就收起」会立刻把刚打开的面板关掉
-          clickEvent?.stopPropagation();
-          toggleModelMenu(true);
-          el.modelKey.focus();
-        },
-        resumable
-      });
-      break;
-    }
+  const handler = EVENT_HANDLERS[event.type];
+  if (handler) {
+    handler(event);
   }
 
   if (stick) {
@@ -1798,6 +2131,404 @@ function handleEvent(event) {
   if (state.filter !== 'all') {
     applyFilter();
   }
+}
+
+/* ---------- 事件分发 ---------- */
+
+/**
+ * 事件类型 → 处理函数。
+ *
+ * <p>原来是一个 380 行的 switch，读起来要在「去重/滚动/渲染」之间来回跳；
+ * 拆成一事件一函数之后，加新事件只要补一条映射，改动范围可控。
+ */
+const EVENT_HANDLERS = {
+  'run.started': onRunStarted,
+  'assistant.delta': onAssistantDelta,
+  'tool.started': onToolStarted,
+  'tool.completed': onToolCompleted,
+  'approval.required': onApprovalRequired,
+  'approval.resolved': onApprovalResolved,
+  'run.completed': onRunCompleted,
+  'run.cancelled': onRunCancelled,
+  'run.failed': onRunFailed,
+  'context.compacted': onContextCompacted,
+  'plan.updated': onPlanUpdated,
+  'run.steered': onRunSteered,
+  'run.retrying': onRunRetrying,
+  'run.continued': onRunContinued,
+  'subagent.started': onSubagentStarted,
+  'subagent.finished': onSubagentFinished,
+  'task.updated': onTaskUpdated,
+  'sandbox.diff': onSandboxDiff,
+  'arbitration.required': onArbitrationRequired,
+  'arbitration.resolved': onArbitrationResolved
+};
+
+/** 一轮开始：接管运行状态，画用户消息，另起一个操作外壳。 */
+function onRunStarted(event) {
+  state.running = true;
+  state.runId = event.runId || state.runId;
+  state.turnRuns = event.runId ? [event.runId] : [];
+  startRunClock(Date.now());
+  markSessionStatus('RUNNING');
+  syncComposer();
+  clearThinking();
+  const input = event.payload.input || '';
+  if (state.pendingInputs[0] === input) {
+    state.pendingInputs.shift();
+    stampLastUserMessage(event.sequence, input);
+  } else if (state.queue[0] === input) {
+    // 排队的下一句被自动开成新一轮，从队列拿掉，再画进对话
+    state.queue.shift();
+    renderQueue();
+    appendUserMessage(input, event.sequence);
+  } else if (input) {
+    appendUserMessage(input, event.sequence);
+  }
+  // 新的一轮另起一组，避免操作和结论接在上一轮后面
+  beginTurnShell();
+  ensureTurnShell();
+  showThinking();
+  state.modelRetryUntil = 0;
+  record(event, { kind: 'run', tone: 'run', status: '开始', title: '运行开始', detail: input });
+  promoteBlankSession(input);
+}
+
+/**
+ * 空白对话发出第一条消息后转正：清掉空白标记、用第一句话当标题，并落库。
+ *
+ * <p>后端在 publish(run.started) 时已经清了 is_blank，这里同步界面状态，
+ * 否则侧栏会一直把它画成「新对话」（浅色、置顶），看起来像还能被归档。
+ */
+function promoteBlankSession(input) {
+  const found = state.sessions.find((session) => session.id === state.sessionId);
+  if (!found || !found.isBlank) {
+    return;
+  }
+  found.isBlank = false;
+  const title = preview(input || '', 22) || found.title;
+  found.title = title;
+  state.sessionTitle = title;
+  el.crumbTitle.textContent = title;
+  renderSessions();
+  // 标题落库：刷新后仍然是这句话，而不是又变回「新对话」
+  apiFetch(`/api/sessions/${encodeURIComponent(found.id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title })
+  }).then(() => loadProjects()).catch((error) => console.warn('[blank] 标题保存失败', error));
+}
+
+function onAssistantDelta(event) {
+  commitReply(event.payload.text);
+  recordDelta(event, event.payload.text);
+}
+
+function onToolStarted(event) {
+  clearThinking();
+  const row = addToolRow(event.payload.callId, event.payload.name, event.payload.summary);
+  row.setStatus('run', '…');
+  state.toolRows.set(event.payload.callId, row);
+  showThinking();
+  record(event, {
+    kind: 'tool',
+    tone: 'tool',
+    status: '运行中',
+    title: `${event.payload.name} · ${event.payload.summary}`,
+    detail: null
+  });
+}
+
+function onToolCompleted(event) {
+  const failed = String(event.payload.resultSummary || '').startsWith('ERROR');
+  const row = state.toolRows.get(event.payload.callId);
+  if (row) {
+    state.toolRows.delete(event.payload.callId);
+    row.setStatus(failed ? 'error' : 'ok', failed ? '✕' : '✓');
+    row.setMeta(`${event.payload.latencyMs} ms`);
+    row.setBody(event.payload.resultSummary);
+  }
+  record(event, {
+    kind: 'tool',
+    tone: failed ? 'error' : 'ok',
+    status: failed ? '失败' : '完成',
+    title: event.payload.callId,
+    detail: event.payload.resultSummary,
+    foot: `${event.payload.latencyMs} ms`
+  });
+}
+
+function onApprovalRequired(event) {
+  clearThinking();
+  const row = addToolRow(event.payload.callId, event.payload.name, event.payload.argsSummary);
+  row.setStatus('wait', '!');
+  state.toolRows.set(event.payload.callId, row);
+  state.pendingApprovals.set(event.payload.callId, {
+    name: event.payload.name,
+    args: event.payload.argsSummary,
+    row
+  });
+  renderApprovalDock();
+  record(event, {
+    kind: 'approval',
+    tone: 'warn',
+    status: '待审批',
+    title: `${event.payload.name} · ${event.payload.argsSummary}`,
+    detail: '需要你批准后才能执行',
+    actions: true,
+    callId: event.payload.callId
+  });
+}
+
+function onApprovalResolved(event) {
+  const approved = event.payload.decision === 'APPROVED';
+  const pending = state.pendingApprovals.get(event.payload.callId);
+  if (pending) {
+    state.pendingApprovals.delete(event.payload.callId);
+    pending.row.setStatus(approved ? 'run' : 'error', approved ? '…' : '✕');
+    pending.row.setMeta(approved ? '已批准' : '已拒绝');
+    if (!approved) {
+      state.toolRows.delete(event.payload.callId);
+    }
+  }
+  renderApprovalDock();
+  record(event, {
+    kind: 'approval',
+    tone: approved ? 'ok' : 'error',
+    status: approved ? '已批准' : '已拒绝',
+    title: event.payload.callId,
+    detail: null
+  });
+}
+
+/** 一轮结束：「运行结束」≠「任务做完」，计划还有未完成项时如实标成未完成。 */
+function onRunCompleted(event) {
+  state.running = false;
+  state.modelRetryUntil = 0;
+  stopRunClock();
+  markSessionStatus('COMPLETED');
+  state.lastRunId = event.runId || state.runId || state.lastRunId;
+  state.runId = null;
+  state.changedFiles = event.payload.changedFiles || [];
+  const openSteps = Array.isArray(event.payload.openSteps) ? event.payload.openSteps : [];
+  const planTotal = Number(event.payload.planTotal || 0);
+  const planDone = Number(event.payload.planDone || 0);
+  const planOpen = openSteps.length > 0;
+  const progress = planProgressLabel(planDone, planTotal);
+  setRunState(planOpen ? 'warn' : 'done', (planOpen ? '本轮结束' : '已完成') + progress);
+  setComposerEnabled(true);
+  clearThinking();
+  finishReply(false);
+  const extras = [];
+  if (event.payload.changedFiles && event.payload.changedFiles.length) {
+    extras.push('变更：' + event.payload.changedFiles.join('、'));
+  }
+  if (event.payload.checks && event.payload.checks.length) {
+    extras.push('检查：' + event.payload.checks.join('、'));
+  }
+  if (planOpen) {
+    extras.push('剩余：' + openSteps.join('、'));
+  }
+  record(event, {
+    kind: 'run',
+    tone: planOpen ? 'warn' : 'ok',
+    status: planOpen ? '未完成' : '完成',
+    title: (planOpen ? '本轮结束' : '运行完成') + progress,
+    detail: event.payload.summary,
+    foot: extras.join(' · '),
+    resumable: planOpen
+  });
+  appendTurnResult({
+    tone: planOpen ? 'warn' : 'ok',
+    title: (planOpen ? `本轮结束 · 还有 ${openSteps.length} 项没做` : '本轮已完成') + progress,
+    openSteps,
+    changedFiles: event.payload.changedFiles || [],
+    // 自动继续会换 runId，同一轮里写过的文件分散在多个快照中，合并后再取
+    runIds: state.turnRuns.length ? state.turnRuns.slice()
+      : (event.runId ? [event.runId] : [state.lastRunId]),
+    resumable: planOpen
+  });
+  refreshChanges();
+}
+
+function onRunCancelled(event) {
+  state.running = false;
+  state.modelRetryUntil = 0;
+  stopRunClock();
+  markSessionStatus('CANCELLED');
+  state.lastRunId = event.runId || state.runId || state.lastRunId;
+  state.runId = null;
+  setRunState('idle', '已取消');
+  setComposerEnabled(true);
+  clearThinking();
+  finishReply(false);
+  record(event, {
+    kind: 'run',
+    tone: 'warn',
+    status: '已取消',
+    title: '运行已取消',
+    detail: event.payload.reason || ''
+  });
+}
+
+/**
+ * 运行失败：取消、步数触顶、服务重启中断、真失败四种语义分开处理。
+ * 前三种都能继续跑，界面上不能显示成红色错误。
+ */
+function onRunFailed(event) {
+  state.modelRetryUntil = 0;
+  const code = String(event.payload.code || '');
+  const { cancelled, paused, interrupted, resumable } = classifyRunFailure(code);
+  state.running = false;
+  stopRunClock();
+  markSessionStatus(cancelled ? 'CANCELLED' : paused ? 'PAUSED' : interrupted ? 'INTERRUPTED' : 'FAILED');
+  state.lastRunId = event.runId || state.runId || state.lastRunId;
+  state.runId = null;
+  setRunState(resumable ? 'warn' : cancelled ? 'idle' : 'error',
+    paused ? '已暂停' : interrupted ? '已中断' : cancelled ? '已取消' : '失败');
+  setComposerEnabled(true);
+  clearThinking();
+  finishReply(!resumable);
+  record(event, {
+    kind: 'run',
+    tone: resumable || cancelled ? 'warn' : 'error',
+    status: paused ? '可继续' : interrupted ? '已中断' : cancelled ? '已取消' : (event.payload.retryable ? '可重试' : '失败'),
+    title: paused ? `本轮已暂停 · ${code}` : interrupted ? `运行已中断 · ${code}` : `运行${cancelled ? '取消' : '失败'} · ${code}`,
+    detail: event.payload.message,
+    resumable
+  });
+  // 模型错误：把原始报错翻译成可行动的提示（401 去填 Key、404 查端点…）
+  const modelError = code === 'MODEL_ERROR' ? classifyModelError(event.payload.message) : null;
+  if (modelError && modelError.hint) {
+    showNotice(modelError.hint);
+  }
+  appendTurnResult({
+    tone: cancelled || resumable ? 'warn' : 'error',
+    title: paused ? '本轮已暂停' : interrupted ? '运行已中断' : cancelled ? '本轮已取消' : '运行失败',
+    detail: event.payload.message,
+    hint: modelError ? modelError.hint : '',
+    actionLabel: modelError && modelError.action === 'model-settings' ? '打开模型设置' : '',
+    onAction: (clickEvent) => {
+      // 阻止冒泡：document 上的「点外面就收起」会立刻把刚打开的面板关掉
+      clickEvent?.stopPropagation();
+      toggleModelMenu(true);
+      el.modelKey.focus();
+    },
+    resumable
+  });
+}
+
+function onContextCompacted(event) {
+  appendCompaction(event.payload);
+}
+
+function onPlanUpdated(event) {
+  renderPlan(event.payload);
+}
+
+function onRunSteered(event) {
+  const steered = event.payload.input || '';
+  const index = state.queue.indexOf(steered);
+  if (index >= 0) {
+    state.queue.splice(index, 1);
+    renderQueue();
+  }
+  if (steered) {
+    appendUserMessage(steered);
+  }
+  showNotice('已追加指令：' + steered);
+  setRunState('running', '已收到补充指令');
+}
+
+function onRunRetrying(event) {
+  rollbackLivePreview();
+  const delayMs = Number(event.payload.delayMs || 0);
+  const attempt = Number(event.payload.attempt || 1);
+  const seconds = Math.max(1, Math.round(delayMs / 1000));
+  state.modelRetryUntil = Date.now() + delayMs;
+  const reason = event.payload.reason || '模型请求失败';
+  showNotice(`模型暂时连不上，${seconds} 秒后再试（第 ${attempt} 次）。可以点停止。`);
+  setRunState('warn', `等待重试 · ${seconds}s`);
+  record(event, {
+    kind: 'run',
+    tone: 'warn',
+    status: `${seconds}s`,
+    title: `模型请求失败，第 ${attempt} 次重试`,
+    detail: reason
+  });
+}
+
+function onRunContinued(event) {
+  if (event.runId && !state.turnRuns.includes(event.runId)) {
+    state.turnRuns.push(event.runId);
+  }
+  const attempt = Number(event.payload.attempt || 1);
+  const max = Number(event.payload.maxAttempts || 0);
+  showNotice(`自动继续 ${attempt}/${max}：${event.payload.reason || ''}`);
+  setRunState('running', '自动继续中');
+  record(event, {
+    kind: 'run',
+    tone: 'ok',
+    status: max ? `${attempt}/${max}` : '继续',
+    title: '计划未完成，自动继续',
+    detail: event.payload.reason
+  });
+}
+
+function onSubagentStarted(event) {
+  appendSubagent(event.payload);
+}
+
+function onSubagentFinished(event) {
+  finishSubagent(event.payload);
+}
+
+function onTaskUpdated(event) {
+  renderTaskBoard(event.payload);
+  record(event, {
+    kind: 'task',
+    tone: taskTone(event.payload.status),
+    status: TASK_STATUS_LABEL[event.payload.status] || event.payload.status,
+    title: [event.payload.taskId, event.payload.title].filter(Boolean).join(' '),
+    detail: [event.payload.agentId ? '@' + event.payload.agentId : '', event.payload.detail || '']
+      .filter(Boolean).join(' · ')
+  });
+}
+
+function onSandboxDiff(event) {
+  renderSandboxChange(event.payload);
+  record(event, {
+    kind: 'sandbox',
+    tone: 'warn',
+    status: '沙箱',
+    title: event.payload.path,
+    detail: `@${event.payload.agentId || '?'} · +${event.payload.added || 0} -${event.payload.removed || 0}`
+  });
+}
+
+function onArbitrationRequired(event) {
+  renderArbitration(event.payload);
+  // 只是提示状态，运行态仍由 run.started / run.completed 维护，避免提前把界面放回空闲
+  setRunState('warn', '待你裁决');
+  record(event, {
+    kind: 'arbitration',
+    tone: 'error',
+    status: '待仲裁',
+    title: event.payload.kind === 'conflict' ? '变更冲突' : event.payload.kind === 'verification'
+      ? '硬校验未通过' : '方案分歧',
+    detail: '需要你决定后才会继续'
+  });
+}
+
+function onArbitrationResolved(event) {
+  settleArbitration(event.payload);
+  record(event, {
+    kind: 'arbitration',
+    tone: 'ok',
+    status: '已裁决',
+    title: event.payload.choice || '',
+    detail: event.payload.arbitrationId
+  });
 }
 
 /* ---------- 对话渲染 ---------- */
@@ -1941,7 +2672,7 @@ async function loadRunChangeDetail(runIds, paths, stat, body) {
   }
   try {
     const reports = await Promise.all(ids.map(async (runId) => {
-      const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/changes`);
+      const response = await apiFetch(`/api/runs/${encodeURIComponent(runId)}/changes`);
       if (!response.ok) {
         throw new Error('HTTP ' + response.status);
       }
@@ -1961,27 +2692,6 @@ async function loadRunChangeDetail(runIds, paths, stat, body) {
  * 合并一轮里多个 run 的改动：同一文件以最后一次运行的统计为准
  * （最后一次的 diff 本身就是相对 HEAD 的完整改动，直接相加会重复计数）。
  */
-function mergeRunReports(reports) {
-  const files = new Map();
-  let gitRepository = false;
-  let truncated = false;
-  for (const report of reports || []) {
-    gitRepository = gitRepository || report.gitRepository === true;
-    truncated = truncated || report.truncated === true;
-    for (const file of report.files || []) {
-      files.set(normalizePath(file.path), file);
-    }
-  }
-  const list = [...files.values()];
-  return {
-    gitRepository,
-    truncated,
-    files: list,
-    added: list.reduce((sum, file) => sum + Number(file.added || 0), 0),
-    removed: list.reduce((sum, file) => sum + Number(file.removed || 0), 0)
-  };
-}
-
 function renderRunChangeDetail(report, paths, stat, body) {
   const files = Array.isArray(report.files) ? report.files : [];
   const added = Number(report.added || 0);
@@ -2293,7 +3003,7 @@ async function decideSandbox(group, sandboxId, action) {
     button.disabled = true;
   });
   try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/multi/sandboxes/${encodeURIComponent(sandboxId)}/${action}`, {
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/multi/sandboxes/${encodeURIComponent(sandboxId)}/${action}`, {
       method: 'POST'
     });
     if (action === 'reject') {
@@ -2367,7 +3077,7 @@ async function resolveArbitration(arbitrationId, choice) {
     }
   }
   try {
-    await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/multi/arbitrations/${encodeURIComponent(arbitrationId)}/resolve`, {
+    await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/multi/arbitrations/${encodeURIComponent(arbitrationId)}/resolve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ choice })
@@ -2467,7 +3177,7 @@ async function loadPlan() {
     return;
   }
   try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/plan`);
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/plan`);
     if (!response.ok) {
       return;
     }
@@ -2849,7 +3559,7 @@ async function resendUserMessage(wrapper, sequence, content) {
   }
   closeStream();
   try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/resend`, {
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/resend`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sequence, content: text })
@@ -3000,7 +3710,7 @@ async function resolveApproval(callId, approved, scope) {
   buttons.forEach((item) => { item.disabled = true; });
 
   try {
-    const response = await fetch(`/api/approvals/${encodeURIComponent(callId)}`, {
+    const response = await apiFetch(`/api/approvals/${encodeURIComponent(callId)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ approved })
@@ -3221,7 +3931,7 @@ async function loadChanges(options = {}) {
     el.changesState.className = 'changes-state';
   }
   try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/diff`);
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/diff`);
     if (!response.ok) {
       throw new Error('HTTP ' + response.status);
     }
@@ -3280,18 +3990,6 @@ function renderChanges(report, silent) {
 }
 
 /** 本次运行改过的文件排最前，其余按路径排序，和 git status 的阅读顺序接近。 */
-function sortChangeFiles(files) {
-  const runOrder = new Map((state.changedFiles || []).map((path, index) => [normalizePath(path), index]));
-  return files.slice().sort((a, b) => {
-    const left = runOrder.has(normalizePath(a.path)) ? runOrder.get(normalizePath(a.path)) : Number.MAX_SAFE_INTEGER;
-    const right = runOrder.has(normalizePath(b.path)) ? runOrder.get(normalizePath(b.path)) : Number.MAX_SAFE_INTEGER;
-    if (left !== right) {
-      return left - right;
-    }
-    return String(a.path).localeCompare(String(b.path));
-  });
-}
-
 /** 刷新后尽量停在原文件上；第一次打开就选本次运行改过的第一个。 */
 function pickDefaultChangeFile() {
   const previous = state.changeSelected;
@@ -3312,13 +4010,18 @@ function renderChangeTotals(files) {
     return;
   }
   el.changesTotals.hidden = false;
+  el.changesTotals.append(...diffStatNodes(added, removed));
+}
+
+/** +x / −y 两个统计节点。每次重新创建，避免同一节点被搬到别处。 */
+function diffStatNodes(added, removed) {
   const add = document.createElement('span');
   add.className = 'add';
   add.textContent = '+' + added;
   const del = document.createElement('span');
   del.className = 'del';
   del.textContent = '−' + removed;
-  el.changesTotals.append(add, del);
+  return [add, del];
 }
 
 function renderChangeList() {
@@ -3507,16 +4210,6 @@ function renderRunChanges() {
   }
 }
 
-function statusKind(status) {
-  if (status === '??' || status === 'A') {
-    return 'added';
-  }
-  if (status === 'D') {
-    return 'deleted';
-  }
-  return 'modified';
-}
-
 /** 单行 diff：双行号（旧/新）+ 代码；加/删/上下文由 kind 决定配色。 */
 function diffLineRow(line) {
   const row = document.createElement('div');
@@ -3548,6 +4241,9 @@ function changeHint(text) {
 /* ---------- 工作区选择 ---------- */
 
 async function openPicker(options = {}) {
+  // 项目弹窗借用同一个目录浏览器：选完把路径交回去，而不是直接开对话
+  state.pickerOnPick = typeof options.onPick === 'function' ? options.onPick : null;
+  el.pickerConfirm.textContent = state.pickerOnPick ? '选择此文件夹' : '在此工作区开始';
   el.picker.hidden = false;
   el.pickerError.hidden = true;
   el.pickerConfirm.disabled = true;
@@ -3565,7 +4261,7 @@ function closePicker() {
 
 async function loadRoots() {
   try {
-    const response = await fetch('/api/workspaces/roots');
+    const response = await apiFetch('/api/workspaces/roots');
     if (!response.ok) {
       return;
     }
@@ -3589,7 +4285,7 @@ async function browseTo(path) {
   el.pickerError.hidden = true;
   try {
     const query = path ? '?path=' + encodeURIComponent(path) : '';
-    const response = await fetch('/api/workspaces/browse' + query);
+    const response = await apiFetch('/api/workspaces/browse' + query);
     if (!response.ok) {
       throw new Error(await describeError(response));
     }
@@ -3778,7 +4474,7 @@ async function submitMessage(content, attachments = []) {
   scrollThread();
 
   try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/messages`, {
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -3907,7 +4603,7 @@ async function cancelRun() {
   }
   el.send.disabled = true;
   try {
-    const response = await fetch(`/api/runs/${encodeURIComponent(state.runId)}/cancel`, { method: 'POST' });
+    const response = await apiFetch(`/api/runs/${encodeURIComponent(state.runId)}/cancel`, { method: 'POST' });
     if (!response.ok) {
       throw new Error(await describeError(response));
     }
@@ -3930,7 +4626,7 @@ async function continueRun(box) {
   const buttons = [...box.querySelectorAll('button')];
   buttons.forEach((item) => { item.disabled = true; });
   try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/continue`, {
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/continue`, {
       method: 'POST'
     });
     if (!response.ok) {
@@ -3954,7 +4650,7 @@ async function refreshActiveRun() {
     return null;
   }
   try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/runs/active`);
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/runs/active`);
     if (!response.ok) {
       return null;
     }
@@ -3982,7 +4678,7 @@ async function rollbackRun() {
   }
   el.changesRollback.disabled = true;
   try {
-    const response = await fetch(`/api/runs/${encodeURIComponent(state.lastRunId)}/rollback`, { method: 'POST' });
+    const response = await apiFetch(`/api/runs/${encodeURIComponent(state.lastRunId)}/rollback`, { method: 'POST' });
     if (response.status === 404) {
       showNotice('这次运行没有产生文件改动，无需回滚。');
       return;
@@ -4193,7 +4889,7 @@ async function loadQueue() {
   }
   const sessionId = state.sessionId;
   try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/queue`);
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/queue`);
     if (!response.ok || state.sessionId !== sessionId) {
       return;
     }
@@ -4250,7 +4946,7 @@ function editQueuedItem(index, row) {
         return;
       }
       try {
-        const response = await fetch(
+        const response = await apiFetch(
           `/api/sessions/${encodeURIComponent(state.sessionId)}/queue/${index}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -4273,7 +4969,7 @@ function editQueuedItem(index, row) {
 
 async function removeQueuedItem(index) {
   try {
-    const response = await fetch(
+    const response = await apiFetch(
       `/api/sessions/${encodeURIComponent(state.sessionId)}/queue/${index}`, { method: 'DELETE' });
     if (!response.ok) {
       throw new Error(await describeError(response));
@@ -4474,7 +5170,7 @@ async function loadTree(path = '', container = el.tree) {
 }
 
 async function fetchTree(path) {
-  const response = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/files?path=${encodeURIComponent(path)}`);
+  const response = await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/files?path=${encodeURIComponent(path)}`);
   if (!response.ok) {
     throw new Error(await describeError(response));
   }
@@ -4613,7 +5309,7 @@ async function openPreview(path, row) {
   el.previewBody.textContent = '读取中…';
   highlightTree(path, row);
   try {
-    const response = await fetch(
+    const response = await apiFetch(
       `/api/sessions/${encodeURIComponent(state.sessionId)}/file?path=${encodeURIComponent(path)}`);
     if (!response.ok) {
       throw new Error(await describeError(response));
@@ -4762,7 +5458,7 @@ function ensureFileIndex() {
     return;
   }
   state.fileIndexLoading = true;
-  fetch(`/api/sessions/${encodeURIComponent(sessionId)}/files/flat`)
+  apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/files/flat`)
     .then((response) => (response.ok ? response.json() : null))
     .then((data) => {
       if (!data || state.fileIndexSession !== sessionId) {

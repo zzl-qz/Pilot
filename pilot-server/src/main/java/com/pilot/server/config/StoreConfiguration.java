@@ -1,5 +1,7 @@
 package com.pilot.server.config;
 
+import com.pilot.core.project.InMemoryProjectRepository;
+import com.pilot.core.project.ProjectRepository;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.InMemoryConversationRepository;
 import com.pilot.core.session.InMemoryPlanRepository;
@@ -11,6 +13,7 @@ import com.pilot.server.store.EventCodec;
 import com.pilot.server.store.InMemorySettingsStore;
 import com.pilot.server.store.JdbcConversationRepository;
 import com.pilot.server.store.JdbcPlanRepository;
+import com.pilot.server.store.JdbcProjectRepository;
 import com.pilot.server.store.JdbcRunRepository;
 import com.pilot.server.store.JdbcSessionRepository;
 import com.pilot.server.store.JdbcSettingsStore;
@@ -56,6 +59,18 @@ public class StoreConfiguration {
     @ConditionalOnProperty(name = "pilot.store", havingValue = "sqlite", matchIfMissing = true)
     RunRepository jdbcRunRepository(SqliteStore store) {
         return new JdbcRunRepository(store);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "pilot.store", havingValue = "sqlite", matchIfMissing = true)
+    ProjectRepository jdbcProjectRepository(SqliteStore store) {
+        return new JdbcProjectRepository(store);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "pilot.store", havingValue = "memory")
+    ProjectRepository inMemoryProjectRepository() {
+        return new InMemoryProjectRepository();
     }
 
     /** 对话记忆与会话事件分开存：事件是审计日志，记忆才是模型看到的上下文。 */

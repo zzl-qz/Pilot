@@ -16,10 +16,48 @@ public final class InMemorySessionRepository implements SessionRepository {
     private final ConcurrentMap<String, State> sessions = new ConcurrentHashMap<>();
 
     @Override
-    public Session create(String sessionId, String title, String workspace, Instant createdAt) {
-        var state = new State(sessionId, title, workspace, createdAt);
+    public Session create(String sessionId, String title, String workspace, Instant createdAt, String projectId,
+                          boolean isBlank) {
+        var state = new State(sessionId, title, workspace, createdAt, projectId, isBlank);
         sessions.put(sessionId, state);
         return state.snapshot();
+    }
+
+    @Override
+    public boolean markNotBlank(String sessionId) {
+        State state = sessionId == null ? null : sessions.get(sessionId);
+        if (state == null) {
+            return false;
+        }
+        synchronized (state) {
+            boolean changed = state.isBlank;
+            state.isBlank = false;
+            return changed;
+        }
+    }
+
+    @Override
+    public boolean setArchived(String sessionId, boolean archived) {
+        State state = sessionId == null ? null : sessions.get(sessionId);
+        if (state == null) {
+            return false;
+        }
+        synchronized (state) {
+            state.archived = archived;
+        }
+        return true;
+    }
+
+    @Override
+    public boolean updateWorkspace(String sessionId, String workspace) {
+        State state = sessionId == null ? null : sessions.get(sessionId);
+        if (state == null) {
+            return false;
+        }
+        synchronized (state) {
+            state.workspace = workspace;
+        }
+        return true;
     }
 
     @Override
@@ -118,23 +156,29 @@ public final class InMemorySessionRepository implements SessionRepository {
 
     private static final class State {
         private final String id;
-        private final String workspace;
         private final Instant createdAt;
+        private final String projectId;
         private final List<EventEnvelope> events = new ArrayList<>();
         private String title;
+        private String workspace;
         private SessionStatus status = SessionStatus.CREATED;
         private long sequence;
+        private boolean isBlank;
+        private boolean archived;
 
-        private State(String id, String title, String workspace, Instant createdAt) {
+        private State(String id, String title, String workspace, Instant createdAt, String projectId,
+                      boolean isBlank) {
             this.id = id;
             this.title = title;
             this.workspace = workspace;
             this.createdAt = createdAt;
+            this.projectId = projectId;
+            this.isBlank = isBlank;
         }
 
         private Session snapshot() {
             synchronized (this) {
-                return new Session(id, title, createdAt, status, workspace);
+                return new Session(id, title, createdAt, status, workspace, projectId, isBlank, archived);
             }
         }
     }

@@ -6,10 +6,6 @@ import com.pilot.core.tool.ToolCall;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,69 +29,49 @@ public final class JdbcConversationRepository implements ConversationRepository 
 
     @Override
     public List<Message> load(String sessionId) {
-        String sql = "SELECT role, content, tool_calls, tool_call_id FROM conversation_messages "
-                + "WHERE session_id = ? ORDER BY seq";
-        try (Connection connection = store.open();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, sessionId);
-            try (ResultSet rows = statement.executeQuery()) {
-                var messages = new ArrayList<Message>();
-                while (rows.next()) {
-                    messages.add(new Message(
-                            rows.getString(1),
-                            rows.getString(2),
-                            toolCalls(rows.getString(3)),
-                            rows.getString(4)));
-                }
-                return List.copyOf(messages);
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException("读取对话记忆失败: " + sessionId, e);
-        }
+        return JdbcSupport.query(store,
+                "SELECT role, content, tool_calls, tool_call_id FROM conversation_messages "
+                        + "WHERE session_id = ? ORDER BY seq",
+                statement -> statement.setString(1, sessionId),
+                rows -> new Message(
+                        rows.getString(1),
+                        rows.getString(2),
+                        toolCalls(rows.getString(3)),
+                        rows.getString(4)),
+                "读取对话记忆失败: " + sessionId);
     }
 
     @Override
     public void save(String sessionId, List<Message> messages) {
-        String delete = "DELETE FROM conversation_messages WHERE session_id = ?";
-        String insert = "INSERT INTO conversation_messages "
-                + "(session_id, seq, role, content, tool_calls, tool_call_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
-        try (Connection connection = store.open()) {
-            connection.setAutoCommit(false);
-            try (PreparedStatement statement = connection.prepareStatement(delete)) {
+        String now = Instant.now().toString();
+        List<JdbcSupport.Binder> rows = new ArrayList<>();
+        for (int seq = 0; seq < messages.size(); seq++) {
+            Message message = messages.get(seq);
+            int position = seq + 1;
+            String toolCalls = message.toolCalls().isEmpty() ? null : mapper.writeValueAsString(message.toolCalls());
+            rows.add(statement -> {
                 statement.setString(1, sessionId);
-                statement.executeUpdate();
-            }
-            try (PreparedStatement statement = connection.prepareStatement(insert)) {
-                String now = Instant.now().toString();
-                int seq = 1;
-                for (Message message : messages) {
-                    statement.setString(1, sessionId);
-                    statement.setInt(2, seq++);
-                    statement.setString(3, message.role());
-                    statement.setString(4, message.content());
-                    statement.setString(5, message.toolCalls().isEmpty()
-                            ? null : mapper.writeValueAsString(message.toolCalls()));
-                    statement.setString(6, message.toolCallId());
-                    statement.setString(7, now);
-                    statement.addBatch();
-                }
-                statement.executeBatch();
-            }
-            connection.commit();
-        } catch (SQLException e) {
-            throw new IllegalStateException("保存对话记忆失败: " + sessionId, e);
+                statement.setInt(2, position);
+                statement.setString(3, message.role());
+                statement.setString(4, message.content());
+                statement.setString(5, toolCalls);
+                statement.setString(6, message.toolCallId());
+                statement.setString(7, now);
+            });
         }
+        JdbcSupport.inTransaction(store, connection -> {
+            JdbcSupport.exec(connection, "DELETE FROM conversation_messages WHERE session_id = ?",
+                    statement -> statement.setString(1, sessionId));
+            JdbcSupport.batch(connection, "INSERT INTO conversation_messages "
+                    + "(session_id, seq, role, content, tool_calls, tool_call_id, created_at) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?)", rows);
+        }, "保存对话记忆失败: " + sessionId);
     }
 
     @Override
     public void delete(String sessionId) {
-        String sql = "DELETE FROM conversation_messages WHERE session_id = ?";
-        try (Connection connection = store.open(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, sessionId);
-            statement.executeUpdate();
-        } catch (SQLException e) {
-            throw new IllegalStateException("删除对话记忆失败: " + sessionId, e);
-        }
+        JdbcSupport.update(store, "DELETE FROM conversation_messages WHERE session_id = ?",
+                statement -> statement.setString(1, sessionId), "删除对话记忆失败: " + sessionId);
     }
 
     private List<ToolCall> toolCalls(String json) {

@@ -15,12 +15,46 @@ import java.util.Optional;
  */
 public interface SessionRepository {
 
-    Session create(String sessionId, String title, String workspace, Instant createdAt);
+    Session create(String sessionId, String title, String workspace, Instant createdAt, String projectId,
+                   boolean isBlank);
+
+    /** 已经发过消息：清掉空白标记（幂等）。返回是否真的改动过。 */
+    boolean markNotBlank(String sessionId);
+
+    /** 归档 / 取消归档。 */
+    boolean setArchived(String sessionId, boolean archived);
+
+    /** 兼容旧调用：不归属任何项目、不是空白对话。 */
+    default Session create(String sessionId, String title, String workspace, Instant createdAt) {
+        return create(sessionId, title, workspace, createdAt, null, false);
+    }
+
+    /** 兼容旧调用：不归属项目的普通对话。 */
+    default Session create(String sessionId, String title, String workspace, Instant createdAt, String projectId) {
+        return create(sessionId, title, workspace, createdAt, projectId, false);
+    }
 
     Optional<Session> find(String sessionId);
 
     /** 按创建时间倒序返回全部会话。 */
     List<Session> list();
+
+    /** 某个项目下的会话，按创建时间倒序。 */
+    default List<Session> listByProject(String projectId) {
+        return list().stream()
+                .filter(session -> java.util.Objects.equals(session.projectId(), projectId))
+                .toList();
+    }
+
+    /** 项目下唯一的那条「未归档空白对话」，没有则返回空。 */
+    default Optional<Session> findBlank(String projectId) {
+        return listByProject(projectId).stream()
+                .filter(session -> session.isBlank() && !session.archived())
+                .findFirst();
+    }
+
+    /** 切换会话当前使用的文件夹（同一项目绑定的其它目录）。 */
+    boolean updateWorkspace(String sessionId, String workspace);
 
     boolean rename(String sessionId, String title);
 
@@ -30,6 +64,28 @@ public interface SessionRepository {
     List<EventEnvelope> events(String sessionId);
 
     List<EventEnvelope> eventsAfter(String sessionId, long afterSequence);
+
+    /** 会话的事件总数。默认实现不读事件体，仅计数。 */
+    default long eventCount(String sessionId) {
+        return events(sessionId).size();
+    }
+
+    /**
+     * 历史分页：返回序号小于 {@code before} 的最后 {@code limit} 条事件（{@code before} 为空表示从最新往前）。
+     * 默认实现基于全量读取再切片，落库实现应覆盖成带 LIMIT 的查询。
+     */
+    default List<EventEnvelope> eventsPage(String sessionId, Long before, int limit) {
+        List<EventEnvelope> all = events(sessionId);
+        int end = all.size();
+        if (before != null) {
+            end = 0;
+            while (end < all.size() && all.get(end).sequence() < before) {
+                end++;
+            }
+        }
+        int start = Math.max(0, end - Math.max(1, limit));
+        return List.copyOf(all.subList(start, end));
+    }
 
     /** 当前已落库的最大序号。还没有事件时返回 0。 */
     long latestSequence(String sessionId);

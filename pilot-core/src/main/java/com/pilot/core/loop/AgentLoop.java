@@ -2,7 +2,6 @@ package com.pilot.core.loop;
 
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.AssistantDelta;
-import com.pilot.core.event.ContextCompacted;
 import com.pilot.core.event.RunSteered;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
@@ -22,18 +21,13 @@ import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.trace.TraceRecorder;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -63,7 +57,14 @@ public final class AgentLoop {
      * @param contextLimit          上下文预算（按字符估算）；太小会频繁压缩、丢细节
      */
     public record Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt,
-                         Supplier<List<PlanItem>> plan, int maxPlanContinues, int contextLimit) {
+                         Supplier<List<PlanItem>> plan, int maxPlanContinues, int contextLimit,
+                         boolean completionChecks) {
+        /** 兼容旧调用：收尾门默认开启。 */
+        public Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt,
+                      Supplier<List<PlanItem>> plan, int maxPlanContinues, int contextLimit) {
+            this(maxSteps, repeatedToolCallLimit, systemPrompt, plan, maxPlanContinues, contextLimit, true);
+        }
+
         public Config {
             if (maxSteps < 1) {
                 throw new IllegalArgumentException("maxSteps must be >= 1");
@@ -121,50 +122,15 @@ public final class AgentLoop {
     }
 
     private static final int DEFAULT_CONTEXT_LIMIT = 120_000;
-    /** 旧工具输出换占位符的起点（预算占比）。 */
-    private static final double PRUNE_RATIO = 0.55;
-    /** 窗口内超长工具输出首尾截断的起点。 */
-    private static final double TRUNCATE_RATIO = 0.70;
-    /** 摘要也压不下去时，超过这个水位就硬裁剪。 */
-    private static final double DROP_RATIO = 0.97;
     /** 计划未完成时默认自动催模型继续的次数上限。 */
     private static final int DEFAULT_MAX_PLAN_CONTINUES = 3;
-
-    /**
-     * 达到预算该比例先压一次；超过强制档时允许多压几轮。
-     *
-     * <p>0.80 是权衡后的值：0.70 会让长任务在八万字符出头就压，压完只落到七成，
-     * 再跑二十来步又越线，于是出现「连着压两次」。压得晚一点、压得狠一点（摘要目标一半），
-     * 单次任务的总压缩次数明显更少。
-     */
-    private static final double PRE_COMPACT_RATIO = 0.80;
-    private static final double FORCE_COMPACT_RATIO = 0.90;
-    private static final int MAX_COMPACT_ROUNDS = 3;
-    /** 断网或模型临时失败：最多再试 3 次，间隔 2 秒起、翻倍、不超过 30 秒。 */
-    private static final int MAX_TRANSIENT_RETRIES = 3;
-    private static final long RETRY_INITIAL_MS = 2_000L;
-    private static final long RETRY_MAX_MS = 30_000L;
     /** 等待重试时拆成小段，取消能在这段时间内停下来。 */
     private static final long RETRY_SLICE_MS = 250L;
-    private static final Pattern HTTP_STATUS = Pattern.compile("HTTP (\\d+)");
-
-    /** 收尾门：改了代码却没有验证时催几次；自审只做一次。 */
-    private static final int MAX_VERIFY_PROMPTS = 2;
-    private static final int MAX_REVIEW_PROMPTS = 1;
-    /** 只改这些后缀的文档不算「改了代码」，不强制跑构建。 */
-    private static final Set<String> DOC_SUFFIXES = Set.of(".md", ".txt", ".rst", ".adoc");
-    /** 目标像「调研 / 解释 / 定位」时，只读任务也要核对覆盖范围，不能读两个文件就下结论。 */
-    private static final List<String> RESEARCH_HINTS = List.of(
-            "分析", "梳理", "说明", "解释", "为什么", "怎么实现", "如何实现", "调用链", "流程",
-            "审查", "评估", "调研", "看一下", "读一下", "哪些", "对比", "定位");
-    private static final List<String> RESEARCH_HINTS_EN = List.of(
-            "explain", "analyze", "analyse", "review", "how does", "why", "walk through");
-    /** 从验证摘要里读退出码，例如 {@code mvn -q test → exit 0}。 */
-    private static final Pattern EXIT_CODE = Pattern.compile("exit (-?\\d+)");
 
     private final ModelClient client;
     private final ToolRegistry tools;
-    private final ContextCompactor compactor;
+    /** 上下文预算的四层收缩策略与退避状态。 */
+    private final ContextBudget budget;
     private final ToolExecutor toolExecutor;
     private final Config config;
     private final Cancellation cancellation;
@@ -173,17 +139,8 @@ public final class AgentLoop {
     private final Pause retryPause;
     /** 正在生成的文字，只给界面看。为空表示不推预览。 */
     private final Consumer<String> liveText;
-    /** 上次压缩没有实际收益时的上下文大小；涨过这个水位之前不再尝试，避免每步白跑一次摘要。 */
-    private int compactBackoffUntil;
-    /** 本轮原始任务，收尾自审时回灌给模型对照。 */
-    private String goalText;
-    /** 已经催过几次验证 / 自审，用来给收尾门刹车。 */
-    private int verifyPrompts;
-    private int reviewPrompts;
-    /** 本轮工具调用次数，自审提示里用来说明「实际做了多少」。 */
-    private int toolCalls;
-    /** 本轮碰过的路径，只读任务自审时告诉模型「已经看过哪些」。 */
-    private final Set<String> inspected = new LinkedHashSet<>();
+    /** 收尾门：有了目标之后在 run/resume 里创建，一次运行一个。 */
+    private CompletionGate completionGate;
 
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate) {
         this(client, tools, permissionGate, ApprovalBroker.denyAll(), Config.defaults(), Cancellation.none());
@@ -244,7 +201,7 @@ public final class AgentLoop {
         this.liveText = liveText;
         this.client = Objects.requireNonNull(client, "client must not be null");
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
-        this.compactor = new ContextCompactor(client);
+        this.budget = new ContextBudget(new ContextCompactor(client)::compact);
         this.toolExecutor = new ToolExecutor(tools,
                 Objects.requireNonNull(permissionGate, "permissionGate must not be null"),
                 Objects.requireNonNull(approvals, "approvals must not be null"), traceRecorder);
@@ -275,8 +232,9 @@ public final class AgentLoop {
             throw new IllegalArgumentException("userInput must not be blank");
         }
         List<Message> messages = seed(history);
-        this.goalText = userInput.strip();
-        messages.add(Message.user(goalText, attachments == null ? List.of() : attachments));
+        String goal = userInput.strip();
+        this.completionGate = new CompletionGate(PROMPTS, config.completionChecks(), goal);
+        messages.add(Message.user(goal, attachments == null ? List.of() : attachments));
         return loop(messages, events, checkpoint);
     }
 
@@ -289,6 +247,7 @@ public final class AgentLoop {
         if (messages.size() <= 1) {
             throw new IllegalArgumentException("history is empty, nothing to resume");
         }
+        this.completionGate = new CompletionGate(PROMPTS, config.completionChecks(), null);
         return loop(messages, events, checkpoint);
     }
 
@@ -314,7 +273,7 @@ public final class AgentLoop {
                 if (cancellation.cancelled()) {
                     return cancel(messages, events);
                 }
-                compact(messages, contextLimit(), events);
+                budget.apply(messages, contextLimit(), events);
 
                 // 运行中追加的指令：不新开 run，直接进下一轮
                 String steered = pendingInput.get();
@@ -355,7 +314,7 @@ public final class AgentLoop {
                         continue;
                     }
                     // 收尾门：改完不验证、不核对就交差，是「做得浅」的主要来源
-                    Nudge nudge = completionNudge(changedFiles, checks, plan, openSteps);
+                    CompletionGate.Nudge nudge = completionGate.evaluate(changedFiles, checks, plan, openSteps);
                     if (nudge != null) {
                         messages.add(Message.user(nudge.prompt()));
                         events.accept(new RunContinued(nudge.attempt(), nudge.max(), nudge.reason()));
@@ -387,9 +346,9 @@ public final class AgentLoop {
                     if (cancellation.cancelled()) {
                         return cancel(messages, events);
                     }
-                    rememberTarget(call);
+                    completionGate.recordTarget(call);
                     ToolExecutor.Outcome outcome = toolExecutor.execute(call, events);
-                    toolCalls++;
+                    completionGate.countToolCall();
                     if (outcome.changedPath() != null) {
                         changedFiles.add(outcome.changedPath());
                     }
@@ -426,117 +385,6 @@ public final class AgentLoop {
         return PROMPTS.render("plan/continue", Map.of("openSteps", steps)).strip();
     }
 
-    /**
-     * @param attempt 第几次提醒
-     * @param max     这类提醒最多几次
-     */
-    private record Nudge(String prompt, String reason, int attempt, int max) {
-    }
-
-    /**
-     * 收尾前的两道门：
-     * <ol>
-     *   <li>验证：改了代码，却没有任何退出码为 0 的构建 / 测试记录；</li>
-     *   <li>自审：有文件改动，让模型对照原始目标和计划再核对一遍有没有缩水。</li>
-     * </ol>
-     * 两道门都有次数上限，用完就放行；{@code -Dpilot.completion.checks=false} 可整体关闭。
-     *
-     * @return {@code null} 表示可以收尾
-     */
-    private Nudge completionNudge(Set<String> changedFiles, List<String> checks,
-                                  List<PlanItem> plan, List<String> openSteps) {
-        if (!completionChecksEnabled()) {
-            return null;
-        }
-        boolean changed = !changedFiles.isEmpty();
-        // 只读任务没有改动，但「目标像调研、工具却只用了两三次」同样要核对覆盖范围
-        boolean researching = !changed && toolCalls >= 2 && looksLikeResearch(goalText);
-        if (!changed && !researching) {
-            return null;
-        }
-        if (changed && touchesCode(changedFiles) && !hasPassingCheck(checks)
-                && verifyPrompts < MAX_VERIFY_PROMPTS) {
-            verifyPrompts++;
-            String prompt = PROMPTS.render("completion/verify", Map.of(
-                    "changedFiles", bullets(changedFiles),
-                    "checks", checks.isEmpty() ? "（本轮没有跑过构建或测试）" : bullets(checks))).strip();
-            return new Nudge(prompt, "改动未验证，已要求先跑构建或测试", verifyPrompts, MAX_VERIFY_PROMPTS);
-        }
-        if (reviewPrompts < MAX_REVIEW_PROMPTS) {
-            reviewPrompts++;
-            String goal = goalText == null ? "（续跑，无原始输入）" : ToolSupport.oneLine(goalText, 500);
-            String prompt;
-            if (changed) {
-                int done = (int) plan.stream().filter(PlanItem::done).count();
-                prompt = PROMPTS.render("completion/review", Map.of(
-                        "goal", goal,
-                        "toolCalls", String.valueOf(toolCalls),
-                        "changedFiles", bullets(changedFiles),
-                        "planProgress", plan.isEmpty()
-                                ? "（本轮没有维护计划）"
-                                : done + "/" + plan.size() + " 已完成",
-                        "openSteps", openSteps.isEmpty() ? "（无）" : bullets(openSteps),
-                        "checks", checks.isEmpty() ? "（未执行验证）" : bullets(checks)));
-            } else {
-                prompt = PROMPTS.render("completion/review-readonly", Map.of(
-                        "goal", goal,
-                        "toolCalls", String.valueOf(toolCalls),
-                        "inspected", inspected.isEmpty() ? "（未记录具体路径）" : bullets(inspected)));
-            }
-            return new Nudge(prompt.strip(), "收尾前自审：核对目标与结论是否真的覆盖完整",
-                    reviewPrompts, MAX_REVIEW_PROMPTS);
-        }
-        return null;
-    }
-
-    /** 记下这次调用碰过的路径，只读任务自审时说明「已经看过哪些」。 */
-    private void rememberTarget(ToolCall call) {
-        Object path = call.args() == null ? null : call.args().get("path");
-        if (path == null) {
-            return;
-        }
-        String text = String.valueOf(path).strip();
-        if (!text.isEmpty()) {
-            inspected.add(text);
-        }
-    }
-
-    private static boolean looksLikeResearch(String goal) {
-        if (goal == null || goal.isBlank()) {
-            return false;
-        }
-        String lower = goal.toLowerCase(Locale.ROOT);
-        return RESEARCH_HINTS.stream().anyMatch(goal::contains)
-                || RESEARCH_HINTS_EN.stream().anyMatch(lower::contains);
-    }
-
-    private static String bullets(Collection<String> values) {
-        return values.stream().map(value -> "- " + value).collect(Collectors.joining("\n"));
-    }
-
-    /** 改动里是否包含代码文件；纯文档改动不强制跑构建。 */
-    private static boolean touchesCode(Collection<String> changedFiles) {
-        return changedFiles.stream().anyMatch(path -> {
-            String lower = path.toLowerCase(Locale.ROOT);
-            return DOC_SUFFIXES.stream().noneMatch(lower::endsWith);
-        });
-    }
-
-    private static boolean hasPassingCheck(List<String> checks) {
-        for (String check : checks) {
-            Matcher matcher = EXIT_CODE.matcher(check);
-            if (matcher.find() && "0".equals(matcher.group(1))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean completionChecksEnabled() {
-        String flag = System.getProperty("pilot.completion.checks");
-        return flag == null || flag.isBlank() || !"false".equalsIgnoreCase(flag.strip());
-    }
-
     /** 计划快照读失败不应影响收尾：退化成「无计划」，仅少一条完成度信息。 */
     private List<PlanItem> planSnapshot() {
         try {
@@ -570,21 +418,21 @@ public final class AgentLoop {
                 });
                 return new ModelTurn(response, null);
             } catch (RuntimeException e) {
-                if (!isTransientModelFailure(e)) {
+                if (!ModelRetryPolicy.isTransient(e)) {
                     String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
                     events.accept(new RunFailed("MODEL_ERROR",
                             "模型调用失败：" + ToolSupport.oneLine(reason, 300), true));
                     return new ModelTurn(null, new Result(null, "MODEL_ERROR", conversation(messages)));
                 }
                 attempt++;
-                if (attempt > MAX_TRANSIENT_RETRIES) {
+                if (attempt > ModelRetryPolicy.MAX_TRANSIENT_RETRIES) {
                     String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
                     events.accept(new RunFailed("MODEL_ERROR",
-                            "模型暂时不可用，已重试 " + MAX_TRANSIENT_RETRIES + " 次："
+                            "模型暂时不可用，已重试 " + ModelRetryPolicy.MAX_TRANSIENT_RETRIES + " 次："
                                     + ToolSupport.oneLine(reason, 300), true));
                     return new ModelTurn(null, new Result(null, "MODEL_ERROR", conversation(messages)));
                 }
-                long delayMs = retryDelayMs(attempt);
+                long delayMs = ModelRetryPolicy.delayMs(attempt);
                 String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
                 events.accept(new RunRetrying(attempt, delayMs, ToolSupport.oneLine(reason, 300)));
                 if (!pause(delayMs)) {
@@ -592,33 +440,6 @@ public final class AgentLoop {
                 }
             }
         }
-    }
-
-    static long retryDelayMs(int attempt) {
-        int shift = Math.min(Math.max(attempt, 1) - 1, 4);
-        long delay = RETRY_INITIAL_MS << shift;
-        return Math.min(delay, RETRY_MAX_MS);
-    }
-
-    static boolean isTransientModelFailure(RuntimeException error) {
-        String message = error.getMessage() == null ? "" : error.getMessage();
-        if (message.contains("被中断")) {
-            return false;
-        }
-        if (message.contains("模型请求失败")) {
-            return true;
-        }
-        Matcher status = HTTP_STATUS.matcher(message);
-        if (status.find()) {
-            int code = Integer.parseInt(status.group(1));
-            return code == 408 || code == 429 || code >= 500;
-        }
-        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
-            if (cause instanceof java.io.IOException) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /** @return false 表示用户取消或线程被打断，调用方应结束运行 */
@@ -658,79 +479,6 @@ public final class AgentLoop {
             }
         }
         return config.contextLimit();
-    }
-
-    /**
-     * 上下文预算，按代价从低到高分四层，前两层与最后一层都不花模型调用：
-     * <ol>
-     *   <li>旧工具输出换占位符（45% 起）</li>
-     *   <li>窗口内超长工具输出首尾截断（60% 起）</li>
-     *   <li>折叠成交接摘要（70% 起，85% 以上允许多压几轮，压不动就退避）</li>
-     *   <li>硬裁剪最旧的组（95% 起）</li>
-     * </ol>
-     */
-    private void compact(List<Message> messages, int limit, Consumer<SessionEvent> events) {
-        // 字符预算与 token 预算同值：英文按 4 字符 1 token 远远够用，中文接近 1 字符 1 token，
-        // 取两者里更满的那个，避免中文会话被「字符还不多」骗过去，一路涨到超窗。
-        int charBudget = Math.max(1, limit);
-        int tokenBudget = Math.max(1, limit);
-        double usage = usage(messages, charBudget, tokenBudget);
-
-        // 第一、二层不花模型调用，只是把「已经读过的内容」压缩成占位符与头尾
-        if (usage >= PRUNE_RATIO) {
-            ContextCompactor.pruneToolOutputs(messages, limit);
-        }
-        if (usage >= TRUNCATE_RATIO) {
-            ContextCompactor.truncateLongToolOutputs(messages);
-        }
-
-        usage = usage(messages, charBudget, tokenBudget);
-        if (usage < PRE_COMPACT_RATIO) {
-            compactBackoffUntil = 0;
-            dropIfOverBudget(messages, limit);
-            return;
-        }
-
-        // 上一次摘要白跑了一趟模型：上下文再涨 5% 之前别再试
-        int current = ContextCompactor.totalChars(messages);
-        if (compactBackoffUntil > 0 && current < compactBackoffUntil) {
-            dropIfOverBudget(messages, limit);
-            return;
-        }
-
-        int rounds = usage >= FORCE_COMPACT_RATIO ? MAX_COMPACT_ROUNDS : 1;
-        int targetChars = (int) (charBudget * PRE_COMPACT_RATIO);
-        int targetTokens = (int) (tokenBudget * PRE_COMPACT_RATIO);
-        boolean reduced = false;
-        for (int round = 0; round < rounds; round++) {
-            ContextCompactor.Outcome outcome = compactor.compact(messages, targetChars, targetTokens);
-            if (!outcome.compacted()) {
-                break;
-            }
-            reduced = true;
-            events.accept(new ContextCompacted(outcome.coveredMessages(), outcome.charactersBefore(),
-                    outcome.charactersAfter(), outcome.summary()));
-            if (usage(messages, charBudget, tokenBudget) < PRE_COMPACT_RATIO) {
-                break;
-            }
-        }
-
-        int total = ContextCompactor.totalChars(messages);
-        compactBackoffUntil = reduced ? 0 : (int) (total * 1.05) + 1;
-        dropIfOverBudget(messages, limit);
-    }
-
-    /** 当前占用 / 预算，取字符与 token 两个口径里更满的那个。 */
-    private static double usage(List<Message> messages, int charBudget, int tokenBudget) {
-        double byChars = ContextCompactor.totalChars(messages) / (double) charBudget;
-        double byTokens = ContextCompactor.estimateTokens(messages) / (double) tokenBudget;
-        return Math.max(byChars, byTokens);
-    }
-
-    private static void dropIfOverBudget(List<Message> messages, int limit) {
-        if (ContextCompactor.totalChars(messages) > limit * DROP_RATIO) {
-            ContextCompactor.dropOldestGroups(messages, limit);
-        }
     }
 
     private static List<Message> conversation(List<Message> messages) {

@@ -34,6 +34,32 @@ public interface RunStarter {
     }
 
     /**
+     * 抢占式申请一次运行的槽位：同一会话已经有运行在跑时返回空。
+     *
+     * <p>控制器先占位、再发布 {@code run.started}、最后调用 {@code start}，这样「检查有没有在跑」
+     * 与「真的开跑」之间不再是两步无锁操作，双击发送也不会起两个 run。占位后启动失败时
+     * 必须调用 {@link #abandon(String)} 释放，否则会话会被永久占住。
+     *
+     * <p>默认实现直接发号，方便测试里的空实现继续按原样工作。
+     *
+     * @return 本次运行的 runId
+     */
+    default Optional<String> claimRun(String sessionId) {
+        if (activeRun(sessionId).isPresent()) {
+            return Optional.empty();
+        }
+        return Optional.of("run_" + java.util.UUID.randomUUID());
+    }
+
+    /** 释放 {@link #claimRun(String)} 占到但没能启动的槽位。 */
+    default void abandon(String runId) {
+    }
+
+    /** 删除会话时忘掉它留下的内存状态（队列、续跑计数等）。 */
+    default void forget(String sessionId) {
+    }
+
+    /**
      * 重新生成：用上一次的用户输入再跑一遍。真实实现会先丢弃上一轮对话，
      * 避免把同一条用户消息重复放进历史。
      */
