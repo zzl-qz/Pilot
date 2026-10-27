@@ -151,6 +151,9 @@ const state = {
   turnShell: null,
   toolRows: new Map(),
   pendingInputs: [],
+  inputHistory: [],
+  inputHistoryIndex: -1,
+  inputHistoryDraft: '',
   queue: [],
   attachments: [],
   modelOptions: [],
@@ -749,6 +752,7 @@ async function activate(sessionId, title, workspace) {
   closeStream();
   stopRunClock();
   state.sessionId = sessionId;
+  loadInputHistory(sessionId);
   state.sessionTitle = title || '新任务';
   state.workspace = workspace || state.workspace;
   state.pendingInputs = [];
@@ -2785,6 +2789,9 @@ function bindComposer() {
     if (onComposerKeydown(event)) {
       return;
     }
+    if (handleInputHistoryKeydown(event)) {
+      return;
+    }
     const submit = (event.ctrlKey || event.metaKey) && event.key === 'Enter';
     if ((event.key === 'Enter' && !event.shiftKey && !event.isComposing) || submit) {
       event.preventDefault();
@@ -2830,6 +2837,9 @@ async function sendMessage(event) {
 async function submitMessage(content, attachments = []) {
   if ((!content && !attachments.length) || !state.sessionId) {
     return;
+  }
+  if (content.trim()) {
+    rememberInput(content);
   }
 
   // 运行中不再直接插进对话：先排进队列，下一步才会被拿走，拿走之前可以改、可以删
@@ -2893,6 +2903,72 @@ async function submitMessage(content, attachments = []) {
     }
     showNotice('发送失败：' + error.message);
   }
+}
+
+function inputHistoryStorageKey(sessionId = state.sessionId) {
+  return sessionId ? `pilot.inputHistory.${sessionId}` : null;
+}
+
+function loadInputHistory(sessionId) {
+  state.inputHistory = [];
+  state.inputHistoryIndex = -1;
+  state.inputHistoryDraft = '';
+  try {
+    const stored = JSON.parse(localStorage.getItem(inputHistoryStorageKey(sessionId)) || '[]');
+    state.inputHistory = Array.isArray(stored) ? stored.filter((item) => typeof item === 'string') : [];
+  } catch {
+    state.inputHistory = [];
+  }
+}
+
+function rememberInput(input) {
+  const value = input.trim();
+  if (!value || !state.sessionId) return;
+  const history = state.inputHistory.filter((item) => item !== value);
+  history.push(value);
+  state.inputHistory = history.slice(-100);
+  state.inputHistoryIndex = -1;
+  state.inputHistoryDraft = '';
+  try {
+    localStorage.setItem(inputHistoryStorageKey(), JSON.stringify(state.inputHistory));
+  } catch (error) {
+    console.warn('[input-history]', error);
+  }
+}
+
+function handleInputHistoryKeydown(event) {
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown'
+      || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+    return false;
+  }
+  const atStart = el.input.selectionStart === 0;
+  const atEnd = el.input.selectionEnd === el.input.value.length;
+  const browsing = state.inputHistoryIndex >= 0;
+  if ((event.key === 'ArrowUp' && !atStart) || (event.key === 'ArrowDown' && !atEnd)) {
+    return false;
+  }
+  if (!state.inputHistory.length || (event.key === 'ArrowUp' && !browsing && el.input.value.includes('\\n'))) {
+    return false;
+  }
+
+  event.preventDefault();
+  if (!browsing) {
+    if (event.key === 'ArrowDown') return true;
+    state.inputHistoryDraft = el.input.value;
+    state.inputHistoryIndex = state.inputHistory.length;
+  }
+  const next = state.inputHistoryIndex + (event.key === 'ArrowUp' ? -1 : 1);
+  if (next < 0) return true;
+  if (next >= state.inputHistory.length) {
+    state.inputHistoryIndex = -1;
+    el.input.value = state.inputHistoryDraft;
+  } else {
+    state.inputHistoryIndex = next;
+    el.input.value = state.inputHistory[next];
+  }
+  el.input.setSelectionRange(el.input.value.length, el.input.value.length);
+  onComposerInput();
+  return true;
 }
 
 /** 单按钮：运行中点击等于停止，空闲时等于发送（Enter 仍走表单提交，保留运行中追加指令）。 */

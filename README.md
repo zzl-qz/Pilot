@@ -104,6 +104,15 @@ node --test src/test/js
 
 Sprint 6 可复现任务规格与任务矩阵、运行命令见 `evaluation/TASKS.md`，记录模板/当前结果见 `evaluation/REPORT.md`。任务包括代码理解、修复、测试、权限拒绝、循环检测和压缩等。脚本化单测验证的是组件行为，不等同于真实模型成功率；真实模型评估还需配置模型并人工记录结果。
 
+### 浏览器调试产物
+
+用 `playwright-cli` 做界面冒烟测试会在项目根写出 `.playwright-cli/`（页面快照 `page-*.yml`、控制台日志 `console-*.log`、trace 与录屏）。这些是每次运行重新生成的中间文件，用完即弃：
+
+- 已加入 `.gitignore`，不会被 `git add` 波及；
+- 会话结束用包装命令，`close` 时自动清理：`powershell -NoProfile -File scripts/pw.ps1 close`；
+- 单独清理（幂等）：`powershell -NoProfile -File scripts/clean-browser-artifacts.ps1`；
+- 仓库的 `.git/hooks/pre-commit`（本地钩子，不进版本库）会在提交前清理，并把误加进索引的产物撤下、中止这次提交。
+
 ## 已知限制
 
 - 模型的质量、成功率和响应受模型、网络和提示词影响；单元测试不能证明真实端到端质量。

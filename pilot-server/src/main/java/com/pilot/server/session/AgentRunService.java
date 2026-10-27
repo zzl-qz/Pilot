@@ -239,11 +239,12 @@ public class AgentRunService implements RunStarter {
             try {
                 status = execute(sessionId, runId, input, attachments, handle, continuation);
             } finally {
-                registry.unregister(runId);
                 runRepository.finished(runId, status, java.time.Instant.now());
                 runs.remove(runId, handle);
             }
-            if (!maybeAutoContinue(sessionId, status) && !"CANCELLED".equals(status)) {
+            boolean continued = maybeAutoContinue(sessionId, status);
+            registry.unregister(runId);
+            if (!continued && !"CANCELLED".equals(status)) {
                 drainQueue(sessionId);
             }
         });
