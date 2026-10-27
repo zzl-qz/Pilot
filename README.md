@@ -1,6 +1,17 @@
 # Pilot
 
-Pilot 是一个本地工作区内运行的编码代理原型：通过兼容 OpenAI Chat Completions 的模型接口调用工具，提供只读/审批权限、事件时间线与会话式运行能力。项目目前适合开发和评估，不应视为可无监督修改生产代码的成熟产品。
+Pilot 是一个以 Java 构建的本地 Coding Agent 原型。用户通过 Web 界面提交开发任务，服务端调用兼容 OpenAI Chat Completions 的模型，并在配置的工作区内读取代码、搜索文本、执行受控工具操作和运行验证。会话、工具调用、审批与运行状态通过事件流呈现。
+
+当前项目适合本地开发和评估，不是可无监督修改生产代码的成熟产品。模型质量取决于所配置的服务；权限策略也不是操作系统级沙箱。使用前请阅读下方的安全说明，并优先在可丢弃的工作区中试用。
+
+## 功能概览
+
+- 多轮会话、运行历史、任务继续/重新生成与排队消息。
+- 通过 SSE 展示运行进度、工具调用和审批事件。
+- 本地工作区文件浏览、读取、搜索、修改及变更 diff。
+- 可配置的权限模式、命令审批、运行取消和变更回滚。
+- OpenAI Chat Completions 兼容模型端点；无模型配置时可使用 Mock 模式体验界面流程。
+- 本地 SQLite 会话数据、快照及 trace 存储。
 
 ## 架构
 
@@ -16,14 +27,21 @@ pilot-core (AgentLoop、模型客户端、上下文压缩、工具注册/执行�
 
 ## 快速启动
 
-要求：JDK 25、Maven 3.9+（或仓库自带 `mvnw`），SQLite JDBC 所需本机库环境。Windows 使用 `mvnw.cmd`，macOS/Linux 使用 `./mvnw`。本机 JDK 放在 `/Library/Java/JavaVirtualMachines/openjdk-25.jdk`。IntelliJ 2023.2 自带编译器只认到 JDK 22，构建已交给 Maven，用 JDK 25 的 javac。
+要求：JDK 25。仓库提供 Maven Wrapper，无需单独安装 Maven；Windows 使用 `mvnw.cmd`，macOS/Linux 使用 `./mvnw`。SQLite JDBC 通过本机库工作，运行环境需允许其加载本地库。
+
+在仓库根目录构建并运行测试：
 
 ```sh
 ./mvnw test
+```
+
+启动服务（Windows PowerShell 使用 `./mvnw.cmd` 替换命令开头）：
+
+```sh
 ./mvnw -pl pilot-server -am spring-boot:run
 ```
 
-默认 profile 为 `local`，权限默认为 `READ_ONLY`。默认 Web/API 地址为 `http://localhost:9999`。可用环境变量设置模型：
+默认 profile 为 `local`，权限默认为 `READ_ONLY`。默认 Web/API 地址为 `http://localhost:9999`。服务启动后可在浏览器打开该地址。无模型密钥时可使用 Mock 模式体验界面；真实模型运行可用环境变量配置：
 
 ```sh
 PILOT_MODEL_API_KEY=你的密钥 \
@@ -43,6 +61,33 @@ Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环
 - `AUTO`：注册工具直接执行。仅在可丢弃的隔离工作区使用。
 
 权限不是操作系统沙箱。工具路径限制和命令白名单不能替代容器/账户隔离；使用真实模型时，审查模型提出的命令、diff 和审批请求。不要把敏感文件放入可访问工作区。
+
+## 模块说明
+
+| 模块 | 职责 |
+| --- | --- |
+| `pilot-core` | Agent 循环、模型协议、工具注册与执行、权限判断、上下文管理和 trace 契约。 |
+| `pilot-server` | Spring Boot 服务端，提供会话、事件、审批、工作区及设置 API，并装配运行时。 |
+| `pilot-web` | 静态 Web 客户端资源；由服务端一并提供，不需要单独启动前端开发服务器。 |
+
+## 数据与配置
+
+默认配置位于 `pilot-server/src/main/resources/application.yaml`，本地 profile 覆盖配置可放在 Git 忽略的 `pilot-server/src/main/resources/application-local.yaml`。也可通过环境变量配置模型和运行参数，例如 `PILOT_MODEL_API_KEY`、`PILOT_MODEL_ENDPOINT`、`PILOT_MODEL_MODEL`、`PILOT_WORKSPACE`、`PILOT_PERMISSION_MODE`。
+
+运行数据默认写入仓库根目录下的 `.pilot/`，可通过 `PILOT_DATA_DIR` 修改位置。该目录可能包含会话数据库、工作区快照和 trace；请按本机敏感数据管理，不要将密钥或私人会话数据提交到版本库。
+
+## API 概览
+
+主要接口以 `/api` 为前缀：
+
+- `GET/POST /api/sessions`：列出或创建会话。
+- `POST /api/sessions/{id}/messages`：向会话发送任务；`GET /api/sessions/{id}/events`：订阅 SSE 事件。
+- `GET /api/sessions/{id}/history`：读取历史；`GET /api/sessions/{id}/diff`：查看会话变更。
+- `/api/approvals`：查看和处理待审批工具调用。
+- `/api/settings`：查看或更新模型与权限设置。
+- `/api/health`：服务健康状态。
+
+具体请求结构以 `pilot-server` 控制器实现为准；该列表是入口索引，不替代接口契约文档。
 
 ## 测试与评估
 
