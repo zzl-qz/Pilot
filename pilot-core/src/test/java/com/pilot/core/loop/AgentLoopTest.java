@@ -5,6 +5,7 @@ import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.model.ModelClient;
@@ -28,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -215,9 +217,9 @@ class AgentLoopTest {
     }
 
     @Test
-    void modelFailureEndsRun() {
+    void permanentModelFailureEndsRun() {
         ModelClient failing = (messages, tools) -> {
-            throw new ModelClientException("HTTP 503");
+            throw new ModelClientException("模型接口返回 HTTP 401（20 ms, model=gpt）：invalid api key");
         };
         var loop = new AgentLoop(failing, registry(), readOnlyGate(), config(8, 3));
 
@@ -226,8 +228,80 @@ class AgentLoopTest {
         assertEquals("MODEL_ERROR", result.failureCode());
         assertEquals(List.of("run.failed"), eventTypes());
         RunFailed failed = (RunFailed) events.getFirst();
-        assertTrue(failed.message().contains("HTTP 503"), failed.message());
+        assertTrue(failed.message().contains("HTTP 401"), failed.message());
         assertTrue(failed.retryable());
+    }
+
+    @Test
+    void retriesTransientModelFailureUntilItSucceeds() {
+        var calls = new AtomicInteger();
+        ModelClient client = (messages, tools) -> {
+            int n = calls.getAndIncrement();
+            if (n == 0) {
+                throw new ModelClientException(
+                        "模型请求失败（138 ms, model=gpt）：HTTP/1.1 header parser received no bytes");
+            }
+            if (n == 1) {
+                throw new ModelClientException("模型接口返回 HTTP 503（40 ms, model=gpt）：unavailable");
+            }
+            return new ModelResponse("恢复了", List.of());
+        };
+        var waited = new ArrayList<Long>();
+        var loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(),
+                config(8, 3), Cancellation.none(), () -> null, (call, result, latencyMs) -> { },
+                waited::add, null);
+
+        AgentLoop.Result result = loop.run("你好", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals("恢复了", result.finalText());
+        assertEquals(3, calls.get());
+        assertFalse(eventTypes().contains("run.failed"));
+        List<RunRetrying> retries = events.stream()
+                .filter(RunRetrying.class::isInstance)
+                .map(RunRetrying.class::cast)
+                .toList();
+        assertEquals(2, retries.size());
+        assertEquals(2_000L, retries.get(0).delayMs());
+        assertEquals(4_000L, retries.get(1).delayMs());
+        assertEquals(6_000L, waited.stream().mapToLong(Long::longValue).sum());
+    }
+
+    @Test
+    void cancelStopsModelRetry() {
+        var cancelled = new AtomicBoolean();
+        ModelClient client = (messages, tools) -> {
+            throw new ModelClientException("模型请求失败（10 ms, model=gpt）：connection reset");
+        };
+        var loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(),
+                config(8, 3), cancelled::get, () -> null, (call, result, latencyMs) -> { },
+                millis -> cancelled.set(true), null);
+
+        AgentLoop.Result result = loop.run("你好", List.of(), events::add);
+
+        assertEquals("CANCELLED", result.failureCode());
+        assertTrue(eventTypes().contains("run.retrying"));
+        assertTrue(eventTypes().contains("run.cancelled"));
+        assertFalse(eventTypes().contains("run.failed"));
+    }
+
+    @Test
+    void stopsAfterThreeTransientRetries() {
+        var calls = new AtomicInteger();
+        ModelClient client = (messages, tools) -> {
+            calls.incrementAndGet();
+            throw new ModelClientException("模型请求失败（10 ms, model=gpt）：connection reset");
+        };
+        var loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(),
+                config(8, 3), Cancellation.none(), () -> null, (call, result, latencyMs) -> { },
+                millis -> { }, null);
+
+        AgentLoop.Result result = loop.run("你好", List.of(), events::add);
+
+        assertEquals("MODEL_ERROR", result.failureCode());
+        assertEquals(4, calls.get());
+        assertEquals(3, events.stream().filter(RunRetrying.class::isInstance).count());
+        assertTrue(eventTypes().contains("run.failed"));
     }
 
     /** 运行中追加的指令应在下一轮采样前进入历史，并且不新开 run。 */

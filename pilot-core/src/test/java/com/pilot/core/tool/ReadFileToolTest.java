@@ -147,10 +147,10 @@ class ReadFileToolTest {
 
         String result = tool.execute(Map.of("path", "many.txt"));
 
-        assertTrue(result.startsWith("   1 | L1\n"), result);
-        assertTrue(result.contains("\n2000 | L2000\n"), result);
-        assertFalse(result.contains("L2001"), result);
-        assertTrue(result.endsWith("… 显示第 1 到第 2000 行，文件共 100001 行，后续内容未显示，从第 2001 行继续 …"), result);
+        assertTrue(result.startsWith("  1 | L1\n"), result);
+        assertTrue(result.contains("\n200 | L200\n"), result);
+        assertFalse(result.contains("L201"), result);
+        assertTrue(result.endsWith("… 显示第 1 到第 200 行，文件共 100001 行，后续内容未显示，从第 201 行继续 …"), result);
     }
 
     @Test
@@ -185,45 +185,18 @@ class ReadFileToolTest {
     }
 
     @Test
-    void readsEnclosingBlockAndOuterLevel() throws IOException {
-        Files.writeString(workspace.resolve("Demo.java"), """
-                fn outer() {
-                    if cond {
-                        inner();
-                    }
-                    tail();
-                }
-                """);
+    void defaultsToTwoHundredLines() throws IOException {
+        var body = new StringBuilder();
+        for (int i = 1; i <= 250; i++) {
+            body.append("line ").append(i).append('\n');
+        }
+        Files.writeString(workspace.resolve("long.txt"), body.toString());
 
-        String block = tool.execute(Map.of("path", "Demo.java", "anchor_line", 3));
-        assertEquals("""
-                2 |     if cond {
-                3 |         inner();
-                4 |     }
-                … 显示第 2 到第 4 行，含第 3 行所在代码块，文件共 6 行，后续内容未显示，从第 5 行继续 …""", block);
+        String result = tool.execute(Map.of("path", "long.txt"));
 
-        String outer = tool.execute(Map.of("path", "Demo.java", "anchor_line", 3, "block_levels", 2));
-        assertTrue(outer.startsWith("1 | fn outer() {\n"), outer);
-        assertTrue(outer.contains("6 | }\n"), outer);
-        assertTrue(outer.endsWith("… 显示第 1 到第 6 行，含第 3 行所在代码块，文件共 6 行 …"), outer);
-    }
-
-    @Test
-    void readsPythonBranchAsOneBlock() throws IOException {
-        Files.writeString(workspace.resolve("demo.py"), """
-                if cond:
-                    inner()
-                else:
-                    other()
-                next()
-                """);
-
-        String block = tool.execute(Map.of("path", "demo.py", "anchor_line", 2));
-
-        assertTrue(block.startsWith("1 | if cond:\n"), block);
-        assertTrue(block.contains("4 |     other()\n"), block);
-        assertFalse(block.contains("next()"), block);
-        assertTrue(block.endsWith("… 显示第 1 到第 4 行，含第 2 行所在代码块，文件共 5 行，后续内容未显示，从第 5 行继续 …"),
-                block);
+        assertTrue(result.contains("1 | line 1\n"), result);
+        assertTrue(result.contains("200 | line 200\n"), result);
+        assertFalse(result.contains("201 | line 201"), result);
+        assertTrue(result.contains("从第 201 行继续"), result);
     }
 }

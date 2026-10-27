@@ -1,6 +1,7 @@
 package com.pilot.server.session;
 
 import com.pilot.core.approval.ApprovalBroker;
+import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.loop.AgentLoop;
@@ -68,6 +69,7 @@ public class AgentRunService implements RunStarter {
     private final com.pilot.core.session.PlanRepository plans;
     private final ConcurrentMap<String, RunHandle> runs = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Deque<String>> inboxes = new ConcurrentHashMap<>();
+    private final com.pilot.server.store.QueuedMessageRepository queuedMessages;
     private final ConcurrentMap<String, Integer> autoContinueAttempts = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> autoContinueSignature = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
@@ -80,7 +82,7 @@ public class AgentRunService implements RunStarter {
                            com.pilot.core.session.RunRepository runRepository,
                            ConversationRepository conversations,
                            com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper,
-                           PilotDataDir dataDir) {
+                           PilotDataDir dataDir, com.pilot.server.store.QueuedMessageRepository queuedMessages) {
         this.sessions = sessions;
         this.conversations = conversations;
         this.plans = plans;
@@ -95,6 +97,7 @@ public class AgentRunService implements RunStarter {
         this.runRepository = runRepository;
         this.objectMapper = objectMapper;
         this.dataDir = dataDir;
+        this.queuedMessages = queuedMessages;
         this.executor = Executors.newFixedThreadPool(properties.runThreads(), runnable -> {
             Thread thread = new Thread(runnable, "pilot-agent-run");
             thread.setDaemon(true);
@@ -131,16 +134,14 @@ public class AgentRunService implements RunStarter {
         Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
             queue.offer(text.strip());
+            persistQueue(sessionId, queue);
         }
         return true;
     }
 
     @Override
     public List<String> queued(String sessionId) {
-        Deque<String> queue = inboxes.get(sessionId);
-        if (queue == null) {
-            return List.of();
-        }
+        Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
             return List.copyOf(queue);
         }
@@ -148,13 +149,8 @@ public class AgentRunService implements RunStarter {
 
     @Override
     public boolean editQueued(String sessionId, int index, String text) {
-        if (text == null || text.isBlank()) {
-            return false;
-        }
-        Deque<String> queue = inboxes.get(sessionId);
-        if (queue == null) {
-            return false;
-        }
+        if (text == null || text.isBlank()) return false;
+        Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
             if (index < 0 || index >= queue.size()) {
                 return false;
@@ -163,16 +159,14 @@ public class AgentRunService implements RunStarter {
             items.set(index, text.strip());
             queue.clear();
             queue.addAll(items);
+            persistQueue(sessionId, queue);
             return true;
         }
     }
 
     @Override
     public boolean removeQueued(String sessionId, int index) {
-        Deque<String> queue = inboxes.get(sessionId);
-        if (queue == null) {
-            return false;
-        }
+        Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
             if (index < 0 || index >= queue.size()) {
                 return false;
@@ -181,6 +175,7 @@ public class AgentRunService implements RunStarter {
             items.remove(index);
             queue.clear();
             queue.addAll(items);
+            persistQueue(sessionId, queue);
             return true;
         }
     }
@@ -216,17 +211,20 @@ public class AgentRunService implements RunStarter {
     }
 
     private Deque<String> inbox(String sessionId) {
-        return inboxes.computeIfAbsent(sessionId, key -> new ArrayDeque<>());
+        return inboxes.computeIfAbsent(sessionId, key -> new ArrayDeque<>(queuedMessages.load(key)));
+    }
+
+    private void persistQueue(String sessionId, Deque<String> queue) {
+        queuedMessages.save(sessionId, List.copyOf(queue));
     }
 
     /** 每轮采样前拉一条用户追加的指令；没有就返回 null。 */
     private String pollSteer(String sessionId) {
-        Deque<String> queue = inboxes.get(sessionId);
-        if (queue == null) {
-            return null;
-        }
+        Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
-            return queue.poll();
+            String next = queue.poll();
+            if (next != null) persistQueue(sessionId, queue);
+            return next;
         }
     }
 
@@ -398,7 +396,8 @@ public class AgentRunService implements RunStarter {
         var traceRecorder = new JsonlTraceRecorder(
                 dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
         var loop = new AgentLoop(modelClient, tools, permissionGate, approvals, config, handle.cancelled::get,
-                () -> pollSteer(sessionId), traceRecorder);
+                () -> pollSteer(sessionId), traceRecorder,
+                delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)));
 
         snapshots.bind(runId, toolFactory.resolve(workspace));
         try {

@@ -26,6 +26,16 @@ class EditFileToolTest {
     }
 
     @Test
+    void missingOldStringIncludesClosestLines() throws IOException {
+        Files.writeString(workspace.resolve("sample.txt"), "header\n  useful target line\nfooter\n");
+
+        String result = tool.execute(Map.of("path", "sample.txt", "old_string", "useful target lnie", "new_string", "replacement"));
+
+        assertTrue(result.contains("最接近的文件片段"), result);
+        assertTrue(result.contains("2:   useful target line"), result);
+    }
+
+    @Test
     void replacesUniqueTailInFileLargerThanFormerCeiling() throws IOException {
         Path file = workspace.resolve("big.txt");
         byte[] prefix = "a".repeat(512 * 1024).getBytes(StandardCharsets.UTF_8);

@@ -95,6 +95,34 @@ public final class SessionService {
         return new Run(runId, sessionId, startedAt);
     }
 
+    /**
+     * 把正在生成的文字推给当前界面，不写入会话历史。
+     * 序号沿用最后一条已落库事件，避免浏览器把预览当成新游标，重连时漏掉后面的正式事件。
+     */
+    public void preview(String sessionId, String runId, SessionEvent event) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        Objects.requireNonNull(event, "event must not be null");
+        Object lock = lockFor(sessionId);
+        synchronized (lock) {
+            if (repository.find(sessionId).isEmpty()) {
+                return;
+            }
+            long sequence = repository.latestSequence(sessionId);
+            if (sequence < 1) {
+                return;
+            }
+            EventEnvelope envelope = EventEnvelope.of(sequence, clock.instant(), sessionId, runId, event);
+            for (Consumer<EventEnvelope> subscriber : listeners(sessionId)) {
+                try {
+                    subscriber.accept(envelope);
+                } catch (RuntimeException e) {
+                    listeners(sessionId).remove(subscriber);
+                    log.debug("Dropped session subscriber for {}: {}", sessionId, e.toString());
+                }
+            }
+        }
+    }
+
     /** 追加事件并推送给当前订阅者，返回带序号与时间戳的信封。 */
     public EventEnvelope publish(String sessionId, String runId, SessionEvent event) {
         Objects.requireNonNull(runId, "runId must not be null");

@@ -9,10 +9,12 @@ import {
 const EVENT_TYPES = [
   'run.started',
   'assistant.delta',
+  'assistant.preview',
   'context.compacted',
   'plan.updated',
   'run.steered',
   'run.continued',
+  'run.retrying',
   'subagent.started',
   'subagent.finished',
   'tool.started',
@@ -20,6 +22,7 @@ const EVENT_TYPES = [
   'approval.resolved',
   'tool.completed',
   'run.failed',
+  'run.cancelled',
   'run.completed'
 ];
 
@@ -116,6 +119,8 @@ const state = {
   lastRunId: null,
   runStartedAt: null,
   lastEventAt: null,
+  /** 模型请求失败后的等待：{ until }，计时器在这段时间里显示倒计时 */
+  modelRetryUntil: 0,
   clock: null,
   cursor: 0,
   permissionMode: null,
@@ -135,6 +140,8 @@ const state = {
   thinking: null,
   reply: null,
   replyText: '',
+  replyLive: false,
+  replyCommitted: '',
   /** 当前这一轮的外壳：操作组在前，结论文本在后 */
   turnShell: null,
   toolRows: new Map(),
@@ -1008,6 +1015,11 @@ function closeStream() {
 }
 
 function handleEvent(event) {
+  // 预览沿用上一条已落库事件的序号，不能参与游标，否则会被当成重复事件丢掉
+  if (event.type === 'assistant.preview') {
+    showLivePreview(event.payload && event.payload.text);
+    return;
+  }
   // 同一事件可能被旧连接重复推送，按 sequence 去重，避免历史消息叠加渲染
   if (typeof event.sequence === 'number') {
     if (event.sequence <= state.cursor) {
@@ -1046,12 +1058,13 @@ function handleEvent(event) {
       beginTurnShell();
       ensureTurnShell();
       showThinking();
+      state.modelRetryUntil = 0;
       record(event, { kind: 'run', tone: 'run', status: '开始', title: '运行开始', detail: input });
       break;
     }
 
     case 'assistant.delta':
-      appendDelta(event.payload.text);
+      commitReply(event.payload.text);
       recordDelta(event, event.payload.text);
       break;
 
@@ -1138,6 +1151,7 @@ function handleEvent(event) {
 
     case 'run.completed': {
       state.running = false;
+      state.modelRetryUntil = 0;
       stopRunClock();
       markSessionStatus('COMPLETED');
       state.lastRunId = event.runId || state.runId || state.lastRunId;
@@ -1208,6 +1222,24 @@ function handleEvent(event) {
       setRunState('running', '已收到补充指令');
       break;
     }
+    case 'run.retrying': {
+      rollbackLivePreview();
+      const delayMs = Number(event.payload.delayMs || 0);
+      const attempt = Number(event.payload.attempt || 1);
+      const seconds = Math.max(1, Math.round(delayMs / 1000));
+      state.modelRetryUntil = Date.now() + delayMs;
+      const reason = event.payload.reason || '模型请求失败';
+      showNotice(`模型暂时连不上，${seconds} 秒后再试（第 ${attempt} 次）。可以点停止。`);
+      setRunState('warn', `等待重试 · ${seconds}s`);
+      record(event, {
+        kind: 'run',
+        tone: 'warn',
+        status: `${seconds}s`,
+        title: `模型请求失败，第 ${attempt} 次重试`,
+        detail: reason
+      });
+      break;
+    }
     case 'run.continued': {
       if (event.runId && !state.turnRuns.includes(event.runId)) {
         state.turnRuns.push(event.runId);
@@ -1233,7 +1265,28 @@ function handleEvent(event) {
       finishSubagent(event.payload);
       break;
     }
+    case 'run.cancelled': {
+      state.running = false;
+      state.modelRetryUntil = 0;
+      stopRunClock();
+      markSessionStatus('CANCELLED');
+      state.lastRunId = event.runId || state.runId || state.lastRunId;
+      state.runId = null;
+      setRunState('idle', '已取消');
+      setComposerEnabled(true);
+      clearThinking();
+      finishReply(false);
+      record(event, {
+        kind: 'run',
+        tone: 'warn',
+        status: '已取消',
+        title: '运行已取消',
+        detail: event.payload.reason || ''
+      });
+      break;
+    }
     case 'run.failed': {
+      state.modelRetryUntil = 0;
       const code = String(event.payload.code || '');
       const cancelled = code === 'CANCELLED';
       // 步数触顶不是失败：历史对话已保留，继续跑即可
@@ -1831,6 +1884,64 @@ function startReply() {
   state.replyText = '';
 }
 
+/** 模型还在吐字。失败重试时整段丢掉，成功后由落库的全文覆盖这一段。 */
+function showLivePreview(text) {
+  if (!text) {
+    return;
+  }
+  if (!state.replyLive) {
+    state.replyCommitted = state.reply ? (state.replyText || '') : '';
+    state.replyLive = true;
+  }
+  appendDelta(text);
+}
+
+/** 这一轮的完整回复。预览已经拼过的话，用全文盖上，避免再接一遍。 */
+function commitReply(text) {
+  const piece = text || '';
+  if (state.replyLive) {
+    const full = (state.replyCommitted || '') + piece;
+    if (!state.reply) {
+      startReply();
+    }
+    state.replyText = full;
+    state.reply.dataset.text = full;
+    state.replyLive = false;
+    state.replyCommitted = full;
+    if (!state.replaying) {
+      scheduleReplyRender();
+    }
+    return;
+  }
+  appendDelta(piece);
+  state.replyCommitted = state.replyText;
+}
+
+/** 这次请求失败了，把还没落库的预览从气泡上撤掉。 */
+function rollbackLivePreview() {
+  if (!state.replyLive) {
+    return;
+  }
+  const base = state.replyCommitted || '';
+  state.replyLive = false;
+  state.replyText = base;
+  if (!state.reply) {
+    return;
+  }
+  state.reply.dataset.text = base;
+  if (!base) {
+    const article = state.reply.closest('article');
+    if (article) {
+      article.remove();
+    }
+    state.reply = null;
+    return;
+  }
+  if (!state.replaying) {
+    scheduleReplyRender();
+  }
+}
+
 function appendDelta(text) {
   if (!text) {
     return;
@@ -1889,6 +2000,8 @@ function finishReply(failed) {
   }
   state.reply = null;
   state.replyText = '';
+  state.replyLive = false;
+  state.replyCommitted = '';
 }
 
 function appendUserMessage(text, sequence) {
@@ -3208,6 +3321,12 @@ function tickRunClock() {
     stopRunClock();
     return;
   }
+  if (state.modelRetryUntil > Date.now()) {
+    const left = Math.max(1, Math.ceil((state.modelRetryUntil - Date.now()) / 1000));
+    setRunState('warn', `等待重试 · ${left}s`);
+    return;
+  }
+  state.modelRetryUntil = 0;
   const elapsed = elapsedText(Date.now() - (state.runStartedAt || Date.now()));
   const idle = Math.max(0, Math.round((Date.now() - (state.lastEventAt || Date.now())) / 1000));
   if (idle >= STALL_SECONDS) {
@@ -3246,6 +3365,8 @@ function resetView() {
   state.pendingApprovals.clear();
   state.reply = null;
   state.replyText = '';
+  state.replyLive = false;
+  state.replyCommitted = '';
   state.turnShell = null;
   state.running = false;
   state.runId = null;

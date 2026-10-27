@@ -20,6 +20,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * OpenAI 兼容的 chat completions 客户端（非流式）。
@@ -129,6 +130,83 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             throw new ModelClientException("模型响应缺少 message：" + snippet(response.body()));
         }
         return new ModelResponse(text(message.get("content")), toolCalls(message.get("tool_calls")));
+    }
+
+    @Override
+    public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta) {
+        var body = new LinkedHashMap<String, Object>();
+        body.put("model", model);
+        body.put("messages", messages.stream().map(this::messagePayload).toList());
+        body.put("stream", true);
+        if (tools != null && !tools.isEmpty()) {
+            body.put("tools", tools.stream().map(this::toolPayload).toList());
+            body.put("tool_choice", "auto");
+        }
+        var request = HttpRequest.newBuilder(endpoint)
+                .header("Authorization", "Bearer " + apiKey)
+                .header("Content-Type", "application/json")
+                .header("Accept", "text/event-stream")
+                .timeout(requestTimeout)
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body), StandardCharsets.UTF_8))
+                .build();
+        long startedAt = System.nanoTime();
+        try {
+            HttpResponse<java.io.InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                try (var stream = response.body()) {
+                    throw new ModelClientException("模型接口返回 HTTP " + response.statusCode() + "："
+                            + snippet(new String(stream.readAllBytes(), StandardCharsets.UTF_8)));
+                }
+            }
+            StringBuilder content = new StringBuilder();
+            var toolParts = new LinkedHashMap<Integer, Map<String, Object>>();
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (!line.startsWith("data:")) continue;
+                    String data = line.substring(5).strip();
+                    if (data.equals("[DONE]")) break;
+                    JsonNode root = objectMapper.readTree(data);
+                    JsonNode choices = root.path("choices");
+                    if (!choices.isArray() || choices.isEmpty()) continue;
+                    JsonNode delta = choices.get(0).path("delta");
+                    JsonNode text = delta.get("content");
+                    if (text != null && text.isTextual()) {
+                        String chunk = text.asString();
+                        content.append(chunk);
+                        if (textDelta != null && !chunk.isEmpty()) textDelta.accept(chunk);
+                    }
+                    JsonNode calls = delta.path("tool_calls");
+                    if (calls.isArray()) {
+                        for (JsonNode call : calls) {
+                            int index = call.path("index").asInt();
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> part = toolParts.computeIfAbsent(index, ignored -> new LinkedHashMap<>());
+                            JsonNode id = call.get("id");
+                            if (id != null) part.put("id", part.getOrDefault("id", "") + id.asString());
+                            JsonNode function = call.path("function");
+                            if (function.has("name")) part.put("name", part.getOrDefault("name", "") + function.path("name").asString());
+                            if (function.has("arguments")) part.put("arguments", part.getOrDefault("arguments", "") + function.path("arguments").asString());
+                        }
+                    }
+                }
+            }
+            List<ToolCall> calls = toolParts.values().stream().map(part -> {
+                try {
+                    String args = (String) part.getOrDefault("arguments", "{}");
+                    JsonNode parsed = objectMapper.readTree(args);
+                    return new ToolCall((String) part.get("id"), (String) part.get("name"), objectMapper.convertValue(parsed, Map.class));
+                } catch (Exception e) {
+                    throw new ModelClientException("流式工具参数不是合法 JSON", e);
+                }
+            }).toList();
+            return new ModelResponse(content.toString(), calls);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ModelClientException("模型请求被中断", e);
+        } catch (IOException e) {
+            throw new ModelClientException("流式模型请求失败（" + elapsedMs(startedAt) + " ms）：" + e.getMessage(), e);
+        }
     }
 
     private Map<String, Object> messagePayload(Message message) {

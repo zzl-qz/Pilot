@@ -8,6 +8,7 @@ import com.pilot.core.event.PlanUpdated;
 import com.pilot.core.event.RunSteered;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunContinued;
+import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunStarted;
@@ -46,6 +47,7 @@ public class EventCodec {
             case "plan.updated" -> PlanUpdated.class;
             case "run.steered" -> RunSteered.class;
             case "run.continued" -> RunContinued.class;
+            case "run.retrying" -> RunRetrying.class;
             case "subagent.started" -> SubagentStarted.class;
             case "subagent.finished" -> SubagentFinished.class;
             case "run.cancelled" -> RunCancelled.class;

@@ -3,6 +3,7 @@ package com.pilot.server.store;
 import com.pilot.core.event.ContextCompacted;
 import com.pilot.core.event.PlanUpdated;
 import com.pilot.core.event.RunCancelled;
+import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.SessionEvent;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
@@ -85,6 +86,15 @@ class EventCodecNewEventsTest {
         assertEquals(0, completed.planTotal().intValue());
         assertTrue(completed.openSteps().isEmpty());
         assertFalse(completed.planOpen());
+    }
+
+    @Test
+    void roundTripsRunRetrying() {
+        var event = new RunRetrying(2, 4_000L, "HTTP/1.1 header parser received no bytes");
+
+        SessionEvent decoded = roundTrip("run.retrying", event);
+
+        assertEquals(event, decoded);
     }
 
     @Test

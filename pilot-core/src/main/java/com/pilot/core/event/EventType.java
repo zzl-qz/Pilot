@@ -6,10 +6,13 @@ package com.pilot.core.event;
 public enum EventType {
     RUN_STARTED("run.started"),
     ASSISTANT_DELTA("assistant.delta"),
+    /** 只推给当前界面，不落库。刷新之后以落库的 assistant.delta 为准。 */
+    ASSISTANT_PREVIEW("assistant.preview"),
     CONTEXT_COMPACTED("context.compacted"),
     PLAN_UPDATED("plan.updated"),
     RUN_STEERED("run.steered"),
     RUN_CONTINUED("run.continued"),
+    RUN_RETRYING("run.retrying"),
     SUBAGENT_STARTED("subagent.started"),
     SUBAGENT_FINISHED("subagent.finished"),
     TOOL_STARTED("tool.started"),

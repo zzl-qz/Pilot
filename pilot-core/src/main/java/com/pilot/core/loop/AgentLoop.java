@@ -8,6 +8,7 @@ import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
@@ -26,6 +27,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -43,7 +46,11 @@ public final class AgentLoop {
             你可以使用提供的工具查看文件、搜索文本、修改文件、执行受限命令。
             所有路径都必须使用工作区内的相对路径，命令在工作区根目录执行。
             先获取事实再回答，不要编造未读取过的文件内容。
+            只做用户明确要求的事。不要加用户没提到的参数、工具或机制；现有工具够用就直接用。
+            读文件用 read_file，一次大约 200 行（line_count）。更长的文件按结果里的下一行行号接着读，不要一次读完。
+            搜索用 search_text，能确定后缀时加上 glob。
             修改文件时优先用 edit_file，并保证 old_string 唯一；文件不存在时用 create_file。
+            edit_file 对不上时，按工具返回的相近片段重试，不要猜缩进。
             改完代码后尽量用 run_command 运行相关的构建或测试来验证，并在结论中说明执行了什么命令、结果如何。
             不要每做一步就停下来问用户「行不行」「要不要继续」。权限由系统处理：能调用就直接做，
             工具被拒绝或正在等批准时，结果里会写明，你根据那个结果继续。
@@ -121,6 +128,13 @@ public final class AgentLoop {
     private static final double PRE_COMPACT_RATIO = 0.70;
     private static final double FORCE_COMPACT_RATIO = 0.85;
     private static final int MAX_COMPACT_ROUNDS = 3;
+    /** 断网或模型临时失败：最多再试 3 次，间隔 2 秒起、翻倍、不超过 30 秒。 */
+    private static final int MAX_TRANSIENT_RETRIES = 3;
+    private static final long RETRY_INITIAL_MS = 2_000L;
+    private static final long RETRY_MAX_MS = 30_000L;
+    /** 等待重试时拆成小段，取消能在这段时间内停下来。 */
+    private static final long RETRY_SLICE_MS = 250L;
+    private static final Pattern HTTP_STATUS = Pattern.compile("HTTP (\\d+)");
 
     private final ModelClient client;
     private final ToolRegistry tools;
@@ -130,6 +144,9 @@ public final class AgentLoop {
     private final Cancellation cancellation;
     private final Supplier<String> pendingInput;
     private final TraceRecorder traceRecorder;
+    private final Pause retryPause;
+    /** 正在生成的文字，只给界面看。为空表示不推预览。 */
+    private final Consumer<String> liveText;
     /** 上次压缩没有实际收益时的上下文大小；涨过这个水位之前不再尝试，避免每步白跑一次摘要。 */
     private int compactBackoffUntil;
 
@@ -158,14 +175,38 @@ public final class AgentLoop {
                      ApprovalBroker approvals, Config config, Cancellation cancellation,
                      Supplier<String> pendingInput) {
         this(client, tools, permissionGate, approvals, config, cancellation, pendingInput,
-                (call, result, latencyMs) -> { });
+                (call, result, latencyMs) -> { }, (Pause) Thread::sleep, null);
     }
 
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
                      ApprovalBroker approvals, Config config, Cancellation cancellation,
                      Supplier<String> pendingInput, TraceRecorder traceRecorder) {
+        this(client, tools, permissionGate, approvals, config, cancellation, pendingInput,
+                traceRecorder, Thread::sleep, null);
+    }
+
+    /**
+     * @param liveText 模型正在吐的字。只更新界面，不进会话历史。
+     */
+    public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
+                     ApprovalBroker approvals, Config config, Cancellation cancellation,
+                     Supplier<String> pendingInput, TraceRecorder traceRecorder,
+                     Consumer<String> liveText) {
+        this(client, tools, permissionGate, approvals, config, cancellation, pendingInput,
+                traceRecorder, Thread::sleep, liveText);
+    }
+
+    /**
+     * @param retryPause 重试前的等待。生产环境睡觉，测试里记下来立刻返回。
+     */
+    AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
+              ApprovalBroker approvals, Config config, Cancellation cancellation,
+              Supplier<String> pendingInput, TraceRecorder traceRecorder, Pause retryPause,
+              Consumer<String> liveText) {
         this.pendingInput = Objects.requireNonNull(pendingInput, "pendingInput must not be null");
         this.traceRecorder = Objects.requireNonNull(traceRecorder, "traceRecorder must not be null");
+        this.retryPause = retryPause == null ? Thread::sleep : retryPause;
+        this.liveText = liveText;
         this.client = Objects.requireNonNull(client, "client must not be null");
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.compactor = new ContextCompactor(client);
@@ -246,16 +287,14 @@ public final class AgentLoop {
                     events.accept(new RunSteered(steered));
                 }
 
-                ModelResponse response;
-                try {
-                    response = client.chat(List.copyOf(messages), tools.definitions());
-                } catch (RuntimeException e) {
-                    String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                    events.accept(new RunFailed("MODEL_ERROR", "模型调用失败：" + ToolSupport.oneLine(reason, 300), true));
-                    return new Result(null, "MODEL_ERROR", conversation(messages));
+                ModelTurn turn = callModel(messages, events);
+                if (turn.stop() != null) {
+                    return turn.stop();
                 }
+                ModelResponse response = turn.response();
 
                 String content = response.content() == null ? "" : response.content();
+                // 请求成功后只落一条完整回复。预览过程中的片段不进历史，重试也不会粘成两段。
                 if (!content.isBlank()) {
                     events.accept(new AssistantDelta(content));
                 }
@@ -353,6 +392,99 @@ public final class AgentLoop {
         }
     }
 
+    /**
+     * 断网、超时、429、5xx 先重试，最多 3 次，仍失败就结束运行。用户可以随时取消。
+     * 401、403、404、400 这种重试也不会好的错误，立刻失败。
+     */
+    private ModelTurn callModel(List<Message> messages, Consumer<SessionEvent> events) {
+        int attempt = 0;
+        while (true) {
+            if (cancellation.cancelled()) {
+                return new ModelTurn(null, cancel(messages, events));
+            }
+            try {
+                ModelResponse response = client.chat(List.copyOf(messages), tools.definitions(), delta -> {
+                    if (liveText == null || delta == null || delta.isEmpty()) {
+                        return;
+                    }
+                    try {
+                        liveText.accept(delta);
+                    } catch (RuntimeException ignored) {
+                        // 界面预览失败不影响这一次模型请求
+                    }
+                });
+                return new ModelTurn(response, null);
+            } catch (RuntimeException e) {
+                if (!isTransientModelFailure(e)) {
+                    String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                    events.accept(new RunFailed("MODEL_ERROR",
+                            "模型调用失败：" + ToolSupport.oneLine(reason, 300), true));
+                    return new ModelTurn(null, new Result(null, "MODEL_ERROR", conversation(messages)));
+                }
+                attempt++;
+                if (attempt > MAX_TRANSIENT_RETRIES) {
+                    String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                    events.accept(new RunFailed("MODEL_ERROR",
+                            "模型暂时不可用，已重试 " + MAX_TRANSIENT_RETRIES + " 次："
+                                    + ToolSupport.oneLine(reason, 300), true));
+                    return new ModelTurn(null, new Result(null, "MODEL_ERROR", conversation(messages)));
+                }
+                long delayMs = retryDelayMs(attempt);
+                String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                events.accept(new RunRetrying(attempt, delayMs, ToolSupport.oneLine(reason, 300)));
+                if (!pause(delayMs)) {
+                    return new ModelTurn(null, cancel(messages, events));
+                }
+            }
+        }
+    }
+
+    static long retryDelayMs(int attempt) {
+        int shift = Math.min(Math.max(attempt, 1) - 1, 4);
+        long delay = RETRY_INITIAL_MS << shift;
+        return Math.min(delay, RETRY_MAX_MS);
+    }
+
+    static boolean isTransientModelFailure(RuntimeException error) {
+        String message = error.getMessage() == null ? "" : error.getMessage();
+        if (message.contains("被中断")) {
+            return false;
+        }
+        if (message.contains("模型请求失败")) {
+            return true;
+        }
+        Matcher status = HTTP_STATUS.matcher(message);
+        if (status.find()) {
+            int code = Integer.parseInt(status.group(1));
+            return code == 408 || code == 429 || code >= 500;
+        }
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.io.IOException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @return false 表示用户取消或线程被打断，调用方应结束运行 */
+    private boolean pause(long delayMs) {
+        long waited = 0;
+        while (waited < delayMs) {
+            if (cancellation.cancelled()) {
+                return false;
+            }
+            long slice = Math.min(RETRY_SLICE_MS, delayMs - waited);
+            try {
+                retryPause.await(slice);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            waited += slice;
+        }
+        return !cancellation.cancelled();
+    }
+
     private Result cancel(List<Message> messages, Consumer<SessionEvent> events) {
         events.accept(new RunCancelled("运行已被用户取消。"));
         return new Result(null, "CANCELLED", conversation(messages));
@@ -443,6 +575,14 @@ public final class AgentLoop {
         return calls.stream()
                 .map(call -> call.name() + "(" + canonical(call.args()) + ")")
                 .collect(Collectors.joining(";"));
+    }
+
+    private record ModelTurn(ModelResponse response, Result stop) {
+    }
+
+    /** 重试前等待。测试传入立刻返回的实现，避免真的睡几秒。 */
+    interface Pause {
+        void await(long millis) throws InterruptedException;
     }
 
     /** 参数规范化：Map 按 key 排序，保证同样的调用得到同样的签名。 */

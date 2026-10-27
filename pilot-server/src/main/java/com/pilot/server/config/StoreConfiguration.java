@@ -91,6 +91,18 @@ public class StoreConfiguration {
 
     @Bean
     @ConditionalOnProperty(name = "pilot.store", havingValue = "sqlite", matchIfMissing = true)
+    com.pilot.server.store.QueuedMessageRepository queuedMessageRepository(SqliteStore store) {
+        return new com.pilot.server.store.QueuedMessageRepository(store);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "pilot.store", havingValue = "memory")
+    com.pilot.server.store.QueuedMessageRepository inMemoryQueuedMessageRepository() {
+        return new com.pilot.server.store.QueuedMessageRepository();
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "pilot.store", havingValue = "sqlite", matchIfMissing = true)
     SettingsStore jdbcSettingsStore(SqliteStore store) {
         return new JdbcSettingsStore(store);
     }

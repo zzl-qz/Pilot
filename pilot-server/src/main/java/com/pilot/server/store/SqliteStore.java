@@ -72,7 +72,8 @@ public final class SqliteStore {
                 PRIMARY KEY (session_id, ord)
             )""",
             "CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, sequence)",
-            "CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session_id, status)"
+            "CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session_id, status)",
+            "CREATE TABLE IF NOT EXISTS queued_messages (session_id TEXT NOT NULL, position INTEGER NOT NULL, content TEXT NOT NULL, PRIMARY KEY (session_id, position))"
     };
 
     private final String url;

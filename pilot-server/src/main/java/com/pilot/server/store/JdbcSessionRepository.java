@@ -124,6 +124,19 @@ public final class JdbcSessionRepository implements SessionRepository {
     }
 
     @Override
+    public long latestSequence(String sessionId) {
+        String sql = "SELECT sequence FROM sessions WHERE id = ?";
+        try (Connection connection = store.open(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sessionId);
+            try (var rows = statement.executeQuery()) {
+                return rows.next() ? rows.getLong(1) : 0L;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("读取会话序号失败: " + sessionId, e);
+        }
+    }
+
+    @Override
     public int dropEventsFrom(String sessionId, long fromSequence) {
         if (find(sessionId).isEmpty()) {
             throw new NoSuchSessionException(sessionId);

@@ -31,6 +31,9 @@ public interface SessionRepository {
 
     List<EventEnvelope> eventsAfter(String sessionId, long afterSequence);
 
+    /** 当前已落库的最大序号。还没有事件时返回 0。 */
+    long latestSequence(String sessionId);
+
     /**
      * 删掉序号大于等于 {@code fromSequence} 的事件。
      * 会话自己的序号计数器不动，后面新事件继续递增，避免和已经发出去的 SSE 游标撞号。

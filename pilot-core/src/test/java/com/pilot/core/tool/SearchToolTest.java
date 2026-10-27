@@ -54,6 +54,53 @@ class SearchToolTest {
     }
 
     @Test
+    void globRestrictsSearchToMatchingFiles() throws IOException {
+        Files.writeString(workspace.resolve("src/Other.txt"), "alpha in text file\\n");
+
+        String result = tool.execute(Map.of("pattern", "alpha", "glob", "*.java"));
+
+        assertTrue(result.contains("src/App.java:2:"), result);
+        assertFalse(result.contains("a.txt"), result);
+        assertFalse(result.contains("Other.txt"), result);
+    }
+
+    @Test
+    void searchesLargeFilesWithRipgrepAndSkipsThemInTheFallback() throws IOException {
+        var body = new StringBuilder();
+        body.append("x".repeat(1024 * 1024 + 5)).append('\n').append("large-marker\n");
+        Files.writeString(workspace.resolve("large.txt"), body.toString());
+
+        String result = tool.execute(Map.of("pattern", "large-marker"));
+
+        if (ripgrepAvailable()) {
+            assertTrue(result.contains("large.txt:2: large-marker"), result);
+        } else {
+            assertTrue(result.startsWith("未找到匹配项"), result);
+        }
+    }
+
+    @Test
+    void patternStartingWithDashIsStillAPattern() throws IOException {
+        Files.writeString(workspace.resolve("flags.txt"), "keep\n-flag\n");
+
+        String result = tool.execute(Map.of("pattern", "-flag"));
+
+        assertTrue(result.contains("flags.txt:2: -flag"), result);
+    }
+
+    private static boolean ripgrepAvailable() {
+        try {
+            Process process = new ProcessBuilder("rg", "--version").redirectErrorStream(true).start();
+            return process.waitFor() == 0;
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return false;
+        }
+    }
+
+    @Test
     void reportsNoMatch() {
         String result = tool.execute(Map.of("pattern", "not-there-anywhere"));
 

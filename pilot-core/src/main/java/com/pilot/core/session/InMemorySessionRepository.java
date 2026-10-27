@@ -86,6 +86,17 @@ public final class InMemorySessionRepository implements SessionRepository {
     }
 
     @Override
+    public long latestSequence(String sessionId) {
+        State state = sessionId == null ? null : sessions.get(sessionId);
+        if (state == null) {
+            return 0;
+        }
+        synchronized (state) {
+            return state.sequence;
+        }
+    }
+
+    @Override
     public EventEnvelope append(String sessionId, String runId, Instant timestamp, SessionEvent event,
                                 SessionStatus status) {
         State state = require(sessionId);
