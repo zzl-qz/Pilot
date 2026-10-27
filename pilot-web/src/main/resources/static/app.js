@@ -5,6 +5,11 @@ import {
   describeModelSaved,
   errorText
 } from './lib/model-settings.js';
+import {
+  expandQuickCommand,
+  filterPaletteActions,
+  filterQuickCommands
+} from './lib/commands.js';
 
 const EVENT_TYPES = [
   'run.started',
@@ -166,14 +171,14 @@ const state = {
   paletteItems: []
 };
 
-const COMMANDS = [
-  { label: '新任务（选择工作区）', hint: 'Ctrl N', run: () => openPicker() },
-  { label: '切换活动/变更面板', hint: 'Ctrl B', run: () => toggleActivity() },
-  { label: '刷新变更', hint: '', run: () => selectTab('changes') },
-  { label: '复制会话 ID', hint: '', run: copySessionId },
-  { label: '清空当前视图', hint: '', run: () => resetView() },
-  { label: '重新连接事件流', hint: '', run: () => reconnect() }
-];
+const COMMAND_ACTIONS = {
+  'new-session': () => openPicker(),
+  'toggle-activity': () => toggleActivity(),
+  'refresh-changes': () => selectTab('changes'),
+  'copy-session-id': copySessionId,
+  'reset-view': () => resetView(),
+  reconnect: () => reconnect()
+};
 
 init();
 
@@ -3027,8 +3032,7 @@ function closePalette() {
 }
 
 function renderPalette(query) {
-  const needle = query.trim().toLowerCase();
-  const items = COMMANDS.filter((item) => !needle || item.label.toLowerCase().includes(needle));
+  const items = filterPaletteActions(query);
   state.paletteItems = items;
   state.paletteIndex = Math.min(state.paletteIndex, Math.max(items.length - 1, 0));
 
@@ -3062,7 +3066,7 @@ function renderPalette(query) {
 
 function runPaletteItem(item) {
   closePalette();
-  item.run();
+  COMMAND_ACTIONS[item.action]?.();
 }
 
 function onPaletteKeydown(event) {
@@ -3405,14 +3409,6 @@ function isNearBottom(node, slack = 140) {
 
 /* ---------- 工作台：文件树 / 预览 / 分栏 / @ 引用 ---------- */
 
-const QUICK_COMMANDS = [
-  { name: '/test', hint: '跑全量测试', text: '运行 mvnw -o test，汇总失败用例与原因，不要改动代码。' },
-  { name: '/fix', hint: '修最近一次失败', text: '读取最近一次失败的测试或编译错误，定位根因并直接修改代码，改完重新运行验证。' },
-  { name: '/run', hint: '跑指定模块', text: '运行 mvnw -o -pl pilot-core test，并把失败点整理出来。' },
-  { name: '/review', hint: '审阅未提交改动', text: '审阅当前工作区未提交的改动，按风险从高到低列出问题与建议。' },
-  { name: '/explain', hint: '解释当前文件', text: '解释当前打开文件的核心逻辑、调用链和潜在风险。' }
-];
-
 function initWorkbench() {
   setupGutter(el.gutterLeft, '--sidebar-w', 210, 460, false);
   setupGutter(el.gutterRight, '--activity-w', 300, 720, true);
@@ -3584,7 +3580,7 @@ function onComposerInput() {
   const caret = el.input.selectionStart;
   const before = el.input.value.slice(0, caret);
   const fileMatch = /(^|\s)@([\w./-]*)$/.exec(before);
-  const commandMatch = /^\/([\w-]*)$/.exec(before);
+  const commandMatch = /^\/([\w-]*)(?:\s+.*)?$/.exec(before);
   if (fileMatch) {
     showRefMenu('file', fileMatch[2]);
   } else if (commandMatch) {
@@ -3596,7 +3592,7 @@ function onComposerInput() {
 
 function showRefMenu(kind, query) {
   const items = kind === 'command'
-    ? QUICK_COMMANDS.filter((item) => item.name.includes(query))
+    ? filterQuickCommands(query)
     : treeFiles().filter((path) => path.toLowerCase().includes(String(query).toLowerCase())).slice(0, 40);
 
   el.refMenu.replaceChildren();
@@ -3621,7 +3617,7 @@ function showRefMenu(kind, query) {
     desc.className = 'ref-desc';
     if (kind === 'command') {
       label.textContent = item.name;
-      desc.textContent = item.hint;
+      desc.textContent = `${item.label} · ${item.hint}`;
     } else {
       label.className = 'mono';
       label.textContent = item;
@@ -3655,7 +3651,9 @@ function applyRef(item) {
   const after = value.slice(caret);
   const kind = state.refKind;
   if (kind === 'command') {
-    el.input.value = item.text + after.replace(/^\s*/, ' ');
+    const commandMatch = /^\/([\w-]*)(?:\s+(.*))?$/.exec(before);
+    const prompt = expandQuickCommand(item, commandMatch?.[2] || '');
+    el.input.value = prompt + after;
   } else {
     const replaced = before.replace(/@([\w./-]*)$/, '@' + item + ' ');
     el.input.value = replaced + after;
