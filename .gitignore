@@ -34,6 +34,8 @@ build/
 
 ### 本机配置（含密钥，禁止提交） ###
 application-local.properties
+application-local.yaml
+application-local.yml
 
 ### 运行期数据：trace、快照、本地库 ###
 .pilot/

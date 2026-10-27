@@ -135,6 +135,8 @@ const state = {
   thinking: null,
   reply: null,
   replyText: '',
+  /** 当前这一轮的外壳：操作组在前，结论文本在后 */
+  turnShell: null,
   toolRows: new Map(),
   pendingInputs: [],
   queue: [],
@@ -1040,6 +1042,9 @@ function handleEvent(event) {
       } else if (input) {
         appendUserMessage(input, event.sequence);
       }
+      // 新的一轮另起一组，避免操作和结论接在上一轮后面
+      beginTurnShell();
+      ensureTurnShell();
       showThinking();
       record(event, { kind: 'run', tone: 'run', status: '开始', title: '运行开始', detail: input });
       break;
@@ -1370,7 +1375,10 @@ function appendTurnResult({ tone, title, detail, openSteps, changedFiles, runIds
     card.append(row);
   }
 
-  el.messages.append(card);
+  const parent = state.turnShell && state.turnShell.shell.isConnected
+    ? state.turnShell.shell
+    : el.messages;
+  parent.append(card);
   hideEmptyState();
   scrollThread();
 }
@@ -1629,8 +1637,13 @@ function renderPlan(payload) {
     li.textContent = item.step || '';
     list.append(li);
   }
-  // 移到末尾，让计划跟着最新进度走
-  el.messages.append(card);
+  // 计划跟在这一轮前面。操作和结论在外壳里，结论仍是这一轮的最后一段
+  const shell = state.turnShell && state.turnShell.shell.isConnected ? state.turnShell.shell : null;
+  if (shell) {
+    shell.before(card);
+  } else {
+    el.messages.append(card);
+  }
   hideEmptyState();
 }
 
@@ -1672,9 +1685,123 @@ function showThinking() {
   }
 
   wrapper.append(who, bubble);
-  el.messages.append(wrapper);
+  // 跟在这一轮的操作和结论后面，不要插到结论上面
+  const shell = state.turnShell;
+  if (shell && shell.shell.isConnected) {
+    shell.shell.append(wrapper);
+  } else {
+    el.messages.append(wrapper);
+  }
   state.thinking = wrapper;
-  scrollThread();
+  if (!state.replaying) {
+    scrollThread();
+  }
+}
+
+/** 下一轮开始前丢掉当前外壳的引用，已经画出来的那一组留在原位。 */
+function beginTurnShell() {
+  state.turnShell = null;
+}
+
+/**
+ * 一轮对话的容器：操作默认收成一行，结论文本始终排在操作后面。
+ * 模型往往先吐一句再调工具，如果结论气泡先挂到对话末尾，后到的操作就会堆在结论下面。
+ */
+function ensureTurnShell() {
+  if (state.turnShell && state.turnShell.shell.isConnected) {
+    return state.turnShell;
+  }
+  const shell = document.createElement('div');
+  shell.className = 'turn-shell';
+
+  const tools = document.createElement('details');
+  tools.className = 'tool-group';
+  tools.hidden = true;
+
+  const summary = document.createElement('summary');
+  summary.className = 'tool-group-head';
+
+  const chevron = document.createElement('span');
+  chevron.className = 'tool-group-chevron';
+  chevron.setAttribute('aria-hidden', 'true');
+
+  const label = document.createElement('span');
+  label.className = 'tool-group-label';
+  label.textContent = '操作';
+
+  const count = document.createElement('span');
+  count.className = 'tool-group-count';
+
+  summary.append(chevron, label, count);
+
+  const list = document.createElement('div');
+  list.className = 'tool-group-list';
+  tools.append(summary, list);
+
+  const replySlot = document.createElement('div');
+  replySlot.className = 'turn-reply';
+
+  shell.append(tools, replySlot);
+  el.messages.append(shell);
+
+  const turn = {
+    shell,
+    tools,
+    list,
+    label,
+    count,
+    replySlot,
+    total: 0,
+    running: 0,
+    counts: new Map()
+  };
+  state.turnShell = turn;
+  return turn;
+}
+
+const TOOL_LABELS = {
+  read_file: '读取',
+  list_dir: '列目录',
+  search_text: '搜索',
+  edit_file: '编辑',
+  create_file: '新建',
+  run_command: '命令',
+  update_plan: '计划'
+};
+
+function toolLabel(name) {
+  return TOOL_LABELS[name] || name || '操作';
+}
+
+function refreshToolGroup(turn) {
+  if (!turn || turn.total <= 0) {
+    if (turn) {
+      turn.tools.hidden = true;
+    }
+    return;
+  }
+  turn.tools.hidden = false;
+  const bits = [];
+  for (const [name, n] of turn.counts) {
+    bits.push(`${toolLabel(name)} ${n}`);
+  }
+  turn.label.textContent = turn.running > 0 ? `正在执行 ${turn.total} 项` : `${turn.total} 项操作`;
+  turn.count.textContent = bits.join(' · ');
+}
+
+function noteToolStarted(turn, name) {
+  turn.total += 1;
+  turn.running += 1;
+  turn.counts.set(name, (turn.counts.get(name) || 0) + 1);
+  refreshToolGroup(turn);
+}
+
+function noteToolSettled(turn) {
+  if (!turn) {
+    return;
+  }
+  turn.running = Math.max(0, turn.running - 1);
+  refreshToolGroup(turn);
 }
 
 function clearThinking() {
@@ -1699,7 +1826,7 @@ function startReply() {
   bubble.className = 'bubble';
 
   wrapper.append(who, bubble);
-  el.messages.append(wrapper);
+  ensureTurnShell().replySlot.append(wrapper);
   state.reply = bubble;
   state.replyText = '';
 }
@@ -1922,16 +2049,23 @@ function addToolRow(callId, name, args) {
   button.addEventListener('click', () => row.classList.toggle('is-open'));
 
   row.append(button, body);
-  el.messages.append(row);
+  const turn = ensureTurnShell();
+  turn.list.append(row);
+  noteToolStarted(turn, name || 'tool');
   if (!state.replaying) {
     scrollThread();
   }
 
+  let settled = false;
   const handle = {
     element: row,
     setStatus(kind, glyph) {
       status.className = 'tool-status is-' + kind;
       status.textContent = glyph;
+      if (!settled && (kind === 'ok' || kind === 'error')) {
+        settled = true;
+        noteToolSettled(turn);
+      }
     },
     setMeta(value) {
       metaEl.textContent = value || '';
@@ -3112,6 +3246,7 @@ function resetView() {
   state.pendingApprovals.clear();
   state.reply = null;
   state.replyText = '';
+  state.turnShell = null;
   state.running = false;
   state.runId = null;
   state.lastRunId = null;

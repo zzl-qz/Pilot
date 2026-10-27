@@ -14,7 +14,7 @@ import java.util.Map;
  * 这是 Coding Agent 与普通文本替换的关键区别：绝不自动选择第一处匹配。
  */
 public final class EditFileTool implements Tool, WritesFiles {
-    private static final long MAX_BYTES = 512 * 1024;
+    private static final long MAX_BYTES = 32L * 1024 * 1024;
 
     private final PathValidator paths;
     private final SnapshotSink snapshots;
@@ -36,7 +36,8 @@ public final class EditFileTool implements Tool, WritesFiles {
     @Override
     public String description() {
         return "把工作区内文本文件中的 old_string 精确替换为 new_string。"
-                + "old_string 必须在文件中唯一出现；匹配到多处会报错，需要提供更多上下文。";
+                + "old_string 必须在文件中唯一出现；匹配到多处会报错，需要提供更多上下文。"
+                + "较大的文本文件也可以改，上限 32MB。";
     }
 
     @Override
@@ -86,7 +87,7 @@ public final class EditFileTool implements Tool, WritesFiles {
 
         try {
             if (Files.size(file) > MAX_BYTES) {
-                return "ERROR: 文件过大（上限 " + MAX_BYTES + " 字节），请拆分为更小的修改。";
+                return "ERROR: 文件过大（上限 32MB），无法整份替换。";
             }
             byte[] bytes = Files.readAllBytes(file);
             if (ToolSupport.isBinary(bytes)) {

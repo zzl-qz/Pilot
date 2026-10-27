@@ -1,0 +1,53 @@
+# Pilot 本机配置。这个文件是 UTF-8 的 YAML。
+# 以前的 properties 在 IDE 里常被当成 ISO-8859-1，中文注释会显示成乱码。
+
+server:
+  # 本机页面和接口都走这个端口
+  port: 9999
+  error:
+    # 4xx 把校验原因带回响应体，界面能直接看到「端点必须是 http/https」这类说明
+    include-message: always
+
+spring:
+  application:
+    name: Pilot
+  # 本机密钥放在同目录的 application-local.yaml（已被 git 忽略），或用环境变量 PILOT_PROFILE 换一套
+  profiles:
+    active: ${PILOT_PROFILE:local}
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          # 本地改前端后，浏览器每次重新校验，避免刷新仍看到旧 JS/CSS
+          no-cache: true
+  devtools:
+    livereload:
+      # 浏览器自动刷新那条附加服务用不上，关掉以免多占一个端口
+      enabled: false
+
+pilot:
+  data:
+    # 会话库、快照、trace、附件默认放在项目下的 .pilot
+    # 要换位置：环境变量 PILOT_DATA_DIR，或启动参数 -Dpilot.data.dir=...
+    dir: ${PILOT_DATA_DIR:${user.dir}/.pilot}
+  model:
+    # endpoint 可以写服务根地址，也可以写完整的 /v1/chat/completions
+    endpoint: ${PILOT_MODEL_ENDPOINT:https://api.openai.com/v1/chat/completions}
+    model: ${PILOT_MODEL_MODEL:gpt-4o-mini}
+    # 不要把密钥写进会提交的文件。用 application-local.yaml，或环境变量 PILOT_MODEL_API_KEY
+    api-key: ${PILOT_MODEL_API_KEY:}
+    # 单次模型请求超时（秒）。中转站可能更早返回 504
+    timeout-seconds: 90
+  agent:
+    # 工具能碰到的根目录，默认是进程工作目录。建议显式指到项目根
+    workspace: ${PILOT_WORKSPACE:${user.dir}}
+    # 单轮步数上限，只当保险丝。触顶后界面可以继续接着跑
+    max-steps: ${PILOT_AGENT_MAX_STEPS:120}
+    # 计划没做完就收尾时，自动催模型再做几轮。设成 0 会每写完一段就停下来问
+    max-plan-continues: ${PILOT_AGENT_MAX_PLAN_CONTINUES:8}
+    repeated-tool-call-limit: 3
+    # READ_ONLY 拒绝写入；ASK 逐次批准；AUTO_EDIT 写入直接生效、命令仍批准；AUTO 全部放行
+    permission-mode: ${PILOT_PERMISSION_MODE:READ_ONLY}
+    approval-timeout-seconds: 300
+    # 同时能跑的任务数。一个任务卡住时，不要把后面的任务全堵死
+    run-threads: ${PILOT_AGENT_RUN_THREADS:4}

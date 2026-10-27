@@ -1,0 +1,7 @@
+# 测试不要触发开发重载，否则测试进程会自己重启
+spring:
+  devtools:
+    restart:
+      enabled: false
+    livereload:
+      enabled: false

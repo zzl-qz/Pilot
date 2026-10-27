@@ -16,14 +16,14 @@ pilot-core (AgentLoop、模型客户端、上下文压缩、工具注册/执行�
 
 ## 快速启动
 
-要求：JDK 24、Maven 3.9+（或仓库自带 `mvnw`），SQLite JDBC 所需本机库环境。Windows 使用 `mvnw.cmd`，macOS/Linux 使用 `./mvnw`。
+要求：JDK 25、Maven 3.9+（或仓库自带 `mvnw`），SQLite JDBC 所需本机库环境。Windows 使用 `mvnw.cmd`，macOS/Linux 使用 `./mvnw`。本机 JDK 放在 `/Library/Java/JavaVirtualMachines/openjdk-25.jdk`。IntelliJ 2023.2 自带编译器只认到 JDK 22，构建已交给 Maven，用 JDK 25 的 javac。
 
 ```sh
 ./mvnw test
 ./mvnw -pl pilot-server -am spring-boot:run
 ```
 
-默认 profile 为 `local`，权限默认为 `READ_ONLY`。默认 Web/API 地址为 `http://localhost:8080`。可用环境变量设置模型：
+默认 profile 为 `local`，权限默认为 `READ_ONLY`。默认 Web/API 地址为 `http://localhost:9999`。可用环境变量设置模型：
 
 ```sh
 PILOT_MODEL_API_KEY=你的密钥 \
@@ -33,7 +33,7 @@ PILOT_WORKSPACE=/绝对/工作区路径 \
 ./mvnw -pl pilot-server -am spring-boot:run
 ```
 
-Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环境变量。不要把密钥提交到仓库；也可在被忽略的 `pilot-server/src/main/resources/application-local.properties` 配置。请先确认工作区路径正确，并从 READ_ONLY 开始。
+Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环境变量。不要把密钥提交到仓库；也可在被忽略的 `pilot-server/src/main/resources/application-local.yaml` 配置。请先确认工作区路径正确，并从 READ_ONLY 开始。
 
 ## 权限说明
 

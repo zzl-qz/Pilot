@@ -14,7 +14,7 @@
     <packaging>pom</packaging>
     <name>Pilot</name>
     <properties>
-        <java.version>24</java.version>
+        <java.version>25</java.version>
     </properties>
     <modules>
         <module>pilot-core</module>
@@ -27,7 +27,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- sqlite-jdbc 通过 System.load 加载本地库，JDK 24 起需要显式授权 -->
+                    <!-- sqlite-jdbc 通过 System.load 加载本地库，JDK 25 需要显式授权 -->
                     <argLine>--enable-native-access=ALL-UNNAMED</argLine>
                 </configuration>
             </plugin>
