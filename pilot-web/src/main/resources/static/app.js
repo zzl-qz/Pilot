@@ -575,6 +575,8 @@ async function loadSessions() {
 /* ---------- 项目 ---------- */
 
 const LAST_PROJECT_KEY = 'pilot.project';
+/** 「未分组」不是真实项目，折叠状态用固定 key 存。 */
+const UNGROUPED_KEY = '__ungrouped__';
 /** 折叠的项目：纯界面状态，刷新后恢复成展开。 */
 const collapsedProjects = new Set();
 
@@ -669,14 +671,14 @@ function resolveBlankConflict(project) {
   activateSession(blank.id);
 }
 
-function toggleProject(projectId) {
-  if (!projectId) {
+function toggleProject(key) {
+  if (!key) {
     return;
   }
-  if (collapsedProjects.has(projectId)) {
-    collapsedProjects.delete(projectId);
+  if (collapsedProjects.has(key)) {
+    collapsedProjects.delete(key);
   } else {
-    collapsedProjects.add(projectId);
+    collapsedProjects.add(key);
   }
   renderSessions();
 }
@@ -1728,16 +1730,30 @@ function renderSessions() {
     el.sessionList.append(projectGroupNode(group));
   }
   el.sessionEmpty.hidden = groups.length > 0;
-  // 计数只算还在用的：归档的不该出现在「几个对话」里
-  el.sessionCount.textContent = String(state.sessions.filter((session) => !session.archived).length);
+  // 顶部数字是项目总数，对话数已经由每个项目自己的徽章表达
+  el.sessionCount.textContent = String(state.projects.length);
 }
 
 function projectGroupNode({ project, blank, active, archived }) {
   const item = document.createElement('li');
   item.className = 'project-group';
 
+  const key = project.id || UNGROUPED_KEY;
+  const collapsed = collapsedProjects.has(key);
+
   const head = document.createElement('div');
   head.className = 'project-head';
+
+  // 折叠箭头固定在最左，点箭头或项目名都能收起整个分组
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'project-toggle' + (collapsed ? ' is-collapsed' : '');
+  toggle.title = (collapsed ? '展开「' : '收起「') + project.name + '」';
+  toggle.setAttribute('aria-label', toggle.title);
+  toggle.setAttribute('aria-expanded', String(!collapsed));
+  toggle.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10 8l-4 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  toggle.addEventListener('click', () => toggleProject(key));
+  head.append(toggle);
 
   const name = document.createElement('button');
   name.type = 'button';
@@ -1750,12 +1766,14 @@ function projectGroupNode({ project, blank, active, archived }) {
   count.className = 'project-count';
   count.textContent = String(active.length + (blank ? 1 : 0));
   name.append(label, count);
-  if (project.id) {
-    name.addEventListener('click', () => toggleProject(project.id));
-  }
+  name.addEventListener('click', () => toggleProject(key));
   head.append(name);
 
+  // 新建对话 / 项目设置默认弱化，hover 或键盘聚焦时才出现
   if (project.id) {
+    const actions = document.createElement('div');
+    actions.className = 'project-actions';
+
     const add = document.createElement('button');
     add.type = 'button';
     add.className = 'icon-btn icon-btn-sm';
@@ -1766,6 +1784,7 @@ function projectGroupNode({ project, blank, active, archived }) {
       event.stopPropagation();
       newConversation(project.id);
     });
+
     const settings = document.createElement('button');
     settings.type = 'button';
     settings.className = 'icon-btn icon-btn-sm';
@@ -1776,16 +1795,17 @@ function projectGroupNode({ project, blank, active, archived }) {
       event.stopPropagation();
       openProjectModal(project.id);
     });
-    head.append(add, settings);
+
+    actions.append(add, settings);
+    head.append(actions);
   }
   item.append(head);
 
   const list = document.createElement('ul');
   list.className = 'project-sessions';
-  const collapsed = project.id ? collapsedProjects.has(project.id) : false;
   list.hidden = collapsed;
 
-  // 空白对话永远置顶，浅色显示「还没有消息」
+  // 空白对话永远置顶，用加号图标区分于历史对话
   if (blank) {
     list.append(sessionItemNode(blank));
   }
@@ -1793,13 +1813,9 @@ function projectGroupNode({ project, blank, active, archived }) {
     list.append(sessionItemNode(session));
   }
   if (!list.children.length) {
-    if (!project.id) {
-      // 未分组组只在真有历史会话时才出现，这里不会走到
-      return item;
-    }
     const empty = document.createElement('li');
     empty.className = 'project-empty';
-    empty.textContent = '还没有对话';
+    empty.textContent = project.id ? '还没有对话' : '没有未分组的对话';
     list.append(empty);
   }
   item.append(list);
@@ -1824,6 +1840,12 @@ function archivedGroupNode(sessions) {
   return details;
 }
 
+/** 状态圆点：运行中黄、完成绿、失败红；未知状态保持中性灰。 */
+function sessionStatusClass(status) {
+  const value = String(status || '').trim().toLowerCase();
+  return value ? ' is-' + value : ' is-idle';
+}
+
 function sessionItemNode(session) {
   const item = document.createElement('li');
   item.className = 'session-row';
@@ -1839,19 +1861,24 @@ function sessionItemNode(session) {
     : (session.workspace ? `${session.title}\n${session.workspace}` : session.title);
   button.addEventListener('click', () => activateSession(session.id));
 
-  const dot = document.createElement('span');
-  dot.className = 'dot' + (session.status ? ' is-' + String(session.status).toLowerCase() : '');
   const text = document.createElement('span');
   text.className = 'session-title';
   text.textContent = blank ? '新对话' : session.title;
 
-  button.append(dot, text);
-  if (session.workspace && !blank) {
-    const folder = document.createElement('span');
-    folder.className = 'session-folder';
-    folder.textContent = folderName(session.workspace);
-    button.append(folder);
+  if (blank) {
+    // 空白对话不画状态圆点，用加号图标表示「可以立刻开始」
+    const icon = document.createElement('span');
+    icon.className = 'session-new-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+    button.append(icon);
+  } else {
+    const dot = document.createElement('span');
+    dot.className = 'dot' + sessionStatusClass(session.status);
+    dot.setAttribute('aria-hidden', 'true');
+    button.append(dot);
   }
+  button.append(text);
 
   const action = document.createElement('button');
   action.type = 'button';

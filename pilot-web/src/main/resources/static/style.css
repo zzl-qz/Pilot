@@ -4138,3 +4138,199 @@ html[data-theme="light"] .accent-dot.is-on { box-shadow: 0 0 0 2px #fff, 0 0 0 4
 .project-archived > summary::-webkit-details-marker { display: none; }
 .project-archived[open] > summary { color: var(--ink-2); }
 .project-archived .project-sessions { margin-left: 0; padding-left: 0; border-left: 0; }
+
+/* ---------- v5：侧栏「项目 & 对话列表」 ---------- */
+/* 只作用于项目导航块，文件树与主面板保持原样 */
+
+.nav-block[aria-label="项目"] > .nav-head {
+  justify-content: flex-start;
+  padding: 0 6px 2px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+/* 标题占满左侧，计数与加号一起靠右 */
+.nav-block[aria-label="项目"] > .nav-head > span:first-child { flex: 1; }
+
+.project-groups { gap: 0; }
+
+.project-group { list-style: none; }
+/* 组间距 = 4px + 下一组标题的上留白 12px，合计 16px */
+.project-group + .project-group { margin-top: 4px; }
+
+.project-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 4px 8px;
+  border-radius: 8px;
+}
+.project-head:hover { background: none; }
+
+.project-toggle {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.project-toggle svg {
+  width: 12px;
+  height: 12px;
+  transform: rotate(90deg);
+  transition: transform 0.16s ease;
+}
+.project-toggle.is-collapsed svg { transform: rotate(0deg); }
+.project-toggle:hover { background: var(--panel-2); color: var(--ink-2); }
+
+.project-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  padding: 3px 2px;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  text-align: left;
+  cursor: pointer;
+}
+.project-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-count {
+  flex: none;
+  min-width: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  line-height: 15px;
+  text-align: center;
+}
+
+.project-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.project-head:hover .project-actions,
+.project-head:focus-within .project-actions { opacity: 1; }
+.project-actions .icon-btn { color: var(--dim); }
+.project-actions .icon-btn:hover { background: var(--panel-2); color: var(--ink-2); }
+
+.project-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 0 0 8px;
+  padding: 2px 0 2px 10px;
+  list-style: none;
+  border-left: 1px solid var(--line-soft);
+}
+
+.project-empty {
+  padding: 6px 8px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.session-item {
+  height: auto;
+  min-height: 34px;
+  padding: 8px 10px;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.session-item:hover { background: rgba(255, 255, 255, 0.045); color: var(--ink); }
+/* 选中态：柔和深色底 + 左侧窄竖线，不再整行描边 */
+.session-item.is-active {
+  background: var(--panel-2);
+  color: var(--ink);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.session-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* 状态圆点：运行中黄、完成绿、失败红，未知保持中性灰 */
+.session-item .dot {
+  width: 6px;
+  height: 6px;
+  margin-right: 1px;
+  background: var(--dim);
+}
+.session-item .dot.is-running,
+.session-item .dot.is-waiting_approval,
+.session-item .dot.is-paused,
+.session-item .dot.is-interrupted {
+  background: var(--warn);
+  box-shadow: none;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.session-item .dot.is-completed,
+.session-item .dot.is-done,
+.session-item .dot.is-idle,
+.session-item .dot.is-ready { background: var(--ok); }
+.session-item .dot.is-failed,
+.session-item .dot.is-error { background: var(--err); }
+
+/* 空白新对话：置顶、无圆点、浅底强调 */
+.session-item.is-blank {
+  color: var(--ink-2);
+  font-style: normal;
+  background: rgba(255, 255, 255, 0.035);
+}
+.session-item.is-blank:hover { background: rgba(255, 255, 255, 0.06); }
+.session-item.is-blank.is-active {
+  color: var(--ink);
+  background: var(--panel-2);
+}
+.session-item.is-blank .dot { display: none; }
+.session-new-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  color: var(--accent);
+}
+.session-new-icon svg { width: 11px; height: 11px; }
+
+.session-row { gap: 2px; }
+.session-row .session-action { opacity: 0; }
+.session-row:hover .session-action,
+.session-row:focus-within .session-action { opacity: 0.7; }
+
+/* 归档区与项目内容的缩进对齐 */
+.project-archived { margin: 2px 0 4px 18px; }
