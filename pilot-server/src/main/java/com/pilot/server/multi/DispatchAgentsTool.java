@@ -52,26 +52,31 @@ public final class DispatchAgentsTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
+        Map<String, Object> fields = Map.ofEntries(
+                Map.entry("id", Map.of("type", "string", "description", "任务编号，会话内唯一，例如 T1")),
+                Map.entry("title", Map.of("type", "string", "description", "任务标题，界面展示用")),
+                Map.entry("goal", Map.of("type", "string", "description", "完整目标：做什么、做到什么算完成")),
+                Map.entry("depends_on", Map.of("type", "array", "items", Map.of("type", "string"),
+                        "description", "前置任务编号；为空表示可立即并行")),
+                Map.entry("files", Map.of("type", "array", "items", Map.of("type", "string"),
+                        "description", "文件白名单 glob，例如 pilot-core/src/**/*.java")),
+                Map.entry("deny_files", Map.of("type", "array", "items", Map.of("type", "string"),
+                        "description", "禁止访问的 glob")),
+                Map.entry("writable", Map.of("type", "boolean",
+                        "description", "是否允许提交沙箱改动；只读调研填 false")),
+                Map.entry("tools", Map.of("type", "array", "items", Map.of("type", "string"),
+                        "description", "可用工具白名单，支持 * 通配符，例如 read_*/search_text/run_command")),
+                Map.entry("commands", Map.of("type", "array", "items", Map.of("type", "string"),
+                        "description", "命令白名单，按参数前缀匹配，例如 mvn test / git status；留空沿用内置可执行白名单")),
+                Map.entry("deny_commands", Map.of("type", "array", "items", Map.of("type", "string"),
+                        "description", "禁止执行的命令前缀，优先级高于 commands")),
+                Map.entry("risk", Map.of("type", "string", "enum", List.of("low", "medium", "high"),
+                        "description", "风险等级，高风险必须人工审批")),
+                Map.entry("reviewers", Map.of("type", "integer",
+                        "description", "同一任务并行出方案的子 Agent 数量（1-3），结论不一致会触发仲裁")));
         Map<String, Object> task = Map.of(
                 "type", "object",
-                "properties", Map.of(
-                        "id", Map.of("type", "string", "description", "任务编号，会话内唯一，例如 T1"),
-                        "title", Map.of("type", "string", "description", "任务标题，界面展示用"),
-                        "goal", Map.of("type", "string", "description", "完整目标：做什么、做到什么算完成"),
-                        "depends_on", Map.of("type", "array", "items", Map.of("type", "string"),
-                                "description", "前置任务编号；为空表示可立即并行"),
-                        "files", Map.of("type", "array", "items", Map.of("type", "string"),
-                                "description", "文件白名单 glob，例如 pilot-core/src/**/*.java"),
-                        "deny_files", Map.of("type", "array", "items", Map.of("type", "string"),
-                                "description", "禁止访问的 glob"),
-                        "writable", Map.of("type", "boolean",
-                                "description", "是否允许提交沙箱改动；只读调研填 false"),
-                        "tools", Map.of("type", "array", "items", Map.of("type", "string"),
-                                "description", "可用工具白名单，例如 read_file/search_text/run_command"),
-                        "risk", Map.of("type", "string", "enum", List.of("low", "medium", "high"),
-                                "description", "风险等级，高风险必须人工审批"),
-                        "reviewers", Map.of("type", "integer",
-                                "description", "同一任务并行出方案的子 Agent 数量（1-3），结论不一致会触发仲裁")),
+                "properties", fields,
                 "required", List.of("id", "goal"),
                 "additionalProperties", false);
         return Map.of(
@@ -137,11 +142,14 @@ public final class DispatchAgentsTool implements Tool {
         List<String> files = globs(strings(map.get("files")), "files");
         List<String> denyFiles = globs(strings(map.get("deny_files")), "deny_files");
         List<String> tools = strings(map.get("tools"));
+        List<String> commands = strings(map.get("commands"));
+        List<String> denyCommands = strings(map.get("deny_commands"));
         RiskLevel risk = RiskLevel.of(text(map.get("risk")));
         boolean writable = bool(map.get("writable"));
         int reviewers = number(map.get("reviewers"));
         AgentScope scope = (writable ? AgentScope.readWrite(files, denyFiles) : AgentScope.readOnly(files, denyFiles))
-                .withTools(tools, List.of());
+                .withTools(tools, List.of())
+                .withCommands(commands, denyCommands);
         return new TaskSpec(id, title, goal, dependsOn, scope, risk, reviewers);
     }
 

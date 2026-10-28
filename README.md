@@ -116,6 +116,7 @@ Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环
 
 - 星型拓扑：子 Agent 之间不通信，结论统一交回父 Agent；需要别的产出时由父 Agent 摘要转发。
 - 权限硬隔离：每个子任务带文件白名单（`AgentScope`），路径校验在 `PathValidator` 里拦截，白名单外的文件在子 Agent 视图里不存在，列举/搜索也会被过滤。
+- 细粒度授权：工具白名单支持 `read_*` 这类通配符；`commands` / `deny_commands` 按参数前缀限制 `run_command`（如 `mvn test`、`git status`），`*` 匹配单个参数、`**` 匹配剩余参数；只读任务即使拿到 `run_command` 也不能执行 `git add` / `git commit`。
 - 变更沙箱：子 Agent 的 `edit_file` / `create_file` 只产出 unified diff 与目标内容，写入 `.pilot/multi/<session>/` 审计副本，真实工作区在用户点「接受变更」之前保持只读；接受时用内容指纹校验文件没有被别人改过。
 - 合并预检：同一文件的重叠改动、两个 Agent 新建同一文件都会标记为冲突，冲突不自动合并。
 - 硬校验：在 `git worktree` 出来的隔离副本上套用「工作区未提交改动 + 沙箱改动」，执行 `mvnw compile` / `mvnw test`（可用 `pilot.multi.verify-commands` 覆盖）。编译器与测试结果优先于任何 Agent 的判断。

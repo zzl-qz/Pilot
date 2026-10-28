@@ -22,39 +22,56 @@ import java.util.regex.Pattern;
  *   <li>无通配符的写法既匹配该文件，也匹配以它开头的子路径（当目录用）。</li>
  * </ul>
  * 禁止清单永远优先于允许清单；允许清单为空表示「整个工作区可见」。
+ *
+ * <p>命令白名单按「参数前缀」匹配：{@code mvn test} 允许 {@code mvn test -q}，但不允许
+ * {@code mvn package}；{@code *} 匹配单个参数，{@code **} 匹配任意后续参数。
+ * 工具名同样支持 {@code *} 通配符，例如 {@code read_*}。
  */
 public final class AgentScope {
     private final List<String> allowFiles;
     private final List<String> denyFiles;
     private final Set<String> allowTools;
     private final Set<String> denyTools;
+    private final List<String> allowCommands;
+    private final List<String> denyCommands;
     private final boolean writable;
 
     private AgentScope(Collection<String> allowFiles, Collection<String> denyFiles,
-                       Collection<String> allowTools, Collection<String> denyTools, boolean writable) {
+                       Collection<String> allowTools, Collection<String> denyTools,
+                       Collection<String> allowCommands, Collection<String> denyCommands, boolean writable) {
         this.allowFiles = clean(allowFiles);
         this.denyFiles = clean(denyFiles);
         this.allowTools = cleanTools(allowTools);
         this.denyTools = cleanTools(denyTools);
+        this.allowCommands = cleanCommands(allowCommands);
+        this.denyCommands = cleanCommands(denyCommands);
         this.writable = writable;
     }
 
     /** 只读审计视图：能读的东西有限，但一律不许写。 */
     public static AgentScope readOnly(Collection<String> allowFiles, Collection<String> denyFiles) {
-        return new AgentScope(allowFiles, denyFiles, List.of(), List.of(), false);
+        return new AgentScope(allowFiles, denyFiles, List.of(), List.of(), List.of(), List.of(), false);
     }
 
     /** 可提交沙箱改动的视图；写入只落到沙箱，不碰真实工作区。 */
     public static AgentScope readWrite(Collection<String> allowFiles, Collection<String> denyFiles) {
-        return new AgentScope(allowFiles, denyFiles, List.of(), List.of(), true);
+        return new AgentScope(allowFiles, denyFiles, List.of(), List.of(), List.of(), List.of(), true);
     }
 
     public AgentScope withTools(Collection<String> allowTools, Collection<String> denyTools) {
-        return new AgentScope(allowFiles, denyFiles, allowTools, denyTools, writable);
+        return new AgentScope(allowFiles, denyFiles, allowTools, denyTools,
+                allowCommands, denyCommands, writable);
+    }
+
+    /** 命令白名单：空允许清单表示沿用 {@code run_command} 的内置可执行白名单。 */
+    public AgentScope withCommands(Collection<String> allowCommands, Collection<String> denyCommands) {
+        return new AgentScope(allowFiles, denyFiles, allowTools, denyTools,
+                allowCommands, denyCommands, writable);
     }
 
     public AgentScope withWritable(boolean writable) {
-        return new AgentScope(allowFiles, denyFiles, allowTools, denyTools, writable);
+        return new AgentScope(allowFiles, denyFiles, allowTools, denyTools,
+                allowCommands, denyCommands, writable);
     }
 
     public List<String> allowFiles() {
@@ -71,6 +88,14 @@ public final class AgentScope {
 
     public Set<String> denyTools() {
         return denyTools;
+    }
+
+    public List<String> allowCommands() {
+        return allowCommands;
+    }
+
+    public List<String> denyCommands() {
+        return denyCommands;
     }
 
     public boolean writable() {
@@ -139,16 +164,46 @@ public final class AgentScope {
         return prefix;
     }
 
-    /** 工具是否在白名单内。允许清单为空表示不额外限制，禁止清单依然生效。 */
+    /** 工具是否在白名单内。允许清单为空表示不额外限制，禁止清单依然生效；支持 {@code *} 通配符。 */
     public boolean allowsTool(String toolName) {
         if (toolName == null || toolName.isBlank()) {
             return false;
         }
-        String name = toolName.strip();
-        if (denyTools.contains(name)) {
+        String name = toolName.strip().toLowerCase(Locale.ROOT);
+        if (matchesAnyTool(denyTools, name)) {
             return false;
         }
-        return allowTools.isEmpty() || allowTools.contains(name);
+        return allowTools.isEmpty() || matchesAnyTool(allowTools, name);
+    }
+
+    /**
+     * 命令是否在视图内：按参数前缀匹配，{@code *} 匹配单个参数，{@code **} 匹配任意后续参数。
+     *
+     * <p>允许清单为空表示不额外限制（仍受 {@code run_command} 内置可执行白名单约束），
+     * 禁止清单永远优先。
+     */
+    public boolean allowsCommand(String command) {
+        return allowsCommandArgs(commandTokens(command));
+    }
+
+    /** 使用已经分词好的参数判断，避免引号内的空格被重新拆分。 */
+    public boolean allowsCommandArgs(Collection<String> args) {
+        if (args == null || args.isEmpty()) {
+            return false;
+        }
+        List<String> tokens = new ArrayList<>();
+        for (String arg : args) {
+            if (arg != null && !arg.isBlank()) {
+                tokens.add(arg.strip().toLowerCase(Locale.ROOT));
+            }
+        }
+        if (tokens.isEmpty()) {
+            return false;
+        }
+        if (matchesAnyCommand(denyCommands, tokens)) {
+            return false;
+        }
+        return allowCommands.isEmpty() || matchesAnyCommand(allowCommands, tokens);
     }
 
     /** 给子 Agent 看的权限说明，写进系统提示词；真正的拦截在后端。 */
@@ -163,6 +218,12 @@ public final class AgentScope {
         }
         if (!denyTools.isEmpty()) {
             out.append("\n- 禁用工具：").append(String.join(" / ", denyTools));
+        }
+        if (!allowCommands.isEmpty()) {
+            out.append("\n- 可用命令（按参数前缀匹配）：").append(String.join(" / ", allowCommands));
+        }
+        if (!denyCommands.isEmpty()) {
+            out.append("\n- 禁用命令：").append(String.join(" / ", denyCommands));
         }
         out.append(writable
                 ? "\n- 改动权限：可以在白名单内提交改动，改动只进沙箱，不会直接写入真实工作区"
@@ -197,6 +258,52 @@ public final class AgentScope {
             path = path.substring(0, path.length() - 1);
         }
         return path;
+    }
+
+    private static boolean matchesAnyTool(Set<String> patterns, String name) {
+        for (String pattern : patterns) {
+            if (matches(pattern, name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean matchesAnyCommand(List<String> patterns, List<String> tokens) {
+        for (String pattern : patterns) {
+            if (commandMatches(pattern, tokens)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 白名单项是命令的前缀；{@code *} 占一个参数，{@code **} 吞掉剩余参数。 */
+    static boolean commandMatches(String pattern, List<String> tokens) {
+        List<String> expected = commandTokens(pattern);
+        if (expected.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < expected.size(); i++) {
+            String part = expected.get(i);
+            if ("**".equals(part)) {
+                return true;
+            }
+            if (i >= tokens.size()) {
+                return false;
+            }
+            if (!"*".equals(part) && !part.equals(tokens.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<String> commandTokens(String command) {
+        if (command == null || command.isBlank()) {
+            return List.of();
+        }
+        return List.of(command.strip().toLowerCase(Locale.ROOT).split("\\s+"));
     }
 
     private static boolean matchesAny(List<String> globs, String path) {
@@ -270,6 +377,21 @@ public final class AgentScope {
         return List.copyOf(seen);
     }
 
+    private static List<String> cleanCommands(Collection<String> values) {
+        if (values == null) {
+            return List.of();
+        }
+        var seen = new LinkedHashSet<String>();
+        for (String value : values) {
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            seen.add(String.join(" ", commandTokens(value)));
+        }
+        seen.remove("");
+        return List.copyOf(seen);
+    }
+
     private static Set<String> cleanTools(Collection<String> values) {
         if (values == null) {
             return Set.of();
@@ -287,7 +409,8 @@ public final class AgentScope {
     @Override
     public String toString() {
         return "AgentScope{allow=" + allowFiles + ", deny=" + denyFiles
-                + ", tools=" + allowTools + ", writable=" + writable + '}';
+                + ", tools=" + allowTools + ", commands=" + allowCommands
+                + ", writable=" + writable + '}';
     }
 
     @Override
@@ -302,12 +425,15 @@ public final class AgentScope {
                 && allowFiles.equals(scope.allowFiles)
                 && denyFiles.equals(scope.denyFiles)
                 && allowTools.equals(scope.allowTools)
-                && denyTools.equals(scope.denyTools);
+                && denyTools.equals(scope.denyTools)
+                && allowCommands.equals(scope.allowCommands)
+                && denyCommands.equals(scope.denyCommands);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(allowFiles, denyFiles, allowTools, denyTools, writable);
+        return Objects.hash(allowFiles, denyFiles, allowTools, denyTools,
+                allowCommands, denyCommands, writable);
     }
 
     /** 用于拼错误信息：把白名单说清楚，模型才知道下一步怎么绕。 */
@@ -320,5 +446,17 @@ public final class AgentScope {
             parts.add("禁止范围 " + denyFiles);
         }
         return "路径 " + path + " 不在你的文件白名单内（" + String.join("；", parts) + "）";
+    }
+
+    /** 命令越界时的错误信息。 */
+    public String commandHint(String command) {
+        List<String> parts = new ArrayList<>();
+        if (!allowCommands.isEmpty()) {
+            parts.add("允许 " + allowCommands);
+        }
+        if (!denyCommands.isEmpty()) {
+            parts.add("禁止 " + denyCommands);
+        }
+        return "命令 " + command + " 不在你的命令白名单内（" + String.join("；", parts) + "）";
     }
 }

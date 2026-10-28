@@ -1,5 +1,6 @@
 package com.pilot.core.tool;
 
+import com.pilot.core.multi.AgentScope;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.workspace.PathValidator;
 
@@ -120,11 +121,18 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             return "ERROR: 命令不在白名单内: " + tokens.get(0)
                     + "。可用: " + String.join(", ", ALLOWED_EXECUTABLES.stream().sorted().toList());
         }
+        AgentScope scope = paths.scope();
+        if (scope != null && !scope.allowsCommandArgs(tokens)) {
+            return "ERROR: " + scope.commandHint(raw);
+        }
         if ("git".equals(executable)) {
             String sub = tokens.size() > 1 ? tokens.get(1).toLowerCase(Locale.ROOT) : "";
             if (GIT_READONLY.contains(sub)) {
                 // 只读子命令直接放行
             } else if (GIT_WRITE.contains(sub)) {
+                if (scope != null && !scope.writable()) {
+                    return "ERROR: 只读任务不允许 git " + sub + "，改动请通过沙箱写工具提交";
+                }
                 String problem = checkGitWrite(tokens, sub);
                 if (problem != null) {
                     return "ERROR: " + problem;

@@ -54,6 +54,57 @@ class AgentScopeTest {
     }
 
     @Test
+    void toolAllowListSupportsWildcards() {
+        var scope = AgentScope.readOnly(List.of(), List.of())
+                .withTools(List.of("read_*", "search_text"), List.of());
+
+        assertTrue(scope.allowsTool("read_file"));
+        assertTrue(scope.allowsTool("search_text"));
+        assertFalse(scope.allowsTool("edit_file"));
+        assertFalse(scope.allowsTool("list_dir"));
+    }
+
+    @Test
+    void commandAllowListMatchesArgumentPrefix() {
+        var scope = AgentScope.readOnly(List.of(), List.of())
+                .withCommands(List.of("mvn test", "git status"), List.of());
+
+        assertTrue(scope.allowsCommand("mvn test"));
+        assertTrue(scope.allowsCommand("mvn test -q -DskipITs"));
+        assertTrue(scope.allowsCommand("git status --porcelain"));
+        assertFalse(scope.allowsCommand("mvn package"));
+        assertFalse(scope.allowsCommand("mvn testfoo"));
+        assertFalse(scope.allowsCommand(""));
+    }
+
+    @Test
+    void commandDenyListWinsOverAllowList() {
+        var scope = AgentScope.readOnly(List.of(), List.of())
+                .withCommands(List.of("mvn"), List.of("mvn deploy"));
+
+        assertTrue(scope.allowsCommand("mvn test"));
+        assertFalse(scope.allowsCommand("mvn deploy -q"));
+    }
+
+    @Test
+    void commandWildcardsMatchSingleOrRestArguments() {
+        var scope = AgentScope.readOnly(List.of(), List.of())
+                .withCommands(List.of("git *", "npm run **"), List.of());
+
+        assertTrue(scope.allowsCommand("git status --porcelain"));
+        assertFalse(scope.allowsCommand("git"));
+        assertTrue(scope.allowsCommand("npm run build --silent"));
+    }
+
+    @Test
+    void emptyCommandAllowListMeansBuiltinPolicyOnly() {
+        var scope = AgentScope.readOnly(List.of(), List.of());
+
+        assertTrue(scope.allowsCommand("mvn -q test"));
+        assertFalse(scope.allowsCommand("  "));
+    }
+
+    @Test
     void scopeDescriptionTellsModelItsBoundary() {
         var scope = AgentScope.readOnly(List.of("pilot-core/**"), List.of("pilot-core/secret/**"));
 

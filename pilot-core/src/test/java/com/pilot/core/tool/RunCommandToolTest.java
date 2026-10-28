@@ -1,5 +1,6 @@
 package com.pilot.core.tool;
 
+import com.pilot.core.multi.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -136,6 +137,41 @@ class RunCommandToolTest {
         String timeout = tool.checkSummary(call, "ERROR: 命令超时（120 秒）已被终止");
         assertTrue(timeout != null && timeout.contains("超时"), String.valueOf(timeout));
         assertNull(tool.checkSummary(call, null));
+    }
+
+    @Test
+    void rejectsCommandOutsideScope() {
+        var scope = AgentScope.readOnly(List.of(), List.of())
+                .withTools(List.of("run_command"), List.of())
+                .withCommands(List.of("git status"), List.of());
+        var tool = new RunCommandTool(new PathValidator(workspace, scope));
+
+        String result = tool.execute(Map.of("command", "mvn -v"));
+
+        assertTrue(result.startsWith("ERROR: 命令 mvn -v 不在你的命令白名单内"), result);
+        assertTrue(result.contains("git status"), result);
+    }
+
+    @Test
+    void readOnlyScopeRejectsGitWrite() {
+        var scope = AgentScope.readOnly(List.of(), List.of())
+                .withCommands(List.of("git"), List.of());
+        var tool = new RunCommandTool(new PathValidator(workspace, scope));
+
+        String result = tool.execute(Map.of("command", "git commit -m \"test\""));
+
+        assertTrue(result.startsWith("ERROR: 只读任务不允许 git commit"), result);
+    }
+
+    @Test
+    void writableScopeStillAllowsGitWriteChecks() {
+        var scope = AgentScope.readWrite(List.of(), List.of())
+                .withCommands(List.of("git commit"), List.of());
+        var tool = new RunCommandTool(new PathValidator(workspace, scope));
+
+        String result = tool.execute(Map.of("command", "git commit"));
+
+        assertTrue(result.startsWith("ERROR: git commit 必须带 -m"), result);
     }
 
     @Test
