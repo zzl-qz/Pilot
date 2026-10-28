@@ -160,11 +160,15 @@ public class AgentRunService implements RunStarter {
 
     @Override
     public boolean steer(String sessionId, String text) {
-        if (text == null || text.isBlank() || registry.activeRun(sessionId).isEmpty()) {
+        if (text == null || text.isBlank()) {
             return false;
         }
         Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
+            // 与运行结束后的队列交接共用锁，避免检查完活动运行后才入队，消息无人接走。
+            if (registry.activeRun(sessionId).isEmpty()) {
+                return false;
+            }
             queue.offer(text.strip());
             persistQueue(sessionId, queue);
         }
@@ -250,16 +254,6 @@ public class AgentRunService implements RunStarter {
         queuedMessages.save(sessionId, List.copyOf(queue));
     }
 
-    /** 每轮采样前拉一条用户追加的指令；没有就返回 null。 */
-    private String pollSteer(String sessionId) {
-        Deque<String> queue = inbox(sessionId);
-        synchronized (queue) {
-            String next = queue.poll();
-            if (next != null) persistQueue(sessionId, queue);
-            return next;
-        }
-    }
-
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
                         boolean continuation) {
         var handle = new RunHandle();
@@ -289,24 +283,35 @@ public class AgentRunService implements RunStarter {
             log.error("Run {} 收尾失败", runId, e);
         } finally {
             runs.remove(runId, handle);
-            // 两参 remove：自动续跑已经把槽位换成新 runId 时不会误删
-            registry.unregister(runId);
             try {
                 runRepository.finished(runId, status, java.time.Instant.now());
             } catch (RuntimeException e) {
                 log.warn("记录 run {} 结束状态失败", runId, e);
             }
-            metrics.recordRun(status, System.currentTimeMillis() - startedAt);
-            if (!continued && !"CANCELLED".equals(status)) {
-                drainQueue(sessionId);
+            Deque<String> queue = inbox(sessionId);
+            try {
+                synchronized (queue) {
+                    // 释放槽位和启动排队消息必须连在一起，HTTP 新请求不能抢进交接窗口。
+                    registry.unregister(runId);
+                    if (!continued && "COMPLETED".equals(status) && !handle.cancelled.get()
+                            && plans.load(sessionId).stream().allMatch(com.pilot.core.plan.PlanItem::done)) {
+                        drainQueue(sessionId, queue);
+                    }
+                }
+            } catch (RuntimeException e) {
+                log.error("会话 {} 的排队消息交接失败，保留队列等待重试", sessionId, e);
+            } finally {
+                metrics.recordRun(status, System.currentTimeMillis() - startedAt);
             }
         }
     }
 
     @Override
     public java.util.Optional<String> claimRun(String sessionId) {
-        String runId = "run_" + java.util.UUID.randomUUID();
-        return registry.claim(runId, sessionId) ? java.util.Optional.of(runId) : java.util.Optional.empty();
+        synchronized (inbox(sessionId)) {
+            String runId = "run_" + java.util.UUID.randomUUID();
+            return registry.claim(runId, sessionId) ? java.util.Optional.of(runId) : java.util.Optional.empty();
+        }
     }
 
     @Override
@@ -327,18 +332,26 @@ public class AgentRunService implements RunStarter {
         }
     }
 
-    /** 这轮结束时队列里还有话，就按顺序自动开下一轮，不让用户再点一次发送。 */
-    private void drainQueue(String sessionId) {
-        if (registry.activeRun(sessionId).isPresent()) {
+    /** 当前任务完整结束后，在队列锁内占位并启动下一条；失败、暂停、计划未完成时不消费。 */
+    private void drainQueue(String sessionId, Deque<String> queue) {
+        String next = queue.peek();
+        if (next == null) {
             return;
         }
-        String next = pollSteer(sessionId);
-        if (next == null || next.isBlank()) {
+        String runId = claimRun(sessionId).orElse(null);
+        if (runId == null) {
             return;
         }
-        String runId = "run_" + java.util.UUID.randomUUID();
-        sessions.publish(sessionId, runId, new RunStarted(next));
-        launch(sessionId, runId, next, List.of(), false);
+        try {
+            sessions.publish(sessionId, runId, new RunStarted(next));
+            launch(sessionId, runId, next, List.of(), false);
+        } catch (RuntimeException e) {
+            registry.unregister(runId);
+            publish(sessionId, runId, new RunFailed("QUEUE_START_FAILED", "排队消息启动失败，消息已保留", false));
+            throw e;
+        }
+        queue.remove();
+        persistQueue(sessionId, queue);
     }
 
     /**
@@ -671,7 +684,8 @@ public class AgentRunService implements RunStarter {
         var traceRecorder = new JsonlTraceRecorder(
                 dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
         var loop = new AgentLoop(modelClient, tools, permissionGate, approvals, config, handle.cancelled::get,
-                () -> pollSteer(sessionId), traceRecorder,
+                // 普通发送只排队，不能作为 steer 在工具步骤之间插入并改变当前任务。
+                () -> null, traceRecorder,
                 delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)));
 
         snapshots.bind(runId, toolFactory.resolve(workspace));

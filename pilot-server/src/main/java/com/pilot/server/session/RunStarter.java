@@ -81,7 +81,7 @@ public interface RunStarter {
     }
 
     /**
-     * 运行中追加输入：入队等下一轮消费，不新开 run。
+     * 运行中追加输入：排队等待当前任务完整结束，再为每条消息独立启动一次运行。
      *
      * @return false 表示当前没有活动运行，调用方应按普通消息处理
      */
@@ -89,7 +89,7 @@ public interface RunStarter {
         return false;
     }
 
-    /** 还没被当前运行拿走的用户消息，按入队顺序。 */
+    /** 等待当前任务结束后执行的用户消息，按入队顺序。 */
     default List<String> queued(String sessionId) {
         return List.of();
     }

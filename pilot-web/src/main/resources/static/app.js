@@ -2405,6 +2405,10 @@ function onRunCancelled(event) {
 function onRunFailed(event) {
   state.modelRetryUntil = 0;
   const code = String(event.payload.code || '');
+  // 启动失败时服务端保留消息；恢复已被 run.started 从界面移除的队列项。
+  if (!state.replaying && code === 'QUEUE_START_FAILED') {
+    loadQueue();
+  }
   const { cancelled, paused, interrupted, resumable } = classifyRunFailure(code);
   state.running = false;
   stopRunClock();
@@ -2486,6 +2490,15 @@ function onRunRetrying(event) {
 }
 
 function onRunContinued(event) {
+  const wasRunning = state.running;
+  state.running = true;
+  state.runId = event.runId || state.runId;
+  markSessionStatus('RUNNING');
+  syncComposer();
+  if (!wasRunning) {
+    startRunClock(Date.now());
+    showThinking();
+  }
   if (event.runId && !state.turnRuns.includes(event.runId)) {
     state.turnRuns.push(event.runId);
   }
@@ -4481,7 +4494,7 @@ async function submitMessage(content, attachments = []) {
     rememberInput(content);
   }
 
-  // 运行中不再直接插进对话：先排进队列，下一步才会被拿走，拿走之前可以改、可以删
+  // 运行中先排队，当前任务完成后才发出；等待时可以改、可以删
   const wasRunning = state.running;
   if (!wasRunning) {
     appendUserMessage(content || attachmentSummary(attachments));
@@ -4906,7 +4919,7 @@ function syncComposer() {
   el.send.disabled = running ? false : !state.composerEnabled;
   el.changesRollback.hidden = !(state.lastRunId && !running);
   el.input.placeholder = running
-    ? '运行中。再写一句会排进上方队列，轮到之前可以改或删'
+    ? '运行中。再写一句会排队，当前任务完成后依次发送；等待时可改、可删'
     : '描述任务，Enter 发送，Shift + Enter 换行，@ 引用文件，/ 快捷指令';
 }
 
@@ -4940,7 +4953,7 @@ function renderQueue() {
   }
   const title = document.createElement('p');
   title.className = 'queue-title';
-  title.textContent = `排队 ${items.length} 句。下一步会带上；这轮先结束的话，自动接着跑。`;
+  title.textContent = `排队 ${items.length} 句。当前任务完成后依次发送，等待期间可改或删。`;
   el.messageQueue.append(title);
   items.forEach((text, index) => {
     const row = document.createElement('div');
