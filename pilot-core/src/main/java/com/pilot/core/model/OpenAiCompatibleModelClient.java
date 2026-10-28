@@ -23,8 +23,12 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * OpenAI 兼容的 chat completions 客户端（非流式）。
+ * OpenAI 兼容的 chat completions 客户端。
  * 只负责协议转换：把 {@link Message} 序列化为请求体，把响应的 content 与 tool_calls 解析回来。
+ *
+ * <p>两个入口：{@link #chat(List, List)} 一次性返回完整响应；三参数重载带 {@code stream=true}，
+ * 逐行读取 {@code data:} 分片，按 {@code index} 归并分散在多行里的 tool_calls，
+ * 并把增量文本实时回调给调用方。AgentLoop 走的是流式路径。
  */
 public final class OpenAiCompatibleModelClient implements ModelClient {
     private static final int ERROR_SNIPPET_CHARS = 300;

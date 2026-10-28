@@ -46,3 +46,6 @@ application-local.yml
 
 ### IDEA 数据库控制台留下的临时库 ###
 identifier.sqlite
+
+### 本地机制文档：按机制整理的实现说明，只在本机维护，不进版本库 ###
+/docs/
