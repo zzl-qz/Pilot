@@ -55,6 +55,11 @@ public interface RunStarter {
     default void abandon(String runId) {
     }
 
+    /** 独占文件恢复/切分支期间的工作区，abandon 时释放；其他会话不能趁此启动。 */
+    default boolean lockWorkspace(String operationId, java.nio.file.Path workspace) {
+        return true;
+    }
+
     /** 删除会话时忘掉它留下的内存状态（队列、续跑计数等）。 */
     default void forget(String sessionId) {
     }

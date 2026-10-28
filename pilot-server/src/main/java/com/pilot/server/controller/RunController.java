@@ -59,12 +59,20 @@ public class RunController {
     /** 把该次运行改过的文件还原成运行前的内容，并删除本次新建的文件。 */
     @PostMapping("/{runId}/rollback")
     public RunSnapshotService.RollbackReport rollback(@PathVariable String runId) {
+        RunSnapshotService.SnapshotMeta meta = snapshots.meta(runId);
+        if (meta == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有该运行的回滚快照: " + runId);
+        String operationId = "restore_" + java.util.UUID.randomUUID();
+        if (!runStarter.lockWorkspace(operationId, Path.of(meta.workspace()))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "工作区仍有任务在运行，请结束后再回滚");
+        }
         try {
             return snapshots.rollback(runId);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
+        } finally {
+            runStarter.abandon(operationId);
         }
     }
 

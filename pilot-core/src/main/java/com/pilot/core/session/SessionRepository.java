@@ -56,6 +56,9 @@ public interface SessionRepository {
     /** 切换会话当前使用的文件夹（同一项目绑定的其它目录）。 */
     boolean updateWorkspace(String sessionId, String workspace);
 
+    /** 回退历史后同步会话状态，不改变事件序号。 */
+    boolean updateStatus(String sessionId, SessionStatus status);
+
     boolean rename(String sessionId, String title);
 
     /** 删除会话及其事件；返回是否真的删除了记录。 */

@@ -78,6 +78,7 @@ public final class CreateFileTool implements Tool, WritesFiles {
             Files.createDirectories(file.getParent());
             snapshots.beforeWrite(file);
             Files.writeString(file, content, StandardCharsets.UTF_8);
+            snapshots.afterWrite(file);
             int bytes = content.getBytes(StandardCharsets.UTF_8).length;
             return "已创建 " + paths.display(file) + "（" + bytes + " 字节，"
                     + (int) content.lines().count() + " 行）";

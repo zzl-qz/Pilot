@@ -114,6 +114,15 @@ public final class JdbcSessionRepository implements SessionRepository {
     }
 
     @Override
+    public boolean updateStatus(String sessionId, SessionStatus status) {
+        return JdbcSupport.update(store, "UPDATE sessions SET status = ? WHERE id = ?",
+                statement -> {
+                    statement.setString(1, status.name());
+                    statement.setString(2, sessionId);
+                }, "回退会话状态失败: " + sessionId) > 0;
+    }
+
+    @Override
     public boolean rename(String sessionId, String title) {
         return JdbcSupport.update(store, "UPDATE sessions SET title = ? WHERE id = ?",
                 statement -> {

@@ -236,7 +236,13 @@ public final class SessionService {
             if (repository.find(sessionId).isEmpty()) {
                 throw new NoSuchSessionException(sessionId);
             }
-            return repository.dropEventsFrom(sessionId, fromSequence);
+            int removed = repository.dropEventsFrom(sessionId, fromSequence);
+            SessionStatus status = SessionStatus.CREATED;
+            for (EventEnvelope event : repository.events(sessionId)) {
+                status = nextStatus(status, event.payload());
+            }
+            repository.updateStatus(sessionId, status);
+            return removed;
         }
     }
 

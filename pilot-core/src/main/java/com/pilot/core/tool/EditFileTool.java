@@ -115,6 +115,7 @@ public final class EditFileTool implements Tool, WritesFiles {
             String updated = content.substring(0, index) + replacement + content.substring(index + search.length());
             snapshots.beforeWrite(file);
             Files.writeString(file, updated, StandardCharsets.UTF_8);
+            snapshots.afterWrite(file);
             return "已修改 " + paths.display(file) + "：替换 1 处（"
                     + lineCount(search) + " 行 → " + lineCount(replacement) + " 行）";
         } catch (IOException e) {

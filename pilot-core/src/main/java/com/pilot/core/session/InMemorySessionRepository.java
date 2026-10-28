@@ -61,6 +61,14 @@ public final class InMemorySessionRepository implements SessionRepository {
     }
 
     @Override
+    public boolean updateStatus(String sessionId, SessionStatus status) {
+        State state = sessions.get(sessionId);
+        if (state == null) return false;
+        synchronized (state) { state.status = status; }
+        return true;
+    }
+
+    @Override
     public Optional<Session> find(String sessionId) {
         State state = sessionId == null ? null : sessions.get(sessionId);
         return state == null ? Optional.empty() : Optional.of(state.snapshot());

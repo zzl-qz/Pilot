@@ -10,6 +10,9 @@ import java.nio.file.Path;
 public interface SnapshotSink {
     void beforeWrite(Path file);
 
+    /** 写入后立即记录工具产出的指纹，以识别运行尚未结束时发生的外部修改。 */
+    default void afterWrite(Path file) { }
+
     static SnapshotSink none() {
         return file -> {
         };
