@@ -443,21 +443,22 @@ public class AgentRunService implements RunStarter {
      * 组装本轮 system：正文全部来自 {@code prompts/} 资源，这里只注入环境与当前计划。
      *
      * <p>计划每轮重新注入：压缩会折叠历史，但 system 是重建的，长期约束不会丢
-     * （与 Claude Code 把约束放 CLAUDE.md 的思路一致）。
+     * （与 Claude Code 把约束放 CLAUDE.md 的思路一致）。计划与日期排在 system 最尾：
+     * 越动态的段越靠后，前缀缓存按 token 匹配，尾部变化只损失尾部缓存。
      *
      * <p>正文段落按 {@code availableTools} 过滤：依赖的工具没注册，对应段落不进提示词，
-     * 避免教模型调用不存在的工具。
+     * 避免教模型调用不存在的工具。仓库快照不进 system（每轮 git status 变化会断全部缓存），
+     * 改在会话首条 run 时作为 user 消息注入一次。
      */
     private String systemPrompt(String sessionId, String workspace, Set<String> availableTools) {
         String prompt = PROMPTS.system(PromptLibrary.environment(workspace), availableTools);
-        String repository = repositoryBrief(workspace);
-        if (!repository.isEmpty()) {
-            prompt = prompt + "\n\n" + repository;
-        }
         String rules = projectRules(workspace);
         if (!rules.isEmpty()) {
             prompt = prompt + "\n\n" + rules;
         }
+        String today = PROMPTS.render("system/today",
+                Map.of("today", java.time.LocalDate.now().toString())).strip();
+        prompt = prompt + "\n\n" + today;
         String plan = planBrief(sessionId);
         return plan.isEmpty() ? prompt : prompt + "\n\n" + plan;
     }
@@ -479,10 +480,29 @@ public class AgentRunService implements RunStarter {
     }
 
     /**
+     * 会话首条 run 时把仓库快照作为第一条 user 消息注入一次，此后不再注入。
+     *
+     * <p>快照不进 system：git 状态每轮都会变，进 system 会让跨轮前缀缓存全部失效；
+     * 作为首条 user 消息随历史正常落盘与压缩，模板已声明「以工具实查为准」。
+     */
+    private List<Message> withRepositoryBrief(List<Message> history, String workspace) {
+        if (!history.isEmpty()) {
+            return history;
+        }
+        String brief = repositoryBrief(workspace);
+        if (brief.isEmpty()) {
+            return history;
+        }
+        List<Message> seeded = new ArrayList<>(history);
+        seeded.add(Message.user(brief));
+        return List.copyOf(seeded);
+    }
+
+    /**
      * 仓库现状快照：顶层结构、git 分支与未提交改动、构建方式。
      *
-     * <p>顶级 agent 都会把这几项注入上下文，模型不用从零摸索，也不会覆盖用户手上的未提交改动。
-     * 每轮只做一次目录列举 + 一次带超时的 {@code git status}，读不到就降级，不影响运行。
+     * <p>模型不用从零摸索，也不会覆盖用户手上的未提交改动。
+     * 仅在会话首条 run 时生成一次，此后模型按提示词要求用工具实查。
      */
     private String repositoryBrief(String workspace) {
         Path root;
@@ -495,7 +515,7 @@ public class AgentRunService implements RunStarter {
             return "";
         }
         try {
-            return PROMPTS.render("system/repository", Map.of(
+            return PROMPTS.render("context/repository", Map.of(
                     "tree", workspaceTree(root),
                     "git", gitState(root),
                     "build", buildHint(root))).strip();
@@ -708,9 +728,10 @@ public class AgentRunService implements RunStarter {
 
         snapshots.bind(runId, toolFactory.resolve(workspace));
         try {
+            // 普通运行时，会话首条消息前注入一次仓库快照（见 withRepositoryBrief）；续跑不注入
             AgentLoop.Result result = continuation
                     ? loop.resume(history, sink, checkpoint)
-                    : loop.run(input, attachments, history, sink, checkpoint);
+                    : loop.run(input, attachments, withRepositoryBrief(history, workspace), sink, checkpoint);
             conversations.save(sessionId, result.conversation());
             log.info("Agent run {} completed: failureCode={}, messages={}, workspace={}", runId, result.failureCode(),
                     result.conversation().size(), workspace == null ? properties.workspace() : workspace);

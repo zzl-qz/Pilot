@@ -122,6 +122,58 @@ class AgentRunServiceTest {
     }
 
     @Test
+    void injectsRepositoryBriefOncePerSession() throws Exception {
+        var requests = new CopyOnWriteArrayList<List<Message>>();
+        var calls = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            requests.add(messages);
+            return done();
+        };
+        Files.writeString(workspace.resolve("a.txt"), "evidence");
+        try (var fixture = new Fixture(model, 8)) {
+            fixture.start();
+            fixture.awaitFinished("COMPLETED");
+
+            // 第二次 run：历史非空，不应重复注入
+            String secondRun = fixture.service.claimRun(fixture.sessionId).orElseThrow();
+            fixture.service.start(fixture.sessionId, secondRun, "第二个任务");
+            fixture.awaitFinished("COMPLETED");
+
+            List<Message> first = requests.get(0);
+            assertEquals(1, snapshotCount(first), "会话首条请求应恰好注入一次仓库快照");
+            int snapshotAt = -1;
+            int inputAt = -1;
+            for (int i = 0; i < first.size(); i++) {
+                Message message = first.get(i);
+                if (!"user".equals(message.role())) {
+                    continue;
+                }
+                if (snapshotAt < 0 && message.content().startsWith("## 仓库现状")) {
+                    snapshotAt = i;
+                }
+                if (inputAt < 0 && "原任务".equals(message.content())) {
+                    inputAt = i;
+                }
+            }
+            assertTrue(inputAt >= 0, "用户输入应在快照之后");
+            assertTrue(snapshotAt >= 0 && snapshotAt < inputAt, "快照应位于首条用户输入之前");
+
+            List<Message> second = requests.get(1);
+            assertEquals(1, snapshotCount(second), "第二轮 run 不应重复注入快照");
+            assertTrue(second.stream().anyMatch(message -> "user".equals(message.role())
+                    && "第二个任务".equals(message.content())));
+        }
+    }
+
+    /** 请求里「## 仓库现状」开头的 user 消息数。 */
+    private static long snapshotCount(List<Message> messages) {
+        return messages.stream()
+                .filter(message -> "user".equals(message.role()))
+                .filter(message -> message.content().startsWith("## 仓库现状"))
+                .count();
+    }
+
+    @Test
     void keepsQueueWhenStepLimitPausesTask() throws Exception {
         assertKeepsQueue(1, List.of(), AgentRunServiceTest::readFile, "MAX_STEPS");
     }
@@ -317,8 +369,12 @@ class AgentRunServiceTest {
         }
     }
 
+    /** 用户输入序列：过滤会话首条自动注入的仓库快照（以「## 仓库现状」开头的 user 消息）。 */
     private static List<String> userInputs(List<Message> messages) {
-        return messages.stream().filter(message -> "user".equals(message.role())).map(Message::content).toList();
+        return messages.stream().filter(message -> "user".equals(message.role()))
+                .map(Message::content)
+                .filter(content -> !content.startsWith("## 仓库现状"))
+                .toList();
     }
 
     private static ModelResponse readFile() {
