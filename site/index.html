@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pilot · 在你工作区里工作的 Coding Agent</title>
+<meta name="description" content="Pilot 是一个用 Java 构建、可自托管的本地 Coding Agent。任务在受控工作区里执行，文件、命令与网络能力都经过工具边界与权限策略，全过程以可重放的事件流呈现。">
+<meta name="theme-color" content="#0a0c10">
+<meta property="og:title" content="Pilot · 在你工作区里工作的 Coding Agent">
+<meta property="og:description" content="Java 构建、可自托管：理解任务、检查仓库、修改文件、运行验证、汇报差异。">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0c10'/%3E%3Cpath d='M11 23V9h6.5a5 5 0 0 1 0 10H15' stroke='%236ea8ff' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#mechanics">跳到主要内容</a>
+
+<header class="topbar" id="topbar">
+  <a class="brand" href="#top">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M6 19V5h6.8a4.6 4.6 0 0 1 0 9.2H11" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg>
+    </span>
+    Pilot
+    <span class="brand-sub">本地 Coding Agent</span>
+  </a>
+  <nav class="nav" aria-label="主导航">
+    <a href="#demo">界面</a>
+    <a href="#mechanics">机制</a>
+    <a href="#evidence">代码</a>
+    <a href="#permissions">安全</a>
+    <a href="#start">上手</a>
+  </nav>
+  <a class="gh" href="https://github.com/zzl-qz/Pilot" rel="noopener" aria-label="GitHub 仓库">
+    <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A7.99 7.99 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+    <span>GitHub</span>
+  </a>
+</header>
+
+<main id="top">
+
+  <!-- ══ Hero ═════════════════════════════════════════ -->
+  <section class="hero">
+    <div class="hero-bg" aria-hidden="true">
+      <div class="hero-grid"></div>
+      <div class="hero-orb hero-orb-a"></div>
+      <div class="hero-orb hero-orb-b"></div>
+    </div>
+
+    <div class="hero-inner">
+      <p class="eyebrow"><span class="dot"></span>Java 25 · 自托管 · 可审查</p>
+
+      <h1>它在你自己的<br><span class="grad">工作区里改代码</span></h1>
+
+      <p class="lede">
+        提交任务，Pilot 读仓库、列计划、改文件、跑验证，然后把每一步摊开给你看。
+        模型供应商可以换，执行边界不能绕——路径、工具、命令全部在后端硬校验。
+      </p>
+
+      <div class="install" role="group" aria-label="安装命令">
+        <span class="install-prompt" aria-hidden="true">$</span>
+        <code>git clone https://github.com/zzl-qz/Pilot.git &amp;&amp; cd Pilot &amp;&amp; ./start.cmd</code>
+        <button class="copy icon-only" data-copy="git clone https://github.com/zzl-qz/Pilot.git && cd Pilot && ./start.cmd" aria-label="复制安装命令">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+
+      <div class="cta">
+        <a class="btn btn-primary" href="#start">
+          快速开始
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+        <a class="btn btn-ghost" href="#demo">看看界面</a>
+      </div>
+
+      <dl class="stats" aria-label="项目规模">
+        <div><dt>机制</dt><dd><span class="count" data-count="9" data-pad="2">09</span></dd></div>
+        <div><dt>工具</dt><dd><span class="count" data-count="14">14</span></dd></div>
+        <div><dt>权限档位</dt><dd><span class="count" data-count="4" data-pad="2">04</span></dd></div>
+        <div><dt>上下文预算</dt><dd><span class="count" data-count="120">120</span><small>k</small></dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ══ 技术栈流动条 ══════════════════════════════════ -->
+  <div class="marquee" aria-label="技术栈">
+    <div class="marquee-track">
+      <span>Java 25</span><i>·</i><span>Spring Boot 4</span><i>·</i><span>SQLite WAL</span><i>·</i>
+      <span>Server-Sent Events</span><i>·</i><span>Jackson 3</span><i>·</i><span>虚拟线程</span><i>·</i>
+      <span>OpenAI 兼容端点</span><i>·</i><span>Maven Wrapper</span><i>·</i>
+      <span aria-hidden="true">Java 25</span><i aria-hidden="true">·</i><span aria-hidden="true">Spring Boot 4</span><i aria-hidden="true">·</i>
+      <span aria-hidden="true">SQLite WAL</span><i aria-hidden="true">·</i><span aria-hidden="true">Server-Sent Events</span><i aria-hidden="true">·</i>
+      <span aria-hidden="true">Jackson 3</span><i aria-hidden="true">·</i><span aria-hidden="true">虚拟线程</span><i aria-hidden="true">·</i>
+      <span aria-hidden="true">OpenAI 兼容端点</span><i aria-hidden="true">·</i><span aria-hidden="true">Maven Wrapper</span><i aria-hidden="true">·</i>
+    </div>
+  </div>
+
+  <!-- ══ 交互界面 ═════════════════════════════════════ -->
+  <section class="section" id="demo">
+    <header class="section-head">
+      <p class="kicker">界面</p>
+      <h2>过程本身就是证据</h2>
+      <p class="sub">不给你一句「已完成」，而是给出可复核的调用链、待批的操作和可回退的时间点。</p>
+    </header>
+
+    <div class="app-frame reveal">
+      <div class="app-tabs" role="tablist" aria-label="界面视图">
+        <button role="tab" id="tab-run" aria-selected="true" aria-controls="panel-run" data-panel="panel-run" class="tab active">
+          <span class="tab-dot"></span>运行与事件
+        </button>
+        <button role="tab" id="tab-approve" aria-selected="false" aria-controls="panel-approve" data-panel="panel-approve" class="tab" tabindex="-1">
+          <span class="tab-dot"></span>审批挂起
+        </button>
+        <button role="tab" id="tab-rewind" aria-selected="false" aria-controls="panel-rewind" data-panel="panel-rewind" class="tab" tabindex="-1">
+          <span class="tab-dot"></span>检查点回退
+        </button>
+      </div>
+
+      <!-- 视图 1：运行与事件 -->
+      <div class="app-body" id="panel-run" role="tabpanel" aria-labelledby="tab-run">
+        <aside class="app-side">
+          <div class="side-group">
+            <p class="side-label">项目</p>
+            <p class="side-project">Pilot <span class="side-badge">3 对话</span></p>
+          </div>
+          <ul class="side-list">
+            <li class="active">
+              <span class="side-title">修复登录失败提示</span>
+              <span class="side-meta">12 事件 · 刚才</span>
+            </li>
+            <li>
+              <span class="side-title">补充注册页测试</span>
+              <span class="side-meta">3 事件 · 8 分钟前</span>
+            </li>
+            <li>
+              <span class="side-title">梳理 SSE 重连流程</span>
+              <span class="side-meta">已归档</span>
+            </li>
+          </ul>
+        </aside>
+
+        <div class="app-main">
+          <div class="msg user">
+            <span class="msg-role">你</span>
+            <p>修复登录失败时的提示文案，保持登录 API 兼容。</p>
+          </div>
+
+          <div class="msg agent">
+            <span class="msg-role">Pilot <span class="msg-tag">run_8f2c</span></span>
+            <p>先定位错误提示的来源，再改文案并跑相关测试。</p>
+
+            <div class="tool">
+              <span class="tool-name">read_file</span>
+              <span class="tool-arg">src/main/java/com/acme/auth/LoginController.java</span>
+              <span class="tool-time">38ms</span>
+            </div>
+            <div class="tool">
+              <span class="tool-name">search_text</span>
+              <span class="tool-arg">pattern=errorMessage</span>
+              <span class="tool-time">12ms</span>
+            </div>
+            <div class="tool">
+              <span class="tool-name">edit_file</span>
+              <span class="tool-arg">LoginController.java  +4 −2</span>
+              <span class="tool-time ok">已审批</span>
+            </div>
+            <div class="tool">
+              <span class="tool-name">run_command</span>
+              <span class="tool-arg">mvn -q test</span>
+              <span class="tool-time ok">exit 0</span>
+            </div>
+
+            <p class="msg-done">
+              改了 1 个文件，验证 <code>mvn -q test → exit 0</code>。
+              计划 3/3 完成，没有越过你设置的「保持 API 兼容」约束。
+            </p>
+          </div>
+        </div>
+
+        <aside class="app-timeline">
+          <p class="side-label">事件流 <span class="live"><i></i>SSE</span></p>
+          <ol class="tl">
+            <li><span class="tl-type">run.started</span><span class="tl-t">09:41:02</span></li>
+            <li><span class="tl-type">assistant.delta</span><span class="tl-t">09:41:04</span></li>
+            <li><span class="tl-type">tool.started</span><span class="tl-t">09:41:05</span></li>
+            <li><span class="tl-type">tool.completed</span><span class="tl-t">09:41:05</span></li>
+            <li><span class="tl-type warn">approval.required</span><span class="tl-t">09:41:09</span></li>
+            <li><span class="tl-type">approval.resolved</span><span class="tl-t">09:41:14</span></li>
+            <li><span class="tl-type">tool.completed</span><span class="tl-t">09:41:31</span></li>
+            <li><span class="tl-type ok">run.completed</span><span class="tl-t">09:41:32</span></li>
+          </ol>
+        </aside>
+      </div>
+
+      <!-- 视图 2：审批挂起 -->
+      <div class="app-body" id="panel-approve" role="tabpanel" aria-labelledby="tab-approve" hidden>
+        <aside class="app-side">
+          <div class="side-group">
+            <p class="side-label">权限</p>
+            <p class="side-project">ASK <span class="side-badge">每次确认</span></p>
+          </div>
+          <ul class="side-list muted">
+            <li class="active"><span class="side-title">写文件</span><span class="side-meta">需批准</span></li>
+            <li><span class="side-title">执行命令</span><span class="side-meta">需批准</span></li>
+            <li><span class="side-title">只读工具</span><span class="side-meta">直接放行</span></li>
+          </ul>
+        </aside>
+
+        <div class="app-main">
+          <div class="approval-card">
+            <div class="approval-head">
+              <span class="approval-badge">待批准</span>
+              <span class="approval-tool">edit_file</span>
+              <span class="approval-call">call_a1f9</span>
+            </div>
+            <p class="approval-target">src/main/java/com/acme/auth/LoginController.java</p>
+            <pre class="approval-diff"><span class="d-del">- throw new IllegalStateException("bad credentials");</span>
+<span class="d-add">+ throw new BadCredentialsException("用户名或密码不正确");</span></pre>
+            <div class="approval-actions">
+              <button class="btn btn-primary btn-sm" type="button" disabled>允许</button>
+              <button class="btn btn-ghost btn-sm" type="button" disabled>拒绝</button>
+              <span class="approval-note">等待 45 秒后按拒绝处理</span>
+            </div>
+          </div>
+          <p class="mock-note">Agent 线程停在 <code>CompletableFuture.join()</code> 上，不轮询、不占 CPU；超时由 broker 直接完成成拒绝。</p>
+        </div>
+
+        <aside class="app-timeline">
+          <p class="side-label">状态</p>
+          <ol class="tl">
+            <li><span class="tl-type">tool.started</span><span class="tl-t">09:41:09</span></li>
+            <li><span class="tl-type warn">approval.required</span><span class="tl-t">09:41:09</span></li>
+            <li><span class="tl-type dim">approval.resolved</span><span class="tl-t">等待中</span></li>
+            <li><span class="tl-type dim">tool.completed</span><span class="tl-t">等待中</span></li>
+          </ol>
+        </aside>
+      </div>
+
+      <!-- 视图 3：检查点回退 -->
+      <div class="app-body" id="panel-rewind" role="tabpanel" aria-labelledby="tab-rewind" hidden>
+        <aside class="app-side">
+          <div class="side-group">
+            <p class="side-label">回退范围</p>
+            <p class="side-project">第 7 条消息前</p>
+          </div>
+          <ul class="side-list muted">
+            <li class="active"><span class="side-title">只撤代码</span><span class="side-meta">保留对话</span></li>
+            <li><span class="side-title">只撤对话</span><span class="side-meta">保留文件</span></li>
+            <li><span class="side-title">一起撤</span><span class="side-meta">先校验</span></li>
+          </ul>
+        </aside>
+
+        <div class="app-main">
+          <p class="rewind-title">涉及 2 轮运行、3 个文件</p>
+          <ul class="file-list">
+            <li><span class="f-path">src/main/java/com/acme/auth/LoginController.java</span><span class="f-state ok">可恢复</span></li>
+            <li><span class="f-path">src/test/java/com/acme/auth/LoginControllerTest.java</span><span class="f-state ok">可恢复</span></li>
+            <li><span class="f-path">src/main/resources/messages_zh.properties</span><span class="f-state warn">检测到手工修改</span></li>
+          </ul>
+          <p class="mock-note">指纹链对不上时直接拒绝恢复，<strong>不提供强制覆盖</strong>——宁可让你重跑，也不静默丢改动。</p>
+        </div>
+
+        <aside class="app-timeline">
+          <p class="side-label">校验</p>
+          <ol class="tl">
+            <li><span class="tl-type">快照链</span><span class="tl-t ok">一致</span></li>
+            <li><span class="tl-type">当前指纹</span><span class="tl-t">已比对</span></li>
+            <li><span class="tl-type warn">冲突</span><span class="tl-t">1 处</span></li>
+            <li><span class="tl-type dim">写入</span><span class="tl-t">已阻止</span></li>
+          </ol>
+        </aside>
+      </div>
+
+      <p class="frame-caption"><span>fig. 1</span> 界面示意：真实数据来自同一份事件流，预览与截图无关</p>
+    </div>
+  </section>
+
+  <!-- ══ 三条主张 ═════════════════════════════════════ -->
+  <section class="section" id="why">
+    <header class="section-head">
+      <p class="kicker">为什么</p>
+      <h2>三个必须先回答的问题</h2>
+      <p class="sub">可信度不来自「听起来对」，来自可追踪的执行痕迹。</p>
+    </header>
+    <div class="grid grid-3">
+      <article class="card spot reveal">
+        <p class="fig">fig. 2.1</p>
+        <h3>它到底改了什么</h3>
+        <p>每次调用、每个文件、每条验证都落成事件，最终汇成 diff 与检查清单。</p>
+        <p class="card-foot">事件 → 存储 → 重放，同一份数据喂给界面和审计</p>
+      </article>
+      <article class="card spot reveal">
+        <p class="fig">fig. 2.2</p>
+        <h3>自动执行有多危险</h3>
+        <p>四档权限按<b>可逆性</b>分级：写入能回滚，命令不能，两者策略不同。</p>
+        <p class="card-foot">路径校验穿透符号链接，越界在解析阶段就失败</p>
+      </article>
+      <article class="card spot reveal">
+        <p class="fig">fig. 2.3</p>
+        <h3>能不能换模型与扩展</h3>
+        <p>核心不依赖 Spring，换模型只需实现一个接口；加工具不用改循环。</p>
+        <p class="card-foot">Tool / PermissionGate / ModelClient 都是可替换契约</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ══ 九大机制 ═════════════════════════════════════ -->
+  <section class="section" id="mechanics">
+    <header class="section-head">
+      <p class="kicker">架构</p>
+      <h2>九个机制，各管一件事</h2>
+      <p class="sub">按机制而非 Maven 模块划分：一个机制常常一半在 <code>pilot-core</code>（契约与执行），一半在 <code>pilot-server</code>（装配与持久化）。</p>
+    </header>
+
+    <div class="mech-group reveal">
+      <p class="group-label"><span>01—04</span>执行内核</p>
+      <div class="grid grid-4">
+        <article class="card mech spot">
+          <span class="num">01</span>
+          <h3>会话与事件流</h3>
+          <p>状态先落成不可变事件再广播，断线按游标重放补齐。</p>
+          <p class="refs"><code>EventEnvelope</code><code>SessionService</code></p>
+        </article>
+        <article class="card mech spot">
+          <span class="num">02</span>
+          <h3>Agent 循环</h3>
+          <p>步进式循环，每步复查取消与纠正；收尾前先过计划与收尾门。</p>
+          <p class="refs"><code>AgentLoop</code><code>CompletionGate</code></p>
+        </article>
+        <article class="card mech spot">
+          <span class="num">03</span>
+          <h3>上下文管理</h3>
+          <p>四层收缩，代价从低到高：占位符 → 截断 → 摘要 → 硬裁剪。</p>
+          <p class="refs"><code>ContextBudget</code></p>
+        </article>
+        <article class="card mech spot">
+          <span class="num">04</span>
+          <h3>提示词装配</h3>
+          <p>正文全在资源文件，按 order 拼接、按 requires 过滤，变量缺失即报错。</p>
+          <p class="refs"><code>PromptLibrary</code></p>
+        </article>
+      </div>
+    </div>
+
+    <div class="mech-group reveal">
+      <p class="group-label"><span>05—07</span>边界与协作</p>
+      <div class="grid grid-3">
+        <article class="card mech spot">
+          <span class="num">05</span>
+          <h3>工具机制</h3>
+          <p>注册即能力：未注册的工具模型看不见，用法教学也不进提示词。</p>
+          <p class="refs"><code>Tool</code><code>ToolExecutor</code></p>
+        </article>
+        <article class="card mech spot">
+          <span class="num">06</span>
+          <h3>权限与审批</h3>
+          <p>四档热切换；审批用 Future 挂起，超时即拒绝，零轮询。</p>
+          <p class="refs"><code>PolicyPermissionGate</code><code>PathValidator</code></p>
+        </article>
+        <article class="card mech spot">
+          <span class="num">07</span>
+          <h3>多智能体</h3>
+          <p>任务 DAG 构造即校验无环；子 Agent 只产 diff，硬校验跑在隔离副本上。</p>
+          <p class="refs"><code>TaskGraph</code><code>DiffSandbox</code></p>
+        </article>
+      </div>
+    </div>
+
+    <div class="mech-group reveal">
+      <p class="group-label"><span>08—09</span>状态与观测</p>
+      <div class="grid grid-2">
+        <article class="card mech spot">
+          <span class="num">08</span>
+          <h3>快照与回退</h3>
+          <p>写前备份、双指纹链检测外部修改；冲突就拒绝恢复，不静默覆盖。三种范围：只撤代码、只撤对话、一起撤。</p>
+          <p class="card-foot">单文件上限 8MB；符号链接、硬链接与目录占位一律拒绝恢复</p>
+          <p class="refs"><code>RunSnapshotService</code><code>CheckpointController</code></p>
+        </article>
+        <article class="card mech spot">
+          <span class="num">09</span>
+          <h3>模型与可观测</h3>
+          <p>协议转换与运行时解耦，配置热切换；工具调用落 JSONL trace，指标走进程内计数器。</p>
+          <p class="card-foot">trace 只存 300 字符摘要，避免把文件内容和密钥写进长期日志</p>
+          <p class="refs"><code>ModelClient</code><code>JsonlTraceRecorder</code><code>RunMetrics</code></p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 代码证据 ═════════════════════════════════════ -->
+  <section class="section" id="evidence">
+    <header class="section-head">
+      <p class="kicker">代码</p>
+      <h2>三处不好写的地方</h2>
+      <p class="sub">这里的取舍比功能列表更能说明项目现在处在什么水平。代码摘自当前仓库，不是示意。</p>
+    </header>
+
+    <div class="code-tabs" role="tablist" aria-label="代码示例">
+      <button role="tab" id="ctab-ctx" aria-selected="true" aria-controls="cpanel-ctx" data-panel="cpanel-ctx" class="chip-tab active">
+        上下文四层
+      </button>
+      <button role="tab" id="ctab-path" aria-selected="false" aria-controls="cpanel-path" data-panel="cpanel-path" class="chip-tab" tabindex="-1">
+        路径穿透符号链接
+      </button>
+      <button role="tab" id="ctab-approve" aria-selected="false" aria-controls="cpanel-approve" data-panel="cpanel-approve" class="chip-tab" tabindex="-1">
+        审批不轮询
+      </button>
+    </div>
+
+    <div class="code-shell">
+      <div class="code-panel" id="cpanel-ctx" role="tabpanel" aria-labelledby="ctab-ctx">
+        <div class="code-head">
+          <span class="code-file">ContextBudget.java</span>
+          <span class="code-lang">java</span>
+          <span class="code-line">:54</span>
+        </div>
+        <div class="code-split">
+          <pre><code><span class="c-kw">boolean</span> apply(List&lt;Message&gt; messages, <span class="c-kw">int</span> limit, Consumer&lt;SessionEvent&gt; events) {
+    <span class="c-kw">int</span> charBudget = Math.max(<span class="c-num">1</span>, limit);
+    <span class="c-kw">int</span> tokenBudget = charBudget;
+    <span class="c-kw">double</span> usage = usage(messages, charBudget, tokenBudget);
+
+    <span class="c-cm">// 第一、二层不花模型调用</span>
+    <span class="c-kw">if</span> (usage &gt;= PRUNE_RATIO) {        <span class="c-cm">// 55%</span>
+        ContextCompactor.pruneToolOutputs(messages, limit);
+    }
+    <span class="c-kw">if</span> (usage &gt;= TRUNCATE_RATIO) {     <span class="c-cm">// 70%</span>
+        ContextCompactor.truncateLongToolOutputs(messages);
+    }</code></pre>
+          <aside class="code-notes">
+            <p><b>为什么两个预算同值。</b>英文 4 字符约 1 token，中文接近 1 字符 1 token。只按字符判断，中文会话会在真正接近窗口前被当成「还很空」。</p>
+            <p><b>为什么先做不要钱的。</b>占位符化和截断只是 O(n) 遍历；摘要要花一次模型调用，还必须接受细节永久丢失。</p>
+          </aside>
+        </div>
+      </div>
+
+      <div class="code-panel" id="cpanel-path" role="tabpanel" aria-labelledby="ctab-path" hidden>
+        <div class="code-head">
+          <span class="code-file">PathValidator.java</span>
+          <span class="code-lang">java</span>
+          <span class="code-line">:89</span>
+        </div>
+        <div class="code-split">
+          <pre><code><span class="c-cm">// 从候选路径向上找最近的现存祖先，取它的真实路径</span>
+Path existing = candidate;
+<span class="c-kw">while</span> (existing != <span class="c-kw">null</span> &amp;&amp; !Files.exists(existing)) {
+    existing = existing.getParent();
+}
+Path realExisting = existing.toRealPath();
+<span class="c-kw">if</span> (!realExisting.startsWith(root)) {
+    <span class="c-kw">throw new</span> WorkspaceViolationException(
+            <span class="c-str">"路径超出工作区（符号链接）: "</span> + value);
+}</code></pre>
+          <aside class="code-notes">
+            <p><b>只做 startsWith 会被绕过。</b>工作区里一个 <code>link → /etc</code> 的符号链接，<code>link/passwd</code> 前缀检查是通的。</p>
+            <p><b>为什么要「现存祖先」。</b>新建文件时目标还不存在，直接 <code>toRealPath()</code> 会抛异常；取现存祖先再拼后缀，两种情况都覆盖。</p>
+          </aside>
+        </div>
+      </div>
+
+      <div class="code-panel" id="cpanel-approve" role="tabpanel" aria-labelledby="ctab-approve" hidden>
+        <div class="code-head">
+          <span class="code-file">InMemoryApprovalBroker.java</span>
+          <span class="code-lang">java</span>
+          <span class="code-line">:46</span>
+        </div>
+        <div class="code-split">
+          <pre><code>future.completeOnTimeout(<span class="c-kw">false</span>, timeout.toMillis(), MILLISECONDS)
+        .whenComplete((approved, error) -&gt; pending.remove(callId, entry));
+<span class="c-kw">return</span> future;
+
+<span class="c-cm">// ToolExecutor 侧：阻塞等待，不轮询</span>
+<span class="c-kw">boolean</span> approved;
+<span class="c-kw">try</span> {
+    approved = decision.join();
+} <span class="c-kw">catch</span> (CompletionException e) {
+    approved = <span class="c-kw">false</span>;
+}</code></pre>
+          <aside class="code-notes">
+            <p><b>超时默认拒绝。</b><code>completeOnTimeout(false, …)</code> 把安全侧写进类型系统：没人处理也不会变成放行。</p>
+            <p><b>阻塞但不轮询。</b>线程停在 Future 上，用户点击即唤醒；轮询写法会把延迟和 CPU 一起搭进去。</p>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 权限 ═════════════════════════════════════════ -->
+  <section class="section" id="permissions">
+    <header class="section-head">
+      <p class="kicker">安全</p>
+      <h2>四档权限，按可逆性分级</h2>
+      <p class="sub">不是按「危险程度」一刀切：文件改动有快照可回滚，命令的副作用没有等价物。</p>
+    </header>
+    <div class="table-wrap reveal">
+      <table class="perm">
+        <thead>
+          <tr><th>档位</th><th>读工具</th><th>写文件</th><th>执行命令</th><th>适用场景</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>READ_ONLY</code><span class="tag">默认</span></td>
+            <td class="yes" data-label="读">放行</td><td class="no" data-label="写">拒绝</td><td class="no" data-label="命令">拒绝</td>
+            <td>先看看它想干什么</td>
+          </tr>
+          <tr>
+            <td><code>ASK</code></td>
+            <td class="yes" data-label="读">放行</td><td class="ask" data-label="写">逐次审批</td><td class="ask" data-label="命令">逐次审批</td>
+            <td>认真改代码，但每步想确认</td>
+          </tr>
+          <tr>
+            <td><code>AUTO_EDIT</code></td>
+            <td class="yes" data-label="读">放行</td><td class="yes" data-label="写">直接执行</td><td class="ask" data-label="命令">逐次审批</td>
+            <td>信任编辑，仍需看住命令</td>
+          </tr>
+          <tr>
+            <td><code>AUTO</code></td>
+            <td class="yes" data-label="读">放行</td><td class="yes" data-label="写">直接执行</td><td class="yes" data-label="命令">直接执行</td>
+            <td>仅限可丢弃的隔离工作区</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v5M12 16h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      权限不是操作系统沙箱。路径限制与命令白名单不能替代容器或独立账户隔离，使用真实模型时请先备份并优先在可丢弃工作区试用。
+    </p>
+  </section>
+
+  <!-- ══ 上手 ═════════════════════════════════════════ -->
+  <section class="section" id="start">
+    <header class="section-head">
+      <p class="kicker">上手</p>
+      <h2>三步，跑在你自己机器上</h2>
+      <p class="sub">需要 JDK 25。启动脚本先构建、跑测试，成功后才启动服务；失败不会拿旧包顶上。</p>
+    </header>
+
+    <ol class="steps">
+      <li class="step reveal">
+        <span class="step-num">1</span>
+        <div class="step-body">
+          <h3>克隆仓库</h3>
+          <div class="mini-code">
+            <code>git clone https://github.com/zzl-qz/Pilot.git</code>
+            <button class="copy icon-only" data-copy="git clone https://github.com/zzl-qz/Pilot.git" aria-label="复制克隆命令">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+        </div>
+      </li>
+      <li class="step reveal">
+        <span class="step-num">2</span>
+        <div class="step-body">
+          <h3>启动服务</h3>
+          <div class="os-tabs" role="tablist" aria-label="操作系统">
+            <button role="tab" id="os-win" aria-selected="true" aria-controls="os-panel-win" data-panel="os-panel-win" class="os-tab active">Windows</button>
+            <button role="tab" id="os-nix" aria-selected="false" aria-controls="os-panel-nix" data-panel="os-panel-nix" class="os-tab" tabindex="-1">macOS / Linux</button>
+          </div>
+          <div id="os-panel-win" role="tabpanel" aria-labelledby="os-win" class="mini-code">
+            <code>.\start.cmd</code>
+            <button class="copy icon-only" data-copy=".\\start.cmd" aria-label="复制启动命令">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div id="os-panel-nix" role="tabpanel" aria-labelledby="os-nix" class="mini-code" hidden>
+            <code>bash start.sh</code>
+            <button class="copy icon-only" data-copy="bash start.sh" aria-label="复制启动命令">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <p class="step-hint">默认 <code>http://localhost:9999</code>，权限为 <code>READ_ONLY</code>。</p>
+        </div>
+      </li>
+      <li class="step reveal">
+        <span class="step-num">3</span>
+        <div class="step-body">
+          <h3>接上真实模型</h3>
+          <div class="mini-code block">
+            <pre><code><span class="c-cm"># 环境变量，或被 Git 忽略的 application-local.yaml</span>
+PILOT_MODEL_API_KEY=你的密钥
+PILOT_MODEL_ENDPOINT=https://api.openai.com/v1/chat/completions
+PILOT_MODEL_MODEL=gpt-4o-mini
+PILOT_WORKSPACE=/绝对/工作区路径</code></pre>
+            <button class="copy icon-only" data-copy="PILOT_MODEL_API_KEY=你的密钥&#10;PILOT_MODEL_ENDPOINT=https://api.openai.com/v1/chat/completions&#10;PILOT_MODEL_MODEL=gpt-4o-mini&#10;PILOT_WORKSPACE=/绝对/工作区路径" aria-label="复制配置">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <p class="step-hint">无密钥时可先用 Mock 流程熟悉界面。</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ══ 边界 ═════════════════════════════════════════ -->
+  <section class="section" id="limits">
+    <header class="section-head">
+      <p class="kicker">已知边界</p>
+      <h2>它现在还做不到什么</h2>
+      <p class="sub">如实记录，比含糊其辞更有用。</p>
+    </header>
+    <div class="grid grid-2 limits">
+      <article class="limit reveal"><h3>不是沙箱</h3><p>命令内部的越界、子进程网络访问、提示注入越权，只能靠容器与可丢弃工作区解决。</p></article>
+      <article class="limit reveal"><h3>token 是估算值</h3><p>中文按 1 字符 1 token、英文按 4 字符 1 token，可能比真实 tokenizer 更早触发压缩。</p></article>
+      <article class="limit reveal"><h3>摘要不可逆</h3><p>被折叠的对话细节只剩摘要，续跑时可能需要复读原文件。</p></article>
+      <article class="limit reveal"><h3>命令副作用不可回退</h3><p>检查点只覆盖写工具记录的路径，<code>sed -i</code> 或构建产物不在恢复范围。</p></article>
+      <article class="limit reveal"><h3>多智能体不自动合并</h3><p>冲突与结论分歧一律交人裁决，这是刻意的产品选择。</p></article>
+      <article class="limit reveal"><h3>没有成本统计</h3><p>响应里的 usage 被丢弃，token 花费无法对账；上下文预算按字符估算。</p></article>
+    </div>
+  </section>
+
+  <!-- ══ 收尾 CTA ═════════════════════════════════════ -->
+  <section class="closing">
+    <div class="closing-inner">
+      <h2>先在自己的仓库里<br><span class="grad">试一件小事</span></h2>
+      <p class="sub">从 <code>READ_ONLY</code> 开始，让它先解释代码；确认行为符合预期，再放开写入。</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/zzl-qz/Pilot" rel="noopener">
+          打开仓库
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+        <a class="btn btn-ghost" href="#start">回到上手</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-brand-col">
+      <a class="brand" href="#top">
+        <span class="mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M6 19V5h6.8a4.6 4.6 0 0 1 0 9.2H11" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg>
+        </span>
+        Pilot
+      </a>
+      <p class="footer-note">用 Java 构建的本地 Coding Agent 原型。适合本地开发与评估，不是可无监督修改生产代码的成熟产品。</p>
+    </div>
+    <nav class="footer-nav" aria-label="页脚导航">
+      <div>
+        <p class="footer-head">产品</p>
+        <a href="#demo">界面</a>
+        <a href="#mechanics">机制</a>
+        <a href="#permissions">权限</a>
+        <a href="#limits">已知边界</a>
+      </div>
+      <div>
+        <p class="footer-head">开始</p>
+        <a href="#start">安装</a>
+        <a href="#start">模型配置</a>
+        <a href="https://github.com/zzl-qz/Pilot" rel="noopener">源码 <span class="ext">↗</span></a>
+      </div>
+      <div>
+        <p class="footer-head">关于</p>
+        <a href="https://github.com/zzl-qz/Pilot/blob/master/README.md" rel="noopener">README <span class="ext">↗</span></a>
+        <a href="https://github.com/zzl-qz/Pilot/blob/master/PRODUCT_PLAN.md" rel="noopener">产品计划 <span class="ext">↗</span></a>
+        <a href="https://github.com/zzl-qz/Pilot/issues" rel="noopener">反馈 <span class="ext">↗</span></a>
+      </div>
+    </nav>
+  </div>
+  <div class="footer-bar">
+    <span>© 2026 Pilot</span>
+    <span class="footer-facts">
+      <span>代码与数据默认留在本机</span>
+      <span>无遥测</span>
+      <span>MIT</span>
+    </span>
+  </div>
+</footer>
+
+<script src="app.js" defer></script>
+</body>
+</html>
