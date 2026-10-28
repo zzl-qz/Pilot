@@ -57,6 +57,24 @@ class CompletionGateTest {
     }
 
     @Test
+    void exitZeroInsideCommandCannotHideItsRealFailureOrUnfinishedState() {
+        for (String check : List.of(
+                "node -e process.exit(1) exit 0 → exit 1",
+                "node -e process.exit(1) exit 0 → RUNNING",
+                "node -e process.exit(1) exit 0 → TIMED_OUT（进程退出码 0）")) {
+            var gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+            var nudge = gate.evaluate(Set.of("src/A.java"), List.of(check), List.of(), List.of());
+            assertNotNull(nudge, check);
+            assertTrue(nudge.reason().contains("未验证"), check + ": " + nudge.reason());
+        }
+        var gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+        var passed = gate.evaluate(Set.of("src/A.java"),
+                List.of("node -e process.exit(0) exit 1 → exit 0"), List.of(), List.of());
+        assertNotNull(passed);
+        assertTrue(passed.reason().contains("自审"), passed.reason());
+    }
+
+    @Test
     void verificationIsAskedAtMostTwiceThenFallsThroughToReview() {
         var gate = new CompletionGate(PROMPTS, true, "修一个 bug");
         Set<String> changed = Set.of("src/A.java");

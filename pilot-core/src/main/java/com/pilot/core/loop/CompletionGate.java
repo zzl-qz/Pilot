@@ -40,8 +40,8 @@ final class CompletionGate {
             "审查", "评估", "调研", "看一下", "读一下", "哪些", "对比", "定位");
     private static final List<String> RESEARCH_HINTS_EN = List.of(
             "explain", "analyze", "analyse", "review", "how does", "why", "walk through");
-    /** 从验证摘要里读退出码，例如 {@code mvn -q test → exit 0}。 */
-    private static final Pattern EXIT_CODE = Pattern.compile("exit (-?\\d+)");
+    /** 只认工具附加的最终退出码，命令参数里的 exit 0 不能充当通过证据。 */
+    private static final Pattern EXIT_CODE = Pattern.compile("→ exit (-?\\d+)\\z");
 
     /** @param attempt 第几次提醒；{@code max} 是这类提醒的上限 */
     record Nudge(String prompt, String reason, int attempt, int max) {

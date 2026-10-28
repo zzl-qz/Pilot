@@ -14,11 +14,13 @@ import { rankFileMatches } from './lib/mention.js';
 import { mergeRunReports, sortChangeFiles, statusKind } from './lib/changes.js';
 import { applyRule, classifyRunFailure, planProgressLabel } from './lib/events.js';
 import { groupSessionsByProject, resolveFolders, samePath } from './lib/projects.js';
+import { commandStatusLabel, isCommandActive, mergeCommandLog } from './lib/command-tasks.js';
 
 /** 原生 fetch 别名：apiFetch 内部用它，避免自己调用自己。 */
 const NATIVE_FETCH = window.fetch.bind(window);
 /** 普通接口的默认超时。SSE 走 EventSource，不经过这里。 */
 const REQUEST_TIMEOUT_MS = 20000;
+const COMMAND_LOG_CHUNK_LIMIT = 65536;
 
 /**
  * 统一请求入口：带超时与取消。
@@ -138,6 +140,20 @@ const el = {
   panelTabs: document.querySelector('#panel-tabs'),
   panelActivity: document.querySelector('#panel-activity'),
   panelChanges: document.querySelector('#panel-changes'),
+  panelCommands: document.querySelector('#panel-commands'),
+  commandsCount: document.querySelector('#commands-count'),
+  commandsState: document.querySelector('#commands-state'),
+  commandsRefresh: document.querySelector('#commands-refresh'),
+  commandsEmpty: document.querySelector('#commands-empty'),
+  commandsList: document.querySelector('#commands-list'),
+  commandDetail: document.querySelector('#command-detail'),
+  commandTitle: document.querySelector('#command-title'),
+  commandMeta: document.querySelector('#command-meta'),
+  commandReason: document.querySelector('#command-reason'),
+  commandStop: document.querySelector('#command-stop'),
+  commandLog: document.querySelector('#command-log'),
+  commandLogNote: document.querySelector('#command-log-note'),
+  commandLogBottom: document.querySelector('#command-log-bottom'),
   changeCount: document.querySelector('#change-count'),
   changesState: document.querySelector('#changes-state'),
   changesRefresh: document.querySelector('#changes-refresh'),
@@ -307,6 +323,12 @@ const COMMAND_ACTIONS = {
   'copy-session-id': copySessionId,
   'reset-view': () => resetView(),
   reconnect: () => reconnect()
+};
+
+const commandView = {
+  tasks: [], selectedId: null, detail: null, log: emptyCommandLog(),
+  version: 0, timer: null, controller: null, busy: false,
+  stopController: null, stoppingId: null, loadingLog: false, loaded: false
 };
 
 const THEME_KEY = 'pilot.theme';
@@ -491,6 +513,13 @@ function init() {
   el.filters.addEventListener('click', onFilterClick);
   el.prompts.addEventListener('click', onPromptClick);
   el.panelTabs.addEventListener('click', onTabClick);
+  el.commandsRefresh.addEventListener('click', restartCommandPolling);
+  el.commandStop.addEventListener('click', stopSelectedCommand);
+  el.commandLogBottom.addEventListener('click', () => { el.commandLog.scrollTop = el.commandLog.scrollHeight; });
+  document.addEventListener('visibilitychange', syncCommandPolling);
+  window.addEventListener('pagehide', stopCommandRequests);
+  window.addEventListener('beforeunload', stopCommandRequests);
+  window.addEventListener('pageshow', syncCommandPolling);
   el.changesRefresh.addEventListener('click', () => loadChanges());
   el.changesRollback.addEventListener('click', rollbackRun);
   el.branchCreate.addEventListener('click', createWorkspaceBranch);
@@ -526,7 +555,7 @@ function init() {
     if (event.target === el.palette) closePalette();
   });
   document.addEventListener('keydown', onGlobalKeydown);
-  window.addEventListener('resize', syncScrim);
+  window.addEventListener('resize', () => { syncScrim(); syncCommandPolling(); });
   bindComposer();
   initWorkbench();
   loadHealth();
@@ -1640,6 +1669,7 @@ async function activate(sessionId, title, workspace) {
   state.reconnectAttempt = 0;
   stopRunClock();
   state.sessionId = sessionId;
+  resetCommandPanel();
   state.task = null;
   state.taskDirty = false;
   state.taskBusy = false;
@@ -1688,6 +1718,7 @@ async function activate(sessionId, title, workspace) {
   el.previewPath.textContent = '未选择文件';
   el.previewBody.textContent = '在左侧文件树里点一个文件，或从「变更」里点开 diff 文件。';
   loadTree('');
+  syncCommandPolling();
 }
 
 /** 断线/刷新后校准运行状态：服务端还有活跃 run 就恢复计时与停止按钮。 */
@@ -2339,6 +2370,7 @@ function onToolCompleted(event) {
     detail: event.payload.resultSummary,
     foot: `${event.payload.latencyMs} ms`
   });
+  if (!state.replaying) refreshCommandTasks(commandPanelVisible());
 }
 
 function onApprovalRequired(event) {
@@ -4125,9 +4157,10 @@ function toggleActivity() {
   el.app.classList.toggle('inspector-collapsed', !visible);
   syncScrim();
   if (visible) {
-  el.timeline.scrollTop = el.timeline.scrollHeight;
+    el.timeline.scrollTop = el.timeline.scrollHeight;
   }
-  }
+  syncCommandPolling();
+}
 
 function isNarrow() {
   return window.matchMedia('(max-width: 960px)').matches;
@@ -4153,9 +4186,322 @@ function selectTab(tab) {
   el.panelActivity.hidden = tab !== 'activity';
   el.panelChanges.hidden = tab !== 'changes';
   el.panelPreview.hidden = tab !== 'preview';
+  el.panelCommands.hidden = tab !== 'commands';
   el.filters.hidden = tab !== 'activity';
   if (tab === 'changes') {
     loadChanges();
+  }
+  syncCommandPolling();
+}
+
+/* ---------- 会话命令任务：只在当前可见面板轮询，日志用服务端游标增量读取 ---------- */
+
+function emptyCommandLog() {
+  return { text: '', offset: 0, trimmed: 0, truncated: false, eof: false };
+}
+
+function commandPanelVisible() {
+  return Boolean(state.sessionId && !document.hidden && state.tab === 'commands'
+    && (isNarrow() ? el.activity.classList.contains('is-open') : !el.activity.classList.contains('is-hidden')));
+}
+
+function stopCommandRequests() {
+  clearTimeout(commandView.timer);
+  commandView.timer = null;
+  commandView.version += 1;
+  commandView.controller?.abort();
+  commandView.stopController?.abort();
+  commandView.controller = null;
+  commandView.stopController = null;
+  commandView.busy = false;
+  commandView.stoppingId = null;
+  commandView.loadingLog = false;
+}
+
+function resetCommandPanel() {
+  stopCommandRequests();
+  commandView.tasks = [];
+  commandView.selectedId = null;
+  commandView.detail = null;
+  commandView.log = emptyCommandLog();
+  commandView.loadingLog = false;
+  commandView.loaded = false;
+  el.commandsState.className = 'commands-state';
+  el.commandsState.textContent = state.sessionId ? '打开命令面板查看当前会话任务' : '选择会话后可查看命令';
+  el.commandsRefresh.disabled = !state.sessionId;
+  renderCommandTasks();
+  renderCommandDetail();
+}
+
+function syncCommandPolling() {
+  if (!commandPanelVisible()) {
+    stopCommandRequests();
+    return;
+  }
+  if (!commandView.busy && !commandView.timer) refreshCommandTasks(true);
+}
+
+function restartCommandPolling() {
+  stopCommandRequests();
+  refreshCommandTasks(commandPanelVisible());
+}
+
+function commandRequestCurrent(sessionId, version) {
+  return state.sessionId === sessionId && commandView.version === version;
+}
+
+async function commandJson(url, controller, method = 'GET') {
+  const request = new AbortController();
+  const abort = () => request.abort();
+  let timedOut = false;
+  if (controller.signal.aborted) request.abort();
+  else controller.signal.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => { timedOut = true; request.abort(); }, REQUEST_TIMEOUT_MS);
+  try {
+    const response = await NATIVE_FETCH(url, { method, signal: request.signal });
+    if (!response.ok) throw new Error(await describeError(response));
+    // 取消和超时必须覆盖响应体读取，不能在收到响应头时就解除。
+    return await response.json();
+  } catch (error) {
+    if (timedOut && error?.name === 'AbortError') throw new Error('请求超时（20 秒）');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    controller.signal.removeEventListener('abort', abort);
+  }
+}
+
+async function refreshCommandTasks(withLogs = commandPanelVisible()) {
+  if (!state.sessionId || document.hidden || commandView.busy || commandView.stopController) return;
+  clearTimeout(commandView.timer);
+  commandView.timer = null;
+  const sessionId = state.sessionId;
+  const version = commandView.version;
+  const controller = new AbortController();
+  commandView.controller = controller;
+  commandView.busy = true;
+  if (!commandView.loaded) el.commandsState.textContent = '正在连接命令任务…';
+  const base = `/api/sessions/${encodeURIComponent(sessionId)}/commands`;
+  let catchUpLogs = false;
+  try {
+    const data = await commandJson(base, controller);
+    if (!commandRequestCurrent(sessionId, version)) return;
+    commandView.loaded = true;
+    commandView.tasks = (Array.isArray(data.tasks) ? data.tasks : [])
+      .filter((task) => task && task.taskId && task.sessionId === sessionId)
+      .sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')));
+    if (!commandView.tasks.some((task) => task.taskId === commandView.selectedId)) {
+      commandView.selectedId = commandView.tasks[0]?.taskId || null;
+      commandView.log = emptyCommandLog();
+      commandView.loadingLog = Boolean(commandView.selectedId);
+    }
+    commandView.detail = commandView.tasks.find((task) => task.taskId === commandView.selectedId) || null;
+    renderCommandTasks();
+    renderCommandDetail();
+    if (withLogs && commandPanelVisible() && commandView.selectedId) {
+      const taskId = commandView.selectedId;
+      const taskUrl = `${base}/${encodeURIComponent(taskId)}`;
+      renderCommandLog();
+      const [task, chunk] = await Promise.all([
+        commandJson(taskUrl, controller),
+        commandJson(`${taskUrl}/logs?offset=${encodeURIComponent(commandView.log.offset)}&limit=${COMMAND_LOG_CHUNK_LIMIT}`, controller)
+      ]);
+      if (!commandRequestCurrent(sessionId, version) || commandView.selectedId !== taskId) return;
+      if (task.sessionId !== sessionId || chunk.taskId !== taskId) throw new Error('命令任务响应不匹配，请刷新');
+      commandView.detail = task;
+      commandView.tasks = commandView.tasks.map((item) => item.taskId === taskId ? task : item);
+      commandView.log = mergeCommandLog(commandView.log, chunk);
+      catchUpLogs = !chunk.eof && Array.from(chunk.text || '').length >= COMMAND_LOG_CHUNK_LIMIT;
+      commandView.loadingLog = false;
+      renderCommandTasks();
+      renderCommandDetail();
+    }
+    const active = commandView.tasks.filter((task) => isCommandActive(task.status)).length;
+    el.commandsState.className = 'commands-state';
+    el.commandsState.textContent = commandView.tasks.length
+      ? `${commandView.tasks.length} 个任务 · ${active ? `${active} 个运行中` : '已更新'}`
+      : '已连接 · 暂无命令任务';
+  } catch (error) {
+    if (!commandRequestCurrent(sessionId, version) || controller.signal.aborted) return;
+    commandView.loadingLog = false;
+    el.commandsState.className = 'commands-state is-error';
+    el.commandsState.textContent = '连接失败：' + error.message + '。可点击刷新重试。';
+    renderCommandLog();
+  } finally {
+    if (commandRequestCurrent(sessionId, version)) {
+      commandView.busy = false;
+      commandView.controller = null;
+      if (commandPanelVisible()) commandView.timer = setTimeout(() => {
+        commandView.timer = null;
+        refreshCommandTasks(true);
+      }, catchUpLogs ? 50 : 1000);
+    }
+  }
+}
+
+function commandElapsed(task) {
+  const start = Date.parse(task.startedAt || '');
+  const finish = task.finishedAt ? Date.parse(task.finishedAt) : Date.now();
+  return Number.isFinite(start) && Number.isFinite(finish) ? elapsedText(Math.max(0, finish - start)) : '时间未知';
+}
+
+function commandDate(value) {
+  const date = new Date(value);
+  return value && Number.isFinite(date.getTime()) ? date.toLocaleString() : '—';
+}
+
+function commandSummary(task) {
+  return `${commandStatusLabel(task.status)} · ${task.background ? '后台' : '前台'} · ${commandElapsed(task)}`
+    + (task.exitCode != null ? ` · 退出码 ${task.exitCode}` : '');
+}
+
+function renderCommandTasks() {
+  const active = commandView.tasks.filter((task) => isCommandActive(task.status)).length;
+  el.commandsCount.textContent = String(active || commandView.tasks.length);
+  el.commandsCount.hidden = commandView.tasks.length === 0;
+  el.commandsCount.title = active ? `${active} 个命令运行中` : `${commandView.tasks.length} 个历史命令`;
+  el.commandsEmpty.hidden = commandView.tasks.length > 0;
+  const existing = new Map([...el.commandsList.children].map((row) => [row.dataset.taskId, row]));
+  let index = 0;
+  for (const task of commandView.tasks) {
+    let row = existing.get(task.taskId);
+    if (!row) {
+      row = document.createElement('li');
+      row.dataset.taskId = task.taskId;
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'command-task';
+      const command = document.createElement('span');
+      command.className = 'command-task-command mono';
+      const summary = document.createElement('span');
+      summary.className = 'command-task-summary';
+      const id = document.createElement('span');
+      id.className = 'command-task-id mono';
+      item.append(command, summary, id);
+      item.addEventListener('click', () => selectCommandTask(task.taskId));
+      row.append(item);
+    }
+    existing.delete(task.taskId);
+    const item = row.firstElementChild;
+    item.classList.toggle('is-selected', task.taskId === commandView.selectedId);
+    item.setAttribute('aria-pressed', String(task.taskId === commandView.selectedId));
+    item.dataset.status = task.status;
+    item.title = `${String(task.command || '')}\n${task.workdir || ''}\n${commandDate(task.startedAt)}`;
+    item.children[0].textContent = String(task.command || '（命令内容为空）');
+    item.children[1].textContent = commandSummary(task);
+    item.children[2].textContent = task.taskId;
+    if (el.commandsList.children[index] !== row) {
+      el.commandsList.insertBefore(row, el.commandsList.children[index] || null);
+    }
+    index += 1;
+  }
+  for (const row of existing.values()) row.remove();
+}
+
+function selectCommandTask(taskId) {
+  if (commandView.selectedId === taskId) return;
+  stopCommandRequests();
+  commandView.selectedId = taskId;
+  commandView.detail = commandView.tasks.find((task) => task.taskId === taskId) || null;
+  commandView.log = emptyCommandLog();
+  commandView.loadingLog = true;
+  renderCommandTasks();
+  renderCommandDetail();
+  refreshCommandTasks(true);
+}
+
+function renderCommandDetail() {
+  const task = commandView.detail;
+  el.commandDetail.hidden = !task;
+  if (!task) {
+    el.commandLog.textContent = '';
+    el.commandLog.dataset.trimmed = '0';
+    return;
+  }
+  el.commandTitle.textContent = String(task.command || '命令任务');
+  el.commandTitle.title = String(task.command || '');
+  el.commandMeta.textContent = `${commandSummary(task)}${task.pid != null ? ` · PID ${task.pid}` : ''}\n`
+    + `任务 ${task.taskId}\n目录 ${task.workdir || '—'}\n开始 ${commandDate(task.startedAt)}`
+    + (task.finishedAt ? `\n结束 ${commandDate(task.finishedAt)}` : '')
+    + `\n超时 ${task.timeoutSeconds > 0 ? `${task.timeoutSeconds} 秒` : '不限时'}`;
+  el.commandReason.hidden = !task.reason;
+  el.commandReason.textContent = task.reason || '';
+  const stopping = commandView.stoppingId === task.taskId || task.status === 'STOPPING';
+  el.commandStop.disabled = !isCommandActive(task.status) || stopping;
+  el.commandStop.textContent = stopping ? '正在停止…' : '停止命令';
+  renderCommandLog();
+}
+
+function renderCommandLog() {
+  if (!commandView.detail) return;
+  const log = commandView.log;
+  const stick = isNearBottom(el.commandLog, 80);
+  const previousHeight = el.commandLog.scrollHeight;
+  const previousTop = el.commandLog.scrollTop;
+  const removedPoints = Math.max(0, log.trimmed - Number(el.commandLog.dataset.trimmed || 0));
+  if (el.commandLog.textContent !== log.text) {
+    const removedHeight = !stick && removedPoints ? commandLogRemovedHeight(removedPoints) : 0;
+    el.commandLog.textContent = log.text;
+    if (stick) el.commandLog.scrollTop = el.commandLog.scrollHeight;
+    else if (removedPoints) el.commandLog.scrollTop = Math.max(0, previousTop - removedHeight);
+    else if (el.commandLog.scrollHeight < previousHeight) {
+      el.commandLog.scrollTop = Math.max(0, previousTop - previousHeight + el.commandLog.scrollHeight);
+    }
+  }
+  el.commandLog.dataset.trimmed = String(log.trimmed);
+  const notes = [];
+  if (log.trimmed) notes.push(`界面已省略 ${log.trimmed.toLocaleString()} 个较早字符`);
+  if (log.truncated) notes.push('服务端输出已截断');
+  if (commandView.loadingLog) notes.push('正在读取日志…');
+  else if (isCommandActive(commandView.detail.status)) notes.push(log.text ? '实时更新 · 每秒刷新' : '命令运行中，等待输出');
+  else notes.push(log.eof ? (log.text ? '日志已读完' : '命令没有输出') : '正在读取历史输出…');
+  el.commandLogNote.textContent = notes.join(' · ');
+}
+
+/** 旧日志被裁剪时保留阅读位置；总高度不变也不能让内容悄悄跳到后面的行。 */
+function commandLogRemovedHeight(removedPoints) {
+  const node = el.commandLog.firstChild;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return 0;
+  const removedUnits = Array.from(node.textContent).slice(0, removedPoints).join('').length;
+  if (removedUnits >= node.textContent.length) return el.commandLog.scrollHeight;
+  const range = document.createRange();
+  range.setStart(node, removedUnits);
+  range.setEnd(node, Math.min(removedUnits + 1, node.textContent.length));
+  const contentTop = el.commandLog.getBoundingClientRect().top + el.commandLog.clientTop
+    + (parseFloat(getComputedStyle(el.commandLog).paddingTop) || 0);
+  return Math.max(0, range.getBoundingClientRect().top - contentTop + el.commandLog.scrollTop);
+}
+
+async function stopSelectedCommand() {
+  const task = commandView.detail;
+  if (!task || !isCommandActive(task.status) || commandView.stoppingId) return;
+  // 停止前取消旧的状态读取，避免晚到的 RUNNING 响应覆盖停止结果。
+  stopCommandRequests();
+  const sessionId = state.sessionId;
+  const controller = new AbortController();
+  commandView.stopController = controller;
+  commandView.stoppingId = task.taskId;
+  renderCommandDetail();
+  try {
+    const updated = await commandJson(`/api/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(task.taskId)}/stop`, controller, 'POST');
+    if (state.sessionId !== sessionId || controller.signal.aborted) return;
+    commandView.tasks = commandView.tasks.map((item) => item.taskId === task.taskId ? updated : item);
+    if (commandView.selectedId === task.taskId) commandView.detail = updated;
+    renderCommandTasks();
+    renderCommandDetail();
+  } catch (error) {
+    if (state.sessionId === sessionId && !controller.signal.aborted) {
+      el.commandsState.className = 'commands-state is-error';
+      el.commandsState.textContent = '停止失败：' + error.message;
+      showNotice('停止命令失败：' + error.message);
+    }
+  } finally {
+    if (commandView.stopController === controller) {
+      commandView.stopController = null;
+      commandView.stoppingId = null;
+      renderCommandDetail();
+      syncCommandPolling();
+    }
   }
 }
 
@@ -5218,6 +5564,7 @@ function closeOverlays() {
   el.activity.classList.remove('is-open');
   el.toggleActivity.setAttribute('aria-pressed', String(!el.activity.classList.contains('is-hidden')));
   syncScrim();
+  syncCommandPolling();
   if (!el.palette.hidden) {
     closePalette();
   }

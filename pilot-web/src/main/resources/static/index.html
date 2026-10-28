@@ -20,7 +20,7 @@
       document.documentElement.dataset.accent = 'blue';
     }
   </script>
-  <link rel="stylesheet" href="/style.css?v=25">
+  <link rel="stylesheet" href="/style.css?v=26">
 </head>
 <body>
 <div class="app" id="app">
@@ -256,6 +256,7 @@
           变更<span id="change-count" class="tab-count" hidden>0</span>
         </button>
         <button class="tab" type="button" data-tab="preview" role="tab" aria-selected="false">预览</button>
+        <button class="tab" type="button" data-tab="commands" role="tab" aria-selected="false">命令<span id="commands-count" class="tab-count" hidden>0</span></button>
         <button class="tab is-on" type="button" data-tab="activity" role="tab" aria-selected="true">活动</button>
       </div>
       <div class="filters" id="filters" role="tablist" aria-label="事件过滤">
@@ -309,6 +310,29 @@
         </button>
       </div>
       <pre id="preview-body" class="preview-body"><span class="preview-hint">在左侧文件树里点一个文件，或从「变更」里点开 diff 文件。</span></pre>
+    </div>
+
+    <div id="panel-commands" class="panel-body command-panel" hidden>
+      <div class="commands-bar">
+        <span id="commands-state" class="commands-state" role="status">选择会话后可查看命令</span>
+        <button id="commands-refresh" class="btn btn-sm" type="button">刷新</button>
+      </div>
+      <p class="commands-help">后台命令会继续运行，暂停对话不会停止命令。</p>
+      <p id="commands-empty" class="commands-empty">当前会话还没有命令任务。代理执行命令后会出现在这里。</p>
+      <ul id="commands-list" class="commands-list" aria-label="当前会话的命令任务"></ul>
+      <section id="command-detail" class="command-detail" aria-label="命令详情" hidden>
+        <div class="command-detail-head">
+          <strong id="command-title" class="command-title mono"></strong>
+          <button id="command-stop" class="btn btn-danger btn-sm" type="button" title="停止命令及已跟踪的子进程；暂停对话不会停止后台命令">停止命令</button>
+        </div>
+        <p id="command-meta" class="command-meta"></p>
+        <p id="command-reason" class="command-reason" hidden></p>
+        <div class="command-log-head">
+          <span id="command-log-note" class="command-log-note" role="status">等待日志</span>
+          <button id="command-log-bottom" class="btn btn-sm" type="button">跳到最新</button>
+        </div>
+        <pre id="command-log" class="command-log" tabindex="0" aria-label="命令输出日志"></pre>
+      </section>
     </div>
     </aside>
     </div>
@@ -459,6 +483,6 @@
 <div id="scrim" class="scrim" hidden></div>
 
 <div id="drop-veil" class="drop-veil" hidden>松开以添加文件</div>
-  <script type="module" src="/app.js?v=28"></script>
+  <script type="module" src="/app.js?v=29"></script>
 </body>
 </html>

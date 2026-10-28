@@ -31,8 +31,8 @@ public class RunRegistry {
 
     public synchronized boolean claim(String runId, String sessionId, java.nio.file.Path workspace) {
         String key = workspace == null ? null : workspaceKey(workspace);
-        if (key != null && workspaceOperations.containsKey(key)
-                && !runId.equals(workspaceOperations.get(key))) return false;
+        if (key != null && workspaceOperations.entrySet().stream().anyMatch(entry -> overlaps(key, entry.getKey())
+                && !runId.equals(entry.getValue()))) return false;
         String existing = sessionToRun.putIfAbsent(sessionId, runId);
         if (existing != null && !existing.equals(runId)) {
             return false;
@@ -49,8 +49,8 @@ public class RunRegistry {
 
     public synchronized void register(String runId, String sessionId, java.nio.file.Path workspace) {
         String key = workspace == null ? null : workspaceKey(workspace);
-        if (key != null && workspaceOperations.containsKey(key)
-                && !runId.equals(workspaceOperations.get(key))) {
+        if (key != null && workspaceOperations.entrySet().stream().anyMatch(entry -> overlaps(key, entry.getKey())
+                && !runId.equals(entry.getValue()))) {
             throw new IllegalStateException("工作区正在回退或切换分支");
         }
         if (key != null) runWorkspaces.put(runId, key);
@@ -77,8 +77,9 @@ public class RunRegistry {
 
     public synchronized boolean lockWorkspace(String operationId, java.nio.file.Path workspace) {
         String key = workspaceKey(workspace);
-        if (workspaceOperations.containsKey(key) && !operationId.equals(workspaceOperations.get(key))) return false;
-        if (runWorkspaces.entrySet().stream().anyMatch(entry -> key.equals(entry.getValue())
+        if (workspaceOperations.entrySet().stream().anyMatch(entry -> overlaps(key, entry.getKey())
+                && !operationId.equals(entry.getValue()))) return false;
+        if (runWorkspaces.entrySet().stream().anyMatch(entry -> overlaps(key, entry.getValue())
                 && !operationId.equals(entry.getKey()))) return false;
         workspaceOperations.put(key, operationId);
         return true;
@@ -87,6 +88,13 @@ public class RunRegistry {
     private static String workspaceKey(java.nio.file.Path workspace) {
         try { return workspace.toRealPath().toString(); }
         catch (java.io.IOException e) { return workspace.toAbsolutePath().normalize().toString(); }
+    }
+
+    /** 父目录与子目录共享文件，恢复期间必须使用同一套互斥边界。 */
+    private static boolean overlaps(String first, String second) {
+        var left = java.nio.file.Path.of(first);
+        var right = java.nio.file.Path.of(second);
+        return left.startsWith(right) || right.startsWith(left);
     }
 
     public Optional<String> activeRun(String sessionId) {

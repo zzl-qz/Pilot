@@ -22,10 +22,12 @@ public class SessionCleanupService {
     private final SandboxStore sandboxes;
     private final RunStarter runStarter;
     private final TaskControlService taskControls;
+    private final com.pilot.core.tool.CommandTaskManager commandTasks;
 
     public SessionCleanupService(SessionService sessions, ConversationRepository conversations,
                                  PlanRepository plans, RunRepository runs, SandboxStore sandboxes,
-                                 RunStarter runStarter, TaskControlService taskControls) {
+                                 RunStarter runStarter, TaskControlService taskControls,
+                                 com.pilot.core.tool.CommandTaskManager commandTasks) {
         this.sessions = sessions;
         this.conversations = conversations;
         this.plans = plans;
@@ -33,12 +35,15 @@ public class SessionCleanupService {
         this.sandboxes = sandboxes;
         this.runStarter = runStarter;
         this.taskControls = taskControls;
+        this.commandTasks = commandTasks;
     }
 
     /**
      * @return 会话是否存在并已被删除
      */
     public boolean delete(String sessionId) {
+        commandTasks.stopSession(sessionId);
+        runStarter.activeRun(sessionId).ifPresent(runStarter::cancel);
         boolean removed = sessions.delete(sessionId);
         conversations.delete(sessionId);
         plans.delete(sessionId);

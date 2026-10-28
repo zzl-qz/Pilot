@@ -18,6 +18,12 @@ import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.CommandTaskManager;
+import com.pilot.core.tool.RunCommandTool;
+import com.pilot.core.tool.CommandStatusTool;
+import com.pilot.core.tool.CommandLogsTool;
+import com.pilot.core.tool.StopCommandTool;
+import com.pilot.core.workspace.PathValidator;
 import tools.jackson.databind.ObjectMapper;
 import com.pilot.core.trace.JsonlTraceRecorder;
 import com.pilot.server.config.AgentProperties;
@@ -88,6 +94,7 @@ public class AgentRunService implements RunStarter {
     private final RunSnapshotService snapshots;
     private final RunRegistry registry;
     private final TaskControlService taskControls;
+    private final CommandTaskManager commandTasks;
     private final com.pilot.core.session.RunRepository runRepository;
     private final ExecutorService executor;
     private final ConversationRepository conversations;
@@ -112,9 +119,11 @@ public class AgentRunService implements RunStarter {
                            com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper,
                            PilotDataDir dataDir, com.pilot.server.store.QueuedMessageRepository queuedMessages,
                            MultiAgentService multiAgent, MultiAgentProperties multiProperties,
-                           com.pilot.server.observability.RunMetrics metrics, TaskControlService taskControls) {
+                           com.pilot.server.observability.RunMetrics metrics, TaskControlService taskControls,
+                           CommandTaskManager commandTasks) {
         this.sessions = sessions;
         this.taskControls = taskControls;
+        this.commandTasks = commandTasks;
         this.conversations = conversations;
         this.plans = plans;
         this.modelClient = modelClient;
@@ -425,7 +434,12 @@ public class AgentRunService implements RunStarter {
 
     @Override
     public boolean lockWorkspace(String operationId, Path workspace) {
-        return registry.lockWorkspace(operationId, workspace);
+        if (commandTasks.hasRunningInWorkspace(workspace) || !registry.lockWorkspace(operationId, workspace)) return false;
+        if (commandTasks.hasRunningInWorkspace(workspace)) {
+            registry.unregister(operationId);
+            return false;
+        }
+        return true;
     }
 
     @Override
@@ -781,7 +795,7 @@ public class AgentRunService implements RunStarter {
                             .toList(),
                     explanation));
         };
-        ToolRegistry tools = toolFactory.registryFor(workspace, planSink);
+        ToolRegistry tools = sessionTools(sessionId, workspace, planSink);
         // 事件类型计数：压缩次数、工具调用量、失败码分布都从这里来
         Consumer<SessionEvent> sink = event -> {
             if (event instanceof com.pilot.core.event.ApprovalRequired approval) {
@@ -836,7 +850,7 @@ public class AgentRunService implements RunStarter {
         var loop = new AgentLoop(modelClient, tools, permissionGate, approvals, config, handle.cancelled::get,
                 () -> pollSteering(sessionId), traceRecorder,
                 delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
-                .withTaskContext(() -> taskControls.prompt(sessionId))
+                .withTaskContext(() -> taskControls.prompt(sessionId) + commandContext(sessionId))
                 .withCompletionClaim(() -> claimCompletion(sessionId, handle));
 
         snapshots.bind(runId, toolFactory.resolve(workspace));
@@ -881,6 +895,29 @@ public class AgentRunService implements RunStarter {
         private volatile boolean paused;
         private volatile Future<?> future;
         private RunHandle(String sessionId) { this.sessionId = sessionId; }
+    }
+
+    /** 会话命令有独立的任务归属；默认和受限子代理工具集不共享这个入口。 */
+    private ToolRegistry sessionTools(String sessionId, String workspace, PlanSink planSink) {
+        var tools = new ToolRegistry();
+        toolFactory.registryFor(workspace, planSink).tools().stream()
+                .filter(tool -> !"run_command".equals(tool.name())).forEach(tools::register);
+        tools.register(new RunCommandTool(new PathValidator(toolFactory.resolve(workspace)), commandTasks, sessionId));
+        tools.register(new CommandStatusTool(commandTasks, sessionId));
+        tools.register(new CommandLogsTool(commandTasks, sessionId));
+        tools.register(new StopCommandTool(commandTasks, sessionId));
+        return tools;
+    }
+
+    private String commandContext(String sessionId) {
+        var tasks = commandTasks.list(sessionId);
+        if (tasks.isEmpty()) return "";
+        return "\n\n本会话最近的命令任务（后台命令独立运行，已启动不代表验证通过）：\n"
+                + tasks.stream().limit(10).map(task -> "- " + task.taskId() + " [" + task.status() + "] "
+                        + com.pilot.core.tool.ToolSupport.oneLine(task.command(), 180)
+                        + (task.exitCode() == null ? "" : "，退出码 " + task.exitCode()))
+                .collect(Collectors.joining("\n"))
+                + "\n用 command_status 确认实际退出结果、command_logs 查看增量日志，必要时 stop_command 停止进程。";
     }
 
     private void publish(String sessionId, String runId, SessionEvent event) {

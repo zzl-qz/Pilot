@@ -80,10 +80,12 @@ class PromptLibraryTest {
         var variables = Map.of(
                 "executables", "mvn/mvnw",
                 "gitReadonly", "status/diff",
-                "gitWrite", "add/commit");
+                "gitWrite", "add/commit",
+                "backgroundHelp", "后台返回任务 ID");
 
         for (String tool : List.of("read_file", "list_dir", "search_text", "edit_file",
-                "create_file", "run_command", "update_plan", "spawn_agent", "dispatch_agents")) {
+                "create_file", "run_command", "command_status", "command_logs", "stop_command",
+                "update_plan", "spawn_agent", "dispatch_agents")) {
             String text = prompts.render("tools/" + tool, variables);
             assertFalse(text.isBlank(), tool);
             assertFalse(text.contains("{{"), tool + " 仍有未替换的变量");

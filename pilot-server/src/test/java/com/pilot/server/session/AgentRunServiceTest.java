@@ -257,6 +257,7 @@ class AgentRunServiceTest {
         final BlockingQueue<String> finished = new LinkedBlockingQueue<>();
         final String sessionId = sessions.createSession("test", workspace.toString()).id();
         final AgentRunService service;
+        final com.pilot.core.tool.CommandTaskManager commandTasks;
         String runId;
 
         Fixture(ModelClient model, int maxSteps) {
@@ -264,6 +265,7 @@ class AgentRunServiceTest {
                     maxSteps, 3, 300, 1, 0, 60_000, false);
             var mapper = JsonMapper.builder().build();
             var dataDir = new PilotDataDir(dataRoot.toString());
+            commandTasks = new com.pilot.core.tool.CommandTaskManager(dataDir.file("commands"), mapper);
             var factory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
             when(factory.resolve(anyString())).thenReturn(workspace);
             when(factory.registryFor(anyString(), any(PlanSink.class))).thenAnswer(invocation -> {
@@ -284,7 +286,8 @@ class AgentRunServiceTest {
                             new InMemorySettingsStore()), new RunSnapshotService(mapper, dataDir),
                     new RunRegistry(), RunRepository.noop(), new InMemoryConversationRepository(),
                     plans, mapper, dataDir, new QueuedMessageRepository(), null,
-                    new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics, new TaskControlService(mapper, dataDir));
+                    new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics, new TaskControlService(mapper, dataDir),
+                    commandTasks);
         }
 
         void start() {
@@ -306,6 +309,7 @@ class AgentRunServiceTest {
         @Override
         public void close() {
             service.shutdown();
+            commandTasks.close();
         }
     }
 

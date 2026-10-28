@@ -59,9 +59,18 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     private static final Charset GBK = Charset.forName("GBK");
 
     private final PathValidator paths;
+    private final CommandTaskManager commandTasks;
+    private final String sessionId;
 
     public RunCommandTool(PathValidator paths) {
+        this(paths, null, null);
+    }
+
+    /** 会话运行使用受托管命令；独立沙箱工具继续使用同步构造器。 */
+    public RunCommandTool(PathValidator paths, CommandTaskManager commandTasks, String sessionId) {
         this.paths = Objects.requireNonNull(paths, "paths must not be null");
+        this.commandTasks = commandTasks;
+        this.sessionId = commandTasks == null ? null : Objects.requireNonNull(sessionId, "sessionId must not be null");
     }
 
     @Override
@@ -74,18 +83,25 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         return PromptLibrary.standard().render("tools/run_command", Map.of(
                 "executables", String.join("/", ALLOWED_EXECUTABLES.stream().sorted().toList()),
                 "gitReadonly", String.join("/", GIT_READONLY.stream().sorted().toList()),
-                "gitWrite", String.join("/", GIT_WRITE.stream().sorted().toList()))).strip();
+                "gitWrite", String.join("/", GIT_WRITE.stream().sorted().toList()),
+                "backgroundHelp", commandTasks == null ? "本运行环境仅支持同步执行。" :
+                        "background=true 会立即返回任务 ID，适合开发服务器或长测试。后台默认不设超时；显式 timeoutSeconds 最大 600。"
+                                + "用 command_status 查询实际状态、command_logs 增量读取日志、stop_command 停止进程树。"
+                                + "启动成功不代表验证通过；测试必须等到完成并检查退出码。")).strip();
     }
 
     @Override
     public Map<String, Object> parameters() {
+        Map<String, Object> properties = new java.util.LinkedHashMap<>();
+        properties.put("command", Map.of("type", "string",
+                "description", "完整命令，例如 \"mvn -q test\" 或 \"git status --porcelain\""));
+        properties.put("timeoutSeconds", Map.of("type", "integer", "minimum", 0, "maximum", 600,
+                "description", "前台默认 120 秒，后台默认 0（不设超时），最大 600 秒"));
+        if (commandTasks != null) properties.put("background", Map.of("type", "boolean", "default", false,
+                "description", "后台运行并立即返回任务 ID；默认 false，等待命令结束"));
         return Map.of(
                 "type", "object",
-                "properties", Map.of(
-                        "command", Map.of("type", "string",
-                                "description", "完整命令，例如 \"mvn -q test\" 或 \"git status --porcelain\""),
-                        "timeoutSeconds", Map.of("type", "integer",
-                                "description", "超时秒数，默认 120，最大 600")),
+                "properties", properties,
                 "required", List.of("command"),
                 "additionalProperties", false);
     }
@@ -144,9 +160,14 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             }
         }
 
+        Object backgroundArg = args.get("background");
+        if (backgroundArg != null && !(backgroundArg instanceof Boolean)) return "ERROR: background 必须是布尔值";
+        boolean background = Boolean.TRUE.equals(backgroundArg);
+        if (background && commandTasks == null) return "ERROR: 当前运行环境不支持后台命令";
         List<String> command = withWrapper(tokens);
-        long timeoutMs = timeout(args);
-        return run(command, tokens, timeoutMs);
+        long timeoutMs = timeout(args, background);
+        return commandTasks == null ? run(command, tokens, timeoutMs)
+                : runManaged(command, tokens, background, timeoutMs);
     }
 
     /** 提交必须自带消息（否则会拉起编辑器卡到超时），且只允许操作工作区内的相对路径。 */
@@ -184,6 +205,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         if (result == null) {
             return null;
         }
+        if (commandTasks != null) return CommandToolSupport.checkSummary(commandTasks, sessionId, result);
         String command = call == null || call.args() == null ? "" : String.valueOf(call.args().getOrDefault("command", ""));
         var matcher = EXIT_CODE.matcher(result);
         if (matcher.find()) {
@@ -194,6 +216,41 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             return ToolSupport.oneLine(command, 90) + " → " + ToolSupport.oneLine(result, 80);
         }
         return null;
+    }
+
+    private String runManaged(List<String> command, List<String> displayTokens, boolean background, long timeoutMs) {
+        ProcessBuilder builder = new ProcessBuilder(command).directory(paths.root().toFile()).redirectErrorStream(true);
+        useCurrentJdk(builder.environment());
+        CommandTaskManager.Task task;
+        try {
+            task = commandTasks.start(sessionId, String.join(" ", displayTokens), builder, background, timeoutMs);
+        } catch (RuntimeException e) {
+            return "ERROR: 无法启动命令：" + redact(String.valueOf(e.getMessage()));
+        }
+        String taskId = task.taskId();
+        if (background) return CommandToolSupport.render(task);
+        try {
+            while (CommandToolSupport.running(task)) {
+                Thread.sleep(50);
+                task = commandTasks.get(sessionId, taskId);
+            }
+        } catch (InterruptedException e) {
+            commandTasks.stop(sessionId, taskId);
+            // 中断调用方前，给进程树的协作终止和强制清理留出有界时间。
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (CommandToolSupport.running(task) && System.nanoTime() < deadline) {
+                try { Thread.sleep(25); } catch (InterruptedException ignored) { }
+                task = commandTasks.get(sessionId, taskId);
+            }
+            Thread.currentThread().interrupt();
+            return "ERROR: 命令执行被中断\n" + CommandToolSupport.render(task);
+        }
+        if (task == null) return "ERROR: 命令记录已清理，无法确认最终结果：" + taskId;
+        var chunk = commandTasks.logs(sessionId, taskId, 0, MAX_OUTPUT_CHARS);
+        String rendered = CommandToolSupport.render(task);
+        if (chunk != null) rendered += "\n输出:\n" + chunk.text()
+                + (chunk.truncated() || !chunk.eof() ? "\n… 后续日志使用 command_logs，offset=" + chunk.nextOffset() : "");
+        return rendered;
     }
 
     private String run(List<String> command, List<String> displayTokens, long timeoutMs) {
@@ -291,6 +348,9 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             wrapper = findWrapper("gradlew");
         }
         if (wrapper != null) {
+            // Git 检出或打包可能丢失执行位；只为已识别的构建 wrapper 加解释器，绝不执行 shell -c。
+            boolean unix = !System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+            if (unix && !Files.isExecutable(wrapper)) command.add("/bin/sh");
             command.add(wrapper.toAbsolutePath().toString());
         } else {
             Path resolved = resolveOnPath(tokens.get(0));
@@ -389,23 +449,21 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         return null;
     }
 
-    private static long timeout(Map<String, Object> args) {
+    private static long timeout(Map<String, Object> args, boolean background) {
         Object value = args == null ? null : args.get("timeoutSeconds");
-        long seconds = DEFAULT_TIMEOUT_MS / 1000;
+        long fallback = background ? 0 : DEFAULT_TIMEOUT_MS / 1000;
+        long seconds = fallback;
         if (value instanceof Number number) {
             seconds = number.longValue();
         } else if (value != null) {
             try {
                 seconds = Long.parseLong(value.toString().trim());
             } catch (NumberFormatException ignored) {
-                seconds = DEFAULT_TIMEOUT_MS / 1000;
+                seconds = fallback;
             }
         }
-        long millis = seconds * 1000L;
-        if (millis <= 0) {
-            return DEFAULT_TIMEOUT_MS;
-        }
-        return Math.min(millis, MAX_TIMEOUT_MS);
+        if (seconds <= 0) return background ? 0 : DEFAULT_TIMEOUT_MS;
+        return Math.min(seconds, MAX_TIMEOUT_MS / 1000) * 1000L;
     }
 
     /** 支持单双引号的最小分词器：不展开变量，不做通配符。 */

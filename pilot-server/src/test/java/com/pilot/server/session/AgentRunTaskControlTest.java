@@ -277,12 +277,14 @@ class AgentRunTaskControlTest {
         final String id = sessions.createSession("任务控制测试", workspace.toString()).id();
         final TaskControlService tasks;
         final AgentRunService service;
+        final com.pilot.core.tool.CommandTaskManager commandTasks;
         String firstRun;
 
         Fixture(ModelClient model, Tool additional) {
             var properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY, 8, 3, 300, 1, 0, 60_000, false);
             var mapper = JsonMapper.builder().build();
             var data = new PilotDataDir(dataRoot.toString());
+            commandTasks = new com.pilot.core.tool.CommandTaskManager(data.file("commands"), mapper);
             tasks = new TaskControlService(mapper, data);
             var factory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
             when(factory.resolve(anyString())).thenReturn(workspace);
@@ -303,7 +305,8 @@ class AgentRunTaskControlTest {
                     new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()), new InMemorySettingsStore()),
                     new RunSnapshotService(mapper, data), new RunRegistry(), RunRepository.noop(), conversations, plans,
                     mapper, data, new QueuedMessageRepository(), null,
-                    new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics, tasks);
+                    new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics, tasks,
+                    commandTasks);
         }
 
         void start(TaskControlService.Requirements requirements) {
@@ -314,7 +317,7 @@ class AgentRunTaskControlTest {
         void finished(String... statuses) throws InterruptedException {
             for (String status : statuses) assertEquals(status, finished.poll(8, TimeUnit.SECONDS));
         }
-        public void close() { service.shutdown(); }
+        public void close() { service.shutdown(); commandTasks.close(); }
     }
 
     private static List<String> userInputs(List<Message> messages) {

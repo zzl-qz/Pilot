@@ -107,6 +107,18 @@ class RunCommandToolTest {
     }
 
     @Test
+    void runsUnixWrapperWithoutExecutablePermission() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(
+                System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win"));
+        Path wrapper = workspace.resolve("mvnw");
+        java.nio.file.Files.writeString(wrapper, "#!/bin/sh\nprintf 'wrapper-ok:%s\\n' \"$1\"\n");
+        assertFalse(java.nio.file.Files.isExecutable(wrapper));
+        String result = tool().execute(Map.of("command", "mvn -v", "timeoutSeconds", 10));
+        assertTrue(result.contains("退出码: 0"), result);
+        assertTrue(result.contains("wrapper-ok:-v"), result);
+    }
+
+    @Test
     void runsWhitelistedCommandInsideWorkspace() {
         var tool = tool();
 

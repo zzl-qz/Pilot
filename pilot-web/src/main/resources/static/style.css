@@ -4499,3 +4499,33 @@ html[data-theme="light"] .accent-dot.is-on { box-shadow: 0 0 0 2px #fff, 0 0 0 4
   .task-contract-body { max-height: 30dvh; }
   .task-live-controls > span { flex-basis: 100%; }
 }
+
+/* 命令任务与日志不依赖当前对话是否仍在执行。 */
+.command-panel { overflow: hidden; }
+.commands-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line-soft); }
+.commands-state { flex: 1; min-width: 0; font-size: 11px; color: var(--dim); overflow-wrap: anywhere; }
+.commands-state.is-error, .command-reason { color: var(--err); }
+.commands-help, .commands-empty { margin: 8px 10px; font-size: 11px; color: var(--dim); line-height: 1.6; }
+.commands-list { flex: 0 0 auto; max-height: min(220px, 28dvh); margin: 0; padding: 0 8px 8px; list-style: none; overflow-y: auto; }
+.commands-list li + li { margin-top: 5px; }
+.command-task { display: grid; width: 100%; gap: 4px; padding: 8px 9px; text-align: left; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--ink); cursor: pointer; }
+.command-task:hover, .command-task.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.command-task-command { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.command-task-summary { font-size: 11px; color: var(--ink-2); }
+.command-task-id { font-size: 10px; color: var(--dim); overflow-wrap: anywhere; }
+.command-task[data-status="RUNNING"] .command-task-summary, .command-task[data-status="STOPPING"] .command-task-summary { color: var(--accent); }
+.command-task[data-status="FAILED"] .command-task-summary, .command-task[data-status="TIMED_OUT"] .command-task-summary, .command-task[data-status="OUTPUT_LIMIT"] .command-task-summary { color: var(--err); }
+.command-detail { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 10px; border-top: 1px solid var(--line); }
+.command-detail-head { display: flex; align-items: flex-start; gap: 8px; flex: 0 0 auto; }
+.command-title { flex: 1; min-width: 0; font-size: 12px; line-height: 1.5; font-weight: 500; overflow-wrap: anywhere; max-height: 54px; overflow-y: auto; }
+.command-detail-head .btn { flex: 0 0 auto; }
+.command-meta { margin: 8px 0; max-height: 108px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; color: var(--dim); line-height: 1.55; }
+.command-reason { flex: 0 0 auto; margin: 0 0 7px; font-size: 11px; max-height: 48px; overflow-y: auto; overflow-wrap: anywhere; }
+.command-log-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.command-log-note { flex: 1; min-width: 0; color: var(--dim); font-size: 10px; line-height: 1.5; }
+.command-log { flex: 1; min-height: 80px; margin: 0; padding: 10px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; color: var(--ink); font: 11px/1.65 var(--mono); tab-size: 4; }
+.command-log:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-height: 650px) {
+  .commands-list { max-height: 22dvh; }
+  .command-meta { max-height: 65px; }
+}
