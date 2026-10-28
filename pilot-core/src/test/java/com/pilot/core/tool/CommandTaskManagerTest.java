@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -71,8 +72,8 @@ class CommandTaskManagerTest {
             assertFalse(ProcessHandle.of(timed.pid()).map(ProcessHandle::isAlive).orElse(false));
             Path childPidFile = workspace.resolve("child.pid");
             var tree = manager.start("session_a", "tree", process("tree", childPidFile.toString()), true, 10_000);
-            waitUntil(() -> Files.exists(childPidFile));
-            long childPid = Long.parseLong(Files.readString(childPidFile));
+            waitUntil(() -> hasContent(childPidFile));
+            long childPid = Long.parseLong(Files.readString(childPidFile).strip());
             assertTrue(ProcessHandle.of(childPid).orElseThrow().isAlive());
             assertNull(manager.get("session_b", tree.taskId()));
             assertNull(manager.logs("session_b", tree.taskId(), 0, 100));
@@ -92,8 +93,8 @@ class CommandTaskManagerTest {
         try (var manager = manager()) {
             Path childPidFile = workspace.resolve("orphan.pid");
             var task = manager.start("session_a", "parent exits", process("orphan", childPidFile.toString()), true, 10_000);
-            waitUntil(() -> Files.exists(childPidFile));
-            long childPid = Long.parseLong(Files.readString(childPidFile));
+            waitUntil(() -> hasContent(childPidFile));
+            long childPid = Long.parseLong(Files.readString(childPidFile).strip());
             waitUntil(() -> !ProcessHandle.of(task.pid()).map(ProcessHandle::isAlive).orElse(false));
             assertEquals("RUNNING", manager.get("session_a", task.taskId()).status());
             manager.stop("session_a", task.taskId());
@@ -240,6 +241,13 @@ class CommandTaskManagerTest {
         long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(8);
         while (!ready.getAsBoolean() && System.nanoTime() < until) Thread.sleep(10);
         assertTrue(ready.getAsBoolean(), "expected command lifecycle boundary was not reached");
+    }
+    private static boolean hasContent(Path file) {
+        try {
+            return Files.isRegularFile(file) && Files.size(file) > 0;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     /** Subprocess fixture uses the same JDK as the test, requiring no shell or external interpreter. */

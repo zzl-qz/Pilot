@@ -40,19 +40,29 @@ class PromptLibraryTest {
         String full = prompts.system(VARS, java.util.Set.of(
                 "read_file", "list_dir", "search_text", "edit_file", "create_file",
                 "run_command", "update_plan", "spawn_agent", "dispatch_agents"));
-        assertTrue(full.contains("## 工具选择：子代理与派发"));
+        assertTrue(full.contains("spawn_agent"));
+        assertTrue(full.contains("dispatch_agents"));
         assertTrue(full.contains("## 多智能体调度"));
 
         // 只有 spawn_agent：dispatch_agents 相关段整体消失
         String withoutDispatch = prompts.system(VARS, java.util.Set.of(
                 "read_file", "list_dir", "search_text", "edit_file", "create_file",
                 "run_command", "update_plan", "spawn_agent"));
+        assertTrue(withoutDispatch.contains("spawn_agent"), "已注册的子代理工具应保留使用指导");
         assertFalse(withoutDispatch.contains("dispatch_agents"), "工具未注册时提示词不应出现它的用法教学");
         assertFalse(withoutDispatch.contains("多智能体调度"));
+
+        // 只有 dispatch_agents：并行派发指导仍保留，不应被 spawn_agent 的缺失连带过滤。
+        String withoutSpawn = prompts.system(VARS, java.util.Set.of(
+                "read_file", "run_command", "dispatch_agents"));
+        assertTrue(withoutSpawn.contains("dispatch_agents"));
+        assertTrue(withoutSpawn.contains("## 多智能体调度"));
+        assertFalse(withoutSpawn.contains("spawn_agent"), "只注册派发工具时不应介绍探索工具");
 
         // 两个都没有：连子代理选择表也不出现
         String bare = prompts.system(VARS, java.util.Set.of("read_file", "run_command"));
         assertFalse(bare.contains("spawn_agent"));
+        assertFalse(bare.contains("dispatch_agents"));
         assertTrue(bare.contains("## 工具选择"), "主选择表与工具无关，不应被过滤");
     }
 

@@ -117,6 +117,41 @@ class AgentRunServiceTest {
     }
 
     @Test
+    void countsToolAndCompletionEventsOncePerRun() throws Exception {
+        var calls = new AtomicInteger();
+        ModelClient model = (messages, tools) -> calls.getAndIncrement() == 0 ? readFile() : done();
+        Files.writeString(workspace.resolve("a.txt"), "evidence");
+
+        try (var fixture = new Fixture(model, 8)) {
+            fixture.start();
+            fixture.awaitFinished("COMPLETED");
+
+            var metrics = fixture.metrics.snapshot();
+            assertEquals(1L, metrics.runs());
+            for (String event : List.of("event.tool.started", "event.tool.completed", "event.run.completed")) {
+                assertEquals(1L, metrics.counters().getOrDefault(event, 0L).longValue(), event);
+            }
+            assertEquals(2L, metrics.counters().getOrDefault("event.assistant.delta", 0L).longValue());
+        }
+    }
+
+    @Test
+    void countsFailedRunEvents() throws Exception {
+        ModelClient model = (messages, tools) -> {
+            throw new IllegalArgumentException("invalid model request");
+        };
+        try (var fixture = new Fixture(model, 8)) {
+            fixture.start();
+            fixture.awaitFinished("FAILED");
+
+            var metrics = fixture.metrics.snapshot();
+            assertEquals(1L, metrics.runs());
+            assertEquals(1L, metrics.counters().getOrDefault("event.run.failed", 0L).longValue());
+            assertEquals(1L, metrics.counters().getOrDefault("run.FAILED", 0L).longValue());
+        }
+    }
+
+    @Test
     void keepsQueueWhenModelFails() throws Exception {
         assertKeepsQueue(8, List.of(), () -> { throw new IllegalArgumentException("invalid model request"); }, "FAILED");
     }
@@ -308,6 +343,7 @@ class AgentRunServiceTest {
         final InMemoryPlanRepository plans = new InMemoryPlanRepository();
         final BlockingQueue<String> finished = new LinkedBlockingQueue<>();
         final String sessionId = sessions.createSession("test", workspace.toString()).id();
+        final RunMetrics metrics;
         final AgentRunService service;
         final com.pilot.core.tool.CommandTaskManager commandTasks;
         String runId;
@@ -325,7 +361,7 @@ class AgentRunServiceTest {
                 tools.register(new ReadFileTool(new PathValidator(workspace)));
                 return tools;
             });
-            var metrics = new RunMetrics() {
+            metrics = new RunMetrics() {
                 @Override
                 public void recordRun(String status, long durationMs) {
                     super.recordRun(status, durationMs);

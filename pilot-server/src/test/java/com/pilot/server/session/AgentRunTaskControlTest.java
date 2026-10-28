@@ -281,7 +281,8 @@ class AgentRunTaskControlTest {
         String firstRun;
 
         Fixture(ModelClient model, Tool additional) {
-            var properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY, 8, 3, 300, 1, 0, 60_000, false);
+            var properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY,
+                    8, 3, 5, 300, 1, 0, 60_000, false);
             var mapper = JsonMapper.builder().build();
             var data = new PilotDataDir(dataRoot.toString());
             commandTasks = new com.pilot.core.tool.CommandTaskManager(data.file("commands"), mapper);
@@ -321,7 +322,11 @@ class AgentRunTaskControlTest {
     }
 
     private static List<String> userInputs(List<Message> messages) {
-        return messages.stream().filter(message -> "user".equals(message.role())).map(Message::content).toList();
+        return messages.stream()
+                .filter(message -> "user".equals(message.role()))
+                .map(Message::content)
+                .filter(content -> !content.startsWith("## 仓库现状"))
+                .toList();
     }
     private static ModelResponse done() { return new ModelResponse("检查完成", List.of()); }
     private static void await(CountDownLatch latch) {
