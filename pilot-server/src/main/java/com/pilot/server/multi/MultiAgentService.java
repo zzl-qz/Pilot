@@ -406,7 +406,9 @@ public class MultiAgentService {
         } catch (RuntimeException ignored) {
             // 工作区名只用于提示词，取不到就退化成通用描述
         }
-        return PROMPTS.render("subagent/base", Map.of(
+        // 只读子代理拿极简版：没有「改动怎么提交」段，减少无效指令（dsh 极简模式的同款思路）
+        String template = spec.scope().writable() ? "subagent/base" : "subagent/base-readonly";
+        return PROMPTS.render(template, Map.of(
                 "taskId", spec.id(),
                 "workspace", workspace,
                 "scope", spec.scope().describe(),

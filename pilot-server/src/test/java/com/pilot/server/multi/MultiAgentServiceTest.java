@@ -72,7 +72,11 @@ class MultiAgentServiceTest {
 
     @Test
     void completesReadOnlyTaskAndReportsEvidence() throws IOException {
-        ModelClient client = (messages, tools) -> new ModelResponse(REPORT, List.of());
+        var systems = new CopyOnWriteArrayList<String>();
+        ModelClient client = (messages, tools) -> {
+            systems.add(messages.get(0).content());
+            return new ModelResponse(REPORT, List.of());
+        };
         var service = service(client);
         var spec = TaskSpec.readOnly("T1", "盘点空类", "确认 src/A.java 是否需要改动",
                 List.of(), List.of("src/**"));
@@ -86,6 +90,33 @@ class MultiAgentServiceTest {
                 && "done".equals(updated.status())));
         assertTrue(events.stream().anyMatch(event -> event instanceof TaskUpdated updated
                 && "running".equals(updated.status())));
+        // 只读子代理用极简模板：不含「改动怎么提交」段
+        assertFalse(systems.isEmpty(), "子代理应至少发起一次模型请求");
+        assertTrue(systems.stream().allMatch(system -> system.contains("只读调研任务")),
+                "只读子任务应使用只读模板");
+        assertTrue(systems.stream().noneMatch(system -> system.contains("改动怎么提交")),
+                "只读模板不应教提交改动");
+    }
+
+    @Test
+    void writableTaskKeepsFullSubagentPrompt() throws IOException {
+        var systems = new CopyOnWriteArrayList<String>();
+        ModelClient client = (messages, tools) -> {
+            systems.add(messages.get(0).content());
+            return new ModelResponse("【结论】\n已补测试\n\n【证据清单】\n- src/A.java:1\n\n【风险评估】\n- 无\n",
+                    List.of());
+        };
+        var service = service(client);
+        var spec = TaskSpec.editable("T2", "补测试", "为 src/A.java 补一条回归测试",
+                List.of(), List.of("src/**"), com.pilot.core.multi.RiskLevel.MEDIUM);
+
+        MultiAgentService.Result result = service.dispatch(dispatch(List.of(spec)));
+
+        assertTrue(result.completed(), result.report());
+        assertTrue(systems.stream().allMatch(system -> system.contains("改动怎么提交")),
+                "写任务子代理应保留完整模板（含提交段）");
+        assertFalse(systems.stream().anyMatch(system -> system.contains("只读调研任务")),
+                "写任务不应误用只读模板");
     }
 
     @Test

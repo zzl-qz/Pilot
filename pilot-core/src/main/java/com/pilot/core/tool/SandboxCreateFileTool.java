@@ -42,7 +42,8 @@ public final class SandboxCreateFileTool implements Tool {
         return Map.of(
                 "type", "object",
                 "properties", Map.of(
-                        "path", Map.of("type", "string", "description", "工作区内的相对文件路径"),
+                        "path", Map.of("type", "string", "description",
+                                "工作区内的相对文件路径；文件不能已存在，改已有文件请用 edit_file"),
                         "content", Map.of("type", "string", "description", "文件的完整内容")),
                 "required", List.of("path", "content"),
                 "additionalProperties", false);

@@ -48,7 +48,8 @@ public final class SandboxEditFileTool implements Tool {
                 "type", "object",
                 "properties", Map.of(
                         "path", Map.of("type", "string", "description", "工作区内的相对文件路径"),
-                        "old_string", Map.of("type", "string", "description", "要被替换的原文，必须唯一匹配"),
+                        "old_string", Map.of("type", "string", "description",
+                                "要被替换的原文，必须唯一匹配；找不到或匹配多处时会返回相近片段，按片段修正，不要凭印象重写整段"),
                         "new_string", Map.of("type", "string", "description", "替换后的内容，可为空字符串表示删除")),
                 "required", List.of("path", "old_string", "new_string"),
                 "additionalProperties", false);
