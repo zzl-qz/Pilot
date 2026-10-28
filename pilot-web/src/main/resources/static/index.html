@@ -20,7 +20,7 @@
       document.documentElement.dataset.accent = 'blue';
     }
   </script>
-  <link rel="stylesheet" href="/style.css?v=24">
+  <link rel="stylesheet" href="/style.css?v=25">
 </head>
 <body>
 <div class="app" id="app">
@@ -114,6 +114,23 @@
 
     <div class="stage">
     <section class="thread-pane" aria-label="会话">
+      <details id="task-contract" class="task-contract" hidden>
+        <summary><span>当前任务</span><span id="task-contract-summary"></span></summary>
+        <div class="task-contract-body">
+          <p class="task-field-label">原始目标</p>
+          <p id="task-original-goal" class="task-original-goal"></p>
+          <label class="task-field"><span>用户约束（每行一条）</span><textarea id="task-constraints" rows="2" placeholder="例如：只修改服务端，保持现有接口兼容"></textarea></label>
+          <div class="task-field-label">验收条件与证据</div>
+          <p class="task-help">逐项核对后勾选，并填写验证证据；任务运行结束不会自动代表通过验收。</p>
+          <div id="task-acceptance" class="task-acceptance"></div>
+          <button id="task-add-criterion" class="btn btn-sm" type="button">添加验收条件</button>
+          <div id="task-corrections" class="task-corrections" hidden></div>
+          <div class="task-contract-actions">
+            <span id="task-contract-hint" class="task-help" role="status"></span>
+            <button id="task-contract-save" class="btn btn-primary btn-sm" type="button">保存要求与验收记录</button>
+          </div>
+        </div>
+      </details>
       <div id="messages" class="thread is-empty" aria-live="polite">
         <div class="empty" id="empty-state">
           <span class="empty-logo" aria-hidden="true">P</span>
@@ -146,6 +163,24 @@
       </div>
 
       <div class="composer-wrap">
+        <details id="task-draft" class="task-draft">
+          <summary>新任务要求（可选）</summary>
+          <div class="task-draft-fields">
+            <label class="task-field"><span>用户约束（每行一条）</span><textarea id="task-draft-constraints" rows="2" placeholder="不能改变什么、允许修改哪些文件"></textarea></label>
+            <label class="task-field"><span>验收条件（每行一条）</span><textarea id="task-draft-acceptance" rows="2" placeholder="什么结果出现后才算完成"></textarea></label>
+            <p class="task-help">随下一条新任务保存；暂停后点“继续当前任务”会沿用原目标和要求。</p>
+          </div>
+        </details>
+        <div id="task-live-controls" class="task-live-controls" hidden>
+          <span id="task-live-hint">Enter 排队下一件事；纠正会在下一安全步骤生效。</span>
+          <button id="task-steer" class="btn btn-sm" type="button">立即纠正当前</button>
+          <button id="task-pause" class="btn btn-sm" type="button">暂停当前</button>
+          <button id="task-cancel" class="msg-action" type="button">取消</button>
+        </div>
+        <div id="task-resume-controls" class="task-live-controls" hidden>
+          <span>继续时保留原始目标、约束、验收条件和纠正记录。</span>
+          <button id="task-resume" class="btn btn-primary btn-sm" type="button">继续当前任务</button>
+        </div>
         <div id="message-queue" class="message-queue" hidden></div>
         <div id="approval-dock" class="approval" hidden></div>
         <div id="ref-menu" class="ref-menu" hidden></div>
@@ -199,7 +234,8 @@
               </span>
             </span>
             <div class="composer-actions">
-              <!-- 单按钮：空闲是发送，运行中同一位置变成停止 -->
+              <span id="send-mode-label" class="send-mode-label">发送任务</span>
+              <!-- 运行中发送明确表示排队下一件事；暂停和纠正使用独立入口。 -->
               <button id="send" class="send" type="button" disabled aria-label="发送" title="发送 (Ctrl Enter)">
                 <svg class="icon-send" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.8M4.6 7.2 8 3.8l3.4 3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
                 <svg class="icon-stop" viewBox="0 0 16 16" aria-hidden="true"><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.6" fill="currentColor"/></svg>
@@ -423,6 +459,6 @@
 <div id="scrim" class="scrim" hidden></div>
 
 <div id="drop-veil" class="drop-veil" hidden>松开以添加文件</div>
-<script type="module" src="/app.js?v=26"></script>
+  <script type="module" src="/app.js?v=28"></script>
 </body>
 </html>

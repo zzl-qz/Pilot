@@ -401,12 +401,28 @@ public class SessionController {
     private String lastUserInput(String sessionId) {
         List<EventEnvelope> events = sessions.events(sessionId);
         for (int i = events.size() - 1; i >= 0; i--) {
-            if (events.get(i).payload() instanceof RunStarted started) {
+            if (events.get(i).payload() instanceof RunStarted started
+                    && !"（继续上一次未完成的任务）".equals(started.input())) {
                 return started.input();
             }
         }
         return null;
     }
+
+    @PostMapping("/{id}/steer")
+    public ResponseEntity<MessageResponse> steer(@PathVariable String id, @RequestBody SteerRequest request) {
+        requireSession(id);
+        if (request == null || request.content() == null || request.content().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "纠正内容不能为空");
+        }
+        String runId = request.runId() == null ? runStarter.activeRun(id).orElse(null) : request.runId();
+        if (runId == null || !runStarter.steer(id, runId, request.content())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "当前任务已结束或正在暂停，纠正未发送，请续跑后再纠正");
+        }
+        return ResponseEntity.accepted().body(new MessageResponse(id, runId));
+    }
+
+    public record SteerRequest(String content, String runId) { }
 
     @PostMapping("/{id}/messages")
     public ResponseEntity<MessageResponse> sendMessage(@PathVariable String id, @RequestBody MessageRequest request) {
@@ -417,8 +433,8 @@ public class SessionController {
         }
         // 运行中只接受纯文本追加；先检查状态，避免被拒绝的附件请求产生文件副作用。
         String activeRun = runStarter.activeRun(id).orElse(null);
-        if (activeRun != null && hasAttachments) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "运行中不能追加附件，请等本轮结束后再发");
+        if (activeRun != null && (hasAttachments || request.task() != null)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "排队消息暂不支持附件和独立验收条件，请等本轮结束后再发");
         }
         AttachmentService.Prepared prepared;
         try {
@@ -427,14 +443,17 @@ public class SessionController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
         if (activeRun != null) {
-            if (runStarter.steer(id, prepared.content())) {
+            if (runStarter.followup(id, prepared.content())) {
                 return ResponseEntity.accepted().body(new MessageResponse(id, activeRun));
             }
         }
         // 检查与启动之间可能刚好起了一个 run：抢占失败就退化成追加输入
         String runId = runStarter.claimRun(id).orElse(null);
         if (runId == null) {
-            if (runStarter.steer(id, prepared.content())) {
+            if (hasAttachments || request.task() != null) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "运行状态已变化，请结束当前任务后重试");
+            }
+            if (runStarter.followup(id, prepared.content())) {
                 return ResponseEntity.accepted()
                         .body(new MessageResponse(id, runStarter.activeRun(id).orElse(null)));
             }
@@ -442,7 +461,7 @@ public class SessionController {
         }
         launch(runId, () -> {
             sessions.publish(id, runId, new RunStarted(prepared.content()));
-            runStarter.start(id, runId, prepared.content(), prepared.attachments());
+            runStarter.start(id, runId, prepared.content(), prepared.attachments(), request.task());
         });
         return ResponseEntity.ok().body(new MessageResponse(id, runId));
     }
@@ -571,7 +590,8 @@ public class SessionController {
 
     public record RenameRequest(String title) { }
 
-    public record MessageRequest(String content, List<AttachmentService.Inbound> attachments) { }
+    public record MessageRequest(String content, List<AttachmentService.Inbound> attachments,
+                                 com.pilot.server.session.TaskControlService.Requirements task) { }
 
     public record ResendRequest(Long sequence, String content) { }
 

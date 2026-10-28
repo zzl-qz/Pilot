@@ -26,15 +26,17 @@ public class CheckpointController {
     private final ConversationRepository conversations;
     private final PlanRepository plans;
     private final AgentProperties properties;
+    private final com.pilot.server.session.TaskControlService tasks;
 
     public CheckpointController(SessionService sessions, RunStarter runs, RunSnapshotService snapshots,
-                                ConversationRepository conversations, PlanRepository plans, AgentProperties properties) {
+                                ConversationRepository conversations, PlanRepository plans, AgentProperties properties, com.pilot.server.session.TaskControlService tasks) {
         this.sessions = sessions;
         this.runs = runs;
         this.snapshots = snapshots;
         this.conversations = conversations;
         this.plans = plans;
         this.properties = properties;
+        this.tasks = tasks;
     }
 
     @GetMapping
@@ -79,6 +81,8 @@ public class CheckpointController {
                 }
             }
             if (withConversation) {
+                tasks.restoreTo(id, selection.event().runId());
+                runs.discardSteering(id);
                 conversations.save(id, checkpoint.messages());
                 plans.save(id, checkpoint.plan());
                 sessions.dropEventsFrom(id, request.sequence());
@@ -109,9 +113,11 @@ public class CheckpointController {
                     if (event.sequence() >= request.sequence()) break;
                     sessions.publish(fork.id(), event.runId(), event.payload());
                 }
+                tasks.restoreTo(fork.id(), selection.event().runId());
                 conversations.save(fork.id(), checkpoint.messages());
                 plans.save(fork.id(), checkpoint.plan());
             } catch (RuntimeException e) {
+                tasks.delete(fork.id());
                 conversations.delete(fork.id());
                 plans.delete(fork.id());
                 sessions.delete(fork.id());

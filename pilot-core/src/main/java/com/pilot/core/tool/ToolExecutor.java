@@ -18,6 +18,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -50,8 +51,16 @@ public final class ToolExecutor {
     }
 
     public Outcome execute(ToolCall call, Consumer<SessionEvent> events) {
+        return execute(call, events, () -> null);
+    }
+
+    /**
+     * @param beforeStart 真正进入工具前（含审批结束后）的最后检查；非空原因表示跳过此次执行。
+     */
+    public Outcome execute(ToolCall call, Consumer<SessionEvent> events, Supplier<String> beforeStart) {
         Objects.requireNonNull(call, "call must not be null");
         Objects.requireNonNull(events, "events must not be null");
+        Objects.requireNonNull(beforeStart, "beforeStart must not be null");
 
         String argsSummary = summarizeArgs(call);
         events.accept(new ToolStarted(call.callId(), call.name(), argsSummary));
@@ -62,7 +71,7 @@ public final class ToolExecutor {
         if (tool.isEmpty()) {
             result = "ERROR: 未知工具 " + call.name() + "，可用工具: " + availableNames();
         } else {
-            result = executeTool(call, tool.get(), argsSummary, events);
+            result = executeTool(call, tool.get(), argsSummary, events, beforeStart);
         }
 
         String changedPath = null;
@@ -91,22 +100,25 @@ public final class ToolExecutor {
         return result != null && !result.startsWith("ERROR");
     }
 
-    /** 权限拒绝 / 用户拒绝属于「没执行」，既不算改动也不算验证结果。 */
+    /** 权限拒绝、用户拒绝和控制信号跳过都属于「没执行」，既不算改动也不算验证结果。 */
     private static boolean blocked(String result) {
         return result != null
-                && (result.startsWith("ERROR: 权限拒绝") || result.startsWith("ERROR: 用户拒绝"));
+                && (result.startsWith("ERROR: 权限拒绝") || result.startsWith("ERROR: 用户拒绝")
+                || result.startsWith("SKIPPED:"));
     }
 
-    private String executeTool(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events) {
+    private String executeTool(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events,
+                               Supplier<String> beforeStart) {
         PermissionResult permission = permissionGate.check(call, tool);
         return switch (permission.decision()) {
-            case ALLOW -> run(tool, call);
+            case ALLOW -> runIfCurrent(tool, call, beforeStart);
             case DENY -> "ERROR: 权限拒绝：" + permission.reason();
-            case ASK -> awaitApproval(call, tool, argsSummary, events);
+            case ASK -> awaitApproval(call, tool, argsSummary, events, beforeStart);
         };
     }
 
-    private String awaitApproval(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events) {
+    private String awaitApproval(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events,
+                                 Supplier<String> beforeStart) {
         CompletableFuture<Boolean> decision = approvals.register(call.callId(), tool.name(), argsSummary);
         events.accept(new ApprovalRequired(call.callId(), tool.name(), argsSummary));
 
@@ -120,8 +132,14 @@ public final class ToolExecutor {
         events.accept(new ApprovalResolved(call.callId(),
                 approved ? ApprovalDecision.APPROVED : ApprovalDecision.DENIED));
         return approved
-                ? run(tool, call)
+                ? runIfCurrent(tool, call, beforeStart)
                 : "ERROR: 用户拒绝执行 " + tool.name() + "，文件未修改。";
+    }
+
+    private static String runIfCurrent(Tool tool, ToolCall call, Supplier<String> beforeStart) {
+        String interruption = beforeStart.get();
+        return interruption == null || interruption.isBlank()
+                ? run(tool, call) : "SKIPPED: " + interruption;
     }
 
     private static String run(Tool tool, ToolCall call) {

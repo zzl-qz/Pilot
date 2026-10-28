@@ -44,3 +44,10 @@ test('planProgressLabel 没有计划时不显示进度', () => {
   assert.equal(planProgressLabel(1, 3), ' · 计划 1/3');
   assert.equal(planProgressLabel(undefined, 2), ' · 计划 0/2');
 });
+
+
+test('用户暂停保留续跑入口，不显示为取消或失败', () => {
+  assert.deepEqual(classifyRunFailure('PAUSED'), {
+    cancelled: false, paused: true, interrupted: false, resumable: true
+  });
+});

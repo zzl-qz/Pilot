@@ -21,16 +21,18 @@ public class SessionCleanupService {
     private final RunRepository runs;
     private final SandboxStore sandboxes;
     private final RunStarter runStarter;
+    private final TaskControlService taskControls;
 
     public SessionCleanupService(SessionService sessions, ConversationRepository conversations,
                                  PlanRepository plans, RunRepository runs, SandboxStore sandboxes,
-                                 RunStarter runStarter) {
+                                 RunStarter runStarter, TaskControlService taskControls) {
         this.sessions = sessions;
         this.conversations = conversations;
         this.plans = plans;
         this.runs = runs;
         this.sandboxes = sandboxes;
         this.runStarter = runStarter;
+        this.taskControls = taskControls;
     }
 
     /**
@@ -45,6 +47,7 @@ public class SessionCleanupService {
         sandboxes.reset(sessionId);
         // 队列、续跑计数、运行槽位这些都是内存状态，不清理会一直占着
         runStarter.forget(sessionId);
+        taskControls.delete(sessionId);
         return removed;
     }
 }

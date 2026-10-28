@@ -85,9 +85,9 @@ class AgentRunServiceTest {
         try (var fixture = new Fixture(model, 8)) {
             fixture.start();
             await(enteredFirst);
-            assertTrue(fixture.service.steer(fixture.sessionId, "下一条"));
-            assertTrue(fixture.service.steer(fixture.sessionId, "再下一条"));
-            assertTrue(fixture.service.steer(fixture.sessionId, "删除这条"));
+            assertTrue(fixture.service.followup(fixture.sessionId, "下一条"));
+            assertTrue(fixture.service.followup(fixture.sessionId, "再下一条"));
+            assertTrue(fixture.service.followup(fixture.sessionId, "删除这条"));
             releaseFirst.countDown();
             await(enteredSecond);
 
@@ -129,7 +129,7 @@ class AgentRunServiceTest {
     @Test
     void keepsQueueWhenModelStopsWithAnOpenPlan() throws Exception {
         assertKeepsQueue(8, List.of(new PlanItem("还没做完的原任务", PlanItem.PENDING)),
-                AgentRunServiceTest::done, "COMPLETED");
+                AgentRunServiceTest::done, "INTERRUPTED");
     }
 
     @Test
@@ -160,7 +160,7 @@ class AgentRunServiceTest {
             fixture.plans.save(fixture.sessionId, List.of(new PlanItem("原任务计划", PlanItem.PENDING)));
             fixture.start();
             await(enteredFirst);
-            assertTrue(fixture.service.steer(fixture.sessionId, "下一条"));
+            assertTrue(fixture.service.followup(fixture.sessionId, "下一条"));
             releaseFirst.countDown();
             await(enteredContinuation);
             assertEquals(List.of("下一条"), fixture.queue());
@@ -188,7 +188,7 @@ class AgentRunServiceTest {
         try (var fixture = new Fixture(model, 8)) {
             fixture.start();
             await(entered);
-            assertTrue(fixture.service.steer(fixture.sessionId, "下一条"));
+            assertTrue(fixture.service.followup(fixture.sessionId, "下一条"));
             assertTrue(fixture.service.cancel(fixture.runId));
             fixture.awaitFinished("CANCELLED");
             assertEquals(List.of("下一条"), fixture.queue());
@@ -211,7 +211,7 @@ class AgentRunServiceTest {
         try (var fixture = new Fixture(model, 8)) {
             fixture.start();
             await(entered);
-            assertTrue(fixture.service.steer(fixture.sessionId, "下一条"));
+            assertTrue(fixture.service.followup(fixture.sessionId, "下一条"));
             // 删除目标会话模拟 run.started 发布失败；排队内容不应先被移除。
             fixture.sessions.delete(fixture.sessionId);
             release.countDown();
@@ -240,7 +240,7 @@ class AgentRunServiceTest {
             fixture.plans.save(fixture.sessionId, plan);
             fixture.start();
             await(entered);
-            assertTrue(fixture.service.steer(fixture.sessionId, "下一条"));
+            assertTrue(fixture.service.followup(fixture.sessionId, "下一条"));
             release.countDown();
             fixture.awaitFinished(status);
             assertEquals(List.of("下一条"), fixture.queue());
@@ -284,7 +284,7 @@ class AgentRunServiceTest {
                             new InMemorySettingsStore()), new RunSnapshotService(mapper, dataDir),
                     new RunRegistry(), RunRepository.noop(), new InMemoryConversationRepository(),
                     plans, mapper, dataDir, new QueuedMessageRepository(), null,
-                    new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics);
+                    new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics, new TaskControlService(mapper, dataDir));
         }
 
         void start() {

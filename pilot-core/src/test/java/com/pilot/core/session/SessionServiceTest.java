@@ -7,6 +7,7 @@ import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.RunFailed;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -82,6 +83,30 @@ class SessionServiceTest {
         assertEquals("run.cancelled", envelope.type());
         assertEquals(SessionStatus.CANCELLED, sessions.find(session.id()).orElseThrow().status());
         assertTrue(sessions.find(session.id()).orElseThrow().status().terminal());
+    }
+
+    @Test
+    void userPauseHasItsOwnTerminalStatusAndCanResume() {
+        Session session = sessions.createSession("暂停测试");
+        Run run = sessions.sendMessage(session.id(), "开始任务");
+
+        sessions.publish(session.id(), run.runId(), new RunFailed("PAUSED", "用户暂停", true));
+
+        assertEquals(SessionStatus.PAUSED, sessions.find(session.id()).orElseThrow().status());
+        assertTrue(sessions.find(session.id()).orElseThrow().status().terminal());
+
+        sessions.sendMessage(session.id(), "继续原任务");
+        assertEquals(SessionStatus.RUNNING, sessions.find(session.id()).orElseThrow().status());
+    }
+
+    @Test
+    void stepLimitIsNotAnExplicitUserPause() {
+        Session session = sessions.createSession("步数测试");
+        Run run = sessions.sendMessage(session.id(), "开始任务");
+
+        sessions.publish(session.id(), run.runId(), new RunFailed("MAX_STEPS", "达到步数上限", true));
+
+        assertEquals(SessionStatus.FAILED, sessions.find(session.id()).orElseThrow().status());
     }
 
     @Test

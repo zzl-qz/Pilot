@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -141,6 +142,20 @@ public final class AgentLoop {
     private final Consumer<String> liveText;
     /** 收尾门：有了目标之后在 run/resume 里创建，一次运行一个。 */
     private CompletionGate completionGate;
+    private Supplier<String> taskContext = () -> "";
+    private BooleanSupplier completionClaim = () -> true;
+
+    /** 每次模型请求重新注入持久化目标，避免压缩、续跑或纠正使约束丢失。 */
+    public AgentLoop withTaskContext(Supplier<String> context) {
+        taskContext = Objects.requireNonNull(context, "task context must not be null");
+        return this;
+    }
+
+    /** 与消息入口共享的收尾占位：失败表示仍有新纠正或暂停需要处理。 */
+    public AgentLoop withCompletionClaim(BooleanSupplier claim) {
+        completionClaim = Objects.requireNonNull(claim, "completion claim must not be null");
+        return this;
+    }
 
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate) {
         this(client, tools, permissionGate, ApprovalBroker.denyAll(), Config.defaults(), Cancellation.none());
@@ -161,7 +176,7 @@ public final class AgentLoop {
     }
 
     /**
-     * @param pendingInput 每轮采样前拉取一次运行中追加的用户输入；返回 null 表示没有
+     * @param pendingInput 在模型请求和工具执行之间拉取当前任务纠正；返回 null 表示没有
      */
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
                      ApprovalBroker approvals, Config config, Cancellation cancellation,
@@ -275,26 +290,34 @@ public final class AgentLoop {
                 }
                 budget.apply(messages, contextLimit(), events);
 
-                // 运行中追加的指令：不新开 run，直接进下一轮
-                String steered = pendingInput.get();
-                if (steered != null && !steered.isBlank()) {
-                    messages.add(Message.user(steered.strip()));
-                    events.accept(new RunSteered(steered));
-                }
+                applySteering(messages, events, pendingInput.get());
 
                 ModelTurn turn = callModel(messages, events);
                 if (turn.stop() != null) {
                     return turn.stop();
                 }
                 ModelResponse response = turn.response();
+                if (cancellation.cancelled()) {
+                    return cancel(messages, events);
+                }
 
                 String content = response.content() == null ? "" : response.content();
+                List<ToolCall> calls = response.toolCalls() == null ? List.of() : response.toolCalls();
+                String correction = pendingInput.get();
+                if (hasInput(correction)) {
+                    // 模型返回时已经有纠正：旧方案的工具都不执行，补齐协议结果后重新规划。
+                    messages.add(Message.assistant(content, calls));
+                    skipCalls(messages, calls, 0, "用户已纠正当前任务，请根据新指令重新规划。");
+                    applySteering(messages, events, correction);
+                    safeCheckpoint(checkpoint, messages);
+                    lastSignature = null;
+                    repeated = 0;
+                    continue;
+                }
                 // 请求成功后只落一条完整回复。预览过程中的片段不进历史，重试也不会粘成两段。
                 if (!content.isBlank()) {
                     events.accept(new AssistantDelta(content));
                 }
-                List<ToolCall> calls = response.toolCalls() == null ? List.of() : response.toolCalls();
-
                 if (calls.isEmpty()) {
                     messages.add(Message.assistant(content, List.of()));
                     String summary = content.isBlank() ? "任务完成（模型未返回文本）" : content;
@@ -321,6 +344,12 @@ public final class AgentLoop {
                         safeCheckpoint(checkpoint, messages);
                         continue;
                     }
+                    // 发出完成事件之前与输入入口原子交接，确保已接收的纠正不会落在完成之后。
+                    if (cancellation.cancelled()) return cancel(messages, events);
+                    if (applySteering(messages, events, pendingInput.get()) || !completionClaim.getAsBoolean()) {
+                        safeCheckpoint(checkpoint, messages);
+                        continue;
+                    }
                     // 模型给出纯文本就收尾，但计划没做完≠任务完成，把差距如实交给客户端
                     events.accept(new RunCompleted(summary, List.copyOf(changedFiles), List.copyOf(checks),
                             done, plan.size(), openSteps));
@@ -338,17 +367,31 @@ public final class AgentLoop {
                 }
                 if (repeated >= config.repeatedToolCallLimit()) {
                     String detail = "模型连续 " + repeated + " 次请求相同的工具调用，已中断以避免死循环。";
+                    skipCalls(messages, calls, 0, "已达到重复工具调用上限，本次调用未执行。");
                     events.accept(new RunFailed("REPEATED_TOOL_CALL", detail, false));
                     return new Result(null, "REPEATED_TOOL_CALL", conversation(messages));
                 }
 
-                for (ToolCall call : calls) {
+                for (int index = 0; index < calls.size(); index++) {
                     if (cancellation.cancelled()) {
+                        skipCalls(messages, calls, index, "运行已暂停或取消，本次调用未执行。");
                         return cancel(messages, events);
                     }
-                    completionGate.recordTarget(call);
-                    ToolExecutor.Outcome outcome = toolExecutor.execute(call, events);
-                    completionGate.countToolCall();
+                    String nextCorrection = pendingInput.get();
+                    if (hasInput(nextCorrection)) {
+                        skipCalls(messages, calls, index, "用户已纠正当前任务，本次调用未执行，请重新规划。");
+                        applySteering(messages, events, nextCorrection);
+                        lastSignature = null;
+                        repeated = 0;
+                        break;
+                    }
+                    ToolCall call = calls.get(index);
+                    var startGuard = new ToolStartGuard();
+                    ToolExecutor.Outcome outcome = toolExecutor.execute(call, events, startGuard);
+                    if (!outcome.result().startsWith("SKIPPED:")) {
+                        completionGate.recordTarget(call);
+                        completionGate.countToolCall();
+                    }
                     if (outcome.changedPath() != null) {
                         changedFiles.add(outcome.changedPath());
                     }
@@ -356,9 +399,18 @@ public final class AgentLoop {
                         checks.add(outcome.check());
                     }
                     messages.add(Message.tool(call.callId(), outcome.result()));
+                    if (hasInput(startGuard.correction)) {
+                        // 审批期间的纠正也要先补齐整批 tool 结果，再追加 user 消息。
+                        skipCalls(messages, calls, index + 1, "用户已纠正当前任务，本次调用未执行，请重新规划。");
+                        applySteering(messages, events, startGuard.correction);
+                        lastSignature = null;
+                        repeated = 0;
+                        break;
+                    }
                 }
                 // 每步落盘，进程被打断时最多丢当前这一步
                 safeCheckpoint(checkpoint, messages);
+                if (cancellation.cancelled()) return cancel(messages, events);
             }
 
             events.accept(new RunFailed("MAX_STEPS",
@@ -367,6 +419,43 @@ public final class AgentLoop {
         } finally {
             safeCheckpoint(checkpoint, messages);
         }
+    }
+
+    private static boolean hasInput(String input) {
+        return input != null && !input.isBlank();
+    }
+
+    /** 审批通过不等于仍可执行；开始产生副作用前再消费一次控制信号。 */
+    private final class ToolStartGuard implements Supplier<String> {
+        private String correction;
+
+        @Override
+        public String get() {
+            if (cancellation.cancelled()) return "运行已暂停或取消，本次调用未执行。";
+            correction = pendingInput.get();
+            if (cancellation.cancelled()) return "运行已暂停或取消，本次调用未执行。";
+            return hasInput(correction) ? "用户已纠正当前任务，本次调用未执行，请重新规划。" : null;
+        }
+    }
+
+    private static boolean applySteering(List<Message> messages, Consumer<SessionEvent> events, String input) {
+        if (!hasInput(input)) return false;
+        messages.add(Message.user(input.strip()));
+        events.accept(new RunSteered(input.strip()));
+        return true;
+    }
+
+    /** assistant 的每个 tool_call 都必须有对应结果，否则暂停后续跑会被模型协议拒绝。 */
+    private static void skipCalls(List<Message> messages, List<ToolCall> calls, int from, String reason) {
+        for (int index = from; index < calls.size(); index++) {
+            messages.add(Message.tool(calls.get(index).callId(), "SKIPPED: " + reason));
+        }
+    }
+
+    private void refreshTaskContext(List<Message> messages) {
+        String context = taskContext.get();
+        messages.set(0, Message.system(config.systemPrompt()
+                + (context == null || context.isBlank() ? "" : "\n\n" + context)));
     }
 
     private static void safeCheckpoint(Consumer<List<Message>> checkpoint, List<Message> messages) {
@@ -406,6 +495,7 @@ public final class AgentLoop {
                 return new ModelTurn(null, cancel(messages, events));
             }
             try {
+                refreshTaskContext(messages);
                 ModelResponse response = client.chat(List.copyOf(messages), tools.definitions(), delta -> {
                     if (liveText == null || delta == null || delta.isEmpty()) {
                         return;
@@ -418,6 +508,9 @@ public final class AgentLoop {
                 });
                 return new ModelTurn(response, null);
             } catch (RuntimeException e) {
+                if (cancellation.cancelled()) {
+                    return new ModelTurn(null, cancel(messages, events));
+                }
                 if (!ModelRetryPolicy.isTransient(e)) {
                     String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
                     events.accept(new RunFailed("MODEL_ERROR",

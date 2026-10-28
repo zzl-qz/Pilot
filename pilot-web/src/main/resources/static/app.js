@@ -100,6 +100,26 @@ const el = {
   prompts: document.querySelector('#prompts'),
   approvalDock: document.querySelector('#approval-dock'),
   messageQueue: document.querySelector('#message-queue'),
+  taskContract: document.querySelector('#task-contract'),
+  taskSummary: document.querySelector('#task-contract-summary'),
+  taskGoal: document.querySelector('#task-original-goal'),
+  taskConstraints: document.querySelector('#task-constraints'),
+  taskAcceptance: document.querySelector('#task-acceptance'),
+  taskAddCriterion: document.querySelector('#task-add-criterion'),
+  taskCorrections: document.querySelector('#task-corrections'),
+  taskHint: document.querySelector('#task-contract-hint'),
+  taskSave: document.querySelector('#task-contract-save'),
+  taskDraft: document.querySelector('#task-draft'),
+  taskDraftConstraints: document.querySelector('#task-draft-constraints'),
+  taskDraftAcceptance: document.querySelector('#task-draft-acceptance'),
+  taskLiveControls: document.querySelector('#task-live-controls'),
+  taskLiveHint: document.querySelector('#task-live-hint'),
+  taskSteer: document.querySelector('#task-steer'),
+  taskPause: document.querySelector('#task-pause'),
+  taskCancel: document.querySelector('#task-cancel'),
+  taskResumeControls: document.querySelector('#task-resume-controls'),
+  taskResume: document.querySelector('#task-resume'),
+  sendModeLabel: document.querySelector('#send-mode-label'),
   toggleActivity: document.querySelector('#toggle-activity'),
   activity: document.querySelector('#activity'),
   railToggle: document.querySelector('#rail-toggle'),
@@ -241,6 +261,13 @@ const state = {
   inputHistoryDraft: '',
   queue: [],
   queueCollapsed: false,
+  task: null,
+  taskDirty: false,
+  taskBusy: false,
+  taskLoadVersion: 0,
+  taskRefreshTimer: null,
+  steering: false,
+  pausing: false,
   /** 正在改队列里的某一条：{ index, previous }，previous 是进编辑前输入框里的草稿 */
   queueEdit: null,
   attachments: [],
@@ -468,6 +495,17 @@ function init() {
   el.changesRollback.addEventListener('click', rollbackRun);
   el.branchCreate.addEventListener('click', createWorkspaceBranch);
   el.send.addEventListener('click', onSendButtonClick);
+  el.taskSteer.addEventListener('click', steerCurrentTask);
+  el.taskPause.addEventListener('click', pauseCurrentTask);
+  el.taskCancel.addEventListener('click', cancelRun);
+  el.taskResume.addEventListener('click', () => continueRun(el.taskResumeControls));
+  el.taskConstraints.addEventListener('input', markTaskDirty);
+  el.taskSave.addEventListener('click', saveTaskContract);
+  el.taskAddCriterion.addEventListener('click', () => {
+    appendTaskCriterion({ text: '', checked: false, evidence: '' });
+    markTaskDirty();
+    el.taskAcceptance.lastElementChild.querySelector('.task-criterion-text').focus();
+  });
   el.noticeClose.addEventListener('click', hideNotice);
   el.pickerClose.addEventListener('click', closePicker);
   el.pickerUp.addEventListener('click', pickerUp);
@@ -1602,6 +1640,14 @@ async function activate(sessionId, title, workspace) {
   state.reconnectAttempt = 0;
   stopRunClock();
   state.sessionId = sessionId;
+  state.task = null;
+  state.taskDirty = false;
+  state.taskBusy = false;
+  state.pausing = false;
+  state.steering = false;
+  el.taskDraftConstraints.value = '';
+  el.taskDraftAcceptance.value = '';
+  renderTaskContract();
   const listed = state.sessions.find((item) => item.id === sessionId);
   if (listed && listed.projectId) {
     state.currentProjectId = listed.projectId;
@@ -1959,6 +2005,7 @@ async function loadHistory({ keepViewport = false } = {}) {
   renderHistoryWindow(data.events || [], data.hasMore === true, { keepViewport });
   await loadPlan();
   await loadQueue();
+  await loadTaskContract();
 }
 
 /**
@@ -2163,6 +2210,9 @@ function handleEvent(event) {
   }
   if (state.filter !== 'all') {
     applyFilter();
+  }
+  if (!state.replaying && ['run.started', 'run.steered', 'run.continued', 'run.completed', 'run.failed', 'run.cancelled'].includes(event.type)) {
+    scheduleTaskRefresh();
   }
 }
 
@@ -2465,15 +2515,10 @@ function onPlanUpdated(event) {
 
 function onRunSteered(event) {
   const steered = event.payload.input || '';
-  const index = state.queue.indexOf(steered);
-  if (index >= 0) {
-    state.queue.splice(index, 1);
-    renderQueue();
-  }
   if (steered) {
-    appendUserMessage(steered);
+    appendUserMessage('【纠正当前任务】' + steered, undefined, { allowTaskActions: false });
   }
-  showNotice('已追加指令：' + steered);
+  showNotice('纠正已应用：' + steered);
   setRunState('running', '已收到补充指令');
 }
 
@@ -3521,7 +3566,7 @@ function finishReply(failed) {
   state.replyCommitted = '';
 }
 
-function appendUserMessage(text, sequence) {
+function appendUserMessage(text, sequence, { allowTaskActions = true } = {}) {
   const wrapper = document.createElement('article');
   wrapper.className = 'msg msg-user';
   wrapper.dataset.text = text;
@@ -3533,12 +3578,15 @@ function appendUserMessage(text, sequence) {
   bubble.className = 'bubble';
   bubble.textContent = text;
 
-  const actions = document.createElement('div');
-  actions.className = 'msg-actions';
-  actions.append(button('编辑', 'msg-edit-btn', () => beginEditUserMessage(wrapper)));
-  actions.append(button('回退 / 分支', 'msg-edit-btn', () => openMessageCheckpoint(wrapper)));
-
-  wrapper.append(bubble, actions);
+  wrapper.append(bubble);
+  // 纠正是当前运行内的输入，不是独立任务起点，后端没有对应的编辑或检查点恢复入口。
+  if (allowTaskActions) {
+    const actions = document.createElement('div');
+    actions.className = 'msg-actions';
+    actions.append(button('编辑', 'msg-edit-btn', () => beginEditUserMessage(wrapper)));
+    actions.append(button('回退 / 分支', 'msg-edit-btn', () => openMessageCheckpoint(wrapper)));
+    wrapper.append(actions);
+  }
   el.messages.append(wrapper);
   hideEmptyState();
 }
@@ -4676,6 +4724,7 @@ async function submitMessage(content, attachments = []) {
 
   // 运行中先排队，当前任务完成后才发出；等待时可以改、可以删
   const wasRunning = state.running;
+  const taskRequirements = !wasRunning ? taskDraftRequirements() : null;
   if (!wasRunning) {
     appendUserMessage(content || attachmentSummary(attachments));
     state.pendingInputs.push(content);
@@ -4699,6 +4748,7 @@ async function submitMessage(content, attachments = []) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         content,
+        ...(taskRequirements ? { task: taskRequirements } : {}),
         attachments: attachments.map((item) => ({
           name: item.name,
           mimeType: item.mimeType,
@@ -4711,10 +4761,16 @@ async function submitMessage(content, attachments = []) {
       return;
     }
     if (!response.ok) {
-      throw new Error('HTTP ' + response.status);
+      throw new Error(await describeError(response));
     }
     const started = await response.json();
+    if (!wasRunning) {
+      el.taskDraftConstraints.value = '';
+      el.taskDraftAcceptance.value = '';
+      el.taskDraft.open = false;
+    }
     state.runId = started.runId || null;
+    scheduleTaskRefresh();
     syncComposer();
   } catch (error) {
     if (!wasRunning) {
@@ -4733,6 +4789,7 @@ async function submitMessage(content, attachments = []) {
       // 运行中追加图片会被服务端拒绝，把附件放回输入区，避免白丢
       setAttachments(attachments);
     }
+    if (!el.input.value.trim()) { el.input.value = content; autoGrow(); }
     showNotice('发送失败：' + error.message);
   }
 }
@@ -4803,13 +4860,60 @@ function handleInputHistoryKeydown(event) {
   return true;
 }
 
-/** 单按钮：运行中点击等于停止，空闲时等于发送（Enter 仍走表单提交，保留运行中追加指令）。 */
+/** 点击发送与 Enter 语义一致：运行中排队，空闲时开始新任务。 */
 function onSendButtonClick() {
-  if (state.running) {
-    cancelRun();
+  el.composer.requestSubmit();
+}
+
+async function steerCurrentTask() {
+  const content = el.input.value.trim();
+  if (!state.running || !state.sessionId || state.steering || !content) {
+    if (!content) { showNotice('先在输入框写下如何纠正当前任务。'); el.input.focus(); }
     return;
   }
-  el.composer.requestSubmit();
+  if (state.attachments.length || state.queueEdit) {
+    showNotice('纠正当前任务只接受纯文本；请先完成队列编辑或移除附件。');
+    return;
+  }
+  const sessionId = state.sessionId;
+  const runId = state.runId;
+  state.steering = true;
+  syncComposer();
+  try {
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/steer`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content, runId })
+    });
+    if (!response.ok) throw new Error(await describeError(response));
+    if (state.sessionId !== sessionId) return;
+    rememberInput(content);
+    if (el.input.value.trim() === content) { el.input.value = ''; autoGrow(); }
+    showNotice('纠正已收到，将在下一安全步骤生效；当前已经开始的工具操作会先结束。');
+    scheduleTaskRefresh();
+  } catch (error) {
+    if (state.sessionId === sessionId) showNotice('纠正未发送：' + error.message);
+  } finally {
+    if (state.sessionId === sessionId) { state.steering = false; syncComposer(); }
+  }
+}
+
+async function pauseCurrentTask() {
+  if (!state.running || state.pausing) return;
+  const sessionId = state.sessionId;
+  if (!state.runId) await refreshActiveRun();
+  if (state.sessionId !== sessionId || !state.runId) return;
+  const runId = state.runId;
+  state.pausing = true;
+  syncComposer();
+  try {
+    const response = await apiFetch(`/api/runs/${encodeURIComponent(runId)}/pause`, { method: 'POST' });
+    if (!response.ok) throw new Error(await describeError(response));
+    if (state.sessionId === sessionId) showNotice('已请求暂停；任务目标与等待消息会保留，暂停完成后可以续跑。');
+  } catch (error) {
+    if (state.sessionId !== sessionId) return;
+    showNotice('暂停失败：' + error.message);
+    state.pausing = false;
+    syncComposer();
+  }
 }
 
 async function cancelRun() {
@@ -4843,6 +4947,8 @@ async function continueRun(box) {
   if (state.running || !state.sessionId) {
     return;
   }
+  if (state.taskDirty && !(await saveTaskContract())) return;
+  if (state.running) return;
   const buttons = [...box.querySelectorAll('button')];
   buttons.forEach((item) => { item.disabled = true; });
   try {
@@ -4869,12 +4975,14 @@ async function refreshActiveRun() {
   if (!state.sessionId) {
     return null;
   }
+  const sessionId = state.sessionId;
   try {
-    const response = await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/runs/active`);
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/runs/active`);
     if (!response.ok) {
       return null;
     }
     const data = await response.json();
+    if (state.sessionId !== sessionId) return null;
     if (data.runId) {
       state.runId = data.runId;
       state.running = true;
@@ -5122,27 +5230,195 @@ function setComposerEnabled(enabled) {
   syncComposer();
 }
 
-/** 输入区：单按钮，空闲是发送、运行中变停止；结束后按需显示回滚。 */
+/** 发送、纠正和暂停分别拥有明确入口。 */
 function syncComposer() {
   const running = state.running;
   const editing = Boolean(state.queueEdit);
-  // 运行中圆按钮仍是停止。改排队消息用 Enter 保存，避免把停止入口盖掉
-  el.send.classList.toggle('is-running', running);
-  el.send.setAttribute('aria-label', running ? '停止' : editing ? '保存排队消息' : '发送');
-  el.send.title = running
-    ? '停止本次运行'
-    : editing ? '保存这条排队消息 (Enter)' : '发送 (Ctrl Enter)';
-  el.send.disabled = running ? false : !state.composerEnabled;
+  el.send.classList.remove('is-running');
+  el.send.setAttribute('aria-label', editing ? '保存排队消息' : running ? '排队下一件事' : '发送任务');
+  el.send.title = editing ? '保存排队消息 (Enter)' : running ? '排队下一件事 (Enter)' : '发送任务 (Enter)';
+  el.send.disabled = (!running && !state.composerEnabled) || state.steering;
+  el.sendModeLabel.textContent = editing ? '保存排队消息' : running ? '排队下一件事' : '发送任务';
   el.changesRollback.hidden = !(state.lastRunId && !running);
   el.branchCreate.disabled = !state.sessionId || running;
-  if (editing) {
-    el.input.placeholder = '正在编辑排队的消息… Enter 保存';
-  } else {
-    el.input.placeholder = running
-      ? '运行中。再写一句会排队，当前任务完成后依次发送；等待时可改、可删'
-      : '描述任务，Enter 发送，Shift + Enter 换行，@ 引用文件，/ 快捷指令';
-  }
+  el.taskLiveControls.hidden = !running;
+  el.taskSteer.disabled = state.steering || editing || state.pausing;
+  el.taskSteer.textContent = state.steering ? '发送纠正中…' : '立即纠正当前';
+  el.taskPause.disabled = state.pausing;
+  el.taskPause.textContent = state.pausing ? '正在暂停…' : '暂停当前';
+  el.taskCancel.disabled = state.pausing;
+  el.taskDraft.hidden = running || editing;
+  if (!running) state.pausing = false;
+  el.input.placeholder = editing ? '正在编辑排队的消息… Enter 保存' : running
+    ? '下一件事用 Enter 排队；纠正当前方向请点“立即纠正当前”'
+    : '描述新任务，Enter 发送；续跑当前任务请点“继续当前任务”';
+  syncTaskControls();
   renderQueueEditBar();
+}
+
+/* ---------- 持久任务目标、约束与验收 ---------- */
+
+function taskDraftRequirements() {
+  const lines = (value) => value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const constraints = lines(el.taskDraftConstraints.value);
+  const acceptance = lines(el.taskDraftAcceptance.value).map((text) => ({ text, checked: false, evidence: '' }));
+  return constraints.length || acceptance.length ? { constraints, acceptance } : null;
+}
+
+function scheduleTaskRefresh() {
+  clearTimeout(state.taskRefreshTimer);
+  const sessionId = state.sessionId;
+  state.taskRefreshTimer = setTimeout(() => {
+    if (state.sessionId === sessionId) loadTaskContract();
+  }, 300);
+}
+
+async function loadTaskContract() {
+  const sessionId = state.sessionId;
+  if (!sessionId) return;
+  const version = ++state.taskLoadVersion;
+  try {
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/task`);
+    if (!response.ok) throw new Error(await describeError(response));
+    const text = await response.text();
+    const task = text.trim() ? JSON.parse(text) : null;
+    if (state.sessionId !== sessionId || version !== state.taskLoadVersion) return;
+    // 后台刷新不覆盖用户尚未保存的验收记录；新任务或运行状态变化仍需展示。
+    if (state.taskDirty && !state.running && task?.taskId === state.task?.taskId) return;
+    state.task = task;
+    state.taskDirty = false;
+    renderTaskContract();
+  } catch (error) {
+    if (state.sessionId === sessionId) {
+      el.taskHint.textContent = '任务要求读取失败：' + error.message;
+    }
+  }
+}
+
+function renderTaskContract() {
+  const task = state.task;
+  el.taskContract.hidden = !task;
+  el.taskAcceptance.replaceChildren();
+  el.taskCorrections.replaceChildren();
+  if (!task) { syncTaskControls(); return; }
+  const labels = { ACTIVE: '执行中', PAUSED: '已暂停', INTERRUPTED: '已中断',
+    AWAITING_REVIEW: '待验收', COMPLETED: '已验收', FAILED: '待处理' };
+  const items = Array.isArray(task.acceptance) ? task.acceptance : [];
+  const checked = items.filter((item) => item.checked).length;
+  const status = String(task.status || '').toUpperCase();
+  el.taskSummary.textContent = `${labels[status] || status || '已保存'} · ${items.length ? `验收 ${checked}/${items.length}` : '未设置验收条件'}`;
+  el.taskGoal.textContent = task.originalGoal || '';
+  el.taskConstraints.value = (task.constraints || []).join('\n');
+  for (const item of items) appendTaskCriterion(item);
+  if (!items.length) {
+    const empty = document.createElement('p');
+    empty.className = 'task-help task-acceptance-empty';
+    empty.textContent = '还没有明确的验收条件，可在暂停后添加。';
+    el.taskAcceptance.append(empty);
+  }
+  const corrections = Array.isArray(task.corrections) ? task.corrections : [];
+  el.taskCorrections.hidden = !corrections.length;
+  if (corrections.length) {
+    const title = document.createElement('p');
+    title.className = 'task-field-label';
+    title.textContent = '当前任务的纠正记录';
+    const list = document.createElement('ol');
+    for (const correction of corrections) {
+      const item = document.createElement('li');
+      item.textContent = typeof correction === 'string' ? correction : correction.content || '';
+      list.append(item);
+    }
+    el.taskCorrections.append(title, list);
+  }
+  el.taskHint.textContent = state.running ? '运行中可查看要求；修改当前方向请使用“立即纠正当前”。' : '目标和要求已保存，继续任务时会重新提供给模型。';
+  syncTaskControls();
+}
+
+function appendTaskCriterion(item) {
+  el.taskAcceptance.querySelector('.task-acceptance-empty')?.remove();
+  const row = document.createElement('div');
+  row.className = 'task-criterion';
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.className = 'task-criterion-checked';
+  check.checked = item.checked === true;
+  check.setAttribute('aria-label', '此验收条件已验证');
+  const fields = document.createElement('div');
+  const text = document.createElement('input');
+  text.type = 'text';
+  text.className = 'task-criterion-text';
+  text.value = item.text || '';
+  text.placeholder = '可核对的完成条件';
+  text.setAttribute('aria-label', '验收条件');
+  const evidence = document.createElement('textarea');
+  evidence.className = 'task-criterion-evidence';
+  evidence.rows = 1;
+  evidence.value = item.evidence || '';
+  evidence.placeholder = '验证证据，例如测试命令与结果、复现步骤';
+  evidence.setAttribute('aria-label', '验证证据');
+  const remove = button('移除', 'msg-action', () => { row.remove(); markTaskDirty(); });
+  for (const field of [check, text, evidence]) field.addEventListener('input', markTaskDirty);
+  fields.append(text, evidence);
+  row.append(check, fields, remove);
+  el.taskAcceptance.append(row);
+  syncTaskControls();
+}
+
+function markTaskDirty() {
+  state.taskDirty = true;
+  el.taskHint.textContent = '尚未保存。保存后，继续任务时会使用这些要求。';
+  syncTaskControls();
+}
+
+function syncTaskControls() {
+  const locked = state.running || state.taskBusy;
+  for (const field of el.taskContract.querySelectorAll('input, textarea, button')) field.disabled = locked;
+  el.taskSave.disabled = locked || !state.taskDirty;
+  el.taskSave.textContent = state.taskBusy ? '保存中…' : '保存要求与验收记录';
+  const status = String(state.task?.status || '').toUpperCase();
+  el.taskResumeControls.hidden = state.running || !state.task
+    || !['PAUSED', 'INTERRUPTED', 'FAILED', 'AWAITING_REVIEW', 'ACTIVE'].includes(status);
+  el.taskResume.disabled = state.taskBusy;
+}
+
+async function saveTaskContract() {
+  if (state.running || state.taskBusy || !state.task || !state.sessionId) return false;
+  const acceptance = [...el.taskAcceptance.querySelectorAll('.task-criterion')].map((row) => ({
+    text: row.querySelector('.task-criterion-text').value.trim(),
+    checked: row.querySelector('.task-criterion-checked').checked,
+    evidence: row.querySelector('.task-criterion-evidence').value.trim()
+  }));
+  if (acceptance.some((item) => !item.text || (item.checked && !item.evidence))) {
+    el.taskHint.textContent = '请填写每条验收条件；勾选“已验证”时还需填写验证证据。';
+    return false;
+  }
+  const sessionId = state.sessionId;
+  state.taskBusy = true;
+  syncTaskControls();
+  try {
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/task`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        constraints: el.taskConstraints.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean), acceptance
+      })
+    });
+    if (!response.ok) throw new Error(await describeError(response));
+    const task = await response.json();
+    if (state.sessionId !== sessionId) return false;
+    state.task = task;
+    state.taskDirty = false;
+    renderTaskContract();
+    await refreshActiveRun();
+    if (state.sessionId !== sessionId) return false;
+    scheduleTaskRefresh();
+    el.taskHint.textContent = '要求与验收记录已保存。';
+    return true;
+  } catch (error) {
+    el.taskHint.textContent = '保存失败：' + error.message;
+    return false;
+  } finally {
+    if (state.sessionId === sessionId) { state.taskBusy = false; syncTaskControls(); }
+  }
 }
 
 async function loadQueue() {

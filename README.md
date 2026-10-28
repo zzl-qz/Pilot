@@ -9,8 +9,9 @@ Pilot 是一个以 Java 构建的本地 Coding Agent 原型。用户通过 Web �
 - 项目制导航：先建项目，再在项目下新建对话；一个项目可以绑定多个文件夹，对话可在其中切换。
 - 空白对话在项目内唯一：同一项目最多一条「还没发过消息」的对话，再点新建会提示归档旧的或回到旧的；有历史的对话不限数量，可归档/恢复。
 - 项目记录建项目时的 git 基线（`baseCommit`），改文件夹只影响之后新建的对话，老对话保留自己的文件视图。
-- 多轮会话、运行历史、任务继续/重新生成与排队消息。
-- 运行中发送的消息等待当前任务完成后依次独立执行；失败、取消、步数触顶或计划未完成时保留队列，等待期间可编辑、删除。
+- 多轮会话、运行历史、任务继续/重新生成与排队消息；运行中可分别选择排队下一件事、纠正当前任务或暂停后续跑。
+- 运行中发送的消息等待当前任务完成后依次独立执行；失败、取消、暂停、步数触顶、计划未完成或验收未通过时保留队列，等待期间可编辑、删除。
+- 持久保存原始目标、用户约束、验收条件与证据；续跑重新核对任务要求，明确验收条件需要人工勾选并提供证据。
 - 通过 SSE 展示运行进度、工具调用和审批事件。
 - 本地工作区文件浏览、读取、搜索、修改及变更 diff。
 - 可配置的权限模式、命令审批、运行取消和变更回滚。
@@ -36,19 +37,21 @@ pilot-core (AgentLoop、模型客户端、上下文压缩、工具注册/执行�
 
 ## 快速启动
 
-要求：JDK 25。仓库提供 Maven Wrapper，无需单独安装 Maven；Windows 使用 `mvnw.cmd`，macOS/Linux 使用 `./mvnw`。SQLite JDBC 通过本机库工作，运行环境需允许其加载本地库。
+要求：JDK 25。仓库提供 Maven Wrapper，无需单独安装 Maven。启动脚本会先构建并安装 `pilot-server` 及其依赖模块、运行测试，成功后再启动服务；构建或测试失败会停止，不会启动旧包。SQLite JDBC 所需的本机访问参数已包含在脚本中。
 
-在仓库根目录构建并运行测试：
-
-```sh
-./mvnw test
-```
-
-启动服务（Windows PowerShell 使用 `./mvnw.cmd` 替换命令开头）：
+macOS/Linux：
 
 ```sh
-./mvnw -pl pilot-server -am spring-boot:run
+bash start.sh
 ```
+
+Windows PowerShell / 命令提示符：
+
+```powershell
+.\start.cmd
+```
+
+脚本会切换到自身所在的仓库根目录，也可以从其他目录通过完整路径运行，例如 `bash /path/to/pilot/start.sh`。传入参数会交给应用，例如 `bash start.sh --server.port=10001`（Windows 使用 `.\start.cmd --server.port=10001`）。构建前先检查 Java 版本：优先使用 `JAVA_HOME`，未设置时使用 PATH 中的 Java；版本为 25 及以上则保留。macOS 检测到版本过低或不可用时，会尝试已安装的 JDK 25，打印本次切换说明，不修改全局 Java 设置。Windows/Linux 遇到不合适的版本会在 Maven 启动前报错，请将 `JAVA_HOME` 或 PATH 指向 JDK 25 及以上版本。
 
 默认 profile 为 `local`，权限默认为 `READ_ONLY`。默认 Web/API 地址为 `http://localhost:9999`。服务启动后可在浏览器打开该地址。无模型密钥时可使用 Mock 模式体验界面；真实模型运行可用环境变量配置：
 
@@ -57,10 +60,21 @@ PILOT_MODEL_API_KEY=你的密钥 \
 PILOT_MODEL_ENDPOINT=https://api.openai.com/v1/chat/completions \
 PILOT_MODEL_MODEL=gpt-4o-mini \
 PILOT_WORKSPACE=/绝对/工作区路径 \
-./mvnw -pl pilot-server -am spring-boot:run
+bash start.sh
 ```
 
 Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环境变量。不要把密钥提交到仓库；也可在被忽略的 `pilot-server/src/main/resources/application-local.yaml` 配置。请先确认工作区路径正确，并从 READ_ONLY 开始。
+
+### 开发时构建与运行
+
+只运行测试时，在仓库根目录执行 `bash mvnw test`（Windows 使用 `.\mvnw.cmd test`）。若需要 Spring Boot 开发运行方式，先在根目录安装整个服务端依赖链，再单独运行服务端：
+
+```sh
+bash mvnw -pl pilot-server -am install
+bash mvnw -pl pilot-server spring-boot:run
+```
+
+单独构建或运行 `pilot-server` 会读取本机 Maven 仓库中已安装的 `pilot-core`。修改 core 后若只在服务端执行命令，可能仍读到旧 JAR，出现缺少方法或启动失败；需要重新执行根目录的 `install` 命令更新依赖。`start.sh` / `start.cmd` 每次都会完成这一步并运行测试。Windows 的对应命令将 `bash mvnw` 替换为 `.\mvnw.cmd`。
 
 ## 权限说明
 
@@ -102,6 +116,8 @@ Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环
 - `PATCH /api/sessions/{id}/workspace`：在项目绑定的文件夹之间切换该对话的工作区。
 - `PATCH /api/sessions/{id}/archive`：归档或恢复对话；归档只影响列表，历史与事件都保留。
 - `POST /api/sessions/{id}/messages`：向会话发送任务；`GET /api/sessions/{id}/events`：订阅 SSE 事件。
+- `POST /api/sessions/{id}/steer`：纠正当前运行；`POST /api/runs/{runId}/pause`：暂停当前任务；`POST /api/sessions/{id}/continue`：沿用任务目标与要求继续。
+- `GET/PUT /api/sessions/{id}/task`：查看当前任务，或在空闲时保存约束、验收条件与证据；原始目标不可通过此接口修改。
 - `GET /api/sessions/{id}/history`：读取历史（`limit` + `before` 游标分页，长会话只取尾部一页）；`GET /api/sessions/{id}/diff`：查看会话变更。
 - `GET /api/metrics`：进程内运行指标（运行数、状态分布、失败码、事件类型计数、平均耗时）。
 - `/api/approvals`：查看和处理待审批工具调用。
@@ -112,6 +128,33 @@ Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环
 - `POST /api/sessions/{id}/multi/arbitrations/{arbitrationId}/resolve`：记录人工仲裁结果。
 
 具体请求结构以 `pilot-server` 控制器实现为准；该列表是入口索引，不替代接口契约文档。
+
+## 任务控制
+
+任务控制参考 [dsh 的 followup / steer](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/agent/README.md) 对下一轮输入与当前步骤纠正的区分，以及 [Codex 的 Plan / Goal](https://developers.openai.com/blog/mastering-codex-remote-for-engineering) 对执行路径与持久目标的区分。Pilot 的计划记录执行步骤，任务卡保存原始目标、约束和验收条件，两者在续跑时一并提供给模型。
+
+运行中，输入框的 Enter 和发送按钮都表示「排队下一件事」。例如当前在修复登录问题，发送「接下来补充注册页测试」会进入队列，等当前任务完成后再独立启动。需要调整正在做的事情时，在同一输入框写下纠正内容，再点「立即纠正当前」；它会追加到当前任务的纠正记录，不消费或替换排队消息。纠正绑定当前运行 ID，如果发送时任务已经交接到下一项，服务端会拒绝该请求，输入内容仍保留。
+
+纠正和暂停都在安全步骤边界生效。已经开始的工具操作会先结束，随后才应用纠正或停止继续执行；点击「暂停当前」不会回滚已完成的文件修改。暂停保留任务要求、模型记忆、计划与排队消息，点击「继续当前任务」接着原任务执行。关闭页面或服务重启后，持久记录仍保留；未正常结束的运行显示为已中断，可以续跑。
+
+开始新任务前可展开「新任务要求」，按行填写用户约束和验收条件。执行后「当前任务」卡会显示不可覆盖的原始目标、约束、验收条件与证据、纠正记录；运行时只读，暂停或结束后可编辑并保存。任务记录独立于压缩后的对话记忆保存，避免续跑仅依赖聊天摘要。
+
+模型结束运行不代表已通过人工验收。设有明确验收条件时，尚未勾选的条件会让任务停在「待验收」，后续队列继续保留。核对每条条件并填写证据（例如测试命令与结果、复现步骤）后勾选，保存全部验收结果才会标记「已验收」，并自动启动下一条排队任务。纠正方向会取消已有验收勾选，保留旧证据供重新核对；未设置验收条件的任务仍使用现有计划与收尾检查判断完成。
+
+主要请求示例：
+
+```jsonc
+// POST /api/sessions/{id}/messages：空闲时开始带要求的新任务
+{"content":"修复登录失败提示","task":{"constraints":["保持登录 API 兼容"],"acceptance":[{"text":"错误密码显示明确提示","checked":false,"evidence":""}]}}
+
+// POST /api/sessions/{id}/steer：运行中纠正当前任务
+{"content":"只修改登录页，不调整注册流程","runId":"run_当前运行ID"}
+
+// PUT /api/sessions/{id}/task：空闲时保存要求与人工验收结果
+{"constraints":["保持登录 API 兼容"],"acceptance":[{"text":"错误密码显示明确提示","checked":true,"evidence":"手工验证：错误密码显示明确提示，刷新后可重新登录"}]}
+```
+
+运行中的排队消息只接受普通任务文本；结构化要求通过空闲时的新任务请求提交，也可以暂停当前任务后在任务卡中编辑。`GET /task` 在尚未创建任务记录时返回 `null`。
 
 ## 消息检查点
 

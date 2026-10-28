@@ -87,6 +87,7 @@ public class AgentRunService implements RunStarter {
     private final ModelSettings modelSettings;
     private final RunSnapshotService snapshots;
     private final RunRegistry registry;
+    private final TaskControlService taskControls;
     private final com.pilot.core.session.RunRepository runRepository;
     private final ExecutorService executor;
     private final ConversationRepository conversations;
@@ -111,8 +112,9 @@ public class AgentRunService implements RunStarter {
                            com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper,
                            PilotDataDir dataDir, com.pilot.server.store.QueuedMessageRepository queuedMessages,
                            MultiAgentService multiAgent, MultiAgentProperties multiProperties,
-                           com.pilot.server.observability.RunMetrics metrics) {
+                           com.pilot.server.observability.RunMetrics metrics, TaskControlService taskControls) {
         this.sessions = sessions;
+        this.taskControls = taskControls;
         this.conversations = conversations;
         this.plans = plans;
         this.modelClient = modelClient;
@@ -147,6 +149,70 @@ public class AgentRunService implements RunStarter {
         launch(sessionId, runId, input, attachments == null ? List.of() : attachments, false);
     }
 
+    @Override
+    public void start(String sessionId, String runId, String input, List<Attachment> attachments,
+                      TaskControlService.Requirements task) {
+        launch(sessionId, runId, input, attachments == null ? List.of() : attachments, false, task);
+    }
+
+    @Override
+    public boolean steer(String sessionId, String text) {
+        return steer(sessionId, registry.activeRun(sessionId).orElse(null), text);
+    }
+
+    @Override
+    public boolean steer(String sessionId, String expectedRunId, String text) {
+        if (text == null || text.isBlank()) return false;
+        synchronized (inbox(sessionId)) {
+            String runId = registry.activeRun(sessionId).orElse(null);
+            if (runId == null || !runId.equals(expectedRunId)) return false;
+            RunHandle handle = runId == null ? null : runs.get(runId);
+            if (handle == null || !handle.accepting || handle.cancelled.get()) return false;
+            taskControls.correct(sessionId, text.strip());
+            var pending = new ArrayList<>(queuedMessages.load("steer:" + sessionId));
+            pending.add(text.strip());
+            queuedMessages.save("steer:" + sessionId, pending);
+            handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
+            return true;
+        }
+    }
+
+    @Override
+    public void discardSteering(String sessionId) {
+        synchronized (inbox(sessionId)) { queuedMessages.save("steer:" + sessionId, List.of()); }
+    }
+
+    private String pollSteering(String sessionId) {
+        synchronized (inbox(sessionId)) {
+            var pending = queuedMessages.load("steer:" + sessionId);
+            if (pending.isEmpty()) return null;
+            queuedMessages.save("steer:" + sessionId, List.of());
+            return String.join("\n\n", pending);
+        }
+    }
+
+    private boolean claimCompletion(String sessionId, RunHandle handle) {
+        synchronized (inbox(sessionId)) {
+            if (handle.cancelled.get() || !queuedMessages.load("steer:" + sessionId).isEmpty()) return false;
+            handle.accepting = false;
+            return true;
+        }
+    }
+
+    @Override
+    public boolean pause(String runId) {
+        RunHandle handle = runs.get(runId);
+        if (handle == null) return false;
+        synchronized (inbox(handle.sessionId)) {
+            if (!handle.accepting) return false;
+            handle.paused = true;
+            handle.accepting = false;
+            handle.cancelled.set(true);
+            handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
+            return true;
+        }
+    }
+
     /** 续跑：不追加用户消息，用落盘的记忆接着跑。 */
     @Override
     public void resume(String sessionId, String runId) {
@@ -159,7 +225,7 @@ public class AgentRunService implements RunStarter {
     }
 
     @Override
-    public boolean steer(String sessionId, String text) {
+    public boolean followup(String sessionId, String text) {
         if (text == null || text.isBlank()) {
             return false;
         }
@@ -256,17 +322,53 @@ public class AgentRunService implements RunStarter {
 
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
                         boolean continuation) {
-        var handle = new RunHandle();
-        runs.put(runId, handle);
-        try {
-            registry.register(runId, sessionId, sessionWorkspace(sessionId));
-            runRepository.started(runId, sessionId, java.time.Instant.now());
-            handle.future = executor.submit(() -> runOnWorker(sessionId, runId, input, attachments, handle, continuation));
-        } catch (RuntimeException e) {
-            // 连启动都没成功：把刚占的槽位还回去，否则会话会一直显示「运行中」
-            runs.remove(runId, handle);
-            registry.unregister(runId);
-            throw e;
+        launch(sessionId, runId, input, attachments, continuation, null);
+    }
+
+    private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
+                        boolean continuation, TaskControlService.Requirements requirements) {
+        launch(sessionId, runId, input, attachments, continuation, requirements, false);
+    }
+
+    private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
+                        boolean continuation, TaskControlService.Requirements requirements, boolean regenerate) {
+        synchronized (inbox(sessionId)) {
+            var handle = new RunHandle(sessionId);
+            runs.put(runId, handle);
+            try {
+                registry.register(runId, sessionId, sessionWorkspace(sessionId));
+                snapshots.saveConversation(runId, conversations.load(sessionId), plans.load(sessionId));
+                taskControls.snapshot(sessionId, runId);
+                var previous = taskControls.load(sessionId);
+                if (!continuation && !regenerate) {
+                    if (previous != null) plans.delete(sessionId);
+                    taskControls.start(sessionId, input,
+                            requirements == null ? List.of() : requirements.constraints(),
+                            requirements == null ? List.of() : requirements.acceptance());
+                    queuedMessages.save("steer:" + sessionId, List.of());
+                } else if (previous != null) {
+                    if (regenerate) {
+                        plans.delete(sessionId);
+                        taskControls.update(sessionId, previous.constraints(), previous.acceptance().stream()
+                                .map(item -> new TaskControlService.Acceptance(item.text(), false, item.evidence())).toList());
+                        queuedMessages.save("steer:" + sessionId, List.of());
+                    }
+                    taskControls.status(sessionId, "ACTIVE");
+                } else {
+                    String original = sessions.events(sessionId).stream()
+                            .filter(event -> event.payload() instanceof RunStarted started
+                                    && !started.input().equals("（继续上一次未完成的任务）"))
+                            .map(event -> ((RunStarted) event.payload()).input()).reduce((first, last) -> last)
+                            .orElse("继续对话中尚未完成的任务");
+                    taskControls.start(sessionId, original, List.of(), List.of());
+                }
+                runRepository.started(runId, sessionId, java.time.Instant.now());
+                handle.future = executor.submit(() -> runOnWorker(sessionId, runId, input, attachments, handle, continuation));
+            } catch (RuntimeException e) {
+                runs.remove(runId, handle);
+                registry.unregister(runId);
+                throw e;
+            }
         }
     }
 
@@ -281,7 +383,10 @@ public class AgentRunService implements RunStarter {
             continued = maybeAutoContinue(sessionId, status);
         } catch (RuntimeException e) {
             log.error("Run {} 收尾失败", runId, e);
+            taskControls.status(sessionId, "FAILED");
+            publish(sessionId, runId, new RunFailed("INTERNAL_ERROR", "执行失败：" + e.getMessage(), true));
         } finally {
+            handle.accepting = false;
             runs.remove(runId, handle);
             try {
                 runRepository.finished(runId, status, java.time.Instant.now());
@@ -336,6 +441,7 @@ public class AgentRunService implements RunStarter {
         autoContinueSignature.remove(sessionId);
         try {
             queuedMessages.save(sessionId, List.of());
+            queuedMessages.save("steer:" + sessionId, List.of());
         } catch (RuntimeException e) {
             log.warn("清理会话 {} 的排队消息失败（会话可能已被删除）", sessionId, e);
         }
@@ -361,6 +467,19 @@ public class AgentRunService implements RunStarter {
         }
         queue.remove();
         persistQueue(sessionId, queue);
+    }
+
+    @Override
+    public void requirementsUpdated(String sessionId) {
+        Deque<String> queue = inbox(sessionId);
+        synchronized (queue) {
+            var task = taskControls.load(sessionId);
+            if (task == null || !"COMPLETED".equals(task.status())
+                    || registry.activeRun(sessionId).isPresent()
+                    || plans.load(sessionId).stream().anyMatch(item -> !item.done())) return;
+            try { drainQueue(sessionId, queue); }
+            catch (RuntimeException e) { log.error("验收后的排队消息启动失败，队列已保留：{}", sessionId, e); }
+        }
     }
 
     /**
@@ -411,10 +530,12 @@ public class AgentRunService implements RunStarter {
     /** 重新生成：先丢掉上一轮对话（含最后一条用户消息），再用同样的输入重跑，避免历史重复。 */
     @Override
     public void regenerate(String sessionId, String runId, String input) {
+        var task = taskControls.load(sessionId);
+        String originalInput = task == null ? input : task.originalGoal();
         List<Message> history = conversations.load(sessionId);
         int lastUser = -1;
         for (int i = history.size() - 1; i >= 0; i--) {
-            if ("user".equals(history.get(i).role())) {
+            if ("user".equals(history.get(i).role()) && originalInput.equals(history.get(i).content())) {
                 lastUser = i;
                 break;
             }
@@ -422,7 +543,7 @@ public class AgentRunService implements RunStarter {
         if (lastUser >= 0) {
             conversations.save(sessionId, history.subList(0, lastUser));
         }
-        start(sessionId, runId, input);
+        launch(sessionId, runId, originalInput, List.of(), false, null, task != null);
     }
 
     @Override
@@ -431,21 +552,15 @@ public class AgentRunService implements RunStarter {
         if (handle == null) {
             return false;
         }
+        handle.accepting = false;
         handle.cancelled.set(true);
         var future = handle.future;
         if (future != null) {
             future.cancel(true);
         }
-        denyPendingApprovals();
+        handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
         log.info("Run {} cancel requested", runId);
         return true;
-    }
-
-    /** 取消后不再有用户决策，挂起的审批直接按拒绝收尾，避免 Agent 线程继续等待。 */
-    private void denyPendingApprovals() {
-        for (var pending : approvals.pending()) {
-            approvals.resolve(pending.callId(), false);
-        }
     }
 
     /**
@@ -669,8 +784,34 @@ public class AgentRunService implements RunStarter {
         ToolRegistry tools = toolFactory.registryFor(workspace, planSink);
         // 事件类型计数：压缩次数、工具调用量、失败码分布都从这里来
         Consumer<SessionEvent> sink = event -> {
-            metrics.count("event." + event.type().wireName());
-            publish(sessionId, runId, event);
+            if (event instanceof com.pilot.core.event.ApprovalRequired approval) {
+                handle.pendingApprovals.add(approval.callId());
+                if (handle.cancelled.get() || !queuedMessages.load("steer:" + sessionId).isEmpty()) {
+                    approvals.resolve(approval.callId(), false);
+                }
+            } else if (event instanceof com.pilot.core.event.ApprovalResolved approval) {
+                handle.pendingApprovals.remove(approval.callId());
+            }
+            SessionEvent delivered = event;
+            if (event instanceof com.pilot.core.event.RunCancelled) {
+                taskControls.status(sessionId, handle.paused ? "PAUSED" : "INTERRUPTED");
+                if (handle.paused) delivered = new RunFailed("PAUSED", "任务已暂停，目标、约束、验收条件和排队消息已保留。", true);
+            } else if (event instanceof RunFailed) {
+                taskControls.status(sessionId, "INTERRUPTED");
+            } else if (event instanceof com.pilot.core.event.RunCompleted completed) {
+                var task = completed.openSteps().isEmpty() ? taskControls.finish(sessionId)
+                        : taskControls.status(sessionId, "INTERRUPTED");
+                if (task != null && "AWAITING_REVIEW".equals(task.status())) {
+                    var open = new ArrayList<>(completed.openSteps());
+                    task.acceptance().stream().filter(item -> !item.checked())
+                            .forEach(item -> open.add("待验收：" + item.text()));
+                    delivered = new com.pilot.core.event.RunCompleted(completed.summary(), completed.changedFiles(),
+                            completed.checks(), completed.planDone() + (int) task.acceptance().stream().filter(item -> item.checked()).count(),
+                            completed.planTotal() + task.acceptance().size(), open);
+                }
+            }
+            metrics.count("event." + delivered.type().wireName());
+            publish(sessionId, runId, delivered);
         };
         Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
         var config = new AgentLoop.Config(properties.maxSteps(), properties.repeatedToolCallLimit(),
@@ -693,13 +834,13 @@ public class AgentRunService implements RunStarter {
         var traceRecorder = new JsonlTraceRecorder(
                 dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
         var loop = new AgentLoop(modelClient, tools, permissionGate, approvals, config, handle.cancelled::get,
-                // 普通发送只排队，不能作为 steer 在工具步骤之间插入并改变当前任务。
-                () -> null, traceRecorder,
-                delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)));
+                () -> pollSteering(sessionId), traceRecorder,
+                delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
+                .withTaskContext(() -> taskControls.prompt(sessionId))
+                .withCompletionClaim(() -> claimCompletion(sessionId, handle));
 
         snapshots.bind(runId, toolFactory.resolve(workspace));
         try {
-            snapshots.saveConversation(runId, history, plans.load(sessionId));
             AgentLoop.Result result = continuation
                     ? loop.resume(history, sink, checkpoint)
                     : loop.run(input, attachments, history, sink, checkpoint);
@@ -707,8 +848,10 @@ public class AgentRunService implements RunStarter {
             log.info("Agent run {} completed: failureCode={}, messages={}, workspace={}", runId, result.failureCode(),
                     result.conversation().size(), workspace == null ? properties.workspace() : workspace);
             if (result.failureCode() == null) {
-                return "COMPLETED";
+                var task = taskControls.load(sessionId);
+                return task == null ? "COMPLETED" : task.status();
             }
+            if (handle.paused) return "PAUSED";
             // 步数触顶要单独返回，外层才会按未完成计划自动接下一轮。
             // 以前一律收成 FAILED，自动继续的判断永远进不去。
             if ("CANCELLED".equals(result.failureCode()) || "MAX_STEPS".equals(result.failureCode())) {
@@ -718,6 +861,7 @@ public class AgentRunService implements RunStarter {
         } catch (RuntimeException e) {
             log.error("Agent run {} failed unexpectedly", runId, e);
             String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            taskControls.status(sessionId, "FAILED");
             publish(sessionId, runId, new RunFailed("INTERNAL_ERROR", "执行失败：" + reason, false));
             return "FAILED";
         } finally {
@@ -731,7 +875,12 @@ public class AgentRunService implements RunStarter {
 
     private static final class RunHandle {
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
+        private final Set<String> pendingApprovals = ConcurrentHashMap.newKeySet();
+        private final String sessionId;
+        private volatile boolean accepting = true;
+        private volatile boolean paused;
         private volatile Future<?> future;
+        private RunHandle(String sessionId) { this.sessionId = sessionId; }
     }
 
     private void publish(String sessionId, String runId, SessionEvent event) {

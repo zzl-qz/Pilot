@@ -36,6 +36,14 @@ public class RunController {
         return new CancelResponse(runId, true);
     }
 
+    @PostMapping("/{runId}/pause")
+    public CancelResponse pause(@PathVariable String runId) {
+        if (!runStarter.pause(runId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "任务已结束或正在暂停");
+        }
+        return new CancelResponse(runId, true);
+    }
+
     /**
      * 本轮运行改了哪些文件：只统计该次运行写过的路径，带增删行数与逐文件 diff。
      *

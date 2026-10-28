@@ -1,6 +1,6 @@
 package com.pilot.core.session;
 
-/** 会话状态。终态不可再接收新的运行事件。 */
+/** 会话最近一轮的状态；终态表示该轮已结束，仍可通过新一轮继续任务。 */
 public enum SessionStatus {
     CREATED,
     RUNNING,
@@ -8,9 +8,10 @@ public enum SessionStatus {
     COMPLETED,
     FAILED,
     CANCELLED,
+    PAUSED,
     INTERRUPTED;
 
     public boolean terminal() {
-        return this == COMPLETED || this == FAILED || this == CANCELLED || this == INTERRUPTED;
+        return this == COMPLETED || this == FAILED || this == CANCELLED || this == PAUSED || this == INTERRUPTED;
     }
 }

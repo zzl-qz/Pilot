@@ -42,7 +42,7 @@ export function applyRule(event, cursor) {
 export function classifyRunFailure(code) {
   const value = String(code || '');
   const cancelled = value === 'CANCELLED';
-  const paused = value === 'MAX_STEPS';
+  const paused = value === 'MAX_STEPS' || value === 'PAUSED';
   const interrupted = value === 'INTERRUPTED';
   return {
     cancelled,

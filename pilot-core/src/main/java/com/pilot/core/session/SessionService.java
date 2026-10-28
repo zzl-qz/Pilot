@@ -315,16 +315,19 @@ public final class SessionService {
             case APPROVAL_REQUIRED, ARBITRATION_REQUIRED -> SessionStatus.WAITING_APPROVAL;
             case APPROVAL_RESOLVED, ARBITRATION_RESOLVED -> SessionStatus.RUNNING;
             case RUN_COMPLETED -> SessionStatus.COMPLETED;
-            // 进程重启导致的中断和真正的失败要分开：前者可继续，不该显示成「失败」
-            case RUN_FAILED -> isInterrupted(event) ? SessionStatus.INTERRUPTED : SessionStatus.FAILED;
+            // 用户暂停、进程中断与真正失败分别显示；暂停仍是本轮终态，可以另起一轮续跑。
+            case RUN_FAILED -> failedStatus(event);
             case RUN_CANCELLED -> SessionStatus.CANCELLED;
             default -> current;
         };
     }
 
-    /** {@code run.failed} 的 code 为 INTERRUPTED 表示运行不是自己结束的（服务重启）。 */
-    private static boolean isInterrupted(SessionEvent event) {
-        return event instanceof RunFailed failed && "INTERRUPTED".equals(failed.code());
+    private static SessionStatus failedStatus(SessionEvent event) {
+        if (event instanceof RunFailed failed) {
+            if ("PAUSED".equals(failed.code())) return SessionStatus.PAUSED;
+            if ("INTERRUPTED".equals(failed.code())) return SessionStatus.INTERRUPTED;
+        }
+        return SessionStatus.FAILED;
     }
 
     /**
