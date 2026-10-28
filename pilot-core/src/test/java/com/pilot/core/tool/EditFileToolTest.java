@@ -52,4 +52,58 @@ class EditFileToolTest {
         assertTrue(updated.endsWith("\nDONE\n"), updated.substring(updated.length() - 20));
         assertEquals(-1, updated.indexOf("UNIQUE_TAIL"));
     }
+
+    /** 先读后改是机制约束：本次运行没读过的文件拒绝编辑，错误信息要能指导下一步。 */
+    @Test
+    void rejectsEditingUnreadFile() throws IOException {
+        Path file = workspace.resolve("sample.txt");
+        Files.writeString(file, "header\ntarget line\nfooter\n");
+        var reads = new ReadTracker();
+        var guarded = new EditFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
+
+        String denied = guarded.execute(Map.of(
+                "path", "sample.txt", "old_string", "target line", "new_string", "replaced"));
+
+        assertTrue(denied.startsWith("ERROR: 本次运行尚未读取过"), denied);
+        assertTrue(denied.contains("read_file"), denied);
+        assertEquals("header\ntarget line\nfooter\n", Files.readString(file), "未读文件不应被改动");
+
+        // read_file 之后放行；错误信息里教的补救动作真实有效
+        var reader = new ReadFileTool(new PathValidator(workspace), reads);
+        assertTrue(reader.execute(Map.of("path", "sample.txt")).contains("target line"));
+        String allowed = guarded.execute(Map.of(
+                "path", "sample.txt", "old_string", "target line", "new_string", "replaced"));
+        assertTrue(allowed.startsWith("已修改 "), allowed);
+    }
+
+    /** 刚创建或刚编辑过的文件视为已读：连续编辑不被误伤。 */
+    @Test
+    void treatsJustWrittenFileAsObserved() throws IOException {
+        var reads = new ReadTracker();
+        var creator = new CreateFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
+        var editor = new EditFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
+
+        assertTrue(creator.execute(Map.of(
+                "path", "fresh.txt", "content", "one\ntwo\n")).startsWith("已创建 "));
+
+        String edited = editor.execute(Map.of(
+                "path", "fresh.txt", "old_string", "two", "new_string", "TWO"));
+        assertTrue(edited.startsWith("已修改 "), edited);
+
+        // 编辑过一次之后，紧接着再改也不需要重读
+        String again = editor.execute(Map.of(
+                "path", "fresh.txt", "old_string", "TWO", "new_string", "2"));
+        assertTrue(again.startsWith("已修改 "), again);
+    }
+
+    /** allowAll 是测试与未装配场景的默认值：行为与改造前完全一致。 */
+    @Test
+    void allowAllGuardKeepsLegacyBehavior() throws IOException {
+        Files.writeString(workspace.resolve("legacy.txt"), "before\n");
+
+        String result = new EditFileTool(new PathValidator(workspace)).execute(Map.of(
+                "path", "legacy.txt", "old_string", "before", "new_string", "after"));
+
+        assertTrue(result.startsWith("已修改 "), result);
+    }
 }

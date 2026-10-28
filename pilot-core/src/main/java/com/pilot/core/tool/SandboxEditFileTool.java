@@ -20,10 +20,16 @@ public final class SandboxEditFileTool implements Tool {
 
     private final PathValidator paths;
     private final SandboxSink sandbox;
+    private final ReadGuard reads;
 
     public SandboxEditFileTool(PathValidator paths, SandboxSink sandbox) {
+        this(paths, sandbox, ReadGuard.allowAll());
+    }
+
+    public SandboxEditFileTool(PathValidator paths, SandboxSink sandbox, ReadGuard reads) {
         this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
         this.sandbox = java.util.Objects.requireNonNull(sandbox, "sandbox must not be null");
+        this.reads = reads == null ? ReadGuard.allowAll() : reads;
     }
 
     @Override
@@ -79,6 +85,11 @@ public final class SandboxEditFileTool implements Tool {
         if (!Files.isRegularFile(file)) {
             return "ERROR: 文件不存在: " + rawPath;
         }
+        // 先读后改是机制约束：没读过的文件拒绝编辑，不依赖提示词劝导
+        if (!reads.isObserved(file)) {
+            return "ERROR: 本次运行尚未读取过 " + rawPath
+                    + "，无法确认原文与行号。先 read_file 查看当前内容，再给出 old_string。";
+        }
         try {
             if (Files.size(file) > MAX_BYTES) {
                 return "ERROR: 文件过大（上限 32MB），无法整份替换。";
@@ -104,6 +115,7 @@ public final class SandboxEditFileTool implements Tool {
             }
             String updated = content.substring(0, index) + replacement + content.substring(index + search.length());
             sandbox.record(paths.display(file), content, updated);
+            reads.observed(file);
             return "已提交到沙箱 " + paths.display(file) + "：替换 1 处（"
                     + (int) search.lines().count() + " 行 → " + (int) replacement.lines().count() + " 行）";
         } catch (IOException e) {

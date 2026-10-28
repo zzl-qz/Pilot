@@ -313,7 +313,7 @@ class AgentRunServiceTest {
 
         Fixture(ModelClient model, int maxSteps) {
             var properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY,
-                    maxSteps, 3, 300, 1, 0, 60_000, false);
+                    maxSteps, 3, 5, 300, 1, 0, 60_000, false);
             var mapper = JsonMapper.builder().build();
             var dataDir = new PilotDataDir(dataRoot.toString());
             var factory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));

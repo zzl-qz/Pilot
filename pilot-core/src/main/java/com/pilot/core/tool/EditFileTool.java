@@ -18,14 +18,20 @@ public final class EditFileTool implements Tool, WritesFiles {
 
     private final PathValidator paths;
     private final SnapshotSink snapshots;
+    private final ReadGuard reads;
 
     public EditFileTool(PathValidator paths) {
         this(paths, SnapshotSink.none());
     }
 
     public EditFileTool(PathValidator paths, SnapshotSink snapshots) {
+        this(paths, snapshots, ReadGuard.allowAll());
+    }
+
+    public EditFileTool(PathValidator paths, SnapshotSink snapshots, ReadGuard reads) {
         this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
         this.snapshots = java.util.Objects.requireNonNull(snapshots, "snapshots must not be null");
+        this.reads = reads == null ? ReadGuard.allowAll() : reads;
     }
 
     @Override
@@ -82,6 +88,12 @@ public final class EditFileTool implements Tool, WritesFiles {
         if (!Files.isRegularFile(file)) {
             return "ERROR: 不是普通文件: " + rawPath;
         }
+        // 先读后改是机制约束：本次运行没读过的文件拒绝编辑，不依赖提示词劝导。
+        // 刚创建或刚编辑过的文件已在 ReadGuard 登记过，连续编辑不受影响。
+        if (!reads.isObserved(file)) {
+            return "ERROR: 本次运行尚未读取过 " + rawPath
+                    + "，无法确认原文与行号。先 read_file 查看当前内容，再给出 old_string。";
+        }
 
         try {
             if (Files.size(file) > MAX_BYTES) {
@@ -115,6 +127,7 @@ public final class EditFileTool implements Tool, WritesFiles {
             String updated = content.substring(0, index) + replacement + content.substring(index + search.length());
             snapshots.beforeWrite(file);
             Files.writeString(file, updated, StandardCharsets.UTF_8);
+            reads.observed(file);
             return "已修改 " + paths.display(file) + "：替换 1 处（"
                     + lineCount(search) + " 行 → " + lineCount(replacement) + " 行）";
         } catch (IOException e) {

@@ -101,6 +101,46 @@ class AgentLoopTest {
         assertFalse(eventTypes().contains("run.completed"));
     }
 
+    /** 渐进提醒：第 3 次跳过执行并注入提醒，第 4 次只跳过，第 5 次才中断。 */
+    @Test
+    void remindsThenSkipsBeforeAbortingOnRepeatedCalls() {
+        var tool = new CountingTool("read_file", "content");
+        var call = new ToolCall("call_1", "read_file", Map.of("path", "pom.xml"));
+        var client = new ScriptedModelClient(
+                new ModelResponse("", List.of(call)),   // 1: 执行
+                new ModelResponse("", List.of(call)),   // 2: 执行
+                new ModelResponse("", List.of(call)),   // 3: 跳过 + 注入提醒
+                new ModelResponse("", List.of(call)),   // 4: 跳过（不再新提醒）
+                new ModelResponse("", List.of(call)),   // 5: 中断
+                new ModelResponse("不该走到这里", List.of()));
+        var loop = new AgentLoop(client, registry(tool), readOnlyGate(),
+                new AgentLoop.Config(8, 3, 5, "你是测试代理"));
+
+        AgentLoop.Result result = loop.run("读 pom.xml", List.of(), events::add);
+
+        assertEquals("REPEATED_TOOL_CALL", result.failureCode());
+        assertEquals(2, tool.executions.get(), "达到提醒档后的重复调用不应再执行");
+        assertEquals(5, client.requests.size());
+        // 第 4 次请求的历史里包含全部已注入消息：提醒恰好一条（第 5 次请求同样只含这一条）
+        long reminders = client.requests.get(3).stream()
+                .filter(message -> "user".equals(message.role()))
+                .filter(message -> message.content().contains("连续第 3 次"))
+                .count();
+        assertEquals(1, reminders, "提醒消息只应注入一次");
+        assertTrue(events.stream().anyMatch(event -> event instanceof RunContinued continued
+                        && continued.reason().contains("重复调用提醒")),
+                "提醒应有对应事件");
+        assertTrue(events.stream().anyMatch(event -> event instanceof RunFailed failed
+                && failed.code().equals("REPEATED_TOOL_CALL")));
+        // 跳过执行的合成结果要让模型知道为什么没有真实结果
+        String skipped = client.requests.get(3).stream()
+                .filter(message -> "tool".equals(message.role()))
+                .map(Message::content)
+                .filter(content -> content.contains("已跳过执行"))
+                .findFirst().orElse("");
+        assertTrue(skipped.contains("连续第 3 次"), skipped);
+    }
+
     @Test
     void stopsAtMaxSteps() {
         var tool = new CountingTool("read_file", "content");

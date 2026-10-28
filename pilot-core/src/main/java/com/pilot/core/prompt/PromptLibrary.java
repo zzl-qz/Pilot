@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -63,10 +64,18 @@ public final class PromptLibrary {
     public static final String DIR_PROPERTY = "pilot.prompts.dir";
     public static final String DIR_ENV = "PILOT_PROMPTS_DIR";
 
-    /** 系统提示词的组装顺序：身份 → 流程 → 工具 → 证据与风险 → 输出。 */
-    private static final List<String> SYSTEM_SECTIONS = List.of(
-            "system/base", "system/workflow", "system/tools", "system/tools-agents",
-            "system/orchestration", "system/dispatch", "system/output");
+    /**
+     * 系统提示词注册表：按 order 稀疏分配拼接顺序，requiresTools 声明依赖
+     * （代码声明优先于 md 头部 frontmatter）。新增段落取区间空隙值。
+     */
+    private static final List<SystemSection> SYSTEM_SECTIONS = List.of(
+            new SystemSection("system/base", 0),
+            new SystemSection("system/workflow", 100),
+            new SystemSection("system/tools", 200),
+            new SystemSection("system/tools-agents", 300, Set.of("spawn_agent", "dispatch_agents")),
+            new SystemSection("system/orchestration", 400),
+            new SystemSection("system/dispatch", 500, Set.of("dispatch_agents")),
+            new SystemSection("system/output", 9000));
 
     /** frontmatter 解析结果：声明的依赖工具 + 去掉声明头之后的正文。 */
     private record Parsed(Set<String> requires, String body) {
@@ -114,18 +123,26 @@ public final class PromptLibrary {
     /**
      * 拼出完整系统提示词，并按实际可用工具过滤段落。
      *
+     * <p>段落顺序由注册表的 order 决定（越动态的段越靠后）；依赖声明取注册表与 frontmatter
+     * 中的前者：代码声明优先，没有时回落到 md 标记。
+     *
      * @param availableTools 本轮会话实际注册的工具名；{@code null} 表示不过滤（全部段落注入）。
-     *                       声明了 {@code requires} 且其中任一工具不在集合里时，整段跳过。
+     *                       声明了依赖且其中任一工具不在集合里时，整段跳过。
      */
     public String system(Map<String, String> variables, Set<String> availableTools) {
-        List<String> sections = new ArrayList<>(SYSTEM_SECTIONS.size());
-        for (String name : SYSTEM_SECTIONS) {
-            Parsed parsed = parseFrontmatter(name, get(name));
-            if (availableTools != null && !parsed.requires().isEmpty()
-                    && !availableTools.containsAll(parsed.requires())) {
+        List<SystemSection> ordered = SYSTEM_SECTIONS.stream()
+                .sorted(Comparator.comparingInt(SystemSection::order))
+                .toList();
+        List<String> sections = new ArrayList<>(ordered.size());
+        for (SystemSection section : ordered) {
+            Parsed parsed = parseFrontmatter(section.name(), get(section.name()));
+            Set<String> requires = !section.requiresTools().isEmpty()
+                    ? section.requiresTools()
+                    : parsed.requires();
+            if (availableTools != null && !requires.isEmpty() && !availableTools.containsAll(requires)) {
                 continue;
             }
-            String text = interpolate(name, parsed.body(), variables).strip();
+            String text = interpolate(section.name(), parsed.body(), variables).strip();
             if (!text.isEmpty()) {
                 sections.add(text);
             }

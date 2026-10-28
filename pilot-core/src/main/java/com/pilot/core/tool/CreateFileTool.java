@@ -13,14 +13,20 @@ import java.util.Map;
 public final class CreateFileTool implements Tool, WritesFiles {
     private final PathValidator paths;
     private final SnapshotSink snapshots;
+    private final ReadGuard reads;
 
     public CreateFileTool(PathValidator paths) {
         this(paths, SnapshotSink.none());
     }
 
     public CreateFileTool(PathValidator paths, SnapshotSink snapshots) {
+        this(paths, snapshots, ReadGuard.allowAll());
+    }
+
+    public CreateFileTool(PathValidator paths, SnapshotSink snapshots, ReadGuard reads) {
         this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
         this.snapshots = java.util.Objects.requireNonNull(snapshots, "snapshots must not be null");
+        this.reads = reads == null ? ReadGuard.allowAll() : reads;
     }
 
     @Override
@@ -78,6 +84,8 @@ public final class CreateFileTool implements Tool, WritesFiles {
             Files.createDirectories(file.getParent());
             snapshots.beforeWrite(file);
             Files.writeString(file, content, StandardCharsets.UTF_8);
+            // 刚创建的文件视为已读：后续 edit_file 不会被「先读后改」拦截
+            reads.observed(file);
             int bytes = content.getBytes(StandardCharsets.UTF_8).length;
             return "已创建 " + paths.display(file) + "（" + bytes + " 字节，"
                     + (int) content.lines().count() + " 行）";

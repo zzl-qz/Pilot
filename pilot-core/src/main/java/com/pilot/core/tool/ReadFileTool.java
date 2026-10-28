@@ -21,9 +21,15 @@ public final class ReadFileTool implements Tool {
     private static final int BINARY_SAMPLE_BYTES = 8000;
 
     private final PathValidator paths;
+    private final ReadGuard reads;
 
     public ReadFileTool(PathValidator paths) {
+        this(paths, ReadGuard.allowAll());
+    }
+
+    public ReadFileTool(PathValidator paths, ReadGuard reads) {
         this.paths = paths;
+        this.reads = reads == null ? ReadGuard.allowAll() : reads;
     }
 
     @Override
@@ -87,7 +93,10 @@ public final class ReadFileTool implements Tool {
             if (looksBinary(file)) {
                 return "ERROR: 二进制文件，无法读取: " + rawPath;
             }
-            return readSlice(file, startLine, lineCount);
+            String slice = readSlice(file, startLine, lineCount);
+            // 读取成功后登记：这是 edit_file「先读后改」校验的依据
+            reads.observed(file);
+            return slice;
         } catch (IOException e) {
             return "ERROR: 读取失败: " + e.getMessage();
         }

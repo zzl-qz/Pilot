@@ -702,7 +702,8 @@ public class AgentRunService implements RunStarter {
         Set<String> sessionTools = sessionTools(tools);
         Consumer<SessionEvent> sink = event -> publish(sessionId, runId, event);
         Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
-        var config = new AgentLoop.Config(properties.maxSteps(), properties.repeatedToolCallLimit(),
+        var config = new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(),
+                properties.repeatAbortAt(),
                 systemPrompt(sessionId, workspace, sessionTools),
                 // 收尾时读一次计划，把「本轮是否真的做完」一并写进 run.completed
                 () -> plans.load(sessionId),
