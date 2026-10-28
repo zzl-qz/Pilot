@@ -94,7 +94,7 @@ public final class SqliteStore {
             // 再建一个 idx_events_session 只会让每次写入多维护一棵 B 树
             "DROP INDEX IF EXISTS idx_events_session",
             "CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session_id, status)",
-            "CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, created_at)",
+            // idx_sessions_project 依赖 migrate() 补的 project_id 列，不能在补列之前建
             "CREATE TABLE IF NOT EXISTS queued_messages (session_id TEXT NOT NULL, position INTEGER NOT NULL, content TEXT NOT NULL, PRIMARY KEY (session_id, position))"
     };
 
@@ -157,6 +157,8 @@ public final class SqliteStore {
         addColumnIfMissing(statement, "sessions", "is_blank", "INTEGER NOT NULL DEFAULT 0");
         addColumnIfMissing(statement, "sessions", "archived", "INTEGER NOT NULL DEFAULT 0");
         addColumnIfMissing(statement, "projects", "base_commit", "TEXT");
+        // 索引依赖上面补出来的列，必须放在补列之后
+        statement.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, created_at)");
     }
 
     private static void addColumnIfMissing(Statement statement, String table, String column, String definition)
