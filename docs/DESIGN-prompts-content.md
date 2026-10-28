@@ -122,4 +122,23 @@ String template = spec.scope().writable() ? "subagent/base" : "subagent/base-rea
 - 本期不新增段落注册表条目；若未来 `subagent/` 引入更多条件模板，再评估
   是否需要 `SystemSection` 级别的条件机制。
 
+## 6. 实施记录（2026-10-28，dev 分支，提交 240997d）
+
+单批完成。全量测试：pilot-core 209 + pilot-server 135 全绿。
+
+验收核对：
+
+- `timeoutSeconds` 数值单一出处收敛到 `tools/run_command.md`（收尾门改为按场景复述，不复述参数值）。
+- 只读子代理 system 断言：含「只读调研任务」、不含「改动怎么提交」；写任务保留完整模板
+  （`MultiAgentServiceTest` 双向断言）。
+- `prompts/README.md` 目录清单与实际目录一致（8 个子目录全覆盖）。
+
+与设计稿的偏差：
+
+| 偏差 | 说明 |
+| --- | --- |
+| `TaskSpec.editable` 签名 | 便捷构造需要显式 `RiskLevel`（`readOnly` 内定 LOW、`editable` 由调用方指定），测试按此适配 |
+| 沙箱版工具的参数描述同步增强 | 设计只提了主版；`SandboxEditFileTool` / `SandboxCreateFileTool` 与主版参数描述重复声明，为保持「子代理与主代理对齐」（其 javadoc 明示的设计约束），两侧同步修改 |
+| 本文档存留待定 | 一期文档已按项目维护者决定从仓库移除（提交 1c73e5b）；本文档是否保留由维护者决定，不需要时删除即可，不影响任何代码 |
+
 > AI生成
