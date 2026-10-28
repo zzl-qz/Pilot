@@ -258,8 +258,8 @@ public class AgentRunService implements RunStarter {
                         boolean continuation) {
         var handle = new RunHandle();
         runs.put(runId, handle);
-        registry.register(runId, sessionId);
         try {
+            registry.register(runId, sessionId, sessionWorkspace(sessionId));
             runRepository.started(runId, sessionId, java.time.Instant.now());
             handle.future = executor.submit(() -> runOnWorker(sessionId, runId, input, attachments, handle, continuation));
         } catch (RuntimeException e) {
@@ -310,8 +310,17 @@ public class AgentRunService implements RunStarter {
     public java.util.Optional<String> claimRun(String sessionId) {
         synchronized (inbox(sessionId)) {
             String runId = "run_" + java.util.UUID.randomUUID();
-            return registry.claim(runId, sessionId) ? java.util.Optional.of(runId) : java.util.Optional.empty();
+            return registry.claim(runId, sessionId, sessionWorkspace(sessionId)) ? java.util.Optional.of(runId) : java.util.Optional.empty();
         }
+    }
+
+    private Path sessionWorkspace(String sessionId) {
+        return toolFactory.resolve(sessions.find(sessionId).map(Session::workspace).orElse(null));
+    }
+
+    @Override
+    public boolean lockWorkspace(String operationId, Path workspace) {
+        return registry.lockWorkspace(operationId, workspace);
     }
 
     @Override
@@ -690,6 +699,7 @@ public class AgentRunService implements RunStarter {
 
         snapshots.bind(runId, toolFactory.resolve(workspace));
         try {
+            snapshots.saveConversation(runId, history, plans.load(sessionId));
             AgentLoop.Result result = continuation
                     ? loop.resume(history, sink, checkpoint)
                     : loop.run(input, attachments, history, sink, checkpoint);
@@ -711,7 +721,11 @@ public class AgentRunService implements RunStarter {
             publish(sessionId, runId, new RunFailed("INTERNAL_ERROR", "执行失败：" + reason, false));
             return "FAILED";
         } finally {
-            snapshots.clear();
+            try {
+                snapshots.finish();
+            } finally {
+                snapshots.clear();
+            }
         }
     }
 

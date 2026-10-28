@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -51,6 +52,26 @@ class RunChangesApiTest {
                 .andExpect(jsonPath("$.workspace").value(workspace.toAbsolutePath().normalize().toString()))
                 .andExpect(jsonPath("$.files[0].path").value("a.txt"))
                 .andExpect(jsonPath("$.files[0].status").value("M"));
+    }
+
+    @Test
+    void rollbackEndpointReportsConflictAndKeepsManualEdit() throws Exception {
+        Path file = workspace.resolve("a.txt");
+        Files.writeString(file, "original");
+        snapshots.bind("run_rollback_conflict", workspace);
+        snapshots.beforeWrite(file);
+        Files.writeString(file, "agent result");
+        snapshots.finish();
+        snapshots.clear();
+        Files.writeString(file, "manual edit");
+
+        mvc.perform(post("/api/runs/{runId}/rollback", "run_rollback_conflict"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.conflicts[0]").value("a.txt"))
+                .andExpect(jsonPath("$.restored").isEmpty())
+                .andExpect(jsonPath("$.deleted").isEmpty());
+
+        org.junit.jupiter.api.Assertions.assertEquals("manual edit", Files.readString(file));
     }
 
     @Test

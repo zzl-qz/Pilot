@@ -20,7 +20,7 @@
       document.documentElement.dataset.accent = 'blue';
     }
   </script>
-  <link rel="stylesheet" href="/style.css?v=23">
+  <link rel="stylesheet" href="/style.css?v=24">
 </head>
 <body>
 <div class="app" id="app">
@@ -242,6 +242,7 @@
           <span id="changes-totals" class="changes-totals" hidden></span>
         </div>
         <div class="changes-actions">
+          <button id="branch-create" class="btn btn-sm" type="button" title="在当前工作区创建并切换到新分支">Git 分支</button>
           <button id="changes-rollback" class="btn btn-danger btn-sm" type="button" hidden title="把本次运行改过的文件还原到运行前">回滚</button>
           <button id="changes-refresh" class="icon-btn icon-btn-sm" type="button" title="刷新变更" aria-label="刷新变更">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.6V5.4h-2.8" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -422,6 +423,6 @@
 <div id="scrim" class="scrim" hidden></div>
 
 <div id="drop-veil" class="drop-veil" hidden>松开以添加文件</div>
-<script type="module" src="/app.js?v=25"></script>
+<script type="module" src="/app.js?v=26"></script>
 </body>
 </html>

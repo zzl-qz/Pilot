@@ -122,6 +122,7 @@ const el = {
   changesState: document.querySelector('#changes-state'),
   changesRefresh: document.querySelector('#changes-refresh'),
   changesRollback: document.querySelector('#changes-rollback'),
+  branchCreate: document.querySelector('#branch-create'),
   runChanges: document.querySelector('#run-changes'),
   changeFiles: document.querySelector('#change-files'),
   changeDiff: document.querySelector('#change-diff'),
@@ -465,6 +466,7 @@ function init() {
   el.panelTabs.addEventListener('click', onTabClick);
   el.changesRefresh.addEventListener('click', () => loadChanges());
   el.changesRollback.addEventListener('click', rollbackRun);
+  el.branchCreate.addEventListener('click', createWorkspaceBranch);
   el.send.addEventListener('click', onSendButtonClick);
   el.noticeClose.addEventListener('click', hideNotice);
   el.pickerClose.addEventListener('click', closePicker);
@@ -3534,6 +3536,7 @@ function appendUserMessage(text, sequence) {
   const actions = document.createElement('div');
   actions.className = 'msg-actions';
   actions.append(button('编辑', 'msg-edit-btn', () => beginEditUserMessage(wrapper)));
+  actions.append(button('回退 / 分支', 'msg-edit-btn', () => openMessageCheckpoint(wrapper)));
 
   wrapper.append(bubble, actions);
   el.messages.append(wrapper);
@@ -3548,6 +3551,174 @@ function stampLastUserMessage(sequence, text) {
     return;
   }
   last.dataset.sequence = String(sequence);
+}
+
+/** 选择的是用户消息发送前的检查点；代码和模型记忆分别恢复。 */
+async function openMessageCheckpoint(wrapper) {
+  if (state.running) {
+    showNotice('请等任务结束或停止后，再选择消息回退。');
+    return;
+  }
+  const sequence = Number(wrapper.dataset.sequence);
+  const sessionId = state.sessionId;
+  if (!sequence || !sessionId) {
+    showNotice('这条消息没有独立检查点，请选择它所属的任务。');
+    return;
+  }
+  const dialog = document.createElement('dialog');
+  dialog.className = 'checkpoint-dialog';
+  dialog.setAttribute('aria-labelledby', 'checkpoint-title');
+  const title = document.createElement('h2');
+  title.id = 'checkpoint-title';
+  title.textContent = '回到这条消息发送前';
+  const excerpt = document.createElement('blockquote');
+  excerpt.textContent = wrapper.dataset.text || '';
+  const info = document.createElement('p');
+  info.className = 'checkpoint-hint';
+  info.textContent = '正在检查后续改动…';
+  const details = document.createElement('div');
+  details.className = 'checkpoint-details';
+  details.setAttribute('role', 'status');
+  const choices = document.createElement('fieldset');
+  choices.className = 'checkpoint-choices';
+  const legend = document.createElement('legend');
+  legend.textContent = '选择回退范围';
+  choices.append(legend);
+  const options = new Map();
+  for (const [value, label, description] of [
+    ['both', '一起撤', '还原文件，移除这条消息及后续对话，并回填原消息。'],
+    ['code', '只撤代码', '还原后续任务改过的文件，保留当前对话。'],
+    ['conversation', '只撤对话', '保留当前文件，移除这条消息及后续对话，并回填原消息。']
+  ]) {
+    const row = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'checkpoint-mode';
+    input.value = value;
+    const text = document.createElement('span');
+    const name = document.createElement('strong');
+    name.textContent = label;
+    const hint = document.createElement('small');
+    hint.textContent = description;
+    text.append(name, hint);
+    row.append(input, text);
+    choices.append(row);
+    options.set(value, input);
+  }
+  const branchHint = document.createElement('p');
+  branchHint.className = 'checkpoint-hint';
+  branchHint.textContent = '另开对话分支：保留原聊天，从此处的历史开始；新聊天使用当前工作区文件。Git 分支可在变更面板单独创建。';
+  const footer = document.createElement('div');
+  footer.className = 'checkpoint-actions';
+  const cancel = button('取消', 'btn btn-sm', () => dialog.close());
+  const fork = button('另开对话分支', 'btn btn-sm', () => applyCheckpoint('fork'));
+  const restore = button('确认回退', 'btn btn-primary btn-sm', () => applyCheckpoint('restore'));
+  fork.disabled = true;
+  restore.disabled = true;
+  footer.append(cancel, fork, restore);
+  dialog.append(title, excerpt, info, details, choices, branchHint, footer);
+  let busy = false;
+  let previewData = null;
+  dialog.addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.addEventListener('keydown', (event) => event.stopPropagation());
+  document.body.append(dialog);
+  dialog.showModal();
+  cancel.focus();
+  const url = `/api/sessions/${encodeURIComponent(sessionId)}/checkpoints`;
+
+  function updateChoices() {
+    if (!previewData) return;
+    const canCode = previewData.code.ready && previewData.code.files.length > 0;
+    options.get('both').disabled = !canCode || !previewData.conversationAvailable;
+    options.get('code').disabled = !canCode;
+    options.get('conversation').disabled = !previewData.conversationAvailable;
+    const selected = [...options.values()].find((input) => input.checked && !input.disabled)
+      || [...options.values()].find((input) => !input.disabled);
+    for (const input of options.values()) input.checked = input === selected;
+    restore.disabled = !selected;
+    fork.disabled = !previewData.conversationAvailable;
+  }
+
+  function renderPreview(data) {
+    previewData = data;
+    info.textContent = `将回退所选消息及之后的 ${data.runs} 轮任务，涉及 ${data.code.files.length} 个文件。新建文件会被删除。`;
+    details.replaceChildren();
+    for (const [label, paths] of [
+      ['检测到后续修改，代码回退已阻止', data.code.conflicts],
+      ['快照不可用，无法回退代码', data.code.unavailable],
+      ['涉及文件', data.code.files]
+    ]) {
+      if (!paths.length) continue;
+      const heading = document.createElement('p');
+      heading.textContent = label;
+      const list = document.createElement('ul');
+      for (const path of paths) {
+        const item = document.createElement('li');
+        item.textContent = path;
+        list.append(item);
+      }
+      details.append(heading, list);
+    }
+    if (!data.conversationAvailable) {
+      const hint = document.createElement('p');
+      hint.textContent = '这条历史消息没有可用的对话检查点，无法回退对话或另开对话分支。';
+      details.append(hint);
+    }
+    updateChoices();
+  }
+
+  async function refreshPreview() {
+    const response = await apiFetch(`${url}?sequence=${sequence}`);
+    if (!response.ok) throw new Error(await describeError(response));
+    const data = await response.json();
+    if (dialog.isConnected) renderPreview(data);
+  }
+
+  async function applyCheckpoint(action) {
+    const mode = [...options.values()].find((input) => input.checked)?.value;
+    if (busy || !previewData || (action === 'restore' && !mode)) return;
+    busy = true;
+    for (const node of dialog.querySelectorAll('button, input')) node.disabled = true;
+    try {
+      const response = await apiFetch(`${url}/${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sequence, mode, revision: previewData.revision })
+      });
+      if (!response.ok) throw new Error(await describeError(response));
+      const data = await response.json();
+      if (action === 'restore' && !data.applied) {
+        await refreshPreview();
+        throw new Error('文件校验未通过，回退未完成；请检查冲突或缺失快照。');
+      }
+      dialog.close();
+      closeStream();
+      await loadSessions();
+      if (action === 'fork') {
+        await activate(data.sessionId, data.title, data.workspace);
+      } else {
+        await activate(sessionId, state.sessionTitle, state.workspace);
+      }
+      if (action === 'fork' || mode !== 'code') {
+        const draft = el.input.value.trim();
+        el.input.value = draft && draft !== data.input ? `${draft}\n\n${data.input}` : data.input;
+        autoGrow();
+        el.input.focus();
+      }
+      loadChanges();
+      showNotice(action === 'fork' ? '已创建对话分支，原聊天已保留；当前工作区文件继续共用。'
+        : mode === 'code' ? '代码已回退，对话已保留。' : mode === 'conversation' ? '对话已回退，原消息已回填。' : '代码和对话已回退，原消息已回填。');
+    } catch (error) {
+      info.textContent = '操作失败：' + error.message;
+    } finally {
+      busy = false;
+      cancel.disabled = false;
+      updateChoices();
+    }
+  }
+
+  try { await refreshPreview(); }
+  catch (error) { info.textContent = '检查点读取失败：' + error.message; }
 }
 
 function beginEditUserMessage(wrapper) {
@@ -3589,6 +3760,7 @@ function restoreUserBubble(wrapper, text) {
   const actions = document.createElement('div');
   actions.className = 'msg-actions';
   actions.append(button('编辑', 'msg-edit-btn', () => beginEditUserMessage(wrapper)));
+  actions.append(button('回退 / 分支', 'msg-edit-btn', () => openMessageCheckpoint(wrapper)));
   wrapper.append(bubble, actions);
 }
 
@@ -4716,8 +4888,36 @@ async function refreshActiveRun() {
   }
 }
 
+async function createWorkspaceBranch() {
+  if (!state.sessionId || state.running) {
+    return;
+  }
+  const name = window.prompt('新 Git 分支名称（当前未提交改动会保留在工作区）');
+  if (!name || !name.trim()) {
+    return;
+  }
+  el.branchCreate.disabled = true;
+  try {
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/branch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() })
+    });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const branch = await response.json();
+    showNotice(`已切换到 Git 分支 ${branch.name}，当前未提交改动已保留。`);
+    loadChanges();
+  } catch (error) {
+    showNotice('创建分支失败：' + error.message);
+  } finally {
+    el.branchCreate.disabled = false;
+  }
+}
+
 async function rollbackRun() {
-  if (!state.lastRunId) {
+  if (!state.lastRunId || state.running) {
     return;
   }
   const confirmed = window.confirm('把本次运行改过的文件还原到运行前？新建的文件会被删除。');
@@ -4735,6 +4935,11 @@ async function rollbackRun() {
       throw new Error(await describeError(response));
     }
     const report = await response.json();
+    const conflicts = report.conflicts || [];
+    if (conflicts.length) {
+      showNotice(`检测到回退后又被修改的文件，未执行回退：${conflicts.join('、')}`);
+      return;
+    }
     const failed = (report.failed || []).length;
     showNotice(`已回滚：还原 ${(report.restored || []).length} 个、删除 ${(report.deleted || []).length} 个`
       + (failed ? `、失败 ${failed} 个` : ''));
@@ -4929,6 +5134,7 @@ function syncComposer() {
     : editing ? '保存这条排队消息 (Enter)' : '发送 (Ctrl Enter)';
   el.send.disabled = running ? false : !state.composerEnabled;
   el.changesRollback.hidden = !(state.lastRunId && !running);
+  el.branchCreate.disabled = !state.sessionId || running;
   if (editing) {
     el.input.placeholder = '正在编辑排队的消息… Enter 保存';
   } else {
@@ -5267,6 +5473,7 @@ function resetView() {
   state.replyCommitted = '';
   state.turnShell = null;
   state.running = false;
+  setRunState('idle', '空闲');
   state.runId = null;
   state.lastRunId = null;
   state.changedFiles = [];
