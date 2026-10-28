@@ -36,7 +36,7 @@ import java.util.regex.Pattern;
 public final class RunCommandTool implements Tool, ProducesCheck {
     private static final Set<String> ALLOWED_EXECUTABLES = Set.of(
             "mvn", "mvnw", "gradle", "gradlew", "git", "java", "javac",
-            "node", "npm", "pnpm", "python", "python3", "pytest", "dotnet", "go", "cargo", "rustc", "tsc");
+            "node", "npm", "npx", "pnpm", "python", "python3", "pytest", "dotnet", "go", "cargo", "rustc", "tsc");
 
     private static final Set<String> GIT_READONLY = Set.of(
             "status", "diff", "log", "show", "branch", "rev-parse", "ls-files", "describe", "blame", "remote");
@@ -249,18 +249,18 @@ public final class RunCommandTool implements Tool, ProducesCheck {
      * 都指向当前运行时的 JDK，保证构建命令看到的是同一个 Java。
      */
     private static void useCurrentJdk(Map<String, String> env) {
-        String javaHome = System.getProperty("java.home");
-        if (javaHome == null || javaHome.isBlank()) {
-            return;
-        }
-        Path bin = Path.of(javaHome, "bin");
-        env.put("JAVA_HOME", javaHome);
         String pathKey = env.keySet().stream()
                 .filter(key -> key.equalsIgnoreCase("PATH"))
                 .findFirst()
                 .orElse("PATH");
-        String current = env.getOrDefault(pathKey, "");
-        env.put(pathKey, current.isBlank() ? bin.toString() : bin + File.pathSeparator + current);
+        String javaHome = System.getProperty("java.home");
+        if (javaHome != null && !javaHome.isBlank()) {
+            Path bin = Path.of(javaHome, "bin");
+            env.put("JAVA_HOME", javaHome);
+            String current = env.getOrDefault(pathKey, "");
+            env.put(pathKey, joinPath(bin.toString(), stripPrefix(current, bin.toString())));
+        }
+        env.put(pathKey, joinPath(runtimeBins(), env.getOrDefault(pathKey, "")));
     }
 
     private static String render(String displayCommand, List<String> actual, int exitCode,
@@ -341,15 +341,38 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         return null;
     }
 
-    /** PATH 前面拼上当前运行时的 JDK，避免解析到系统默认的旧 java。 */
+    /** PATH 前面先放内置的 Python/Node，再放当前 JDK，避免用到系统里另一套解释器。 */
     private static String effectivePath() {
         String base = System.getenv("PATH");
         String javaHome = System.getProperty("java.home");
-        if (javaHome == null || javaHome.isBlank()) {
-            return base;
+        if (javaHome != null && !javaHome.isBlank()) {
+            base = joinPath(Path.of(javaHome, "bin").toString(), base);
         }
-        String bin = Path.of(javaHome, "bin").toString();
-        return base == null || base.isBlank() ? bin : bin + File.pathSeparator + base;
+        return joinPath(runtimeBins(), base);
+    }
+
+    static String runtimeBins() {
+        String extra = System.getProperty("pilot.runtime.bin");
+        return extra == null ? "" : extra.strip();
+    }
+
+    private static String joinPath(String front, String rest) {
+        if (front == null || front.isBlank()) {
+            return rest == null ? "" : rest;
+        }
+        rest = stripPrefix(rest, front);
+        if (rest == null || rest.isBlank()) {
+            return front;
+        }
+        return front + File.pathSeparator + rest;
+    }
+
+    private static String stripPrefix(String path, String prefix) {
+        if (path == null || path.isBlank() || prefix == null || prefix.isBlank()) {
+            return path == null ? "" : path;
+        }
+        String head = prefix + File.pathSeparator;
+        return path.startsWith(head) ? path.substring(head.length()) : path.equals(prefix) ? "" : path;
     }
 
     private Path findWrapper(String baseName) {

@@ -239,6 +239,9 @@ const state = {
   inputHistoryIndex: -1,
   inputHistoryDraft: '',
   queue: [],
+  queueCollapsed: false,
+  /** 正在改队列里的某一条：{ index, previous }，previous 是进编辑前输入框里的草稿 */
+  queueEdit: null,
   attachments: [],
   modelOptions: [],
   modelApiKeySet: false,
@@ -1967,6 +1970,7 @@ function renderHistoryWindow(events, hasMore, { keepViewport = false } = {}) {
   resetView();
   state.pendingInputs = [];
   state.queue = [];
+  state.queueEdit = null;
   renderQueue();
   state.historyHasMore = hasMore;
   state.windowEvents = [];
@@ -4474,6 +4478,10 @@ function onPromptClick(event) {
 async function sendMessage(event) {
   event.preventDefault();
   const content = el.input.value.trim();
+  if (state.queueEdit) {
+    await saveQueuedEdit(content);
+    return;
+  }
   const attachments = state.attachments.slice();
   if (!content && !attachments.length) {
     return;
@@ -4912,15 +4920,23 @@ function setComposerEnabled(enabled) {
 /** 输入区：单按钮，空闲是发送、运行中变停止；结束后按需显示回滚。 */
 function syncComposer() {
   const running = state.running;
+  const editing = Boolean(state.queueEdit);
+  // 运行中圆按钮仍是停止。改排队消息用 Enter 保存，避免把停止入口盖掉
   el.send.classList.toggle('is-running', running);
-  el.send.setAttribute('aria-label', running ? '停止' : '发送');
-  el.send.title = running ? '停止本次运行' : '发送 (Ctrl Enter)';
-  // 运行中按钮必须可点：此时它是唯一的停止入口
+  el.send.setAttribute('aria-label', running ? '停止' : editing ? '保存排队消息' : '发送');
+  el.send.title = running
+    ? '停止本次运行'
+    : editing ? '保存这条排队消息 (Enter)' : '发送 (Ctrl Enter)';
   el.send.disabled = running ? false : !state.composerEnabled;
   el.changesRollback.hidden = !(state.lastRunId && !running);
-  el.input.placeholder = running
-    ? '运行中。再写一句会排队，当前任务完成后依次发送；等待时可改、可删'
-    : '描述任务，Enter 发送，Shift + Enter 换行，@ 引用文件，/ 快捷指令';
+  if (editing) {
+    el.input.placeholder = '正在编辑排队的消息… Enter 保存';
+  } else {
+    el.input.placeholder = running
+      ? '运行中。再写一句会排队，当前任务完成后依次发送；等待时可改、可删'
+      : '描述任务，Enter 发送，Shift + Enter 换行，@ 引用文件，/ 快捷指令';
+  }
+  renderQueueEditBar();
 }
 
 async function loadQueue() {
@@ -4949,62 +4965,203 @@ function renderQueue() {
   el.messageQueue.replaceChildren();
   el.messageQueue.hidden = items.length === 0;
   if (!items.length) {
+    if (state.queueEdit) {
+      el.input.value = state.queueEdit.previous || '';
+      autoGrow();
+      state.queueEdit = null;
+      syncComposer();
+    } else {
+      renderQueueEditBar();
+    }
     return;
   }
-  const title = document.createElement('p');
+  if (state.queueEdit && state.queueEdit.index >= items.length) {
+    const previous = state.queueEdit.previous;
+    state.queueEdit = null;
+    if (el.input && previous != null) {
+      el.input.value = previous;
+      autoGrow();
+    }
+  }
+
+  const collapsed = state.queueCollapsed === true;
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'queue-head';
+  head.setAttribute('aria-expanded', String(!collapsed));
+  const chevron = document.createElement('span');
+  chevron.className = 'queue-chevron' + (collapsed ? '' : ' is-open');
+  chevron.textContent = '›';
+  const title = document.createElement('span');
   title.className = 'queue-title';
-  title.textContent = `排队 ${items.length} 句。当前任务完成后依次发送，等待期间可改或删。`;
-  el.messageQueue.append(title);
+  title.textContent = items.length === 1 ? '1 条排队' : `${items.length} 条排队`;
+  head.append(chevron, title);
+  head.addEventListener('click', () => {
+    state.queueCollapsed = !state.queueCollapsed;
+    renderQueue();
+  });
+  el.messageQueue.append(head);
+  if (collapsed) {
+    return;
+  }
+
   items.forEach((text, index) => {
     const row = document.createElement('div');
-    row.className = 'queue-item';
-    const body = document.createElement('p');
+    row.className = 'queue-item' + (state.queueEdit && state.queueEdit.index === index ? ' is-editing' : '');
+
+    const dot = document.createElement('span');
+    dot.className = 'queue-dot';
+    dot.setAttribute('aria-hidden', 'true');
+
+    const body = document.createElement('button');
+    body.type = 'button';
+    body.className = 'queue-text';
     body.textContent = text;
+    body.title = '编辑这条排队消息';
+    body.addEventListener('click', () => beginQueueEdit(index));
+
     const actions = document.createElement('div');
     actions.className = 'queue-actions';
-    actions.append(
-      button('改', 'btn btn-sm', () => editQueuedItem(index, row)),
-      button('移除', 'btn btn-sm', () => removeQueuedItem(index))
-    );
-    row.append(body, actions);
+    const up = iconButton('往前排', queueUpIcon(), () => moveQueuedItem(index));
+    up.disabled = index === 0;
+    const remove = iconButton('删除', queueTrashIcon(), () => removeQueuedItem(index));
+    actions.append(up, remove);
+    row.append(dot, body, actions);
     el.messageQueue.append(row);
   });
 }
 
-function editQueuedItem(index, row) {
-  const current = state.queue[index] || '';
-  const field = document.createElement('textarea');
-  field.value = current;
-  const actions = document.createElement('div');
-  actions.className = 'queue-actions';
-  actions.append(
-    button('取消', 'btn btn-sm', () => renderQueue()),
-    button('保存', 'btn btn-primary btn-sm', async () => {
-      const text = field.value.trim();
-      if (!text) {
-        showNotice('排队的内容不能是空的，不想发就点移除。');
-        return;
+function renderQueueEditBar() {
+  let bar = document.getElementById('queue-edit');
+  if (!state.queueEdit) {
+    if (bar) {
+      bar.hidden = true;
+    }
+    return;
+  }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'queue-edit';
+    bar.className = 'queue-edit';
+    const label = document.createElement('span');
+    label.textContent = '正在编辑排队消息';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'queue-edit-cancel';
+    cancel.textContent = '取消';
+    cancel.addEventListener('click', cancelQueueEdit);
+    bar.append(label, cancel);
+    el.messageQueue.insertAdjacentElement('afterend', bar);
+  }
+  bar.hidden = false;
+}
+
+function beginQueueEdit(index) {
+  const text = state.queue[index];
+  if (text == null) {
+    return;
+  }
+  if (!state.queueEdit) {
+    state.queueEdit = { index, previous: el.input.value };
+  } else {
+    state.queueEdit.index = index;
+  }
+  el.input.value = text;
+  autoGrow();
+  el.input.focus();
+  syncComposer();
+  renderQueue();
+}
+
+function cancelQueueEdit() {
+  if (!state.queueEdit) {
+    return;
+  }
+  el.input.value = state.queueEdit.previous || '';
+  state.queueEdit = null;
+  autoGrow();
+  syncComposer();
+  renderQueue();
+}
+
+async function saveQueuedEdit(content) {
+  const edit = state.queueEdit;
+  if (!edit) {
+    return;
+  }
+  if (!content) {
+    showNotice('排队的内容不能是空的，不想发就点删除。');
+    return;
+  }
+  try {
+    const data = await putQueueItem(edit.index, content);
+    state.queue = Array.isArray(data.items) ? data.items : [];
+    el.input.value = edit.previous || '';
+    state.queueEdit = null;
+    autoGrow();
+    syncComposer();
+    renderQueue();
+  } catch (error) {
+    showNotice('改队列失败：' + error.message);
+  }
+}
+
+async function moveQueuedItem(index) {
+  if (index <= 0 || !state.sessionId) {
+    return;
+  }
+  const current = state.queue[index];
+  const above = state.queue[index - 1];
+  try {
+    await putQueueItem(index - 1, current);
+    const data = await putQueueItem(index, above);
+    state.queue = Array.isArray(data.items) ? data.items : [];
+    if (state.queueEdit) {
+      if (state.queueEdit.index === index) {
+        state.queueEdit.index = index - 1;
+      } else if (state.queueEdit.index === index - 1) {
+        state.queueEdit.index = index;
       }
-      try {
-        const response = await apiFetch(
-          `/api/sessions/${encodeURIComponent(state.sessionId)}/queue/${index}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: text })
-          });
-        if (!response.ok) {
-          throw new Error(await describeError(response));
-        }
-        const data = await response.json();
-        state.queue = Array.isArray(data.items) ? data.items : [];
-        renderQueue();
-      } catch (error) {
-        showNotice('改队列失败：' + error.message);
-      }
-    })
-  );
-  row.replaceChildren(field, actions);
-  field.focus();
+    }
+    renderQueue();
+  } catch (error) {
+    showNotice('调整顺序失败：' + error.message);
+  }
+}
+
+async function putQueueItem(index, content) {
+  const response = await apiFetch(
+    `/api/sessions/${encodeURIComponent(state.sessionId)}/queue/${index}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content })
+    });
+  if (!response.ok) {
+    throw new Error(await describeError(response));
+  }
+  return response.json();
+}
+
+function iconButton(label, svg, onClick) {
+  const control = document.createElement('button');
+  control.type = 'button';
+  control.className = 'queue-icon';
+  control.title = label;
+  control.setAttribute('aria-label', label);
+  control.innerHTML = svg;
+  control.addEventListener('click', (event) => {
+    event.stopPropagation();
+    onClick();
+  });
+  return control;
+}
+
+function queueUpIcon() {
+  return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V4.2M4.8 7.2 8 3.8l3.2 3.4" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+}
+
+function queueTrashIcon() {
+  return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 4.5h9M6.2 4.4V3.2h3.6v1.2M5.2 4.5l.4 8h4.8l.4-8" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 }
 
 async function removeQueuedItem(index) {

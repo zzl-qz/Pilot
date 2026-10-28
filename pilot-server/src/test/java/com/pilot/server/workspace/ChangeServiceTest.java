@@ -312,6 +312,49 @@ class ChangeServiceTest {
 
         assertTrue(report.gitRepository());
         assertTrue(report.diff().contains("+new"), report.diff());
+        ChangeService.FileChange staged = sessionFile(report, "a.txt");
+        assertEquals(1, staged.added(), "已暂存的新增行也要计入，不能显示成 +0");
+        assertEquals(0, staged.removed());
+    }
+
+    /** 变更面板的 +N −M 跟 git numstat 同一口径：暂存的新文件、未暂存的修改、未跟踪文件都要有行数。 */
+    @Test
+    void sessionReportCountsLineStatsLikeNumstat() throws IOException {
+        assumeTrue(git("--version"), "需要本机可用的 git");
+        git("init", "-q");
+        git("config", "core.autocrlf", "false");
+        Files.writeString(workspace.resolve("keep.txt"), "one\ntwo\n");
+        git("add", ".");
+        commit();
+
+        Files.writeString(workspace.resolve("keep.txt"), "one\nTWO\n");
+        Files.writeString(workspace.resolve("Added.java"), "class A {}\nclass B {}\n");
+        git("add", "Added.java");
+        Files.writeString(workspace.resolve("note.md"), "a\nb\nc\n");
+
+        ChangeService.ChangeReport report = changes.inspect(workspace);
+
+        ChangeService.FileChange modified = sessionFile(report, "keep.txt");
+        assertEquals("M", modified.status());
+        assertEquals(1, modified.added());
+        assertEquals(1, modified.removed());
+
+        ChangeService.FileChange added = sessionFile(report, "Added.java");
+        assertEquals("A", added.status());
+        assertEquals(2, added.added());
+        assertEquals(0, added.removed());
+
+        ChangeService.FileChange untracked = sessionFile(report, "note.md");
+        assertEquals("??", untracked.status());
+        assertEquals(3, untracked.added());
+        assertEquals(0, untracked.removed());
+    }
+
+    private static ChangeService.FileChange sessionFile(ChangeService.ChangeReport report, String path) {
+        return report.files().stream()
+                .filter(file -> file.path().equals(path))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("缺少文件: " + path));
     }
 
     private static ChangeService.RunFileChange file(ChangeService.RunChangeReport report, String path) {

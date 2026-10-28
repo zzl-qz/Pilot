@@ -54,7 +54,9 @@ class MultiAgentServiceTest {
         Files.createDirectories(workspace.resolve("src"));
         Files.writeString(workspace.resolve("src/A.java"), "class A {}\n");
         var agent = new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 300, 2, 1, 60_000, true);
-        var factory = new WorkspaceToolFactory(agent, SnapshotSink.none());
+        var factory = new WorkspaceToolFactory(agent,
+                new com.pilot.server.config.WebSearchProperties(false, "http://127.0.0.1:9", "", ""),
+                SnapshotSink.none(), JsonMapper.builder().build());
         var store = new SandboxStore(JsonMapper.builder().build(), new PilotDataDir(dataDir.toString()));
         var properties = new MultiAgentProperties(true, 2, 2, 8, 30, List.of());
         VerificationGate gate = (root, base, changes) -> VerificationGate.Report.skipped("测试环境跳过编译");

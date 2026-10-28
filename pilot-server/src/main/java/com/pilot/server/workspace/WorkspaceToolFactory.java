@@ -14,10 +14,16 @@ import com.pilot.core.tool.SearchTool;
 import com.pilot.core.tool.SnapshotSink;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.UpdatePlanTool;
+import com.pilot.core.tool.WebFetchTool;
+import com.pilot.core.tool.WebSearchTool;
 import com.pilot.core.workspace.PathValidator;
+import tools.jackson.databind.ObjectMapper;
 import com.pilot.server.config.AgentProperties;
+import com.pilot.server.config.WebSearchProperties;
 import org.springframework.stereotype.Component;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,12 +38,21 @@ import java.util.concurrent.ConcurrentMap;
 @Component
 public class WorkspaceToolFactory {
     private final AgentProperties properties;
+    private final WebSearchProperties webSearchProperties;
     private final SnapshotSink snapshots;
+    private final ObjectMapper mapper;
+    private final HttpClient webClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build();
     private final ConcurrentMap<String, ToolRegistry> cache = new ConcurrentHashMap<>();
 
-    public WorkspaceToolFactory(AgentProperties properties, SnapshotSink snapshots) {
+    public WorkspaceToolFactory(AgentProperties properties, WebSearchProperties webSearchProperties,
+                                SnapshotSink snapshots, ObjectMapper mapper) {
         this.properties = properties;
+        this.webSearchProperties = webSearchProperties;
         this.snapshots = snapshots;
+        this.mapper = mapper;
     }
 
     /** @param workspace 会话工作区；为空时回退到配置中的默认工作区 */
@@ -87,6 +102,12 @@ public class WorkspaceToolFactory {
         if (view.allowsTool("search_text")) {
             registry.register(new SearchTool(validator));
         }
+        if (view.allowsTool("web_search")) {
+            registry.register(searchTool());
+        }
+        if (view.allowsTool("web_fetch")) {
+            registry.register(new WebFetchTool(webClient));
+        }
         if (view.allowsTool("run_command")) {
             registry.register(new RunCommandTool(validator));
         }
@@ -99,12 +120,18 @@ public class WorkspaceToolFactory {
         return registry;
     }
 
+    private WebSearchTool searchTool() {
+        return new WebSearchTool(webClient, mapper, webSearchProperties.endpointUri());
+    }
+
     private ToolRegistry create(Path root, PlanSink planSink) {
         var validator = new PathValidator(root);
         var registry = new ToolRegistry();
         registry.register(new ReadFileTool(validator));
         registry.register(new ListDirTool(validator));
         registry.register(new SearchTool(validator));
+        registry.register(searchTool());
+        registry.register(new WebFetchTool(webClient));
         registry.register(new EditFileTool(validator, snapshots));
         registry.register(new CreateFileTool(validator, snapshots));
         registry.register(new RunCommandTool(validator));

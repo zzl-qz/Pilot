@@ -29,7 +29,13 @@ public class ChangeService {
     /** 单个 git 命令最多收集这么多字节；超出部分读掉但不保留，避免堆被打爆。 */
     private static final int MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
-    public record FileChange(String status, String path) {
+    /**
+     * 工作区里的一个改动文件。
+     *
+     * @param added   相对 HEAD 新增的行数；未跟踪文件按当前内容整文件计
+     * @param removed 相对 HEAD 删除的行数
+     */
+    public record FileChange(String status, String path, int added, int removed) {
     }
 
     /**
@@ -63,14 +69,17 @@ public class ChangeService {
 
         String status = exec(workspace, List.of("git", "status", "--porcelain=v1", "-uall"));
         // 与运行级保持一致：相对 HEAD 取补丁，已暂存的改动才不会在审阅面板里消失
+        boolean head = hasHead(workspace);
         var diffCommand = new ArrayList<>(List.of("git", "-c", "core.quotePath=false", "diff",
                 "--no-color", "--no-ext-diff"));
-        if (hasHead(workspace)) {
+        if (head) {
             diffCommand.add("HEAD");
         }
         diffCommand.add("--");
         diffCommand.add(".");
         String diff = stripNoise(exec(workspace, diffCommand));
+        // 行数用 numstat，不从可能被截断的补丁正文里数，否则大改动会显示成 +0 −0
+        Map<String, int[]> stats = numstat(workspace, head);
 
         var files = new ArrayList<FileChange>();
         boolean truncated = false;
@@ -88,7 +97,17 @@ public class ChangeService {
             if (renameMark > 0) {
                 path = path.substring(renameMark + 4);
             }
-            files.add(new FileChange(code.isEmpty() ? "?" : code, path));
+            if (code.isEmpty()) {
+                code = "?";
+            }
+            int[] stat = stats.get(path);
+            if (stat == null && countsAsWholeFile(code)) {
+                stat = new int[]{countTextLines(workspace.resolve(path)), 0};
+            }
+            if (stat == null) {
+                stat = new int[]{0, 0};
+            }
+            files.add(new FileChange(code, path, stat[0], stat[1]));
         }
 
         boolean diffTruncated = diff.length() > MAX_DIFF_CHARS;
@@ -320,6 +339,89 @@ public class ChangeService {
             }
         }
         return null;
+    }
+
+    /**
+     * 每个改动文件的增删行数。有提交时相对 HEAD（暂存和工作区都算），
+     * 还没有提交时只看暂存区。未跟踪文件不在这份输出里，调用方另行数行。
+     */
+    private static Map<String, int[]> numstat(Path root, boolean head) {
+        var command = new ArrayList<>(List.of("git", "-c", "core.quotePath=false", "diff",
+                "--numstat", "--no-color", "--no-ext-diff"));
+        if (head) {
+            command.add("HEAD");
+        } else {
+            command.add("--cached");
+        }
+        command.add("--");
+        command.add(".");
+        return parseNumstat(exec(root, command));
+    }
+
+    private static Map<String, int[]> parseNumstat(String output) {
+        Map<String, int[]> result = new LinkedHashMap<>();
+        if (output == null || output.isBlank()) {
+            return result;
+        }
+        for (String line : output.lines().toList()) {
+            String[] parts = line.split("\t", 3);
+            if (parts.length < 3 || parts[2].isBlank()) {
+                continue;
+            }
+            result.put(renameDestination(parts[2].strip()), new int[]{parseStat(parts[0]), parseStat(parts[1])});
+        }
+        return result;
+    }
+
+    /** 二进制文件的 numstat 是 {@code -}，按 0 行计，避免界面把「没法数」显示成异常。 */
+    private static int parseStat(String raw) {
+        if (raw == null || raw.isBlank() || "-".equals(raw)) {
+            return 0;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(raw.trim()));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /**
+     * numstat 的重命名有两种写法：{@code old => new}，或 {@code dir/{old => new}.java}。
+     * 界面列表用的是新路径，这里收成同一个键。
+     */
+    private static String renameDestination(String path) {
+        int arrow = path.indexOf(" => ");
+        if (arrow < 0) {
+            return path;
+        }
+        int open = path.indexOf('{');
+        int close = path.lastIndexOf('}');
+        if (open >= 0 && close > arrow) {
+            String inner = path.substring(open + 1, close);
+            int innerArrow = inner.indexOf(" => ");
+            String dest = innerArrow < 0 ? inner : inner.substring(innerArrow + 4);
+            return path.substring(0, open) + dest + path.substring(close + 1);
+        }
+        return path.substring(arrow + 4);
+    }
+
+    /** 未跟踪或新增、且 numstat 里没有这一条时，按当前文件内容整份计为新增。 */
+    private static boolean countsAsWholeFile(String code) {
+        return code.indexOf('?') >= 0 || code.indexOf('A') >= 0;
+    }
+
+    /** 未跟踪文件的行数。过大或二进制不硬读，避免审阅面板被一个大文件拖住。 */
+    private static int countTextLines(Path absolute) {
+        try {
+            if (!Files.isRegularFile(absolute) || Files.size(absolute) > MAX_UNTRACKED_BYTES || isBinary(absolute)) {
+                return 0;
+            }
+            try (var stream = Files.lines(absolute, StandardCharsets.UTF_8)) {
+                return (int) Math.min(Integer.MAX_VALUE, stream.count());
+            }
+        } catch (IOException | java.io.UncheckedIOException e) {
+            return 0;
+        }
     }
 
     private static boolean hasHead(Path root) {

@@ -73,6 +73,25 @@ class RunCommandToolTest {
         assertTrue(result.startsWith("ERROR: git add 只允许工作区内的相对路径"), result);
     }
 
+    @Test
+    void prefersBundledRuntimeOnPath() throws Exception {
+        Path bin = workspace.resolve("runtime-bin");
+        java.nio.file.Files.createDirectories(bin);
+        Path python = bin.resolve("python3");
+        java.nio.file.Files.writeString(python, "#!/bin/sh\necho bundled-python\n");
+        String previous = System.getProperty("pilot.runtime.bin");
+        System.setProperty("pilot.runtime.bin", bin.toString());
+        try {
+            assertEquals(python.toAbsolutePath(), RunCommandTool.resolveOnPath("python3").toAbsolutePath());
+        } finally {
+            if (previous == null) {
+                System.clearProperty("pilot.runtime.bin");
+            } else {
+                System.setProperty("pilot.runtime.bin", previous);
+            }
+        }
+    }
+
     /** mvnw 本身也要映射到工作区 wrapper，而不是去 PATH 里找一个不存在的 mvnw。 */
     @Test
     void mapsMvnwToWorkspaceWrapper() throws Exception {

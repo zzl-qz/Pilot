@@ -1,0 +1,38 @@
+# Pilot 写给本机 SearXNG 的配置。只监听 127.0.0.1，不对外。
+# 这些引擎都不需要 API key。JSON 必须开着，否则 web_search 拿不到结果。
+
+use_default_settings:
+  engines:
+    keep_only:
+      - brave
+      - duckduckgo
+      - baidu
+      - sogou
+      - quark
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json
+
+server:
+  port: 8888
+  bind_address: "127.0.0.1"
+  secret_key: "pilot-local-only"
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+outgoing:
+  request_timeout: 5.0
+  max_request_timeout: 10.0
+
+engines:
+  - name: baidu
+    disabled: false
+  - name: sogou
+    disabled: false
+  - name: quark
+    disabled: false
