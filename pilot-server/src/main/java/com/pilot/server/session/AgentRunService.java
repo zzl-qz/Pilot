@@ -444,9 +444,12 @@ public class AgentRunService implements RunStarter {
      *
      * <p>计划每轮重新注入：压缩会折叠历史，但 system 是重建的，长期约束不会丢
      * （与 Claude Code 把约束放 CLAUDE.md 的思路一致）。
+     *
+     * <p>正文段落按 {@code availableTools} 过滤：依赖的工具没注册，对应段落不进提示词，
+     * 避免教模型调用不存在的工具。
      */
-    private String systemPrompt(String sessionId, String workspace) {
-        String prompt = PROMPTS.system(PromptLibrary.environment(workspace));
+    private String systemPrompt(String sessionId, String workspace, Set<String> availableTools) {
+        String prompt = PROMPTS.system(PromptLibrary.environment(workspace), availableTools);
         String repository = repositoryBrief(workspace);
         if (!repository.isEmpty()) {
             prompt = prompt + "\n\n" + repository;
@@ -457,6 +460,22 @@ public class AgentRunService implements RunStarter {
         }
         String plan = planBrief(sessionId);
         return plan.isEmpty() ? prompt : prompt + "\n\n" + plan;
+    }
+
+    /**
+     * 本轮会话的完整工具名单：基础工具集 + 本方法调用点下方按条件注册的
+     * {@code spawn_agent} / {@code dispatch_agents}。系统提示词据此过滤依赖段。
+     *
+     * <p>条件注册的工具在这里声明第二遍是权衡的结果：SpawnAgentTool 持有 config，
+     * 注册无法提前到 systemPrompt 之前；谁改注册条件，谁同步改这里。
+     */
+    private Set<String> sessionTools(ToolRegistry base) {
+        Set<String> names = new java.util.LinkedHashSet<>(base.names());
+        names.add("spawn_agent");
+        if (multiProperties.enabled()) {
+            names.add("dispatch_agents");
+        }
+        return Set.copyOf(names);
     }
 
     /**
@@ -658,14 +677,13 @@ public class AgentRunService implements RunStarter {
                     explanation));
         };
         ToolRegistry tools = toolFactory.registryFor(workspace, planSink);
-        // 事件类型计数：压缩次数、工具调用量、失败码分布都从这里来
-        Consumer<SessionEvent> sink = event -> {
-            metrics.count("event." + event.type().wireName());
-            publish(sessionId, runId, event);
-        };
+        // 完整工具名单要先于 systemPrompt 算出：spawn_agent / dispatch_agents 在下方才注册，
+        // 而 SpawnAgentTool 依赖 config，注册顺序无法提前；两处条件必须保持一致。
+        Set<String> sessionTools = sessionTools(tools);
+        Consumer<SessionEvent> sink = event -> publish(sessionId, runId, event);
         Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
         var config = new AgentLoop.Config(properties.maxSteps(), properties.repeatedToolCallLimit(),
-                systemPrompt(sessionId, workspace),
+                systemPrompt(sessionId, workspace, sessionTools),
                 // 收尾时读一次计划，把「本轮是否真的做完」一并写进 run.completed
                 () -> plans.load(sessionId),
                 // 计划没做完时自动继续，而不是停下来等用户点「继续执行」

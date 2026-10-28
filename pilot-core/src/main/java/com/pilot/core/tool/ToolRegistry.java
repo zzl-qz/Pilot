@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -38,6 +39,11 @@ public final class ToolRegistry {
         return tools().stream()
                 .map(tool -> new ToolDefinition(tool.name(), tool.description(), tool.parameters()))
                 .toList();
+    }
+
+    /** 当前已注册的工具名，供系统提示词按工具过滤依赖段落。 */
+    public Set<String> names() {
+        return Set.copyOf(tools.keySet());
     }
 
     public Map<String, Tool> asMap() {

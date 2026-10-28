@@ -8,9 +8,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -22,8 +25,10 @@ import java.util.regex.Pattern;
  * <pre>
  * prompts/system/base.md            身份、边界、意图判定
  * prompts/system/workflow.md        调研、计划、编辑、验证
- * prompts/system/tools.md           工具选择策略
- * prompts/system/orchestration.md   多智能体调度与仲裁规则
+ * prompts/system/tools.md           工具选择策略（跨工具约束）
+ * prompts/system/tools-agents.md    子代理选择行（frontmatter 声明 requires）
+ * prompts/system/orchestration.md   证据与风险（对单 Agent 也成立的条款）
+ * prompts/system/dispatch.md        多智能体调度（requires: dispatch_agents）
  * prompts/system/output.md          结论格式
  * prompts/system/repository.md      仓库快照（顶层结构 / git / 构建方式）
  * prompts/system/project-rules.md   项目约定（PILOT.md 等）
@@ -40,6 +45,12 @@ import java.util.regex.Pattern;
  * prompts/subagent/job.md           子 Agent 的具体任务（{{title}} / {{goal}} / {{note}}）
  * </pre>
  *
+ * <p>system 段落可以在文件头声明 frontmatter（首行 {@code ---}，{@code requires:} 一键，再一行
+ * {@code ---}），声明该段依赖的工具，如 {@code requires: [dispatch_agents]}；组装时这些工具
+ * 不在可用集合里，整段跳过——工具未注册，用法教学就不该出现在提示词里。
+ * frontmatter 只支持 {@code requires} 一个键，出现其他键或格式非法时抛异常：
+ * 与变量缺失同一哲学，破损的提示词不应该被静默送进模型。
+ *
  * <p>模板变量写作 {@code {{name}}}，渲染时缺失即抛异常（宁可当场失败，也不要给模型一段
  * 带占位符的破损提示词）。classpath 资源不可变，读一次缓存；外部目录每次读盘，
  * 因此调提示词不需要重新打包，只要重启服务或等下一次运行。
@@ -52,9 +63,14 @@ public final class PromptLibrary {
     public static final String DIR_PROPERTY = "pilot.prompts.dir";
     public static final String DIR_ENV = "PILOT_PROMPTS_DIR";
 
-    /** 系统提示词的组装顺序：身份 → 流程 → 工具 → 多智能体调度 → 输出。 */
+    /** 系统提示词的组装顺序：身份 → 流程 → 工具 → 证据与风险 → 输出。 */
     private static final List<String> SYSTEM_SECTIONS = List.of(
-            "system/base", "system/workflow", "system/tools", "system/orchestration", "system/output");
+            "system/base", "system/workflow", "system/tools", "system/tools-agents",
+            "system/orchestration", "system/dispatch", "system/output");
+
+    /** frontmatter 解析结果：声明的依赖工具 + 去掉声明头之后的正文。 */
+    private record Parsed(Set<String> requires, String body) {
+    }
 
     private static final String CLASSPATH_ROOT = "prompts/";
     private static final String SUFFIX = ".md";
@@ -90,11 +106,26 @@ public final class PromptLibrary {
         return current;
     }
 
-    /** 拼出完整系统提示词：各段用空行隔开，去掉每段首尾空白。 */
+    /** 拼出完整系统提示词：各段用空行隔开，去掉每段首尾空白。不过滤依赖工具的段。 */
     public String system(Map<String, String> variables) {
+        return system(variables, null);
+    }
+
+    /**
+     * 拼出完整系统提示词，并按实际可用工具过滤段落。
+     *
+     * @param availableTools 本轮会话实际注册的工具名；{@code null} 表示不过滤（全部段落注入）。
+     *                       声明了 {@code requires} 且其中任一工具不在集合里时，整段跳过。
+     */
+    public String system(Map<String, String> variables, Set<String> availableTools) {
         List<String> sections = new ArrayList<>(SYSTEM_SECTIONS.size());
         for (String name : SYSTEM_SECTIONS) {
-            String text = render(name, variables).strip();
+            Parsed parsed = parseFrontmatter(name, get(name));
+            if (availableTools != null && !parsed.requires().isEmpty()
+                    && !availableTools.containsAll(parsed.requires())) {
+                continue;
+            }
+            String text = interpolate(name, parsed.body(), variables).strip();
             if (!text.isEmpty()) {
                 sections.add(text);
             }
@@ -102,9 +133,13 @@ public final class PromptLibrary {
         return String.join("\n\n", sections);
     }
 
-    /** 单段渲染，用于 plan / subagent 这类运行时拼接的片段。 */
+    /** 单段渲染，用于 plan / subagent 这类运行时拼接的片段；头部 frontmatter 不进正文。 */
     public String render(String name, Map<String, String> variables) {
-        String template = get(name);
+        Parsed parsed = parseFrontmatter(name, get(name));
+        return interpolate(name, parsed.body(), variables);
+    }
+
+    private String interpolate(String name, String template, Map<String, String> variables) {
         Matcher matcher = VARIABLE.matcher(template);
         StringBuilder out = new StringBuilder(template.length() + 64);
         while (matcher.find()) {
@@ -118,6 +153,64 @@ public final class PromptLibrary {
         }
         matcher.appendTail(out);
         return out.toString();
+    }
+
+    /**
+     * 解析段落头部的 frontmatter：首行 {@code ---}，若干 {@code key: value}，再一行 {@code ---}。
+     *
+     * <p>只支持 {@code requires} 一个键，值为逗号分隔或方括号包裹的工具名列表；
+     * 没有 frontmatter 时原文即正文。格式非法一律抛异常，不静默降级。
+     */
+    static Parsed parseFrontmatter(String name, String template) {
+        String text = template == null ? "" : template;
+        List<String> lines = text.lines().toList();
+        if (lines.isEmpty() || !"---".equals(lines.get(0).strip())) {
+            return new Parsed(Set.of(), text);
+        }
+        int end = -1;
+        for (int i = 1; i < lines.size(); i++) {
+            if ("---".equals(lines.get(i).strip())) {
+                end = i;
+                break;
+            }
+        }
+        if (end < 0) {
+            throw new IllegalArgumentException("提示词 " + name + " 的 frontmatter 缺少结束分隔符 ---");
+        }
+        Set<String> requires = new LinkedHashSet<>();
+        for (int i = 1; i < end; i++) {
+            String line = lines.get(i).strip();
+            if (line.isEmpty()) {
+                continue;
+            }
+            int colon = line.indexOf(':');
+            if (colon < 0) {
+                throw new IllegalArgumentException("提示词 " + name + " 的 frontmatter 行无法解析：" + line);
+            }
+            String key = line.substring(0, colon).strip();
+            String value = line.substring(colon + 1).strip();
+            if (!"requires".equals(key)) {
+                throw new IllegalArgumentException("提示词 " + name
+                        + " 的 frontmatter 不支持的键：" + key + "（只支持 requires）");
+            }
+            requires.addAll(toolList(value));
+        }
+        String body = String.join("\n", lines.subList(end + 1, lines.size()));
+        return new Parsed(Set.copyOf(requires), body);
+    }
+
+    /** {@code [a, b]} / {@code a, b} / {@code a} 三种写法统一成工具名列表。 */
+    private static List<String> toolList(String value) {
+        String list = value.strip();
+        if (list.startsWith("[") && list.endsWith("]")) {
+            list = list.substring(1, list.length() - 1);
+        } else if (list.startsWith("[") != list.endsWith("]")) {
+            throw new IllegalArgumentException("frontmatter requires 列表括号不成对：" + value);
+        }
+        return Arrays.stream(list.split("[,，]"))
+                .map(String::strip)
+                .filter(item -> !item.isEmpty())
+                .toList();
     }
 
     /** 读取模板原文，不做变量替换。 */

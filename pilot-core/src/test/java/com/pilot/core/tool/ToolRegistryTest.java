@@ -40,6 +40,14 @@ class ToolRegistryTest {
         assertEquals("列目录", registry.definitions().get(0).description());
     }
 
+    @Test
+    void exposesRegisteredNamesForPromptFiltering() {
+        registry.register(tool("read_file", "读文件"));
+        registry.register(tool("list_dir", "列目录"));
+
+        assertEquals(java.util.Set.of("read_file", "list_dir"), registry.names());
+    }
+
     private static Tool tool(String name, String description) {
         return new Tool() {
             @Override

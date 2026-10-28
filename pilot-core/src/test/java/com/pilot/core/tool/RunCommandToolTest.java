@@ -77,8 +77,12 @@ class RunCommandToolTest {
     void prefersBundledRuntimeOnPath() throws Exception {
         Path bin = workspace.resolve("runtime-bin");
         java.nio.file.Files.createDirectories(bin);
-        Path python = bin.resolve("python3");
-        java.nio.file.Files.writeString(python, "#!/bin/sh\necho bundled-python\n");
+        // resolveOnPath 在 Windows 只认 .exe/.cmd/.bat（直接执行 Unix 脚本会报 Win32 错误），
+        // 测试按平台创建对应的文件名。
+        boolean windows = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+        Path python = bin.resolve(windows ? "python3.cmd" : "python3");
+        java.nio.file.Files.writeString(python,
+                windows ? "@echo bundled-python\r\n" : "#!/bin/sh\necho bundled-python\n");
         String previous = System.getProperty("pilot.runtime.bin");
         System.setProperty("pilot.runtime.bin", bin.toString());
         try {
