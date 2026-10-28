@@ -6,6 +6,7 @@ import com.pilot.core.tool.CreateFileTool;
 import com.pilot.core.tool.EditFileTool;
 import com.pilot.core.tool.ListDirTool;
 import com.pilot.core.tool.ReadFileTool;
+import com.pilot.core.tool.ReadTracker;
 import com.pilot.core.tool.RunCommandTool;
 import com.pilot.core.tool.SandboxCreateFileTool;
 import com.pilot.core.tool.SandboxEditFileTool;
@@ -93,8 +94,10 @@ public class WorkspaceToolFactory {
         AgentScope view = scope == null ? AgentScope.readOnly(java.util.List.of(), java.util.List.of()) : scope;
         var validator = new PathValidator(resolve(workspace), view);
         var registry = new ToolRegistry();
+        // 每个子 Agent 一份「先读后改」记录，与父级互不共享
+        var reads = new ReadTracker();
         if (view.allowsTool("read_file")) {
-            registry.register(new ReadFileTool(validator));
+            registry.register(new ReadFileTool(validator, reads));
         }
         if (view.allowsTool("list_dir")) {
             registry.register(new ListDirTool(validator));
@@ -112,10 +115,10 @@ public class WorkspaceToolFactory {
             registry.register(new RunCommandTool(validator));
         }
         if (view.writable() && view.allowsTool("edit_file")) {
-            registry.register(new SandboxEditFileTool(validator, sandbox));
+            registry.register(new SandboxEditFileTool(validator, sandbox, reads));
         }
         if (view.writable() && view.allowsTool("create_file")) {
-            registry.register(new SandboxCreateFileTool(validator, sandbox));
+            registry.register(new SandboxCreateFileTool(validator, sandbox, reads));
         }
         return registry;
     }
@@ -127,13 +130,16 @@ public class WorkspaceToolFactory {
     private ToolRegistry create(Path root, PlanSink planSink) {
         var validator = new PathValidator(root);
         var registry = new ToolRegistry();
-        registry.register(new ReadFileTool(validator));
+        // 每次 run 一份「先读后改」记录：read_file 登记过的文件才允许 edit_file
+        // （刚创建或刚编辑过的文件同样登记，连续编辑不受影响）
+        var reads = new ReadTracker();
+        registry.register(new ReadFileTool(validator, reads));
         registry.register(new ListDirTool(validator));
         registry.register(new SearchTool(validator));
         registry.register(searchTool());
         registry.register(new WebFetchTool(webClient));
-        registry.register(new EditFileTool(validator, snapshots));
-        registry.register(new CreateFileTool(validator, snapshots));
+        registry.register(new EditFileTool(validator, snapshots, reads));
+        registry.register(new CreateFileTool(validator, snapshots, reads));
         registry.register(new RunCommandTool(validator));
         if (planSink != null) {
             registry.register(new UpdatePlanTool(planSink));

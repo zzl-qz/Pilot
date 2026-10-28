@@ -49,7 +49,8 @@ public final class SearchTool implements Tool {
         return Map.of(
                 "type", "object",
                 "properties", Map.of(
-                        "pattern", Map.of("type", "string", "description", "正则表达式"),
+                        "pattern", Map.of("type", "string", "description",
+                                "正则表达式；先精确定位符号再用宽松模式，避免一次命中过多"),
                         "path", Map.of("type", "string", "description", "工作区内的相对路径，省略表示根目录"),
                         "glob", Map.of("type", "string", "description", "文件 glob，例如 *.java")),
                 "required", List.of("pattern"),

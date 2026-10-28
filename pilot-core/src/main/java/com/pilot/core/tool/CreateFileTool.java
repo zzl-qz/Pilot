@@ -13,14 +13,20 @@ import java.util.Map;
 public final class CreateFileTool implements Tool, WritesFiles {
     private final PathValidator paths;
     private final SnapshotSink snapshots;
+    private final ReadGuard reads;
 
     public CreateFileTool(PathValidator paths) {
         this(paths, SnapshotSink.none());
     }
 
     public CreateFileTool(PathValidator paths, SnapshotSink snapshots) {
+        this(paths, snapshots, ReadGuard.allowAll());
+    }
+
+    public CreateFileTool(PathValidator paths, SnapshotSink snapshots, ReadGuard reads) {
         this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
         this.snapshots = java.util.Objects.requireNonNull(snapshots, "snapshots must not be null");
+        this.reads = reads == null ? ReadGuard.allowAll() : reads;
     }
 
     @Override
@@ -38,7 +44,8 @@ public final class CreateFileTool implements Tool, WritesFiles {
         return Map.of(
                 "type", "object",
                 "properties", Map.of(
-                        "path", Map.of("type", "string", "description", "工作区内的相对文件路径"),
+                        "path", Map.of("type", "string", "description",
+                                "工作区内的相对文件路径；文件不能已存在，改已有文件请用 edit_file"),
                         "content", Map.of("type", "string", "description", "文件的完整内容")),
                 "required", List.of("path", "content"),
                 "additionalProperties", false);
@@ -79,6 +86,8 @@ public final class CreateFileTool implements Tool, WritesFiles {
             snapshots.beforeWrite(file);
             Files.writeString(file, content, StandardCharsets.UTF_8);
             snapshots.afterWrite(file);
+            // 刚创建的文件视为已读：后续 edit_file 不会被「先读后改」拦截
+            reads.observed(file);
             int bytes = content.getBytes(StandardCharsets.UTF_8).length;
             return "已创建 " + paths.display(file) + "（" + bytes + " 字节，"
                     + (int) content.lines().count() + " 行）";

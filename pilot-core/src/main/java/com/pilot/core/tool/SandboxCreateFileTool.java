@@ -15,10 +15,16 @@ import java.util.Map;
 public final class SandboxCreateFileTool implements Tool {
     private final PathValidator paths;
     private final SandboxSink sandbox;
+    private final ReadGuard reads;
 
     public SandboxCreateFileTool(PathValidator paths, SandboxSink sandbox) {
+        this(paths, sandbox, ReadGuard.allowAll());
+    }
+
+    public SandboxCreateFileTool(PathValidator paths, SandboxSink sandbox, ReadGuard reads) {
         this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
         this.sandbox = java.util.Objects.requireNonNull(sandbox, "sandbox must not be null");
+        this.reads = reads == null ? ReadGuard.allowAll() : reads;
     }
 
     @Override
@@ -36,7 +42,8 @@ public final class SandboxCreateFileTool implements Tool {
         return Map.of(
                 "type", "object",
                 "properties", Map.of(
-                        "path", Map.of("type", "string", "description", "工作区内的相对文件路径"),
+                        "path", Map.of("type", "string", "description",
+                                "工作区内的相对文件路径；文件不能已存在，改已有文件请用 edit_file"),
                         "content", Map.of("type", "string", "description", "文件的完整内容")),
                 "required", List.of("path", "content"),
                 "additionalProperties", false);
@@ -70,6 +77,8 @@ public final class SandboxCreateFileTool implements Tool {
         }
         try {
             sandbox.record(paths.display(file), null, content);
+            // 刚创建的文件视为已读：后续 edit_file 不会被「先读后改」拦截
+            reads.observed(file);
             return "已提交到沙箱 " + paths.display(file) + "（新文件，"
                     + (int) content.lines().count() + " 行）";
         } catch (RuntimeException e) {

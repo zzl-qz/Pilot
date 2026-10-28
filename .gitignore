@@ -39,6 +39,7 @@ application-local.yml
 
 ### 运行期数据：trace、快照、本地库 ###
 .pilot/
+.temp
 
 ### 浏览器调试产物：playwright-cli 的页面快照与控制台日志，用完即清 ###
 .playwright-cli/

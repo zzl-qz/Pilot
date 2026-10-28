@@ -52,26 +52,40 @@ public final class AgentLoop {
             PROMPTS.system(PromptLibrary.environment(null));
 
     /**
-     * @param repeatedToolCallLimit 连续相同工具调用达到该次数即中断（含第一次）
+     * @param repeatRemindAt       连续相同工具调用达到该次数时跳过执行并注入提醒，给模型纠错机会；
+     *                              0 表示不提醒，达到 {@code repeatAbortAt} 直接中断（旧行为）
+     * @param repeatAbortAt         连续相同工具调用达到该次数即中断（含第一次）
      * @param plan                  当前计划快照，收尾时用来判断「任务是否真的做完」；默认无计划
      * @param maxPlanContinues      计划还有未完成项时自动催模型继续的次数上限；0 表示不自动继续
      * @param contextLimit          上下文预算（按字符估算）；太小会频繁压缩、丢细节
      */
-    public record Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt,
+    public record Config(int maxSteps, int repeatRemindAt, int repeatAbortAt, String systemPrompt,
                          Supplier<List<PlanItem>> plan, int maxPlanContinues, int contextLimit,
                          boolean completionChecks) {
+        /** 兼容旧调用：连续相同调用达到 {@code repeatedToolCallLimit} 即中断，不提醒。 */
+        public Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt,
+                      Supplier<List<PlanItem>> plan, int maxPlanContinues, int contextLimit,
+                      boolean completionChecks) {
+            this(maxSteps, 0, repeatedToolCallLimit, systemPrompt, plan, maxPlanContinues,
+                    contextLimit, completionChecks);
+        }
+
         /** 兼容旧调用：收尾门默认开启。 */
         public Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt,
                       Supplier<List<PlanItem>> plan, int maxPlanContinues, int contextLimit) {
-            this(maxSteps, repeatedToolCallLimit, systemPrompt, plan, maxPlanContinues, contextLimit, true);
+            this(maxSteps, 0, repeatedToolCallLimit, systemPrompt, plan, maxPlanContinues, contextLimit, true);
         }
 
         public Config {
             if (maxSteps < 1) {
                 throw new IllegalArgumentException("maxSteps must be >= 1");
             }
-            if (repeatedToolCallLimit < 1) {
-                throw new IllegalArgumentException("repeatedToolCallLimit must be >= 1");
+            if (repeatAbortAt < 1) {
+                throw new IllegalArgumentException("repeatAbortAt must be >= 1");
+            }
+            if (repeatRemindAt < 0 || (repeatRemindAt > 0 && repeatRemindAt >= repeatAbortAt)) {
+                throw new IllegalArgumentException(
+                        "repeatRemindAt must be 0 (disabled) or less than repeatAbortAt");
             }
             if (systemPrompt == null || systemPrompt.isBlank()) {
                 throw new IllegalArgumentException("systemPrompt must not be blank");
@@ -85,21 +99,28 @@ public final class AgentLoop {
             plan = plan == null ? List::of : plan;
         }
 
-        /** 兼容旧调用：上下文预算用默认值。 */
+        /** 兼容旧调用：上下文预算用默认值，收尾门开启。 */
         public Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt,
                       Supplier<List<PlanItem>> plan, int maxPlanContinues) {
-            this(maxSteps, repeatedToolCallLimit, systemPrompt, plan, maxPlanContinues, DEFAULT_CONTEXT_LIMIT);
+            this(maxSteps, 0, repeatedToolCallLimit, systemPrompt, plan, maxPlanContinues,
+                    DEFAULT_CONTEXT_LIMIT, true);
         }
 
         public Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt,
                       Supplier<List<PlanItem>> plan) {
-            this(maxSteps, repeatedToolCallLimit, systemPrompt, plan, DEFAULT_MAX_PLAN_CONTINUES,
-                    DEFAULT_CONTEXT_LIMIT);
+            this(maxSteps, 0, repeatedToolCallLimit, systemPrompt, plan, DEFAULT_MAX_PLAN_CONTINUES,
+                    DEFAULT_CONTEXT_LIMIT, true);
         }
 
         public Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt) {
-            this(maxSteps, repeatedToolCallLimit, systemPrompt, List::of, DEFAULT_MAX_PLAN_CONTINUES,
-                    DEFAULT_CONTEXT_LIMIT);
+            this(maxSteps, 0, repeatedToolCallLimit, systemPrompt, List::of, DEFAULT_MAX_PLAN_CONTINUES,
+                    DEFAULT_CONTEXT_LIMIT, true);
+        }
+
+        /** 渐进提醒：达到 {@code repeatRemindAt} 跳过执行并提醒，达到 {@code repeatAbortAt} 中断。 */
+        public Config(int maxSteps, int repeatRemindAt, int repeatAbortAt, String systemPrompt) {
+            this(maxSteps, repeatRemindAt, repeatAbortAt, systemPrompt, List::of,
+                    DEFAULT_MAX_PLAN_CONTINUES, DEFAULT_CONTEXT_LIMIT, true);
         }
 
         /**
@@ -107,7 +128,8 @@ public final class AgentLoop {
          * 重复工具调用检测，触顶后对话历史仍会保留，可以继续下一轮。
          */
         public static Config defaults() {
-            return new Config(120, 3, DEFAULT_SYSTEM_PROMPT);
+            return new Config(120, 0, 3, DEFAULT_SYSTEM_PROMPT, List::of, DEFAULT_MAX_PLAN_CONTINUES,
+                    DEFAULT_CONTEXT_LIMIT, true);
         }
     }
 
@@ -365,11 +387,26 @@ public final class AgentLoop {
                     lastSignature = signature;
                     repeated = 1;
                 }
-                if (repeated >= config.repeatedToolCallLimit()) {
+                if (repeated >= config.repeatAbortAt()) {
                     String detail = "模型连续 " + repeated + " 次请求相同的工具调用，已中断以避免死循环。";
                     skipCalls(messages, calls, 0, "已达到重复工具调用上限，本次调用未执行。");
                     events.accept(new RunFailed("REPEATED_TOOL_CALL", detail, false));
                     return new Result(null, "REPEATED_TOOL_CALL", conversation(messages));
+                }
+                // 达到提醒档：跳过执行，合成结果与提醒给模型纠错机会；提醒只注入一次
+                if (config.repeatRemindAt() > 0 && repeated >= config.repeatRemindAt()) {
+                    for (ToolCall call : calls) {
+                        messages.add(Message.tool(call.callId(),
+                                "已跳过执行：这是连续第 " + repeated + " 次发出完全相同的调用（"
+                                        + call.name() + "），结果不会与上一次不同。"));
+                    }
+                    if (repeated == config.repeatRemindAt()) {
+                        messages.add(Message.user(repeatReminder(calls, repeated)));
+                        events.accept(new RunContinued(1, 1,
+                                "重复调用提醒：连续第 " + repeated + " 次，已跳过执行"));
+                    }
+                    safeCheckpoint(checkpoint, messages);
+                    continue;
                 }
 
                 for (int index = 0; index < calls.size(); index++) {
@@ -472,6 +509,16 @@ public final class AgentLoop {
                 .map(step -> "- " + step)
                 .collect(Collectors.joining("\n"));
         return PROMPTS.render("plan/continue", Map.of("openSteps", steps)).strip();
+    }
+
+    /** 重复调用提醒：模板在 {@code prompts/loop/repeat-reminder.md}。 */
+    private static String repeatReminder(List<ToolCall> calls, int count) {
+        String tools = calls.stream()
+                .map(ToolCall::name)
+                .distinct()
+                .collect(Collectors.joining(", "));
+        return PROMPTS.render("loop/repeat-reminder",
+                Map.of("count", String.valueOf(count), "tool", tools)).strip();
     }
 
     /** 计划快照读失败不应影响收尾：退化成「无计划」，仅少一条完成度信息。 */
