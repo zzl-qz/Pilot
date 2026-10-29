@@ -77,6 +77,8 @@ bash mvnw -pl pilot-server spring-boot:run
 
 单独构建或运行 `pilot-server` 会读取本机 Maven 仓库中已安装的 `pilot-core`。修改 core 后若只在服务端执行命令，可能仍读到旧 JAR，出现缺少方法或启动失败；需要重新执行根目录的 `install` 命令更新依赖。`start.sh` / `start.cmd` 每次都会完成这一步并运行测试。Windows 的对应命令将 `bash mvnw` 替换为 `.\mvnw.cmd`。
 
+在 IntelliJ IDEA 中请把仓库根目录的 `pom.xml` 作为 Maven 项目导入，再运行 `PilotServerApplication`，不要只导入 `pilot-server/pom.xml`。首次导入或模块输出被清理后，先执行 **Reload All Maven Projects** 和 **Build Project**。项目已经为 DevTools 配置了多模块 restart classloader 与编译静默窗口，正常增量编译不会再因 `pilot-core` / `pilot-server` 分批落盘而短暂缺类。
+
 ## 权限说明
 
 - `READ_ONLY`：只读工具放行，写文件和命令拒绝（默认）。
@@ -98,7 +100,7 @@ bash mvnw -pl pilot-server spring-boot:run
 
 默认配置位于 `pilot-server/src/main/resources/application.yaml`，本地 profile 覆盖配置可放在 Git 忽略的 `pilot-server/src/main/resources/application-local.yaml`。也可通过环境变量配置模型和运行参数，例如 `PILOT_MODEL_API_KEY`、`PILOT_MODEL_ENDPOINT`、`PILOT_MODEL_MODEL`、`PILOT_WORKSPACE`、`PILOT_PERMISSION_MODE`。
 
-上下文预算默认 120000，按「字符」和「token」两个口径取更满的一个：英文约 96k 字符、中文约 96k 字符（≈96k token）时触发压缩，压缩后回到预算的一半左右再继续。模型窗口够大时可以调高，例如 `PILOT_AGENT_CONTEXT_MAX_CHARS=300000` 或 `-Dpilot.context.max-chars=300000`。
+上下文预算默认 120000，按「字符」和「token」两个口径取更满的一个：英文约 96k 字符、中文约 96k 字符（≈96k token）时触发摘要，以预算约 80% 为目标；摘要仍压不下去且超过 97% 时再硬裁剪旧组。模型窗口够大时可以调高，例如 `PILOT_AGENT_CONTEXT_MAX_CHARS=300000` 或 `-Dpilot.context.max-chars=300000`。
 
 提示词不写在 Java 代码里，正文位于 `pilot-core/src/main/resources/prompts/`：`system/` 下是系统提示词的五段（身份与边界、工作流、工具策略、多智能体调度、结论格式），另有计划注入、压缩摘要、自动继续、子代理任务模板，以及子 Agent 的三段式身份/任务模板（`subagent/base.md`、`subagent/job.md`）。模板变量写作 `{{name}}`，缺失变量会直接报错。调提示词时可用 `PILOT_PROMPTS_DIR`（或系统属性 `pilot.prompts.dir`）指向一个外部目录，同名文件优先于打包资源，只覆盖其中一部分也可以，无需重新打包。
 
@@ -121,6 +123,7 @@ bash mvnw -pl pilot-server spring-boot:run
 - `GET/PUT /api/sessions/{id}/task`：查看当前任务，或在空闲时保存约束、验收条件与证据；原始目标不可通过此接口修改。
 - `GET /api/sessions/{id}/commands`：列出命令任务；`GET /api/sessions/{id}/commands/{taskId}`：查看状态；`GET .../{taskId}/logs?offset=0&limit=16000`：增量读取日志；`POST .../{taskId}/stop`：停止命令及其子进程。
 - `GET /api/sessions/{id}/history`：读取历史（`limit` + `before` 游标分页，长会话只取尾部一页）；`GET /api/sessions/{id}/diff`：查看会话变更。
+- `GET /api/sessions/{id}/context`：查看持久模型记忆的估算占用；`POST /api/sessions/{id}/context/compact`：空闲时主动压缩早期模型记忆，聊天与审计事件保留不动。
 - `GET /api/metrics`：进程内运行指标（运行数、状态分布、失败码、事件类型计数、平均耗时）。
 - `/api/approvals`：查看和处理待审批工具调用。
 - `/api/settings`：查看或更新模型与权限设置。
@@ -157,6 +160,14 @@ bash mvnw -pl pilot-server spring-boot:run
 ```
 
 运行中的排队消息只接受普通任务文本；结构化要求通过空闲时的新任务请求提交，也可以暂停当前任务后在任务卡中编辑。`GET /task` 在尚未创建任务记录时返回 `null`。
+
+## 自适应执行与 Goal
+
+新任务直接进入普通执行，不先消耗一次模型请求做模式分类。普通任务同样要求完整执行和针对性验证；任务很长但路径明确时仍走普通执行。只有主 Agent 发现任务需要跨轮追踪动态结果、形成调查→修复→复验闭环，或用户明确要求持续推进到结果时，才调用 `promote_goal` 保存完成条件并启用独立核验。Goal 的继续必须同时给出具体缺口、唯一下一动作和预期观察，并由新文件状态、有效验证或后台终态驱动；等待、需要输入、未验证、无进展、核验失败和预算耗尽分别保留状态。
+
+执行预算只作高位事故熔断，不在半额度强制改变策略，也没有“读取/搜索 32 次后禁止调查”的业务门。默认 DIRECT 每段最多 120 次主执行请求、800 万输入 token、50 万输出 token 和 2 小时模型活跃时间；Goal 的请求保险丝跟随 `pilot.agent.max-steps`（默认 120），token 上限相同，活跃时间为 4 小时。核验器另预留最多 2 次请求；任何非取消停止另有一次禁用工具的阶段收尾。显式继续只开启新的预算段，历史用量、证据、停滞计数、缺口和下一动作都不会清零。
+
+代码完成门只接受类型明确且成功的测试、构建、静态检查或格式检查；`git status`、版本查询等普通 `exit 0` 不能充当验证。续跑会恢复本任务已改文件和有效检查，源码变化后旧验证自动失效。同步 `spawn_agent` 使用冻结且去递归/Goal 控制的工具快照；单次派生最多 8 个工作步和 1 个收尾请求（合计最多 9 次模型请求），同一 run 共享最多 4 次派生、24 次子模型请求的资源池，子请求及 token 用量同时计入父任务的事故熔断。子运行会把改动路径和检查结果结构化交回父完成门，即使失败也不会丢失已产生的事实。静态重复调用保持快速止损；仍在运行的后台状态/日志查询按结果变化判断停滞，避免把合法轮询误杀。上下文摘要连续 3 次无收益或连续 3 次快速回填时熔断模型摘要，继续使用本地裁剪。完整协议见 [Goal 执行说明](evaluation/GOALS.md)。
 
 ## 后台命令
 
@@ -227,7 +238,8 @@ Sprint 6 可复现任务规格与任务矩阵、运行命令见 `evaluation/TASK
 ## 已知限制
 
 - 模型的质量、成功率和响应受模型、网络和提示词影响；单元测试不能证明真实端到端质量。
-- token 数是按字符估算的（ASCII 4 字符 1 token，中文 1 字符 1 token），不是模型 tokenizer 的精确计数；压缩摘要可能丢失细节，需复读原文件核实。
+- 模型端点返回 `usage` 时，任务输入/输出 Token 使用模型精确值；不返回时按字符保守估算（ASCII 4 字符 1 token，中文 1 字符 1 token），界面用 `≈` 明示。当前任务统计只覆盖主 Agent 的模型调用，子 Agent 汇总用量仍列为后续能力；上下文占用始终是本地估算。
+- 主动压缩会额外调用一次模型生成交接摘要；压缩只替换模型记忆中的早期内容，不删除聊天和审计记录。摘要可能丢失细节，关键事实仍需复读原文件核实。
 - ASK 依赖运行中的审批服务；等待超时按拒绝处理。不要把审批 UI 当作安全沙箱。
 - 运行时存储、文件写入、命令执行均有本地副作用；先备份并使用可丢弃工作区。
 - 评估集当前是任务规格和自动化测试映射，不包含十份独立仓库快照；评估前应在干净 checkout 执行，并记录提交号。
