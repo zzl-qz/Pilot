@@ -14,6 +14,7 @@ import com.pilot.core.session.InMemoryConversationRepository;
 import com.pilot.core.session.InMemoryPlanRepository;
 import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.tool.ReadFileTool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolRegistry;
@@ -23,6 +24,7 @@ import com.pilot.server.config.ModelProperties;
 import com.pilot.server.config.ModelSettings;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.config.SkillProperties;
 import com.pilot.server.observability.RunMetrics;
 import com.pilot.server.store.InMemorySettingsStore;
 import com.pilot.server.store.QueuedMessageRepository;
@@ -208,6 +210,99 @@ class AgentRunServiceTest {
                 .count();
     }
 
+    /** 请求里的 system 提示词（第一条 system 消息）。 */
+    private static String systemOf(List<Message> messages) {
+        return messages.stream()
+                .filter(message -> "system".equals(message.role()))
+                .map(Message::content)
+                .findFirst()
+                .orElse("");
+    }
+
+    /** 往工作区写一个项目级技能。 */
+    private void writeSkill(String name, String description, String body) throws Exception {
+        var skill = Files.createDirectories(workspace.resolve(".pilot/skills").resolve(name));
+        Files.writeString(skill.resolve("SKILL.md"), "---\ndescription: " + description + "\n---\n" + body);
+    }
+
+    @Test
+    void emptyWorkspaceHasNoSkillSurface() throws Exception {
+        var requests = new CopyOnWriteArrayList<List<Message>>();
+        var toolSets = new CopyOnWriteArrayList<List<ToolDefinition>>();
+        ModelClient model = (messages, tools) -> {
+            requests.add(messages);
+            toolSets.add(tools);
+            return done();
+        };
+        try (var fixture = new Fixture(model, 8)) {
+            fixture.start();
+            fixture.awaitFinished("COMPLETED");
+
+            assertTrue(toolSets.get(0).stream().noneMatch(tool -> "use_skill".equals(tool.name())),
+                    "无技能时不注册 use_skill");
+            assertFalse(systemOf(requests.get(0)).contains("## 技能"),
+                    "无技能时目录段整体消失，零 token 成本");
+        }
+    }
+
+    @Test
+    void skillRegistersUseSkillAndCatalogSection() throws Exception {
+        writeSkill("demo", "审阅当前未提交的改动。", "## 流程\n1. 查状态");
+        var requests = new CopyOnWriteArrayList<List<Message>>();
+        var toolSets = new CopyOnWriteArrayList<List<ToolDefinition>>();
+        ModelClient model = (messages, tools) -> {
+            requests.add(messages);
+            toolSets.add(tools);
+            return done();
+        };
+        try (var fixture = new Fixture(model, 8)) {
+            fixture.start();
+            fixture.awaitFinished("COMPLETED");
+
+            assertTrue(toolSets.get(0).stream().anyMatch(tool -> "use_skill".equals(tool.name())));
+            var useSkill = toolSets.get(0).stream().filter(tool -> "use_skill".equals(tool.name())).findFirst().orElseThrow();
+            assertFalse(useSkill.description().isBlank(), "描述来自 prompts/tools/use_skill.md");
+            String system = systemOf(requests.get(0));
+            assertTrue(system.contains("## 技能"), "目录段随 use_skill 注册而注入");
+            assertTrue(system.contains("- demo：审阅当前未提交的改动。"));
+        }
+    }
+
+    @Test
+    void explicitSkillInjectsGuidanceBeforeUserInputAndPersists() throws Exception {
+        writeSkill("demo", "审阅当前未提交的改动。", "## 流程\n1. 查状态");
+        var requests = new CopyOnWriteArrayList<List<Message>>();
+        ModelClient model = (messages, tools) -> {
+            requests.add(messages);
+            return done();
+        };
+        try (var fixture = new Fixture(model, 8)) {
+            fixture.startWithSkill("正文任务", "demo");
+            fixture.awaitFinished("COMPLETED");
+
+            List<Message> first = requests.get(0);
+            int activation = -1;
+            int input = -1;
+            for (int i = 0; i < first.size(); i++) {
+                String text = first.get(i).content();
+                if (!"user".equals(first.get(i).role())) {
+                    continue;
+                }
+                if (text.startsWith("（用户为本任务指定了技能 demo")) {
+                    activation = i;
+                }
+                if ("正文任务".equals(text)) {
+                    input = i;
+                }
+            }
+            assertTrue(activation >= 0, "激活指引应作为独立 user 消息注入");
+            assertTrue(activation < input, "激活消息应位于用户输入之前");
+            assertTrue(fixture.conversations.load(fixture.sessionId).stream()
+                    .anyMatch(message -> message.content().startsWith("（用户为本任务指定了技能 demo")),
+                    "激活消息随对话记忆落盘，续跑/压缩不丢");
+        }
+    }
+
     @Test
     void keepsQueueWhenStepLimitPausesTask() throws Exception {
         assertKeepsQueue(1, List.of(), AgentRunServiceTest::readFile, "MAX_STEPS");
@@ -341,6 +436,7 @@ class AgentRunServiceTest {
     private class Fixture implements AutoCloseable {
         final SessionService sessions = new SessionService();
         final InMemoryPlanRepository plans = new InMemoryPlanRepository();
+        final InMemoryConversationRepository conversations = new InMemoryConversationRepository();
         final BlockingQueue<String> finished = new LinkedBlockingQueue<>();
         final String sessionId = sessions.createSession("test", workspace.toString()).id();
         final RunMetrics metrics;
@@ -372,16 +468,22 @@ class AgentRunServiceTest {
                     new PolicyPermissionGate(PermissionMode.READ_ONLY), ApprovalBroker.denyAll(),
                     properties, new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
                             new InMemorySettingsStore()), new RunSnapshotService(mapper, dataDir),
-                    new RunRegistry(), RunRepository.noop(), new InMemoryConversationRepository(),
+                    new RunRegistry(), RunRepository.noop(), conversations,
                     plans, mapper, dataDir, new QueuedMessageRepository(), null,
                     new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics, new TaskControlService(mapper, dataDir),
-                    commandTasks);
+                    commandTasks, new SkillService(new SkillProperties(true, null), properties, dataDir));
         }
 
         void start() {
             runId = service.claimRun(sessionId).orElseThrow();
             sessions.publish(sessionId, runId, new RunStarted("原任务"));
             service.start(sessionId, runId, "原任务");
+        }
+
+        void startWithSkill(String input, String skill) {
+            runId = service.claimRun(sessionId).orElseThrow();
+            sessions.publish(sessionId, runId, new RunStarted(input));
+            service.start(sessionId, runId, input, List.of(), null, skill);
         }
 
         List<String> queue() {

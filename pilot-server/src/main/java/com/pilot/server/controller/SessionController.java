@@ -13,6 +13,7 @@ import com.pilot.core.session.SessionStatus;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.AttachmentService;
 import com.pilot.server.session.RunStarter;
+import com.pilot.server.session.SkillService;
 import com.pilot.server.workspace.WorkspaceService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -67,12 +68,14 @@ public class SessionController {
     private final AttachmentService attachments;
     private final ProjectRepository projects;
     private final com.pilot.server.session.SessionCleanupService cleanup;
+    private final SkillService skills;
 
     public SessionController(SessionService sessions, RunStarter runStarter, ObjectMapper objectMapper,
                              WorkspaceService workspaces, AgentProperties agentProperties,
                              PlanRepository plans, AttachmentService attachments,
                              ProjectRepository projects,
-                             com.pilot.server.session.SessionCleanupService cleanup) {
+                             com.pilot.server.session.SessionCleanupService cleanup,
+                             SkillService skills) {
         this.sessions = sessions;
         this.runStarter = runStarter;
         this.attachments = attachments;
@@ -82,6 +85,7 @@ public class SessionController {
         this.plans = plans;
         this.projects = projects;
         this.cleanup = cleanup;
+        this.skills = skills;
     }
 
     /**
@@ -431,10 +435,24 @@ public class SessionController {
         if (request == null || ((request.content() == null || request.content().isBlank()) && !hasAttachments)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
         }
+        String skill = request.skill() == null || request.skill().isBlank()
+                ? null : request.skill().strip();
+        if (skill != null) {
+            // 激活是启动期行为，排队消息无法携带；错误信息直接给出可行动的原因
+            var catalog = skills.catalogFor(workspaceOf(id));
+            if (catalog.find(skill).isEmpty()) {
+                String reason = catalog.invalid().stream()
+                        .filter(problem -> problem.name().equals(skill))
+                        .map(problem -> problem.reason())
+                        .findFirst().orElse("未找到");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "技能 " + skill + " 不可用：" + reason);
+            }
+        }
         // 运行中只接受纯文本追加；先检查状态，避免被拒绝的附件请求产生文件副作用。
         String activeRun = runStarter.activeRun(id).orElse(null);
-        if (activeRun != null && (hasAttachments || request.task() != null)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "排队消息暂不支持附件和独立验收条件，请等本轮结束后再发");
+        if (activeRun != null && (hasAttachments || request.task() != null || skill != null)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "排队消息暂不支持附件、独立验收条件和技能，请等本轮结束后再发");
         }
         AttachmentService.Prepared prepared;
         try {
@@ -450,7 +468,7 @@ public class SessionController {
         // 检查与启动之间可能刚好起了一个 run：抢占失败就退化成追加输入
         String runId = runStarter.claimRun(id).orElse(null);
         if (runId == null) {
-            if (hasAttachments || request.task() != null) {
+            if (hasAttachments || request.task() != null || skill != null) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "运行状态已变化，请结束当前任务后重试");
             }
             if (runStarter.followup(id, prepared.content())) {
@@ -461,9 +479,13 @@ public class SessionController {
         }
         launch(runId, () -> {
             sessions.publish(id, runId, new RunStarted(prepared.content()));
-            runStarter.start(id, runId, prepared.content(), prepared.attachments(), request.task());
+            runStarter.start(id, runId, prepared.content(), prepared.attachments(), request.task(), skill);
         });
         return ResponseEntity.ok().body(new MessageResponse(id, runId));
+    }
+
+    private String workspaceOf(String sessionId) {
+        return sessions.find(sessionId).map(com.pilot.core.session.Session::workspace).orElse(null);
     }
 
     /**
@@ -591,7 +613,8 @@ public class SessionController {
     public record RenameRequest(String title) { }
 
     public record MessageRequest(String content, List<AttachmentService.Inbound> attachments,
-                                 com.pilot.server.session.TaskControlService.Requirements task) { }
+                                 com.pilot.server.session.TaskControlService.Requirements task,
+                                 String skill) { }
 
     public record ResendRequest(Long sequence, String content) { }
 

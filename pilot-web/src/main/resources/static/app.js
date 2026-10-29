@@ -8,8 +8,10 @@ import {
 import {
   expandQuickCommand,
   filterPaletteActions,
-  filterQuickCommands
+  filterQuickCommands,
+  QUICK_COMMANDS
 } from './lib/commands.js';
+import { mergeCommands, resolveSkillCommand, toSkillCommands } from './lib/skills.js';
 import { rankFileMatches } from './lib/mention.js';
 import { mergeRunReports, sortChangeFiles, statusKind } from './lib/changes.js';
 import { applyRule, classifyRunFailure, planProgressLabel } from './lib/events.js';
@@ -1687,6 +1689,9 @@ async function activate(sessionId, title, workspace) {
   state.fileIndex = [];
   state.fileIndexSession = null;
   state.fileIndexFailedAt = 0;
+  // 技能清单同理：项目级技能在 .pilot/skills 里，随工作区变化
+  state.skills = [];
+  refreshSkills(sessionId);
   loadInputHistory(sessionId);
   state.sessionTitle = title || '新任务';
   state.workspace = workspace || state.workspace;
@@ -5064,6 +5069,14 @@ async function submitMessage(content, attachments = []) {
   if ((!content && !attachments.length) || !state.sessionId) {
     return;
   }
+  // 技能命令：`/命令 参数` 精确命中时以 skill 字段发送，正文只留参数；
+  // 排队消息不支持技能（后端 409），运行中退化为普通文本
+  const skillCall = !state.running && !attachments.length
+    ? resolveSkillCommand(content, toSkillCommands(state.skills))
+    : null;
+  const payloadContent = skillCall
+    ? (skillCall.args || '（用户未提供额外要求，按技能指引执行）')
+    : content;
   if (content.trim()) {
     rememberInput(content);
   }
@@ -5093,7 +5106,8 @@ async function submitMessage(content, attachments = []) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        content,
+        content: payloadContent,
+        ...(skillCall ? { skill: skillCall.skill } : {}),
         ...(taskRequirements ? { task: taskRequirements } : {}),
         attachments: attachments.map((item) => ({
           name: item.name,
@@ -6385,6 +6399,30 @@ function refreshChangeMarkers(files) {
 
 /* ---------- 输入框：@ 引用与 / 快捷指令 ---------- */
 
+/** 输入框 `/` 菜单的候选：内置快捷指令 + 技能命令（同名时技能遮蔽内置）。 */
+function composerCommands() {
+  return mergeCommands(QUICK_COMMANDS, toSkillCommands(state.skills));
+}
+
+/** 拉取当前会话的技能清单；失败时清空，不阻塞会话加载。 */
+function refreshSkills(sessionId) {
+  apiFetch(`/api/skills?sessionId=${encodeURIComponent(sessionId)}`)
+    .then((response) => (response.ok ? response.json() : null))
+    .then((data) => {
+      if (!data || state.sessionId !== sessionId) {
+        return;
+      }
+      state.skills = Array.isArray(data.available) ? data.available : [];
+      // 清单回来时菜单可能还开着，按当前输入重渲染（与文件索引同款处理）
+      if (!el.refMenu.hidden && state.refKind === 'command') {
+        onComposerInput();
+      }
+    })
+    .catch(() => {
+      state.skills = [];
+    });
+}
+
 function onComposerInput() {
   autoGrow();
   const caret = el.input.selectionStart;
@@ -6403,7 +6441,7 @@ function onComposerInput() {
 
 function showRefMenu(kind, query) {
   const items = kind === 'command'
-    ? filterQuickCommands(query)
+    ? filterQuickCommands(query, composerCommands())
     : treeFiles().filter((path) => path.toLowerCase().includes(String(query).toLowerCase())).slice(0, 40);
 
   el.refMenu.replaceChildren();
@@ -6513,8 +6551,13 @@ function applyRef(item) {
   const kind = state.refKind;
   if (kind === 'command') {
     const commandMatch = /^\/([\w-]*)(?:\s+(.*))?$/.exec(before);
-    const prompt = expandQuickCommand(item, commandMatch?.[2] || '');
-    el.input.value = prompt + after;
+    if (item.skill) {
+      // 技能命令：只补全指令名，参数留给用户继续输入；发送时才映射成 skill 字段
+      el.input.value = item.name + ' ' + after;
+    } else {
+      const prompt = expandQuickCommand(item, commandMatch?.[2] || '');
+      el.input.value = prompt + after;
+    }
   } else {
     const replaced = before.replace(/@([\w./-]*)$/, '@' + item + ' ');
     el.input.value = replaced + after;

@@ -66,6 +66,11 @@ pilot:
   runtime:
     # true：缺 Python 3.12 / Node 22 时下载到 .pilot/runtime，run_command 优先用它们
     provision: ${PILOT_RUNTIME_PROVISION:true}
+  # 技能：SKILL.md + 参考文件 + 可选脚本的纯文件技能包，激活即注入指引、动作仍走既有工具
+  # 项目级 <workspace>/.pilot/skills（随仓库走）、用户级 <dataDir>/skills（本机个人库，PILOT_SKILLS_DIR 可改）
+  skills:
+    # false 时整条链退化：use_skill 不注册、目录段不注入、/api/skills 返回空
+    enabled: true
   # 运行期数据保留：事件、快照、trace 默认只增不减。设成正数后每天清理一次早于 N 天的数据，
   # 0 表示关闭（保留全部）。会话本身不会被删。
   retention:

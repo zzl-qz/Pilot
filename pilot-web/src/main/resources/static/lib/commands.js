@@ -48,9 +48,9 @@ export const COMMAND_PALETTE_ACTIONS = [
   { label: '重新连接事件流', hint: '', keywords: ['重连', '事件', '连接', 'reconnect'], action: 'reconnect' }
 ];
 
-export function filterQuickCommands(query) {
+export function filterQuickCommands(query, commands = QUICK_COMMANDS) {
   const needle = String(query || '').trim().toLowerCase();
-  return QUICK_COMMANDS.filter((command) => {
+  return (commands || []).filter((command) => {
     const fields = [command.name, command.label, command.hint, ...command.aliases];
     return !needle || fields.some((field) => field.toLowerCase().includes(needle));
   });

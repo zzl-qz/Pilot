@@ -24,6 +24,15 @@ public interface RunStarter {
         start(sessionId, runId, input, attachments);
     }
 
+    /**
+     * 指定技能启动：技能存在性由控制器校验，指引作为首条 user 消息注入由实现完成。
+     * 默认转发到无技能版本，测试里的空实现不用改。
+     */
+    default void start(String sessionId, String runId, String input, List<Attachment> attachments,
+                       TaskControlService.Requirements task, String skill) {
+        start(sessionId, runId, input, attachments, task);
+    }
+
     /** 普通追加仅排队；保留默认转发以兼容已有启动器。 */
     default boolean followup(String sessionId, String text) { return steer(sessionId, text); }
 

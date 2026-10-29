@@ -307,7 +307,7 @@ class AgentRunTaskControlTest {
                     new RunSnapshotService(mapper, data), new RunRegistry(), RunRepository.noop(), conversations, plans,
                     mapper, data, new QueuedMessageRepository(), null,
                     new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics, tasks,
-                    commandTasks);
+                    commandTasks, new SkillService(new com.pilot.server.config.SkillProperties(true, null), properties, data));
         }
 
         void start(TaskControlService.Requirements requirements) {
