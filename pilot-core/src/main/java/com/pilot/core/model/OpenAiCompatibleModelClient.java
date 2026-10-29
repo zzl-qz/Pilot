@@ -58,6 +58,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     /**
      * 兼容常见的配置写法：服务根地址或 {@code /v1} 结尾时补齐 chat completions 路径。
      * 完整地址原样使用，避免猜错第三方网关的自定义路径。
+     *
+     * <p>「/v1 结尾」不限于裸 {@code /v1}：自建网关常把兼容层挂在 {@code /api/llm/v1}
+     * 这类前缀下，只认裸 {@code /v1} 会把请求 POST 到网关根，得到与密钥无关的 401。
      */
     static URI resolveEndpoint(URI endpoint) {
         if (endpoint == null) {
@@ -67,7 +70,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (path == null || path.isEmpty() || "/".equals(path)) {
             return appendPath(endpoint, "/v1/chat/completions");
         }
-        if ("/v1".equals(path) || "/v1/".equals(path)) {
+        if (path.endsWith("/v1") || path.endsWith("/v1/")) {
             return appendPath(endpoint, "/chat/completions");
         }
         return endpoint;

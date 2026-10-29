@@ -44,6 +44,20 @@ class OpenAiCompatibleModelClientTest {
                 OpenAiCompatibleModelClient.resolveEndpoint(URI.create("https://gateway.test/custom/chat")));
     }
 
+    /** 自建网关常把兼容层挂在 /api/llm/v1 这类前缀下：只认裸 /v1 会把 POST 打到网关根。 */
+    @Test
+    void completesChatPathForPrefixedV1Endpoints() {
+        assertEquals(URI.create("https://gateway.test/api/llm/v1/chat/completions"),
+                OpenAiCompatibleModelClient.resolveEndpoint(URI.create("https://gateway.test/api/llm/v1")));
+        assertEquals(URI.create("https://gateway.test/api/llm/v1/chat/completions"),
+                OpenAiCompatibleModelClient.resolveEndpoint(URI.create("https://gateway.test/api/llm/v1/")));
+        // /v11、/service-v1 这类不是兼容层基址，仍原样使用
+        assertEquals(URI.create("https://gateway.test/v11"),
+                OpenAiCompatibleModelClient.resolveEndpoint(URI.create("https://gateway.test/v11")));
+        assertEquals(URI.create("https://gateway.test/service-v1"),
+                OpenAiCompatibleModelClient.resolveEndpoint(URI.create("https://gateway.test/service-v1")));
+    }
+
     @Test
     void parsesToolCallsFromResponse() throws IOException {
         var captured = new AtomicReference<String>();
