@@ -37,6 +37,11 @@ public class SkillService {
         this.dataDir = dataDir;
     }
 
+    /** 技能体系总开关（安装器同样受它约束）。 */
+    public boolean enabled() {
+        return properties.enabled();
+    }
+
     /** 项目级技能目录固定为 {@code <workspace>/.pilot/skills}：目录即协议，不设配置。 */
     public Path projectRootFor(String workspace) {
         return resolve(workspace).resolve(".pilot").resolve("skills");
