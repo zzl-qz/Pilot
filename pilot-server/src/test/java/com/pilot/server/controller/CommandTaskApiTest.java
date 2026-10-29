@@ -91,6 +91,9 @@ class CommandTaskApiTest {
 
     private CommandTaskManager.Task start(String owner, String mode) {
         var builder = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                // 锁定子进程输出为 UTF-8：中文 Windows 控制台默认按 GBK 输出，😀 不可表示，
+                // 断言在本机会永远失败；分页与日志断言按 UTF-8 计码点，与平台控制台编码无关。
+                "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8",
                 "-cp", System.getProperty("java.class.path"), Fixture.class.getName(), mode).directory(workspace.toFile());
         return commands.start(owner, "java fixture " + mode, builder, true, 0);
     }

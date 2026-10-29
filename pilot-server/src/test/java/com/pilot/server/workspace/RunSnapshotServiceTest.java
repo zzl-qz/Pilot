@@ -191,16 +191,28 @@ class RunSnapshotServiceTest {
     }
 
     @Test
-    void refusesSymlinkedParentAndDirectoryReplacingNewFile() throws IOException {
+    void refusesSymlinkedParentBackup() throws IOException {
         Path file = workspace.resolve("dir/a.txt");
         Files.createDirectories(file.getParent());
         Files.writeString(file, "before");
         change("linked_parent", file, "after");
         Path moved = workspace.resolve("moved");
         Files.move(file.getParent(), moved);
-        Files.createSymbolicLink(file.getParent(), moved);
+        try {
+            Files.createSymbolicLink(file.getParent(), moved);
+        } catch (IOException | UnsupportedOperationException e) {
+            // Windows 创建符号链接需要 SeCreateSymbolicLinkPrivilege（管理员或开发者模式）。
+            // 无特权时跳过而非报错：被测行为依赖符号链接真实存在，环境给不了就换机器再验。
+            org.junit.jupiter.api.Assumptions.assumeTrue(false,
+                    "本机无法创建符号链接（需要管理员或开发者模式），跳过符号链接拒绝断言");
+            return;
+        }
         assertEquals(List.of("dir/a.txt"), snapshots.rollback("linked_parent").conflicts());
         assertEquals("after", Files.readString(moved.resolve("a.txt")));
+    }
+
+    @Test
+    void refusesDirectoryReplacingNewFile() throws IOException {
         Path created = workspace.resolve("new.txt");
         change("directory_collision", created, "new");
         Files.delete(created);
