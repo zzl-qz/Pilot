@@ -1,8 +1,10 @@
 import { normalizePath, parseDiff } from './lib/diff.js';
 import {
+  buildModelProbe,
   buildModelUpdate,
   classifyModelError,
   describeModelSaved,
+  describeModelsFetched,
   errorText
 } from './lib/model-settings.js';
 import {
@@ -81,8 +83,9 @@ const el = {
   modelName: document.querySelector('#model-name'),
   modelEndpoint: document.querySelector('#model-endpoint'),
   modelKey: document.querySelector('#model-key'),
- modelClearKey: document.querySelector('#model-clear-key'),
+  modelClearKey: document.querySelector('#model-clear-key'),
   modelHint: document.querySelector('#model-hint'),
+  modelFetch: document.querySelector('#model-fetch'),
   modelSave: document.querySelector('#model-save'),
   attachments: document.querySelector('#attachments'),
   workspaceChip: document.querySelector('#workspace-chip'),
@@ -181,6 +184,7 @@ const el = {
   settingsModelKey: document.querySelector('#settings-model-key'),
   settingsModelClearKey: document.querySelector('#settings-model-clear-key'),
   settingsModelSave: document.querySelector('#settings-model-save'),
+  settingsModelFetch: document.querySelector('#settings-model-fetch'),
   settingsModelHint: document.querySelector('#settings-model-hint'),
   permissionOptions: document.querySelector('#permission-options'),
   settingsPermissionHint: document.querySelector('#settings-permission-hint'),
@@ -294,6 +298,8 @@ const state = {
   queueEdit: null,
   attachments: [],
   modelOptions: [],
+  /** 「获取可用模型」拉到的端点清单；null 表示还没探测过，显示配置里的候选 */
+  remoteModels: null,
   modelApiKeySet: false,
   modelApiKeyMasked: '',
   /** 外观偏好：light / dark / system，真正生效的是解析后的 light/dark */
@@ -461,6 +467,7 @@ function init() {
     }
   });
   el.settingsModelSave.addEventListener('click', saveModelFromSettings);
+  el.settingsModelFetch.addEventListener('click', fetchModelsFromSettings);
   el.settingsModelClearKey.addEventListener('change', onSettingsClearKeyToggle);
   el.changeFiles.addEventListener('keydown', onChangeListKeydown);
   el.changeViewPreview.addEventListener('click', () => {
@@ -489,6 +496,7 @@ function init() {
   el.permChip.addEventListener('click', () => togglePermissionMenu());
   el.modelChip.addEventListener('click', () => toggleModelMenu());
   el.modelSave.addEventListener('click', saveModel);
+  el.modelFetch.addEventListener('click', fetchModelsFromMenu);
   el.modelClearKey.addEventListener('change', onModelClearKeyToggle);
   el.input.addEventListener('paste', onPasteAttachments);
   bindFileDrop();
@@ -1166,13 +1174,14 @@ function onModelClearKeyToggle() {
 }
 
 /** 下拉里给出候选模型，点击即切换；当前模型排在最前面。 */
-/** 候选模型列表：当前模型排第一，其余去重保序。 */
+/** 候选模型列表：当前模型排第一；探测过后端点清单优先，没探测过用配置候选。 */
 function modelCandidates(current) {
   const names = [];
   if (current) {
     names.push(current);
   }
-  for (const name of state.modelOptions) {
+  const source = state.remoteModels ?? state.modelOptions;
+  for (const name of source) {
     if (name && !names.includes(name)) {
       names.push(name);
     }
@@ -1235,6 +1244,59 @@ function saveModelFromSettings() {
     button: el.settingsModelSave,
     onSaved: renderAbout
   });
+}
+
+function fetchModelsFromMenu() {
+  return fetchModelList({
+    endpoint: el.modelEndpoint.value,
+    apiKey: el.modelKey.value,
+    hint: setModelHint,
+    button: el.modelFetch
+  });
+}
+
+function fetchModelsFromSettings() {
+  return fetchModelList({
+    endpoint: el.settingsModelEndpoint.value,
+    apiKey: el.settingsModelKey.value,
+    hint: (text, tone) => setSettingsStatus(el.settingsModelHint, text, tone),
+    button: el.settingsModelFetch
+  });
+}
+
+/**
+ * 「获取可用模型」：用表单里现填的端点与密钥探测，留空由服务端回退到已保存值。
+ *
+ * <p>成功后候选列表整体换成端点返回的清单（模型菜单和设置面板同步），失败保留原列表、
+ * 错误就地显示。探测只读，不会改动已保存的配置。
+ */
+async function fetchModelList(source) {
+  const payload = buildModelProbe({ endpoint: source.endpoint, apiKey: source.apiKey });
+  source.button.disabled = true;
+  source.hint('正在从端点获取模型列表…', 'idle');
+  try {
+    // 后端探测上限 30 秒，这里给到 45 秒，慢中转站也能等到结果
+    const response = await apiFetch('/api/settings/model/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }, 45000);
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const data = await response.json();
+    state.remoteModels = Array.isArray(data.models) ? data.models.slice() : [];
+    renderModelOptions((state.settingsData && state.settingsData.model) || '');
+    renderSettingsModelOptions(el.settingsModelName.value);
+    const endpoint = payload.endpoint || (state.settingsData && state.settingsData.modelEndpoint) || '';
+    source.hint(describeModelsFetched(data, { endpoint }), 'ok');
+    return true;
+  } catch (error) {
+    source.hint('获取失败：' + error.message, 'error');
+    return false;
+  } finally {
+    source.button.disabled = false;
+  }
 }
 
 /** 模型菜单和设置面板共用同一套保存流程，只是把提示写到各自的容器里。 */

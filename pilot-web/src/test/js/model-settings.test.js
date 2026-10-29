@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildModelProbe,
   buildModelUpdate,
   classifyModelError,
   describeModelSaved,
+  describeModelsFetched,
   errorText
 } from '../../main/resources/static/lib/model-settings.js';
 
@@ -63,4 +65,25 @@ test('404 指向端点/模型名，429 与超时只提示重试', () => {
   assert.equal(classifyModelError('模型请求超时（90000 ms）').kind, 'timeout');
   assert.equal(classifyModelError('请求被中断').kind, 'unknown');
   assert.equal(classifyModelError(null).hint, '');
+});
+
+test('探测请求体：两端空格去掉，留空交给服务端回退已保存值', () => {
+  assert.deepEqual(
+    buildModelProbe({ endpoint: ' https://api.example/v1 ', apiKey: ' sk-1 ' }),
+    { endpoint: 'https://api.example/v1', apiKey: 'sk-1' }
+  );
+  assert.deepEqual(buildModelProbe(), { endpoint: '', apiKey: '' });
+  assert.deepEqual(buildModelProbe({ endpoint: null, apiKey: null }), { endpoint: '', apiKey: '' });
+});
+
+test('获取模型成功文案带数量与来源，空清单引导手填', () => {
+  const data = { models: ['gpt-5.1', 'deepseek-chat'] };
+  assert.match(describeModelsFetched(data, { endpoint: 'https://api.example/v1' }), /已获取 2 个可用模型，来自 https:\/\/api\.example\/v1/);
+  assert.match(describeModelsFetched(data, {}), /已获取 2 个可用模型/);
+  assert.match(describeModelsFetched(data), /点击列表中的模型即可选择/);
+
+  assert.match(describeModelsFetched({ models: [] }, { endpoint: 'https://api.example' }), /没有返回任何模型/);
+  assert.match(describeModelsFetched({ models: [] }, {}), /请手动填写模型名/);
+  assert.match(describeModelsFetched({}, {}), /没有返回任何模型/);
+  assert.match(describeModelsFetched(null, {}), /没有返回任何模型/);
 });

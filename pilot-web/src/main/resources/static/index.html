@@ -20,7 +20,7 @@
       document.documentElement.dataset.accent = 'blue';
     }
   </script>
-  <link rel="stylesheet" href="/style.css?v=26">
+  <link rel="stylesheet" href="/style.css?v=27">
 </head>
 <body>
 <div class="app" id="app">
@@ -218,7 +218,11 @@
                     <p id="model-hint" class="model-hint" role="status" aria-live="polite"></p>
                     <div class="model-actions">
                       <label class="model-clear-key"><input id="model-clear-key" type="checkbox"> 清除已保存密钥</label>
-                      <button id="model-save" class="btn btn-primary btn-sm" type="button">保存</button>
+                      <span class="model-actions-buttons">
+                        <button id="model-fetch" class="btn btn-sm" type="button"
+                                title="用当前端点与密钥拉取可用模型清单">获取模型</button>
+                        <button id="model-save" class="btn btn-primary btn-sm" type="button">保存</button>
+                      </span>
                     </div>
                   </div>
                 </span>
@@ -432,7 +436,7 @@
 
         <section class="settings-pane" data-section="model" hidden>
           <h3 class="settings-title">模型</h3>
-          <p class="settings-hint">留空表示保持当前值，保存后下一次模型请求生效。</p>
+          <p class="settings-hint">留空表示保持当前值，保存后下一次模型请求生效；填好端点与密钥后可点「获取模型」拉取清单。</p>
           <div id="settings-model-options" class="settings-model-options" role="listbox" aria-label="候选模型"></div>
           <label class="settings-field"><span>模型</span><input id="settings-model-name" type="text" spellcheck="false" placeholder="gpt-5.1"></label>
           <label class="settings-field"><span>端点</span><input id="settings-model-endpoint" type="text" spellcheck="false" placeholder="https://api.openai.com/v1"></label>
@@ -440,7 +444,11 @@
           <p id="settings-model-hint" class="settings-status" role="status" aria-live="polite"></p>
           <div class="settings-actions">
             <label class="settings-check"><input id="settings-model-clear-key" type="checkbox"> 清除已保存密钥</label>
-            <button id="settings-model-save" class="btn btn-primary" type="button">保存模型</button>
+            <span class="settings-actions-buttons">
+              <button id="settings-model-fetch" class="btn" type="button"
+                      title="用当前端点与密钥拉取可用模型清单">获取模型</button>
+              <button id="settings-model-save" class="btn btn-primary" type="button">保存模型</button>
+            </span>
           </div>
         </section>
 
@@ -496,6 +504,6 @@
 <div id="scrim" class="scrim" hidden></div>
 
 <div id="drop-veil" class="drop-veil" hidden>松开以添加文件</div>
-  <script type="module" src="/app.js?v=29"></script>
+  <script type="module" src="/app.js?v=30"></script>
 </body>
 </html>
