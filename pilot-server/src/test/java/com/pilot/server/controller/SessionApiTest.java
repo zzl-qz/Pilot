@@ -1,6 +1,7 @@
 package com.pilot.server.controller;
 
 import com.pilot.core.event.AssistantDelta;
+import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.session.Run;
 import com.pilot.core.session.SessionService;
@@ -10,12 +11,12 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.ObjectMapper;
@@ -87,6 +88,16 @@ class SessionApiTest {
         }
 
         @Override
+        public ContextStatus contextStatus(String sessionId) {
+            return new ContextStatus(18, 42_000, 120_000, true, true);
+        }
+
+        @Override
+        public CompactionResult compactContext(String sessionId) {
+            return new CompactionResult(true, 12, 42_000, 16_000, "已压缩 12 条较早消息");
+        }
+
+        @Override
         public boolean editQueued(String sessionId, int index, String text) {
             if (text == null || text.isBlank() || index < 0 || index >= queue.size()) {
                 return false;
@@ -138,7 +149,7 @@ class SessionApiTest {
                 .andExpect(jsonPath("$.sessionId").value(sessionId))
                 .andExpect(jsonPath("$.runId").isNotEmpty());
 
-        var events = sessions.events(sessionId);
+        List<EventEnvelope> events = sessions.events(sessionId);
         assertEquals(1, events.size());
         assertEquals("run.started", events.get(0).type());
         assertEquals("修复边界条件", ((RunStarted) events.get(0).payload()).input());
@@ -157,6 +168,23 @@ class SessionApiTest {
         String body = mvc.perform(get("/api/sessions"))
                 .andReturn().getResponse().getContentAsString();
         assertTrue(body.contains(sessionId), body);
+    }
+
+    @Test
+    void exposesContextUsageAndManualCompaction() throws Exception {
+        String sessionId = createSession();
+
+        mvc.perform(get("/api/sessions/{id}/context", sessionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.usedTokens").value(42_000))
+                .andExpect(jsonPath("$.limitTokens").value(120_000))
+                .andExpect(jsonPath("$.percent").value(35))
+                .andExpect(jsonPath("$.canCompact").value(true));
+
+        mvc.perform(post("/api/sessions/{id}/context/compact", sessionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.compacted").value(true))
+                .andExpect(jsonPath("$.tokensAfter").value(16_000));
     }
 
     @Test
@@ -469,7 +497,7 @@ class SessionApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.runId").isNotEmpty());
 
-        var events = sessions.events(sessionId);
+        List<EventEnvelope> events = sessions.events(sessionId);
         assertEquals(1, events.size());
         assertEquals("改过的第一句", ((RunStarted) events.get(0).payload()).input());
     }

@@ -1,6 +1,7 @@
 package com.pilot.core.tool;
 
 import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** 命令工具共用的状态表示；日志内容不参与判断验证是否通过。 */
@@ -39,14 +40,17 @@ final class CommandToolSupport {
 
     static String checkSummary(CommandTaskManager manager, String sessionId, String result) {
         if (result == null) return null;
-        var id = TASK_ID.matcher(result);
-        var status = STATUS.matcher(result);
+        Matcher id = TASK_ID.matcher(result);
+        Matcher status = STATUS.matcher(result);
         if (!id.find() || !status.find()) return null;
         // 查询与渲染之间即使进程刚好结束，返回的 RUNNING 也不算验证已完成。
         if ("RUNNING".equals(status.group(1)) || "STOPPING".equals(status.group(1))) return null;
-        var task = manager.get(sessionId, id.group(1));
+        CommandTaskManager.Task task = manager.get(sessionId, id.group(1));
         if (task == null || running(task) || task.exitCode() == null || !task.status().equals(status.group(1))) return null;
         String command = ToolSupport.oneLine(task.command(), 90);
+        if (result.startsWith("ERROR: 命令已结束，但无法完整确认其工作区变更")) {
+            return command + " → CHANGE_TRACKING_INCOMPLETE";
+        }
         if ("COMPLETED".equals(task.status()) || "FAILED".equals(task.status())) {
             return command + " → exit " + task.exitCode();
         }

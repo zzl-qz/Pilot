@@ -2,7 +2,9 @@ package com.pilot.server.workspace;
 
 import org.springframework.stereotype.Component;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,6 +15,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Stream;
 
 /**
  * 变更审阅：读取工作区的 git 状态与 diff，供界面展示「这次到底改了什么」。
@@ -70,7 +74,7 @@ public class ChangeService {
         String status = exec(workspace, List.of("git", "status", "--porcelain=v1", "-uall"));
         // 与运行级保持一致：相对 HEAD 取补丁，已暂存的改动才不会在审阅面板里消失
         boolean head = hasHead(workspace);
-        var diffCommand = new ArrayList<>(List.of("git", "-c", "core.quotePath=false", "diff",
+        ArrayList<String> diffCommand = new ArrayList<>(List.of("git", "-c", "core.quotePath=false", "diff",
                 "--no-color", "--no-ext-diff"));
         if (head) {
             diffCommand.add("HEAD");
@@ -81,7 +85,7 @@ public class ChangeService {
         // 行数用 numstat，不从可能被截断的补丁正文里数，否则大改动会显示成 +0 −0
         Map<String, int[]> stats = numstat(workspace, head);
 
-        var files = new ArrayList<FileChange>();
+        ArrayList<FileChange> files = new ArrayList<FileChange>();
         boolean truncated = false;
         for (String line : status.lines().toList()) {
             if (line.length() < 3) {
@@ -137,7 +141,7 @@ public class ChangeService {
             return new RunChangeReport(runId, root.toString(), gitRepository, List.of(), 0, 0, false, null);
         }
         if (!gitRepository) {
-            var files = new ArrayList<RunFileChange>();
+            ArrayList<RunFileChange> files = new ArrayList<RunFileChange>();
             for (String path : wanted) {
                 String status = Files.isRegularFile(root.resolve(path)) ? "M" : "D";
                 files.add(new RunFileChange(path, status, 0, 0, ""));
@@ -153,7 +157,7 @@ public class ChangeService {
         diffPaths.addAll(scan.renameSources());
         Map<String, String> chunks = diffChunks(root, List.copyOf(diffPaths), head);
 
-        var files = new ArrayList<RunFileChange>();
+        ArrayList<RunFileChange> files = new ArrayList<RunFileChange>();
         int addedTotal = 0;
         int removedTotal = 0;
         int budget = MAX_DIFF_CHARS;
@@ -287,7 +291,7 @@ public class ChangeService {
 
     /** 一次 git diff 取全部文件的补丁，再按文件头切开；路径用字面量 pathspec，避免被当成通配符。 */
     private static Map<String, String> diffChunks(Path root, List<String> paths, boolean head) {
-        var command = new ArrayList<>(List.of("git", "-c", "core.quotePath=false", "diff",
+        ArrayList<String> command = new ArrayList<>(List.of("git", "-c", "core.quotePath=false", "diff",
                 "--no-color", "--no-ext-diff", "--unified=3"));
         // 相对 HEAD 比较：已暂存（git add）的改动也要算进来；仓库还没有提交时退回工作区 diff
         if (head) {
@@ -346,7 +350,7 @@ public class ChangeService {
      * 还没有提交时只看暂存区。未跟踪文件不在这份输出里，调用方另行数行。
      */
     private static Map<String, int[]> numstat(Path root, boolean head) {
-        var command = new ArrayList<>(List.of("git", "-c", "core.quotePath=false", "diff",
+        ArrayList<String> command = new ArrayList<>(List.of("git", "-c", "core.quotePath=false", "diff",
                 "--numstat", "--no-color", "--no-ext-diff"));
         if (head) {
             command.add("HEAD");
@@ -416,7 +420,7 @@ public class ChangeService {
             if (!Files.isRegularFile(absolute) || Files.size(absolute) > MAX_UNTRACKED_BYTES || isBinary(absolute)) {
                 return 0;
             }
-            try (var stream = Files.lines(absolute, StandardCharsets.UTF_8)) {
+            try (Stream<String> stream = Files.lines(absolute, StandardCharsets.UTF_8)) {
                 return (int) Math.min(Integer.MAX_VALUE, stream.count());
             }
         } catch (IOException | java.io.UncheckedIOException e) {
@@ -429,7 +433,7 @@ public class ChangeService {
     }
 
     private static List<String> withPathspec(List<String> command, List<String> paths) {
-        var full = new ArrayList<>(command);
+        ArrayList<String> full = new ArrayList<>(command);
         full.add("--");
         for (String path : paths) {
             full.add(":(literal)" + path);
@@ -444,7 +448,7 @@ public class ChangeService {
 
     /** 文本文件里出现 NUL 一律按二进制处理：不合成 diff，避免把乱码塞进对话区。 */
     private static boolean isBinary(Path path) {
-        try (var input = Files.newInputStream(path)) {
+        try (InputStream input = Files.newInputStream(path)) {
             byte[] sample = input.readNBytes(8192);
             for (byte value : sample) {
                 if (value == 0) {
@@ -560,7 +564,7 @@ public class ChangeService {
         try {
             Process process = builder.start();
             process.getOutputStream().close();
-            var timedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
+            AtomicBoolean timedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             Thread watchdog = Thread.ofVirtual().name("pilot-git-watchdog").start(() -> {
                 try {
                     if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
@@ -572,9 +576,9 @@ public class ChangeService {
                 }
             });
 
-            var collected = new java.io.ByteArrayOutputStream();
+            ByteArrayOutputStream collected = new java.io.ByteArrayOutputStream();
             byte[] buffer = new byte[8192];
-            try (var stream = process.getInputStream()) {
+            try (InputStream stream = process.getInputStream()) {
                 int read;
                 while ((read = stream.read(buffer)) > 0) {
                     if (collected.size() < MAX_OUTPUT_BYTES) {

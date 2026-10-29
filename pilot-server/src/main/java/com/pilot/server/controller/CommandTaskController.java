@@ -40,7 +40,7 @@ public class CommandTaskController {
         if (offset < 0 || limit < 1 || limit > 65536) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "日志位置不能小于 0，单次读取长度必须在 1–65536 之间");
         }
-        var chunk = commands.logs(id, taskId, offset, limit);
+        CommandTaskManager.LogChunk chunk = commands.logs(id, taskId, offset, limit);
         if (chunk == null) throw missingTask();
         return chunk;
     }

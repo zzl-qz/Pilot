@@ -34,9 +34,9 @@ class SandboxToolsTest {
     @Test
     void editToolOnlyRecordsProposal(@TempDir Path dir) throws IOException {
         Path root = workspace(dir);
-        var proposals = new ArrayList<Proposal>();
+        ArrayList<Proposal> proposals = new ArrayList<Proposal>();
         SandboxSink sink = (path, oldText, newText) -> proposals.add(new Proposal(path, oldText, newText));
-        var tool = new SandboxEditFileTool(new PathValidator(root), sink);
+        SandboxEditFileTool tool = new SandboxEditFileTool(new PathValidator(root), sink);
 
         String result = tool.execute(Map.of(
                 "path", "src/A.java",
@@ -54,8 +54,8 @@ class SandboxToolsTest {
     @Test
     void createToolRecordsNewFile(@TempDir Path dir) throws IOException {
         Path root = workspace(dir);
-        var proposals = new ArrayList<Proposal>();
-        var tool = new SandboxCreateFileTool(new PathValidator(root),
+        ArrayList<Proposal> proposals = new ArrayList<Proposal>();
+        SandboxCreateFileTool tool = new SandboxCreateFileTool(new PathValidator(root),
                 (path, oldText, newText) -> proposals.add(new Proposal(path, oldText, newText)));
 
         tool.execute(Map.of("path", "src/B.java", "content", "class B {}\n"));
@@ -68,9 +68,9 @@ class SandboxToolsTest {
     @Test
     void scopeBlocksFilesOutsideWhitelist(@TempDir Path dir) throws IOException {
         Path root = workspace(dir);
-        var scope = AgentScope.readOnly(List.of("src/**"), List.of());
-        var validator = new PathValidator(root, scope);
-        var tool = new SandboxEditFileTool(validator, SandboxSink.rejectAll());
+        AgentScope scope = AgentScope.readOnly(List.of("src/**"), List.of());
+        PathValidator validator = new PathValidator(root, scope);
+        SandboxEditFileTool tool = new SandboxEditFileTool(validator, SandboxSink.rejectAll());
 
         String result = tool.execute(Map.of(
                 "path", "secret.txt",
@@ -86,8 +86,8 @@ class SandboxToolsTest {
     @Test
     void listDirHidesFilesOutsideScope(@TempDir Path dir) throws IOException {
         Path root = workspace(dir);
-        var scope = AgentScope.readOnly(List.of("src/**"), List.of());
-        var tool = new ListDirTool(new PathValidator(root, scope));
+        AgentScope scope = AgentScope.readOnly(List.of("src/**"), List.of());
+        ListDirTool tool = new ListDirTool(new PathValidator(root, scope));
 
         String result = tool.execute(Map.of("path", "."));
 
@@ -99,7 +99,7 @@ class SandboxToolsTest {
     void editWithoutUniqueMatchFails(@TempDir Path dir) throws IOException {
         Path root = workspace(dir);
         Files.writeString(root.resolve("src/Dup.java"), "x\nx\n");
-        var tool = new SandboxEditFileTool(new PathValidator(root), SandboxSink.rejectAll());
+        SandboxEditFileTool tool = new SandboxEditFileTool(new PathValidator(root), SandboxSink.rejectAll());
 
         String result = tool.execute(Map.of("path", "src/Dup.java", "old_string", "x", "new_string", "y"));
 

@@ -42,6 +42,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -116,7 +117,11 @@ public class MultiAgentService {
      * @param cancelled 父 run 的取消信号，子 Agent 逐个检查
      */
     public record Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
-                           Consumer<SessionEvent> events, BooleanSupplier cancelled) {
+                           Consumer<SessionEvent> events, BooleanSupplier cancelled, ModelClient executionClient) {
+        public Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
+                        Consumer<SessionEvent> events, BooleanSupplier cancelled) {
+            this(sessionId, runId, workspace, specs, events, cancelled, null);
+        }
     }
 
     /** 单个任务的最终结果。 */
@@ -352,9 +357,9 @@ public class MultiAgentService {
         AgentLoop.Config config = new AgentLoop.Config(properties.maxSteps(), 3, 5,
                 systemPrompt(spec, dispatch), List::of, 0, 120_000, true);
         // 每个子 Agent 单独一份 trace：出问题能按 agentId 回放它自己的工具调用链
-        var trace = new JsonlTraceRecorder(
+        JsonlTraceRecorder trace = new JsonlTraceRecorder(
                 dataDir.file("traces", dispatch.sessionId() + "-" + agentId + ".jsonl"), objectMapper);
-        var loop = new AgentLoop(modelClient, tools, new PolicyPermissionGate(PermissionMode.AUTO),
+        AgentLoop loop = new AgentLoop(dispatch.executionClient() == null ? modelClient : dispatch.executionClient(), tools, new PolicyPermissionGate(PermissionMode.AUTO),
                 ApprovalBroker.denyAll(), config, () -> cancelled(dispatch), () -> null, trace);
 
         publish(dispatch.events(), new SubagentStarted(agentId, oneLine(spec.title() + "：" + spec.goal(), 200)));
@@ -386,6 +391,7 @@ public class MultiAgentService {
         return event -> {
             if (event instanceof AssistantDelta || event instanceof AssistantPreview
                     || event instanceof ContextCompacted || event instanceof PlanUpdated
+                    || event instanceof com.pilot.core.event.RunUsageUpdated
                     || event instanceof RunCompleted || event instanceof RunFailed
                     || event instanceof RunCancelled || event instanceof RunContinued
                     || event instanceof RunRetrying || event instanceof ApprovalRequired
@@ -399,7 +405,7 @@ public class MultiAgentService {
     private String systemPrompt(TaskSpec spec, Dispatch dispatch) {
         String workspace = "当前工作区";
         try {
-            var name = toolFactory.resolve(dispatch.workspace()).getFileName();
+            Path name = toolFactory.resolve(dispatch.workspace()).getFileName();
             if (name != null) {
                 workspace = name.toString();
             }

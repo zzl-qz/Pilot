@@ -32,14 +32,14 @@ class SandboxStoreTest {
     private DiffSandbox proposal() throws IOException {
         Files.createDirectories(workspace.resolve("src"));
         Files.writeString(workspace.resolve("src/A.java"), ORIGINAL);
-        var sandbox = new DiffSandbox("sbx_1", "agent_1", "T1", "");
+        DiffSandbox sandbox = new DiffSandbox("sbx_1", "agent_1", "T1", "");
         sandbox.add("src/A.java", ORIGINAL, "a\nCHANGED\nc\n", true, RiskLevel.MEDIUM);
         return sandbox;
     }
 
     @Test
     void acceptWritesSandboxContentToWorkspace() throws IOException {
-        var store = store();
+        SandboxStore store = store();
         store.add("ses_1", proposal());
         assertEquals(ORIGINAL, Files.readString(workspace.resolve("src/A.java")), "接受之前不能落盘");
 
@@ -52,7 +52,7 @@ class SandboxStoreTest {
 
     @Test
     void acceptRefusesToOverwriteAFileThatChangedMeanwhile() throws IOException {
-        var store = store();
+        SandboxStore store = store();
         store.add("ses_1", proposal());
         Files.writeString(workspace.resolve("src/A.java"), "a\n用户改过了\nc\n");
 
@@ -65,7 +65,7 @@ class SandboxStoreTest {
 
     @Test
     void rejectLeavesWorkspaceUntouched() throws IOException {
-        var store = store();
+        SandboxStore store = store();
         store.add("ses_1", proposal());
 
         assertTrue(store.reject("ses_1", "sbx_1"));
@@ -77,8 +77,8 @@ class SandboxStoreTest {
 
     @Test
     void refusesToWriteOutsideWorkspace() throws IOException {
-        var store = store();
-        var sandbox = new DiffSandbox("sbx_2", "agent_2", "T2", "");
+        SandboxStore store = store();
+        DiffSandbox sandbox = new DiffSandbox("sbx_2", "agent_2", "T2", "");
         sandbox.add("../../escape.txt", null, "boom", false, RiskLevel.MEDIUM);
         store.add("ses_1", sandbox);
 

@@ -38,8 +38,8 @@ public final class InMemoryApprovalBroker implements ApprovalBroker {
         if (callId == null || callId.isBlank()) {
             throw new IllegalArgumentException("callId must not be blank");
         }
-        var future = new CompletableFuture<Boolean>();
-        var entry = new Entry(new PendingApproval(callId, toolName, argsSummary, clock.instant()), future);
+        CompletableFuture<Boolean> future = new CompletableFuture<Boolean>();
+        Entry entry = new Entry(new PendingApproval(callId, toolName, argsSummary, clock.instant()), future);
         if (pending.putIfAbsent(callId, entry) != null) {
             throw new IllegalStateException("approval already pending: " + callId);
         }

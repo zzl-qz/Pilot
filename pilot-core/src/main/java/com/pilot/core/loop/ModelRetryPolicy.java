@@ -11,9 +11,9 @@ import java.util.regex.Pattern;
  * 这组判断放在这里而不是 AgentLoop 里，是因为它是纯函数、边界又多（异常链、状态码文本），
  * 单独拿出来可以直接覆盖每种情况。
  */
-final class ModelRetryPolicy {
+public final class ModelRetryPolicy {
     /** 最多再试 3 次，间隔 2 秒起、翻倍、不超过 30 秒。 */
-    static final int MAX_TRANSIENT_RETRIES = 3;
+    public static final int MAX_TRANSIENT_RETRIES = 3;
     private static final long INITIAL_MS = 2_000L;
     private static final long MAX_MS = 30_000L;
     private static final Pattern HTTP_STATUS = Pattern.compile("HTTP (\\d+)");
@@ -22,7 +22,7 @@ final class ModelRetryPolicy {
     }
 
     /** 第 {@code attempt} 次重试前等多久（attempt 从 1 开始）。 */
-    static long delayMs(int attempt) {
+    public static long delayMs(int attempt) {
         int shift = Math.min(Math.max(attempt, 1) - 1, 4);
         return Math.min(INITIAL_MS << shift, MAX_MS);
     }
@@ -33,7 +33,7 @@ final class ModelRetryPolicy {
      * <p>按消息文本判断是因为模型客户端把状态码和原因都拼进了异常消息；
      * 再兜一层 {@link IOException} 异常链，覆盖连接被重置这类没有状态码的情况。
      */
-    static boolean isTransient(RuntimeException error) {
+    public static boolean isTransient(RuntimeException error) {
         String message = error.getMessage() == null ? "" : error.getMessage();
         // 主动中断（取消、超时杀线程）不该重试，否则用户点了停止还要再等一轮
         if (message.contains("被中断")) {

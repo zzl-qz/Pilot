@@ -81,9 +81,9 @@ public class AttachmentService {
             throw new IllegalArgumentException("一次最多附加 " + MAX_FILES + " 个文件");
         }
 
-        var text = new StringBuilder(body);
-        var attachments = new ArrayList<Attachment>();
-        var pending = new ArrayList<PendingAttachment>();
+        StringBuilder text = new StringBuilder(body);
+        ArrayList<Attachment> attachments = new ArrayList<Attachment>();
+        ArrayList<PendingAttachment> pending = new ArrayList<PendingAttachment>();
         for (Inbound item : inbound) {
             if (item == null || item.dataBase64() == null || item.dataBase64().isBlank()) {
                 continue;
@@ -99,7 +99,7 @@ public class AttachmentService {
         if (text.toString().isBlank() && pending.stream().noneMatch(item -> IMAGE_TYPES.contains(item.mime()))) {
             throw new IllegalArgumentException("消息正文和附件不能同时为空");
         }
-        var savedPaths = new ArrayList<Path>();
+        ArrayList<Path> savedPaths = new ArrayList<Path>();
         try {
             for (PendingAttachment item : pending) {
                 Attachment saved = save(sessionId, item.name(), item.mime(), item.bytes());
@@ -148,6 +148,31 @@ public class AttachmentService {
             throw new IllegalArgumentException("附件「" + item.name() + "」超过 " + (MAX_BYTES / 1024 / 1024) + " MB");
         }
         return bytes;
+    }
+
+    public record DisplayAttachment(String name, String mimeType, String url) { }
+
+    public List<DisplayAttachment> displayAttachments(String sessionId, List<Attachment> attachments) {
+        if (attachments == null) {
+            return List.of();
+        }
+        return attachments.stream().filter(Attachment::image)
+                .map(item -> new DisplayAttachment(item.name(), item.mimeType(),
+                        "/api/sessions/" + safeName(sessionId, 80) + "/attachments/"
+                                + Path.of(item.path()).getFileName()))
+                .toList();
+    }
+
+    public Path resolveImage(String sessionId, String fileName) {
+        if (sessionId == null || fileName == null || !fileName.matches("[a-fA-F0-9-]{36}-.+")) {
+            throw new IllegalArgumentException("invalid attachment reference");
+        }
+        Path sessionDir = root.resolve(safeName(sessionId, 80)).normalize();
+        Path file = sessionDir.resolve(fileName).normalize();
+        if (!file.getParent().equals(sessionDir) || !Files.isRegularFile(file)) {
+            throw new IllegalArgumentException("attachment not found");
+        }
+        return file;
     }
 
     private Attachment save(String sessionId, String name, String mime, byte[] bytes) {

@@ -96,6 +96,43 @@ public interface RunStarter {
         return false;
     }
 
+    /** 当前模型记忆的上下文占用；token 是保守估算，端点 usage 不适合反推整段记忆。 */
+    default ContextStatus contextStatus(String sessionId) {
+        return new ContextStatus(0, 0, 1, true, false);
+    }
+
+    /** 用户主动压缩已落盘的模型记忆；聊天事件历史不删除。 */
+    default CompactionResult compactContext(String sessionId) {
+        return new CompactionResult(false, 0, 0, 0, "当前运行器不支持主动压缩");
+    }
+
+    record ContextStatus(int messages, int usedTokens, int limitTokens,
+                         boolean estimated, boolean canCompact, int percent) {
+        public ContextStatus(int messages, int usedTokens, int limitTokens,
+                             boolean estimated, boolean canCompact) {
+            this(messages, usedTokens, limitTokens, estimated, canCompact,
+                    Math.min(100, (int) Math.round(Math.max(0, usedTokens) * 100.0
+                            / Math.max(1, limitTokens))));
+        }
+
+        public ContextStatus {
+            messages = Math.max(0, messages);
+            usedTokens = Math.max(0, usedTokens);
+            limitTokens = Math.max(1, limitTokens);
+            percent = Math.max(0, Math.min(100, percent));
+        }
+    }
+
+    record CompactionResult(boolean compacted, int coveredMessages,
+                            int tokensBefore, int tokensAfter, String message) {
+        public CompactionResult {
+            coveredMessages = Math.max(0, coveredMessages);
+            tokensBefore = Math.max(0, tokensBefore);
+            tokensAfter = Math.max(0, tokensAfter);
+            message = message == null ? "" : message;
+        }
+    }
+
     /**
      * 立即纠正当前任务：在下一个安全步骤注入，不创建独立任务。
      *

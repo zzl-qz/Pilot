@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.stream.Stream;
 
 /**
  * 运行期数据的保留策略：事件、快照和 trace 都是只增不减的，跑久了会持续占盘。
@@ -75,7 +76,7 @@ public class RetentionService {
             return 0;
         }
         int removed = 0;
-        try (var entries = Files.list(traces)) {
+        try (Stream<Path> entries = Files.list(traces)) {
             for (Path file : entries.filter(Files::isRegularFile).toList()) {
                 try {
                     if (Files.getLastModifiedTime(file).toInstant().isBefore(cutoff)) {

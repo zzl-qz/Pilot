@@ -17,6 +17,8 @@ import com.pilot.server.workspace.WorkspaceService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -35,6 +37,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -102,7 +105,7 @@ public class SessionController {
         Project project = projectId == null ? null : requireProject(projectId);
 
         if (project != null) {
-            var existingBlank = sessions.findBlank(projectId);
+            Optional<Session> existingBlank = sessions.findBlank(projectId);
             if (existingBlank.isPresent()) {
                 if (request == null || request.replaceBlank() == null || !request.replaceBlank()) {
                     throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -257,6 +260,24 @@ public class SessionController {
     public ActiveRunResponse activeRun(@PathVariable String id) {
         requireSession(id);
         return new ActiveRunResponse(id, runStarter.activeRun(id).orElse(null));
+    }
+
+    /** Cursor/Codex 风格的上下文占用视图：读取的是模型记忆，不是聊天事件条数。 */
+    @GetMapping("/{id}/context")
+    public RunStarter.ContextStatus context(@PathVariable String id) {
+        requireSession(id);
+        return runStarter.contextStatus(id);
+    }
+
+    /** 主动压缩只改模型记忆；人可见的聊天与审计事件完整保留。 */
+    @PostMapping("/{id}/context/compact")
+    public RunStarter.CompactionResult compactContext(@PathVariable String id) {
+        requireSession(id);
+        try {
+            return runStarter.compactContext(id);
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
     }
 
     /** 用上一次的用户输入重跑一轮，历史里不会重复这条用户消息。 */
@@ -460,7 +481,7 @@ public class SessionController {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行");
         }
         launch(runId, () -> {
-            sessions.publish(id, runId, new RunStarted(prepared.content()));
+            sessions.publish(id, runId, new RunStarted(prepared.content(), prepared.attachments()));
             runStarter.start(id, runId, prepared.content(), prepared.attachments(), request.task());
         });
         return ResponseEntity.ok().body(new MessageResponse(id, runId));
@@ -498,10 +519,10 @@ public class SessionController {
                                              @RequestHeader(name = "Last-Event-ID", required = false) Long lastEventId) {
         requireSession(id);
         long cursor = after != null ? after : lastEventId != null ? lastEventId : 0L;
-        var emitter = new SseEmitter(0L);
-        var closed = new AtomicBoolean(false);
-        var subscription = new AtomicReference<EventSubscription>();
-        var heartbeat = new AtomicReference<ScheduledFuture<?>>();
+        SseEmitter emitter = new SseEmitter(0L);
+        AtomicBoolean closed = new AtomicBoolean(false);
+        AtomicReference<EventSubscription> subscription = new AtomicReference<EventSubscription>();
+        AtomicReference<ScheduledFuture<?>> heartbeat = new AtomicReference<ScheduledFuture<?>>();
 
         // 浏览器刷新、切换会话或关页面都会让连接失效；这属于正常生命周期，
         // 不能把写入失败当成异常抛给上层，否则每个事件都会刷一份堆栈。
@@ -597,6 +618,7 @@ public class SessionController {
 
     public record QueueEditRequest(String content) { }
 
+    // 结构化图文队列尚未完成前维持现有契约，避免半成品类型使整个服务无法编译。
     public record QueueResponse(List<String> items) { }
 
     public record MessageResponse(String sessionId, String runId) { }

@@ -22,7 +22,7 @@ class JsonlTraceRecorderTest {
     @Test
     void appendsOneLinePerToolCall() throws IOException {
         Path file = tempDir.resolve("nested").resolve("trace.jsonl");
-        var recorder = new JsonlTraceRecorder(file, JsonMapper.builder().build());
+        JsonlTraceRecorder recorder = new JsonlTraceRecorder(file, JsonMapper.builder().build());
 
         recorder.record(new ToolCall("c1", "read_file", Map.of("path", "a.txt")), "读到 12 行", 5L);
         recorder.record(new ToolCall("c2", "run_command", Map.of("command", "mvnw test")),
@@ -39,7 +39,7 @@ class JsonlTraceRecorderTest {
     @Test
     void truncatesLongPayloadsToKeepLinesReadable() throws IOException {
         Path file = tempDir.resolve("trace.jsonl");
-        var recorder = new JsonlTraceRecorder(file, JsonMapper.builder().build());
+        JsonlTraceRecorder recorder = new JsonlTraceRecorder(file, JsonMapper.builder().build());
 
         recorder.record(new ToolCall("c1", "read_file", Map.of("path", "a.txt")), "x".repeat(5_000), 1L);
 

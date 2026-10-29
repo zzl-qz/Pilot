@@ -6,14 +6,15 @@ import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.session.RunStarter;
 import com.pilot.server.config.AgentProperties;
+import com.pilot.server.session.RunStarter;
 import com.pilot.server.workspace.RunSnapshotService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /** 按用户消息回到发送前；分支保留原对话，使用当前工作区文件。 */
@@ -56,7 +57,7 @@ public class CheckpointController {
             Selection selection = select(id, request.sequence());
             checkRevision(selection, request.revision());
             boolean withConversation = !"code".equals(request.mode());
-            var checkpoint = withConversation ? snapshots.conversation(selection.event().runId()) : null;
+            RunSnapshotService.ConversationCheckpoint checkpoint = withConversation ? snapshots.conversation(selection.event().runId()) : null;
             if (withConversation && checkpoint == null) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "对话检查点不存在或已过期，无法恢复模型记忆");
             }
@@ -69,7 +70,7 @@ public class CheckpointController {
                 if (!runs.lockWorkspace(slot, Path.of(workspace(selection.session())))) {
                     throw new ResponseStatusException(HttpStatus.CONFLICT, "同一工作区有任务正在运行或回退，请稍后重试");
                 }
-                var preview = codePreview(selection);
+                RunSnapshotService.RestorePreview preview = codePreview(selection);
                 if (!preview.ready()) {
                     return new RestoreResponse(false, selection.input(), new RunSnapshotService.RollbackReport(
                             selection.event().runId(), workspace(selection.session()), List.of(), List.of(),
@@ -102,7 +103,7 @@ public class CheckpointController {
         try {
             Selection selection = select(id, request.sequence());
             checkRevision(selection, request.revision());
-            var checkpoint = snapshots.conversation(selection.event().runId());
+            RunSnapshotService.ConversationCheckpoint checkpoint = snapshots.conversation(selection.event().runId());
             if (checkpoint == null) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "对话检查点不存在或已过期，无法创建分支");
             }
@@ -151,11 +152,11 @@ public class CheckpointController {
     }
 
     private RunSnapshotService.RestorePreview codePreview(Selection selection) {
-        var preview = snapshots.preview(selection.runIds());
+        RunSnapshotService.RestorePreview preview = snapshots.preview(selection.runIds());
         for (String runId : selection.runIds()) {
-            var meta = snapshots.meta(runId);
+            RunSnapshotService.SnapshotMeta meta = snapshots.meta(runId);
             if (meta != null && !sameWorkspace(workspace(selection.session()), meta.workspace())) {
-                var unavailable = new java.util.ArrayList<>(preview.unavailable());
+                ArrayList<String> unavailable = new java.util.ArrayList<>(preview.unavailable());
                 unavailable.add("当前工作区与检查点不同，请切回原工作区后回退代码");
                 return new RunSnapshotService.RestorePreview(preview.files(), preview.conflicts(), unavailable);
             }

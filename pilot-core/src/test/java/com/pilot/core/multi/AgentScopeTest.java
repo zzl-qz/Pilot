@@ -11,7 +11,7 @@ class AgentScopeTest {
 
     @Test
     void allowGlobsLimitVisibleFiles() {
-        var scope = AgentScope.readOnly(List.of("pilot-core/src/**/*.java"), List.of());
+        AgentScope scope = AgentScope.readOnly(List.of("pilot-core/src/**/*.java"), List.of());
 
         assertTrue(scope.allowsPath("pilot-core/src/main/java/com/pilot/core/A.java"));
         assertTrue(scope.allowsPath("pilot-core/src/main/java/com/pilot/core/deep/B.java"));
@@ -21,7 +21,7 @@ class AgentScopeTest {
 
     @Test
     void denyListWinsOverAllowList() {
-        var scope = AgentScope.readOnly(List.of("pilot-core/**"), List.of("pilot-core/src/test/**"));
+        AgentScope scope = AgentScope.readOnly(List.of("pilot-core/**"), List.of("pilot-core/src/test/**"));
 
         assertTrue(scope.allowsPath("pilot-core/src/main/java/A.java"));
         assertFalse(scope.allowsPath("pilot-core/src/test/java/A.java"));
@@ -36,7 +36,7 @@ class AgentScopeTest {
 
     @Test
     void emptyAllowListMeansWholeWorkspace() {
-        var scope = AgentScope.readWrite(List.of(), List.of("pom.xml"));
+        AgentScope scope = AgentScope.readWrite(List.of(), List.of("pom.xml"));
 
         assertTrue(scope.allowsPath("src/main/java/A.java"));
         assertFalse(scope.allowsPath("pom.xml"));
@@ -45,7 +45,7 @@ class AgentScopeTest {
 
     @Test
     void toolAllowListRestrictsTools() {
-        var scope = AgentScope.readOnly(List.of(), List.of())
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
                 .withTools(List.of("read_file", "search_text"), List.of());
 
         assertTrue(scope.allowsTool("read_file"));
@@ -55,7 +55,7 @@ class AgentScopeTest {
 
     @Test
     void toolAllowListSupportsWildcards() {
-        var scope = AgentScope.readOnly(List.of(), List.of())
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
                 .withTools(List.of("read_*", "search_text"), List.of());
 
         assertTrue(scope.allowsTool("read_file"));
@@ -66,7 +66,7 @@ class AgentScopeTest {
 
     @Test
     void commandAllowListMatchesArgumentPrefix() {
-        var scope = AgentScope.readOnly(List.of(), List.of())
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
                 .withCommands(List.of("mvn test", "git status"), List.of());
 
         assertTrue(scope.allowsCommand("mvn test"));
@@ -79,7 +79,7 @@ class AgentScopeTest {
 
     @Test
     void commandDenyListWinsOverAllowList() {
-        var scope = AgentScope.readOnly(List.of(), List.of())
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
                 .withCommands(List.of("mvn"), List.of("mvn deploy"));
 
         assertTrue(scope.allowsCommand("mvn test"));
@@ -88,7 +88,7 @@ class AgentScopeTest {
 
     @Test
     void commandWildcardsMatchSingleOrRestArguments() {
-        var scope = AgentScope.readOnly(List.of(), List.of())
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
                 .withCommands(List.of("git *", "npm run **"), List.of());
 
         assertTrue(scope.allowsCommand("git status --porcelain"));
@@ -98,7 +98,7 @@ class AgentScopeTest {
 
     @Test
     void emptyCommandAllowListMeansBuiltinPolicyOnly() {
-        var scope = AgentScope.readOnly(List.of(), List.of());
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of());
 
         assertTrue(scope.allowsCommand("mvn -q test"));
         assertFalse(scope.allowsCommand("  "));
@@ -106,7 +106,7 @@ class AgentScopeTest {
 
     @Test
     void scopeDescriptionTellsModelItsBoundary() {
-        var scope = AgentScope.readOnly(List.of("pilot-core/**"), List.of("pilot-core/secret/**"));
+        AgentScope scope = AgentScope.readOnly(List.of("pilot-core/**"), List.of("pilot-core/secret/**"));
 
         String text = scope.describe();
 

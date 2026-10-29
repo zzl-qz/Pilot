@@ -17,7 +17,7 @@ class PathValidatorTest {
     @Test
     void resolvesRelativePathInsideWorkspace() throws IOException {
         Files.createDirectories(workspace.resolve("pilot-core/src"));
-        var validator = new PathValidator(workspace);
+        PathValidator validator = new PathValidator(workspace);
 
         Path resolved = validator.resolve("pilot-core/src");
 
@@ -29,14 +29,14 @@ class PathValidatorTest {
     void allowsParentSegmentsThatStayInsideWorkspace() throws IOException {
         Files.createDirectories(workspace.resolve("a/b"));
         Files.writeString(workspace.resolve("pom.xml"), "<project/>");
-        var validator = new PathValidator(workspace);
+        PathValidator validator = new PathValidator(workspace);
 
         assertEquals(workspace.resolve("pom.xml").toRealPath(), validator.resolve("a/b/../../pom.xml"));
     }
 
     @Test
     void rejectsPathTraversal() {
-        var validator = new PathValidator(workspace);
+        PathValidator validator = new PathValidator(workspace);
 
         assertThrows(WorkspaceViolationException.class, () -> validator.resolve("../../etc/passwd"));
         assertThrows(WorkspaceViolationException.class, () -> validator.resolve("a/../../outside.txt"));
@@ -44,7 +44,7 @@ class PathValidatorTest {
 
     @Test
     void rejectsAbsolutePathOutsideWorkspace() {
-        var validator = new PathValidator(workspace);
+        PathValidator validator = new PathValidator(workspace);
 
         Path outside = workspace.getParent().resolve("outside.txt");
         assertThrows(WorkspaceViolationException.class, () -> validator.resolve(outside.toString()));
@@ -62,14 +62,14 @@ class PathValidatorTest {
             return;
         }
 
-        var validator = new PathValidator(workspace);
+        PathValidator validator = new PathValidator(workspace);
         assertThrows(WorkspaceViolationException.class,
                 () -> validator.resolve("external-link/new-file.txt"));
     }
 
     @Test
     void rejectsBlankPath() {
-        var validator = new PathValidator(workspace);
+        PathValidator validator = new PathValidator(workspace);
 
         assertThrows(IllegalArgumentException.class, () -> validator.resolve("  "));
         assertThrows(IllegalArgumentException.class, () -> validator.resolve(null));

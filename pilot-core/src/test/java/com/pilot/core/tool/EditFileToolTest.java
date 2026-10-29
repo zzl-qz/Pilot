@@ -59,8 +59,8 @@ class EditFileToolTest {
     void rejectsEditingUnreadFile() throws IOException {
         Path file = workspace.resolve("sample.txt");
         Files.writeString(file, "header\ntarget line\nfooter\n");
-        var reads = new ReadTracker();
-        var guarded = new EditFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
+        ReadTracker reads = new ReadTracker();
+        EditFileTool guarded = new EditFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
 
         String denied = guarded.execute(Map.of(
                 "path", "sample.txt", "old_string", "target line", "new_string", "replaced"));
@@ -70,7 +70,7 @@ class EditFileToolTest {
         assertEquals("header\ntarget line\nfooter\n", Files.readString(file), "未读文件不应被改动");
 
         // read_file 之后放行；错误信息里教的补救动作真实有效
-        var reader = new ReadFileTool(new PathValidator(workspace), reads);
+        ReadFileTool reader = new ReadFileTool(new PathValidator(workspace), reads);
         assertTrue(reader.execute(Map.of("path", "sample.txt")).contains("target line"));
         String allowed = guarded.execute(Map.of(
                 "path", "sample.txt", "old_string", "target line", "new_string", "replaced"));
@@ -81,11 +81,11 @@ class EditFileToolTest {
     void outOfRangeReadDoesNotUnlockEditing() throws IOException {
         Path file = workspace.resolve("sample.txt");
         Files.writeString(file, "target line\n");
-        var paths = new PathValidator(workspace);
-        var reads = new ReadTracker();
-        var reader = new ReadFileTool(paths, reads);
-        var editor = new EditFileTool(paths, SnapshotSink.none(), reads);
-        var edit = Map.<String, Object>of(
+        PathValidator paths = new PathValidator(workspace);
+        ReadTracker reads = new ReadTracker();
+        ReadFileTool reader = new ReadFileTool(paths, reads);
+        EditFileTool editor = new EditFileTool(paths, SnapshotSink.none(), reads);
+        Map<String,Object> edit = Map.<String, Object>of(
                 "path", "sample.txt", "old_string", "target line", "new_string", "replaced");
 
         assertTrue(reader.execute(Map.of("path", "sample.txt", "start_line", 9999))
@@ -103,9 +103,9 @@ class EditFileToolTest {
     /** 刚创建或刚编辑过的文件视为已读：连续编辑不被误伤。 */
     @Test
     void treatsJustWrittenFileAsObserved() throws IOException {
-        var reads = new ReadTracker();
-        var creator = new CreateFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
-        var editor = new EditFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
+        ReadTracker reads = new ReadTracker();
+        CreateFileTool creator = new CreateFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
+        EditFileTool editor = new EditFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
 
         assertTrue(creator.execute(Map.of(
                 "path", "fresh.txt", "content", "one\ntwo\n")).startsWith("已创建 "));

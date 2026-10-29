@@ -1,11 +1,13 @@
 package com.pilot.core.loop;
 
 import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ModelResponse;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.ToolCall;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -39,8 +41,10 @@ public final class ContextCompactor {
         }
     }
 
-    /** 无论如何都要留下的最近组数，保证模型还能看到「刚才做了什么」。 */
-    private static final int MIN_KEEP_GROUPS = 2;
+    /** 无论如何都要留下的最近组数，保证压缩后仍能看到最近完整的行动—观察链。 */
+    private static final int MIN_KEEP_GROUPS = 5;
+    /** 真正超窗时允许硬裁剪到更少的组；协议可用性优先于近期上下文完整度。 */
+    private static final int HARD_DROP_MIN_KEEP_GROUPS = 2;
     /**
      * 摘要后希望总量落到的位置：目标预算的 50%。
      *
@@ -121,22 +125,24 @@ public final class ContextCompactor {
         int reserveChars = Math.max(1, (int) (targetChars * KEEP_RATIO));
         int reserveTokens = Math.max(1, (int) (targetTokens * KEEP_RATIO));
         int start = groups.size();
+        int keptGroups = 0;
         int keptChars = 0;
         int keptTokens = 0;
-        while (start > minKeepGroups) {
+        while (start > 0) {
             int[] group = groups.get(start - 1);
             int sizeChars = chars(messages, group);
             int sizeTokens = tokens(messages, group);
-            // 最新一组无论如何都留下，之后任一预算超了就停
-            if (keptChars > 0 && (keptChars + sizeChars > reserveChars
+            // 最近 minKeepGroups 组无论多大都保留；之后任一预算超了就停。
+            if (keptGroups >= minKeepGroups && (keptChars + sizeChars > reserveChars
                     || keptTokens + sizeTokens > reserveTokens)) {
                 break;
             }
             keptChars += sizeChars;
             keptTokens += sizeTokens;
+            keptGroups++;
             start--;
         }
-        if (start >= groups.size()) {
+        if (start <= 0 || start >= groups.size()) {
             return Outcome.none(beforeChars);
         }
 
@@ -171,8 +177,11 @@ public final class ContextCompactor {
             return Outcome.none(beforeChars);
         }
 
+        // 摘要可以替代旧文本，但不能替代图像本身。把被折叠消息中的稳定附件引用
+        // 挂到交接摘要上，Goal reviewer、续跑和子代理继承历史时仍能看到原图。
+        List<Attachment> pinnedAttachments = attachments(messages, 1, end);
         messages.subList(1, end).clear();
-        messages.add(1, Message.user(replacement));
+        messages.add(1, Message.user(replacement, pinnedAttachments));
         return new Outcome(covered, beforeChars, totalChars(messages), summary);
     }
 
@@ -236,20 +245,25 @@ public final class ContextCompactor {
      */
     public static int dropOldestGroups(List<Message> messages, int limit) {
         int dropped = 0;
+        LinkedHashMap<String, Attachment> pinnedAttachments = new LinkedHashMap<>();
         // 兜底上限：即使分组逻辑写错也不能把调用方卡死
         int guard = messages.size() + 1;
         while (totalChars(messages) > limit && guard-- > 0) {
             List<int[]> groups = groups(messages);
-            if (groups.size() <= MIN_KEEP_GROUPS) {
+            if (groups.size() <= HARD_DROP_MIN_KEEP_GROUPS) {
                 break;
             }
             // 参数是 [start, end)：要删的是第一组本体，取它的结束下标，别取开始下标
             int end = groups.get(0)[1];
+            for (Attachment attachment : attachments(messages, 1, end)) {
+                pinnedAttachments.putIfAbsent(attachment.path(), attachment);
+            }
             dropped += end - 1;
             messages.subList(1, end).clear();
         }
         if (dropped > 0) {
-            messages.add(1, Message.user("[更早的 " + dropped + " 条消息已因上下文超限丢弃]"));
+            messages.add(1, Message.user("[更早的 " + dropped + " 条消息已因上下文超限丢弃]",
+                    List.copyOf(pinnedAttachments.values())));
         }
         return dropped;
     }
@@ -269,7 +283,10 @@ public final class ContextCompactor {
     }
 
     /** 单段文本的 token 估算：ASCII 4 字符 1 个，非 ASCII 1 字符 1 个。 */
-    static int estimateTokens(String content) {
+    public static int estimateTokens(String content) {
+        if (content == null || content.isEmpty()) {
+            return 0;
+        }
         int ascii = 0;
         int wide = 0;
         for (int i = 0; i < content.length(); i++) {
@@ -295,8 +312,8 @@ public final class ContextCompactor {
     }
 
     private String summarize(String transcript) {
-        var request = List.of(Message.system(SUMMARY_PROMPT), Message.user(transcript));
-        var response = client.chat(request, List.of());
+        List<Message> request = List.of(Message.system(SUMMARY_PROMPT), Message.user(transcript));
+        ModelResponse response = client.chat(request, List.of());
         return response.content() == null ? "" : response.content().strip();
     }
 
@@ -352,7 +369,7 @@ public final class ContextCompactor {
      * index 0 是 system，不参与分组。
      */
     private static List<int[]> groups(List<Message> messages) {
-        var result = new ArrayList<int[]>();
+        ArrayList<int[]> result = new ArrayList<int[]>();
         int i = 1;
         while (i < messages.size()) {
             int start = i;
@@ -371,7 +388,7 @@ public final class ContextCompactor {
 
     /** 从最新往最旧拼，超出预算就丢弃更早的部分并标记省略。 */
     private static String transcript(List<Message> messages, int from, int to) {
-        var parts = new ArrayList<String>();
+        ArrayList<String> parts = new ArrayList<String>();
         int total = 0;
         for (int i = to - 1; i >= from; i--) {
             String part = render(messages.get(i));
@@ -382,7 +399,7 @@ public final class ContextCompactor {
             parts.add(part);
             total += part.length();
         }
-        var builder = new StringBuilder();
+        StringBuilder builder = new StringBuilder();
         for (int i = parts.size() - 1; i >= 0; i--) {
             builder.append(parts.get(i)).append('\n');
         }
@@ -395,9 +412,20 @@ public final class ContextCompactor {
             content = content.substring(0, TOOL_SNIPPET_CHARS) + "…";
         }
         if (message.hasToolCalls()) {
-            var names = message.toolCalls().stream().map(ToolCall::name).toList();
+            List<String> names = message.toolCalls().stream().map(ToolCall::name).toList();
             return "[" + message.role() + "] (调用工具: " + String.join(", ", names) + ") " + content;
         }
         return "[" + message.role() + "] " + content;
+    }
+
+    /** 按稳定落盘路径去重；同一图在多轮引用时只向模型重发一次。 */
+    private static List<Attachment> attachments(List<Message> messages, int from, int to) {
+        LinkedHashMap<String, Attachment> unique = new LinkedHashMap<>();
+        for (int index = from; index < to; index++) {
+            for (Attachment attachment : messages.get(index).attachments()) {
+                unique.putIfAbsent(attachment.path(), attachment);
+            }
+        }
+        return List.copyOf(unique.values());
     }
 }

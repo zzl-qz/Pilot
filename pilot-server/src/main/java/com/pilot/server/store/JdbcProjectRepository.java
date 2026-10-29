@@ -66,7 +66,7 @@ public final class JdbcProjectRepository implements ProjectRepository {
         }
         // 一次读完全部文件夹再分组，避免每个项目各查一次（N+1）
         Map<String, List<String>> folders = new HashMap<>();
-        for (var row : JdbcSupport.query(store,
+        for (Map.Entry<String,String> row : JdbcSupport.query(store,
                 "SELECT project_id, path FROM project_folders ORDER BY project_id, position",
                 statement -> { },
                 rows -> Map.entry(rows.getString("project_id"), rows.getString("path")),

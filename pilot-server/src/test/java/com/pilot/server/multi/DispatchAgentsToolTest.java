@@ -1,5 +1,6 @@
 package com.pilot.server.multi;
 
+import com.pilot.core.multi.AgentScope;
 import com.pilot.core.multi.TaskSpec;
 import org.junit.jupiter.api.Test;
 
@@ -22,7 +23,7 @@ class DispatchAgentsToolTest {
                 "deny_commands", List.of("mvn deploy"),
                 "writable", false))));
 
-        var scope = specs.get(0).scope();
+        AgentScope scope = specs.get(0).scope();
         assertTrue(scope.allowsTool("read_file"));
         assertTrue(scope.allowsCommand("mvn test -q"));
         assertFalse(scope.allowsCommand("mvn deploy"));
@@ -34,7 +35,7 @@ class DispatchAgentsToolTest {
         List<TaskSpec> specs = DispatchAgentsTool.parseTasks(Map.of("tasks", List.of(Map.of(
                 "id", "T1", "goal", "只做代码调研"))));
 
-        var scope = specs.get(0).scope();
+        AgentScope scope = specs.get(0).scope();
         assertFalse(scope.writable());
         assertTrue(scope.allowsPath("README.md"));
         assertFalse(scope.allowsCommand(""));

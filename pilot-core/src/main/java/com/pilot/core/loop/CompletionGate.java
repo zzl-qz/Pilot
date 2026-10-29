@@ -4,15 +4,15 @@ import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolSupport;
+import com.pilot.core.tool.VerificationCheck;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -40,9 +40,6 @@ final class CompletionGate {
             "审查", "评估", "调研", "看一下", "读一下", "哪些", "对比", "定位");
     private static final List<String> RESEARCH_HINTS_EN = List.of(
             "explain", "analyze", "analyse", "review", "how does", "why", "walk through");
-    /** 只认工具附加的最终退出码，命令参数里的 exit 0 不能充当通过证据。 */
-    private static final Pattern EXIT_CODE = Pattern.compile("→ exit (-?\\d+)\\z");
-
     /** @param attempt 第几次提醒；{@code max} 是这类提醒的上限 */
     record Nudge(String prompt, String reason, int attempt, int max) {
     }
@@ -78,6 +75,35 @@ final class CompletionGate {
         String text = String.valueOf(path).strip();
         if (!text.isEmpty()) {
             inspected.add(text);
+        }
+    }
+
+    /**
+     * 续跑时从已持久化的对话恢复只读覆盖事实。工具调用本身已经发生过，不能因为
+     * 新建了一个 AgentLoop 就把调研任务重新当成“没有检查过任何东西”。跳过调用不计入。
+     */
+    void restoreFrom(List<Message> history) {
+        if (history == null || history.isEmpty()) {
+            return;
+        }
+        Map<String, String> results = new HashMap<>();
+        for (Message message : history) {
+            if ("tool".equals(message.role()) && message.toolCallId() != null) {
+                results.put(message.toolCallId(), message.content());
+            }
+        }
+        for (Message message : history) {
+            if (!"assistant".equals(message.role())) {
+                continue;
+            }
+            for (ToolCall call : message.toolCalls()) {
+                String result = results.get(call.callId());
+                if (result != null && result.startsWith("SKIPPED:")) {
+                    continue;
+                }
+                countToolCall();
+                recordTarget(call);
+            }
         }
     }
 
@@ -157,12 +183,7 @@ final class CompletionGate {
     }
 
     private static boolean hasPassingCheck(List<String> checks) {
-        for (String check : checks) {
-            Matcher matcher = EXIT_CODE.matcher(check);
-            if (matcher.find() && "0".equals(matcher.group(1))) {
-                return true;
-            }
-        }
-        return false;
+        return checks.stream().map(VerificationCheck::passingKind)
+                .anyMatch(VerificationCheck.Kind::qualifies);
     }
 }

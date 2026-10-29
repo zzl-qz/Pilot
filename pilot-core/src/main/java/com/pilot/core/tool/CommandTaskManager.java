@@ -10,6 +10,7 @@ import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -35,7 +36,16 @@ public final class CommandTaskManager implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(CommandTaskManager.class);
     public record Task(String taskId, String sessionId, String command, String workdir, String status,
                        Long pid, Integer exitCode, Instant startedAt, Instant finishedAt,
-                       boolean background, long timeoutSeconds, String reason) { }
+                       boolean background, long timeoutSeconds, String reason,
+                       CommandChangeTracker.Handle changeTracking) {
+        /** Backward-compatible constructor for tests and command records created before change tracking. */
+        public Task(String taskId, String sessionId, String command, String workdir, String status,
+                    Long pid, Integer exitCode, Instant startedAt, Instant finishedAt,
+                    boolean background, long timeoutSeconds, String reason) {
+            this(taskId, sessionId, command, workdir, status, pid, exitCode, startedAt, finishedAt,
+                    background, timeoutSeconds, reason, null);
+        }
+    }
 
     /** Offsets and limits count Unicode code points; callers should reuse nextOffset unchanged. */
     public record LogChunk(String taskId, long offset, long nextOffset, String text,
@@ -71,6 +81,12 @@ public final class CommandTaskManager implements AutoCloseable {
 
     public synchronized Task start(String sessionId, String displayCommand, ProcessBuilder builder,
                                    boolean background, long timeoutMillis) {
+        return start(sessionId, displayCommand, builder, background, timeoutMillis, null);
+    }
+
+    public synchronized Task start(String sessionId, String displayCommand, ProcessBuilder builder,
+                                   boolean background, long timeoutMillis,
+                                   CommandChangeTracker.Handle changeTracking) {
         sessionDirectory(sessionId);
         Objects.requireNonNull(builder, "builder must not be null");
         if (closed || Files.exists(sessionDirectory(sessionId).resolve(".closed"))) {
@@ -94,6 +110,9 @@ public final class CommandTaskManager implements AutoCloseable {
         String id = "cmd_" + UUID.randomUUID();
         Task task = new Task(id, sessionId, redact(displayCommand, secrets), workdir.toString(), "RUNNING",
                 null, null, Instant.now(), null, background, timeoutMillis / 1000 + (timeoutMillis % 1000 == 0 ? 0 : 1), "");
+        task = new Task(task.taskId(), task.sessionId(), task.command(), task.workdir(), task.status(), task.pid(),
+                task.exitCode(), task.startedAt(), task.finishedAt(), task.background(), task.timeoutSeconds(),
+                task.reason(), changeTracking);
         Entry entry = new Entry(task, secrets);
         entries.put(id, entry);
         try {
@@ -340,10 +359,10 @@ public final class CommandTaskManager implements AutoCloseable {
     private void recover() {
         try {
             Files.createDirectories(storage);
-            try (var sessions = Files.newDirectoryStream(storage)) {
+            try (DirectoryStream<Path> sessions = Files.newDirectoryStream(storage)) {
                 for (Path directory : sessions) {
                     if (!Files.isDirectory(directory) || Files.isSymbolicLink(directory)) continue;
-                    try (var files = Files.newDirectoryStream(directory, "cmd_*.json")) {
+                    try (DirectoryStream<Path> files = Files.newDirectoryStream(directory, "cmd_*.json")) {
                         for (Path file : files) {
                             try {
                                 recoverTask(file);
@@ -388,7 +407,7 @@ public final class CommandTaskManager implements AutoCloseable {
     }
 
     private void prune(int keep) {
-        var oldest = entries.values().stream().filter(entry -> !running(entry.task))
+        List<Entry> oldest = entries.values().stream().filter(entry -> !running(entry.task))
                 .sorted(Comparator.comparing(entry -> entry.task.startedAt())).toList();
         for (Entry entry : oldest) {
             if (entries.size() <= keep) break;
@@ -439,7 +458,8 @@ public final class CommandTaskManager implements AutoCloseable {
     }
     private static Task state(Task previous, String status, Long pid, Integer exit, Instant finished, String reason) {
         return new Task(previous.taskId(), previous.sessionId(), previous.command(), previous.workdir(), status,
-                pid, exit, previous.startedAt(), finished, previous.background(), previous.timeoutSeconds(), reason);
+                pid, exit, previous.startedAt(), finished, previous.background(), previous.timeoutSeconds(), reason,
+                previous.changeTracking());
     }
     private static int readCodePoint(Reader reader) throws IOException {
         int first = reader.read();

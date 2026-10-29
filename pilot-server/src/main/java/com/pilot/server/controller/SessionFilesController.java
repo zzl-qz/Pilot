@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /**
  * 工作区文件浏览：给左侧文件树和右侧只读预览用。
@@ -67,7 +68,7 @@ public class SessionFilesController {
 
         List<Entry> entries = new ArrayList<>();
         boolean truncated = false;
-        try (var stream = Files.list(directory)) {
+        try (Stream<Path> stream = Files.list(directory)) {
             List<Path> children = stream
                     .filter(child -> !NOISY.contains(name(child).toLowerCase(Locale.ROOT)))
                     .sorted(Comparator

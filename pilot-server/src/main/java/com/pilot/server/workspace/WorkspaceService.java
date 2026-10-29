@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /**
  * 本地目录浏览与工作区校验。
@@ -59,7 +60,7 @@ public class WorkspaceService {
         Path directory = rawPath == null || rawPath.isBlank() ? home() : requireDirectory(rawPath);
         List<DirectoryEntry> children = new ArrayList<>();
         boolean truncated = false;
-        try (var stream = Files.list(directory)) {
+        try (Stream<Path> stream = Files.list(directory)) {
             List<Path> dirs = stream
                     .filter(Files::isDirectory)
                     .filter(path -> !isNoisy(path))

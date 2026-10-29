@@ -53,12 +53,12 @@ class MultiAgentServiceTest {
     private MultiAgentService service(ModelClient client) throws IOException {
         Files.createDirectories(workspace.resolve("src"));
         Files.writeString(workspace.resolve("src/A.java"), "class A {}\n");
-        var agent = new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 2, 1, 60_000, true);
-        var factory = new WorkspaceToolFactory(agent,
+        AgentProperties agent = new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 2, 1, 60_000, true);
+        WorkspaceToolFactory factory = new WorkspaceToolFactory(agent,
                 new com.pilot.server.config.WebSearchProperties(false, "http://127.0.0.1:9", "", ""),
                 SnapshotSink.none(), JsonMapper.builder().build());
-        var store = new SandboxStore(JsonMapper.builder().build(), new PilotDataDir(dataDir.toString()));
-        var properties = new MultiAgentProperties(true, 2, 2, 8, 30, List.of());
+        SandboxStore store = new SandboxStore(JsonMapper.builder().build(), new PilotDataDir(dataDir.toString()));
+        MultiAgentProperties properties = new MultiAgentProperties(true, 2, 2, 8, 30, List.of());
         VerificationGate gate = (root, base, changes) -> VerificationGate.Report.skipped("测试环境跳过编译");
         events = new CopyOnWriteArrayList<>();
         return new MultiAgentService(client, factory, store, gate, properties,
@@ -72,13 +72,13 @@ class MultiAgentServiceTest {
 
     @Test
     void completesReadOnlyTaskAndReportsEvidence() throws IOException {
-        var systems = new CopyOnWriteArrayList<String>();
+        CopyOnWriteArrayList<String> systems = new CopyOnWriteArrayList<String>();
         ModelClient client = (messages, tools) -> {
             systems.add(messages.get(0).content());
             return new ModelResponse(REPORT, List.of());
         };
-        var service = service(client);
-        var spec = TaskSpec.readOnly("T1", "盘点空类", "确认 src/A.java 是否需要改动",
+        MultiAgentService service = service(client);
+        TaskSpec spec = TaskSpec.readOnly("T1", "盘点空类", "确认 src/A.java 是否需要改动",
                 List.of(), List.of("src/**"));
 
         MultiAgentService.Result result = service.dispatch(dispatch(List.of(spec)));
@@ -100,14 +100,14 @@ class MultiAgentServiceTest {
 
     @Test
     void writableTaskKeepsFullSubagentPrompt() throws IOException {
-        var systems = new CopyOnWriteArrayList<String>();
+        CopyOnWriteArrayList<String> systems = new CopyOnWriteArrayList<String>();
         ModelClient client = (messages, tools) -> {
             systems.add(messages.get(0).content());
             return new ModelResponse("【结论】\n已补测试\n\n【证据清单】\n- src/A.java:1\n\n【风险评估】\n- 无\n",
                     List.of());
         };
-        var service = service(client);
-        var spec = TaskSpec.editable("T2", "补测试", "为 src/A.java 补一条回归测试",
+        MultiAgentService service = service(client);
+        TaskSpec spec = TaskSpec.editable("T2", "补测试", "为 src/A.java 补一条回归测试",
                 List.of(), List.of("src/**"), com.pilot.core.multi.RiskLevel.MEDIUM);
 
         MultiAgentService.Result result = service.dispatch(dispatch(List.of(spec)));
@@ -124,10 +124,10 @@ class MultiAgentServiceTest {
         ModelClient failing = (messages, tools) -> {
             throw new IllegalStateException("boom");
         };
-        var service = service(failing);
-        var first = TaskSpec.readOnly("T1", "先做", "做第一件事", List.of(), List.of("src/**"));
-        var second = TaskSpec.readOnly("T2", "后做", "做第二件事", List.of("T1"), List.of("src/**"));
-        var independent = TaskSpec.readOnly("T3", "并行", "独立任务", List.of(), List.of("src/**"));
+        MultiAgentService service = service(failing);
+        TaskSpec first = TaskSpec.readOnly("T1", "先做", "做第一件事", List.of(), List.of("src/**"));
+        TaskSpec second = TaskSpec.readOnly("T2", "后做", "做第二件事", List.of("T1"), List.of("src/**"));
+        TaskSpec independent = TaskSpec.readOnly("T3", "并行", "独立任务", List.of(), List.of("src/**"));
 
         MultiAgentService.Result result = service.dispatch(dispatch(List.of(first, second, independent)));
 
@@ -147,8 +147,8 @@ class MultiAgentServiceTest {
             return new ModelResponse("【结论】\n" + conclusion
                     + "\n\n【证据清单】\n- src/A.java:1 空类\n\n【风险评估】\n- 无\n", List.of());
         };
-        var service = service(client);
-        var spec = TaskSpec.readOnly("T1", "空类处置", "判断空类去留", List.of(), List.of("src/**"))
+        MultiAgentService service = service(client);
+        TaskSpec spec = TaskSpec.readOnly("T1", "空类处置", "判断空类去留", List.of(), List.of("src/**"))
                 .withReviewers(2);
 
         MultiAgentService.Result result = service.dispatch(dispatch(List.of(spec)));

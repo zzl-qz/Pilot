@@ -17,7 +17,7 @@ class TaskGraphTest {
 
     @Test
     void rejectsUnknownDependency() {
-        var error = assertThrows(IllegalArgumentException.class,
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> new TaskGraph(List.of(task("T1", "T9"))));
 
         assertTrue(error.getMessage().contains("T9"));
@@ -25,7 +25,7 @@ class TaskGraphTest {
 
     @Test
     void rejectsCycles() {
-        var error = assertThrows(IllegalArgumentException.class,
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> new TaskGraph(List.of(task("T1", "T2"), task("T2", "T1"))));
 
         assertTrue(error.getMessage().contains("环"));
@@ -33,7 +33,7 @@ class TaskGraphTest {
 
     @Test
     void onlyDependencyFreeTasksAreReadyAtFirst() {
-        var graph = new TaskGraph(List.of(task("T1"), task("T2"), task("T3", "T1")));
+        TaskGraph graph = new TaskGraph(List.of(task("T1"), task("T2"), task("T3", "T1")));
 
         List<String> ready = graph.ready(Set.of(), Set.of()).stream().map(TaskSpec::id).toList();
 
@@ -42,14 +42,14 @@ class TaskGraphTest {
 
     @Test
     void downstreamIsTransitive() {
-        var graph = new TaskGraph(List.of(task("T1"), task("T2", "T1"), task("T3", "T2"), task("T4")));
+        TaskGraph graph = new TaskGraph(List.of(task("T1"), task("T2", "T1"), task("T3", "T2"), task("T4")));
 
         assertEquals(Set.of("T2", "T3"), graph.downstream("T1"));
     }
 
     @Test
     void topoOrderPutsDependenciesFirst() {
-        var graph = new TaskGraph(List.of(task("T3", "T2"), task("T2", "T1"), task("T1")));
+        TaskGraph graph = new TaskGraph(List.of(task("T3", "T2"), task("T2", "T1"), task("T1")));
 
         List<String> order = graph.topoOrder();
 

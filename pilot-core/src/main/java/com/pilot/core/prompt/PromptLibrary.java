@@ -42,6 +42,10 @@ import java.util.regex.Pattern;
  * prompts/completion/review-readonly.md  只读调研任务的自审
  * prompts/compact/summary.md        上下文压缩摘要
  * prompts/plan/continue.md          计划未完成时的自动继续（{{openSteps}}）
+ * prompts/goal/continue.md          Goal 跨轮继续合同（目标 / 缺口 / 唯一下一动作）
+ * prompts/goal/review.md            Goal 独立完成核验合同
+ * prompts/loop/stuck-nudge.md       运行时检测停滞后的换路提醒
+ * prompts/loop/budget-wind-down.md  执行段预算收尾合同
  * prompts/subagent/task.md          子代理任务说明（{{task}}）
  * prompts/subagent/base.md          子 Agent 系统提示（{{taskId}} / {{scope}} / {{risk}}）
  * prompts/subagent/job.md           子 Agent 的具体任务（{{title}} / {{goal}} / {{note}}）

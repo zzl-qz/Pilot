@@ -1,5 +1,7 @@
 package com.pilot.server.workspace;
 
+import com.pilot.core.loop.Message;
+import com.pilot.core.tool.CommandChangeTracker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -150,11 +152,11 @@ class RunSnapshotServiceTest {
         snapshots.clear();
         assertTrue(snapshots.preview(List.of("chain_1", "chain_2")).ready());
         Files.writeString(later, "manual");
-        var blocked = snapshots.rollback(List.of("chain_1", "chain_2"));
+        RunSnapshotService.RollbackReport blocked = snapshots.rollback(List.of("chain_1", "chain_2"));
         assertEquals(List.of("later.txt"), blocked.conflicts());
         assertEquals("second", Files.readString(file), "任何冲突都应在写文件前拦截");
         Files.writeString(later, "new");
-        var restored = snapshots.rollback(List.of("chain_1", "chain_2"));
+        RunSnapshotService.RollbackReport restored = snapshots.rollback(List.of("chain_1", "chain_2"));
         assertTrue(restored.failed().isEmpty());
         assertEquals("before", Files.readString(file));
         assertFalse(Files.exists(later));
@@ -210,11 +212,11 @@ class RunSnapshotServiceTest {
 
     @Test
     void conversationCheckpointSurvivesServiceRestartWithExactMessages() {
-        var messages = List.of(com.pilot.core.loop.Message.user("重复"),
+        List<Message> messages = List.of(com.pilot.core.loop.Message.user("重复"),
                 com.pilot.core.loop.Message.assistant("之前的回复", List.of()),
                 com.pilot.core.loop.Message.user("重复"));
         snapshots.saveConversation("conversation", messages, List.of());
-        var reopened = new RunSnapshotService(JsonMapper.builder().build(), storage);
+        RunSnapshotService reopened = new RunSnapshotService(JsonMapper.builder().build(), storage);
         assertEquals(messages, reopened.conversation("conversation").messages());
         snapshots.bind("empty", workspace);
         snapshots.finish();
@@ -245,6 +247,63 @@ class RunSnapshotServiceTest {
         Files.writeString(directory.resolve("meta.json"),
                 "{\"runId\":\"legacy\",\"workspace\":\"/tmp\",\"files\":[]}");
         assertFalse(snapshots.preview(List.of("legacy")).ready());
+    }
+
+    @Test
+    void importsOnlySourceChangesMadeByACommandAndRollsThemBack() throws IOException {
+        Path changed = workspace.resolve("src/A.java");
+        Path deleted = workspace.resolve("src/Delete.java");
+        Path created = workspace.resolve("generated/B.java");
+        Files.createDirectories(changed.getParent());
+        Files.writeString(changed, "class A { }\n");
+        Files.writeString(deleted, "class Delete { }\n");
+
+        snapshots.bind("command_run", workspace);
+        CommandChangeTracker.Handle handle = snapshots.begin(workspace);
+        Files.writeString(changed, "class A { int value; }\n");
+        Files.delete(deleted);
+        Files.createDirectories(created.getParent());
+        Files.writeString(created, "class B { }\n");
+        Path buildNoise = workspace.resolve("target/generated.bin");
+        Files.createDirectories(buildNoise.getParent());
+        Files.writeString(buildNoise, "artifact");
+
+        CommandChangeTracker.Result changes = snapshots.finish(handle);
+        snapshots.finish();
+        snapshots.clear();
+
+        assertTrue(changes.complete(), changes.warning());
+        assertEquals(List.of("generated/B.java", "src/A.java", "src/Delete.java"), changes.changedPaths());
+        assertFalse(changes.changedPaths().contains("target/generated.bin"));
+        RunSnapshotService.RollbackReport rollback = snapshots.rollback("command_run");
+        assertTrue(rollback.failed().isEmpty(), rollback.failed().toString());
+        assertEquals("class A { }\n", Files.readString(changed));
+        assertEquals("class Delete { }\n", Files.readString(deleted));
+        assertFalse(Files.exists(created));
+        assertTrue(Files.exists(buildNoise), "ignored build artifacts are not part of source rollback");
+    }
+
+    @Test
+    void commandBaselineCanFinishInALaterRun() throws IOException {
+        Path file = workspace.resolve("src/later.txt");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, "before");
+        snapshots.bind("launch_run", workspace);
+        CommandChangeTracker.Handle handle = snapshots.begin(workspace);
+        snapshots.finish();
+        snapshots.clear();
+
+        Files.writeString(file, "background change");
+        snapshots.bind("status_run", workspace);
+        CommandChangeTracker.Result result = snapshots.finish(handle);
+        snapshots.finish();
+        snapshots.clear();
+
+        assertEquals(List.of("src/later.txt"), result.changedPaths());
+        assertEquals("background change", Files.readString(file));
+        RunSnapshotService.RollbackReport rollback = snapshots.rollback("status_run");
+        assertTrue(rollback.failed().isEmpty());
+        assertEquals("before", Files.readString(file));
     }
 
     private void change(String runId, Path file, String content) throws IOException {

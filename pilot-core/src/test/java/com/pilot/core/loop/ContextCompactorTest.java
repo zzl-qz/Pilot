@@ -18,8 +18,8 @@ class ContextCompactorTest {
 
     @Test
     void foldsOlderHistoryIntoBudgetedHandoffSummary() {
-        var messages = history(10, 3_000);
-        var compactor = new ContextCompactor(summarizing("## 目标\n完成 P0-1"), 2);
+        List<Message> messages = history(10, 3_000);
+        ContextCompactor compactor = new ContextCompactor(summarizing("## 目标\n完成 P0-1"), 2);
         int before = ContextCompactor.totalChars(messages);
 
         ContextCompactor.Outcome outcome = compactor.compact(messages, 12_000);
@@ -41,8 +41,8 @@ class ContextCompactorTest {
     @Test
     void keepsHistoryWhenSummaryIsNotShorter() {
         // 可折叠的部分很小，摘要却很长：省不下预算，只会丢信息，应当放弃这次压缩
-        var messages = history(4, 50);
-        var compactor = new ContextCompactor(summarizing("摘要".repeat(2_500)), 2);
+        List<Message> messages = history(4, 50);
+        ContextCompactor compactor = new ContextCompactor(summarizing("摘要".repeat(2_500)), 2);
         int before = messages.size();
 
         ContextCompactor.Outcome outcome = compactor.compact(messages, 150);
@@ -53,11 +53,11 @@ class ContextCompactorTest {
 
     @Test
     void keepsHistoryWhenSummaryFails() {
-        var messages = history(10, 3_000);
+        List<Message> messages = history(10, 3_000);
         ModelClient failing = (request, tools) -> {
             throw new ModelClientException("模型挂了");
         };
-        var compactor = new ContextCompactor(failing, 2);
+        ContextCompactor compactor = new ContextCompactor(failing, 2);
         int before = messages.size();
 
         ContextCompactor.Outcome outcome = compactor.compact(messages, 12_000);
@@ -68,8 +68,8 @@ class ContextCompactorTest {
 
     @Test
     void leavesHistoryAloneWhenUnderBudget() {
-        var messages = history(3, 10);
-        var compactor = new ContextCompactor(summarizing("不该被调用"), 2);
+        List<Message> messages = history(3, 10);
+        ContextCompactor compactor = new ContextCompactor(summarizing("不该被调用"), 2);
 
         ContextCompactor.Outcome outcome = compactor.compact(messages, 10_000);
 
@@ -79,7 +79,7 @@ class ContextCompactorTest {
 
     @Test
     void prunesOldToolOutputsButKeepsToolIdentity() {
-        var messages = history(6, 5_000);
+        List<Message> messages = history(6, 5_000);
 
         int pruned = ContextCompactor.pruneToolOutputs(messages, 20_000);
 
@@ -91,7 +91,7 @@ class ContextCompactorTest {
 
     @Test
     void truncatesOversizedToolOutputKeepingHeadAndTail() {
-        var messages = history(1, 20_000);
+        List<Message> messages = history(1, 20_000);
 
         int changed = ContextCompactor.truncateLongToolOutputs(messages);
 
@@ -105,7 +105,7 @@ class ContextCompactorTest {
 
     @Test
     void dropsOldestGroupsOnlyWhenStillOverBudget() {
-        var messages = history(10, 3_000);
+        List<Message> messages = history(10, 3_000);
 
         int dropped = ContextCompactor.dropOldestGroups(messages, 7_000);
 
@@ -131,8 +131,8 @@ class ContextCompactorTest {
     /** 双预算：字符还很空、但 token 已经吃紧时，也要按 token 压。 */
     @Test
     void compactsWhenTokenBudgetIsTheTighterOne() {
-        var messages = history(20, 3_000);
-        var compactor = new ContextCompactor(summarizing("摘要"), 2);
+        List<Message> messages = history(20, 3_000);
+        ContextCompactor compactor = new ContextCompactor(summarizing("摘要"), 2);
 
         ContextCompactor.Outcome outcome = compactor.compact(messages, 100_000, 8_000);
 
@@ -144,8 +144,8 @@ class ContextCompactorTest {
     /** 压完要留出足够余量，否则再跑十几步就得压第二次。 */
     @Test
     void leavesHalfTheBudgetFreeAfterCompaction() {
-        var messages = history(20, 3_000);
-        var compactor = new ContextCompactor(summarizing("摘要"), 2);
+        List<Message> messages = history(20, 3_000);
+        ContextCompactor compactor = new ContextCompactor(summarizing("摘要"), 2);
 
         ContextCompactor.Outcome outcome = compactor.compact(messages, 20_000, 20_000);
 
@@ -154,18 +154,62 @@ class ContextCompactorTest {
                 "压缩后应降到目标的一半附近，实际 " + ContextCompactor.totalChars(messages));
     }
 
+    @Test
+    void defaultCompactorKeepsFiveRecentActionObservationGroups() {
+        List<Message> messages = history(10, 3_000);
+        ContextCompactor compactor = new ContextCompactor(summarizing("摘要"));
+
+        ContextCompactor.Outcome outcome = compactor.compact(messages, 12_000);
+
+        assertTrue(outcome.compacted());
+        long toolResults = messages.stream().filter(message -> "tool".equals(message.role())).count();
+        assertEquals(5, toolResults, "压缩摘要之外应保留最近五组完整工具结果");
+        assertToolPairsIntact(messages);
+    }
+
+    @Test
+    void pinsImageAttachmentsWhenTheirMessageIsCompacted() {
+        Attachment image = new Attachment("shot.png", "image/png", "/stable/attachments/shot.png");
+        ArrayList<Message> messages = new ArrayList<>();
+        messages.add(Message.system("sys"));
+        messages.add(Message.user("请根据这张图实现", List.of(image)));
+        messages.addAll(history(10, 3_000).subList(1, 21));
+        ContextCompactor compactor = new ContextCompactor(summarizing("目标：按截图实现"), 2);
+
+        ContextCompactor.Outcome outcome = compactor.compact(messages, 12_000);
+
+        assertTrue(outcome.compacted());
+        assertEquals(List.of(image), messages.get(1).attachments(),
+                "折叠旧文字时必须把原图引用固定在交接摘要上");
+    }
+
+    @Test
+    void pinsImageAttachmentsWhenHardDroppingOldGroups() {
+        Attachment image = new Attachment("shot.png", "image/png", "/stable/attachments/shot.png");
+        ArrayList<Message> messages = new ArrayList<>();
+        messages.add(Message.system("sys"));
+        messages.add(Message.user("请看图", List.of(image)));
+        messages.addAll(history(10, 3_000).subList(1, 21));
+
+        int dropped = ContextCompactor.dropOldestGroups(messages, 7_000);
+
+        assertTrue(dropped > 0);
+        assertEquals(List.of(image), messages.get(1).attachments(),
+                "硬裁剪也只能丢文字，不能丢失任务所依赖的原图");
+    }
+
     /** 中文按 1 字符 1 token 估算，不能沿用「4 字符 1 token」把中文上下文算少。 */
     @Test
     void estimatesChineseTokensHigherThanAscii() {
-        var ascii = List.of(Message.user("a".repeat(100)));
-        var chinese = List.of(Message.user("中".repeat(100)));
+        List<Message> ascii = List.of(Message.user("a".repeat(100)));
+        List<Message> chinese = List.of(Message.user("中".repeat(100)));
 
         assertEquals(25, ContextCompactor.estimateTokens(ascii));
         assertEquals(100, ContextCompactor.estimateTokens(chinese));
     }
 
     private static List<Message> history(int groups, int charsPerTool) {
-        var messages = new ArrayList<Message>();
+        ArrayList<Message> messages = new ArrayList<Message>();
         messages.add(Message.system("sys"));
         for (int i = 0; i < groups; i++) {
             messages.add(Message.assistant("step " + i,

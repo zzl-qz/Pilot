@@ -1,5 +1,6 @@
 package com.pilot.server.session;
 
+import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -16,8 +17,8 @@ public class TaskControlRecovery implements ApplicationRunner {
     }
     @Override
     public void run(ApplicationArguments args) {
-        for (var session : sessions.list()) {
-            var task = tasks.load(session.id());
+        for (Session session : sessions.list()) {
+            TaskControlService.TaskContract task = tasks.load(session.id());
             if (task != null && "ACTIVE".equals(task.status())) tasks.status(session.id(), "INTERRUPTED");
         }
     }

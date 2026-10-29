@@ -186,7 +186,7 @@ class ReadFileToolTest {
 
     @Test
     void defaultsToTwoHundredLines() throws IOException {
-        var body = new StringBuilder();
+        StringBuilder body = new StringBuilder();
         for (int i = 1; i <= 250; i++) {
             body.append("line ").append(i).append('\n');
         }

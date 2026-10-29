@@ -32,7 +32,7 @@ public final class CommandLogsTool implements Tool {
         try {
             long offset = CommandToolSupport.integerArg(args, "offset", 0, 0, Long.MAX_VALUE);
             int limit = (int) CommandToolSupport.integerArg(args, "limit", 12000, 1, 32000);
-            var chunk = tasks.logs(sessionId, id, offset, limit);
+            CommandTaskManager.LogChunk chunk = tasks.logs(sessionId, id, offset, limit);
             if (chunk == null) return "ERROR: 当前会话没有该命令任务";
             return "任务ID: " + chunk.taskId() + "\noffset: " + chunk.offset()
                     + "\nnextOffset: " + chunk.nextOffset() + "\neof: " + chunk.eof()

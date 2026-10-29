@@ -178,7 +178,7 @@ public final class JdbcSessionRepository implements SessionRepository {
                 statement.setLong(index++, before);
             }
             statement.setInt(index, Math.max(1, limit));
-            var page = new ArrayList<EventEnvelope>();
+            ArrayList<EventEnvelope> page = new ArrayList<EventEnvelope>();
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
                     page.add(mapEvent(rows, sessionId));
@@ -290,7 +290,7 @@ public final class JdbcSessionRepository implements SessionRepository {
                 statement.setString(1, sessionId);
                 statement.setLong(2, afterSequence);
                 try (ResultSet rows = statement.executeQuery()) {
-                    var result = new ArrayList<EventEnvelope>();
+                    ArrayList<EventEnvelope> result = new ArrayList<EventEnvelope>();
                     while (rows.next()) {
                         result.add(mapEvent(rows, sessionId));
                     }

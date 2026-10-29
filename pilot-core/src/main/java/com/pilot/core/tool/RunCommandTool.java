@@ -6,7 +6,9 @@ import com.pilot.core.workspace.PathValidator;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,6 +20,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -46,6 +49,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
      * push / reset / clean / checkout 等会改写远端或不可逆地丢文件，仍要求人工执行。
      */
     private static final Set<String> GIT_WRITE = Set.of("add", "commit");
+    private static final Set<String> INSPECTION_FLAGS = Set.of(
+            "-v", "--version", "-version", "version", "-h", "--help", "help");
 
     private static final Pattern SHELL_META = Pattern.compile("[&|;<>^`\\n\\r]|\\$\\(");
     private static final Pattern SECRET_KEY = Pattern.compile("(?i)(key|token|secret|password|credential|passwd)");
@@ -61,16 +66,27 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     private final PathValidator paths;
     private final CommandTaskManager commandTasks;
     private final String sessionId;
+    private final CommandChangeTracker changes;
 
     public RunCommandTool(PathValidator paths) {
-        this(paths, null, null);
+        this(paths, null, null, CommandChangeTracker.none());
+    }
+
+    public RunCommandTool(PathValidator paths, CommandChangeTracker changes) {
+        this(paths, null, null, changes);
     }
 
     /** 会话运行使用受托管命令；独立沙箱工具继续使用同步构造器。 */
     public RunCommandTool(PathValidator paths, CommandTaskManager commandTasks, String sessionId) {
+        this(paths, commandTasks, sessionId, CommandChangeTracker.none());
+    }
+
+    public RunCommandTool(PathValidator paths, CommandTaskManager commandTasks, String sessionId,
+                          CommandChangeTracker changes) {
         this.paths = Objects.requireNonNull(paths, "paths must not be null");
         this.commandTasks = commandTasks;
         this.sessionId = commandTasks == null ? null : Objects.requireNonNull(sessionId, "sessionId must not be null");
+        this.changes = changes == null ? CommandChangeTracker.none() : changes;
     }
 
     @Override
@@ -113,61 +129,104 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     @Override
     public String execute(Map<String, Object> args) {
+        return executeResult(args).text();
+    }
+
+    @Override
+    public ToolResult executeResult(Map<String, Object> args) {
+        Preparation preparation = prepare(args);
+        if (preparation.error() != null) return ToolResult.text(preparation.error());
+        Prepared prepared = preparation.prepared();
+        CommandChangeTracker.Handle tracking;
+        try {
+            tracking = prepared.trackChanges() ? changes.begin(paths.root()) : CommandChangeTracker.Handle.none();
+        } catch (RuntimeException e) {
+            return ToolResult.text("ERROR: 无法建立命令前文件基线，命令未执行：" + redact(String.valueOf(e.getMessage())));
+        }
+
+        String text;
+        boolean terminal;
+        if (commandTasks == null) {
+            text = run(prepared.command(), prepared.displayTokens(), prepared.timeoutMs());
+            terminal = true;
+        } else {
+            ManagedRun managed = runManaged(prepared.command(), prepared.displayTokens(), prepared.background(),
+                    prepared.timeoutMs(), tracking);
+            text = managed.text();
+            terminal = managed.terminal();
+        }
+        if (!terminal || !tracking.active()) return ToolResult.text(text);
+        CommandChangeTracker.Result result;
+        try {
+            result = changes.finish(tracking);
+        } catch (RuntimeException e) {
+            result = new CommandChangeTracker.Result(List.of(), false, String.valueOf(e.getMessage()));
+        }
+        if (!result.complete()) {
+            text = "ERROR: 命令已结束，但无法完整确认其工作区变更；不得据此宣称验证通过："
+                    + result.warning() + "\n" + text;
+        }
+        return new ToolResult(text, result.changedPaths(), List.of());
+    }
+
+    private Preparation prepare(Map<String, Object> args) {
         String raw = ToolSupport.stringArg(args, "command");
         if (raw == null) {
-            return "ERROR: 缺少参数 command";
+            return Preparation.error("ERROR: 缺少参数 command");
         }
         if (SHELL_META.matcher(raw).find()) {
-            return "ERROR: 命令包含不允许的 shell 元字符（& | ; < > ^ ` $( 或换行），请一次只执行一条命令。";
+            return Preparation.error("ERROR: 命令包含不允许的 shell 元字符（& | ; < > ^ ` $( 或换行），请一次只执行一条命令。");
         }
 
         List<String> tokens = tokenize(raw);
         if (tokens.isEmpty()) {
-            return "ERROR: 命令为空";
+            return Preparation.error("ERROR: 命令为空");
         }
         if (tokens.size() > MAX_TOKENS) {
-            return "ERROR: 参数过多（上限 " + MAX_TOKENS + " 个）";
+            return Preparation.error("ERROR: 参数过多（上限 " + MAX_TOKENS + " 个）");
         }
 
         String executable = tokens.get(0).toLowerCase(Locale.ROOT);
         if (executable.contains("/") || executable.contains("\\")) {
-            return "ERROR: 只接受白名单内的裸命令名，不接受路径: " + tokens.get(0);
+            return Preparation.error("ERROR: 只接受白名单内的裸命令名，不接受路径: " + tokens.get(0));
         }
         if (!ALLOWED_EXECUTABLES.contains(executable)) {
-            return "ERROR: 命令不在白名单内: " + tokens.get(0)
-                    + "。可用: " + String.join(", ", ALLOWED_EXECUTABLES.stream().sorted().toList());
+            return Preparation.error("ERROR: 命令不在白名单内: " + tokens.get(0)
+                    + "。可用: " + String.join(", ", ALLOWED_EXECUTABLES.stream().sorted().toList()));
         }
         AgentScope scope = paths.scope();
         if (scope != null && !scope.allowsCommandArgs(tokens)) {
-            return "ERROR: " + scope.commandHint(raw);
+            return Preparation.error("ERROR: " + scope.commandHint(raw));
         }
+        boolean trackChanges = !(tokens.size() == 2 && INSPECTION_FLAGS.contains(tokens.get(1)));
         if ("git".equals(executable)) {
             String sub = tokens.size() > 1 ? tokens.get(1).toLowerCase(Locale.ROOT) : "";
             if (GIT_READONLY.contains(sub)) {
-                // 只读子命令直接放行
+                trackChanges = false;
             } else if (GIT_WRITE.contains(sub)) {
                 if (scope != null && !scope.writable()) {
-                    return "ERROR: 只读任务不允许 git " + sub + "，改动请通过沙箱写工具提交";
+                    return Preparation.error("ERROR: 只读任务不允许 git " + sub + "，改动请通过沙箱写工具提交");
                 }
                 String problem = checkGitWrite(tokens, sub);
                 if (problem != null) {
-                    return "ERROR: " + problem;
+                    return Preparation.error("ERROR: " + problem);
                 }
             } else {
-                return "ERROR: git 只允许只读子命令与 add/commit: "
+                return Preparation.error("ERROR: git 只允许只读子命令与 add/commit: "
                         + String.join(", ", GIT_READONLY.stream().sorted().toList())
-                        + "，以及 add/commit；push/reset/clean/checkout 等仍需人工执行。";
+                        + "，以及 add/commit；push/reset/clean/checkout 等仍需人工执行。");
             }
         }
 
-        Object backgroundArg = args.get("background");
-        if (backgroundArg != null && !(backgroundArg instanceof Boolean)) return "ERROR: background 必须是布尔值";
+        Object backgroundArg = args == null ? null : args.get("background");
+        if (backgroundArg != null && !(backgroundArg instanceof Boolean)) {
+            return Preparation.error("ERROR: background 必须是布尔值");
+        }
         boolean background = Boolean.TRUE.equals(backgroundArg);
-        if (background && commandTasks == null) return "ERROR: 当前运行环境不支持后台命令";
+        if (background && commandTasks == null) return Preparation.error("ERROR: 当前运行环境不支持后台命令");
         List<String> command = withWrapper(tokens);
         long timeoutMs = timeout(args, background);
-        return commandTasks == null ? run(command, tokens, timeoutMs)
-                : runManaged(command, tokens, background, timeoutMs);
+        return new Preparation(new Prepared(command, tokens, background, timeoutMs, trackChanges), null);
     }
 
     /** 提交必须自带消息（否则会拉起编辑器卡到超时），且只允许操作工作区内的相对路径。 */
@@ -207,7 +266,10 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         if (commandTasks != null) return CommandToolSupport.checkSummary(commandTasks, sessionId, result);
         String command = call == null || call.args() == null ? "" : String.valueOf(call.args().getOrDefault("command", ""));
-        var matcher = EXIT_CODE.matcher(result);
+        if (result.startsWith("ERROR: 命令已结束，但无法完整确认其工作区变更")) {
+            return ToolSupport.oneLine(command, 90) + " → CHANGE_TRACKING_INCOMPLETE";
+        }
+        Matcher matcher = EXIT_CODE.matcher(result);
         if (matcher.find()) {
             return ToolSupport.oneLine(command, 90) + " → exit " + matcher.group(1);
         }
@@ -218,17 +280,21 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         return null;
     }
 
-    private String runManaged(List<String> command, List<String> displayTokens, boolean background, long timeoutMs) {
+    private ManagedRun runManaged(List<String> command, List<String> displayTokens, boolean background,
+                                  long timeoutMs, CommandChangeTracker.Handle tracking) {
         ProcessBuilder builder = new ProcessBuilder(command).directory(paths.root().toFile()).redirectErrorStream(true);
         useCurrentJdk(builder.environment());
         CommandTaskManager.Task task;
         try {
-            task = commandTasks.start(sessionId, String.join(" ", displayTokens), builder, background, timeoutMs);
+            task = commandTasks.start(sessionId, String.join(" ", displayTokens), builder, background, timeoutMs,
+                    tracking.active() ? tracking : null);
         } catch (RuntimeException e) {
-            return "ERROR: 无法启动命令：" + redact(String.valueOf(e.getMessage()));
+            return new ManagedRun("ERROR: 无法启动命令：" + redact(String.valueOf(e.getMessage())), true);
         }
         String taskId = task.taskId();
-        if (background) return CommandToolSupport.render(task);
+        if (background && CommandToolSupport.running(task)) {
+            return new ManagedRun(CommandToolSupport.render(task), false);
+        }
         try {
             while (CommandToolSupport.running(task)) {
                 Thread.sleep(50);
@@ -243,14 +309,14 @@ public final class RunCommandTool implements Tool, ProducesCheck {
                 task = commandTasks.get(sessionId, taskId);
             }
             Thread.currentThread().interrupt();
-            return "ERROR: 命令执行被中断\n" + CommandToolSupport.render(task);
+            return new ManagedRun("ERROR: 命令执行被中断\n" + CommandToolSupport.render(task), true);
         }
-        if (task == null) return "ERROR: 命令记录已清理，无法确认最终结果：" + taskId;
-        var chunk = commandTasks.logs(sessionId, taskId, 0, MAX_OUTPUT_CHARS);
+        if (task == null) return new ManagedRun("ERROR: 命令记录已清理，无法确认最终结果：" + taskId, true);
+        CommandTaskManager.LogChunk chunk = commandTasks.logs(sessionId, taskId, 0, MAX_OUTPUT_CHARS);
         String rendered = CommandToolSupport.render(task);
         if (chunk != null) rendered += "\n输出:\n" + chunk.text()
                 + (chunk.truncated() || !chunk.eof() ? "\n… 后续日志使用 command_logs，offset=" + chunk.nextOffset() : "");
-        return rendered;
+        return new ManagedRun(rendered, true);
     }
 
     private String run(List<String> command, List<String> displayTokens, long timeoutMs) {
@@ -466,6 +532,17 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         return Math.min(seconds, MAX_TIMEOUT_MS / 1000) * 1000L;
     }
 
+    private record Prepared(List<String> command, List<String> displayTokens, boolean background,
+                            long timeoutMs, boolean trackChanges) { }
+
+    private record Preparation(Prepared prepared, String error) {
+        private static Preparation error(String message) {
+            return new Preparation(null, message);
+        }
+    }
+
+    private record ManagedRun(String text, boolean terminal) { }
+
     /** 支持单双引号的最小分词器：不展开变量，不做通配符。 */
     static List<String> tokenize(String raw) {
         List<String> tokens = new ArrayList<>();
@@ -505,7 +582,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     }
 
     private static byte[] readAll(Process process) {
-        try (var stream = process.getInputStream()) {
+        try (InputStream stream = process.getInputStream()) {
             return stream.readAllBytes();
         } catch (IOException e) {
             return new byte[0];
@@ -535,7 +612,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             return "";
         }
         try {
-            var decoder = StandardCharsets.UTF_8.newDecoder();
+            CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder();
             return decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString();
         } catch (java.nio.charset.CharacterCodingException e) {
             return new String(bytes, GBK);

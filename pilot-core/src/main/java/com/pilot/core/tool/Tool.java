@@ -35,4 +35,12 @@ public interface Tool {
      * @return 返回给模型的文本结果；失败时以 {@code ERROR: } 开头说明原因
      */
     String execute(Map<String, Object> args);
+
+    /**
+     * 需要把多个改动路径或验证项传给父执行循环的工具可覆盖此方法。
+     * 普通工具仍只需实现 {@link #execute(Map)}，行为保持不变。
+     */
+    default ToolResult executeResult(Map<String, Object> args) {
+        return ToolResult.text(execute(args));
+    }
 }

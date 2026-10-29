@@ -1,6 +1,7 @@
 package com.pilot.server.session;
 
 import com.pilot.core.approval.ApprovalBroker;
+import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunStarted;
@@ -43,6 +44,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -57,12 +59,12 @@ class AgentRunTaskControlTest {
 
     @Test
     void followupCreatesIndependentTaskWhileSteerChangesTheCurrentRun() throws Exception {
-        var firstEntered = new CountDownLatch(1);
-        var firstRelease = new CountDownLatch(1);
-        var correctedEntered = new CountDownLatch(1);
-        var correctedRelease = new CountDownLatch(1);
-        var requests = new CopyOnWriteArrayList<List<Message>>();
-        var calls = new AtomicInteger();
+        CountDownLatch firstEntered = new CountDownLatch(1);
+        CountDownLatch firstRelease = new CountDownLatch(1);
+        CountDownLatch correctedEntered = new CountDownLatch(1);
+        CountDownLatch correctedRelease = new CountDownLatch(1);
+        CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<List<Message>>();
+        AtomicInteger calls = new AtomicInteger();
         ModelClient model = (messages, tools) -> {
             requests.add(List.copyOf(messages));
             return switch (calls.getAndIncrement()) {
@@ -79,7 +81,7 @@ class AgentRunTaskControlTest {
                 default -> done();
             };
         };
-        try (var f = new Fixture(model, null)) {
+        try (Fixture f = new Fixture(model, null)) {
             f.start(new TaskControlService.Requirements(List.of("只改重连逻辑"), List.of()));
             await(firstEntered);
             String taskId = f.tasks.load(f.id).taskId();
@@ -91,19 +93,19 @@ class AgentRunTaskControlTest {
             assertEquals(taskId, f.tasks.load(f.id).taskId());
             firstRelease.countDown();
             await(correctedEntered);
-            var currentInput = userInputs(requests.get(1));
+            List<String> currentInput = userInputs(requests.get(1));
             assertTrue(currentInput.contains("立即改查服务端重启后的重连"));
             assertFalse(currentInput.contains("下一件事：整理文档"));
             assertTrue(requests.get(1).getFirst().content().contains("只改重连逻辑"));
             assertTrue(requests.get(1).getFirst().content().contains("立即改查服务端重启后的重连"));
             correctedRelease.countDown();
             f.finished("COMPLETED", "COMPLETED");
-            var events = f.sessions.events(f.id);
+            List<EventEnvelope> events = f.sessions.events(f.id);
             assertEquals(2, events.stream().filter(e -> e.payload() instanceof RunStarted).count());
-            var steer = events.stream().filter(e -> e.payload() instanceof RunSteered).findFirst().orElseThrow();
+            EventEnvelope steer = events.stream().filter(e -> e.payload() instanceof RunSteered).findFirst().orElseThrow();
             assertEquals(f.firstRun, steer.runId(), "立即纠正必须留在当前运行内");
             assertFalse(events.stream().anyMatch(e -> "tool.started".equals(e.type())), "返回的旧方案工具不能继续执行");
-            var next = f.tasks.load(f.id);
+            TaskControlService.TaskContract next = f.tasks.load(f.id);
             assertNotEquals(taskId, next.taskId());
             assertEquals("下一件事：整理文档", next.originalGoal());
             assertTrue(next.constraints().isEmpty(), "下一件独立任务不能继承上一件的范围约束");
@@ -117,11 +119,11 @@ class AgentRunTaskControlTest {
 
     @Test
     void pauseWaitsForCurrentToolAndResumeReinjectsOriginalRequirements() throws Exception {
-        var toolEntered = new CountDownLatch(1);
-        var toolRelease = new CountDownLatch(1);
-        var executions = new AtomicInteger();
-        var requests = new CopyOnWriteArrayList<List<Message>>();
-        var calls = new AtomicInteger();
+        CountDownLatch toolEntered = new CountDownLatch(1);
+        CountDownLatch toolRelease = new CountDownLatch(1);
+        AtomicInteger executions = new AtomicInteger();
+        CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<List<Message>>();
+        AtomicInteger calls = new AtomicInteger();
         Tool blocking = new Tool() {
             public String name() { return "inspect_connection"; }
             public String description() { return "读取连接状态"; }
@@ -140,12 +142,12 @@ class AgentRunTaskControlTest {
                     ? new ModelResponse("检查连接", List.of(new ToolCall("inspect", "inspect_connection", Map.of())))
                     : done();
         };
-        try (var f = new Fixture(model, blocking)) {
-            var requirements = new TaskControlService.Requirements(List.of("不得修改数据库"),
+        try (Fixture f = new Fixture(model, blocking)) {
+            TaskControlService.Requirements requirements = new TaskControlService.Requirements(List.of("不得修改数据库"),
                     List.of(new TaskControlService.Acceptance("断线后重连测试通过", false, "")));
             f.start(requirements);
             await(toolEntered);
-            var original = f.tasks.load(f.id);
+            TaskControlService.TaskContract original = f.tasks.load(f.id);
             assertTrue(f.service.followup(f.id, "下一件事"));
             assertTrue(f.service.pause(f.firstRun));
             assertFalse(f.service.steer(f.id, "暂停后不能再插入"));
@@ -153,7 +155,7 @@ class AgentRunTaskControlTest {
             assertFalse(f.sessions.events(f.id).stream().anyMatch(e -> e.payload() instanceof RunCompleted));
             toolRelease.countDown();
             f.finished("PAUSED");
-            var paused = f.tasks.load(f.id);
+            TaskControlService.TaskContract paused = f.tasks.load(f.id);
             assertEquals("PAUSED", paused.status());
             assertEquals(original.taskId(), paused.taskId());
             assertEquals(original.constraints(), paused.constraints());
@@ -183,16 +185,16 @@ class AgentRunTaskControlTest {
 
     @Test
     void completedModelOutputDoesNotDrainQueueUntilExplicitAcceptanceIsReviewed() throws Exception {
-        var entered = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
-        var calls = new AtomicInteger();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
         ModelClient model = (messages, tools) -> {
             calls.incrementAndGet();
             entered.countDown();
             await(release);
             return done();
         };
-        try (var f = new Fixture(model, null)) {
+        try (Fixture f = new Fixture(model, null)) {
             f.start(new TaskControlService.Requirements(List.of(),
                     List.of(new TaskControlService.Acceptance("通过重连测试", false, ""))));
             await(entered);
@@ -202,7 +204,7 @@ class AgentRunTaskControlTest {
             assertEquals("AWAITING_REVIEW", f.tasks.load(f.id).status());
             assertEquals(List.of("另一个独立任务"), f.service.queued(f.id));
             assertEquals(1, calls.get());
-            var result = f.sessions.events(f.id).stream().map(e -> e.payload())
+            RunCompleted result = f.sessions.events(f.id).stream().map(e -> e.payload())
                     .filter(RunCompleted.class::isInstance).map(RunCompleted.class::cast).findFirst().orElseThrow();
             assertTrue(result.openSteps().contains("待验收：通过重连测试"));
             assertTrue(result.planOpen());
@@ -217,20 +219,20 @@ class AgentRunTaskControlTest {
 
     @Test
     void regenerateAfterResumePreservesOriginalGoalAndCorrections() throws Exception {
-        var requests = new CopyOnWriteArrayList<List<Message>>();
+        CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<List<Message>>();
         ModelClient model = (messages, tools) -> { requests.add(List.copyOf(messages)); return done(); };
-        try (var f = new Fixture(model, null)) {
+        try (Fixture f = new Fixture(model, null)) {
             f.start(new TaskControlService.Requirements(List.of("不得修改数据库"), List.of()));
             f.finished("COMPLETED");
-            var original = f.tasks.correct(f.id, "优先检查服务端重启后的重连");
-            var resumed = f.service.claimRun(f.id).orElseThrow();
+            TaskControlService.TaskContract original = f.tasks.correct(f.id, "优先检查服务端重启后的重连");
+            String resumed = f.service.claimRun(f.id).orElseThrow();
             f.sessions.publish(f.id, resumed, new RunStarted("（继续上一次未完成的任务）"));
             f.service.resume(f.id, resumed);
             f.finished("COMPLETED");
-            var regenerated = f.service.claimRun(f.id).orElseThrow();
+            String regenerated = f.service.claimRun(f.id).orElseThrow();
             f.service.regenerate(f.id, regenerated, "（继续上一次未完成的任务）");
             f.finished("COMPLETED");
-            var task = f.tasks.load(f.id);
+            TaskControlService.TaskContract task = f.tasks.load(f.id);
             assertEquals(original.taskId(), task.taskId());
             assertEquals("修复断线重连", task.originalGoal());
             assertEquals(original.corrections(), task.corrections());
@@ -241,9 +243,9 @@ class AgentRunTaskControlTest {
 
     @Test
     void confirmedAcceptanceWakesQueuedTaskWithNewGoal() throws Exception {
-        var entered = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
-        var calls = new AtomicInteger();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
         ModelClient model = (messages, tools) -> {
             if (calls.getAndIncrement() == 0) {
                 entered.countDown();
@@ -251,7 +253,7 @@ class AgentRunTaskControlTest {
             }
             return done();
         };
-        try (var f = new Fixture(model, null)) {
+        try (Fixture f = new Fixture(model, null)) {
             f.start(new TaskControlService.Requirements(List.of(),
                     List.of(new TaskControlService.Acceptance("重连测试通过", false, ""))));
             await(entered);
@@ -269,6 +271,111 @@ class AgentRunTaskControlTest {
         } finally { release.countDown(); }
     }
 
+    @Test
+    void goalReviewKeepsQueueUntilVerifiedAndManuallyAccepted() throws Exception {
+        java.nio.file.Files.writeString(workspace.resolve("a.txt"), "真实复现证据");
+        CountDownLatch secondExecution = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<TaskControlService> tasksRef = new java.util.concurrent.atomic.AtomicReference<TaskControlService>();
+        AtomicReference<String> idRef = new java.util.concurrent.atomic.AtomicReference<String>();
+        AtomicInteger executions = new AtomicInteger();
+        AtomicInteger reviews = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            if (tools.size() == 1 && tools.getFirst().name().equals("submit_decision")) {
+                if (reviews.getAndIncrement() == 0) return GoalExecutionPolicyTest.decision(Map.of(
+                        "decision", "CONTINUE", "gap", "还缺集成核对",
+                        "next_action", "完成集成核对", "expected_observation", "得到集成证据",
+                        "coverage", List.of(Map.of("criterion", 0, "satisfied", false, "evidence", List.of()))));
+                List<TaskControlService.Evidence> evidence = tasksRef.get().load(idRef.get()).execution().evidence();
+                String readEvidence = evidence.stream().filter(e -> e.tool().equals("read_file")).findFirst().orElseThrow().id();
+                return GoalExecutionPolicyTest.decision(Map.of("decision", "COMPLETE", "gap", "",
+                        "next_action", "", "expected_observation", "", "coverage",
+                        List.of(Map.of("criterion", 0, "satisfied", true, "evidence", List.of(readEvidence)))));
+            }
+            int index = executions.getAndIncrement();
+            if (index == 0) return new ModelResponse("", List.of(new ToolCall("goal", "promote_goal", Map.of(
+                    "reason", "需要跨轮核验", "completion_conditions", List.of("集成行为已核对")))));
+            if (index == 1) return new ModelResponse("", List.of(new ToolCall("read", "read_file", Map.of("path", "a.txt"))));
+            if (index == 3) { secondExecution.countDown(); await(release); }
+            return done();
+        };
+        try (Fixture f = new Fixture(model, null, true)) {
+            tasksRef.set(f.tasks); idRef.set(f.id);
+            f.start(new TaskControlService.Requirements(List.of(), List.of(new TaskControlService.Acceptance("人工核对", false, ""))));
+            await(secondExecution);
+            assertTrue(f.service.followup(f.id, "下一件事"));
+            assertFalse(f.sessions.events(f.id).stream().anyMatch(e -> e.payload() instanceof RunCompleted));
+            assertFalse(f.sessions.events(f.id).stream().anyMatch(e -> e.payload() instanceof com.pilot.core.event.AssistantDelta));
+            release.countDown();
+            f.finished("AWAITING_REVIEW");
+            assertEquals(1, f.sessions.events(f.id).stream().filter(e -> e.payload() instanceof RunCompleted).count());
+            assertEquals(List.of("下一件事"), f.service.queued(f.id));
+            assertFalse(f.tasks.load(f.id).acceptance().getFirst().checked());
+        } finally { release.countDown(); }
+    }
+
+    @Test
+    void pauseDuringFirstExecutionRequestNeverCompletesTask() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1); CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            calls.incrementAndGet(); entered.countDown(); await(release); return done();
+        };
+        try (Fixture f = new Fixture(model, null, true)) {
+            f.start(null); await(entered); assertTrue(f.service.pause(f.firstRun)); release.countDown();
+            f.finished("PAUSED");
+            assertEquals(1, calls.get());
+            assertEquals("PAUSED", f.tasks.load(f.id).status());
+            assertFalse(f.sessions.events(f.id).stream().anyMatch(e -> e.payload() instanceof RunCompleted));
+        } finally { release.countDown(); }
+    }
+
+    @Test
+    void verifiedExecutionSupersedesStaleInternalPlanWithoutMarkingTaskInterrupted() throws Exception {
+        ModelClient model = (messages, tools) -> done();
+        try (Fixture f = new Fixture(model, null, true)) {
+            f.plans.save(f.id, List.of(new com.pilot.core.plan.PlanItem(
+                    "已经被目标核验覆盖的旧计划", com.pilot.core.plan.PlanItem.PENDING)));
+
+            f.start(null);
+            f.finished("COMPLETED");
+
+            assertEquals("COMPLETED", f.tasks.load(f.id).status());
+            assertTrue(f.plans.load(f.id).isEmpty(), "核验通过后旧的内部计划应被清理");
+            RunCompleted completed = f.sessions.events(f.id).stream().map(EventEnvelope::payload)
+                    .filter(RunCompleted.class::isInstance).map(RunCompleted.class::cast)
+                    .findFirst().orElseThrow();
+            assertTrue(completed.openSteps().isEmpty(),
+                    "最终事件不能再携带已被核验结果取代的旧 openSteps");
+        }
+    }
+
+    @Test
+    void verifierProtocolFailureKeepsDedicatedTaskStatus() throws Exception {
+        AtomicInteger mainCalls = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            if (tools.size() == 1 && "submit_decision".equals(tools.getFirst().name())) {
+                return new ModelResponse("无效核验结果", List.of());
+            }
+            if (tools.stream().anyMatch(tool -> "promote_goal".equals(tool.name()))
+                    && mainCalls.getAndIncrement() == 0) {
+                return new ModelResponse("", List.of(new ToolCall("goal", "promote_goal", Map.of(
+                        "reason", "需要跨轮独立核验",
+                        "completion_conditions", List.of("结果经过独立核验")))));
+            }
+            return done();
+        };
+        try (Fixture f = new Fixture(model, null, true)) {
+            f.start(null);
+            f.finished("VERIFICATION_FAILED");
+
+            assertEquals("VERIFICATION_FAILED", f.tasks.load(f.id).status());
+            assertTrue(f.sessions.events(f.id).stream().map(EventEnvelope::payload)
+                    .anyMatch(event -> event instanceof RunFailed failed
+                            && "VERIFICATION_FAILED".equals(failed.code())));
+        }
+    }
+
     private class Fixture implements AutoCloseable {
         final SessionService sessions = new SessionService();
         final InMemoryPlanRepository plans = new InMemoryPlanRepository();
@@ -280,22 +387,23 @@ class AgentRunTaskControlTest {
         final com.pilot.core.tool.CommandTaskManager commandTasks;
         String firstRun;
 
-        Fixture(ModelClient model, Tool additional) {
-            var properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY,
-                    8, 3, 5, 300, 1, 0, 60_000, false);
-            var mapper = JsonMapper.builder().build();
-            var data = new PilotDataDir(dataRoot.toString());
+        Fixture(ModelClient model, Tool additional) { this(model, additional, false); }
+        Fixture(ModelClient model, Tool additional, boolean goals) {
+            AgentProperties properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY,
+                    40, 3, 5, 300, 1, 0, 60_000, false, goals);
+            JsonMapper mapper = JsonMapper.builder().build();
+            PilotDataDir data = new PilotDataDir(dataRoot.toString());
             commandTasks = new com.pilot.core.tool.CommandTaskManager(data.file("commands"), mapper);
             tasks = new TaskControlService(mapper, data);
-            var factory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
+            WorkspaceToolFactory factory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
             when(factory.resolve(anyString())).thenReturn(workspace);
             when(factory.registryFor(anyString(), any(PlanSink.class))).thenAnswer(invocation -> {
-                var tools = new ToolRegistry();
+                ToolRegistry tools = new ToolRegistry();
                 tools.register(new ReadFileTool(new PathValidator(workspace)));
                 if (additional != null) tools.register(additional);
                 return tools;
             });
-            var metrics = new RunMetrics() {
+            RunMetrics metrics = new RunMetrics() {
                 public void recordRun(String status, long durationMs) {
                     super.recordRun(status, durationMs);
                     finished.add(status);

@@ -14,7 +14,7 @@ class EventEnvelopeTest {
 
     @Test
     void serializesAllEnvelopeFields() {
-        var envelope = EventEnvelope.of(7, Instant.parse("2026-10-25T10:15:30Z"), "ses_1", "run_1",
+        EventEnvelope envelope = EventEnvelope.of(7, Instant.parse("2026-10-25T10:15:30Z"), "ses_1", "run_1",
                 new AssistantDelta("你好"));
 
         JsonNode node = json.readTree(json.writeValueAsString(envelope));
@@ -30,7 +30,7 @@ class EventEnvelopeTest {
 
     @Test
     void derivesTypeFromPayload() {
-        var envelope = EventEnvelope.of(1, Instant.parse("2026-10-25T10:15:30Z"), "ses_1", "run_1",
+        EventEnvelope envelope = EventEnvelope.of(1, Instant.parse("2026-10-25T10:15:30Z"), "ses_1", "run_1",
                 new ToolCompleted("call_1", "ok", 12L));
 
         assertEquals("tool.completed", envelope.type());
@@ -45,7 +45,7 @@ class EventEnvelopeTest {
 
     @Test
     void rejectsUnsupportedVersionAndMismatchedType() {
-        var timestamp = Instant.parse("2026-10-25T10:15:30Z");
+        Instant timestamp = Instant.parse("2026-10-25T10:15:30Z");
         assertThrows(IllegalArgumentException.class, () -> new EventEnvelope(
                 1, timestamp, "run.started", "ses_1", "run_1", new RunStarted("hi"), 0));
         assertThrows(IllegalArgumentException.class, () -> new EventEnvelope(

@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
@@ -79,6 +80,7 @@ public final class SqliteStore {
                 content TEXT NOT NULL,
                 tool_calls TEXT,
                 tool_call_id TEXT,
+                attachments TEXT,
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (session_id, seq)
             )""",
@@ -157,6 +159,9 @@ public final class SqliteStore {
         addColumnIfMissing(statement, "sessions", "is_blank", "INTEGER NOT NULL DEFAULT 0");
         addColumnIfMissing(statement, "sessions", "archived", "INTEGER NOT NULL DEFAULT 0");
         addColumnIfMissing(statement, "projects", "base_commit", "TEXT");
+        // 图片附件已经由 AttachmentService 复制到稳定的数据目录；这里持久化引用，
+        // 让 checkpoint / resume / 进程重启后仍能重建同一条多模态消息。
+        addColumnIfMissing(statement, "conversation_messages", "attachments", "TEXT");
         // 索引依赖上面补出来的列，必须放在补列之后
         statement.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, created_at)");
     }
@@ -171,7 +176,7 @@ public final class SqliteStore {
     }
 
     private static boolean hasColumn(Statement statement, String table, String column) throws SQLException {
-        try (var rows = statement.executeQuery("PRAGMA table_info(" + table + ")")) {
+        try (ResultSet rows = statement.executeQuery("PRAGMA table_info(" + table + ")")) {
             while (rows.next()) {
                 if (column.equals(rows.getString("name"))) {
                     return true;

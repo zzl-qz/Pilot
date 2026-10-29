@@ -15,7 +15,7 @@ class LocalSearchRuntimeTest {
 
     @Test
     void staysDownWhenDisabled() {
-        var runtime = new LocalSearchRuntime(
+        LocalSearchRuntime runtime = new LocalSearchRuntime(
                 new WebSearchProperties(false, "http://127.0.0.1:9", "", ""),
                 new PilotDataDir(dataDir.toString()));
 

@@ -20,7 +20,7 @@ class RunCommandToolTest {
 
     @Test
     void rejectsExecutableOutsideWhitelist() {
-        var tool = tool();
+        RunCommandTool tool = tool();
 
         String result = tool.execute(Map.of("command", "rm -rf /"));
 
@@ -29,7 +29,7 @@ class RunCommandToolTest {
 
     @Test
     void rejectsPathInsteadOfBareCommand() {
-        var tool = tool();
+        RunCommandTool tool = tool();
 
         String result = tool.execute(Map.of("command", "C:\\Windows\\System32\\cmd.exe /c dir"));
 
@@ -38,7 +38,7 @@ class RunCommandToolTest {
 
     @Test
     void rejectsShellMetacharacters() {
-        var tool = tool();
+        RunCommandTool tool = tool();
 
         String result = tool.execute(Map.of("command", "git status && rm -rf ."));
 
@@ -47,7 +47,7 @@ class RunCommandToolTest {
 
     @Test
     void rejectsDangerousGitWriteSubcommands() {
-        var tool = tool();
+        RunCommandTool tool = tool();
 
         for (String command : List.of("git push origin main", "git reset --hard HEAD", "git clean -fd")) {
             String result = tool.execute(Map.of("command", command));
@@ -57,7 +57,7 @@ class RunCommandToolTest {
 
     @Test
     void requiresCommitMessage() {
-        var tool = tool();
+        RunCommandTool tool = tool();
 
         String result = tool.execute(Map.of("command", "git commit"));
 
@@ -66,7 +66,7 @@ class RunCommandToolTest {
 
     @Test
     void rejectsGitWriteOutsideWorkspace() {
-        var tool = tool();
+        RunCommandTool tool = tool();
 
         String result = tool.execute(Map.of("command", "git add ../outside.txt"));
 
@@ -102,7 +102,7 @@ class RunCommandToolTest {
         org.junit.jupiter.api.Assumptions.assumeTrue(
                 System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win"));
         java.nio.file.Files.writeString(workspace.resolve("mvnw.cmd"), "@echo wrapper-ok %1\r\n");
-        var tool = tool();
+        RunCommandTool tool = tool();
 
         String result = tool.execute(Map.of("command", "mvnw -v", "timeoutSeconds", 60));
 
@@ -124,7 +124,7 @@ class RunCommandToolTest {
 
     @Test
     void runsWhitelistedCommandInsideWorkspace() {
-        var tool = tool();
+        RunCommandTool tool = tool();
 
         String result = tool.execute(Map.of("command", "java -version", "timeoutSeconds", 60));
 
@@ -135,7 +135,7 @@ class RunCommandToolTest {
 
     @Test
     void resolvesBuildToolFromPath() {
-        var resolved = RunCommandTool.resolveOnPath("mvn");
+        Path resolved = RunCommandTool.resolveOnPath("mvn");
 
         assertNull(RunCommandTool.resolveOnPath("definitely-not-a-real-binary-xyz"));
         assertTrue(resolved != null && resolved.getFileName().toString().toLowerCase().contains("mvn"),
@@ -144,7 +144,7 @@ class RunCommandToolTest {
 
     @Test
     void runsBuildToolThroughWindowsShell() {
-        var tool = tool();
+        RunCommandTool tool = tool();
 
         String result = tool.execute(Map.of("command", "mvn -v", "timeoutSeconds", 90));
 
@@ -154,7 +154,7 @@ class RunCommandToolTest {
     /** 子进程不能沿用系统默认的旧 JDK，否则 mvn test 加载不了 Java 24 的字节码。 */
     @Test
     void childProcessUsesTheSameJdkAsPilot() {
-        var tool = tool();
+        RunCommandTool tool = tool();
 
         String result = tool.execute(Map.of("command", "java -XshowSettings:properties -version", "timeoutSeconds", 60));
 
@@ -164,8 +164,8 @@ class RunCommandToolTest {
     /** 失败和超时同样要留一行结果：否则「跑过但挂了」在收尾门和界面上都看不见。 */
     @Test
     void reportsCheckSummaryForSuccessAndFailure() {
-        var call = new ToolCall("call_1", "run_command", Map.of("command", "mvn -q test"));
-        var tool = tool();
+        ToolCall call = new ToolCall("call_1", "run_command", Map.of("command", "mvn -q test"));
+        RunCommandTool tool = tool();
 
         assertEquals("mvn -q test → exit 0", tool.checkSummary(call, "命令: mvn -q test\n退出码: 0\n耗时: 12 ms"));
         assertEquals("mvn -q test → exit 1", tool.checkSummary(call, "命令: mvn -q test\n退出码: 1\n耗时: 12 ms"));
@@ -176,10 +176,10 @@ class RunCommandToolTest {
 
     @Test
     void rejectsCommandOutsideScope() {
-        var scope = AgentScope.readOnly(List.of(), List.of())
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
                 .withTools(List.of("run_command"), List.of())
                 .withCommands(List.of("git status"), List.of());
-        var tool = new RunCommandTool(new PathValidator(workspace, scope));
+        RunCommandTool tool = new RunCommandTool(new PathValidator(workspace, scope));
 
         String result = tool.execute(Map.of("command", "mvn -v"));
 
@@ -189,9 +189,9 @@ class RunCommandToolTest {
 
     @Test
     void readOnlyScopeRejectsGitWrite() {
-        var scope = AgentScope.readOnly(List.of(), List.of())
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
                 .withCommands(List.of("git"), List.of());
-        var tool = new RunCommandTool(new PathValidator(workspace, scope));
+        RunCommandTool tool = new RunCommandTool(new PathValidator(workspace, scope));
 
         String result = tool.execute(Map.of("command", "git commit -m \"test\""));
 
@@ -200,9 +200,9 @@ class RunCommandToolTest {
 
     @Test
     void writableScopeStillAllowsGitWriteChecks() {
-        var scope = AgentScope.readWrite(List.of(), List.of())
+        AgentScope scope = AgentScope.readWrite(List.of(), List.of())
                 .withCommands(List.of("git commit"), List.of());
-        var tool = new RunCommandTool(new PathValidator(workspace, scope));
+        RunCommandTool tool = new RunCommandTool(new PathValidator(workspace, scope));
 
         String result = tool.execute(Map.of("command", "git commit"));
 

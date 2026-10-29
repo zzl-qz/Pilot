@@ -4,9 +4,9 @@ import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.config.WebSearchProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.SmartLifecycle;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
-import org.springframework.context.SmartLifecycle;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 /**
  * Pilot 启动时在本机拉起 SearXNG。
@@ -311,7 +312,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
     }
 
     private static boolean copyDir(Path from, Path to) {
-        try (var walk = Files.walk(from)) {
+        try (Stream<Path> walk = Files.walk(from)) {
             for (Path path : walk.toList()) {
                 Path target = to.resolve(from.relativize(path).toString());
                 if (Files.isDirectory(path)) {
@@ -334,7 +335,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
         }
         // 刚被杀掉的 git 子进程可能还占着 .git，等一会儿重试几次
         for (int attempt = 0; attempt < 3; attempt++) {
-            try (var walk = Files.walk(root)) {
+            try (Stream<Path> walk = Files.walk(root)) {
                 walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
                     try {
                         Files.deleteIfExists(path);
@@ -416,7 +417,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
         if (!Files.isDirectory(theme) || sameContent(theme.resolve("manifest.json"), staticRoot.resolve("manifest.json"))) {
             return;
         }
-        try (var children = Files.list(theme)) {
+        try (Stream<Path> children = Files.list(theme)) {
             for (Path child : children.toList()) {
                 Path target = staticRoot.resolve(child.getFileName().toString());
                 deleteTree(target);

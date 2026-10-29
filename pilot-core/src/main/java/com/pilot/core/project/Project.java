@@ -41,7 +41,7 @@ public record Project(String id, String name, List<String> folders, String baseC
         if (folders == null || folders.isEmpty()) {
             return List.of();
         }
-        var unique = new LinkedHashSet<String>();
+        LinkedHashSet<String> unique = new LinkedHashSet<String>();
         for (String folder : folders) {
             if (folder == null) {
                 continue;

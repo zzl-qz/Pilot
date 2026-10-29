@@ -19,17 +19,17 @@ class TaskControlWakeTest {
 
     @Test
     void releasesEditSlotBeforeWakingQueueAndReturnsCurrentTask() {
-        var sessions = new SessionService();
+        SessionService sessions = new SessionService();
         String id = sessions.createSession("验收测试").id();
-        var tasks = new TaskControlService(JsonMapper.builder().build(), new PilotDataDir(data.toString()));
+        TaskControlService tasks = new TaskControlService(JsonMapper.builder().build(), new PilotDataDir(data.toString()));
         tasks.start(id, "原任务", List.of(), List.of(new TaskControlService.Acceptance("测试通过", false, "")));
         tasks.finish(id);
-        var runs = new RecordingRuns(() -> {
+        RecordingRuns runs = new RecordingRuns(() -> {
             assertEquals("COMPLETED", tasks.load(id).status());
             tasks.start(id, "排队的下一件事", List.of(), List.of());
         });
-        var controller = new TaskControlController(sessions, runs, tasks);
-        var response = controller.update(id, new TaskControlService.Requirements(List.of(),
+        TaskControlController controller = new TaskControlController(sessions, runs, tasks);
+        TaskControlService.TaskContract response = controller.update(id, new TaskControlService.Requirements(List.of(),
                 List.of(new TaskControlService.Acceptance("测试通过", true, "实际测试输出通过"))));
         assertEquals(1, runs.notifications);
         assertFalse(runs.claimed);
@@ -39,11 +39,11 @@ class TaskControlWakeTest {
 
     @Test
     void editingPausedOrUnverifiedTaskNeverStartsNextTask() {
-        var sessions = new SessionService();
+        SessionService sessions = new SessionService();
         String id = sessions.createSession("验收测试").id();
-        var tasks = new TaskControlService(JsonMapper.builder().build(), new PilotDataDir(data.toString()));
-        var runs = new RecordingRuns(() -> fail("尚未完成验收不能启动下一件事"));
-        var controller = new TaskControlController(sessions, runs, tasks);
+        TaskControlService tasks = new TaskControlService(JsonMapper.builder().build(), new PilotDataDir(data.toString()));
+        RecordingRuns runs = new RecordingRuns(() -> fail("尚未完成验收不能启动下一件事"));
+        TaskControlController controller = new TaskControlController(sessions, runs, tasks);
         tasks.start(id, "原任务", List.of(), List.of(new TaskControlService.Acceptance("测试通过", false, "")));
         tasks.finish(id);
         controller.update(id, new TaskControlService.Requirements(List.of("保留接口"),

@@ -11,6 +11,7 @@ import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.permission.PermissionResult;
 
 import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -30,7 +31,38 @@ public final class ToolExecutor {
      * @param changedPath 写工具实际改动的文件（展示用相对路径），未改动为 {@code null}
      * @param check       验证类工具产生的一行结果摘要，例如 {@code mvn -q test → exit 0}
      */
-    public record Outcome(String toolName, String result, String changedPath, String check) {
+    public enum OutcomeStatus {
+        SUCCESS, EMPTY, TRANSIENT_FAILURE, PERMANENT_FAILURE, DENIED, RUNNING, CANCELLED, SKIPPED
+    }
+
+    public record Outcome(String toolName, String result, List<String> changedPaths, List<String> checks,
+                          OutcomeStatus status) {
+        public Outcome(String toolName, String result, String changedPath, String check) {
+            this(toolName, result, singleton(changedPath), singleton(check), classify(result, singleton(check)));
+        }
+
+        public Outcome(String toolName, String result, String changedPath, String check, OutcomeStatus status) {
+            this(toolName, result, singleton(changedPath), singleton(check), status);
+        }
+
+        public Outcome {
+            changedPaths = normalized(changedPaths);
+            checks = normalized(checks);
+        }
+
+        /** 兼容只产生单个路径的既有调用方。 */
+        public String changedPath() {
+            return changedPaths.isEmpty() ? null : changedPaths.getFirst();
+        }
+
+        /** 兼容只产生单个检查项的既有调用方。 */
+        public String check() {
+            return checks.isEmpty() ? null : checks.getFirst();
+        }
+
+        public boolean usableEvidence() {
+            return status == OutcomeStatus.SUCCESS;
+        }
     }
 
     private final ToolRegistry tools;
@@ -66,23 +98,26 @@ public final class ToolExecutor {
         events.accept(new ToolStarted(call.callId(), call.name(), argsSummary));
         long startedAt = System.nanoTime();
 
-        String result;
+        ToolResult execution;
         Optional<Tool> tool = tools.find(call.name());
         if (tool.isEmpty()) {
-            result = "ERROR: 未知工具 " + call.name() + "，可用工具: " + availableNames();
+            execution = ToolResult.text("ERROR: 未知工具 " + call.name() + "，可用工具: " + availableNames());
         } else {
-            result = executeTool(call, tool.get(), argsSummary, events, beforeStart);
+            execution = executeTool(call, tool.get(), argsSummary, events, beforeStart);
         }
+        String result = execution.text();
 
-        String changedPath = null;
-        String check = null;
+        ArrayList<String> changedPaths = new ArrayList<>(execution.changedPaths());
+        ArrayList<String> checks = new ArrayList<>(execution.checks());
+        String nativeCheck = null;
         if (tool.isPresent() && !blocked(result)) {
             if (succeeded(result) && tool.get() instanceof WritesFiles writes) {
-                changedPath = writes.changedPath(call);
+                add(changedPaths, writes.changedPath(call));
             }
             // 失败和超时也要留下验证记录：否则「跑过但挂了」在收尾门和界面上都看不见
             if (tool.get() instanceof ProducesCheck produces) {
-                check = produces.checkSummary(call, result);
+                nativeCheck = produces.checkSummary(call, result);
+                add(checks, nativeCheck);
             }
         }
 
@@ -93,7 +128,50 @@ public final class ToolExecutor {
             // Trace 写入故障不能阻断代理工具执行。
         }
         events.accept(new ToolCompleted(call.callId(), ToolSupport.oneLine(result, 120), latencyMs));
-        return new Outcome(call.name(), result, changedPath, check);
+        // 结构化子结果里的历史检查不决定外层工具本身成败；外层状态只看正文与本工具自产检查。
+        return new Outcome(call.name(), result, changedPaths, checks, classify(result, singleton(nativeCheck)));
+    }
+
+    private static OutcomeStatus classify(String result, List<String> checks) {
+        if (result == null || result.isBlank()) return OutcomeStatus.EMPTY;
+        String value = result.strip();
+        if (value.contains("未找到网页结果") || value.contains("没有找到网页结果")
+                || value.contains("无搜索结果")) return OutcomeStatus.EMPTY;
+        if (value.startsWith("SKIPPED:")) return OutcomeStatus.SKIPPED;
+        if (value.startsWith("ERROR: 权限拒绝") || value.startsWith("ERROR: 用户拒绝")) {
+            return OutcomeStatus.DENIED;
+        }
+        if (value.contains("状态: RUNNING") || value.contains("状态: STOPPING")) return OutcomeStatus.RUNNING;
+        if (value.contains("状态: CANCELLED") || value.contains("状态: TIMED_OUT")) return OutcomeStatus.CANCELLED;
+        if (value.startsWith("ERROR")) {
+            String lower = value.toLowerCase(java.util.Locale.ROOT);
+            if (lower.contains("timeout") || lower.contains("timed out") || lower.contains("超时")
+                    || lower.contains("429") || lower.contains("502") || lower.contains("503")
+                    || lower.contains("504") || lower.contains("连接") || lower.contains("temporar")) {
+                return OutcomeStatus.TRANSIENT_FAILURE;
+            }
+            return OutcomeStatus.PERMANENT_FAILURE;
+        }
+        if (checks != null && checks.stream().anyMatch(check -> !check.matches(".+ → exit 0"))) {
+            return OutcomeStatus.PERMANENT_FAILURE;
+        }
+        return OutcomeStatus.SUCCESS;
+    }
+
+    private static List<String> singleton(String value) {
+        return value == null || value.isBlank() ? List.of() : List.of(value.strip());
+    }
+
+    private static List<String> normalized(List<String> values) {
+        return values == null ? List.of() : values.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(String::strip)
+                .distinct()
+                .toList();
+    }
+
+    private static void add(List<String> values, String value) {
+        if (value != null && !value.isBlank() && !values.contains(value.strip())) values.add(value.strip());
     }
 
     private static boolean succeeded(String result) {
@@ -107,18 +185,18 @@ public final class ToolExecutor {
                 || result.startsWith("SKIPPED:"));
     }
 
-    private String executeTool(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events,
-                               Supplier<String> beforeStart) {
+    private ToolResult executeTool(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events,
+                                   Supplier<String> beforeStart) {
         PermissionResult permission = permissionGate.check(call, tool);
         return switch (permission.decision()) {
             case ALLOW -> runIfCurrent(tool, call, beforeStart);
-            case DENY -> "ERROR: 权限拒绝：" + permission.reason();
+            case DENY -> ToolResult.text("ERROR: 权限拒绝：" + permission.reason());
             case ASK -> awaitApproval(call, tool, argsSummary, events, beforeStart);
         };
     }
 
-    private String awaitApproval(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events,
-                                 Supplier<String> beforeStart) {
+    private ToolResult awaitApproval(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events,
+                                     Supplier<String> beforeStart) {
         CompletableFuture<Boolean> decision = approvals.register(call.callId(), tool.name(), argsSummary);
         events.accept(new ApprovalRequired(call.callId(), tool.name(), argsSummary));
 
@@ -133,23 +211,23 @@ public final class ToolExecutor {
                 approved ? ApprovalDecision.APPROVED : ApprovalDecision.DENIED));
         return approved
                 ? runIfCurrent(tool, call, beforeStart)
-                : "ERROR: 用户拒绝执行 " + tool.name() + "，文件未修改。";
+                : ToolResult.text("ERROR: 用户拒绝执行 " + tool.name() + "，文件未修改。");
     }
 
-    private static String runIfCurrent(Tool tool, ToolCall call, Supplier<String> beforeStart) {
+    private static ToolResult runIfCurrent(Tool tool, ToolCall call, Supplier<String> beforeStart) {
         String interruption = beforeStart.get();
         return interruption == null || interruption.isBlank()
-                ? run(tool, call) : "SKIPPED: " + interruption;
+                ? run(tool, call) : ToolResult.text("SKIPPED: " + interruption);
     }
 
-    private static String run(Tool tool, ToolCall call) {
+    private static ToolResult run(Tool tool, ToolCall call) {
         try {
             Map<String, Object> args = call.args() == null ? Map.of() : call.args();
-            String result = tool.execute(args);
-            return result == null ? "" : result;
+            ToolResult result = tool.executeResult(args);
+            return result == null ? ToolResult.text("") : result;
         } catch (RuntimeException e) {
             String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            return "ERROR: 工具执行失败：" + reason;
+            return ToolResult.text("ERROR: 工具执行失败：" + reason);
         }
     }
 

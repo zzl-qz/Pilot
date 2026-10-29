@@ -41,7 +41,7 @@ final class JdbcSupport {
              PreparedStatement statement = connection.prepareStatement(sql)) {
             binder.bind(statement);
             try (ResultSet rows = statement.executeQuery()) {
-                var result = new ArrayList<T>();
+                ArrayList<T> result = new ArrayList<T>();
                 while (rows.next()) {
                     result.add(mapper.map(rows));
                 }

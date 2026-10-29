@@ -1,12 +1,15 @@
 package com.pilot.core.model;
 
 import com.pilot.core.loop.Attachment;
+import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.loop.Message;
 import com.pilot.core.tool.ToolCall;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -86,14 +89,14 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
 
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
-        var body = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String,Object> body = new LinkedHashMap<String, Object>();
         body.put("model", model);
         body.put("messages", messages.stream().map(this::messagePayload).toList());
         if (tools != null && !tools.isEmpty()) {
             body.put("tools", tools.stream().map(this::toolPayload).toList());
         }
 
-        var request = HttpRequest.newBuilder(endpoint)
+        HttpRequest request = HttpRequest.newBuilder(endpoint)
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
                 .timeout(requestTimeout)
@@ -133,20 +136,32 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (message.isMissingNode()) {
             throw new ModelClientException("模型响应缺少 message：" + snippet(response.body()));
         }
-        return new ModelResponse(text(message.get("content")), toolCalls(message.get("tool_calls")));
+        String content = text(message.get("content"));
+        List<ToolCall> calls = toolCalls(message.get("tool_calls"));
+        ModelResponse.FinishReason finishReason = ModelResponse.FinishReason.fromWire(
+                text(choices.get(0).get("finish_reason")));
+        if (finishReason == ModelResponse.FinishReason.UNKNOWN) {
+            finishReason = calls.isEmpty() ? ModelResponse.FinishReason.STOP : ModelResponse.FinishReason.TOOL_CALLS;
+        }
+        return new ModelResponse(content, calls, usage(root.get("usage"), messages, content, calls), finishReason);
     }
 
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta) {
-        var body = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String,Object> body = new LinkedHashMap<String, Object>();
         body.put("model", model);
         body.put("messages", messages.stream().map(this::messagePayload).toList());
         body.put("stream", true);
+        // OpenAI 只有显式请求才在流末尾返回 usage。第三方兼容端点不一定接受这个字段，
+        // 因此只对官方域名启用；其他端点若主动返回 usage 仍会被解析。
+        if ("api.openai.com".equalsIgnoreCase(endpoint.getHost())) {
+            body.put("stream_options", Map.of("include_usage", true));
+        }
         if (tools != null && !tools.isEmpty()) {
             body.put("tools", tools.stream().map(this::toolPayload).toList());
             body.put("tool_choice", "auto");
         }
-        var request = HttpRequest.newBuilder(endpoint)
+        HttpRequest request = HttpRequest.newBuilder(endpoint)
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
@@ -157,22 +172,30 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         try {
             HttpResponse<java.io.InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                try (var stream = response.body()) {
+                try (InputStream stream = response.body()) {
                     throw new ModelClientException("模型接口返回 HTTP " + response.statusCode() + "："
                             + snippet(new String(stream.readAllBytes(), StandardCharsets.UTF_8)));
                 }
             }
             StringBuilder content = new StringBuilder();
-            var toolParts = new LinkedHashMap<Integer, Map<String, Object>>();
-            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+            LinkedHashMap<Integer,Map<String,Object>> toolParts = new LinkedHashMap<Integer, Map<String, Object>>();
+            ModelUsage reportedUsage = null;
+            ModelResponse.FinishReason finishReason = ModelResponse.FinishReason.UNKNOWN;
+            try (BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     if (!line.startsWith("data:")) continue;
                     String data = line.substring(5).strip();
                     if (data.equals("[DONE]")) break;
                     JsonNode root = objectMapper.readTree(data);
+                    ModelUsage chunkUsage = reportedUsage(root.get("usage"));
+                    if (chunkUsage != null) {
+                        reportedUsage = chunkUsage;
+                    }
                     JsonNode choices = root.path("choices");
                     if (!choices.isArray() || choices.isEmpty()) continue;
+                    String finish = text(choices.get(0).get("finish_reason"));
+                    if (!finish.isBlank()) finishReason = ModelResponse.FinishReason.fromWire(finish);
                     JsonNode delta = choices.get(0).path("delta");
                     JsonNode text = delta.get("content");
                     if (text != null && text.isTextual()) {
@@ -204,7 +227,13 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     throw new ModelClientException("流式工具参数不是合法 JSON", e);
                 }
             }).toList();
-            return new ModelResponse(content.toString(), calls);
+            ModelUsage finalUsage = reportedUsage != null
+                    ? reportedUsage
+                    : estimatedUsage(messages, content.toString(), calls);
+            if (finishReason == ModelResponse.FinishReason.UNKNOWN) {
+                finishReason = calls.isEmpty() ? ModelResponse.FinishReason.STOP : ModelResponse.FinishReason.TOOL_CALLS;
+            }
+            return new ModelResponse(content.toString(), calls, finalUsage, finishReason);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ModelClientException("模型请求被中断", e);
@@ -214,7 +243,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     private Map<String, Object> messagePayload(Message message) {
-        var payload = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String,Object> payload = new LinkedHashMap<String, Object>();
         payload.put("role", message.role());
         if (message.hasToolCalls()) {
             payload.put("content", message.content().isBlank() ? null : message.content());
@@ -239,11 +268,11 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
      * 避免给不支持多模态的兼容端点发送数组。
      */
     static Object contentFor(Message message) {
-        var images = message.attachments().stream().filter(Attachment::image).toList();
+        List<Attachment> images = message.attachments().stream().filter(Attachment::image).toList();
         if (images.isEmpty()) {
             return message.content();
         }
-        var parts = new ArrayList<Map<String, Object>>();
+        ArrayList<Map<String,Object>> parts = new ArrayList<Map<String, Object>>();
         if (!message.content().isBlank()) {
             parts.add(Map.of("type", "text", "text", message.content()));
         }
@@ -275,7 +304,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (node == null || !node.isArray() || node.isEmpty()) {
             return List.of();
         }
-        var calls = new ArrayList<ToolCall>();
+        ArrayList<ToolCall> calls = new ArrayList<ToolCall>();
         for (JsonNode item : node) {
             String callId = text(item.get("id"));
             JsonNode function = item.get("function");
@@ -286,6 +315,49 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             calls.add(new ToolCall(callId, name, arguments(function.get("arguments"))));
         }
         return List.copyOf(calls);
+    }
+
+    private ModelUsage usage(JsonNode node, List<Message> messages, String content, List<ToolCall> calls) {
+        ModelUsage reported = reportedUsage(node);
+        return reported == null ? estimatedUsage(messages, content, calls) : reported;
+    }
+
+    private static ModelUsage reportedUsage(JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return null;
+        }
+        long input = longValue(node, "prompt_tokens", "input_tokens");
+        long output = longValue(node, "completion_tokens", "output_tokens");
+        JsonNode details = node.path("completion_tokens_details");
+        if (details.isMissingNode() || details.isNull()) {
+            details = node.path("output_tokens_details");
+        }
+        long reasoning = longValue(details, "reasoning_tokens");
+        if (input <= 0 && output <= 0 && reasoning <= 0) {
+            return null;
+        }
+        return new ModelUsage(input, output, reasoning, true);
+    }
+
+    private static long longValue(JsonNode node, String... names) {
+        if (node == null) return 0L;
+        for (String name : names) {
+            JsonNode value = node.get(name);
+            if (value != null && value.isNumber()) {
+                return Math.max(0L, value.asLong());
+            }
+        }
+        return 0L;
+    }
+
+    private ModelUsage estimatedUsage(List<Message> messages, String content, List<ToolCall> calls) {
+        long output = ContextCompactor.estimateTokens(content);
+        for (ToolCall call : calls == null ? List.<ToolCall>of() : calls) {
+            output += ContextCompactor.estimateTokens(call.name());
+            output += ContextCompactor.estimateTokens(objectMapper.writeValueAsString(
+                    call.args() == null ? Map.of() : call.args()));
+        }
+        return new ModelUsage(ContextCompactor.estimateTokens(messages), output, 0, false);
     }
 
     private Map<String, Object> arguments(JsonNode node) {

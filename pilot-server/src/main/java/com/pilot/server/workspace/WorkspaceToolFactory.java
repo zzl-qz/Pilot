@@ -3,6 +3,7 @@ package com.pilot.server.workspace;
 import com.pilot.core.multi.AgentScope;
 import com.pilot.core.plan.PlanSink;
 import com.pilot.core.tool.CreateFileTool;
+import com.pilot.core.tool.CommandChangeTracker;
 import com.pilot.core.tool.EditFileTool;
 import com.pilot.core.tool.ListDirTool;
 import com.pilot.core.tool.ReadFileTool;
@@ -18,14 +19,14 @@ import com.pilot.core.tool.UpdatePlanTool;
 import com.pilot.core.tool.WebFetchTool;
 import com.pilot.core.tool.WebSearchTool;
 import com.pilot.core.workspace.PathValidator;
-import tools.jackson.databind.ObjectMapper;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.WebSearchProperties;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
 import java.net.http.HttpClient;
-import java.time.Duration;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -92,10 +93,10 @@ public class WorkspaceToolFactory {
      */
     public ToolRegistry registryForScope(String workspace, AgentScope scope, SandboxSink sandbox) {
         AgentScope view = scope == null ? AgentScope.readOnly(java.util.List.of(), java.util.List.of()) : scope;
-        var validator = new PathValidator(resolve(workspace), view);
-        var registry = new ToolRegistry();
+        PathValidator validator = new PathValidator(resolve(workspace), view);
+        ToolRegistry registry = new ToolRegistry();
         // 每个子 Agent 一份「先读后改」记录，与父级互不共享
-        var reads = new ReadTracker();
+        ReadTracker reads = new ReadTracker();
         if (view.allowsTool("read_file")) {
             registry.register(new ReadFileTool(validator, reads));
         }
@@ -112,7 +113,7 @@ public class WorkspaceToolFactory {
             registry.register(new WebFetchTool(webClient));
         }
         if (view.allowsTool("run_command")) {
-            registry.register(new RunCommandTool(validator));
+            registry.register(new RunCommandTool(validator, commandChanges()));
         }
         if (view.writable() && view.allowsTool("edit_file")) {
             registry.register(new SandboxEditFileTool(validator, sandbox, reads));
@@ -128,11 +129,11 @@ public class WorkspaceToolFactory {
     }
 
     private ToolRegistry create(Path root, PlanSink planSink) {
-        var validator = new PathValidator(root);
-        var registry = new ToolRegistry();
+        PathValidator validator = new PathValidator(root);
+        ToolRegistry registry = new ToolRegistry();
         // 每次 run 一份「先读后改」记录：read_file 登记过的文件才允许 edit_file
         // （刚创建或刚编辑过的文件同样登记，连续编辑不受影响）
-        var reads = new ReadTracker();
+        ReadTracker reads = new ReadTracker();
         registry.register(new ReadFileTool(validator, reads));
         registry.register(new ListDirTool(validator));
         registry.register(new SearchTool(validator));
@@ -140,10 +141,14 @@ public class WorkspaceToolFactory {
         registry.register(new WebFetchTool(webClient));
         registry.register(new EditFileTool(validator, snapshots, reads));
         registry.register(new CreateFileTool(validator, snapshots, reads));
-        registry.register(new RunCommandTool(validator));
+        registry.register(new RunCommandTool(validator, commandChanges()));
         if (planSink != null) {
             registry.register(new UpdatePlanTool(planSink));
         }
         return registry;
+    }
+
+    private CommandChangeTracker commandChanges() {
+        return snapshots instanceof CommandChangeTracker tracker ? tracker : CommandChangeTracker.none();
     }
 }

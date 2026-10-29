@@ -1,11 +1,14 @@
 package com.pilot.server.session;
 
 import com.pilot.core.approval.ApprovalBroker;
+import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunStarted;
+import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.loop.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
+import com.pilot.core.model.ModelUsage;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.plan.PlanItem;
@@ -46,10 +49,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.MockMakers.SUBCLASS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
-import static org.mockito.MockMakers.SUBCLASS;
 
 class AgentRunServiceTest {
     @TempDir
@@ -58,15 +61,39 @@ class AgentRunServiceTest {
     Path dataRoot;
 
     @Test
+    void aggregatesChildUsageWithoutReplacingMainRunSnapshot() {
+        AgentRunService.RunUsageAccumulator usage = new AgentRunService.RunUsageAccumulator();
+
+        RunUsageUpdated main = usage.main(new RunUsageUpdated(2, 1_000, 100,
+                700, 8_000, true));
+        RunUsageUpdated child = usage.child(new ModelUsage(300, 30, 0, true));
+        RunUsageUpdated nextMain = usage.main(new RunUsageUpdated(3, 1_500, 150,
+                900, 8_000, true));
+        RunUsageUpdated unknownChild = usage.child(ModelUsage.unknown());
+
+        assertEquals(2, main.modelRequests());
+        assertEquals(3, child.modelRequests());
+        assertEquals(1_300, child.inputTokens());
+        assertEquals(4, nextMain.modelRequests(), "新的主快照必须继续叠加已有子请求，而不是倒退");
+        assertEquals(1_800, nextMain.inputTokens());
+        assertEquals(900, nextMain.contextTokens(), "上下文水位始终来自最近主请求");
+        assertEquals(5, unknownChild.modelRequests());
+        assertFalse(unknownChild.exact(), "任一来源缺少精确 usage 时聚合结果必须标记为估算");
+    }
+
+    @Test
     void waitsForTaskCompletionThenStartsEditedMessagesInOrder() throws Exception {
-        var enteredFirst = new CountDownLatch(1);
-        var releaseFirst = new CountDownLatch(1);
-        var enteredSecond = new CountDownLatch(1);
-        var releaseSecond = new CountDownLatch(1);
-        var requests = new CopyOnWriteArrayList<List<Message>>();
-        var calls = new AtomicInteger();
+        CountDownLatch enteredFirst = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch enteredSecond = new CountDownLatch(1);
+        CountDownLatch releaseSecond = new CountDownLatch(1);
+        CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<List<Message>>();
+        AtomicInteger calls = new AtomicInteger();
         ModelClient model = (messages, tools) -> {
             requests.add(messages);
+            if (tools.isEmpty() && messages.getLast().content().startsWith("[系统收尾要求]")) {
+                return new ModelResponse("本轮达到步数边界，进度已保存。", List.of());
+            }
             return switch (calls.getAndIncrement()) {
                 case 0 -> {
                     enteredFirst.countDown();
@@ -82,7 +109,7 @@ class AgentRunServiceTest {
             };
         };
         Files.writeString(workspace.resolve("a.txt"), "original task evidence");
-        try (var fixture = new Fixture(model, 8)) {
+        try (Fixture fixture = new Fixture(model, 8)) {
             fixture.start();
             await(enteredFirst);
             assertTrue(fixture.service.followup(fixture.sessionId, "下一条"));
@@ -102,11 +129,11 @@ class AgentRunServiceTest {
             assertEquals(List.of(), fixture.queue());
             assertEquals(List.of("原任务", "修改后的下一条"), userInputs(requests.get(2)));
             assertEquals(List.of("原任务", "修改后的下一条", "再下一条"), userInputs(requests.get(3)));
-            var events = fixture.sessions.events(fixture.sessionId);
+            List<EventEnvelope> events = fixture.sessions.events(fixture.sessionId);
             assertFalse(events.stream().anyMatch(event -> event.type().equals("run.steered")));
-            var firstCompleted = events.stream().filter(event -> event.payload() instanceof RunCompleted)
+            EventEnvelope firstCompleted = events.stream().filter(event -> event.payload() instanceof RunCompleted)
                     .findFirst().orElseThrow();
-            var nextStarted = events.stream().filter(event -> event.payload() instanceof RunStarted started
+            EventEnvelope nextStarted = events.stream().filter(event -> event.payload() instanceof RunStarted started
                     && started.input().equals("修改后的下一条")).findFirst().orElseThrow();
             assertTrue(firstCompleted.sequence() < nextStarted.sequence());
             assertNotEquals(firstCompleted.runId(), nextStarted.runId());
@@ -118,15 +145,15 @@ class AgentRunServiceTest {
 
     @Test
     void countsToolAndCompletionEventsOncePerRun() throws Exception {
-        var calls = new AtomicInteger();
+        AtomicInteger calls = new AtomicInteger();
         ModelClient model = (messages, tools) -> calls.getAndIncrement() == 0 ? readFile() : done();
         Files.writeString(workspace.resolve("a.txt"), "evidence");
 
-        try (var fixture = new Fixture(model, 8)) {
+        try (Fixture fixture = new Fixture(model, 8)) {
             fixture.start();
             fixture.awaitFinished("COMPLETED");
 
-            var metrics = fixture.metrics.snapshot();
+            RunMetrics.Snapshot metrics = fixture.metrics.snapshot();
             assertEquals(1L, metrics.runs());
             for (String event : List.of("event.tool.started", "event.tool.completed", "event.run.completed")) {
                 assertEquals(1L, metrics.counters().getOrDefault(event, 0L).longValue(), event);
@@ -140,11 +167,11 @@ class AgentRunServiceTest {
         ModelClient model = (messages, tools) -> {
             throw new IllegalArgumentException("invalid model request");
         };
-        try (var fixture = new Fixture(model, 8)) {
+        try (Fixture fixture = new Fixture(model, 8)) {
             fixture.start();
             fixture.awaitFinished("FAILED");
 
-            var metrics = fixture.metrics.snapshot();
+            RunMetrics.Snapshot metrics = fixture.metrics.snapshot();
             assertEquals(1L, metrics.runs());
             assertEquals(1L, metrics.counters().getOrDefault("event.run.failed", 0L).longValue());
             assertEquals(1L, metrics.counters().getOrDefault("run.FAILED", 0L).longValue());
@@ -158,14 +185,14 @@ class AgentRunServiceTest {
 
     @Test
     void injectsRepositoryBriefOncePerSession() throws Exception {
-        var requests = new CopyOnWriteArrayList<List<Message>>();
-        var calls = new AtomicInteger();
+        CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<List<Message>>();
+        AtomicInteger calls = new AtomicInteger();
         ModelClient model = (messages, tools) -> {
             requests.add(messages);
             return done();
         };
         Files.writeString(workspace.resolve("a.txt"), "evidence");
-        try (var fixture = new Fixture(model, 8)) {
+        try (Fixture fixture = new Fixture(model, 8)) {
             fixture.start();
             fixture.awaitFinished("COMPLETED");
 
@@ -221,14 +248,17 @@ class AgentRunServiceTest {
 
     @Test
     void waitsAcrossAutomaticContinuationBeforeStartingQueuedMessage() throws Exception {
-        var enteredFirst = new CountDownLatch(1);
-        var releaseFirst = new CountDownLatch(1);
-        var enteredContinuation = new CountDownLatch(1);
-        var releaseContinuation = new CountDownLatch(1);
-        var requests = new CopyOnWriteArrayList<List<Message>>();
-        var calls = new AtomicInteger();
+        CountDownLatch enteredFirst = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch enteredContinuation = new CountDownLatch(1);
+        CountDownLatch releaseContinuation = new CountDownLatch(1);
+        CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<List<Message>>();
+        AtomicInteger calls = new AtomicInteger();
         ModelClient model = (messages, tools) -> {
             requests.add(messages);
+            if (tools.isEmpty() && messages.getLast().content().startsWith("[系统收尾要求]")) {
+                return new ModelResponse("本轮达到步数边界，进度已保存。", List.of());
+            }
             return switch (calls.getAndIncrement()) {
                 case 0 -> {
                     enteredFirst.countDown();
@@ -243,7 +273,7 @@ class AgentRunServiceTest {
                 default -> done();
             };
         };
-        try (var fixture = new Fixture(model, 1)) {
+        try (Fixture fixture = new Fixture(model, 1)) {
             fixture.plans.save(fixture.sessionId, List.of(new PlanItem("原任务计划", PlanItem.PENDING)));
             fixture.start();
             await(enteredFirst);
@@ -251,12 +281,12 @@ class AgentRunServiceTest {
             releaseFirst.countDown();
             await(enteredContinuation);
             assertEquals(List.of("下一条"), fixture.queue());
-            assertEquals(List.of("原任务"), userInputs(requests.get(1)));
+            assertEquals(List.of("原任务"), userInputs(requests.get(2)));
             fixture.plans.save(fixture.sessionId, List.of(new PlanItem("原任务计划", PlanItem.COMPLETED)));
             releaseContinuation.countDown();
             fixture.awaitFinished("MAX_STEPS", "COMPLETED", "COMPLETED");
             assertEquals(List.of(), fixture.queue());
-            assertEquals(List.of("原任务", "下一条"), userInputs(requests.get(2)));
+            assertEquals(List.of("原任务", "下一条"), userInputs(requests.get(3)));
         } finally {
             releaseFirst.countDown();
             releaseContinuation.countDown();
@@ -265,14 +295,14 @@ class AgentRunServiceTest {
 
     @Test
     void keepsQueueWhenUserCancelsTask() throws Exception {
-        var entered = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
         ModelClient model = (messages, tools) -> {
             entered.countDown();
             await(release);
             return readFile();
         };
-        try (var fixture = new Fixture(model, 8)) {
+        try (Fixture fixture = new Fixture(model, 8)) {
             fixture.start();
             await(entered);
             assertTrue(fixture.service.followup(fixture.sessionId, "下一条"));
@@ -288,14 +318,14 @@ class AgentRunServiceTest {
 
     @Test
     void keepsQueueWhenStartingNextRunFails() throws Exception {
-        var entered = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
         ModelClient model = (messages, tools) -> {
             entered.countDown();
             await(release);
             return done();
         };
-        try (var fixture = new Fixture(model, 8)) {
+        try (Fixture fixture = new Fixture(model, 8)) {
             fixture.start();
             await(entered);
             assertTrue(fixture.service.followup(fixture.sessionId, "下一条"));
@@ -312,9 +342,9 @@ class AgentRunServiceTest {
 
     private void assertKeepsQueue(int maxSteps, List<PlanItem> plan,
                                  java.util.function.Supplier<ModelResponse> response, String status) throws Exception {
-        var entered = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
-        var calls = new AtomicInteger();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
         ModelClient model = (messages, tools) -> {
             if (calls.getAndIncrement() == 0) {
                 entered.countDown();
@@ -323,7 +353,7 @@ class AgentRunServiceTest {
             }
             return done();
         };
-        try (var fixture = new Fixture(model, maxSteps)) {
+        try (Fixture fixture = new Fixture(model, maxSteps)) {
             fixture.plans.save(fixture.sessionId, plan);
             fixture.start();
             await(entered);
@@ -331,7 +361,8 @@ class AgentRunServiceTest {
             release.countDown();
             fixture.awaitFinished(status);
             assertEquals(List.of("下一条"), fixture.queue());
-            assertEquals(1, calls.get());
+            assertEquals("INTERRUPTED".equals(status) ? 1 : 2, calls.get(),
+                    "真正停止时应额外执行一次禁用工具的收尾请求");
             assertTrue(fixture.service.activeRun(fixture.sessionId).isEmpty());
         } finally {
             release.countDown();
@@ -349,15 +380,15 @@ class AgentRunServiceTest {
         String runId;
 
         Fixture(ModelClient model, int maxSteps) {
-            var properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY,
+            AgentProperties properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY,
                     maxSteps, 3, 5, 300, 1, 0, 60_000, false);
-            var mapper = JsonMapper.builder().build();
-            var dataDir = new PilotDataDir(dataRoot.toString());
+            JsonMapper mapper = JsonMapper.builder().build();
+            PilotDataDir dataDir = new PilotDataDir(dataRoot.toString());
             commandTasks = new com.pilot.core.tool.CommandTaskManager(dataDir.file("commands"), mapper);
-            var factory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
+            WorkspaceToolFactory factory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
             when(factory.resolve(anyString())).thenReturn(workspace);
             when(factory.registryFor(anyString(), any(PlanSink.class))).thenAnswer(invocation -> {
-                var tools = new ToolRegistry();
+                ToolRegistry tools = new ToolRegistry();
                 tools.register(new ReadFileTool(new PathValidator(workspace)));
                 return tools;
             });

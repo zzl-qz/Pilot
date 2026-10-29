@@ -5,6 +5,8 @@ package com.pilot.core.event;
  */
 public enum EventType {
     RUN_STARTED("run.started"),
+    RUN_USAGE_UPDATED("run.usage"),
+    EXECUTION_UPDATED("execution.updated"),
     ASSISTANT_DELTA("assistant.delta"),
     /** 只推给当前界面，不落库。刷新之后以落库的 assistant.delta 为准。 */
     ASSISTANT_PREVIEW("assistant.preview"),

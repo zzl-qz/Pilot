@@ -33,6 +33,14 @@ final class ContextBudget {
     private static final double PRE_COMPACT_RATIO = 0.80;
     private static final double FORCE_COMPACT_RATIO = 0.90;
     private static final int MAX_COMPACT_ROUNDS = 3;
+    /** 连续三次摘要都没有收益后熔断，避免摘要模型自身形成消耗循环。 */
+    private static final int MAX_CONSECUTIVE_COMPACT_FAILURES = 3;
+    /** 成功压缩后的三个采样边界内再次越线，视为一次快速回填。 */
+    private static final int RAPID_REFILL_WINDOW_APPLIES = 3;
+    /** 快速回填连续出现三次后熔断，之后只走本地裁剪。 */
+    private static final int MAX_RAPID_REFILLS = 3;
+    /** 熔断后必须真正降到低水位才恢复，刚低于预压线不足以证明抖动已消失。 */
+    private static final double CIRCUIT_RECOVERY_RATIO = 0.55;
 
     /** 摘要压缩的动作本身；抽成函数式接口是为了能单独测「压不动时怎么退避」。 */
     @FunctionalInterface
@@ -43,6 +51,12 @@ final class ContextBudget {
     private final Compactor compactor;
     /** 上次压缩没有实际收益时的上下文大小；涨过这个水位之前不再尝试，避免每步白跑一次摘要。 */
     private int backoffUntil;
+    private int consecutiveCompactFailures;
+    private int rapidRefillStreak;
+    private int applyIndex;
+    private int lastSuccessfulCompactApply = -1;
+    private boolean rapidRefillCounted;
+    private boolean compactCircuitOpen;
 
     ContextBudget(Compactor compactor) {
         this.compactor = compactor;
@@ -53,6 +67,7 @@ final class ContextBudget {
      * @return 本次是否真的压缩过
      */
     boolean apply(List<Message> messages, int limit, Consumer<SessionEvent> events) {
+        applyIndex++;
         // 字符预算与 token 预算同值：英文按 4 字符 1 token 远远够用，中文接近 1 字符 1 token，
         // 取两者里更满的那个，避免中文会话被「字符还不多」骗过去，一路涨到超窗。
         int charBudget = Math.max(1, limit);
@@ -70,6 +85,24 @@ final class ContextBudget {
         usage = usage(messages, charBudget, tokenBudget);
         if (usage < PRE_COMPACT_RATIO) {
             backoffUntil = 0;
+            consecutiveCompactFailures = 0;
+            if (usage < CIRCUIT_RECOVERY_RATIO) {
+                compactCircuitOpen = false;
+                rapidRefillStreak = 0;
+                lastSuccessfulCompactApply = -1;
+                rapidRefillCounted = false;
+            } else if (lastSuccessfulCompactApply > 0
+                    && applyIndex - lastSuccessfulCompactApply > RAPID_REFILL_WINDOW_APPLIES) {
+                rapidRefillStreak = 0;
+                lastSuccessfulCompactApply = -1;
+                rapidRefillCounted = false;
+            }
+            dropIfOverBudget(messages, limit);
+            return false;
+        }
+
+        recordRapidRefill();
+        if (compactCircuitOpen) {
             dropIfOverBudget(messages, limit);
             return false;
         }
@@ -99,9 +132,37 @@ final class ContextBudget {
         }
 
         int total = ContextCompactor.totalChars(messages);
-        backoffUntil = reduced ? 0 : (int) (total * 1.05) + 1;
+        if (reduced) {
+            backoffUntil = 0;
+            consecutiveCompactFailures = 0;
+            lastSuccessfulCompactApply = applyIndex;
+            rapidRefillCounted = false;
+        } else {
+            backoffUntil = (int) (total * 1.05) + 1;
+            consecutiveCompactFailures++;
+            if (consecutiveCompactFailures >= MAX_CONSECUTIVE_COMPACT_FAILURES) {
+                compactCircuitOpen = true;
+            }
+        }
         dropIfOverBudget(messages, limit);
         return reduced;
+    }
+
+    private void recordRapidRefill() {
+        if (lastSuccessfulCompactApply < 0 || rapidRefillCounted) {
+            return;
+        }
+        int distance = applyIndex - lastSuccessfulCompactApply;
+        rapidRefillCounted = true;
+        if (distance <= RAPID_REFILL_WINDOW_APPLIES) {
+            rapidRefillStreak++;
+            if (rapidRefillStreak >= MAX_RAPID_REFILLS) {
+                compactCircuitOpen = true;
+            }
+            return;
+        }
+        rapidRefillStreak = 0;
+        lastSuccessfulCompactApply = -1;
     }
 
     /** 当前占用 / 预算，取字符与 token 两个口径里更满的那个。 */

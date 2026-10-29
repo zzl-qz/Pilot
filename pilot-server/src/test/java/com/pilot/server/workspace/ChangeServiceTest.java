@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -115,7 +116,7 @@ class ChangeServiceTest {
     void capsNumberOfReportedFiles() throws IOException {
         assumeTrue(git("--version"), "需要本机可用的 git");
         git("init", "-q");
-        var paths = new java.util.ArrayList<String>();
+        ArrayList<String> paths = new java.util.ArrayList<String>();
         for (int i = 0; i < 510; i++) {
             String path = "f" + i + ".txt";
             paths.add(path);
@@ -369,7 +370,7 @@ class ChangeServiceTest {
     }
 
     private boolean git(String... args) {
-        var command = new java.util.ArrayList<String>();
+        ArrayList<String> command = new java.util.ArrayList<String>();
         command.add("git");
         command.addAll(List.of(args));
         ProcessBuilder builder = new ProcessBuilder(command);

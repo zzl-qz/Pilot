@@ -29,7 +29,7 @@ public final class ToolRegistry {
     }
 
     public List<Tool> tools() {
-        var result = new ArrayList<>(tools.values());
+        ArrayList<Tool> result = new ArrayList<>(tools.values());
         result.sort(Comparator.comparing(Tool::name));
         return List.copyOf(result);
     }

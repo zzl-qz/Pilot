@@ -2,6 +2,7 @@ package com.pilot.server.session;
 
 import org.springframework.stereotype.Component;
 
+import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -92,8 +93,8 @@ public class RunRegistry {
 
     /** 父目录与子目录共享文件，恢复期间必须使用同一套互斥边界。 */
     private static boolean overlaps(String first, String second) {
-        var left = java.nio.file.Path.of(first);
-        var right = java.nio.file.Path.of(second);
+        Path left = java.nio.file.Path.of(first);
+        Path right = java.nio.file.Path.of(second);
         return left.startsWith(right) || right.startsWith(left);
     }
 
