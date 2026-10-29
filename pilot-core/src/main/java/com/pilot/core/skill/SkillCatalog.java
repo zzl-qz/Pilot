@@ -160,12 +160,20 @@ public final class SkillCatalog {
                 parsed.body(), files));
     }
 
-    /** 递归列出技能目录内的文件（排除 SKILL.md），路径统一用 {@code /} 分隔；上限 MAX_FILES。 */
+    /**
+     * 递归列出技能目录内的文件（排除 SKILL.md 与 {@code .git/} 下的一切），
+     * 路径统一用 {@code /} 分隔；上限 MAX_FILES。
+     *
+     * <p>跳过 {@code .git}：手动把 git 仓库 clone 进技能目录是合法安装方式，
+     * 但仓库元数据对 use_skill 的文件清单只有噪音（还能把 200 条配额吃光），
+     * 参考文件与脚本才是渐进披露第三层关心的内容。
+     */
     private static List<String> listFiles(Path dir) {
         List<String> files = new ArrayList<>();
         try (Stream<Path> walk = Files.walk(dir, 6)) {
             walk.filter(Files::isRegularFile)
                     .filter(path -> !path.getFileName().toString().equals("SKILL.md"))
+                    .filter(path -> !insideGit(dir, path))
                     .limit(MAX_FILES)
                     .forEach(path -> files.add(dir.relativize(path).toString()
                             .replace('\\', '/')));
@@ -174,6 +182,16 @@ public final class SkillCatalog {
         }
         files.sort(String::compareTo);
         return List.copyOf(files);
+    }
+
+    /** 相对路径里任一段是 {@code .git} 即命中（含 {@code .git} 里的文件与其深层子目录）。 */
+    private static boolean insideGit(Path dir, Path path) {
+        for (int i = dir.getNameCount(); i < path.getNameCount(); i++) {
+            if (".git".equals(path.getName(i).toString())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 按名取技能，含正文与文件清单。 */

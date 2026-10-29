@@ -131,6 +131,23 @@ class SkillCatalogTest {
     }
 
     @Test
+    void filesListSkipsGitMetadataFromManuallyClonedSkills() throws IOException {
+        // 手动 clone 进技能目录是合法安装方式，但 .git 里的元数据不该出现在 use_skill 的清单里
+        Path root = Files.createDirectories(dir.resolve("skills"));
+        write(root, "cloned", "---\ndescription: x\n", "正文");
+        Files.createDirectories(root.resolve("cloned/.git/refs/heads"));
+        Files.createDirectories(root.resolve("cloned/references"));
+        Files.writeString(root.resolve("cloned/.git/HEAD"), "ref: refs/heads/main");
+        Files.writeString(root.resolve("cloned/.git/config"), "[core]");
+        Files.writeString(root.resolve("cloned/references/api.md"), "参考");
+
+        var skill = SkillCatalog.scan(roots(noProject(), root)).find("cloned").orElseThrow();
+
+        assertEquals(List.of("references/api.md"), skill.files());
+        assertFalse(skill.files().stream().anyMatch(file -> file.contains(".git")));
+    }
+
+    @Test
     void readFileEnforcesContainmentAndLineLimits() throws IOException {
         Path root = Files.createDirectories(dir.resolve("skills"));
         write(root, "demo", "---\ndescription: x\n", "正文");
