@@ -56,6 +56,20 @@ public class ModelSettings {
         return current;
     }
 
+    /**
+     * 「获取可用模型」的探测目标：入参留空时回退到已保存值（与 {@link #update} 同语义），
+     * 只读、不落盘、不改当前配置。
+     *
+     * @throws IllegalArgumentException 回退后仍没有合法的 http(s) 端点
+     */
+    public synchronized Snapshot probeTarget(String endpoint, String apiKey) {
+        Snapshot before = current;
+        String targetEndpoint = blank(endpoint) ? before.endpoint() : endpoint.strip();
+        String targetKey = blank(apiKey) ? before.apiKey() : apiKey.strip();
+        requireHttpEndpoint(targetEndpoint);
+        return new Snapshot(targetEndpoint, before.model(), targetKey);
+    }
+
     /** 界面上可选的模型名（不含用户自己填的），供下拉列表使用。 */
     public List<String> options() {
         return options;

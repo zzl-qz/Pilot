@@ -1,11 +1,14 @@
 package com.pilot.server.controller;
 
+import com.pilot.core.model.ModelClientException;
 import com.pilot.core.permission.PermissionMode;
+import com.pilot.server.config.ModelCatalogService;
 import com.pilot.server.config.ModelSettings;
 import com.pilot.server.config.PermissionSettings;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -26,10 +29,13 @@ import java.util.List;
 public class SettingsController {
     private final PermissionSettings permissions;
     private final ModelSettings models;
+    private final ModelCatalogService catalog;
 
-    public SettingsController(PermissionSettings permissions, ModelSettings models) {
+    public SettingsController(PermissionSettings permissions, ModelSettings models,
+                              ModelCatalogService catalog) {
         this.permissions = permissions;
         this.models = models;
+        this.catalog = catalog;
     }
 
     @GetMapping
@@ -82,6 +88,26 @@ public class SettingsController {
         return current();
     }
 
+    /**
+     * 获取端点上的可用模型清单：填好端点（和密钥）后不必再手抄模型名。
+     *
+     * <p>端点与密钥留空时回退到已保存值；请求由服务端代发，避免 CORS
+     * 和浏览器直连第三方网关。探测只读：不落盘、不改当前配置、不回传密钥。
+     * 上游失败（无效密钥、无此路由、超时等）映射 502，把具体原因带回响应体。
+     */
+    @PostMapping("/model/models")
+    public ModelsResponse listModels(@RequestBody(required = false) ModelsRequest request) {
+        String endpoint = request == null ? null : request.endpoint();
+        String apiKey = request == null ? null : request.apiKey();
+        try {
+            return new ModelsResponse(catalog.fetchAvailableModels(endpoint, apiKey));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (ModelClientException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
+    }
+
     private SettingsResponse current() {
         ModelSettings.Snapshot snapshot = models.snapshot();
         return new SettingsResponse(
@@ -106,4 +132,12 @@ public class SettingsController {
      * 所以 {@code clearApiKey} 用包装类型，缺省视为不清理。
      */
     public record ModelRequest(String endpoint, String model, String apiKey, Boolean clearApiKey) { }
+
+    /**
+     * 探测入参：两个字段都留空表示用已保存的端点与密钥。
+     * 密钥只在这次请求里用一下，不落盘、不回传。
+     */
+    public record ModelsRequest(String endpoint, String apiKey) { }
+
+    public record ModelsResponse(List<String> models) { }
 }
