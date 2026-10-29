@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  emptySkillsHint,
   mergeCommands,
   resolveSkillCommand,
+  skillEntry,
   toSkillCommands
 } from '../../main/resources/static/lib/skills.js';
 import { QUICK_COMMANDS } from '../../main/resources/static/lib/commands.js';
@@ -76,4 +78,19 @@ test('resolveSkillCommand ignores builtin commands, plain text and partial prefi
   assert.equal(resolveSkillCommand('看看代码', commands), null);
   assert.equal(resolveSkillCommand('', commands), null);
   assert.equal(resolveSkillCommand('/review', []), null, '没有技能时一律按普通文本');
+});
+
+test('skillEntry renders source and command metadata for the settings page', () => {
+  assert.deepEqual(skillEntry({ name: 'demo', description: '做某事。', command: '/review', source: 'project' }),
+    { name: 'demo', meta: '项目级 · 快捷命令 /review', description: '做某事。' });
+  assert.deepEqual(skillEntry({ name: 'mine', description: '个人技能。', source: 'user' }),
+    { name: 'mine', meta: '用户级', description: '个人技能。' });
+  assert.deepEqual(skillEntry(null), { name: '', meta: '', description: '' });
+});
+
+test('emptySkillsHint points users at the install directory', () => {
+  assert.match(emptySkillsHint('D:/repo/.pilot/skills'), /D:\/repo\/\.pilot\/skills 下建一个目录/);
+  assert.match(emptySkillsHint('D:/repo/.pilot/skills'), /SKILL\.md/);
+  assert.match(emptySkillsHint('-'), /在技能目录下建一个目录/);
+  assert.match(emptySkillsHint(undefined), /在技能目录下建一个目录/);
 });

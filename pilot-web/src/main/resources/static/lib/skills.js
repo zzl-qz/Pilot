@@ -54,3 +54,23 @@ export function resolveSkillCommand(text, skillCommands) {
   }
   return { skill: command.skill, args: (match[2] || '').trim() };
 }
+
+/** 设置页单条技能的展示：{ name, meta, description }，meta 含来源与快捷命令。 */
+export function skillEntry(skill) {
+  const source = skill?.source === 'project' ? '项目级' : skill?.source === 'user' ? '用户级' : '';
+  const command = skill?.command ? `快捷命令 ${skill.command}` : '';
+  const meta = [source, command].filter(Boolean).join(' · ');
+  return {
+    name: skill?.name || '',
+    meta,
+    description: skill?.description || ''
+  };
+}
+
+/** 设置页空态引导：告诉用户往哪个目录放什么文件。 */
+export function emptySkillsHint(projectRoot) {
+  const where = projectRoot && projectRoot !== '-'
+    ? `在 ${projectRoot} 下`
+    : '在技能目录下';
+  return `还没有可用技能：${where}建一个目录，里面放 SKILL.md（frontmatter 至少要有一句 description），保存后下次运行即生效。`;
+}

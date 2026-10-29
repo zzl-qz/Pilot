@@ -35,6 +35,7 @@ public class SkillsController {
     /**
      * 技能清单。技能目录按工作区解析（项目级技能随仓库走），因此以会话为锚点；
      * 不带 sessionId 时按默认工作区返回（用于新建会话前的展示）。
+     * {@code projectRoot}/{@code userRoot} 是两个安装位置，供设置页引导用户往哪放。
      */
     @GetMapping
     public SkillsResponse list(@RequestParam(name = "sessionId", required = false) String sessionId) {
@@ -47,7 +48,9 @@ public class SkillsController {
         }
         var catalog = skills.catalogFor(workspace);
         List<SkillPayload> available = catalog.list().stream().map(SkillPayload::of).toList();
-        return new SkillsResponse(available, catalog.invalid());
+        return new SkillsResponse(available, catalog.invalid(),
+                skills.projectRootFor(workspace).toString(),
+                skills.userRootOf().toString());
     }
 
     public record SkillPayload(String name, String description, String command, String argumentHint,
@@ -60,5 +63,6 @@ public class SkillsController {
         }
     }
 
-    public record SkillsResponse(List<SkillPayload> available, List<SkillProblem> invalid) { }
+    public record SkillsResponse(List<SkillPayload> available, List<SkillProblem> invalid,
+                                 String projectRoot, String userRoot) { }
 }

@@ -416,6 +416,7 @@
         <button class="settings-tab is-on" type="button" data-section="appearance">外观</button>
         <button class="settings-tab" type="button" data-section="model">模型</button>
         <button class="settings-tab" type="button" data-section="permission">权限</button>
+        <button class="settings-tab" type="button" data-section="skills">技能</button>
         <button class="settings-tab" type="button" data-section="keys">快捷键</button>
         <button class="settings-tab" type="button" data-section="about">关于</button>
       </nav>
@@ -448,6 +449,18 @@
           <p class="settings-hint">决定工具能做什么：从只读到全放行，切换后立即生效。</p>
           <div id="permission-options" class="permission-options" role="radiogroup" aria-label="权限模式"></div>
           <p id="settings-permission-hint" class="settings-status" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="settings-pane" data-section="skills" hidden>
+          <h3 class="settings-title">技能</h3>
+          <p class="settings-hint">技能是打包好的工作流程与领域知识（目录里放 SKILL.md 与参考文件），装进目录即生效、无需重启；同名时项目级遮蔽用户级。带快捷命令的技能会出现在输入框的 / 菜单。</p>
+          <dl class="settings-about">
+            <div><dt>项目级目录</dt><dd id="settings-skills-project" class="mono">-</dd></div>
+            <div><dt>用户级目录</dt><dd id="settings-skills-user" class="mono">-</dd></div>
+          </dl>
+          <h3 class="settings-title">可用技能</h3>
+          <dl id="settings-skills-list" class="settings-about"></dl>
+          <p id="settings-skills-hint" class="settings-status" role="status" aria-live="polite"></p>
         </section>
 
         <section class="settings-pane" data-section="keys" hidden>

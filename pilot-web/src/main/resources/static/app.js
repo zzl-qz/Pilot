@@ -11,7 +11,7 @@ import {
   filterQuickCommands,
   QUICK_COMMANDS
 } from './lib/commands.js';
-import { mergeCommands, resolveSkillCommand, toSkillCommands } from './lib/skills.js';
+import { mergeCommands, resolveSkillCommand, skillEntry, emptySkillsHint, toSkillCommands } from './lib/skills.js';
 import { rankFileMatches } from './lib/mention.js';
 import { mergeRunReports, sortChangeFiles, statusKind } from './lib/changes.js';
 import { applyRule, classifyRunFailure, planProgressLabel } from './lib/events.js';
@@ -184,6 +184,10 @@ const el = {
   settingsModelHint: document.querySelector('#settings-model-hint'),
   permissionOptions: document.querySelector('#permission-options'),
   settingsPermissionHint: document.querySelector('#settings-permission-hint'),
+  skillsProject: document.querySelector('#settings-skills-project'),
+  skillsUser: document.querySelector('#settings-skills-user'),
+  skillsList: document.querySelector('#settings-skills-list'),
+  skillsHint: document.querySelector('#settings-skills-hint'),
   aboutWorkspace: document.querySelector('#settings-about-workspace'),
   aboutConnection: document.querySelector('#settings-about-connection'),
   aboutModel: document.querySelector('#settings-about-model'),
@@ -1300,7 +1304,69 @@ function renderSettings(section) {
   renderAccentOptions();
   renderPermissionOptions();
   renderSettingsModel(state.settingsData);
+  renderSkillsSection();
   renderAbout();
+}
+
+/** 设置页「技能」区块：目录位置、可用/无效清单与空态引导；每次打开重新拉取（装完技能即见）。 */
+async function renderSkillsSection() {
+  if (!el.skillsList) {
+    return;
+  }
+  el.skillsProject.textContent = '…';
+  el.skillsUser.textContent = '…';
+  el.skillsList.replaceChildren();
+  setSettingsStatus(el.skillsHint, '正在读取技能目录…');
+  try {
+    const url = state.sessionId
+      ? `/api/skills?sessionId=${encodeURIComponent(state.sessionId)}`
+      : '/api/skills';
+    const response = await apiFetch(url);
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const data = await response.json();
+    el.skillsProject.textContent = data.projectRoot || '-';
+    el.skillsProject.title = data.projectRoot || '';
+    el.skillsUser.textContent = data.userRoot || '-';
+    el.skillsUser.title = data.userRoot || '';
+
+    const available = Array.isArray(data.available) ? data.available : [];
+    const invalid = Array.isArray(data.invalid) ? data.invalid : [];
+    for (const skill of available) {
+      const entry = skillEntry(skill);
+      const row = document.createElement('div');
+      const name = document.createElement('dt');
+      name.textContent = entry.meta ? `${entry.name}（${entry.meta}）` : entry.name;
+      const description = document.createElement('dd');
+      description.textContent = entry.description;
+      row.append(name, description);
+      el.skillsList.append(row);
+    }
+    for (const problem of invalid) {
+      const row = document.createElement('div');
+      const name = document.createElement('dt');
+      name.textContent = `${problem.name || '（未知目录）'}（无效）`;
+      const reason = document.createElement('dd');
+      reason.textContent = problem.reason || '校验未通过';
+      row.append(name, reason);
+      el.skillsList.append(row);
+    }
+    if (!available.length && !invalid.length) {
+      setSettingsStatus(el.skillsHint, emptySkillsHint(data.projectRoot));
+      return;
+    }
+    const parts = [];
+    if (available.length) {
+      parts.push(`可用 ${available.length} 个`);
+    }
+    if (invalid.length) {
+      parts.push(`无效 ${invalid.length} 个（原因见列表）`);
+    }
+    setSettingsStatus(el.skillsHint, parts.join('；') + '。修改或新增后无需重启，下次运行生效。');
+  } catch (error) {
+    setSettingsStatus(el.skillsHint, '读取失败：' + error.message, 'error');
+  }
 }
 
 function showSettingsSection(section) {

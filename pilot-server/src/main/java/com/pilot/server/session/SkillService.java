@@ -38,7 +38,7 @@ public class SkillService {
     }
 
     /** 项目级技能目录固定为 {@code <workspace>/.pilot/skills}：目录即协议，不设配置。 */
-    private Path projectRoot(String workspace) {
+    public Path projectRootFor(String workspace) {
         return resolve(workspace).resolve(".pilot").resolve("skills");
     }
 
@@ -55,12 +55,13 @@ public class SkillService {
             return SkillCatalog.EMPTY;
         }
         List<SkillCatalog.Root> roots = new ArrayList<>();
-        roots.add(new SkillCatalog.Root(projectRoot(workspace), SkillSource.PROJECT));
-        roots.add(new SkillCatalog.Root(userRoot(), SkillSource.USER));
+        roots.add(new SkillCatalog.Root(projectRootFor(workspace), SkillSource.PROJECT));
+        roots.add(new SkillCatalog.Root(userRootOf(), SkillSource.USER));
         return SkillCatalog.scan(roots);
     }
 
-    private Path userRoot() {
+    /** 用户级技能目录：配置 > 环境变量 {@code PILOT_SKILLS_DIR} > {@code <dataDir>/skills}。 */
+    public Path userRootOf() {
         if (properties.userDir() != null) {
             return Path.of(properties.userDir());
         }
