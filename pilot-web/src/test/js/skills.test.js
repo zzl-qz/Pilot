@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {
   emptySkillsHint,
   mergeCommands,
+  parseInstallSource,
   resolveSkillCommand,
   skillEntry,
+  summarizeInstallResults,
   toSkillCommands
 } from '../../main/resources/static/lib/skills.js';
 import { QUICK_COMMANDS } from '../../main/resources/static/lib/commands.js';
@@ -93,4 +95,44 @@ test('emptySkillsHint points users at the install directory', () => {
   assert.match(emptySkillsHint('D:/repo/.pilot/skills'), /SKILL\.md/);
   assert.match(emptySkillsHint('-'), /在技能目录下建一个目录/);
   assert.match(emptySkillsHint(undefined), /在技能目录下建一个目录/);
+});
+
+test('parseInstallSource classifies git urls and absolute local paths', () => {
+  assert.deepEqual(parseInstallSource('https://github.com/u/review.git'), { type: 'git', value: 'https://github.com/u/review.git' });
+  assert.deepEqual(parseInstallSource('http://gitea.local/team/skills.git'), { type: 'git', value: 'http://gitea.local/team/skills.git' });
+  assert.deepEqual(parseInstallSource(' D:\\skills\\review '), { type: 'local', value: 'D:\\skills\\review' });
+  assert.deepEqual(parseInstallSource('D:/skills/review'), { type: 'local', value: 'D:/skills/review' });
+  assert.deepEqual(parseInstallSource('\\\\server\\share\\skills'), { type: 'local', value: '\\\\server\\share\\skills' });
+  assert.deepEqual(parseInstallSource('/home/user/skills'), { type: 'local', value: '/home/user/skills' });
+});
+
+test('parseInstallSource rejects bare domains, relative paths, home and junk', () => {
+  assert.equal(parseInstallSource('github.com/u/repo'), null, '裸域名不自动补协议：严格优先');
+  assert.equal(parseInstallSource('skills/review'), null);
+  assert.equal(parseInstallSource('~/skills/review'), null);
+  assert.equal(parseInstallSource('随便一句话'), null);
+  assert.equal(parseInstallSource('  '), null);
+  assert.equal(parseInstallSource(null), null);
+});
+
+test('summarizeInstallResults groups outcomes for the dialog', () => {
+  const summary = summarizeInstallResults([
+    { name: 'a', status: 'installed' },
+    { name: 'b', status: 'conflict' },
+    { name: 'c', status: 'error', reason: '超过上限' },
+    { name: 'd', status: 'invalid', reason: '无效技能' },
+    { name: '', status: 'installed' }
+  ]);
+  assert.deepEqual(summary.installed, ['a']);
+  assert.deepEqual(summary.conflicts, ['b']);
+  assert.deepEqual(summary.errors, [
+    { name: 'c', reason: '超过上限' },
+    { name: 'd', reason: '无效技能' }
+  ]);
+
+  const allGood = summarizeInstallResults([{ name: 'x', status: 'installed' }]);
+  assert.deepEqual(allGood, { installed: ['x'], conflicts: [], errors: [] });
+
+  const nothing = summarizeInstallResults(null);
+  assert.deepEqual(nothing, { installed: [], conflicts: [], errors: [] });
 });

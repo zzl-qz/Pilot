@@ -74,3 +74,43 @@ export function emptySkillsHint(projectRoot) {
     : '在技能目录下';
   return `还没有可用技能：${where}建一个目录，里面放 SKILL.md（frontmatter 至少要有一句 description），保存后下次运行即生效。`;
 }
+
+/**
+ * 安装来源分类：http(s) → git；盘符/UNC/POSIX 绝对路径 → 本机目录；其余判非法。
+ *
+ * <p>严格优先：裸域名不自动补 https（提示文案教用户带协议），相对路径与 ~ 不接受——
+ * 服务端对两者同样拒绝，两边口径一致比宽容更重要。
+ */
+export function parseInstallSource(text) {
+  const value = String(text || '').trim();
+  if (!value) {
+    return null;
+  }
+  if (/^https?:\/\//i.test(value)) {
+    return { type: 'git', value };
+  }
+  if (/^[A-Za-z]:[\\/]/.test(value) || /^(\\\\|\/)/.test(value)) {
+    return { type: 'local', value };
+  }
+  return null;
+}
+
+/** 安装结果三组化：成功的 / 冲突的 / 失败的，供弹窗结果行渲染。 */
+export function summarizeInstallResults(results) {
+  const installed = [];
+  const conflicts = [];
+  const errors = [];
+  for (const item of results || []) {
+    if (!item || !item.name) {
+      continue;
+    }
+    if (item.status === 'installed') {
+      installed.push(item.name);
+    } else if (item.status === 'conflict') {
+      conflicts.push(item.name);
+    } else {
+      errors.push({ name: item.name, reason: item.reason || '未知原因' });
+    }
+  }
+  return { installed, conflicts, errors };
+}
