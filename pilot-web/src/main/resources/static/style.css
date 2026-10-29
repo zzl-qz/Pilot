@@ -197,6 +197,8 @@ kbd {
 .session-item .dot.is-waiting_approval { background: var(--warn); }
 .session-item .dot.is-paused { background: var(--warn); }
 .session-item .dot.is-interrupted { background: var(--warn); }
+.session-item .dot.is-blocked { background: var(--warn); }
+.session-item .dot.is-budget_limited { background: var(--warn); }
 .session-item .dot.is-failed { background: var(--err); }
 
 .session-folder {
@@ -398,6 +400,13 @@ kbd {
   min-height: 0;
 }
 
+.thread-scroll-region {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .thread {
   flex: 1;
   min-height: 0;
@@ -408,6 +417,44 @@ kbd {
   overflow-y: auto;
   scroll-behavior: smooth;
   overscroll-behavior: contain;
+}
+
+.thread-bottom {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: 14px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  transform: translateX(-50%);
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--panel);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--ink-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.thread-bottom[hidden] { display: none; }
+.thread-bottom:hover {
+  border-color: var(--accent-line);
+  background: var(--panel-2);
+  color: var(--accent);
+  transform: translateX(-50%) translateY(-1px);
+}
+.thread-bottom:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.thread-bottom svg { width: 18px; height: 18px; }
+
+/* 历史补页会主动恢复 scrollTop；此时不能再让平滑滚动和浏览器锚定各补偿一次。 */
+.thread.is-restoring-history {
+  scroll-behavior: auto !important;
+  overflow-anchor: none;
 }
 
 /*
@@ -2257,6 +2304,9 @@ kbd {
 
 .history-more {
   align-self: center;
+  min-width: 168px;
+  min-height: 28px;
+  box-sizing: border-box;
   margin: 2px 0 10px;
   padding: 5px 14px;
   border: 1px solid var(--line);
@@ -4370,7 +4420,9 @@ html[data-theme="light"] .accent-dot.is-on { box-shadow: 0 0 0 2px #fff, 0 0 0 4
 .session-item .dot.is-running,
 .session-item .dot.is-waiting_approval,
 .session-item .dot.is-paused,
-.session-item .dot.is-interrupted {
+.session-item .dot.is-interrupted,
+.session-item .dot.is-blocked,
+.session-item .dot.is-budget_limited {
   background: var(--warn);
   box-shadow: none;
   animation: pulse 1.6s ease-in-out infinite;

@@ -40,6 +40,7 @@ export const QUICK_COMMANDS = [
 
 export const COMMAND_PALETTE_ACTIONS = [
   { label: '新任务（选择工作区）', hint: 'Ctrl N', keywords: ['任务', '工作区', 'workspace', 'new'], action: 'new-session' },
+  { label: '查看上下文与压缩', hint: '', keywords: ['上下文', '压缩', 'context', 'compact', 'token'], action: 'open-context' },
   { label: '切换活动/变更面板', hint: 'Ctrl B', keywords: ['活动', '变更', '面板', 'activity', 'changes'], action: 'toggle-activity' },
   { label: '打开设置', hint: 'Ctrl ,', keywords: ['设置', '主题', '外观', '强调色', 'settings', 'theme'], action: 'open-settings' },
   { label: '刷新变更', hint: '', keywords: ['变更', '刷新', 'diff'], action: 'refresh-changes' },
