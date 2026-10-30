@@ -49,8 +49,6 @@ pilot:
     workspace: ${PILOT_WORKSPACE:${user.dir}}
     # 单轮步数上限，只当保险丝。触顶后界面可以继续接着跑
     max-steps: ${PILOT_AGENT_MAX_STEPS:120}
-    # Pi 风格的单循环默认不在触顶后再调用模型放行整段预算；仅供对照实验开启。
-    budget-arbitration-enabled: ${PILOT_AGENT_BUDGET_ARBITRATION_ENABLED:false}
     # 执行预算只是高位事故熔断，不作为日常收尾条件，也不在半额度强制改变策略。
     # 触发后保留进度、证据、待执行动作和预期观察；显式继续才开启新的预算段。
     direct-max-requests: ${PILOT_AGENT_DIRECT_MAX_REQUESTS:120}

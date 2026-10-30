@@ -40,14 +40,9 @@ class GoalExecutionPolicyTest {
 
     GoalExecutionPolicy policy(ModelClient model, int budget, int directRequests, long directInput,
                                int investigationTools) {
-        return policy(model, budget, directRequests, directInput, investigationTools, false);
-    }
-
-    GoalExecutionPolicy policy(ModelClient model, int budget, int directRequests, long directInput,
-                               int investigationTools, boolean budgetArbitrationEnabled) {
         return new GoalExecutionPolicy(model, JsonMapper.builder().build(), tasks, "s", root, () -> false, budget,
                 directRequests, directInput, 5_000, 60_000, investigationTools,
-                2_000_000, 250_000, 1_800_000, budgetArbitrationEnabled);
+                2_000_000, 250_000, 1_800_000);
     }
 
     static ModelResponse decision(Map<String, Object> args) {
@@ -338,35 +333,11 @@ class GoalExecutionPolicyTest {
         assertTrue(stop.getMessage().contains("执行段即将结束"));
     }
 
-    @Test void budgetArbiterGrantsOneSegmentAfterRealProgressAndProvidesNextAction() throws Exception {
+    @Test void budgetBoundaryDoesNotRequestAnotherModelDecisionAfterProgress() throws Exception {
         Files.writeString(root.resolve("A.java"), "v1");
-        AtomicInteger arbiters = new AtomicInteger();
+        AtomicInteger calls = new AtomicInteger();
         GoalExecutionPolicy policy = policy((messages, tools) -> {
-            if (tools.stream().anyMatch(tool -> "submit_budget_decision".equals(tool.name()))) {
-                arbiters.incrementAndGet();
-                return decisionForBudget("ALLOW", "已有代码改动，仍需定向验证", "运行 A.java 的测试", "测试退出码为 0");
-            }
-            return new ModelResponse("继续", List.of(), new ModelUsage(10, 1, 0, true));
-        }, 20, 4, 50_000, 32, true);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        for (int i = 0; i < 4; i++) policy.budgetedClient().chat(history, List.of());
-
-        assertDoesNotThrow(() -> policy.beforeRequest(history));
-        assertEquals(1, arbiters.get());
-        assertEquals(1, tasks.load("s").execution().budgetSegments());
-        assertTrue(policy.requestGuidance().contains("运行 A.java 的测试"));
-        assertNull(policy.requestGuidance());
-        assertDoesNotThrow(() -> policy.budgetedClient().chat(history, List.of()));
-    }
-
-    @Test void budgetArbiterIsOffByDefaultEvenAfterProgress() throws Exception {
-        Files.writeString(root.resolve("A.java"), "v1");
-        AtomicInteger arbiters = new AtomicInteger();
-        GoalExecutionPolicy policy = policy((messages, tools) -> {
-            if (tools.stream().anyMatch(tool -> "submit_budget_decision".equals(tool.name()))) {
-                arbiters.incrementAndGet();
-            }
+            calls.incrementAndGet();
             return new ModelResponse("继续", List.of(), new ModelUsage(10, 1, 0, true));
         }, 20, 4, 50_000, 32);
         policy.beforeRequest(history);
@@ -375,7 +346,7 @@ class GoalExecutionPolicyTest {
 
         assertEquals("BUDGET_LIMITED", assertThrows(ExecutionPolicy.Stop.class,
                 () -> policy.beforeRequest(history)).code());
-        assertEquals(0, arbiters.get());
+        assertEquals(4, calls.get());
     }
 
     @Test void reviewerReceivesValidCompactLedgerWithOldEditAndNewSource() {
@@ -404,57 +375,6 @@ class GoalExecutionPolicyTest {
 
         assertNotNull(policy.review(history, Set.of(), List.of()));
         assertEquals(1, reviews.get());
-    }
-
-    @Test void budgetArbiterDenialIsRecordedAndDoesNotLoop() throws Exception {
-        Files.writeString(root.resolve("A.java"), "v1");
-        AtomicInteger arbiters = new AtomicInteger();
-        GoalExecutionPolicy policy = policy((messages, tools) -> {
-            if (tools.stream().anyMatch(tool -> "submit_budget_decision".equals(tool.name()))) {
-                arbiters.incrementAndGet();
-                return decisionForBudget("DENY", "仍在重复调查", "", "");
-            }
-            return new ModelResponse("继续", List.of(), new ModelUsage(10, 1, 0, true));
-        }, 20, 4, 50_000, 32, true);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        for (int i = 0; i < 4; i++) policy.budgetedClient().chat(history, List.of());
-
-        assertEquals("BUDGET_LIMITED", assertThrows(ExecutionPolicy.Stop.class,
-                () -> policy.beforeRequest(history)).code());
-        assertEquals("BUDGET_LIMITED", assertThrows(ExecutionPolicy.Stop.class,
-                () -> policy.beforeRequest(history)).code());
-        assertEquals(1, arbiters.get());
-        assertEquals(0, tasks.load("s").execution().budgetSegments());
-    }
-
-    @Test void automaticBudgetGrantsStopAtTwoEvenWithFurtherProgress() throws Exception {
-        Files.writeString(root.resolve("A.java"), "v1");
-        AtomicInteger arbiters = new AtomicInteger();
-        GoalExecutionPolicy policy = policy((messages, tools) -> {
-            if (tools.stream().anyMatch(tool -> "submit_budget_decision".equals(tool.name()))) {
-                arbiters.incrementAndGet();
-                return decisionForBudget("ALLOW", "继续定向实现", "修改 A.java", "相关测试通过");
-            }
-            return new ModelResponse("继续", List.of(), new ModelUsage(10, 1, 0, true));
-        }, 20, 4, 50_000, 32, true);
-        policy.beforeRequest(history);
-        for (int segment = 0; segment < 3; segment++) {
-            Files.writeString(root.resolve("A.java"), "v" + (segment + 2));
-            observe(policy, "edit_file", "A.java", "updated", null);
-            for (int i = 0; i < 4; i++) policy.budgetedClient().chat(history, List.of());
-            if (segment < 2) assertDoesNotThrow(() -> policy.beforeRequest(history));
-        }
-        assertEquals("BUDGET_LIMITED", assertThrows(ExecutionPolicy.Stop.class,
-                () -> policy.beforeRequest(history)).code());
-        assertEquals(2, arbiters.get());
-        assertEquals(2, tasks.load("s").execution().budgetSegments());
-    }
-
-    private static ModelResponse decisionForBudget(String verdict, String reason, String next, String expected) {
-        return new ModelResponse("", List.of(new ToolCall("budget", "submit_budget_decision",
-                Map.of("decision", verdict, "reason", reason, "next_action", next,
-                        "expected_evidence", expected))), new ModelUsage(20, 5, 0, true));
     }
 
     @Test void repeatedInvestigationGetsOneActionNudge() {

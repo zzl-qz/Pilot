@@ -294,29 +294,56 @@ class AgentRunServiceTest {
     }
 
     @Test
-    void stepLimitUsesBudgetArbiterBeforeAutomaticallyContinuing() throws Exception {
+    void goalStepLimitResumesWithoutBudgetReviewer() throws Exception {
         AtomicInteger executionCalls = new AtomicInteger();
-        AtomicInteger arbitrationCalls = new AtomicInteger();
         ModelClient model = (messages, tools) -> {
-            if (tools.stream().anyMatch(tool -> "submit_budget_decision".equals(tool.name()))) {
-                arbitrationCalls.incrementAndGet();
-                return new ModelResponse("", List.of(new ToolCall("budget", "submit_budget_decision",
-                        Map.of("decision", "ALLOW", "reason", "已有代码改动，仍需验证",
-                                "next_action", "运行定向测试", "expected_evidence", "测试通过"))));
+            if (tools.isEmpty() && messages.getLast().content().startsWith("[系统收尾要求]")) {
+                return new ModelResponse("进度已保存", List.of());
             }
             int call = executionCalls.getAndIncrement();
-            if (call < 4) return new ModelResponse("", List.of(new ToolCall("edit" + call, "edit_file",
+            if (call < 4) return new ModelResponse("", List.of(new ToolCall("read" + call, "read_file",
                     Map.of("path", "A" + call + ".java"))));
             return done();
         };
-        try (Fixture fixture = new Fixture(model, 4, true, true)) {
+        try (Fixture fixture = new Fixture(model, 4, true)) {
             fixture.start();
             fixture.awaitFinished("MAX_STEPS");
-            assertEquals(1, arbitrationCalls.get());
-            assertTrue(fixture.sessions.events(fixture.sessionId).stream()
-                    .anyMatch(event -> event.payload() instanceof com.pilot.core.event.RunContinued continued
-                            && continued.reason().contains("预算仲裁通过")));
-            assertNotNull(fixture.finished.poll(5, TimeUnit.SECONDS), "自动续跑的工作线程也应结束");
+            assertEquals(4, executionCalls.get());
+            TaskControlService tasks = new TaskControlService(JsonMapper.builder().build(),
+                    new PilotDataDir(dataRoot.toString()));
+            assertEquals("BUDGET_LIMITED", tasks.load(fixture.sessionId).status());
+
+            String resumeRun = fixture.service.claimRun(fixture.sessionId).orElseThrow();
+            fixture.sessions.publish(fixture.sessionId, resumeRun, new RunStarted("（继续上一次未完成的任务）"));
+            fixture.service.resume(fixture.sessionId, resumeRun);
+            fixture.awaitFinished("COMPLETED");
+            assertEquals(5, executionCalls.get());
+            assertEquals(1, tasks.load(fixture.sessionId).execution().budgetSegments());
+        }
+    }
+
+    @Test
+    void unfinishedGoalPlanContinuesAfterStepLimitWithoutAnotherDecision() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        Fixture[] current = new Fixture[1];
+        ModelClient model = (messages, tools) -> {
+            if (tools.isEmpty() && messages.getLast().content().startsWith("[系统收尾要求]")) {
+                return new ModelResponse("进度已保存", List.of());
+            }
+            if (calls.getAndIncrement() == 0) return readFile();
+            current[0].plans.save(current[0].sessionId,
+                    List.of(new PlanItem("原任务计划", PlanItem.COMPLETED)));
+            return done();
+        };
+        try (Fixture fixture = new Fixture(model, 1, true)) {
+            current[0] = fixture;
+            fixture.plans.save(fixture.sessionId, List.of(new PlanItem("原任务计划", PlanItem.PENDING)));
+            fixture.start();
+            fixture.awaitFinished("MAX_STEPS", "COMPLETED");
+            assertEquals(2, calls.get());
+            TaskControlService tasks = new TaskControlService(JsonMapper.builder().build(),
+                    new PilotDataDir(dataRoot.toString()));
+            assertEquals(1, tasks.load(fixture.sessionId).execution().budgetSegments());
         }
     }
 
@@ -411,13 +438,9 @@ class AgentRunServiceTest {
         }
 
         Fixture(ModelClient model, int maxSteps, boolean goals) {
-            this(model, maxSteps, goals, false);
-        }
-
-        Fixture(ModelClient model, int maxSteps, boolean goals, boolean budgetArbitration) {
             AgentProperties properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY,
                     maxSteps, 3, 5, 300, 1, 0, 60_000, false, goals,
-                    null, null, null, null, null, null, null, null, budgetArbitration);
+                    null, null, null, null, null, null, null, null);
             JsonMapper mapper = JsonMapper.builder().build();
             PilotDataDir dataDir = new PilotDataDir(dataRoot.toString());
             commandTasks = new com.pilot.core.tool.CommandTaskManager(dataDir.file("commands"), mapper);

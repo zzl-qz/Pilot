@@ -13,7 +13,6 @@ import com.pilot.core.event.SessionEvent;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.Attachment;
 import com.pilot.core.loop.ContextCompactor;
-import com.pilot.core.loop.ExecutionPolicy;
 import com.pilot.core.loop.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelUsage;
@@ -575,11 +574,7 @@ public class AgentRunService implements RunStarter {
      * <p>两道刹车：最多连续 {@value #MAX_AUTO_CONTINUE} 次；计划状态连续两轮没有变化即视为卡住，停下等人工介入。
      */
     private boolean maybeAutoContinue(String sessionId, String status, RunHandle handle) {
-        if (properties.goalModeEnabledValue() && taskControls.load(sessionId) != null
-                && taskControls.load(sessionId).execution() != null) {
-            return continueAfterStepLimit(sessionId, status, handle);
-        }
-        if (!"MAX_STEPS".equals(status)) {
+        if (!"MAX_STEPS".equals(status) || handle.cancelled.get()) {
             autoContinueAttempts.remove(sessionId);
             autoContinueSignature.remove(sessionId);
             return false;
@@ -609,36 +604,6 @@ public class AgentRunService implements RunStarter {
         autoContinueSignature.put(sessionId, signature);
         String runId = "run_" + java.util.UUID.randomUUID();
         publish(sessionId, runId, new RunContinued(attempt, MAX_AUTO_CONTINUE, "步数触顶，按未完成计划继续"));
-        launch(sessionId, runId, null, List.of(), true);
-        return true;
-    }
-
-    /** 单次循环触顶时也走同一预算仲裁，获批后才启动下一段。 */
-    private boolean continueAfterStepLimit(String sessionId, String status, RunHandle handle) {
-        if (!"MAX_STEPS".equals(status) || handle.cancelled.get()) return false;
-        TaskControlService.TaskContract task = taskControls.load(sessionId);
-        if (task == null || task.execution() == null) return false;
-        int before = task.execution().budgetSegments();
-        GoalExecutionPolicy policy = new GoalExecutionPolicy(modelClient, objectMapper, taskControls, sessionId,
-                sessionWorkspace(sessionId), handle.cancelled::get, properties.maxSteps(),
-                properties.directMaxRequests(), properties.directMaxInputTokens(),
-                properties.directMaxOutputTokens(), properties.directMaxActiveMillis(),
-                properties.directMaxInvestigationTools(), properties.goalMaxInputTokens(),
-                properties.goalMaxOutputTokens(), properties.goalMaxActiveMillis(),
-                properties.budgetArbitrationEnabledValue());
-        try {
-            policy.beforeRequest(conversations.load(sessionId));
-        } catch (ExecutionPolicy.Stop stopped) {
-            return false;
-        }
-        TaskControlService.TaskContract updated = taskControls.load(sessionId);
-        if (updated == null || updated.execution() == null
-                || updated.execution().budgetSegments() <= before) return false;
-        String runId = "run_" + java.util.UUID.randomUUID();
-        int automatic = (int) updated.execution().evidence().stream()
-                .filter(e -> "budget_arbiter".equals(e.tool()) && "ALLOW".equals(e.status())).count();
-        publish(sessionId, runId, new RunContinued(automatic,
-                GoalExecutionPolicy.MAX_AUTO_BUDGET_GRANTS, "预算仲裁通过，继续执行下一项具体动作"));
         launch(sessionId, runId, null, List.of(), true);
         return true;
     }
@@ -973,10 +938,12 @@ public class AgentRunService implements RunStarter {
                 taskControls.status(sessionId, handle.paused ? "PAUSED" : "INTERRUPTED");
                 if (handle.paused) delivered = new RunFailed("PAUSED", "任务已暂停，目标、约束、验收条件和排队消息已保留。", true);
             } else if (event instanceof RunFailed failed) {
-                taskControls.status(sessionId, Set.of("BLOCKED", "BUDGET_LIMITED", "WAITING", "NEED_INPUT",
+                String taskStatus = "MAX_STEPS".equals(failed.code()) && properties.goalModeEnabledValue()
+                        ? "BUDGET_LIMITED"
+                        : Set.of("BLOCKED", "BUDGET_LIMITED", "WAITING", "NEED_INPUT",
                                 "UNVERIFIED", "NO_PROGRESS", "REVIEW_UNAVAILABLE", "VERIFICATION_FAILED")
-                                .contains(failed.code())
-                        ? failed.code() : "INTERRUPTED");
+                                .contains(failed.code()) ? failed.code() : "INTERRUPTED";
+                taskControls.status(sessionId, taskStatus);
             } else if (event instanceof com.pilot.core.event.RunCompleted completed) {
                 TaskControlService.TaskContract verified = taskControls.load(sessionId);
                 boolean goalVerified = verified != null && verified.execution() != null
@@ -1021,7 +988,7 @@ public class AgentRunService implements RunStarter {
                     properties.directMaxOutputTokens(), properties.directMaxActiveMillis(),
                     properties.directMaxInvestigationTools(),
                     properties.goalMaxInputTokens(), properties.goalMaxOutputTokens(),
-                    properties.goalMaxActiveMillis(), properties.budgetArbitrationEnabledValue()) : null;
+                    properties.goalMaxActiveMillis()) : null;
         if (goalPolicy != null) {
             goalPolicy.withUpdates(state -> sink.accept(new com.pilot.core.event.ExecutionUpdated(
                     state.mode(), state.phase(), state.requests(), state.reason(), state.gap())));
