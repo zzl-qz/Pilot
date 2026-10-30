@@ -24,6 +24,11 @@ public interface RunStarter {
         start(sessionId, runId, input, attachments);
     }
 
+    default void start(String sessionId, String runId, String input, List<Attachment> attachments,
+                       List<Integer> imagePositions, TaskControlService.Requirements task) {
+        start(sessionId, runId, input, attachments, task);
+    }
+
     /** 普通追加仅排队；保留默认转发以兼容已有启动器。 */
     default boolean followup(String sessionId, String text) { return steer(sessionId, text); }
 

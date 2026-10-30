@@ -169,7 +169,13 @@ public class AgentRunService implements RunStarter {
     @Override
     public void start(String sessionId, String runId, String input, List<Attachment> attachments,
                       TaskControlService.Requirements task) {
-        launch(sessionId, runId, input, attachments == null ? List.of() : attachments, false, task);
+        launch(sessionId, runId, input, attachments, List.of(), false, task);
+    }
+
+    @Override
+    public void start(String sessionId, String runId, String input, List<Attachment> attachments,
+                      List<Integer> imagePositions, TaskControlService.Requirements task) {
+        launch(sessionId, runId, input, attachments, imagePositions, false, task);
     }
 
     @Override
@@ -388,16 +394,23 @@ public class AgentRunService implements RunStarter {
 
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
                         boolean continuation) {
-        launch(sessionId, runId, input, attachments, continuation, null);
+        launch(sessionId, runId, input, attachments, List.of(), continuation, null);
     }
 
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
                         boolean continuation, TaskControlService.Requirements requirements) {
-        launch(sessionId, runId, input, attachments, continuation, requirements, false);
+        launch(sessionId, runId, input, attachments, List.of(), continuation, requirements);
     }
 
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
-                        boolean continuation, TaskControlService.Requirements requirements, boolean regenerate) {
+                        List<Integer> imagePositions, boolean continuation,
+                        TaskControlService.Requirements requirements) {
+        launch(sessionId, runId, input, attachments, imagePositions, continuation, requirements, false);
+    }
+
+    private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
+                        List<Integer> imagePositions, boolean continuation,
+                        TaskControlService.Requirements requirements, boolean regenerate) {
         synchronized (inbox(sessionId)) {
             RunHandle handle = new RunHandle(sessionId);
             runs.put(runId, handle);
@@ -431,7 +444,7 @@ public class AgentRunService implements RunStarter {
                     taskControls.start(sessionId, original, List.of(), List.of());
                 }
                 runRepository.started(runId, sessionId, java.time.Instant.now());
-                handle.future = executor.submit(() -> runOnWorker(sessionId, runId, input, attachments, handle, continuation));
+                handle.future = executor.submit(() -> runOnWorker(sessionId, runId, input, attachments, imagePositions, handle, continuation));
             } catch (RuntimeException e) {
                 runs.remove(runId, handle);
                 registry.unregister(runId);
@@ -442,12 +455,12 @@ public class AgentRunService implements RunStarter {
 
     /** 工作线程主体：无论怎么结束都要注销槽位，否则 /continue 会永久 409。 */
     private void runOnWorker(String sessionId, String runId, String input, List<Attachment> attachments,
-                             RunHandle handle, boolean continuation) {
+                             List<Integer> imagePositions, RunHandle handle, boolean continuation) {
         long startedAt = System.currentTimeMillis();
         String status = "FAILED";
         boolean continued = false;
         try {
-            status = execute(sessionId, runId, input, attachments, handle, continuation);
+            status = execute(sessionId, runId, input, attachments, imagePositions, handle, continuation);
             continued = maybeAutoContinue(sessionId, status);
         } catch (RuntimeException e) {
             log.error("Run {} 收尾失败", runId, e);
@@ -618,7 +631,7 @@ public class AgentRunService implements RunStarter {
         if (lastUser >= 0) {
             conversations.save(sessionId, history.subList(0, lastUser));
         }
-        launch(sessionId, runId, originalInput, List.of(), false, null, task != null);
+        launch(sessionId, runId, originalInput, List.of(), List.of(), false, null, task != null);
     }
 
     @Override
@@ -884,7 +897,7 @@ public class AgentRunService implements RunStarter {
     }
 
     private String execute(String sessionId, String runId, String input, List<Attachment> attachments,
-                           RunHandle handle, boolean continuation) {
+                           List<Integer> imagePositions, RunHandle handle, boolean continuation) {
         List<Message> history = conversations.load(sessionId);
         String workspace = sessions.find(sessionId).map(Session::workspace).orElse(null);
         PlanSink planSink = (items, explanation) -> {
@@ -1014,7 +1027,7 @@ public class AgentRunService implements RunStarter {
             String completionGoal = activeTask == null ? null : activeTask.originalGoal();
             AgentLoop.Result result = continuation
                     ? loop.resume(history, sink, checkpoint, completionGoal)
-                    : loop.run(input, attachments, withRepositoryBrief(history, workspace), sink, checkpoint);
+                    : loop.run(input, attachments, imagePositions, withRepositoryBrief(history, workspace), sink, checkpoint);
             conversations.save(sessionId, result.conversation());
             log.info("Agent run {} completed: failureCode={}, messages={}, workspace={}", runId, result.failureCode(),
                     result.conversation().size(), workspace == null ? properties.workspace() : workspace);

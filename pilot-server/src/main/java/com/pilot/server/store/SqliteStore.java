@@ -81,6 +81,7 @@ public final class SqliteStore {
                 tool_calls TEXT,
                 tool_call_id TEXT,
                 attachments TEXT,
+                image_positions TEXT,
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (session_id, seq)
             )""",
@@ -162,6 +163,7 @@ public final class SqliteStore {
         // 图片附件已经由 AttachmentService 复制到稳定的数据目录；这里持久化引用，
         // 让 checkpoint / resume / 进程重启后仍能重建同一条多模态消息。
         addColumnIfMissing(statement, "conversation_messages", "attachments", "TEXT");
+        addColumnIfMissing(statement, "conversation_messages", "image_positions", "TEXT");
         // 索引依赖上面补出来的列，必须放在补列之后
         statement.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, created_at)");
     }

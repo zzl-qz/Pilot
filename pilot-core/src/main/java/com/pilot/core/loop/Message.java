@@ -14,7 +14,7 @@ import java.util.List;
  * @param attachments 需要模型侧二次处理的附件（图片等）；文本附件已内联进 content
  */
 public record Message(String role, String content, List<ToolCall> toolCalls, String toolCallId,
-                      List<Attachment> attachments) {
+                      List<Attachment> attachments, List<Integer> imagePositions) {
     public Message {
         if (role == null || role.isBlank()) {
             throw new IllegalArgumentException("role must not be blank");
@@ -22,17 +22,27 @@ public record Message(String role, String content, List<ToolCall> toolCalls, Str
         content = content == null ? "" : content;
         toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
         attachments = attachments == null ? List.of() : List.copyOf(attachments);
+        imagePositions = imagePositions == null ? List.of() : List.copyOf(imagePositions);
+        long imageCount = attachments.stream().filter(Attachment::image).count();
+        if (!imagePositions.isEmpty() && imagePositions.size() != imageCount) {
+            throw new IllegalArgumentException("image positions must match image attachments");
+        }
         if ("tool".equals(role) && (toolCallId == null || toolCallId.isBlank())) {
             throw new IllegalArgumentException("tool message requires toolCallId");
         }
     }
 
+    public Message(String role, String content, List<ToolCall> toolCalls, String toolCallId,
+                   List<Attachment> attachments) {
+        this(role, content, toolCalls, toolCallId, attachments, List.of());
+    }
+
     public Message(String role, String content, List<ToolCall> toolCalls, String toolCallId) {
-        this(role, content, toolCalls, toolCallId, List.of());
+        this(role, content, toolCalls, toolCallId, List.of(), List.of());
     }
 
     public Message(String role, String content) {
-        this(role, content, List.of(), null, List.of());
+        this(role, content, List.of(), null, List.of(), List.of());
     }
 
     public static Message system(String text) {
@@ -45,6 +55,10 @@ public record Message(String role, String content, List<ToolCall> toolCalls, Str
 
     public static Message user(String text, List<Attachment> attachments) {
         return new Message("user", text, List.of(), null, attachments);
+    }
+
+    public static Message user(String text, List<Attachment> attachments, List<Integer> imagePositions) {
+        return new Message("user", text, List.of(), null, attachments, imagePositions);
     }
 
     public static Message assistant(String text, List<ToolCall> toolCalls) {

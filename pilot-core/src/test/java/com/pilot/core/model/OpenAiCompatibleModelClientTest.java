@@ -174,6 +174,22 @@ class OpenAiCompatibleModelClientTest {
     }
 
     @Test
+    void preservesImagePositionBetweenText() throws IOException {
+        Path image = Files.createTempFile("pilot-position", ".png");
+        Files.write(image, new byte[] { 1, 2, 3 });
+        try {
+            Message message = Message.user("beforeafter",
+                    List.of(new Attachment("image.png", "image/png", image.toString())), List.of(6));
+            JsonNode content = json.valueToTree(OpenAiCompatibleModelClient.contentFor(message));
+            assertEquals("before", content.get(0).get("text").asText());
+            assertEquals("image_url", content.get(1).get("type").asText());
+            assertEquals("after", content.get(2).get("text").asText());
+        } finally {
+            Files.deleteIfExists(image);
+        }
+    }
+
+    @Test
     void surfacesHttpErrorStatus() throws IOException {
         HttpServer server = startServer(new AtomicReference<>(), 503, "{\"error\":\"overloaded\"}");
         server.start();

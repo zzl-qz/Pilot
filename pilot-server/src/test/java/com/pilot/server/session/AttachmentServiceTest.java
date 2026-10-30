@@ -50,6 +50,18 @@ class AttachmentServiceTest {
     }
 
     @Test
+    void imagePositionsCountOnlyImageAttachments() {
+        AttachmentService service = new AttachmentService(root);
+        AttachmentService.Prepared prepared = service.prepare("ses_1", "beforeafter", List.of(
+                new AttachmentService.Inbound("shot.png", "image/png", base64("png")),
+                new AttachmentService.Inbound("notes.txt", "text/plain", base64("note"))), List.of(6));
+
+        assertEquals(1, prepared.attachments().size());
+        assertEquals(List.of(6), prepared.imagePositions());
+        assertTrue(prepared.content().contains("notes.txt"));
+    }
+
+    @Test
     void acceptsDataUrlPrefixedPayload() {
         AttachmentService service = new AttachmentService(root);
 

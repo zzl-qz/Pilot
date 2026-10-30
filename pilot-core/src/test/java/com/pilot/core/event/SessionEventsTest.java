@@ -13,7 +13,7 @@ class SessionEventsTest {
     @Test
     void runStarted() {
         assertSerialized(new RunStarted("修复构建"), "run.started", """
-                {"input":"修复构建","attachments":[]}""");
+                {"input":"修复构建","attachments":[],"imagePositions":[]}""");
     }
 
     @Test

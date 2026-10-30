@@ -20,7 +20,7 @@
       document.documentElement.dataset.accent = 'amber';
     }
   </script>
-  <link rel="stylesheet" href="/style.css?v=28">
+  <link rel="stylesheet" href="/style.css?v=29">
   <link rel="stylesheet" href="/shell.css?v=5">
 </head>
 <body>
@@ -197,11 +197,12 @@
         <div id="message-queue" class="message-queue" hidden></div>
         <div id="approval-dock" class="approval" hidden></div>
         <div id="ref-menu" class="ref-menu" hidden></div>
-        <div id="attachments" class="attachments" hidden></div>
         <form id="composer" class="composer">
+          <div id="attachments" class="attachments" hidden></div>
           <label class="visually-hidden" for="input">输入任务</label>
-          <textarea id="input" rows="1" spellcheck="false"
-                    placeholder="描述任务，Enter 发送，Shift + Enter 换行，@ 引用文件，/ 快捷指令"></textarea>
+          <div id="input-flow" class="input-flow" contenteditable="true" role="textbox" aria-multiline="true"
+               data-placeholder="描述任务，Enter 发送，Shift + Enter 换行，@ 引用文件，/ 快捷指令"></div>
+          <textarea id="input" rows="1" spellcheck="false" tabindex="-1"></textarea>
           <div class="composer-bar">
             <span class="composer-left">
               <span class="composer-chips">

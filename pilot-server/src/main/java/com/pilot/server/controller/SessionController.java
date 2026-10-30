@@ -459,7 +459,7 @@ public class SessionController {
         }
         AttachmentService.Prepared prepared;
         try {
-            prepared = attachments.prepare(id, request.content(), request.attachments());
+            prepared = attachments.prepare(id, request.content(), request.attachments(), request.imagePositions());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
@@ -481,8 +481,8 @@ public class SessionController {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行");
         }
         launch(runId, () -> {
-            sessions.publish(id, runId, new RunStarted(prepared.content(), prepared.attachments()));
-            runStarter.start(id, runId, prepared.content(), prepared.attachments(), request.task());
+            sessions.publish(id, runId, new RunStarted(prepared.content(), prepared.attachments(), prepared.imagePositions()));
+            runStarter.start(id, runId, prepared.content(), prepared.attachments(), prepared.imagePositions(), request.task());
         });
         return ResponseEntity.ok().body(new MessageResponse(id, runId));
     }
@@ -612,7 +612,13 @@ public class SessionController {
     public record RenameRequest(String title) { }
 
     public record MessageRequest(String content, List<AttachmentService.Inbound> attachments,
-                                 com.pilot.server.session.TaskControlService.Requirements task) { }
+                                 com.pilot.server.session.TaskControlService.Requirements task,
+                                 List<Integer> imagePositions) {
+        public MessageRequest(String content, List<AttachmentService.Inbound> attachments,
+                              com.pilot.server.session.TaskControlService.Requirements task) {
+            this(content, attachments, task, List.of());
+        }
+    }
 
     public record ResendRequest(Long sequence, String content) { }
 

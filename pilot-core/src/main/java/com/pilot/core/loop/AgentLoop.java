@@ -274,6 +274,12 @@ public final class AgentLoop {
      */
     public Result run(String userInput, List<Attachment> attachments, List<Message> history,
                       Consumer<SessionEvent> events, Consumer<List<Message>> checkpoint) {
+        return run(userInput, attachments, List.of(), history, events, checkpoint);
+    }
+
+    public Result run(String userInput, List<Attachment> attachments, List<Integer> imagePositions,
+                      List<Message> history, Consumer<SessionEvent> events,
+                      Consumer<List<Message>> checkpoint) {
         Objects.requireNonNull(events, "events must not be null");
         Objects.requireNonNull(checkpoint, "checkpoint must not be null");
         if (userInput == null || userInput.isBlank()) {
@@ -282,7 +288,8 @@ public final class AgentLoop {
         List<Message> messages = seed(history);
         String goal = userInput.strip();
         this.completionGate = new CompletionGate(PROMPTS, config.completionChecks(), goal);
-        messages.add(Message.user(goal, attachments == null ? List.of() : attachments));
+        messages.add(Message.user(goal, attachments == null ? List.of() : attachments,
+                imagePositions == null ? List.of() : imagePositions));
         return loop(messages, events, checkpoint);
     }
 

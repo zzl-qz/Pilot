@@ -198,7 +198,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     if (!finish.isBlank()) finishReason = ModelResponse.FinishReason.fromWire(finish);
                     JsonNode delta = choices.get(0).path("delta");
                     JsonNode text = delta.get("content");
-                    if (text != null && text.isTextual()) {
+                    if (text != null && text.isString()) {
                         String chunk = text.asString();
                         content.append(chunk);
                         if (textDelta != null && !chunk.isEmpty()) textDelta.accept(chunk);
@@ -273,11 +273,27 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             return message.content();
         }
         ArrayList<Map<String,Object>> parts = new ArrayList<Map<String, Object>>();
-        if (!message.content().isBlank()) {
-            parts.add(Map.of("type", "text", "text", message.content()));
+        List<Integer> positions = message.imagePositions();
+        if (positions.isEmpty()) {
+            if (!message.content().isBlank()) {
+                parts.add(Map.of("type", "text", "text", message.content()));
+            }
+            for (Attachment image : images) {
+                parts.add(Map.of("type", "image_url", "image_url", Map.of("url", dataUrl(image))));
+            }
+            return parts;
         }
-        for (Attachment image : images) {
-            parts.add(Map.of("type", "image_url", "image_url", Map.of("url", dataUrl(image))));
+        int cursor = 0;
+        for (int i = 0; i < images.size(); i++) {
+            int position = Math.max(cursor, Math.min(message.content().length(), positions.get(i)));
+            if (position > cursor) {
+                parts.add(Map.of("type", "text", "text", message.content().substring(cursor, position)));
+            }
+            parts.add(Map.of("type", "image_url", "image_url", Map.of("url", dataUrl(images.get(i)))));
+            cursor = position;
+        }
+        if (cursor < message.content().length()) {
+            parts.add(Map.of("type", "text", "text", message.content().substring(cursor)));
         }
         return parts;
     }
@@ -364,7 +380,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (node == null || node.isNull()) {
             return Map.of();
         }
-        String raw = node.isTextual() ? node.asText() : node.toString();
+        String raw = node.isString() ? node.asString() : node.toString();
         if (raw.isBlank()) {
             return Map.of();
         }
@@ -381,7 +397,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     private static String text(JsonNode node) {
-        return node == null || node.isNull() ? "" : node.asText();
+        return node == null || node.isNull() ? "" : node.asString();
     }
 
     private static String snippet(String text) {

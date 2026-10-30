@@ -107,6 +107,7 @@ const el = {
   contextCompact: document.querySelector('#context-compact'),
   contextHint: document.querySelector('#context-hint'),
   attachments: document.querySelector('#attachments'),
+  inputFlow: document.querySelector('#input-flow'),
   workspaceChip: document.querySelector('#workspace-chip'),
   workspaceName: document.querySelector('#workspace-name'),
   sessionChip: document.querySelector('#session-chip'),
@@ -530,6 +531,7 @@ function init() {
   el.modelSave.addEventListener('click', saveModel);
   el.modelClearKey.addEventListener('change', onModelClearKeyToggle);
   el.input.addEventListener('paste', onPasteAttachments);
+  el.inputFlow?.addEventListener('paste', onPasteAttachments);
   el.messages.addEventListener('scroll', onHistoryScroll, { passive: true });
   el.threadBottom.addEventListener('click', jumpToThreadBottom);
   bindFileDrop();
@@ -1659,7 +1661,12 @@ function bindFileDrop() {
     el.dropVeil.hidden = true;
     const files = filesFromDrop(event.dataTransfer);
     if (files.length) {
-      addAttachments(files);
+      const target = event.target instanceof Element ? event.target.closest('#input-flow') : null;
+      if (target) {
+        insertImagesAtCaret(files);
+      } else {
+        addAttachments(files);
+      }
     }
   });
 }
@@ -1719,7 +1726,91 @@ function onPasteAttachments(event) {
     return;
   }
   event.preventDefault();
-  addAttachments(files);
+  if (event.target instanceof Element && event.target.closest('#input-flow')) {
+    insertImagesAtCaret(files);
+  } else {
+    addAttachments(files);
+  }
+}
+
+async function insertImagesAtCaret(files) {
+  const images = [];
+  for (const file of files) {
+    if (state.attachments.length >= MAX_ATTACHMENTS) break;
+    const name = file.name || `paste-${Date.now()}.png`;
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      showNotice(`「${name}」超过 2 MB，已跳过。`);
+      continue;
+    }
+    const mimeType = file.type || guessMime(name);
+    if (!mimeType.startsWith('image/')) {
+      addAttachments([file]);
+      continue;
+    }
+    images.push({
+      id: `attachment-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name, mimeType, dataBase64: await readAsDataUrl(file)
+    });
+  }
+  if (!images.length || !el.inputFlow) return;
+  const selection = window.getSelection();
+  const range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+  const fragment = document.createDocumentFragment();
+  images.forEach((item) => {
+    state.attachments.push(item);
+    const node = document.createElement('span');
+    node.className = 'flow-image';
+    node.contentEditable = 'false';
+    node.dataset.attachmentId = item.id;
+    node.title = `${item.name}（点击删除）`;
+    node.addEventListener('click', () => {
+      const index = state.attachments.findIndex((attachment) => attachment.id === item.id);
+      if (index >= 0) state.attachments.splice(index, 1);
+      node.remove();
+      onComposerInput();
+      renderAttachments();
+    });
+    const preview = document.createElement('img');
+    preview.src = item.dataBase64;
+    preview.alt = item.name;
+    node.append(preview);
+    fragment.append(node, document.createTextNode(' '));
+  });
+  if (range && el.inputFlow.contains(range.commonAncestorContainer)) {
+    range.deleteContents();
+    range.insertNode(fragment);
+    range.collapse(false);
+  } else {
+    el.inputFlow.append(fragment);
+  }
+  el.inputFlow.focus();
+  onComposerInput();
+  renderAttachments();
+}
+
+function imagePositionsForContent() {
+  if (!el.inputFlow) return [];
+  let offset = 0;
+  const positions = [];
+  const walk = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      offset += node.nodeValue?.length || 0;
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    if (node.classList.contains('flow-image')) {
+      positions.push(offset);
+      return;
+    }
+    if (node.tagName === 'BR') {
+      offset += 1;
+      return;
+    }
+    [...node.childNodes].forEach(walk);
+    if (/^(DIV|P)$/.test(node.tagName) && node.nextSibling) offset += 1;
+  };
+  [...el.inputFlow.childNodes].forEach(walk);
+  return positions;
 }
 
 async function addAttachments(files) {
@@ -1735,7 +1826,10 @@ async function addAttachments(files) {
     }
     const mimeType = file.type || guessMime(name);
     try {
-      state.attachments.push({ name, mimeType, dataBase64: await readAsDataUrl(file) });
+      state.attachments.push({
+      id: `attachment-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name, mimeType, dataBase64: await readAsDataUrl(file)
+    });
     } catch (error) {
       showNotice('读取附件失败：' + error.message);
     }
@@ -1756,6 +1850,13 @@ function renderAttachments() {
   state.attachments.forEach((item, index) => {
     const chip = document.createElement('span');
     chip.className = 'attachment-chip';
+    if (String(item.mimeType || '').startsWith('image/')) {
+      const preview = document.createElement('img');
+      preview.className = 'attachment-preview';
+      preview.src = item.dataBase64;
+      preview.alt = '';
+      chip.append(preview);
+    }
     const name = document.createElement('span');
     name.className = 'attachment-name';
     name.textContent = item.name;
@@ -5518,6 +5619,14 @@ function confirmPicker() {
 /* ---------- 输入 ---------- */
 
 function bindComposer() {
+  el.inputFlow?.addEventListener('input', onComposerInput);
+  el.inputFlow?.addEventListener('keydown', (event) => {
+    if (handleFlowHistoryKeydown(event)) return;
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      el.composer.requestSubmit();
+    }
+  });
   el.input.addEventListener('keydown', (event) => {
     if (onComposerKeydown(event)) {
       return;
@@ -5554,24 +5663,29 @@ function onPromptClick(event) {
 
 async function sendMessage(event) {
   event.preventDefault();
-  const content = el.input.value.trim();
+  onComposerInput();
+  const rawContent = el.input.value;
+  const leadingWhitespace = rawContent.length - rawContent.trimStart().length;
+  const content = rawContent.trim();
   if (state.queueEdit) {
     await saveQueuedEdit(content);
     return;
   }
   const attachments = state.attachments.slice();
+  const imagePositions = imagePositionsForContent().map((position) => Math.max(0, position - leadingWhitespace));
   if (!content && !attachments.length) {
     return;
   }
   el.input.value = '';
   autoGrow();
   setAttachments([]);
+  if (el.inputFlow) el.inputFlow.replaceChildren();
   // 只有附件没有文字时也要有正文，服务端和模型都需要一句话说明
-  await submitMessage(content || attachmentSummary(attachments), attachments);
+  await submitMessage(content || attachmentSummary(attachments), attachments, imagePositions);
 }
 
 /** 提交一条用户消息并启动运行；输入框与「继续」按钮共用。 */
-async function submitMessage(content, attachments = []) {
+async function submitMessage(content, attachments = [], imagePositions = []) {
   if ((!content && !attachments.length) || !state.sessionId) {
     return;
   }
@@ -5611,7 +5725,8 @@ async function submitMessage(content, attachments = []) {
           name: item.name,
           mimeType: item.mimeType,
           dataBase64: item.dataBase64
-        }))
+        })),
+        imagePositions
       })
     });
     if (response.status === 202) {
@@ -5681,6 +5796,27 @@ function rememberInput(input) {
   } catch (error) {
     console.warn('[input-history]', error);
   }
+}
+
+function handleFlowHistoryKeydown(event) {
+  if (!['ArrowUp', 'ArrowDown'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+  const browsing = state.inputHistoryIndex >= 0;
+  const text = flowText();
+  if (!state.inputHistory.length || (!browsing && event.key === 'ArrowUp' && text.includes('\n'))) return false;
+  event.preventDefault();
+  if (!browsing) {
+    if (event.key === 'ArrowDown') return true;
+    state.inputHistoryDraft = text;
+    state.inputHistoryIndex = state.inputHistory.length;
+  }
+  const next = state.inputHistoryIndex + (event.key === 'ArrowUp' ? -1 : 1);
+  if (next < 0) return true;
+  state.inputHistoryIndex = next;
+  const value = next >= state.inputHistory.length ? state.inputHistoryDraft : state.inputHistory[next];
+  if (next >= state.inputHistory.length) state.inputHistoryIndex = -1;
+  el.inputFlow.replaceChildren(document.createTextNode(value || ''));
+  onComposerInput();
+  return true;
 }
 
 function handleInputHistoryKeydown(event) {
@@ -5934,7 +6070,23 @@ async function rollbackRun() {
   }
 }
 
+function flowText() {
+  if (!el.inputFlow) return el.input.value;
+  return [...el.inputFlow.childNodes].map((node) => {
+    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    if (node.classList.contains('flow-image')) return '';
+    return node.innerText || node.textContent || '';
+  }).join('');
+}
+
+function syncFlowFromText(value) {
+  if (!el.inputFlow || document.activeElement === el.inputFlow) return;
+  el.inputFlow.replaceChildren(document.createTextNode(value || ''));
+}
+
 function autoGrow() {
+  syncFlowFromText(el.input.value);
   el.input.style.height = 'auto';
   el.input.style.height = Math.min(el.input.scrollHeight, 180) + 'px';
 }
@@ -7074,6 +7226,9 @@ function refreshChangeMarkers(files) {
 /* ---------- 输入框：@ 引用与 / 快捷指令 ---------- */
 
 function onComposerInput() {
+  if (el.inputFlow && document.activeElement === el.inputFlow) {
+    el.input.value = flowText();
+  }
   autoGrow();
   syncComposer();
   const caret = el.input.selectionStart;
