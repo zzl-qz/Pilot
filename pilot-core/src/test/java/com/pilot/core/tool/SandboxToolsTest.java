@@ -52,6 +52,24 @@ class SandboxToolsTest {
     }
 
     @Test
+    void sandboxBatchProducesOneAtomicProposal(@TempDir Path dir) throws IOException {
+        Path root = workspace(dir);
+        ArrayList<Proposal> proposals = new ArrayList<>();
+        SandboxEditFileTool tool = new SandboxEditFileTool(new PathValidator(root),
+                (path, oldText, newText) -> proposals.add(new Proposal(path, oldText, newText)));
+
+        String result = tool.execute(Map.of("path", "src/A.java", "edits", List.of(
+                Map.of("old_string", "class A", "new_string", "class B"),
+                Map.of("old_string", "int x = 1;", "new_string", "int x = 2;"))));
+
+        assertTrue(result.contains("替换 2 处"), result);
+        assertEquals(1, proposals.size());
+        assertTrue(proposals.get(0).newText().contains("class B"));
+        assertTrue(proposals.get(0).newText().contains("int x = 2;"));
+        assertTrue(Files.readString(root.resolve("src/A.java")).contains("class A"));
+    }
+
+    @Test
     void createToolRecordsNewFile(@TempDir Path dir) throws IOException {
         Path root = workspace(dir);
         ArrayList<Proposal> proposals = new ArrayList<Proposal>();

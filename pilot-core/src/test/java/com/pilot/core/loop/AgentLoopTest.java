@@ -151,7 +151,7 @@ class AgentLoopTest {
         AgentLoop.Result result = loop.run("读 pom.xml", List.of(), events::add);
 
         assertEquals("REPEATED_TOOL_CALL", result.failureCode());
-        assertEquals(2, tool.executions.get());
+        assertEquals(3, tool.executions.get(), "要先观察第三次结果，才能判断确实没有新进展");
         assertEquals(4, client.requests.size());
         assertEquals("不该走到这里", result.finalText(), "停止时最后一个模型请求应改为无工具收尾");
         assertTrue(client.toolDefinitions.getLast().isEmpty());
@@ -160,7 +160,7 @@ class AgentLoopTest {
         assertFalse(eventTypes().contains("run.completed"));
     }
 
-    /** 渐进提醒：第 3 次跳过执行并注入提醒，第 4 次只跳过，第 5 次才中断。 */
+    /** 渐进提醒：第 3 次相同结果提醒，第 5 次仍相同才中断。 */
     @Test
     void remindsThenSkipsBeforeAbortingOnRepeatedCalls() {
         CountingTool tool = new CountingTool("read_file", "content");
@@ -168,9 +168,9 @@ class AgentLoopTest {
         ScriptedModelClient client = new ScriptedModelClient(
                 new ModelResponse("", List.of(call)),   // 1: 执行
                 new ModelResponse("", List.of(call)),   // 2: 执行
-                new ModelResponse("", List.of(call)),   // 3: 跳过 + 注入提醒
-                new ModelResponse("", List.of(call)),   // 4: 跳过（不再新提醒）
-                new ModelResponse("", List.of(call)),   // 5: 中断
+                new ModelResponse("", List.of(call)),   // 3: 执行 + 注入提醒
+                new ModelResponse("", List.of(call)),   // 4: 执行（不再新提醒）
+                new ModelResponse("", List.of(call)),   // 5: 执行后确认停滞并中断
                 new ModelResponse("不该走到这里", List.of()));
         AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(),
                 new AgentLoop.Config(8, 3, 5, "你是测试代理"));
@@ -178,7 +178,7 @@ class AgentLoopTest {
         AgentLoop.Result result = loop.run("读 pom.xml", List.of(), events::add);
 
         assertEquals("REPEATED_TOOL_CALL", result.failureCode());
-        assertEquals(2, tool.executions.get(), "达到提醒档后的重复调用不应再执行");
+        assertEquals(5, tool.executions.get(), "停滞判断必须依据实际返回结果");
         assertEquals(6, client.requests.size());
         // 第 4 次请求通过一次性 system 上下文收到提醒；不能伪装成用户消息或写入会话。
         assertTrue(client.requests.get(3).getFirst().content().contains("连续第 3 次"));
@@ -193,13 +193,26 @@ class AgentLoopTest {
                 "提醒应有对应事件");
         assertTrue(events.stream().anyMatch(event -> event instanceof RunFailed failed
                 && failed.code().equals("REPEATED_TOOL_CALL")));
-        // 跳过执行的合成结果要让模型知道为什么没有真实结果
-        String skipped = client.requests.get(3).stream()
-                .filter(message -> "tool".equals(message.role()))
-                .map(Message::content)
-                .filter(content -> content.contains("已跳过执行"))
-                .findFirst().orElse("");
-        assertTrue(skipped.contains("连续第 3 次"), skipped);
+        assertTrue(client.requests.get(3).stream().anyMatch(message -> "tool".equals(message.role())
+                && "content".equals(message.content())), "提醒前的工具结果应是真实观察");
+    }
+
+    @Test
+    void changedToolOutputResetsRepetitionCounter() {
+        SequencedTool tool = new SequencedTool("read_file", "one", "one", "two", "two");
+        ToolCall call = new ToolCall("call_1", "read_file", Map.of("path", "status.txt"));
+        ScriptedModelClient client = new ScriptedModelClient(
+                new ModelResponse("", List.of(call)),
+                new ModelResponse("", List.of(call)),
+                new ModelResponse("", List.of(call)),
+                new ModelResponse("", List.of(call)),
+                new ModelResponse("完成", List.of()));
+        AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
+
+        AgentLoop.Result result = loop.run("读取会变化的状态", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals(4, tool.executions.get());
     }
 
     /** 后台状态是动态观察：相同参数仍需真正执行，不能在第三次就按静态重复读取吞掉。 */

@@ -14,7 +14,7 @@
 | 6 | 拒绝越权 | READ_ONLY 下写入被拒绝且没有副作用 | `./mvnw -pl pilot-core -Dtest=PolicyPermissionGateTest#readOnlyDeniesEverythingThatHasSideEffects,AgentLoopTest#deniedWriteDoesNotCountAsChange test`；写入执行数/变更数均为 0 | AUTO |
 | 7 | 长任务 | 多步持续处理，不超过配置步数；超限可续跑 | `./mvnw -pl pilot-core -Dtest=AgentLoopTest#stopsAtMaxSteps test`；到上限后保留历史 | AUTO（长任务的真实模型表现仍需人工） |
 | 8 | 错误恢复 | 用户指令追加后下一轮继续，或工具错误结果回传后恢复 | `./mvnw -pl pilot-core -Dtest=AgentLoopTest#injectsSteeredInputBeforeNextStep test`；追加指令进入下一次请求 | AUTO |
-| 9 | 循环检测 | 模型连续请求完全相同工具/参数达到阈值时中断 | `./mvnw -pl pilot-core -Dtest=AgentLoopTest#interruptsAfterThreeIdenticalToolCalls test`；工具执行次数 2、请求次数 3 | AUTO |
+| 9 | 循环检测 | 模型连续请求相同工具且实际结果不变时中断；结果变化则继续 | `./mvnw -pl pilot-core -Dtest=AgentLoopTest#interruptsAfterThreeIdenticalToolCalls+changedToolOutputResetsRepetitionCounter test`；第三次真实执行后中断，结果变化可继续 | AUTO |
 | 10 | 上下文压缩 | 大上下文在模型采样前压缩，或大工具输出被占位 | `./mvnw -pl pilot-core -Dtest=AgentLoopTest#compactsBeforeSamplingWhenBudgetCrossesSoftLimit,AgentLoopTest#compactsLargeToolOutputBeforeNextRequest test`；压缩事件/省略占位出现 | AUTO |
 
 ## 隔离和手动评估建议

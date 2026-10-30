@@ -55,9 +55,8 @@ public final class AgentLoop {
             PROMPTS.system(PromptLibrary.environment(null));
 
     /**
-     * @param repeatRemindAt       连续相同工具调用达到该次数时跳过执行并注入提醒，给模型纠错机会；
-     *                              0 表示不提醒，达到 {@code repeatAbortAt} 直接中断（旧行为）
-     * @param repeatAbortAt         连续相同工具调用达到该次数即中断（含第一次）
+     * @param repeatRemindAt       相同调用连续得到相同结果达到该次数时注入提醒；0 表示不提醒
+     * @param repeatAbortAt         相同调用连续得到相同结果达到该次数时中断（含第一次）
      * @param plan                  当前计划快照，收尾时用来判断「任务是否真的做完」；默认无计划
      * @param maxPlanContinues      计划还有未完成项时自动催模型继续的次数上限；0 表示不自动继续
      * @param contextLimit          上下文预算（按字符估算）；太小会频繁压缩、丢细节
@@ -65,7 +64,7 @@ public final class AgentLoop {
     public record Config(int maxSteps, int repeatRemindAt, int repeatAbortAt, String systemPrompt,
                          Supplier<List<PlanItem>> plan, int maxPlanContinues, int contextLimit,
                          boolean completionChecks) {
-        /** 兼容旧调用：连续相同调用达到 {@code repeatedToolCallLimit} 即中断，不提醒。 */
+        /** 兼容旧调用：连续无新结果达到 {@code repeatedToolCallLimit} 即中断，不提醒。 */
         public Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt,
                       Supplier<List<PlanItem>> plan, int maxPlanContinues, int contextLimit,
                       boolean completionChecks) {
@@ -120,7 +119,7 @@ public final class AgentLoop {
                     DEFAULT_CONTEXT_LIMIT, true);
         }
 
-        /** 渐进提醒：达到 {@code repeatRemindAt} 跳过执行并提醒，达到 {@code repeatAbortAt} 中断。 */
+        /** 渐进提醒：达到 {@code repeatRemindAt} 提醒，达到 {@code repeatAbortAt} 中断。 */
         public Config(int maxSteps, int repeatRemindAt, int repeatAbortAt, String systemPrompt) {
             this(maxSteps, repeatRemindAt, repeatAbortAt, systemPrompt, List::of,
                     DEFAULT_MAX_PLAN_CONTINUES, DEFAULT_CONTEXT_LIMIT, true);
@@ -328,6 +327,7 @@ public final class AgentLoop {
     private Result loop(List<Message> messages, Consumer<SessionEvent> events,
                         Consumer<List<Message>> checkpoint) {
         String lastSignature = null;
+        List<String> lastOutcomes = List.of();
         int repeated = 0;
         int planContinues = 0;
         int outputLimitStreak = 0;
@@ -382,6 +382,7 @@ public final class AgentLoop {
                     applySteering(messages, events, correction);
                     safeCheckpoint(checkpoint, messages);
                     lastSignature = null;
+                    lastOutcomes = List.of();
                     repeated = 0;
                     continue;
                 }
@@ -466,37 +467,6 @@ public final class AgentLoop {
 
                 String signature = signature(calls);
                 boolean awaitingDynamicObservation = dynamicPolls.canObserveAgain(signature, calls);
-                if (awaitingDynamicObservation) {
-                    // command_status / command_logs 的相同参数是在观察外部状态，不等同于重复读静态文件。
-                    // 是否真的停滞只能在执行并看到新结果后判断，不能在调用前把它吞掉。
-                    lastSignature = signature;
-                    repeated = 0;
-                } else if (signature.equals(lastSignature)) {
-                    repeated++;
-                } else {
-                    lastSignature = signature;
-                    repeated = 1;
-                }
-                if (repeated >= config.repeatAbortAt()) {
-                    String detail = "模型连续 " + repeated + " 次请求相同的工具调用，已中断以避免死循环。";
-                    skipCalls(messages, calls, 0, "已达到重复工具调用上限，本次调用未执行。");
-                    throw new ExecutionPolicy.Stop("REPEATED_TOOL_CALL", detail);
-                }
-                // 达到提醒档：跳过执行，合成结果与提醒给模型纠错机会；提醒只注入一次
-                if (config.repeatRemindAt() > 0 && repeated >= config.repeatRemindAt()) {
-                    for (ToolCall call : calls) {
-                        messages.add(Message.tool(call.callId(),
-                                "已跳过执行：这是连续第 " + repeated + " 次发出完全相同的调用（"
-                                        + call.name() + "），结果不会与上一次不同。"));
-                    }
-                    if (repeated == config.repeatRemindAt()) {
-                        runtimeGuidance.add(repeatReminder(calls, repeated));
-                        events.accept(new RunContinued(1, 1,
-                                "重复调用提醒：连续第 " + repeated + " 次，已跳过执行"));
-                    }
-                    safeCheckpoint(checkpoint, messages);
-                    continue;
-                }
 
                 ArrayList<ToolExecutor.Outcome> stepOutcomes = new ArrayList<ToolExecutor.Outcome>();
                 boolean batchInterrupted = false;
@@ -540,12 +510,34 @@ public final class AgentLoop {
                         skipCalls(messages, calls, index + 1, "用户已纠正当前任务，本次调用未执行，请重新规划。");
                         applySteering(messages, events, startGuard.correction);
                         lastSignature = null;
+                        lastOutcomes = List.of();
                         repeated = 0;
                         batchInterrupted = true;
                         break;
                     }
                 }
                 if (!batchInterrupted) {
+                    if (!awaitingDynamicObservation) {
+                        List<String> observedResults = stepOutcomes.stream()
+                                .map(ToolExecutor.Outcome::result).toList();
+                        repeated = signature.equals(lastSignature)
+                                && observedResults.equals(lastOutcomes) ? repeated + 1 : 1;
+                        lastSignature = signature;
+                        lastOutcomes = observedResults;
+                        if (config.repeatRemindAt() > 0 && repeated == config.repeatRemindAt()) {
+                            runtimeGuidance.add(repeatReminder(calls, repeated));
+                            events.accept(new RunContinued(1, 1,
+                                    "重复调用提醒：连续第 " + repeated + " 次无新结果"));
+                        }
+                        if (repeated >= config.repeatAbortAt()) {
+                            throw new ExecutionPolicy.Stop("REPEATED_TOOL_CALL",
+                                    "连续 " + repeated + " 次相同工具调用得到相同结果，已中断无效循环。");
+                        }
+                    } else {
+                        lastSignature = null;
+                        lastOutcomes = List.of();
+                        repeated = 0;
+                    }
                     DynamicPollTracker.Decision decision = dynamicPolls.observe(signature, calls, stepOutcomes);
                     if (decision.remind()) {
                         runtimeGuidance.add(stuckReminder(calls, decision.unchangedCount(),

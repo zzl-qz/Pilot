@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -129,5 +130,37 @@ class EditFileToolTest {
                 "path", "legacy.txt", "old_string", "before", "new_string", "after"));
 
         assertTrue(result.startsWith("已修改 "), result);
+    }
+
+    @Test
+    void appliesDisjointEditsAgainstOriginalFileInOneWrite() throws IOException {
+        Path file = workspace.resolve("sample.txt");
+        Files.writeString(file, "\uFEFFfirst\r\nkeep\r\nlast\r\n");
+
+        String result = tool.execute(Map.of("path", "sample.txt", "edits", List.of(
+                Map.of("old_string", "last", "new_string", "end"),
+                Map.of("old_string", "first", "new_string", "start"))));
+
+        assertTrue(result.contains("替换 2 处"), result);
+        assertEquals("\uFEFFstart\r\nkeep\r\nend\r\n", Files.readString(file));
+    }
+
+    @Test
+    void rejectedBatchLeavesFileUntouched() throws IOException {
+        Path file = workspace.resolve("sample.txt");
+        String original = "header\nvalue\nfooter\n";
+        Files.writeString(file, original);
+
+        String missing = tool.execute(Map.of("path", "sample.txt", "edits", List.of(
+                Map.of("old_string", "header", "new_string", "title"),
+                Map.of("old_string", "absent", "new_string", "other"))));
+        assertTrue(missing.contains("edits[1] 未找到"), missing);
+        assertEquals(original, Files.readString(file));
+
+        String overlap = tool.execute(Map.of("path", "sample.txt", "edits", List.of(
+                Map.of("old_string", "header\nvalue", "new_string", "first"),
+                Map.of("old_string", "value", "new_string", "second"))));
+        assertTrue(overlap.contains("重叠或嵌套"), overlap);
+        assertEquals(original, Files.readString(file));
     }
 }
