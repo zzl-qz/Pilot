@@ -107,6 +107,15 @@ class SessionApiTest {
         }
 
         @Override
+        public boolean moveQueued(String sessionId, int from, int to) {
+            if (from < 0 || from >= queue.size() || to < 0 || to >= queue.size() || from == to) {
+                return false;
+            }
+            queue.add(to, queue.remove(from));
+            return true;
+        }
+
+        @Override
         public boolean removeQueued(String sessionId, int index) {
             if (index < 0 || index >= queue.size()) {
                 return false;
@@ -188,11 +197,21 @@ class SessionApiTest {
     }
 
     @Test
-    void rejectsAttachmentsDuringActiveRunWithoutPersistingThemAndQueuesText() throws Exception {
+    void queuesAttachmentsDuringActiveRunButRejectsStandaloneAcceptance() throws Exception {
         String sessionId = createSession();
         Path attachmentRoot = ATTACHMENT_ROOT.resolve(sessionId);
         runStarter.running.set(true);
         try {
+            String task = json.writeValueAsString(Map.of(
+                    "content", "带验收条件的新任务",
+                    "task", Map.of("constraints", List.of("别动 pom"), "acceptance", List.of())));
+            mvc.perform(post("/api/sessions/{id}/messages", sessionId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(task))
+                    .andExpect(status().isConflict());
+            assertFalse(Files.exists(attachmentRoot), "冲突响应前不应创建附件目录或文件");
+
+            // 二进制文件落盘后以路径形式进入排队正文，不再因为带附件被拒绝
             String attachment = json.writeValueAsString(Map.of(
                     "content", "检查这个文件",
                     "attachments", List.of(Map.of(
@@ -202,9 +221,12 @@ class SessionApiTest {
             mvc.perform(post("/api/sessions/{id}/messages", sessionId)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(attachment))
-                    .andExpect(status().isConflict());
-
-            assertFalse(Files.exists(attachmentRoot), "冲突响应前不应创建附件目录或文件");
+                    .andExpect(status().isAccepted());
+            assertTrue(Files.isDirectory(attachmentRoot), "排队消息的附件应该已经落盘");
+            mvc.perform(get("/api/sessions/{id}/queue", sessionId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.entries[0].content").value(org.hamcrest.Matchers.containsString("payload.bin")))
+                    .andExpect(jsonPath("$.entries[0].attachments.length()").value(0));
 
             mvc.perform(post("/api/sessions/{id}/messages", sessionId)
                             .contentType(MediaType.APPLICATION_JSON)
@@ -215,6 +237,48 @@ class SessionApiTest {
         } finally {
             runStarter.running.set(false);
         }
+    }
+
+    /** 历史记录和队列里的缩略图靠这个接口取回；只放行图片，其余落盘文件不外露。 */
+    @Test
+    void servesStoredImagesOnlyForTheOwningSession() throws Exception {
+        String sessionId = createSession();
+        byte[] png = {(byte) 0x89, 'P', 'N', 'G', 1, 2, 3};
+        String body = json.writeValueAsString(Map.of(
+                "content", "看图",
+                "attachments", List.of(
+                        Map.of("name", "shot.png", "mimeType", "image/png",
+                                "dataBase64", java.util.Base64.getEncoder().encodeToString(png)),
+                        Map.of("name", "payload.bin", "mimeType", "application/octet-stream",
+                                "dataBase64", "AQIDBA=="))));
+        mvc.perform(post("/api/sessions/{id}/messages", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        Path dir = ATTACHMENT_ROOT.resolve(sessionId);
+        String image;
+        String binary;
+        try (var files = Files.list(dir)) {
+            List<String> names = files.map(path -> path.getFileName().toString()).toList();
+            image = names.stream().filter(name -> name.endsWith("-shot.png")).findFirst().orElseThrow();
+            binary = names.stream().filter(name -> name.endsWith("-payload.bin")).findFirst().orElseThrow();
+        }
+
+        byte[] served = mvc.perform(get("/api/sessions/{id}/attachments/{file}", sessionId, image))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .content().contentType(MediaType.IMAGE_PNG))
+                .andReturn().getResponse().getContentAsByteArray();
+        assertEquals(png.length, served.length);
+
+        mvc.perform(get("/api/sessions/{id}/attachments/{file}", sessionId, binary))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/sessions/{id}/attachments/{file}", sessionId, "../../etc-passwd"))
+                .andExpect(status().isNotFound());
+        String other = createSession();
+        mvc.perform(get("/api/sessions/{id}/attachments/{file}", other, image))
+                .andExpect(status().isNotFound());
     }
 
     /** 首屏只回放尾部一页，向上翻页用 before 游标。 */
@@ -543,6 +607,21 @@ class SessionApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0]").value("改成先列计划"));
 
+        mvc.perform(post("/api/sessions/{id}/messages", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"第二件事\"}"))
+                .andExpect(status().isAccepted());
+
+        mvc.perform(post("/api/sessions/{id}/queue/{index}/move", sessionId, 0).param("to", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0]").value("第二件事"))
+                .andExpect(jsonPath("$.items[1]").value("改成先列计划"));
+        mvc.perform(post("/api/sessions/{id}/queue/{index}/move", sessionId, 0).param("to", "5"))
+                .andExpect(status().isNotFound());
+
+        mvc.perform(delete("/api/sessions/{id}/queue/{index}", sessionId, 0))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1));
         mvc.perform(delete("/api/sessions/{id}/queue/{index}", sessionId, 0))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items.length()").value(0));

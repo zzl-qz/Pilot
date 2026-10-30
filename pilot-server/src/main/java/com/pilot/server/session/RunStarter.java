@@ -29,8 +29,32 @@ public interface RunStarter {
         start(sessionId, runId, input, attachments, task);
     }
 
+    /** 排队中的一条消息：正文已经内联了文本文件，这里只额外带需要多模态编码的图片。 */
+    record QueuedMessage(String content, List<Attachment> attachments, List<Integer> imagePositions) {
+        public QueuedMessage {
+            content = content == null ? "" : content;
+            attachments = attachments == null ? List.of() : List.copyOf(attachments);
+            imagePositions = imagePositions == null ? List.of() : List.copyOf(imagePositions);
+        }
+    }
+
+    /** 带附件信息的排队清单，顺序与 queued 一致。 */
+    default List<QueuedMessage> queuedMessages(String sessionId) {
+        return queued(sessionId).stream().map(text -> new QueuedMessage(text, List.of(), List.of())).toList();
+    }
+
     /** 普通追加仅排队；保留默认转发以兼容已有启动器。 */
     default boolean followup(String sessionId, String text) { return steer(sessionId, text); }
+
+    /**
+     * 带图片附件的追加。默认实现只认纯文本，带附件时返回 false，
+     * 这样不支持附件的启动器不会悄悄丢掉用户的图片。
+     */
+    default boolean followup(String sessionId, String text, List<Attachment> attachments,
+                             List<Integer> imagePositions) {
+        boolean plain = attachments == null || attachments.isEmpty();
+        return plain && followup(sessionId, text);
+    }
 
     /** 暂停在当前安全步骤结束后生效，保留任务及排队消息。 */
     default boolean pause(String runId) { return false; }
@@ -164,6 +188,16 @@ public interface RunStarter {
 
     /** 改队列里的某一句。下标从 0 开始。 */
     default boolean editQueued(String sessionId, int index, String text) {
+        return false;
+    }
+
+    /** 把某一句往前挪一位（和前一句交换）。文字和图片作为一个整体移动。 */
+    default boolean moveQueuedUp(String sessionId, int index) {
+        return false;
+    }
+
+    /** 把某一句挪到指定位置（拖拽排序用），一次完成。文字和图片作为一个整体移动。下标从 0 开始。 */
+    default boolean moveQueued(String sessionId, int from, int to) {
         return false;
     }
 

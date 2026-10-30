@@ -197,13 +197,19 @@ ToolRegistry 是工具目录；ToolExecutor 是单次调用的执行流程。执
 
 | 工具 | 解决的问题 | 结果或副作用 |
 | --- | --- | --- |
-| `list_dir`、`search_text`、`read_file` | 查文件、找调用、按范围读取源码 | 返回所见内容 |
-| `edit_file`、`create_file` | 精确替换或创建文件 | 主会话直接写工作区；调度子任务使用另外的沙箱版本 |
-| `run_command` | 编译、测试、启动服务或检查 Git | 启动真实进程 |
+| `list_dir`、`glob_files`、`search_text`、`read_file` | 查文件、按名字找文件、找调用、按范围读取源码；`read_file` 还能读图片，并对 PDF 抽取文本（扫描件渲染为图片） | 返回所见内容；图片以图片消息交给模型 |
+| `edit_file`、`create_file`、`apply_patch` | 精确替换、创建文件，或用一份补丁跨文件修改（含重命名、删除） | 主会话直接写工作区，补丁要么全部生效要么全部不落盘；调度子任务使用另外的沙箱版本 |
+| `run_command` | 编译、测试、lint、启动服务或检查 Git；支持 `&& \|\| ; \|` 串联，每一段独立校验 | 查看类命令只读放行，构建与写入类按权限档位审批；启动真实进程 |
+| `browser` | 在隔离浏览器里验证本机 Web 应用：快照、点击、输入、上传、截图、控制台与网络记录 | 浏览器握手成功后才对模型声明；点击等本机交互在 AUTO_EDIT 放行，执行任意脚本需审批 |
+| `mcp_tools`、`mcp_call` | 按需发现并调用 `.mcp.json` 里配置的 MCP 服务器工具 | 每次请求只带这两个定义；启动服务器需审批，声明 `readOnlyHint` 的工具免审批 |
 | `command_status`、`command_logs`、`stop_command` | 跟踪已经启动的长命令 | 查询状态、增量日志或发出终止请求 |
 | `update_plan` | 保存步骤和完成状态 | 更新计划并发出事件 |
 | `web_search`、`web_fetch` | 搜索资料和读取网页 | 发起网络请求，返回资料 |
 | `spawn_agent`、`dispatch_agents` | 把工作交给子 Agent | 启动子运行或多任务调度 |
+
+### 工具能力随运行时声明
+
+`Tool.availability()` 让依赖外部进程的工具声明自己此刻能否使用：`ToolRegistry.definitions()` 与系统提示词只包含可用工具，调用不可用工具会得到带原因的错误，提示模型不要重试。浏览器要等 sidecar 握手并真的启动过一次浏览器才算可用，MCP 要工作区配置了服务器才可用。权限则可以按「这一次调用」判定（`Tool.readOnly(args)`、`LocalInteraction`），所以 `run_command` 里的 `git status` 与 `mvn test`、`browser` 里的快照与点击会得到不同的审批结果。工具产出的图片（截图、PDF 页面、MCP 图片）作为 `ToolResult.images` 返回，循环把它们放进紧随工具结果之后的一条用户图片消息，旧图片只保留最近几条。
 
 工具参数定义帮助模型使用正确形状，后端仍必须校验输入。给模型看不到某个工具可以减少误用，但也应确认其他工具没有绕过相同边界的能力。
 

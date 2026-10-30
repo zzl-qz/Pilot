@@ -5,6 +5,7 @@ import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.RunUsageUpdated;
+import com.pilot.core.loop.Attachment;
 import com.pilot.core.loop.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
@@ -140,6 +141,80 @@ class AgentRunServiceTest {
         } finally {
             releaseFirst.countDown();
             releaseSecond.countDown();
+        }
+    }
+
+    @Test
+    void queuedImagesSurviveEditsAndReachTheNextRun() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<List<Message>>();
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            requests.add(messages);
+            if (calls.getAndIncrement() == 0) {
+                entered.countDown();
+                await(release);
+            }
+            return done();
+        };
+        Attachment image = new Attachment("shot.png", "image/png", "/stable/attachments/shot.png");
+        try (Fixture fixture = new Fixture(model, 8)) {
+            fixture.start();
+            await(entered);
+            assertTrue(fixture.service.followup(fixture.sessionId, "看这张图", List.of(image), List.of(2)));
+            assertTrue(fixture.service.followup(fixture.sessionId, "纯文字"));
+            assertEquals(List.of("看这张图", "纯文字"), fixture.queue());
+            List<RunStarter.QueuedMessage> queued = fixture.service.queuedMessages(fixture.sessionId);
+            assertEquals(List.of(image), queued.get(0).attachments());
+            assertEquals(List.of(), queued.get(1).attachments());
+
+            // 往前排时文字和图片一起走，不能出现文字换了位置图片还留在原地
+            assertTrue(fixture.service.moveQueuedUp(fixture.sessionId, 1));
+            queued = fixture.service.queuedMessages(fixture.sessionId);
+            assertEquals(List.of("纯文字", "看这张图"), fixture.queue());
+            assertEquals(List.of(), queued.get(0).attachments());
+            assertEquals(List.of(image), queued.get(1).attachments());
+            assertFalse(fixture.service.moveQueuedUp(fixture.sessionId, 0));
+            assertTrue(fixture.service.moveQueuedUp(fixture.sessionId, 1));
+            assertEquals(List.of("看这张图", "纯文字"), fixture.queue());
+
+            // 拖拽排序：一次挪到目标位置，图片跟着文字走；越界或原地不动都拒绝
+            assertTrue(fixture.service.followup(fixture.sessionId, "第三句"));
+            assertTrue(fixture.service.moveQueued(fixture.sessionId, 0, 2));
+            assertEquals(List.of("纯文字", "第三句", "看这张图"), fixture.queue());
+            assertEquals(List.of(image), fixture.service.queuedMessages(fixture.sessionId).get(2).attachments());
+            assertTrue(fixture.service.moveQueued(fixture.sessionId, 2, 0));
+            assertEquals(List.of("看这张图", "纯文字", "第三句"), fixture.queue());
+            assertFalse(fixture.service.moveQueued(fixture.sessionId, 1, 1));
+            assertFalse(fixture.service.moveQueued(fixture.sessionId, 0, 3));
+            assertFalse(fixture.service.moveQueued(fixture.sessionId, -1, 0));
+            assertTrue(fixture.service.removeQueued(fixture.sessionId, 2));
+            assertEquals(List.of("看这张图", "纯文字"), fixture.queue());
+
+            assertTrue(fixture.service.editQueued(fixture.sessionId, 0, "改成这样看图"));
+            queued = fixture.service.queuedMessages(fixture.sessionId);
+            assertEquals("改成这样看图", queued.get(0).content());
+            assertEquals(List.of(image), queued.get(0).attachments(), "只改文字，图片要跟着留下");
+            assertEquals(List.of(2), queued.get(0).imagePositions());
+
+            release.countDown();
+            fixture.awaitFinished("COMPLETED", "COMPLETED", "COMPLETED");
+
+            Message delivered = requests.get(1).stream()
+                    .filter(message -> "user".equals(message.role()) && "改成这样看图".equals(message.content()))
+                    .findFirst().orElseThrow();
+            assertEquals(List.of(image), delivered.attachments());
+            assertEquals(List.of(2), delivered.imagePositions());
+            RunStarted started = fixture.sessions.events(fixture.sessionId).stream()
+                    .map(event -> event.payload())
+                    .filter(payload -> payload instanceof RunStarted run && "改成这样看图".equals(run.input()))
+                    .map(payload -> (RunStarted) payload)
+                    .findFirst().orElseThrow();
+            assertEquals(List.of(image), started.attachments());
+            assertEquals(List.of(), fixture.queue());
+        } finally {
+            release.countDown();
         }
     }
 

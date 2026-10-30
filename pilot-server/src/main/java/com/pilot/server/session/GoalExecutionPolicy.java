@@ -127,7 +127,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (task != null && task.execution() != null) {
             changedPaths.addAll(task.execution().changedPaths());
             task.execution().evidence().stream()
-                    .filter(e -> Set.of("edit_file", "create_file").contains(e.tool()))
+                    .filter(e -> Set.of("edit_file", "create_file", "apply_patch").contains(e.tool()))
                     .map(TaskControlService.Evidence::target).filter(p -> !p.isBlank()).forEach(changedPaths::add);
         }
     }
@@ -202,11 +202,11 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         int observations = 0;
         String phase = "start";
         for (TaskControlService.Evidence evidence : state.evidence()) {
-            if (successfulEvidence(evidence) && (Set.of("edit_file", "create_file").contains(evidence.tool())
+            if (successfulEvidence(evidence) && (Set.of("edit_file", "create_file", "apply_patch").contains(evidence.tool())
                     || isQualifyingVerification(evidence))) {
                 observations = 0;
                 phase = evidence.id();
-            } else if (Set.of("read_file", "search_text", "list_dir").contains(evidence.tool())) {
+            } else if (Set.of("read_file", "search_text", "list_dir", "glob_files").contains(evidence.tool())) {
                 observations++;
             }
         }
@@ -481,7 +481,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 .filter(e -> "command_status".equals(e.tool()) && terminalCommandObservation(e))
                 .map(GoalExecutionPolicy::taskId).filter(value -> !value.isBlank())
                 .collect(Collectors.toSet());
-        all.stream().filter(e -> Set.of("edit_file", "create_file").contains(e.tool())
+        all.stream().filter(e -> Set.of("edit_file", "create_file", "apply_patch").contains(e.tool())
                         || isQualifyingVerification(e)
                         || (e.operationKey() != null && e.operationKey().startsWith(AUTO_REVERIFY_KEY))
                         || ("run_command".equals(e.tool()) && isBackgroundLaunch(e)
@@ -980,7 +980,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 .filter(GoalExecutionPolicy::keepEvidence).toList();
         LinkedHashMap<String, TaskControlService.Evidence> selected = new LinkedHashMap<>();
         addRecent(selected, all, 20);
-        addRecent(selected, all.stream().filter(e -> Set.of("edit_file", "create_file", "spawn_agent")
+        addRecent(selected, all.stream().filter(e -> Set.of("edit_file", "create_file", "apply_patch", "spawn_agent")
                 .contains(e.tool()) || isVerificationAttempt(e)).toList(), 18);
         addRecent(selected, all.stream().filter(e -> successfulEvidence(e)
                 && Set.of("web_fetch", "read_file").contains(e.tool())).toList(), 12);
@@ -1078,7 +1078,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
 
     private static boolean codeEvidence(TaskControlService.Execution state) {
         return state.changedPaths().stream().anyMatch(GoalExecutionPolicy::isCodePath)
-                || state.evidence().stream().anyMatch(e -> Set.of("edit_file", "create_file").contains(e.tool())
+                || state.evidence().stream().anyMatch(e -> Set.of("edit_file", "create_file", "apply_patch").contains(e.tool())
                 && isCodePath(e.target()) && successfulEvidence(e));
     }
     private static boolean keepEvidence(TaskControlService.Evidence evidence) {

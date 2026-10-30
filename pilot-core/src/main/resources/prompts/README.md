@@ -38,6 +38,7 @@ requires: [dispatch_agents]
 ```
 
 - 只支持 `requires` 一个键；值支持 `a`、`a, b`、`[a, b]` 三种写法；其他键或格式非法抛异常。
+- 能力依赖运行时握手的工具（如 `browser`）对应的段落同样用 `requires` 过滤：能力不可用时，提示词里也不会出现它的用法。
 - 独立工具的使用指导分别放在独立段落中，例如 `tools-spawn` 与 `tools-dispatch`，避免关闭一个工具时连带移除另一个工具的指导。
 - 原 `system/tools-agents.md` 已拆为 `system/tools-spawn.md` 和 `system/tools-dispatch.md`；使用外部目录覆盖旧片段时，也需要按工具拆分到这两个文件。
 - **注册表声明优先**：`PromptLibrary.SYSTEM_SECTIONS`（`SystemSection` 记录）里的

@@ -69,6 +69,22 @@ public record Message(String role, String content, List<ToolCall> toolCalls, Str
         return new Message("tool", content, List.of(), toolCallId);
     }
 
+    /** 工具产出图片的消息前缀；压缩与历史修剪据此识别，不把截图当作用户原图长期固定。 */
+    public static final String TOOL_IMAGE_MARKER = "[工具图片]";
+
+    /**
+     * 工具产出的图片。OpenAI 兼容协议的 tool 消息只能承载文本，所以图片放在本批 tool 结果之后的
+     * 一条 user 消息里；文字部分说明来源，模型据此把图片对应回具体的工具调用。
+     */
+    public static Message toolImages(String description, List<Attachment> images) {
+        String text = TOOL_IMAGE_MARKER + " " + (description == null ? "" : description.strip());
+        return new Message("user", text, List.of(), null, images);
+    }
+
+    public boolean isToolImages() {
+        return "user".equals(role) && content.startsWith(TOOL_IMAGE_MARKER);
+    }
+
     public boolean hasToolCalls() {
         return !toolCalls.isEmpty();
     }

@@ -362,10 +362,11 @@ public class MultiAgentService {
         AgentLoop loop = new AgentLoop(dispatch.executionClient() == null ? modelClient : dispatch.executionClient(), tools, new PolicyPermissionGate(PermissionMode.AUTO),
                 ApprovalBroker.denyAll(), config, () -> cancelled(dispatch), () -> null, trace);
 
-        publish(dispatch.events(), new SubagentStarted(agentId, oneLine(spec.title() + "：" + spec.goal(), 200)));
+        publish(dispatch.events(), new SubagentStarted(agentId, oneLine(spec.title() + "：" + spec.goal(), 200),
+                oneLine(spec.id() + " " + spec.title(), 40)));
         try {
             AgentLoop.Result result = loop.run(userPrompt(spec, note), List.of(),
-                    subagentSink(dispatch.events()));
+                    subagentSink(dispatch.events(), agentId));
             if (result.failed()) {
                 String reason = "子 Agent 未完成：" + result.failureCode();
                 publish(dispatch.events(), new SubagentFinished(agentId, reason, false));
@@ -387,8 +388,13 @@ public class MultiAgentService {
      * <p>模型增量、run.completed / run.failed 属于父会话语义，直接放行会把子 Agent 的文字混进父回答、
      * 甚至把整个会话标成失败。
      */
-    private static Consumer<SessionEvent> subagentSink(Consumer<SessionEvent> sink) {
+    private static Consumer<SessionEvent> subagentSink(Consumer<SessionEvent> sink, String agentId) {
         return event -> {
+            if (event instanceof com.pilot.core.event.ToolStarted started) {
+                // 多个子 Agent 并行时必须带归属，前端才分得清哪条操作是谁发起的。
+                sink.accept(started.forAgent(agentId));
+                return;
+            }
             if (event instanceof AssistantDelta || event instanceof AssistantPreview
                     || event instanceof ContextCompacted || event instanceof PlanUpdated
                     || event instanceof com.pilot.core.event.RunUsageUpdated

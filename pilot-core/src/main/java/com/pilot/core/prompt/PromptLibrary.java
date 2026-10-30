@@ -79,6 +79,7 @@ public final class PromptLibrary {
             new SystemSection("system/tools", 200),
             new SystemSection("system/tools-spawn", 300, Set.of("spawn_agent")),
             new SystemSection("system/tools-dispatch", 310, Set.of("dispatch_agents")),
+            new SystemSection("system/browser", 350, Set.of("browser")),
             new SystemSection("system/orchestration", 400),
             new SystemSection("system/dispatch", 500, Set.of("dispatch_agents")),
             new SystemSection("system/output", 9000));

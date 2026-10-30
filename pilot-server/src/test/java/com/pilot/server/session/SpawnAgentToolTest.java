@@ -5,6 +5,7 @@ import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.SubagentFinished;
 import com.pilot.core.event.SubagentStarted;
 import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.ToolStarted;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.Message;
 import com.pilot.core.model.ModelClient;
@@ -47,6 +48,47 @@ class SpawnAgentToolTest {
         assertTrue(events.get(0) instanceof SubagentStarted started && started.task().contains("盘点入口类"));
         assertTrue(events.stream().anyMatch(event -> event instanceof SubagentFinished finished && finished.ok()),
                 "子代理结束事件必须带成功标记");
+    }
+
+    @Test
+    void childToolCallsCarryTheSubagentIdSoUiCanGroupThem() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(named("read_file"));
+        AtomicInteger turn = new AtomicInteger();
+        ModelClient client = (request, definitions) -> turn.getAndIncrement() == 0
+                ? new ModelResponse("", List.of(new ToolCall("call_child_1", "read_file", Map.of())))
+                : new ModelResponse("读完了", List.of());
+        ArrayList<SessionEvent> events = new ArrayList<>();
+        SpawnAgentTool tool = new SpawnAgentTool(client, registry,
+                new PolicyPermissionGate(PermissionMode.READ_ONLY), ApprovalBroker.denyAll(),
+                new AgentLoop.Config(5, 3, "sys"), List::of, events::add, () -> false);
+
+        tool.execute(Map.of("task", "读一个文件"));
+
+        String agentId = events.stream().filter(SubagentStarted.class::isInstance)
+                .map(event -> ((SubagentStarted) event).agentId()).findFirst().orElseThrow();
+        List<ToolStarted> started = events.stream().filter(ToolStarted.class::isInstance)
+                .map(ToolStarted.class::cast).toList();
+        assertFalse(started.isEmpty(), "子代理的工具调用要透传给时间线");
+        assertTrue(started.stream().allMatch(item -> agentId.equals(item.agentId())),
+                "透传的工具事件必须带上子代理归属");
+    }
+
+    @Test
+    void passesTheOptionalDisplayNameToTheStartEvent() {
+        ModelClient client = (request, tools) -> new ModelResponse("ok", List.of());
+        ArrayList<SessionEvent> events = new ArrayList<>();
+        SpawnAgentTool tool = new SpawnAgentTool(client, new ToolRegistry(),
+                new PolicyPermissionGate(PermissionMode.READ_ONLY), ApprovalBroker.denyAll(),
+                new AgentLoop.Config(5, 3, "sys"), List::of, events::add, () -> false);
+
+        tool.execute(Map.of("task", "盘点入口类", "name", "盘点入口"));
+        tool.execute(Map.of("task", "再看看"));
+
+        List<SubagentStarted> started = events.stream().filter(SubagentStarted.class::isInstance)
+                .map(SubagentStarted.class::cast).toList();
+        assertEquals("盘点入口", started.get(0).name());
+        assertEquals(null, started.get(1).name(), "没起名就不带名字，界面自己从任务里推");
     }
 
     @Test

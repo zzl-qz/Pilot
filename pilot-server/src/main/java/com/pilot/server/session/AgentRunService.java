@@ -295,16 +295,25 @@ public class AgentRunService implements RunStarter {
 
     @Override
     public boolean followup(String sessionId, String text) {
-        if (text == null || text.isBlank()) {
+        return followup(sessionId, text, List.of(), List.of());
+    }
+
+    @Override
+    public boolean followup(String sessionId, String text, List<Attachment> attachments,
+                            List<Integer> imagePositions) {
+        boolean hasAttachments = attachments != null && !attachments.isEmpty();
+        if ((text == null || text.isBlank()) && !hasAttachments) {
             return false;
         }
+        String content = text == null ? "" : text.strip();
         Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
             // 与运行结束后的队列交接共用锁，避免检查完活动运行后才入队，消息无人接走。
             if (registry.activeRun(sessionId).isEmpty()) {
                 return false;
             }
-            queue.offer(text.strip());
+            queue.offer(QueuedMessageCodec.encode(
+                    new QueuedMessageCodec.Stored(content, attachments, imagePositions)));
             persistQueue(sessionId, queue);
         }
         return true;
@@ -314,7 +323,18 @@ public class AgentRunService implements RunStarter {
     public List<String> queued(String sessionId) {
         Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
-            return List.copyOf(queue);
+            return queue.stream().map(raw -> QueuedMessageCodec.decode(raw).content()).toList();
+        }
+    }
+
+    @Override
+    public List<QueuedMessage> queuedMessages(String sessionId) {
+        Deque<String> queue = inbox(sessionId);
+        synchronized (queue) {
+            return queue.stream()
+                    .map(QueuedMessageCodec::decode)
+                    .map(item -> new QueuedMessage(item.content(), item.attachments(), item.imagePositions()))
+                    .toList();
         }
     }
 
@@ -327,7 +347,41 @@ public class AgentRunService implements RunStarter {
                 return false;
             }
             ArrayList<String> items = new ArrayList<>(queue);
-            items.set(index, text.strip());
+            // 只改文字，图片附件跟着这条消息走
+            items.set(index, QueuedMessageCodec.encode(
+                    QueuedMessageCodec.decode(items.get(index)).withContent(text.strip())));
+            queue.clear();
+            queue.addAll(items);
+            persistQueue(sessionId, queue);
+            return true;
+        }
+    }
+
+    @Override
+    public boolean moveQueuedUp(String sessionId, int index) {
+        Deque<String> queue = inbox(sessionId);
+        synchronized (queue) {
+            if (index <= 0 || index >= queue.size()) {
+                return false;
+            }
+            ArrayList<String> items = new ArrayList<>(queue);
+            java.util.Collections.swap(items, index - 1, index);
+            queue.clear();
+            queue.addAll(items);
+            persistQueue(sessionId, queue);
+            return true;
+        }
+    }
+
+    @Override
+    public boolean moveQueued(String sessionId, int from, int to) {
+        Deque<String> queue = inbox(sessionId);
+        synchronized (queue) {
+            if (from < 0 || from >= queue.size() || to < 0 || to >= queue.size() || from == to) {
+                return false;
+            }
+            ArrayList<String> items = new ArrayList<>(queue);
+            items.add(to, items.remove(from));
             queue.clear();
             queue.addAll(items);
             persistQueue(sessionId, queue);
@@ -532,17 +586,19 @@ public class AgentRunService implements RunStarter {
 
     /** 当前任务完整结束后，在队列锁内占位并启动下一条；失败、暂停、计划未完成时不消费。 */
     private void drainQueue(String sessionId, Deque<String> queue) {
-        String next = queue.peek();
-        if (next == null) {
+        String raw = queue.peek();
+        if (raw == null) {
             return;
         }
+        QueuedMessageCodec.Stored next = QueuedMessageCodec.decode(raw);
         String runId = claimRun(sessionId).orElse(null);
         if (runId == null) {
             return;
         }
         try {
-            sessions.publish(sessionId, runId, new RunStarted(next));
-            launch(sessionId, runId, next, List.of(), false);
+            sessions.publish(sessionId, runId,
+                    new RunStarted(next.content(), next.attachments(), next.imagePositions()));
+            launch(sessionId, runId, next.content(), next.attachments(), next.imagePositions(), false, null);
         } catch (RuntimeException e) {
             registry.unregister(runId);
             publish(sessionId, runId, new RunFailed("QUEUE_START_FAILED", "排队消息启动失败，消息已保留", false));
@@ -1098,6 +1154,8 @@ public class AgentRunService implements RunStarter {
         tools.register(new CommandStatusTool(commandTasks, sessionId, snapshots));
         tools.register(new CommandLogsTool(commandTasks, sessionId));
         tools.register(new StopCommandTool(commandTasks, sessionId));
+        // 浏览器与 MCP：始终注册，是否可见由工具自己的 availability 在运行时决定。
+        toolFactory.sessionExtras(sessionId, workspace).forEach(tools::register);
         return tools;
     }
 

@@ -28,6 +28,20 @@ public interface Tool {
     /** 是否只读。Sprint 2 的 READ_ONLY 策略据此放行。 */
     boolean readOnly();
 
+    /**
+     * 按本次调用的参数判断是否只读。默认等于 {@link #readOnly()}；
+     * 一个工具里既有查询又有改动的动作时（命令、浏览器、外部工具）覆盖它，
+     * 让权限层对「看」放行、对「改」审批，而不是整个工具一刀切。
+     */
+    default boolean readOnly(Map<String, Object> args) {
+        return readOnly();
+    }
+
+    /** 运行时能力。依赖外部进程的工具覆盖；不可用时不向模型声明。 */
+    default Availability availability() {
+        return Availability.ready();
+    }
+
     /** 同一模型回复中的多个此类调用能否并行执行；只读并不自动意味着并行安全。 */
     default boolean parallelSafe() {
         return false;

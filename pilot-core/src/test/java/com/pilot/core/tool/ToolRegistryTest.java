@@ -48,6 +48,64 @@ class ToolRegistryTest {
         assertEquals(java.util.Set.of("read_file", "list_dir"), registry.names());
     }
 
+    @Test
+    void unavailableToolsStayFindableButAreHiddenFromTheModel() {
+        registry.register(tool("read_file", "读文件"));
+        registry.register(tool("browser", "浏览器", Availability.unavailable("未检测到 Chrome")));
+
+        assertTrue(registry.find("browser").isPresent());
+        assertEquals(java.util.Set.of("read_file"), registry.names());
+        assertEquals(List.of("read_file"), registry.definitions().stream().map(d -> d.name()).toList());
+        assertEquals(Map.of("browser", "未检测到 Chrome"), registry.unavailable());
+        assertEquals(List.of("read_file"), registry.availableTools().stream().map(Tool::name).toList());
+    }
+
+    @Test
+    void availabilityIsReevaluatedOnEveryQuery() {
+        java.util.concurrent.atomic.AtomicReference<Availability> state =
+                new java.util.concurrent.atomic.AtomicReference<>(Availability.unavailable("starting"));
+        registry.register(new Tool() {
+            public String name() { return "browser"; }
+            public String description() { return "b"; }
+            public Map<String, Object> parameters() { return Map.of("type", "object"); }
+            public boolean readOnly() { return true; }
+            public Availability availability() { return state.get(); }
+            public String execute(Map<String, Object> args) { return ""; }
+        });
+        assertTrue(registry.names().isEmpty());
+
+        state.set(Availability.ready());
+
+        assertEquals(java.util.Set.of("browser"), registry.names());
+        assertTrue(registry.unavailable().isEmpty());
+    }
+
+    @Test
+    void aThrowingAvailabilityProbeCountsAsUnavailable() {
+        registry.register(new Tool() {
+            public String name() { return "browser"; }
+            public String description() { return "b"; }
+            public Map<String, Object> parameters() { return Map.of("type", "object"); }
+            public boolean readOnly() { return true; }
+            public Availability availability() { throw new IllegalStateException("boom"); }
+            public String execute(Map<String, Object> args) { return ""; }
+        });
+
+        assertTrue(registry.names().isEmpty());
+        assertTrue(registry.unavailable().get("browser").contains("boom"));
+    }
+
+    private static Tool tool(String name, String description, Availability availability) {
+        return new Tool() {
+            public String name() { return name; }
+            public String description() { return description; }
+            public Map<String, Object> parameters() { return Map.of("type", "object"); }
+            public boolean readOnly() { return true; }
+            public Availability availability() { return availability; }
+            public String execute(Map<String, Object> args) { return ""; }
+        };
+    }
+
     private static Tool tool(String name, String description) {
         return new Tool() {
             @Override

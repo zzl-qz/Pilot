@@ -337,7 +337,46 @@ public class SessionController {
     @GetMapping("/{id}/queue")
     public QueueResponse queue(@PathVariable String id) {
         requireSession(id);
-        return new QueueResponse(runStarter.queued(id));
+        return queueResponse(id);
+    }
+
+    private QueueResponse queueResponse(String id) {
+        List<RunStarter.QueuedMessage> messages = runStarter.queuedMessages(id);
+        return new QueueResponse(
+                messages.stream().map(RunStarter.QueuedMessage::content).toList(),
+                messages.stream()
+                        .map(message -> new QueueEntry(message.content(),
+                                attachments.displayAttachments(id, message.attachments())))
+                        .toList());
+    }
+
+    /**
+     * 取回随消息上传的图片，用于历史记录和排队列表里的缩略图。
+     * 只放行图片：其余落盘文件是给模型工具读的，不该经浏览器暴露。
+     */
+    @GetMapping("/{id}/attachments/{file}")
+    public ResponseEntity<Resource> attachment(@PathVariable String id, @PathVariable String file) {
+        requireSession(id);
+        java.nio.file.Path path;
+        try {
+            path = attachments.resolveImage(id, file);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在");
+        }
+        String lower = file.toLowerCase(java.util.Locale.ROOT);
+        MediaType type = lower.endsWith(".png") ? MediaType.IMAGE_PNG
+                : lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? MediaType.IMAGE_JPEG
+                : lower.endsWith(".gif") ? MediaType.IMAGE_GIF
+                : lower.endsWith(".webp") ? MediaType.parseMediaType("image/webp")
+                : null;
+        if (type == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "附件不是图片");
+        }
+        return ResponseEntity.ok()
+                .contentType(type)
+                .header("X-Content-Type-Options", "nosniff")
+                .header("Cache-Control", "private, max-age=86400")
+                .body(new FileSystemResource(path));
     }
 
     /** 改队列里的某一句，下标从 0 开始。还没轮到的才能改。 */
@@ -351,7 +390,27 @@ public class SessionController {
         if (!runStarter.editQueued(id, index, request.content())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列里没有这一句");
         }
-        return new QueueResponse(runStarter.queued(id));
+        return queueResponse(id);
+    }
+
+    /** 往前排一位。整条消息（含图片）一起移动，所以不能靠前端互换两条的文字。 */
+    @PostMapping("/{id}/queue/{index}/up")
+    public QueueResponse moveQueuedUp(@PathVariable String id, @PathVariable int index) {
+        requireSession(id);
+        if (!runStarter.moveQueuedUp(id, index)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "这一句已经在最前面，或已经不在队列里");
+        }
+        return queueResponse(id);
+    }
+
+    /** 拖拽排序：把 index 这一句挪到 to 的位置，整条消息（含图片）一起移动。 */
+    @PostMapping("/{id}/queue/{index}/move")
+    public QueueResponse moveQueued(@PathVariable String id, @PathVariable int index, @RequestParam int to) {
+        requireSession(id);
+        if (!runStarter.moveQueued(id, index, to)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "位置无效，或这一句已经不在队列里");
+        }
+        return queueResponse(id);
     }
 
     @DeleteMapping("/{id}/queue/{index}")
@@ -360,7 +419,7 @@ public class SessionController {
         if (!runStarter.removeQueued(id, index)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列里没有这一句");
         }
-        return new QueueResponse(runStarter.queued(id));
+        return queueResponse(id);
     }
 
     /**
@@ -452,10 +511,11 @@ public class SessionController {
         if (request == null || ((request.content() == null || request.content().isBlank()) && !hasAttachments)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
         }
-        // 运行中只接受纯文本追加；先检查状态，避免被拒绝的附件请求产生文件副作用。
+        // 运行中的消息进队列，附件随消息保存；独立验收条件只属于一次新任务的启动，不能排队。
+        // 先检查状态，避免被拒绝的请求产生文件副作用。
         String activeRun = runStarter.activeRun(id).orElse(null);
-        if (activeRun != null && (hasAttachments || request.task() != null)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "排队消息暂不支持附件和独立验收条件，请等本轮结束后再发");
+        if (activeRun != null && request.task() != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "排队消息暂不支持独立验收条件，请等本轮结束后再发");
         }
         AttachmentService.Prepared prepared;
         try {
@@ -464,17 +524,17 @@ public class SessionController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
         if (activeRun != null) {
-            if (runStarter.followup(id, prepared.content())) {
+            if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions())) {
                 return ResponseEntity.accepted().body(new MessageResponse(id, activeRun));
             }
         }
         // 检查与启动之间可能刚好起了一个 run：抢占失败就退化成追加输入
         String runId = runStarter.claimRun(id).orElse(null);
         if (runId == null) {
-            if (hasAttachments || request.task() != null) {
+            if (request.task() != null) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "运行状态已变化，请结束当前任务后重试");
             }
-            if (runStarter.followup(id, prepared.content())) {
+            if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions())) {
                 return ResponseEntity.accepted()
                         .body(new MessageResponse(id, runStarter.activeRun(id).orElse(null)));
             }
@@ -624,8 +684,13 @@ public class SessionController {
 
     public record QueueEditRequest(String content) { }
 
-    // 结构化图文队列尚未完成前维持现有契约，避免半成品类型使整个服务无法编译。
-    public record QueueResponse(List<String> items) { }
+    /**
+     * @param items   排队消息正文，顺序即执行顺序（保持旧契约）
+     * @param entries 同一批消息的结构化版本，额外带上图片附件，界面据此画缩略图
+     */
+    public record QueueResponse(List<String> items, List<QueueEntry> entries) { }
+
+    public record QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments) { }
 
     public record MessageResponse(String sessionId, String runId) { }
 

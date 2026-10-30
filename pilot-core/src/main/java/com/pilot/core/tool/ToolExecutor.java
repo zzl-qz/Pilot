@@ -7,6 +7,7 @@ import com.pilot.core.event.ApprovalResolved;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.event.ToolStarted;
+import com.pilot.core.loop.Attachment;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.permission.PermissionResult;
 
@@ -36,7 +37,12 @@ public final class ToolExecutor {
     }
 
     public record Outcome(String toolName, String result, List<String> changedPaths, List<String> checks,
-                          OutcomeStatus status) {
+                          OutcomeStatus status, List<Attachment> images) {
+        public Outcome(String toolName, String result, List<String> changedPaths, List<String> checks,
+                       OutcomeStatus status) {
+            this(toolName, result, changedPaths, checks, status, List.of());
+        }
+
         public Outcome(String toolName, String result, String changedPath, String check) {
             this(toolName, result, singleton(changedPath), singleton(check), classify(result, singleton(check)));
         }
@@ -48,6 +54,7 @@ public final class ToolExecutor {
         public Outcome {
             changedPaths = normalized(changedPaths);
             checks = normalized(checks);
+            images = images == null ? List.of() : List.copyOf(images);
         }
 
         /** 兼容只产生单个路径的既有调用方。 */
@@ -100,8 +107,13 @@ public final class ToolExecutor {
 
         ToolResult execution;
         Optional<Tool> tool = tools.find(call.name());
+        Availability availability = tool.map(ToolRegistry::available).orElse(Availability.ready());
         if (tool.isEmpty()) {
             execution = ToolResult.text("ERROR: 未知工具 " + call.name() + "，可用工具: " + availableNames());
+        } else if (!availability.available()) {
+            // 运行时没握手成功的能力不重试：把原因和可行的替代路径一次说清
+            execution = ToolResult.text("ERROR: 工具 " + call.name() + " 当前不可用：" + availability.reason()
+                    + "。不要重复调用；如实告诉用户该能力缺失，并改用其他可用工具或说明无法验证的部分。");
         } else {
             execution = executeTool(call, tool.get(), argsSummary, events, beforeStart);
         }
@@ -129,7 +141,8 @@ public final class ToolExecutor {
         }
         events.accept(new ToolCompleted(call.callId(), ToolSupport.oneLine(result, 120), latencyMs));
         // 结构化子结果里的历史检查不决定外层工具本身成败；外层状态只看正文与本工具自产检查。
-        return new Outcome(call.name(), result, changedPaths, checks, classify(result, singleton(nativeCheck)));
+        List<Attachment> images = succeeded(result) && !blocked(result) ? execution.images() : List.of();
+        return new Outcome(call.name(), result, changedPaths, checks, classify(result, singleton(nativeCheck)), images);
     }
 
     private static OutcomeStatus classify(String result, List<String> checks) {
@@ -232,7 +245,7 @@ public final class ToolExecutor {
     }
 
     private String availableNames() {
-        List<String> names = tools.tools().stream().map(Tool::name).toList();
+        List<String> names = tools.availableTools().stream().map(Tool::name).toList();
         return names.isEmpty() ? "(无)" : String.join(", ", names);
     }
 

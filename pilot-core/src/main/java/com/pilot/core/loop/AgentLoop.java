@@ -155,6 +155,8 @@ public final class AgentLoop {
     /** 动态后台状态即使暂时不变也可能稍后完成；给它比普通重复调用更宽的有界观察窗口。 */
     private static final int MIN_DYNAMIC_POLL_ABORT = 8;
     private static final int MAX_PARALLEL_READS = 8;
+    /** 历史里最多保留几条带图片的工具观察；更早的换成文字说明。 */
+    private static final int MAX_TOOL_IMAGE_MESSAGES = 3;
     /** 计划未完成时默认自动催模型继续的次数上限。 */
     private static final int DEFAULT_MAX_PLAN_CONTINUES = 3;
     /** 等待重试时拆成小段，取消能在这段时间内停下来。 */
@@ -361,6 +363,7 @@ public final class AgentLoop {
                 if (cancellation.cancelled()) {
                     return cancel(messages, events);
                 }
+                ContextCompactor.dropStaleToolImages(messages, MAX_TOOL_IMAGE_MESSAGES);
                 budget.apply(messages, contextLimit(), events);
 
                 if (applySteering(messages, events, pendingInput.get())) {
@@ -453,6 +456,7 @@ public final class AgentLoop {
                             outcome = toolExecutor.execute(reverification, events, startGuard);
                         }
                         recordToolOutcome(reverification, outcome, changedFiles, checks, messages);
+                        flushToolImages(messages);
                         if (hasInput(startGuard.correction)) {
                             applySteering(messages, events, startGuard.correction);
                         }
@@ -601,6 +605,7 @@ public final class AgentLoop {
                         }
                     }
                 }
+                flushToolImages(messages);
                 if (!batchInterrupted) {
                     if (!awaitingDynamicObservation) {
                         List<String> observedResults = stepOutcomes.stream()
@@ -696,6 +701,28 @@ public final class AgentLoop {
                         .orElse(false));
     }
 
+    /** 工具产出的图片；等本批 tool 结果全部落进历史后再统一作为一条 user 消息发出。 */
+    private final List<PendingToolImages> pendingToolImages = new ArrayList<>();
+
+    private record PendingToolImages(ToolCall call, List<Attachment> images) { }
+
+    /**
+     * tool 消息只能是文本，图片必须排在整批 tool 结果之后，否则会拆开
+     * assistant(tool_calls) 与它的 tool 结果，被模型协议拒绝。
+     */
+    private void flushToolImages(List<Message> messages) {
+        if (pendingToolImages.isEmpty()) return;
+        List<Attachment> images = new ArrayList<>();
+        List<String> sources = new ArrayList<>();
+        for (PendingToolImages pending : pendingToolImages) {
+            images.addAll(pending.images());
+            sources.add(pending.call().name() + "(" + pending.call().callId() + ")："
+                    + pending.images().stream().map(Attachment::name).collect(Collectors.joining(", ")));
+        }
+        pendingToolImages.clear();
+        messages.add(Message.toolImages("以下图片由工具产出，对应上面的调用结果——" + String.join("；", sources), images));
+    }
+
     private void recordToolOutcome(ToolCall call, ToolExecutor.Outcome outcome,
                                    Set<String> changedFiles, List<String> checks, List<Message> messages) {
         if (!outcome.result().startsWith("SKIPPED:")) {
@@ -707,6 +734,7 @@ public final class AgentLoop {
             if (!checks.contains(check)) checks.add(check);
         }
         messages.add(Message.tool(call.callId(), outcome.result()));
+        if (!outcome.images().isEmpty()) pendingToolImages.add(new PendingToolImages(call, outcome.images()));
         if (executionPolicy != null) executionPolicy.observed(call, outcome);
     }
 

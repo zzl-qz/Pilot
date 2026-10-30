@@ -5,6 +5,7 @@ import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.SubagentFinished;
 import com.pilot.core.event.SubagentStarted;
+import com.pilot.core.event.ToolStarted;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.ExecutionPolicy;
 import com.pilot.core.loop.Message;
@@ -120,6 +121,9 @@ public final class SpawnAgentTool implements Tool {
                         "task", Map.of(
                                 "type", "string",
                                 "description", "子任务的完整描述，包含目标、范围与期望产出"),
+                        "name", Map.of(
+                                "type", "string",
+                                "description", "子任务的简短名字（10 字以内，如「统计 Java 文件」），用于界面展示，可省略"),
                         "fork_turns", Map.of(
                                 "type", "string",
                                 "enum", List.of("none", "all"),
@@ -155,7 +159,7 @@ public final class SpawnAgentTool implements Tool {
         }
 
         String agentId = "agent_" + UUID.randomUUID().toString().substring(0, 8);
-        events.accept(new SubagentStarted(agentId, task));
+        events.accept(new SubagentStarted(agentId, task, args == null ? "" : text(args.get("name"))));
         ArtifactCollector artifacts = new ArtifactCollector();
         AtomicReference<RunCompleted> completion = new AtomicReference<>();
         try {
@@ -166,7 +170,7 @@ public final class SpawnAgentTool implements Tool {
             String prompt = PROMPTS.render("subagent/task", Map.of("task", task)).strip();
             // 子代理有独立累计器；子 run 的终止事件绝不能流入父 sink，否则会提前完成/中断父任务。
             AgentLoop.Result result = loop.run(prompt, context,
-                    event -> forwardChildEvent(event, completion));
+                    event -> forwardChildEvent(event, completion, agentId));
             if (result.failed()) {
                 String reason = "子代理未完成：" + result.failureCode();
                 String report = "ERROR: " + reason + resultManifest(artifacts, completion.get());
@@ -250,9 +254,14 @@ public final class SpawnAgentTool implements Tool {
                 List::of, 0, parent.contextLimit(), parent.completionChecks());
     }
 
-    private void forwardChildEvent(SessionEvent event, AtomicReference<RunCompleted> completion) {
+    private void forwardChildEvent(SessionEvent event, AtomicReference<RunCompleted> completion, String agentId) {
         if (event instanceof RunCompleted completed) {
             completion.set(completed);
+            return;
+        }
+        if (event instanceof ToolStarted started) {
+            // 标上归属，前端才能把这些操作收进对应的子智能体，而不是混在主智能体的操作里。
+            events.accept(started.forAgent(agentId));
             return;
         }
         // 子 run 的 assistant/run/plan/usage 事件没有 agentId，转发会污染父时间线和任务状态。

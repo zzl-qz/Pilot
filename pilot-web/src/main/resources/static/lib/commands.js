@@ -46,6 +46,8 @@ export const COMMAND_PALETTE_ACTIONS = [
   { label: '刷新变更', hint: '', keywords: ['变更', '刷新', 'diff'], action: 'refresh-changes' },
   { label: '复制会话 ID', hint: '', keywords: ['会话', '复制', 'id', 'session'], action: 'copy-session-id' },
   { label: '清空当前视图', hint: '', keywords: ['清空', '重置', '视图', 'reset'], action: 'reset-view' },
+  { label: '导出对话为 Markdown', hint: '', keywords: ['导出', '下载', '保存', '对话', 'export', 'markdown', 'md'], action: 'export-markdown' },
+  { label: '开启 / 关闭桌面通知', hint: '', keywords: ['通知', '提醒', '后台', 'notification', 'notify'], action: 'toggle-notify' },
   { label: '重新连接事件流', hint: '', keywords: ['重连', '事件', '连接', 'reconnect'], action: 'reconnect' }
 ];
 

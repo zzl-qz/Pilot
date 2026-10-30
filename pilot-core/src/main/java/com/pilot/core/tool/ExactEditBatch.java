@@ -92,7 +92,7 @@ final class ExactEditBatch {
         return value.replace("\r\n", "\n").replace('\r', '\n');
     }
 
-    private static String closestExcerpt(String content, String search) {
+    static String closestExcerpt(String content, String search) {
         String[] sourceLines = content.split("\\R", -1);
         String[] searchLines = search.split("\\R", -1);
         String needle = searchLines.length == 0 ? search : searchLines[0].strip();

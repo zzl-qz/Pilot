@@ -20,42 +20,33 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 在工作区内执行受限命令，用于构建与测试验证。
+ * 在工作区内执行受限命令，用于构建、测试、运行开发服务和查看仓库。
  *
  * <p>安全边界：
  * <ul>
  *   <li>只允许白名单可执行文件；仓库内标准构建 wrapper 可带 {@code ./} 前缀；</li>
- *   <li>不经过 shell，禁止 {@code & | ; < > ^ `$(} 等元字符，避免串联命令；</li>
+ *   <li>解析后不交给 shell 二次解释：单条命令直接以参数数组启动，{@code && || ; |} 串联时每个词都重新加单引号，
+ *       引号外的重定向、命令替换、子 shell、后台符一律拒绝；</li>
+ *   <li>每个命令段独立判定（{@link CommandPolicy}）：查看类命令只读放行，构建/测试/写文件按档位审批，
+ *       发布与全局安装直接拒绝；文件类工具的路径参数必须在工作区内；</li>
  *   <li>{@code git} 允许只读子命令与 {@code add}/{@code commit}，其余写操作需人工执行；</li>
  *   <li>强制超时、输出上限，并对疑似密钥的环境变量值做脱敏。</li>
  * </ul>
  *
- * <p>该工具不是只读工具，因此 {@code READ_ONLY} 模式一律拒绝、{@code ASK} 模式逐次审批。
+ * <p>权限按「本次调用」判定（{@link #readOnly(Map)}）：整条命令都是只读查看时，{@code READ_ONLY} 与
+ * {@code ASK} 档位直接放行；其余沿用「READ_ONLY 拒绝、ASK/AUTO_EDIT 逐次审批」。
  */
 public final class RunCommandTool implements Tool, ProducesCheck {
-    private static final Set<String> ALLOWED_EXECUTABLES = Set.of(
-            "mvn", "mvnw", "gradle", "gradlew", "git", "java", "javac",
-            "node", "npm", "npx", "pnpm", "python", "python3", "pytest", "dotnet", "go", "cargo", "rustc", "tsc");
-
-    private static final Set<String> GIT_READONLY = Set.of(
-            "status", "diff", "log", "show", "branch", "rev-parse", "ls-files", "describe", "blame", "remote");
-
-    /**
-     * 允许的写操作只有暂存与提交：两者都能用工作区快照或 {@code git revert} 恢复。
-     * push / reset / clean / checkout 等会改写远端或不可逆地丢文件，仍要求人工执行。
-     */
-    private static final Set<String> GIT_WRITE = Set.of("add", "commit");
-    private static final Set<String> INSPECTION_FLAGS = Set.of(
-            "-v", "--version", "-version", "version", "-h", "--help", "help");
-
-    private static final Pattern SHELL_META = Pattern.compile("[&|;<>^`\\n\\r]|\\$\\(");
     private static final Pattern SECRET_KEY = Pattern.compile("(?i)(key|token|secret|password|credential|passwd)");
     private static final Pattern EXIT_CODE = Pattern.compile("^退出码: (-?\\d+)", Pattern.MULTILINE);
 
+    private static final boolean WINDOWS =
+            System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
     private static final int MAX_TOKENS = 64;
     private static final int MAX_OUTPUT_CHARS = 12_000;
     private static final int HEAD_CHARS = 4_000;
@@ -97,9 +88,11 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     @Override
     public String description() {
         return PromptLibrary.standard().render("tools/run_command", Map.of(
-                "executables", String.join("/", ALLOWED_EXECUTABLES.stream().sorted().toList()),
-                "gitReadonly", String.join("/", GIT_READONLY.stream().sorted().toList()),
-                "gitWrite", String.join("/", GIT_WRITE.stream().sorted().toList()),
+                "inspection", String.join("/", CommandPolicy.INSPECTION.stream().sorted().toList()),
+                "development", String.join("/", CommandPolicy.DEVELOPMENT.stream().sorted().toList()),
+                "mutators", String.join("/", CommandPolicy.FILE_MUTATORS.stream().sorted().toList()),
+                "gitReadonly", String.join("/", CommandPolicy.GIT_READONLY.stream().sorted().toList()),
+                "gitWrite", String.join("/", CommandPolicy.GIT_WRITE.stream().sorted().toList()),
                 "backgroundHelp", commandTasks == null ? "本运行环境仅支持同步执行。" :
                         "background=true 会立即返回任务 ID，适合开发服务器或长测试。后台默认不设超时；显式 timeoutSeconds 最大 600。"
                                 + "用 command_status 查询实际状态、command_logs 增量读取日志、stop_command 停止进程树。"
@@ -127,6 +120,18 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     @Override
     public boolean readOnly() {
         return false;
+    }
+
+    /**
+     * 按本次命令判定：整条命令都是查看类（ls/cat/rg/git status/curl localhost …）才算只读。
+     * 无法通过校验的命令也放行到执行层——它只会返回具体错误，没有必要让用户为一条必然失败的命令点审批。
+     */
+    @Override
+    public boolean readOnly(Map<String, Object> args) {
+        Preparation preparation = prepare(args);
+        if (preparation.error() != null) return true;
+        // 后台任务会常驻进程，哪怕命令本身是查看类也要走审批。
+        return !preparation.prepared().background() && preparation.prepared().readOnly();
     }
 
     @Override
@@ -176,32 +181,13 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         if (raw == null) {
             return Preparation.error("ERROR: 缺少参数 command");
         }
-        if (SHELL_META.matcher(raw).find()) {
-            return Preparation.error("ERROR: 命令包含不允许的 shell 元字符（& | ; < > ^ ` $( 或换行），请一次只执行一条命令。");
+        CommandChain.Parsed parsed = CommandChain.parse(raw);
+        if (parsed.error() != null) {
+            return Preparation.error("ERROR: " + parsed.error());
         }
+        List<CommandChain.Segment> segments = new ArrayList<>(parsed.segments());
+        List<String> operators = new ArrayList<>(parsed.operators());
 
-        List<String> tokens = tokenize(raw);
-        if (tokens.isEmpty()) {
-            return Preparation.error("ERROR: 命令为空");
-        }
-        if (tokens.size() > MAX_TOKENS) {
-            return Preparation.error("ERROR: 参数过多（上限 " + MAX_TOKENS + " 个）");
-        }
-
-        String executable = tokens.get(0).toLowerCase(Locale.ROOT);
-        if (Set.of("./mvnw", ".\\mvnw.cmd").contains(executable)) executable = "mvnw";
-        if (Set.of("./gradlew", ".\\gradlew.bat").contains(executable)) executable = "gradlew";
-        if (!executable.equals(tokens.get(0).toLowerCase(Locale.ROOT))) {
-            tokens = new ArrayList<>(tokens);
-            tokens.set(0, executable);
-        }
-        if (executable.contains("/") || executable.contains("\\")) {
-            return Preparation.error("ERROR: 只接受白名单内的裸命令名或标准构建 wrapper，不接受路径: " + tokens.get(0));
-        }
-        if (!ALLOWED_EXECUTABLES.contains(executable)) {
-            return Preparation.error("ERROR: 命令不在白名单内: " + tokens.get(0)
-                    + "。可用: " + String.join(", ", ALLOWED_EXECUTABLES.stream().sorted().toList()));
-        }
         Path workdir = paths.root();
         Object requestedWorkdir = args == null ? null : args.get("workdir");
         if (requestedWorkdir != null) {
@@ -217,30 +203,41 @@ public final class RunCommandTool implements Tool, ProducesCheck {
                 return Preparation.error("ERROR: workdir 不是现有目录：" + directory);
             }
         }
-        AgentScope scope = paths.scope();
-        if (scope != null && !scope.allowsCommandArgs(tokens)) {
-            return Preparation.error("ERROR: " + scope.commandHint(raw));
-        }
-        String selectorProblem = packageDirectoryProblem(tokens, workdir);
-        if (selectorProblem != null) return Preparation.error("ERROR: " + selectorProblem);
-        boolean trackChanges = !(tokens.size() == 2 && INSPECTION_FLAGS.contains(tokens.get(1)));
-        if ("git".equals(executable)) {
-            String sub = tokens.size() > 1 ? tokens.get(1).toLowerCase(Locale.ROOT) : "";
-            if (GIT_READONLY.contains(sub)) {
-                trackChanges = false;
-            } else if (GIT_WRITE.contains(sub)) {
-                if (scope != null && !scope.writable()) {
-                    return Preparation.error("ERROR: 只读任务不允许 git " + sub + "，改动请通过沙箱写工具提交");
-                }
-                String problem = checkGitWrite(tokens, sub);
-                if (problem != null) {
-                    return Preparation.error("ERROR: " + problem);
-                }
-            } else {
-                return Preparation.error("ERROR: git 只允许只读子命令与 add/commit: "
-                        + String.join(", ", GIT_READONLY.stream().sorted().toList())
-                        + "，以及 add/commit；push/reset/clean/checkout 等仍需人工执行。");
+        // 模型习惯写 "cd sub && npm test"：开头的 cd 折算成工作目录，目录仍须在工作区内
+        while (!segments.isEmpty() && segments.getFirst().tokens().getFirst().equals("cd")) {
+            List<String> cd = segments.getFirst().tokens();
+            if (segments.size() == 1 || cd.size() != 2
+                    || !(operators.getFirst().equals("&&") || operators.getFirst().equals(";"))) {
+                return Preparation.error("ERROR: cd 只能写成命令开头的 \"cd 目录 && 命令\"；"
+                        + "目录不会保留到下一次调用，请改用 workdir 参数");
             }
+            try {
+                workdir = paths.resolve(workdir.resolve(cd.get(1)).toString());
+            } catch (RuntimeException e) {
+                return Preparation.error("ERROR: cd 目标无效：" + e.getMessage());
+            }
+            if (!Files.isDirectory(workdir)) {
+                return Preparation.error("ERROR: cd 目标不是现有目录：" + cd.get(1));
+            }
+            segments.removeFirst();
+            operators.removeFirst();
+        }
+
+        boolean chained = segments.size() > 1;
+        if (chained && WINDOWS) {
+            return Preparation.error("ERROR: Windows 上暂不支持用 && | ; 串联命令，请拆成多次调用");
+        }
+        List<List<String>> checked = new ArrayList<>(segments.size());
+        boolean readOnly = true;
+        boolean trackChanges = false;
+        for (CommandChain.Segment segment : segments) {
+            SegmentCheck check = checkSegment(segment.tokens(), workdir);
+            if (check.error() != null) {
+                return Preparation.error("ERROR: " + check.error());
+            }
+            checked.add(check.tokens());
+            readOnly &= check.readOnly();
+            trackChanges |= check.trackChanges();
         }
 
         Object backgroundArg = args == null ? null : args.get("background");
@@ -249,9 +246,101 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         boolean background = Boolean.TRUE.equals(backgroundArg);
         if (background && commandTasks == null) return Preparation.error("ERROR: 当前运行环境不支持后台命令");
-        List<String> command = withWrapper(tokens);
         long timeoutMs = timeout(args, background);
-        return new Preparation(new Prepared(command, tokens, workdir, background, timeoutMs, trackChanges), null);
+
+        if (!chained) {
+            List<String> tokens = checked.getFirst();
+            return new Preparation(new Prepared(withWrapper(tokens), tokens, workdir, background, timeoutMs,
+                    trackChanges, readOnly), null);
+        }
+        // 每段仍用解析出的绝对路径启动；shell 只负责连接符，看不到任何可展开的内容
+        StringBuilder resolved = new StringBuilder();
+        for (int i = 0; i < checked.size(); i++) {
+            if (i > 0) resolved.append(' ').append(operators.get(i - 1)).append(' ');
+            resolved.append(withWrapper(checked.get(i)).stream().map(CommandChain::quote)
+                    .collect(Collectors.joining(" ")));
+            if (segments.get(i).mergeStderr()) resolved.append(" 2>&1");
+        }
+        String display = String.join(" ", segmentsDisplay(checked, operators));
+        return new Preparation(new Prepared(List.of("/bin/sh", "-c", resolved.toString()), List.of(display), workdir,
+                background, timeoutMs, trackChanges, readOnly), null);
+    }
+
+    private static List<String> segmentsDisplay(List<List<String>> segments, List<String> operators) {
+        List<String> parts = new ArrayList<>();
+        for (int i = 0; i < segments.size(); i++) {
+            if (i > 0) parts.add(operators.get(i - 1));
+            parts.add(String.join(" ", segments.get(i)));
+        }
+        return parts;
+    }
+
+    private record SegmentCheck(List<String> tokens, boolean readOnly, boolean trackChanges, String error) {
+        static SegmentCheck error(String message) {
+            return new SegmentCheck(List.of(), false, false, message);
+        }
+    }
+
+    /** 单个命令段的全部静态校验；通过后返回规范化的参数与「只读 / 是否需要追踪变更」。 */
+    private SegmentCheck checkSegment(List<String> rawTokens, Path workdir) {
+        List<String> tokens = rawTokens;
+        if (tokens.size() > MAX_TOKENS) {
+            return SegmentCheck.error("参数过多（上限 " + MAX_TOKENS + " 个）");
+        }
+        String executable = tokens.get(0).toLowerCase(Locale.ROOT);
+        if (Set.of("./mvnw", ".\\mvnw.cmd").contains(executable)) executable = "mvnw";
+        if (Set.of("./gradlew", ".\\gradlew.bat").contains(executable)) executable = "gradlew";
+        if (!executable.equals(tokens.get(0).toLowerCase(Locale.ROOT))) {
+            tokens = new ArrayList<>(tokens);
+            tokens.set(0, executable);
+        }
+        if (executable.contains("/") || executable.contains("\\")) {
+            return SegmentCheck.error("只接受白名单内的裸命令名或标准构建 wrapper，不接受路径: " + tokens.get(0));
+        }
+        if (!CommandPolicy.knownExecutable(executable)) {
+            return SegmentCheck.error("命令不在白名单内: " + tokens.get(0)
+                    + "。可用: " + String.join(", ", CommandPolicy.allExecutables()));
+        }
+        if (!executable.equals(tokens.get(0))) {
+            tokens = new ArrayList<>(tokens);
+            tokens.set(0, executable);
+        }
+        String forbidden = CommandPolicy.forbidden(tokens);
+        if (forbidden != null) return SegmentCheck.error(forbidden);
+
+        AgentScope scope = paths.scope();
+        if (scope != null && !scope.allowsCommandArgs(tokens)) {
+            return SegmentCheck.error(scope.commandHint(String.join(" ", tokens)));
+        }
+        String selectorProblem = packageDirectoryProblem(tokens, workdir);
+        if (selectorProblem != null) return SegmentCheck.error(selectorProblem);
+        String argumentProblem = CommandPolicy.arguments(tokens, workdir, paths);
+        if (argumentProblem != null) return SegmentCheck.error(argumentProblem);
+
+        boolean trackChanges = !(tokens.size() == 2 && CommandPolicy.INSPECTION_FLAGS.contains(tokens.get(1)));
+        if (CommandPolicy.INSPECTION.contains(executable) || "curl".equals(executable)) trackChanges = false;
+        if ("git".equals(executable)) {
+            String sub = tokens.size() > 1 ? tokens.get(1).toLowerCase(Locale.ROOT) : "";
+            if (CommandPolicy.GIT_READONLY.contains(sub)) {
+                trackChanges = false;
+            } else if (CommandPolicy.GIT_WRITE.contains(sub)) {
+                if (scope != null && !scope.writable()) {
+                    return SegmentCheck.error("只读任务不允许 git " + sub + "，改动请通过沙箱写工具提交");
+                }
+                String problem = checkGitWrite(tokens, sub);
+                if (problem != null) {
+                    return SegmentCheck.error(problem);
+                }
+            } else {
+                return SegmentCheck.error("git 只允许只读子命令与 add/commit: "
+                        + String.join(", ", CommandPolicy.GIT_READONLY.stream().sorted().toList())
+                        + "，以及 add/commit；push/reset/clean/checkout 等仍需人工执行。");
+            }
+        }
+        if (CommandPolicy.FILE_MUTATORS.contains(executable) && scope != null && !scope.writable()) {
+            return SegmentCheck.error("只读任务不允许 " + executable + "，改动请通过沙箱写工具提交");
+        }
+        return new SegmentCheck(tokens, CommandPolicy.readOnly(tokens), trackChanges, null);
     }
 
     /** Package-manager directory selectors must stay inside the same workspace boundary as workdir. */
@@ -590,7 +679,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     }
 
     private record Prepared(List<String> command, List<String> displayTokens, Path workdir, boolean background,
-                            long timeoutMs, boolean trackChanges) { }
+                            long timeoutMs, boolean trackChanges, boolean readOnly) { }
 
     private record Preparation(Prepared prepared, String error) {
         private static Preparation error(String message) {

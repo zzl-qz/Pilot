@@ -11,12 +11,29 @@ import {
   filterQuickCommands
 } from './lib/commands.js';
 import { rankFileMatches } from './lib/mention.js';
+import { readDraft, writeDraft } from './lib/drafts.js';
+import { faviconHref, shouldNotify, tabTitle } from './lib/attention.js';
+import { buildTranscript, transcriptFileName } from './lib/transcript.js';
+import {
+  agentLine, agentMeta, agentTitle, manifestFacts, pickOwner, shortAgentId, splitSubagentResult,
+  summarizeAgents
+} from './lib/agents.js';
 import { mergeRunReports, sortChangeFiles, statusKind } from './lib/changes.js';
 import { applyRule, classifyRunFailure, planProgressLabel } from './lib/events.js';
 import { groupSessionsByProject, resolveFolders, samePath } from './lib/projects.js';
 import { commandStatusLabel, isCommandActive, mergeCommandLog } from './lib/command-tasks.js';
 import { estimateTextTokens, languageLabel, parseCallout, resolveFileReference } from './lib/content-format.js';
 import { resolveComposerAction } from './lib/composer-state.js';
+import { createComposerInput } from './lib/composer-input.js';
+import {
+  attachmentUrl,
+  checkIncomingFile,
+  fileBadge,
+  formatBytes,
+  isImageAttachment,
+  joinAttachmentMarkers,
+  splitAttachmentMarkers
+} from './lib/attachments.js';
 import {
   canLoadEarlier,
   HISTORY_AUTO_LOAD_THRESHOLD,
@@ -106,16 +123,24 @@ const el = {
   contextOutputTokens: document.querySelector('#context-output-tokens'),
   contextCompact: document.querySelector('#context-compact'),
   contextHint: document.querySelector('#context-hint'),
-  attachments: document.querySelector('#attachments'),
+  attachButton: document.querySelector('#attach-button'),
+  filePicker: document.querySelector('#file-picker'),
   inputFlow: document.querySelector('#input-flow'),
   workspaceChip: document.querySelector('#workspace-chip'),
   workspaceName: document.querySelector('#workspace-name'),
   sessionChip: document.querySelector('#session-chip'),
+  agentsChip: document.querySelector('#agents-chip'),
+  agentsDock: document.querySelector('#agents-dock'),
+  agentThread: document.querySelector('#agent-thread'),
+  agentThreadBack: document.querySelector('#agent-thread-back'),
+  agentThreadHead: document.querySelector('#agent-thread-head'),
+  agentThreadBody: document.querySelector('#agent-thread-body'),
   connection: document.querySelector('#connection'),
   connectionText: document.querySelector('#connection-text'),
   newSession: document.querySelector('#new-session'),
   sessionList: document.querySelector('#session-list'),
   sessionEmpty: document.querySelector('#session-empty'),
+  sessionSearch: document.querySelector('#session-search'),
   crumbTitle: document.querySelector('#crumb-title'),
   notice: document.querySelector('#notice'),
   noticeText: document.querySelector('#notice-text'),
@@ -217,7 +242,6 @@ const el = {
   timelineEmpty: document.querySelector('#timeline-empty'),
   composer: document.querySelector('#composer'),
   dropVeil: document.querySelector('#drop-veil'),
-  input: document.querySelector('#input'),
   send: document.querySelector('#send'),
   palette: document.querySelector('#palette'),
   paletteInput: document.querySelector('#palette-input'),
@@ -245,6 +269,31 @@ const el = {
   folderMenu: document.querySelector('#folder-menu')
 };
 
+/** 草稿里附件的原始数据（含 base64）；输入框里的芯片只记 id，发送时按芯片顺序取回。 */
+const draftAttachments = new Map();
+
+/** 输入框编辑器。草稿里有哪些附件由芯片决定，不另存数组。 */
+const composerInput = createComposerInput(el.inputFlow, {
+  onChange: () => onComposerInput(),
+  onRemove: (id) => draftAttachments.delete(id)
+});
+
+/**
+ * 旧代码按 textarea 的接口读写草稿；这里把 value / focus 转给编辑器，
+ * 避免再维护一个会和可视内容漂移的隐藏 textarea。
+ */
+el.input = {
+  get value() {
+    return composerInput.getText();
+  },
+  set value(text) {
+    composerInput.setText(text);
+  },
+  focus() {
+    composerInput.focusEnd();
+  }
+};
+
 const LAST_WORKSPACE_KEY = 'pilot.workspace';
 const LAST_SESSION_KEY = 'pilot.session';
 /** 超过这个秒数没有新事件，就提示「可能卡住」，让用户知道还能停止。 */
@@ -264,6 +313,8 @@ const state = {
   workspace: null,
   runId: null,
   lastRunId: null,
+  queueHeld: false, // 上一轮没完整收尾，服务端暂不消费排队消息
+  lastOutcome: '', // 最近一轮的结局（NEED_INPUT 等），决定要不要给常驻的「继续」入口
   runStartedAt: null,
   /** 当前/最后一轮 usage；模型没返回 usage 时 exact=false。 */
   runUsage: null,
@@ -313,12 +364,19 @@ const state = {
   /** 当前这一轮的外壳：操作组在前，结论文本在后 */
   turnShell: null,
   toolRows: new Map(),
+  /** 当前对话里出现过的子智能体：agentId → 界面句柄（见 createAgent）。 */
+  agents: new Map(),
+  agentsDockOpen: false,
+  agentsUiQueued: false,
+  threadAgentId: null,
   pendingInputs: [],
   inputHistory: [],
   inputHistoryIndex: -1,
   inputHistoryDraft: '',
   queue: [],
-  queueCollapsed: false,
+  /** 与 queue 一一对应：{ content, attachments }，attachments 里是图片（本地乐观项带 base64，服务端项带 url） */
+  queueEntries: [],
+  queueCollapsed: null, // null=跟随屏幕宽度（窄屏默认收起），点击后变成显式值
   task: null,
   taskDirty: false,
   taskBusy: false,
@@ -327,15 +385,18 @@ const state = {
   steering: false,
   pausing: false,
   cancelling: false,
-  /** 正在改队列里的某一条：{ index, previous }，previous 是进编辑前输入框里的草稿 */
+  /** 正在改队列里的某一条：{ index, stash, files }，stash 是进编辑前收起来的草稿节点，files 是正文里内联的文件块 */
   queueEdit: null,
-  attachments: [],
+  /** 当前草稿里的附件，顺序与输入框里的芯片一致（只读视图，增删请走输入框）。 */
+  get attachments() {
+    return composerInput.attachmentIds().map((id) => draftAttachments.get(id)).filter(Boolean);
+  },
   modelOptions: [],
   modelApiKeySet: false,
   modelApiKeyMasked: '',
   /** 外观偏好：light / dark / system，真正生效的是解析后的 light/dark */
   themeMode: 'dark',
-  accent: 'amber',
+  accent: 'sky',
   /** /api/settings 的最近一次响应，设置面板和关于页共用 */
   settingsData: null,
   settingsSection: 'appearance',
@@ -366,7 +427,9 @@ const COMMAND_ACTIONS = {
   'refresh-changes': () => selectTab('changes'),
   'copy-session-id': copySessionId,
   'reset-view': () => resetView(),
-  reconnect: () => reconnect()
+  reconnect: () => reconnect(),
+  'export-markdown': () => exportTranscript(),
+  'toggle-notify': () => toggleNotifications()
 };
 
 const commandView = {
@@ -385,6 +448,7 @@ const THEME_MODES = [
 ];
 
 const ACCENTS = [
+  { name: 'sky', label: '天蓝' },
   { name: 'blue', label: '靛蓝' },
   { name: 'violet', label: '紫罗兰' },
   { name: 'green', label: '松绿' },
@@ -398,6 +462,15 @@ const PERMISSION_TITLES = {
   AUTO_EDIT: '自动改文件',
   AUTO: '完全放行'
 };
+
+let sessionQuery = '';
+const SESSION_EMPTY_TEXT = '还没有项目，点上面「新任务」新建一个。';
+
+// 这几个模块级变量必须在 init() 之前声明，否则同步路径里用到会落进暂时性死区
+let noticeTimer = null;
+let draftTimer = null;
+let attentionKind = 'idle';
+const NOTIFY_KEY = 'pilot.notify';
 
 init();
 
@@ -448,7 +521,7 @@ function applyTheme(mode, options = {}) {
 }
 
 function applyAccent(name, options = {}) {
-  const next = ACCENTS.some((item) => item.name === name) ? name : 'amber';
+  const next = ACCENTS.some((item) => item.name === name) ? name : 'sky';
   state.accent = next;
   document.documentElement.dataset.accent = next;
   if (options.persist !== false) {
@@ -482,7 +555,7 @@ function bindThemeMedia() {
 
 function init() {
   applyTheme(readStored(THEME_KEY, 'dark'), { persist: false });
-  applyAccent(readStored(ACCENT_KEY, 'amber'), { persist: false });
+  applyAccent(readStored(ACCENT_KEY, 'sky'), { persist: false });
   bindThemeMedia();
   el.themeToggle.addEventListener('click', toggleTheme);
   el.settingsOpen.addEventListener('click', () => openSettings());
@@ -504,6 +577,18 @@ function init() {
   el.changeViewPreview.addEventListener('click', () => {
     if (state.changeSelected) {
       openPreview(state.changeSelected);
+    }
+  });
+  el.sessionSearch.addEventListener('input', () => {
+    sessionQuery = el.sessionSearch.value.trim().toLowerCase();
+    renderSessions();
+  });
+  el.sessionSearch.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && el.sessionSearch.value) {
+      event.stopPropagation();
+      el.sessionSearch.value = '';
+      sessionQuery = '';
+      renderSessions();
     }
   });
   el.newSession.addEventListener('click', beginNewConversation);
@@ -530,8 +615,16 @@ function init() {
   el.contextCompact.addEventListener('click', compactContext);
   el.modelSave.addEventListener('click', saveModel);
   el.modelClearKey.addEventListener('change', onModelClearKeyToggle);
-  el.input.addEventListener('paste', onPasteAttachments);
-  el.inputFlow?.addEventListener('paste', onPasteAttachments);
+  el.inputFlow.addEventListener('paste', onPasteAttachments);
+  el.attachButton.addEventListener('click', () => el.filePicker.click());
+  el.filePicker.addEventListener('change', () => {
+    const files = [...el.filePicker.files];
+    // 清空后同一个文件可以连续选两次
+    el.filePicker.value = '';
+    if (files.length) {
+      addDraftFiles(files);
+    }
+  });
   el.messages.addEventListener('scroll', onHistoryScroll, { passive: true });
   el.threadBottom.addEventListener('click', jumpToThreadBottom);
   bindFileDrop();
@@ -552,6 +645,9 @@ function init() {
   });
   el.workspaceChip.addEventListener('click', () => openPicker());
   el.sessionChip.addEventListener('click', copySessionId);
+  el.agentsChip.addEventListener('click', toggleAgentsDock);
+  el.agentsDock.addEventListener('click', onAgentsDockClick);
+  el.agentThreadBack.addEventListener('click', closeAgentThread);
   el.sidebarToggle.addEventListener('click', toggleSidebar);
   el.railToggle.addEventListener('click', toggleSidebar);
   el.treeRefresh.addEventListener('click', () => loadTree(''));
@@ -1618,10 +1714,7 @@ function renderAbout() {
 
 /* ---------- 附件 ---------- */
 
-const MAX_ATTACHMENTS = 5;
-const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
-
-/** 从系统拖文件进来。和粘贴走同一条附件队列，限制也一样：最多 5 个、单个 2 MB。 */
+/** 从系统拖文件进来。落在输入框上就插在落点，其余位置追加到末尾；限制与粘贴、选择文件一致。 */
 function bindFileDrop() {
   let depth = 0;
   document.addEventListener('dragenter', (event) => {
@@ -1660,20 +1753,33 @@ function bindFileDrop() {
     depth = 0;
     el.dropVeil.hidden = true;
     const files = filesFromDrop(event.dataTransfer);
-    if (files.length) {
-      const target = event.target instanceof Element ? event.target.closest('#input-flow') : null;
-      if (target) {
-        insertImagesAtCaret(files);
-      } else {
-        addAttachments(files);
-      }
+    if (!files.length) {
+      return;
     }
+    placeCaretAtDrop(event);
+    addDraftFiles(files);
   });
 }
 
 function dragHasFiles(event) {
   const types = event.dataTransfer && event.dataTransfer.types;
   return !!types && [...types].includes('Files');
+}
+
+/** 文件落在输入框文字里时，把光标挪到落点，附件就出现在手指松开的位置。 */
+function placeCaretAtDrop(event) {
+  if (!(event.target instanceof Element) || !event.target.closest('#input-flow')) {
+    return;
+  }
+  const range = document.caretRangeFromPoint ? document.caretRangeFromPoint(event.clientX, event.clientY) : null;
+  const inside = range && el.inputFlow.contains(range.startContainer)
+    && !(range.startContainer.parentElement && range.startContainer.parentElement.closest('.flow-chip'));
+  if (!inside) {
+    return;
+  }
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 /** 文件夹不展开。左侧工作区已经能打开目录，这里只收具体文件。 */
@@ -1705,7 +1811,7 @@ function filesFromDrop(dataTransfer) {
   return files;
 }
 
-/** 粘贴时优先取剪贴板里的文件（截图、复制的文件），纯文本粘贴保持原样。 */
+/** 粘贴时优先取剪贴板里的文件（截图、复制的文件）；纯文本由输入框自己按纯文本处理。 */
 function onPasteAttachments(event) {
   const data = event.clipboardData;
   if (!data) {
@@ -1726,153 +1832,52 @@ function onPasteAttachments(event) {
     return;
   }
   event.preventDefault();
-  if (event.target instanceof Element && event.target.closest('#input-flow')) {
-    insertImagesAtCaret(files);
-  } else {
-    addAttachments(files);
-  }
+  addDraftFiles(files);
 }
 
-async function insertImagesAtCaret(files) {
-  const images = [];
+/**
+ * 把文件加进草稿：读成 base64，在光标处插入芯片（图片是缩略图，其余是类型徽标）。
+ * 超限、空文件、重复文件各给一句明确的提示，不会半路静默丢掉。
+ */
+async function addDraftFiles(files) {
+  if (state.queueEdit) {
+    showNotice('正在编辑排队消息，附件保持不变；改完保存后再添加新文件。');
+    return;
+  }
+  const accepted = [];
+  const notices = [];
   for (const file of files) {
-    if (state.attachments.length >= MAX_ATTACHMENTS) break;
     const name = file.name || `paste-${Date.now()}.png`;
-    if (file.size > MAX_ATTACHMENT_BYTES) {
-      showNotice(`「${name}」超过 2 MB，已跳过。`);
+    const probe = { name, size: file.size };
+    const verdict = checkIncomingFile([...state.attachments, ...accepted], probe);
+    if (!verdict.ok) {
+      if (!verdict.silent) {
+        notices.push(verdict.reason);
+      }
       continue;
     }
-    const mimeType = file.type || guessMime(name);
-    if (!mimeType.startsWith('image/')) {
-      addAttachments([file]);
-      continue;
-    }
-    images.push({
-      id: `attachment-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      name, mimeType, dataBase64: await readAsDataUrl(file)
-    });
-  }
-  if (!images.length || !el.inputFlow) return;
-  const selection = window.getSelection();
-  const range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
-  const fragment = document.createDocumentFragment();
-  images.forEach((item) => {
-    state.attachments.push(item);
-    const node = document.createElement('span');
-    node.className = 'flow-image';
-    node.contentEditable = 'false';
-    node.dataset.attachmentId = item.id;
-    node.title = `${item.name}（点击删除）`;
-    node.addEventListener('click', () => {
-      const index = state.attachments.findIndex((attachment) => attachment.id === item.id);
-      if (index >= 0) state.attachments.splice(index, 1);
-      node.remove();
-      onComposerInput();
-      renderAttachments();
-    });
-    const preview = document.createElement('img');
-    preview.src = item.dataBase64;
-    preview.alt = item.name;
-    node.append(preview);
-    fragment.append(node, document.createTextNode(' '));
-  });
-  if (range && el.inputFlow.contains(range.commonAncestorContainer)) {
-    range.deleteContents();
-    range.insertNode(fragment);
-    range.collapse(false);
-  } else {
-    el.inputFlow.append(fragment);
-  }
-  el.inputFlow.focus();
-  onComposerInput();
-  renderAttachments();
-}
-
-function imagePositionsForContent() {
-  if (!el.inputFlow) return [];
-  let offset = 0;
-  const positions = [];
-  const walk = (node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      offset += node.nodeValue?.length || 0;
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-    if (node.classList.contains('flow-image')) {
-      positions.push(offset);
-      return;
-    }
-    if (node.tagName === 'BR') {
-      offset += 1;
-      return;
-    }
-    [...node.childNodes].forEach(walk);
-    if (/^(DIV|P)$/.test(node.tagName) && node.nextSibling) offset += 1;
-  };
-  [...el.inputFlow.childNodes].forEach(walk);
-  return positions;
-}
-
-async function addAttachments(files) {
-  for (const file of files) {
-    if (state.attachments.length >= MAX_ATTACHMENTS) {
-      showNotice(`一次最多附加 ${MAX_ATTACHMENTS} 个文件。`);
-      break;
-    }
-    const name = file.name || `paste-${Date.now()}.png`;
-    if (file.size > MAX_ATTACHMENT_BYTES) {
-      showNotice(`「${name}」超过 2 MB，已跳过。`);
-      continue;
-    }
-    const mimeType = file.type || guessMime(name);
     try {
-      state.attachments.push({
-      id: `attachment-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      name, mimeType, dataBase64: await readAsDataUrl(file)
-    });
+      accepted.push({
+        id: `attachment-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        name,
+        size: file.size,
+        mimeType: file.type || guessMime(name),
+        dataBase64: await readAsDataUrl(file)
+      });
     } catch (error) {
-      showNotice('读取附件失败：' + error.message);
+      notices.push(`读取「${name}」失败：${error.message}`);
     }
   }
-  renderAttachments();
-  syncComposer();
-}
-
-function setAttachments(list) {
-  state.attachments = (list || []).slice();
-  renderAttachments();
-  syncComposer();
-}
-
-function renderAttachments() {
-  el.attachments.replaceChildren();
-  el.attachments.hidden = state.attachments.length === 0;
-  state.attachments.forEach((item, index) => {
-    const chip = document.createElement('span');
-    chip.className = 'attachment-chip';
-    if (String(item.mimeType || '').startsWith('image/')) {
-      const preview = document.createElement('img');
-      preview.className = 'attachment-preview';
-      preview.src = item.dataBase64;
-      preview.alt = '';
-      chip.append(preview);
-    }
-    const name = document.createElement('span');
-    name.className = 'attachment-name';
-    name.textContent = item.name;
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'attachment-remove';
-    remove.title = '移除附件';
-    remove.textContent = '×';
-    remove.addEventListener('click', () => {
-      state.attachments.splice(index, 1);
-      renderAttachments();
-      syncComposer();
-    });
-    chip.append(name, remove);
-    el.attachments.append(chip);
-  });
+  if (notices.length) {
+    showNotice(notices.join(' '));
+  }
+  if (!accepted.length) {
+    return;
+  }
+  accepted.forEach((item) => draftAttachments.set(item.id, item));
+  composerInput.insertAttachments(accepted);
+  composerInput.focus();
+  onComposerInput();
 }
 
 function attachmentSummary(list) {
@@ -1934,6 +1939,7 @@ async function startSession(workspace) {
 
 
 async function activate(sessionId, title, workspace) {
+  flushDraft();
   closeStream();
   state.reconnectAttempt = 0;
   stopRunClock();
@@ -1953,6 +1959,8 @@ async function activate(sessionId, title, workspace) {
     state.historyScrollTimer = null;
   }
   state.runUsage = null;
+  state.lastOutcome = '';
+  state.queueHeld = false;
   state.liveOutputTokens = 0;
   state.contextStatus = null;
   resetCommandPanel();
@@ -1975,11 +1983,13 @@ async function activate(sessionId, title, workspace) {
   state.fileIndexSession = null;
   state.fileIndexFailedAt = 0;
   loadInputHistory(sessionId);
+  restoreDraft(sessionId);
   state.sessionTitle = title || '新任务';
   state.workspace = workspace || state.workspace;
   state.pendingInputs = [];
   localStorage.setItem(LAST_SESSION_KEY, sessionId);
   el.crumbTitle.textContent = state.sessionTitle;
+  setAttention('idle');
   el.sessionChip.textContent = sessionId.slice(0, 8);
   el.sessionChip.title = sessionId + '\n点击复制会话 ID';
   el.sessionChip.hidden = false;
@@ -2065,7 +2075,9 @@ function renderWorkspace() {
     return;
   }
   const project = currentProject();
-  el.workspaceName.textContent = project ? `${project.name} / ${folderName(state.workspace)}` : folderName(state.workspace);
+  // 项目名和文件夹名相同（默认就是这样）时只显示一次，避免 “pilot / pilot”
+  const folder = folderName(state.workspace);
+  el.workspaceName.textContent = project && project.name !== folder ? `${project.name} / ${folder}` : folder;
   el.workspaceName.title = (project
     ? `项目：${project.name}\n当前文件夹：${state.workspace}\n点击切换`
     : state.workspace + '\n点击选择其他目录');
@@ -2110,11 +2122,19 @@ function activateSession(sessionId) {
 /** 侧栏按项目分组渲染：项目头 + 空白对话（置顶）+ 历史对话 + 归档折叠区。 */
 function renderSessions() {
   el.sessionList.replaceChildren();
-  const groups = groupSessionsByProject(state.projects, state.sessions);
+  // 搜索只按对话标题过滤；搜索时没有命中的项目整组隐藏，命中的组强制展开
+  const visible = sessionQuery
+    ? state.sessions.filter((item) => String(item.title || '').toLowerCase().includes(sessionQuery))
+    : state.sessions;
+  let groups = groupSessionsByProject(state.projects, visible);
+  if (sessionQuery) {
+    groups = groups.filter((group) => group.blank || group.active.length || group.archived.length);
+  }
   for (const group of groups) {
     el.sessionList.append(projectGroupNode(group));
   }
   el.sessionEmpty.hidden = groups.length > 0;
+  el.sessionEmpty.textContent = sessionQuery ? '没有标题包含「' + sessionQuery + '」的对话。' : SESSION_EMPTY_TEXT;
   // 顶部数字是项目总数，对话数已经由每个项目自己的徽章表达
   el.sessionCount.textContent = String(state.projects.length);
 }
@@ -2124,7 +2144,7 @@ function projectGroupNode({ project, blank, active, archived }) {
   item.className = 'project-group';
 
   const key = project.id || UNGROUPED_KEY;
-  const collapsed = collapsedProjects.has(key);
+  const collapsed = !sessionQuery && collapsedProjects.has(key);
 
   const head = document.createElement('div');
   head.className = 'project-head';
@@ -2363,7 +2383,8 @@ function renderHistoryWindow(events, hasMore, { keepViewport = false } = {}) {
   state.threadFollowing = !keepViewport;
   state.pendingInputs = [];
   state.queue = [];
-  state.queueEdit = null;
+  state.queueEntries = [];
+  endQueueEdit();
   renderQueue();
   state.historyHasMore = hasMore;
   state.windowEvents = [];
@@ -2682,7 +2703,50 @@ const EVENT_HANDLERS = {
 };
 
 /** 一轮开始：接管运行状态，画用户消息，另起一个操作外壳。 */
+/**
+ * 新的一轮开始后，上一轮留在界面上的东西全部作废：
+ * 结果卡和活动记录里的「继续执行」按钮（改成一句“已继续执行”），以及过期的提示条。
+ */
+function retireStaleActions() {
+  for (const row of el.messages.querySelectorAll('.turn-card .turn-actions')) {
+    const stale = row.querySelectorAll('.is-continue');
+    if (!stale.length) {
+      continue;
+    }
+    stale.forEach((node) => node.remove());
+    if (!row.children.length) {
+      const done = document.createElement('p');
+      done.className = 'turn-resolved';
+      done.textContent = '已继续执行';
+      row.replaceWith(done);
+    }
+  }
+  el.timeline.querySelectorAll('.approval-actions.is-resume').forEach((box) => box.remove());
+}
+
+/** 运行已经结束（完成、失败、取消）时，还没处理的审批不可能再被处理，要连同审批条一起收掉。 */
+function settlePendingApprovals(note) {
+  if (!state.pendingApprovals.size) {
+    return;
+  }
+  for (const [callId, pending] of state.pendingApprovals) {
+    pending.row.setStatus('error', '✕');
+    pending.row.setMeta(note);
+    state.toolRows.delete(callId);
+  }
+  state.pendingApprovals.clear();
+  renderApprovalDock();
+}
+
 function onRunStarted(event) {
+  retireStaleActions();
+  state.lastOutcome = '';
+  state.queueHeld = false;
+  syncTaskControls();
+  if (!state.replaying) {
+    hideNotice();
+  }
+  signalAttention('running');
   state.running = true;
   state.cancelling = false;
   state.runId = event.runId || state.runId;
@@ -2706,16 +2770,16 @@ function onRunStarted(event) {
   syncComposer();
   clearThinking();
   const input = event.payload.input || '';
-  if (state.pendingInputs[0] === input) {
+  const attachments = event.payload.attachments || [];
+  if (state.pendingInputs.length && sameUserInput(state.pendingInputs[0], input)) {
     state.pendingInputs.shift();
     stampLastUserMessage(event.sequence, input);
-  } else if (state.queue[0] === input) {
+  } else if (state.queue.length && sameUserInput(state.queue[0], input)) {
     // 排队的下一句被自动开成新一轮，从队列拿掉，再画进对话
-    state.queue.shift();
-    renderQueue();
-    appendUserMessage(input, event.sequence);
+    shiftQueue();
+    appendUserMessage(input, event.sequence, { attachments });
   } else if (input) {
-    appendUserMessage(input, event.sequence);
+    appendUserMessage(input, event.sequence, { attachments });
   }
   // 新的一轮另起一组，避免操作和结论接在上一轮后面
   beginTurnShell();
@@ -2796,7 +2860,8 @@ function onToolStarted(event) {
     state.replyBreakReason = `继续核对「${toolLabel(event.payload.name)}」结果`;
   }
   clearThinking();
-  const row = addToolRow(event.payload.callId, event.payload.name, event.payload.summary);
+  const owner = pickOwner(event.payload.agentId, state.agents.values());
+  const row = addToolRow(event.payload.callId, event.payload.name, event.payload.summary, owner);
   row.setStatus('run', '…');
   state.toolRows.set(event.payload.callId, row);
   showThinking();
@@ -2804,7 +2869,7 @@ function onToolStarted(event) {
     kind: 'tool',
     tone: 'tool',
     status: '运行中',
-    title: `${event.payload.name} · ${event.payload.summary}`,
+    title: `${owner ? `@${shortAgentId(owner.id)} ` : ''}${event.payload.name} · ${event.payload.summary}`,
     detail: null
   });
 }
@@ -2830,11 +2895,14 @@ function onToolCompleted(event) {
 }
 
 function onApprovalRequired(event) {
+  signalAttention('attention', `需要你批准：${event.payload.name || '工具调用'}`);
   clearThinking();
-  const row = addToolRow(event.payload.callId, event.payload.name, event.payload.argsSummary);
+  const row = addToolRow(event.payload.callId, event.payload.name, event.payload.argsSummary,
+    pickOwner(event.payload.agentId, state.agents.values()));
   row.setStatus('wait', '!');
   state.toolRows.set(event.payload.callId, row);
   state.pendingApprovals.set(event.payload.callId, {
+    agent: pickOwner(event.payload.agentId, state.agents.values()),
     name: event.payload.name,
     args: event.payload.argsSummary,
     row
@@ -2852,6 +2920,9 @@ function onApprovalRequired(event) {
 }
 
 function onApprovalResolved(event) {
+  if (!state.replaying && state.pendingApprovals.size <= 1) {
+    setAttention('running');
+  }
   const approved = event.payload.decision === 'APPROVED';
   const pending = state.pendingApprovals.get(event.payload.callId);
   if (pending) {
@@ -2874,6 +2945,12 @@ function onApprovalResolved(event) {
 
 /** 一轮结束：「运行结束」≠「任务做完」，计划还有未完成项时如实标成未完成。 */
 function onRunCompleted(event) {
+  if (!state.replaying) {
+    hideNotice();
+  }
+  settlePendingApprovals('运行已结束');
+  settleAgents(event);
+  signalAttention('done', '本轮已完成');
   state.running = false;
   state.cancelling = false;
   state.modelRetryUntil = 0;
@@ -2892,6 +2969,14 @@ function onRunCompleted(event) {
   setComposerEnabled(true);
   clearThinking();
   finishReply(false);
+  state.queueHeld = planOpen;
+  // 任务状态要等服务端刷新才变；这几百毫秒里「继续当前任务」条不能闪一下。
+  // 没有验收条件、计划也做完时，这轮收尾就等于任务完成，先在本地按完成处理，刷新后以服务端为准。
+  if (!planOpen && state.task && !(state.task.acceptance || []).length) {
+    state.task = { ...state.task, status: 'COMPLETED' };
+  }
+  syncTaskControls();
+  renderQueue();
   const extras = [];
   if (event.payload.changedFiles && event.payload.changedFiles.length) {
     extras.push('变更：' + event.payload.changedFiles.join('、'));
@@ -2926,6 +3011,12 @@ function onRunCompleted(event) {
 }
 
 function onRunCancelled(event) {
+  if (!state.replaying) {
+    hideNotice();
+  }
+  settlePendingApprovals('运行已取消');
+  settleAgents(event);
+  signalAttention('idle');
   state.running = false;
   state.cancelling = false;
   state.modelRetryUntil = 0;
@@ -2938,6 +3029,8 @@ function onRunCancelled(event) {
   setComposerEnabled(true);
   clearThinking();
   finishReply(false);
+  state.queueHeld = true;
+  renderQueue();
   record(event, {
     kind: 'run',
     tone: 'warn',
@@ -2952,6 +3045,16 @@ function onRunCancelled(event) {
  * run.failed 是传输事件名，不等于都是真故障：取消、暂停、中断、目标阻塞、预算用尽分别展示。
  */
 function onRunFailed(event) {
+  if (!state.replaying) {
+    hideNotice();
+  }
+  settlePendingApprovals('运行已中止');
+  settleAgents(event);
+  {
+    const failure = classifyRunFailure(String(event.payload.code || ''));
+    signalAttention(failure.cancelled ? 'idle' : failure.resumable ? 'attention' : 'error',
+      event.payload.message || '本轮没有完成');
+  }
   state.modelRetryUntil = 0;
   const code = String(event.payload.code || '');
   // 启动失败时服务端保留消息；恢复已被 run.started 从界面移除的队列项。
@@ -2960,6 +3063,9 @@ function onRunFailed(event) {
   }
   const { cancelled, paused, interrupted, blocked, budgetLimited, outcome, resumable } = classifyRunFailure(code);
   const canContinueNow = resumable && code !== 'NEED_INPUT';
+  // 需要输入的结局要的是新信息，不是原样重跑：不给常驻的「继续当前任务」条
+  state.lastOutcome = code === 'NEED_INPUT' ? code : '';
+  syncTaskControls();
   const outcomeLabels = { WAITING: '等待外部事件', NEED_INPUT: '需要输入', UNVERIFIED: '结果未验证',
     NO_PROGRESS: '暂无有效进展', REVIEW_UNAVAILABLE: '核验暂不可用' };
   const outcomeLabel = outcomeLabels[outcome] || '';
@@ -2978,6 +3084,8 @@ function onRunFailed(event) {
   setComposerEnabled(true);
   clearThinking();
   finishReply(!resumable);
+  state.queueHeld = true;
+  renderQueue();
   record(event, {
     kind: 'run',
     tone: resumable || cancelled ? 'warn' : 'error',
@@ -3041,7 +3149,7 @@ function onRunRetrying(event) {
   if (!state.replaying) {
     showNotice(`模型暂时连不上，${seconds} 秒后再试（第 ${attempt} 次）。可以点停止。`);
   }
-  setRunState('warn', `等待重试 · ${seconds}s`);
+  setRunState('retry', `等待重试 · ${seconds}s`);
   record(event, {
     kind: 'run',
     tone: 'warn',
@@ -3052,6 +3160,9 @@ function onRunRetrying(event) {
 }
 
 function onRunContinued(event) {
+  retireStaleActions();
+  state.lastOutcome = '';
+  syncTaskControls();
   const wasRunning = state.running;
   const separatedReply = collapseReplyAsProgress(event.payload.reason);
   state.running = true;
@@ -3083,11 +3194,29 @@ function onRunContinued(event) {
 }
 
 function onSubagentStarted(event) {
-  appendSubagent(event.payload);
+  const agent = createAgent(event);
+  if (!agent) {
+    return;
+  }
+  record(event, {
+    kind: 'tool',
+    tone: 'run',
+    status: '子智能体',
+    title: `${agent.label} @${shortAgentId(agent.id)} 开始`,
+    detail: event.payload.task || ''
+  });
 }
 
 function onSubagentFinished(event) {
-  finishSubagent(event.payload);
+  const agent = finishAgent(event);
+  const ok = event.payload.ok !== false;
+  record(event, {
+    kind: 'tool',
+    tone: ok ? 'ok' : 'error',
+    status: ok ? '子智能体完成' : '子智能体失败',
+    title: `${agent ? agent.label : '子智能体'} @${shortAgentId(event.payload.agentId)}`,
+    detail: preview(event.payload.summary || '', 160)
+  });
 }
 
 function onTaskUpdated(event) {
@@ -3171,7 +3300,7 @@ function appendTurnResult({ tone, title, detail, openSteps, changedFiles, runIds
   head.className = 'turn-head';
   const mark = document.createElement('span');
   mark.className = 'turn-mark';
-  mark.textContent = tone === 'ok' ? '✓' : tone === 'warn' ? '!' : '×';
+  mark.setAttribute('aria-hidden', 'true'); // 图标由样式绘制
   const label = document.createElement('strong');
   label.textContent = title || '本轮结束';
   head.append(mark, label);
@@ -3208,7 +3337,8 @@ function appendTurnResult({ tone, title, detail, openSteps, changedFiles, runIds
 
   const actions = [];
   if (resumable) {
-    actions.push(button('继续执行', 'btn btn-primary', () => continueRun(card)));
+    // 输入框上方有常驻的「继续」条时，这里的按钮由样式藏起来，避免同一件事出现两个入口
+    actions.push(button('继续执行', 'btn btn-primary is-continue', () => continueRun(card)));
   }
   if (actionLabel && typeof onAction === 'function') {
     actions.push(button(actionLabel, 'btn btn-sm', onAction));
@@ -3402,36 +3532,475 @@ function fmtChars(value) {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k 字符` : `${n} 字符`;
 }
 
-/** 子代理：一条折叠卡片，展开可看它回传的结论。 */
-function appendSubagent(payload) {
-  const card = document.createElement('details');
-  card.className = 'subagent-card';
-  card.dataset.agentId = payload.agentId || '';
+/* ---------- 多智能体：一眼看出有没有分工，点开能看到每个子智能体各自做了什么 ---------- */
 
-  const head = document.createElement('summary');
-  head.className = 'subagent-head';
-  head.textContent = `子任务：${payload.task || ''}`;
+const AGENT_MARK = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="3.4" r="1.9"/><circle cx="3.4" cy="12.4" r="1.9"/><circle cx="12.6" cy="12.4" r="1.9"/><path d="M8 5.3v2.4M8 7.7L4.4 10.6M8 7.7l3.6 2.9" fill="none"/></svg>';
 
-  const body = document.createElement('pre');
-  body.className = 'subagent-body';
-  body.textContent = '执行中…';
+/** 这一轮的「多智能体」分组：挂在操作列表前面，里面每个子智能体一张可展开的卡片。 */
+function ensureAgentGroup(turn) {
+  if (turn.agentGroup && turn.agentGroup.root.isConnected) {
+    return turn.agentGroup;
+  }
+  const root = document.createElement('section');
+  root.className = 'agent-group';
 
-  card.append(head, body);
-  el.messages.append(card);
-  hideEmptyState();
+  const head = document.createElement('div');
+  head.className = 'agent-group-head';
+  const mark = document.createElement('span');
+  mark.className = 'agent-group-mark';
+  mark.innerHTML = AGENT_MARK;
+  const title = document.createElement('span');
+  title.className = 'agent-group-title';
+  title.textContent = '多智能体';
+  const sum = document.createElement('span');
+  sum.className = 'agent-group-sum';
+  head.append(mark, title, sum);
+
+  const list = document.createElement('div');
+  list.className = 'agent-list';
+  root.append(head, list);
+  turn.shell.insertBefore(root, turn.tools);
+
+  turn.agentGroup = { root, sum, list, agents: [] };
+  return turn.agentGroup;
 }
 
-function finishSubagent(payload) {
-  const id = payload.agentId || '';
-  const card = el.messages.querySelector(`.subagent-card[data-agent-id="${CSS.escape(id)}"]`);
-  if (!card) {
+function createAgent(event) {
+  const payload = event.payload || {};
+  const id = String(payload.agentId || '');
+  if (!id) {
+    return null;
+  }
+  if (state.agents.has(id)) {
+    return state.agents.get(id);
+  }
+  const turn = ensureTurnShell();
+  const group = ensureAgentGroup(turn);
+  const label = `子智能体 ${group.agents.length + 1}`;
+  const task = String(payload.task || '');
+
+  const card = document.createElement('details');
+  card.className = 'tool-group agent-card is-running';
+  card.dataset.agentId = id;
+
+  const head = document.createElement('summary');
+  head.className = 'tool-group-head agent-head';
+  const chevron = document.createElement('span');
+  chevron.className = 'tool-group-chevron';
+  chevron.setAttribute('aria-hidden', 'true');
+  const dot = document.createElement('span');
+  dot.className = 'agent-dot';
+  dot.setAttribute('aria-hidden', 'true');
+  const title = String(payload.name || '').trim() || agentTitle(task);
+  const name = document.createElement('span');
+  name.className = 'tool-group-label agent-name';
+  name.textContent = title;
+  name.title = task;
+  const ident = document.createElement('span');
+  ident.className = 'agent-ident';
+  ident.textContent = '@' + shortAgentId(id);
+  const strip = document.createElement('span');
+  strip.className = 'run-strip';
+  strip.setAttribute('aria-hidden', 'true');
+  const meta = document.createElement('span');
+  meta.className = 'agent-meta';
+  head.append(chevron, dot, name, ident, strip, meta);
+
+  const body = document.createElement('div');
+  body.className = 'agent-body';
+  const taskFull = document.createElement('p');
+  taskFull.className = 'agent-brief';
+  taskFull.textContent = task;
+  const list = document.createElement('div');
+  list.className = 'tool-group-list agent-tools';
+  const result = document.createElement('div');
+  result.className = 'agent-result';
+  result.hidden = true;
+  const resultLabel = document.createElement('span');
+  resultLabel.className = 'agent-result-label';
+  const resultText = document.createElement('pre');
+  const resultFacts = document.createElement('p');
+  resultFacts.className = 'agent-result-facts';
+  resultFacts.hidden = true;
+  result.append(resultLabel, resultText, resultFacts);
+  const actions = document.createElement('div');
+  actions.className = 'agent-actions';
+  const openThread = document.createElement('button');
+  openThread.type = 'button';
+  openThread.className = 'agent-open';
+  openThread.textContent = '在线程视图中打开';
+  openThread.addEventListener('click', () => openAgentThread(id));
+  actions.append(openThread);
+  body.append(taskFull, list, result, actions);
+
+  card.append(head, body);
+  group.list.append(card);
+
+  const agent = {
+    id, label, title, task, group, card, list, strip, meta, result, resultLabel, resultText, resultFacts,
+    status: 'running',
+    log: [],
+    latest: '',
+    conclusion: '',
+    tools: 0,
+    running: 0,
+    startedAt: eventTimestamp(event),
+    finishedAt: null,
+    stripQueued: false
+  };
+  group.agents.push(agent);
+  state.agents.set(id, agent);
+  refreshAgent(agent);
+  hideEmptyState();
+  if (!state.replaying) {
+    ensureAgentClock();
+    scrollThread();
+  }
+  return agent;
+}
+
+function finishAgent(event) {
+  const payload = event.payload || {};
+  const agent = state.agents.get(String(payload.agentId || ''));
+  if (!agent) {
+    return null;
+  }
+  const ok = payload.ok !== false;
+  agent.status = ok ? 'done' : 'failed';
+  agent.finishedAt = eventTimestamp(event);
+  agent.resultLabel.textContent = ok ? '结论' : '失败原因';
+  const parsed = splitSubagentResult(payload.summary);
+  agent.conclusion = parsed.text;
+  agent.resultText.textContent = parsed.text || (ok ? '完成，没有返回文字结论' : '子智能体失败');
+  agent.resultFacts.textContent = manifestFacts(parsed).join(' · ');
+  agent.resultFacts.title = [...parsed.changed, ...parsed.checks].join('\n');
+  agent.resultFacts.hidden = !agent.resultFacts.textContent;
+  agent.result.hidden = false;
+  if (!ok) {
+    agent.card.open = true;
+  }
+  refreshAgent(agent);
+  return agent;
+}
+
+/** 运行结束时还没收到「完成」的子智能体（取消、中断、失败）：如实标成已中止，别一直转圈。 */
+function settleAgents(event) {
+  for (const agent of state.agents.values()) {
+    if (agent.status !== 'running') {
+      continue;
+    }
+    agent.status = 'stopped';
+    agent.finishedAt = eventTimestamp(event);
+    refreshAgent(agent);
+  }
+}
+
+function refreshAgent(agent) {
+  const ms = agent.status === 'running'
+    ? Date.now() - agent.startedAt
+    : agent.finishedAt == null ? null : agent.finishedAt - agent.startedAt;
+  agent.card.classList.toggle('is-running', agent.status === 'running');
+  agent.card.classList.toggle('is-done', agent.status === 'done');
+  agent.card.classList.toggle('is-failed', agent.status === 'failed');
+  agent.card.classList.toggle('is-stopped', agent.status === 'stopped');
+  agent.meta.textContent = agent.status === 'stopped'
+    ? '已中止'
+    : agentMeta({ tools: agent.tools, ms, status: agent.status });
+  agent.group.sum.textContent = summarizeAgents(agent.group.agents).text;
+  renderRunStrip(agent);
+  syncAgentsChip();
+  queueAgentsUi();
+}
+
+/** 子智能体运行中，卡片上的耗时每秒走一次；全部结束就停表。 */
+function ensureAgentClock() {
+  if (state.agentTimer) {
     return;
   }
-  card.classList.toggle('is-failed', payload.ok === false);
-  const body = card.querySelector('.subagent-body');
-  if (body) {
-    body.textContent = payload.summary || (payload.ok === false ? '子代理失败' : '完成');
+  state.agentTimer = setInterval(() => {
+    const running = [...state.agents.values()].filter((agent) => agent.status === 'running');
+    if (!running.length || !state.running) {
+      clearInterval(state.agentTimer);
+      state.agentTimer = null;
+      return;
+    }
+    running.forEach(refreshAgent);
+  }, 1000);
+}
+
+/** 顶栏的「多智能体」徽标：这个对话用过子智能体才出现，运行中带脉动圆点。 */
+function syncAgentsChip() {
+  const summary = summarizeAgents(state.agents.values());
+  el.agentsChip.hidden = summary.total === 0;
+  el.agentsChip.classList.toggle('is-running', summary.running > 0);
+  el.agentsChip.classList.toggle('has-failed', summary.failed > 0);
+  el.agentsChip.textContent = summary.running
+    ? `多智能体 · ${summary.running}/${summary.total} 运行中`
+    : `多智能体 · ${summary.total}`;
+}
+
+/* ---------- 输入框上方的子智能体面板 + 子智能体线程视图（对标 Codex 的 Subagents 面板） ---------- */
+
+/** 回放历史或并行运行时会连续触发很多次，合并到下一帧只画一次。 */
+function queueAgentsUi() {
+  if (state.agentsUiQueued) {
+    return;
   }
+  state.agentsUiQueued = true;
+  requestAnimationFrame(() => {
+    state.agentsUiQueued = false;
+    renderAgentsDock();
+    if (state.threadAgentId) {
+      renderAgentThread();
+    }
+  });
+}
+
+function toggleAgentsDock() {
+  state.agentsDockOpen = !state.agentsDockOpen;
+  renderAgentsDock();
+}
+
+function agentRowTime(agent) {
+  const ms = agent.status === 'running'
+    ? Date.now() - agent.startedAt
+    : agent.finishedAt == null ? null : agent.finishedAt - agent.startedAt;
+  return agentMeta({ tools: 0, ms, status: agent.status }).replace(/^(启动中|无操作)$/, '');
+}
+
+function agentDot(agent) {
+  const dot = document.createElement('span');
+  dot.className = `agent-dot is-${agent.status}`;
+  dot.setAttribute('aria-hidden', 'true');
+  return dot;
+}
+
+/**
+ * 输入框上方的面板：有子智能体在跑就自动出现，折叠成一行；展开后分「运行中 / 已完成」两组，
+ * 每行一个子智能体，点一下打开它的线程。没有在跑时，只有点顶栏徽标才会显示。
+ */
+function renderAgentsDock() {
+  const all = [...state.agents.values()];
+  const summary = summarizeAgents(all);
+  const visible = summary.total > 0 && (summary.running > 0 || state.agentsDockOpen);
+  el.agentsDock.hidden = !visible;
+  if (!visible) {
+    el.agentsDock.replaceChildren();
+    return;
+  }
+
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'agents-dock-head';
+  head.dataset.action = 'toggle';
+  head.setAttribute('aria-expanded', String(state.agentsDockOpen));
+  const chevron = document.createElement('span');
+  chevron.className = 'agents-dock-chevron';
+  chevron.setAttribute('aria-hidden', 'true');
+  const title = document.createElement('span');
+  title.className = 'agents-dock-title';
+  title.textContent = summary.running ? `${summary.running} 个子智能体运行中` : '子智能体';
+  const sub = document.createElement('span');
+  sub.className = 'agents-dock-sub';
+  sub.textContent = summary.running ? `共 ${summary.total} 个 · ${summary.total - summary.running} 已结束` : summary.text;
+  head.append(chevron, title, sub);
+  el.agentsDock.replaceChildren(head);
+  el.agentsDock.classList.toggle('is-running', summary.running > 0);
+
+  if (!state.agentsDockOpen) {
+    return;
+  }
+  const groups = [
+    ['运行中', all.filter((agent) => agent.status === 'running')],
+    ['已完成', all.filter((agent) => agent.status !== 'running')]
+  ];
+  const body = document.createElement('div');
+  body.className = 'agents-dock-body';
+  for (const [label, members] of groups) {
+    if (!members.length) {
+      continue;
+    }
+    const section = document.createElement('p');
+    section.className = 'agents-dock-section';
+    section.textContent = `${label} · ${members.length}`;
+    body.append(section);
+    for (const agent of members) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = `agents-row is-${agent.status}`;
+      row.dataset.action = 'open';
+      row.dataset.agentId = agent.id;
+      const name = document.createElement('span');
+      name.className = 'agents-row-name';
+      name.textContent = agent.title;
+      const line = document.createElement('span');
+      line.className = 'agents-row-line';
+      line.textContent = agentLine(agent);
+      const time = document.createElement('span');
+      time.className = 'agents-row-time';
+      time.textContent = agentRowTime(agent);
+      const text = document.createElement('span');
+      text.className = 'agents-row-text';
+      text.append(name, line);
+      row.append(agentDot(agent), text, time);
+      body.append(row);
+    }
+  }
+  el.agentsDock.append(body);
+}
+
+function onAgentsDockClick(event) {
+  const target = event.target.closest('[data-action]');
+  if (!target) {
+    return;
+  }
+  if (target.dataset.action === 'toggle') {
+    toggleAgentsDock();
+  } else if (target.dataset.action === 'open') {
+    openAgentThread(target.dataset.agentId);
+  }
+}
+
+/** 打开某个子智能体的线程：盖在对话区上，只读，能看到它的任务、每一步操作和结论。 */
+function openAgentThread(id) {
+  const agent = state.agents.get(String(id || ''));
+  if (!agent) {
+    return;
+  }
+  state.threadAgentId = agent.id;
+  el.agentThread.hidden = false;
+  el.messages.closest('.thread-scroll-region')?.classList.add('has-agent-thread');
+  renderAgentThread();
+  el.agentThreadBody.scrollTop = 0;
+}
+
+function closeAgentThread() {
+  state.threadAgentId = null;
+  el.agentThread.hidden = true;
+  el.messages.closest('.thread-scroll-region')?.classList.remove('has-agent-thread');
+}
+
+function renderAgentThread() {
+  const agent = state.agents.get(state.threadAgentId || '');
+  if (!agent) {
+    closeAgentThread();
+    return;
+  }
+  const status = { running: '运行中', done: '已完成', failed: '失败', stopped: '已中止' }[agent.status] || agent.status;
+  const ms = agent.status === 'running'
+    ? Date.now() - agent.startedAt
+    : agent.finishedAt == null ? null : agent.finishedAt - agent.startedAt;
+
+  const title = document.createElement('div');
+  title.className = 'agent-thread-title';
+  const name = document.createElement('strong');
+  name.textContent = agent.title;
+  const ident = document.createElement('span');
+  ident.className = 'agent-ident';
+  ident.textContent = '@' + shortAgentId(agent.id);
+  const badge = document.createElement('span');
+  badge.className = `agent-thread-status is-${agent.status}`;
+  badge.append(agentDot(agent), document.createTextNode(status));
+  const time = document.createElement('span');
+  time.className = 'agent-thread-time';
+  time.textContent = agentMeta({ tools: agent.tools, ms, status: agent.status });
+  title.append(name, ident, badge, time);
+  el.agentThreadHead.replaceChildren(title);
+
+  const body = document.createDocumentFragment();
+  const note = document.createElement('p');
+  note.className = 'agent-thread-note';
+  note.textContent = '只读线程：想调整它的做法，请在主对话里告诉 Pilot。';
+  const taskLabel = document.createElement('p');
+  taskLabel.className = 'agent-thread-label';
+  taskLabel.textContent = '派给它的任务';
+  const task = document.createElement('p');
+  task.className = 'agent-thread-task';
+  task.textContent = agent.task;
+  body.append(note, taskLabel, task);
+
+  const opsLabel = document.createElement('p');
+  opsLabel.className = 'agent-thread-label';
+  opsLabel.textContent = agent.log.length ? `操作 · ${agent.log.length}` : '操作';
+  body.append(opsLabel);
+  if (!agent.log.length) {
+    const empty = document.createElement('p');
+    empty.className = 'agent-thread-empty';
+    empty.textContent = agent.status === 'running' ? '还没有操作，正在思考…' : '没有调用任何工具。';
+    body.append(empty);
+  }
+  const list = document.createElement('div');
+  list.className = 'tool-group agent-thread-ops';
+  for (const entry of agent.log) {
+    const row = document.createElement('div');
+    row.className = 'tool-row' + (entry.open ? ' is-open' : '');
+    const button = document.createElement('button');
+    button.type = 'button';
+    const mark = document.createElement('span');
+    mark.className = 'tool-status is-' + entry.status;
+    mark.textContent = entry.status === 'ok' ? '✓' : entry.status === 'error' ? '✕' : entry.status === 'wait' ? '!' : '…';
+    mark.title = TOOL_STATUS_TITLES[entry.status] || '';
+    const icon = document.createElement('span');
+    icon.className = 'tool-icon';
+    icon.textContent = TOOL_ICONS[entry.name] || '·';
+    const nm = document.createElement('span');
+    nm.className = 'tool-name';
+    nm.textContent = entry.name;
+    const args = document.createElement('span');
+    args.className = 'tool-args';
+    args.textContent = entry.args;
+    const meta = document.createElement('span');
+    meta.className = 'tool-meta';
+    meta.textContent = entry.meta;
+    button.append(mark, icon, nm, args, meta);
+    button.addEventListener('click', () => {
+      entry.open = !entry.open;
+      row.classList.toggle('is-open', entry.open);
+    });
+    const detail = document.createElement('div');
+    detail.className = 'tool-body';
+    const pre = document.createElement('pre');
+    pre.textContent = entry.body;
+    detail.append(pre);
+    row.append(button, detail);
+    list.append(row);
+  }
+  body.append(list);
+
+  const resultLabel = document.createElement('p');
+  resultLabel.className = 'agent-thread-label';
+  resultLabel.textContent = agent.status === 'failed' ? '失败原因' : '结论';
+  body.append(resultLabel);
+  const result = document.createElement('pre');
+  result.className = 'agent-thread-result';
+  result.textContent = agent.status === 'running'
+    ? '还在运行，结论会在它完成后出现在这里。'
+    : agent.resultText.textContent || (agent.status === 'stopped' ? '运行结束时它还没有给出结论。' : '');
+  body.append(result);
+  if (agent.resultFacts.textContent) {
+    const facts = document.createElement('p');
+    facts.className = 'agent-result-facts';
+    facts.textContent = agent.resultFacts.textContent;
+    body.append(facts);
+  }
+  const scroll = el.agentThreadBody.scrollTop;
+  el.agentThreadBody.replaceChildren(body);
+  el.agentThreadBody.scrollTop = scroll;
+}
+
+/** 跳到子智能体卡片并展开；不指定就跳到最近一个（优先正在运行的）。 */
+function focusAgent(id) {
+  const all = [...state.agents.values()];
+  const agent = id
+    ? state.agents.get(id)
+    : all.filter((item) => item.status === 'running').pop() || all.pop();
+  if (!agent || !agent.card.isConnected) {
+    return;
+  }
+  agent.card.open = true;
+  agent.card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  agent.card.classList.add('is-flash');
+  setTimeout(() => agent.card.classList.remove('is-flash'), 1400);
 }
 
 /** 多智能体任务看板：同一 taskId 就地更新状态，不重复插卡片。 */
@@ -3507,6 +4076,7 @@ function renderTaskBoard(payload) {
     status.className = 'multi-status';
     const agent = document.createElement('span');
     agent.className = 'multi-agent';
+    agent.addEventListener('click', () => focusAgent(agent.dataset.agentId || null));
     const detail = document.createElement('span');
     detail.className = 'multi-detail';
     row.append(name, status, agent, detail);
@@ -3520,7 +4090,10 @@ function renderTaskBoard(payload) {
   row.classList.toggle('is-warn', status === 'dissent' || status === 'blocked' || status === 'cancelled');
   row.querySelector('.multi-name').textContent = `${taskId} ${payload.title || ''}`.trim();
   row.querySelector('.multi-status').textContent = TASK_STATUS_LABEL[status] || status;
-  row.querySelector('.multi-agent').textContent = payload.agentId ? `@${payload.agentId}` : '';
+  const agentTag = row.querySelector('.multi-agent');
+  agentTag.textContent = payload.agentId ? `@${payload.agentId}` : '';
+  agentTag.dataset.agentId = payload.agentId || '';
+  agentTag.classList.toggle('is-link', Boolean(payload.agentId));
   row.querySelector('.multi-detail').textContent = payload.detail || '';
 
   const rows = Array.from(list.children);
@@ -3863,7 +4436,11 @@ function ensureTurnShell() {
   const count = document.createElement('span');
   count.className = 'tool-group-count';
 
-  summary.append(chevron, label, count);
+  const strip = document.createElement('span');
+  strip.className = 'run-strip';
+  strip.setAttribute('aria-hidden', 'true');
+
+  summary.append(chevron, label, count, strip);
 
   const list = document.createElement('div');
   list.className = 'tool-group-list';
@@ -3901,6 +4478,7 @@ function ensureTurnShell() {
     list,
     label,
     count,
+    strip,
     replySlot,
     stats,
     statNodes,
@@ -3934,7 +4512,7 @@ function renderTurnStats(turn = state.turnShell) {
   turn.statNote.textContent = !reported
     ? '旧任务未记录 Token'
     : exact
-      ? '主任务 · 模型 usage'
+      ? '主任务 · 模型实测用量'
       : '主任务 · Token 为估算';
 }
 
@@ -3960,7 +4538,12 @@ const TOOL_LABELS = {
   search_text: '搜索',
   edit_file: '编辑',
   create_file: '新建',
+  glob_files: '找文件',
+  apply_patch: '补丁',
   run_command: '命令',
+  browser: '浏览器',
+  mcp_tools: 'MCP',
+  mcp_call: 'MCP',
   update_plan: '计划'
 };
 
@@ -3982,6 +4565,37 @@ function refreshToolGroup(turn) {
   }
   turn.label.textContent = turn.running > 0 ? `正在执行 ${turn.total} 项` : `${turn.total} 项操作`;
   turn.count.textContent = bits.join(' · ');
+  renderRunStrip(turn);
+}
+
+/**
+ * 运行条：这一轮每一步操作画成一格，按发生顺序排开。
+ * 灰=完成，红=失败，琥珀=等待审批，天蓝（脉动）=正在执行，一眼看出跑到哪、哪步出过错。
+ */
+const TOOL_STATUS_TITLES = { run: '运行中', ok: '已完成', error: '失败', wait: '等待批准' };
+
+function renderRunStrip(turn) {
+  if (!turn || !turn.strip || turn.stripQueued) {
+    return;
+  }
+  // 回放历史时会连续触发几百次，合并到下一帧只画一次
+  turn.stripQueued = true;
+  requestAnimationFrame(() => {
+    turn.stripQueued = false;
+    drawRunStrip(turn);
+  });
+}
+
+function drawRunStrip(turn) {
+  const ticks = [];
+  for (const row of turn.list.children) {
+    const status = row.querySelector('.tool-status');
+    const kind = status ? (/is-(ok|error|wait|run)/.exec(status.className) || [])[1] : null;
+    const tick = document.createElement('i');
+    tick.className = 'run-tick is-' + (kind || 'run');
+    ticks.push(tick);
+  }
+  turn.strip.replaceChildren(...ticks);
 }
 
 function noteToolStarted(turn, name) {
@@ -4206,7 +4820,97 @@ function collapseReplyAsProgress(reason) {
   return true;
 }
 
-function appendUserMessage(text, sequence, { allowTaskActions = true } = {}) {
+/**
+ * 把一条用户消息拆成界面要画的几块：用户原话、图片缩略图、文件卡片。
+ *
+ * 服务端会把文本文件的内容拼进正文，这里按标记还原成卡片，气泡里只留用户自己写的话。
+ * 本地刚发出的消息还没经过服务端，非图片附件没有标记，就直接按附件本身画卡片。
+ */
+function describeUserMessage(text, attachments = []) {
+  const parsed = splitAttachmentMarkers(text);
+  const list = attachments || [];
+  const images = list
+    .filter(isImageAttachment)
+    .map((item) => ({ name: item.name || '图片', url: attachmentUrl(state.sessionId, item) }))
+    .filter((item) => item.url);
+  const files = parsed.files.map((file) => ({
+    name: file.name,
+    mimeType: file.mimeType,
+    meta: file.kind === 'inline' ? `${file.lines} 行` : '已保存'
+  }));
+  for (const item of list) {
+    if (!isImageAttachment(item) && !files.some((file) => file.name === item.name)) {
+      files.push({ name: item.name || '附件', mimeType: item.mimeType, meta: item.size ? formatBytes(item.size) : '' });
+    }
+  }
+  // 只发附件时前端会补一句「（附带文件：…）」给模型看；界面上卡片已经说明了，不再重复一遍
+  const generated = /^（(附带文件：.*|附件)）$/.test(parsed.body);
+  return { body: generated && (images.length || files.length) ? '' : parsed.body, images, files };
+}
+
+/** 文件卡片：类型徽标 + 文件名 + 一小段说明（行数 / 大小）。消息气泡和排队列表共用。 */
+function buildFileCard(file) {
+  const card = document.createElement('span');
+  card.className = 'attach-card';
+  card.title = file.name;
+  const info = fileBadge(file.name, file.mimeType);
+  const badge = document.createElement('span');
+  badge.className = `chip-badge ft-${info.tone}`;
+  badge.textContent = info.label;
+  const name = document.createElement('span');
+  name.className = 'attach-card-name';
+  name.textContent = file.name;
+  card.append(badge, name);
+  if (file.meta) {
+    const meta = document.createElement('span');
+    meta.className = 'attach-card-meta';
+    meta.textContent = file.meta;
+    card.append(meta);
+  }
+  return card;
+}
+
+/** 图片缩略图，点开在新标签页看原图。 */
+function buildImageThumb(image) {
+  const link = document.createElement('a');
+  link.className = 'attach-thumb';
+  link.href = image.url;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.title = image.name;
+  const picture = document.createElement('img');
+  picture.src = image.url;
+  picture.alt = image.name;
+  picture.loading = 'lazy';
+  link.append(picture);
+  return link;
+}
+
+function buildAttachmentStrip(view) {
+  const strip = document.createElement('div');
+  strip.className = 'attach-strip';
+  view.images.forEach((image) => strip.append(buildImageThumb(image)));
+  view.files.forEach((file) => strip.append(buildFileCard(file)));
+  return strip;
+}
+
+/** 乐观渲染的文本和服务端回传的文本只差文件块：比较时都去掉再比。 */
+function sameUserInput(left, right) {
+  return left === right || splitAttachmentMarkers(left).body === splitAttachmentMarkers(right).body;
+}
+
+function buildUserBubble(text, attachments = []) {
+  const view = describeUserMessage(text, attachments);
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = view.body;
+  if (view.images.length || view.files.length) {
+    bubble.append(buildAttachmentStrip(view));
+  }
+  return bubble;
+}
+
+function appendUserMessage(text, sequence, { allowTaskActions = true, attachments = [] } = {}) {
   const wrapper = document.createElement('article');
   wrapper.className = 'msg msg-user';
   wrapper.dataset.text = text;
@@ -4214,31 +4918,29 @@ function appendUserMessage(text, sequence, { allowTaskActions = true } = {}) {
     wrapper.dataset.sequence = String(sequence);
   }
 
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
-  bubble.textContent = text;
-
-  wrapper.append(bubble);
+  // 取消编辑时要按原样画回来，附件信息留在节点上
+  wrapper._attachments = attachments;
+  wrapper.append(buildUserBubble(text, attachments));
   // 纠正是当前运行内的输入，不是独立任务起点，后端没有对应的编辑或检查点恢复入口。
   if (allowTaskActions) {
-    const actions = document.createElement('div');
-    actions.className = 'msg-actions';
-    actions.append(button('编辑', 'msg-edit-btn', () => beginEditUserMessage(wrapper)));
-    actions.append(button('回退 / 分支', 'msg-edit-btn', () => openMessageCheckpoint(wrapper)));
-    wrapper.append(actions);
+    wrapper.append(userMessageActions(wrapper));
   }
   el.messages.append(wrapper);
   hideEmptyState();
 }
 
-/** 乐观渲染时还没有序号，run.started 到达后补上，编辑才知道改的是哪一句。 */
+/**
+ * 乐观渲染时还没有序号，run.started 到达后补上，编辑才知道改的是哪一句。
+ * 同时换成服务端的完整正文：编辑、重发要带着内联进去的文件内容。
+ */
 function stampLastUserMessage(sequence, text) {
   const nodes = el.messages.querySelectorAll('.msg-user');
   const last = nodes[nodes.length - 1];
-  if (!last || last.dataset.text !== text || !sequence) {
+  if (!last || !sameUserInput(last.dataset.text, text) || !sequence) {
     return;
   }
   last.dataset.sequence = String(sequence);
+  last.dataset.text = text;
 }
 
 /** 选择的是用户消息发送前的检查点；代码和模型记忆分别恢复。 */
@@ -4260,7 +4962,7 @@ async function openMessageCheckpoint(wrapper) {
   title.id = 'checkpoint-title';
   title.textContent = '回到这条消息发送前';
   const excerpt = document.createElement('blockquote');
-  excerpt.textContent = wrapper.dataset.text || '';
+  excerpt.textContent = splitAttachmentMarkers(wrapper.dataset.text).body || wrapper.dataset.text || '';
   const info = document.createElement('p');
   info.className = 'checkpoint-hint';
   info.textContent = '正在检查后续改动…';
@@ -4388,10 +5090,15 @@ async function openMessageCheckpoint(wrapper) {
         await activate(sessionId, state.sessionTitle, state.workspace);
       }
       if (action === 'fork' || mode !== 'code') {
-        const draft = el.input.value.trim();
-        el.input.value = draft && draft !== data.input ? `${draft}\n\n${data.input}` : data.input;
-        autoGrow();
+        // 追加而不是覆盖：草稿里可能已经有附件芯片
+        const draft = composerInput.getText().trim();
+        if (!draft) {
+          el.input.value = data.input;
+        } else if (draft !== data.input) {
+          composerInput.appendText(`\n\n${data.input}`);
+        }
         el.input.focus();
+        onComposerInput();
       }
       loadChanges();
       showNotice(action === 'fork' ? '已创建对话分支，原聊天已保留；当前工作区文件继续共用。'
@@ -4423,14 +5130,17 @@ function beginEditUserMessage(wrapper) {
     return;
   }
   const original = wrapper.dataset.text || '';
+  // 只改用户自己写的话；内联进正文的文件内容不展开，发送时原样接回去
+  const parsed = splitAttachmentMarkers(original);
   const editor = document.createElement('div');
   editor.className = 'msg-editor';
   const field = document.createElement('textarea');
-  field.value = original;
+  field.value = parsed.body;
   const actions = document.createElement('div');
   actions.className = 'msg-editor-actions';
   const cancel = button('取消', 'msg-action', () => restoreUserBubble(wrapper, original));
-  const send = button('发送', 'btn btn-primary btn-sm', () => resendUserMessage(wrapper, sequence, field.value));
+  const send = button('发送', 'btn btn-primary btn-sm', () => resendUserMessage(
+    wrapper, sequence, joinAttachmentMarkers(field.value, parsed.files)));
   actions.append(cancel, send);
   editor.append(field, actions);
   wrapper.querySelector('.bubble')?.remove();
@@ -4442,14 +5152,8 @@ function beginEditUserMessage(wrapper) {
 
 function restoreUserBubble(wrapper, text) {
   wrapper.replaceChildren();
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
-  bubble.textContent = text;
-  const actions = document.createElement('div');
-  actions.className = 'msg-actions';
-  actions.append(button('编辑', 'msg-edit-btn', () => beginEditUserMessage(wrapper)));
-  actions.append(button('回退 / 分支', 'msg-edit-btn', () => openMessageCheckpoint(wrapper)));
-  wrapper.append(bubble, actions);
+  const bubble = buildUserBubble(text, wrapper._attachments || []);
+  wrapper.append(bubble, userMessageActions(wrapper));
 }
 
 async function resendUserMessage(wrapper, sequence, content) {
@@ -4492,10 +5196,15 @@ const TOOL_ICONS = {
   search_text: 'S',
   edit_file: 'E',
   create_file: '+',
-  run_command: '$'
+  glob_files: 'G',
+  apply_patch: 'P',
+  run_command: '$',
+  browser: 'B',
+  mcp_tools: 'M',
+  mcp_call: 'M'
 };
 
-function addToolRow(callId, name, args) {
+function addToolRow(callId, name, args, agent = null) {
   const existing = state.toolRows.get(callId);
   if (existing) {
     return existing;
@@ -4538,8 +5247,20 @@ function addToolRow(callId, name, args) {
 
   row.append(button, body);
   const turn = ensureTurnShell();
-  turn.list.append(row);
-  noteToolStarted(turn, name || 'tool');
+  // 子智能体发起的操作收进它自己的卡片，主智能体的「操作」只统计主智能体自己做的事。
+  const target = agent || turn;
+  const entry = agent ? { callId, name: name || 'tool', args: args || '', status: 'run', meta: '', body: '', open: false } : null;
+  if (agent) {
+    agent.list.append(row);
+    agent.tools += 1;
+    agent.running += 1;
+    agent.log.push(entry);
+    agent.latest = `${toolLabel(name)} ${args || ''}`.trim().slice(0, 64);
+    refreshAgent(agent);
+  } else {
+    turn.list.append(row);
+    noteToolStarted(turn, name || 'tool');
+  }
   if (!state.replaying) {
     scrollThread();
   }
@@ -4550,18 +5271,40 @@ function addToolRow(callId, name, args) {
     setStatus(kind, glyph) {
       status.className = 'tool-status is-' + kind;
       status.textContent = glyph;
+      status.title = TOOL_STATUS_TITLES[kind] || '';
+      renderRunStrip(target);
+      if (entry) {
+        entry.status = kind;
+        queueAgentsUi();
+      }
       if (!settled && (kind === 'ok' || kind === 'error')) {
         settled = true;
-        noteToolSettled(turn);
+        if (agent) {
+          agent.running = Math.max(0, agent.running - 1);
+          refreshAgent(agent);
+        } else {
+          noteToolSettled(turn);
+        }
       }
     },
     setMeta(value) {
       metaEl.textContent = value || '';
+      if (entry) {
+        entry.meta = value || '';
+        queueAgentsUi();
+      }
     },
     setBody(value) {
       pre.textContent = value || '';
       if (value) {
         metaEl.textContent = metaEl.textContent || '详情';
+      }
+      if (entry) {
+        entry.body = value || '';
+        if (value && !entry.meta) {
+          entry.meta = '详情';
+        }
+        queueAgentsUi();
       }
     }
   };
@@ -4585,7 +5328,18 @@ function renderApprovalDock() {
 
   const head = document.createElement('p');
   head.className = 'approval-head';
-  head.append(document.createTextNode('需要批准 · '));
+  if (pending.agent) {
+    // 和 Codex 一样标出请求来自哪个子智能体线程，批准前就知道是谁要执行
+    const source = document.createElement('button');
+    source.type = 'button';
+    source.className = 'approval-source';
+    source.textContent = `${pending.agent.title} @${shortAgentId(pending.agent.id)}`;
+    source.title = '打开这个子智能体的线程';
+    source.addEventListener('click', () => openAgentThread(pending.agent.id));
+    head.append(document.createTextNode('子智能体 '), source, document.createTextNode(' 需要批准 · '));
+  } else {
+    head.append(document.createTextNode('需要批准 · '));
+  }
   const toolName = document.createElement('span');
   toolName.className = 'tool-name';
   toolName.textContent = pending.name;
@@ -4714,7 +5468,7 @@ function record(event, { kind, tone, status, title, detail, foot, actions, callI
   }
   if (resumable) {
     const box = document.createElement('div');
-    box.className = 'approval-actions';
+    box.className = 'approval-actions is-resume';
     box.append(button('继续执行', 'btn btn-primary', () => continueRun(box)));
     item.append(box);
   }
@@ -5622,23 +6376,11 @@ function confirmPicker() {
 /* ---------- 输入 ---------- */
 
 function bindComposer() {
-  el.inputFlow?.addEventListener('input', onComposerInput);
-  el.inputFlow?.addEventListener('keydown', (event) => {
-    if (handleFlowHistoryKeydown(event)) return;
+  el.inputFlow.addEventListener('keydown', (event) => {
+    // 候选菜单开着时，方向键 / Enter / Tab / Esc 归菜单；其次才是翻历史和发送
+    if (onComposerKeydown(event)) return;
+    if (handleHistoryKeydown(event)) return;
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
-      event.preventDefault();
-      el.composer.requestSubmit();
-    }
-  });
-  el.input.addEventListener('keydown', (event) => {
-    if (onComposerKeydown(event)) {
-      return;
-    }
-    if (handleInputHistoryKeydown(event)) {
-      return;
-    }
-    const submit = (event.ctrlKey || event.metaKey) && event.key === 'Enter';
-    if ((event.key === 'Enter' && !event.shiftKey && !event.isComposing) || submit) {
       event.preventDefault();
       el.composer.requestSubmit();
     }
@@ -5667,22 +6409,26 @@ function onPromptClick(event) {
 async function sendMessage(event) {
   event.preventDefault();
   onComposerInput();
-  const rawContent = el.input.value;
+  const draft = composerInput.getDraft();
+  const rawContent = draft.text;
   const leadingWhitespace = rawContent.length - rawContent.trimStart().length;
   const content = rawContent.trim();
   if (state.queueEdit) {
     await saveQueuedEdit(content);
     return;
   }
-  const attachments = state.attachments.slice();
-  const imagePositions = imagePositionsForContent().map((position) => Math.max(0, position - leadingWhitespace));
+  const attachments = state.attachments;
+  // 图片位置是相对原始草稿算的，去掉首尾空白后要跟着平移，并夹在正文长度以内
+  const imagePositions = draft.imagePositions
+    .map((position) => Math.min(content.length, Math.max(0, position - leadingWhitespace)));
   if (!content && !attachments.length) {
     return;
   }
-  el.input.value = '';
-  autoGrow();
-  setAttachments([]);
-  if (el.inputFlow) el.inputFlow.replaceChildren();
+  composerInput.setText('');
+  writeDraft(localStorage, state.sessionId, '');
+  draftAttachments.clear();
+  syncComposer();
+  hideRefMenu();
   // 只有附件没有文字时也要有正文，服务端和模型都需要一句话说明
   await submitMessage(content || attachmentSummary(attachments), attachments, imagePositions);
 }
@@ -5700,7 +6446,7 @@ async function submitMessage(content, attachments = [], imagePositions = []) {
   const wasRunning = state.running;
   const taskRequirements = !wasRunning ? taskDraftRequirements() : null;
   if (!wasRunning) {
-    appendUserMessage(content || attachmentSummary(attachments));
+    appendUserMessage(content || attachmentSummary(attachments), undefined, { attachments });
     state.pendingInputs.push(content);
     renameSessionIfDefault(content);
     state.running = true;
@@ -5710,6 +6456,7 @@ async function submitMessage(content, attachments = [], imagePositions = []) {
     setRunState('running', '发送中');
   } else {
     state.queue.push(content);
+    state.queueEntries.push({ content, attachments });
     renderQueue();
     setRunState('running', '已排队');
   }
@@ -5758,14 +6505,19 @@ async function submitMessage(content, attachments = [], imagePositions = []) {
       const index = state.queue.lastIndexOf(content);
       if (index >= 0) {
         state.queue.splice(index, 1);
+        state.queueEntries.splice(index, 1);
         renderQueue();
       }
     }
-    if (wasRunning && attachments.length) {
-      // 运行中追加图片会被服务端拒绝，把附件放回输入区，避免白丢
-      setAttachments(attachments);
+    // 没发出去的内容放回输入区，附件和文字都不能白丢
+    if (!composerInput.getText().trim() && !composerInput.hasChips()) {
+      el.input.value = content;
+      if (attachments.length) {
+        attachments.forEach((item) => draftAttachments.set(item.id, item));
+        composerInput.insertAttachments(attachments);
+      }
+      onComposerInput();
     }
-    if (!el.input.value.trim()) { el.input.value = content; autoGrow(); }
     showNotice('发送失败：' + error.message);
   }
 }
@@ -5801,58 +6553,39 @@ function rememberInput(input) {
   }
 }
 
-function handleFlowHistoryKeydown(event) {
-  if (!['ArrowUp', 'ArrowDown'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+/**
+ * 上 / 下方向键翻本会话发过的输入。
+ * 只在光标已经到了首行（上）或末行（下）时接管，多行草稿里方向键仍然是移动光标；
+ * 草稿里带附件或正在改排队消息时不接管，避免翻历史把芯片冲掉。
+ */
+function handleHistoryKeydown(event) {
+  if (!['ArrowUp', 'ArrowDown'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+    return false;
+  }
+  if (!state.inputHistory.length || composerInput.hasChips() || state.queueEdit) {
+    return false;
+  }
+  const up = event.key === 'ArrowUp';
+  if (!composerInput.caretOnEdgeLine(up ? 'first' : 'last')) {
+    return false;
+  }
   const browsing = state.inputHistoryIndex >= 0;
-  const text = flowText();
-  if (!state.inputHistory.length || (!browsing && event.key === 'ArrowUp' && text.includes('\n'))) return false;
   event.preventDefault();
   if (!browsing) {
-    if (event.key === 'ArrowDown') return true;
-    state.inputHistoryDraft = text;
+    if (!up) return true;
+    state.inputHistoryDraft = composerInput.getText();
     state.inputHistoryIndex = state.inputHistory.length;
   }
-  const next = state.inputHistoryIndex + (event.key === 'ArrowUp' ? -1 : 1);
-  if (next < 0) return true;
-  state.inputHistoryIndex = next;
-  const value = next >= state.inputHistory.length ? state.inputHistoryDraft : state.inputHistory[next];
-  if (next >= state.inputHistory.length) state.inputHistoryIndex = -1;
-  el.inputFlow.replaceChildren(document.createTextNode(value || ''));
-  onComposerInput();
-  return true;
-}
-
-function handleInputHistoryKeydown(event) {
-  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown'
-      || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
-    return false;
-  }
-  const atStart = el.input.selectionStart === 0;
-  const atEnd = el.input.selectionEnd === el.input.value.length;
-  const browsing = state.inputHistoryIndex >= 0;
-  if ((event.key === 'ArrowUp' && !atStart) || (event.key === 'ArrowDown' && !atEnd)) {
-    return false;
-  }
-  if (!state.inputHistory.length || (event.key === 'ArrowUp' && !browsing && el.input.value.includes('\\n'))) {
-    return false;
-  }
-
-  event.preventDefault();
-  if (!browsing) {
-    if (event.key === 'ArrowDown') return true;
-    state.inputHistoryDraft = el.input.value;
-    state.inputHistoryIndex = state.inputHistory.length;
-  }
-  const next = state.inputHistoryIndex + (event.key === 'ArrowUp' ? -1 : 1);
+  const next = state.inputHistoryIndex + (up ? -1 : 1);
   if (next < 0) return true;
   if (next >= state.inputHistory.length) {
     state.inputHistoryIndex = -1;
-    el.input.value = state.inputHistoryDraft;
+    composerInput.setText(state.inputHistoryDraft);
   } else {
     state.inputHistoryIndex = next;
-    el.input.value = state.inputHistory[next];
+    composerInput.setText(state.inputHistory[next]);
   }
-  el.input.setSelectionRange(el.input.value.length, el.input.value.length);
+  composerInput.focusEnd();
   onComposerInput();
   return true;
 }
@@ -5897,7 +6630,7 @@ async function steerCurrentTask() {
     if (!response.ok) throw new Error(await describeError(response));
     if (state.sessionId !== sessionId) return;
     rememberInput(content);
-    if (el.input.value.trim() === content) { el.input.value = ''; autoGrow(); }
+    if (el.input.value.trim() === content) { el.input.value = ''; syncComposer(); }
     showNotice('纠正已收到，将在下一安全步骤生效；当前已经开始的工具操作会先结束。');
     scheduleTaskRefresh();
   } catch (error) {
@@ -5975,9 +6708,13 @@ async function continueRun(box) {
     state.runId = data.runId || state.runId;
     state.lastRunId = data.runId || state.lastRunId;
     state.running = true;
+    state.lastOutcome = '';
     startRunClock(Date.now());
-    setRunState('run', '运行中');
+    setRunState('running', '运行中');
+    retireStaleActions();
+    hideNotice();
     syncComposer();
+    syncTaskControls();
   } catch (error) {
     showNotice('继续失败：' + error.message);
     buttons.forEach((item) => { item.disabled = false; });
@@ -6071,27 +6808,6 @@ async function rollbackRun() {
     el.changesRollback.disabled = false;
     syncComposer();
   }
-}
-
-function flowText() {
-  if (!el.inputFlow) return el.input.value;
-  return [...el.inputFlow.childNodes].map((node) => {
-    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
-    if (node.nodeType !== Node.ELEMENT_NODE) return '';
-    if (node.classList.contains('flow-image')) return '';
-    return node.innerText || node.textContent || '';
-  }).join('');
-}
-
-function syncFlowFromText(value) {
-  if (!el.inputFlow || document.activeElement === el.inputFlow) return;
-  el.inputFlow.replaceChildren(document.createTextNode(value || ''));
-}
-
-function autoGrow() {
-  syncFlowFromText(el.input.value);
-  el.input.style.height = 'auto';
-  el.input.style.height = Math.min(el.input.scrollHeight, 180) + 'px';
 }
 
 /* ---------- 命令面板 ---------- */
@@ -6205,6 +6921,10 @@ function onGlobalKeydown(event) {
       closeSettings();
       return;
     }
+    if (!el.agentThread.hidden) {
+      closeAgentThread();
+      return;
+    }
     if (!el.permMenu.hidden) {
       togglePermissionMenu(false);
       return;
@@ -6307,9 +7027,9 @@ function syncComposer() {
   el.taskCancel.textContent = state.cancelling ? '正在取消…' : '取消';
   el.taskDraft.hidden = running || editing;
   if (!running) state.pausing = false;
-  el.input.placeholder = editing ? '正在编辑排队的消息… Enter 保存' : running
-    ? '下一件事用 Enter 排队；纠正当前方向请点“立即纠正当前”'
-    : '描述新任务，Enter 发送；续跑当前任务请点“继续当前任务”';
+  el.inputFlow.dataset.placeholder = editing ? '正在编辑排队的消息… Enter 保存' : running
+    ? '下一件事用 Enter 排队，可附带文件；纠正当前方向请点“立即纠正当前”'
+    : '描述任务，Enter 发送，Shift + Enter 换行，@ 引用文件，/ 快捷指令';
   syncTaskControls();
   renderQueueEditBar();
 }
@@ -6371,7 +7091,7 @@ function renderTaskContract() {
     ? '已完成'
     : (labels[status] || status || '已保存');
   el.taskSummary.textContent = `${lifecycleLabel} · ${items.length ? `验收 ${checked}/${items.length}` : '未设置验收条件'}`;
-  el.taskGoal.textContent = task.originalGoal || '';
+  el.taskGoal.textContent = plainBody(task.originalGoal);
   const executionPanel = document.querySelector('#task-execution');
   const execution = task.execution;
   executionPanel.hidden = !execution;
@@ -6465,9 +7185,11 @@ function syncTaskControls() {
   el.taskSave.textContent = state.taskBusy ? '保存中…' : '保存要求与验收记录';
   const status = String(state.task?.status || '').toUpperCase();
   el.taskResumeControls.hidden = state.running || !state.task
+    || state.lastOutcome === 'NEED_INPUT'
     || !['PAUSED', 'INTERRUPTED', 'FAILED', 'AWAITING_REVIEW', 'ACTIVE', 'BLOCKED', 'BUDGET_LIMITED',
       'WAITING', 'UNVERIFIED', 'NO_PROGRESS', 'REVIEW_UNAVAILABLE'].includes(status);
   el.taskResume.disabled = state.taskBusy;
+  document.body.classList.toggle('has-resume-bar', !el.taskResumeControls.hidden);
 }
 
 async function saveTaskContract() {
@@ -6510,6 +7232,20 @@ async function saveTaskContract() {
   }
 }
 
+/**
+ * 服务端队列响应 → 本地状态。
+ * items 是正文，entries 额外带每条消息的图片；老响应没有 entries 时按正文补齐。
+ */
+function applyQueueResponse(data) {
+  const items = Array.isArray(data && data.items) ? data.items : [];
+  const entries = Array.isArray(data && data.entries) ? data.entries : [];
+  state.queue = items;
+  state.queueEntries = items.map((content, index) => ({
+    content,
+    attachments: (entries[index] && entries[index].attachments) || []
+  }));
+}
+
 async function loadQueue() {
   if (!state.sessionId || !el.messageQueue) {
     return;
@@ -6520,42 +7256,64 @@ async function loadQueue() {
     if (!response.ok || state.sessionId !== sessionId) {
       return;
     }
-    const data = await response.json();
-    state.queue = Array.isArray(data.items) ? data.items : [];
+    applyQueueResponse(await response.json());
     renderQueue();
   } catch (error) {
     console.warn('[queue]', error);
   }
 }
 
+/** 队首被自动开成新一轮：从队列拿掉，正在改的那条要跟着调整。 */
+function shiftQueue() {
+  state.queue.shift();
+  state.queueEntries.shift();
+  const edit = state.queueEdit;
+  if (edit) {
+    if (edit.index === 0) {
+      endQueueEdit();
+    } else {
+      edit.index -= 1;
+    }
+  }
+  renderQueue();
+}
+
+/** 队列里某一条被删掉后，正在编辑的下标要对应挪动；删的正是它就结束编辑。 */
+function adjustQueueEditAfterRemoval(index) {
+  const edit = state.queueEdit;
+  if (!edit) {
+    return;
+  }
+  if (edit.index === index) {
+    endQueueEdit();
+  } else if (edit.index > index) {
+    edit.index -= 1;
+  }
+}
+
+function queueIsCollapsed() {
+  if (state.queueCollapsed === null || state.queueCollapsed === undefined) {
+    return window.matchMedia('(max-width: 700px)').matches;
+  }
+  return state.queueCollapsed === true;
+}
+
 function renderQueue() {
   if (!el.messageQueue) {
     return;
   }
-  const items = state.queue || [];
+  const items = state.queueEntries || [];
   el.messageQueue.replaceChildren();
   el.messageQueue.hidden = items.length === 0;
+  if (state.queueEdit && state.queueEdit.index >= items.length) {
+    endQueueEdit();
+  }
   if (!items.length) {
-    if (state.queueEdit) {
-      el.input.value = state.queueEdit.previous || '';
-      autoGrow();
-      state.queueEdit = null;
-      syncComposer();
-    } else {
-      renderQueueEditBar();
-    }
+    renderQueueEditBar();
     return;
   }
-  if (state.queueEdit && state.queueEdit.index >= items.length) {
-    const previous = state.queueEdit.previous;
-    state.queueEdit = null;
-    if (el.input && previous != null) {
-      el.input.value = previous;
-      autoGrow();
-    }
-  }
 
-  const collapsed = state.queueCollapsed === true;
+  const collapsed = queueIsCollapsed();
   const head = document.createElement('button');
   head.type = 'button';
   head.className = 'queue-head';
@@ -6567,8 +7325,26 @@ function renderQueue() {
   title.className = 'queue-title';
   title.textContent = items.length === 1 ? '1 条排队' : `${items.length} 条排队`;
   head.append(chevron, title);
+  if (!state.running && state.queueHeld) {
+    // 上一轮没有完整收尾（失败、暂停、计划没做完）时服务端不会自动发送排队消息，要明说，免得以为卡住了
+    const idle = document.createElement('span');
+    idle.className = 'queue-head-meta is-idle';
+    idle.textContent = '当前未运行 · 任务完成后才会发送';
+    idle.title = '上一轮没有完整收尾，排队消息会等任务继续并完成后再发送。你也可以直接在输入框发一条新消息。';
+    head.append(idle);
+  }
+  const attachmentTotal = items.reduce((sum, entry) => {
+    const view = describeUserMessage(entry.content, entry.attachments);
+    return sum + view.images.length + view.files.length;
+  }, 0);
+  if (attachmentTotal) {
+    const hint = document.createElement('span');
+    hint.className = 'queue-head-meta';
+    hint.textContent = `含 ${attachmentTotal} 个附件`;
+    head.append(hint);
+  }
   head.addEventListener('click', () => {
-    state.queueCollapsed = !state.queueCollapsed;
+    state.queueCollapsed = !collapsed;
     renderQueue();
   });
   el.messageQueue.append(head);
@@ -6576,20 +7352,35 @@ function renderQueue() {
     return;
   }
 
-  items.forEach((text, index) => {
+  items.forEach((entry, index) => {
+    const view = describeUserMessage(entry.content, entry.attachments);
     const row = document.createElement('div');
     row.className = 'queue-item' + (state.queueEdit && state.queueEdit.index === index ? ' is-editing' : '');
+
+    const grip = document.createElement('span');
+    grip.className = 'queue-grip';
+    grip.setAttribute('aria-hidden', 'true');
+    grip.title = '拖动调整顺序';
+    grip.innerHTML = queueGripIcon();
 
     const dot = document.createElement('span');
     dot.className = 'queue-dot';
     dot.setAttribute('aria-hidden', 'true');
 
+    const main = document.createElement('div');
+    main.className = 'queue-main';
     const body = document.createElement('button');
     body.type = 'button';
-    body.className = 'queue-text';
-    body.textContent = text;
+    body.className = 'queue-text' + (view.body ? '' : ' is-muted');
+    body.textContent = view.body || '（仅附件）';
     body.title = '编辑这条排队消息';
     body.addEventListener('click', () => beginQueueEdit(index));
+    main.append(body);
+    if (view.images.length || view.files.length) {
+      const strip = buildAttachmentStrip(view);
+      strip.classList.add('is-compact');
+      main.append(strip);
+    }
 
     const actions = document.createElement('div');
     actions.className = 'queue-actions';
@@ -6597,9 +7388,78 @@ function renderQueue() {
     up.disabled = index === 0;
     const remove = iconButton('删除', queueTrashIcon(), () => removeQueuedItem(index));
     actions.append(up, remove);
-    row.append(dot, body, actions);
+    row.append(grip, dot, main, actions);
+    bindQueueDrag(row, index, items.length);
     el.messageQueue.append(row);
   });
+}
+
+/**
+ * 拖拽排序：只有按住左侧手柄才会开始拖，点文字依旧是编辑。
+ * 正在编辑某条时不允许拖，免得下标在编辑中途变掉。
+ */
+function bindQueueDrag(row, index, total) {
+  if (total < 2 || state.queueEdit) {
+    row.classList.add('is-static');
+    return;
+  }
+  const grip = row.querySelector('.queue-grip');
+  grip.addEventListener('pointerdown', () => { row.draggable = true; });
+  const stopDrag = () => {
+    row.draggable = false;
+    row.classList.remove('is-dragging');
+    clearQueueDropMarks();
+  };
+  row.addEventListener('dragstart', (event) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+    state.queueDrag = index;
+    row.classList.add('is-dragging');
+  });
+  row.addEventListener('dragend', () => {
+    state.queueDrag = null;
+    stopDrag();
+  });
+  row.addEventListener('dragover', (event) => {
+    if (state.queueDrag === null || state.queueDrag === undefined || isFileDrag(event)) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const after = queueDropAfter(row, event);
+    clearQueueDropMarks();
+    row.classList.add(after ? 'drop-after' : 'drop-before');
+  });
+  row.addEventListener('dragleave', (event) => {
+    if (!row.contains(event.relatedTarget)) {
+      row.classList.remove('drop-before', 'drop-after');
+    }
+  });
+  row.addEventListener('drop', (event) => {
+    const from = state.queueDrag;
+    if (from === null || from === undefined || isFileDrag(event)) {
+      return;
+    }
+    event.preventDefault();
+    const slot = index + (queueDropAfter(row, event) ? 1 : 0);
+    state.queueDrag = null;
+    stopDrag();
+    moveQueuedTo(from, from < slot ? slot - 1 : slot);
+  });
+}
+
+function isFileDrag(event) {
+  return Array.from((event.dataTransfer && event.dataTransfer.types) || []).includes('Files');
+}
+
+function queueDropAfter(row, event) {
+  const box = row.getBoundingClientRect();
+  return event.clientY > box.top + box.height / 2;
+}
+
+function clearQueueDropMarks() {
+  el.messageQueue.querySelectorAll('.drop-before, .drop-after')
+    .forEach((node) => node.classList.remove('drop-before', 'drop-after'));
 }
 
 function renderQueueEditBar() {
@@ -6615,7 +7475,7 @@ function renderQueueEditBar() {
     bar.id = 'queue-edit';
     bar.className = 'queue-edit';
     const label = document.createElement('span');
-    label.textContent = '正在编辑排队消息';
+    label.textContent = '正在编辑排队消息（附件保持不变）';
     const cancel = document.createElement('button');
     cancel.type = 'button';
     cancel.className = 'queue-edit-cancel';
@@ -6627,31 +7487,45 @@ function renderQueueEditBar() {
   bar.hidden = false;
 }
 
+/**
+ * 开始改某一条排队消息：把当前草稿（文字和附件芯片）整块收起来，输入框只放这条的文字。
+ * 内联进正文的文件块不进输入框，保存时原样接回去，附件因此不会在编辑里丢失。
+ */
 function beginQueueEdit(index) {
-  const text = state.queue[index];
-  if (text == null) {
+  const entry = state.queueEntries[index];
+  if (!entry) {
     return;
   }
+  const parsed = splitAttachmentMarkers(entry.content);
+  const view = describeUserMessage(entry.content, entry.attachments);
   if (!state.queueEdit) {
-    state.queueEdit = { index, previous: el.input.value };
+    state.queueEdit = { index, stash: composerInput.detach(), files: parsed.files };
   } else {
     state.queueEdit.index = index;
+    state.queueEdit.files = parsed.files;
   }
-  el.input.value = text;
-  autoGrow();
-  el.input.focus();
+  composerInput.setText(view.body);
+  composerInput.focusEnd();
   syncComposer();
   renderQueue();
+}
+
+/** 结束编辑并把进编辑前的草稿放回输入框。 */
+function endQueueEdit() {
+  const edit = state.queueEdit;
+  if (!edit) {
+    return;
+  }
+  state.queueEdit = null;
+  composerInput.restore(edit.stash);
+  syncComposer();
 }
 
 function cancelQueueEdit() {
   if (!state.queueEdit) {
     return;
   }
-  el.input.value = state.queueEdit.previous || '';
-  state.queueEdit = null;
-  autoGrow();
-  syncComposer();
+  endQueueEdit();
   renderQueue();
 }
 
@@ -6660,17 +7534,19 @@ async function saveQueuedEdit(content) {
   if (!edit) {
     return;
   }
-  if (!content) {
+  const entry = state.queueEntries[edit.index];
+  const hasAttachments = edit.files.length > 0 || Boolean(entry && entry.attachments.length);
+  let text = joinAttachmentMarkers(content, edit.files);
+  if (!text && hasAttachments) {
+    text = attachmentSummary(entry ? entry.attachments : []);
+  }
+  if (!text) {
     showNotice('排队的内容不能是空的，不想发就点删除。');
     return;
   }
   try {
-    const data = await putQueueItem(edit.index, content);
-    state.queue = Array.isArray(data.items) ? data.items : [];
-    el.input.value = edit.previous || '';
-    state.queueEdit = null;
-    autoGrow();
-    syncComposer();
+    applyQueueResponse(await putQueueItem(edit.index, text));
+    endQueueEdit();
     renderQueue();
   } catch (error) {
     showNotice('改队列失败：' + error.message);
@@ -6678,24 +7554,54 @@ async function saveQueuedEdit(content) {
 }
 
 async function moveQueuedItem(index) {
-  if (index <= 0 || !state.sessionId) {
+  if (index > 0) {
+    await moveQueuedTo(index, index - 1);
+  }
+}
+
+/** 把第 from 条挪到第 to 条的位置。先本地换位让界面立刻跟手，服务端返回后再以它为准。 */
+async function moveQueuedTo(from, to) {
+  const total = (state.queueEntries || []).length;
+  if (!state.sessionId || from === to || from < 0 || to < 0 || from >= total || to >= total) {
     return;
   }
-  const current = state.queue[index];
-  const above = state.queue[index - 1];
-  try {
-    await putQueueItem(index - 1, current);
-    const data = await putQueueItem(index, above);
-    state.queue = Array.isArray(data.items) ? data.items : [];
-    if (state.queueEdit) {
-      if (state.queueEdit.index === index) {
-        state.queueEdit.index = index - 1;
-      } else if (state.queueEdit.index === index - 1) {
-        state.queueEdit.index = index;
-      }
+  const sessionId = state.sessionId;
+  const before = { entries: state.queueEntries.slice(), queue: (state.queue || []).slice() };
+  const relocate = (list) => {
+    if (list.length === total) {
+      list.splice(to, 0, list.splice(from, 1)[0]);
     }
-    renderQueue();
+  };
+  relocate(state.queueEntries);
+  relocate(state.queue);
+  const edit = state.queueEdit;
+  if (edit) {
+    if (edit.index === from) {
+      edit.index = to;
+    } else if (from < to && edit.index > from && edit.index <= to) {
+      edit.index -= 1;
+    } else if (from > to && edit.index >= to && edit.index < from) {
+      edit.index += 1;
+    }
+  }
+  renderQueue();
+  try {
+    const response = await apiFetch(
+      `/api/sessions/${encodeURIComponent(sessionId)}/queue/${from}/move?to=${to}`, { method: 'POST' });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    if (state.sessionId === sessionId) {
+      applyQueueResponse(await response.json());
+      renderQueue();
+    }
   } catch (error) {
+    if (state.sessionId === sessionId) {
+      state.queueEntries = before.entries;
+      state.queue = before.queue;
+      renderQueue();
+      loadQueue();
+    }
     showNotice('调整顺序失败：' + error.message);
   }
 }
@@ -6731,6 +7637,10 @@ function queueUpIcon() {
   return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V4.2M4.8 7.2 8 3.8l3.2 3.4" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 }
 
+function queueGripIcon() {
+  return '<svg viewBox="0 0 16 16" aria-hidden="true"><g fill="currentColor"><circle cx="6" cy="4" r="1.1"/><circle cx="10" cy="4" r="1.1"/><circle cx="6" cy="8" r="1.1"/><circle cx="10" cy="8" r="1.1"/><circle cx="6" cy="12" r="1.1"/><circle cx="10" cy="12" r="1.1"/></g></svg>';
+}
+
 function queueTrashIcon() {
   return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 4.5h9M6.2 4.4V3.2h3.6v1.2M5.2 4.5l.4 8h4.8l.4-8" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 }
@@ -6742,8 +7652,8 @@ async function removeQueuedItem(index) {
     if (!response.ok) {
       throw new Error(await describeError(response));
     }
-    const data = await response.json();
-    state.queue = Array.isArray(data.items) ? data.items : [];
+    applyQueueResponse(await response.json());
+    adjustQueueEditAfterRemoval(index);
     renderQueue();
   } catch (error) {
     showNotice('移除失败：' + error.message);
@@ -6819,12 +7729,121 @@ function elapsedText(ms) {
   return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}m`;
 }
 
+/* ---------- 标签页注意力信号 / 桌面通知 / 导出 ---------- */
+
+
+function notificationsEnabled() {
+  return readStored(NOTIFY_KEY, 'off') === 'on';
+}
+
+/**
+ * 运行中、等你批准、完成、失败，都反映到标签页标题和图标上；
+ * 页面在后台且开了通知时再弹一条系统通知。回到页面后，完成/失败的标记自动褪掉。
+ */
+function setAttention(kind) {
+  attentionKind = kind;
+  const base = state.sessionTitle || '新任务';
+  document.title = kind === 'idle' ? 'Pilot · 本地编码代理' : tabTitle(base, kind) + ' · Pilot';
+  const icon = document.querySelector('link[rel="icon"]');
+  if (icon) {
+    icon.href = faviconHref(kind);
+  }
+}
+
+function signalAttention(kind, body) {
+  if (state.replaying) {
+    return;
+  }
+  setAttention(kind);
+  const permission = typeof Notification === 'undefined' ? 'denied' : Notification.permission;
+  if (shouldNotify({ kind, hidden: document.hidden, enabled: notificationsEnabled(), permission })) {
+    try {
+      const note = new Notification(tabTitle(state.sessionTitle || '新任务', kind), { body, tag: 'pilot-run', silent: false });
+      note.onclick = () => { window.focus(); note.close(); };
+    } catch (error) {
+      console.warn('[notify]', error);
+    }
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && (attentionKind === 'done' || attentionKind === 'error')) {
+    setAttention('idle');
+  }
+});
+
+async function toggleNotifications() {
+  if (notificationsEnabled()) {
+    writeStored(NOTIFY_KEY, 'off');
+    showNotice('已关闭桌面通知。');
+    return;
+  }
+  if (typeof Notification === 'undefined') {
+    showNotice('这个浏览器不支持桌面通知。');
+    return;
+  }
+  const permission = Notification.permission === 'default'
+    ? await Notification.requestPermission()
+    : Notification.permission;
+  if (permission !== 'granted') {
+    showNotice('浏览器没有授予通知权限，请在地址栏左侧的站点设置里允许通知。');
+    return;
+  }
+  writeStored(NOTIFY_KEY, 'on');
+  showNotice('已开启桌面通知：页面在后台时，任务完成、失败或需要你批准会提醒你。');
+}
+
+/** 把当前对话导出成 Markdown 文件，按页面上的顺序：提问、工具摘要、回答。 */
+function exportTranscript() {
+  if (!state.sessionId) {
+    return;
+  }
+  const messages = [];
+  for (const node of el.messages.querySelectorAll('.msg-user .bubble, .msg-assistant .bubble, .tool-group:not(.agent-card)')) {
+    if (node.classList.contains('tool-group')) {
+      const parts = node.querySelector('summary')?.children || [];
+      const summary = [parts[1]?.textContent, parts[2]?.textContent].filter(Boolean).join('：');
+      messages.push({ role: 'tools', summary });
+    } else if (node.closest('.msg-user')) {
+      const text = [...node.childNodes].filter((child) => child.nodeType === 3).map((child) => child.textContent).join('');
+      messages.push({ role: 'user', text });
+    } else {
+      messages.push({ role: 'assistant', text: node.dataset.text || node.textContent });
+    }
+  }
+  if (!messages.some((message) => message.role !== 'tools')) {
+    showNotice('当前对话还没有内容可导出。');
+    return;
+  }
+  const markdown = buildTranscript({
+    title: state.sessionTitle,
+    workspace: state.workspace,
+    exportedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    messages
+  });
+  const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = transcriptFileName(state.sessionTitle);
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showNotice('已导出对话：' + link.download);
+}
+
+
+/** 提示 7 秒后自己消失；用户可以随时点 ✕，新的提示会重新计时。 */
 function showNotice(message) {
   el.noticeText.textContent = message;
   el.notice.hidden = false;
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(hideNotice, 7000);
 }
 
 function hideNotice() {
+  clearTimeout(noticeTimer);
+  noticeTimer = null;
   el.notice.hidden = true;
 }
 
@@ -6834,6 +7853,14 @@ function resetView() {
   stopRunClock();
   state.cursor = 0;
   state.toolRows.clear();
+  state.agents.clear();
+  clearInterval(state.agentTimer);
+  state.agentTimer = null;
+  state.agentsDockOpen = false;
+  state.threadAgentId = null;
+  el.agentThread.hidden = true;
+  syncAgentsChip();
+  renderAgentsDock();
   state.pendingApprovals.clear();
   state.reply = null;
   state.replyText = '';
@@ -6943,7 +7970,6 @@ function isNearBottom(node, slack = 140) {
 function initWorkbench() {
   setupGutter(el.gutterLeft, '--sidebar-w', 210, 460, false);
   setupGutter(el.gutterRight, '--activity-w', 300, 720, true);
-  el.input.addEventListener('input', onComposerInput);
   document.addEventListener('click', (event) => {
     if (!event.target.closest('.composer-wrap')) {
       hideRefMenu();
@@ -7228,17 +8254,39 @@ function refreshChangeMarkers(files) {
 
 /* ---------- 输入框：@ 引用与 / 快捷指令 ---------- */
 
-function onComposerInput() {
-  if (el.inputFlow && document.activeElement === el.inputFlow) {
-    el.input.value = flowText();
+
+/** 草稿只存纯文字：带附件芯片或正在编辑排队消息时不动它。 */
+function scheduleDraftSave() {
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(flushDraft, 400);
+}
+
+function flushDraft() {
+  clearTimeout(draftTimer);
+  draftTimer = null;
+  if (!state.sessionId || state.queueEdit || composerInput.hasChips()) {
+    return;
   }
-  autoGrow();
+  writeDraft(localStorage, state.sessionId, composerInput.getText());
+}
+
+function restoreDraft(sessionId) {
+  // 已经有附件芯片时保持原样，免得把用户刚拖进来的文件冲掉
+  if (state.queueEdit || composerInput.hasChips()) {
+    return;
+  }
+  composerInput.setText(readDraft(localStorage, sessionId));
   syncComposer();
-  const caret = el.input.selectionStart;
-  const before = el.input.value.slice(0, caret);
+}
+
+function onComposerInput() {
+  scheduleDraftSave();
+  syncComposer();
+  const before = composerInput.textBeforeCaret();
   // 路径里可能有中文、空格以外的任意字符；只按「空白之前」截断，@ 后不要求是 ASCII
   const fileMatch = /(^|\s)@([^\s@]*)$/.exec(before);
-  const commandMatch = /^\/([\w-]*)(?:\s+.*)?$/.exec(before);
+  // 快捷指令会整段替换草稿，带着附件时不展开，免得把附件冲掉
+  const commandMatch = composerInput.hasChips() ? null : /^\/([\w-]*)(?:\s+.*)?$/.exec(before);
   if (fileMatch) {
     showRefMenu('file', fileMatch[2]);
   } else if (commandMatch) {
@@ -7249,9 +8297,14 @@ function onComposerInput() {
 }
 
 function showRefMenu(kind, query) {
-  const items = kind === 'command'
-    ? filterQuickCommands(query)
-    : treeFiles().filter((path) => path.toLowerCase().includes(String(query).toLowerCase())).slice(0, 40);
+  let items;
+  if (kind === 'command') {
+    items = filterQuickCommands(query);
+  } else {
+    // 文件树是懒加载的，只看已展开的目录会漏掉大部分文件；用整仓清单排序
+    ensureFileIndex();
+    items = rankFileMatches(mentionCandidates(), query);
+  }
 
   el.refMenu.replaceChildren();
   state.refItems = items;
@@ -7272,18 +8325,27 @@ function showRefMenu(kind, query) {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'ref-item' + (index === 0 ? ' is-on' : '');
-    const label = document.createElement('span');
-    const desc = document.createElement('span');
-    desc.className = 'ref-desc';
     if (kind === 'command') {
+      const label = document.createElement('span');
       label.textContent = item.name;
+      const desc = document.createElement('span');
+      desc.className = 'ref-desc';
       desc.textContent = `${item.label} · ${item.hint}`;
+      row.append(label, desc);
     } else {
-      label.className = 'mono';
-      label.textContent = item;
-      desc.textContent = '文件';
+      const info = fileBadge(item);
+      const badge = document.createElement('span');
+      badge.className = `chip-badge ft-${info.tone}`;
+      badge.textContent = info.label;
+      const slash = item.lastIndexOf('/');
+      const name = document.createElement('span');
+      name.className = 'ref-name';
+      name.textContent = item.slice(slash + 1);
+      const dir = document.createElement('span');
+      dir.className = 'ref-dir';
+      dir.textContent = slash >= 0 ? item.slice(0, slash) : '';
+      row.append(badge, name, dir);
     }
-    row.append(label, desc);
     row.addEventListener('mousedown', (event) => {
       event.preventDefault();
       applyRef(item);
@@ -7306,7 +8368,7 @@ function treeFiles() {
 
 /** 有完整索引就用它，否则退回文件树里已加载的节点。 */
 function mentionCandidates() {
-  return state.fileIndex.length ? state.fileIndex : treeFiles();
+  return state.fileIndex && state.fileIndex.length ? state.fileIndex : treeFiles();
 }
 
 /**
@@ -7353,23 +8415,18 @@ function ensureFileIndex() {
 }
 
 function applyRef(item) {
-  const value = el.input.value;
-  const caret = el.input.selectionStart;
-  const before = value.slice(0, caret);
-  const after = value.slice(caret);
   const kind = state.refKind;
-  if (kind === 'command') {
-    const commandMatch = /^\/([\w-]*)(?:\s+(.*))?$/.exec(before);
-    const prompt = expandQuickCommand(item, commandMatch?.[2] || '');
-    el.input.value = prompt + after;
-  } else {
-    const replaced = before.replace(/@([\w./-]*)$/, '@' + item + ' ');
-    el.input.value = replaced + after;
-  }
   hideRefMenu();
-  autoGrow();
-  el.input.focus();
-  el.input.setSelectionRange(el.input.value.length, el.input.value.length);
+  if (kind === 'command') {
+    const commandMatch = /^\/([\w-]*)(?:\s+(.*))?$/.exec(composerInput.textBeforeCaret());
+    const prompt = expandQuickCommand(item, commandMatch?.[2] || '');
+    el.input.value = prompt + composerInput.textAfterCaret();
+    composerInput.focusEnd();
+  } else {
+    // 选中的文件变成输入框里的一个引用芯片，发送时还原成 @路径
+    composerInput.insertMention(item);
+  }
+  onComposerInput();
 }
 
 function onComposerKeydown(event) {
@@ -7386,7 +8443,7 @@ function onComposerKeydown(event) {
       rows[state.refIndex]?.scrollIntoView({ block: 'nearest' });
       return true;
     }
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       applyRef(state.refItems[state.refIndex]);
       return true;
@@ -7411,27 +8468,97 @@ function button(label, className, onClick) {
   return node;
 }
 
-function copyControl(label, readText) {
-  const control = button('复制', 'copy-control', async () => {
+/** 16px 线性图标，统一 1.6 描边，颜色跟随文字。 */
+const ACTION_ICONS = {
+  edit: '<path d="M10.8 2.7l2.5 2.5-7.6 7.6-3.2.7.7-3.2z"/><path d="M9.4 4.1l2.5 2.5"/>',
+  branch: '<circle cx="4.5" cy="3.6" r="1.7"/><circle cx="4.5" cy="12.4" r="1.7"/><circle cx="11.5" cy="5.6" r="1.7"/><path d="M4.5 5.3v5.4M11.5 7.3c0 2.5-2.3 3.4-6 3.9"/>',
+  copy: '<rect x="5.6" y="5.6" width="7.9" height="7.9" rx="2"/><path d="M10.4 3.4A1.4 1.4 0 0 0 9 2H4.2A1.7 1.7 0 0 0 2.5 3.7V9c0 .8.6 1.4 1.4 1.4"/>',
+  check: '<path d="M3.4 8.6l3.1 3.1 6.1-7"/>'
+};
+
+function actionIconSvg(name) {
+  return `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ACTION_ICONS[name]}</svg>`;
+}
+
+/** 图标按钮：不写字，悬停时用自带的小气泡说明（data-tip），读屏和键盘用 aria-label。 */
+function actionIcon(label, icon, className, onClick) {
+  const node = document.createElement('button');
+  node.type = 'button';
+  node.className = 'icon-action ' + className;
+  node.setAttribute('aria-label', label);
+  node.dataset.tip = label;
+  node.innerHTML = actionIconSvg(icon);
+  node.addEventListener('click', onClick);
+  return node;
+}
+
+function userMessageActions(wrapper) {
+  const actions = document.createElement('div');
+  actions.className = 'msg-actions';
+  actions.append(
+    actionIcon('编辑并重新发送', 'edit', 'msg-edit-btn', () => beginEditUserMessage(wrapper)),
+    actionIcon('回退或另开分支', 'branch', 'msg-edit-btn', () => openMessageCheckpoint(wrapper))
+  );
+  return actions;
+}
+
+/** 优先用异步剪贴板；权限被拒或非安全上下文时退回 execCommand，保证复制一定能用。 */
+async function writeClipboard(value) {
+  try {
+    await navigator.clipboard.writeText(value);
+    return;
+  } catch (error) {
+    const area = document.createElement('textarea');
+    area.value = value;
+    area.setAttribute('readonly', '');
+    area.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+    document.body.append(area);
+    area.select();
+    const ok = document.execCommand('copy');
+    area.remove();
+    if (!ok) {
+      throw error;
+    }
+  }
+}
+
+function copyControl(label, readText, { tip = true } = {}) {
+  const control = document.createElement('button');
+  control.type = 'button';
+  control.className = 'copy-control icon-action';
+  control.setAttribute('aria-label', label);
+  if (tip) {
+    control.dataset.tip = label;
+  } else {
+    control.title = label;
+  }
+  control.innerHTML = actionIconSvg('copy');
+  let timer = null;
+  control.addEventListener('click', async () => {
     const value = String(readText() || '');
     if (!value) {
       return;
     }
     try {
-      await navigator.clipboard.writeText(value);
-      control.textContent = '已复制';
+      await writeClipboard(value);
+      control.innerHTML = actionIconSvg('check');
       control.classList.add('is-done');
-      setTimeout(() => {
-        control.textContent = '复制';
+      if (control.dataset.tip) {
+        control.dataset.tip = '已复制';
+      }
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        control.innerHTML = actionIconSvg('copy');
         control.classList.remove('is-done');
+        if (control.dataset.tip) {
+          control.dataset.tip = label;
+        }
       }, 1600);
     } catch (error) {
       console.warn('[clipboard]', error);
       showNotice('复制失败，请手动选择内容。');
     }
   });
-  control.setAttribute('aria-label', label);
-  control.title = label;
   return control;
 }
 
@@ -7578,7 +8705,7 @@ function codeBlock(code, language) {
   const label = document.createElement('span');
   label.className = 'md-code-language';
   label.textContent = languageLabel(language);
-  head.append(label, copyControl('复制代码', () => code.replace(/\n+$/, '')));
+  head.append(label, copyControl('复制代码', () => code.replace(/\n+$/, ''), { tip: false }));
   const pre = document.createElement('pre');
   const el = document.createElement('code');
   if (language) {
@@ -7775,7 +8902,17 @@ function formatTime(value) {
   return date.toLocaleTimeString('zh-CN', { hour12: false });
 }
 
+/** 去掉服务端拼进消息的附件块，只留用户写的话；只发了文件时退回文件名。标题、摘要都不该带整份文件内容。 */
+function plainBody(value) {
+  const text = String(value || '');
+  const { body, files } = splitAttachmentMarkers(text);
+  if (body.trim()) {
+    return body;
+  }
+  return files.length ? files.map((file) => file.name).join('、') : text;
+}
+
 function preview(value, maxLength) {
-  const single = String(value || '').replace(/\s+/g, ' ').trim();
+  const single = plainBody(value).replace(/\s+/g, ' ').trim();
   return single.length <= maxLength ? single : single.slice(0, maxLength) + '…';
 }

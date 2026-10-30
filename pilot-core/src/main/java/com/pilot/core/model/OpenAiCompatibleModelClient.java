@@ -279,7 +279,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                 parts.add(Map.of("type", "text", "text", message.content()));
             }
             for (Attachment image : images) {
-                parts.add(Map.of("type", "image_url", "image_url", Map.of("url", dataUrl(image))));
+                parts.add(imagePart(message, image));
             }
             return parts;
         }
@@ -289,13 +289,24 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             if (position > cursor) {
                 parts.add(Map.of("type", "text", "text", message.content().substring(cursor, position)));
             }
-            parts.add(Map.of("type", "image_url", "image_url", Map.of("url", dataUrl(images.get(i)))));
+            parts.add(imagePart(message, images.get(i)));
             cursor = position;
         }
         if (cursor < message.content().length()) {
             parts.add(Map.of("type", "text", "text", message.content().substring(cursor)));
         }
         return parts;
+    }
+
+    /**
+     * 用户上传的图片丢失时直接报错（用户需要知道）；工具产出的图片只是一次性观察，
+     * 文件被清理后改成文字说明，不让整段历史因此再也发不出去。
+     */
+    private static Map<String, Object> imagePart(Message message, Attachment image) {
+        if (message.isToolImages() && !Files.isRegularFile(Path.of(image.path()))) {
+            return Map.of("type", "text", "text", "[图片已不存在：" + image.name() + "]");
+        }
+        return Map.of("type", "image_url", "image_url", Map.of("url", dataUrl(image)));
     }
 
     private static String dataUrl(Attachment image) {

@@ -29,6 +29,22 @@ class SessionEventsTest {
     }
 
     @Test
+    void toolStartedKeepsAgentOwnershipOnlyWhenPresent() {
+        assertSerialized(new ToolStarted("call_1", "read_file", "A.java", "agent_ab12"), "tool.started", """
+                {"callId":"call_1","name":"read_file","summary":"A.java","agentId":"agent_ab12"}""");
+        assertEquals(new ToolStarted("call_1", "read_file", "A.java", "agent_x"),
+                new ToolStarted("call_1", "read_file", "A.java").forAgent("agent_x"));
+    }
+
+    @Test
+    void subagentStartedNameIsOptional() {
+        assertSerialized(new SubagentStarted("agent_1", "盘点入口类"), "subagent.started", """
+                {"agentId":"agent_1","task":"盘点入口类"}""");
+        assertSerialized(new SubagentStarted("agent_1", "盘点入口类", "盘点入口"), "subagent.started", """
+                {"agentId":"agent_1","task":"盘点入口类","name":"盘点入口"}""");
+    }
+
+    @Test
     void approvalRequired() {
         assertSerialized(new ApprovalRequired("call_2", "write_file", "+18 -4"), "approval.required", """
                 {"callId":"call_2","name":"write_file","argsSummary":"+18 -4"}""");

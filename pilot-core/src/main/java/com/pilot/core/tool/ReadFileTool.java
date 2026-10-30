@@ -51,7 +51,9 @@ public final class ReadFileTool implements Tool {
                         "start_line", Map.of("type", "integer",
                                 "description", "起始行号。正数从 1 开始，负数从末尾数，-1 是最后一行。默认 1"),
                         "line_count", Map.of("type", "integer",
-                                "description", "最多读取行数，默认 200，最大 2000")),
+                                "description", "最多读取行数，默认 200，最大 2000"),
+                        "pages", Map.of("type", "string",
+                                "description", "仅 PDF：页码或范围，例如 \"3\" 或 \"2-5\"，默认前 10 页，单次最多 30 页")),
                 "required", List.of("path"),
                 "additionalProperties", false);
     }
@@ -64,6 +66,28 @@ public final class ReadFileTool implements Tool {
     @Override
     public boolean parallelSafe() {
         return true;
+    }
+
+    /** 图片与 PDF 走媒体分支，其余沿用文本读取。 */
+    @Override
+    public ToolResult executeResult(Map<String, Object> args) {
+        String rawPath = ToolSupport.stringArg(args, "path");
+        if (rawPath != null) {
+            try {
+                Path file = paths.resolve(rawPath);
+                if (Files.isRegularFile(file)) {
+                    if (MediaFileReader.isImage(file)) return MediaFileReader.readImage(file, rawPath);
+                    if (MediaFileReader.isPdf(file)) {
+                        return MediaFileReader.readPdf(file, rawPath, args.get("pages"));
+                    }
+                }
+            } catch (RuntimeException e) {
+                // 路径非法的错误文本交给下面的文本分支统一生成
+            } catch (IOException e) {
+                return ToolResult.text("ERROR: 读取失败: " + e.getMessage());
+            }
+        }
+        return ToolResult.text(execute(args));
     }
 
     @Override

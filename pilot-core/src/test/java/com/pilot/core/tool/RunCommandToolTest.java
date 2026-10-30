@@ -37,12 +37,24 @@ class RunCommandToolTest {
     }
 
     @Test
-    void rejectsShellMetacharacters() {
+    void validatesEverySegmentOfAChain() {
         RunCommandTool tool = tool();
 
         String result = tool.execute(Map.of("command", "git status && rm -rf ."));
 
-        assertTrue(result.startsWith("ERROR: 命令包含不允许的 shell 元字符"), result);
+        assertTrue(result.startsWith("ERROR: 命令不在白名单内: rm"), result);
+    }
+
+    @Test
+    void rejectsUnquotedShellSyntax() {
+        RunCommandTool tool = tool();
+
+        for (String command : List.of("git status > out.txt", "git status `whoami`", "echo $(whoami)",
+                "git status &", "(git status)", "git log < /etc/passwd", "git status ||", "&& git status")) {
+            String result = tool.execute(Map.of("command", command));
+            assertTrue(result.startsWith("ERROR: "), command + " -> " + result);
+            assertFalse(result.contains("退出码"), command + " -> " + result);
+        }
     }
 
     @Test

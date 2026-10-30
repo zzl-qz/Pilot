@@ -222,6 +222,28 @@ public final class ContextCompactor {
     }
 
     /**
+     * 工具图片只保留最近 {@code keep} 条：截图是「此刻页面长什么样」的观察，旧的已经过期，
+     * 却会按图片 token 持续占用上下文。更早的图片换成文字说明，模型需要时重新截图。
+     *
+     * @return 被去掉图片的消息条数
+     */
+    public static int dropStaleToolImages(List<Message> messages, int keep) {
+        int kept = 0;
+        int dropped = 0;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Message message = messages.get(i);
+            if (!message.isToolImages() || message.attachments().isEmpty()) continue;
+            if (++kept <= Math.max(0, keep)) continue;
+            String names = message.attachments().stream().map(Attachment::name)
+                    .collect(java.util.stream.Collectors.joining(", "));
+            messages.set(i, new Message("user", Message.TOOL_IMAGE_MARKER + " 较早的图片已省略（" + names
+                    + "）；需要当前状态请重新截图或读取。"));
+            dropped++;
+        }
+        return dropped;
+    }
+
+    /**
      * 第二层：仍然留在窗口里的超长工具输出只保留头尾，避免单条就把预算吃光。
      *
      * @return 被截断的条数
@@ -501,6 +523,8 @@ public final class ContextCompactor {
     private static List<Attachment> attachments(List<Message> messages, int from, int to) {
         LinkedHashMap<String, Attachment> unique = new LinkedHashMap<>();
         for (int index = from; index < to; index++) {
+            // 工具截图是一次性观察，折叠后由摘要里的文字证据代替，不跟着交接摘要无限累积
+            if (messages.get(index).isToolImages()) continue;
             for (Attachment attachment : messages.get(index).attachments()) {
                 unique.putIfAbsent(attachment.path(), attachment);
             }

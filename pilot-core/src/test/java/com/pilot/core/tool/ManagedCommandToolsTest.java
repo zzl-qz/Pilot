@@ -147,7 +147,7 @@ class ManagedCommandToolsTest {
         try (CommandTaskManager manager = manager()) {
             RunCommandTool legacy = new RunCommandTool(new PathValidator(workspace));
             RunCommandTool managed = run(manager);
-            for (String command : List.of("rm -rf /", "/bin/java -version", "git status && java -version",
+            for (String command : List.of("rm -rf /", "/bin/java -version", "git status && rm -rf build",
                     "git reset --hard HEAD", "git add ../outside", "git commit")) {
                 String expected = legacy.execute(Map.of("command", command));
                 assertTrue(expected.startsWith("ERROR:"), expected);

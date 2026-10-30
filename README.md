@@ -174,6 +174,12 @@ bash mvnw -pl pilot-server spring-boot:run
 
 代码完成门只接受类型明确且成功的测试、构建、静态检查或格式检查；`git status`、版本查询等普通 `exit 0` 不能充当验证。续跑会恢复本任务已改文件和有效检查，源码变化后旧验证自动失效。同步 `spawn_agent` 使用冻结且去递归/Goal 控制的工具快照；单次派生最多 8 个工作步和 1 个收尾请求（合计最多 9 次模型请求），同一 run 共享最多 4 次派生、24 次子模型请求的资源池，子请求及 token 用量同时计入父任务的事故熔断。子运行会把改动路径和检查结果结构化交回父完成门，即使失败也不会丢失已产生的事实。重复调用只有连续得到相同结果才算停滞；仍在运行的后台状态/日志查询使用更宽的有界观察窗口。上下文摘要连续 3 次无收益或连续 3 次快速回填时熔断模型摘要，继续使用本地裁剪。完整协议见 [Goal 执行说明](evaluation/GOALS.md)。
 
+## 浏览器验证与 MCP
+
+`browser` 工具在隔离的 Chromium 里打开本机页面（只允许 localhost / 127.0.0.1 / [::1]），支持 DOM 快照、点击、输入、选择、文件上传、截图、控制台与网络记录，用于让代理验证自己改的前端。运行时是固定版本 `playwright-core@1.64.1` 的 Node sidecar，首次启动时自动安装到 `.pilot/browser`，浏览器优先用本机 Chrome / Edge，都没有时下载 Playwright Chromium。可用 `pilot.browser.enabled=false` 关闭，`PILOT_BROWSER_PATH` 指定浏览器可执行文件。握手没通过时模型看不到这个工具，原因保留在工具不可用信息里；本机装好浏览器后约一分钟内自动重测。截图保存在数据目录的 `artifacts/` 下。
+
+MCP 服务器在工作区的 `.mcp.json`（格式同 Claude Code：`{"mcpServers": {"名字": {"command": "npx", "args": [...], "env": {...}}}}`）或数据目录的 `mcp.json` 里配置，目前支持 stdio 传输。模型每次请求只携带 `mcp_tools` 与 `mcp_call` 两个定义，具体工具按需查询；启动服务器等于执行配置里的命令，所以需要审批，声明了 `readOnlyHint` 的工具调用免审批。
+
 ## 后台命令
 
 代理调用 `run_command` 时可指定 `background: true`，命令启动后返回任务 ID，代理可继续其他工作。后台命令仍遵守现有权限与审批流程；界面不提供绕过审批的任意命令启动表单。代理可以用 `command_status` 查询状态、`command_logs` 增量读取输出、`stop_command` 停止任务。
@@ -226,7 +232,7 @@ bash mvnw -pl pilot-server spring-boot:run
 
 ```sh
 cd pilot-web
-node --test src/test/js
+npm test
 ```
 
 Sprint 6 可复现任务规格与任务矩阵、运行命令见 `evaluation/TASKS.md`，记录模板/当前结果见 `evaluation/REPORT.md`。任务包括代码理解、修复、测试、权限拒绝、循环检测和压缩等。脚本化单测验证的是组件行为，不等同于真实模型成功率；真实模型评估还需配置模型并人工记录结果。

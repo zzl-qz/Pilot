@@ -23,11 +23,13 @@ public class SessionCleanupService {
     private final RunStarter runStarter;
     private final TaskControlService taskControls;
     private final com.pilot.core.tool.CommandTaskManager commandTasks;
+    private final org.springframework.beans.factory.ObjectProvider<com.pilot.core.browser.BrowserBackend> browser;
 
     public SessionCleanupService(SessionService sessions, ConversationRepository conversations,
                                  PlanRepository plans, RunRepository runs, SandboxStore sandboxes,
                                  RunStarter runStarter, TaskControlService taskControls,
-                                 com.pilot.core.tool.CommandTaskManager commandTasks) {
+                                 com.pilot.core.tool.CommandTaskManager commandTasks,
+                                 org.springframework.beans.factory.ObjectProvider<com.pilot.core.browser.BrowserBackend> browser) {
         this.sessions = sessions;
         this.conversations = conversations;
         this.plans = plans;
@@ -36,6 +38,7 @@ public class SessionCleanupService {
         this.runStarter = runStarter;
         this.taskControls = taskControls;
         this.commandTasks = commandTasks;
+        this.browser = browser;
     }
 
     /**
@@ -43,6 +46,8 @@ public class SessionCleanupService {
      */
     public boolean delete(String sessionId) {
         commandTasks.stopSession(sessionId);
+        com.pilot.core.browser.BrowserBackend backend = browser.getIfAvailable();
+        if (backend != null) backend.closeSession(sessionId);
         runStarter.activeRun(sessionId).ifPresent(runStarter::cancel);
         boolean removed = sessions.delete(sessionId);
         conversations.delete(sessionId);
