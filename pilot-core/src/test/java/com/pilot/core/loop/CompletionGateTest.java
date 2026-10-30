@@ -25,6 +25,26 @@ class CompletionGateTest {
     }
 
     @Test
+    void actionGoalWithoutAnyChangeIsPushedOnceToActuallyAct() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复登录接口的空指针");
+
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
+
+        assertNotNull(nudge);
+        assertTrue(nudge.reason().contains("动手"), nudge.reason());
+        assertTrue(nudge.prompt().contains("修复登录接口的空指针"), nudge.prompt());
+        // 只推一次，之后放行，避免对确实只需要回答的请求反复催办
+        assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of()));
+    }
+
+    @Test
+    void questionGoalMentioningActionWordsIsNotPushedToAct() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "为什么这里没有修复");
+
+        assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of()));
+    }
+
+    @Test
     void asksForVerificationWhenCodeChangedWithoutPassingCheck() {
         CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
 

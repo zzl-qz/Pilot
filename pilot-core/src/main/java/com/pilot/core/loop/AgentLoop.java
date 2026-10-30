@@ -155,6 +155,8 @@ public final class AgentLoop {
     /** 动态后台状态即使暂时不变也可能稍后完成；给它比普通重复调用更宽的有界观察窗口。 */
     private static final int MIN_DYNAMIC_POLL_ABORT = 8;
     private static final int MAX_PARALLEL_READS = 8;
+    /** 相同调用达到中断阈值后的缓冲轮数：先给模型强纠偏，仍无变化才中断。 */
+    private static final int MAX_REPEAT_GRACE = 2;
     /** 历史里最多保留几条带图片的工具观察；更早的换成文字说明。 */
     private static final int MAX_TOOL_IMAGE_MESSAGES = 3;
     /** 计划未完成时默认自动催模型继续的次数上限。 */
@@ -338,6 +340,7 @@ public final class AgentLoop {
         String lastSignature = null;
         List<String> lastOutcomes = List.of();
         int repeated = 0;
+        int repeatGrace = 0;
         int planContinues = 0;
         int outputLimitStreak = 0;
         LinkedHashSet<String> changedFiles = new LinkedHashSet<String>();
@@ -614,14 +617,21 @@ public final class AgentLoop {
                                 && observedResults.equals(lastOutcomes) ? repeated + 1 : 1;
                         lastSignature = signature;
                         lastOutcomes = observedResults;
+                        if (repeated == 1) repeatGrace = 0;
                         if (config.repeatRemindAt() > 0 && repeated == config.repeatRemindAt()) {
                             runtimeGuidance.add(repeatReminder(calls, repeated));
                             events.accept(new RunContinued(1, 1,
                                     "重复调用提醒：连续第 " + repeated + " 次无新结果"));
                         }
                         if (repeated >= config.repeatAbortAt()) {
-                            throw new ExecutionPolicy.Stop("REPEATED_TOOL_CALL",
-                                    "连续 " + repeated + " 次相同工具调用得到相同结果，已中断无效循环。");
+                            if (repeatGrace >= MAX_REPEAT_GRACE) {
+                                throw new ExecutionPolicy.Stop("REPEATED_TOOL_CALL",
+                                        "连续 " + repeated + " 次相同工具调用得到相同结果，已中断无效循环。");
+                            }
+                            repeatGrace++;
+                            runtimeGuidance.add(repeatFinalWarning(calls, repeated, repeatGrace));
+                            events.accept(new RunContinued(repeatGrace, MAX_REPEAT_GRACE,
+                                    "重复调用缓冲：连续第 " + repeated + " 次无新结果，要求换路"));
                         }
                     } else {
                         lastSignature = null;
@@ -800,6 +810,17 @@ public final class AgentLoop {
                 .collect(Collectors.joining(", "));
         return PROMPTS.render("loop/repeat-reminder",
                 Map.of("count", String.valueOf(count), "tool", tools)).strip();
+    }
+
+    /** 达到中断阈值后的缓冲提醒：明确告知再重复会被中断，要求换成能产生不同状态的动作。 */
+    private static String repeatFinalWarning(List<ToolCall> calls, int count, int grace) {
+        String tools = calls.stream().map(ToolCall::name).distinct().collect(Collectors.joining(", "));
+        return PROMPTS.render("loop/stuck-nudge", Map.of(
+                "pattern", "同一工具调用连续 " + count + " 次得到相同结果：" + tools,
+                "repeatCount", String.valueOf(count),
+                "unchangedState", "最近的工具结果与上一次完全相同；缓冲还剩 " + (MAX_REPEAT_GRACE - grace)
+                        + " 次，用完后本轮会被中断",
+                "blockedActions", "- 不要再次用相同参数调用 " + tools)).strip();
     }
 
     /** 动态任务仍在运行但观察没有变化时，要求模型换成有意义的等待/替代动作。 */

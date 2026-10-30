@@ -40,6 +40,7 @@ import java.util.regex.Pattern;
  * prompts/completion/verify.md      收尾前的验证要求
  * prompts/completion/review.md      有改动时的收尾自审
  * prompts/completion/review-readonly.md  只读调研任务的自审
+ * prompts/completion/act.md        实现类目标没有任何改动就想收尾时的催办
  * prompts/compact/summary.md        上下文压缩摘要
  * prompts/plan/continue.md          计划未完成时的自动继续（{{openSteps}}）
  * prompts/goal/continue.md          Goal 跨轮继续合同（目标 / 缺口 / 唯一下一动作）

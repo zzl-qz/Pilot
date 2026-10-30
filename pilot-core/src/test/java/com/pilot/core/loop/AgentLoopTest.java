@@ -148,7 +148,10 @@ class AgentLoopTest {
 
     @Test
     void injectsExecutionPolicyGuidanceAsEphemeralSystemContext() {
-        ScriptedModelClient client = new ScriptedModelClient(new ModelResponse("已按现有证据实施。", List.of()));
+        // 目标含「修改」且没有任何文件改动：收尾门会按实现类目标催办一次，脚本要多备一条回复
+        ScriptedModelClient client = new ScriptedModelClient(
+                new ModelResponse("已按现有证据实施。", List.of()),
+                new ModelResponse("已按现有证据实施。", List.of()));
         AtomicBoolean delivered = new AtomicBoolean();
         ExecutionPolicy policy = new ExecutionPolicy() {
             @Override public void beforeRequest(List<Message> history) { }
@@ -207,14 +210,21 @@ class AgentLoopTest {
                 new ModelResponse("", List.of(call)),
                 new ModelResponse("", List.of(call)),
                 new ModelResponse("", List.of(call)),
+                new ModelResponse("", List.of(call)),
+                new ModelResponse("", List.of(call)),
                 new ModelResponse("不该走到这里", List.of()));
         AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
 
         AgentLoop.Result result = loop.run("读 pom.xml", List.of(), events::add);
 
         assertEquals("REPEATED_TOOL_CALL", result.failureCode());
-        assertEquals(3, tool.executions.get(), "要先观察第三次结果，才能判断确实没有新进展");
-        assertEquals(4, client.requests.size());
+        // 第 3 次达到阈值后先有两次缓冲，第 5 次仍相同才中断
+        assertEquals(5, tool.executions.get(), "要先观察结果，才能判断确实没有新进展");
+        assertEquals(6, client.requests.size());
+        assertTrue(client.requests.get(3).getFirst().content().contains("运行时停滞检查"),
+                "达到阈值后的缓冲轮应收到强纠偏提醒");
+        assertFalse(result.conversation().stream().anyMatch(message -> "user".equals(message.role())
+                && message.content().contains("运行时停滞检查")), "缓冲提醒不能写进会话历史");
         assertEquals("不该走到这里", result.finalText(), "停止时最后一个模型请求应改为无工具收尾");
         assertTrue(client.toolDefinitions.getLast().isEmpty());
         assertTrue(events.stream().anyMatch(event -> event instanceof RunFailed failed
@@ -232,7 +242,9 @@ class AgentLoopTest {
                 new ModelResponse("", List.of(call)),   // 2: 执行
                 new ModelResponse("", List.of(call)),   // 3: 执行 + 注入提醒
                 new ModelResponse("", List.of(call)),   // 4: 执行（不再新提醒）
-                new ModelResponse("", List.of(call)),   // 5: 执行后确认停滞并中断
+                new ModelResponse("", List.of(call)),   // 5: 执行，到达中断阈值，进入缓冲 1
+                new ModelResponse("", List.of(call)),   // 6: 执行，缓冲 2
+                new ModelResponse("", List.of(call)),   // 7: 执行后缓冲用尽并中断
                 new ModelResponse("不该走到这里", List.of()));
         AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(),
                 new AgentLoop.Config(8, 3, 5, "你是测试代理"));
@@ -240,8 +252,8 @@ class AgentLoopTest {
         AgentLoop.Result result = loop.run("读 pom.xml", List.of(), events::add);
 
         assertEquals("REPEATED_TOOL_CALL", result.failureCode());
-        assertEquals(5, tool.executions.get(), "停滞判断必须依据实际返回结果");
-        assertEquals(6, client.requests.size());
+        assertEquals(7, tool.executions.get(), "停滞判断必须依据实际返回结果");
+        assertEquals(8, client.requests.size());
         // 第 4 次请求通过一次性 system 上下文收到提醒；不能伪装成用户消息或写入会话。
         assertTrue(client.requests.get(3).getFirst().content().contains("连续第 3 次"));
         assertFalse(client.requests.get(3).stream()
@@ -257,6 +269,28 @@ class AgentLoopTest {
                 && failed.code().equals("REPEATED_TOOL_CALL")));
         assertTrue(client.requests.get(3).stream().anyMatch(message -> "tool".equals(message.role())
                 && "content".equals(message.content())), "提醒前的工具结果应是真实观察");
+    }
+
+    /** 达到中断阈值进入缓冲后，只要模型换成不同的调用，缓冲计数就应重置，任务继续而不是中断。 */
+    @Test
+    void differentCallDuringRepeatBufferResetsItAndContinues() {
+        CountingTool tool = new CountingTool("read_file", "content");
+        ToolCall same = new ToolCall("call_1", "read_file", Map.of("path", "pom.xml"));
+        ToolCall other = new ToolCall("call_2", "read_file", Map.of("path", "other.xml"));
+        ScriptedModelClient client = new ScriptedModelClient(
+                new ModelResponse("", List.of(same)),
+                new ModelResponse("", List.of(same)),
+                new ModelResponse("", List.of(same)),   // 第 3 次到达阈值，进入缓冲 1
+                new ModelResponse("", List.of(other)),  // 换了调用：计数与缓冲重置
+                new ModelResponse("完成", List.of()));
+        AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
+
+        AgentLoop.Result result = loop.run("读 pom.xml", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals(4, tool.executions.get());
+        assertTrue(client.requests.get(3).getFirst().content().contains("运行时停滞检查"),
+                "缓冲轮应收到强纠偏提醒");
     }
 
     @Test

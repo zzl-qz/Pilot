@@ -53,6 +53,10 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private static final int REVIEWER_RESERVED_REQUESTS = 2;
     private static final int MAX_CONSECUTIVE_RESEARCH_FAILURES = 3;
     private static final int INVESTIGATION_NUDGE_AT = 16;
+    /** 验证状态没有变化时，在以 UNVERIFIED 停止之前额外允许催办的次数。 */
+    private static final int MAX_UNCHANGED_VALIDATION_NUDGES = 2;
+    /** 普通任务收尾核对指出缺口后，模型仍没有产生新证据时允许的缓冲次数。 */
+    private static final int MAX_DIRECT_IDLE_REVIEWS = 1;
     private static final Set<String> RESEARCH_TOOLS = Set.of("web_search", "web_fetch");
     private static final Pattern TASK_ID = Pattern.compile("(?m)^任务ID: ([A-Za-z0-9_-]+)$");
     private static final String AUTO_REVERIFY_KEY = "auto_reverify:";
@@ -81,6 +85,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private List<Attachment> attachments = List.of();
     private String lastValidationNudgeFingerprint = "";
     private boolean automaticReverificationAttempted;
+    private int unchangedValidationNudges;
     private int consecutiveResearchFailures;
     private boolean researchRouteUnavailable;
     private boolean finalizing;
@@ -627,8 +632,13 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             String reason = verificationGap(state);
             String fingerprint = validationProgress(state);
             if (fingerprint.equals(lastValidationNudgeFingerprint)) {
-                updatePhase(state, "UNVERIFIED", reason.isBlank() ? "代码改动尚无当前版本的成功验证" : reason);
-                throw new Stop("UNVERIFIED", reason.isBlank() ? "代码改动尚无当前版本的成功验证。" : reason);
+                // 验证状态没变也先多给几次机会：环境问题往往要模型换目录或换命令才能解开
+                if (++unchangedValidationNudges > MAX_UNCHANGED_VALIDATION_NUDGES) {
+                    updatePhase(state, "UNVERIFIED", reason.isBlank() ? "代码改动尚无当前版本的成功验证" : reason);
+                    throw new Stop("UNVERIFIED", reason.isBlank() ? "代码改动尚无当前版本的成功验证。" : reason);
+                }
+            } else {
+                unchangedValidationNudges = 0;
             }
             lastValidationNudgeFingerprint = fingerprint;
             return "代码已修改，但还没有当前版本的针对性验证。" + (reason.isBlank() ? "" : reason + "。")
@@ -658,14 +668,24 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         String progress = directProgress(beforeReview);
         if (!beforeReview.nextAction().isBlank()
                 && progress.equals(beforeReview.progress())) {
-            updatePhase(beforeReview, "NO_PROGRESS", beforeReview.gap());
-            throw new Stop("NO_PROGRESS", "收尾核对指出的缺口尚无新增证据：" + beforeReview.gap()
-                    + "；下一步：" + beforeReview.nextAction());
+            int idle = beforeReview.idleReviews() + 1;
+            if (idle > MAX_DIRECT_IDLE_REVIEWS) {
+                updatePhase(beforeReview, "NO_PROGRESS", beforeReview.gap());
+                throw new Stop("NO_PROGRESS", "收尾核对指出的缺口尚无新增证据：" + beforeReview.gap()
+                        + "；下一步：" + beforeReview.nextAction());
+            }
+            // 缓冲：不再花一次核对请求，直接把同一个缺口和唯一下一步强调给模型
+            TaskControlService.Execution waiting = copy(beforeReview, "DIRECT", beforeReview.phase(),
+                    beforeReview.gap(), beforeReview.evidence(), idle, beforeReview.progress(), beforeReview.usage());
+            if (tasks.execution(session, task(), waiting)) updates.accept(waiting);
+            return "收尾核对指出的缺口仍无新增证据：" + beforeReview.gap() + "。不要再次总结或交付，现在只做："
+                    + beforeReview.nextAction() + "。预期证据：" + beforeReview.expectedObservation() + "。";
         }
         TaskControlService.TaskContract requirements = task();
         updatePhase(beforeReview, "VERIFYING", beforeReview.gap());
         TaskControlService.Execution state = state();
         Map<String, Object> answer = reviewDecision(directReviewContext(history, state), true);
+        if (answer == null) return null;
         if (!sameRequirements(requirements, task())) return "用户要求已变更，请重新核对目标。";
         String decision = string(answer, "decision");
         String gap = string(answer, "gap");
@@ -891,6 +911,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         String reason = lastFailure == null ? "核验器重试后仍未返回有效结构"
                 : Objects.toString(lastFailure.getMessage(), "未知错误");
         updatePhase(state(), "VERIFICATION_FAILED", reason);
+        // 普通任务的收尾核对只是额外保险：核对器自身故障时记录为未核验并放行，不让任务因此失败
+        if (direct) return null;
         throw new Stop("VERIFICATION_FAILED", "收尾核验暂时不可用，现有结果保持为未核验状态："
                 + oneLine(reason, 180));
     }

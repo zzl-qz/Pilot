@@ -32,6 +32,13 @@ final class CompletionGate {
     private static final int MAX_VERIFY_PROMPTS = 2;
     /** 收尾自审只做一次，再多就变成来回客套。 */
     private static final int MAX_REVIEW_PROMPTS = 1;
+    /** 实现类目标却没有任何改动就想收尾时，只推一次让它直接动手。 */
+    private static final int MAX_ACTION_PROMPTS = 1;
+    /** 目标像「修复 / 实现 / 修改」时，没有任何改动就收尾通常是半途停手，而不是完成。 */
+    private static final List<String> ACTION_HINTS = List.of(
+            "修复", "修改", "实现", "添加", "增加", "新增", "重构", "优化", "改成", "改为", "开发", "落地");
+    private static final List<String> ACTION_HINTS_EN = List.of(
+            "fix", "implement", "add ", "change", "refactor", "update", "build");
     /** 只改这些后缀的文档不算「改了代码」，不强制跑构建。 */
     private static final Set<String> DOC_SUFFIXES = Set.of(".md", ".txt", ".rst", ".adoc");
     /** 目标像「调研 / 解释 / 定位」时，只读任务也要核对覆盖范围，不能读两个文件就下结论。 */
@@ -49,6 +56,7 @@ final class CompletionGate {
     private final String goal;
     private int verifyPrompts;
     private int reviewPrompts;
+    private int actionPrompts;
     private int toolCalls;
     private final Set<String> inspected = new LinkedHashSet<>();
 
@@ -128,6 +136,14 @@ final class CompletionGate {
         boolean changed = !changedFiles.isEmpty();
         // 只读任务没有改动，但「目标像调研、工具却只用了两三次」同样要核对覆盖范围
         boolean researching = !changed && toolCalls >= 2 && looksLikeResearch(goal);
+        // 实现类目标却一个文件都没改就想收尾，多半是只给了方案或反问了一句，而不是真的做完
+        if (!changed && !researching && actionPrompts < MAX_ACTION_PROMPTS && looksLikeAction(goal)
+                && !looksLikeResearch(goal)) {
+            actionPrompts++;
+            String prompt = prompts.render("completion/act",
+                    Map.of("goal", ToolSupport.oneLine(goal, 500))).strip();
+            return new Nudge(prompt, "实现类目标尚无任何改动，已要求直接动手", actionPrompts, MAX_ACTION_PROMPTS);
+        }
         if (!changed && !researching) {
             return null;
         }
@@ -164,6 +180,15 @@ final class CompletionGate {
                     reviewPrompts, MAX_REVIEW_PROMPTS);
         }
         return null;
+    }
+
+    private static boolean looksLikeAction(String goal) {
+        if (goal == null || goal.isBlank()) {
+            return false;
+        }
+        String lower = goal.toLowerCase(Locale.ROOT);
+        return ACTION_HINTS.stream().anyMatch(goal::contains)
+                || ACTION_HINTS_EN.stream().anyMatch(lower::contains);
     }
 
     private static boolean looksLikeResearch(String goal) {

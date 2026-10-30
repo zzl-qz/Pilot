@@ -129,6 +129,9 @@ class GoalExecutionPolicyTest {
         observe(policy, "edit_file", "A.java", "updated", null);
 
         assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
+        // 验证状态没有变化时也有缓冲：再催两次，之后仍无变化才以 UNVERIFIED 停止
+        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
+        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
         ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class,
                 () -> policy.review(history, Set.of("A.java"), List.of()));
         assertEquals("UNVERIFIED", stop.code());
@@ -182,6 +185,11 @@ class GoalExecutionPolicyTest {
         observe(policy, "edit_file", "B.java", "updated", null);
         observe(policy, "run_command", "", "tests passed", "mvn test → exit 0");
         assertNotNull(policy.review(history, Set.of("A.java", "B.java"), List.of()));
+        // 缓冲：无新证据时先重申同一个下一步，不再花一次核对请求
+        String buffered = policy.review(history, Set.of("A.java", "B.java"), List.of());
+        assertNotNull(buffered);
+        assertTrue(buffered.contains("仍无新增证据"), buffered);
+        assertEquals(1, reviews.get());
 
         ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class,
                 () -> policy.review(history, Set.of("A.java", "B.java"), List.of()));
@@ -193,6 +201,24 @@ class GoalExecutionPolicyTest {
                 () -> resumed.beforeRequest(history));
         assertEquals("NO_PROGRESS", immediate.code());
         assertEquals(1, reviews.get(), "无新证据时继续不应再次核验");
+    }
+
+    @Test void directReviewerFailureFailsOpenInsteadOfStoppingTheTask() {
+        AtomicInteger calls = new AtomicInteger();
+        GoalExecutionPolicy policy = policy((messages, tools) -> {
+            calls.incrementAndGet();
+            return new ModelResponse("not a structured decision", List.of());
+        }, 20);
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "A.java", "updated", null);
+        observe(policy, "edit_file", "B.java", "updated", null);
+        observe(policy, "run_command", "", "tests passed", "mvn test → exit 0");
+
+        assertNull(policy.review(history, Set.of("A.java", "B.java"), List.of()),
+                "普通任务的核对器自身故障时应放行，而不是让任务失败");
+        assertEquals(2, calls.get());
+        assertEquals("VERIFICATION_FAILED", tasks.load("s").execution().phase(),
+                "放行的同时仍需把未核验状态记录下来");
     }
 
     @Test void unavailableBrowserRequestFallsBackToRunnableRegressionForOrdinaryUiTask() {
@@ -308,6 +334,9 @@ class GoalExecutionPolicyTest {
 
         assertNotNull(policy.review(history, Set.of("A.java"), List.of()),
                 "新增静态检查结果后仍应给模型修复失败测试的机会");
+        // 验证状态不变时再催两次，之后仍无变化才以 UNVERIFIED 停止
+        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
+        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
         ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class,
                 () -> policy.review(history, Set.of("A.java"), List.of()));
         assertEquals("UNVERIFIED", stop.code());
@@ -614,6 +643,8 @@ class GoalExecutionPolicyTest {
         observe(policy, "run_command", "", "working tree clean", "git status → exit 0");
 
         assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
+        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
+        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
         ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class,
                 () -> policy.review(history, Set.of("A.java"), List.of()));
         assertEquals("UNVERIFIED", stop.code());
@@ -628,6 +659,9 @@ class GoalExecutionPolicyTest {
         GoalExecutionPolicy resumed = policy((messages, tools) -> fail("reviewer not expected"), 20);
         resumed.beforeRequest(history);
         assertEquals(Set.of("A.java"), resumed.priorChangedPaths());
+        assertNotNull(resumed.review(history, Set.of(), List.of()));
+        // 验证状态不变时再催两次，之后仍无变化才以 UNVERIFIED 停止
+        assertNotNull(resumed.review(history, Set.of(), List.of()));
         assertNotNull(resumed.review(history, Set.of(), List.of()));
         assertEquals("UNVERIFIED", assertThrows(ExecutionPolicy.Stop.class,
                 () -> resumed.review(history, Set.of(), List.of())).code());
