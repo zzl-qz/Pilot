@@ -9,13 +9,13 @@ import java.util.Objects;
 import java.util.function.Supplier;
 
 /**
- * 权限策略：
+ * 权限策略：默认全放行，与 Codex / OpenCode 的默认行为对齐——写入和命令不再逐个打断，
+ * 工作区边界由 PathValidator 保证，文件改动由快照兜底可回滚。
  * <ul>
- *   <li>READ_ONLY：只读工具放行，写入/命令一律拒绝</li>
+ *   <li>AUTO：在已注册工具范围内放行（默认）</li>
+ *   <li>AUTO_EDIT：写入直接生效，命令仍挂起审批</li>
  *   <li>ASK：只读放行，写入/命令挂起等待用户审批</li>
- *   <li>AUTO_EDIT：写入直接生效（事后按 diff 审阅、必要时回滚），命令仍挂起审批；
- *       隔离沙箱内的本机交互（{@link LocalInteraction}，如浏览器点击）同样放行</li>
- *   <li>AUTO：在已注册工具范围内放行（工作区边界仍由 PathValidator 保证）</li>
+ *   <li>READ_ONLY：只读工具放行，写入/命令一律拒绝（相当于 Codex / OpenCode 的 plan 模式）</li>
  * </ul>
  *
  * <p>档位可以在运行时切换：传入 {@link Supplier} 时每次检查都读取最新值，
@@ -25,7 +25,7 @@ public final class PolicyPermissionGate implements PermissionGate {
     private final Supplier<PermissionMode> mode;
 
     public PolicyPermissionGate(PermissionMode mode) {
-        PermissionMode fixed = mode == null ? PermissionMode.READ_ONLY : mode;
+        PermissionMode fixed = mode == null ? PermissionMode.AUTO : mode;
         this.mode = () -> fixed;
     }
 
@@ -52,6 +52,6 @@ public final class PolicyPermissionGate implements PermissionGate {
 
     public PermissionMode mode() {
         PermissionMode current = mode.get();
-        return current == null ? PermissionMode.READ_ONLY : current;
+        return current == null ? PermissionMode.AUTO : current;
     }
 }

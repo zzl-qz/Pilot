@@ -4,6 +4,7 @@ import com.pilot.core.permission.PermissionMode;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class AgentPropertiesTest {
     @Test void directAndGoalDefaultsAreHighAccidentFusesRatherThanShortBusinessBudgets() {
@@ -11,12 +12,23 @@ class AgentPropertiesTest {
                 120, 3, 5, 300, 4, 8, 120_000, true);
 
         assertEquals(120, properties.directMaxRequests());
-        assertEquals(8_000_000L, properties.directMaxInputTokens());
-        assertEquals(500_000L, properties.directMaxOutputTokens());
-        assertEquals(7_200_000L, properties.directMaxActiveMillis());
+        assertEquals(50_000_000L, properties.directMaxInputTokens());
+        assertEquals(2_000_000L, properties.directMaxOutputTokens());
+        assertEquals(28_800_000L, properties.directMaxActiveMillis());
         assertEquals(512, properties.directMaxInvestigationTools());
-        assertEquals(8_000_000L, properties.goalMaxInputTokens());
-        assertEquals(500_000L, properties.goalMaxOutputTokens());
-        assertEquals(14_400_000L, properties.goalMaxActiveMillis());
+        assertEquals(50_000_000L, properties.goalMaxInputTokens());
+        assertEquals(2_000_000L, properties.goalMaxOutputTokens());
+        assertEquals(28_800_000L, properties.goalMaxActiveMillis());
+    }
+
+    @Test void defaultsFollowCodexAndOpenCodeFullyPermissiveAndNoCompletionGates() {
+        AgentProperties properties = new AgentProperties(".", null, 0, null, null, 0, 0, null, null, null);
+
+        assertEquals(PermissionMode.AUTO, properties.permissionMode(), "默认完全放行");
+        assertEquals(1_000, properties.maxSteps());
+        assertEquals(1_000, properties.directMaxRequests());
+        assertEquals(400_000, properties.contextMaxChars());
+        assertEquals(0, properties.maxPlanContinues(), "计划不再自动催继续");
+        assertFalse(properties.completionChecksEnabled(), "收尾门默认关闭");
     }
 }

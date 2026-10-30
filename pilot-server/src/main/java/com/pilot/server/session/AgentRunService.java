@@ -986,8 +986,8 @@ public class AgentRunService implements RunStarter {
                                 completed.planTotal(), completed.planTotal(), List.of());
                     }
                 }
-                TaskControlService.TaskContract task = effective.openSteps().isEmpty() ? taskControls.finish(sessionId)
-                        : taskControls.status(sessionId, "INTERRUPTED");
+                // 计划未完成只作为如实上报的信息，不再把正常收尾改判成中断
+                TaskControlService.TaskContract task = taskControls.finish(sessionId);
                 delivered = effective;
                 if (task != null && "AWAITING_REVIEW".equals(task.status())) {
                     ArrayList<String> open = new ArrayList<>(effective.openSteps());

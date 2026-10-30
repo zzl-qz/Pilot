@@ -47,30 +47,32 @@ pilot:
     goal-mode-enabled: ${PILOT_AGENT_GOAL_MODE_ENABLED:true}
     # 工具能碰到的根目录，默认是进程工作目录。建议显式指到项目根
     workspace: ${PILOT_WORKSPACE:${user.dir}}
-    # 单轮步数上限，只当保险丝。触顶后界面可以继续接着跑
-    max-steps: ${PILOT_AGENT_MAX_STEPS:120}
+    # 单轮步数上限，只当事故熔断。触顶后界面可以继续接着跑
+    max-steps: ${PILOT_AGENT_MAX_STEPS:1000}
     # 执行预算只是高位事故熔断，不作为日常收尾条件，也不在半额度强制改变策略。
-    # 触发后保留进度、证据、待执行动作和预期观察；显式继续才开启新的预算段。
-    direct-max-requests: ${PILOT_AGENT_DIRECT_MAX_REQUESTS:120}
-    direct-max-input-tokens: ${PILOT_AGENT_DIRECT_MAX_INPUT_TOKENS:8000000}
-    direct-max-output-tokens: ${PILOT_AGENT_DIRECT_MAX_OUTPUT_TOKENS:500000}
-    direct-max-active-millis: ${PILOT_AGENT_DIRECT_MAX_ACTIVE_MILLIS:7200000}
+    # 触发后保留进度、证据、待执行动作和预期观察；继续才开启新的预算段。
+    direct-max-requests: ${PILOT_AGENT_DIRECT_MAX_REQUESTS:1000}
+    direct-max-input-tokens: ${PILOT_AGENT_DIRECT_MAX_INPUT_TOKENS:50000000}
+    direct-max-output-tokens: ${PILOT_AGENT_DIRECT_MAX_OUTPUT_TOKENS:2000000}
+    direct-max-active-millis: ${PILOT_AGENT_DIRECT_MAX_ACTIVE_MILLIS:28800000}
     # 兼容旧配置的高位调查诊断值；运行时不据此拒绝合法的读取和搜索。
     direct-max-investigation-tools: ${PILOT_AGENT_DIRECT_MAX_INVESTIGATION_TOOLS:512}
     # Goal 长任务的高位事故熔断。
-    goal-max-input-tokens: ${PILOT_AGENT_GOAL_MAX_INPUT_TOKENS:8000000}
-    goal-max-output-tokens: ${PILOT_AGENT_GOAL_MAX_OUTPUT_TOKENS:500000}
-    goal-max-active-millis: ${PILOT_AGENT_GOAL_MAX_ACTIVE_MILLIS:14400000}
-    # 计划没做完就收尾时，自动催模型再做几轮。设成 0 会每写完一段就停下来问
-    max-plan-continues: ${PILOT_AGENT_MAX_PLAN_CONTINUES:8}
+    goal-max-input-tokens: ${PILOT_AGENT_GOAL_MAX_INPUT_TOKENS:50000000}
+    goal-max-output-tokens: ${PILOT_AGENT_GOAL_MAX_OUTPUT_TOKENS:2000000}
+    goal-max-active-millis: ${PILOT_AGENT_GOAL_MAX_ACTIVE_MILLIS:28800000}
+    # 计划只作为给模型和用户的进度提示，不因为没写完就拦住收尾
+    max-plan-continues: ${PILOT_AGENT_MAX_PLAN_CONTINUES:0}
     # 上下文预算（字符估算）。太小会频繁压缩、丢细节；128k 窗口的模型可以开到 300000 左右
-    context-max-chars: ${PILOT_AGENT_CONTEXT_MAX_CHARS:120000}
-    # 连续相同工具调用：第 3 次注入提醒并跳过执行（给模型纠错机会），第 5 次中断运行。提醒设 0 关闭
+    context-max-chars: ${PILOT_AGENT_CONTEXT_MAX_CHARS:400000}
+    # 连续相同工具调用只注入提醒，不再中断运行
     repeat-remind-at: 3
-    repeat-abort-at: 5
-    # READ_ONLY 拒绝写入；ASK 逐次批准；AUTO_EDIT 写入直接生效、命令仍批准；AUTO 全部放行
-    permission-mode: ${PILOT_PERMISSION_MODE:READ_ONLY}
+    # READ_ONLY 只读（对应 Codex/OpenCode 的 plan 模式）；ASK 逐次批准；
+    # AUTO_EDIT 写入直接生效、命令仍批准；AUTO 全部放行（默认，与 Codex/OpenCode 一致）
+    permission-mode: ${PILOT_PERMISSION_MODE:AUTO}
     approval-timeout-seconds: 300
+    # 收尾门默认关闭：模型说完成就完成，不再额外要求验证或自审（与 Codex/OpenCode 一致）
+    completion-checks: ${PILOT_AGENT_COMPLETION_CHECKS:false}
     # 同时能跑的任务数。一个任务卡住时，不要把后面的任务全堵死
     run-threads: ${PILOT_AGENT_RUN_THREADS:4}
   web-search:

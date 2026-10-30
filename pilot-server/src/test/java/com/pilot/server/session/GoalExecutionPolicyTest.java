@@ -122,140 +122,13 @@ class GoalExecutionPolicyTest {
         assertEquals("VERIFIED", tasks.load("s").execution().phase());
     }
 
-    @Test void directCodeChangeGetsOneValidationNudgeThenQualifiedStop() throws Exception {
-        Files.writeString(root.resolve("A.java"), "v1");
-        GoalExecutionPolicy policy = policy((messages, tools) -> fail("direct must not invoke reviewer"), 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
 
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
-        // 验证状态没有变化时也有缓冲：再催两次，之后仍无变化才以 UNVERIFIED 停止
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
-        ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class,
-                () -> policy.review(history, Set.of("A.java"), List.of()));
-        assertEquals("UNVERIFIED", stop.code());
-        assertEquals("DIRECT", tasks.load("s").execution().mode(), "缺少验证不应把普通任务强制升级 Goal");
-    }
 
-    @Test void multiFileDirectTaskContinuesUntilOriginalRequestHasEvidence() {
-        tasks.start("s", "修复重连状态机，并把调用方接到新状态；确认断线和恢复两条路径", List.of(), List.of());
-        AtomicInteger reviews = new AtomicInteger();
-        GoalExecutionPolicy policy = policy((messages, tools) -> {
-            assertEquals("submit_completion_decision", tools.getFirst().name());
-            if (reviews.getAndIncrement() == 0) {
-                return directDecision(Map.of("decision", "CONTINUE", "gap", "调用方尚未接入",
-                        "next_action", "修改调用方", "expected_observation", "调用方使用新的重连结果",
-                        "evidence", List.of()));
-            }
-            String checkId = tasks.load("s").execution().evidence().stream()
-                    .filter(e -> "run_command".equals(e.tool()) && e.check() != null
-                            && e.check().contains("exit 0"))
-                    .reduce((first, last) -> last).orElseThrow().id();
-            return directDecision(Map.of("decision", "COMPLETE", "gap", "", "next_action", "",
-                    "expected_observation", "", "evidence", List.of(checkId)));
-        }, 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "状态机已修改", null);
-        observe(policy, "edit_file", "B.java", "调用路径待核对", null);
-        observe(policy, "run_command", "", "tests passed", "mvn test → exit 0");
 
-        String guidance = policy.review(history, Set.of("A.java", "B.java"), List.of());
-        assertTrue(guidance.contains("调用方尚未接入"));
-        assertEquals("EXECUTING", tasks.load("s").execution().phase());
-        observe(policy, "edit_file", "B.java", "调用方已接入", null);
-        observe(policy, "run_command", "", "tests passed again", "mvn test → exit 0");
-        assertNull(policy.review(history, Set.of("A.java", "B.java"), List.of()));
-        assertEquals("VERIFIED", tasks.load("s").execution().phase());
-        assertNull(policy.review(history, Set.of("A.java", "B.java"), List.of()),
-                "同一证据版本已通过时不应再次花费核验请求");
-        assertEquals(2, reviews.get());
-    }
 
-    @Test void directReviewStopsWhenModelRepeatsFinalWithoutNewEvidence() {
-        AtomicInteger reviews = new AtomicInteger();
-        GoalExecutionPolicy policy = policy((messages, tools) -> {
-            reviews.incrementAndGet();
-            return directDecision(Map.of("decision", "CONTINUE", "gap", "缺少调用方接线",
-                    "next_action", "修改调用方", "expected_observation", "调用方引用新接口",
-                    "evidence", List.of()));
-        }, 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        observe(policy, "edit_file", "B.java", "updated", null);
-        observe(policy, "run_command", "", "tests passed", "mvn test → exit 0");
-        assertNotNull(policy.review(history, Set.of("A.java", "B.java"), List.of()));
-        // 缓冲：无新证据时先重申同一个下一步，不再花一次核对请求
-        String buffered = policy.review(history, Set.of("A.java", "B.java"), List.of());
-        assertNotNull(buffered);
-        assertTrue(buffered.contains("仍无新增证据"), buffered);
-        assertEquals(1, reviews.get());
 
-        ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class,
-                () -> policy.review(history, Set.of("A.java", "B.java"), List.of()));
-        assertEquals("NO_PROGRESS", stop.code());
-        assertEquals(1, reviews.get());
 
-        GoalExecutionPolicy resumed = policy((messages, tools) -> fail("no model call expected"), 20);
-        ExecutionPolicy.Stop immediate = assertThrows(ExecutionPolicy.Stop.class,
-                () -> resumed.beforeRequest(history));
-        assertEquals("NO_PROGRESS", immediate.code());
-        assertEquals(1, reviews.get(), "无新证据时继续不应再次核验");
-    }
 
-    @Test void directReviewerFailureFailsOpenInsteadOfStoppingTheTask() {
-        AtomicInteger calls = new AtomicInteger();
-        GoalExecutionPolicy policy = policy((messages, tools) -> {
-            calls.incrementAndGet();
-            return new ModelResponse("not a structured decision", List.of());
-        }, 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        observe(policy, "edit_file", "B.java", "updated", null);
-        observe(policy, "run_command", "", "tests passed", "mvn test → exit 0");
-
-        assertNull(policy.review(history, Set.of("A.java", "B.java"), List.of()),
-                "普通任务的核对器自身故障时应放行，而不是让任务失败");
-        assertEquals(2, calls.get());
-        assertEquals("VERIFICATION_FAILED", tasks.load("s").execution().phase(),
-                "放行的同时仍需把未核验状态记录下来");
-    }
-
-    @Test void unavailableBrowserRequestFallsBackToRunnableRegressionForOrdinaryUiTask() {
-        tasks.start("s", "修复输入框多图发送与队列恢复", List.of(), List.of());
-        GoalExecutionPolicy policy = policy((messages, tools) -> {
-            assertTrue(messages.getLast().content().contains("浏览器工具是否可用：否"));
-            return directDecision(Map.of("decision", "CONTINUE", "gap", "缺少浏览器验证",
-                    "next_action", "用浏览器验证多图发送", "expected_observation", "页面中多图正常",
-                    "evidence", List.of()));
-        }, 20).withAvailableTools(Set.of("read_file", "run_command"));
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        observe(policy, "edit_file", "B.java", "updated", null);
-        observe(policy, "run_command", "", "tests passed", "mvn test → exit 0");
-
-        String guidance = policy.review(history, Set.of("A.java", "B.java"), List.of());
-        assertTrue(guidance.contains("定向回归测试"));
-        assertFalse(guidance.contains("下一步只做：用浏览器"));
-        assertEquals("EXECUTING", tasks.load("s").execution().phase());
-    }
-
-    @Test void explicitBrowserAcceptanceStopsForMissingCapability() {
-        tasks.start("s", "修复输入框，必须在真实浏览器中验证多图发送", List.of(), List.of());
-        GoalExecutionPolicy policy = policy((messages, tools) -> directDecision(Map.of(
-                "decision", "CONTINUE", "gap", "缺少真实浏览器验证",
-                "next_action", "打开浏览器点击多图发送", "expected_observation", "截图显示多图正常",
-                "evidence", List.of())), 20).withAvailableTools(Set.of("read_file", "run_command"));
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        observe(policy, "edit_file", "B.java", "updated", null);
-        observe(policy, "run_command", "", "tests passed", "mvn test → exit 0");
-
-        ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class,
-                () -> policy.review(history, Set.of("A.java", "B.java"), List.of()));
-        assertEquals("NEED_INPUT", stop.code());
-        assertTrue(stop.getMessage().contains("浏览器交互工具"));
-    }
 
     @Test void oldNoProgressBrowserBlockerGetsOneFreshReviewAfterPolicyUpgrade() {
         TaskControlService.TaskContract task = tasks.load("s");
@@ -272,172 +145,18 @@ class GoalExecutionPolicyTest {
         assertEquals("EXECUTING", migrated.phase());
         assertEquals("", migrated.nextAction());
         assertEquals("", migrated.progress());
-        assertEquals(5, migrated.assessmentVersionValue());
+        assertEquals(0, migrated.idleReviews(), "旧策略的停滞计数不能继续压制升级后的首轮执行");
+        assertEquals(6, migrated.assessmentVersionValue());
     }
 
-    @Test void directReviewRejectsFabricatedCompletionEvidence() {
-        GoalExecutionPolicy policy = policy((messages, tools) -> directDecision(Map.of(
-                "decision", "COMPLETE", "gap", "", "next_action", "", "expected_observation", "",
-                "evidence", List.of("invented-id"))), 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        observe(policy, "edit_file", "B.java", "updated", null);
-        observe(policy, "run_command", "", "tests passed", "mvn test → exit 0");
 
-        String guidance = policy.review(history, Set.of("A.java", "B.java"), List.of());
-        assertTrue(guidance.contains("可追溯证据"));
-        assertEquals("EXECUTING", tasks.load("s").execution().phase());
-    }
 
-    @Test void successfulCheckIsBoundToExactTaskFileVersionEvenWithLargeDirtyWorkspace() throws Exception {
-        Files.writeString(root.resolve("A.java"), "x".repeat(90_000));
-        Files.writeString(root.resolve("unrelated.txt"), "before");
-        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        observe(policy, "run_command", "", "command completed", "mvn test → exit 0");
 
-        assertNull(policy.review(history, Set.of("A.java"), List.of()));
-        Files.writeString(root.resolve("unrelated.txt"), "after");
-        assertNull(policy.review(history, Set.of("A.java"), List.of()),
-                "无关文件变化不能使本任务验证失效");
-        Files.writeString(root.resolve("A.java"), "changed after test");
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()),
-                "实际改动文件变化后必须重新验证");
-    }
 
-    @Test void correctedSubprojectChecksSupersedeEarlierWrongDirectoryFailures() throws Exception {
-        Files.writeString(root.resolve("A.java"), "v1");
-        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        observe(policy, "run_command", "", "ERROR: package.json not found", "npm test → exit 254");
-        observe(policy, "run_command", "", "ERROR: package.json not found", "npm run check → exit 254");
 
-        assertTrue(policy.review(history, Set.of("A.java"), List.of()).contains("工作目录"),
-                "首次环境错误应给执行模型一次修正机会");
-        observe(policy, "run_command", "", "command completed", "npm --prefix pilot-web test → exit 0");
-        observe(policy, "run_command", "", "command completed", "npm --prefix pilot-web run check → exit 0");
 
-        assertNull(policy.review(history, Set.of("A.java"), List.of()));
-        assertEquals("VERIFIED", tasks.load("s").execution().phase());
-    }
 
-    @Test void passingStaticCheckDoesNotHideStillFailingTests() throws Exception {
-        Files.writeString(root.resolve("A.java"), "v1");
-        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        observe(policy, "run_command", "", "ERROR: tests failed", "npm test → exit 1");
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
-        observe(policy, "run_command", "", "command completed", "npm run check → exit 0");
 
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()),
-                "新增静态检查结果后仍应给模型修复失败测试的机会");
-        // 验证状态不变时再催两次，之后仍无变化才以 UNVERIFIED 停止
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
-        ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class,
-                () -> policy.review(history, Set.of("A.java"), List.of()));
-        assertEquals("UNVERIFIED", stop.code());
-        assertTrue(stop.getMessage().contains("npm test"), stop.getMessage());
-    }
-
-    @Test void directValidationNudgeResetsAfterSourceChange() throws Exception {
-        Path file = root.resolve("A.java");
-        Files.writeString(file, "v1");
-        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        observe(policy, "run_command", "", "ERROR: tests failed", "npm test → exit 1");
-
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
-        Files.writeString(file, "v2");
-        observe(policy, "edit_file", "A.java", "fixed failing branch", null);
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()),
-                "修过代码后不能因为之前催办过一次就提前停止");
-        observe(policy, "run_command", "", "tests passed", "npm test → exit 0");
-
-        assertNull(policy.review(history, Set.of("A.java"), List.of()));
-        assertEquals("VERIFIED", tasks.load("s").execution().phase());
-    }
-
-    @Test void staleScopedTestIsReplayedOnceAndExplained() throws Exception {
-        Path web = root.resolve("pilot-web/src/app.js");
-        Files.createDirectories(web.getParent());
-        Files.writeString(root.resolve("pilot-web/package.json"), "{}");
-        Files.writeString(web, "v1");
-        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "pilot-web/src/app.js", "updated", null);
-        observe(policy, "run_command", "", "tests passed", "npm --prefix pilot-web test → exit 0");
-        observe(policy, "run_command", "", "tests passed", "mvn -pl pilot-server -Dtest=QueueTest test → exit 0");
-        Files.writeString(web, "v2");
-
-        ToolCall replay = policy.reverificationCall();
-        assertNotNull(replay);
-        assertEquals("run_command", replay.name());
-        assertEquals("npm --prefix pilot-web test", replay.args().get("command"));
-        assertNull(policy.reverificationCall(), "同一轮至多自动复验一次");
-        policy.beforeTool(replay);
-        policy.observed(replay, new ToolExecutor.Outcome("run_command", "ERROR: 权限拒绝", List.of(), List.of(),
-                ToolExecutor.OutcomeStatus.DENIED));
-        GoalExecutionPolicy resumed = policy((messages, tools) -> fail("reviewer not expected"), 20);
-        assertNull(resumed.reverificationCall(), "已记录的同版本自动复验不应在每次点击继续后重复执行");
-        String guidance = policy.review(history, Set.of("pilot-web/src/app.js"), List.of());
-        assertTrue(guidance.contains("旧源码版本"), guidance);
-        assertTrue(guidance.contains("pilot-web/src/app.js"), guidance);
-    }
-
-    @Test void unsafeHistoricalTestCommandIsNeverAutoReplayed() throws Exception {
-        Path file = root.resolve("A.java");
-        Files.writeString(file, "v1");
-        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        observe(policy, "run_command", "", "tests passed", "npm test -- --updateSnapshot → exit 0");
-        Files.writeString(file, "v2");
-
-        assertNull(policy.reverificationCall());
-    }
-
-    @Test void successfulReverificationAppliesToCurrentSourceVersion() throws Exception {
-        Path web = root.resolve("pilot-web/src/app.js");
-        Files.createDirectories(web.getParent());
-        Files.writeString(root.resolve("pilot-web/package.json"), "{}");
-        Files.writeString(web, "v1");
-        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "pilot-web/src/app.js", "updated", null);
-        observe(policy, "run_command", "", "tests passed", "npm --prefix pilot-web test → exit 0");
-        Files.writeString(web, "v2");
-
-        ToolCall replay = policy.reverificationCall();
-        assertNotNull(replay);
-        policy.beforeTool(replay);
-        policy.observed(replay, new ToolExecutor.Outcome("run_command", "tests passed", null,
-                "npm --prefix pilot-web test → exit 0"));
-
-        assertNull(policy.review(history, Set.of("pilot-web/src/app.js"), List.of()));
-        assertEquals("VERIFIED", tasks.load("s").execution().phase());
-    }
-
-    @Test void delayedBackgroundResultCannotValidateNewerSource() throws Exception {
-        Files.writeString(root.resolve("A.java"), "v1");
-        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        ToolCall run = new ToolCall("run", "run_command", Map.of("command", "mvn test"));
-        policy.beforeTool(run);
-        policy.observed(run, new ToolExecutor.Outcome("run_command", "任务ID: job1\n状态: RUNNING", null, null));
-        Files.writeString(root.resolve("A.java"), "v2");
-        ToolCall status = new ToolCall("status", "command_status", Map.of("taskId", "job1"));
-        policy.beforeTool(status);
-        policy.observed(status, new ToolExecutor.Outcome("command_status",
-                "任务ID: job1\n状态: COMPLETED", null, "mvn test → exit 0"));
-
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
-    }
 
     @Test void noProgressGuardUsesRepeatedEvidenceStateNotTotalReviewCount() {
         AtomicInteger calls = new AtomicInteger();
@@ -636,22 +355,8 @@ class GoalExecutionPolicyTest {
         assertEquals(1, tasks.load("s").execution().budgetSegments());
     }
 
-    @Test void arbitrarySuccessfulCommandCannotValidateCodeChange() {
-        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
-        policy.beforeRequest(history);
-        observe(policy, "edit_file", "A.java", "updated", null);
-        observe(policy, "run_command", "", "working tree clean", "git status → exit 0");
 
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
-        ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class,
-                () -> policy.review(history, Set.of("A.java"), List.of()));
-        assertEquals("UNVERIFIED", stop.code());
-        assertTrue(policy.priorChecks().isEmpty(), "任意 exit 0 不得污染历史验证事实");
-    }
-
-    @Test void directResumeRetainsHistoricalChangedPathsAndStillRequiresVerification() {
+    @Test void directResumeRetainsHistoricalChangedPathsAndFinishesWithoutVerificationGate() {
         GoalExecutionPolicy first = policy((messages, tools) -> fail("reviewer not expected"), 20);
         first.beforeRequest(history);
         observe(first, "edit_file", "A.java", "updated", null);
@@ -659,12 +364,26 @@ class GoalExecutionPolicyTest {
         GoalExecutionPolicy resumed = policy((messages, tools) -> fail("reviewer not expected"), 20);
         resumed.beforeRequest(history);
         assertEquals(Set.of("A.java"), resumed.priorChangedPaths());
-        assertNotNull(resumed.review(history, Set.of(), List.of()));
-        // 验证状态不变时再催两次，之后仍无变化才以 UNVERIFIED 停止
-        assertNotNull(resumed.review(history, Set.of(), List.of()));
-        assertNotNull(resumed.review(history, Set.of(), List.of()));
-        assertEquals("UNVERIFIED", assertThrows(ExecutionPolicy.Stop.class,
-                () -> resumed.review(history, Set.of(), List.of())).code());
+        assertNull(resumed.reverificationCall(), "是否复跑验证由模型决定，策略不再自动插入");
+        assertNull(resumed.review(history, Set.of(), List.of()),
+                "普通执行没有验证也能收尾，与 Codex / OpenCode 一致");
+        assertEquals("VERIFIED", tasks.load("s").execution().phase());
+    }
+
+    @Test void ordinaryTaskFinishesWithoutAnyReviewerCall() {
+        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "A.java", "updated", null);
+        observe(policy, "edit_file", "B.java", "updated", null);
+        observe(policy, "read_file", "C.java", "读取内容", null);
+
+        assertFalse(policy.independentCompletionReview(Set.of("A.java", "B.java")));
+        assertNull(policy.review(history, Set.of("A.java", "B.java"), List.of()));
+        TaskControlService.Execution state = tasks.load("s").execution();
+        assertEquals("DIRECT", state.mode());
+        assertEquals("VERIFIED", state.phase());
+        assertEquals("", state.gap());
+        assertEquals("", state.nextAction());
     }
 
     @Test void structuredSubagentOutcomePersistsAllPathsAndChecks() {
@@ -765,7 +484,8 @@ class GoalExecutionPolicyTest {
                 .findFirst().orElseThrow();
         assertEquals(launchVersion, terminalCheck.endVersion(),
                 "后台测试必须绑定启动时源码，不能偷换成查询终态时的新版本");
-        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
+        assertNull(policy.review(history, Set.of("A.java"), List.of()),
+                "旧版本结果不再阻断收尾，是否重跑由模型决定");
     }
 
     @Test void reviewerRetriesOneTransientFailureButNotPermanentFailure() {

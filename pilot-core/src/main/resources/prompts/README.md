@@ -10,9 +10,9 @@
 | --- | --- | --- |
 | `system/` | 系统提示词段落（身份、流程、工具策略、输出格式） | 每次 run 组装，进 system |
 | `tools/` | 每个工具的描述，文件名 = `Tool.name()` | 随工具定义每次请求发送 |
-| `completion/` | 收尾门自查（verify / review / review-readonly / act） | 收尾前按需注入 user 消息 |
+| `completion/` | 收尾门自查（verify / review / review-readonly / act），默认关闭 | 收尾前按需注入 user 消息 |
 | `compact/` | 上下文压缩摘要指令 | 压缩时注入 |
-| `plan/` | 计划未完成的自动继续提醒 | 自动续跑时注入 user 消息 |
+| `plan/` | 计划未完成的自动继续提醒（默认关闭） | 自动续跑时注入 user 消息 |
 | `goal/` | Goal 续轮与独立完成核验合同 | Goal 外循环按需注入 |
 | `loop/` | 停滞纠偏与预算收尾合同 | 运行时状态机触发，使用临时运行指令 |
 | `subagent/` | 子代理的任务与系统提示 | 子代理启动时渲染 |

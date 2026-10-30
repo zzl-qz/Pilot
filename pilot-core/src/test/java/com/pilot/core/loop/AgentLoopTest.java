@@ -202,8 +202,9 @@ class AgentLoopTest {
                 .anyMatch(message -> message.content().contains("补充针对性验证")));
     }
 
+    /** 重复调用只提醒、不再中断：与 Codex / OpenCode 一致，是否换理由模型自己决定。 */
     @Test
-    void interruptsAfterThreeIdenticalToolCalls() {
+    void neverAbortsOnIdenticalToolCalls() {
         CountingTool tool = new CountingTool("read_file", "content");
         ToolCall call = new ToolCall("call_1", "read_file", Map.of("path", "pom.xml"));
         ScriptedModelClient client = new ScriptedModelClient(
@@ -212,46 +213,38 @@ class AgentLoopTest {
                 new ModelResponse("", List.of(call)),
                 new ModelResponse("", List.of(call)),
                 new ModelResponse("", List.of(call)),
-                new ModelResponse("不该走到这里", List.of()));
+                new ModelResponse("按已有结果收尾", List.of()));
         AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
 
         AgentLoop.Result result = loop.run("读 pom.xml", List.of(), events::add);
 
-        assertEquals("REPEATED_TOOL_CALL", result.failureCode());
-        // 第 3 次达到阈值后先有两次缓冲，第 5 次仍相同才中断
-        assertEquals(5, tool.executions.get(), "要先观察结果，才能判断确实没有新进展");
+        assertNull(result.failureCode(), "重复调用不再让运行失败");
+        assertEquals(5, tool.executions.get());
         assertEquals(6, client.requests.size());
-        assertTrue(client.requests.get(3).getFirst().content().contains("运行时停滞检查"),
-                "达到阈值后的缓冲轮应收到强纠偏提醒");
-        assertFalse(result.conversation().stream().anyMatch(message -> "user".equals(message.role())
-                && message.content().contains("运行时停滞检查")), "缓冲提醒不能写进会话历史");
-        assertEquals("不该走到这里", result.finalText(), "停止时最后一个模型请求应改为无工具收尾");
-        assertTrue(client.toolDefinitions.getLast().isEmpty());
-        assertTrue(events.stream().anyMatch(event -> event instanceof RunFailed failed
-                && failed.code().equals("REPEATED_TOOL_CALL")));
-        assertFalse(eventTypes().contains("run.completed"));
+        assertFalse(events.stream().anyMatch(event -> event instanceof RunFailed));
+        assertTrue(eventTypes().contains("run.completed"));
     }
 
-    /** 渐进提醒：第 3 次相同结果提醒，第 5 次仍相同才中断。 */
+    /** 渐进提醒：第 3 次起每次相同结果都提醒，但绝不中断。 */
     @Test
-    void remindsThenSkipsBeforeAbortingOnRepeatedCalls() {
+    void remindsOnEveryRepeatedCallWithoutAborting() {
         CountingTool tool = new CountingTool("read_file", "content");
         ToolCall call = new ToolCall("call_1", "read_file", Map.of("path", "pom.xml"));
         ScriptedModelClient client = new ScriptedModelClient(
                 new ModelResponse("", List.of(call)),   // 1: 执行
                 new ModelResponse("", List.of(call)),   // 2: 执行
                 new ModelResponse("", List.of(call)),   // 3: 执行 + 注入提醒
-                new ModelResponse("", List.of(call)),   // 4: 执行（不再新提醒）
-                new ModelResponse("", List.of(call)),   // 5: 执行，到达中断阈值，进入缓冲 1
-                new ModelResponse("", List.of(call)),   // 6: 执行，缓冲 2
-                new ModelResponse("", List.of(call)),   // 7: 执行后缓冲用尽并中断
-                new ModelResponse("不该走到这里", List.of()));
+                new ModelResponse("", List.of(call)),   // 4: 执行 + 继续提醒
+                new ModelResponse("", List.of(call)),   // 5: 执行 + 继续提醒
+                new ModelResponse("", List.of(call)),   // 6: 执行 + 继续提醒
+                new ModelResponse("", List.of(call)),   // 7: 执行 + 继续提醒
+                new ModelResponse("按已有结果收尾", List.of()));
         AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(),
                 new AgentLoop.Config(8, 3, 5, "你是测试代理"));
 
         AgentLoop.Result result = loop.run("读 pom.xml", List.of(), events::add);
 
-        assertEquals("REPEATED_TOOL_CALL", result.failureCode());
+        assertNull(result.failureCode(), "重复调用不再中断运行");
         assertEquals(7, tool.executions.get(), "停滞判断必须依据实际返回结果");
         assertEquals(8, client.requests.size());
         // 第 4 次请求通过一次性 system 上下文收到提醒；不能伪装成用户消息或写入会话。
@@ -265,15 +258,15 @@ class AgentLoopTest {
         assertTrue(events.stream().anyMatch(event -> event instanceof RunContinued continued
                         && continued.reason().contains("重复调用提醒")),
                 "提醒应有对应事件");
-        assertTrue(events.stream().anyMatch(event -> event instanceof RunFailed failed
-                && failed.code().equals("REPEATED_TOOL_CALL")));
+        assertFalse(events.stream().anyMatch(event -> event instanceof RunFailed),
+                "重复调用不应产生失败事件");
         assertTrue(client.requests.get(3).stream().anyMatch(message -> "tool".equals(message.role())
                 && "content".equals(message.content())), "提醒前的工具结果应是真实观察");
     }
 
-    /** 达到中断阈值进入缓冲后，只要模型换成不同的调用，缓冲计数就应重置，任务继续而不是中断。 */
+    /** 换一个调用后计数重置，提醒也随之中止，任务照常继续。 */
     @Test
-    void differentCallDuringRepeatBufferResetsItAndContinues() {
+    void differentCallResetsRepetitionCounterAndContinues() {
         CountingTool tool = new CountingTool("read_file", "content");
         ToolCall same = new ToolCall("call_1", "read_file", Map.of("path", "pom.xml"));
         ToolCall other = new ToolCall("call_2", "read_file", Map.of("path", "other.xml"));
@@ -289,8 +282,6 @@ class AgentLoopTest {
 
         assertNull(result.failureCode());
         assertEquals(4, tool.executions.get());
-        assertTrue(client.requests.get(3).getFirst().content().contains("运行时停滞检查"),
-                "缓冲轮应收到强纠偏提醒");
     }
 
     @Test
@@ -833,57 +824,42 @@ class AgentLoopTest {
         assertEquals(1, completed.planTotal().intValue());
     }
 
-    /** 计划没做完时不该停下来等用户，应该自动催一轮继续，直到计划标记完成。 */
+    /** 计划只是进度提示：模型说完成就完成，未完成项如实报给界面，不再自动催它继续。 */
     @Test
-    void continuesAutomaticallyWhilePlanHasOpenSteps() {
+    void finishesAndReportsOpenPlanStepsWithoutBlocking() {
         ScriptedModelClient client = new ScriptedModelClient(
                 new ModelResponse("先做到这里。", List.of()),
                 new ModelResponse("全部做完了。", List.of()));
-        AtomicInteger round = new java.util.concurrent.atomic.AtomicInteger();
-        java.util.function.Supplier<List<PlanItem>> plan = () -> round.getAndIncrement() == 0
-                ? List.of(new PlanItem("检查分支状态", PlanItem.COMPLETED),
-                          new PlanItem("跑回归测试", PlanItem.PENDING))
-                : List.of(new PlanItem("检查分支状态", PlanItem.COMPLETED),
-                          new PlanItem("跑回归测试", PlanItem.COMPLETED));
+        List<PlanItem> plan = List.of(new PlanItem("检查分支状态", PlanItem.COMPLETED),
+                new PlanItem("跑回归测试", PlanItem.PENDING));
         AgentLoop loop = new AgentLoop(client, registry(new CountingTool("list_dir", "a.txt")), readOnlyGate(),
-                new AgentLoop.Config(8, 3, "你是测试代理", plan, 3));
+                new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 3));
         List<List<Message>> checkpoints = new ArrayList<>();
 
         AgentLoop.Result result = loop.run("继续", List.of(), events::add,
                 messages -> checkpoints.add(List.copyOf(messages)));
 
-        assertEquals(1, events.stream().filter(RunContinued.class::isInstance).count(),
-                "应自动提示模型继续一次");
-        assertEquals(2, client.requests.size(), "模型应被调用两轮");
+        assertNull(result.failureCode());
+        assertEquals(0, events.stream().filter(RunContinued.class::isInstance).count(),
+                "计划未完成不再自动催一轮");
+        assertEquals(1, client.requests.size(), "模型说完成就直接收尾");
         RunCompleted completed = events.stream()
                 .filter(RunCompleted.class::isInstance)
                 .map(RunCompleted.class::cast)
                 .findFirst()
                 .orElseThrow();
-        assertFalse(completed.planOpen(), "第二轮计划已全部完成");
-        // 继续提示要真的送进下一轮上下文，否则模型不知道还要做什么
-        String secondRound = client.requests.get(1).getFirst().content();
-        assertTrue(secondRound.contains("跑回归测试"), secondRound);
-        assertTrue(secondRound.contains("自动继续"), secondRound);
-        assertFalse(result.conversation().stream()
-                .anyMatch(message -> message.content().contains("自动继续")));
-        assertTrue(checkpoints.stream().flatMap(List::stream)
-                .noneMatch(message -> message.content().contains("自动继续")),
-                "内部续跑提示不能写进 checkpoint");
+        assertTrue(completed.planOpen(), "未完成项要如实标出来");
+        assertEquals(List.of("跑回归测试"), completed.openSteps());
     }
 
-    /** ExecutionPolicy 只增加核验，不能让 DIRECT/GOAL 绕过共同的未完成计划门。 */
+    /** 计划未完成时 ExecutionPolicy 仍然照常运行，但不会因此多出几轮。 */
     @Test
-    void executionPolicyStillContinuesWhilePlanHasOpenSteps() {
+    void executionPolicyRunsWithOpenPlanSteps() {
         ScriptedModelClient client = new ScriptedModelClient(
                 new ModelResponse("先做到这里。", List.of()),
                 new ModelResponse("全部做完了。", List.of()));
-        AtomicInteger round = new AtomicInteger();
-        java.util.function.Supplier<List<PlanItem>> plan = () -> round.getAndIncrement() == 0
-                ? List.of(new PlanItem("实现接口", PlanItem.COMPLETED),
-                          new PlanItem("跑回归测试", PlanItem.PENDING))
-                : List.of(new PlanItem("实现接口", PlanItem.COMPLETED),
-                          new PlanItem("跑回归测试", PlanItem.COMPLETED));
+        List<PlanItem> plan = List.of(new PlanItem("实现接口", PlanItem.COMPLETED),
+                new PlanItem("跑回归测试", PlanItem.PENDING));
         AtomicInteger reviews = new AtomicInteger();
         ExecutionPolicy policy = new ExecutionPolicy() {
             @Override public void beforeRequest(List<Message> history) { }
@@ -893,19 +869,18 @@ class AgentLoopTest {
             }
         };
         AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(),
-                new AgentLoop.Config(8, 3, "你是测试代理", plan, 3))
+                new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 3))
                 .withExecutionPolicy(policy);
 
         AgentLoop.Result result = loop.run("继续完成计划", List.of(), events::add);
 
         assertNull(result.failureCode());
-        assertEquals(2, client.requests.size());
-        assertEquals(1, events.stream().filter(RunContinued.class::isInstance).count());
-        assertEquals(1, reviews.get(), "policy reviewer 只能在共同计划门通过后运行");
+        assertEquals(1, client.requests.size());
+        assertEquals(1, reviews.get());
         RunCompleted completed = events.stream().filter(RunCompleted.class::isInstance)
                 .map(RunCompleted.class::cast).findFirst().orElseThrow();
-        assertFalse(completed.planOpen());
-        assertEquals(2, completed.planDone());
+        assertTrue(completed.planOpen());
+        assertEquals(1, completed.planDone());
         assertEquals(2, completed.planTotal());
     }
 
@@ -1024,9 +999,9 @@ class AgentLoopTest {
         assertEquals(1, reviews.get());
     }
 
-    /** 模型死活不改计划时必须停手，把未完成项交回界面，不能无限催。 */
+    /** 计划没做完也直接收尾，未完成项如实交回界面。 */
     @Test
-    void stopsAfterAutoContinueLimit() {
+    void finishesWithOpenPlanStepsInsteadOfAutoContinuing() {
         ScriptedModelClient client = new ScriptedModelClient(
                 new ModelResponse("做到这里。", List.of()),
                 new ModelResponse("还是做到这里。", List.of()));
@@ -1036,7 +1011,7 @@ class AgentLoopTest {
 
         loop.run("继续", List.of(), events::add);
 
-        assertEquals(1, events.stream().filter(RunContinued.class::isInstance).count());
+        assertEquals(0, events.stream().filter(RunContinued.class::isInstance).count());
         RunCompleted completed = events.stream()
                 .filter(RunCompleted.class::isInstance)
                 .map(RunCompleted.class::cast)

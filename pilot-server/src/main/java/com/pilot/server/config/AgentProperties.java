@@ -51,8 +51,9 @@ public record AgentProperties(String workspace, PermissionMode permissionMode,
         workspace = workspace == null || workspace.isBlank()
                 ? Path.of("").toAbsolutePath().normalize().toString()
                 : Path.of(workspace).toAbsolutePath().normalize().toString();
-        permissionMode = permissionMode == null ? PermissionMode.READ_ONLY : permissionMode;
-        maxSteps = maxSteps < 1 ? 120 : maxSteps;
+        // 默认完全放行，与 Codex / OpenCode 的默认行为一致；只读档位保留为可选的 plan 模式。
+        permissionMode = permissionMode == null ? PermissionMode.AUTO : permissionMode;
+        maxSteps = maxSteps < 1 ? 1_000 : maxSteps;
         int abort = repeatAbortAt == null || repeatAbortAt < 1 ? 5 : repeatAbortAt;
         // 提醒档必须早于中断档：配反了启动就报错，不静默修正
         int remind = repeatRemindAt == null ? 3 : repeatRemindAt;
@@ -64,36 +65,38 @@ public record AgentProperties(String workspace, PermissionMode permissionMode,
         repeatAbortAt = abort;
         approvalTimeoutSeconds = approvalTimeoutSeconds < 1 ? 300 : approvalTimeoutSeconds;
         runThreads = runThreads < 1 ? 4 : Math.min(runThreads, 16);
-        int continues = maxPlanContinues == null ? 8 : maxPlanContinues;
+        // 计划不再拦住收尾：默认不自动继续，只把未完成项如实报给用户。
+        int continues = maxPlanContinues == null ? 0 : maxPlanContinues;
         maxPlanContinues = continues < 0 ? 0 : Math.min(continues, 10);
         contextMaxChars = contextMaxChars == null || contextMaxChars < 20_000
-                ? 120_000
+                ? 400_000
                 : Math.min(contextMaxChars, 2_000_000);
-        // 系统属性作为兜底，保留 `-Dpilot.completion.checks=false` 的老用法
+        // 收尾门默认关闭：与 Codex / OpenCode 一致，模型说完成就完成，不额外要求验证或自审。
+        // 仍可用 `-Dpilot.completion.checks=true` 或 `pilot.agent.completion-checks: true` 打开。
         String flag = System.getProperty("pilot.completion.checks");
         if (completionChecks == null) {
-            completionChecks = flag == null || flag.isBlank() || !"false".equalsIgnoreCase(flag.strip());
+            completionChecks = flag != null && !flag.isBlank() && "true".equalsIgnoreCase(flag.strip());
         }
         directMaxRequests = directMaxRequests == null || directMaxRequests < 4
                 ? maxSteps : Math.min(directMaxRequests, maxSteps);
         directMaxInputTokens = directMaxInputTokens == null || directMaxInputTokens < 50_000
-                ? 8_000_000L : directMaxInputTokens;
+                ? 50_000_000L : directMaxInputTokens;
         directMaxOutputTokens = directMaxOutputTokens == null || directMaxOutputTokens < 5_000
-                ? 500_000L : directMaxOutputTokens;
+                ? 2_000_000L : directMaxOutputTokens;
         directMaxActiveMillis = directMaxActiveMillis == null || directMaxActiveMillis < 60_000
-                ? 2 * 60 * 60_000L : directMaxActiveMillis;
+                ? 8 * 60 * 60_000L : directMaxActiveMillis;
         directMaxInvestigationTools = directMaxInvestigationTools == null || directMaxInvestigationTools < 8
                 ? 512 : directMaxInvestigationTools;
         goalMaxInputTokens = goalMaxInputTokens == null || goalMaxInputTokens < 10_000
-                ? 8_000_000L : goalMaxInputTokens;
+                ? 50_000_000L : goalMaxInputTokens;
         goalMaxOutputTokens = goalMaxOutputTokens == null || goalMaxOutputTokens < 1_000
-                ? 500_000L : goalMaxOutputTokens;
+                ? 2_000_000L : goalMaxOutputTokens;
         goalMaxActiveMillis = goalMaxActiveMillis == null || goalMaxActiveMillis < 60_000
-                ? 4 * 60 * 60_000L : goalMaxActiveMillis;
+                ? 8 * 60 * 60_000L : goalMaxActiveMillis;
     }
 
-    /** 收尾门是否启用（{@code null} 视为启用）。 */
+    /** 收尾门是否启用（默认关闭）。 */
     public boolean completionChecksEnabled() {
-        return completionChecks == null || completionChecks;
+        return Boolean.TRUE.equals(completionChecks);
     }
 }

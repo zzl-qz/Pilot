@@ -61,9 +61,9 @@ public final class AgentLoop {
 
     /**
      * @param repeatRemindAt       相同调用连续得到相同结果达到该次数时注入提醒；0 表示不提醒
-     * @param repeatAbortAt         相同调用连续得到相同结果达到该次数时中断（含第一次）
-     * @param plan                  当前计划快照，收尾时用来判断「任务是否真的做完」；默认无计划
-     * @param maxPlanContinues      计划还有未完成项时自动催模型继续的次数上限；0 表示不自动继续
+     * @param repeatAbortAt         保留兼容：重复调用不再中断运行
+     * @param plan                  当前计划快照，收尾时如实上报未完成项；不拦住收尾
+     * @param maxPlanContinues      保留兼容：计划未完成不再自动催模型继续
      * @param contextLimit          上下文预算（按字符估算）；太小会频繁压缩、丢细节
      */
     public record Config(int maxSteps, int repeatRemindAt, int repeatAbortAt, String systemPrompt,
@@ -155,8 +155,6 @@ public final class AgentLoop {
     /** 动态后台状态即使暂时不变也可能稍后完成；给它比普通重复调用更宽的有界观察窗口。 */
     private static final int MIN_DYNAMIC_POLL_ABORT = 8;
     private static final int MAX_PARALLEL_READS = 8;
-    /** 相同调用达到中断阈值后的缓冲轮数：先给模型强纠偏，仍无变化才中断。 */
-    private static final int MAX_REPEAT_GRACE = 2;
     /** 历史里最多保留几条带图片的工具观察；更早的换成文字说明。 */
     private static final int MAX_TOOL_IMAGE_MESSAGES = 3;
     /** 计划未完成时默认自动催模型继续的次数上限。 */
@@ -340,8 +338,6 @@ public final class AgentLoop {
         String lastSignature = null;
         List<String> lastOutcomes = List.of();
         int repeated = 0;
-        int repeatGrace = 0;
-        int planContinues = 0;
         int outputLimitStreak = 0;
         LinkedHashSet<String> changedFiles = new LinkedHashSet<String>();
         ArrayList<String> checks = new ArrayList<String>();
@@ -432,16 +428,7 @@ public final class AgentLoop {
                             .filter(item -> !item.done())
                             .map(PlanItem::step)
                             .toList();
-                    // 计划是所有执行模式共享的完成事实。ExecutionPolicy 只增加模式级核验，
-                    // 不能绕过未完成计划，也不能把它当作已经完成后再清空。
-                    if (!openSteps.isEmpty() && planContinues < config.maxPlanContinues()) {
-                        planContinues++;
-                        runtimeGuidance.add(continuePrompt(openSteps));
-                        events.accept(new RunContinued(planContinues, config.maxPlanContinues(),
-                                "计划还有 " + openSteps.size() + " 项未完成，自动继续"));
-                        safeCheckpoint(checkpoint, messages);
-                        continue;
-                    }
+                    // 计划只是给模型和用户的进度提示，不再拦住收尾：模型说完成就完成。
                     // 旧版本成功的定向检查不能证明当前源码；仅复跑策略明确选出的受限命令。
                     // 仍由 ToolExecutor 走权限审批、工作区边界、超时及变更追踪。
                     ToolCall reverification = executionPolicy == null ? null : executionPolicy.reverificationCall();
@@ -617,21 +604,11 @@ public final class AgentLoop {
                                 && observedResults.equals(lastOutcomes) ? repeated + 1 : 1;
                         lastSignature = signature;
                         lastOutcomes = observedResults;
-                        if (repeated == 1) repeatGrace = 0;
-                        if (config.repeatRemindAt() > 0 && repeated == config.repeatRemindAt()) {
+                        // 重复调用只提醒、不中断：是否换理由模型自己判断，运行不再因此失败。
+                        if (config.repeatRemindAt() > 0 && repeated >= config.repeatRemindAt()) {
                             runtimeGuidance.add(repeatReminder(calls, repeated));
                             events.accept(new RunContinued(1, 1,
                                     "重复调用提醒：连续第 " + repeated + " 次无新结果"));
-                        }
-                        if (repeated >= config.repeatAbortAt()) {
-                            if (repeatGrace >= MAX_REPEAT_GRACE) {
-                                throw new ExecutionPolicy.Stop("REPEATED_TOOL_CALL",
-                                        "连续 " + repeated + " 次相同工具调用得到相同结果，已中断无效循环。");
-                            }
-                            repeatGrace++;
-                            runtimeGuidance.add(repeatFinalWarning(calls, repeated, repeatGrace));
-                            events.accept(new RunContinued(repeatGrace, MAX_REPEAT_GRACE,
-                                    "重复调用缓冲：连续第 " + repeated + " 次无新结果，要求换路"));
                         }
                     } else {
                         lastSignature = null;
@@ -672,7 +649,7 @@ public final class AgentLoop {
                                    String code, String reason, boolean emitFailure) {
         String fallback = "本轮未能完整结束（" + code + "）：" + ToolSupport.oneLine(reason, 500)
                 + ("NO_PROGRESS".equals(code)
-                ? "\n\n已有进度已保存。请提供新信息，或在工作区出现实际变更后再继续。"
+                ? "\n\n已有进度已保存。可以先继续一次推进未完成步骤，或直接补充要执行的命令与资料后重新发送。"
                 : "\n\n已有进度已保存。请根据上面的原因补充条件或选择继续执行。");
         String finalText = fallback;
         if (!cancellation.cancelled() && !"NO_PROGRESS".equals(code)) {
@@ -794,14 +771,6 @@ public final class AgentLoop {
         }
     }
 
-    /** 自动续跑时给模型的提醒：模板在 {@code prompts/plan/continue.md}。 */
-    private static String continuePrompt(List<String> openSteps) {
-        String steps = openSteps.stream()
-                .map(step -> "- " + step)
-                .collect(Collectors.joining("\n"));
-        return PROMPTS.render("plan/continue", Map.of("openSteps", steps)).strip();
-    }
-
     /** 重复调用提醒：模板在 {@code prompts/loop/repeat-reminder.md}。 */
     private static String repeatReminder(List<ToolCall> calls, int count) {
         String tools = calls.stream()
@@ -812,16 +781,6 @@ public final class AgentLoop {
                 Map.of("count", String.valueOf(count), "tool", tools)).strip();
     }
 
-    /** 达到中断阈值后的缓冲提醒：明确告知再重复会被中断，要求换成能产生不同状态的动作。 */
-    private static String repeatFinalWarning(List<ToolCall> calls, int count, int grace) {
-        String tools = calls.stream().map(ToolCall::name).distinct().collect(Collectors.joining(", "));
-        return PROMPTS.render("loop/stuck-nudge", Map.of(
-                "pattern", "同一工具调用连续 " + count + " 次得到相同结果：" + tools,
-                "repeatCount", String.valueOf(count),
-                "unchangedState", "最近的工具结果与上一次完全相同；缓冲还剩 " + (MAX_REPEAT_GRACE - grace)
-                        + " 次，用完后本轮会被中断",
-                "blockedActions", "- 不要再次用相同参数调用 " + tools)).strip();
-    }
 
     /** 动态任务仍在运行但观察没有变化时，要求模型换成有意义的等待/替代动作。 */
     private static String stuckReminder(List<ToolCall> calls, int count, String unchangedState) {

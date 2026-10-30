@@ -1172,10 +1172,10 @@ async function loadHealth() {
 /* ---------- 权限模式 ---------- */
 
 const PERMISSION_MODES = [
-  { mode: 'READ_ONLY', label: 'READ_ONLY', hint: '只读：写入与命令一律拒绝' },
-  { mode: 'ASK', label: 'ASK', hint: '逐次批准：每次写入和命令都要确认' },
+  { mode: 'AUTO', label: 'AUTO', hint: '全部放行：写入与命令都不再打断（默认，与 Codex / OpenCode 一致）' },
   { mode: 'AUTO_EDIT', label: '自动改', hint: '改文件直接生效，命令仍需批准；改完看 diff，可回滚' },
-  { mode: 'AUTO', label: 'AUTO', hint: '全部放行：写入与命令都不再打断' }
+  { mode: 'ASK', label: 'ASK', hint: '逐次批准：每次写入和命令都要确认' },
+  { mode: 'READ_ONLY', label: 'READ_ONLY', hint: '只读：写入与命令一律拒绝（相当于 plan 模式）' }
 ];
 
 function applyPermissionMode(mode) {
@@ -3108,7 +3108,7 @@ function onRunFailed(event) {
     detail: event.payload.message,
     hint: modelError ? modelError.hint : code === 'NEED_INPUT'
       ? '请在输入框补充所需条件后发送。' : code === 'NO_PROGRESS'
-        ? '请提供新信息，或等工作区与验证条件发生变化后再发送。' : '',
+        ? 'Goal 模式连续核验没有新增证据。点继续让它再试一次，或直接补充要执行的命令与资料后发送。' : '',
     actionLabel: modelError && modelError.action === 'model-settings' ? '打开模型设置' : '',
     onAction: (clickEvent) => {
       // 阻止冒泡：document 上的「点外面就收起」会立刻把刚打开的面板关掉
