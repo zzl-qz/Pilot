@@ -428,9 +428,9 @@ public final class AgentLoop {
                         safeCheckpoint(checkpoint, messages);
                         continue;
                     }
-                    // 通用收尾门必须先于模式级 reviewer：无论 DIRECT / GOAL，改动、验证、
-                    // 计划与只读覆盖范围都使用同一套基础事实，策略不能关闭这些检查。
-                    CompletionGate.Nudge nudge = completionGate.evaluate(changedFiles, checks, plan, openSteps);
+                    // 通用验证先于模式级 reviewer；有独立审查时跳过重复的模型自审。
+                    CompletionGate.Nudge nudge = completionGate.evaluate(changedFiles, checks, plan, openSteps,
+                            executionPolicy != null && executionPolicy.independentCompletionReview(changedFiles));
                     if (nudge != null) {
                         runtimeGuidance.add(nudge.prompt());
                         events.accept(new RunContinued(nudge.attempt(), nudge.max(), nudge.reason()));

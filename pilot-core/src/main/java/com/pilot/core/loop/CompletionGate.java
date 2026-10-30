@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
  * <p>两道门，各最多催几次：
  * <ol>
  *   <li>验证：改了代码，却没有任何退出码为 0 的构建 / 测试记录；</li>
- *   <li>自审：有文件改动（或只读任务读得太少），让模型对照原始目标和计划再核对一遍有没有缩水。</li>
+ *   <li>自审：没有独立审查时，有文件改动（或只读任务读得太少），让模型核对原始目标。</li>
  * </ol>
  *
  * <p>抽成独立类是因为它有自己的状态（催了几次、看过哪些路径、调了几次工具），
@@ -117,6 +117,11 @@ final class CompletionGate {
      * @return {@code null} 表示可以收尾
      */
     Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps) {
+        return evaluate(changedFiles, checks, plan, openSteps, false);
+    }
+
+    Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps,
+                   boolean independentReview) {
         if (!enabled) {
             return null;
         }
@@ -134,7 +139,7 @@ final class CompletionGate {
                     "checks", checks.isEmpty() ? "（本轮没有跑过构建或测试）" : bullets(checks))).strip();
             return new Nudge(prompt, "改动未验证，已要求先跑构建或测试", verifyPrompts, MAX_VERIFY_PROMPTS);
         }
-        if (reviewPrompts < MAX_REVIEW_PROMPTS) {
+        if (!independentReview && reviewPrompts < MAX_REVIEW_PROMPTS) {
             reviewPrompts++;
             String goalText = goal == null ? "（续跑，无原始输入）" : ToolSupport.oneLine(goal, 500);
             String prompt;

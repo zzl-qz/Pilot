@@ -57,6 +57,24 @@ class CompletionGateTest {
     }
 
     @Test
+    void independentReviewerAvoidsDuplicateSelfReview() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+
+        assertNull(gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"),
+                List.of(), List.of(), true));
+    }
+
+    @Test
+    void independentReviewerStillRequiresCodeVerification() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(),
+                List.of(), List.of(), true);
+        assertNotNull(nudge);
+        assertTrue(nudge.reason().contains("未验证"), nudge.reason());
+    }
+
+    @Test
     void unrelatedSuccessfulCommandsDoNotVerifyCodeChanges() {
         for (String check : List.of(
                 "git status --short → exit 0",

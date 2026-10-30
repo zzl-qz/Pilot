@@ -23,6 +23,7 @@ import java.nio.file.Path;
  * @param directMaxOutputTokens 普通执行累计输出的高位事故熔断
  * @param directMaxActiveMillis 普通执行模型活跃时间的高位事故熔断
  * @param directMaxInvestigationTools 兼容旧配置的高位调查诊断值；运行时不据此拒绝读取/搜索
+ * @param budgetArbitrationEnabled 触顶后是否允许一次额外模型仲裁；默认关闭
  */
 @ConfigurationProperties(prefix = "pilot.agent")
 public record AgentProperties(String workspace, PermissionMode permissionMode,
@@ -32,20 +33,23 @@ public record AgentProperties(String workspace, PermissionMode permissionMode,
                               Boolean completionChecks, Boolean goalModeEnabled,
                               Integer directMaxRequests, Long directMaxInputTokens, Long directMaxOutputTokens,
                               Long directMaxActiveMillis, Integer directMaxInvestigationTools,
-                              Long goalMaxInputTokens, Long goalMaxOutputTokens, Long goalMaxActiveMillis) {
+                              Long goalMaxInputTokens, Long goalMaxOutputTokens, Long goalMaxActiveMillis,
+                              Boolean budgetArbitrationEnabled) {
     public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort,
                            int timeout, int threads, Integer continues, Integer chars, Boolean checks) {
         this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, false,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null);
     }
     public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort,
                            int timeout, int threads, Integer continues, Integer chars, Boolean checks,
                            Boolean goals) {
         this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, goals,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null);
     }
 
     public boolean goalModeEnabledValue() { return !Boolean.FALSE.equals(goalModeEnabled); }
+    /** 默认单循环直接在高位预算触顶时保留进度；旧仲裁可显式开启作对照。 */
+    public boolean budgetArbitrationEnabledValue() { return Boolean.TRUE.equals(budgetArbitrationEnabled); }
     @org.springframework.boot.context.properties.bind.ConstructorBinding
     public AgentProperties {
         workspace = workspace == null || workspace.isBlank()

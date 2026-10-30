@@ -624,7 +624,8 @@ public class AgentRunService implements RunStarter {
                 properties.directMaxRequests(), properties.directMaxInputTokens(),
                 properties.directMaxOutputTokens(), properties.directMaxActiveMillis(),
                 properties.directMaxInvestigationTools(), properties.goalMaxInputTokens(),
-                properties.goalMaxOutputTokens(), properties.goalMaxActiveMillis());
+                properties.goalMaxOutputTokens(), properties.goalMaxActiveMillis(),
+                properties.budgetArbitrationEnabledValue());
         try {
             policy.beforeRequest(conversations.load(sessionId));
         } catch (ExecutionPolicy.Stop stopped) {
@@ -1020,7 +1021,7 @@ public class AgentRunService implements RunStarter {
                     properties.directMaxOutputTokens(), properties.directMaxActiveMillis(),
                     properties.directMaxInvestigationTools(),
                     properties.goalMaxInputTokens(), properties.goalMaxOutputTokens(),
-                    properties.goalMaxActiveMillis()) : null;
+                    properties.goalMaxActiveMillis(), properties.budgetArbitrationEnabledValue()) : null;
         if (goalPolicy != null) {
             goalPolicy.withUpdates(state -> sink.accept(new com.pilot.core.event.ExecutionUpdated(
                     state.mode(), state.phase(), state.requests(), state.reason(), state.gap())));

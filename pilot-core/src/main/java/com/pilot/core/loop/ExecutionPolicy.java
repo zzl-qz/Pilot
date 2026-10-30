@@ -23,6 +23,8 @@ public interface ExecutionPolicy {
     default void beginFinalization() { }
     /** 仅用于观测与提示；普通请求不因此增加核验调用。 */
     default boolean goalActive() { return false; }
+    /** Whether this task has its own independent completion review at the final boundary. */
+    default boolean independentCompletionReview(Set<String> changedFiles) { return goalActive(); }
     /** 续跑时恢复上一执行段已持久化的改动文件，供通用收尾门使用。 */
     default Set<String> priorChangedPaths() { return Set.of(); }
     /** 续跑时恢复上一执行段的类型化验证记录，不包含任意的成功命令。 */

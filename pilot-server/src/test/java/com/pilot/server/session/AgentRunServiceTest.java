@@ -309,7 +309,7 @@ class AgentRunServiceTest {
                     Map.of("path", "A" + call + ".java"))));
             return done();
         };
-        try (Fixture fixture = new Fixture(model, 4, true)) {
+        try (Fixture fixture = new Fixture(model, 4, true, true)) {
             fixture.start();
             fixture.awaitFinished("MAX_STEPS");
             assertEquals(1, arbitrationCalls.get());
@@ -411,8 +411,13 @@ class AgentRunServiceTest {
         }
 
         Fixture(ModelClient model, int maxSteps, boolean goals) {
+            this(model, maxSteps, goals, false);
+        }
+
+        Fixture(ModelClient model, int maxSteps, boolean goals, boolean budgetArbitration) {
             AgentProperties properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY,
-                    maxSteps, 3, 5, 300, 1, 0, 60_000, false, goals);
+                    maxSteps, 3, 5, 300, 1, 0, 60_000, false, goals,
+                    null, null, null, null, null, null, null, null, budgetArbitration);
             JsonMapper mapper = JsonMapper.builder().build();
             PilotDataDir dataDir = new PilotDataDir(dataRoot.toString());
             commandTasks = new com.pilot.core.tool.CommandTaskManager(dataDir.file("commands"), mapper);
