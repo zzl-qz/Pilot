@@ -49,6 +49,10 @@ class GoalExecutionPolicyTest {
         return new ModelResponse("", List.of(new ToolCall("judge", "submit_decision", args)));
     }
 
+    static ModelResponse directDecision(Map<String, Object> args) {
+        return new ModelResponse("", List.of(new ToolCall("judge", "submit_completion_decision", args)));
+    }
+
     ModelResponse complete() {
         TaskControlService.Execution state = tasks.load("s").execution();
         String evidence = state.evidence().stream().filter(e -> "SUCCESS".equals(e.status()))
@@ -129,6 +133,74 @@ class GoalExecutionPolicyTest {
                 () -> policy.review(history, Set.of("A.java"), List.of()));
         assertEquals("UNVERIFIED", stop.code());
         assertEquals("DIRECT", tasks.load("s").execution().mode(), "缺少验证不应把普通任务强制升级 Goal");
+    }
+
+    @Test void multiFileDirectTaskContinuesUntilOriginalRequestHasEvidence() {
+        tasks.start("s", "修复重连状态机，并把调用方接到新状态；确认断线和恢复两条路径", List.of(), List.of());
+        AtomicInteger reviews = new AtomicInteger();
+        GoalExecutionPolicy policy = policy((messages, tools) -> {
+            assertEquals("submit_completion_decision", tools.getFirst().name());
+            if (reviews.getAndIncrement() == 0) {
+                return directDecision(Map.of("decision", "CONTINUE", "gap", "调用方尚未接入",
+                        "next_action", "修改调用方", "expected_observation", "调用方使用新的重连结果",
+                        "evidence", List.of()));
+            }
+            String checkId = tasks.load("s").execution().evidence().stream()
+                    .filter(e -> "run_command".equals(e.tool()) && e.check() != null
+                            && e.check().contains("exit 0"))
+                    .reduce((first, last) -> last).orElseThrow().id();
+            return directDecision(Map.of("decision", "COMPLETE", "gap", "", "next_action", "",
+                    "expected_observation", "", "evidence", List.of(checkId)));
+        }, 20);
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "A.java", "状态机已修改", null);
+        observe(policy, "edit_file", "B.java", "调用路径待核对", null);
+        observe(policy, "run_command", "", "tests passed", "mvn test → exit 0");
+
+        String guidance = policy.review(history, Set.of("A.java", "B.java"), List.of());
+        assertTrue(guidance.contains("调用方尚未接入"));
+        assertEquals("EXECUTING", tasks.load("s").execution().phase());
+        observe(policy, "edit_file", "B.java", "调用方已接入", null);
+        observe(policy, "run_command", "", "tests passed again", "mvn test → exit 0");
+        assertNull(policy.review(history, Set.of("A.java", "B.java"), List.of()));
+        assertEquals("VERIFIED", tasks.load("s").execution().phase());
+        assertNull(policy.review(history, Set.of("A.java", "B.java"), List.of()),
+                "同一证据版本已通过时不应再次花费核验请求");
+        assertEquals(2, reviews.get());
+    }
+
+    @Test void directReviewStopsWhenModelRepeatsFinalWithoutNewEvidence() {
+        AtomicInteger reviews = new AtomicInteger();
+        GoalExecutionPolicy policy = policy((messages, tools) -> {
+            reviews.incrementAndGet();
+            return directDecision(Map.of("decision", "CONTINUE", "gap", "缺少调用方接线",
+                    "next_action", "修改调用方", "expected_observation", "调用方引用新接口",
+                    "evidence", List.of()));
+        }, 20);
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "A.java", "updated", null);
+        observe(policy, "edit_file", "B.java", "updated", null);
+        observe(policy, "run_command", "", "tests passed", "mvn test → exit 0");
+        assertNotNull(policy.review(history, Set.of("A.java", "B.java"), List.of()));
+
+        ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class,
+                () -> policy.review(history, Set.of("A.java", "B.java"), List.of()));
+        assertEquals("NO_PROGRESS", stop.code());
+        assertEquals(1, reviews.get());
+    }
+
+    @Test void directReviewRejectsFabricatedCompletionEvidence() {
+        GoalExecutionPolicy policy = policy((messages, tools) -> directDecision(Map.of(
+                "decision", "COMPLETE", "gap", "", "next_action", "", "expected_observation", "",
+                "evidence", List.of("invented-id"))), 20);
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "A.java", "updated", null);
+        observe(policy, "edit_file", "B.java", "updated", null);
+        observe(policy, "run_command", "", "tests passed", "mvn test → exit 0");
+
+        String guidance = policy.review(history, Set.of("A.java", "B.java"), List.of());
+        assertTrue(guidance.contains("可追溯证据"));
+        assertEquals("EXECUTING", tasks.load("s").execution().phase());
     }
 
     @Test void successfulCheckIsBoundToExactTaskFileVersionEvenWithLargeDirtyWorkspace() throws Exception {
