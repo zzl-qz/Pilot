@@ -825,14 +825,25 @@ public class AgentRunService implements RunStarter {
     }
 
     private static String buildHint(Path root) {
+        String childNodeProjects;
+        try (Stream<Path> children = Files.list(root)) {
+            childNodeProjects = children.filter(Files::isDirectory)
+                    .filter(path -> Files.isRegularFile(path.resolve("package.json")))
+                    .map(path -> path.getFileName().toString())
+                    .sorted().limit(8).collect(Collectors.joining("、"));
+        } catch (IOException e) {
+            childNodeProjects = "";
+        }
+        String nodeHint = childNodeProjects.isEmpty() ? ""
+                : "；Node 子项目：" + childNodeProjects + "（先读各自 package.json，运行 npm 命令时设置对应 workdir）";
         if (Files.isRegularFile(root.resolve("pom.xml"))) {
-            return "Maven 项目：优先用工作区的 `mvnw`（Windows 是 `mvnw.cmd`），不要依赖系统 maven";
+            return "Maven 项目：优先用工作区的 `mvnw`，不要依赖系统 maven" + nodeHint;
         }
         if (Files.isRegularFile(root.resolve("build.gradle")) || Files.isRegularFile(root.resolve("build.gradle.kts"))) {
             return "Gradle 项目：用工作区的 `gradlew`";
         }
         if (Files.isRegularFile(root.resolve("package.json"))) {
-            return "Node 项目：先看 package.json 的 scripts，再跑 `npm test` / `npm run build` 这类脚本";
+            return "Node 项目：先看 package.json 的 scripts，再跑 `npm test` / `npm run build` 这类脚本" + nodeHint;
         }
         if (Files.isRegularFile(root.resolve("pyproject.toml"))
                 || Files.isRegularFile(root.resolve("requirements.txt"))) {
@@ -844,7 +855,7 @@ public class AgentRunService implements RunStarter {
         if (Files.isRegularFile(root.resolve("go.mod"))) {
             return "Go 项目：`go build ./...` / `go test ./...`";
         }
-        return "未识别到构建文件，改动后按项目实际情况验证";
+        return "未识别到根目录构建文件，改动后按项目实际情况验证" + nodeHint;
     }
 
     /**

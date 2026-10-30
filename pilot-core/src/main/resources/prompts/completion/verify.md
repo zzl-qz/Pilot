@@ -6,7 +6,7 @@
 验证记录：
 {{checks}}
 
-先用 run_command 跑与改动最相关的最小验证（例如 `mvnw -q -pl <模块> test -Dtest=<类>`，Windows 用 `.\mvnw.cmd`；构建和测试类命令按 run_command 的说明给足超时）。
+先确认构建文件所在目录，再用 run_command 跑与改动最相关的最小验证（例如根目录 `mvnw -q -pl <模块> test -Dtest=<类>`，或 `workdir="pilot-web"` 下运行 `npm test`；构建和测试类命令按 run_command 的说明给足超时）。
 - 如果验证命令在后台运行，使用返回的任务 ID 查询 command_status 和 command_logs，等待终态和真实退出码；启动成功、RUNNING 或日志中的成功字样均不能当作验证通过。
 - 通过：在结论里写明命令和结果，然后收尾。
 - 失败：修到通过，或说明卡在哪里。

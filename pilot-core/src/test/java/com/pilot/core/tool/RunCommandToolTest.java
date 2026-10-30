@@ -120,6 +120,9 @@ class RunCommandToolTest {
         String result = tool().execute(Map.of("command", "mvn -v", "timeoutSeconds", 10));
         assertTrue(result.contains("退出码: 0"), result);
         assertTrue(result.contains("wrapper-ok:-v"), result);
+        String conventional = tool().execute(Map.of("command", "./mvnw -v", "timeoutSeconds", 10));
+        assertTrue(conventional.contains("退出码: 0"), conventional);
+        assertTrue(conventional.contains("wrapper-ok:-v"), conventional);
     }
 
     @Test
@@ -131,6 +134,20 @@ class RunCommandToolTest {
         assertTrue(result.contains("退出码: 0"), result);
         assertTrue(result.contains("耗时:"), result);
         assertFalse(tool.readOnly());
+    }
+
+    @Test
+    void runsInRequestedChildDirectoryAndRejectsEscapes() throws Exception {
+        Path child = java.nio.file.Files.createDirectory(workspace.resolve("pilot-web"));
+        String result = tool().execute(Map.of("command", "node -p process.cwd()", "workdir", "pilot-web"));
+        assertTrue(result.contains("退出码: 0"), result);
+        assertTrue(result.contains(child.toString()), result);
+        assertTrue(tool().execute(Map.of("command", "node -v", "workdir", "../outside"))
+                .startsWith("ERROR: workdir 无效"));
+        assertTrue(tool().execute(Map.of("command", "node -v", "workdir", "missing"))
+                .startsWith("ERROR: workdir 不是现有目录"));
+        assertTrue(tool().execute(Map.of("command", "npm --prefix ../outside test"))
+                .startsWith("ERROR: --prefix 必须指向工作区内的目录"));
     }
 
     @Test

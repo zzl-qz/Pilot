@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
  *
  * <p>安全边界：
  * <ul>
- *   <li>只允许白名单可执行文件，不接受绝对路径或带目录的命令；</li>
+ *   <li>只允许白名单可执行文件；仓库内标准构建 wrapper 可带 {@code ./} 前缀；</li>
  *   <li>不经过 shell，禁止 {@code & | ; < > ^ `$(} 等元字符，避免串联命令；</li>
  *   <li>{@code git} 允许只读子命令与 {@code add}/{@code commit}，其余写操作需人工执行；</li>
  *   <li>强制超时、输出上限，并对疑似密钥的环境变量值做脱敏。</li>
@@ -111,6 +111,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         Map<String, Object> properties = new java.util.LinkedHashMap<>();
         properties.put("command", Map.of("type", "string",
                 "description", "完整命令，例如 \"mvn -q test\" 或 \"git status --porcelain\""));
+        properties.put("workdir", Map.of("type", "string",
+                "description", "可选，工作区内的工作目录，例如 pilot-web；默认工作区根目录"));
         properties.put("timeoutSeconds", Map.of("type", "integer", "minimum", 0, "maximum", 600,
                 "description", "前台默认 120 秒，后台默认 0（不设超时），最大 600 秒"));
         if (commandTasks != null) properties.put("background", Map.of("type", "boolean", "default", false,
@@ -147,11 +149,11 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         String text;
         boolean terminal;
         if (commandTasks == null) {
-            text = run(prepared.command(), prepared.displayTokens(), prepared.timeoutMs());
+            text = run(prepared.command(), prepared.displayTokens(), prepared.workdir(), prepared.timeoutMs());
             terminal = true;
         } else {
-            ManagedRun managed = runManaged(prepared.command(), prepared.displayTokens(), prepared.background(),
-                    prepared.timeoutMs(), tracking);
+            ManagedRun managed = runManaged(prepared.command(), prepared.displayTokens(), prepared.workdir(),
+                    prepared.background(), prepared.timeoutMs(), tracking);
             text = managed.text();
             terminal = managed.terminal();
         }
@@ -187,17 +189,40 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
 
         String executable = tokens.get(0).toLowerCase(Locale.ROOT);
+        if (Set.of("./mvnw", ".\\mvnw.cmd").contains(executable)) executable = "mvnw";
+        if (Set.of("./gradlew", ".\\gradlew.bat").contains(executable)) executable = "gradlew";
+        if (!executable.equals(tokens.get(0).toLowerCase(Locale.ROOT))) {
+            tokens = new ArrayList<>(tokens);
+            tokens.set(0, executable);
+        }
         if (executable.contains("/") || executable.contains("\\")) {
-            return Preparation.error("ERROR: 只接受白名单内的裸命令名，不接受路径: " + tokens.get(0));
+            return Preparation.error("ERROR: 只接受白名单内的裸命令名或标准构建 wrapper，不接受路径: " + tokens.get(0));
         }
         if (!ALLOWED_EXECUTABLES.contains(executable)) {
             return Preparation.error("ERROR: 命令不在白名单内: " + tokens.get(0)
                     + "。可用: " + String.join(", ", ALLOWED_EXECUTABLES.stream().sorted().toList()));
         }
+        Path workdir = paths.root();
+        Object requestedWorkdir = args == null ? null : args.get("workdir");
+        if (requestedWorkdir != null) {
+            if (!(requestedWorkdir instanceof String directory) || directory.isBlank()) {
+                return Preparation.error("ERROR: workdir 必须是工作区内的非空目录路径");
+            }
+            try {
+                workdir = paths.resolve(directory);
+            } catch (RuntimeException e) {
+                return Preparation.error("ERROR: workdir 无效：" + e.getMessage());
+            }
+            if (!Files.isDirectory(workdir)) {
+                return Preparation.error("ERROR: workdir 不是现有目录：" + directory);
+            }
+        }
         AgentScope scope = paths.scope();
         if (scope != null && !scope.allowsCommandArgs(tokens)) {
             return Preparation.error("ERROR: " + scope.commandHint(raw));
         }
+        String selectorProblem = packageDirectoryProblem(tokens, workdir);
+        if (selectorProblem != null) return Preparation.error("ERROR: " + selectorProblem);
         boolean trackChanges = !(tokens.size() == 2 && INSPECTION_FLAGS.contains(tokens.get(1)));
         if ("git".equals(executable)) {
             String sub = tokens.size() > 1 ? tokens.get(1).toLowerCase(Locale.ROOT) : "";
@@ -226,7 +251,39 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         if (background && commandTasks == null) return Preparation.error("ERROR: 当前运行环境不支持后台命令");
         List<String> command = withWrapper(tokens);
         long timeoutMs = timeout(args, background);
-        return new Preparation(new Prepared(command, tokens, background, timeoutMs, trackChanges), null);
+        return new Preparation(new Prepared(command, tokens, workdir, background, timeoutMs, trackChanges), null);
+    }
+
+    /** Package-manager directory selectors must stay inside the same workspace boundary as workdir. */
+    private String packageDirectoryProblem(List<String> tokens, Path workdir) {
+        if (!Set.of("npm", "pnpm", "yarn", "bun").contains(tokens.getFirst().toLowerCase(Locale.ROOT))) return null;
+        for (int index = 1; index < tokens.size(); index++) {
+            String token = tokens.get(index);
+            String selector = null;
+            String value = null;
+            if (Set.of("--prefix", "--dir", "--cwd", "-C").contains(token)) {
+                selector = token;
+                if (++index >= tokens.size()) return selector + " 缺少目录";
+                value = tokens.get(index);
+            } else {
+                for (String flag : List.of("--prefix=", "--dir=", "--cwd=")) {
+                    if (token.startsWith(flag)) {
+                        selector = flag.substring(0, flag.length() - 1);
+                        value = token.substring(flag.length());
+                        break;
+                    }
+                }
+            }
+            if (selector == null) continue;
+            if (value.isBlank() || value.startsWith("-")) return selector + " 缺少目录";
+            try {
+                Path selected = paths.resolve(workdir.resolve(value).toString());
+                if (!Files.isDirectory(selected)) return selector + " 不是现有工作区目录：" + value;
+            } catch (RuntimeException e) {
+                return selector + " 必须指向工作区内的目录：" + value;
+            }
+        }
+        return null;
     }
 
     /** 提交必须自带消息（否则会拉起编辑器卡到超时），且只允许操作工作区内的相对路径。 */
@@ -280,9 +337,9 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         return null;
     }
 
-    private ManagedRun runManaged(List<String> command, List<String> displayTokens, boolean background,
+    private ManagedRun runManaged(List<String> command, List<String> displayTokens, Path workdir, boolean background,
                                   long timeoutMs, CommandChangeTracker.Handle tracking) {
-        ProcessBuilder builder = new ProcessBuilder(command).directory(paths.root().toFile()).redirectErrorStream(true);
+        ProcessBuilder builder = new ProcessBuilder(command).directory(workdir.toFile()).redirectErrorStream(true);
         useCurrentJdk(builder.environment());
         CommandTaskManager.Task task;
         try {
@@ -319,8 +376,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         return new ManagedRun(rendered, true);
     }
 
-    private String run(List<String> command, List<String> displayTokens, long timeoutMs) {
-        Path workdir = paths.root();
+    private String run(List<String> command, List<String> displayTokens, Path workdir, long timeoutMs) {
         long startedAt = System.nanoTime();
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(workdir.toFile());
@@ -361,6 +417,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         long latencyMs = Math.max(0L, (System.nanoTime() - startedAt) / 1_000_000L);
         String rendered = render(String.join(" ", displayTokens), command,
                 finished ? exitCode(process) : -1, latencyMs, text);
+        rendered = "工作目录: " + workdir + "\n" + rendered;
         return finished ? rendered : "ERROR: 命令超时（" + (timeoutMs / 1000) + " 秒）已被终止\n" + rendered;
     }
 
@@ -532,7 +589,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         return Math.min(seconds, MAX_TIMEOUT_MS / 1000) * 1000L;
     }
 
-    private record Prepared(List<String> command, List<String> displayTokens, boolean background,
+    private record Prepared(List<String> command, List<String> displayTokens, Path workdir, boolean background,
                             long timeoutMs, boolean trackChanges) { }
 
     private record Preparation(Prepared prepared, String error) {

@@ -11,7 +11,7 @@
 | 查看命令状态、增量日志或停止进程 | command_status / command_logs / stop_command（当前环境提供时） |
 | 维护多步计划 | update_plan |
 
-- 命令只能在工作区根目录用白名单程序执行，不支持管道、重定向和 `&&` 串联。需要组合信息时分开调用，或改用工具自身的能力。
+- 命令使用白名单程序执行，默认工作区根目录；子项目的测试或构建用 `workdir` 指向该目录。先确认 `package.json`、`pom.xml` 等构建文件的位置，不要在错误目录重复执行同一命令。不支持管道、重定向和 `&&` 串联。
 - 不要用命令做 read_file / search_text 能做的事（cat、grep、sed、find），也不要为了「看一眼」而跑命令。
 - run_command 支持 background 时，开发服务器或长测试可用 background=true 获取任务 ID；后台默认无超时，测试可显式设置 timeoutSeconds。继续用 command_status（waitSeconds 最多 5）和 command_logs 查询，不能把 RUNNING 当成验证成功。服务不再使用时用 stop_command 停止。
 - 同一轮可以一次给出多个互相独立的工具调用（例如同时读几个文件），比一次一个更快。

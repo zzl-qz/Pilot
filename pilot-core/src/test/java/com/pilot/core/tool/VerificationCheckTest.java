@@ -20,6 +20,16 @@ class VerificationCheckTest {
     @Test
     void exposesTypedKindsForSupportedVerificationFamilies() {
         assertEquals(VerificationCheck.Kind.TEST, VerificationCheck.classifyCommand("npm test"));
+        assertEquals(VerificationCheck.Kind.TEST,
+                VerificationCheck.passingKind("npm --prefix pilot-web test → exit 0"));
+        assertEquals(VerificationCheck.Kind.TEST,
+                VerificationCheck.passingKind(".\\mvnw.cmd test → exit 0"));
+        assertEquals(VerificationCheck.Kind.STATIC_ANALYSIS,
+                VerificationCheck.passingKind("npm --prefix pilot-web run check → exit 0"));
+        assertEquals(VerificationCheck.Kind.TEST,
+                VerificationCheck.classifyCommand("pnpm -C packages/ui test"));
+        assertEquals(VerificationCheck.Kind.TEST,
+                VerificationCheck.classifyCommand("npm --prefix=pilot-web test"));
         assertEquals(VerificationCheck.Kind.BUILD, VerificationCheck.classifyCommand("javac Main.java"));
         assertEquals(VerificationCheck.Kind.STATIC_ANALYSIS, VerificationCheck.classifyCommand("npx eslint ."));
         assertEquals(VerificationCheck.Kind.FORMAT_CHECK,
@@ -80,5 +90,9 @@ class VerificationCheckTest {
                 VerificationCheck.classifyCommand("npx playwright test"));
         assertEquals(VerificationCheck.Kind.TEST,
                 VerificationCheck.classifyCommand("npx cypress run"));
+        assertEquals(VerificationCheck.Kind.OTHER,
+                VerificationCheck.classifyCommand("npm --prefix test"));
+        assertEquals(VerificationCheck.Kind.OTHER,
+                VerificationCheck.classifyCommand("npm --unknown project test"));
     }
 }

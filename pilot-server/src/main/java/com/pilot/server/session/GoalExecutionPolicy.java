@@ -474,11 +474,13 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 || codeEvidence(state);
         if (codeChanged && !passingCurrentCheck(state)) {
             String reason = verificationFailure(state);
-            if (!reason.isBlank() || directValidationNudges++ > 0) {
+            if (directValidationNudges++ > 0) {
                 updatePhase(state, "UNVERIFIED", reason.isBlank() ? "代码改动尚无当前版本的成功验证" : reason);
                 throw new Stop("UNVERIFIED", reason.isBlank() ? "代码改动尚无当前版本的成功验证。" : reason);
             }
-            return "代码已修改，但还没有当前版本的针对性验证。请运行最贴近改动的测试或构建；若因权限或环境无法执行，说明具体原因后收尾。";
+            return "代码已修改，但还没有当前版本的针对性验证。" + (reason.isBlank() ? "" : reason + "。")
+                    + "请检查命令的工作目录和失败日志，修复后运行最贴近改动的测试或构建；"
+                    + "若因权限或环境无法执行，说明具体原因后收尾。";
         }
         updatePhase(state, "VERIFIED", "");
         return null;
@@ -678,17 +680,29 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     }
 
     private boolean passingCurrentCheck(TaskControlService.Execution state) {
-        String version = sourceVersion();
-        return state.evidence().stream().anyMatch(e -> isQualifyingVerification(e)
-                && version.equals(e.endVersion()));
+        Map<VerificationCheck.Kind, TaskControlService.Evidence> latest = latestCurrentChecks(state);
+        return !latest.isEmpty() && latest.values().stream().allMatch(GoalExecutionPolicy::isQualifyingVerification);
     }
 
     private String verificationFailure(TaskControlService.Execution state) {
-        return state.evidence().stream().filter(GoalExecutionPolicy::isVerificationAttempt)
-                .filter(e -> Set.of("DENIED", "PERMANENT_FAILURE", "CANCELLED").contains(e.status())
-                        || (e.check() != null && e.check().matches(".+ → exit [1-9][0-9]*")))
+        return latestCurrentChecks(state).values().stream()
+                .filter(e -> !isQualifyingVerification(e))
                 .reduce((a, b) -> b).map(e -> "验证未能成功完成（" + e.status() + "）：" + oneLine(e.result(), 180))
                 .orElse("");
+    }
+
+    /** 同一源码版本每类验证只看最近一次结果；旧的目录错误不能否定修正后的成功。 */
+    private Map<VerificationCheck.Kind, TaskControlService.Evidence> latestCurrentChecks(TaskControlService.Execution state) {
+        String version = sourceVersion();
+        Map<VerificationCheck.Kind, TaskControlService.Evidence> latest = new LinkedHashMap<>();
+        for (TaskControlService.Evidence evidence : state.evidence()) {
+            if (!version.equals(evidence.endVersion()) || !isVerificationAttempt(evidence)) continue;
+            String check = Objects.toString(evidence.check(), "");
+            int arrow = check.lastIndexOf(" → exit ");
+            String command = arrow < 0 ? check : check.substring(0, arrow);
+            latest.put(VerificationCheck.classifyCommand(command), evidence);
+        }
+        return latest;
     }
 
     private void updatePhase(TaskControlService.Execution state, String phase, String gap) {

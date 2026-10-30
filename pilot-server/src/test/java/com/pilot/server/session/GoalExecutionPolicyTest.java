@@ -148,6 +148,38 @@ class GoalExecutionPolicyTest {
                 "实际改动文件变化后必须重新验证");
     }
 
+    @Test void correctedSubprojectChecksSupersedeEarlierWrongDirectoryFailures() throws Exception {
+        Files.writeString(root.resolve("A.java"), "v1");
+        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "A.java", "updated", null);
+        observe(policy, "run_command", "", "ERROR: package.json not found", "npm test → exit 254");
+        observe(policy, "run_command", "", "ERROR: package.json not found", "npm run check → exit 254");
+
+        assertTrue(policy.review(history, Set.of("A.java"), List.of()).contains("工作目录"),
+                "首次环境错误应给执行模型一次修正机会");
+        observe(policy, "run_command", "", "command completed", "npm --prefix pilot-web test → exit 0");
+        observe(policy, "run_command", "", "command completed", "npm --prefix pilot-web run check → exit 0");
+
+        assertNull(policy.review(history, Set.of("A.java"), List.of()));
+        assertEquals("VERIFIED", tasks.load("s").execution().phase());
+    }
+
+    @Test void passingStaticCheckDoesNotHideStillFailingTests() throws Exception {
+        Files.writeString(root.resolve("A.java"), "v1");
+        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "A.java", "updated", null);
+        observe(policy, "run_command", "", "ERROR: tests failed", "npm test → exit 1");
+        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
+        observe(policy, "run_command", "", "command completed", "npm run check → exit 0");
+
+        ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class,
+                () -> policy.review(history, Set.of("A.java"), List.of()));
+        assertEquals("UNVERIFIED", stop.code());
+        assertTrue(stop.getMessage().contains("npm test"), stop.getMessage());
+    }
+
     @Test void delayedBackgroundResultCannotValidateNewerSource() throws Exception {
         Files.writeString(root.resolve("A.java"), "v1");
         GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);

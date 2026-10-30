@@ -135,12 +135,30 @@ public final class VerificationCheck {
 
     private static Kind classifyPackageManager(List<String> args) {
         if (args.isEmpty()) return Kind.OTHER;
-        int scriptIndex = "run".equals(args.getFirst()) ? 1 : 0;
-        if (Set.of("exec", "dlx").contains(args.getFirst())) {
-            return classifyRunner(args.subList(1, args.size()));
+        // Package managers accept project selectors before the script. Skipping only known
+        // selectors keeps `npm --prefix web test` verifiable without treating arbitrary flags
+        // (or their values) as a test command.
+        int index = 0;
+        while (index < args.size()) {
+            String option = args.get(index);
+            if (Set.of("--prefix", "--workspace", "-w", "--dir", "-c", "--cwd").contains(option)) {
+                if (index + 1 >= args.size() || args.get(index + 1).startsWith("-")) return Kind.OTHER;
+                index += 2;
+            } else if (Set.of("--prefix", "--workspace", "--dir", "--cwd").stream()
+                    .anyMatch(flag -> option.startsWith(flag + "=") && option.length() > flag.length() + 1)) {
+                index++;
+            } else {
+                break;
+            }
         }
-        if (scriptIndex >= args.size()) return Kind.OTHER;
-        String script = args.get(scriptIndex).split(":", 2)[0];
+        if (index >= args.size() || args.get(index).startsWith("-")) return Kind.OTHER;
+        List<String> command = args.subList(index, args.size());
+        int scriptIndex = "run".equals(command.getFirst()) ? 1 : 0;
+        if (Set.of("exec", "dlx").contains(command.getFirst())) {
+            return classifyRunner(command.subList(1, command.size()));
+        }
+        if (scriptIndex >= command.size()) return Kind.OTHER;
+        String script = command.get(scriptIndex).split(":", 2)[0];
         if (SCRIPT_TESTS.contains(script)) return Kind.TEST;
         if (SCRIPT_BUILDS.contains(script)) return Kind.BUILD;
         if (SCRIPT_CHECKS.contains(script)) return Kind.STATIC_ANALYSIS;
@@ -235,7 +253,11 @@ public final class VerificationCheck {
     private static String bare(String executable) {
         String value = executable.replace('\\', '/');
         int slash = value.lastIndexOf('/');
-        return slash >= 0 ? value.substring(slash + 1) : value;
+        value = slash >= 0 ? value.substring(slash + 1) : value;
+        if (Set.of("mvnw.cmd", "gradlew.bat").contains(value)) {
+            return value.substring(0, value.lastIndexOf('.'));
+        }
+        return value;
     }
 
     private static String lastSegment(String task) {
