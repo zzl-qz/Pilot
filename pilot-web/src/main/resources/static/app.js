@@ -2959,7 +2959,7 @@ function onRunFailed(event) {
     loadQueue();
   }
   const { cancelled, paused, interrupted, blocked, budgetLimited, outcome, resumable } = classifyRunFailure(code);
-  const canContinueNow = resumable && !['NEED_INPUT', 'NO_PROGRESS'].includes(code);
+  const canContinueNow = resumable && code !== 'NEED_INPUT';
   const outcomeLabels = { WAITING: '等待外部事件', NEED_INPUT: '需要输入', UNVERIFIED: '结果未验证',
     NO_PROGRESS: '暂无有效进展', REVIEW_UNAVAILABLE: '核验暂不可用' };
   const outcomeLabel = outcomeLabels[outcome] || '';
@@ -6466,7 +6466,7 @@ function syncTaskControls() {
   const status = String(state.task?.status || '').toUpperCase();
   el.taskResumeControls.hidden = state.running || !state.task
     || !['PAUSED', 'INTERRUPTED', 'FAILED', 'AWAITING_REVIEW', 'ACTIVE', 'BLOCKED', 'BUDGET_LIMITED',
-      'WAITING', 'UNVERIFIED', 'REVIEW_UNAVAILABLE'].includes(status);
+      'WAITING', 'UNVERIFIED', 'NO_PROGRESS', 'REVIEW_UNAVAILABLE'].includes(status);
   el.taskResume.disabled = state.taskBusy;
 }
 
