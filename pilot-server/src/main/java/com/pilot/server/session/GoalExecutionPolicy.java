@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -54,6 +55,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private static final int INVESTIGATION_NUDGE_AT = 16;
     private static final Set<String> RESEARCH_TOOLS = Set.of("web_search", "web_fetch");
     private static final Pattern TASK_ID = Pattern.compile("(?m)^任务ID: ([A-Za-z0-9_-]+)$");
+    private static final String AUTO_REVERIFY_KEY = "auto_reverify:";
 
     private final ModelClient model;
     private final ObjectMapper mapper;
@@ -76,6 +78,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private java.util.function.Consumer<TaskControlService.Execution> updates = ignored -> { };
     private List<Attachment> attachments = List.of();
     private String lastValidationNudgeFingerprint = "";
+    private boolean automaticReverificationAttempted;
     private int consecutiveResearchFailures;
     private boolean researchRouteUnavailable;
     private boolean finalizing;
@@ -437,16 +440,18 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         ArrayList<TaskControlService.Evidence> evidence = new ArrayList<>(state.evidence());
         // 工具本身的执行结果和它汇总的验证是两类事实。不能把首个失败 check 套上外层
         // SUCCESS，也不能因为子代理最终失败就丢掉它此前真正跑成功的 check。
+        String operation = call.callId().startsWith("pilot_reverify_")
+                ? AUTO_REVERIFY_KEY + operationKey(call) : operationKey(call);
         evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), call.name(), path,
                 clip(outcome.result() == null ? "" : outcome.result(), 3_000), endVersion, null,
-                outcome.status().name(), startVersion, endVersion, System.currentTimeMillis(), operationKey(call)));
+                outcome.status().name(), startVersion, endVersion, System.currentTimeMillis(), operation));
         // 结构化工具（例如 spawn_agent）可能汇总多次真实检查；从第 0 条起逐条入账。
         for (int index = 0; index < outcome.checks().size(); index++) {
             String check = outcome.checks().get(index);
             String status = check.matches("(?s).+ → exit 0") ? "SUCCESS" : "PERMANENT_FAILURE";
             evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), call.name(), path,
                     check, endVersion, check, status, startVersion, endVersion,
-                    System.currentTimeMillis(), operationKey(call) + ":check:" + index));
+                    System.currentTimeMillis(), operation + ":check:" + index));
         }
         evidence = trimEvidence(evidence);
         tasks.execution(session, task, copy(state, state.mode(), "EXECUTING", state.gap(), evidence,
@@ -463,6 +468,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 .collect(Collectors.toSet());
         all.stream().filter(e -> Set.of("edit_file", "create_file").contains(e.tool())
                         || isQualifyingVerification(e)
+                        || (e.operationKey() != null && e.operationKey().startsWith(AUTO_REVERIFY_KEY))
                         || ("run_command".equals(e.tool()) && isBackgroundLaunch(e)
                         && !completedTasks.contains(taskId(e))))
                 .forEach(e -> retained.put(e.id(), e));
@@ -513,11 +519,97 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         return "GOAL".equals(state.mode()) ? reviewGoal(history, state) : reviewDirect(history, state);
     }
 
+    @Override public ToolCall reverificationCall() {
+        if (automaticReverificationAttempted) return null;
+        TaskControlService.Execution state = state();
+        if (!"DIRECT".equals(state.mode()) || changedPaths.stream().noneMatch(GoalExecutionPolicy::isCodePath)
+                || !latestCurrentChecks(state).isEmpty()) return null;
+        String currentVersion = sourceVersion();
+        if (state.evidence().stream().anyMatch(e -> currentVersion.equals(e.endVersion())
+                && !"SKIPPED".equals(e.status()) && e.operationKey() != null
+                && e.operationKey().startsWith(AUTO_REVERIFY_KEY))) return null;
+        TaskControlService.Evidence candidate = state.evidence().stream()
+                .filter(GoalExecutionPolicy::isQualifyingVerification)
+                .filter(e -> !currentVersion.equals(e.endVersion()))
+                .filter(e -> safeReplayCommand(checkCommand(e.check()))
+                        && replayDirectoryAvailable(checkCommand(e.check())))
+                .max(Comparator.comparingInt((TaskControlService.Evidence e) -> replayScore(checkCommand(e.check())))
+                        .thenComparingLong(TaskControlService.Evidence::observedAtEpochMillis))
+                .orElse(null);
+        if (candidate == null) return null;
+        automaticReverificationAttempted = true;
+        return new ToolCall("pilot_reverify_" + UUID.randomUUID(), "run_command",
+                Map.of("command", checkCommand(candidate.check()), "timeoutSeconds", 300));
+    }
+
+    /** 自动复跑只接受此前成功的简单测试/静态检查命令；实际执行还要经过 run_command 和权限门。 */
+    private static boolean safeReplayCommand(String command) {
+        if (command == null || command.length() > 180 || !command.matches("[A-Za-z0-9_./:= -]+")) return false;
+        if (!Set.of(VerificationCheck.Kind.TEST, VerificationCheck.Kind.STATIC_ANALYSIS)
+                .contains(VerificationCheck.classifyCommand(command))) return false;
+        List<String> tokens = List.of(command.strip().split("\\s+"));
+        if (tokens.isEmpty()) return false;
+        if ("npm".equals(tokens.getFirst())) {
+            int index = 1;
+            if (tokens.size() > 2 && "--prefix".equals(tokens.get(index))) {
+                if (!safeModule(tokens.get(index + 1))) return false;
+                index += 2;
+            }
+            return tokens.subList(index, tokens.size()).equals(List.of("test"))
+                    || tokens.subList(index, tokens.size()).equals(List.of("run", "check"))
+                    || tokens.subList(index, tokens.size()).equals(List.of("run", "lint"))
+                    || tokens.subList(index, tokens.size()).equals(List.of("run", "typecheck"));
+        }
+        if (!Set.of("mvn", "mvnw", "./mvnw").contains(tokens.getFirst())) return false;
+        boolean goal = false;
+        for (int index = 1; index < tokens.size(); index++) {
+            String token = tokens.get(index);
+            if ("test".equals(token)) goal = true;
+            else if ("-q".equals(token)) continue;
+            else if ("-pl".equals(token) && index + 1 < tokens.size() && safeModule(tokens.get(index + 1))) index++;
+            else if (token.matches("-Dtest=[A-Za-z0-9_.*,-]+")) continue;
+            else return false;
+        }
+        return goal;
+    }
+
+    private static boolean safeModule(String module) {
+        return module != null && module.matches("[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*")
+                && !module.startsWith(".") && !module.contains("..");
+    }
+
+    /** 历史检查没有单独保存 workdir；只复跑能从命令本身确定正确项目目录的检查。 */
+    private boolean replayDirectoryAvailable(String command) {
+        List<String> tokens = List.of(command.strip().split("\\s+"));
+        if (tokens.isEmpty()) return false;
+        if ("npm".equals(tokens.getFirst())) {
+            Path project = tokens.size() > 2 && "--prefix".equals(tokens.get(1))
+                    ? root.resolve(tokens.get(2)).normalize() : root;
+            return project.startsWith(root) && Files.isRegularFile(project.resolve("package.json"));
+        }
+        return Files.isRegularFile(root.resolve("pom.xml"));
+    }
+
+    private int replayScore(String command) {
+        int score = VerificationCheck.classifyCommand(command) == VerificationCheck.Kind.TEST ? 100 : 0;
+        for (String path : changedPaths) {
+            int slash = path.indexOf('/');
+            if (slash > 0 && command.contains(" " + path.substring(0, slash) + " ")) score += 200;
+        }
+        return score;
+    }
+
+    private static String checkCommand(String check) {
+        if (check == null) return "";
+        int arrow = check.lastIndexOf(" → exit ");
+        return arrow < 0 ? "" : check.substring(0, arrow).strip();
+    }
+
     private String reviewDirect(List<Message> history, TaskControlService.Execution state) {
         boolean codeChanged = changedPaths.stream().anyMatch(GoalExecutionPolicy::isCodePath)
                 || codeEvidence(state);
         if (codeChanged && !passingCurrentCheck(state)) {
-            String reason = verificationFailure(state);
+            String reason = verificationGap(state);
             String fingerprint = validationProgress(state);
             if (fingerprint.equals(lastValidationNudgeFingerprint)) {
                 updatePhase(state, "UNVERIFIED", reason.isBlank() ? "代码改动尚无当前版本的成功验证" : reason);
@@ -525,7 +617,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             }
             lastValidationNudgeFingerprint = fingerprint;
             return "代码已修改，但还没有当前版本的针对性验证。" + (reason.isBlank() ? "" : reason + "。")
-                    + "请检查命令的工作目录和失败日志，修复后运行最贴近改动的测试或构建；"
+                    + "请运行当前版本的定向测试或构建；检查工作目录和失败日志，修复后重试；"
                     + "若因权限或环境无法执行，说明具体原因后收尾。";
         }
         if (needsDirectReview(state, codeChanged)) {
@@ -874,6 +966,22 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 .filter(e -> !isQualifyingVerification(e))
                 .reduce((a, b) -> b).map(e -> "验证未能成功完成（" + e.status() + "）：" + oneLine(e.result(), 180))
                 .orElse("");
+    }
+
+    private String verificationGap(TaskControlService.Execution state) {
+        String failure = verificationFailure(state);
+        if (!failure.isBlank()) return failure;
+        String version = sourceVersion();
+        TaskControlService.Evidence stale = state.evidence().stream()
+                .filter(GoalExecutionPolicy::isQualifyingVerification)
+                .filter(e -> !version.equals(e.endVersion()))
+                .max(Comparator.comparingLong(TaskControlService.Evidence::observedAtEpochMillis))
+                .orElse(null);
+        if (stale == null) return "当前源码尚无成功验证记录";
+        String command = checkCommand(stale.check());
+        return "先前成功的 " + oneLine(command, 120) + " 属于旧源码版本，当前改动文件（"
+                + changedPaths.stream().limit(5).collect(Collectors.joining("、"))
+                + "）已有变化；旧结果不能证明当前版本";
     }
 
     /** 同一源码版本每类验证只看最近一次结果；旧的目录错误不能否定修正后的成功。 */

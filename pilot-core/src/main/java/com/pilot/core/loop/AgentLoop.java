@@ -436,6 +436,30 @@ public final class AgentLoop {
                         safeCheckpoint(checkpoint, messages);
                         continue;
                     }
+                    // 旧版本成功的定向检查不能证明当前源码；仅复跑策略明确选出的受限命令。
+                    // 仍由 ToolExecutor 走权限审批、工作区边界、超时及变更追踪。
+                    ToolCall reverification = executionPolicy == null ? null : executionPolicy.reverificationCall();
+                    if (reverification != null) {
+                        messages.add(Message.assistant("当前源码变化使先前验证失效，自动复跑定向检查。",
+                                List.of(reverification)));
+                        events.accept(new RunContinued(1, 1, "当前源码变化，自动复跑先前成功的定向检查"));
+                        ToolStartGuard startGuard = new ToolStartGuard();
+                        ToolExecutor.Outcome outcome;
+                        if (!executionPolicy.permits(reverification)) {
+                            outcome = new ToolExecutor.Outcome(reverification.name(),
+                                    "SKIPPED: " + executionPolicy.denialReason(reverification), null, null);
+                        } else {
+                            executionPolicy.beforeTool(reverification);
+                            outcome = toolExecutor.execute(reverification, events, startGuard);
+                        }
+                        recordToolOutcome(reverification, outcome, changedFiles, checks, messages);
+                        if (hasInput(startGuard.correction)) {
+                            applySteering(messages, events, startGuard.correction);
+                        }
+                        safeCheckpoint(checkpoint, messages);
+                        if (cancellation.cancelled()) return cancel(messages, events);
+                        continue;
+                    }
                     // 通用验证先于模式级 reviewer；有独立审查时跳过重复的模型自审。
                     CompletionGate.Nudge nudge = completionGate.evaluate(changedFiles, checks, plan, openSteps,
                             executionPolicy != null && executionPolicy.independentCompletionReview(changedFiles));

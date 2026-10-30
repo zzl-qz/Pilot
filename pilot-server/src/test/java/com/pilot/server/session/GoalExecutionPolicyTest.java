@@ -273,6 +273,66 @@ class GoalExecutionPolicyTest {
         assertEquals("VERIFIED", tasks.load("s").execution().phase());
     }
 
+    @Test void staleScopedTestIsReplayedOnceAndExplained() throws Exception {
+        Path web = root.resolve("pilot-web/src/app.js");
+        Files.createDirectories(web.getParent());
+        Files.writeString(root.resolve("pilot-web/package.json"), "{}");
+        Files.writeString(web, "v1");
+        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "pilot-web/src/app.js", "updated", null);
+        observe(policy, "run_command", "", "tests passed", "npm --prefix pilot-web test → exit 0");
+        observe(policy, "run_command", "", "tests passed", "mvn -pl pilot-server -Dtest=QueueTest test → exit 0");
+        Files.writeString(web, "v2");
+
+        ToolCall replay = policy.reverificationCall();
+        assertNotNull(replay);
+        assertEquals("run_command", replay.name());
+        assertEquals("npm --prefix pilot-web test", replay.args().get("command"));
+        assertNull(policy.reverificationCall(), "同一轮至多自动复验一次");
+        policy.beforeTool(replay);
+        policy.observed(replay, new ToolExecutor.Outcome("run_command", "ERROR: 权限拒绝", List.of(), List.of(),
+                ToolExecutor.OutcomeStatus.DENIED));
+        GoalExecutionPolicy resumed = policy((messages, tools) -> fail("reviewer not expected"), 20);
+        assertNull(resumed.reverificationCall(), "已记录的同版本自动复验不应在每次点击继续后重复执行");
+        String guidance = policy.review(history, Set.of("pilot-web/src/app.js"), List.of());
+        assertTrue(guidance.contains("旧源码版本"), guidance);
+        assertTrue(guidance.contains("pilot-web/src/app.js"), guidance);
+    }
+
+    @Test void unsafeHistoricalTestCommandIsNeverAutoReplayed() throws Exception {
+        Path file = root.resolve("A.java");
+        Files.writeString(file, "v1");
+        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "A.java", "updated", null);
+        observe(policy, "run_command", "", "tests passed", "npm test -- --updateSnapshot → exit 0");
+        Files.writeString(file, "v2");
+
+        assertNull(policy.reverificationCall());
+    }
+
+    @Test void successfulReverificationAppliesToCurrentSourceVersion() throws Exception {
+        Path web = root.resolve("pilot-web/src/app.js");
+        Files.createDirectories(web.getParent());
+        Files.writeString(root.resolve("pilot-web/package.json"), "{}");
+        Files.writeString(web, "v1");
+        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "pilot-web/src/app.js", "updated", null);
+        observe(policy, "run_command", "", "tests passed", "npm --prefix pilot-web test → exit 0");
+        Files.writeString(web, "v2");
+
+        ToolCall replay = policy.reverificationCall();
+        assertNotNull(replay);
+        policy.beforeTool(replay);
+        policy.observed(replay, new ToolExecutor.Outcome("run_command", "tests passed", null,
+                "npm --prefix pilot-web test → exit 0"));
+
+        assertNull(policy.review(history, Set.of("pilot-web/src/app.js"), List.of()));
+        assertEquals("VERIFIED", tasks.load("s").execution().phase());
+    }
+
     @Test void delayedBackgroundResultCannotValidateNewerSource() throws Exception {
         Files.writeString(root.resolve("A.java"), "v1");
         GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);

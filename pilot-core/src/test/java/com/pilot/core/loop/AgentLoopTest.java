@@ -854,6 +854,64 @@ class AgentLoopTest {
         assertEquals(2, completed.planTotal());
     }
 
+    @Test
+    void policyReverificationRunsThroughToolExecutorBeforeCompletion() {
+        CountingTool command = new CountingTool("run_command", "测试通过");
+        ScriptedModelClient client = new ScriptedModelClient(
+                new ModelResponse("准备交付", List.of()),
+                new ModelResponse("已按当前版本复验", List.of()));
+        AtomicBoolean offered = new AtomicBoolean();
+        ExecutionPolicy policy = new ExecutionPolicy() {
+            @Override public void beforeRequest(List<Message> history) { }
+            @Override public ToolCall reverificationCall() {
+                return offered.compareAndSet(false, true)
+                        ? new ToolCall("auto-check", "run_command", Map.of("command", "npm test")) : null;
+            }
+            @Override public String review(List<Message> history, Set<String> changedFiles, List<String> checks) {
+                return null;
+            }
+        };
+        AgentLoop loop = new AgentLoop(client, registry(command), new PolicyPermissionGate(PermissionMode.AUTO),
+                config(8, 3)).withExecutionPolicy(policy);
+
+        AgentLoop.Result result = loop.run("验证当前代码", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals(1, command.executions.get());
+        List<Message> secondRequest = client.requests.get(1);
+        assertTrue(secondRequest.stream().anyMatch(message -> message.hasToolCalls()
+                && message.toolCalls().stream().anyMatch(call -> "auto-check".equals(call.callId()))));
+        assertTrue(secondRequest.stream().anyMatch(message -> "tool".equals(message.role())
+                && "auto-check".equals(message.toolCallId()) && "测试通过".equals(message.content())));
+    }
+
+    @Test
+    void automaticReverificationStillRespectsPermissionMode() {
+        CountingTool command = new CountingTool("run_command", "测试通过");
+        ScriptedModelClient client = new ScriptedModelClient(
+                new ModelResponse("准备交付", List.of()),
+                new ModelResponse("无法运行命令", List.of()));
+        AtomicBoolean offered = new AtomicBoolean();
+        ExecutionPolicy policy = new ExecutionPolicy() {
+            @Override public void beforeRequest(List<Message> history) { }
+            @Override public ToolCall reverificationCall() {
+                return offered.compareAndSet(false, true)
+                        ? new ToolCall("auto-denied", "run_command", Map.of("command", "npm test")) : null;
+            }
+            @Override public String review(List<Message> history, Set<String> changedFiles, List<String> checks) {
+                return null;
+            }
+        };
+        AgentLoop loop = new AgentLoop(client, registry(command), readOnlyGate(), config(8, 3))
+                .withExecutionPolicy(policy);
+
+        loop.run("验证当前代码", List.of(), events::add);
+
+        assertEquals(0, command.executions.get());
+        assertTrue(client.requests.get(1).stream().anyMatch(message -> "tool".equals(message.role())
+                && "auto-denied".equals(message.toolCallId()) && message.content().contains("权限拒绝")));
+    }
+
     /** 自动续跑到限时也必须保留真实计划，不能因为启用了 policy 就伪装成无计划完成。 */
     @Test
     void executionPolicyPreservesOpenPlanAtContinueLimit() {

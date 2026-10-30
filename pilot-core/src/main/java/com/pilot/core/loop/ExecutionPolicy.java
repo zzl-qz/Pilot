@@ -29,6 +29,8 @@ public interface ExecutionPolicy {
     default Set<String> priorChangedPaths() { return Set.of(); }
     /** 续跑时恢复上一执行段的类型化验证记录，不包含任意的成功命令。 */
     default List<String> priorChecks() { return List.of(); }
+    /** 上次成功的安全定向检查因源码变化失效时，可请求本轮至多一次受权限控制的复验。 */
+    default ToolCall reverificationCall() { return null; }
     /** Null accepts completion; otherwise return the concrete work still required. */
     String review(List<Message> history, Set<String> changedFiles, List<String> checks);
 
