@@ -374,6 +374,27 @@ class AgentLoopTest {
     }
 
     @Test
+    void unchangedNoProgressStopsWithoutAnotherModelRequest() {
+        ScriptedModelClient client = new ScriptedModelClient();
+        ExecutionPolicy policy = new ExecutionPolicy() {
+            @Override public void beforeRequest(List<Message> history) {
+                throw new Stop("NO_PROGRESS", "没有新增证据；需要补充信息");
+            }
+            @Override public String review(List<Message> history, Set<String> changedFiles, List<String> checks) {
+                return null;
+            }
+        };
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), config(8, 3))
+                .withExecutionPolicy(policy);
+
+        AgentLoop.Result result = loop.run("继续", List.of(), events::add);
+
+        assertEquals("NO_PROGRESS", result.failureCode());
+        assertTrue(client.requests.isEmpty());
+        assertTrue(result.finalText().contains("没有新增证据"));
+    }
+
+    @Test
     void deniedToolIsReportedWithoutExecution() {
         CountingTool tool = new CountingTool("write_file", "written");
         PermissionGate denyAll = (call, candidate) -> PermissionResult.deny("Sprint 2 只支持只读");

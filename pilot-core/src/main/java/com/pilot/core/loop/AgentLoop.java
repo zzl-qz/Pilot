@@ -656,9 +656,11 @@ public final class AgentLoop {
     private Result finalizeFailure(List<Message> messages, Consumer<SessionEvent> events, UsageTracker usage,
                                    String code, String reason, boolean emitFailure) {
         String fallback = "本轮未能完整结束（" + code + "）：" + ToolSupport.oneLine(reason, 500)
-                + "\n\n已有进度已保存。请根据上面的原因补充条件或选择继续执行。";
+                + ("NO_PROGRESS".equals(code)
+                ? "\n\n已有进度已保存。请提供新信息，或在工作区出现实际变更后再继续。"
+                : "\n\n已有进度已保存。请根据上面的原因补充条件或选择继续执行。");
         String finalText = fallback;
-        if (!cancellation.cancelled()) {
+        if (!cancellation.cancelled() && !"NO_PROGRESS".equals(code)) {
             try {
                 if (executionPolicy != null) executionPolicy.beginFinalization();
                 refreshTaskContext(messages, null);

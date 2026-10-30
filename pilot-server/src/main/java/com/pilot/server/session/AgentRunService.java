@@ -964,7 +964,7 @@ public class AgentRunService implements RunStarter {
                     properties.goalMaxInputTokens(), properties.goalMaxOutputTokens(),
                     properties.goalMaxActiveMillis()) : null;
         if (goalPolicy != null) {
-            goalPolicy.withUpdates(state -> sink.accept(new com.pilot.core.event.ExecutionUpdated(
+            goalPolicy.withAvailableTools(availableTools).withUpdates(state -> sink.accept(new com.pilot.core.event.ExecutionUpdated(
                     state.mode(), state.phase(), state.requests(), state.reason(), state.gap())));
             tools.register(goalPolicy.promotionTool());
         }

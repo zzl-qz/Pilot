@@ -2959,6 +2959,7 @@ function onRunFailed(event) {
     loadQueue();
   }
   const { cancelled, paused, interrupted, blocked, budgetLimited, outcome, resumable } = classifyRunFailure(code);
+  const canContinueNow = resumable && !['NEED_INPUT', 'NO_PROGRESS'].includes(code);
   const outcomeLabels = { WAITING: '等待外部事件', NEED_INPUT: '需要输入', UNVERIFIED: '结果未验证',
     NO_PROGRESS: '暂无有效进展', REVIEW_UNAVAILABLE: '核验暂不可用' };
   const outcomeLabel = outcomeLabels[outcome] || '';
@@ -2985,7 +2986,7 @@ function onRunFailed(event) {
     title: outcomeLabel ? `本轮结束 · ${outcomeLabel}` : blocked ? '任务遇到阻塞' : budgetLimited ? '本轮已达预算' : paused ? `本轮已暂停 · ${code}`
       : interrupted ? `运行已中断 · ${code}` : `运行${cancelled ? '取消' : '失败'} · ${code}`,
     detail: event.payload.message,
-    resumable
+    resumable: canContinueNow
   });
   // 模型错误：把原始报错翻译成可行动的提示（401 去填 Key、404 查端点…）
   const modelError = code === 'MODEL_ERROR' ? classifyModelError(event.payload.message) : null;
@@ -2997,7 +2998,9 @@ function onRunFailed(event) {
     title: outcomeLabel ? outcomeLabel : blocked ? '任务遇到阻塞' : budgetLimited ? '本轮已达预算' : paused ? '本轮已暂停'
       : interrupted ? '运行已中断' : cancelled ? '本轮已取消' : '运行失败',
     detail: event.payload.message,
-    hint: modelError ? modelError.hint : '',
+    hint: modelError ? modelError.hint : code === 'NEED_INPUT'
+      ? '请在输入框补充所需条件后发送。' : code === 'NO_PROGRESS'
+        ? '请提供新信息，或等工作区与验证条件发生变化后再发送。' : '',
     actionLabel: modelError && modelError.action === 'model-settings' ? '打开模型设置' : '',
     onAction: (clickEvent) => {
       // 阻止冒泡：document 上的「点外面就收起」会立刻把刚打开的面板关掉
@@ -3005,7 +3008,7 @@ function onRunFailed(event) {
       toggleModelMenu(true);
       el.modelKey.focus();
     },
-    resumable
+    resumable: canContinueNow
   });
   if (!state.replaying) loadContextStatus();
 }
@@ -6463,7 +6466,7 @@ function syncTaskControls() {
   const status = String(state.task?.status || '').toUpperCase();
   el.taskResumeControls.hidden = state.running || !state.task
     || !['PAUSED', 'INTERRUPTED', 'FAILED', 'AWAITING_REVIEW', 'ACTIVE', 'BLOCKED', 'BUDGET_LIMITED',
-      'WAITING', 'NEED_INPUT', 'UNVERIFIED', 'NO_PROGRESS', 'REVIEW_UNAVAILABLE'].includes(status);
+      'WAITING', 'UNVERIFIED', 'REVIEW_UNAVAILABLE'].includes(status);
   el.taskResume.disabled = state.taskBusy;
 }
 

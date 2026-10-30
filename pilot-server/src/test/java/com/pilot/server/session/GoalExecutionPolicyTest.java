@@ -187,6 +187,66 @@ class GoalExecutionPolicyTest {
                 () -> policy.review(history, Set.of("A.java", "B.java"), List.of()));
         assertEquals("NO_PROGRESS", stop.code());
         assertEquals(1, reviews.get());
+
+        GoalExecutionPolicy resumed = policy((messages, tools) -> fail("no model call expected"), 20);
+        ExecutionPolicy.Stop immediate = assertThrows(ExecutionPolicy.Stop.class,
+                () -> resumed.beforeRequest(history));
+        assertEquals("NO_PROGRESS", immediate.code());
+        assertEquals(1, reviews.get(), "无新证据时继续不应再次核验");
+    }
+
+    @Test void unavailableBrowserRequestFallsBackToRunnableRegressionForOrdinaryUiTask() {
+        tasks.start("s", "修复输入框多图发送与队列恢复", List.of(), List.of());
+        GoalExecutionPolicy policy = policy((messages, tools) -> {
+            assertTrue(messages.getLast().content().contains("浏览器工具是否可用：否"));
+            return directDecision(Map.of("decision", "CONTINUE", "gap", "缺少浏览器验证",
+                    "next_action", "用浏览器验证多图发送", "expected_observation", "页面中多图正常",
+                    "evidence", List.of()));
+        }, 20).withAvailableTools(Set.of("read_file", "run_command"));
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "A.java", "updated", null);
+        observe(policy, "edit_file", "B.java", "updated", null);
+        observe(policy, "run_command", "", "tests passed", "mvn test → exit 0");
+
+        String guidance = policy.review(history, Set.of("A.java", "B.java"), List.of());
+        assertTrue(guidance.contains("定向回归测试"));
+        assertFalse(guidance.contains("下一步只做：用浏览器"));
+        assertEquals("EXECUTING", tasks.load("s").execution().phase());
+    }
+
+    @Test void explicitBrowserAcceptanceStopsForMissingCapability() {
+        tasks.start("s", "修复输入框，必须在真实浏览器中验证多图发送", List.of(), List.of());
+        GoalExecutionPolicy policy = policy((messages, tools) -> directDecision(Map.of(
+                "decision", "CONTINUE", "gap", "缺少真实浏览器验证",
+                "next_action", "打开浏览器点击多图发送", "expected_observation", "截图显示多图正常",
+                "evidence", List.of())), 20).withAvailableTools(Set.of("read_file", "run_command"));
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "A.java", "updated", null);
+        observe(policy, "edit_file", "B.java", "updated", null);
+        observe(policy, "run_command", "", "tests passed", "mvn test → exit 0");
+
+        ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class,
+                () -> policy.review(history, Set.of("A.java", "B.java"), List.of()));
+        assertEquals("NEED_INPUT", stop.code());
+        assertTrue(stop.getMessage().contains("浏览器交互工具"));
+    }
+
+    @Test void oldNoProgressBrowserBlockerGetsOneFreshReviewAfterPolicyUpgrade() {
+        TaskControlService.TaskContract task = tasks.load("s");
+        TaskControlService.Execution old = new TaskControlService.Execution("DIRECT", "旧策略", List.of(),
+                List.of(), 8, 1_000, List.of(), "NO_PROGRESS", "缺少浏览器验证", 0, "unchanged",
+                0, 0L, 4, TaskControlService.Usage.empty(), List.of(),
+                "打开浏览器验证", "得到截图", 0);
+        assertTrue(tasks.execution("s", task, old));
+
+        GoalExecutionPolicy policy = policy((messages, tools) -> fail("model not expected"), 20);
+        policy.beforeRequest(history);
+
+        TaskControlService.Execution migrated = tasks.load("s").execution();
+        assertEquals("EXECUTING", migrated.phase());
+        assertEquals("", migrated.nextAction());
+        assertEquals("", migrated.progress());
+        assertEquals(5, migrated.assessmentVersionValue());
     }
 
     @Test void directReviewRejectsFabricatedCompletionEvidence() {
