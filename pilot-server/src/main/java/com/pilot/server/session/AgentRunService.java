@@ -81,9 +81,6 @@ public class AgentRunService implements RunStarter {
     private static final int MAX_AUTO_CONTINUE = 3;
     /** 提示词正文在 {@code prompts/} 资源里，这里只做变量注入与拼接。 */
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
-    /** 项目约定文件，按优先级取第一个存在的。 */
-    private static final List<String> CONVENTION_FILES = List.of("PILOT.md", "AGENTS.md", "CLAUDE.md");
-    private static final int MAX_CONVENTION_CHARS = 8_000;
     /** 仓库快照：顶层条目与未提交改动都限行，避免 system 被大仓库撑爆。 */
     private static final int MAX_TREE_ENTRIES = 30;
     private static final int MAX_GIT_CHANGES = 12;
@@ -856,10 +853,7 @@ public class AgentRunService implements RunStarter {
         return "未识别到根目录构建文件，改动后按项目实际情况验证" + nodeHint;
     }
 
-    /**
-     * 把工作区里的项目约定注入 system：项目规范应该跟着仓库走，而不是写死在代码里。
-     * 目前只读根目录的 {@code PILOT.md} / {@code AGENTS.md} / {@code CLAUDE.md}，取第一个存在的。
-     */
+    /** 把工作区和祖先目录的项目约定注入 system，并保留每份文件的来源。 */
     private String projectRules(String workspace) {
         Path root;
         try {
@@ -867,27 +861,7 @@ public class AgentRunService implements RunStarter {
         } catch (RuntimeException e) {
             return "";
         }
-        for (String name : CONVENTION_FILES) {
-            Path file = root.resolve(name);
-            if (!Files.isRegularFile(file)) {
-                continue;
-            }
-            try {
-                String rules = Files.readString(file, StandardCharsets.UTF_8).strip();
-                if (rules.isEmpty()) {
-                    continue;
-                }
-                if (rules.length() > MAX_CONVENTION_CHARS) {
-                    rules = rules.substring(0, MAX_CONVENTION_CHARS) + "\n…（约定文件过长，已截断）";
-                }
-                return PROMPTS.render("system/project-rules",
-                        Map.of("source", name, "rules", rules)).strip();
-            } catch (IOException e) {
-                log.warn("读取项目约定文件失败：{}", file, e);
-                return "";
-            }
-        }
-        return "";
+        return ProjectRuleLoader.load(root, PROMPTS);
     }
 
     private String planBrief(String sessionId) {

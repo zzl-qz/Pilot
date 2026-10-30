@@ -31,6 +31,8 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -65,6 +67,66 @@ class AgentLoopTest {
         assertEquals("call_1", toolMessage.toolCallId());
         assertEquals("a.txt\nsrc/", toolMessage.content());
         assertTrue(secondRequest.get(secondRequest.size() - 2).hasToolCalls());
+    }
+
+    @Test
+    void independentReadsRunConcurrentlyButResultsKeepCallOrder() {
+        CountDownLatch bothStarted = new CountDownLatch(2);
+        Tool reader = new Tool() {
+            @Override public String name() { return "read_file"; }
+            @Override public String description() { return "测试并行读取"; }
+            @Override public Map<String, Object> parameters() { return Map.of("type", "object"); }
+            @Override public boolean readOnly() { return true; }
+            @Override public boolean parallelSafe() { return true; }
+            @Override public String execute(Map<String, Object> args) {
+                bothStarted.countDown();
+                try {
+                    return bothStarted.await(2, TimeUnit.SECONDS) ? String.valueOf(args.get("path"))
+                            : "ERROR: 读取没有并发执行";
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return "ERROR: 读取被中断";
+                }
+            }
+        };
+        ScriptedModelClient client = new ScriptedModelClient(
+                new ModelResponse("", List.of(
+                        new ToolCall("first", "read_file", Map.of("path", "a.txt")),
+                        new ToolCall("second", "read_file", Map.of("path", "b.txt")))),
+                new ModelResponse("已读取", List.of()));
+        AgentLoop loop = new AgentLoop(client, registry(reader), readOnlyGate(), config(8, 3));
+
+        AgentLoop.Result result = loop.run("读取两个文件", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals(List.of("a.txt", "b.txt"), client.requests.get(1).stream()
+                .filter(message -> "tool".equals(message.role())).map(Message::content).toList());
+    }
+
+    @Test
+    void customPermissionGateKeepsReadBatchSequential() {
+        AtomicInteger checks = new AtomicInteger();
+        PermissionGate customGate = (call, tool) -> {
+            checks.incrementAndGet();
+            return PermissionResult.allow();
+        };
+        Tool reader = new Tool() {
+            @Override public String name() { return "read_file"; }
+            @Override public String description() { return "测试读取"; }
+            @Override public Map<String, Object> parameters() { return Map.of("type", "object"); }
+            @Override public boolean readOnly() { return true; }
+            @Override public boolean parallelSafe() { return true; }
+            @Override public String execute(Map<String, Object> args) { return String.valueOf(args.get("path")); }
+        };
+        ScriptedModelClient client = new ScriptedModelClient(
+                new ModelResponse("", List.of(
+                        new ToolCall("first", "read_file", Map.of("path", "a.txt")),
+                        new ToolCall("second", "read_file", Map.of("path", "b.txt")))),
+                new ModelResponse("完成", List.of()));
+        AgentLoop loop = new AgentLoop(client, registry(reader), customGate, config(8, 3));
+
+        assertNull(loop.run("读取两个文件", List.of(), events::add).failureCode());
+        assertEquals(2, checks.get(), "自定义权限门不应被额外预检或并行调用");
     }
 
     @Test

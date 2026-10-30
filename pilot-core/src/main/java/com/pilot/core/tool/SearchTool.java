@@ -64,6 +64,11 @@ public final class SearchTool implements Tool {
     }
 
     @Override
+    public boolean parallelSafe() {
+        return true;
+    }
+
+    @Override
     public String execute(Map<String, Object> args) {
         String patternText = ToolSupport.stringArg(args, "pattern");
         if (patternText == null) {

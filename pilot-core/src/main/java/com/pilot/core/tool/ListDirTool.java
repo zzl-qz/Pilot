@@ -46,6 +46,11 @@ public final class ListDirTool implements Tool {
     }
 
     @Override
+    public boolean parallelSafe() {
+        return true;
+    }
+
+    @Override
     public String execute(Map<String, Object> args) {
         String rawPath = ToolSupport.stringArg(args, "path");
         String target = rawPath == null ? "." : rawPath;

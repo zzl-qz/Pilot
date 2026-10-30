@@ -28,6 +28,11 @@ public interface Tool {
     /** 是否只读。Sprint 2 的 READ_ONLY 策略据此放行。 */
     boolean readOnly();
 
+    /** 同一模型回复中的多个此类调用能否并行执行；只读并不自动意味着并行安全。 */
+    default boolean parallelSafe() {
+        return false;
+    }
+
     /**
      * 执行工具。
      *

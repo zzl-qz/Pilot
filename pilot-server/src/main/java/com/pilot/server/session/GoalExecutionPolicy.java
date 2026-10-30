@@ -75,7 +75,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private final Map<String, String> toolStartVersions = new LinkedHashMap<>();
     private java.util.function.Consumer<TaskControlService.Execution> updates = ignored -> { };
     private List<Attachment> attachments = List.of();
-    private int directValidationNudges;
+    private String lastValidationNudgeFingerprint = "";
     private int consecutiveResearchFailures;
     private boolean researchRouteUnavailable;
     private boolean finalizing;
@@ -518,10 +518,12 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 || codeEvidence(state);
         if (codeChanged && !passingCurrentCheck(state)) {
             String reason = verificationFailure(state);
-            if (directValidationNudges++ > 0) {
+            String fingerprint = validationProgress(state);
+            if (fingerprint.equals(lastValidationNudgeFingerprint)) {
                 updatePhase(state, "UNVERIFIED", reason.isBlank() ? "代码改动尚无当前版本的成功验证" : reason);
                 throw new Stop("UNVERIFIED", reason.isBlank() ? "代码改动尚无当前版本的成功验证。" : reason);
             }
+            lastValidationNudgeFingerprint = fingerprint;
             return "代码已修改，但还没有当前版本的针对性验证。" + (reason.isBlank() ? "" : reason + "。")
                     + "请检查命令的工作目录和失败日志，修复后运行最贴近改动的测试或构建；"
                     + "若因权限或环境无法执行，说明具体原因后收尾。";
@@ -597,6 +599,14 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 .map(e -> e.tool() + "|" + e.target() + "|" + hash(e.result()) + "|" + e.endVersion())
                 .distinct().sorted().collect(Collectors.joining("\n"));
         return hash(sourceVersion() + "\n" + observed);
+    }
+
+    /** 失败的验证也是新诊断；仅当源码与最近各类验证结果都没变时才停止重复催办。 */
+    private String validationProgress(TaskControlService.Execution state) {
+        String checks = latestCurrentChecks(state).values().stream()
+                .map(e -> e.check() + "|" + e.status() + "|" + hash(e.result()))
+                .collect(Collectors.joining("\n"));
+        return hash(sourceVersion() + "\n" + checks);
     }
 
     private boolean validDirectEvidence(Map<String, Object> answer, TaskControlService.Execution state,

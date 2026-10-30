@@ -8,8 +8,10 @@ import com.pilot.core.tool.ToolCall;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 上下文压缩，分四层，先做不花钱的，再动模型：
@@ -71,6 +73,11 @@ public final class ContextCompactor {
 
     private static final int TOOL_SNIPPET_CHARS = 800;
     private static final int SUMMARY_INPUT_CHARS = 60_000;
+    private static final int FILE_LIST_MAX_CHARS = 5_000;
+    private static final String READ_FILES_START = "<read_files>";
+    private static final String READ_FILES_END = "</read_files>";
+    private static final String MODIFIED_FILES_START = "<modified_files>";
+    private static final String MODIFIED_FILES_END = "</modified_files>";
 
     /** 摘要提示词正文在 {@code prompts/compact/summary.md}。 */
     static final String SUMMARY_PROMPT = PromptLibrary.standard().get("compact/summary");
@@ -165,6 +172,7 @@ public final class ContextCompactor {
         if (summary.length() > MAX_SUMMARY_CHARS) {
             summary = summary.substring(0, MAX_SUMMARY_CHARS) + "\n…（摘要过长已截断）";
         }
+        summary += fileHistory(messages, 1, end);
 
         int covered = end - 1;
         String head = header(covered);
@@ -412,10 +420,81 @@ public final class ContextCompactor {
             content = content.substring(0, TOOL_SNIPPET_CHARS) + "…";
         }
         if (message.hasToolCalls()) {
-            List<String> names = message.toolCalls().stream().map(ToolCall::name).toList();
-            return "[" + message.role() + "] (调用工具: " + String.join(", ", names) + ") " + content;
+            List<String> calls = message.toolCalls().stream().map(call -> {
+                String target = describe(call).replace('\n', ' ').replace('\r', ' ');
+                return target.length() > 240 ? target.substring(0, 240) + "…" : target;
+            }).toList();
+            return "[" + message.role() + "] (调用工具: " + String.join(", ", calls) + ") " + content;
         }
         return "[" + message.role() + "] " + content;
+    }
+
+    /** 文件清单由工具调用确定性提取，上一轮摘要里的清单也要继承，不能依赖模型记住路径。 */
+    private static String fileHistory(List<Message> messages, int from, int to) {
+        LinkedHashSet<String> read = new LinkedHashSet<>();
+        LinkedHashSet<String> modified = new LinkedHashSet<>();
+        Map<String, String> results = new HashMap<>();
+        for (int index = from; index < to; index++) {
+            Message message = messages.get(index);
+            if ("tool".equals(message.role())) results.put(message.toolCallId(), message.content());
+        }
+        for (int index = from; index < to; index++) {
+            Message message = messages.get(index);
+            if ("user".equals(message.role()) && message.content().startsWith("[上下文交接摘要")) {
+                inheritedFiles(message.content(), read, modified);
+            }
+            for (ToolCall call : message.toolCalls()) {
+                Object value = call.args() == null ? null : call.args().get("path");
+                if (!(value instanceof String path) || !validTrackedPath(path)) continue;
+                String result = results.get(call.callId());
+                if (result == null || result.isBlank() || result.startsWith("ERROR")
+                        || result.startsWith("SKIPPED:")) continue;
+                switch (call.name()) {
+                    case "read_file" -> read.add(path);
+                    case "edit_file", "create_file" -> modified.add(path);
+                    default -> { }
+                }
+            }
+        }
+        read.removeAll(modified);
+        if (read.isEmpty() && modified.isEmpty()) return "";
+        StringBuilder output = new StringBuilder("\n\n");
+        appendPaths(output, READ_FILES_START, READ_FILES_END, read);
+        appendPaths(output, MODIFIED_FILES_START, MODIFIED_FILES_END, modified);
+        return output.toString().stripTrailing();
+    }
+
+    private static void inheritedFiles(String summary, Set<String> read, Set<String> modified) {
+        Set<String> active = null;
+        for (String line : summary.lines().toList()) {
+            String value = line.strip();
+            if (READ_FILES_START.equals(value)) active = read;
+            else if (MODIFIED_FILES_START.equals(value)) active = modified;
+            else if (READ_FILES_END.equals(value) || MODIFIED_FILES_END.equals(value)) active = null;
+            else if (active != null && validTrackedPath(value)) active.add(value);
+        }
+    }
+
+    private static boolean validTrackedPath(String path) {
+        return path != null && !path.isBlank() && path.length() <= 300
+                && path.indexOf('\n') < 0 && path.indexOf('\r') < 0
+                && path.indexOf('<') < 0 && path.indexOf('>') < 0;
+    }
+
+    private static void appendPaths(StringBuilder output, String start, String end, Set<String> paths) {
+        if (paths.isEmpty()) return;
+        output.append(start).append('\n');
+        int omitted = 0;
+        for (String path : paths) {
+            if (output.length() + path.length() + end.length() + 2 > FILE_LIST_MAX_CHARS) {
+                omitted++;
+                continue;
+            }
+            output.append(path).append('\n');
+        }
+        output.append(end);
+        if (omitted > 0) output.append("\n[还有 ").append(omitted).append(" 条文件路径因长度限制省略]");
+        output.append('\n');
     }
 
     /** 按稳定落盘路径去重；同一图在多轮引用时只向模型重发一次。 */

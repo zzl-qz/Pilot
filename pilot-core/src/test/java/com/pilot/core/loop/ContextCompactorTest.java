@@ -39,6 +39,63 @@ class ContextCompactorTest {
     }
 
     @Test
+    void compactionKeepsFileHistoryAcrossMultipleSummaries() {
+        List<Message> messages = history(10, 3_000);
+        ModelClient summarizer = (request, tools) -> {
+            assertTrue(request.get(1).content().contains("read_file f0"),
+                    "摘要输入要包含实际工具目标，不能只有工具名");
+            return new ModelResponse("已完成先前工作", List.of());
+        };
+        ContextCompactor first = new ContextCompactor(summarizer, 2);
+
+        assertTrue(first.compact(messages, 12_000).compacted());
+        assertTrue(messages.get(1).content().contains("<read_files>\nf0\n"));
+
+        for (int i = 100; i < 110; i++) {
+            messages.add(Message.assistant("step " + i,
+                    List.of(new ToolCall("c" + i, "read_file", Map.of("path", "f" + i)))));
+            messages.add(Message.tool("c" + i, "x".repeat(3_000)));
+        }
+        ContextCompactor second = new ContextCompactor(summarizing("继续完成"), 2);
+
+        assertTrue(second.compact(messages, 12_000).compacted());
+        assertTrue(messages.get(1).content().contains("f0"), "上一份摘要里的文件路径必须继承");
+        assertTrue(messages.get(1).content().contains("f100"));
+    }
+
+    @Test
+    void compactionTracksModifiedFilesSeparatelyFromReads() {
+        List<Message> messages = history(10, 3_000);
+        messages.add(1, Message.assistant("edit", List.of(new ToolCall("edit", "edit_file",
+                Map.of("path", "src/A.java", "old_string", "old", "new_string", "new")))));
+        messages.add(2, Message.tool("edit", "已修改 src/A.java"));
+        messages.add(3, Message.assistant("read", List.of(new ToolCall("read", "read_file",
+                Map.of("path", "src/A.java")))));
+        messages.add(4, Message.tool("read", "content"));
+
+        assertTrue(new ContextCompactor(summarizing("摘要"), 2).compact(messages, 12_000).compacted());
+        String summary = messages.get(1).content();
+        assertTrue(summary.contains("<modified_files>\nsrc/A.java\n</modified_files>"), summary);
+        assertFalse(summary.contains("<read_files>\nsrc/A.java"), summary);
+    }
+
+    @Test
+    void failedOrSkippedToolCallsDoNotBecomeFileHistory() {
+        List<Message> messages = history(10, 3_000);
+        messages.add(1, Message.assistant("edit", List.of(new ToolCall("failed-edit", "edit_file",
+                Map.of("path", "src/Untouched.java")))));
+        messages.add(2, Message.tool("failed-edit", "ERROR: 原文没有匹配"));
+        messages.add(3, Message.assistant("read", List.of(new ToolCall("skipped-read", "read_file",
+                Map.of("path", "src/Unread.java")))));
+        messages.add(4, Message.tool("skipped-read", "SKIPPED: 用户已纠正任务"));
+
+        assertTrue(new ContextCompactor(summarizing("摘要"), 2).compact(messages, 12_000).compacted());
+        String summary = messages.get(1).content();
+        assertFalse(summary.contains("src/Untouched.java"), summary);
+        assertFalse(summary.contains("src/Unread.java"), summary);
+    }
+
+    @Test
     void keepsHistoryWhenSummaryIsNotShorter() {
         // 可折叠的部分很小，摘要却很长：省不下预算，只会丢信息，应当放弃这次压缩
         List<Message> messages = history(4, 50);

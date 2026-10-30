@@ -62,6 +62,11 @@ public final class ReadFileTool implements Tool {
     }
 
     @Override
+    public boolean parallelSafe() {
+        return true;
+    }
+
+    @Override
     public String execute(Map<String, Object> args) {
         String rawPath = ToolSupport.stringArg(args, "path");
         if (rawPath == null) {

@@ -246,10 +246,31 @@ class GoalExecutionPolicyTest {
         assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
         observe(policy, "run_command", "", "command completed", "npm run check → exit 0");
 
+        assertNotNull(policy.review(history, Set.of("A.java"), List.of()),
+                "新增静态检查结果后仍应给模型修复失败测试的机会");
         ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class,
                 () -> policy.review(history, Set.of("A.java"), List.of()));
         assertEquals("UNVERIFIED", stop.code());
         assertTrue(stop.getMessage().contains("npm test"), stop.getMessage());
+    }
+
+    @Test void directValidationNudgeResetsAfterSourceChange() throws Exception {
+        Path file = root.resolve("A.java");
+        Files.writeString(file, "v1");
+        GoalExecutionPolicy policy = policy((messages, tools) -> fail("reviewer not expected"), 20);
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "A.java", "updated", null);
+        observe(policy, "run_command", "", "ERROR: tests failed", "npm test → exit 1");
+
+        assertNotNull(policy.review(history, Set.of("A.java"), List.of()));
+        Files.writeString(file, "v2");
+        observe(policy, "edit_file", "A.java", "fixed failing branch", null);
+        assertNotNull(policy.review(history, Set.of("A.java"), List.of()),
+                "修过代码后不能因为之前催办过一次就提前停止");
+        observe(policy, "run_command", "", "tests passed", "npm test → exit 0");
+
+        assertNull(policy.review(history, Set.of("A.java"), List.of()));
+        assertEquals("VERIFIED", tasks.load("s").execution().phase());
     }
 
     @Test void delayedBackgroundResultCannotValidateNewerSource() throws Exception {

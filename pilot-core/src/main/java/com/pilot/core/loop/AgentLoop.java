@@ -14,6 +14,7 @@ import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
 import com.pilot.core.permission.PermissionGate;
+import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.ToolCall;
@@ -29,6 +30,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -149,6 +154,7 @@ public final class AgentLoop {
     private static final int DEFAULT_CONTEXT_LIMIT = 120_000;
     /** 动态后台状态即使暂时不变也可能稍后完成；给它比普通重复调用更宽的有界观察窗口。 */
     private static final int MIN_DYNAMIC_POLL_ABORT = 8;
+    private static final int MAX_PARALLEL_READS = 8;
     /** 计划未完成时默认自动催模型继续的次数上限。 */
     private static final int DEFAULT_MAX_PLAN_CONTINUES = 3;
     /** 等待重试时拆成小段，取消能在这段时间内停下来。 */
@@ -156,6 +162,7 @@ public final class AgentLoop {
 
     private final ModelClient client;
     private final ToolRegistry tools;
+    private final PermissionGate permissionGate;
     /** 上下文预算的四层收缩策略与退避状态。 */
     private final ContextBudget budget;
     private final ToolExecutor toolExecutor;
@@ -248,9 +255,9 @@ public final class AgentLoop {
         this.liveText = liveText;
         this.client = Objects.requireNonNull(client, "client must not be null");
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
+        this.permissionGate = Objects.requireNonNull(permissionGate, "permissionGate must not be null");
         this.budget = new ContextBudget(new ContextCompactor(client)::compact);
-        this.toolExecutor = new ToolExecutor(tools,
-                Objects.requireNonNull(permissionGate, "permissionGate must not be null"),
+        this.toolExecutor = new ToolExecutor(tools, this.permissionGate,
                 Objects.requireNonNull(approvals, "approvals must not be null"), traceRecorder);
         this.config = Objects.requireNonNull(config, "config must not be null");
         this.cancellation = Objects.requireNonNull(cancellation, "cancellation must not be null");
@@ -470,50 +477,104 @@ public final class AgentLoop {
 
                 ArrayList<ToolExecutor.Outcome> stepOutcomes = new ArrayList<ToolExecutor.Outcome>();
                 boolean batchInterrupted = false;
-                for (int index = 0; index < calls.size(); index++) {
-                    if (cancellation.cancelled()) {
-                        skipCalls(messages, calls, index, "运行已暂停或取消，本次调用未执行。");
-                        return cancel(messages, events);
-                    }
-                    String nextCorrection = pendingInput.get();
-                    if (hasInput(nextCorrection)) {
-                        skipCalls(messages, calls, index, "用户已纠正当前任务，本次调用未执行，请重新规划。");
-                        applySteering(messages, events, nextCorrection);
-                        lastSignature = null;
-                        repeated = 0;
-                        batchInterrupted = true;
-                        break;
-                    }
-                    ToolCall call = calls.get(index);
-                    ToolStartGuard startGuard = new ToolStartGuard();
-                    ToolExecutor.Outcome outcome;
-                    if (executionPolicy != null && !executionPolicy.permits(call)) {
-                        outcome = new ToolExecutor.Outcome(call.name(),
-                                "SKIPPED: " + executionPolicy.denialReason(call), null, null);
-                    } else {
-                        if (executionPolicy != null) executionPolicy.beforeTool(call);
-                        outcome = toolExecutor.execute(call, events, startGuard);
-                    }
-                    stepOutcomes.add(outcome);
-                    if (!outcome.result().startsWith("SKIPPED:")) {
-                        completionGate.recordTarget(call);
-                        completionGate.countToolCall();
-                    }
-                    changedFiles.addAll(outcome.changedPaths());
-                    for (String check : outcome.checks()) {
-                        if (!checks.contains(check)) checks.add(check);
-                    }
-                    messages.add(Message.tool(call.callId(), outcome.result()));
-                    if (executionPolicy != null) executionPolicy.observed(call, outcome);
-                    if (hasInput(startGuard.correction)) {
-                        // 审批期间的纠正也要先补齐整批 tool 结果，再追加 user 消息。
-                        skipCalls(messages, calls, index + 1, "用户已纠正当前任务，本次调用未执行，请重新规划。");
-                        applySteering(messages, events, startGuard.correction);
+                if (parallelReadBatch(calls)) {
+                    String beforeBatch = pendingInput.get();
+                    if (hasInput(beforeBatch)) {
+                        skipCalls(messages, calls, 0, "用户已纠正当前任务，本次调用未执行，请重新规划。");
+                        applySteering(messages, events, beforeBatch);
                         lastSignature = null;
                         lastOutcomes = List.of();
                         repeated = 0;
                         batchInterrupted = true;
-                        break;
+                    } else {
+                        AtomicReference<String> correctionDuringBatch = new AtomicReference<>();
+                        Consumer<SessionEvent> serializedEvents = event -> {
+                            synchronized (events) { events.accept(event); }
+                        };
+                        Supplier<String> parallelStartGuard = () -> {
+                            if (cancellation.cancelled()) return "运行已暂停或取消，本次调用未执行。";
+                            synchronized (pendingInput) {
+                                if (hasInput(correctionDuringBatch.get())) {
+                                    return "用户已纠正当前任务，本次调用未执行，请重新规划。";
+                                }
+                                String queuedCorrection = pendingInput.get();
+                                if (hasInput(queuedCorrection)) {
+                                    correctionDuringBatch.set(queuedCorrection);
+                                    return "用户已纠正当前任务，本次调用未执行，请重新规划。";
+                                }
+                            }
+                            return cancellation.cancelled() ? "运行已暂停或取消，本次调用未执行。" : null;
+                        };
+                        List<Boolean> permitted = new ArrayList<>(calls.size());
+                        for (ToolCall call : calls) {
+                            boolean allow = executionPolicy == null || executionPolicy.permits(call);
+                            permitted.add(allow);
+                            if (allow && executionPolicy != null) executionPolicy.beforeTool(call);
+                        }
+                        try (ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor()) {
+                            List<CompletableFuture<ToolExecutor.Outcome>> futures = new ArrayList<>(calls.size());
+                            for (int index = 0; index < calls.size(); index++) {
+                                ToolCall call = calls.get(index);
+                                if (!permitted.get(index)) {
+                                    futures.add(CompletableFuture.completedFuture(new ToolExecutor.Outcome(call.name(),
+                                            "SKIPPED: " + executionPolicy.denialReason(call), null, null)));
+                                } else {
+                                    futures.add(CompletableFuture.supplyAsync(() -> toolExecutor.execute(
+                                            call, serializedEvents, parallelStartGuard), workers));
+                                }
+                            }
+                            for (int index = 0; index < calls.size(); index++) {
+                                ToolExecutor.Outcome outcome = futures.get(index).join();
+                                stepOutcomes.add(outcome);
+                                recordToolOutcome(calls.get(index), outcome, changedFiles, checks, messages);
+                            }
+                        }
+                        if (hasInput(correctionDuringBatch.get())) {
+                            applySteering(messages, events, correctionDuringBatch.get());
+                            lastSignature = null;
+                            lastOutcomes = List.of();
+                            repeated = 0;
+                            batchInterrupted = true;
+                        }
+                    }
+                } else {
+                    for (int index = 0; index < calls.size(); index++) {
+                        if (cancellation.cancelled()) {
+                            skipCalls(messages, calls, index, "运行已暂停或取消，本次调用未执行。");
+                            return cancel(messages, events);
+                        }
+                        String nextCorrection = pendingInput.get();
+                        if (hasInput(nextCorrection)) {
+                            skipCalls(messages, calls, index, "用户已纠正当前任务，本次调用未执行，请重新规划。");
+                            applySteering(messages, events, nextCorrection);
+                            lastSignature = null;
+                            lastOutcomes = List.of();
+                            repeated = 0;
+                            batchInterrupted = true;
+                            break;
+                        }
+                        ToolCall call = calls.get(index);
+                        ToolStartGuard startGuard = new ToolStartGuard();
+                        ToolExecutor.Outcome outcome;
+                        if (executionPolicy != null && !executionPolicy.permits(call)) {
+                            outcome = new ToolExecutor.Outcome(call.name(),
+                                    "SKIPPED: " + executionPolicy.denialReason(call), null, null);
+                        } else {
+                            if (executionPolicy != null) executionPolicy.beforeTool(call);
+                            outcome = toolExecutor.execute(call, events, startGuard);
+                        }
+                        stepOutcomes.add(outcome);
+                        recordToolOutcome(call, outcome, changedFiles, checks, messages);
+                        if (hasInput(startGuard.correction)) {
+                            // 审批期间的纠正也要先补齐整批 tool 结果，再追加 user 消息。
+                            skipCalls(messages, calls, index + 1, "用户已纠正当前任务，本次调用未执行，请重新规划。");
+                            applySteering(messages, events, startGuard.correction);
+                            lastSignature = null;
+                            lastOutcomes = List.of();
+                            repeated = 0;
+                            batchInterrupted = true;
+                            break;
+                        }
                     }
                 }
                 if (!batchInterrupted) {
@@ -598,6 +659,29 @@ public final class AgentLoop {
 
     private static boolean hasInput(String input) {
         return input != null && !input.isBlank();
+    }
+
+    private boolean parallelReadBatch(List<ToolCall> calls) {
+        // 自定义权限门可能有状态或审批副作用；只有内置纯策略门可安全预检并并行。
+        return permissionGate instanceof PolicyPermissionGate
+                && calls.size() > 1 && calls.size() <= MAX_PARALLEL_READS
+                && calls.stream().allMatch(call -> tools.find(call.name())
+                        .map(tool -> tool.parallelSafe() && permissionGate.check(call, tool).isAllowed())
+                        .orElse(false));
+    }
+
+    private void recordToolOutcome(ToolCall call, ToolExecutor.Outcome outcome,
+                                   Set<String> changedFiles, List<String> checks, List<Message> messages) {
+        if (!outcome.result().startsWith("SKIPPED:")) {
+            completionGate.recordTarget(call);
+            completionGate.countToolCall();
+        }
+        changedFiles.addAll(outcome.changedPaths());
+        for (String check : outcome.checks()) {
+            if (!checks.contains(check)) checks.add(check);
+        }
+        messages.add(Message.tool(call.callId(), outcome.result()));
+        if (executionPolicy != null) executionPolicy.observed(call, outcome);
     }
 
     /** 审批通过不等于仍可执行；开始产生副作用前再消费一次控制信号。 */
