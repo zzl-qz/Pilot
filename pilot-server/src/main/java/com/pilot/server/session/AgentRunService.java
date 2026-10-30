@@ -13,6 +13,7 @@ import com.pilot.core.event.SessionEvent;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.Attachment;
 import com.pilot.core.loop.ContextCompactor;
+import com.pilot.core.loop.ExecutionPolicy;
 import com.pilot.core.loop.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelUsage;
@@ -461,7 +462,7 @@ public class AgentRunService implements RunStarter {
         boolean continued = false;
         try {
             status = execute(sessionId, runId, input, attachments, imagePositions, handle, continuation);
-            continued = maybeAutoContinue(sessionId, status);
+            continued = maybeAutoContinue(sessionId, status, handle);
         } catch (RuntimeException e) {
             log.error("Run {} 收尾失败", runId, e);
             taskControls.status(sessionId, "FAILED");
@@ -573,9 +574,11 @@ public class AgentRunService implements RunStarter {
      *
      * <p>两道刹车：最多连续 {@value #MAX_AUTO_CONTINUE} 次；计划状态连续两轮没有变化即视为卡住，停下等人工介入。
      */
-    private boolean maybeAutoContinue(String sessionId, String status) {
+    private boolean maybeAutoContinue(String sessionId, String status, RunHandle handle) {
         if (properties.goalModeEnabledValue() && taskControls.load(sessionId) != null
-                && taskControls.load(sessionId).execution() != null) return false;
+                && taskControls.load(sessionId).execution() != null) {
+            return continueAfterStepLimit(sessionId, status, handle);
+        }
         if (!"MAX_STEPS".equals(status)) {
             autoContinueAttempts.remove(sessionId);
             autoContinueSignature.remove(sessionId);
@@ -606,6 +609,35 @@ public class AgentRunService implements RunStarter {
         autoContinueSignature.put(sessionId, signature);
         String runId = "run_" + java.util.UUID.randomUUID();
         publish(sessionId, runId, new RunContinued(attempt, MAX_AUTO_CONTINUE, "步数触顶，按未完成计划继续"));
+        launch(sessionId, runId, null, List.of(), true);
+        return true;
+    }
+
+    /** 单次循环触顶时也走同一预算仲裁，获批后才启动下一段。 */
+    private boolean continueAfterStepLimit(String sessionId, String status, RunHandle handle) {
+        if (!"MAX_STEPS".equals(status) || handle.cancelled.get()) return false;
+        TaskControlService.TaskContract task = taskControls.load(sessionId);
+        if (task == null || task.execution() == null) return false;
+        int before = task.execution().budgetSegments();
+        GoalExecutionPolicy policy = new GoalExecutionPolicy(modelClient, objectMapper, taskControls, sessionId,
+                sessionWorkspace(sessionId), handle.cancelled::get, properties.maxSteps(),
+                properties.directMaxRequests(), properties.directMaxInputTokens(),
+                properties.directMaxOutputTokens(), properties.directMaxActiveMillis(),
+                properties.directMaxInvestigationTools(), properties.goalMaxInputTokens(),
+                properties.goalMaxOutputTokens(), properties.goalMaxActiveMillis());
+        try {
+            policy.beforeRequest(conversations.load(sessionId));
+        } catch (ExecutionPolicy.Stop stopped) {
+            return false;
+        }
+        TaskControlService.TaskContract updated = taskControls.load(sessionId);
+        if (updated == null || updated.execution() == null
+                || updated.execution().budgetSegments() <= before) return false;
+        String runId = "run_" + java.util.UUID.randomUUID();
+        int automatic = (int) updated.execution().evidence().stream()
+                .filter(e -> "budget_arbiter".equals(e.tool()) && "ALLOW".equals(e.status())).count();
+        publish(sessionId, runId, new RunContinued(automatic,
+                GoalExecutionPolicy.MAX_AUTO_BUDGET_GRANTS, "预算仲裁通过，继续执行下一项具体动作"));
         launch(sessionId, runId, null, List.of(), true);
         return true;
     }

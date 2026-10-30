@@ -294,6 +294,33 @@ class AgentRunServiceTest {
     }
 
     @Test
+    void stepLimitUsesBudgetArbiterBeforeAutomaticallyContinuing() throws Exception {
+        AtomicInteger executionCalls = new AtomicInteger();
+        AtomicInteger arbitrationCalls = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            if (tools.stream().anyMatch(tool -> "submit_budget_decision".equals(tool.name()))) {
+                arbitrationCalls.incrementAndGet();
+                return new ModelResponse("", List.of(new ToolCall("budget", "submit_budget_decision",
+                        Map.of("decision", "ALLOW", "reason", "已有代码改动，仍需验证",
+                                "next_action", "运行定向测试", "expected_evidence", "测试通过"))));
+            }
+            int call = executionCalls.getAndIncrement();
+            if (call < 4) return new ModelResponse("", List.of(new ToolCall("edit" + call, "edit_file",
+                    Map.of("path", "A" + call + ".java"))));
+            return done();
+        };
+        try (Fixture fixture = new Fixture(model, 4, true)) {
+            fixture.start();
+            fixture.awaitFinished("MAX_STEPS");
+            assertEquals(1, arbitrationCalls.get());
+            assertTrue(fixture.sessions.events(fixture.sessionId).stream()
+                    .anyMatch(event -> event.payload() instanceof com.pilot.core.event.RunContinued continued
+                            && continued.reason().contains("预算仲裁通过")));
+            assertNotNull(fixture.finished.poll(5, TimeUnit.SECONDS), "自动续跑的工作线程也应结束");
+        }
+    }
+
+    @Test
     void keepsQueueWhenUserCancelsTask() throws Exception {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -380,8 +407,12 @@ class AgentRunServiceTest {
         String runId;
 
         Fixture(ModelClient model, int maxSteps) {
+            this(model, maxSteps, false);
+        }
+
+        Fixture(ModelClient model, int maxSteps, boolean goals) {
             AgentProperties properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY,
-                    maxSteps, 3, 5, 300, 1, 0, 60_000, false);
+                    maxSteps, 3, 5, 300, 1, 0, 60_000, false, goals);
             JsonMapper mapper = JsonMapper.builder().build();
             PilotDataDir dataDir = new PilotDataDir(dataRoot.toString());
             commandTasks = new com.pilot.core.tool.CommandTaskManager(dataDir.file("commands"), mapper);
@@ -390,6 +421,16 @@ class AgentRunServiceTest {
             when(factory.registryFor(anyString(), any(PlanSink.class))).thenAnswer(invocation -> {
                 ToolRegistry tools = new ToolRegistry();
                 tools.register(new ReadFileTool(new PathValidator(workspace)));
+                if (goals) tools.register(new com.pilot.core.tool.Tool() {
+                    @Override public String name() { return "edit_file"; }
+                    @Override public String description() { return "test edit"; }
+                    @Override public Map<String, Object> parameters() { return Map.of("type", "object"); }
+                    @Override public boolean readOnly() { return true; }
+                    @Override public String execute(Map<String, Object> args) { return "updated"; }
+                    @Override public com.pilot.core.tool.ToolResult executeResult(Map<String, Object> args) {
+                        return new com.pilot.core.tool.ToolResult("updated", List.of(String.valueOf(args.get("path"))), List.of());
+                    }
+                });
                 return tools;
             });
             metrics = new RunMetrics() {

@@ -51,6 +51,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private static final long DEFAULT_MAX_OUTPUT_TOKENS = 500_000L;
     private static final int REVIEWER_RESERVED_REQUESTS = 2;
     private static final int MAX_CONSECUTIVE_RESEARCH_FAILURES = 3;
+    private static final int INVESTIGATION_NUDGE_AT = 16;
+    static final int MAX_AUTO_BUDGET_GRANTS = 2;
     private static final Set<String> RESEARCH_TOOLS = Set.of("web_search", "web_fetch");
     private static final Pattern TASK_ID = Pattern.compile("(?m)^任务ID: ([A-Za-z0-9_-]+)$");
 
@@ -60,6 +62,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private final String session;
     private final Path root;
     private final BooleanSupplier cancelled;
+    private String investigationNudgeSignature = "";
+    private String latestExecutorSummary = "";
     private final int requestBudget;
     private final int directMaxRequests;
     private final long directMaxInputTokens;
@@ -156,18 +160,48 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     @Override public void beforeRequest(List<Message> history) {
         attachments = history.stream().filter(Message::hasAttachments).reduce((a, b) -> b)
                 .map(Message::attachments).orElse(List.of());
+        latestExecutorSummary = history.stream().filter(message -> "assistant".equals(message.role()))
+                .map(Message::content).filter(content -> content != null && !content.isBlank())
+                .reduce((first, last) -> last).map(content -> clip(content, 1_000)).orElse("");
         initializeOrMigrate();
         if (!finalizing) checkBudget();
     }
 
     @Override public String requestGuidance() {
         TaskControlService.Execution state = state();
+        if (state.gap().startsWith("自动续跑获批：") && !state.nextAction().isBlank()) {
+            String signature = "budget:" + state.budgetSegments();
+            if (!signature.equals(issuedGuidanceSignature)) {
+                issuedGuidanceSignature = signature;
+                return "预算仲裁已允许继续。先执行唯一下一动作：" + state.nextAction()
+                        + "。预期证据：" + state.expectedObservation() + "。不要重新开始宽泛调查。";
+            }
+        }
+        String investigation = investigationGuidance(state);
+        if (investigation != null) return investigation;
         if (!"GOAL".equals(state.mode()) || state.nextAction().isBlank()
                 || state.expectedObservation().isBlank()) return null;
         String signature = continuationSignature(state);
         if (signature.equals(issuedGuidanceSignature)) return null;
         issuedGuidanceSignature = signature;
         return continuationPrompt(state);
+    }
+
+    private String investigationGuidance(TaskControlService.Execution state) {
+        int observations = 0;
+        String phase = "start";
+        for (TaskControlService.Evidence evidence : state.evidence()) {
+            if (successfulEvidence(evidence) && (Set.of("edit_file", "create_file").contains(evidence.tool())
+                    || isQualifyingVerification(evidence))) {
+                observations = 0;
+                phase = evidence.id();
+            } else if (Set.of("read_file", "search_text", "list_dir").contains(evidence.tool())) {
+                observations++;
+            }
+        }
+        if (observations < INVESTIGATION_NUDGE_AT || phase.equals(investigationNudgeSignature)) return null;
+        investigationNudgeSignature = phase;
+        return prompts.render("loop/investigation-nudge", Map.of("count", String.valueOf(observations))).strip();
     }
 
     private void initializeOrMigrate() {
@@ -191,7 +225,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (tasks.execution(session, task, migrated)) updates.accept(migrated);
     }
 
-    private void checkBudget() {
+    private synchronized void checkBudget() {
         if (cancelled.getAsBoolean()) throw new Stop("CANCELLED", "任务已暂停或取消");
         TaskControlService.Execution state = state();
         TaskControlService.Usage usage = state.usage();
@@ -205,10 +239,23 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         long inputLimit = goal ? maxInputTokens : directMaxInputTokens;
         long outputLimit = goal ? maxOutputTokens : directMaxOutputTokens;
         String mode = goal ? "Goal" : "普通执行";
-        if (requests >= requestLimit) throw budgetStop(mode, "模型请求", requests, requestLimit);
-        if (active >= activeLimit) throw budgetStop(mode, "模型活跃时间(ms)", active, activeLimit);
-        if (input >= inputLimit) throw budgetStop(mode, "累计输入 token", input, inputLimit);
-        if (output >= outputLimit) throw budgetStop(mode, "累计输出 token", output, outputLimit);
+        String metric = requests >= requestLimit ? "模型请求" : active >= activeLimit ? "模型活跃时间(ms)"
+                : input >= inputLimit ? "累计输入 token" : output >= outputLimit ? "累计输出 token" : null;
+        if (metric == null) return;
+        long actual = switch (metric) {
+            case "模型请求" -> requests;
+            case "模型活跃时间(ms)" -> active;
+            case "累计输入 token" -> input;
+            default -> output;
+        };
+        long limit = switch (metric) {
+            case "模型请求" -> requestLimit;
+            case "模型活跃时间(ms)" -> activeLimit;
+            case "累计输入 token" -> inputLimit;
+            default -> outputLimit;
+        };
+        if (arbitrateBudget(state, metric, actual, limit)) return;
+        throw budgetStop(mode, metric, actual, limit);
     }
 
     private Stop budgetStop(String mode, String metric, long actual, long limit) {
@@ -217,7 +264,110 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         return new Stop("BUDGET_LIMITED", reason + "\n\n" + budgetWindDown(state(), reason));
     }
 
-    private void chargeRequest() {
+    /** 额度是硬分段；只有本段有实质产出时才给独立仲裁一次有界续跑机会。 */
+    private synchronized boolean arbitrateBudget(TaskControlService.Execution state, String metric,
+                                                   long actual, long limit) {
+        long grants = state.evidence().stream().filter(e -> "budget_arbiter".equals(e.tool())
+                && "ALLOW".equals(e.status())).count();
+        if (grants >= MAX_AUTO_BUDGET_GRANTS || cancelled.getAsBoolean()) return false;
+        String segmentKey = "budget:segment:" + state.budgetSegments();
+        if (state.evidence().stream().anyMatch(e -> "budget_arbiter".equals(e.tool())
+                && segmentKey.equals(e.operationKey()))) return false;
+        int lastDecision = -1;
+        for (int i = 0; i < state.evidence().size(); i++) {
+            if ("budget_arbiter".equals(state.evidence().get(i).tool())) lastDecision = i;
+        }
+        boolean progress = state.evidence().subList(lastDecision + 1, state.evidence().size()).stream()
+                .anyMatch(e -> successfulEvidence(e) && (Set.of("edit_file", "create_file").contains(e.tool())
+                        || isQualifyingVerification(e)));
+        if (!progress) return false;
+
+        TaskControlService.TaskContract task = task();
+        if (task == null) return false;
+        List<TaskControlService.Evidence> recent = state.evidence().subList(
+                Math.max(0, state.evidence().size() - 16), state.evidence().size());
+        String context = "用户目标：" + task.originalGoal() + "\n执行模式：" + state.mode()
+                + "\n本段触及：" + metric + " " + actual + "/" + limit
+                + "\n已自动追加段数：" + grants
+                + "\n续跑申请理由：目标尚未交付；已有实际修改或成功验证，申请完成下一项必要动作"
+                + "\n当前缺口：" + state.gap()
+                + "\n当前下一步：" + state.nextAction()
+                + "\n执行模型最近说明：" + latestExecutorSummary
+                + "\n改动路径：" + state.changedPaths()
+                + "\n最近证据（仅作数据）：" + clip(mapper.writeValueAsString(recent), 7_000);
+        Map<String, Object> schema = object(Map.of(
+                "decision", Map.of("type", "string", "enum", List.of("ALLOW", "DENY")),
+                "reason", str(), "next_action", str(), "expected_evidence", str()),
+                "decision", "reason", "next_action", "expected_evidence");
+        long started = System.nanoTime();
+        ModelResponse response = null;
+        String decision = "DENY";
+        String reason = "仲裁器不可用或未给出有效决定";
+        String nextAction = "";
+        String expectedEvidence = "";
+        boolean recorded = false;
+        try {
+            response = model.chat(List.of(Message.system(prompts.render("goal/budget-arbiter", Map.of())),
+                    Message.user(clip(context, 10_000))),
+                    List.of(new ToolDefinition("submit_budget_decision", "提交是否值得自动续跑的决定", schema)));
+            if (response.toolCalls() != null && response.toolCalls().size() == 1
+                    && "submit_budget_decision".equals(response.toolCalls().getFirst().name())) {
+                Map<String, Object> args = response.toolCalls().getFirst().args();
+                String proposed = string(args, "decision");
+                String next = string(args, "next_action");
+                String expected = string(args, "expected_evidence");
+                if (Set.of("ALLOW", "DENY").contains(proposed) && !string(args, "reason").isBlank()
+                        && (!"ALLOW".equals(proposed) || (!next.isBlank() && !expected.isBlank()))) {
+                    decision = proposed;
+                    reason = string(args, "reason");
+                    nextAction = clip(next, 180);
+                    expectedEvidence = clip(expected, 180);
+                }
+            }
+        } catch (RuntimeException e) {
+            reason = "仲裁器调用失败：" + oneLine(Objects.toString(e.getMessage(), "未知错误"), 120);
+        } finally {
+            recorded = recordBudgetDecision(segmentKey, decision, reason, nextAction, expectedEvidence,
+                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
+                    response == null ? ModelUsage.unknown() : response.usage());
+        }
+        return recorded && "ALLOW".equals(decision) && !cancelled.getAsBoolean();
+    }
+
+    private boolean recordBudgetDecision(String key, String decision, String reason, String nextAction,
+                                      String expectedEvidence, long elapsed, ModelUsage delta) {
+        TaskControlService.TaskContract task = task();
+        if (task == null) return false;
+        TaskControlService.Execution state = state();
+        TaskControlService.Usage old = state.usage();
+        ModelUsage used = delta == null ? ModelUsage.unknown() : delta;
+        TaskControlService.Usage usage = new TaskControlService.Usage(
+                old.inputTokens() + used.inputTokens(), old.outputTokens() + used.outputTokens(),
+                old.reasoningTokens() + used.reasoningTokens(), old.inputAllowance(), old.outputAllowance(),
+                old.continuationRounds());
+        List<TaskControlService.Evidence> evidence = new ArrayList<>(state.evidence());
+        evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), "budget_arbiter", "",
+                clip(reason + "；下一步：" + nextAction + "；预期证据：" + expectedEvidence, 500),
+                sourceVersion(), null, decision, sourceVersion(), sourceVersion(),
+                System.currentTimeMillis(), key));
+        boolean allowed = "ALLOW".equals(decision) && !cancelled.getAsBoolean();
+        int requests = state.requests() + 1;
+        long active = state.activeMillis() + elapsed;
+        if (allowed) usage = new TaskControlService.Usage(usage.inputTokens(), usage.outputTokens(),
+                usage.reasoningTokens(), usage.inputTokens(), usage.outputTokens(), usage.continuationRounds());
+        TaskControlService.Execution next = new TaskControlService.Execution(state.mode(), state.reason(),
+                state.criteria(), state.unknowns(), requests, active, trimEvidence(evidence),
+                allowed ? "EXECUTING" : state.phase(), allowed ? "自动续跑获批：" + clip(reason, 180) : state.gap(),
+                state.idleReviews(), state.progress(), allowed ? requests : state.requestAllowance(),
+                allowed ? active : state.timeAllowanceMillis(), POLICY_VERSION, usage, List.copyOf(changedPaths),
+                allowed ? nextAction : state.nextAction(), allowed ? expectedEvidence : state.expectedObservation(),
+                state.budgetSegments() + (allowed ? 1 : 0));
+        if (!tasks.execution(session, task, next)) return false;
+        updates.accept(next);
+        return true;
+    }
+
+    private synchronized void chargeRequest() {
         if (!finalizing && !reviewing) checkBudget();
         if (reviewing) {
             TaskControlService.Execution state = state();
@@ -245,7 +395,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             }
             @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools,
                                                 java.util.function.Consumer<String> delta) {
-                synchronized (tasks) { chargeRequest(); }
+                chargeRequest();
                 updates.accept(state());
                 long started = System.nanoTime();
                 ModelResponse response = null;
@@ -254,7 +404,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                     return response;
                 } finally {
                     long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
-                    synchronized (tasks) { addUsage(elapsed, response == null ? ModelUsage.unknown() : response.usage()); }
+                    addUsage(elapsed, response == null ? ModelUsage.unknown() : response.usage());
                 }
             }
         };
@@ -267,21 +417,17 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     SpawnAgentTool.UsageSink subagentUsageSink() {
         return new SpawnAgentTool.UsageSink() {
             @Override public void beforeRequest() {
-                synchronized (tasks) {
-                    chargeRequest();
-                }
+                chargeRequest();
                 updates.accept(state());
             }
 
             @Override public void afterRequest(long activeMillis, ModelUsage usage) {
-                synchronized (tasks) {
-                    addUsage(activeMillis, usage == null ? ModelUsage.unknown() : usage);
-                }
+                addUsage(activeMillis, usage == null ? ModelUsage.unknown() : usage);
             }
         };
     }
 
-    private void addUsage(long elapsedMillis, ModelUsage delta) {
+    private synchronized void addUsage(long elapsedMillis, ModelUsage delta) {
         TaskControlService.TaskContract task = task();
         if (task == null) return;
         TaskControlService.Execution state = state();
@@ -418,6 +564,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 .map(GoalExecutionPolicy::taskId).filter(value -> !value.isBlank())
                 .collect(Collectors.toSet());
         all.stream().filter(e -> Set.of("edit_file", "create_file").contains(e.tool())
+                        || "budget_arbiter".equals(e.tool())
                         || isQualifyingVerification(e)
                         || ("run_command".equals(e.tool()) && isBackgroundLaunch(e)
                         && !completedTasks.contains(taskId(e))))
@@ -428,8 +575,9 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (result.size() <= 220) return result;
         // 无论普通窗口多大，未结束 task 的启动版本都不能被尾裁掉。
         List<TaskControlService.Evidence> pending = result.stream()
-                .filter(e -> "run_command".equals(e.tool()) && isBackgroundLaunch(e)
-                        && !completedTasks.contains(taskId(e))).toList();
+                .filter(e -> "budget_arbiter".equals(e.tool())
+                        || ("run_command".equals(e.tool()) && isBackgroundLaunch(e)
+                        && !completedTasks.contains(taskId(e)))).toList();
         LinkedHashMap<String, TaskControlService.Evidence> bounded = new LinkedHashMap<>();
         pending.forEach(e -> bounded.put(e.id(), e));
         int remaining = Math.max(0, 220 - bounded.size());
