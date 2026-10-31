@@ -273,6 +273,10 @@ const el = {
   skillsInstallHint: document.querySelector('#skills-install-hint'),
   skillsInstallOverwrite: document.querySelector('#skills-install-overwrite'),
   skillsInstallConfirm: document.querySelector('#skills-install-confirm'),
+  usageRange: document.querySelector('#usage-range'),
+  usageSummary: document.querySelector('#usage-summary'),
+  usageDaily: document.querySelector('#usage-daily'),
+  usageSessions: document.querySelector('#usage-sessions'),
   aboutWorkspace: document.querySelector('#settings-about-workspace'),
   aboutConnection: document.querySelector('#settings-about-connection'),
   aboutModel: document.querySelector('#settings-about-model'),
@@ -442,6 +446,8 @@ const state = {
   /** /api/settings 的最近一次响应，设置面板和关于页共用 */
   settingsData: null,
   settingsSection: 'appearance',
+  usageDays: 7,
+  usageLoading: false,
   changeFiles: [],
   changeDiffByPath: new Map(),
   changeSelected: null,
@@ -619,9 +625,18 @@ function init() {
   });
   el.settingsNav.addEventListener('click', (event) => {
     const tab = event.target.closest('.settings-tab');
-    if (tab) {
-      showSettingsSection(tab.dataset.section);
+    if (!tab) {
+      return;
     }
+    showSettingsSection(tab.dataset.section);
+  });
+  el.usageRange?.addEventListener('click', (event) => {
+    const button = event.target.closest('.usage-range-btn');
+    if (!button) {
+      return;
+    }
+    state.usageDays = Number(button.dataset.days) || 7;
+    loadUsage();
   });
   el.skillsInstallOpen.addEventListener('click', openSkillsInstall);
   el.skillsInstallClose.addEventListener('click', closeSkillsInstall);
@@ -2106,6 +2121,112 @@ function showSettingsSection(section) {
   for (const pane of el.settings.querySelectorAll('.settings-pane')) {
     pane.hidden = pane.dataset.section !== section;
   }
+  if (section === 'usage') {
+    loadUsage();
+  }
+}
+
+/* ---------- 用量面板：/api/usage 聚合（主 + 子智能体，run 末值求和） ---------- */
+
+async function loadUsage() {
+  if (state.usageLoading || !el.usageSummary) {
+    return;
+  }
+  state.usageLoading = true;
+  for (const button of el.usageRange.querySelectorAll('.usage-range-btn')) {
+    const on = Number(button.dataset.days) === state.usageDays;
+    button.classList.toggle('is-on', on);
+    button.setAttribute('aria-checked', String(on));
+  }
+  el.usageSummary.replaceChildren(buildHint('加载中…'));
+  try {
+    const response = await apiFetch(`/api/usage?days=${state.usageDays}`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    renderUsage(await response.json());
+  } catch (error) {
+    el.usageSummary.replaceChildren(buildHint(`用量数据加载失败：${error.message}`));
+  } finally {
+    state.usageLoading = false;
+  }
+}
+
+function renderUsage(report) {
+  // 合计三张数卡：请求次数与输入/输出 token（估算口径与任务卡一致，这里统一不加 ≈，
+  // 历史维度区分精确/估算意义不大，任务卡保留精确标记）
+  const cards = [
+    ['模型请求', formatCount(report.totalRequests)],
+    ['输入 token', formatCount(report.totalInputTokens)],
+    ['输出 token', formatCount(report.totalOutputTokens)]
+  ];
+  const summary = document.createElement('div');
+  summary.className = 'usage-cards';
+  for (const [label, value] of cards) {
+    const card = document.createElement('div');
+    card.className = 'usage-card';
+    const number = document.createElement('strong');
+    number.textContent = value;
+    const name = document.createElement('span');
+    name.textContent = label;
+    card.append(number, name);
+    summary.append(card);
+  }
+  el.usageSummary.replaceChildren(summary);
+
+  // 每日条形：输入为主、输出叠在上面，高度按窗口内最大值归一
+  const daily = report.daily || [];
+  el.usageDaily.replaceChildren();
+  if (daily.length === 0) {
+    el.usageDaily.append(buildHint('这个窗口内还没有用量记录。'));
+  } else {
+    const max = Math.max(...daily.map((day) => day.inputTokens + day.outputTokens), 1);
+    for (const day of daily) {
+      const column = document.createElement('div');
+      column.className = 'usage-bar-day';
+      column.title = `${day.date}：请求 ${day.requests}，输入 ${formatCount(day.inputTokens)}，输出 ${formatCount(day.outputTokens)}`;
+      const total = day.inputTokens + day.outputTokens;
+      const bar = document.createElement('div');
+      bar.className = 'usage-bar';
+      bar.style.height = Math.max(4, Math.round((total / max) * 56)) + 'px';
+      bar.style.setProperty('--bar-out', `${(day.outputTokens / Math.max(total, 1)) * 100}%`);
+      column.append(bar);
+      const label = document.createElement('span');
+      label.textContent = day.date.slice(5);
+      column.append(label);
+      el.usageDaily.append(column);
+    }
+  }
+
+  // 会话 Top：按 token 总量已降序
+  el.usageSessions.replaceChildren();
+  for (const session of report.sessions || []) {
+    const item = document.createElement('li');
+    const name = document.createElement('span');
+    name.className = 'usage-session-name';
+    name.textContent = session.title;
+    name.title = `${session.title}（${session.sessionId}）`;
+    const meta = document.createElement('span');
+    meta.className = 'usage-session-meta';
+    meta.textContent = `${formatCount(session.inputTokens + session.outputTokens)} token · ${session.requests} 请求`;
+    item.append(name, meta);
+    el.usageSessions.append(item);
+  }
+}
+
+function buildHint(text) {
+  const hint = document.createElement('p');
+  hint.className = 'settings-hint';
+  hint.textContent = text;
+  return hint;
+}
+
+function formatCount(value) {
+  const number = Number(value) || 0;
+  if (number >= 1_000_000_000) return (number / 1_000_000_000).toFixed(1) + 'B';
+  if (number >= 1_000_000) return (number / 1_000_000).toFixed(1) + 'M';
+  if (number >= 10_000) return (number / 1_000).toFixed(0) + 'k';
+  return String(number);
 }
 
 function renderThemeOptions() {

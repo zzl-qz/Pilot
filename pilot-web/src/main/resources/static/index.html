@@ -537,6 +537,7 @@
         <button class="settings-tab" type="button" data-section="model">模型</button>
         <button class="settings-tab" type="button" data-section="permission">权限</button>
         <button class="settings-tab" type="button" data-section="skills">技能</button>
+        <button class="settings-tab" type="button" data-section="usage">用量</button>
         <button class="settings-tab" type="button" data-section="keys">快捷键</button>
         <button class="settings-tab" type="button" data-section="about">关于</button>
       </nav>
@@ -588,6 +589,20 @@
           <h3 class="settings-title">可用技能</h3>
           <dl id="settings-skills-list" class="settings-about"></dl>
           <p id="settings-skills-hint" class="settings-status" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="settings-pane" data-section="usage" hidden>
+          <h3 class="settings-title">用量与成本</h3>
+          <p class="settings-hint">主智能体与子智能体（spawn / dispatch）的模型请求与 token 都计入；中断任务已发生的成本也保留。端点未返回 usage 时按字符保守估算，与任务卡口径一致。</p>
+          <div id="usage-range" class="usage-range" role="radiogroup" aria-label="统计窗口">
+            <button class="usage-range-btn is-on" type="button" data-days="7">近 7 天</button>
+            <button class="usage-range-btn" type="button" data-days="30">近 30 天</button>
+          </div>
+          <div id="usage-summary" class="usage-summary" aria-live="polite"></div>
+          <h3 class="settings-title">每日用量</h3>
+          <div id="usage-daily" class="usage-daily"></div>
+          <h3 class="settings-title">会话 Top 10</h3>
+          <ol id="usage-sessions" class="usage-sessions"></ol>
         </section>
 
         <section class="settings-pane" data-section="keys" hidden>
