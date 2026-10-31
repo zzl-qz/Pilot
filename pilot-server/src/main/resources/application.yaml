@@ -43,6 +43,9 @@ pilot:
     api-key: ${PILOT_MODEL_API_KEY:}
     # 单次模型请求超时（秒）。中转站可能更早返回 504
     timeout-seconds: 90
+    # 给 system 提示词打 cache_control 显式缓存标记：只对支持该字段的端点（Anthropic 兼容网关）开启。
+    # OpenAI 官方端点按前缀自动缓存，保持 false 即可，避免第三方端点拒绝未知字段。
+    prompt-caching: ${PILOT_MODEL_PROMPT_CACHING:false}
   agent:
     goal-mode-enabled: ${PILOT_AGENT_GOAL_MODE_ENABLED:true}
     # 工具能碰到的根目录，默认是进程工作目录。建议显式指到项目根

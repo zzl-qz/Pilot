@@ -19,8 +19,10 @@ Pilot 是一个以 Java 构建的本地 Coding Agent 原型。用户通过 Web �
 - 可配置的权限模式、命令审批、运行取消和变更回滚。
 - 消息检查点：消息旁「回退 / 分支」可选择只撤代码、只撤对话或一起撤，回到该消息发送前；支持另开对话分支并保留原聊天。
 - 回退前展示文件清单并校验后续修改；发现手工修改、缺失快照、链接文件或跨工作区时阻止代码回退。Git 分支可在变更面板单独创建，未提交改动继续保留。
-- 收尾门：改了代码却没跑验证、有改动但没核对目标、只读调研调用太少就下结论时，自动推回一轮（`pilot.agent.completion-checks=false` 或 `-Dpilot.completion.checks=false` 可关闭）。
-- 项目约定：沿工作区祖先目录加载 `PILOT.md` / `AGENTS.md` / `CLAUDE.md`，每层按此顺序取首份，标明来源并限制长度后注入系统提示词。
+- 收尾门：默认关闭（与 Codex / OpenCode 一致，模型说完成就完成）；需要时用 `pilot.agent.completion-checks=true` 打开。
+- 项目约定：先加载用户级 `~/.pilot/PILOT.md`、`AGENTS.md`、`CLAUDE.md`（优先级最低），再沿工作区祖先目录逐级加载同名文件，每层按此顺序取首份，标明来源并限制长度后注入系统提示词。
+- 确定性钩子：`.pilot/settings.json` 的 `hooks` 支持 `PreToolUse` / `PostToolUse`，格式兼容 Claude Code；配置后编辑完自动跑格式化或 lint，结果直接贴在工具结果后面，`blockOnFailure` 可让前置钩子阻止执行。
+- 权限规则：同一份 `.pilot/settings.json` 的 `permissions.allow` / `deny` / `ask` 支持 `Tool` 与 `Tool(specifier)` 两种写法（命令用 `mvn test:*` 前缀，文件用 `src/**` glob），判定顺序 deny → ask → allow，未命中才回落权限档位。
 - 仓库快照：会话首次运行时注入顶层结构、git 分支与未提交改动、识别到的构建方式，模型不用从零摸索。
 - OpenAI Chat Completions 兼容模型端点；无模型配置时可使用 Mock 模式体验界面流程。
 - 本地 SQLite 会话数据、快照及 trace 存储。
@@ -55,7 +57,7 @@ Windows PowerShell / 命令提示符：
 
 脚本会切换到自身所在的仓库根目录，也可以从其他目录通过完整路径运行，例如 `bash /path/to/pilot/start.sh`。传入参数会交给应用，例如 `bash start.sh --server.port=10001`（Windows 使用 `.\start.cmd --server.port=10001`）。构建前先检查 Java 版本：优先使用 `JAVA_HOME`，未设置时使用 PATH 中的 Java；版本为 25 及以上则保留。macOS 检测到版本过低或不可用时，会尝试已安装的 JDK 25，打印本次切换说明，不修改全局 Java 设置。Windows/Linux 遇到不合适的版本会在 Maven 启动前报错，请将 `JAVA_HOME` 或 PATH 指向 JDK 25 及以上版本。
 
-默认 profile 为 `local`，权限默认为 `READ_ONLY`。默认 Web/API 地址为 `http://localhost:9999`。服务启动后可在浏览器打开该地址。无模型密钥时可使用 Mock 模式体验界面；真实模型运行可用环境变量配置：
+默认 profile 为 `local`，权限默认为 `AUTO`（完全放行；可在界面切到 `AUTO_EDIT` / `ASK` / `READ_ONLY`）。默认 Web/API 地址为 `http://localhost:9999`。服务启动后可在浏览器打开该地址。无模型密钥时可使用 Mock 模式体验界面；真实模型运行可用环境变量配置：
 
 ```sh
 PILOT_MODEL_API_KEY=你的密钥 \
@@ -65,7 +67,7 @@ PILOT_WORKSPACE=/绝对/工作区路径 \
 bash start.sh
 ```
 
-Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环境变量。不要把密钥提交到仓库；也可在被忽略的 `pilot-server/src/main/resources/application-local.yaml` 配置。请先确认工作区路径正确，并从 READ_ONLY 开始。
+Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环境变量。不要把密钥提交到仓库；也可在被忽略的 `pilot-server/src/main/resources/application-local.yaml` 配置。请先确认工作区路径正确；默认档位是 `AUTO`，若在不可丢弃的工作区里试用，建议先切到 `ASK` 或 `READ_ONLY`。
 
 ### 开发时构建与运行
 
@@ -82,10 +84,37 @@ bash mvnw -pl pilot-server spring-boot:run
 
 ## 权限说明
 
-- `READ_ONLY`：只读工具放行，写文件和命令拒绝（默认）。
-- `ASK`：只读工具放行；每次写入或命令请求用户审批，拒绝/超时不得执行。
+- `AUTO`：注册工具直接执行（默认，与 Codex / OpenCode 一致）。
 - `AUTO_EDIT`：写文件直接执行，命令仍需审批。
-- `AUTO`：注册工具直接执行。仅在可丢弃的隔离工作区使用。
+- `ASK`：只读工具放行；每次写入或命令请求用户审批，拒绝/超时不得执行。
+- `READ_ONLY`：只读工具放行，写文件和命令拒绝（相当于 plan 模式）。
+
+### `.pilot/settings.json`
+
+工作区（或用户级 `~/.pilot/`）的这份配置可以进一步收窄权限、挂上确定性钩子，格式与 Claude Code 一致：
+
+```json
+{
+  "permissions": {
+    "deny":  ["run_command(rm -rf:*)", "read_file(.env)"],
+    "ask":   ["edit_file(docs/*.md)"],
+    "allow": ["run_command(mvn test:*)", "edit_file(src/**)"]
+  },
+  "hooks": {
+    "PostToolUse": [
+      { "matcher": "edit_file|create_file|apply_patch",
+        "hooks": [ { "type": "command", "command": "mvn -q spotless:apply" } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "run_command", "command": "git status --porcelain", "blockOnFailure": false }
+    ]
+  }
+}
+```
+
+- 权限判定顺序为 deny → ask → allow，规则不命中时才回落到档位；命令规则 `mvn test:*` 表示前缀匹配，文件规则支持 `*` 与 `**`。
+- `PostToolUse` 的输出会贴在工具结果后面交给模型（例如格式化后剩下多少问题）；`PreToolUse` 配了 `blockOnFailure` 时，命令退出码非 0 会阻止工具执行。
+- 钩子命令来自配置文件而不是模型，超时默认 60 秒；配置解析失败等同于没有钩子，不会阻断运行。
 
 权限不是操作系统沙箱。工具路径限制和命令白名单不能替代容器/账户隔离；使用真实模型时，审查模型提出的命令、diff 和审批请求。不要把敏感文件放入可访问工作区。
 

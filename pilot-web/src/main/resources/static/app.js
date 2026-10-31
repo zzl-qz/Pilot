@@ -4183,12 +4183,29 @@ async function decideSandbox(group, sandboxId, action) {
     button.disabled = true;
   });
   try {
-    const response = await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/multi/sandboxes/${encodeURIComponent(sandboxId)}/${action}`, {
-      method: 'POST'
-    });
+    const response = await acceptSandbox(sandboxId, action, false);
     if (action === 'reject') {
       group.classList.add('is-rejected');
       showNotice(`已拒绝 ${sandboxId} 的改动`);
+      return;
+    }
+    // 服务端门控拦下未校验或未通过校验的改动：说明原因，并让用户显式确认后重试一次
+    if (response.status === 409 || response.status === 412) {
+      const reason = await describeError(response);
+      if (response.status === 409 || !window.confirm(`${reason}\n\n仍要接受这批未通过校验的改动吗？`)) {
+        group.classList.add('is-rejected');
+        showNotice(reason);
+        return;
+      }
+      const forced = await acceptSandbox(sandboxId, action, true);
+      const data = await forced.json().catch(() => ({}));
+      if (data.ok) {
+        group.classList.add('is-accepted');
+        showNotice(`已接受 ${sandboxId}：写入 ${(data.written || []).length} 个文件`);
+      } else {
+        group.classList.add('is-rejected');
+        showNotice(`未能写入：${(data.failed && data.failed.join('；')) || data.message || '未知错误'}`);
+      }
       return;
     }
     const data = await response.json().catch(() => ({}));
@@ -4202,6 +4219,14 @@ async function decideSandbox(group, sandboxId, action) {
   } catch (error) {
     showNotice(`操作失败：${error.message}`);
   }
+}
+
+function acceptSandbox(sandboxId, action, acknowledgeUnverified) {
+  return apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/multi/sandboxes/${encodeURIComponent(sandboxId)}/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(acknowledgeUnverified ? { acknowledgeUnverified: true } : {})
+  });
 }
 
 /** 仲裁卡：各方方案 + 证据 + 风险都在报告里，按钮只做「人来决定」。 */

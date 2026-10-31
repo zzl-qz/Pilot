@@ -31,10 +31,10 @@ Pilot 的第一阶段目标是让多智能体开发具备可执行的权限边�
 
 | 编号 | 当前情况 | 实际影响 | 现有入口 |
 | --- | --- | --- | --- |
-| G1 | 调度子 Agent 内部使用 AUTO，命令直接运行在真实工作区；文件范围没有传递为进程访问边界 | 临时目录实测：只读任务的文件工具拒绝访问某文件，命令工具仍可改写该文件 | `MultiAgentService.runOnce`、`WorkspaceToolFactory.registryForScope`、`RunCommandTool` |
+| G1 | ~~调度子 Agent 内部使用 AUTO~~ 已关闭：子 Agent 改为继承父会话档位且只能收紧，只读任务强制 READ_ONLY，只读会话派发可写任务直接失败并说明原因。命令仍运行在真实工作区，进程级访问边界属于 M2 的隔离运行器 | 剩余影响：子 Agent 的命令仍可访问宿主目录，需 M2 隔离后端 | `MultiAgentService.runOnce`、`effectiveMode`、`ExecutionBackend` |
 | G2 | 沙箱编辑从真实文件读取原文，再覆盖同路径提案；读取工具也只看真实文件 | 临时目录实测：对同一文件连续改两处，最终提案丢失第一处修改；新文件也无法在接受前正常复读 | `SandboxEditFileTool`、`SandboxCreateFileTool`、`DiffSandbox` |
 | G3 | DAG 依赖主要控制启动顺序，没有把上游产物装入下游工作区或上下文 | 后端接口已经在上游生成，下游仍可能读取旧接口或根本看不到新文件 | `MultiAgentService.dispatch`、`runOnce`、`userPrompt` |
-| G4 | 校验跳过仍可能被计入整批完成；接受接口没有校验状态硬约束 | 未运行校验的改动能进入接受流程；选择部分沙箱后也没有重新验证该候选组合 | `MultiAgentService.dispatch`、`MultiAgentController.accept` |
+| G4 | ~~接受接口没有校验状态硬约束~~ 已关闭：`accept` 服务端先重跑硬校验并记账，未解决仲裁返回 409，未通过/未校验返回 412，只有用户显式 `acknowledgeUnverified` 才放行。candidateHash 与幂等键属于 M3 | 剩余影响：选择部分沙箱后不会自动重新组装候选 | `MultiAgentController.accept`、`SandboxStore.recordVerification` |
 | G5 | `spawn_agent` 持有父工具注册表，同一表随后被注册派生工具；子运行事件直接传父出口 | 递归派生、真实文件写入和子运行污染父状态缺少可靠边界 | `SpawnAgentTool`、`AgentRunService.execute` |
 | G6 | 仲裁结果主要保存为事件，未完成可恢复的调度状态迁移 | 父 Agent 是否停止、选定方案如何恢复下游，仍依赖模型理解文字 | `MultiAgentController.resolve`、`MultiAgentService` |
 | G7 | 沙箱和任务看板以内存为主，JSON 是审计副本；缺少子任务恢复模型 | 重启后无法完整找回待接受产物和执行位置 | `SandboxStore` |
