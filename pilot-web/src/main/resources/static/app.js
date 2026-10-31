@@ -28,7 +28,7 @@ import { applyRule, classifyRunFailure, planProgressLabel } from './lib/events.j
 import { frameSrc, latencyLabel, nextMirrorMode, pauseToggleLabel, ripplePosition, shouldAutoSwitch, urlLabel } from './lib/browser-mirror.js';
 import { groupSessionsByProject, resolveFolders, samePath } from './lib/projects.js';
 import { commandStatusLabel, isCommandActive, mergeCommandLog } from './lib/command-tasks.js';
-import { estimateTextTokens, languageLabel, parseCallout, resolveFileReference } from './lib/content-format.js';
+import { estimateTextTokens, languageLabel, outputKind, parseCallout, resolveFileReference, safeImageSource } from './lib/content-format.js';
 import { resolveComposerAction } from './lib/composer-state.js';
 import { createComposerInput } from './lib/composer-input.js';
 import {
@@ -9629,6 +9629,27 @@ function markdownBlocks(lines) {
       continue;
     }
 
+    if (line.trim() === '$$') {
+      const math = [];
+      i++;
+      while (i < lines.length && lines[i].trim() !== '$$') {
+        math.push(lines[i]);
+        i++;
+      }
+      if (i < lines.length) {
+        i++;
+      }
+      nodes.push(mathBlock(math.join('\n')));
+      continue;
+    }
+
+    const source = sourceBlockAt(lines, i);
+    if (source) {
+      nodes.push(codeBlock(source.lines.join('\n'), source.language));
+      i = source.next;
+      continue;
+    }
+
     const fence = line.match(FENCE_PATTERN);
     if (fence) {
       const marker = fence[1][0];
@@ -9732,24 +9753,250 @@ function markdownBlocks(lines) {
   return nodes;
 }
 
+/** 模型有时会直接输出 XML/SVG 源码而不加 Markdown 围栏。空行不能把一份 SVG 拆开。 */
+function sourceBlockAt(lines, start) {
+  const first = lines[start].trim();
+  const svg = /^<svg\b/i.test(first);
+  const html = /^<(!doctype\s+html|html)\b/i.test(first);
+  if (!svg && !html) {
+    return null;
+  }
+  const closer = svg ? '</svg>' : '</html>';
+  let end = start;
+  let closed = false;
+  while (end < lines.length && end - start < 4000) {
+    if (lines[end].toLowerCase().includes(closer)) {
+      end++;
+      closed = true;
+      break;
+    }
+    end++;
+  }
+  if (!closed) {
+    end = lines.length;
+  }
+  const taken = lines.slice(start, end);
+  const tagLines = taken.filter((line) => /^\s*<\/?[\w:!?-]+(?:\s|\/?>)/.test(line));
+  if (tagLines.length < 3) {
+    return null;
+  }
+  return { lines: taken, next: end, language: svg ? 'svg' : 'html' };
+}
+
+function safeSvg(source) {
+  const doc = new DOMParser().parseFromString(source, 'image/svg+xml');
+  const svg = doc.documentElement;
+  if (!svg || svg.nodeName.toLowerCase() !== 'svg' || doc.querySelector('parsererror')) {
+    return null;
+  }
+  svg.querySelectorAll('script, foreignObject, iframe, object, embed, audio, video').forEach((node) => node.remove());
+  svg.querySelectorAll('*').forEach((el) => {
+    [...el.attributes].forEach((attr) => {
+      const name = attr.name.toLowerCase();
+      const value = attr.value.trim().toLowerCase();
+      if (name.startsWith('on') || value.startsWith('javascript:') || (name === 'href' && value.startsWith('javascript:'))) {
+        el.removeAttribute(attr.name);
+      }
+    });
+  });
+  return document.importNode(svg, true);
+}
+
 function codeBlock(code, language) {
+  const text = code.replace(/\n+$/, '');
+  const kind = outputKind(language, text);
   const figure = document.createElement('figure');
-  figure.className = 'md-code';
+  figure.className = 'md-code' + (kind === 'code' || kind === 'diff' ? '' : ' is-rich');
   const head = document.createElement('figcaption');
   head.className = 'md-code-head';
   const label = document.createElement('span');
   label.className = 'md-code-language';
-  label.textContent = languageLabel(language);
-  head.append(label, copyControl('复制代码', () => code.replace(/\n+$/, ''), { tip: false }));
+  label.textContent = languageLabel(kind === 'code' ? language : kind);
+  const source = sourcePre(text, language);
+  head.append(label);
+  const preview = buildPreview(kind, text, source);
+  if (preview) {
+    source.hidden = true;
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'md-code-toggle';
+    toggle.textContent = '代码';
+    toggle.addEventListener('click', () => {
+      const showCode = source.hidden;
+      source.hidden = !showCode;
+      preview.hidden = showCode;
+      toggle.textContent = showCode ? '预览' : '代码';
+    });
+    head.append(toggle, copyControl('复制代码', () => text, { tip: false }));
+    figure.append(head, preview, source);
+    return figure;
+  }
+  head.append(copyControl('复制代码', () => text, { tip: false }));
+  figure.append(head, source);
+  return figure;
+}
+
+function buildPreview(kind, text, source) {
+  if (kind === 'svg') {
+    const svg = safeSvg(text);
+    if (!svg) {
+      return null;
+    }
+    const preview = document.createElement('div');
+    preview.className = 'md-preview';
+    preview.append(svg);
+    return preview;
+  }
+  if (kind === 'html') {
+    const preview = document.createElement('div');
+    preview.className = 'md-preview';
+    const frame = document.createElement('iframe');
+    frame.className = 'md-preview-frame';
+    frame.sandbox = '';
+    frame.srcdoc = text;
+    frame.title = 'HTML 预览';
+    preview.append(frame);
+    return preview;
+  }
+  if (kind === 'mermaid') {
+    const preview = document.createElement('div');
+    preview.className = 'md-preview is-mermaid';
+    paintWhenAttached(preview, () => renderMermaid(preview, text, source));
+    return preview;
+  }
+  if (kind === 'math') {
+    const preview = document.createElement('div');
+    preview.className = 'md-preview is-math';
+    paintWhenAttached(preview, () => renderMath(preview, text, true));
+    return preview;
+  }
+  return null;
+}
+
+function mathBlock(tex) {
+  const node = document.createElement('div');
+  node.className = 'md-math';
+  paintWhenAttached(node, () => renderMath(node, tex, true));
+  return node;
+}
+
+function paintWhenAttached(node, paint) {
+  queueMicrotask(() => {
+    if (node.isConnected) {
+      paint();
+    }
+  });
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      if (existing.dataset.loaded === '1') {
+        resolve();
+      } else {
+        existing.addEventListener('load', () => resolve(), { once: true });
+        existing.addEventListener('error', () => reject(new Error(src)), { once: true });
+      }
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.onload = () => {
+      script.dataset.loaded = '1';
+      resolve();
+    };
+    script.onerror = () => reject(new Error(src));
+    document.head.append(script);
+  });
+}
+
+let mermaidLoading;
+function loadMermaid() {
+  if (window.mermaid) {
+    return Promise.resolve(window.mermaid);
+  }
+  if (!mermaidLoading) {
+    mermaidLoading = loadScript('/vendor/mermaid/mermaid.min.js').then(() => window.mermaid);
+  }
+  return mermaidLoading;
+}
+
+let katexLoading;
+function loadKatex() {
+  if (window.katex) {
+    return Promise.resolve(window.katex);
+  }
+  if (!katexLoading) {
+    if (!document.querySelector('link[data-katex]')) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = '/vendor/katex/katex.min.css';
+      link.dataset.katex = '1';
+      document.head.append(link);
+    }
+    katexLoading = loadScript('/vendor/katex/katex.min.js').then(() => window.katex);
+  }
+  return katexLoading;
+}
+
+async function renderMermaid(host, source, code) {
+  try {
+    const mermaid = await loadMermaid();
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: document.documentElement.dataset.theme === 'light' ? 'default' : 'dark'
+    });
+    const id = 'pilot-mermaid-' + Math.random().toString(36).slice(2);
+    const drawn = await mermaid.render(id, source);
+    host.replaceChildren();
+    const wrap = document.createElement('div');
+    wrap.className = 'md-mermaid';
+    wrap.innerHTML = drawn.svg;
+    host.append(wrap);
+  } catch (error) {
+    host.hidden = true;
+    code.hidden = false;
+  }
+}
+
+async function renderMath(host, tex, display) {
+  try {
+    const katex = await loadKatex();
+    host.replaceChildren();
+    katex.render(tex, host, { throwOnError: false, displayMode: display });
+  } catch (error) {
+    host.textContent = tex;
+  }
+}
+
+function sourcePre(code, language) {
   const pre = document.createElement('pre');
+  if (outputKind(language, code) === 'diff') {
+    pre.className = 'is-diff';
+    code.split('\n').forEach((line) => {
+      const row = document.createElement('span');
+      row.className = 'diff-line';
+      if (line.startsWith('@@')) {
+        row.classList.add('is-hunk');
+      } else if (line.startsWith('+') && !line.startsWith('+++')) {
+        row.classList.add('is-add');
+      } else if (line.startsWith('-') && !line.startsWith('---')) {
+        row.classList.add('is-del');
+      }
+      row.textContent = line.length ? line : ' ';
+      pre.append(row);
+    });
+    return pre;
+  }
   const el = document.createElement('code');
   if (language) {
     el.dataset.lang = language;
   }
-  el.textContent = code.replace(/\n+$/, '');
+  el.textContent = code;
   pre.append(el);
-  figure.append(head, pre);
-  return figure;
+  return pre;
 }
 
 function splitRow(line) {
@@ -9859,7 +10106,7 @@ function buildList(lines, start) {
 
 function inlineFragment(text) {
   const fragment = document.createDocumentFragment();
-  const pattern = /(`[^`\n]+`|\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*[^*\n]+\*|\[[^\]\n]+\]\([^)\s]+\))/g;
+  const pattern = /(!\[[^\]\n]*\]\([^)\s]+\)|(?<!\$)\$(?!\$)(?:\\.|[^$\n])+\$(?!\$)|`[^`\n]+`|\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*[^*\n]+\*|\[[^\]\n]+\]\([^)\s]+\))/g;
   let last = 0;
   let match;
   while ((match = pattern.exec(text)) !== null) {
@@ -9876,6 +10123,28 @@ function inlineFragment(text) {
 }
 
 function inlineToken(token) {
+  if (token.startsWith('$') && !token.startsWith('$$')) {
+    const tex = token.slice(1, -1);
+    if (/[\\^_]/.test(tex)) {
+      const node = document.createElement('span');
+      node.className = 'md-math';
+      paintWhenAttached(node, () => renderMath(node, tex, false));
+      return node;
+    }
+    return document.createTextNode(token);
+  }
+  if (token.startsWith('![')) {
+    const image = token.match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
+    const src = image ? safeImageSource(image[2]) : null;
+    if (src) {
+      const node = document.createElement('img');
+      node.className = 'md-image';
+      node.alt = image[1];
+      node.src = src;
+      return node;
+    }
+    return document.createTextNode(token);
+  }
   if (token.startsWith('`')) {
     const code = document.createElement('code');
     code.textContent = token.slice(1, -1);

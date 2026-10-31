@@ -8,6 +8,8 @@
     "check:viewports": "node src/test/viewport/check-viewports.mjs"
   },
   "devDependencies": {
+    "katex": "^0.16.22",
+    "mermaid": "^11.17.2",
     "playwright": "^1.49.0"
   }
 }

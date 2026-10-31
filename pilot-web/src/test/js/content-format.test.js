@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import {
   estimateTextTokens,
   languageLabel,
+  outputKind,
   parseCallout,
-  resolveFileReference
+  resolveFileReference,
+  safeImageSource
 } from '../../main/resources/static/lib/content-format.js';
 
 test('parseCallout 识别 GitHub 风格提示并保留正文', () => {
@@ -40,8 +42,27 @@ test('resolveFileReference 拒绝外链、越界路径和其他绝对路径', ()
 test('languageLabel 把常见代码围栏名称转成可读标签', () => {
   assert.equal(languageLabel('ts'), 'TypeScript');
   assert.equal(languageLabel('bash'), 'Shell');
+  assert.equal(languageLabel('svg'), 'SVG');
   assert.equal(languageLabel(''), '代码');
   assert.equal(languageLabel('kotlin'), 'KOTLIN');
+});
+
+test('outputKind 把可预览内容和源码、差异分开', () => {
+  assert.equal(outputKind('svg', '<svg></svg>'), 'svg');
+  assert.equal(outputKind('', '<svg xmlns="http://www.w3.org/2000/svg"></svg>'), 'svg');
+  assert.equal(outputKind('html', '<html></html>'), 'html');
+  assert.equal(outputKind('diff', '+ a\n- b'), 'diff');
+  assert.equal(outputKind('mermaid', 'graph TD; A-->B'), 'mermaid');
+  assert.equal(outputKind('latex', 'E=mc^2'), 'math');
+  assert.equal(outputKind('java', 'class A {}'), 'code');
+  assert.equal(outputKind('svg', '<svg>'), 'code');
+});
+
+test('safeImageSource 只接受网页图片和 data URL', () => {
+  assert.equal(safeImageSource('https://example.com/a.png'), 'https://example.com/a.png');
+  assert.equal(safeImageSource('javascript:alert(1)'), null);
+  assert.equal(safeImageSource('data:image/png;base64,aaaa'), 'data:image/png;base64,aaaa');
+  assert.equal(safeImageSource('data:text/html;base64,aaaa'), null);
 });
 
 test('estimateTextTokens 对中文更保守，并正确处理 emoji 码点', () => {

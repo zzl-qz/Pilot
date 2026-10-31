@@ -28,10 +28,9 @@ spring:
       # IDEA 会分批写入多模块的 class 文件。给编译留出完整落盘时间，避免只看到 server、
       # 尚未看到 core 时就提前重启，产生 SnapshotSink.class 等短暂缺失。
       #
-      # 注意：重启会中断正在执行的任务（模型请求被打断，本轮按「服务重启」收尾）。
-      # Agent 自己在任务里跑 mvn 也会改写 target/classes 并触发重启，跑长任务时建议关掉：
-      # 环境变量 PILOT_DEVTOOLS_RESTART=false，或启动参数 -Dspring.devtools.restart.enabled=false。
-      enabled: ${PILOT_DEVTOOLS_RESTART:true}
+      # 默认关掉。Agent 跑 mvn 会改写 target/classes，开着就会把整个服务重启一遍，
+      # 任务被打断，CPU 和风扇也会跟着飙。改 Pilot 自己的代码时再设 PILOT_DEVTOOLS_RESTART=true。
+      enabled: ${PILOT_DEVTOOLS_RESTART:false}
       poll-interval: 2s
       quiet-period: 1s
 
