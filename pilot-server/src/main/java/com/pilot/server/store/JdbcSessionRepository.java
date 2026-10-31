@@ -199,6 +199,27 @@ public final class JdbcSessionRepository implements SessionRepository {
                 "读取会话序号失败: " + sessionId).stream().findFirst().orElse(0L);
     }
 
+    /** 跨会话查询（type 上没有索引，量级靠时间窗口控制；usage 聚合单次最多几千行）。 */
+    @Override
+    public List<EventEnvelope> eventsOfType(String type, Instant since) {
+        String sql = "SELECT session_id, sequence, run_id, type, payload, created_at FROM events "
+                + "WHERE type = ? AND created_at >= ? ORDER BY created_at, session_id, sequence";
+        try (Connection connection = store.open();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, type);
+            statement.setString(2, since.toString());
+            ArrayList<EventEnvelope> result = new ArrayList<EventEnvelope>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    result.add(mapEvent(rows, rows.getString("session_id")));
+                }
+            }
+            return List.copyOf(result);
+        } catch (SQLException e) {
+            throw new IllegalStateException("跨会话事件查询失败: " + type, e);
+        }
+    }
+
     @Override
     public int dropEventsFrom(String sessionId, long fromSequence) {
         if (find(sessionId).isEmpty()) {

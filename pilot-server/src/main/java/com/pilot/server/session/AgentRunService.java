@@ -1226,7 +1226,7 @@ public class AgentRunService implements RunStarter {
             // 多智能体调度：父 Agent 只能派活，子 Agent 的改动一律进沙箱
             if (multiProperties.enabled()) {
                 tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink,
-                        handle.cancelled::get, executionClient, profiles));
+                        handle.cancelled::get, executionClient, profiles, childUsage));
             }
         }
         // 与会话数据库、快照保持一致，统一落在数据目录（默认项目下的 .pilot）

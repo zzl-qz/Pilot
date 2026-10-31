@@ -72,7 +72,7 @@ public final class SpawnAgentTool implements Tool {
     private final AtomicInteger runRequests = new AtomicInteger();
 
     /** 把子请求计入父任务累计事故熔断；Goal 关闭时使用 no-op，run 级池仍然生效。 */
-    interface UsageSink {
+    public interface UsageSink {
         void beforeRequest();
 
         void afterRequest(long activeMillis, ModelUsage usage);

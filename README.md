@@ -173,6 +173,7 @@ bash mvnw -pl pilot-server spring-boot:run
 - `GET /api/sessions/{id}/history`：读取历史（`limit` + `before` 游标分页，长会话只取尾部一页）；`GET /api/sessions/{id}/diff`：查看会话变更。
 - `GET /api/sessions/{id}/context`：查看持久模型记忆的估算占用；`POST /api/sessions/{id}/context/compact`：空闲时主动压缩早期模型记忆，聊天与审计事件保留不动。
 - `GET /api/metrics`：进程内运行指标（运行数、状态分布、失败码、事件类型计数、平均耗时）。
+- `GET /api/usage?days=N`：用量聚合（默认 30 天，夹在 1-90）：按日 token/请求数、会话 Top 10 与合计；`run.usage` 是 run 内累计快照，聚合时每个 run 只取末值，主 Agent 与已归集的子 Agent（spawn / dispatch）都计入。
 - `/api/approvals`：查看和处理待审批工具调用。
 - `/api/settings`：查看或更新模型与权限设置。
 - `/api/health`：服务健康状态。
@@ -345,7 +346,7 @@ node evaluation/harness/runner.mjs --dry-run --out /tmp/dry.jsonl  # 只验证�
 ## 已知限制
 
 - 模型的质量、成功率和响应受模型、网络和提示词影响；单元测试不能证明真实端到端质量。
-- 模型端点返回 `usage` 时，任务输入/输出 Token 使用模型精确值；不返回时按字符保守估算（ASCII 4 字符 1 token，中文 1 字符 1 token），界面用 `≈` 明示。当前任务统计只覆盖主 Agent 的模型调用，子 Agent 汇总用量仍列为后续能力；上下文占用始终是本地估算。
+- 模型端点返回 `usage` 时，任务输入/输出 Token 使用模型精确值；不返回时按字符保守估算（ASCII 4 字符 1 token，中文 1 字符 1 token），界面用 `≈` 明示。任务统计覆盖主 Agent 与子 Agent（spawn / dispatch 已归集），设置页「用量」面板按日与会话展示历史成本；上下文占用始终是本地估算。
 - 主动压缩会额外调用一次模型生成交接摘要；压缩只替换模型记忆中的早期内容，不删除聊天和审计记录。摘要可能丢失细节，关键事实仍需复读原文件核实。
 - ASK 依赖运行中的审批服务；等待超时按拒绝处理。不要把审批 UI 当作安全沙箱。
 - 运行时存储、文件写入、命令执行均有本地副作用；先备份并使用可丢弃工作区。

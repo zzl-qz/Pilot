@@ -7,6 +7,7 @@ import com.pilot.core.multi.AgentScope;
 import com.pilot.core.multi.RiskLevel;
 import com.pilot.core.multi.TaskSpec;
 import com.pilot.core.tool.Tool;
+import com.pilot.server.session.SpawnAgentTool;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -34,21 +35,30 @@ public final class DispatchAgentsTool implements Tool {
     private final BooleanSupplier cancelled;
     /** 本 run 可用的自定义代理目录（两级扫描结果）；没有定义时为 EMPTY。 */
     private final AgentProfileCatalog profiles;
+    /** 子 Agent 用量归集：计入父任务事故熔断与 run.usage 聚合。 */
+    private final SpawnAgentTool.UsageSink usageSink;
 
     public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
                               Consumer<SessionEvent> events, BooleanSupplier cancelled) {
-        this(service, sessionId, runId, workspace, events, cancelled, null, AgentProfileCatalog.EMPTY);
+        this(service, sessionId, runId, workspace, events, cancelled, null, AgentProfileCatalog.EMPTY, null);
     }
 
     public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
                               Consumer<SessionEvent> events, BooleanSupplier cancelled,
                               com.pilot.core.model.ModelClient executionClient) {
-        this(service, sessionId, runId, workspace, events, cancelled, executionClient, AgentProfileCatalog.EMPTY);
+        this(service, sessionId, runId, workspace, events, cancelled, executionClient, AgentProfileCatalog.EMPTY, null);
     }
 
     public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
                               Consumer<SessionEvent> events, BooleanSupplier cancelled,
                               com.pilot.core.model.ModelClient executionClient, AgentProfileCatalog profiles) {
+        this(service, sessionId, runId, workspace, events, cancelled, executionClient, profiles, null);
+    }
+
+    public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
+                              Consumer<SessionEvent> events, BooleanSupplier cancelled,
+                              com.pilot.core.model.ModelClient executionClient, AgentProfileCatalog profiles,
+                              SpawnAgentTool.UsageSink usageSink) {
         this.executionClient = executionClient;
         this.service = Objects.requireNonNull(service, "service must not be null");
         this.sessionId = Objects.requireNonNull(sessionId, "sessionId must not be null");
@@ -57,6 +67,7 @@ public final class DispatchAgentsTool implements Tool {
         this.events = Objects.requireNonNull(events, "events must not be null");
         this.cancelled = Objects.requireNonNull(cancelled, "cancelled must not be null");
         this.profiles = profiles == null ? AgentProfileCatalog.EMPTY : profiles;
+        this.usageSink = usageSink == null ? SpawnAgentTool.UsageSink.none() : usageSink;
     }
 
     @Override
@@ -138,7 +149,8 @@ public final class DispatchAgentsTool implements Tool {
         }
         try {
             MultiAgentService.Result result = service.dispatch(
-                    new MultiAgentService.Dispatch(sessionId, runId, workspace, specs, events, cancelled, executionClient));
+                    new MultiAgentService.Dispatch(sessionId, runId, workspace, specs, events, cancelled,
+                            executionClient, usageSink));
             return result.report();
         } catch (IllegalArgumentException e) {
             return "ERROR: 任务计划不合法：" + e.getMessage();

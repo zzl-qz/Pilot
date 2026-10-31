@@ -20,6 +20,9 @@ import com.pilot.core.event.SubagentStarted;
 import com.pilot.core.event.TaskUpdated;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ModelResponse;
+import com.pilot.core.model.ModelUsage;
+import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.multi.AgentReport;
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.DissentReport;
@@ -57,6 +60,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -123,12 +127,23 @@ public class MultiAgentService {
     /**
      * @param events    会话事件出口（父 run 的 sink）
      * @param cancelled 父 run 的取消信号，子 Agent 逐个检查
+     * @param usageSink 子 Agent 模型用量归集：计入父任务事故熔断与 run.usage 聚合；空时用 no-op
      */
     public record Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
-                           Consumer<SessionEvent> events, BooleanSupplier cancelled, ModelClient executionClient) {
+                           Consumer<SessionEvent> events, BooleanSupplier cancelled, ModelClient executionClient,
+                           com.pilot.server.session.SpawnAgentTool.UsageSink usageSink) {
         public Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
                         Consumer<SessionEvent> events, BooleanSupplier cancelled) {
-            this(sessionId, runId, workspace, specs, events, cancelled, null);
+            this(sessionId, runId, workspace, specs, events, cancelled, null, null);
+        }
+
+        public Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
+                        Consumer<SessionEvent> events, BooleanSupplier cancelled, ModelClient executionClient) {
+            this(sessionId, runId, workspace, specs, events, cancelled, executionClient, null);
+        }
+
+        com.pilot.server.session.SpawnAgentTool.UsageSink usageSinkOrNull() {
+            return usageSink == null ? com.pilot.server.session.SpawnAgentTool.UsageSink.none() : usageSink;
         }
     }
 
@@ -399,7 +414,9 @@ public class MultiAgentService {
         // 每个子 Agent 单独一份 trace：出问题能按 agentId 回放它自己的工具调用链
         JsonlTraceRecorder trace = new JsonlTraceRecorder(
                 dataDir.file("traces", dispatch.sessionId() + "-" + agentId + ".jsonl"), objectMapper);
-        AgentLoop loop = new AgentLoop(dispatch.executionClient() == null ? modelClient : dispatch.executionClient(),
+        AgentLoop loop = new AgentLoop(usageCounting(
+                        dispatch.executionClient() == null ? modelClient : dispatch.executionClient(),
+                        dispatch.usageSinkOrNull()),
                 tools, new PolicyPermissionGate(mode), ApprovalBroker.denyAll(), config,
                 () -> cancelled(dispatch), () -> null, trace);
 
@@ -431,6 +448,36 @@ public class MultiAgentService {
         PermissionMode parent = permissions == null ? null : permissions.mode();
         if (scope != null && !scope.writable()) return PermissionMode.READ_ONLY;
         return parent == null ? PermissionMode.READ_ONLY : parent;
+    }
+
+    /**
+     * 把子 Agent 的每次模型请求计入父任务的 usage 归集（与 spawn_agent 同模式）：
+     * 事故熔断拿请求数，run.usage 聚合拿 token 明细。包装只记账不干预响应。
+     */
+    private static ModelClient usageCounting(ModelClient delegate,
+                                             com.pilot.server.session.SpawnAgentTool.UsageSink sink) {
+        return new ModelClient() {
+            @Override public ModelResponse chat(java.util.List<com.pilot.core.loop.Message> messages,
+                                                java.util.List<ToolDefinition> tools) {
+                return chat(messages, tools, null);
+            }
+
+            @Override public ModelResponse chat(java.util.List<com.pilot.core.loop.Message> messages,
+                                                java.util.List<ToolDefinition> tools,
+                                                java.util.function.Consumer<String> textDelta) {
+                sink.beforeRequest();
+                long started = System.nanoTime();
+                ModelResponse response = null;
+                try {
+                    response = delegate.chat(messages, tools, textDelta);
+                    return response;
+                } finally {
+                    long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+                    sink.afterRequest(elapsed,
+                            response == null ? ModelUsage.unknown() : response.usage());
+                }
+            }
+        };
     }
 
     /**
