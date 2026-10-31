@@ -35,7 +35,13 @@ public final class PolicyPermissionGate implements PermissionGate {
 
     @Override
     public PermissionResult check(ToolCall call, Tool tool) {
-        if (tool.readOnly(call == null ? null : call.args())) {
+        var args = call == null ? null : call.args();
+        if (tool.confirm(args)) {
+            return mode() == PermissionMode.READ_ONLY
+                    ? PermissionResult.deny("READ_ONLY 模式禁止执行 " + tool.name())
+                    : PermissionResult.ask("这项操作有破坏性，需要你确认后才执行");
+        }
+        if (tool.readOnly(args)) {
             return PermissionResult.allow();
         }
         return switch (mode()) {

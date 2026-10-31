@@ -45,6 +45,22 @@ class PolicyPermissionGateTest {
     }
 
     @Test
+    void autoStillAsksBeforeDangerousCommands() {
+        PolicyPermissionGate gate = new PolicyPermissionGate(PermissionMode.AUTO);
+        Tool dangerous = new Tool() {
+            @Override public String name() { return "run_command"; }
+            @Override public String description() { return "run_command"; }
+            @Override public Map<String, Object> parameters() { return Map.of("type", "object"); }
+            @Override public boolean readOnly() { return false; }
+            @Override public boolean confirm(Map<String, Object> args) { return true; }
+            @Override public String execute(Map<String, Object> args) { return ""; }
+        };
+
+        assertEquals(PermissionDecision.ASK, gate.check(CALL, dangerous).decision());
+        assertEquals(PermissionDecision.ALLOW, gate.check(CALL, commandTool).decision());
+    }
+
+    @Test
     void autoAllowsRegisteredTools() {
         PolicyPermissionGate gate = new PolicyPermissionGate(PermissionMode.AUTO);
 

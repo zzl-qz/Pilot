@@ -241,7 +241,7 @@ public final class SpawnAgentTool implements Tool {
     private static ToolRegistry isolatedTools(ToolRegistry source) {
         ToolRegistry isolated = new ToolRegistry();
         source.tools().stream()
-                .filter(tool -> !FORBIDDEN_TOOLS.contains(tool.name()))
+                .filter(tool -> tool.readOnly() && !FORBIDDEN_TOOLS.contains(tool.name()))
                 .forEach(isolated::register);
         return isolated;
     }
@@ -250,7 +250,8 @@ public final class SpawnAgentTool implements Tool {
     private static AgentLoop.Config subagentConfig(AgentLoop.Config parent) {
         int steps = Math.min(parent.maxSteps(), MAX_SUBAGENT_STEPS);
         return new AgentLoop.Config(steps, parent.repeatRemindAt(), parent.repeatAbortAt(),
-                parent.systemPrompt() + "\n\n[子代理隔离] 只完成派发的子任务。你不能创建 Goal、派生其他代理或改写父任务状态。",
+                parent.systemPrompt() + "\n\n[子代理隔离] 你是只读探索。只完成派发的子任务，把结论交回父代理。"
+                        + "不能改文件，不能跑命令，不能创建 Goal，不能再派生子代理。",
                 List::of, 0, parent.contextLimit(), parent.completionChecks());
     }
 

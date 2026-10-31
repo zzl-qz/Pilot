@@ -153,6 +153,27 @@ class SpawnAgentToolTest {
     }
 
     @Test
+    void exploreChildDoesNotReceiveWriteTools() {
+        ToolRegistry parent = new ToolRegistry();
+        parent.register(named("read_file"));
+        parent.register(writing("edit_file"));
+        parent.register(writing("run_command"));
+        ArrayList<Set<String>> visible = new ArrayList<>();
+        ModelClient client = (request, definitions) -> {
+            visible.add(definitions.stream().map(ToolDefinition::name)
+                    .collect(java.util.stream.Collectors.toSet()));
+            return new ModelResponse("looked", List.of());
+        };
+        SpawnAgentTool tool = new SpawnAgentTool(client, parent,
+                new PolicyPermissionGate(PermissionMode.AUTO), ApprovalBroker.denyAll(),
+                new AgentLoop.Config(8, 0, 4, "sys"), List::of, event -> { }, () -> false);
+
+        tool.execute(Map.of("task", "find the entry"));
+
+        assertEquals(Set.of("read_file"), visible.get(0));
+    }
+
+    @Test
     void usesIndependentEightStepBudgetAndDoesNotForwardChildCompletion() {
         ToolRegistry tools = new ToolRegistry();
         tools.register(named("probe"));
@@ -289,6 +310,16 @@ class SpawnAgentToolTest {
         assertEquals(1, requests.get());
         assertEquals(1, reports.get());
         assertEquals(321, inputTokens.get());
+    }
+
+    private static Tool writing(String name) {
+        return new Tool() {
+            @Override public String name() { return name; }
+            @Override public String description() { return name; }
+            @Override public Map<String, Object> parameters() { return Map.of("type", "object"); }
+            @Override public boolean readOnly() { return false; }
+            @Override public String execute(Map<String, Object> args) { return "wrote"; }
+        };
     }
 
     private static Tool named(String name) {

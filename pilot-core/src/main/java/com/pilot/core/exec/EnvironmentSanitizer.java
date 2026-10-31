@@ -21,7 +21,7 @@ public final class EnvironmentSanitizer {
                     + "connection_string|dsn).*");
     /** 无凭据也必需的基础变量。 */
     private static final Set<String> BASE_ALLOWED = Set.of(
-            "PATH", "HOME", "USERPROFILE", "TEMP", "TMP", "TMPDIR", "SYSTEMROOT", "WINDIR",
+            "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "USERPROFILE", "TEMP", "TMP", "TMPDIR", "SYSTEMROOT", "WINDIR",
             "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ", "JAVA_HOME", "MAVEN_HOME", "GRADLE_HOME",
             "CI", "GITHUB_ACTIONS", "GITHUB_WORKSPACE", "BUILD_NUMBER", "NODE_ENV",
             "NODE_HOME", "NPM_CONFIG_CACHE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",

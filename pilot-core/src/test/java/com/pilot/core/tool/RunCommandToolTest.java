@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -17,6 +18,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RunCommandToolTest {
     @TempDir
     Path workspace;
+
+    @Test
+    void commandEnvironmentDropsSecretsButKeepsBuildVariables() {
+        Map<String, String> env = new LinkedHashMap<>();
+        env.put("PATH", "/usr/bin");
+        env.put("HOME", "/Users/dev");
+        env.put("USER", "dev");
+        env.put("OPENAI_API_KEY", "sk-test");
+        env.put("GITHUB_TOKEN", "ghp_xxx");
+
+        RunCommandTool.prepareEnvironment(env);
+
+        assertFalse(env.containsKey("OPENAI_API_KEY"));
+        assertFalse(env.containsKey("GITHUB_TOKEN"));
+        assertEquals("/Users/dev", env.get("HOME"));
+        assertEquals("dev", env.get("USER"));
+        assertTrue(env.get("PATH").contains("/usr/bin"), env.get("PATH"));
+        assertFalse(env.get("JAVA_HOME").isBlank());
+    }
 
     @Test
     void rejectsExecutableOutsideWhitelist() {
@@ -58,13 +78,14 @@ class RunCommandToolTest {
     }
 
     @Test
-    void rejectsDangerousGitWriteSubcommands() {
+    void asksBeforeDangerousGitWrites() {
         RunCommandTool tool = tool();
 
         for (String command : List.of("git push origin main", "git reset --hard HEAD", "git clean -fd")) {
-            String result = tool.execute(Map.of("command", command));
-            assertTrue(result.startsWith("ERROR: git 只允许只读子命令与 add/commit"), result);
+            assertTrue(tool.confirm(Map.of("command", command)), command);
+            assertFalse(tool.readOnly(Map.of("command", command)), command);
         }
+        assertFalse(tool.confirm(Map.of("command", "git status")));
     }
 
     @Test

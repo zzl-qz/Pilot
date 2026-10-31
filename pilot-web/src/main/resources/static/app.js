@@ -1159,7 +1159,83 @@ function toggleFolderMenu() {
     });
     el.folderMenu.append(item);
   }
+  const worktree = document.createElement('button');
+  worktree.type = 'button';
+  worktree.className = 'perm-item';
+  worktree.textContent = '在 worktree 中开新对话';
+  worktree.addEventListener('click', () => {
+    el.folderMenu.hidden = true;
+    openWorktree();
+  });
+  el.folderMenu.append(worktree);
+  const handoff = document.createElement('button');
+  handoff.type = 'button';
+  handoff.className = 'perm-item';
+  handoff.textContent = '把 worktree 改动交回本地';
+  handoff.addEventListener('click', () => {
+    el.folderMenu.hidden = true;
+    handoffWorktree();
+  });
+  el.folderMenu.append(handoff);
   el.folderMenu.hidden = false;
+}
+
+async function openWorktree() {
+  if (!state.workspace) {
+    showNotice('先选定一个 git 仓库目录');
+    return;
+  }
+  const branch = window.prompt('从哪条分支建立 worktree？留空则用当前分支', '');
+  if (branch === null) {
+    return;
+  }
+  try {
+    const response = await apiFetch('/api/worktrees', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspace: state.workspace,
+        branch,
+        projectId: state.currentProjectId
+      })
+    });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const opened = await response.json();
+    await activate(opened.sessionId, opened.title, opened.path);
+    await loadSessions();
+    showNotice('已从 ' + opened.branch + ' 建立 worktree，对话在这份检出里进行');
+  } catch (error) {
+    showNotice('建立 worktree 失败：' + error.message);
+  }
+}
+
+async function handoffWorktree() {
+  if (!state.sessionId) {
+    return;
+  }
+  try {
+    const response = await apiFetch('/api/worktrees/handoff?sessionId=' + encodeURIComponent(state.sessionId), {
+      method: 'POST'
+    });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const handed = await response.json();
+    state.workspace = handed.workspace;
+    writeStored(LAST_WORKSPACE_KEY, state.workspace);
+    const listed = state.sessions.find((item) => item.id === state.sessionId);
+    if (listed) {
+      listed.workspace = state.workspace;
+    }
+    renderWorkspace();
+    renderSessions();
+    loadTree('');
+    showNotice(handed.note);
+  } catch (error) {
+    showNotice('交回失败：' + error.message);
+  }
 }
 
 async function switchWorkspace(path) {
@@ -3042,11 +3118,11 @@ function closeStream() {
 function handleEvent(event) {
   // 预览沿用上一条已落库事件的序号，不能参与游标，否则会被当成重复事件丢掉
   if (event && event.type === 'assistant.preview') {
-    showLivePreview(event.payload && event.payload.text);
+    showLivePreview(event.payload && event.payload.text, event.timestamp);
     return;
   }
   if (event && event.type === 'assistant.reasoning') {
-    showReasoning(event.payload && event.payload.text);
+    showReasoning(event.payload && event.payload.text, event.timestamp);
     return;
   }
   // 同一事件可能被旧连接重复推送，按 sequence 去重；规则本身在 lib/events.js 里单测
@@ -3266,7 +3342,7 @@ function promoteBlankSession(input) {
 }
 
 function onAssistantDelta(event) {
-  commitReply(event.payload.text);
+  commitReply(event.payload.text, event.timestamp);
   recordDelta(event, event.payload.text);
 }
 
@@ -5191,7 +5267,12 @@ function absorbReplyIntoThinking() {
   showReasoning(text + '\n');
 }
 
-function showReasoning(text) {
+function eventTime(value) {
+  const parsed = value ? Date.parse(value) : NaN;
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function showReasoning(text, at) {
   if (!text) {
     return;
   }
@@ -5207,10 +5288,17 @@ function showReasoning(text) {
     const body = document.createElement('div');
     body.className = 'think-body';
     block.append(summary, body);
-    block._started = Date.now();
+    block._started = eventTime(at) || Date.now();
     block._text = '';
     shell.thinkingBlock = block;
     shell.shell.insertBefore(block, shell.shell.firstChild);
+  }
+  const stamp = eventTime(at);
+  if (stamp && stamp < block._started) {
+    block._started = stamp;
+  }
+  if (stamp) {
+    block._last = stamp;
   }
   block._text += text;
   const body = block.querySelector('.think-body');
@@ -5232,7 +5320,8 @@ function renderThinkingSummary(block) {
   if (!summary) {
     return;
   }
-  const seconds = Math.max(0, Math.round((Date.now() - (block._started || Date.now())) / 1000));
+  const end = block.classList.contains('is-live') ? Date.now() : (block._ended || Date.now());
+  const seconds = Math.max(0, Math.round((end - (block._started || end)) / 1000));
   const action = block._action ? ` · ${block._action}` : '';
   if (block.classList.contains('is-live')) {
     summary.textContent = seconds > 0 ? `思考中 ${seconds} 秒${action}` : `思考中${action}`;
@@ -5256,12 +5345,14 @@ function ensureThinkingClock() {
   }, 1000);
 }
 
-function settleReasoning() {
+function settleReasoning(at) {
   const shell = state.turnShell;
   const block = shell && shell.thinkingBlock;
   if (!block || !block.isConnected || !block.classList.contains('is-live')) {
     return;
   }
+  const stamp = eventTime(at) || block._last;
+  block._ended = stamp && stamp >= block._started ? stamp : Date.now();
   block.open = false;
   block.classList.remove('is-live');
   block._action = '';
@@ -5305,11 +5396,11 @@ function assistantMessageActions(bubble) {
 }
 
 /** 模型还在吐字。失败重试时整段丢掉，成功后由落库的全文覆盖这一段。 */
-function showLivePreview(text) {
+function showLivePreview(text, at) {
   if (!text) {
     return;
   }
-  settleReasoning();
+  settleReasoning(at);
   separateReplyForNextStage();
   if (!state.replyLive) {
     state.replyCommitted = state.reply ? (state.replyText || '') : '';
@@ -5322,8 +5413,8 @@ function showLivePreview(text) {
 }
 
 /** 这一轮的完整回复。预览已经拼过的话，用全文盖上，避免再接一遍。 */
-function commitReply(text) {
-  settleReasoning();
+function commitReply(text, at) {
+  settleReasoning(at);
   separateReplyForNextStage();
   const piece = text || '';
   if (state.replyLive) {

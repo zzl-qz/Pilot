@@ -1,5 +1,7 @@
 package com.pilot.core.tool;
 
+import com.pilot.core.exec.EnvironmentSanitizer;
+import com.pilot.core.exec.OsSandbox;
 import com.pilot.core.multi.AgentScope;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.workspace.PathValidator;
@@ -33,7 +35,7 @@ import java.util.regex.Pattern;
  *   <li>每个命令段独立判定（{@link CommandPolicy}）：查看类命令只读放行，构建/测试/写文件按档位审批，
  *       发布与全局安装直接拒绝；文件类工具的路径参数必须在工作区内；</li>
  *   <li>{@code git} 允许只读子命令与 {@code add}/{@code commit}，其余写操作需人工执行；</li>
- *   <li>强制超时、输出上限，并对疑似密钥的环境变量值做脱敏。</li>
+ *   <li>强制超时、输出上限；子进程只继承构建所需的环境变量，凭据名不会传进去，输出里再做一次脱敏。</li>
  * </ul>
  *
  * <p>权限按「本次调用」判定（{@link #readOnly(Map)}）：整条命令都是只读查看时，{@code READ_ONLY} 与
@@ -133,6 +135,24 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         // 后台任务会常驻进程，哪怕命令本身是查看类也要走审批。
         return !preparation.prepared().background() && preparation.prepared().readOnly();
+    }
+
+    @Override
+    public boolean confirm(Map<String, Object> args) {
+        String raw = ToolSupport.stringArg(args, "command");
+        if (raw == null || raw.isBlank()) {
+            return false;
+        }
+        CommandChain.Parsed parsed = CommandChain.parse(raw);
+        if (parsed.error() != null) {
+            return false;
+        }
+        for (CommandChain.Segment segment : parsed.segments()) {
+            if (CommandPolicy.confirms(segment.tokens())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -370,8 +390,11 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             tokens = new ArrayList<>(tokens);
             tokens.set(0, executable);
         }
-        String forbidden = CommandPolicy.forbidden(tokens);
-        if (forbidden != null) return SegmentCheck.error(forbidden);
+        boolean confirm = CommandPolicy.confirms(tokens);
+        if (!confirm) {
+            String forbidden = CommandPolicy.forbidden(tokens);
+            if (forbidden != null) return SegmentCheck.error(forbidden);
+        }
 
         AgentScope scope = paths.scope();
         if (scope != null && !scope.allowsCommandArgs(tokens)) {
@@ -388,6 +411,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             String sub = tokens.size() > 1 ? tokens.get(1).toLowerCase(Locale.ROOT) : "";
             if (CommandPolicy.GIT_READONLY.contains(sub)) {
                 trackChanges = false;
+            } else if (CommandPolicy.confirms(tokens)) {
+                trackChanges = true;
             } else if (CommandPolicy.GIT_WRITE.contains(sub)) {
                 if (scope != null && !scope.writable()) {
                     return SegmentCheck.error("只读任务不允许 git " + sub + "，改动请通过沙箱写工具提交");
@@ -493,8 +518,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     private ManagedRun runManaged(List<String> command, List<String> displayTokens, Path workdir, boolean background,
                                   long timeoutMs, CommandChangeTracker.Handle tracking) {
-        ProcessBuilder builder = new ProcessBuilder(command).directory(workdir.toFile()).redirectErrorStream(true);
-        useCurrentJdk(builder.environment());
+        CommandLaunch launch = launch(command, workdir);
+        ProcessBuilder builder = launch.builder();
         CommandTaskManager.Task task;
         try {
             task = commandTasks.start(sessionId, String.join(" ", displayTokens), builder, background, timeoutMs,
@@ -527,15 +552,13 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         String rendered = CommandToolSupport.render(task);
         if (chunk != null) rendered += "\n输出:\n" + chunk.text()
                 + (chunk.truncated() || !chunk.eof() ? "\n… 后续日志使用 command_logs，offset=" + chunk.nextOffset() : "");
-        return new ManagedRun(rendered, true);
+        return new ManagedRun(launch.label() + "\n" + rendered, true);
     }
 
     private String run(List<String> command, List<String> displayTokens, Path workdir, long timeoutMs) {
         long startedAt = System.nanoTime();
-        ProcessBuilder builder = new ProcessBuilder(command);
-        builder.directory(workdir.toFile());
-        builder.redirectErrorStream(true);
-        useCurrentJdk(builder.environment());
+        CommandLaunch launch = launch(command, workdir);
+        ProcessBuilder builder = launch.builder();
 
         Process process;
         try {
@@ -571,8 +594,30 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         long latencyMs = Math.max(0L, (System.nanoTime() - startedAt) / 1_000_000L);
         String rendered = render(String.join(" ", displayTokens), command,
                 finished ? exitCode(process) : -1, latencyMs, text);
-        rendered = "工作目录: " + workdir + "\n" + rendered;
+        rendered = launch.label() + "\n工作目录: " + workdir + "\n" + rendered;
         return finished ? rendered : "ERROR: 命令超时（" + (timeoutMs / 1000) + " 秒）已被终止\n" + rendered;
+    }
+
+    /**
+     * 先丢掉凭据和与构建无关的变量，再把 JDK 指到当前运行时。
+     * 子进程不再继承服务进程的整份环境。
+     */
+    private CommandLaunch launch(List<String> command, Path workdir) {
+        OsSandbox.Launch sandbox = OsSandbox.wrap(command, paths.root());
+        ProcessBuilder builder = new ProcessBuilder(sandbox.command())
+                .directory(workdir.toFile())
+                .redirectErrorStream(true);
+        prepareEnvironment(builder.environment());
+        return new CommandLaunch(builder, sandbox.label());
+    }
+
+    private record CommandLaunch(ProcessBuilder builder, String label) {
+    }
+
+    static void prepareEnvironment(Map<String, String> env) {
+        EnvironmentSanitizer sanitizer = EnvironmentSanitizer.defaults();
+        env.keySet().removeIf(key -> !sanitizer.allowed(key));
+        useCurrentJdk(env);
     }
 
     /**

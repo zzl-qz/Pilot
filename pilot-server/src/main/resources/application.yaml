@@ -107,6 +107,9 @@ pilot:
     image: ${PILOT_EXECUTION_IMAGE:eclipse-temurin:25-jdk}
     runtime: ${PILOT_CONTAINER_RUNTIME:}
     network: ${PILOT_EXECUTION_NETWORK:false}
+    # 主会话 run_command 的网络。文件系统沙箱默认开；域名级放行需要代理，所以这里默认允许出网。
+    # 设为 false 时，macOS Seatbelt / Linux bubblewrap 会关掉命令的网络。
+    command-network: ${PILOT_EXECUTION_COMMAND_NETWORK:true}
     memory-mb: ${PILOT_EXECUTION_MEMORY_MB:2048}
     cpus: ${PILOT_EXECUTION_CPUS:2}
     pids-limit: ${PILOT_EXECUTION_PIDS_LIMIT:512}

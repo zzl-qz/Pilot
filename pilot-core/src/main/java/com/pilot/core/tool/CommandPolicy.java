@@ -36,6 +36,10 @@ final class CommandPolicy {
             "status", "diff", "log", "show", "branch", "rev-parse", "ls-files", "describe", "blame", "remote",
             "shortlog", "ls-tree", "cat-file", "rev-list", "grep");
     static final Set<String> GIT_WRITE = Set.of("add", "commit");
+    /** 会改远程、丢掉本地提交或切换检出。允许执行，但任何权限档位都要先弹审批。 */
+    static final Set<String> GIT_CONFIRM = Set.of(
+            "push", "reset", "clean", "checkout", "switch", "restore", "rebase", "merge",
+            "pull", "fetch", "stash", "tag", "cherry-pick", "revert");
     static final Set<String> INSPECTION_FLAGS = Set.of(
             "-v", "--version", "-version", "version", "-h", "--help", "help");
 
@@ -76,6 +80,16 @@ final class CommandPolicy {
             return "禁止全局安装或修改全局配置；依赖请安装到工作区内";
         }
         return null;
+    }
+
+    /** 发布、全局安装，以及会改远程或丢掉提交的 git。为真时不直接拒绝，交给审批弹窗。 */
+    static boolean confirms(List<String> tokens) {
+        String executable = tokens.getFirst().toLowerCase(Locale.ROOT);
+        if ("git".equals(executable) && tokens.size() > 1
+                && GIT_CONFIRM.contains(tokens.get(1).toLowerCase(Locale.ROOT))) {
+            return true;
+        }
+        return forbidden(tokens) != null;
     }
 
     /** 参数中的危险选项与路径越界。返回错误文本，通过时返回 null。 */

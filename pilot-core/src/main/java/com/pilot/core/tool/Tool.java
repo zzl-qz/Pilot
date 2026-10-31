@@ -37,6 +37,14 @@ public interface Tool {
         return readOnly();
     }
 
+    /**
+     * 危险操作。即使权限档位是完全放行，也先弹出审批，批准后才执行。
+     * 查看、构建、测试和普通写入保持默认放行。
+     */
+    default boolean confirm(Map<String, Object> args) {
+        return false;
+    }
+
     /** 运行时能力。依赖外部进程的工具覆盖；不可用时不向模型声明。 */
     default Availability availability() {
         return Availability.ready();

@@ -34,6 +34,21 @@ class ContextBudgetTest {
     }
 
     @Test
+    void keepsRecentFileTextUntilTheBudgetFills() {
+        List<Message> messages = toolHistory(12, 2_000);
+        AtomicInteger calls = new AtomicInteger();
+        ContextBudget budget = new ContextBudget(recording(calls, notCompacted()));
+
+        boolean compacted = budget.apply(messages, 400_000, event -> { });
+
+        assertFalse(compacted);
+        assertEquals(0, calls.get());
+        assertTrue(messages.stream().filter(message -> "tool".equals(message.role()))
+                .allMatch(message -> message.content().length() == 2_000),
+                "预算还充裕时，读过的文件必须留在上下文里");
+    }
+
+    @Test
     void compactsAndReportsWhenOverTheThreshold() {
         List<Message> messages = textHistory(4, 1_000);
         int before = ContextCompactor.totalChars(messages);

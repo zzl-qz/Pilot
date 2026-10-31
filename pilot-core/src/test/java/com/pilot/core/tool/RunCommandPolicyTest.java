@@ -128,8 +128,8 @@ class RunCommandPolicyTest {
             String result = tool.execute(Map.of("command", command));
             assertTrue(result.startsWith("ERROR: "), command + " -> " + result);
         }
-        assertTrue(tool.execute(Map.of("command", "npm publish")).contains("禁止发布"));
-        assertTrue(tool.execute(Map.of("command", "npm install -g typescript")).contains("禁止全局安装"));
+        assertTrue(tool.confirm(Map.of("command", "npm publish")));
+        assertTrue(tool.confirm(Map.of("command", "npm install -g typescript")));
     }
 
     @Test
