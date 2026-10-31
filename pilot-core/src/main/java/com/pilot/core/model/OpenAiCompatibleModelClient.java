@@ -129,9 +129,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new ModelClientException(statusKind(response.statusCode()),
+            String errorBody = snippet(response.body());
+            throw new ModelClientException(ModelFailureSignals.statusKind(response.statusCode(), errorBody),
                     "模型接口返回 HTTP " + response.statusCode()
-                            + "（" + elapsedMs(startedAt) + " ms, model=" + model + "）：" + snippet(response.body()));
+                            + "（" + elapsedMs(startedAt) + " ms, model=" + model + "）：" + errorBody);
         }
 
         JsonNode root;
@@ -189,9 +190,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             HttpResponse<java.io.InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 try (InputStream stream = response.body()) {
-                    throw new ModelClientException(statusKind(response.statusCode()),
-                            "模型接口返回 HTTP " + response.statusCode() + "："
-                                    + snippet(new String(stream.readAllBytes(), StandardCharsets.UTF_8)));
+                    String errorBody = snippet(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
+                    throw new ModelClientException(ModelFailureSignals.statusKind(response.statusCode(), errorBody),
+                            "模型接口返回 HTTP " + response.statusCode() + "：" + errorBody);
                 }
             }
             StringBuilder content = new StringBuilder();
@@ -431,16 +432,6 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             throw new ModelClientException(ModelFailureKind.PERMANENT,
                     "工具调用参数不是合法 JSON：" + snippet(raw), e);
         }
-    }
-
-    /**
-     * HTTP 状态码分类。连着但被拒绝（401/403/404/400/422）重试没有意义；
-     * 408、429、5xx 是服务端暂时性故障，值得退避后再试。
-     */
-    private static ModelFailureKind statusKind(int statusCode) {
-        return statusCode == 408 || statusCode == 429 || statusCode >= 500
-                ? ModelFailureKind.TRANSIENT
-                : ModelFailureKind.PERMANENT;
     }
 
     private static long elapsedMs(long startedAt) {

@@ -4,6 +4,7 @@ import com.pilot.core.loop.Message;
 import com.pilot.core.tool.CommandChangeTracker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -200,7 +201,11 @@ class RunSnapshotServiceTest {
         change("linked_parent", file, "after");
         Path moved = workspace.resolve("moved");
         Files.move(file.getParent(), moved);
-        Files.createSymbolicLink(file.getParent(), moved);
+        try {
+            Files.createSymbolicLink(file.getParent(), moved);
+        } catch (java.nio.file.FileSystemException e) {
+            Assumptions.assumeTrue(false, "当前 Windows 账户没有创建符号链接的特权，跳过符号链接专用断言");
+        }
         assertEquals(List.of("dir/a.txt"), snapshots.rollback("linked_parent").conflicts());
         assertEquals("after", Files.readString(moved.resolve("a.txt")));
         Path created = workspace.resolve("new.txt");
