@@ -12,6 +12,7 @@ import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.Attachment;
+import com.pilot.core.multi.AgentProfileCatalog;
 import com.pilot.core.multi.AgentScope;
 import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.loop.Message;
@@ -122,6 +123,13 @@ public class AgentRunService implements RunStarter {
     private final RunStateTracker runStates;
     private final com.pilot.server.store.ToolCallJournalFactory journals;
     private final com.pilot.server.validation.ValidationLedger validations;
+    /** 自定义子代理目录；测试轻量装配不注入时，spawn/dispatch 的 agent 引用只能拿到空目录。 */
+    private volatile AgentProfileService agentProfiles;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAgentProfiles(AgentProfileService agentProfiles) {
+        this.agentProfiles = agentProfiles;
+    }
 
     /** 兼容旧调用：不启用检查点与幂等账本。 */
     public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
@@ -1208,14 +1216,17 @@ public class AgentRunService implements RunStarter {
         };
         // 工作区级 allow/deny/ask 规则优先于档位，未命中时回落到原 gate（对齐 Claude Code settings.json）
         PermissionGate sessionGate = withWorkspaceRules(permissionGate, toolFactory.resolve(workspace));
+        // 本 run 可用的自定义代理目录（两级扫描，热更新）；测试未注入时为空目录
+        AgentProfileCatalog profiles = agentProfiles == null
+                ? AgentProfileCatalog.EMPTY : agentProfiles.catalogFor(workspace);
         // 审查 run 不派子代理：单一视角审到底，也避免派发工具把只读裁剪绕出去。
         if (!review.active()) {
             tools.register(new SpawnAgentTool(modelClient, tools, sessionGate, approvals, config,
-                    () -> conversations.load(sessionId), sink, handle.cancelled::get, childUsage));
+                    () -> conversations.load(sessionId), sink, handle.cancelled::get, childUsage, profiles));
             // 多智能体调度：父 Agent 只能派活，子 Agent 的改动一律进沙箱
             if (multiProperties.enabled()) {
                 tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink,
-                        handle.cancelled::get, executionClient));
+                        handle.cancelled::get, executionClient, profiles));
             }
         }
         // 与会话数据库、快照保持一致，统一落在数据目录（默认项目下的 .pilot）

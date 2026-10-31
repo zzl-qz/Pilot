@@ -1,6 +1,8 @@
 package com.pilot.server.multi;
 
 import com.pilot.core.event.SessionEvent;
+import com.pilot.core.multi.AgentProfile;
+import com.pilot.core.multi.AgentProfileCatalog;
 import com.pilot.core.multi.AgentScope;
 import com.pilot.core.multi.RiskLevel;
 import com.pilot.core.multi.TaskSpec;
@@ -30,13 +32,23 @@ public final class DispatchAgentsTool implements Tool {
     private final String workspace;
     private final Consumer<SessionEvent> events;
     private final BooleanSupplier cancelled;
+    /** 本 run 可用的自定义代理目录（两级扫描结果）；没有定义时为 EMPTY。 */
+    private final AgentProfileCatalog profiles;
 
     public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
                               Consumer<SessionEvent> events, BooleanSupplier cancelled) {
-        this(service, sessionId, runId, workspace, events, cancelled, null);
+        this(service, sessionId, runId, workspace, events, cancelled, null, AgentProfileCatalog.EMPTY);
     }
+
     public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
-                              Consumer<SessionEvent> events, BooleanSupplier cancelled, com.pilot.core.model.ModelClient executionClient) {
+                              Consumer<SessionEvent> events, BooleanSupplier cancelled,
+                              com.pilot.core.model.ModelClient executionClient) {
+        this(service, sessionId, runId, workspace, events, cancelled, executionClient, AgentProfileCatalog.EMPTY);
+    }
+
+    public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
+                              Consumer<SessionEvent> events, BooleanSupplier cancelled,
+                              com.pilot.core.model.ModelClient executionClient, AgentProfileCatalog profiles) {
         this.executionClient = executionClient;
         this.service = Objects.requireNonNull(service, "service must not be null");
         this.sessionId = Objects.requireNonNull(sessionId, "sessionId must not be null");
@@ -44,6 +56,7 @@ public final class DispatchAgentsTool implements Tool {
         this.workspace = workspace;
         this.events = Objects.requireNonNull(events, "events must not be null");
         this.cancelled = Objects.requireNonNull(cancelled, "cancelled must not be null");
+        this.profiles = profiles == null ? AgentProfileCatalog.EMPTY : profiles;
     }
 
     @Override
@@ -62,6 +75,8 @@ public final class DispatchAgentsTool implements Tool {
                 Map.entry("id", Map.of("type", "string", "description", "任务编号，会话内唯一，例如 T1")),
                 Map.entry("title", Map.of("type", "string", "description", "任务标题，界面展示用")),
                 Map.entry("goal", Map.of("type", "string", "description", "完整目标：做什么、做到什么算完成")),
+                Map.entry("agent", Map.of("type", "string",
+                        "description", agentFieldDescription())),
                 Map.entry("depends_on", Map.of("type", "array", "items", Map.of("type", "string"),
                         "description", "前置任务编号；为空表示可立即并行")),
                 Map.entry("files", Map.of("type", "array", "items", Map.of("type", "string"),
@@ -95,6 +110,18 @@ public final class DispatchAgentsTool implements Tool {
                 "additionalProperties", false);
     }
 
+    /** agent 字段的动态说明：有可用代理时点名角色与职责，模型不必猜名字。 */
+    private String agentFieldDescription() {
+        StringBuilder text = new StringBuilder(
+                "引用自定义子代理（.pilot/agents/<name>.md）的名字：工具/文件/命令白名单与角色提示词从定义装配，"
+                        + "本任务里显式声明的字段优先、缺省用定义补");
+        String names = profiles.nameListText();
+        if (!names.isEmpty()) {
+            text.append("。可用代理：").append(names);
+        }
+        return text.toString();
+    }
+
     /** 会派发子 Agent、产生沙箱改动与命令执行，按写操作对待，走当前权限档位。 */
     @Override
     public boolean readOnly() {
@@ -105,7 +132,7 @@ public final class DispatchAgentsTool implements Tool {
     public String execute(Map<String, Object> args) {
         List<TaskSpec> specs;
         try {
-            specs = parseTasks(args);
+            specs = parseTasks(args, profiles);
         } catch (IllegalArgumentException e) {
             return "ERROR: 任务计划不合法：" + e.getMessage();
         }
@@ -123,6 +150,11 @@ public final class DispatchAgentsTool implements Tool {
     }
 
     static List<TaskSpec> parseTasks(Map<String, Object> args) {
+        return parseTasks(args, AgentProfileCatalog.EMPTY);
+    }
+
+    /** @param profiles 本 run 可用的自定义代理目录；空目录时 agent 字段只能引用失败 */
+    static List<TaskSpec> parseTasks(Map<String, Object> args, AgentProfileCatalog profiles) {
         Object raw = args == null ? null : args.get("tasks");
         if (!(raw instanceof Collection<?> collection) || collection.isEmpty()) {
             throw new IllegalArgumentException("tasks 不能为空");
@@ -135,12 +167,12 @@ public final class DispatchAgentsTool implements Tool {
             if (!(item instanceof Map<?, ?> map)) {
                 throw new IllegalArgumentException("每个任务必须是对象");
             }
-            specs.add(toSpec(map));
+            specs.add(toSpec(map, profiles));
         }
         return List.copyOf(specs);
     }
 
-    private static TaskSpec toSpec(Map<?, ?> map) {
+    private static TaskSpec toSpec(Map<?, ?> map, AgentProfileCatalog profiles) {
         String id = text(map.get("id"));
         String goal = text(map.get("goal"));
         String title = text(map.get("title"));
@@ -153,10 +185,20 @@ public final class DispatchAgentsTool implements Tool {
         RiskLevel risk = RiskLevel.of(text(map.get("risk")));
         boolean writable = bool(map.get("writable"));
         int reviewers = number(map.get("reviewers"));
-        AgentScope scope = (writable ? AgentScope.readWrite(files, denyFiles) : AgentScope.readOnly(files, denyFiles))
-                .withTools(tools, List.of())
-                .withCommands(commands, denyCommands);
-        return new TaskSpec(id, title, goal, dependsOn, scope, risk, reviewers);
+        String agentName = text(map.get("agent"));
+        AgentProfile profile = null;
+        if (!agentName.isEmpty()) {
+            profile = profiles.find(agentName)
+                    .orElseThrow(() -> new IllegalArgumentException("引用的代理 " + agentName
+                            + " 不存在（可用：" + (profiles.nameListText().isEmpty() ? "无" : profiles.nameListText()) + "）"));
+        }
+        AgentScope scope = profile == null
+                ? (writable ? AgentScope.readWrite(files, denyFiles) : AgentScope.readOnly(files, denyFiles))
+                    .withTools(tools, List.of())
+                    .withCommands(commands, denyCommands)
+                : profile.mergeScope(writable, files, denyFiles, tools, commands, denyCommands);
+        String effectiveGoal = profile == null ? goal : profile.prefixGoal(goal);
+        return new TaskSpec(id, title, effectiveGoal, dependsOn, scope, risk, reviewers);
     }
 
     /** 白名单里出现绝对路径或 {@code ..} 直接拒绝：宁可派发失败，也不要给出可能越界的范围。 */

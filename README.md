@@ -282,6 +282,28 @@ MCP 服务器在工作区的 `.mcp.json`（格式同 Claude Code：`{"mcpServers
 
 配置项在 `pilot.multi.*`：`enabled`、`max-parallel`、`max-attempts`（默认 3，即最多 2 次重试）、`max-steps`、`verify-timeout-seconds`、`verify-commands`。
 
+## 自定义子代理
+
+`.pilot/agents/<name>.md` 平铺定义角色卡（项目级随仓库走；用户级在数据目录 `agents/` 下，环境变量 `PILOT_AGENTS_DIR` 可改；同名项目级遮蔽用户级；每次 run 重扫描，改完即生效）：
+
+```markdown
+---
+description: 数据库脚本审查员（必填，模型靠它判断何时引用）
+tools: [read_*, search_*, run_command]   # 可省：省略时沿用子代理默认
+files: [src/main/resources/db/**]       # 文件白名单
+deny-commands: [git push]               # 命令黑名单
+writable: true                          # 声明可提交沙箱改动（见下方语义）
+---
+（正文 = 角色提示词，注入子代理的系统提示词）
+```
+
+两种引用方式：
+
+- `dispatch_agents` 任务加 `agent: <名字>`：工具/文件/命令白名单按定义装配，任务里显式声明的字段**优先**、缺省用定义补，不取并集；`writable` **完全由任务决定**（JSON 参数里 false 即显式只读，定义里的可写声明不能放大任务——预设不是越权通道）；角色提示词拼在任务目标前。
+- `spawn_agent` 加 `agent` 参数：在只读探索语义上按定义裁剪工具名单并注入角色提示词（spawn 保持只读，可写角色请走 dispatch）。
+
+引用不存在的名字会明确报错并列出可用代理，不静默退回普通任务；坏定义文件记入扫描问题列表，不拖垮整个目录。
+
 ## 测试与评估
 
 ```sh
