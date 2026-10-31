@@ -153,6 +153,20 @@ public class AgentRunService implements RunStarter {
         });
     }
 
+    /**
+     * 把工作区 {@code .pilot/settings.json} 里的 allow/deny/ask 规则叠在原 gate 前面。
+     * 没有任何规则时原样返回，行为与之前完全一致。
+     */
+    private static PermissionGate withWorkspaceRules(PermissionGate base, java.nio.file.Path workspace) {
+        com.pilot.core.permission.PermissionRules rules = com.pilot.core.permission.PermissionRules.load(workspace);
+        if (rules.isEmpty()) return base;
+        // 规则对只读工具同样生效（例如禁止读 .env），未命中才回落到档位
+        return (call, tool) -> {
+            com.pilot.core.permission.PermissionResult ruled = rules.evaluate(call);
+            return ruled != null ? ruled : base.check(call, tool);
+        };
+    }
+
     @Override
     public void start(String sessionId, String runId, String input) {
         launch(sessionId, runId, input, List.of(), false);
@@ -1044,7 +1058,9 @@ public class AgentRunService implements RunStarter {
                 }
             }
         };
-        tools.register(new SpawnAgentTool(modelClient, tools, permissionGate, approvals, config,
+        // 工作区级 allow/deny/ask 规则优先于档位，未命中时回落到原 gate（对齐 Claude Code settings.json）
+        PermissionGate sessionGate = withWorkspaceRules(permissionGate, toolFactory.resolve(workspace));
+        tools.register(new SpawnAgentTool(modelClient, tools, sessionGate, approvals, config,
                 () -> conversations.load(sessionId), sink, handle.cancelled::get, childUsage));
         // 多智能体调度：父 Agent 只能派活，子 Agent 的改动一律进沙箱
         if (multiProperties.enabled()) {
@@ -1054,11 +1070,13 @@ public class AgentRunService implements RunStarter {
         // 与会话数据库、快照保持一致，统一落在数据目录（默认项目下的 .pilot）
         JsonlTraceRecorder traceRecorder = new JsonlTraceRecorder(
                 dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
-        AgentLoop loop = new AgentLoop(executionClient, tools, permissionGate, approvals, config, handle.cancelled::get,
+        AgentLoop loop = new AgentLoop(executionClient, tools, sessionGate, approvals, config, handle.cancelled::get,
                 () -> pollSteering(sessionId), traceRecorder,
                 delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
                 .withTaskContext(() -> taskControls.prompt(sessionId) + commandContext(sessionId))
-                .withCompletionClaim(() -> claimCompletion(sessionId, handle));
+                .withCompletionClaim(() -> claimCompletion(sessionId, handle))
+                // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力
+                .withHooks(com.pilot.core.hook.Hooks.load(toolFactory.resolve(workspace)));
 
         if (goalPolicy != null) loop.withExecutionPolicy(goalPolicy);
         snapshots.bind(runId, toolFactory.resolve(workspace));

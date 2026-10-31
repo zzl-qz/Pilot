@@ -55,6 +55,8 @@ public class SandboxStore {
     private final ConcurrentMap<String, List<DiffSandbox>> sandboxes = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, List<TaskView>> tasks = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, List<Arbitration>> arbitrations = new ConcurrentHashMap<>();
+    /** 每个沙箱最近一次硬校验结果，键为 {@code sessionId/sandboxId}。 */
+    private final ConcurrentMap<String, VerificationGate.Report> verifications = new ConcurrentHashMap<>();
     private final ObjectMapper mapper;
     private final PilotDataDir dataDir;
 
@@ -67,6 +69,17 @@ public class SandboxStore {
         sandboxes.remove(sessionId);
         tasks.remove(sessionId);
         arbitrations.remove(sessionId);
+        verifications.keySet().removeIf(key -> key.startsWith(sessionId + "/"));
+    }
+
+    /** 记录最近一次硬校验结果，供界面说明「为什么不能接受」。 */
+    public void recordVerification(String sessionId, String sandboxId, VerificationGate.Report report) {
+        if (report != null) verifications.put(sessionId + "/" + sandboxId, report);
+    }
+
+    /** 没有跑过校验时返回 null，调用方必须按「未校验」处理，不能当成通过。 */
+    public VerificationGate.Report verification(String sessionId, String sandboxId) {
+        return verifications.get(sessionId + "/" + sandboxId);
     }
 
     public void add(String sessionId, DiffSandbox sandbox) {

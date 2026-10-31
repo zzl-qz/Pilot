@@ -30,10 +30,18 @@ final class ProjectRuleLoader {
             remaining -= rule.content().length();
         }
         Collections.reverse(nearestFirst);
+        // 用户级全局约定（~/.pilot/）优先级最低，但保证任何项目都能带上个人偏好
+        Rule user = remaining > 0
+                ? firstRule(userHome(), Math.min(MAX_FILE_CHARS, remaining)) : null;
+        if (user != null) nearestFirst.add(0, user);
         return nearestFirst.stream()
                 .map(rule -> prompts.render("system/project-rules",
                         Map.of("source", rule.path().toString(), "rules", rule.content())).strip())
                 .reduce((a, b) -> a + "\n\n" + b).orElse("");
+    }
+
+    private static Path userHome() {
+        return Path.of(System.getProperty("user.home", "."), ".pilot");
     }
 
     private static Rule firstRule(Path dir, int limit) {

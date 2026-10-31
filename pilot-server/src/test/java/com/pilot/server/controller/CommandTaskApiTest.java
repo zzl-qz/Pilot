@@ -90,7 +90,9 @@ class CommandTaskApiTest {
     private String session() { return sessions.createSession("后台命令测试", workspace.toString()).id(); }
 
     private CommandTaskManager.Task start(String owner, String mode) {
+        // Windows 上子进程默认按本地编码输出，显式要求 UTF-8，否则 emoji 会变成问号
         ProcessBuilder builder = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8",
                 "-cp", System.getProperty("java.class.path"), Fixture.class.getName(), mode).directory(workspace.toFile());
         return commands.start(owner, "java fixture " + mode, builder, true, 0);
     }

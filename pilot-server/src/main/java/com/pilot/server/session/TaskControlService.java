@@ -366,11 +366,6 @@ public class TaskControlService {
         return acceptance.stream().allMatch(item -> item.checked() && !item.evidence().isBlank());
     }
 
-    private static void appendLines(StringBuilder target, List<String> lines) {
-        if (lines.isEmpty()) target.append("（无）\n");
-        else lines.forEach(line -> target.append("- ").append(line).append('\n'));
-    }
-
     private static List<String> normalizeConstraints(List<String> constraints) {
         return constraints == null ? List.of() : constraints.stream()
                 .map(value -> required(value, "约束内容不能为空")).toList();

@@ -139,7 +139,7 @@ public class WorkspaceToolFactory {
         // 每个子 Agent 一份「先读后改」记录，与父级互不共享
         ReadTracker reads = new ReadTracker();
         if (view.allowsTool("read_file")) {
-            registry.register(new ReadFileTool(validator, reads));
+            registry.register(new ReadFileTool(validator, reads, sandbox));
         }
         if (view.allowsTool("list_dir")) {
             registry.register(new ListDirTool(validator));

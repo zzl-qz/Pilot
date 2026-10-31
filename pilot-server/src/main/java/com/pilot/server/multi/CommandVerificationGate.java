@@ -8,7 +8,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -74,7 +73,8 @@ public class CommandVerificationGate implements VerificationGate {
 
             List<String> checks = new ArrayList<>();
             for (String command : commands) {
-                Exec result = exec(copy, shell(command), properties.verifyTimeoutSeconds());
+                Exec result = exec(copy, com.pilot.core.tool.ProcessSupport.shell(command),
+                        properties.verifyTimeoutSeconds());
                 checks.add(command + " → exit " + result.exit);
                 if (result.exit != 0) {
                     return Report.failed(checks,
@@ -181,13 +181,6 @@ public class CommandVerificationGate implements VerificationGate {
     }
 
     /** 命令来自配置或项目文件，不受模型控制；这里用 shell 只是为了支持带参数的命令行。 */
-    private static List<String> shell(String command) {
-        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-        return windows
-                ? List.of("cmd.exe", "/c", command)
-                : List.of("/bin/sh", "-c", command);
-    }
-
     private record Exec(int exit, String output) {
     }
 
@@ -200,7 +193,8 @@ public class CommandVerificationGate implements VerificationGate {
             process = builder.start();
             process.getOutputStream().close();
             Process running = process;
-            CompletableFuture<String> output = CompletableFuture.supplyAsync(() -> read(running.getInputStream()));
+            CompletableFuture<String> output = CompletableFuture.supplyAsync(
+                    () -> com.pilot.core.tool.ProcessSupport.read(running.getInputStream()));
             if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
                 output.cancel(true);
@@ -215,15 +209,6 @@ public class CommandVerificationGate implements VerificationGate {
                 process.destroyForcibly();
             }
             return new Exec(-1, "命令被中断");
-        }
-    }
-
-    private static String read(InputStream stream) {
-        try (stream) {
-            byte[] bytes = stream.readNBytes(MAX_OUTPUT_CHARS);
-            return new String(bytes, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            return "";
         }
     }
 

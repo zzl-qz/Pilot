@@ -51,9 +51,13 @@ class MultiAgentServiceTest {
     private List<SessionEvent> events;
 
     private MultiAgentService service(ModelClient client) throws IOException {
+        return service(client, PermissionMode.AUTO);
+    }
+
+    private MultiAgentService service(ModelClient client, PermissionMode mode) throws IOException {
         Files.createDirectories(workspace.resolve("src"));
         Files.writeString(workspace.resolve("src/A.java"), "class A {}\n");
-        AgentProperties agent = new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 2, 1, 60_000, true);
+        AgentProperties agent = new AgentProperties(workspace.toString(), mode, 8, 3, 5, 300, 2, 1, 60_000, true);
         WorkspaceToolFactory factory = new WorkspaceToolFactory(agent,
                 new com.pilot.server.config.WebSearchProperties(false, "http://127.0.0.1:9", "", ""),
                 SnapshotSink.none(), JsonMapper.builder().build());
@@ -62,7 +66,20 @@ class MultiAgentServiceTest {
         VerificationGate gate = (root, base, changes) -> VerificationGate.Report.skipped("测试环境跳过编译");
         events = new CopyOnWriteArrayList<>();
         return new MultiAgentService(client, factory, store, gate, properties,
-                new PilotDataDir(dataDir.toString()), JsonMapper.builder().build());
+                new PilotDataDir(dataDir.toString()), JsonMapper.builder().build(),
+                new com.pilot.server.config.PermissionSettings(agent, permissionStore()), agent);
+    }
+
+    /** 会话权限档位：默认完全放行，可被单个用例覆盖，用来验证子 Agent 只继承不扩权。 */
+    private com.pilot.server.store.SettingsStore permissionStore() {
+        java.util.Map<String, String> values = new java.util.concurrent.ConcurrentHashMap<>();
+        return new com.pilot.server.store.SettingsStore() {
+            @Override public java.util.Optional<String> find(String key) {
+                return java.util.Optional.ofNullable(values.get(key));
+            }
+            @Override public void save(String key, String value) { values.put(key, value); }
+            @Override public void saveAll(java.util.Map<String, String> all) { values.putAll(all); }
+        };
     }
 
     private MultiAgentService.Dispatch dispatch(List<TaskSpec> specs) {
@@ -119,6 +136,23 @@ class MultiAgentServiceTest {
                 "写任务不应误用只读模板");
     }
 
+    /** 子 Agent 只能继承父会话档位：只读会话里派发可写任务必须明确失败，不能自己放开权限。 */
+    @Test
+    void writableSubagentTaskIsRefusedWhenSessionIsReadOnly() throws IOException {
+        MultiAgentService service = service((messages, tools) -> {
+            throw new AssertionError("只读会话不应启动可写子 Agent");
+        }, PermissionMode.READ_ONLY);
+        TaskSpec spec = TaskSpec.editable("T9", "改代码", "修改 src/A.java",
+                List.of(), List.of("src/**"), com.pilot.core.multi.RiskLevel.LOW);
+
+        MultiAgentService.Result result = service.dispatch(dispatch(List.of(spec)));
+
+        assertFalse(result.completed(), result.report());
+        assertEquals(TaskStatus.FAILED, result.outcomes().get(0).status());
+        assertTrue(result.outcomes().get(0).detail().contains("READ_ONLY"),
+                result.outcomes().get(0).detail());
+    }
+
     @Test
     void failedTaskBlocksItsDownstreamOnly() throws IOException {
         ModelClient failing = (messages, tools) -> {
@@ -160,6 +194,36 @@ class MultiAgentServiceTest {
         assertTrue(events.stream().anyMatch(event -> event instanceof ArbitrationRequired required
                 && "dissent".equals(required.kind())));
         assertTrue(result.report().contains("立即停止推进"), result.report());
+    }
+
+    @Test
+    void downstreamReceivesUpstreamConclusionAndSandboxFiles() throws IOException {
+        AtomicInteger requests = new AtomicInteger();
+        ModelClient client = (messages, tools) -> {
+            int request = requests.getAndIncrement();
+            if (request == 0) {
+                return new ModelResponse("", List.of(new com.pilot.core.tool.ToolCall("create", "create_file",
+                        Map.of("path", "src/Api.java", "content", "interface Api {}\n"))));
+            }
+            if (request == 1) {
+                return new ModelResponse("【结论】\n接口已定义\n\n【证据清单】\n- src/Api.java:1\n\n【风险评估】\n- 无", List.of());
+            }
+            String prompt = messages.get(1).content();
+            assertTrue(prompt.contains("接口已定义"), prompt);
+            assertTrue(prompt.contains("interface Api {}"), prompt);
+            return new ModelResponse(REPORT, List.of());
+        };
+        MultiAgentService service = service(client);
+        TaskSpec upstream = TaskSpec.editable("T1", "定义接口", "创建 src/Api.java",
+                List.of(), List.of("src/**"), com.pilot.core.multi.RiskLevel.LOW);
+        TaskSpec downstream = TaskSpec.readOnly("T2", "检查接口", "检查上游接口",
+                List.of("T1"), List.of("src/**"));
+
+        MultiAgentService.Result result = service.dispatch(dispatch(List.of(upstream, downstream)));
+
+        assertEquals(2, result.outcomes().size());
+        assertEquals(TaskStatus.DONE, result.outcomes().get(1).status());
+        assertTrue(requests.get() >= 2);
     }
 
     @Test
