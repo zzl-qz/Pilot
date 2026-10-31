@@ -40,6 +40,23 @@ pilot:
     # 会话库、快照、trace、附件默认放在项目下的 .pilot
     # 要换位置：环境变量 PILOT_DATA_DIR，或启动参数 -Dpilot.data.dir=...
     dir: ${PILOT_DATA_DIR:${user.dir}/.pilot}
+  # 浏览器验证工具（browser）：内置 Chromium + 默认有头。
+  # 完整设计见 docs/PLAN-browser-builtin-headed-mirror.md
+  browser:
+    # false 时 browser 工具不注册
+    enabled: true
+    # 首次使用时自动 npm 安装 playwright-core（固定 1.64.1，官方源失败换 npmmirror）
+    provision: true
+    # 本机没有任何可用浏览器时，自动下载内置 Chromium（完整版约 400MB，仅此一次）
+    download-chromium: true
+    # 默认有头：窗口真实可见，可与智能体共看同一页面、手动接管；无桌面环境自动降级无头
+    headless: ${PILOT_BROWSER_HEADLESS:false}
+    # 内置 Chromium 优先于系统 Chrome / Edge（版本配套、行为跨机器一致）；false = 系统浏览器优先
+    prefer-bundled: ${PILOT_BROWSER_PREFER_BUNDLED:true}
+    # 内置 Chromium 落盘目录；留空 = <仓库根>/.pilot/browser/browsers
+    browsers-dir: ${PILOT_BROWSER_BROWSERS_DIR:}
+    # 空闲多少秒后关掉浏览器进程释放内存。-1 = 自动：无头 600 秒；有头默认不回收（用户可能正看着窗口）
+    idle-shutdown-seconds: ${PILOT_BROWSER_IDLE_SHUTDOWN_SECONDS:-1}
   model:
     # endpoint 可以写服务根地址，也可以写完整的 /v1/chat/completions
     endpoint: ${PILOT_MODEL_ENDPOINT:https://api.openai.com/v1/chat/completions}

@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -33,8 +34,16 @@ import java.util.concurrent.TimeUnit;
  * 安装依赖（首次）→ 与 sidecar 握手并真的启动一次浏览器。只有握手成功，{@link #availability()}
  * 才返回可用，{@code browser} 工具才会向模型声明；失败时原因会保留下来原样告知模型。
  *
- * <p>浏览器本身优先用本机的 Chrome / Edge；都没有时（且允许下载）再安装 Playwright 自带的 Chromium。
- * 运行时目录放在仓库的 {@code .pilot/browser}（与内置 Node/Python 同处，不进 git），找不到仓库根则用数据目录。
+ * <p>浏览器来源：Chromium 完整收进仓库的 {@code .pilot/browser/browsers}
+ * （{@code PLAYWRIGHT_BROWSERS_PATH} 指向该处，下载也落这里，删 {@code .pilot} 即全量清理），
+ * 优先于系统 Chrome / Edge 使用——版本配套、行为跨机器一致；
+ * {@code pilot.browser.prefer-bundled=false} 可反转。
+ *
+ * <p>默认有头运行（{@code pilot.browser.headless=false}），窗口真实可见，用户可与智能体共看同一页面；
+ * 无桌面会话时自动降级无头。空闲回收：无头 10 分钟，有头默认不回收（可用
+ * {@code pilot.browser.idle-shutdown-seconds} 显式控制）。
+ *
+ * <p>运行时目录放在仓库的 {@code .pilot/browser}（与内置 Node/Python 同处，不进 git），找不到仓库根则用数据目录。
  */
 @Component
 public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
@@ -43,12 +52,20 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     static final String PLAYWRIGHT_VERSION = "1.64.1";
     private static final String SCRIPT_RESOURCE = "browser/browser-sidecar.mjs";
     private static final String SCRIPT_NAME = "browser-sidecar.mjs";
+    /** npmmirror 的 Playwright 浏览器镜像，与 npm 换源策略一致。 */
+    private static final String CHROMIUM_MIRROR = "https://npmmirror.com/mirrors/playwright";
 
     private final PilotDataDir dataDir;
     private final ObjectMapper mapper;
     private final boolean enabled;
     private final boolean provision;
     private final boolean downloadChromium;
+    /** 配置要求的有头/无头；实际生效值还要叠加无桌面降级。 */
+    private final boolean headlessConfigured;
+    private final boolean preferBundled;
+    private final String browsersDir;
+    /** >=0：显式秒数；-1：自动（无头 10 分钟，有头不回收）。 */
+    private final long idleShutdownSeconds;
 
     private volatile PlaywrightBackend backend;
     private volatile String pendingReason = "浏览器运行时尚未启动";
@@ -58,12 +75,20 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     public BrowserRuntime(PilotDataDir dataDir, ObjectMapper mapper,
                           @Value("${pilot.browser.enabled:true}") boolean enabled,
                           @Value("${pilot.browser.provision:true}") boolean provision,
-                          @Value("${pilot.browser.download-chromium:true}") boolean downloadChromium) {
+                          @Value("${pilot.browser.download-chromium:true}") boolean downloadChromium,
+                          @Value("${pilot.browser.headless:false}") boolean headless,
+                          @Value("${pilot.browser.prefer-bundled:true}") boolean preferBundled,
+                          @Value("${pilot.browser.browsers-dir:}") String browsersDir,
+                          @Value("${pilot.browser.idle-shutdown-seconds:-1}") long idleShutdownSeconds) {
         this.dataDir = dataDir;
         this.mapper = mapper;
         this.enabled = enabled;
         this.provision = provision;
         this.downloadChromium = downloadChromium;
+        this.headlessConfigured = headless;
+        this.preferBundled = preferBundled;
+        this.browsersDir = browsersDir == null ? "" : browsersDir.strip();
+        this.idleShutdownSeconds = idleShutdownSeconds;
     }
 
     @Override
@@ -138,7 +163,9 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
                     return;
                 }
             }
-            PlaywrightBackend candidate = new PlaywrightBackend(node, script, home, mapper);
+            boolean headless = resolveHeadless();
+            PlaywrightBackend candidate = new PlaywrightBackend(node, script, home, mapper,
+                    idleMillis(headless), sidecarEnvironment(home, headless));
             Availability result = candidate.probe();
             if (!result.available() && provision && downloadChromium
                     && result.reason().contains("没有找到可用的")
@@ -169,7 +196,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
                 List.of(npm.toString(), "install", "--no-audit", "--no-fund", "--omit=dev",
                         "--registry=https://registry.npmmirror.com"));
         for (List<String> command : attempts) {
-            if (run(home, node, Duration.ofMinutes(5), command) == 0
+            if (run(home, node, Duration.ofMinutes(5), command, Map.of()) == 0
                     && Files.isDirectory(home.resolve("node_modules").resolve("playwright-core"))) {
                 return true;
             }
@@ -181,15 +208,85 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     private boolean installChromium(Path home, Path node) {
         Path cli = home.resolve("node_modules").resolve("playwright-core").resolve("cli.js");
         if (!Files.isRegularFile(cli)) return false;
-        log.info("本机没有 Chrome / Edge，正在下载 Playwright Chromium（约 150MB，仅此一次）");
-        return run(home, node, Duration.ofMinutes(15), List.of(node.toString(), cli.toString(), "install", "chromium")) == 0;
+        Path browsers = browsersPath(home);
+        log.info("本机没有可用的浏览器，正在下载内置 Chromium（完整版约 400MB，仅此一次，落盘 {}）", browsers);
+        // 只装完整版：sidecar 一律显式传 executablePath（无头降级也是完整版跑无头模式），
+        // playwright 1.49+ 附带的 headless-shell 用不上，--no-shell 省掉这份下载。
+        // 官方 CDN 失败换 npmmirror 镜像，与 npm 双源策略一致。
+        List<String> command = List.of(node.toString(), cli.toString(), "install", "chromium", "--no-shell");
+        Map<String, String> base = chromiumDownloadEnvironment(browsers);
+        if (run(home, node, Duration.ofMinutes(15), command, base) == 0 && hasChromium(browsers)) {
+            return true;
+        }
+        log.info("官方源下载未成功，换 npmmirror 镜像重试");
+        Map<String, String> mirror = new LinkedHashMap<>(base);
+        mirror.put("PLAYWRIGHT_DOWNLOAD_HOST", CHROMIUM_MIRROR);
+        return run(home, node, Duration.ofMinutes(15), command, mirror) == 0 && hasChromium(browsers);
     }
 
-    private int run(Path home, Path node, Duration timeout, List<String> command) {
+    /** Chromium 下载/安装命令的环境变量：落盘目录收进 .pilot，不污染全局缓存。 */
+    private Map<String, String> chromiumDownloadEnvironment(Path browsers) {
+        Map<String, String> env = new LinkedHashMap<>();
+        env.put("PLAYWRIGHT_BROWSERS_PATH", browsers.toString());
+        return env;
+    }
+
+    /** @return PLAYWRIGHT_BROWSERS_PATH 下是否已有 chromium-* 目录（安装成功的粗校验） */
+    private static boolean hasChromium(Path browsers) {
+        if (!Files.isDirectory(browsers)) return false;
+        try (java.util.stream.Stream<Path> entries = Files.list(browsers)) {
+            return entries.anyMatch(path -> Files.isDirectory(path)
+                    && path.getFileName().toString().startsWith("chromium-"));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /** 有头/无头的实际生效值：配置值叠加无桌面降级。 */
+    private boolean resolveHeadless() {
+        if (!headlessConfigured && !desktopAvailable()) {
+            log.warn("配置为有头，但当前环境没有桌面会话（java.awt.headless），自动降级为无头运行");
+            return true;
+        }
+        return headlessConfigured;
+    }
+
+    private static boolean desktopAvailable() {
+        try {
+            return !java.awt.GraphicsEnvironment.isHeadless();
+        } catch (Throwable error) {
+            return false;
+        }
+    }
+
+    /** 空闲回收策略：显式秒数优先；自动模式下无头 10 分钟，有头不回收（用户可能正看着窗口）。 */
+    private long idleMillis(boolean headless) {
+        if (idleShutdownSeconds >= 0) return idleShutdownSeconds * 1000L;
+        return headless ? 10 * 60_000L : 0L;
+    }
+
+    /** sidecar 进程的注入环境：浏览器选型与有头/无头全部由 Java 配置驱动。 */
+    private Map<String, String> sidecarEnvironment(Path home, boolean headless) {
+        Map<String, String> env = new LinkedHashMap<>();
+        env.put("PLAYWRIGHT_BROWSERS_PATH", browsersPath(home).toString());
+        env.put("PILOT_BROWSER_HEADLESS", headless ? "true" : "false");
+        if (!preferBundled) env.put("PILOT_BROWSER_PREFER_BUNDLED", "false");
+        return env;
+    }
+
+    /** 内置 Chromium 落盘目录：默认在运行时目录下的 browsers/，可用配置改到别处。 */
+    private Path browsersPath(Path home) {
+        if (browsersDir.isEmpty()) return home.resolve("browsers");
+        Path configured = Path.of(browsersDir);
+        return configured.isAbsolute() ? configured : Path.of(".").toAbsolutePath().resolve(configured);
+    }
+
+    private int run(Path home, Path node, Duration timeout, List<String> command, Map<String, String> environment) {
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(home.toFile());
         String path = builder.environment().getOrDefault("PATH", "");
         builder.environment().put("PATH", node.getParent() + File.pathSeparator + path);
+        builder.environment().putAll(environment);
         builder.redirectErrorStream(true);
         builder.redirectOutput(ProcessBuilder.Redirect.appendTo(home.resolve("install.log").toFile()));
         try {

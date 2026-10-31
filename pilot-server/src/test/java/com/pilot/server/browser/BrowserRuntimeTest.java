@@ -34,7 +34,7 @@ class BrowserRuntimeTest {
     @Test
     void disabledRuntimeDeclaresNoCapabilityAndExplainsWhy() {
         BrowserRuntime runtime = new BrowserRuntime(new PilotDataDir(data.toString()), new ObjectMapper(),
-                false, false, false);
+                false, false, false, true, true, "", -1);
         runtime.start();
 
         Availability availability = runtime.availability();
@@ -50,7 +50,7 @@ class BrowserRuntimeTest {
     @Test
     void toolFactoryRegistersSessionExtrasButTheyStayHiddenUntilTheirCapabilityIsReady(@TempDir Path workspace) {
         BrowserRuntime runtime = new BrowserRuntime(new PilotDataDir(data.toString()), new ObjectMapper(),
-                false, false, false);
+                false, false, false, true, true, "", -1);
         WorkspaceToolFactory factory = new WorkspaceToolFactory(
                 new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 2, 1, 60_000, true),
                 new WebSearchProperties(false, "http://127.0.0.1:9", "", ""),
@@ -76,7 +76,7 @@ class BrowserRuntimeTest {
         Assumptions.assumeTrue(Files.isDirectory(repoHome.resolve("node_modules").resolve("playwright-core")),
                 "没有安装 playwright-core");
         BrowserRuntime runtime = new BrowserRuntime(new PilotDataDir(data.toString()), new ObjectMapper(),
-                true, false, false);
+                true, false, false, true, true, "", -1);
         try {
             assertFalse(runtime.availability().available(), "启动之前不能声明能力");
             runtime.start();
