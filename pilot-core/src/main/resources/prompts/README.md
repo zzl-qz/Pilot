@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | `system/` | 系统提示词段落（身份、流程、工具策略、输出格式） | 每次 run 组装，进 system |
 | `tools/` | 每个工具的描述，文件名 = `Tool.name()` | 随工具定义每次请求发送 |
+| `skills/` | 技能的注入模板（activate：用户显式点名技能时的首条 user 消息） | 显式激活时注入一次 |
 | `completion/` | 收尾门自查（verify / review / review-readonly / act），默认关闭 | 收尾前按需注入 user 消息 |
 | `compact/` | 上下文压缩摘要指令 | 压缩时注入 |
 | `plan/` | 计划未完成的自动继续提醒（默认关闭） | 自动续跑时注入 user 消息 |

@@ -23,12 +23,14 @@ import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.skill.SkillCatalog;
 import com.pilot.core.tool.CommandLogsTool;
 import com.pilot.core.tool.CommandStatusTool;
 import com.pilot.core.tool.CommandTaskManager;
 import com.pilot.core.tool.RunCommandTool;
 import com.pilot.core.tool.StopCommandTool;
 import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.UseSkillTool;
 import com.pilot.core.trace.JsonlTraceRecorder;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.AgentProperties;
@@ -114,6 +116,7 @@ public class AgentRunService implements RunStarter {
     private final MultiAgentService multiAgent;
     private final MultiAgentProperties multiProperties;
     private final com.pilot.server.observability.RunMetrics metrics;
+    private final SkillService skills;
     /** 可恢复调度状态；为空时（测试构造）不做检查点，也不影响执行。 */
     private final RunStateTracker runStates;
     private final com.pilot.server.store.ToolCallJournalFactory journals;
@@ -134,7 +137,25 @@ public class AgentRunService implements RunStarter {
         this(sessions, modelClient, toolFactory, permissionGate, approvals, properties, modelSettings,
                 snapshots, registry, runRepository, conversations, plans, objectMapper, dataDir,
                 queuedMessages, multiAgent, multiProperties, metrics, taskControls, commandTasks,
-                null, null, null);
+                null, null, null, null);
+    }
+
+    /** 技能链路构造：技能可用，检查点与幂等账本关闭；测试与轻量装配用。 */
+    public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
+                           PermissionGate permissionGate, ApprovalBroker approvals,
+                           AgentProperties properties, ModelSettings modelSettings,
+                           RunSnapshotService snapshots, RunRegistry registry,
+                           com.pilot.core.session.RunRepository runRepository,
+                           ConversationRepository conversations,
+                           com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper,
+                           PilotDataDir dataDir, com.pilot.server.store.QueuedMessageRepository queuedMessages,
+                           MultiAgentService multiAgent, MultiAgentProperties multiProperties,
+                           com.pilot.server.observability.RunMetrics metrics, TaskControlService taskControls,
+                           CommandTaskManager commandTasks, SkillService skills) {
+        this(sessions, modelClient, toolFactory, permissionGate, approvals, properties, modelSettings,
+                snapshots, registry, runRepository, conversations, plans, objectMapper, dataDir,
+                queuedMessages, multiAgent, multiProperties, metrics, taskControls, commandTasks,
+                skills, null, null, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -148,7 +169,7 @@ public class AgentRunService implements RunStarter {
                            PilotDataDir dataDir, com.pilot.server.store.QueuedMessageRepository queuedMessages,
                            MultiAgentService multiAgent, MultiAgentProperties multiProperties,
                            com.pilot.server.observability.RunMetrics metrics, TaskControlService taskControls,
-                           CommandTaskManager commandTasks, RunStateTracker runStates,
+                           CommandTaskManager commandTasks, SkillService skills, RunStateTracker runStates,
                            com.pilot.server.store.ToolCallJournalFactory journals,
                            com.pilot.server.validation.ValidationLedger validations) {
         this.sessions = sessions;
@@ -174,6 +195,7 @@ public class AgentRunService implements RunStarter {
         this.multiAgent = multiAgent;
         this.multiProperties = multiProperties;
         this.metrics = metrics;
+        this.skills = skills;
         this.executor = Executors.newFixedThreadPool(properties.runThreads(), runnable -> {
             Thread thread = new Thread(runnable, "pilot-agent-run");
             thread.setDaemon(true);
@@ -215,6 +237,22 @@ public class AgentRunService implements RunStarter {
     public void start(String sessionId, String runId, String input, List<Attachment> attachments,
                       List<Integer> imagePositions, TaskControlService.Requirements task) {
         launch(sessionId, runId, input, attachments, imagePositions, false, task);
+    }
+
+    /** 指定技能启动：技能存在性由控制器校验，指引注入由 run 执行链完成。 */
+    @Override
+    public void start(String sessionId, String runId, String input, List<Attachment> attachments,
+                      TaskControlService.Requirements task, String skill) {
+        launch(sessionId, runId, input, attachments == null ? List.of() : attachments, List.of(), false, task, false,
+                skill == null || skill.isBlank() ? null : skill.strip());
+    }
+
+    /** 图片位置与技能同时支持的完整启动：控制器的合并链路走这里。 */
+    @Override
+    public void start(String sessionId, String runId, String input, List<Attachment> attachments,
+                      List<Integer> imagePositions, TaskControlService.Requirements task, String skill) {
+        launch(sessionId, runId, input, attachments == null ? List.of() : attachments, imagePositions, false, task,
+                false, skill == null || skill.isBlank() ? null : skill.strip());
     }
 
     @Override
@@ -496,16 +534,22 @@ public class AgentRunService implements RunStarter {
     }
 
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
-                        List<Integer> imagePositions, boolean continuation,
-                        TaskControlService.Requirements requirements) {
-        launch(sessionId, runId, input, attachments, imagePositions, continuation, requirements, false);
+                         List<Integer> imagePositions, boolean continuation,
+                         TaskControlService.Requirements requirements) {
+        launch(sessionId, runId, input, attachments, imagePositions, continuation, requirements, false, null);
     }
 
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
-                        List<Integer> imagePositions, boolean continuation,
-                        TaskControlService.Requirements requirements, boolean regenerate) {
+                         List<Integer> imagePositions, boolean continuation,
+                         TaskControlService.Requirements requirements, boolean regenerate) {
+        launch(sessionId, runId, input, attachments, imagePositions, continuation, requirements, regenerate, null);
+    }
+
+    private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
+                         List<Integer> imagePositions, boolean continuation,
+                         TaskControlService.Requirements requirements, boolean regenerate, String skill) {
         synchronized (inbox(sessionId)) {
-            RunHandle handle = new RunHandle(sessionId);
+            RunHandle handle = new RunHandle(sessionId, skill);
             runs.put(runId, handle);
             try {
                 registry.register(runId, sessionId, sessionWorkspace(sessionId));
@@ -768,8 +812,12 @@ public class AgentRunService implements RunStarter {
      * 避免教模型调用不存在的工具。仓库快照不进 system（每轮 git status 变化会断全部缓存），
      * 改在会话首条 run 时作为 user 消息注入一次。
      */
-    private String systemPrompt(String sessionId, String workspace, Set<String> availableTools) {
-        String prompt = PROMPTS.system(PromptLibrary.environment(workspace), availableTools);
+    private String systemPrompt(String sessionId, String workspace, Set<String> availableTools,
+                                SkillCatalog catalog) {
+        // skills 变量每次都提供（空目录时传空串）：目录段因 requires:[use_skill] 会被过滤，不会走进来
+        Map<String, String> variables = new java.util.LinkedHashMap<>(PromptLibrary.environment(workspace));
+        variables.put("skills", skills.catalogText(catalog));
+        String prompt = PROMPTS.system(variables, availableTools);
         String rules = projectRules(workspace);
         if (!rules.isEmpty()) {
             prompt = prompt + "\n\n" + rules;
@@ -813,6 +861,25 @@ public class AgentRunService implements RunStarter {
         }
         List<Message> seeded = new ArrayList<>(history);
         seeded.add(Message.user(brief));
+        return List.copyOf(seeded);
+    }
+
+    /**
+     * 用户显式点名技能时，把技能指引作为独立 user 消息注入在用户输入之前（与仓库快照同模式）。
+     *
+     * <p>不进 system：500 行正文会破坏跨轮前缀缓存，而 user 消息随历史可压缩、续跑不丢；
+     * 激活语义（用户指定了什么）本就属于对话流。会话启动到运行之间技能被删除时注入说明，不静默忽略。
+     */
+    private List<Message> withSkillActivation(List<Message> history, String workspace, RunHandle handle) {
+        if (handle.skill == null) {
+            return history;
+        }
+        String activate = skills.activateText(skills.catalogFor(workspace), handle.skill);
+        if (activate == null) {
+            activate = "（用户指定了技能 " + handle.skill + "，但该技能当前不可用：未找到或校验未通过。）";
+        }
+        List<Message> seeded = new ArrayList<>(history);
+        seeded.add(Message.user(activate));
         return List.copyOf(seeded);
     }
 
@@ -1003,6 +1070,12 @@ public class AgentRunService implements RunStarter {
                     explanation));
         };
         ToolRegistry tools = sessionTools(sessionId, workspace, planSink);
+        // 技能目录：本 run 内工具注册与目录段共用同一份快照，避免两次扫描之间目录变化造成不一致
+        SkillCatalog catalog = skills.catalogFor(workspace);
+        if (!catalog.list().isEmpty()) {
+            // 无技能时不注册 use_skill：system/skills 段因 requires 过滤自动消失，零 token 成本
+            tools.register(new UseSkillTool(catalog));
+        }
         // 条件注册的 spawn_agent / dispatch_agents 位于 config 构造之后，先算出最终工具名，
         // 让 system prompt 只注入本轮真实可用的工具说明。
         Set<String> availableTools = sessionTools(tools);
@@ -1070,7 +1143,7 @@ public class AgentRunService implements RunStarter {
         Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
         AgentLoop.Config config = new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(),
                 properties.repeatAbortAt(),
-                systemPrompt(sessionId, workspace, availableTools),
+                systemPrompt(sessionId, workspace, availableTools, catalog),
                 // 收尾时读一次计划，把「本轮是否真的做完」一并写进 run.completed
                 () -> plans.load(sessionId),
                 // 计划没做完时自动继续，而不是停下来等用户点「继续执行」
@@ -1139,12 +1212,15 @@ public class AgentRunService implements RunStarter {
         if (goalPolicy != null) loop.withExecutionPolicy(goalPolicy);
         snapshots.bind(runId, toolFactory.resolve(workspace));
         try {
-            // 普通运行时，会话首条消息前注入一次仓库快照（见 withRepositoryBrief）；续跑不注入
+            // 普通运行时，会话首条消息前注入一次仓库快照（见 withRepositoryBrief）；续跑不注入；
+            // 用户点名了技能时，指引作为独立 user 消息在用户输入之前注入（见 withSkillActivation）
             TaskControlService.TaskContract activeTask = taskControls.load(sessionId);
             String completionGoal = activeTask == null ? null : activeTask.originalGoal();
             AgentLoop.Result result = continuation
                     ? loop.resume(history, sink, checkpoint, completionGoal)
-                    : loop.run(input, attachments, imagePositions, withRepositoryBrief(history, workspace), sink, checkpoint);
+                    : loop.run(input, attachments, imagePositions,
+                            withSkillActivation(withRepositoryBrief(history, workspace), workspace, handle),
+                            sink, checkpoint);
             conversations.save(sessionId, result.conversation());
             log.info("Agent run {} completed: failureCode={}, messages={}, workspace={}", runId, result.failureCode(),
                     result.conversation().size(), workspace == null ? properties.workspace() : workspace);
@@ -1246,12 +1322,17 @@ public class AgentRunService implements RunStarter {
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
         private final Set<String> pendingApprovals = ConcurrentHashMap.newKeySet();
         private final String sessionId;
+        /** 用户显式点名的技能；仅本次 run 注入，自动继续/排队/重放不继承。 */
+        private final String skill;
         private volatile boolean accepting = true;
         private volatile boolean paused;
         /** 非用户取消的中断原因（如服务重启）；为空表示普通取消/暂停。 */
         private volatile String interruptedReason;
         private volatile Future<?> future;
-        private RunHandle(String sessionId) { this.sessionId = sessionId; }
+        private RunHandle(String sessionId, String skill) {
+            this.sessionId = sessionId;
+            this.skill = skill == null || skill.isBlank() ? null : skill.strip();
+        }
     }
 
     /** 会话命令有独立的任务归属；默认和受限子代理工具集不共享这个入口。 */

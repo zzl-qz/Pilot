@@ -1171,6 +1171,7 @@ kbd {
 .model-hint.is-error { color: var(--err); }
 .model-hint.is-warn { color: var(--warn); }
 .model-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.model-actions-buttons { display: inline-flex; align-items: center; gap: 6px; }
 .model-clear-key {
   display: inline-flex;
   align-items: center;
@@ -3823,6 +3824,7 @@ html[data-theme="light"] .subagent-card.is-failed .subagent-head { color: #b3392
 .settings-field input:disabled { opacity: 0.55; }
 
 .settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
+.settings-actions-buttons { display: inline-flex; align-items: center; gap: 8px; }
 .settings-check { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); font-size: 11.5px; }
 
 /* 快捷键 / 关于 */

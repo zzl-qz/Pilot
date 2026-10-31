@@ -56,9 +56,12 @@ public final class AgentLoop {
     /**
      * 默认系统提示词，正文在 {@code prompts/system/*.md}。生产路径由 {@code AgentRunService}
      * 用工作区名等信息重新渲染；这里保留给无会话场景与测试。
+     *
+     * <p>按空工具集过滤：默认场景没有注册任何工具，条件注册的段落（技能目录、子代理、
+     * 并行派发）随之消失——工具不存在，用法教学就不进提示词，也无需提供技能目录变量。
      */
     public static final String DEFAULT_SYSTEM_PROMPT =
-            PROMPTS.system(PromptLibrary.environment(null));
+            PROMPTS.system(PromptLibrary.environment(null), java.util.Set.of());
 
     /**
      * @param repeatRemindAt       相同调用连续得到相同结果达到该次数时注入提醒；0 表示不提醒

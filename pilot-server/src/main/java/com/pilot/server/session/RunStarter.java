@@ -24,9 +24,27 @@ public interface RunStarter {
         start(sessionId, runId, input, attachments);
     }
 
+    /**
+     * 指定技能启动：技能存在性由控制器校验，指引作为首条 user 消息注入由实现完成。
+     * 默认转发到无技能版本，测试里的空实现不用改。
+     */
+    default void start(String sessionId, String runId, String input, List<Attachment> attachments,
+                       TaskControlService.Requirements task, String skill) {
+        start(sessionId, runId, input, attachments, task);
+    }
+
     default void start(String sessionId, String runId, String input, List<Attachment> attachments,
                        List<Integer> imagePositions, TaskControlService.Requirements task) {
         start(sessionId, runId, input, attachments, task);
+    }
+
+    /**
+     * 图片位置与技能同时支持的完整启动，控制器的合并链路走这里。
+     * 默认忽略技能，测试里的空实现不用改。
+     */
+    default void start(String sessionId, String runId, String input, List<Attachment> attachments,
+                       List<Integer> imagePositions, TaskControlService.Requirements task, String skill) {
+        start(sessionId, runId, input, attachments, imagePositions, task);
     }
 
     /** 排队中的一条消息：正文已经内联了文本文件，这里只额外带需要多模态编码的图片。 */

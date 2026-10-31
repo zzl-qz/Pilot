@@ -68,6 +68,21 @@ class CommandTaskManagerTest {
     }
 
     @Test
+    void gbkConsoleOutputIsDecodedWithFallbackInsteadOfMojibake() throws Exception {
+        // 中文 Windows 子进程默认按控制台编码（GBK）输出；管理器严格 UTF-8 解码失败后必须回退 GBK，
+        // 中文不能全部变成替换符。这是老 RunCommandTool 已解决、CommandTaskManager 曾经缺失的一处回归。
+        var command = new java.util.ArrayList<>(List.of(javaBinary(), "-Dstdout.encoding=GBK",
+                "-cp", System.getProperty("java.class.path"), Child.class.getName(), "gbk"));
+        try (var manager = manager()) {
+            var task = manager.start("session_a", "gbk console", new ProcessBuilder(command)
+                    .directory(workspace.toFile()), false, 10_000);
+            assertEquals("COMPLETED", awaitDone(manager, "session_a", task.taskId()).status());
+            String text = manager.logs("session_a", task.taskId(), 0, 100).text();
+            assertTrue(text.contains("你好GBK输出"), text);
+        }
+    }
+
+    @Test
     void timeoutStopsTreeAndManualStopIsSessionScoped() throws Exception {
         try (CommandTaskManager manager = manager()) {
             CommandTaskManager.Task timed = manager.start("session_a", "timeout", process("hold"), true, 400);
@@ -286,6 +301,7 @@ class CommandTaskManagerTest {
                 }
                 case "hold" -> Thread.sleep(30_000);
                 case "done" -> System.out.print("done");
+                case "gbk" -> System.out.print("你好GBK输出");
                 default -> throw new IllegalArgumentException(args[0]);
             }
         }

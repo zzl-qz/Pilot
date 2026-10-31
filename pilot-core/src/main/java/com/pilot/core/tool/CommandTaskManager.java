@@ -10,12 +10,12 @@ import java.io.InputStream;
 import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CoderResult;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.nio.CharBuffer;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -123,8 +123,8 @@ public final class CommandTaskManager implements AutoCloseable {
                 task.exitCode(), task.startedAt(), task.finishedAt(), task.background(), task.timeoutSeconds(),
                 task.reason(), changeTracking);
         Entry entry = new Entry(task, secrets);
-        entries.put(id, entry);
         try {
+            // 元数据先于进程落盘：进程存在之前记录必须已在盘上，崩溃恢复才不会漏掉在跑的命令。
             persist(entry);
             builder.directory(workdir.toFile()).redirectErrorStream(true)
                     .redirectOutput(ProcessBuilder.Redirect.PIPE).redirectInput(ProcessBuilder.Redirect.PIPE);
@@ -136,6 +136,10 @@ public final class CommandTaskManager implements AutoCloseable {
             // Sample before metadata I/O and again before scheduling, reducing the window for short-lived wrappers.
             // Already detached children cannot be recovered portably; callers should run servers in foreground mode.
             entry.discover();
+            // 注册放在 spawn 之后：任务一旦对外可见（list/get/stop）就必然带着 pid 与进程引用，
+            // 否则「start 后立刻查 list」的调用方会拿到 pid=null 的快照（ProcessHandle.of 会 NPE）。
+            // 状态先落盘再发布：观察者看到某个状态时，它的元数据一定已经在盘上。
+            entries.put(id, entry);
             entry.process.getOutputStream().close();
             entry.reader = workers.submit(() -> readOutput(entry));
             entry.discover();
@@ -146,9 +150,12 @@ public final class CommandTaskManager implements AutoCloseable {
                 entry.process.descendants().forEach(ProcessHandle::destroyForcibly);
                 entry.process.destroyForcibly();
             }
-            entry.task = state(entry.task, "FAILED", pid(entry.process), null, Instant.now(),
+            Task failed = state(entry.task, "FAILED", pid(entry.process), null, Instant.now(),
                     redact("命令启动失败：" + failure.getMessage(), secrets));
-            persist(entry);
+            persist(entry, failed);
+            entry.task = failed;
+            // 启动失败同样要可见：调用方拿到 FAILED 回执，list 也能查到，不会永远等一个不存在的任务。
+            entries.putIfAbsent(id, entry);
         }
         return entry.task;
     }
@@ -236,25 +243,22 @@ public final class CommandTaskManager implements AutoCloseable {
             synchronized (entry) {
                 String status = entry.stopStatus != null ? entry.stopStatus : exit == 0 ? "COMPLETED" : "FAILED";
                 String reason = entry.stopReason != null ? entry.stopReason : exit == 0 ? "" : "命令退出码 " + exit;
-                entry.task = state(entry.task, status, entry.task.pid(), exit, Instant.now(), reason);
-                persist(entry);
+                publish(entry, state(entry.task, status, entry.task.pid(), exit, Instant.now(), reason));
             }
         } catch (InterruptedException e) {
             requestStop(entry, "INTERRUPTED", "服务停止，命令已终止");
             forceTree(entry);
             awaitReader(entry);
             synchronized (entry) {
-                entry.task = state(entry.task, entry.stopStatus, entry.task.pid(),
-                        entry.process.isAlive() ? null : entry.process.exitValue(), Instant.now(), entry.stopReason);
-                persist(entry);
+                publish(entry, state(entry.task, entry.stopStatus, entry.task.pid(),
+                        entry.process.isAlive() ? null : entry.process.exitValue(), Instant.now(), entry.stopReason));
             }
             Thread.currentThread().interrupt();
         } catch (RuntimeException e) {
             forceTree(entry);
             synchronized (entry) {
-                entry.task = state(entry.task, "FAILED", entry.task.pid(), null, Instant.now(),
-                        redact("命令监控失败：" + e.getMessage(), entry.secrets));
-                persist(entry);
+                publish(entry, state(entry.task, "FAILED", entry.task.pid(), null, Instant.now(),
+                        redact("命令监控失败：" + e.getMessage(), entry.secrets)));
             }
         }
     }
@@ -266,33 +270,23 @@ public final class CommandTaskManager implements AutoCloseable {
      */
     private void readOutput(Entry entry) {
         StreamingRedactor redactor = new StreamingRedactor(entry.secrets);
+        OutputDecoder decoder = new OutputDecoder();
         long inputChars = 0;
-        boolean localEncoding = false;
-        ByteArrayOutputStream pending = new ByteArrayOutputStream();
         try (InputStream in = entry.process.getInputStream()) {
             byte[] buffer = new byte[4096];
             int count;
             while ((count = in.read(buffer)) >= 0) {
-                pending.write(buffer, 0, count);
-                Decoded decoded = localEncoding ? decodeGbk(pending.toByteArray()) : decodeUtf8(pending.toByteArray());
-                pending.reset();
-                if (decoded.rest().length > 0) pending.write(decoded.rest());
-                if (decoded.localEncoding()) localEncoding = true;
-                if (!decoded.text().isEmpty()) {
-                    inputChars += decoded.text().codePointCount(0, decoded.text().length());
-                    append(entry, redactor.accept(decoded.text(), false));
-                }
-                if (inputChars >= outputLimit || "OUTPUT_LIMIT".equals(entry.stopStatus)) {
+                String decoded = decoder.decode(buffer, count, false);
+                int accepted = (int) Math.min(decoded.length(), outputLimit - inputChars);
+                inputChars += accepted;
+                append(entry, redactor.accept(decoded.substring(0, Math.max(0, accepted)), false));
+                if (accepted < decoded.length()) {
                     requestStop(entry, "OUTPUT_LIMIT", "命令输出达到上限 " + outputLimit + " 字节，已终止进程树");
                     break;
                 }
             }
             if (!"OUTPUT_LIMIT".equals(entry.stopStatus)) {
-                byte[] tail = pending.toByteArray();
-                if (tail.length > 0) {
-                    append(entry, redactor.accept(new String(tail, localEncoding ? GBK : StandardCharsets.UTF_8),
-                            false));
-                }
+                append(entry, redactor.accept(decoder.decode(new byte[0], 0, true), false));
                 // A cap may cut a secret halfway; discard that withheld suffix instead of exposing a partial credential.
                 append(entry, redactor.accept("", true));
             }
@@ -302,38 +296,6 @@ public final class CommandTaskManager implements AutoCloseable {
             log.warn("读取命令输出异常：{}", e.toString());
             if (entry.stopStatus == null) requestStop(entry, "FAILED", "读取命令输出异常：" + e);
         }
-    }
-
-    /** 一段解码结果：已解码文本、需要等下一批字节的尾部、以及是否判定为本地编码。 */
-    private record Decoded(String text, byte[] rest, boolean localEncoding) {
-    }
-
-    private static Decoded decodeUtf8(byte[] bytes) {
-        CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT);
-        ByteBuffer in = ByteBuffer.wrap(bytes);
-        CharBuffer out = CharBuffer.allocate(bytes.length + 4);
-        CoderResult result = decoder.decode(in, out, false);
-        if (result.isMalformed()) {
-            // 不是 UTF-8 流：整段按本地编码重新解码，避免把中文变成替换字符
-            return decodeGbk(bytes);
-        }
-        out.flip();
-        byte[] rest = new byte[in.remaining()];
-        in.get(rest);
-        return new Decoded(out.toString(), rest, false);
-    }
-
-    /** GBK 是双字节编码：只把最后一个可能是首字节的字节留到下一批。 */
-    private static Decoded decodeGbk(byte[] bytes) {
-        int end = bytes.length;
-        if (end > 0) {
-            int last = bytes[end - 1] & 0xff;
-            if (last >= 0x81 && last <= 0xfe) end -= 1;
-        }
-        byte[] rest = end == bytes.length ? new byte[0] : java.util.Arrays.copyOfRange(bytes, end, bytes.length);
-        return new Decoded(new String(bytes, 0, end, GBK), rest, true);
     }
 
     private void append(Entry entry, String output) throws IOException {
@@ -367,8 +329,7 @@ public final class CommandTaskManager implements AutoCloseable {
             entry.stopReason = reason;
             entry.stoppingAt = System.nanoTime();
             entry.stopStatus = status;
-            entry.task = state(entry.task, "STOPPING", entry.task.pid(), null, null, reason);
-            persist(entry);
+            publish(entry, state(entry.task, "STOPPING", entry.task.pid(), null, null, reason));
         }
     }
 
@@ -485,13 +446,26 @@ public final class CommandTaskManager implements AutoCloseable {
         }
     }
 
+    /**
+     * 状态先落盘、后发布：观察者（get/list/日志读取方）看到某个状态时，对应元数据必然已写入完成，
+     * 不会读到持久化过程中的临时文件，也不会在进程崩溃恢复时丢失已观察到的状态。
+     */
+    private void publish(Entry entry, Task next) {
+        persist(entry, next);
+        entry.task = next;
+    }
+
     private void persist(Entry entry) {
-        Path target = metadata(entry.task);
+        persist(entry, entry.task);
+    }
+
+    private void persist(Entry entry, Task task) {
+        Path target = metadata(task);
         try {
             Files.createDirectories(target.getParent());
             Path temp = Files.createTempFile(target.getParent(), "command-", ".tmp");
             try {
-                Files.writeString(temp, mapper.writeValueAsString(entry.task));
+                Files.writeString(temp, mapper.writeValueAsString(task));
                 try { Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
                 catch (AtomicMoveNotSupportedException e) { Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING); }
             } finally { Files.deleteIfExists(temp); }
@@ -575,6 +549,62 @@ public final class CommandTaskManager implements AutoCloseable {
     private record OwnedProcess(ProcessHandle handle, Instant start) {
         private boolean alive() {
             return handle.isAlive() && (start == null || handle.info().startInstant().map(start::equals).orElse(false));
+        }
+    }
+
+    /**
+     * 子进程输出的自适应解码：默认按 UTF-8 严格解码；一旦批内出现非法 UTF-8 字节，
+     * 即判定该条流为 GBK（中文 Windows 控制台程序的常见情况），此后整条流按 GBK 续解。
+     *
+     * <p>切换不回改先前批次：非法字节出现的位置就是非 UTF-8 内容的起点，此前批次几乎总是
+     * ASCII（两种编码下同文），极少存在「既合法 UTF-8 又实为 GBK」的先前内容，受损可接受。
+     * 不完整的多字节序列跨批次缓存在 carry 里，不会误触发切换。
+     */
+    private static final class OutputDecoder {
+        private final ByteArrayOutputStream carry = new ByteArrayOutputStream();
+        private final CharsetDecoder utf8 = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT);
+        private final CharsetDecoder gbk = GBK.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPLACE).onUnmappableCharacter(CodingErrorAction.REPLACE);
+        private boolean gbkMode;
+
+        String decode(byte[] chunk, int length, boolean endOfInput) {
+            carry.write(chunk, 0, length);
+            byte[] bytes = carry.toByteArray();
+            carry.reset();
+            if (!gbkMode) {
+                CharBuffer out = CharBuffer.allocate(bytes.length + 1);
+                ByteBuffer in = ByteBuffer.wrap(bytes);
+                CoderResult result = utf8.decode(in, out, endOfInput);
+                if (result.isUnderflow()) {
+                    // 干净的 UTF-8；未消费的尾部是不完整序列，留到下一批继续
+                    if (in.remaining() > 0) {
+                        carry.write(bytes, bytes.length - in.remaining(), in.remaining());
+                    }
+                    out.flip();
+                    return out.toString();
+                }
+                // 非法或不可映射字节：判定为 GBK 流，本批（含此前挂起字节）整体按 GBK 重解
+                gbkMode = true;
+            }
+            StringBuilder text = new StringBuilder(bytes.length);
+            ByteBuffer in = ByteBuffer.wrap(bytes);
+            CharBuffer out = CharBuffer.allocate(Math.max(64, bytes.length + 1));
+            while (in.hasRemaining()) {
+                CoderResult result = gbk.decode(in, out, endOfInput);
+                out.flip();
+                text.append(out);
+                out.clear();
+                if (result.isUnderflow()) {
+                    // 不完整的 GBK 双字节尾部留到下一批；流结束时由 REPLACE 兜底
+                    if (!endOfInput && in.remaining() > 0) {
+                        carry.write(bytes, bytes.length - in.remaining(), in.remaining());
+                    }
+                    break;
+                }
+                if (!result.isOverflow()) break;   // REPLACE 模式不应出现，防御性收尾
+            }
+            return text.toString();
         }
     }
 

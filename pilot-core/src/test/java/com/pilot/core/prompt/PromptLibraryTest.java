@@ -19,7 +19,8 @@ class PromptLibraryTest {
     private static final Map<String, String> VARS = Map.of(
             "platform", "Windows 11",
             "today", "2026-10-27",
-            "workspace", "pilot");
+            "workspace", "pilot",
+            "skills", "- commit-review：审阅未提交改动");
 
     @Test
     void assemblesSystemPromptWithEnvironment() {
@@ -30,6 +31,22 @@ class PromptLibraryTest {
         assertTrue(prompt.contains("## 工具选择"));
         assertTrue(prompt.contains("## 结论怎么写"));
         assertFalse(prompt.contains("{{"), "系统提示词不应残留未替换的变量");
+    }
+
+    @Test
+    void skillsSectionOnlyAppearsWithUseSkillAndRendersCatalog() {
+        var prompts = PromptLibrary.classpathOnly();
+
+        // use_skill 注册：目录段注入且带出目录数据
+        String withSkills = prompts.system(VARS, java.util.Set.of(
+                "read_file", "run_command", "use_skill"));
+        assertTrue(withSkills.contains("## 技能"));
+        assertTrue(withSkills.contains("- commit-review：审阅未提交改动"));
+
+        // use_skill 未注册：目录段整体消失，连策略文本都不出现（零 token 成本）
+        String withoutSkills = prompts.system(VARS, java.util.Set.of("read_file", "run_command"));
+        assertFalse(withoutSkills.contains("## 技能"));
+        assertFalse(withoutSkills.contains("commit-review"));
     }
 
     @Test
@@ -189,7 +206,7 @@ class PromptLibraryTest {
 
         for (String tool : List.of("read_file", "list_dir", "search_text", "edit_file",
                 "create_file", "run_command", "command_status", "command_logs", "stop_command",
-                "update_plan", "spawn_agent", "dispatch_agents", "glob_files", "apply_patch", "browser",
+                "update_plan", "spawn_agent", "dispatch_agents", "use_skill", "glob_files", "apply_patch", "browser",
                 "mcp_tools", "mcp_call")) {
             String text = prompts.render("tools/" + tool, variables);
             assertFalse(text.isBlank(), tool);

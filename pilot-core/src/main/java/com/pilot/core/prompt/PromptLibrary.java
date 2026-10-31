@@ -27,6 +27,7 @@ import java.util.regex.Pattern;
  * prompts/system/base.md            身份、边界、意图判定
  * prompts/system/workflow.md        调研、计划、编辑、验证
  * prompts/system/tools.md           工具选择策略（跨工具约束）
+ * prompts/system/skills.md          技能目录段（requires: use_skill，{{skills}} 为目录数据）
  * prompts/system/tools-spawn.md     独立调研工具指导（requires: spawn_agent）
  * prompts/system/tools-dispatch.md  并行派发工具指导（requires: dispatch_agents）
  * prompts/system/orchestration.md   证据与风险（对单 Agent 也成立的条款）
@@ -78,6 +79,7 @@ public final class PromptLibrary {
             new SystemSection("system/base", 0),
             new SystemSection("system/workflow", 100),
             new SystemSection("system/tools", 200),
+            new SystemSection("system/skills", 250, Set.of("use_skill")),
             new SystemSection("system/tools-spawn", 300, Set.of("spawn_agent")),
             new SystemSection("system/tools-dispatch", 310, Set.of("dispatch_agents")),
             new SystemSection("system/browser", 350, Set.of("browser")),

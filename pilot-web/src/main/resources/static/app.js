@@ -1,15 +1,20 @@
 import { normalizePath, parseDiff } from './lib/diff.js';
 import {
+  buildModelProbe,
   buildModelUpdate,
   classifyModelError,
   describeModelSaved,
+  describeModelsFetched,
   errorText
 } from './lib/model-settings.js';
 import {
   expandQuickCommand,
   filterPaletteActions,
-  filterQuickCommands
+  filterQuickCommands,
+  QUICK_COMMANDS
 } from './lib/commands.js';
+import { mergeCommands, resolveSkillCommand, skillEntry, emptySkillsHint, toSkillCommands,
+  parseInstallSource, summarizeInstallResults } from './lib/skills.js';
 import { rankFileMatches } from './lib/mention.js';
 import { readDraft, writeDraft } from './lib/drafts.js';
 import { faviconHref, shouldNotify, tabTitle } from './lib/attention.js';
@@ -110,8 +115,9 @@ const el = {
   modelName: document.querySelector('#model-name'),
   modelEndpoint: document.querySelector('#model-endpoint'),
   modelKey: document.querySelector('#model-key'),
- modelClearKey: document.querySelector('#model-clear-key'),
+  modelClearKey: document.querySelector('#model-clear-key'),
   modelHint: document.querySelector('#model-hint'),
+  modelFetch: document.querySelector('#model-fetch'),
   modelSave: document.querySelector('#model-save'),
   contextChip: document.querySelector('#context-chip'),
   contextMenu: document.querySelector('#context-menu'),
@@ -233,9 +239,28 @@ const el = {
   settingsModelKey: document.querySelector('#settings-model-key'),
   settingsModelClearKey: document.querySelector('#settings-model-clear-key'),
   settingsModelSave: document.querySelector('#settings-model-save'),
+  settingsModelFetch: document.querySelector('#settings-model-fetch'),
   settingsModelHint: document.querySelector('#settings-model-hint'),
   permissionOptions: document.querySelector('#permission-options'),
   settingsPermissionHint: document.querySelector('#settings-permission-hint'),
+  skillsProject: document.querySelector('#settings-skills-project'),
+  skillsUser: document.querySelector('#settings-skills-user'),
+  skillsList: document.querySelector('#settings-skills-list'),
+  skillsHint: document.querySelector('#settings-skills-hint'),
+  skillsInstallOpen: document.querySelector('#skills-install-open'),
+  skillsInstall: document.querySelector('#skills-install-modal'),
+  skillsInstallClose: document.querySelector('#skills-install-close'),
+  skillsInstallSource: document.querySelector('#skills-install-source'),
+  skillsInstallBrowse: document.querySelector('#skills-install-browse'),
+  skillsInstallPreview: document.querySelector('#skills-install-preview'),
+  skillsInstallTargetProject: document.querySelector('#skills-install-target-project'),
+  skillsInstallTargetUser: document.querySelector('#skills-install-target-user'),
+  skillsInstallProjectPath: document.querySelector('#skills-install-project-path'),
+  skillsInstallUserPath: document.querySelector('#skills-install-user-path'),
+  skillsInstallCandidates: document.querySelector('#skills-install-candidates'),
+  skillsInstallHint: document.querySelector('#skills-install-hint'),
+  skillsInstallOverwrite: document.querySelector('#skills-install-overwrite'),
+  skillsInstallConfirm: document.querySelector('#skills-install-confirm'),
   aboutWorkspace: document.querySelector('#settings-about-workspace'),
   aboutConnection: document.querySelector('#settings-about-connection'),
   aboutModel: document.querySelector('#settings-about-model'),
@@ -312,6 +337,7 @@ const state = {
   projectEditor: null,
   /** picker 被项目弹窗借用时的回调；为空表示「选完就开新对话」 */
   pickerOnPick: null,
+  pickerOnClose: null,
   workspace: null,
   runId: null,
   lastRunId: null,
@@ -394,6 +420,8 @@ const state = {
     return composerInput.attachmentIds().map((id) => draftAttachments.get(id)).filter(Boolean);
   },
   modelOptions: [],
+  /** 「获取可用模型」拉到的端点清单；null 表示还没探测过，显示配置里的候选 */
+  remoteModels: null,
   modelApiKeySet: false,
   modelApiKeyMasked: '',
   /** 外观偏好：light / dark / system，真正生效的是解析后的 light/dark */
@@ -573,7 +601,19 @@ function init() {
       showSettingsSection(tab.dataset.section);
     }
   });
+  el.skillsInstallOpen.addEventListener('click', openSkillsInstall);
+  el.skillsInstallClose.addEventListener('click', closeSkillsInstall);
+  el.skillsInstall.addEventListener('click', (event) => {
+    if (event.target === el.skillsInstall) {
+      closeSkillsInstall();
+    }
+  });
+  el.skillsInstallBrowse.addEventListener('click', browseSkillsInstallSource);
+  el.skillsInstallPreview.addEventListener('click', () => previewSkillsInstall());
+  el.skillsInstallConfirm.addEventListener('click', () => confirmSkillsInstall());
+  el.skillsInstallOverwrite.addEventListener('click', () => overwriteSkillsInstall());
   el.settingsModelSave.addEventListener('click', saveModelFromSettings);
+  el.settingsModelFetch.addEventListener('click', fetchModelsFromSettings);
   el.settingsModelClearKey.addEventListener('change', onSettingsClearKeyToggle);
   el.changeFiles.addEventListener('keydown', onChangeListKeydown);
   el.changeViewPreview.addEventListener('click', () => {
@@ -616,6 +656,7 @@ function init() {
   el.contextChip.addEventListener('click', () => toggleContextMenu());
   el.contextCompact.addEventListener('click', compactContext);
   el.modelSave.addEventListener('click', saveModel);
+  el.modelFetch.addEventListener('click', fetchModelsFromMenu);
   el.modelClearKey.addEventListener('change', onModelClearKeyToggle);
   el.inputFlow.addEventListener('paste', onPasteAttachments);
   el.attachButton.addEventListener('click', () => el.filePicker.click());
@@ -1313,13 +1354,14 @@ function onModelClearKeyToggle() {
 }
 
 /** 下拉里给出候选模型，点击即切换；当前模型排在最前面。 */
-/** 候选模型列表：当前模型排第一，其余去重保序。 */
+/** 候选模型列表：当前模型排第一；探测过后端点清单优先，没探测过用配置候选。 */
 function modelCandidates(current) {
   const names = [];
   if (current) {
     names.push(current);
   }
-  for (const name of state.modelOptions) {
+  const source = state.remoteModels ?? state.modelOptions;
+  for (const name of source) {
     if (name && !names.includes(name)) {
       names.push(name);
     }
@@ -1499,6 +1541,59 @@ function saveModelFromSettings() {
   });
 }
 
+function fetchModelsFromMenu() {
+  return fetchModelList({
+    endpoint: el.modelEndpoint.value,
+    apiKey: el.modelKey.value,
+    hint: setModelHint,
+    button: el.modelFetch
+  });
+}
+
+function fetchModelsFromSettings() {
+  return fetchModelList({
+    endpoint: el.settingsModelEndpoint.value,
+    apiKey: el.settingsModelKey.value,
+    hint: (text, tone) => setSettingsStatus(el.settingsModelHint, text, tone),
+    button: el.settingsModelFetch
+  });
+}
+
+/**
+ * 「获取可用模型」：用表单里现填的端点与密钥探测，留空由服务端回退到已保存值。
+ *
+ * <p>成功后候选列表整体换成端点返回的清单（模型菜单和设置面板同步），失败保留原列表、
+ * 错误就地显示。探测只读，不会改动已保存的配置。
+ */
+async function fetchModelList(source) {
+  const payload = buildModelProbe({ endpoint: source.endpoint, apiKey: source.apiKey });
+  source.button.disabled = true;
+  source.hint('正在从端点获取模型列表…', 'idle');
+  try {
+    // 后端探测上限 30 秒，这里给到 45 秒，慢中转站也能等到结果
+    const response = await apiFetch('/api/settings/model/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }, 45000);
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const data = await response.json();
+    state.remoteModels = Array.isArray(data.models) ? data.models.slice() : [];
+    renderModelOptions((state.settingsData && state.settingsData.model) || '');
+    renderSettingsModelOptions(el.settingsModelName.value);
+    const endpoint = payload.endpoint || (state.settingsData && state.settingsData.modelEndpoint) || '';
+    source.hint(describeModelsFetched(data, { endpoint }), 'ok');
+    return true;
+  } catch (error) {
+    source.hint('获取失败：' + error.message, 'error');
+    return false;
+  } finally {
+    source.button.disabled = false;
+  }
+}
+
 /** 模型菜单和设置面板共用同一套保存流程，只是把提示写到各自的容器里。 */
 async function submitModel(source) {
   if (!source.model) {
@@ -1566,7 +1661,319 @@ function renderSettings(section) {
   renderAccentOptions();
   renderPermissionOptions();
   renderSettingsModel(state.settingsData);
+  renderSkillsSection();
   renderAbout();
+}
+
+/** 设置页「技能」区块：目录位置、可用/无效清单与空态引导；每次打开重新拉取（装完技能即见）。 */
+async function renderSkillsSection() {
+  if (!el.skillsList) {
+    return;
+  }
+  el.skillsProject.textContent = '…';
+  el.skillsUser.textContent = '…';
+  el.skillsList.replaceChildren();
+  setSettingsStatus(el.skillsHint, '正在读取技能目录…');
+  try {
+    const url = state.sessionId
+      ? `/api/skills?sessionId=${encodeURIComponent(state.sessionId)}`
+      : '/api/skills';
+    const response = await apiFetch(url);
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const data = await response.json();
+    el.skillsProject.textContent = data.projectRoot || '-';
+    el.skillsProject.title = data.projectRoot || '';
+    el.skillsUser.textContent = data.userRoot || '-';
+    el.skillsUser.title = data.userRoot || '';
+
+    const available = Array.isArray(data.available) ? data.available : [];
+    const invalid = Array.isArray(data.invalid) ? data.invalid : [];
+    for (const skill of available) {
+      const entry = skillEntry(skill);
+      const row = document.createElement('div');
+      const name = document.createElement('dt');
+      name.textContent = entry.meta ? `${entry.name}（${entry.meta}）` : entry.name;
+      const description = document.createElement('dd');
+      description.textContent = entry.description;
+      row.append(name, description);
+      el.skillsList.append(row);
+    }
+    for (const problem of invalid) {
+      const row = document.createElement('div');
+      const name = document.createElement('dt');
+      name.textContent = `${problem.name || '（未知目录）'}（无效）`;
+      const reason = document.createElement('dd');
+      reason.textContent = problem.reason || '校验未通过';
+      row.append(name, reason);
+      el.skillsList.append(row);
+    }
+    if (!available.length && !invalid.length) {
+      setSettingsStatus(el.skillsHint, emptySkillsHint(data.projectRoot));
+      return;
+    }
+    const parts = [];
+    if (available.length) {
+      parts.push(`可用 ${available.length} 个`);
+    }
+    if (invalid.length) {
+      parts.push(`无效 ${invalid.length} 个（原因见列表）`);
+    }
+    setSettingsStatus(el.skillsHint, parts.join('；') + '。修改或新增后无需重启，下次运行生效。');
+  } catch (error) {
+    setSettingsStatus(el.skillsHint, '读取失败：' + error.message, 'error');
+  }
+}
+
+/* ---------- 安装技能 ---------- */
+
+/**
+ * 安装弹窗：来源（git / 本机目录）→ 预览候选 → 选目标级别与技能 → 安装。
+ * 冲突时才出现「覆盖安装」；token 全部成功后被服务端作废，重装需重新预览。
+ */
+function openSkillsInstall() {
+  state.skillsInstall = { token: null, kind: null, candidates: [], conflicts: [] };
+  el.skillsInstallSource.value = '';
+  el.skillsInstallCandidates.replaceChildren();
+  el.skillsInstallOverwrite.hidden = true;
+  el.skillsInstallConfirm.disabled = true;
+  el.skillsInstallTargetProject.checked = true;
+  setSettingsStatus(el.skillsInstallHint,
+    '填来源后点「查看内容」；安装只复制文件，不带任何钩子。');
+  el.skillsInstall.hidden = false;
+  const url = state.sessionId
+    ? `/api/skills?sessionId=${encodeURIComponent(state.sessionId)}`
+    : '/api/skills';
+  apiFetch(url)
+    .then((response) => (response.ok ? response.json() : null))
+    .then((data) => {
+      if (!data) {
+        return;
+      }
+      el.skillsInstallProjectPath.textContent = data.projectRoot ? `（${data.projectRoot}）` : '';
+      el.skillsInstallProjectPath.title = data.projectRoot || '';
+      el.skillsInstallUserPath.textContent = data.userRoot ? `（${data.userRoot}）` : '';
+      el.skillsInstallUserPath.title = data.userRoot || '';
+    })
+    .catch(() => { });
+  el.skillsInstallSource.focus();
+}
+
+function closeSkillsInstall() {
+  el.skillsInstall.hidden = true;
+  // 不通知服务端：暂存区由 10 分钟 TTL 自然回收，数据只落在本地数据目录
+  state.skillsInstall = null;
+}
+
+/** 借用目录选择器挑本机路径；取消也要恢复安装弹窗，不能停在「什么都没了」的假死态。 */
+function browseSkillsInstallSource() {
+  el.skillsInstall.hidden = true;
+  openPicker({
+    onPick: (path) => {
+      el.skillsInstallSource.value = path;
+      el.skillsInstall.hidden = false;
+      el.skillsInstallSource.focus();
+    },
+    onClose: () => {
+      el.skillsInstall.hidden = false;
+    }
+  });
+}
+
+async function previewSkillsInstall() {
+  if (!state.skillsInstall) {
+    return;
+  }
+  const source = parseInstallSource(el.skillsInstallSource.value);
+  if (!source) {
+    setSettingsStatus(el.skillsInstallHint,
+      '来源要填 http(s):// 开头的 git 地址，或本机技能目录的绝对路径（如 D:\\skills\\review）。', 'error');
+    return;
+  }
+  el.skillsInstallPreview.disabled = true;
+  setSettingsStatus(el.skillsInstallHint,
+    source.type === 'git' ? '正在拉取仓库（浅克隆）…' : '正在读取目录…');
+  try {
+    const response = await apiFetch('/api/skills/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: source.value,
+        ...(state.sessionId ? { sessionId: state.sessionId } : {})
+      })
+    });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    const data = await response.json();
+    state.skillsInstall.token = data.token;
+    state.skillsInstall.kind = data.kind;
+    state.skillsInstall.candidates = Array.isArray(data.candidates) ? data.candidates : [];
+    renderSkillsInstallCandidates();
+    if (!state.skillsInstall.candidates.length) {
+      setSettingsStatus(el.skillsInstallHint, data.message || '来源里没有找到可安装的技能。');
+    }
+  } catch (error) {
+    setSettingsStatus(el.skillsInstallHint, '查看内容失败：' + error.message, 'error');
+  } finally {
+    el.skillsInstallPreview.disabled = false;
+  }
+}
+
+/** 候选列表：合法项带复选框默认全选，无效项灰显带原因。 */
+function renderSkillsInstallCandidates() {
+  const install = state.skillsInstall;
+  if (!install) {
+    return;
+  }
+  install.conflicts = [];
+  el.skillsInstallOverwrite.hidden = true;
+  el.skillsInstallCandidates.replaceChildren();
+  for (const candidate of install.candidates) {
+    const row = document.createElement('div');
+    const name = document.createElement('dt');
+    const description = document.createElement('dd');
+    if (candidate.valid) {
+      const label = document.createElement('label');
+      label.className = 'settings-check';
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.checked = true;
+      check.dataset.skillName = candidate.name;
+      check.addEventListener('change', updateSkillsInstallConfirm);
+      const text = document.createElement('span');
+      text.textContent = candidate.name + (candidate.command ? ` · ${candidate.command}` : '');
+      label.append(check, text);
+      name.append(label);
+      description.textContent = candidate.description || '';
+    } else {
+      name.textContent = `${candidate.name}（无效，不可安装）`;
+      description.textContent = candidate.reason || '校验未通过';
+    }
+    row.append(name, description);
+    el.skillsInstallCandidates.append(row);
+  }
+  updateSkillsInstallConfirm();
+}
+
+function selectedSkillsInstallNames() {
+  return [...el.skillsInstallCandidates.querySelectorAll('input[type="checkbox"]:checked')]
+    .map((input) => input.dataset.skillName)
+    .filter(Boolean);
+}
+
+function updateSkillsInstallConfirm() {
+  const install = state.skillsInstall;
+  el.skillsInstallConfirm.disabled = !install
+    || !install.token
+    || el.skillsInstallPreview.disabled
+    || selectedSkillsInstallNames().length === 0;
+}
+
+async function confirmSkillsInstall() {
+  const install = state.skillsInstall;
+  if (!install || !install.token) {
+    return;
+  }
+  const skills = selectedSkillsInstallNames();
+  if (!skills.length) {
+    return;
+  }
+  el.skillsInstallConfirm.disabled = true;
+  setSettingsStatus(el.skillsInstallHint, '正在安装…');
+  try {
+    const response = await apiFetch('/api/skills/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: install.token,
+        skills,
+        target: el.skillsInstallTargetProject.checked ? 'project' : 'user',
+        ...(state.sessionId ? { sessionId: state.sessionId } : {})
+      })
+    });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    applySkillsInstallResults((await response.json()).results || []);
+  } catch (error) {
+    setSettingsStatus(el.skillsInstallHint, '安装失败：' + error.message, 'error');
+  } finally {
+    updateSkillsInstallConfirm();
+  }
+}
+
+/** 冲突项重发 overwrite=true：只覆盖冲突的技能，已装好的不重装。 */
+async function overwriteSkillsInstall() {
+  const install = state.skillsInstall;
+  if (!install || !install.token || !install.conflicts.length) {
+    return;
+  }
+  el.skillsInstallOverwrite.disabled = true;
+  setSettingsStatus(el.skillsInstallHint, '正在覆盖安装…');
+  try {
+    const response = await apiFetch('/api/skills/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: install.token,
+        skills: install.conflicts,
+        target: el.skillsInstallTargetProject.checked ? 'project' : 'user',
+        ...(state.sessionId ? { sessionId: state.sessionId } : {}),
+        overwrite: true
+      })
+    });
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+    applySkillsInstallResults((await response.json()).results || []);
+  } catch (error) {
+    setSettingsStatus(el.skillsInstallHint, '覆盖安装失败：' + error.message, 'error');
+  } finally {
+    el.skillsInstallOverwrite.disabled = false;
+  }
+}
+
+function applySkillsInstallResults(results) {
+  const install = state.skillsInstall;
+  if (!install) {
+    return;
+  }
+  const summary = summarizeInstallResults(results);
+  install.conflicts = summary.conflicts;
+  el.skillsInstallOverwrite.hidden = !summary.conflicts.length;
+  const parts = [];
+  if (summary.installed.length) {
+    parts.push(`已安装：${summary.installed.join('、')}`);
+  }
+  if (summary.conflicts.length) {
+    parts.push(`同名冲突：${summary.conflicts.join('、')}（点「覆盖安装」删旧装新）`);
+  }
+  if (summary.errors.length) {
+    parts.push(`失败：${summary.errors.map((item) => `${item.name}（${item.reason}）`).join('；')}`);
+  }
+  setSettingsStatus(el.skillsInstallHint,
+    parts.length ? parts.join('；') + '。' : '没有执行任何安装。',
+    summary.conflicts.length || summary.errors.length ? 'error' : 'idle');
+  if (summary.installed.length) {
+    // 装完立刻可见：设置页清单 + / 菜单的技能命令
+    renderSkillsSection();
+    refreshSkills(state.sessionId);
+    // 已装项取消勾选，防止误重装同名触发覆盖流程；token 保留到 TTL，换目标继续装不必重新预览
+    uncheckSkillsInstallItems(summary.installed);
+  }
+  updateSkillsInstallConfirm();
+}
+
+/** 把指定技能名的候选行取消勾选（安装成功后调用）。 */
+function uncheckSkillsInstallItems(names) {
+  const done = new Set(names || []);
+  for (const input of el.skillsInstallCandidates.querySelectorAll('input[type="checkbox"]')) {
+    if (done.has(input.dataset.skillName)) {
+      input.checked = false;
+    }
+  }
 }
 
 function showSettingsSection(section) {
@@ -1984,6 +2391,9 @@ async function activate(sessionId, title, workspace) {
   state.fileIndex = [];
   state.fileIndexSession = null;
   state.fileIndexFailedAt = 0;
+  // 技能清单同理：项目级技能在 .pilot/skills 里，随工作区变化
+  state.skills = [];
+  refreshSkills(sessionId);
   loadInputHistory(sessionId);
   restoreDraft(sessionId);
   state.sessionTitle = title || '新任务';
@@ -6502,6 +6912,8 @@ function changeHint(text) {
 async function openPicker(options = {}) {
   // 项目弹窗借用同一个目录浏览器：选完把路径交回去，而不是直接开对话
   state.pickerOnPick = typeof options.onPick === 'function' ? options.onPick : null;
+  // 选择器被取消（Esc/关闭按钮）时也要通知借用方，否则借用弹窗永远停在隐藏态
+  state.pickerOnClose = typeof options.onClose === 'function' ? options.onClose : null;
   el.pickerConfirm.textContent = state.pickerOnPick ? '选择此文件夹' : '在此工作区开始';
   el.picker.hidden = false;
   el.pickerError.hidden = true;
@@ -6516,6 +6928,11 @@ async function openPicker(options = {}) {
 
 function closePicker() {
   el.picker.hidden = true;
+  if (state.pickerOnClose) {
+    const onClose = state.pickerOnClose;
+    state.pickerOnClose = null;
+    onClose();
+  }
 }
 
 async function loadRoots() {
@@ -6649,7 +7066,16 @@ function confirmPicker() {
   if (!target) {
     return;
   }
+  // 借用模式下确认 = 把路径交回借用方，不开新对话（openPicker 的 onPick 此前从未被
+  // 消费，「添加文件夹」借用时点确认会误开新会话——在这里补齐意图）
+  const onPick = state.pickerOnPick;
+  state.pickerOnPick = null;
+  state.pickerOnClose = null;
   closePicker();
+  if (onPick) {
+    onPick(target);
+    return;
+  }
   startSession(target);
 }
 
@@ -6718,6 +7144,14 @@ async function submitMessage(content, attachments = [], imagePositions = []) {
   if ((!content && !attachments.length) || !state.sessionId) {
     return;
   }
+  // 技能命令：`/命令 参数` 精确命中时以 skill 字段发送，正文只留参数；
+  // 排队消息不支持技能（后端 409），运行中退化为普通文本
+  const skillCall = !state.running && !attachments.length
+    ? resolveSkillCommand(content, toSkillCommands(state.skills))
+    : null;
+  const payloadContent = skillCall
+    ? (skillCall.args || '（用户未提供额外要求，按技能指引执行）')
+    : content;
   if (content.trim()) {
     rememberInput(content);
   }
@@ -6749,7 +7183,8 @@ async function submitMessage(content, attachments = [], imagePositions = []) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        content,
+        content: payloadContent,
+        ...(skillCall ? { skill: skillCall.skill } : {}),
         ...(taskRequirements ? { task: taskRequirements } : {}),
         attachments: attachments.map((item) => ({
           name: item.name,
@@ -7197,6 +7632,10 @@ function onGlobalKeydown(event) {
     return;
   }
   if (event.key === 'Escape') {
+    if (!el.skillsInstall.hidden) {
+      closeSkillsInstall();
+      return;
+    }
     if (!el.settings.hidden) {
       closeSettings();
       return;
@@ -8545,6 +8984,32 @@ function refreshChangeMarkers(files) {
 
 /* ---------- 输入框：@ 引用与 / 快捷指令 ---------- */
 
+/** 输入框 `/` 菜单的候选：内置快捷指令 + 技能命令（同名时技能遮蔽内置）。 */
+function composerCommands() {
+  return mergeCommands(QUICK_COMMANDS, toSkillCommands(state.skills));
+}
+
+/** 拉取当前会话的技能清单；失败时清空，不阻塞会话加载。无会话时按默认工作区取。 */
+function refreshSkills(sessionId) {
+  const url = sessionId
+    ? `/api/skills?sessionId=${encodeURIComponent(sessionId)}`
+    : '/api/skills';
+  apiFetch(url)
+    .then((response) => (response.ok ? response.json() : null))
+    .then((data) => {
+      if (!data || state.sessionId !== sessionId) {
+        return;
+      }
+      state.skills = Array.isArray(data.available) ? data.available : [];
+      // 清单回来时菜单可能还开着，按当前输入重渲染（与文件索引同款处理）
+      if (!el.refMenu.hidden && state.refKind === 'command') {
+        onComposerInput();
+      }
+    })
+    .catch(() => {
+      state.skills = [];
+    });
+}
 
 /** 草稿只存纯文字：带附件芯片或正在编辑排队消息时不动它。 */
 function scheduleDraftSave() {
@@ -8590,7 +9055,7 @@ function onComposerInput() {
 function showRefMenu(kind, query) {
   let items;
   if (kind === 'command') {
-    items = filterQuickCommands(query);
+    items = filterQuickCommands(query, composerCommands());
   } else {
     // 文件树是懒加载的，只看已展开的目录会漏掉大部分文件；用整仓清单排序
     ensureFileIndex();
@@ -8709,9 +9174,14 @@ function applyRef(item) {
   const kind = state.refKind;
   hideRefMenu();
   if (kind === 'command') {
-    const commandMatch = /^\/([\w-]*)(?:\s+(.*))?$/.exec(composerInput.textBeforeCaret());
-    const prompt = expandQuickCommand(item, commandMatch?.[2] || '');
-    el.input.value = prompt + composerInput.textAfterCaret();
+    const commandMatch = /[\/]([\w-]*)(?:\s+(.*))?$/.exec(composerInput.textBeforeCaret());
+    if (item.skill) {
+      // 技能命令：只补全指令名，参数留给用户继续输入；发送时才映射成 skill 字段
+      el.input.value = item.name + ' ' + composerInput.textAfterCaret();
+    } else {
+      const prompt = expandQuickCommand(item, commandMatch?.[2] || '');
+      el.input.value = prompt + composerInput.textAfterCaret();
+    }
     composerInput.focusEnd();
   } else {
     // 选中的文件变成输入框里的一个引用芯片，发送时还原成 @路径

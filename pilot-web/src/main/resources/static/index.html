@@ -22,7 +22,7 @@
   </script>
   <link rel="preload" href="/fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/ibm-plex-sans-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/style.css?v=30">
+  <link rel="stylesheet" href="/style.css?v=31">
   <link rel="stylesheet" href="/shell.css?v=25">
 </head>
 <body>
@@ -255,7 +255,11 @@
                     <p id="model-hint" class="model-hint" role="status" aria-live="polite"></p>
                     <div class="model-actions">
                       <label class="model-clear-key"><input id="model-clear-key" type="checkbox"> 清除已保存密钥</label>
-                      <button id="model-save" class="btn btn-primary btn-sm" type="button">保存</button>
+                      <span class="model-actions-buttons">
+                        <button id="model-fetch" class="btn btn-sm" type="button"
+                                title="用当前端点与密钥拉取可用模型清单">获取模型</button>
+                        <button id="model-save" class="btn btn-primary btn-sm" type="button">保存</button>
+                      </span>
                     </div>
                   </div>
                 </span>
@@ -513,6 +517,7 @@
         <button class="settings-tab is-on" type="button" data-section="appearance">外观</button>
         <button class="settings-tab" type="button" data-section="model">模型</button>
         <button class="settings-tab" type="button" data-section="permission">权限</button>
+        <button class="settings-tab" type="button" data-section="skills">技能</button>
         <button class="settings-tab" type="button" data-section="keys">快捷键</button>
         <button class="settings-tab" type="button" data-section="about">关于</button>
       </nav>
@@ -528,7 +533,7 @@
 
         <section class="settings-pane" data-section="model" hidden>
           <h3 class="settings-title">模型</h3>
-          <p class="settings-hint">留空表示保持当前值，保存后下一次模型请求生效。</p>
+          <p class="settings-hint">留空表示保持当前值，保存后下一次模型请求生效；填好端点与密钥后可点「获取模型」拉取清单。</p>
           <div id="settings-model-options" class="settings-model-options" role="listbox" aria-label="候选模型"></div>
           <label class="settings-field"><span>模型</span><input id="settings-model-name" type="text" spellcheck="false" placeholder="gpt-5.1"></label>
           <label class="settings-field"><span>端点</span><input id="settings-model-endpoint" type="text" spellcheck="false" placeholder="https://api.openai.com/v1"></label>
@@ -536,7 +541,11 @@
           <p id="settings-model-hint" class="settings-status" role="status" aria-live="polite"></p>
           <div class="settings-actions">
             <label class="settings-check"><input id="settings-model-clear-key" type="checkbox"> 清除已保存密钥</label>
-            <button id="settings-model-save" class="btn btn-primary" type="button">保存模型</button>
+            <span class="settings-actions-buttons">
+              <button id="settings-model-fetch" class="btn" type="button"
+                      title="用当前端点与密钥拉取可用模型清单">获取模型</button>
+              <button id="settings-model-save" class="btn btn-primary" type="button">保存模型</button>
+            </span>
           </div>
         </section>
 
@@ -545,6 +554,21 @@
           <p class="settings-hint">决定工具能做什么：从只读到全放行，切换后立即生效。</p>
           <div id="permission-options" class="permission-options" role="radiogroup" aria-label="权限模式"></div>
           <p id="settings-permission-hint" class="settings-status" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="settings-pane" data-section="skills" hidden>
+          <h3 class="settings-title">技能</h3>
+          <p class="settings-hint">技能是打包好的工作流程与领域知识（目录里放 SKILL.md 与参考文件），装进目录即生效、无需重启；同名时项目级遮蔽用户级。带快捷命令的技能会出现在输入框的 / 菜单。</p>
+          <div class="settings-actions">
+            <button id="skills-install-open" class="btn btn-primary" type="button">安装技能</button>
+          </div>
+          <dl class="settings-about">
+            <div><dt>项目级目录</dt><dd id="settings-skills-project" class="mono">-</dd></div>
+            <div><dt>用户级目录</dt><dd id="settings-skills-user" class="mono">-</dd></div>
+          </dl>
+          <h3 class="settings-title">可用技能</h3>
+          <dl id="settings-skills-list" class="settings-about"></dl>
+          <p id="settings-skills-hint" class="settings-status" role="status" aria-live="polite"></p>
         </section>
 
         <section class="settings-pane" data-section="keys" hidden>
@@ -579,7 +603,47 @@
 
 <div id="scrim" class="scrim" hidden></div>
 
+<div id="skills-install-modal" class="modal" hidden>
+  <div class="modal-box project-box" role="dialog" aria-modal="true" aria-labelledby="skills-install-title">
+    <header class="modal-head">
+      <div>
+        <h2 id="skills-install-title">安装技能</h2>
+        <p class="modal-sub">从 git 仓库或本机目录安装。纯复制、不执行来源里的任何代码；先查看内容，装什么由你勾选。</p>
+      </div>
+      <button id="skills-install-close" class="icon-btn" type="button" aria-label="关闭">✕</button>
+    </header>
+    <div class="project-body">
+      <label class="settings-field"><span>来源（git 地址或本机目录）</span>
+        <input id="skills-install-source" type="text" spellcheck="false"
+               placeholder="https://github.com/…/某个技能仓库 或 D:\skills\review"></label>
+      <div class="settings-actions">
+        <button id="skills-install-browse" class="btn btn-sm" type="button">浏览本机目录…</button>
+        <button id="skills-install-preview" class="btn" type="button">查看内容</button>
+      </div>
+      <div class="project-folders-head"><span>安装位置</span></div>
+      <label class="settings-check">
+        <input id="skills-install-target-project" type="radio" name="skills-install-target" value="project" checked>
+        项目级（当前工作区，随仓库可共享）
+        <span id="skills-install-project-path" class="mono"></span>
+      </label>
+      <label class="settings-check">
+        <input id="skills-install-target-user" type="radio" name="skills-install-target" value="user">
+        用户级（全局，所有工作区可用）
+        <span id="skills-install-user-path" class="mono"></span>
+      </label>
+      <div class="project-folders-head"><span>可安装内容</span></div>
+      <dl id="skills-install-candidates" class="settings-about"></dl>
+      <p id="skills-install-hint" class="settings-status" role="status" aria-live="polite"></p>
+    </div>
+    <footer class="modal-foot">
+      <button id="skills-install-overwrite" class="btn btn-danger" type="button" hidden>覆盖安装</button>
+      <span class="project-foot-spacer"></span>
+      <button id="skills-install-confirm" class="btn btn-primary" type="button" disabled>安装所选</button>
+    </footer>
+  </div>
+</div>
+
 <div id="drop-veil" class="drop-veil" hidden>松开以添加文件</div>
-  <script type="module" src="/app.js?v=61"></script>
+  <script type="module" src="/app.js?v=62"></script>
 </body>
 </html>

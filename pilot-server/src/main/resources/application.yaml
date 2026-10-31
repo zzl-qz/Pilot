@@ -94,6 +94,11 @@ pilot:
   runtime:
     # true：缺 Python 3.12 / Node 22 时下载到 .pilot/runtime，run_command 优先用它们
     provision: ${PILOT_RUNTIME_PROVISION:true}
+  # 技能：SKILL.md + 参考文件 + 可选脚本的纯文件技能包，激活即注入指引、动作仍走既有工具
+  # 项目级 <workspace>/.pilot/skills（随仓库走）、用户级 <dataDir>/skills（本机个人库，PILOT_SKILLS_DIR 可改）
+  skills:
+    # false 时整条链退化：use_skill 不注册、目录段不注入、/api/skills 返回空
+    enabled: true
   # 命令执行的隔离级别。local 只做应用层检查；container 会在容器里跑校验命令，
   # 需要本机有 Docker/Podman 和包含项目工具链的镜像。容器不可用时不会静默降级，
   # /api/maintenance/status 会显示降级原因。
