@@ -1,6 +1,7 @@
 package com.pilot.server.browser;
 
 import com.pilot.core.browser.BrowserBackend;
+import com.pilot.core.browser.BrowserEventListener;
 import com.pilot.core.browser.PlaywrightBackend;
 import com.pilot.core.tool.Availability;
 import com.pilot.server.config.PilotDataDir;
@@ -71,6 +72,8 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     private volatile String pendingReason = "浏览器运行时尚未启动";
     private volatile boolean running;
     private volatile Thread worker;
+    /** 镜像订阅方注册的监听者：backend 异步重建时随实例转移。 */
+    private volatile BrowserEventListener eventListener;
 
     public BrowserRuntime(PilotDataDir dataDir, ObjectMapper mapper,
                           @Value("${pilot.browser.enabled:true}") boolean enabled,
@@ -113,6 +116,31 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     public void closeSession(String sessionId) {
         PlaywrightBackend current = backend;
         if (current != null) current.closeSession(sessionId);
+    }
+
+    @Override
+    public void setEventListener(BrowserEventListener listener) {
+        this.eventListener = listener;
+        PlaywrightBackend current = backend;
+        if (current != null) current.setEventListener(listener);
+    }
+
+    @Override
+    public void mirrorControl(String sessionId, boolean start, int maxWidth, int quality) {
+        PlaywrightBackend current = backend;
+        if (current != null) current.mirrorControl(sessionId, start, maxWidth, quality);
+    }
+
+    @Override
+    public void focusPage(String sessionId) {
+        PlaywrightBackend current = backend;
+        if (current != null) current.focusPage(sessionId);
+    }
+
+    /** sidecar 是否声明了镜像事件能力（握手协商结果；未就绪时为 false）。 */
+    public boolean mirrorCapable() {
+        PlaywrightBackend current = backend;
+        return current != null && current.mirrorCapable();
     }
 
     @Override
@@ -166,6 +194,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
             boolean headless = resolveHeadless();
             PlaywrightBackend candidate = new PlaywrightBackend(node, script, home, mapper,
                     idleMillis(headless), sidecarEnvironment(home, headless));
+            candidate.setEventListener(eventListener);
             Availability result = candidate.probe();
             if (!result.available() && provision && downloadChromium
                     && result.reason().contains("没有找到可用的")

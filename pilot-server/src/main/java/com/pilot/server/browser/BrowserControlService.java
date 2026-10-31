@@ -1,0 +1,217 @@
+package com.pilot.server.browser;
+
+import com.pilot.core.browser.BrowserEventListener;
+import com.pilot.core.tool.Availability;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
+import jakarta.annotation.PreDestroy;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * 浏览器镜像的订阅分发与上行动作入口（瞬态通道，与持久化事件流完全分开）。
+ *
+ * <p>sidecar 的镜像帧是高频瞬态数据：每个会话只保留最新一帧（latest-wins），
+ * 慢消费者自动丢帧、不排队；帧不落库、不落盘——断线重连靠补发缓存帧即可，
+ * 无需游标。若把它塞进 {@code /sessions/{id}/events}（带 sequence、落 pilot.db），
+ * 会把库撑爆并污染历史回放，因此这里是独立的 SSE 端点。
+ *
+ * <p>订阅联动：某会话的第一个订阅者出现时向 sidecar 开 screencast，最后一个断开时
+ * 停止——侧栏折叠（EventSource 关闭）即停止产帧，展开重连自动恢复。
+ *
+ * <p>线程模型：sidecar 事件在 PlaywrightBackend 的单线程事件流里进入 {@link #onEvent}；
+ * SSE 写入以 per-state 锁串行化（HTTP 线程的补发与事件线程的广播互斥），
+ * mirrorControl / focus 等控制动作统一交给单线程 executor，不阻塞请求与事件线程。
+ */
+@Service
+public class BrowserControlService implements BrowserEventListener {
+    private static final Logger log = LoggerFactory.getLogger(BrowserControlService.class);
+
+    private final BrowserRuntime runtime;
+    private final ObjectMapper mapper;
+    private final int maxWidth;
+    private final int quality;
+    private final boolean enabled;
+    private final ConcurrentMap<String, State> states = new ConcurrentHashMap<>();
+    /** 控制动作（开/关镜像、置前）串行执行，避免并发拉起重复请求。 */
+    private final ExecutorService controls = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "pilot-browser-control");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    public BrowserControlService(BrowserRuntime runtime, ObjectMapper mapper,
+                                 @Value("${pilot.browser.mirror.enabled:true}") boolean enabled,
+                                 @Value("${pilot.browser.mirror.max-width:960}") int maxWidth,
+                                 @Value("${pilot.browser.mirror.quality:55}") int quality) {
+        this.runtime = runtime;
+        this.mapper = mapper;
+        this.enabled = enabled;
+        this.maxWidth = clamp(maxWidth, 320, 1920);
+        this.quality = clamp(quality, 20, 90);
+        // 事件监听注册在这里而不是 BrowserRuntime 构造时：避免两个 bean 的构造依赖成环。
+        runtime.setEventListener(this);
+    }
+
+    /** 镜像链路是否开启（pilot.browser.mirror.enabled=false 时端点直接 204）。 */
+    public boolean mirrorEnabled() {
+        return enabled;
+    }
+
+    /** sidecar 是否已声明镜像事件能力（旧 sidecar 无事件通道时不推帧）。 */
+    public boolean mirrorCapable() {
+        return runtime.mirrorCapable();
+    }
+
+    /** 镜像面板的轻量状态：前端据此决定是否显示浏览器 tab、能否连 SSE。 */
+    public Map<String, Object> status(String sessionId) {
+        Availability availability = runtime.availability();
+        return Map.of(
+                "enabled", enabled,
+                "capable", runtime.mirrorCapable(),
+                "available", availability.available(),
+                "reason", availability.reason(),
+                "paused", runtime.interactionsPaused(sessionId));
+    }
+
+    /** 订阅某个会话的镜像帧；连接建立即补发当前状态与最新一帧。 */
+    public SseEmitter subscribe(String sessionId) {
+        return subscribe(sessionId, new SseEmitter(0L));
+    }
+
+    /** 同上，但允许调用方（控制器/测试）自带 emitter。 */
+    public SseEmitter subscribe(String sessionId, SseEmitter emitter) {
+        State state = states.computeIfAbsent(sessionId, key -> new State(key));
+        boolean first;
+        synchronized (state) {
+            first = state.subscribers.isEmpty();
+            state.subscribers.add(emitter);
+        }
+        if (first) {
+            controls.execute(() -> runtime.mirrorControl(sessionId, true, maxWidth, quality));
+        }
+        synchronized (state) {
+            push(state, emitter, "state", statePayload(sessionId));
+            if (state.frame != null) {
+                push(state, emitter, "frame", state.frame.toString());
+            }
+        }
+        return emitter;
+    }
+
+    /** 订阅者断开（页面关闭/折叠/出错）；最后一个断开时停止该会话的 screencast。幂等。 */
+    public void unsubscribe(String sessionId, SseEmitter emitter) {
+        State state = states.get(sessionId);
+        if (state == null) return;
+        synchronized (state) {
+            drop(state, emitter);
+        }
+    }
+
+    /** 把某个会话的浏览器窗口置前（不置顶循环）。 */
+    public void focus(String sessionId) {
+        controls.execute(() -> runtime.focusPage(sessionId));
+    }
+
+    @Override
+    public void onEvent(String sessionId, String kind, JsonNode payload) {
+        switch (kind) {
+            case "mirror-frame" -> {
+                State state = states.get(sessionId);
+                if (state == null) return;
+                state.frame = payload; // latest-wins：新帧直接覆盖，旧帧即弃
+                broadcast(state, "frame", payload.toString());
+            }
+            case "agent-action" -> broadcastTo(sessionId, "action", payload);
+            case "nav" -> broadcastTo(sessionId, "nav", payload);
+            case "browser-closed" -> {
+                // 进程级事件：浏览器断了（空闲回收/崩溃/用户手关），提示所有会话并清掉缓存帧。
+                for (State state : states.values()) {
+                    state.frame = null;
+                    broadcast(state, "closed", payload.toString());
+                }
+            }
+            default -> {
+                // 未知事件忽略，向前兼容新 sidecar
+            }
+        }
+    }
+
+    /** 清理控制线程；Spring 关闭时由容器回调。 */
+    @PreDestroy
+    public void shutdown() {
+        controls.shutdownNow();
+    }
+
+    // ---- 内部 ---------------------------------------------------------------------------
+
+    private void broadcastTo(String sessionId, String name, JsonNode payload) {
+        State state = states.get(sessionId);
+        if (state == null) return;
+        broadcast(state, name, payload.toString());
+    }
+
+    private void broadcast(State state, String name, String data) {
+        synchronized (state) {
+            for (SseEmitter emitter : List.copyOf(state.subscribers)) {
+                push(state, emitter, name, data);
+            }
+        }
+    }
+
+    /** 必须持有 state 锁；写失败（对端断开）时移除订阅，最后一个断开时联动停帧。 */
+    private void push(State state, SseEmitter emitter, String name, String data) {
+        try {
+            emitter.send(SseEmitter.event().name(name).data(data));
+        } catch (IOException | IllegalStateException error) {
+            // ClientAbortException 等：对端已断，静默收尾并摘掉订阅
+            drop(state, emitter);
+        }
+    }
+
+    /** 必须持有 state 锁。 */
+    private void drop(State state, SseEmitter emitter) {
+        if (!state.subscribers.remove(emitter) && state.subscribers.contains(emitter)) {
+            // CopyOnWriteArrayList 语义下 remove 已足够；此分支只为可读性
+        }
+        if (!state.subscribers.isEmpty()) return;
+        state.frame = null;
+        states.remove(state.id, state);
+        controls.execute(() -> runtime.mirrorControl(state.id, false, maxWidth, quality));
+    }
+
+    private String statePayload(String sessionId) {
+        return mapper.writeValueAsString(Map.of(
+                "sessionId", sessionId,
+                "paused", runtime.interactionsPaused(sessionId),
+                "available", runtime.availability().available()));
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    /** 每个会话的镜像状态：最新一帧 + 订阅者表。 */
+    private static final class State {
+        final String id;
+        final List<SseEmitter> subscribers = new CopyOnWriteArrayList<>();
+        volatile JsonNode frame;
+
+        State(String id) {
+            this.id = id;
+        }
+    }
+}
