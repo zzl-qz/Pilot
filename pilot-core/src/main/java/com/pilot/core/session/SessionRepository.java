@@ -94,6 +94,17 @@ public interface SessionRepository {
     long latestSequence(String sessionId);
 
     /**
+     * 跨会话取某类型的事件（用量聚合等全库视角用），按时间升序。
+     * 默认实现返回空：内存实现没有跨会话查询的场景。
+     *
+     * @param type 事件的 wireName，例如 {@code run.usage}
+     * @param since 只取这个时刻之后的事件
+     */
+    default List<EventEnvelope> eventsOfType(String type, java.time.Instant since) {
+        return List.of();
+    }
+
+    /**
      * 删掉序号大于等于 {@code fromSequence} 的事件。
      * 会话自己的序号计数器不动，后面新事件继续递增，避免和已经发出去的 SSE 游标撞号。
      *
