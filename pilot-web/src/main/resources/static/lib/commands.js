@@ -24,10 +24,12 @@ export const QUICK_COMMANDS = [
   },
   {
     name: '/review',
-    label: '审阅改动',
-    hint: '按风险审阅未提交改动',
+    label: '独立审查',
+    hint: '固定审查协议+只读工具，按风险审阅改动（可指定范围）',
     aliases: ['review'],
-    prompt: (args) => `审阅当前工作区未提交的改动${args ? `，重点关注：${args}` : ''}，按风险从高到低列出问题与建议。`
+    // 直发命令原文：服务端识别 /review 后进入独立审查模式（只读工具表 + 固定协议），
+    // 不在前端展开成自然语言——那会退回普通对话，协议与只读裁剪都不生效。
+    prompt: (args) => `/review${args ? ` ${args}` : ''}`
   },
   {
     name: '/explain',
