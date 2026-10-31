@@ -619,8 +619,8 @@ class AgentLoopTest {
                 .map(RunRetrying.class::cast)
                 .toList();
         assertEquals(2, retries.size());
-        assertEquals(2_000L, retries.get(0).delayMs());
-        assertEquals(4_000L, retries.get(1).delayMs());
+        assertEquals(3_000L, retries.get(0).delayMs());
+        assertEquals(3_000L, retries.get(1).delayMs());
         assertEquals(6_000L, waited.stream().mapToLong(Long::longValue).sum());
     }
 
@@ -678,23 +678,26 @@ class AgentLoopTest {
     }
 
     @Test
-    void stopsAfterThreeServerSideTransientRetries() {
+    void keepsRetryingServerErrorsUntilCancelled() {
         AtomicInteger calls = new AtomicInteger();
+        AtomicBoolean cancelled = new AtomicBoolean();
         ModelClient client = (messages, tools) -> {
-            calls.incrementAndGet();
+            if (calls.incrementAndGet() >= 8) {
+                cancelled.set(true);
+            }
             throw new ModelClientException(ModelFailureKind.TRANSIENT,
                     "模型接口返回 HTTP 503（10 ms, model=gpt）：unavailable");
         };
         AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(),
-                config(8, 3), Cancellation.none(), () -> null, (call, result, latencyMs) -> { },
+                config(8, 3), cancelled::get, () -> null, (call, result, latencyMs) -> { },
                 millis -> { }, null);
 
         AgentLoop.Result result = loop.run("你好", List.of(), events::add);
 
-        assertEquals("MODEL_ERROR", result.failureCode());
-        assertEquals(5, calls.get(), "四次业务请求失败后仍会尝试一次无工具收尾");
-        assertEquals(3, events.stream().filter(RunRetrying.class::isInstance).count());
-        assertTrue(eventTypes().contains("run.failed"));
+        assertEquals("CANCELLED", result.failureCode());
+        assertEquals(8, calls.get(), "5xx 也不再限制次数，由用户决定什么时候停");
+        assertEquals(7, events.stream().filter(RunRetrying.class::isInstance).count());
+        assertFalse(eventTypes().contains("run.failed"));
     }
 
     @Test
@@ -722,6 +725,52 @@ class AgentLoopTest {
     }
 
     @Test
+    void recoversFromExternalInterruptWithoutCancellation() {
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient client = (messages, tools) -> {
+            if (calls.getAndIncrement() == 0) {
+                // 服务重启/关停会 interrupt 工作线程，客户端抛错前还重新置了中断位
+                Thread.currentThread().interrupt();
+                throw new ModelClientException(ModelFailureKind.INTERRUPTED, "模型请求被中断");
+            }
+            return new ModelResponse("中断后恢复。", List.of());
+        };
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(),
+                config(8, 3), Cancellation.none(), () -> null, (call, result, latencyMs) -> { },
+                millis -> { }, null);
+
+        AgentLoop.Result result = loop.run("你好", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals(2, calls.get());
+        assertFalse(Thread.currentThread().isInterrupted(), "残留的中断位必须清掉，否则后续请求会立刻失败");
+        assertFalse(eventTypes().contains("run.failed"));
+    }
+
+    @Test
+    void keepsRetryingExternalInterruptsUntilCancelled() {
+        AtomicInteger calls = new AtomicInteger();
+        AtomicBoolean cancelled = new AtomicBoolean();
+        ModelClient client = (messages, tools) -> {
+            if (calls.incrementAndGet() >= 5) {
+                cancelled.set(true);
+            }
+            Thread.currentThread().interrupt();
+            throw new ModelClientException(ModelFailureKind.INTERRUPTED, "模型请求被中断");
+        };
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(),
+                config(8, 3), cancelled::get, () -> null, (call, result, latencyMs) -> { },
+                millis -> { }, null);
+
+        AgentLoop.Result result = loop.run("你好", List.of(), events::add);
+
+        assertEquals("CANCELLED", result.failureCode());
+        assertEquals(5, calls.get());
+        assertFalse(Thread.currentThread().isInterrupted());
+        assertFalse(eventTypes().contains("run.failed"));
+    }
+
+    @Test
     void keepsReconnectingNetworkFailuresUntilCancelled() {
         AtomicInteger calls = new AtomicInteger();
         AtomicBoolean cancelled = new AtomicBoolean();
@@ -740,7 +789,7 @@ class AgentLoopTest {
         AgentLoop.Result result = loop.run("你好", List.of(), events::add);
 
         assertEquals("CANCELLED", result.failureCode());
-        assertEquals(6, calls.get(), "网络中断不受 3 次上限约束，一直到用户取消");
+        assertEquals(6, calls.get(), "网络中断不设次数上限，一直到用户取消");
         assertEquals(5, events.stream().filter(RunRetrying.class::isInstance).count());
         assertFalse(eventTypes().contains("run.failed"));
         List<Long> delays = events.stream()
@@ -748,7 +797,7 @@ class AgentLoopTest {
                 .map(RunRetrying.class::cast)
                 .map(RunRetrying::delayMs)
                 .toList();
-        assertEquals(30_000L, delays.getLast(), "退避有上限，长时间断网不会越等越久");
+        assertTrue(delays.stream().allMatch(delay -> delay == 3_000L), "每次重试间隔约 3 秒，不越等越久");
     }
 
     @Test

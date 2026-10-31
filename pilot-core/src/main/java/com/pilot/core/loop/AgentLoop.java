@@ -677,6 +677,8 @@ public final class AgentLoop {
                 if (response.content() != null && !response.content().isBlank()) finalText = response.content();
             } catch (RuntimeException ignored) {
                 usage.abort();
+                // 收尾请求失败同样要清掉中断标记，避免池化线程带着它影响后续任务
+                Thread.interrupted();
             }
         }
         messages.add(Message.assistant(finalText, List.of()));
@@ -814,9 +816,11 @@ public final class AgentLoop {
     }
 
     /**
-     * 按失败分类决定后续动作：断网、超时、连接中途断开一直退避重连（不会因为一次抖动终结任务，
-     * 用户可随时取消）；408、429、5xx 有限次重试；401、403、404、400、模型不支持、
-     * 响应结构非法这类重试也不会好的错误，立刻失败。
+     * 按失败分类决定后续动作：断网、超时、连接中途断开、408/429/5xx 都一直重试（约 3 秒一次，
+     * 用户可随时取消）；只有 401/403/402、余额或额度耗尽、模型不支持、请求或响应结构非法
+     * 这类重试也不会变好的错误才立刻失败。
+     *
+     * <p>线程被外部中断（服务重启、关停）既不是用户取消也不是模型故障：清掉中断标记后继续重试。
      */
     private ModelTurn callModel(List<Message> messages, Consumer<SessionEvent> events, UsageTracker usage,
                                 RuntimeGuidance runtimeGuidance) {
@@ -867,23 +871,25 @@ public final class AgentLoop {
                 throw stop;
             } catch (RuntimeException e) {
                 usage.abort();
+                // 客户端抛错时会重新设置中断位；不清掉的话，后续每次请求都会立刻失败。
+                Thread.interrupted();
                 if (cancellation.cancelled()) {
                     return new ModelTurn(null, cancel(messages, events));
                 }
                 ModelFailureKind kind = ModelRetryPolicy.classify(e);
-                int limit = ModelRetryPolicy.maxRetries(kind);
+                if (kind == ModelFailureKind.INTERRUPTED) {
+                    // 用户取消已在上面的分支返回。能走到这里说明是外部中断：服务重启、
+                    // 容器关停、线程被别的组件打断。按瞬时故障继续重试，
+                    // 不让一次外部中断把整轮任务判死。
+                    kind = ModelFailureKind.TRANSIENT;
+                }
                 String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                if (limit <= 0) {
+                // 可重试的失败没有次数上限：每 3 秒再试一次，只有用户取消才停。
+                if (!kind.retryable()) {
                     throw new ExecutionPolicy.Stop("MODEL_ERROR",
                             "模型调用失败：" + ToolSupport.oneLine(reason, 300));
                 }
                 attempt++;
-                // 网络类失败 limit 是无限大：断网期间一直重连，只有用户取消才结束。
-                if (attempt > limit) {
-                    throw new ExecutionPolicy.Stop("MODEL_ERROR",
-                            "模型暂时不可用，已重试 " + limit + " 次："
-                                    + ToolSupport.oneLine(reason, 300));
-                }
                 long delayMs = ModelRetryPolicy.delayMs(attempt);
                 events.accept(new RunRetrying(attempt, delayMs, ToolSupport.oneLine(reason, 300)));
                 if (!pause(delayMs)) {

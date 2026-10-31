@@ -981,6 +981,7 @@ public class AgentRunService implements RunStarter {
             if (event instanceof com.pilot.core.event.RunCancelled) {
                 taskControls.status(sessionId, handle.paused ? "PAUSED" : "INTERRUPTED");
                 if (handle.paused) delivered = new RunFailed("PAUSED", "任务已暂停，目标、约束、验收条件和排队消息已保留。", true);
+                else if (handle.interruptedReason != null) delivered = new RunFailed("INTERRUPTED", handle.interruptedReason, true);
             } else if (event instanceof RunFailed failed) {
                 String taskStatus = "MAX_STEPS".equals(failed.code()) && properties.goalModeEnabledValue()
                         ? "BUDGET_LIMITED"
@@ -1158,6 +1159,8 @@ public class AgentRunService implements RunStarter {
         private final String sessionId;
         private volatile boolean accepting = true;
         private volatile boolean paused;
+        /** 非用户取消的中断原因（如服务重启）；为空表示普通取消/暂停。 */
+        private volatile String interruptedReason;
         private volatile Future<?> future;
         private RunHandle(String sessionId) { this.sessionId = sessionId; }
     }
@@ -1210,6 +1213,12 @@ public class AgentRunService implements RunStarter {
 
     @PreDestroy
     void shutdown() {
+        // 先按「服务重启」取消所有在跑的任务，再中断线程：模型请求被 interrupt 后会走取消分支，
+        // 而不是被记成 MODEL_ERROR「模型调用失败」。进度仍会落盘，重启后可继续。
+        for (RunHandle handle : runs.values()) {
+            handle.interruptedReason = "Pilot 服务正在重启或关闭，本轮已中断；进度已保存，恢复后可继续执行。";
+            handle.cancelled.set(true);
+        }
         executor.shutdownNow();
     }
 }

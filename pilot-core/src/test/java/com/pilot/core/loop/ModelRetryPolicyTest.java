@@ -14,16 +14,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ModelRetryPolicyTest {
 
     @Test
-    void backsOffExponentiallyAndCapsAtThirtySeconds() {
-        assertEquals(2_000L, ModelRetryPolicy.delayMs(1));
-        assertEquals(4_000L, ModelRetryPolicy.delayMs(2));
-        assertEquals(8_000L, ModelRetryPolicy.delayMs(3));
-        assertEquals(16_000L, ModelRetryPolicy.delayMs(4));
-        // 封顶：再往后不再翻倍
-        assertEquals(30_000L, ModelRetryPolicy.delayMs(5));
-        assertEquals(30_000L, ModelRetryPolicy.delayMs(20));
-        // 非法入参按第一次处理，不能算出 0 或负数
-        assertEquals(2_000L, ModelRetryPolicy.delayMs(0));
+    void waitsAboutThreeSecondsBetweenAttempts() {
+        // 固定节奏：不瞬间刷请求，也不会越等越久
+        assertEquals(3_000L, ModelRetryPolicy.delayMs(1));
+        assertEquals(3_000L, ModelRetryPolicy.delayMs(2));
+        assertEquals(3_000L, ModelRetryPolicy.delayMs(5));
+        assertEquals(3_000L, ModelRetryPolicy.delayMs(20));
+        assertEquals(3_000L, ModelRetryPolicy.delayMs(0));
     }
 
     @Test
@@ -94,11 +91,15 @@ class ModelRetryPolicyTest {
     }
 
     @Test
-    void networkFailuresHaveNoRetryLimit() {
-        assertEquals(ModelRetryPolicy.UNLIMITED_RETRIES, ModelRetryPolicy.maxRetries(ModelFailureKind.NETWORK));
-        assertEquals(ModelRetryPolicy.MAX_TRANSIENT_RETRIES, ModelRetryPolicy.maxRetries(ModelFailureKind.TRANSIENT));
-        assertEquals(0, ModelRetryPolicy.maxRetries(ModelFailureKind.PERMANENT));
-        assertEquals(0, ModelRetryPolicy.maxRetries(ModelFailureKind.INTERRUPTED));
-        assertEquals(0, ModelRetryPolicy.maxRetries(null));
+    void doesNotRetryWhenThereIsNoMoneyOrQuota() {
+        // 余额/额度问题重试多少次都一样
+        assertFalse(ModelRetryPolicy.isTransient(new RuntimeException(
+                "模型接口返回 HTTP 429：{\"error\":{\"code\":\"insufficient_quota\"}}")));
+        assertFalse(ModelRetryPolicy.isTransient(new RuntimeException("HTTP 402 Payment Required")));
+        assertFalse(ModelRetryPolicy.isTransient(new RuntimeException(
+                "HTTP 400：Your credit balance is too low to access the API")));
+        assertFalse(ModelRetryPolicy.isTransient(new RuntimeException("HTTP 429：账户余额不足")));
+        // 普通限流仍然可重试
+        assertTrue(ModelRetryPolicy.isTransient(new RuntimeException("HTTP 429 Too Many Requests")));
     }
 }
