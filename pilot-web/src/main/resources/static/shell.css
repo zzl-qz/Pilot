@@ -482,6 +482,7 @@ html[data-theme] .bubble .external-ref { text-decoration: underline; text-decora
 html[data-theme] .bubble .external-ref:hover { text-decoration-color: currentColor; }
 
 html[data-theme] .bubble .md-code {
+  max-width: 100%;
   margin: 14px 0 0;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -499,7 +500,58 @@ html[data-theme] .md-code-head {
 }
 html[data-theme] .md-code-language { color: var(--muted); font-family: var(--mono); font-size: 11px; letter-spacing: .02em; }
 html[data-theme] .md-code .copy-control { opacity: .72; }
-html[data-theme] .bubble .md-code pre { margin: 0; border: 0; border-radius: 0; background: transparent; }
+html[data-theme] .bubble .md-code pre {
+  max-width: 100%;
+  margin: 0;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  line-height: 1.65;
+  tab-size: 2;
+  overflow: auto;
+}
+html[data-theme] .bubble .md-code pre.is-capped { max-height: 420px; }
+html[data-theme] .bubble .md-code pre code { display: block; min-width: max-content; white-space: pre; }
+html[data-theme] .md-code-head { gap: 8px; }
+html[data-theme] .md-code-toggle,
+html[data-theme] .md-code-more {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+html[data-theme] .md-code-toggle { margin-left: auto; padding: 3px 8px; border-radius: 999px; }
+html[data-theme] .md-code-toggle:hover,
+html[data-theme] .md-code-more:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, transparent); }
+html[data-theme] .md-code-more {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line-soft);
+  text-align: left;
+}
+html[data-theme] .md-preview {
+  padding: 16px;
+  overflow: auto;
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, .04) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, .04) 75%),
+    linear-gradient(45deg, rgba(255, 255, 255, .04) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, .04) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+html[data-theme] .md-preview svg,
+html[data-theme] .md-mermaid svg { display: block; max-width: 100%; height: auto; }
+html[data-theme] .md-math { margin-top: 12px; overflow-x: auto; }
+html[data-theme] .md-image { display: block; max-width: 100%; height: auto; margin-top: 12px; border-radius: 8px; }
+html[data-theme] .md-code pre.is-diff { display: flex; flex-direction: column; }
+html[data-theme] .diff-line { display: block; min-width: max-content; white-space: pre; }
+html[data-theme] .diff-line.is-add { background: color-mix(in srgb, var(--ok) 16%, transparent); }
+html[data-theme] .diff-line.is-del { background: color-mix(in srgb, var(--err) 16%, transparent); }
+html[data-theme] .diff-line.is-hunk { color: var(--accent); }
+html[data-theme] .md-preview-frame { display: block; width: 100%; height: 420px; border: 0; background: #fff; }
 
 html[data-theme] .bubble .md-callout {
   --callout-color: var(--accent);

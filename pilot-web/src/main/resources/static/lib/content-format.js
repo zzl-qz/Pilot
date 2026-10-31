@@ -77,14 +77,64 @@ export function languageLabel(language) {
     yaml: 'YAML',
     yml: 'YAML',
     html: 'HTML',
+    svg: 'SVG',
     css: 'CSS',
     sql: 'SQL',
     md: 'Markdown',
     markdown: 'Markdown',
     diff: 'Diff',
-    xml: 'XML'
+    patch: 'Diff',
+    xml: 'XML',
+    csv: 'CSV',
+    mermaid: '图表',
+    math: '公式',
+    latex: '公式',
+    tex: '公式',
+    jsx: 'JSX',
+    tsx: 'TSX',
+    go: 'Go',
+    rs: 'Rust',
+    rust: 'Rust',
+    toml: 'TOML'
   };
   return labels[value] || (value ? value.toUpperCase() : '代码');
+}
+
+/**
+ * 模型输出按类型分流，和常见编码产品一致：
+ * 能画出来的（SVG、完整 HTML）默认预览；Diff 按行着色；其余保持源码。
+ */
+export function outputKind(language, code) {
+  const lang = String(language || '').trim().toLowerCase();
+  const body = String(code || '').trim();
+  if ((lang === 'svg' || /^<svg\b/i.test(body)) && /<\/svg>/i.test(body)) {
+    return 'svg';
+  }
+  if ((lang === 'html' || lang === 'xhtml' || /^<!doctype\s+html/i.test(body)) && /<\/html>/i.test(body)) {
+    return 'html';
+  }
+  if (lang === 'diff' || lang === 'patch') {
+    return 'diff';
+  }
+  if (lang === 'mermaid') {
+    return 'mermaid';
+  }
+  if (lang === 'math' || lang === 'latex' || lang === 'tex') {
+    return 'math';
+  }
+  return 'code';
+}
+
+/** 聊天里的图片只接受网页地址和图片 data URL，避免 javascript: 一类源。 */
+export function safeImageSource(url) {
+  const value = String(url || '').trim();
+  if (/^https?:\/\//i.test(value)) {
+    return value;
+  }
+  if (/^data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);base64,[a-z0-9+/=\s]+$/i.test(value)) {
+    return value.replace(/\s/g, '');
+  }
+  return null;
 }
 
 /** 与服务端一致的保守估算：ASCII 约 4 字符/token，中文等宽字符约 1 字符/token。 */

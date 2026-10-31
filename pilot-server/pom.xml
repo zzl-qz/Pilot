@@ -54,6 +54,10 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- true 会加上 -XX:TieredStopAtLevel=1，热代码不进 C2，长任务更吃 CPU。 -->
+                    <optimizedLaunch>false</optimizedLaunch>
+                </configuration>
             </plugin>
         </plugins>
     </build>
