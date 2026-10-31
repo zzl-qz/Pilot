@@ -88,11 +88,24 @@ class AttachmentServiceTest {
         AttachmentService service = new AttachmentService(root);
         List<AttachmentService.Inbound> many = new ArrayList<>();
         for (int i = 0; i < AttachmentService.MAX_FILES + 1; i++) {
-            many.add(new AttachmentService.Inbound("f" + i + ".txt", "text/plain", base64("x")));
+            many.add(new AttachmentService.Inbound("f" + i + ".png", "image/png", base64("png")));
         }
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> service.prepare("ses_1", "hi", many));
         assertTrue(error.getMessage().contains("最多"), error.getMessage());
+    }
+
+    @Test
+    void acceptsSixtyFourImageAttachments() {
+        AttachmentService service = new AttachmentService(root);
+        List<AttachmentService.Inbound> many = new ArrayList<>();
+        for (int i = 0; i < AttachmentService.MAX_FILES; i++) {
+            many.add(new AttachmentService.Inbound("f" + i + ".png", "image/png", base64("png")));
+        }
+
+        AttachmentService.Prepared prepared = service.prepare("ses_1", "看这些图", many);
+
+        assertEquals(64, prepared.attachments().size());
     }
 
     @Test

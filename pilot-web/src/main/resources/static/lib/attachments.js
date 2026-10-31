@@ -7,7 +7,8 @@
  * 这里按同一套标记把它们拆出来，队列和对话气泡都复用。
  */
 
-export const MAX_ATTACHMENTS = 5;
+// 单条消息允许批量附加图片或文件，避免截图类任务被过早截断。
+export const MAX_ATTACHMENTS = 64;
 export const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp', 'ico']);
@@ -75,7 +76,9 @@ export function formatBytes(bytes) {
 export function checkIncomingFile(existing, file) {
   const name = (file && file.name) || '未命名文件';
   const list = Array.isArray(existing) ? existing : [];
-  if (list.some((item) => item.name === name && item.size === file.size)) {
+  const mime = String((file && file.mimeType) || '').toLowerCase();
+  const image = mime.startsWith('image/') || IMAGE_EXTENSIONS.has(extensionOf(name));
+  if (!image && list.some((item) => item.name === name && item.size === file.size)) {
     return { ok: false, silent: true, reason: '' };
   }
   if (list.length >= MAX_ATTACHMENTS) {
@@ -142,6 +145,51 @@ export function splitAttachmentMarkers(text) {
   }
   body += source.slice(cursor);
   return { body: body.replace(/\n{3,}/g, '\n\n').trim(), files };
+}
+
+/**
+ * 按输入时光标记下的字符位置，把图片插回正文。
+ * 位置和图片一一对应；没有位置的旧消息仍把图片放在正文后面。
+ * 非图片附件没有插入位置，跟在最后。
+ *
+ * @returns {Array<{type:'text', text:string}|{type:'image', image: object}|{type:'files', files: object[]}>}
+ */
+export function layoutMessageParts(body, images, files, positions = []) {
+  const text = String(body || '');
+  const pics = Array.isArray(images) ? images : [];
+  const spots = Array.isArray(positions) && positions.length === pics.length
+    ? positions.map((value) => {
+      const index = Number(value);
+      if (!Number.isFinite(index)) {
+        return 0;
+      }
+      return Math.max(0, Math.min(text.length, index));
+    })
+    : null;
+  const parts = [];
+  if (!spots) {
+    if (text) {
+      parts.push({ type: 'text', text });
+    }
+    pics.forEach((image) => parts.push({ type: 'image', image }));
+  } else {
+    let cursor = 0;
+    pics.forEach((image, index) => {
+      const at = Math.max(cursor, spots[index]);
+      if (at > cursor) {
+        parts.push({ type: 'text', text: text.slice(cursor, at) });
+      }
+      parts.push({ type: 'image', image });
+      cursor = at;
+    });
+    if (cursor < text.length) {
+      parts.push({ type: 'text', text: text.slice(cursor) });
+    }
+  }
+  if (files && files.length) {
+    parts.push({ type: 'files', files });
+  }
+  return parts;
 }
 
 /** {@link splitAttachmentMarkers} 的逆操作：编辑排队消息后，把原来的文件块接回正文末尾。 */

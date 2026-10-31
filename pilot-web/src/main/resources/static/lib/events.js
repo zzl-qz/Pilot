@@ -11,8 +11,8 @@
  *
  * <p>三条规则：
  * <ul>
- *   <li>{@code assistant.preview} 沿用上一条已落库事件的序号，不能推进游标，
- *       否则后面的正式事件会因为「序号更小」被当成重复丢掉；</li>
+ *   <li>{@code assistant.preview} 和 {@code assistant.reasoning} 沿用上一条已落库事件的序号，
+ *       不能推进游标，否则后面的正式事件会因为「序号更小」被当成重复丢掉；</li>
  *   <li>序号不大于当前游标的是旧连接重复推送的，跳过；</li>
  *   <li>没有序号的事件（本地回显）照常应用，但不动游标。</li>
  * </ul>
@@ -21,7 +21,7 @@
  */
 export function applyRule(event, cursor) {
   const current = Number.isFinite(cursor) ? cursor : 0;
-  if (!event || event.type === 'assistant.preview') {
+  if (!event || event.type === 'assistant.preview' || event.type === 'assistant.reasoning') {
     return { apply: false, cursor: current };
   }
   if (typeof event.sequence !== 'number') {

@@ -28,6 +28,7 @@ import { createComposerInput } from './lib/composer-input.js';
 import {
   attachmentUrl,
   checkIncomingFile,
+  layoutMessageParts,
   fileBadge,
   formatBytes,
   isImageAttachment,
@@ -76,6 +77,7 @@ const EVENT_TYPES = [
   'execution.updated',
   'assistant.delta',
   'assistant.preview',
+  'assistant.reasoning',
   'context.compacted',
   'plan.updated',
   'run.steered',
@@ -1847,8 +1849,8 @@ async function addDraftFiles(files) {
   const accepted = [];
   const notices = [];
   for (const file of files) {
-    const name = file.name || `paste-${Date.now()}.png`;
-    const probe = { name, size: file.size };
+    const name = file.name || `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+    const probe = { name, size: file.size, mimeType: file.type || guessMime(name) };
     const verdict = checkIncomingFile([...state.attachments, ...accepted], probe);
     if (!verdict.ok) {
       if (!verdict.silent) {
@@ -2633,6 +2635,10 @@ function handleEvent(event) {
     showLivePreview(event.payload && event.payload.text);
     return;
   }
+  if (event && event.type === 'assistant.reasoning') {
+    showReasoning(event.payload && event.payload.text);
+    return;
+  }
   // 同一事件可能被旧连接重复推送，按 sequence 去重；规则本身在 lib/events.js 里单测
   const rule = applyRule(event, state.cursor);
   if (!rule.apply) {
@@ -2777,9 +2783,9 @@ function onRunStarted(event) {
   } else if (state.queue.length && sameUserInput(state.queue[0], input)) {
     // 排队的下一句被自动开成新一轮，从队列拿掉，再画进对话
     shiftQueue();
-    appendUserMessage(input, event.sequence, { attachments });
+    appendUserMessage(input, event.sequence, { attachments, imagePositions: event.payload.imagePositions || [] });
   } else if (input) {
-    appendUserMessage(input, event.sequence, { attachments });
+    appendUserMessage(input, event.sequence, { attachments, imagePositions: event.payload.imagePositions || [] });
   }
   // 新的一轮另起一组，避免操作和结论接在上一轮后面
   beginTurnShell();
@@ -2855,16 +2861,25 @@ function onAssistantDelta(event) {
 }
 
 function onToolStarted(event) {
+  // 调工具前那句「我先去看…」是思考，不是结论。收进思考块并保持展开。
+  absorbReplyIntoThinking();
+  const action = toolLabel(event.payload.name);
+  if (thinkingLive()) {
+    state.turnShell.thinkingBlock._action = action || '';
+    renderThinkingSummary(state.turnShell.thinkingBlock);
+  }
   if (state.reply && (state.replyText || state.reply.dataset.text)) {
     state.replyNeedsBreak = true;
-    state.replyBreakReason = `继续核对「${toolLabel(event.payload.name)}」结果`;
+    state.replyBreakReason = `继续核对「${action}」结果`;
   }
   clearThinking();
   const owner = pickOwner(event.payload.agentId, state.agents.values());
   const row = addToolRow(event.payload.callId, event.payload.name, event.payload.summary, owner);
   row.setStatus('run', '…');
   state.toolRows.set(event.payload.callId, row);
-  showThinking();
+  if (!thinkingLive()) {
+    showThinking();
+  }
   record(event, {
     kind: 'tool',
     tone: 'tool',
@@ -4495,6 +4510,9 @@ async function loadPlan() {
 }
 
 function showThinking() {
+  if (thinkingLive()) {
+    return;
+  }
   clearThinking();
   const wrapper = document.createElement('article');
   wrapper.className = 'msg msg-assistant';
@@ -4737,6 +4755,110 @@ function noteToolSettled(turn) {
   refreshToolGroup(turn);
 }
 
+/** 模型推理：边想边展开，正文或工具一开始就收成「已思考 N 秒」。 */
+function thinkingLive() {
+  const block = state.turnShell && state.turnShell.thinkingBlock;
+  return Boolean(block && block.isConnected && block.classList.contains('is-live'));
+}
+
+/** 工具开始前的说明文字改挂到思考块上，避免变成一条空的 Pilot 回复。 */
+function absorbReplyIntoThinking() {
+  const bubble = state.reply;
+  const text = ((bubble && bubble.dataset.text) || state.replyText || '').trim();
+  if (!text) {
+    return;
+  }
+  const article = bubble && bubble.closest('article');
+  if (article) {
+    article.remove();
+  }
+  state.reply = null;
+  state.replyText = '';
+  state.replyLive = false;
+  state.replyCommitted = '';
+  state.replyNeedsBreak = false;
+  state.replyBreakReason = '';
+  showReasoning(text + '\n');
+}
+
+function showReasoning(text) {
+  if (!text) {
+    return;
+  }
+  clearThinking();
+  const shell = ensureTurnShell();
+  let block = shell.thinkingBlock;
+  if (!block || !block.isConnected) {
+    block = document.createElement('details');
+    block.className = 'think-block is-live';
+    block.open = true;
+    const summary = document.createElement('summary');
+    summary.textContent = '思考中';
+    const body = document.createElement('div');
+    body.className = 'think-body';
+    block.append(summary, body);
+    block._started = Date.now();
+    block._text = '';
+    shell.thinkingBlock = block;
+    shell.shell.insertBefore(block, shell.shell.firstChild);
+  }
+  block._text += text;
+  const body = block.querySelector('.think-body');
+  body.textContent = block._text;
+  if (block.classList.contains('is-live')) {
+    body.scrollTop = body.scrollHeight;
+  }
+  block.open = true;
+  block.classList.add('is-live');
+  renderThinkingSummary(block);
+  ensureThinkingClock();
+  if (!state.replaying) {
+    scrollThread();
+  }
+}
+
+function renderThinkingSummary(block) {
+  const summary = block.querySelector('summary');
+  if (!summary) {
+    return;
+  }
+  const seconds = Math.max(0, Math.round((Date.now() - (block._started || Date.now())) / 1000));
+  const action = block._action ? ` · ${block._action}` : '';
+  if (block.classList.contains('is-live')) {
+    summary.textContent = seconds > 0 ? `思考中 ${seconds} 秒${action}` : `思考中${action}`;
+    return;
+  }
+  summary.textContent = seconds >= 1 ? `已思考 ${seconds} 秒` : '思考过程';
+}
+
+function ensureThinkingClock() {
+  if (state.thinkingClock) {
+    return;
+  }
+  state.thinkingClock = setInterval(() => {
+    const live = document.querySelectorAll('.think-block.is-live');
+    if (!live.length) {
+      clearInterval(state.thinkingClock);
+      state.thinkingClock = null;
+      return;
+    }
+    live.forEach(renderThinkingSummary);
+  }, 1000);
+}
+
+function settleReasoning() {
+  const shell = state.turnShell;
+  const block = shell && shell.thinkingBlock;
+  if (!block || !block.isConnected || !block.classList.contains('is-live')) {
+    return;
+  }
+  block.open = false;
+  block.classList.remove('is-live');
+  block._action = '';
+  renderThinkingSummary(block);
+  shell.thinkingBlock = null;
+}
+
 function clearThinking() {
   if (state.thinking) {
     state.thinking.remove();
@@ -4777,6 +4899,7 @@ function showLivePreview(text) {
   if (!text) {
     return;
   }
+  settleReasoning();
   separateReplyForNextStage();
   if (!state.replyLive) {
     state.replyCommitted = state.reply ? (state.replyText || '') : '';
@@ -4790,6 +4913,7 @@ function showLivePreview(text) {
 
 /** 这一轮的完整回复。预览已经拼过的话，用全文盖上，避免再接一遍。 */
 function commitReply(text) {
+  settleReasoning();
   separateReplyForNextStage();
   const piece = text || '';
   if (state.replyLive) {
@@ -5023,18 +5147,49 @@ function sameUserInput(left, right) {
   return left === right || splitAttachmentMarkers(left).body === splitAttachmentMarkers(right).body;
 }
 
-function buildUserBubble(text, attachments = []) {
+function buildUserBubble(text, attachments = [], imagePositions = []) {
   const view = describeUserMessage(text, attachments);
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
-  bubble.textContent = view.body;
-  if (view.images.length || view.files.length) {
-    bubble.append(buildAttachmentStrip(view));
-  }
+  const flow = document.createElement('div');
+  flow.className = 'bubble-flow';
+  appendMessageParts(flow, layoutMessageParts(view.body, view.images, view.files, imagePositions));
+  bubble.append(flow);
   return bubble;
 }
 
-function appendUserMessage(text, sequence, { allowTaskActions = true, attachments = [] } = {}) {
+/** 连续的图片合成一行，文字和文件卡片按原文顺序穿插。 */
+function appendMessageParts(parent, parts, { compact = false } = {}) {
+  let images = [];
+  const flush = () => {
+    if (!images.length) {
+      return;
+    }
+    const row = document.createElement('span');
+    row.className = 'bubble-images' + (images.length > 1 ? ' is-row' : '') + (compact ? ' is-compact' : '');
+    images.forEach((image) => row.append(buildImageThumb(image)));
+    parent.append(row);
+    images = [];
+  };
+  for (const part of parts) {
+    if (part.type === 'image') {
+      images.push(part.image);
+      continue;
+    }
+    flush();
+    if (part.type === 'text' && part.text) {
+      parent.append(document.createTextNode(part.text));
+    } else if (part.type === 'files') {
+      const strip = document.createElement('span');
+      strip.className = 'attach-strip' + (compact ? ' is-compact' : '');
+      part.files.forEach((file) => strip.append(buildFileCard(file)));
+      parent.append(strip);
+    }
+  }
+  flush();
+}
+
+function appendUserMessage(text, sequence, { allowTaskActions = true, attachments = [], imagePositions = [] } = {}) {
   const wrapper = document.createElement('article');
   wrapper.className = 'msg msg-user';
   wrapper.dataset.text = text;
@@ -5044,7 +5199,8 @@ function appendUserMessage(text, sequence, { allowTaskActions = true, attachment
 
   // 取消编辑时要按原样画回来，附件信息留在节点上
   wrapper._attachments = attachments;
-  wrapper.append(buildUserBubble(text, attachments));
+  wrapper._imagePositions = imagePositions;
+  wrapper.append(buildUserBubble(text, attachments, imagePositions));
   // 纠正是当前运行内的输入，不是独立任务起点，后端没有对应的编辑或检查点恢复入口。
   if (allowTaskActions) {
     wrapper.append(userMessageActions(wrapper));
@@ -5276,7 +5432,7 @@ function beginEditUserMessage(wrapper) {
 
 function restoreUserBubble(wrapper, text) {
   wrapper.replaceChildren();
-  const bubble = buildUserBubble(text, wrapper._attachments || []);
+  const bubble = buildUserBubble(text, wrapper._attachments || [], wrapper._imagePositions || []);
   wrapper.append(bubble, userMessageActions(wrapper));
 }
 
@@ -6570,7 +6726,7 @@ async function submitMessage(content, attachments = [], imagePositions = []) {
   const wasRunning = state.running;
   const taskRequirements = !wasRunning ? taskDraftRequirements() : null;
   if (!wasRunning) {
-    appendUserMessage(content || attachmentSummary(attachments), undefined, { attachments });
+    appendUserMessage(content || attachmentSummary(attachments), undefined, { attachments, imagePositions });
     state.pendingInputs.push(content);
     renameSessionIfDefault(content);
     state.running = true;
@@ -6580,7 +6736,7 @@ async function submitMessage(content, attachments = [], imagePositions = []) {
     setRunState('running', '发送中');
   } else {
     state.queue.push(content);
-    state.queueEntries.push({ content, attachments });
+    state.queueEntries.push({ content, attachments, imagePositions });
     renderQueue();
     setRunState('running', '已排队');
   }
@@ -7363,11 +7519,18 @@ async function saveTaskContract() {
 function applyQueueResponse(data) {
   const items = Array.isArray(data && data.items) ? data.items : [];
   const entries = Array.isArray(data && data.entries) ? data.entries : [];
+  const previous = state.queueEntries || [];
   state.queue = items;
-  state.queueEntries = items.map((content, index) => ({
-    content,
-    attachments: (entries[index] && entries[index].attachments) || []
-  }));
+  state.queueEntries = items.map((content, index) => {
+    const entry = entries[index] || {};
+    const local = previous.find((item) => item.content === content);
+    const remoteImages = entry.imagePositions || [];
+    return {
+      content,
+      attachments: (entry.attachments && entry.attachments.length) ? entry.attachments : (local && local.attachments) || [],
+      imagePositions: remoteImages.length ? remoteImages : (local && local.imagePositions) || []
+    };
+  });
 }
 
 async function loadQueue() {
@@ -7495,16 +7658,16 @@ function renderQueue() {
     main.className = 'queue-main';
     const body = document.createElement('button');
     body.type = 'button';
-    body.className = 'queue-text' + (view.body ? '' : ' is-muted');
-    body.textContent = view.body || '（仅附件）';
+    body.className = 'queue-text' + (view.body || view.images.length ? '' : ' is-muted');
     body.title = '编辑这条排队消息';
+    const parts = layoutMessageParts(view.body, view.images, view.files, entry.imagePositions || []);
+    if (!parts.length) {
+      body.textContent = '（仅附件）';
+    } else {
+      appendMessageParts(body, parts, { compact: true });
+    }
     body.addEventListener('click', () => beginQueueEdit(index));
     main.append(body);
-    if (view.images.length || view.files.length) {
-      const strip = buildAttachmentStrip(view);
-      strip.classList.add('is-compact');
-      main.append(strip);
-    }
 
     const actions = document.createElement('div');
     actions.className = 'queue-actions';
@@ -8106,7 +8269,11 @@ function setupGutter(node, variable, min, max, fromRight) {
   if (!node) {
     return;
   }
+  const owner = node.closest('.app') || document.documentElement;
   node.addEventListener('pointerdown', (event) => {
+    if (isNarrow()) {
+      return;
+    }
     event.preventDefault();
     node.setPointerCapture(event.pointerId);
     node.classList.add('is-dragging');
@@ -8114,7 +8281,7 @@ function setupGutter(node, variable, min, max, fromRight) {
     const move = (moveEvent) => {
       const raw = fromRight ? window.innerWidth - moveEvent.clientX : moveEvent.clientX;
       const value = Math.max(min, Math.min(max, raw));
-      document.documentElement.style.setProperty(variable, value + 'px');
+      owner.style.setProperty(variable, value + 'px');
     };
     const stop = () => {
       node.classList.remove('is-dragging');

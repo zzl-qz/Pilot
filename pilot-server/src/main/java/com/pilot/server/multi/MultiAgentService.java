@@ -447,6 +447,7 @@ public class MultiAgentService {
                 return;
             }
             if (event instanceof AssistantDelta || event instanceof AssistantPreview
+                    || event instanceof com.pilot.core.event.AssistantReasoning
                     || event instanceof ContextCompacted || event instanceof PlanUpdated
                     || event instanceof com.pilot.core.event.RunUsageUpdated
                     || event instanceof RunCompleted || event instanceof RunFailed

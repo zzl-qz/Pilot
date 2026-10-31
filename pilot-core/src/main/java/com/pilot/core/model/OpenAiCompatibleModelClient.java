@@ -165,6 +165,12 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
 
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta) {
+        return chat(messages, tools, textDelta, null);
+    }
+
+    @Override
+    public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools,
+                              Consumer<String> textDelta, Consumer<String> reasoningDelta) {
         LinkedHashMap<String,Object> body = new LinkedHashMap<String, Object>();
         body.put("model", model);
         body.put("messages", messages.stream().map(this::messagePayload).toList());
@@ -196,6 +202,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                 }
             }
             StringBuilder content = new StringBuilder();
+            ThinkSplit thoughts = new ThinkSplit();
             LinkedHashMap<Integer,Map<String,Object>> toolParts = new LinkedHashMap<Integer, Map<String, Object>>();
             ModelUsage reportedUsage = null;
             ModelResponse.FinishReason finishReason = ModelResponse.FinishReason.UNKNOWN;
@@ -215,11 +222,16 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     String finish = text(choices.get(0).get("finish_reason"));
                     if (!finish.isBlank()) finishReason = ModelResponse.FinishReason.fromWire(finish);
                     JsonNode delta = choices.get(0).path("delta");
+                    String reasoning = reasoningText(delta);
+                    if (!reasoning.isEmpty()) {
+                        emit(reasoningDelta, reasoning);
+                    }
                     JsonNode text = delta.get("content");
                     if (text != null && text.isString()) {
-                        String chunk = text.asString();
-                        content.append(chunk);
-                        if (textDelta != null && !chunk.isEmpty()) textDelta.accept(chunk);
+                        thoughts.accept(text.asString(), piece -> {
+                            content.append(piece);
+                            emit(textDelta, piece);
+                        }, piece -> emit(reasoningDelta, piece));
                     }
                     JsonNode calls = delta.path("tool_calls");
                     if (calls.isArray()) {
@@ -236,6 +248,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     }
                 }
             }
+            thoughts.finish(piece -> {
+                content.append(piece);
+                emit(textDelta, piece);
+            }, piece -> emit(reasoningDelta, piece));
             List<ToolCall> calls = toolParts.values().stream().map(part -> {
                 try {
                     String args = (String) part.getOrDefault("arguments", "{}");
@@ -436,6 +452,76 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
 
     private static long elapsedMs(long startedAt) {
         return (System.nanoTime() - startedAt) / 1_000_000L;
+    }
+
+    /** 兼容端点把推理放在 reasoning_content 或 reasoning 上，不进正文。 */
+    private static String reasoningText(JsonNode delta) {
+        if (delta == null) {
+            return "";
+        }
+        String direct = text(delta.get("reasoning_content"));
+        if (!direct.isEmpty()) {
+            return direct;
+        }
+        JsonNode reasoning = delta.get("reasoning");
+        if (reasoning == null || reasoning.isNull()) {
+            return "";
+        }
+        if (reasoning.isTextual()) {
+            return reasoning.asString();
+        }
+        String nested = text(reasoning.get("content"));
+        return nested.isEmpty() ? text(reasoning.get("text")) : nested;
+    }
+
+    private static void emit(Consumer<String> sink, String text) {
+        if (sink == null || text == null || text.isEmpty()) {
+            return;
+        }
+        sink.accept(text);
+    }
+
+    /**
+     * 正文里的 {@code <think>} 块改道到推理通道，避免和回答混在一起。
+     * 标签可能被拆在相邻的流式分片里，所以要留住末尾可能的半截标签。
+     */
+    private static final class ThinkSplit {
+        private static final String OPEN = "<think>";
+        private static final String CLOSE = "</think>";
+        private boolean inside;
+        private String held = "";
+
+        private void accept(String chunk, Consumer<String> answer, Consumer<String> reasoning) {
+            held += chunk == null ? "" : chunk;
+            while (!held.isEmpty()) {
+                String tag = inside ? CLOSE : OPEN;
+                int at = held.indexOf(tag);
+                if (at < 0) {
+                    int keep = unfinished(held, tag);
+                    emit(inside ? reasoning : answer, held.substring(0, held.length() - keep));
+                    held = held.substring(held.length() - keep);
+                    return;
+                }
+                emit(inside ? reasoning : answer, held.substring(0, at));
+                held = held.substring(at + tag.length());
+                inside = !inside;
+            }
+        }
+
+        private void finish(Consumer<String> answer, Consumer<String> reasoning) {
+            emit(inside ? reasoning : answer, held);
+            held = "";
+        }
+
+        private static int unfinished(String text, String tag) {
+            int max = Math.min(text.length(), tag.length() - 1);
+            for (int length = max; length > 0; length--) {
+                if (tag.startsWith(text.substring(text.length() - length))) {
+                    return length;
+                }
+            }
+            return 0;
+        }
     }
 
     private static String text(JsonNode node) {

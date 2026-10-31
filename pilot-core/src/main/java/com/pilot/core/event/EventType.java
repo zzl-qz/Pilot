@@ -10,6 +10,8 @@ public enum EventType {
     ASSISTANT_DELTA("assistant.delta"),
     /** 只推给当前界面，不落库。刷新之后以落库的 assistant.delta 为准。 */
     ASSISTANT_PREVIEW("assistant.preview"),
+    /** 模型推理增量。和预览一样只推给当前界面，不写入会话历史。 */
+    ASSISTANT_REASONING("assistant.reasoning"),
     CONTEXT_COMPACTED("context.compacted"),
     PLAN_UPDATED("plan.updated"),
     RUN_STEERED("run.steered"),

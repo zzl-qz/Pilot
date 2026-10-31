@@ -1928,15 +1928,17 @@ kbd {
   top: 0;
   bottom: 0;
   z-index: 14;
-  width: 6px;
+  width: 10px;
   cursor: col-resize;
+  touch-action: none;
+  user-select: none;
 }
 .gutter::after {
   content: '';
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 2px;
+  left: 4px;
   width: 2px;
   background: transparent;
 }
@@ -2173,21 +2175,48 @@ kbd {
   margin-bottom: 6px;
 }
 .think-block > summary {
-  padding: 5px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 2px;
+  border-radius: 8px;
   cursor: pointer;
   list-style: none;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 12px;
+  transition: background .16s ease, color .16s ease;
 }
 .think-block > summary::-webkit-details-marker { display: none; }
-.think-block > summary::before { content: '▸ '; color: var(--dim); }
-.think-block[open] > summary::before { content: '▾ '; }
+.think-block > summary::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  margin-left: 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform .16s ease;
+}
+.think-block[open] > summary::before { transform: rotate(45deg) translateY(-1px); }
+.think-block > summary:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink-2); }
 .think-body {
+  max-height: 160px;
+  overflow: auto;
   padding: 0 10px 9px;
   color: var(--muted);
   font-size: 12px;
   white-space: pre-wrap;
   line-height: 1.65;
+  scroll-behavior: smooth;
+}
+.think-block.is-live > summary { color: var(--ink-2); }
+.think-block.is-live > summary::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
 }
 
 /* 输入区：@ 文件 / 命令候选 */
@@ -4675,7 +4704,16 @@ html[data-theme="light"] .input-flow[data-empty="true"]::before { color: #aeb5c2
 }
 .flow-chip:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
 .flow-chip.is-mention { padding-right: 8px; }
-.flow-chip.is-image { padding-left: 3px; }
+.flow-chip.is-image {
+  display: inline-flex;
+  align-items: flex-start;
+  max-width: min(220px, 100%);
+  margin: 4px 6px 4px 0;
+  padding: 3px;
+  vertical-align: bottom;
+}
+.flow-chip.is-image .chip-name,
+.flow-chip.is-image .chip-meta { display: none; }
 .chip-thumb {
   flex: none;
   width: 30px;
@@ -4684,6 +4722,12 @@ html[data-theme="light"] .input-flow[data-empty="true"]::before { color: #aeb5c2
   border-radius: 5px;
   object-fit: cover;
   background: var(--panel-3);
+}
+.flow-chip.is-image .chip-thumb {
+  width: 168px;
+  height: 104px;
+  margin: 0;
+  border-radius: 8px;
 }
 .chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .chip-meta { flex: none; color: var(--dim); font-size: 11px; }
@@ -4763,6 +4807,46 @@ html[data-theme="light"] .attach-button:hover { background: rgba(0, 0, 0, 0.05);
 }
 .attach-card-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .attach-card-meta { flex: none; color: var(--dim); font-size: 11px; }
+.bubble-flow { white-space: pre-wrap; }
+.bubble-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.bubble-images:first-child { margin-top: 0; }
+.bubble-images:last-child { margin-bottom: 0; }
+.bubble-images .attach-thumb {
+  width: auto;
+  height: auto;
+  max-width: min(100%, 280px);
+}
+.bubble-images .attach-thumb img {
+  width: auto;
+  height: auto;
+  max-width: min(100%, 280px);
+  max-height: 200px;
+  object-fit: contain;
+}
+.bubble-images.is-row .attach-thumb { max-width: min(48%, 200px); }
+.bubble-images.is-compact { margin: 4px 0; gap: 5px; }
+.bubble-images.is-compact .attach-thumb,
+.bubble-images.is-compact .attach-thumb img {
+  width: 72px;
+  height: 48px;
+  max-width: 72px;
+  max-height: 48px;
+  object-fit: cover;
+}
+.queue-text:has(.bubble-images) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
 .attach-strip.is-compact { margin-top: 5px; gap: 5px; }
 .attach-strip.is-compact .attach-thumb { width: 32px; height: 32px; border-radius: 6px; }
 .attach-strip.is-compact .attach-card { min-height: 24px; padding: 2px 8px 2px 4px; font-size: 11.5px; }

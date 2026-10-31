@@ -1125,6 +1125,8 @@ public class AgentRunService implements RunStarter {
         AgentLoop loop = new AgentLoop(executionClient, tools, sessionGate, approvals, config, handle.cancelled::get,
                 () -> pollSteering(sessionId), traceRecorder,
                 delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
+                .withLiveReasoning(delta -> sessions.preview(sessionId, runId,
+                        new com.pilot.core.event.AssistantReasoning(delta)))
                 .withTaskContext(() -> taskControls.prompt(sessionId) + commandContext(sessionId))
                 .withCompletionClaim(() -> claimCompletion(sessionId, handle))
                 // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力

@@ -77,6 +77,32 @@ class OpenAiCompatibleModelClientTest {
     }
 
     @Test
+    void streamsReasoningSeparatelyFromTheAnswer() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200, """
+                data: {"choices":[{"delta":{"reasoning_content":"先看分隔条"},"finish_reason":null}]}
+
+                data: {"choices":[{"delta":{"content":"<think>再核对"},"finish_reason":null}]}
+
+                data: {"choices":[{"delta":{"content":"宽度</think>可以拖"},"finish_reason":"stop"}]}
+
+                data: [DONE]
+
+                """);
+        server.start();
+        try {
+            StringBuilder answer = new StringBuilder();
+            StringBuilder reasoning = new StringBuilder();
+            ModelResponse response = client(server).chat(List.of(Message.user("开始")), List.of(),
+                    answer::append, reasoning::append);
+            assertEquals("可以拖", response.content());
+            assertEquals("可以拖", answer.toString());
+            assertEquals("先看分隔条再核对宽度", reasoning.toString());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void parsesStreamingLengthFinishReason() throws IOException {
         HttpServer server = startServer(new AtomicReference<>(), 200, """
                 data: {"choices":[{"delta":{"content":"部分结果"},"finish_reason":null}]}

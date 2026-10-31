@@ -10,6 +10,7 @@ import {
   formatBytes,
   isImageAttachment,
   joinAttachmentMarkers,
+  layoutMessageParts,
   splitAttachmentMarkers
 } from '../../main/resources/static/lib/attachments.js';
 
@@ -41,11 +42,19 @@ test('图片判断兼容 MIME 缺失的拖入文件', () => {
 test('新文件校验：重复静默忽略，超限与超大给出原因', () => {
   const existing = [{ name: 'a.txt', size: 10 }];
   assert.deepEqual(checkIncomingFile(existing, { name: 'a.txt', size: 10 }), { ok: false, silent: true, reason: '' });
+  assert.equal(checkIncomingFile(
+    [{ name: 'image.png', size: 10, mimeType: 'image/png' }],
+    { name: 'image.png', size: 10, mimeType: 'image/png' }
+  ).ok, true, '剪贴板图片即使同名同大小也应允许再次添加');
   assert.equal(checkIncomingFile(existing, { name: 'b.txt', size: 10 }).ok, true);
   assert.match(checkIncomingFile(existing, { name: 'big.bin', size: MAX_ATTACHMENT_BYTES + 1 }).reason, /big\.bin.*上限/);
   assert.match(checkIncomingFile(existing, { name: 'empty.txt', size: 0 }).reason, /空文件/);
-  const full = Array.from({ length: MAX_ATTACHMENTS }, (_, i) => ({ name: `f${i}`, size: i + 1 }));
-  assert.match(checkIncomingFile(full, { name: 'x', size: 5 }).reason, /最多附加 5 个/);
+  const belowLimit = Array.from({ length: MAX_ATTACHMENTS - 1 }, (_, i) => ({ name: `f${i}`, size: i + 1 }));
+  assert.equal(belowLimit.length, 63);
+  assert.equal(checkIncomingFile(belowLimit, { name: 'x', size: 65 }).ok, true);
+  const full = [...belowLimit, { name: 'f63', size: 64 }];
+  assert.equal(full.length, MAX_ATTACHMENTS);
+  assert.match(checkIncomingFile(full, { name: 'x', size: 66 }).reason, /最多附加 64 个/);
 });
 
 const INLINE = '[附件 A.java (text/plain)]\nclass A {}\nclass B {}\n[附件结束 A.java]';
@@ -91,4 +100,23 @@ test('附件地址优先用本地数据，其次服务端落盘文件名', () =>
   assert.equal(attachmentUrl('s1', { path: 'C:\\data\\a\\shot.png' }), '/api/sessions/s1/attachments/shot.png');
   assert.equal(attachmentUrl('', { path: '/x/y.png' }), '');
   assert.equal(attachmentUrl('s1', null), '');
+});
+
+test('图片留在输入时的位置，多张图按顺序插入', () => {
+  const shot = { name: 'a.png' };
+  const code = { name: 'b.png' };
+  const parts = layoutMessageParts('看这一块，帮我改一下', [shot, code], [], [4, 5]);
+  assert.deepEqual(parts.map((part) => part.type === 'text' ? part.text : part.image.name), [
+    '看这一块',
+    'a.png',
+    '，',
+    'b.png',
+    '帮我改一下'
+  ]);
+});
+
+test('没有位置记录时图片仍跟在正文后面', () => {
+  const parts = layoutMessageParts('说明', [{ name: 'a.png' }], [{ name: 'note.txt' }], []);
+  assert.deepEqual(parts.map((part) => part.type), ['text', 'image', 'files']);
+  assert.equal(parts[2].files[0].name, 'note.txt');
 });

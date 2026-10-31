@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
  */
 @Component
 public class AttachmentService {
-    static final int MAX_FILES = 5;
+    static final int MAX_FILES = 64;
     static final int MAX_BYTES = 2 * 1024 * 1024;
     static final int MAX_INLINE_CHARS = 200_000;
 

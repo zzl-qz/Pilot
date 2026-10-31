@@ -12,6 +12,10 @@ test('applyRule 丢掉旧连接重复推送的事件', () => {
   assert.deepEqual(applyRule({ type: 'tool.started', sequence: 5 }, 5), { apply: false, cursor: 5 });
 });
 
+test('applyRule 不推进推理预览的游标', () => {
+  assert.deepEqual(applyRule({ type: 'assistant.reasoning', sequence: 9 }, 3), { apply: false, cursor: 3 });
+});
+
 test('applyRule 不推进 assistant.preview 的游标', () => {
   // 预览沿用上一条落库事件的序号：如果推进，后面的正式事件会被当成重复丢掉
   assert.deepEqual(applyRule({ type: 'assistant.preview', sequence: 9 }, 3), { apply: false, cursor: 3 });

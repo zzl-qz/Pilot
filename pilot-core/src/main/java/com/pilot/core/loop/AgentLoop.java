@@ -176,10 +176,18 @@ public final class AgentLoop {
     private final Pause retryPause;
     /** 正在生成的文字，只给界面看。为空表示不推预览。 */
     private final Consumer<String> liveText;
+    /** 模型推理增量，只给界面看，不进会话历史。 */
+    private Consumer<String> liveReasoning = ignored -> { };
     /** 收尾门：有了目标之后在 run/resume 里创建，一次运行一个。 */
     private CompletionGate completionGate;
     private ExecutionPolicy executionPolicy;
     private com.pilot.core.hook.Hooks hooks = com.pilot.core.hook.Hooks.none();
+
+    /** 把模型的推理增量推到界面。不影响最终回答。 */
+    public AgentLoop withLiveReasoning(Consumer<String> reasoning) {
+        liveReasoning = reasoning == null ? ignored -> { } : reasoning;
+        return this;
+    }
 
     public AgentLoop withExecutionPolicy(ExecutionPolicy policy) {
         executionPolicy = Objects.requireNonNull(policy);
@@ -873,6 +881,15 @@ public final class AgentLoop {
                         liveText.accept(delta);
                     } catch (RuntimeException ignored) {
                         // 界面预览失败不影响这一次模型请求
+                    }
+                }, delta -> {
+                    if (delta == null || delta.isEmpty()) {
+                        return;
+                    }
+                    try {
+                        liveReasoning.accept(delta);
+                    } catch (RuntimeException ignored) {
+                        // 推理预览失败不影响这一次模型请求
                     }
                 });
                 usage.finish(response);

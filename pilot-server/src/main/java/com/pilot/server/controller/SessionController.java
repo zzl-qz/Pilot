@@ -346,7 +346,8 @@ public class SessionController {
                 messages.stream().map(RunStarter.QueuedMessage::content).toList(),
                 messages.stream()
                         .map(message -> new QueueEntry(message.content(),
-                                attachments.displayAttachments(id, message.attachments())))
+                                attachments.displayAttachments(id, message.attachments()),
+                                message.imagePositions()))
                         .toList());
     }
 
@@ -686,11 +687,12 @@ public class SessionController {
 
     /**
      * @param items   排队消息正文，顺序即执行顺序（保持旧契约）
-     * @param entries 同一批消息的结构化版本，额外带上图片附件，界面据此画缩略图
+     * @param entries 同一批消息的结构化版本，额外带上图片附件和它们在正文里的位置
      */
     public record QueueResponse(List<String> items, List<QueueEntry> entries) { }
 
-    public record QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments) { }
+    public record QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments,
+                              List<Integer> imagePositions) { }
 
     public record MessageResponse(String sessionId, String runId) { }
 
