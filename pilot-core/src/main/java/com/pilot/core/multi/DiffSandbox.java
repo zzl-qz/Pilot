@@ -97,6 +97,14 @@ public final class DiffSandbox {
         return changes.size();
     }
 
+    public synchronized String candidateHash() {
+        String canonical = changes.stream().sorted(java.util.Comparator.comparing(SandboxChange::path))
+                .map(change -> change.path() + "\0" + change.baseHash() + "\0" + change.newContent()
+                        + "\0" + change.status().wireName())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        return fingerprint(canonical);
+    }
+
     /** 审阅后回写状态用；保持顺序不变。 */
     public synchronized void replaceAll(java.util.Collection<SandboxChange> updated) {
         changes.clear();

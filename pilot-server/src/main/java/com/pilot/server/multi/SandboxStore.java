@@ -71,7 +71,7 @@ public class SandboxStore {
                                String detail, int files) {
     }
 
-    private record VerificationPayload(String status, List<String> checks, String detail) {
+    private record VerificationPayload(String candidateHash, String status, List<String> checks, String detail) {
     }
 
     public SandboxStore(ObjectMapper mapper, PilotDataDir dataDir) {
@@ -90,14 +90,24 @@ public class SandboxStore {
     /** 记录最近一次硬校验结果，供界面说明「为什么不能接受」。 */
     public void recordVerification(String sessionId, String sandboxId, VerificationGate.Report report) {
         if (report != null) {
-            verifications.put(sessionId + "/" + sandboxId, report);
-            persistVerification(sessionId, sandboxId, report);
+            DiffSandbox sandbox = find(sessionId, sandboxId).orElse(null);
+            if (sandbox != null) {
+                verifications.put(sessionId + "/" + sandboxId, report);
+                persistVerification(sessionId, sandboxId, sandbox.candidateHash(), report);
+            }
         }
     }
 
     /** 没有跑过校验时返回 null，调用方必须按「未校验」处理，不能当成通过。 */
     public VerificationGate.Report verification(String sessionId, String sandboxId) {
         restore(sessionId);
+        DiffSandbox sandbox = find(sessionId, sandboxId).orElse(null);
+        if (sandbox == null) return null;
+        VerificationPayload payload = readVerification(sessionId, sandboxId);
+        if (payload == null || !sandbox.candidateHash().equals(payload.candidateHash())) {
+            verifications.remove(sessionId + "/" + sandboxId);
+            return null;
+        }
         return verifications.get(sessionId + "/" + sandboxId);
     }
 
@@ -278,12 +288,13 @@ public class SandboxStore {
         }
     }
 
-    private void persistVerification(String sessionId, String sandboxId, VerificationGate.Report report) {
+    private void persistVerification(String sessionId, String sandboxId, String candidateHash,
+                                     VerificationGate.Report report) {
         Path file = dataDir.file("multi", sanitize(sessionId), "verification-" + sanitize(sandboxId) + ".json");
         try {
             Files.createDirectories(file.getParent());
             Files.writeString(file, mapper.writeValueAsString(
-                    new VerificationPayload(report.status(), report.checks(), report.detail())));
+                    new VerificationPayload(candidateHash, report.status(), report.checks(), report.detail())));
         } catch (IOException e) {
             log.warn("写入多 Agent 校验状态失败: session={}, sandbox={}", sessionId, sandboxId, e);
         }
@@ -364,10 +375,25 @@ public class SandboxStore {
             VerificationPayload payload = mapper.readValue(Files.readString(file), VerificationPayload.class);
             String name = file.getFileName().toString();
             String sandboxId = name.substring("verification-".length(), name.length() - ".json".length());
-            verifications.put(sessionId + "/" + sandboxId,
-                    new VerificationGate.Report(payload.status(), payload.checks(), payload.detail()));
+            DiffSandbox sandbox = sandboxes.getOrDefault(sessionId, List.of()).stream()
+                    .filter(box -> box.id().equals(sandboxId)).findFirst().orElse(null);
+            if (sandbox != null && sandbox.candidateHash().equals(payload.candidateHash())) {
+                verifications.put(sessionId + "/" + sandboxId,
+                        new VerificationGate.Report(payload.status(), payload.checks(), payload.detail()));
+            }
         } catch (Exception e) {
             log.warn("忽略损坏的校验状态文件: {}", file, e);
+        }
+    }
+
+    private VerificationPayload readVerification(String sessionId, String sandboxId) {
+        Path file = dataDir.file("multi", sanitize(sessionId), "verification-" + sanitize(sandboxId) + ".json");
+        if (!Files.isRegularFile(file)) return null;
+        try {
+            return mapper.readValue(Files.readString(file), VerificationPayload.class);
+        } catch (Exception e) {
+            log.warn("忽略损坏的校验状态文件: {}", file, e);
+            return null;
         }
     }
 

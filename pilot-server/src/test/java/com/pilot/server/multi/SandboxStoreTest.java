@@ -109,4 +109,20 @@ class SandboxStoreTest {
         assertEquals("DONE", restored.tasks("ses_restart").get(0).status());
         assertEquals("arb_1", restored.arbitrations("ses_restart").get(0).id());
     }
+
+    @Test
+    void verificationIsInvalidatedWhenCandidateChanges() throws IOException {
+        SandboxStore store = store();
+        DiffSandbox sandbox = proposal();
+        store.add("ses_candidate", sandbox);
+        store.recordVerification("ses_candidate", "sbx_1",
+                VerificationGate.Report.passed(java.util.List.of("test")));
+        assertTrue(store.verification("ses_candidate", "sbx_1").ok());
+
+        sandbox.add("src/A.java", "a\nCHANGED\nc\n", "a\nNEWER\nc\n", true, RiskLevel.MEDIUM);
+        store.add("ses_candidate", sandbox);
+
+        assertTrue(store.verification("ses_candidate", "sbx_1") == null,
+                "旧候选的通过结果不能用于新候选");
+    }
 }
