@@ -35,6 +35,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * （进程起来、能加载 playwright-core、能真的启动一次浏览器）之后才返回可用；
  * 探测失败的原因会原样交给模型，避免它不断重试一个永远不会成功的调用。
  * 探测失败后会按间隔自动重测，用户事后装好 Chrome 不需要重启服务。
+ *
+ * <p>构造时传入的 {@code environment} 会合并到 sidecar 进程环境（如
+ * {@code PLAYWRIGHT_BROWSERS_PATH}、{@code PILOT_BROWSER_HEADLESS}），
+ * 让 Java 配置驱动浏览器选型与有头/无头，sidecar 自己不读任何配置文件。
  */
 public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(PlaywrightBackend.class);
@@ -48,6 +52,8 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     private final Path home;
     private final ObjectMapper mapper;
     private final long idleShutdownMs;
+    /** 合并进 sidecar 进程环境的变量（不可变）；构造器重载里默认为空。 */
+    private final Map<String, String> environment;
 
     private final Object lifecycle = new Object();
     private final AtomicLong ids = new AtomicLong(1);
@@ -70,11 +76,18 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     }
 
     PlaywrightBackend(Path node, Path script, Path home, ObjectMapper mapper, long idleShutdownMs) {
+        this(node, script, home, mapper, idleShutdownMs, Map.of());
+    }
+
+    /** @param environment 合并到 sidecar 进程的额外环境变量；内部会拷贝一份 */
+    public PlaywrightBackend(Path node, Path script, Path home, ObjectMapper mapper, long idleShutdownMs,
+                            Map<String, String> environment) {
         this.node = node;
         this.script = script;
         this.home = home;
         this.mapper = mapper;
         this.idleShutdownMs = idleShutdownMs;
+        this.environment = Map.copyOf(environment);
     }
 
     @Override
@@ -217,6 +230,9 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
         Files.createDirectories(home);
         ProcessBuilder builder = new ProcessBuilder(node.toString(), script.toString());
         builder.directory(home.toFile());
+        if (!environment.isEmpty()) {
+            builder.environment().putAll(environment);
+        }
         builder.redirectError(ProcessBuilder.Redirect.appendTo(home.resolve("sidecar.log").toFile()));
         Process started = builder.start();
         process = started;

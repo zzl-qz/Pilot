@@ -3,10 +3,16 @@
 // 协议（一行一个 JSON）：
 //   请求  {"id": 1, "session": "s1", "op": "navigate", ...参数}
 //   响应  {"id": 1, "ok": true, "text": "...", "screenshot": "/abs/a.png"} 或 {"id": 1, "ok": false, "error": "..."}
+//   事件  {"event": "...", "session": "s1", ...}（无 id；Java 端按 event 字段路由，见事件通道）
 // stdout 只放协议行；任何日志一律走 stderr。
 //
 // 隔离：整个进程共享一个 Chromium，每个 Pilot 会话一个独立 BrowserContext（cookie / storage 互不可见）。
 // 导航只允许回环地址（localhost / 127.0.0.1 / [::1]）：本工具用来验证本机 Web 应用，不是通用上网。
+//
+// 环境变量（由 Java 端注入，未设时保持保守默认）：
+//   PILOT_BROWSER_HEADLESS        'false' 才有头（有窗口）；默认 true（无头）。
+//   PILOT_BROWSER_PREFER_BUNDLED  'false' 时系统 Chrome/Edge 优先于内置缓存；默认 true。
+//   PLAYWRIGHT_BROWSERS_PATH      内置缓存目录（chromium.executablePath() 由此解析）。
 
 import { createRequire } from 'node:module';
 import { existsSync, statSync, mkdirSync } from 'node:fs';
@@ -58,13 +64,15 @@ function loadPlaywright() {
 function candidateExecutables() {
   const list = [];
   if (process.env.PILOT_BROWSER_PATH) list.push(process.env.PILOT_BROWSER_PATH);
+  const bundled = [];
   try {
-    list.push(loadPlaywright().chromium.executablePath());
+    bundled.push(loadPlaywright().chromium.executablePath());
   } catch {
     // 没装 Playwright 自带 Chromium 就继续找系统浏览器
   }
+  const system = [];
   if (process.platform === 'darwin') {
-    list.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    system.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
       '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
       '/Applications/Chromium.app/Contents/MacOS/Chromium',
       '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser');
@@ -72,14 +80,17 @@ function candidateExecutables() {
     const roots = [process.env['PROGRAMFILES'], process.env['PROGRAMFILES(X86)'], process.env['LOCALAPPDATA']]
       .filter(Boolean);
     for (const root of roots) {
-      list.push(`${root}\\Google\\Chrome\\Application\\chrome.exe`,
+      system.push(`${root}\\Google\\Chrome\\Application\\chrome.exe`,
         `${root}\\Microsoft\\Edge\\Application\\msedge.exe`,
         `${root}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`);
     }
   } else {
-    list.push('/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium',
+    system.push('/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium',
       '/usr/bin/chromium-browser', '/snap/bin/chromium', '/usr/bin/microsoft-edge');
   }
+  // 内置缓存优先（版本配套、行为跨机器一致）；用户可用 PILOT_BROWSER_PREFER_BUNDLED=false 反转。
+  const preferBundled = (process.env.PILOT_BROWSER_PREFER_BUNDLED ?? 'true') !== 'false';
+  list.push(...(preferBundled ? [...bundled, ...system] : [...system, ...bundled]));
   return list.filter((path) => {
     try {
       return existsSync(path) && statSync(path).isFile();
@@ -94,17 +105,24 @@ function launchArgs() {
   return ['--disable-dev-shm-usage', '--no-first-run', '--no-default-browser-check', ...extra];
 }
 
+function headlessMode() {
+  // 只有显式收到 'false' 才有头：环境变量缺失时保持无头（老行为），避免误开窗口。
+  return (process.env.PILOT_BROWSER_HEADLESS ?? 'true') !== 'false';
+}
+
 async function launchBrowser() {
   const { chromium } = loadPlaywright();
   const executables = candidateExecutables();
   if (executables.length === 0) {
     throw new Error('没有找到可用的 Chrome / Edge / Chromium。请安装其中之一，或设置环境变量 PILOT_BROWSER_PATH 指向浏览器可执行文件。');
   }
+  const headless = headlessMode();
   const failures = [];
   for (const executablePath of executables) {
     try {
-      const browser = await chromium.launch({ executablePath, headless: true, args: launchArgs(), timeout: 20000 });
+      const browser = await chromium.launch({ executablePath, headless, args: launchArgs(), timeout: 20000 });
       browser.__executable = executablePath;
+      browser.__headless = headless;
       browser.on('disconnected', () => {
         browserPromise = null;
         for (const session of sessions.values()) session.dead = true;
@@ -402,10 +420,11 @@ const handlers = {
     const browser = await getBrowser();
     const version = browser.version();
     const executable = browser.__executable;
-    // 探测只验证能启动，随后关掉，不占用常驻内存。
+    const headless = browser.__headless;
+    // 探测只验证能启动，随后关掉，不占用常驻内存。（有头模式下这会闪一下窗口，属可接受代价。）
     await browser.close();
     browserPromise = null;
-    return { text: `浏览器可用：${executable}（Chromium ${version}）`, executable, version };
+    return { text: `浏览器可用：${executable}（Chromium ${version}${headless ? '' : '，有头'}）`, executable, version, headless };
   },
 
   async navigate(args, current) {
