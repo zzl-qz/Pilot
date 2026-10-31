@@ -94,7 +94,29 @@ pilot:
   runtime:
     # true：缺 Python 3.12 / Node 22 时下载到 .pilot/runtime，run_command 优先用它们
     provision: ${PILOT_RUNTIME_PROVISION:true}
+  # 命令执行的隔离级别。local 只做应用层检查；container 会在容器里跑校验命令，
+  # 需要本机有 Docker/Podman 和包含项目工具链的镜像。容器不可用时不会静默降级，
+  # /api/maintenance/status 会显示降级原因。
+  execution:
+    isolation: ${PILOT_EXECUTION_ISOLATION:local}
+    image: ${PILOT_EXECUTION_IMAGE:eclipse-temurin:25-jdk}
+    runtime: ${PILOT_CONTAINER_RUNTIME:}
+    network: ${PILOT_EXECUTION_NETWORK:false}
+    memory-mb: ${PILOT_EXECUTION_MEMORY_MB:2048}
+    cpus: ${PILOT_EXECUTION_CPUS:2}
+    pids-limit: ${PILOT_EXECUTION_PIDS_LIMIT:512}
+  # 远程访问边界。local 只允许本机回环；token 允许远程，但必须带访问令牌。
+  # SSE 的 EventSource 不能加请求头，因此令牌也接受 ?token=，务必配合来源校验与限流使用。
+  security:
+    mode: ${PILOT_SECURITY_MODE:local}
+    token: ${PILOT_SECURITY_TOKEN:}
+    allowed-origins: ${PILOT_SECURITY_ALLOWED_ORIGINS:}
+    rate-limit-per-minute: ${PILOT_SECURITY_RATE_LIMIT:600}
+    audit: ${PILOT_SECURITY_AUDIT:true}
   # 运行期数据保留：事件、快照、trace 默认只增不减。设成正数后每天清理一次早于 N 天的数据，
   # 0 表示关闭（保留全部）。会话本身不会被删。
   retention:
     days: ${PILOT_RETENTION_DAYS:0}
+    # 备份与校验证据通常不需要长期保留，可以单独设置更短的期限
+    backups-days: ${PILOT_RETENTION_BACKUPS_DAYS:0}
+    validation-days: ${PILOT_RETENTION_VALIDATION_DAYS:0}

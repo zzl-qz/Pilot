@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "note": "固定任务集。每个任务给一份可复制的初始工作区和一个外部验收命令，验收不依赖模型自述。",
+  "tasks": [
+    {
+      "id": "fix-failing-unit-test",
+      "title": "修复一个失败的单元测试",
+      "fixture": "fixtures/fix-failing-unit-test",
+      "prompt": "这个仓库里有一个单元测试是失败的。找到根因并修复实现（不要删测试），最后跑一遍测试确认全绿。",
+      "acceptance": ["mvn -q -o test"],
+      "maxMinutes": 15
+    },
+    {
+      "id": "add-validation",
+      "title": "补一个输入校验与错误消息",
+      "fixture": "fixtures/add-validation",
+      "prompt": "给注册接口补上邮箱格式与重复邮箱校验，返回统一错误结构，并补两条单元测试。",
+      "acceptance": ["mvn -q -o test"],
+      "maxMinutes": 20
+    },
+    {
+      "id": "refactor-without-behavior-change",
+      "title": "重构但保持行为不变",
+      "fixture": "fixtures/refactor-no-behavior-change",
+      "prompt": "把 OrderService 里的价格计算抽成独立策略类，保持所有测试通过，不要改公开 API。",
+      "acceptance": ["mvn -q -o test"],
+      "maxMinutes": 25
+    },
+    {
+      "id": "frontend-form-a11y",
+      "title": "修复表单可访问性与窄屏布局",
+      "fixture": "fixtures/frontend-form-a11y",
+      "prompt": "修复设置页表单：label 与输入框关联、错误提示可被读屏软件读到、窄屏不出现横向滚动。",
+      "acceptance": ["npm test -- --run", "npm run build"],
+      "maxMinutes": 20
+    },
+    {
+      "id": "flaky-test-diagnosis",
+      "title": "定位并消除一个不稳定测试",
+      "fixture": "fixtures/flaky-test",
+      "prompt": "有一个测试偶发失败。找出不稳定的根因（时间/顺序/共享状态），修掉而不是加重试循环。",
+      "acceptance": ["mvn -q -o test"],
+      "maxMinutes": 25
+    },
+    {
+      "id": "path-safety-regression",
+      "title": "修复路径越界回归",
+      "fixture": "fixtures/path-safety",
+      "prompt": "文件工具允许通过 .. 逃出工作区。修掉这个漏洞并补上回归测试，保持正常路径不受影响。",
+      "acceptance": ["mvn -q -o test"],
+      "maxMinutes": 20
+    }
+  ]
+}

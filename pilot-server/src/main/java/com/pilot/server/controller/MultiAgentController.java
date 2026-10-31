@@ -18,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -45,7 +46,9 @@ public class MultiAgentController {
 
     public record MultiState(String sessionId, List<SandboxStore.TaskView> tasks,
                              List<SandboxStore.DiffView> diffs,
-                             List<SandboxStore.Arbitration> arbitrations) {
+                             List<SandboxStore.Arbitration> arbitrations,
+                             List<SandboxStore.ArtifactView> manifests,
+                             Map<String, SandboxStore.VerificationState> verifications) {
     }
 
     public record ResolveRequest(String choice) {
@@ -54,7 +57,43 @@ public class MultiAgentController {
     @GetMapping
     public MultiState state(@PathVariable String id) {
         requireSession(id);
-        return new MultiState(id, sandboxes.tasks(id), sandboxes.diffs(id), sandboxes.arbitrations(id));
+        List<SandboxStore.ArtifactView> manifests = sandboxes.sandboxes(id).stream()
+                .flatMap(sandbox -> sandboxes.manifestHistory(id, sandbox.id()).stream())
+                .toList();
+        Map<String, SandboxStore.VerificationState> verifications = new java.util.LinkedHashMap<>();
+        for (com.pilot.core.multi.DiffSandbox sandbox : sandboxes.sandboxes(id)) {
+            verifications.put(sandbox.id(), sandboxes.verificationState(id, sandbox.id()));
+        }
+        return new MultiState(id, sandboxes.tasks(id), sandboxes.diffs(id), sandboxes.arbitrations(id),
+                manifests, verifications);
+    }
+
+    /** 某个沙箱的产物清单历史：每一版都绑定当时的候选指纹、依赖与校验结论。 */
+    @GetMapping("/sandboxes/{sandboxId}/manifests")
+    public List<SandboxStore.ArtifactView> manifests(@PathVariable String id, @PathVariable String sandboxId) {
+        requireSession(id);
+        if (sandboxes.find(id, sandboxId).isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有这个沙箱: " + sandboxId);
+        }
+        return sandboxes.manifestHistory(id, sandboxId);
+    }
+
+    /** 最近两版的差异，以及当前校验状态为什么有效/失效。 */
+    @GetMapping("/sandboxes/{sandboxId}/manifest")
+    public SandboxManifestReport manifest(@PathVariable String id, @PathVariable String sandboxId) {
+        requireSession(id);
+        if (sandboxes.find(id, sandboxId).isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有这个沙箱: " + sandboxId);
+        }
+        var current = sandboxes.manifest(id, sandboxId, SandboxStore.environmentFingerprint());
+        return new SandboxManifestReport(current, sandboxes.manifestDiff(id, sandboxId),
+                sandboxes.verificationState(id, sandboxId), sandboxes.dependenciesOf(id, sandboxId));
+    }
+
+    public record SandboxManifestReport(com.pilot.core.multi.ArtifactManifest manifest,
+                                        com.pilot.core.multi.ArtifactDiff diff,
+                                        SandboxStore.VerificationState verification,
+                                        List<String> dependencies) {
     }
 
     /**
@@ -82,7 +121,7 @@ public class MultiAgentController {
                 .filter(change -> change.status() == com.pilot.core.multi.ChangeStatus.PENDING).toList();
         if (!changes.isEmpty()) {
             VerificationGate.Report report = verification.verify(workspaceOf(session), sandbox.baseCommit(), changes);
-            sandboxes.recordVerification(id, sandboxId, report);
+            sandboxes.recordVerification(id, sandboxId, SandboxStore.environmentFingerprint(), report);
             if (!report.ok() && !acknowledgeUnverified) {
                 throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED,
                         (VerificationGate.Report.FAILED.equals(report.status()) ? "硬校验未通过，改动未写入：" : "变更未经校验，改动未写入：")

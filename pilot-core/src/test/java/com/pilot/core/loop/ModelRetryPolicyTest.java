@@ -14,13 +14,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ModelRetryPolicyTest {
 
     @Test
-    void waitsAboutThreeSecondsBetweenAttempts() {
-        // 固定节奏：不瞬间刷请求，也不会越等越久
-        assertEquals(3_000L, ModelRetryPolicy.delayMs(1));
-        assertEquals(3_000L, ModelRetryPolicy.delayMs(2));
-        assertEquals(3_000L, ModelRetryPolicy.delayMs(5));
-        assertEquals(3_000L, ModelRetryPolicy.delayMs(20));
-        assertEquals(3_000L, ModelRetryPolicy.delayMs(0));
+    void backsOffExponentiallyUpToACap() {
+        // 退避基准 1 秒，逐次翻倍，封顶 30 秒；抖动由 RetryBudget 负责
+        assertEquals(1_000L, ModelRetryPolicy.delayMs(1));
+        assertEquals(2_000L, ModelRetryPolicy.delayMs(2));
+        assertEquals(4_000L, ModelRetryPolicy.delayMs(3));
+        assertEquals(16_000L, ModelRetryPolicy.delayMs(5));
+        assertEquals(30_000L, ModelRetryPolicy.delayMs(20));
+        assertEquals(1_000L, ModelRetryPolicy.delayMs(0));
     }
 
     @Test

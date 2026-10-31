@@ -59,3 +59,10 @@
 - **执行策略对齐 Codex / OpenCode**：默认权限档位改为完全放行（`AUTO`）；普通执行取消收尾自审、验证绑定、无进展停止与自动复跑；重复调用只提醒不中断；计划未完成不再自动催继续，也不再把正常收尾改判为中断；预算上调为高位事故熔断。
 - **多智能体缺口 G1、G4 已关闭**：子 Agent 改为继承父会话档位且只能收紧；接受变更接口服务端强制重跑硬校验，未解决仲裁返回 409、未通过或未校验返回 412。G2、G3、G5–G8 仍未关闭，隔离运行器（M2）未实现。
 - **仍未完成**：真实模型任务矩阵与端到端验收（G8）。上面的任务 3/9 引用的 `AgentLoopTest#interruptsAfterThreeIdenticalToolCalls` 已随「重复调用不再中断」改为 `neverAbortsOnIdenticalToolCalls`，历史命令不再适用。
+
+### 第二轮：可靠性、隔离与评估工具
+
+- **已具备可执行的真实模型评估工具**：`evaluation/harness/tasks.json` 固定六个任务与外部验收命令，`runner.mjs` 复制工作区、驱动真实会话、独立执行验收并把记录写成 JSONL，`metrics.mjs` 聚合成功率/回归率/成本/耗时/返工/接管率并支持基线比较；`metrics.test.mjs` 用 Node 内置测试器覆盖聚合规则。`--dry-run` 只验证流程，不能用于能力结论。
+- **仍需人工补齐 fixture**：`evaluation/harness/fixtures/` 需要在冻结提交上生成每个任务的初始仓库；没有 fixture 时运行器会记录 `acceptanceRan=false`，这些记录不计入成功率。
+- **隔离后端已落地、命令入口未切换**：`com.pilot.core.exec` 提供本地/容器两种后端，容器配置不可用时显式降级并给出原因（已用 `--pilot.execution.isolation=container` 实测）；容器目前只承接多智能体的校验命令，`run_command` 仍走宿主进程。
+- **可靠性补齐**：运行检查点与租约、启动接管报告、写文件幂等账本、产物清单与依赖失效、校验证据绑定、重试预算与熔断、诊断接口与脱敏、备份与保留策略。当前 Java 测试为 core 426 项、server 298 项，全部通过；前端 100 项纯逻辑测试与 5 项评估指标测试同时为绿。

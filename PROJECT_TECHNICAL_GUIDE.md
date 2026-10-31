@@ -441,17 +441,17 @@ RetentionService 根据保留天数清理旧的事件、快照和 trace 等材�
 
 ## 13 已实现机制和未来执行后端的分界
 
-最近讨论的方向是自研适合 Pilot 的统一执行层，再按平台接入原生限制或容器。这个方向尚未实现，最终后端也还要经过原型验证。当前仓库没有 SubagentRuntime、ExecutionBackend、Windows 原生沙箱或 Docker 任务执行后端。
+统一执行层已落地第一版：`com.pilot.core.exec` 定义 `ExecutionBackend` 契约，提供本地后端与容器后端，并由 `ExecutionBackends.select` 按配置选择。容器不可用时不静默降级，`Selection.degraded()` 与 `/api/maintenance/status` 会给出原因。Windows 原生后端（受限令牌、Job Objects、AppContainer）仍未实现。
 
 | 方案或机制 | 解决什么问题 | 当前状态 |
 | --- | --- | --- |
 | PathValidator、PermissionGate、审批 | 控制经过 Pilot 工具入口的文件和操作 | 已实现 |
 | CommandTaskManager | 命令状态、输出、超时、取消和恢复记录 | 已实现；进程追踪有平台与脱离子进程的限制 |
 | diff 提案和 Git worktree 验证 | 暂存子任务改动，尝试在副本构建 | 已有机制但存在缺口 |
-| 自研统一执行层 | 把工作区、策略、进程和系统限制放到统一契约下 | 讨论中的架构方向 |
+| 统一执行层 `ExecutionBackend` | 把工作区、策略、进程和系统限制放到统一契约下 | 已实现（本地/容器两种后端） |
+| 容器校验执行 | 为编译/测试命令提供独立文件系统、网络与资源上限 | 已接入校验门；`run_command` 仍是宿主进程 |
 | Windows 原生后端 | 在 Windows 上限制真实子进程的权限和资源 | 待验证、待实现 |
-| Docker 或其他隔离运行器 | 提供受限执行环境及可重复的工具链 | 可选方案，尚未接入 |
-| 不可变产物及候选版本验收 | 让上游输出、集成验证和最终接受精确对应 | 生产级计划中的能力 |
+| 不可变产物清单与依赖传播 | 让上游输出、集成验证和最终接受精确对应 | 已实现（清单历史、差异、依赖失效） |
 
 Windows 原生方案可评估受限令牌、文件 ACL、Job Objects 和 AppContainer。它们的职责不同：Job Objects 主要管理一组进程及资源，文件和网络访问还需要另外的系统机制。原生辅助程序可以随 Pilot 打包，由 Java 调用；编译工具和运行时的兼容性需要实际验证。
 
@@ -487,7 +487,7 @@ Windows 原生方案可评估受限令牌、文件 ACL、Job Objects 和 AppCont
 | 长会话忘记要求 | ContextBudget、ContextCompactor、TaskControlService | 摘要保留内容、原始目标注入、重要文件是否复读 |
 | 回退覆盖了人工修改或不可用 | RunSnapshotService、CheckpointController | 内容指纹、快照范围、保留策略和工作区互斥 |
 | 多 Agent 看不到上游修改 | MultiAgentService、DiffSandbox、工作区工具装配 | 当前没有完整的依赖产物与独立工作区协议 |
-| 要加入操作系统级隔离 | RunCommandTool、CommandTaskManager，以及未来执行后端接口 | 系统权限、网络、工具链、继承、进程树、故障恢复 |
+| 要加入操作系统级隔离 | `com.pilot.core.exec`（ExecutionBackend、ContainerExecutionBackend） | 系统权限、网络、工具链、路径映射、进程树、故障恢复 |
 
 ### 测试各自证明什么
 
@@ -514,3 +514,30 @@ Windows 原生方案可评估受限令牌、文件 ACL、Job Objects 和 AppCont
 | [评估任务](evaluation/TASKS.md)与[评估报告](evaluation/REPORT.md) | 如何测试、实际执行结果和覆盖缺口 | 新增任务、冻结评估基线或完成一轮实测 |
 
 新增模块时至少回答四个问题：它解决了什么具体问题，为什么放在这一层，输入和输出归谁所有，失败或重启后怎么办。说明已实现能力时给源码入口；说明未来能力时标明待验证，避免后来的人从规划中推断出不存在的实现。
+
+## 16 可靠性、隔离与可观测性的实现位置
+
+这一节记录本轮补齐的工程能力与仍然存在的边界，避免把「有代码」误读成「已经生产可用」。
+
+| 能力 | 源码入口 | 关键约束 |
+| --- | --- | --- |
+| 可恢复调度状态 | `RunCheckpoint`、`RunCheckpointRepository`、`JdbcRunCheckpointRepository`、`RunStateTracker` | 事件回答「发生过什么」，检查点回答「下一步做什么」；每次工具开始/结束、审批、重试都推进检查点 |
+| 租约与安全接管 | `RunStateTracker.begin/claimLease/heartbeat/recoverAfterRestart` | 同一会话同一时刻只允许一个实例推进；租约过期或释放后才能接管；启动恢复只收敛为中断，不自动重放工具 |
+| 工具调用幂等 | `ToolCallJournal`、`JdbcToolCallJournal`、`ToolExecutor.withJournal` | 只对写文件重放，且要求文件现状与写入后指纹一致；命令重跑是预期行为，永不重放 |
+| 执行隔离 | `com.pilot.core.exec` 下的 `ExecutionBackend`、`LocalExecutionBackend`、`ContainerExecutionBackend`、`ExecutionBackends` | 容器请求不支持静默降级；`run_command` 仍走宿主进程，容器只覆盖校验命令 |
+| 产物版本 | `ArtifactManifest`、`ArtifactFile`、`InputBundle`、`SandboxStore.manifestHistory/manifestDiff/linkDependency` | 清单只读、按修订递增；候选指纹包含依赖指纹；上游变化使下游校验失效 |
+| 校验与完成声明绑定 | `ValidationLedger`、`ValidationEvidence`、`WorkspaceFingerprint`、`/api/sessions/{id}/validation` | 证据绑定候选指纹、命令、环境和运行；产物变化后旧证据不再支撑完成 |
+| 重试治理 | `RetryBudget`、`AgentLoop.withRetryBudget`、`RunRetrying` | 指数退避 + 抖动 + 次数/时长预算 + 熔断；余额与鉴权错误仍立即失败 |
+| 模型兼容契约 | `pilot-core/src/test/resources/model-contract/`、`ModelContractTest` | 脱敏样本覆盖鉴权、余额、限流、网关错误、流式中断、结构异常 |
+| 诊断与脱敏 | `TaskDiagnosticsService`、`Redaction`、`/api/sessions/{id}/diagnostics` | 只读汇总；密钥类文本在输出前脱敏；存储降级会显示原因 |
+| 数据生命周期 | `BackupService`、`RetentionService`、`StorageHealth`、`/api/maintenance/*` | 备份用 `VACUUM INTO`；恢复只能停服务后整体覆盖；写盘失败降级但继续任务 |
+| 远程访问边界 | `SecurityProperties`、`AccessControl`、`RemoteAccessFilter`、`AccessAudit` | 默认仅回环；令牌模式需显式配置；来源校验与限流；拒绝写审计 |
+| 跨平台与窄屏 | `.github/workflows/ci.yml`、`CrossPlatformPathTest`、`pilot-web/src/test/viewport/check-viewports.mjs` | 三平台跑完整测试；固定视口检查横向溢出与关键控件可见性 |
+| 真实模型评估 | `evaluation/harness/tasks.json`、`runner.mjs`、`metrics.mjs` | 外部验收命令未执行就不算成功；记录模型/提示词/工具版本以便横向比较 |
+
+仍然明确没有做到的：
+
+1. 多实例集群调度：租约依赖共享 SQLite，跨机器部署没有协调层。
+2. Windows 原生沙箱与 `run_command` 的容器化：需要路径映射、工具链镜像、停止语义与后代进程归属。
+3. 远程访问的多用户与权限模型：只有单一共享令牌。
+4. 真实任务集的 fixture 仓库与实测数据：harness 已可运行，但 fixtures 需要按任务补充后才能给出能力结论。

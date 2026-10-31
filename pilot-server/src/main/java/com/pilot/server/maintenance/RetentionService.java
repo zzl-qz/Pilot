@@ -28,23 +28,32 @@ public class RetentionService {
     private static final Logger log = LoggerFactory.getLogger(RetentionService.class);
 
     private final int retentionDays;
+    private final int backupDays;
+    private final int validationDays;
     private final ObjectProvider<SqliteStore> store;
     private final RunSnapshotService snapshots;
+    private final BackupService backups;
     private final PilotDataDir dataDir;
 
     public RetentionService(@Value("${pilot.retention.days:0}") int retentionDays,
+                            @Value("${pilot.retention.backups-days:0}") int backupDays,
+                            @Value("${pilot.retention.validation-days:0}") int validationDays,
                             ObjectProvider<SqliteStore> store,
                             RunSnapshotService snapshots,
+                            BackupService backups,
                             PilotDataDir dataDir) {
         this.retentionDays = retentionDays;
+        this.backupDays = backupDays;
+        this.validationDays = validationDays;
         this.store = store;
         this.snapshots = snapshots;
+        this.backups = backups;
         this.dataDir = dataDir;
     }
 
     @Scheduled(cron = "${pilot.retention.cron:0 30 3 * * *}")
     public void scheduledPurge() {
-        if (retentionDays <= 0) {
+        if (!enabled()) {
             return;
         }
         try {
@@ -56,27 +65,36 @@ public class RetentionService {
 
     /** 立即按配置的保留期清理一次；未开启时什么都不做。 */
     public PurgeReport purgeNow() {
-        if (retentionDays <= 0) {
-            return new PurgeReport(0, 0, 0, 0);
-        }
-        Instant cutoff = Instant.now().minus(retentionDays, ChronoUnit.DAYS);
+        // 三类数据可以有不同的保留期：事件/快照要留够复盘时间，备份和校验证据通常更短
+        Instant now = Instant.now();
+        int events = 0;
+        int snapshotRuns = 0;
+        int traces = 0;
         SqliteStore sqlite = store.getIfAvailable();
-        int events = sqlite == null ? 0 : sqlite.deleteEventsBefore(cutoff);
-        int snapshotRuns = snapshots.purgeOlderThan(cutoff);
-        int traces = deleteTracesBefore(cutoff);
-        if (sqlite != null && events > 0) {
-            sqlite.checkpoint();
+        if (retentionDays > 0) {
+            Instant cutoff = now.minus(retentionDays, ChronoUnit.DAYS);
+            events = sqlite == null ? 0 : sqlite.deleteEventsBefore(cutoff);
+            snapshotRuns = snapshots.purgeOlderThan(cutoff);
+            traces = deleteFilesBefore(dataDir.file("traces"), cutoff);
+            if (sqlite != null && events > 0) {
+                sqlite.checkpoint();
+            }
         }
-        return new PurgeReport(events, snapshotRuns, traces, retentionDays);
+        int backupCount = backupDays > 0
+                ? backups.purgeOlderThan(now.minus(backupDays, ChronoUnit.DAYS)) : 0;
+        int validationFiles = validationDays > 0
+                ? deleteFilesBefore(dataDir.file("validation"), now.minus(validationDays, ChronoUnit.DAYS)) : 0;
+        return new PurgeReport(events, snapshotRuns, traces, retentionDays, backupCount, validationFiles,
+                backupDays, validationDays);
     }
 
-    private int deleteTracesBefore(Instant cutoff) {
-        Path traces = dataDir.file("traces");
-        if (!Files.isDirectory(traces)) {
+    /** 删除某个数据目录下早于 cutoff 的普通文件；目录不存在时返回 0。 */
+    private int deleteFilesBefore(Path directory, Instant cutoff) {
+        if (!Files.isDirectory(directory)) {
             return 0;
         }
         int removed = 0;
-        try (Stream<Path> entries = Files.list(traces)) {
+        try (Stream<Path> entries = Files.list(directory)) {
             for (Path file : entries.filter(Files::isRegularFile).toList()) {
                 try {
                     if (Files.getLastModifiedTime(file).toInstant().isBefore(cutoff)) {
@@ -84,11 +102,13 @@ public class RetentionService {
                         removed++;
                     }
                 } catch (IOException e) {
-                    log.warn("清理 trace {} 失败", file, e);
+                    log.warn("清理 {} 失败", file, e);
+                    StorageHealth.markDegraded("retention", e.getMessage());
                 }
             }
         } catch (IOException e) {
-            log.warn("遍历 trace 目录失败: {}", traces, e);
+            log.warn("遍历数据目录失败: {}", directory, e);
+            StorageHealth.markDegraded("retention", e.getMessage());
         }
         return removed;
     }
@@ -98,12 +118,22 @@ public class RetentionService {
         return retentionDays;
     }
 
+    /** 任意一类保留策略是否开启。 */
+    public boolean enabled() {
+        return retentionDays > 0 || backupDays > 0 || validationDays > 0;
+    }
+
     /**
-     * @param events        删除的事件条数
-     * @param snapshotRuns  删除的快照运行数
-     * @param traces        删除的 trace 文件数
-     * @param retentionDays 生效的保留天数
+     * @param events         删除的事件条数
+     * @param snapshotRuns   删除的快照运行数
+     * @param traces         删除的 trace 文件数
+     * @param retentionDays  事件与快照的保留天数
+     * @param backups        删除的备份目录数
+     * @param validationFiles 删除的校验证据文件数
+     * @param backupDays     备份保留天数
+     * @param validationDays 校验证据保留天数
      */
-    public record PurgeReport(int events, int snapshotRuns, int traces, int retentionDays) {
+    public record PurgeReport(int events, int snapshotRuns, int traces, int retentionDays, int backups,
+                              int validationFiles, int backupDays, int validationDays) {
     }
 }

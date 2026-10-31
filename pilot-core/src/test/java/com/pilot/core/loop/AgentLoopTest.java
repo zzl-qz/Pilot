@@ -40,6 +40,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -619,9 +620,16 @@ class AgentLoopTest {
                 .map(RunRetrying.class::cast)
                 .toList();
         assertEquals(2, retries.size());
-        assertEquals(3_000L, retries.get(0).delayMs());
-        assertEquals(3_000L, retries.get(1).delayMs());
-        assertEquals(6_000L, waited.stream().mapToLong(Long::longValue).sum());
+        // 指数退避 + 抖动：第一次 0.5~1 秒，第二次 1~2 秒，且必须与真实等待一致
+        assertTrue(retries.get(0).delayMs() >= 500 && retries.get(0).delayMs() <= 1_000,
+                "第一次退避应在 0.5~1 秒: " + retries.get(0).delayMs());
+        assertTrue(retries.get(1).delayMs() >= 1_000 && retries.get(1).delayMs() <= 2_000,
+                "第二次退避应在 1~2 秒: " + retries.get(1).delayMs());
+        assertEquals(retries.get(0).delayMs() + retries.get(1).delayMs(),
+                waited.stream().mapToLong(Long::longValue).sum());
+        assertNotNull(retries.get(1).maxAttempts(), "重试事件要带上预算，界面才能显示进度");
+        assertNotNull(retries.get(1).remainingMs());
+        assertNotNull(retries.get(1).elapsedMs());
     }
 
     @Test
@@ -789,7 +797,7 @@ class AgentLoopTest {
         AgentLoop.Result result = loop.run("你好", List.of(), events::add);
 
         assertEquals("CANCELLED", result.failureCode());
-        assertEquals(6, calls.get(), "网络中断不设次数上限，一直到用户取消");
+        assertEquals(6, calls.get(), "预算内持续重连，直到用户取消");
         assertEquals(5, events.stream().filter(RunRetrying.class::isInstance).count());
         assertFalse(eventTypes().contains("run.failed"));
         List<Long> delays = events.stream()
@@ -797,7 +805,9 @@ class AgentLoopTest {
                 .map(RunRetrying.class::cast)
                 .map(RunRetrying::delayMs)
                 .toList();
-        assertTrue(delays.stream().allMatch(delay -> delay == 3_000L), "每次重试间隔约 3 秒，不越等越久");
+        assertTrue(delays.stream().allMatch(delay -> delay > 0 && delay <= 30_000),
+                "指数退避不超过上限: " + delays);
+        assertTrue(delays.getLast() > delays.getFirst(), "连续失败应逐步放慢: " + delays);
     }
 
     @Test

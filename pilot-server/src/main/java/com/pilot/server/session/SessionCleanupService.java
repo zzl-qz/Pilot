@@ -24,12 +24,21 @@ public class SessionCleanupService {
     private final TaskControlService taskControls;
     private final com.pilot.core.tool.CommandTaskManager commandTasks;
     private final org.springframework.beans.factory.ObjectProvider<com.pilot.core.browser.BrowserBackend> browser;
+    private final com.pilot.server.validation.ValidationLedger validations;
+    private final com.pilot.server.store.ToolCallJournalFactory journals;
+    private final com.pilot.core.session.RunCheckpointRepository checkpoints;
 
     public SessionCleanupService(SessionService sessions, ConversationRepository conversations,
                                  PlanRepository plans, RunRepository runs, SandboxStore sandboxes,
                                  RunStarter runStarter, TaskControlService taskControls,
                                  com.pilot.core.tool.CommandTaskManager commandTasks,
-                                 org.springframework.beans.factory.ObjectProvider<com.pilot.core.browser.BrowserBackend> browser) {
+                                 org.springframework.beans.factory.ObjectProvider<com.pilot.core.browser.BrowserBackend> browser,
+                                 com.pilot.server.validation.ValidationLedger validations,
+                                 com.pilot.server.store.ToolCallJournalFactory journals,
+                                 com.pilot.core.session.RunCheckpointRepository checkpoints) {
+        this.validations = validations;
+        this.journals = journals;
+        this.checkpoints = checkpoints;
         this.sessions = sessions;
         this.conversations = conversations;
         this.plans = plans;
@@ -58,6 +67,10 @@ public class SessionCleanupService {
         // 队列、续跑计数、运行槽位这些都是内存状态，不清理会一直占着
         runStarter.forget(sessionId);
         taskControls.delete(sessionId);
+        // 校验证据、幂等账本与检查点都属于会话数据，删除后不应还能被诊断接口读到
+        validations.deleteBySession(sessionId);
+        journals.deleteSession(sessionId);
+        checkpoints.deleteBySession(sessionId);
         return removed;
     }
 }

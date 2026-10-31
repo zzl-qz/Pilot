@@ -78,6 +78,9 @@ public final class ToolExecutor {
     private final com.pilot.core.trace.TraceRecorder traceRecorder;
     /** 运行时可替换：AgentLoop 先构造执行器，再按工作区挂上配置好的钩子。 */
     private volatile com.pilot.core.hook.Hooks hooks;
+    /** 工具调用幂等账本；为空表示不记录也不重放。 */
+    private volatile ToolCallJournal journal = ToolCallJournal.none();
+    private volatile String journalRunId;
 
     public ToolExecutor(ToolRegistry tools, PermissionGate permissionGate, ApprovalBroker approvals) {
         this(tools, permissionGate, approvals, (call, result, latencyMs) -> { });
@@ -102,6 +105,13 @@ public final class ToolExecutor {
         return this;
     }
 
+    /** 挂上幂等账本：同一 run 内参数完全相同的写文件调用只真正执行一次。 */
+    public ToolExecutor withJournal(String runId, ToolCallJournal journal) {
+        this.journalRunId = runId == null || runId.isBlank() ? null : runId;
+        this.journal = journal == null ? ToolCallJournal.none() : journal;
+        return this;
+    }
+
     public Outcome execute(ToolCall call, Consumer<SessionEvent> events) {
         return execute(call, events, () -> null);
     }
@@ -121,6 +131,7 @@ public final class ToolExecutor {
         ToolResult execution;
         Optional<Tool> tool = tools.find(call.name());
         Availability availability = tool.map(ToolRegistry::available).orElse(Availability.ready());
+        ToolCallJournal.Recorded replayed = null;
         if (tool.isEmpty()) {
             execution = ToolResult.text("ERROR: 未知工具 " + call.name() + "，可用工具: " + availableNames());
         } else if (!availability.available()) {
@@ -128,7 +139,12 @@ public final class ToolExecutor {
             execution = ToolResult.text("ERROR: 工具 " + call.name() + " 当前不可用：" + availability.reason()
                     + "。不要重复调用；如实告诉用户该能力缺失，并改用其他可用工具或说明无法验证的部分。");
         } else {
-            execution = executeTool(call, tool.get(), argsSummary, events, beforeStart);
+            replayed = replay(call, tool.get());
+            execution = replayed != null
+                    ? ToolResult.text(replayed.result()
+                    + "\n\n[幂等重放] 这个调用在本次运行中已成功执行过，且文件内容仍与当时一致；"
+                    + "本次直接复用结果，没有重复写入。")
+                    : executeTool(call, tool.get(), argsSummary, events, beforeStart);
         }
         String result = execution.text();
         // PostToolUse：把格式化/lint 之类每次都要做的结果直接贴在工具结果后面，不用模型再问一次
@@ -140,19 +156,20 @@ public final class ToolExecutor {
             }
         }
 
-        ArrayList<String> changedPaths = new ArrayList<>(execution.changedPaths());
-        ArrayList<String> checks = new ArrayList<>(execution.checks());
+        ArrayList<String> changedPaths = new ArrayList<>(replayed != null ? replayed.changedPaths() : execution.changedPaths());
+        ArrayList<String> checks = new ArrayList<>(replayed != null ? replayed.checks() : execution.checks());
         String nativeCheck = null;
         if (tool.isPresent() && !blocked(result)) {
             if (succeeded(result) && tool.get() instanceof WritesFiles writes) {
                 add(changedPaths, writes.changedPath(call));
             }
             // 失败和超时也要留下验证记录：否则「跑过但挂了」在收尾门和界面上都看不见
-            if (tool.get() instanceof ProducesCheck produces) {
+            if (replayed == null && tool.get() instanceof ProducesCheck produces) {
                 nativeCheck = produces.checkSummary(call, result);
                 add(checks, nativeCheck);
             }
         }
+        remember(call, replayed, result, changedPaths, checks);
 
         long latencyMs = Math.max(0L, (System.nanoTime() - startedAt) / 1_000_000L);
         try {
@@ -164,6 +181,36 @@ public final class ToolExecutor {
         // 结构化子结果里的历史检查不决定外层工具本身成败；外层状态只看正文与本工具自产检查。
         List<Attachment> images = succeeded(result) && !blocked(result) ? execution.images() : List.of();
         return new Outcome(call.name(), result, changedPaths, checks, classify(result, singleton(nativeCheck)), images);
+    }
+
+    /** 只对写文件类工具重放：命令重跑是预期行为，不能当成重复调用。 */
+    private ToolCallJournal.Recorded replay(ToolCall call, Tool tool) {
+        if (journalRunId == null || !(tool instanceof WritesFiles)) {
+            return null;
+        }
+        try {
+            return journal.replay(journalRunId, call)
+                    .filter(ToolCallJournal.Recorded::replayable)
+                    .orElse(null);
+        } catch (RuntimeException e) {
+            // 账本读写故障不能阻断正常工具执行；退化成「不幂等」即可
+            return null;
+        }
+    }
+
+    private void remember(ToolCall call, ToolCallJournal.Recorded replayed, String result,
+                          List<String> changedPaths, List<String> checks) {
+        if (journalRunId == null || replayed != null || changedPaths.isEmpty()) {
+            return;
+        }
+        if (!succeeded(result) || blocked(result)) {
+            return;
+        }
+        try {
+            journal.record(journalRunId, call, result, changedPaths, checks, true);
+        } catch (RuntimeException ignored) {
+            // 同上：账本失败不影响本次写入结果
+        }
     }
 
     private static OutcomeStatus classify(String result, List<String> checks) {

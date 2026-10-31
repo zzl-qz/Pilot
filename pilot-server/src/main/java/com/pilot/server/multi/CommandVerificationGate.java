@@ -36,10 +36,19 @@ public class CommandVerificationGate implements VerificationGate {
 
     private final MultiAgentProperties properties;
     private final PilotDataDir dataDir;
+    private final com.pilot.core.exec.ExecutionBackends.Selection execution;
 
+    /** 兼容测试与本地装配：不启用容器隔离。 */
     public CommandVerificationGate(MultiAgentProperties properties, PilotDataDir dataDir) {
+        this(properties, dataDir, com.pilot.core.exec.ExecutionBackends.select(null));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public CommandVerificationGate(MultiAgentProperties properties, PilotDataDir dataDir,
+                                   com.pilot.core.exec.ExecutionBackends.Selection execution) {
         this.properties = properties;
         this.dataDir = dataDir;
+        this.execution = execution;
     }
 
     @Override
@@ -73,17 +82,20 @@ public class CommandVerificationGate implements VerificationGate {
 
             List<String> checks = new ArrayList<>();
             for (String command : commands) {
-                Exec result = exec(copy, com.pilot.core.tool.ProcessSupport.shell(command),
-                        properties.verifyTimeoutSeconds());
+                Exec result = execBuild(copy, command);
                 checks.add(command + " → exit " + result.exit);
                 if (result.exit != 0) {
                     return Report.failed(checks,
                             "硬校验失败：" + command + "\n" + tail(result.output));
                 }
             }
-            return warning.isEmpty()
+            String note = warning;
+            if (!execution.isolated()) {
+                note = note.isEmpty() ? execution.describe() : note + "；" + execution.describe();
+            }
+            return note.isEmpty()
                     ? Report.passed(checks)
-                    : new Report(Report.PASSED, checks, "编译与测试通过（" + warning + "）");
+                    : new Report(Report.PASSED, checks, "编译与测试通过（" + note + "）");
         } catch (IOException | RuntimeException e) {
             log.warn("硬校验执行异常", e);
             return Report.skipped("硬校验执行异常：" + e.getMessage());
@@ -178,6 +190,34 @@ public class CommandVerificationGate implements VerificationGate {
         } catch (IOException ignored) {
             // 同上
         }
+    }
+
+    /**
+     * 校验命令的实际执行：配置了容器隔离就走容器，否则还是本机子进程。
+     *
+     * <p>只把「编译/测试」这类命令放进容器；{@code git worktree add/apply} 这类控制平面操作
+     * 仍在宿主执行，因为它们要操作的是宿主上的 git 仓库。
+     */
+    private Exec execBuild(Path directory, String command) {
+        if (!execution.isolated()) {
+            return exec(directory, com.pilot.core.tool.ProcessSupport.shell(command),
+                    properties.verifyTimeoutSeconds());
+        }
+        com.pilot.core.exec.ExecutionLimits base = execution.settings().limits();
+        com.pilot.core.exec.ExecutionLimits limits = new com.pilot.core.exec.ExecutionLimits(
+                properties.verifyTimeoutSeconds(), base.maxOutputBytes(), base.memoryMb(), base.cpus(),
+                base.pidsLimit());
+        com.pilot.core.exec.ExecutionResult result = execution.backend().run(
+                com.pilot.core.exec.ExecutionRequest.shell(command, directory, directory,
+                        java.util.Map.of(), execution.settings().network(), limits));
+        String output = result.output();
+        if (!result.error().isEmpty()) {
+            output = (output.isEmpty() ? "" : output + "\n") + result.error();
+        }
+        if (result.timedOut()) {
+            output = (output.isEmpty() ? "" : output + "\n") + "容器执行超时（" + limits.timeoutSeconds() + " 秒）";
+        }
+        return new Exec(result.exitCode(), output);
     }
 
     /** 命令来自配置或项目文件，不受模型控制；这里用 shell 只是为了支持带参数的命令行。 */

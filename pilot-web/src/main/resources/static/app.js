@@ -3146,16 +3146,22 @@ function onRunRetrying(event) {
   const seconds = Math.max(1, Math.round(delayMs / 1000));
   state.modelRetryUntil = Date.now() + delayMs;
   const reason = event.payload.reason || '模型请求失败';
+  // 有预算就显示「第 n / N 次」和剩余时间，让用户知道是在正常退避还是快撑不住了
+  const maxAttempts = Number(event.payload.maxAttempts || 0);
+  const remainingMs = event.payload.remainingMs;
+  const progress = maxAttempts > 0 ? `第 ${attempt}/${maxAttempts} 次` : `第 ${attempt} 次`;
+  const remaining = typeof remainingMs === 'number' && remainingMs > 0
+    ? `，预算剩余约 ${Math.max(1, Math.round(remainingMs / 1000))}s` : '';
   if (!state.replaying) {
-    showNotice(`模型暂时连不上，${seconds} 秒后再试（第 ${attempt} 次）。可以点停止。`);
+    showNotice(`模型暂时连不上，${seconds} 秒后再试（${progress}${remaining}）。可以点停止，恢复后也能继续。`);
   }
   setRunState('retry', `等待重试 · ${seconds}s`);
   record(event, {
     kind: 'run',
     tone: 'warn',
     status: `${seconds}s`,
-    title: `模型请求失败，第 ${attempt} 次重试`,
-    detail: reason
+    title: `模型请求失败，${progress}重试`,
+    detail: remaining ? `${reason}${remaining}` : reason
   });
 }
 

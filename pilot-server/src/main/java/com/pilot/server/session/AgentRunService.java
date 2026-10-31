@@ -114,7 +114,12 @@ public class AgentRunService implements RunStarter {
     private final MultiAgentService multiAgent;
     private final MultiAgentProperties multiProperties;
     private final com.pilot.server.observability.RunMetrics metrics;
+    /** 可恢复调度状态；为空时（测试构造）不做检查点，也不影响执行。 */
+    private final RunStateTracker runStates;
+    private final com.pilot.server.store.ToolCallJournalFactory journals;
+    private final com.pilot.server.validation.ValidationLedger validations;
 
+    /** 兼容旧调用：不启用检查点与幂等账本。 */
     public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
                            PermissionGate permissionGate, ApprovalBroker approvals,
                            AgentProperties properties, ModelSettings modelSettings,
@@ -126,7 +131,30 @@ public class AgentRunService implements RunStarter {
                            MultiAgentService multiAgent, MultiAgentProperties multiProperties,
                            com.pilot.server.observability.RunMetrics metrics, TaskControlService taskControls,
                            CommandTaskManager commandTasks) {
+        this(sessions, modelClient, toolFactory, permissionGate, approvals, properties, modelSettings,
+                snapshots, registry, runRepository, conversations, plans, objectMapper, dataDir,
+                queuedMessages, multiAgent, multiProperties, metrics, taskControls, commandTasks,
+                null, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
+                           PermissionGate permissionGate, ApprovalBroker approvals,
+                           AgentProperties properties, ModelSettings modelSettings,
+                           RunSnapshotService snapshots, RunRegistry registry,
+                           com.pilot.core.session.RunRepository runRepository,
+                           ConversationRepository conversations,
+                           com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper,
+                           PilotDataDir dataDir, com.pilot.server.store.QueuedMessageRepository queuedMessages,
+                           MultiAgentService multiAgent, MultiAgentProperties multiProperties,
+                           com.pilot.server.observability.RunMetrics metrics, TaskControlService taskControls,
+                           CommandTaskManager commandTasks, RunStateTracker runStates,
+                           com.pilot.server.store.ToolCallJournalFactory journals,
+                           com.pilot.server.validation.ValidationLedger validations) {
         this.sessions = sessions;
+        this.runStates = runStates;
+        this.journals = journals;
+        this.validations = validations;
         this.taskControls = taskControls;
         this.commandTasks = commandTasks;
         this.conversations = conversations;
@@ -481,6 +509,9 @@ public class AgentRunService implements RunStarter {
             runs.put(runId, handle);
             try {
                 registry.register(runId, sessionId, sessionWorkspace(sessionId));
+                if (runStates != null) {
+                    runStates.begin(sessionId, runId, sessionWorkspace(sessionId).toString());
+                }
                 snapshots.saveConversation(runId, conversations.load(sessionId), plans.load(sessionId));
                 taskControls.snapshot(sessionId, runId);
                 TaskControlService.TaskContract previous = taskControls.load(sessionId);
@@ -539,6 +570,9 @@ public class AgentRunService implements RunStarter {
             } catch (RuntimeException e) {
                 log.warn("记录 run {} 结束状态失败", runId, e);
             }
+            if (runStates != null) {
+                runStates.finish(sessionId, runId, status);
+            }
             Deque<String> queue = inbox(sessionId);
             try {
                 synchronized (queue) {
@@ -595,6 +629,13 @@ public class AgentRunService implements RunStarter {
             queuedMessages.save("steer:" + sessionId, List.of());
         } catch (RuntimeException e) {
             log.warn("清理会话 {} 的排队消息失败（会话可能已被删除）", sessionId, e);
+        }
+        if (runStates != null) {
+            try {
+                runStates.forget(sessionId);
+            } catch (RuntimeException ignored) {
+                // 删除会话时的清理失败不应阻断删除本身
+            }
         }
     }
 
@@ -966,8 +1007,14 @@ public class AgentRunService implements RunStarter {
         // 让 system prompt 只注入本轮真实可用的工具说明。
         Set<String> availableTools = sessionTools(tools);
         RunUsageAccumulator runUsage = new RunUsageAccumulator();
+        // 收尾事件里的检查摘要要用于校验证据，sink 里先留一份
+        java.util.concurrent.atomic.AtomicReference<RunCompleted> lastCompleted =
+                new java.util.concurrent.atomic.AtomicReference<>();
         // 事件类型计数：压缩次数、工具调用量、失败码分布都从这里来
         Consumer<SessionEvent> sink = event -> {
+            if (event instanceof RunCompleted completed) {
+                lastCompleted.set(completed);
+            }
             if (event instanceof com.pilot.core.event.ApprovalRequired approval) {
                 handle.pendingApprovals.add(approval.callId());
                 if (handle.cancelled.get() || !queuedMessages.load("steer:" + sessionId).isEmpty()) {
@@ -1014,6 +1061,10 @@ public class AgentRunService implements RunStarter {
                 }
             }
             metrics.count("event." + delivered.type().wireName());
+            // 事件落库同时推进可恢复检查点，重启后能说清「停在哪、下一步做什么」
+            if (runStates != null) {
+                runStates.onEvent(sessionId, runId, delivered);
+            }
             publish(sessionId, runId, delivered);
         };
         Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
@@ -1077,7 +1128,11 @@ public class AgentRunService implements RunStarter {
                 .withTaskContext(() -> taskControls.prompt(sessionId) + commandContext(sessionId))
                 .withCompletionClaim(() -> claimCompletion(sessionId, handle))
                 // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力
-                .withHooks(com.pilot.core.hook.Hooks.load(toolFactory.resolve(workspace)));
+                .withHooks(com.pilot.core.hook.Hooks.load(toolFactory.resolve(workspace)))
+                // 重启接管后重复的写文件调用不重复落盘
+                .withToolJournal(runId, journals == null
+                        ? com.pilot.core.tool.ToolCallJournal.none()
+                        : journals.forWorkspace(sessionId, toolFactory.resolve(workspace)));
 
         if (goalPolicy != null) loop.withExecutionPolicy(goalPolicy);
         snapshots.bind(runId, toolFactory.resolve(workspace));
@@ -1092,6 +1147,7 @@ public class AgentRunService implements RunStarter {
             log.info("Agent run {} completed: failureCode={}, messages={}, workspace={}", runId, result.failureCode(),
                     result.conversation().size(), workspace == null ? properties.workspace() : workspace);
             if (result.failureCode() == null) {
+                recordValidation(sessionId, runId, workspace, lastCompleted.get());
                 TaskControlService.TaskContract task = taskControls.load(sessionId);
                 return task == null ? "COMPLETED" : task.status();
             }
@@ -1117,6 +1173,37 @@ public class AgentRunService implements RunStarter {
             } finally {
                 snapshots.clear();
             }
+        }
+    }
+
+    /**
+     * 把「本轮成功」绑定到当前产物指纹、实际检查命令和环境。
+     *
+     * <p>没有产物变化（只回答问题）时不写证据：那不构成对代码的完成声明。
+     * 有变化但没有任何检查记录时记为 {@code skipped}，界面会显示「未经校验」，而不是通过。
+     */
+    private void recordValidation(String sessionId, String runId, String workspace, RunCompleted completed) {
+        if (validations == null) {
+            return;
+        }
+        try {
+            RunSnapshotService.SnapshotMeta meta = snapshots.meta(runId);
+            List<String> files = meta == null ? List.of()
+                    : meta.files().stream().map(RunSnapshotService.SnapshotEntry::path).toList();
+            String candidate = com.pilot.server.validation.WorkspaceFingerprint.of(
+                    toolFactory.resolve(workspace), files);
+            if (candidate.isBlank()) {
+                return;
+            }
+            List<String> checks = completed == null ? List.of() : completed.checks();
+            String status = checks.isEmpty() ? "skipped"
+                    : checks.stream().allMatch(check -> check.endsWith("→ exit 0")) ? "passed" : "failed";
+            validations.record(new com.pilot.server.validation.ValidationEvidence(
+                    "val_" + java.util.UUID.randomUUID(), sessionId, runId, candidate, files, checks,
+                    status, com.pilot.server.multi.SandboxStore.environmentFingerprint(), "run",
+                    java.time.Instant.now()));
+        } catch (RuntimeException e) {
+            log.debug("记录校验证据失败：session={}, run={}", sessionId, runId, e);
         }
     }
 

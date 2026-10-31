@@ -125,4 +125,19 @@ class SandboxStoreTest {
         assertTrue(store.verification("ses_candidate", "sbx_1") == null,
                 "旧候选的通过结果不能用于新候选");
     }
+
+    @Test
+    void resetRemovesPersistedSessionAndRepeatedRestoreDoesNotDuplicateSandbox() throws IOException {
+        SandboxStore first = store();
+        first.add("ses_cleanup", proposal());
+
+        SandboxStore restored = store();
+        assertEquals(1, restored.sandboxes("ses_cleanup").size());
+        assertEquals(1, restored.sandboxes("ses_cleanup").size());
+
+        restored.reset("ses_cleanup");
+
+        assertEquals(0, restored.sandboxes("ses_cleanup").size());
+        assertEquals(0, Files.list(dataDir.resolve("multi")).toList().size());
+    }
 }

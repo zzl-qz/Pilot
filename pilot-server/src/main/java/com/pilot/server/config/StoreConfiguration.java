@@ -104,6 +104,19 @@ public class StoreConfiguration {
         return RunRepository.noop();
     }
 
+    /** 可恢复调度状态与幂等账本的存储端口；内存模式退化为不持久化。 */
+    @Bean
+    @ConditionalOnProperty(name = "pilot.store", havingValue = "sqlite", matchIfMissing = true)
+    com.pilot.core.session.RunCheckpointRepository jdbcRunCheckpointRepository(SqliteStore store) {
+        return new com.pilot.server.store.JdbcRunCheckpointRepository(store);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "pilot.store", havingValue = "memory")
+    com.pilot.core.session.RunCheckpointRepository inMemoryRunCheckpointRepository() {
+        return new com.pilot.core.session.InMemoryRunCheckpointRepository();
+    }
+
     @Bean
     @ConditionalOnProperty(name = "pilot.store", havingValue = "sqlite", matchIfMissing = true)
     com.pilot.server.store.QueuedMessageRepository queuedMessageRepository(SqliteStore store) {

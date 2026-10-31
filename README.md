@@ -138,7 +138,24 @@ bash mvnw -pl pilot-server spring-boot:run
 
 项目制改造之前创建的会话没有 `project_id`，会显示在侧栏的「未分组」下，数据不会被删除；老库启动时会自动补上 `project_id` 列。
 
-事件、快照和 trace 默认永久保留。设置 `PILOT_RETENTION_DAYS`（或 `pilot.retention.days`）为正数后，服务每天清理一次早于该天数的数据并收缩 WAL；会话本身不会被删除。写文件前的快照对单个文件有 8MB 上限，超过的文件不备份，回滚结果里会把它列为失败而不是静默删除。
+事件、快照和 trace 默认永久保留。设置 `PILOT_RETENTION_DAYS`（或 `pilot.retention.days`）为正数后，服务每天清理一次早于该天数的数据并收缩 WAL；会话本身不会被删除。写文件前的快照对单个文件有 8MB 上限，超过的文件不备份，回滚结果里会把它列为失败而不是静默删除。备份目录与校验证据可以单独设置更短的期限：`PILOT_RETENTION_BACKUPS_DAYS`、`PILOT_RETENTION_VALIDATION_DAYS`。
+
+执行隔离与远程访问是两组独立开关：
+
+| 配置 | 默认 | 作用 |
+| --- | --- | --- |
+| `PILOT_EXECUTION_ISOLATION` | `local` | `container` 时校验命令在容器内执行（`--network=none`、只读根、cap-drop、内存/CPU/进程上限）；容器不可用会显式降级并在 `/api/maintenance/status` 报告原因 |
+| `PILOT_EXECUTION_IMAGE` / `PILOT_EXECUTION_RUNTIME` | temurin 25 / 自动探测 | 容器镜像与运行时（docker/podman） |
+| `PILOT_SECURITY_MODE` | `local` | `token` 允许远程访问，但必须带令牌 |
+| `PILOT_SECURITY_TOKEN` | 空 | 访问令牌；`token` 模式为空会拒绝远程请求 |
+| `PILOT_SECURITY_ALLOWED_ORIGINS` | 空 | 允许的浏览器来源，逗号分隔；默认只允许同源 |
+| `PILOT_SECURITY_RATE_LIMIT` | 600 | 单 IP 每分钟请求上限，`0` 表示关闭 |
+
+令牌可通过 `Authorization: Bearer`、`X-Pilot-Token` 或 SSE 的 `?token=` 传入。浏览器首次用 `http://<host>:8787/?token=<令牌>` 打开后，服务会写入 HttpOnly、SameSite=Strict 的 Cookie，页面内的 `fetch` 与 `EventSource` 随后自动携带，不必改前端代码。被拒绝的请求写入 `.pilot/audit/access.jsonl`，不记录令牌本身。
+
+这只是单令牌边界：没有用户、角色与会话级隔离，适合可信局域网的单人使用。要开放到公网，应在其前面加一层真正的认证代理，并自行处理 TLS。
+
+数据备份用 `POST /api/maintenance/backup`：数据库走 SQLite `VACUUM INTO` 得到事务一致快照，清单、校验证据、命令日志一并复制并写 `manifest.json`（含每个文件的 sha256）。恢复只能停服务后整体覆盖数据目录；不要在服务运行时恢复。
 
 ## API 概览
 
@@ -158,9 +175,13 @@ bash mvnw -pl pilot-server spring-boot:run
 - `/api/approvals`：查看和处理待审批工具调用。
 - `/api/settings`：查看或更新模型与权限设置。
 - `/api/health`：服务健康状态。
-- `GET /api/sessions/{id}/multi`：多智能体任务看板、沙箱改动与待仲裁事项。
+- `GET /api/sessions/{id}/multi`：多智能体任务看板、沙箱改动、待仲裁事项与产物清单摘要。
 - `POST /api/sessions/{id}/multi/sandboxes/{sandboxId}/accept|reject`：接受或拒绝某个子 Agent 的改动。
 - `POST /api/sessions/{id}/multi/arbitrations/{arbitrationId}/resolve`：记录人工仲裁结果。
+- `GET /api/sessions/{id}/multi/sandboxes/{sandboxId}/manifest`：当前产物清单、与上一版的差异、校验有效性原因；`.../manifests` 返回版本历史。
+- `GET /api/sessions/{id}/diagnostics`：任务诊断（停在哪一步、上次成功步骤、下一动作、重试状态、耗时与用量、命令、校验覆盖、存储健康、启动恢复）。文本经过脱敏。
+- `GET /api/sessions/{id}/validation`：完成声明对应的校验证据是否仍覆盖当前产物；`GET /api/recovery`：最近一次启动接管的运行清单。
+- `GET /api/maintenance/status`、`POST /api/maintenance/backup`、`POST /api/maintenance/purge`：存储、备份与保留策略。
 
 具体请求结构以 `pilot-server` 控制器实现为准；该列表是入口索引，不替代接口契约文档。
 
@@ -262,7 +283,21 @@ cd pilot-web
 npm test
 ```
 
-Sprint 6 可复现任务规格与任务矩阵、运行命令见 `evaluation/TASKS.md`，记录模板/当前结果见 `evaluation/REPORT.md`。任务包括代码理解、修复、测试、权限拒绝、循环检测和压缩等。脚本化单测验证的是组件行为，不等同于真实模型成功率；真实模型评估还需配置模型并人工记录结果。
+Sprint 6 可复现任务规格与任务矩阵、运行命令见 `evaluation/TASKS.md`，记录模板/当前结果见 `evaluation/REPORT.md`。任务包括代码理解、修复、测试、权限拒绝、循环检测和压缩等。脚本化单测验证的是组件行为，不等同于真实模型成功率。
+
+真实模型评估已有固定任务集与执行器：`evaluation/harness/tasks.json` 定义六个可复制工作区与外部验收命令，`evaluation/harness/runner.mjs` 驱动真实运行并写出 JSONL，`metrics.mjs` 聚合成功率、回归率、成本、耗时、返工与人工接管率，并支持与上次基线比较：
+
+```sh
+node evaluation/harness/runner.mjs --base http://127.0.0.1:8787 \
+  --model <模型> --prompt-version <提示词版本> --tool-version <工具版本> \
+  --fixtures evaluation/harness/fixtures --out evaluation/harness/runs/run1.jsonl
+node --test evaluation/harness/metrics.test.mjs   # 指标聚合的单元测试
+node evaluation/harness/runner.mjs --dry-run --out /tmp/dry.jsonl  # 只验证流程
+```
+
+只有验收命令真的执行为 0 才算成功；`--dry-run` 的数字只用于验证流程，不能当作能力结论。
+
+窄屏回归用 `cd pilot-web && npm run check:viewports -- --base http://127.0.0.1:8787`：在 390/768/1440 三个视口检查横向溢出、输入框与发送按钮可见性、设置面板是否超出屏幕，并输出截图与 `report.json`。需要先 `npm install` 安装 playwright。
 
 ### 浏览器调试产物
 
@@ -280,4 +315,7 @@ Sprint 6 可复现任务规格与任务矩阵、运行命令见 `evaluation/TASK
 - 主动压缩会额外调用一次模型生成交接摘要；压缩只替换模型记忆中的早期内容，不删除聊天和审计记录。摘要可能丢失细节，关键事实仍需复读原文件核实。
 - ASK 依赖运行中的审批服务；等待超时按拒绝处理。不要把审批 UI 当作安全沙箱。
 - 运行时存储、文件写入、命令执行均有本地副作用；先备份并使用可丢弃工作区。
-- 评估集当前是任务规格和自动化测试映射，不包含十份独立仓库快照；评估前应在干净 checkout 执行，并记录提交号。
+- `run_command` 仍以宿主进程执行：容器隔离目前只覆盖多智能体的校验命令，因为后台命令状态、日志与停止都依赖进程归属。`ExecutionBackend` 已抽出，但把它接到完整命令生命周期还要处理路径映射、工具链镜像与停止语义。
+- 检查点、租约与幂等账本解决的是「同一实例重启后安全接管」，不是多实例集群调度：租约存在 SQLite 里，多实例共享同一数据目录才有意义。
+- 远程访问只有单一共享令牌，没有用户、角色与会话级隔离；开放到公网前应在前面加一层真正的认证代理。
+- 评估集当前是任务规格和自动化测试映射，不包含十份独立仓库快照；评估前应在干净 checkout 执行，并记录提交号。`evaluation/harness/fixtures/` 需要按任务补充初始仓库后才能真正跑出成功率。

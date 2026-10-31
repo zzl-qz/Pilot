@@ -250,6 +250,11 @@ public class MultiAgentService {
                 completed = states.values().stream()
                         .allMatch(state -> state.status == TaskStatus.DONE);
             }
+            // 校验结论绑定到每个沙箱当时的产物清单：候选或依赖一变，旧的通过记录自动失效
+            for (DiffSandbox box : boxes) {
+                sandboxes.recordVerification(dispatch.sessionId(), box.id(),
+                        SandboxStore.environmentFingerprint(), verificationReport);
+            }
         }
 
         List<TaskOutcome> outcomes = states.values().stream().map(TaskState::outcome).toList();
@@ -302,6 +307,8 @@ public class MultiAgentService {
             return;
         }
         sandboxes.add(dispatch.sessionId(), sandbox);
+        // 登记「这个沙箱依赖哪些上游任务的产物」，上游变化时下游校验才会失效
+        sandboxes.linkTaskDependencies(dispatch.sessionId(), state.spec.dependsOn(), sandbox.id());
         state.track(sandbox);
     }
 

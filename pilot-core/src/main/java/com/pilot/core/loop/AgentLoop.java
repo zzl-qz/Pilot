@@ -186,6 +186,12 @@ public final class AgentLoop {
         return this;
     }
 
+    /** 工具调用幂等账本：重启接管后同一参数写文件调用不重复落盘。 */
+    public AgentLoop withToolJournal(String runId, com.pilot.core.tool.ToolCallJournal journal) {
+        this.toolExecutor.withJournal(runId, journal);
+        return this;
+    }
+
     /** 确定性钩子：编辑后自动格式化/lint 之类的事情交给配置，不占用模型注意力。 */
     public AgentLoop withHooks(com.pilot.core.hook.Hooks hooks) {
         this.hooks = hooks == null ? com.pilot.core.hook.Hooks.none() : hooks;
@@ -195,6 +201,14 @@ public final class AgentLoop {
     }
     private Supplier<String> taskContext = () -> "";
     private BooleanSupplier completionClaim = () -> true;
+    /** 模型失败重试的退避、预算与熔断；可在构造后替换以测试或按配置调参。 */
+    private RetryBudget retryBudget = RetryBudget.fromSystemProperties();
+
+    /** 替换重试治理；替换后从干净状态开始。 */
+    public AgentLoop withRetryBudget(RetryBudget budget) {
+        retryBudget = Objects.requireNonNull(budget, "retry budget must not be null");
+        return this;
+    }
 
     /** 每次模型请求重新注入持久化目标，避免压缩、续跑或纠正使约束丢失。 */
     public AgentLoop withTaskContext(Supplier<String> context) {
@@ -862,6 +876,8 @@ public final class AgentLoop {
                     }
                 });
                 usage.finish(response);
+                // 一次成功请求说明端点恢复了，下一次故障重新计算退避与预算
+                retryBudget.reset();
                 runtimeGuidance.clear();
                 // client 已拿到请求快照；立即还原基础 system，避免当前内存历史也携带一次性提示。
                 refreshTaskContext(messages, null);
@@ -884,15 +900,24 @@ public final class AgentLoop {
                     kind = ModelFailureKind.TRANSIENT;
                 }
                 String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                // 可重试的失败没有次数上限：每 3 秒再试一次，只有用户取消才停。
+                // 永久错误（鉴权、余额、模型不支持、结构非法）重试不会变好，立刻失败
                 if (!kind.retryable()) {
                     throw new ExecutionPolicy.Stop("MODEL_ERROR",
                             "模型调用失败：" + ToolSupport.oneLine(reason, 300));
                 }
-                attempt++;
-                long delayMs = ModelRetryPolicy.delayMs(attempt);
-                events.accept(new RunRetrying(attempt, delayMs, ToolSupport.oneLine(reason, 300)));
-                if (!pause(delayMs)) {
+                RetryBudget.Decision decision = retryBudget.afterFailure(reason);
+                if (!decision.retry()) {
+                    // 预算耗尽或熔断：明确停下并说明可以继续，而不是无声地一直重试
+                    throw new ExecutionPolicy.Stop("MODEL_ERROR",
+                            "模型调用重试已停止：" + decision.reason()
+                                    + "。已等待 " + Math.max(0, decision.elapsedMs() / 1000) + " 秒，"
+                                    + "进度与对话已保存；确认模型服务恢复后可继续执行。");
+                }
+                attempt = decision.attempt();
+                events.accept(new RunRetrying(attempt, decision.delayMs(),
+                        ToolSupport.oneLine(reason, 300), decision.elapsedMs(),
+                        decision.remainingMs(), retryBudget.maxAttempts()));
+                if (!pause(decision.delayMs())) {
                     return new ModelTurn(null, cancel(messages, events));
                 }
             }
