@@ -26,6 +26,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -74,6 +76,8 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     private volatile Thread worker;
     /** 镜像订阅方注册的监听者：backend 异步重建时随实例转移。 */
     private volatile BrowserEventListener eventListener;
+    /** 用户接管开关（会话级内存态，不落库）：BrowserTool 据此拦截交互类动作。 */
+    private final ConcurrentMap<String, Boolean> interactionsPaused = new ConcurrentHashMap<>();
 
     public BrowserRuntime(PilotDataDir dataDir, ObjectMapper mapper,
                           @Value("${pilot.browser.enabled:true}") boolean enabled,
@@ -114,8 +118,23 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
 
     @Override
     public void closeSession(String sessionId) {
+        interactionsPaused.remove(sessionId); // 会话关闭即复位接管开关
         PlaywrightBackend current = backend;
         if (current != null) current.closeSession(sessionId);
+    }
+
+    /** 用户接管：暂停/恢复智能体的页面交互动作（观察类不受影响）；内存态，重启即清零。 */
+    public void setInteractionsPaused(String sessionId, boolean paused) {
+        if (paused) {
+            interactionsPaused.put(sessionId, Boolean.TRUE);
+        } else {
+            interactionsPaused.remove(sessionId);
+        }
+    }
+
+    @Override
+    public boolean interactionsPaused(String sessionId) {
+        return interactionsPaused.containsKey(sessionId);
     }
 
     @Override

@@ -126,6 +126,19 @@ public class BrowserControlService implements BrowserEventListener {
         controls.execute(() -> runtime.focusPage(sessionId));
     }
 
+    /**
+     * 用户接管：暂停/恢复智能体的页面交互动作（观察类不受影响）。
+     * 状态存在 BrowserRuntime（唯一事实源），变化经 state 事件回推全部订阅者，
+     * 前端按钮只是它的投影——双击/多端不会产生不一致。
+     */
+    public void setPaused(String sessionId, boolean paused) {
+        runtime.setInteractionsPaused(sessionId, paused);
+        State state = states.get(sessionId);
+        if (state != null) {
+            broadcast(state, "state", statePayload(sessionId));
+        }
+    }
+
     @Override
     public void onEvent(String sessionId, String kind, JsonNode payload) {
         switch (kind) {
@@ -188,6 +201,8 @@ public class BrowserControlService implements BrowserEventListener {
             // CopyOnWriteArrayList 语义下 remove 已足够；此分支只为可读性
         }
         if (!state.subscribers.isEmpty()) return;
+        // 订阅清空：停帧、清缓存帧，接管开关一并复位（没人看着页面就不算接管中）
+        runtime.setInteractionsPaused(state.id, false);
         state.frame = null;
         states.remove(state.id, state);
         controls.execute(() -> runtime.mirrorControl(state.id, false, maxWidth, quality));

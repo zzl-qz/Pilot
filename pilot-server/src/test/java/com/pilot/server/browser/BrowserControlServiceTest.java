@@ -139,4 +139,31 @@ class BrowserControlServiceTest {
         org.junit.jupiter.api.Assertions.assertEquals(true, status.get("available"));
         org.junit.jupiter.api.Assertions.assertEquals(true, status.get("paused"));
     }
+
+    @Test
+    void pauseFlowsToRuntimeAndStateEventGoesBackToSubscribers() throws IOException {
+        SseEmitter emitter = mock(SseEmitter.class);
+        service.subscribe("s1", emitter);
+
+        service.setPaused("s1", true);
+
+        verify(runtime).setInteractionsPaused("s1", true);
+        // 状态变化回推给订阅者（前端按钮按这个翻转，双击不会不一致）
+        verify(emitter, timeout(2000).atLeast(2)).send(any(SseEmitter.SseEventBuilder.class));
+
+        service.setPaused("s1", false);
+        verify(runtime).setInteractionsPaused("s1", false);
+    }
+
+    @Test
+    void takeoverFlagIsResetWhenTheLastSubscriberLeaves() {
+        SseEmitter emitter = mock(SseEmitter.class);
+        service.subscribe("s1", emitter);
+        service.setPaused("s1", true);
+
+        service.unsubscribe("s1", emitter);
+
+        // 没人看着页面就不算接管中：订阅清空即复位，下个订阅者拿到干净状态
+        verify(runtime, timeout(2000)).setInteractionsPaused("s1", false);
+    }
 }

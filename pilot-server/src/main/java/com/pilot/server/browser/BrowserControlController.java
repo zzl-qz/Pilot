@@ -103,6 +103,22 @@ public class BrowserControlController {
         return ResponseEntity.noContent().build();
     }
 
+    /** 用户接管：把页面留给用户，智能体的交互/导航动作被温和拦截（观察类放行）。 */
+    @PostMapping("/{id}/browser/pause")
+    public ResponseEntity<Void> pause(@PathVariable String id) {
+        requireSession(id);
+        browser.setPaused(id, true);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** 恢复智能体的页面操作。 */
+    @PostMapping("/{id}/browser/resume")
+    public ResponseEntity<Void> resume(@PathVariable String id) {
+        requireSession(id);
+        browser.setPaused(id, false);
+        return ResponseEntity.noContent().build();
+    }
+
     private void requireSession(String id) {
         if (sessions.find(id).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "会话不存在: " + id);
