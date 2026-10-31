@@ -7,8 +7,6 @@ import com.pilot.core.workspace.PathValidator;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.Charset;
-import java.nio.charset.CharsetDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -52,7 +50,6 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     private static final int HEAD_CHARS = 4_000;
     private static final long DEFAULT_TIMEOUT_MS = 120_000L;
     private static final long MAX_TIMEOUT_MS = 600_000L;
-    private static final Charset GBK = Charset.forName("GBK");
 
     private final PathValidator paths;
     private final CommandTaskManager commandTasks;
@@ -129,9 +126,30 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     @Override
     public boolean readOnly(Map<String, Object> args) {
         Preparation preparation = prepare(args);
-        if (preparation.error() != null) return true;
+        if (preparation.error() != null) {
+            // 准备失败不等于只读：例如 Windows 上缺少可用 shell 时链式命令只是无法执行，
+            // 仍要按命令本身判断，否则会绕过审批。
+            return staticReadOnly(ToolSupport.stringArg(args, "command"));
+        }
         // 后台任务会常驻进程，哪怕命令本身是查看类也要走审批。
         return !preparation.prepared().background() && preparation.prepared().readOnly();
+    }
+
+    /**
+     * 只按命令文本判断只读性。不在白名单里的命令必然失败，仍按只读放行，
+     * 避免让用户为一条注定报错的命令点一次审批。
+     */
+    private static boolean staticReadOnly(String raw) {
+        if (raw == null || raw.isBlank()) return true;
+        CommandChain.Parsed parsed = CommandChain.parse(raw);
+        if (parsed.error() != null) return true;
+        boolean readOnly = true;
+        for (CommandChain.Segment segment : parsed.segments()) {
+            List<String> tokens = segment.tokens();
+            if (!CommandPolicy.knownExecutable(tokens.getFirst().toLowerCase(Locale.ROOT))) return true;
+            readOnly &= CommandPolicy.readOnly(tokens);
+        }
+        return readOnly;
     }
 
     @Override
@@ -224,9 +242,6 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
 
         boolean chained = segments.size() > 1;
-        if (chained && WINDOWS) {
-            return Preparation.error("ERROR: Windows 上暂不支持用 && | ; 串联命令，请拆成多次调用");
-        }
         List<List<String>> checked = new ArrayList<>(segments.size());
         boolean readOnly = true;
         boolean trackChanges = false;
@@ -254,16 +269,66 @@ public final class RunCommandTool implements Tool, ProducesCheck {
                     trackChanges, readOnly), null);
         }
         // 每段仍用解析出的绝对路径启动；shell 只负责连接符，看不到任何可展开的内容
-        StringBuilder resolved = new StringBuilder();
-        for (int i = 0; i < checked.size(); i++) {
-            if (i > 0) resolved.append(' ').append(operators.get(i - 1)).append(' ');
-            resolved.append(withWrapper(checked.get(i)).stream().map(CommandChain::quote)
-                    .collect(Collectors.joining(" ")));
-            if (segments.get(i).mergeStderr()) resolved.append(" 2>&1");
-        }
+        String script = script(withWrapperSegments(checked), operators, segments);
         String display = String.join(" ", segmentsDisplay(checked, operators));
-        return new Preparation(new Prepared(List.of("/bin/sh", "-c", resolved.toString()), List.of(display), workdir,
+        if (WINDOWS) {
+            List<String> shell = windowsShell(script, operators);
+            if (shell == null) {
+                return Preparation.error("ERROR: Windows 上 && 与 || 需要 PowerShell 7（pwsh.exe）；"
+                        + "请安装 PowerShell 7、改用 ; 连接，或拆成多次调用");
+            }
+            return new Preparation(new Prepared(shell, List.of(display), workdir, background, timeoutMs,
+                    trackChanges, readOnly), null);
+        }
+        return new Preparation(new Prepared(List.of("/bin/sh", "-c", script), List.of(display), workdir,
                 background, timeoutMs, trackChanges, readOnly), null);
+    }
+
+    private List<List<String>> withWrapperSegments(List<List<String>> checked) {
+        List<List<String>> wrapped = new ArrayList<>(checked.size());
+        for (List<String> tokens : checked) wrapped.add(withWrapper(tokens));
+        return wrapped;
+    }
+
+    /**
+     * 把多段命令拼成脚本。Windows 上用 PowerShell：每段加 {@code &} 调用操作符并做 PowerShell 单引号转义；
+     * 其他平台用 POSIX 单引号。
+     */
+    private static String script(List<List<String>> resolved, List<String> operators,
+                                 List<CommandChain.Segment> segments) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < resolved.size(); i++) {
+            if (i > 0) out.append(' ').append(operators.get(i - 1)).append(' ');
+            List<String> tokens = resolved.get(i);
+            out.append(WINDOWS ? "& " + psQuote(tokens.get(0))
+                    : tokens.stream().map(CommandChain::quote).collect(Collectors.joining(" ")));
+            for (int j = 1; j < tokens.size(); j++) {
+                out.append(' ').append(WINDOWS ? psQuote(tokens.get(j)) : CommandChain.quote(tokens.get(j)));
+            }
+            if (segments.get(i).mergeStderr()) out.append(" 2>&1");
+        }
+        return out.toString();
+    }
+
+    /** PowerShell 单引号字面量；内部的单引号写成两个。 */
+    private static String psQuote(String value) {
+        return "'" + value.replace("'", "''") + "'";
+    }
+
+    /**
+     * Windows 上执行链式命令的 shell。优先 PowerShell 7（{@code pwsh} 支持 &&、||、; 和管道），
+     * 回退 Windows PowerShell 5.1（只支持 ; 和管道）。返回 null 表示当前环境无法执行该连接符组合。
+     */
+    private static List<String> windowsShell(String script, List<String> operators) {
+        boolean shortCircuit = operators.contains("&&") || operators.contains("||");
+        Path pwsh = resolveOnPath("pwsh");
+        if (pwsh != null) return List.of(pwsh.toString(), "-NoProfile", "-NonInteractive", "-Command", script);
+        if (shortCircuit) return null;
+        Path powerShell = resolveOnPath("powershell");
+        if (powerShell != null) {
+            return List.of(powerShell.toString(), "-NoProfile", "-NonInteractive", "-Command", script);
+        }
+        return null;
     }
 
     private static List<String> segmentsDisplay(List<List<String>> segments, List<String> operators) {
@@ -754,15 +819,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     /** 优先按 UTF-8 严格解码；失败时回退 GBK（Windows 中文控制台常见）。 */
     static String decode(byte[] bytes) {
-        if (bytes == null || bytes.length == 0) {
-            return "";
-        }
-        try {
-            CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder();
-            return decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString();
-        } catch (java.nio.charset.CharacterCodingException e) {
-            return new String(bytes, GBK);
-        }
+        return ProcessSupport.decode(bytes);
     }
 
     private static String redact(String text) {

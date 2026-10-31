@@ -1,6 +1,7 @@
 package com.pilot.core.loop;
 
 import com.pilot.core.model.ModelClientException;
+import com.pilot.core.model.ModelFailureKind;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -64,5 +65,40 @@ class ModelRetryPolicyTest {
     void givesUpOnPlainRuntimeErrors() {
         assertFalse(ModelRetryPolicy.isTransient(new IllegalStateException("解析响应失败")));
         assertFalse(ModelRetryPolicy.isTransient(new RuntimeException()));
+    }
+
+    @Test
+    void classifiesStructuredKindsWithoutReadingMessageText() {
+        assertEquals(ModelFailureKind.NETWORK,
+                ModelRetryPolicy.classify(new ModelClientException(ModelFailureKind.NETWORK, "任意文本")));
+        assertEquals(ModelFailureKind.TRANSIENT,
+                ModelRetryPolicy.classify(new ModelClientException(ModelFailureKind.TRANSIENT, "任意文本")));
+        assertEquals(ModelFailureKind.PERMANENT,
+                ModelRetryPolicy.classify(new ModelClientException(ModelFailureKind.PERMANENT, "HTTP 429")));
+        assertEquals(ModelFailureKind.INTERRUPTED,
+                ModelRetryPolicy.classify(new ModelClientException(ModelFailureKind.INTERRUPTED, "任意文本")));
+        // 被包装一层也要认出结构化分类
+        assertEquals(ModelFailureKind.PERMANENT,
+                ModelRetryPolicy.classify(new RuntimeException("外层包装",
+                        new ModelClientException(ModelFailureKind.PERMANENT, "模型不支持该参数"))));
+    }
+
+    @Test
+    void classifiesNetworkFailuresFromIoChain() {
+        // 没有状态码的连接问题（断网、连接重置）归网络类，可以一直重连
+        assertEquals(ModelFailureKind.NETWORK,
+                ModelRetryPolicy.classify(new ModelClientException("流式模型请求失败（10 ms）：connection reset",
+                        new IOException("connection reset"))));
+        assertEquals(ModelFailureKind.NETWORK,
+                ModelRetryPolicy.classify(new UncheckedIOException(new IOException("socket closed"))));
+    }
+
+    @Test
+    void networkFailuresHaveNoRetryLimit() {
+        assertEquals(ModelRetryPolicy.UNLIMITED_RETRIES, ModelRetryPolicy.maxRetries(ModelFailureKind.NETWORK));
+        assertEquals(ModelRetryPolicy.MAX_TRANSIENT_RETRIES, ModelRetryPolicy.maxRetries(ModelFailureKind.TRANSIENT));
+        assertEquals(0, ModelRetryPolicy.maxRetries(ModelFailureKind.PERMANENT));
+        assertEquals(0, ModelRetryPolicy.maxRetries(ModelFailureKind.INTERRUPTED));
+        assertEquals(0, ModelRetryPolicy.maxRetries(null));
     }
 }

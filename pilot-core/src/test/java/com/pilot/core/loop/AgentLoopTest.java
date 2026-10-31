@@ -11,6 +11,7 @@ import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelClientException;
+import com.pilot.core.model.ModelFailureKind;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.permission.PermissionGate;
@@ -25,6 +26,7 @@ import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.WritesFiles;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -676,11 +678,12 @@ class AgentLoopTest {
     }
 
     @Test
-    void stopsAfterThreeTransientRetries() {
+    void stopsAfterThreeServerSideTransientRetries() {
         AtomicInteger calls = new AtomicInteger();
         ModelClient client = (messages, tools) -> {
             calls.incrementAndGet();
-            throw new ModelClientException("模型请求失败（10 ms, model=gpt）：connection reset");
+            throw new ModelClientException(ModelFailureKind.TRANSIENT,
+                    "模型接口返回 HTTP 503（10 ms, model=gpt）：unavailable");
         };
         AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(),
                 config(8, 3), Cancellation.none(), () -> null, (call, result, latencyMs) -> { },
@@ -692,6 +695,60 @@ class AgentLoopTest {
         assertEquals(5, calls.get(), "四次业务请求失败后仍会尝试一次无工具收尾");
         assertEquals(3, events.stream().filter(RunRetrying.class::isInstance).count());
         assertTrue(eventTypes().contains("run.failed"));
+    }
+
+    @Test
+    void recoversFromOneNetworkDropWithoutFailingRun() {
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient client = (messages, tools) -> {
+            if (calls.getAndIncrement() == 0) {
+                // 流式读到一半断连：不该让整个任务判死
+                throw new ModelClientException(ModelFailureKind.NETWORK,
+                        "流式模型请求失败（12 ms, model=gpt）：connection reset",
+                        new IOException("connection reset"));
+            }
+            return new ModelResponse("继续干活。", List.of());
+        };
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(),
+                config(8, 3), Cancellation.none(), () -> null, (call, result, latencyMs) -> { },
+                millis -> { }, null);
+
+        AgentLoop.Result result = loop.run("你好", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals("继续干活。", result.finalText());
+        assertEquals(2, calls.get());
+        assertFalse(eventTypes().contains("run.failed"));
+    }
+
+    @Test
+    void keepsReconnectingNetworkFailuresUntilCancelled() {
+        AtomicInteger calls = new AtomicInteger();
+        AtomicBoolean cancelled = new AtomicBoolean();
+        ModelClient client = (messages, tools) -> {
+            if (calls.incrementAndGet() >= 6) {
+                cancelled.set(true);
+            }
+            throw new ModelClientException(ModelFailureKind.NETWORK,
+                    "流式模型请求失败（10 ms, model=gpt）：connection reset",
+                    new IOException("connection reset"));
+        };
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(),
+                config(8, 3), cancelled::get, () -> null, (call, result, latencyMs) -> { },
+                millis -> { }, null);
+
+        AgentLoop.Result result = loop.run("你好", List.of(), events::add);
+
+        assertEquals("CANCELLED", result.failureCode());
+        assertEquals(6, calls.get(), "网络中断不受 3 次上限约束，一直到用户取消");
+        assertEquals(5, events.stream().filter(RunRetrying.class::isInstance).count());
+        assertFalse(eventTypes().contains("run.failed"));
+        List<Long> delays = events.stream()
+                .filter(RunRetrying.class::isInstance)
+                .map(RunRetrying.class::cast)
+                .map(RunRetrying::delayMs)
+                .toList();
+        assertEquals(30_000L, delays.getLast(), "退避有上限，长时间断网不会越等越久");
     }
 
     @Test

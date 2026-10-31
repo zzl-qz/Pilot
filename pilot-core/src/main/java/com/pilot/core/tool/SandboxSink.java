@@ -14,6 +14,18 @@ public interface SandboxSink {
      */
     void record(String path, String oldText, String newText);
 
+    default String currentText(String path, String baselineText) {
+        return baselineText;
+    }
+
+    default boolean proposed(String path) {
+        return false;
+    }
+
+    default String proposedText(String path) {
+        return null;
+    }
+
     /** 没有沙箱时的兜底：任何写入都直接报错，避免误落盘。 */
     static SandboxSink rejectAll() {
         return (path, oldText, newText) -> {

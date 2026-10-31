@@ -22,14 +22,20 @@ public final class ReadFileTool implements Tool {
 
     private final PathValidator paths;
     private final ReadGuard reads;
+    private final SandboxSink sandbox;
 
     public ReadFileTool(PathValidator paths) {
         this(paths, ReadGuard.allowAll());
     }
 
     public ReadFileTool(PathValidator paths, ReadGuard reads) {
+        this(paths, reads, null);
+    }
+
+    public ReadFileTool(PathValidator paths, ReadGuard reads, SandboxSink sandbox) {
         this.paths = paths;
         this.reads = reads == null ? ReadGuard.allowAll() : reads;
+        this.sandbox = sandbox;
     }
 
     @Override
@@ -112,17 +118,19 @@ public final class ReadFileTool implements Tool {
         } catch (RuntimeException e) {
             return "ERROR: " + e.getMessage();
         }
-        if (!Files.exists(file)) {
+        String proposal = sandbox == null ? null : sandbox.proposedText(paths.display(file));
+        if (!Files.exists(file) && proposal == null) {
             return "ERROR: 文件不存在: " + rawPath;
         }
-        if (!Files.isRegularFile(file)) {
+        if (proposal == null && !Files.isRegularFile(file)) {
             return "ERROR: 不是普通文件: " + rawPath;
         }
         try {
-            if (looksBinary(file)) {
+            if (proposal == null && looksBinary(file)) {
                 return "ERROR: 二进制文件，无法读取: " + rawPath;
             }
-            ReadResult slice = readSlice(file, startLine, lineCount);
+            ReadResult slice = proposal == null ? readSlice(file, startLine, lineCount)
+                    : readText(proposal, startLine, lineCount);
             // 只有实际返回文件行才解锁编辑，越界读取和空文件提示不算观察过内容。
             if (slice.hasLines()) {
                 reads.observed(file);
@@ -131,6 +139,19 @@ public final class ReadFileTool implements Tool {
         } catch (IOException e) {
             return "ERROR: 读取失败: " + e.getMessage();
         }
+    }
+
+    private static ReadResult readText(String text, int startLine, int lineCount) {
+        List<String> all = text.lines().map(line -> line.length() > MAX_LINE_CHARS
+                ? line.substring(0, MAX_LINE_CHARS) + "…（超长行已截断）" : line).toList();
+        int total = all.size();
+        if (total == 0) return new ReadResult("(空文件，共 0 行)", false);
+        long requested = startLine < 0 ? (long) total + startLine + 1 : startLine;
+        int start = (int) Math.max(1, Math.min(total, requested));
+        int end = Math.min(total, start + lineCount - 1);
+        List<String> selected = all.subList(start - 1, end);
+        String note = startLine < 0 && requested < 1 ? "（负向起点超出文件开头，已从第 1 行读起）" : "";
+        return new ReadResult(render(start, selected, total, "", note), !selected.isEmpty());
     }
 
     private static boolean looksBinary(Path file) throws IOException {

@@ -1,6 +1,8 @@
 package com.pilot.core.tool;
 
 import com.pilot.core.multi.AgentScope;
+import com.pilot.core.multi.DiffSandbox;
+import com.pilot.core.multi.RiskLevel;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.core.workspace.WorkspaceViolationException;
 import org.junit.jupiter.api.Test;
@@ -67,6 +69,47 @@ class SandboxToolsTest {
         assertTrue(proposals.get(0).newText().contains("class B"));
         assertTrue(proposals.get(0).newText().contains("int x = 2;"));
         assertTrue(Files.readString(root.resolve("src/A.java")).contains("class A"));
+    }
+
+    @Test
+    void consecutiveEditsUseThePreviousSandboxProposal(@TempDir Path dir) throws IOException {
+        Path root = workspace(dir);
+        DiffSandbox sandbox = new DiffSandbox("sbx", "agent", "task", "");
+        ReadTracker reads = new ReadTracker();
+        SandboxSink sink = new SandboxSink() {
+            @Override
+            public void record(String path, String oldText, String newText) {
+                sandbox.add(path, oldText, newText, oldText != null, RiskLevel.LOW);
+            }
+
+            @Override
+            public String currentText(String path, String baselineText) {
+                return sandbox.currentText(path, baselineText);
+            }
+        };
+        SandboxEditFileTool tool = new SandboxEditFileTool(new PathValidator(root), sink, reads);
+        ReadFileTool reader = new ReadFileTool(new PathValidator(root), reads, new SandboxSink() {
+            @Override
+            public void record(String path, String oldText, String newText) {
+                sandbox.add(path, oldText, newText, oldText != null, RiskLevel.LOW);
+            }
+
+            @Override
+            public String proposedText(String path) {
+                return sandbox.proposedText(path);
+            }
+        });
+        reader.execute(Map.of("path", "src/A.java"));
+
+        tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 1;", "new_string", "int x = 2;"));
+        String result = tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 2;", "new_string", "int x = 3;"));
+
+        assertFalse(result.startsWith("ERROR"), result);
+        assertTrue(sandbox.currentText("src/A.java", "").contains("int x = 3;"));
+        assertTrue(sandbox.currentText("src/A.java", "").contains("class A"));
+        assertTrue(Files.readString(root.resolve("src/A.java")).contains("int x = 1;"));
+        String viewed = reader.execute(Map.of("path", "src/A.java"));
+        assertTrue(viewed.contains("int x = 3;"), viewed);
     }
 
     @Test

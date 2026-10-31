@@ -39,6 +39,7 @@ class CommandTaskManagerTest {
             assertEquals("COMPLETED", completed.status());
             assertEquals(0, completed.exitCode());
             CommandTaskManager.LogChunk last = manager.logs("session_a", id, first.nextOffset(), 100);
+
             assertEquals("live尾部完成", last.text());
             assertTrue(last.eof());
             assertFalse(last.truncated());
@@ -227,7 +228,11 @@ class CommandTaskManagerTest {
 
     private CommandTaskManager manager() { return new CommandTaskManager(storage, JsonMapper.builder().build()); }
     private ProcessBuilder process(String... args) {
-        ArrayList<String> command = new java.util.ArrayList<>(List.of(javaBinary(), "-cp", System.getProperty("java.class.path"), Child.class.getName()));
+        // Windows 上子进程的 stdout/stderr 默认按本地编码输出，这里显式要求 UTF-8，
+        // 否则同一条命令会混成两种编码，emoji 与分页边界都无法验证
+        ArrayList<String> command = new java.util.ArrayList<>(List.of(javaBinary(),
+                "-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8",
+                "-cp", System.getProperty("java.class.path"), Child.class.getName()));
         command.addAll(List.of(args));
         return new ProcessBuilder(command).directory(workspace.toFile());
     }

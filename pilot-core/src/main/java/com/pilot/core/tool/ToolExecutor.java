@@ -24,7 +24,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
- * 执行单次工具调用：权限检查 → （必要时）挂起等待审批 → 执行 → 上报事件。
+ * 执行单次工具调用：权限检查 → （必要时）挂起等待审批 → 执行 → 钩子回注 → 上报事件。
  * 审批在这里阻塞 Agent 线程，不轮询；超时由 {@link ApprovalBroker} 以拒绝结束。
  */
 public final class ToolExecutor {
@@ -76,6 +76,8 @@ public final class ToolExecutor {
     private final PermissionGate permissionGate;
     private final ApprovalBroker approvals;
     private final com.pilot.core.trace.TraceRecorder traceRecorder;
+    /** 运行时可替换：AgentLoop 先构造执行器，再按工作区挂上配置好的钩子。 */
+    private volatile com.pilot.core.hook.Hooks hooks;
 
     public ToolExecutor(ToolRegistry tools, PermissionGate permissionGate, ApprovalBroker approvals) {
         this(tools, permissionGate, approvals, (call, result, latencyMs) -> { });
@@ -83,10 +85,21 @@ public final class ToolExecutor {
 
     public ToolExecutor(ToolRegistry tools, PermissionGate permissionGate, ApprovalBroker approvals,
                         com.pilot.core.trace.TraceRecorder traceRecorder) {
+        this(tools, permissionGate, approvals, traceRecorder, com.pilot.core.hook.Hooks.none());
+    }
+
+    public ToolExecutor(ToolRegistry tools, PermissionGate permissionGate, ApprovalBroker approvals,
+                        com.pilot.core.trace.TraceRecorder traceRecorder, com.pilot.core.hook.Hooks hooks) {
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.permissionGate = Objects.requireNonNull(permissionGate, "permissionGate must not be null");
         this.approvals = Objects.requireNonNull(approvals, "approvals must not be null");
         this.traceRecorder = Objects.requireNonNull(traceRecorder, "traceRecorder must not be null");
+        this.hooks = hooks == null ? com.pilot.core.hook.Hooks.none() : hooks;
+    }
+
+    public ToolExecutor withHooks(com.pilot.core.hook.Hooks hooks) {
+        this.hooks = hooks == null ? com.pilot.core.hook.Hooks.none() : hooks;
+        return this;
     }
 
     public Outcome execute(ToolCall call, Consumer<SessionEvent> events) {
@@ -118,6 +131,14 @@ public final class ToolExecutor {
             execution = executeTool(call, tool.get(), argsSummary, events, beforeStart);
         }
         String result = execution.text();
+        // PostToolUse：把格式化/lint 之类每次都要做的结果直接贴在工具结果后面，不用模型再问一次
+        if (tool.isPresent() && !blocked(result)) {
+            com.pilot.core.hook.Hooks.Result post = hooks.run(
+                    com.pilot.core.hook.Hooks.Event.POST_TOOL_USE, call.name());
+            if (!post.output().isBlank()) {
+                result = result + "\n\n[PostToolUse]\n" + post.output();
+            }
+        }
 
         ArrayList<String> changedPaths = new ArrayList<>(execution.changedPaths());
         ArrayList<String> checks = new ArrayList<>(execution.checks());
@@ -201,6 +222,14 @@ public final class ToolExecutor {
     private ToolResult executeTool(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events,
                                    Supplier<String> beforeStart) {
         PermissionResult permission = permissionGate.check(call, tool);
+        // PreToolUse：只在放行后跑，配置要求阻止时退出码非 0 就不执行工具
+        if (permission.decision() == com.pilot.core.permission.PermissionDecision.ALLOW) {
+            com.pilot.core.hook.Hooks.Result pre = hooks.run(
+                    com.pilot.core.hook.Hooks.Event.PRE_TOOL_USE, call.name());
+            if (pre.blocked()) {
+                return ToolResult.text("ERROR: PreToolUse 钩子阻止了 " + tool.name() + "：" + pre.output());
+            }
+        }
         return switch (permission.decision()) {
             case ALLOW -> runIfCurrent(tool, call, beforeStart);
             case DENY -> ToolResult.text("ERROR: 权限拒绝：" + permission.reason());

@@ -87,7 +87,7 @@ public final class SandboxEditFileTool implements Tool {
             if (ToolSupport.isBinary(bytes)) {
                 return "ERROR: 二进制文件，无法编辑: " + rawPath;
             }
-            String content = new String(bytes, StandardCharsets.UTF_8);
+            String content = sandbox.currentText(paths.display(file), new String(bytes, StandardCharsets.UTF_8));
             ExactEditBatch.Applied applied;
             try {
                 applied = ExactEditBatch.apply(content, edits);

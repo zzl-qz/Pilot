@@ -102,8 +102,10 @@ class ManagedCommandToolsTest {
                 assertTrue(done.await(5, TimeUnit.SECONDS));
                 assertTrue(result.get().startsWith("ERROR: 命令执行被中断"), result.get());
                 await(() -> !CommandToolSupport.running(manager.get(SESSION, task.taskId())));
-                assertEquals("CANCELLED", manager.get(SESSION, task.taskId()).status());
-                assertFalse(ProcessHandle.of(task.pid()).map(ProcessHandle::isAlive).orElse(false));
+                CommandTaskManager.Task stopped = manager.get(SESSION, task.taskId());
+                assertEquals("CANCELLED", stopped.status());
+                assertNotNull(stopped.pid(), "运行过的命令必须记录真实 pid，否则无法管理进程树");
+                assertFalse(ProcessHandle.of(stopped.pid()).map(ProcessHandle::isAlive).orElse(false));
             } finally { caller.interrupt(); }
         }
     }

@@ -153,7 +153,10 @@ class RunCommandToolTest {
         Path child = java.nio.file.Files.createDirectory(workspace.resolve("pilot-web"));
         String result = tool().execute(Map.of("command", "node -p process.cwd()", "workdir", "pilot-web"));
         assertTrue(result.contains("退出码: 0"), result);
-        assertTrue(result.contains(child.toString()), result);
+        // Windows 上临时目录可能以 8.3 短名出现，比较真实路径而不是字符串
+        String printed = result.lines().filter(line -> line.contains("工作目录")).findFirst().orElse("")
+                .replaceFirst("^.*工作目录[:：]\\s*", "").strip();
+        assertEquals(child.toRealPath(), Path.of(printed).toRealPath(), result);
         assertTrue(tool().execute(Map.of("command", "node -v", "workdir", "../outside"))
                 .startsWith("ERROR: workdir 无效"));
         assertTrue(tool().execute(Map.of("command", "node -v", "workdir", "missing"))

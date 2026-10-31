@@ -4,11 +4,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
 import java.io.Reader;
 import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CoderResult;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.nio.CharBuffer;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -34,6 +41,8 @@ import java.util.regex.Pattern;
 /** Owns command processes and their durable, append-only, redacted logs. */
 public final class CommandTaskManager implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(CommandTaskManager.class);
+    /** Windows 中文控制台的默认编码，作为非 UTF-8 输出的回退。 */
+    private static final Charset GBK = Charset.forName("GBK");
     public record Task(String taskId, String sessionId, String command, String workdir, String status,
                        Long pid, Integer exitCode, Instant startedAt, Instant finishedAt,
                        boolean background, long timeoutSeconds, String reason,
@@ -120,21 +129,24 @@ public final class CommandTaskManager implements AutoCloseable {
             builder.directory(workdir.toFile()).redirectErrorStream(true)
                     .redirectOutput(ProcessBuilder.Redirect.PIPE).redirectInput(ProcessBuilder.Redirect.PIPE);
             entry.process = builder.start();
+            // pid 必须立刻可见：状态查询、进程树停止和所有权判定都依赖它，
+            // 不能等子进程发现做完，否则会读到 pid 为空的运行中任务。
+            entry.task = state(entry.task, "RUNNING", pid(entry.process), null, null, "");
+            persist(entry);
             // Sample before metadata I/O and again before scheduling, reducing the window for short-lived wrappers.
             // Already detached children cannot be recovered portably; callers should run servers in foreground mode.
             entry.discover();
-            entry.task = state(entry.task, "RUNNING", entry.process.pid(), null, null, "");
-            persist(entry);
             entry.process.getOutputStream().close();
             entry.reader = workers.submit(() -> readOutput(entry));
             entry.discover();
             workers.submit(() -> supervise(entry, timeoutMillis));
         } catch (IOException | RuntimeException failure) {
+            log.warn("命令启动失败（{}）：{}", displayCommand, failure.toString());
             if (entry.process != null) {
                 entry.process.descendants().forEach(ProcessHandle::destroyForcibly);
                 entry.process.destroyForcibly();
             }
-            entry.task = state(entry.task, "FAILED", entry.task.pid(), null, Instant.now(),
+            entry.task = state(entry.task, "FAILED", pid(entry.process), null, Instant.now(),
                     redact("命令启动失败：" + failure.getMessage(), secrets));
             persist(entry);
         }
@@ -247,27 +259,81 @@ public final class CommandTaskManager implements AutoCloseable {
         }
     }
 
+    /**
+     * 增量读取进程输出：读到就写日志，不等换行，也不等进程结束。
+     * 编码先按严格 UTF-8；一旦出现非法字节说明是本地编码（Windows 中文环境常见 GBK），
+     * 之后按 GBK 解码，避免模型与用户看到一串乱码。
+     */
     private void readOutput(Entry entry) {
         StreamingRedactor redactor = new StreamingRedactor(entry.secrets);
         long inputChars = 0;
-        try (Reader reader = new InputStreamReader(entry.process.getInputStream(), StandardCharsets.UTF_8)) {
-            char[] buffer = new char[4096];
+        boolean localEncoding = false;
+        ByteArrayOutputStream pending = new ByteArrayOutputStream();
+        try (InputStream in = entry.process.getInputStream()) {
+            byte[] buffer = new byte[4096];
             int count;
-            while ((count = reader.read(buffer)) >= 0) {
-                int accepted = (int) Math.min(count, outputLimit - inputChars);
-                inputChars += accepted;
-                append(entry, redactor.accept(new String(buffer, 0, accepted), false));
-                if (accepted < count) {
+            while ((count = in.read(buffer)) >= 0) {
+                pending.write(buffer, 0, count);
+                Decoded decoded = localEncoding ? decodeGbk(pending.toByteArray()) : decodeUtf8(pending.toByteArray());
+                pending.reset();
+                if (decoded.rest().length > 0) pending.write(decoded.rest());
+                if (decoded.localEncoding()) localEncoding = true;
+                if (!decoded.text().isEmpty()) {
+                    inputChars += decoded.text().codePointCount(0, decoded.text().length());
+                    append(entry, redactor.accept(decoded.text(), false));
+                }
+                if (inputChars >= outputLimit || "OUTPUT_LIMIT".equals(entry.stopStatus)) {
                     requestStop(entry, "OUTPUT_LIMIT", "命令输出达到上限 " + outputLimit + " 字节，已终止进程树");
                     break;
                 }
-                if ("OUTPUT_LIMIT".equals(entry.stopStatus)) break;
             }
-            // A cap may cut a secret halfway; discard that withheld suffix instead of exposing a partial credential.
-            if (!"OUTPUT_LIMIT".equals(entry.stopStatus)) append(entry, redactor.accept("", true));
+            if (!"OUTPUT_LIMIT".equals(entry.stopStatus)) {
+                byte[] tail = pending.toByteArray();
+                if (tail.length > 0) {
+                    append(entry, redactor.accept(new String(tail, localEncoding ? GBK : StandardCharsets.UTF_8),
+                            false));
+                }
+                // A cap may cut a secret halfway; discard that withheld suffix instead of exposing a partial credential.
+                append(entry, redactor.accept("", true));
+            }
         } catch (IOException e) {
             if (entry.stopStatus == null) requestStop(entry, "FAILED", "读取命令输出失败");
+        } catch (RuntimeException e) {
+            log.warn("读取命令输出异常：{}", e.toString());
+            if (entry.stopStatus == null) requestStop(entry, "FAILED", "读取命令输出异常：" + e);
         }
+    }
+
+    /** 一段解码结果：已解码文本、需要等下一批字节的尾部、以及是否判定为本地编码。 */
+    private record Decoded(String text, byte[] rest, boolean localEncoding) {
+    }
+
+    private static Decoded decodeUtf8(byte[] bytes) {
+        CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        ByteBuffer in = ByteBuffer.wrap(bytes);
+        CharBuffer out = CharBuffer.allocate(bytes.length + 4);
+        CoderResult result = decoder.decode(in, out, false);
+        if (result.isMalformed()) {
+            // 不是 UTF-8 流：整段按本地编码重新解码，避免把中文变成替换字符
+            return decodeGbk(bytes);
+        }
+        out.flip();
+        byte[] rest = new byte[in.remaining()];
+        in.get(rest);
+        return new Decoded(out.toString(), rest, false);
+    }
+
+    /** GBK 是双字节编码：只把最后一个可能是首字节的字节留到下一批。 */
+    private static Decoded decodeGbk(byte[] bytes) {
+        int end = bytes.length;
+        if (end > 0) {
+            int last = bytes[end - 1] & 0xff;
+            if (last >= 0x81 && last <= 0xfe) end -= 1;
+        }
+        byte[] rest = end == bytes.length ? new byte[0] : java.util.Arrays.copyOfRange(bytes, end, bytes.length);
+        return new Decoded(new String(bytes, 0, end, GBK), rest, true);
     }
 
     private void append(Entry entry, String output) throws IOException {
@@ -455,6 +521,15 @@ public final class CommandTaskManager implements AutoCloseable {
     private static Path canonical(Path path) {
         try { return path.toRealPath(); }
         catch (IOException e) { return path.toAbsolutePath().normalize(); }
+    }
+    /** 已启动进程的实际 pid；进程不存在或平台不支持时返回 null。 */
+    private static Long pid(Process process) {
+        if (process == null) return null;
+        try {
+            return process.pid();
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
     private static Task state(Task previous, String status, Long pid, Integer exit, Instant finished, String reason) {
         return new Task(previous.taskId(), previous.sessionId(), previous.command(), previous.workdir(), status,

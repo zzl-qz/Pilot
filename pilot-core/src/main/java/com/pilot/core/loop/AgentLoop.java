@@ -11,6 +11,7 @@ import com.pilot.core.event.RunSteered;
 import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ModelFailureKind;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
 import com.pilot.core.permission.PermissionGate;
@@ -178,9 +179,18 @@ public final class AgentLoop {
     /** 收尾门：有了目标之后在 run/resume 里创建，一次运行一个。 */
     private CompletionGate completionGate;
     private ExecutionPolicy executionPolicy;
+    private com.pilot.core.hook.Hooks hooks = com.pilot.core.hook.Hooks.none();
 
     public AgentLoop withExecutionPolicy(ExecutionPolicy policy) {
         executionPolicy = Objects.requireNonNull(policy);
+        return this;
+    }
+
+    /** 确定性钩子：编辑后自动格式化/lint 之类的事情交给配置，不占用模型注意力。 */
+    public AgentLoop withHooks(com.pilot.core.hook.Hooks hooks) {
+        this.hooks = hooks == null ? com.pilot.core.hook.Hooks.none() : hooks;
+        // 执行器在构造时已经建好，这里补挂一次，否则配置的钩子不会生效
+        this.toolExecutor.withHooks(this.hooks);
         return this;
     }
     private Supplier<String> taskContext = () -> "";
@@ -260,7 +270,7 @@ public final class AgentLoop {
         this.permissionGate = Objects.requireNonNull(permissionGate, "permissionGate must not be null");
         this.budget = new ContextBudget(new ContextCompactor(client)::compact);
         this.toolExecutor = new ToolExecutor(tools, this.permissionGate,
-                Objects.requireNonNull(approvals, "approvals must not be null"), traceRecorder);
+                Objects.requireNonNull(approvals, "approvals must not be null"), traceRecorder, hooks);
         this.config = Objects.requireNonNull(config, "config must not be null");
         this.cancellation = Objects.requireNonNull(cancellation, "cancellation must not be null");
     }
@@ -804,8 +814,9 @@ public final class AgentLoop {
     }
 
     /**
-     * 断网、超时、429、5xx 先重试，最多 3 次，仍失败就结束运行。用户可以随时取消。
-     * 401、403、404、400 这种重试也不会好的错误，立刻失败。
+     * 按失败分类决定后续动作：断网、超时、连接中途断开一直退避重连（不会因为一次抖动终结任务，
+     * 用户可随时取消）；408、429、5xx 有限次重试；401、403、404、400、模型不支持、
+     * 响应结构非法这类重试也不会好的错误，立刻失败。
      */
     private ModelTurn callModel(List<Message> messages, Consumer<SessionEvent> events, UsageTracker usage,
                                 RuntimeGuidance runtimeGuidance) {
@@ -859,20 +870,21 @@ public final class AgentLoop {
                 if (cancellation.cancelled()) {
                     return new ModelTurn(null, cancel(messages, events));
                 }
-                if (!ModelRetryPolicy.isTransient(e)) {
-                    String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                ModelFailureKind kind = ModelRetryPolicy.classify(e);
+                int limit = ModelRetryPolicy.maxRetries(kind);
+                String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                if (limit <= 0) {
                     throw new ExecutionPolicy.Stop("MODEL_ERROR",
                             "模型调用失败：" + ToolSupport.oneLine(reason, 300));
                 }
                 attempt++;
-                if (attempt > ModelRetryPolicy.MAX_TRANSIENT_RETRIES) {
-                    String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                // 网络类失败 limit 是无限大：断网期间一直重连，只有用户取消才结束。
+                if (attempt > limit) {
                     throw new ExecutionPolicy.Stop("MODEL_ERROR",
-                            "模型暂时不可用，已重试 " + ModelRetryPolicy.MAX_TRANSIENT_RETRIES + " 次："
+                            "模型暂时不可用，已重试 " + limit + " 次："
                                     + ToolSupport.oneLine(reason, 300));
                 }
                 long delayMs = ModelRetryPolicy.delayMs(attempt);
-                String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
                 events.accept(new RunRetrying(attempt, delayMs, ToolSupport.oneLine(reason, 300)));
                 if (!pause(delayMs)) {
                     return new ModelTurn(null, cancel(messages, events));

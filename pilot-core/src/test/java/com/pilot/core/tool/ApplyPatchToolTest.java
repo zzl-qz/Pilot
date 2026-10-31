@@ -37,7 +37,8 @@ class ApplyPatchToolTest {
             }
         };
         tool = new ApplyPatchTool(new PathValidator(workspace),
-                file -> snapshots.add(realWorkspace.relativize(file.toAbsolutePath().normalize()).toString()), guard);
+                file -> snapshots.add(realWorkspace.relativize(file.toAbsolutePath().normalize())
+                        .toString().replace('\\', '/')), guard);
     }
 
     private Path write(String name, String content) throws IOException {
