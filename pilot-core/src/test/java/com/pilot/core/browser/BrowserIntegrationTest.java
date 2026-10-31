@@ -27,8 +27,16 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import tools.jackson.databind.JsonNode;
+
+import tools.jackson.databind.JsonNode;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -188,6 +196,51 @@ class BrowserIntegrationTest {
         ToolCall evaluate = new ToolCall("3", "browser", Map.of("action", "evaluate", "expression", "1"));
         assertEquals(PermissionDecision.ASK, new PolicyPermissionGate(PermissionMode.AUTO_EDIT).check(evaluate, probe).decision());
         assertEquals(PermissionDecision.ALLOW, new PolicyPermissionGate(PermissionMode.AUTO).check(evaluate, probe).decision());
+    }
+
+    /** 镜像链路全流程：握手声明能力 → 首帧到达 → 交互坐标上报 → 停帧后不再产帧。 */
+    @Test
+    void mirrorStreamDeliversFramesActionsAndStopsCleanly() throws Exception {
+        assertTrue(backend.mirrorCapable(), "sidecar 未声明镜像能力（ping capabilities）");
+
+        ConcurrentLinkedQueue<String> kinds = new ConcurrentLinkedQueue<>();
+        CountDownLatch firstFrame = new CountDownLatch(1);
+        CountDownLatch action = new CountDownLatch(1);
+        AtomicReference<JsonNode> framePayload = new AtomicReference<>();
+        backend.setEventListener((sessionId, kind, payload) -> {
+            kinds.add(kind);
+            if ("mirror-frame".equals(kind) && framePayload.compareAndSet(null, payload)) {
+                firstFrame.countDown();
+            }
+            if ("agent-action".equals(kind)) {
+                action.countDown();
+            }
+        });
+
+        assertTrue(run("navigate", "url", base).startsWith("已打开"));
+        backend.mirrorControl("it-session", true, 960, 55);
+
+        assertTrue(firstFrame.await(15, TimeUnit.SECONDS), "镜像首帧没有到达，收到的事件：" + kinds);
+        JsonNode payload = framePayload.get();
+        assertTrue(payload.path("frame").asString("").length() > 100, "帧体太小，不像真实 JPEG");
+        assertTrue(payload.path("url").asString("").contains("127.0.0.1"), "帧里没有带上页面地址");
+        assertTrue(kinds.contains("nav"), "导航事件缺失：" + kinds);
+
+        // 镜像开着时智能体交互会上报坐标（前端涟漪用）
+        String snapshot = run("snapshot");
+        run("click", "ref", ref(snapshot, "button", "发送到队列"));
+        assertTrue(action.await(10, TimeUnit.SECONDS), "交互坐标事件没有到达：" + kinds);
+
+        // 停帧：最后一个订阅者断开的场景，此后不应再收到新帧
+        backend.mirrorControl("it-session", false, 0, 0);
+        int seen = kinds.size();
+        run("fill", "ref", ref(snapshot, "textbox|input", "消息内容"), "text", "停帧后还能操作");
+        Thread.sleep(1500);
+        assertTrue(kinds.stream().skip(seen).noneMatch("mirror-frame"::equals),
+                "mirror-stop 之后不应再有帧：" + kinds);
+
+        // 置前不抛异常（无头环境下静默成功）
+        backend.focusPage("it-session");
     }
 
     private String run(String action, Object... pairs) {

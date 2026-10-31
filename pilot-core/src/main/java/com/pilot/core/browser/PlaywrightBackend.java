@@ -20,6 +20,9 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -54,6 +57,16 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     private final long idleShutdownMs;
     /** 合并进 sidecar 进程环境的变量（不可变）；构造器重载里默认为空。 */
     private final Map<String, String> environment;
+    /** sidecar 主动事件的分发器：单线程保证到达顺序，listener 内部自行 latest-wins。 */
+    private final ExecutorService events = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "pilot-browser-events");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    private volatile BrowserEventListener listener;
+    /** sidecar 是否声明了镜像事件能力（握手 ping 的 capabilities 协商结果）。 */
+    private volatile boolean mirrorCapable;
 
     private final Object lifecycle = new Object();
     private final AtomicLong ids = new AtomicLong(1);
@@ -114,6 +127,7 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
         try {
             JsonNode reply = request(null, "probe", Map.of(), PROBE_TIMEOUT);
             state = Availability.ready();
+            mirrorCapable = declaresMirror(reply.path("capabilities"));
             log.info("浏览器运行时可用：{}", reply.path("text").asString(""));
         } catch (BrowserException e) {
             state = Availability.unavailable(friendly(e.getMessage()));
@@ -122,6 +136,14 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
         }
         lastProbeAt = System.currentTimeMillis();
         return state;
+    }
+
+    private static boolean declaresMirror(JsonNode capabilities) {
+        if (!capabilities.isArray()) return false;
+        for (JsonNode item : capabilities) {
+            if ("mirror".equals(item.asString())) return true;
+        }
+        return false;
     }
 
     @Override
@@ -163,7 +185,58 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     @Override
     public void close() {
         closed = true;
+        events.shutdownNow();
         stopProcess();
+    }
+
+    @Override
+    public void setEventListener(BrowserEventListener listener) {
+        this.listener = listener;
+    }
+
+    /** sidecar 是否声明镜像事件能力（capabilities 握手结果）。 */
+    public boolean mirrorCapable() {
+        return mirrorCapable;
+    }
+
+    @Override
+    public void mirrorControl(String sessionId, boolean start, int maxWidth, int quality) {
+        Map<String, Object> arguments = new LinkedHashMap<>();
+        arguments.put("maxWidth", maxWidth);
+        arguments.put("quality", quality);
+        try {
+            request(sessionId, start ? "mirror-start" : "mirror-stop", arguments, Duration.ofSeconds(10));
+        } catch (BrowserException ignored) {
+            // 运行时未就绪或无活动页面：sidecar 已登记镜像请求，浏览器启动后自然生效。
+        }
+    }
+
+    @Override
+    public void focusPage(String sessionId) {
+        try {
+            request(sessionId, "focus", Map.of(), Duration.ofSeconds(10));
+        } catch (BrowserException ignored) {
+            // 没有活动页面，无窗可置
+        }
+    }
+
+    /** sidecar 的主动事件：从协议读取线程转交到单线程事件流，不阻塞 req/resp。 */
+    private void dispatchEvent(JsonNode node) {
+        BrowserEventListener current = listener;
+        if (current == null) return;
+        String sessionId = node.path("session").asString("");
+        String kind = node.path("event").asString("");
+        try {
+            events.execute(() -> {
+                try {
+                    current.onEvent(sessionId, kind, node);
+                } catch (RuntimeException e) {
+                    log.debug("浏览器事件处理失败：{}", e.getMessage());
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // close 之后进程退出前的尾随事件：随运行时一起丢弃
+        }
     }
 
     /** 进程在会话使用期间被重启过（空闲回收、超时重置、崩溃）时，提醒模型页面状态已丢失。 */
@@ -263,6 +336,11 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
                 try {
                     node = mapper.readTree(line);
                 } catch (RuntimeException e) {
+                    continue;
+                }
+                // 主动事件（无 id）走事件通道，其余仍是 req/resp 配对。
+                if (node.has("event")) {
+                    dispatchEvent(node);
                     continue;
                 }
                 long id = node.path("id").asLong(-1);

@@ -36,6 +36,10 @@ let playwright;
 let browserPromise = null;
 const sessions = new Map();
 const queues = new Map();
+// 前端订阅过镜像的会话：浏览器尚未启动时先登记，会话建立时自动开始推帧。
+const mirrorRequested = new Set();
+// 镜像帧限流：前端只需看清页面，12fps 足够，视频页也不至于冲爆 SSE。
+const MIRROR_MIN_FRAME_MS = 80;
 
 function send(message) {
   process.stdout.write(JSON.stringify(message) + '\n');
@@ -127,6 +131,7 @@ async function launchBrowser() {
         browserPromise = null;
         for (const session of sessions.values()) session.dead = true;
         sessions.clear();
+        send({ event: 'browser-closed', reason: 'disconnected' });
       });
       return browser;
     } catch (error) {
@@ -153,6 +158,10 @@ function pushLimited(list, entry) {
 
 function attachPage(session, page) {
   session.page = page;
+  page.on('framenavigated', (frame) => {
+    if (frame !== page.mainFrame()) return;
+    send({ event: 'nav', session: session.id, url: frame.url(), ts: Date.now() });
+  });
   page.on('console', (message) => {
     const location = message.location();
     pushLimited(session.console, {
@@ -192,6 +201,8 @@ function attachPage(session, page) {
     const entry = request.__entry;
     if (entry) entry.failure = request.failure() ? request.failure().errorText : 'failed';
   });
+  // 镜像开着：page 切换（popup/新标签）时把 screencast 跟到新页面上。
+  if (session.mirror) ensureScreencast(session).catch(() => {});
 }
 
 async function createSession(id) {
@@ -203,7 +214,9 @@ async function createSession(id) {
   });
   context.setDefaultTimeout(ACTION_TIMEOUT_MS);
   context.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
-  const session = { id, context, page: null, console: [], network: [], dead: false };
+  const session = { id, context, page: null, console: [], network: [], dead: false,
+    mirror: mirrorRequested.has(id), mirrorWidth: 960, mirrorQuality: 55,
+    cdp: null, cdpPage: null, lastFrameAt: 0 };
   // 主框架导航只允许回环地址，页面里的链接也不能把它带去外网。
   await context.route('**/*', (route) => {
     const request = route.request();
@@ -215,9 +228,88 @@ async function createSession(id) {
     return route.continue();
   });
   context.on('page', (page) => attachPage(session, page));
+  // attachPage 会在 mirror 开启时自动挂 screencast（含首个页面）。
   attachPage(session, await context.newPage());
   sessions.set(id, session);
   return session;
+}
+
+// ---- 镜像（CDP screencast 事件通道）----------------------------------------------------
+// 页面变化才产帧，静态页面零流量；ack 背压限速，帧到达后立刻 ack 以免 Chromium 停发。
+async function ensureScreencast(session) {
+  const page = session.page;
+  if (!page || page.isClosed() || session.cdpPage === page) return;
+  await stopScreencast(session);
+  try {
+    const cdp = await session.context.newCDPSession(page);
+    session.cdp = cdp;
+    session.cdpPage = page;
+    cdp.on('Page.screencastFrame', async (frame) => {
+      try {
+        await cdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId });
+      } catch {
+        // 会话已关
+      }
+      if (!session.mirror || session.dead || session.page !== page) return;
+      const now = Date.now();
+      if (now - session.lastFrameAt < MIRROR_MIN_FRAME_MS) return; // 限流：新帧稍后自然到来
+      session.lastFrameAt = now;
+      send({
+        event: 'mirror-frame',
+        session: session.id,
+        frame: frame.data,
+        w: (frame.metadata && frame.metadata.deviceWidth) || null,
+        h: (frame.metadata && frame.metadata.deviceHeight) || null,
+        url: page.url(),
+        ts: now
+      });
+    });
+    await cdp.send('Page.startScreencast', {
+      format: 'jpeg',
+      quality: session.mirrorQuality,
+      maxWidth: session.mirrorWidth,
+      maxHeight: Math.round(session.mirrorWidth * 0.75),
+      everyNthFrame: 1
+    });
+  } catch (error) {
+    session.cdp = null;
+    session.cdpPage = null;
+    process.stderr.write('screencast 启动失败: ' + String(error && error.message || error) + '\n');
+  }
+}
+
+async function stopScreencast(session) {
+  const cdp = session.cdp;
+  session.cdp = null;
+  session.cdpPage = null;
+  if (!cdp) return;
+  try {
+    await cdp.send('Page.stopScreencast');
+    await cdp.detach();
+  } catch {
+    // 已断开
+  }
+}
+
+// 智能体动作的坐标上报：给前端涟漪高亮用，拿不到坐标就跳过，绝不影响主流程。
+async function reportAction(session, kind, args) {
+  if (!session.mirror) return;
+  try {
+    const box = await locatorFor(session, args).boundingBox();
+    if (box) {
+      send({
+        event: 'agent-action',
+        session: session.id,
+        kind,
+        x: Math.round(box.x + box.width / 2),
+        y: Math.round(box.y + box.height / 2),
+        ref: String(args.ref || args.selector || ''),
+        ts: Date.now()
+      });
+    }
+  } catch {
+    // 页面在动，坐标拿不到就算了
+  }
 }
 
 async function session(id) {
@@ -412,7 +504,8 @@ const handlers = {
     } catch {
       loadPlaywright();
     }
-    return { text: 'pong', version };
+    // capabilities：让 Java 端协商特性（镜像通道），旧 sidecar 不带此字段即不支持。
+    return { text: 'pong', version, capabilities: ['mirror'] };
   },
 
   async probe() {
@@ -424,7 +517,8 @@ const handlers = {
     // 探测只验证能启动，随后关掉，不占用常驻内存。（有头模式下这会闪一下窗口，属可接受代价。）
     await browser.close();
     browserPromise = null;
-    return { text: `浏览器可用：${executable}（Chromium ${version}${headless ? '' : '，有头'}）`, executable, version, headless };
+    return { text: `浏览器可用：${executable}（Chromium ${version}${headless ? '' : '，有头'}）`,
+             executable, version, headless, capabilities: ['mirror'] };
   },
 
   async navigate(args, current) {
@@ -464,6 +558,7 @@ const handlers = {
 
   async click(args, current) {
     const locator = locatorFor(current, args);
+    await reportAction(current, 'click', args);
     try {
       await locator.click({ timeout: ACTION_TIMEOUT_MS });
     } catch (error) {
@@ -476,6 +571,7 @@ const handlers = {
   async fill(args, current) {
     if (typeof args.text !== 'string') throw new Error('fill 需要 text。');
     const locator = locatorFor(current, args);
+    await reportAction(current, 'fill', args);
     try {
       await locator.fill(args.text, { timeout: ACTION_TIMEOUT_MS });
       if (args.submit) await locator.press('Enter');
@@ -489,6 +585,7 @@ const handlers = {
   async type(args, current) {
     if (typeof args.text !== 'string') throw new Error('type 需要 text。');
     const locator = locatorFor(current, args);
+    await reportAction(current, 'type', args);
     try {
       await locator.click({ timeout: ACTION_TIMEOUT_MS });
       await pageOf(current).keyboard.type(args.text, { delay: 15 });
@@ -511,6 +608,7 @@ const handlers = {
     const values = Array.isArray(args.values) ? args.values.map(String) : [];
     if (values.length === 0) throw new Error('select 需要 values。');
     const locator = locatorFor(current, args);
+    await reportAction(current, 'select', args);
     try {
       // 字符串同时匹配 option 的 value 与可见文本。
       const chosen = await locator.selectOption(values, { timeout: ACTION_TIMEOUT_MS });
@@ -528,6 +626,7 @@ const handlers = {
       if (!existsSync(file)) throw new Error(`文件不存在：${file}`);
     }
     const locator = locatorFor(current, args);
+    await reportAction(current, 'upload', args);
     try {
       await locator.setInputFiles(files, { timeout: ACTION_TIMEOUT_MS });
     } catch (error) {
@@ -619,6 +718,26 @@ const handlers = {
 
   async close(args) {
     return { text: '已关闭' };
+  },
+
+  // ---- 镜像与窗口控制 -------------------------------------------------------------------
+  async 'mirror-start'(args, current) {
+    current.mirrorWidth = Math.min(1920, Math.max(320, Math.round(Number(args.maxWidth) || 960)));
+    current.mirrorQuality = Math.min(90, Math.max(20, Math.round(Number(args.quality) || 55)));
+    current.mirror = true;
+    await ensureScreencast(current);
+    return { text: '镜像已开启' };
+  },
+
+  async 'mirror-stop'(args, current) {
+    current.mirror = false;
+    await stopScreencast(current);
+    return { text: '镜像已停止' };
+  },
+
+  async focus(args, current) {
+    await pageOf(current).bringToFront();
+    return { text: '已置前' };
   }
 };
 
@@ -640,6 +759,16 @@ async function dispatch(request) {
   if (op === 'shutdown') {
     setTimeout(() => process.exit(0), 50);
     return { text: 'bye' };
+  }
+  // 镜像控制与置前只作用于已存在的会话：浏览器没起来时不强制拉起（免得开面板即开窗）。
+  if (op === 'mirror-start' || op === 'mirror-stop' || op === 'focus') {
+    if (op === 'mirror-start') mirrorRequested.add(request.session);
+    if (op === 'mirror-stop') mirrorRequested.delete(request.session);
+    const existing = sessions.get(request.session);
+    if (!existing || existing.dead) {
+      return { text: op === 'mirror-start' ? '镜像已登记，浏览器启动后自动开始' : '没有活动页面' };
+    }
+    return handlers[op](request, existing);
   }
   const handler = handlers[op];
   if (!handler) throw new Error(`未知操作：${op}`);
