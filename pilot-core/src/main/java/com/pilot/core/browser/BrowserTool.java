@@ -40,6 +40,10 @@ public final class BrowserTool implements Tool, LocalInteraction {
     private static final Set<String> OBSERVATIONS = Set.of(
             "navigate", "reload", "back", "snapshot", "screenshot", "console", "network", "wait", "close");
     private static final Set<String> INTERACTIONS = Set.of("click", "fill", "type", "press", "select", "upload");
+    /** 用户接管（paused）时拦截的动作：交互类 + 会打断用户的导航/关闭/脚本。观察类放行。 */
+    private static final Set<String> PAUSED_BLOCKS = Set.of(
+            "navigate", "reload", "back", "close", "evaluate",
+            "click", "fill", "type", "press", "select", "upload");
     private static final List<String> ACTIONS = List.of(
             "navigate", "reload", "back", "snapshot", "click", "fill", "type", "press", "select", "upload",
             "screenshot", "console", "network", "wait", "evaluate", "close");
@@ -136,6 +140,13 @@ public final class BrowserTool implements Tool, LocalInteraction {
         if (action == null) return ToolResult.text("ERROR: 缺少参数 action");
         if (!ACTIONS.contains(action)) {
             return ToolResult.text("ERROR: 未知 action: " + action + "；可用：" + String.join(", ", ACTIONS));
+        }
+        // 用户接管：交互与导航被温和拦下（普通提示而非 ERROR，模型理解为等待用户，不会重试风暴）；
+        // 观察类放行——用户操作的进度恰是智能体需要的上下文。
+        if (backend.interactionsPaused(sessionId) && PAUSED_BLOCKS.contains(action)) {
+            return ToolResult.text("用户已接管浏览器并暂停了智能体的页面操作。"
+                    + "snapshot / screenshot / console / network / wait 等观察动作仍可用（可了解用户当前进度）；"
+                    + "交互与导航动作请等用户恢复后再试。");
         }
         Map<String, Object> command = new LinkedHashMap<>();
         command.put("op", action);

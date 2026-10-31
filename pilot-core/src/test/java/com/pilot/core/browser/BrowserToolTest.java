@@ -163,6 +163,34 @@ class BrowserToolTest {
         assertTrue(tool.readOnly(Map.of("action", "teleport")));
     }
 
+    /** 用户接管的拦截矩阵：交互/导航/脚本被温和拦下，观察类照常执行。 */
+    @Test
+    void userTakeoverBlocksInteractionsButNotObservations() {
+        backend.paused = true;
+        BrowserTool tool = tool();
+
+        for (String action : List.of("click", "fill", "type", "press", "select", "upload",
+                "navigate", "reload", "back", "close", "evaluate")) {
+            String result = tool.execute(Map.of("action", action, "url", "http://localhost:1",
+                    "ref", "e1", "text", "x", "key", "Enter", "values", List.of("a"), "files", List.of("a.txt"),
+                    "expression", "1"));
+            assertTrue(result.startsWith("用户已接管浏览器"), action + " 应被拦截：" + result);
+            assertFalse(result.startsWith("ERROR"), "拦截提示不应是 ERROR，避免模型当成故障重试：" + result);
+        }
+        assertTrue(backend.commands.isEmpty(), "被拦截的动作不应触达浏览器");
+
+        // 观察类放行：用户操作的进度正是智能体需要的上下文
+        for (String action : List.of("snapshot", "console", "network", "wait")) {
+            String result = tool.execute(Map.of("action", action));
+            assertFalse(result.startsWith("用户已接管"), action + " 观察动作不应被拦截：" + result);
+        }
+        assertFalse(backend.commands.isEmpty());
+
+        // 恢复后一切照常
+        backend.paused = false;
+        assertEquals("ok", tool.execute(Map.of("action", "click", "ref", "e1")));
+    }
+
     @Test
     void realBackendReportsAReasonInsteadOfThrowingWhenTheRuntimeIsMissing() {
         PlaywrightBackend real = new PlaywrightBackend(workspace.resolve("no-node"), workspace.resolve("sidecar.mjs"),
@@ -188,10 +216,16 @@ class BrowserToolTest {
         private final List<String> sessions = new ArrayList<>();
         private String failure;
         private boolean screenshot;
+        private boolean paused;
 
         @Override
         public Availability availability() {
             return availability;
+        }
+
+        @Override
+        public boolean interactionsPaused(String sessionId) {
+            return paused;
         }
 
         @Override
