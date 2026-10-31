@@ -18,7 +18,7 @@ import {
   agentLine, agentMeta, agentTitle, manifestFacts, pickOwner, shortAgentId, splitSubagentResult,
   summarizeAgents
 } from './lib/agents.js';
-import { mergeRunReports, sortChangeFiles, statusKind } from './lib/changes.js';
+import { editSummary, mergeRunReports, sortChangeFiles, splitPath, statusKind } from './lib/changes.js';
 import { applyRule, classifyRunFailure, planProgressLabel } from './lib/events.js';
 import { groupSessionsByProject, resolveFolders, samePath } from './lib/projects.js';
 import { commandStatusLabel, isCommandActive, mergeCommandLog } from './lib/command-tasks.js';
@@ -3338,7 +3338,7 @@ function appendTurnResult({ tone, title, detail, openSteps, changedFiles, runIds
   }
 
   if (changedFiles && changedFiles.length) {
-    card.append(runChangeDetails(runIds, changedFiles));
+    card.append(turnEditSummary(runIds, changedFiles));
   }
 
   const actions = [];
@@ -3364,135 +3364,228 @@ function appendTurnResult({ tone, title, detail, openSteps, changedFiles, runIds
   scrollThread();
 }
 
+const EDIT_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true">'
+  + '<path d="M4.3 2.5h5l2.4 2.4v8.6H4.3z"/><path d="M9.3 2.5v2.4h2.4"/>'
+  + '<path d="M6 7.9h4M6 10.2h4"/></svg>';
+const EDIT_VISIBLE_ROWS = 3;
+
 /**
- * Codex 风格改动卡：默认收起，摘要只报「改了 N 个文件 +x −y」，
- * 展开后按文件列状态与增删行数，再点单个文件才拉取并渲染 diff。
+ * Codex 风格改动卡：标题行直接给「已编辑 N 个文件 +x −y」和「撤销 / 查看改动」，
+ * 下面默认列三条文件，其余收进「展开其余 N 个文件」；单条文件仍可点开看 diff。
+ *
+ * <p>和旧版折叠卡的区别：不再需要「先展开一次才知道改了什么」。
+ * 文件清单对用户最有价值，应该在第一屏就能读到。
  */
-function runChangeDetails(runIds, changedFiles) {
+function turnEditSummary(runIds, changedFiles) {
   const paths = changedFiles.map(normalizePath);
-  const details = document.createElement('details');
-  details.className = 'turn-changes';
+  const ids = (runIds || []).filter(Boolean);
+  const box = document.createElement('section');
+  box.className = 'turn-edits';
 
-  const head = document.createElement('summary');
-  head.className = 'turn-changes-head';
+  const head = document.createElement('div');
+  head.className = 'turn-edits-head';
+  const icon = document.createElement('span');
+  icon.className = 'turn-edits-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.innerHTML = EDIT_ICON;
   const label = document.createElement('span');
-  label.textContent = `改动 ${paths.length} 个文件`;
+  label.className = 'turn-edits-label';
+  label.textContent = `已编辑 ${paths.length} 个文件`;
   const stat = document.createElement('span');
-  stat.className = 'turn-changes-stat';
-  head.append(label, stat);
+  stat.className = 'turn-edits-stat';
+  const spacer = document.createElement('span');
+  spacer.className = 'turn-edits-spacer';
+  head.append(icon, label, stat, spacer);
 
-  const body = document.createElement('div');
-  body.className = 'turn-changes-body';
-  details.append(head, body);
-
-  let started = false;
-  const start = () => {
-    if (started) {
-      return;
-    }
-    started = true;
-    loadRunChangeDetail(runIds, paths, stat, body);
-  };
-  details.addEventListener('toggle', () => {
-    if (details.open) {
-      start();
-    }
-  });
-  // 刚跑完的这一轮立刻取一次统计，摘要行才有 +x −y；回放历史时按需加载，避免一次打几十个请求
-  if (!state.replaying) {
-    start();
+  if (ids.length && !state.replaying) {
+    const undo = button('撤销', 'btn btn-sm turn-edits-undo', () => undoRunEdits(ids, box));
+    undo.title = '把本轮改过的文件还原到运行前；新建的文件会被删除';
+    undo.dataset.action = 'undo-edits';
+    head.append(undo);
   }
-  return details;
+  const view = button('查看改动', 'btn btn-sm turn-edits-view', () => selectTab('changes'));
+  view.dataset.action = 'view-changes';
+  head.append(view);
+
+  const list = document.createElement('div');
+  list.className = 'turn-edits-list';
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'turn-edits-more';
+  more.hidden = true;
+  box.append(head, list, more);
+
+  // 后端没有快照（非 git、老运行或快照已清理）时，只用文件名占位，不假装有统计
+  const fallback = () => paths.map((path) => ({ path, status: '', added: 0, removed: 0, diff: '' }));
+
+  let expanded = false;
+  const paint = (files, gitRepository, note) => {
+    const summary = editSummary(files, EDIT_VISIBLE_ROWS);
+    label.textContent = summary.label;
+    stat.replaceChildren();
+    if (summary.added || summary.removed) {
+      const add = document.createElement('span');
+      add.className = 'add';
+      add.textContent = '+' + summary.added;
+      const del = document.createElement('span');
+      del.className = 'del';
+      del.textContent = '−' + summary.removed;
+      stat.append(add, document.createTextNode(' '), del);
+    }
+    list.replaceChildren();
+    if (note) {
+      list.append(changeHint(note));
+    }
+    const rows = files.map((file) => runChangeRow(file, gitRepository));
+    rows.forEach((row, index) => {
+      row.hidden = index >= EDIT_VISIBLE_ROWS;
+      list.append(row);
+    });
+    if (summary.hidden.length) {
+      more.hidden = false;
+      more.setAttribute('aria-expanded', String(expanded));
+      more.textContent = `展开其余 ${summary.hidden.length} 个文件`;
+      more.onclick = () => {
+        expanded = !expanded;
+        rows.forEach((row, index) => {
+          row.hidden = !expanded && index >= EDIT_VISIBLE_ROWS;
+        });
+        more.setAttribute('aria-expanded', String(expanded));
+        more.textContent = expanded ? '收起文件列表' : `展开其余 ${summary.hidden.length} 个文件`;
+      };
+    } else {
+      more.hidden = true;
+      more.onclick = null;
+    }
+  };
+
+  if (!ids.length && !state.replaying) {
+    paint(fallback(), false, '这次运行没有留下改动快照，只能列出写过的文件。');
+  } else if (state.replaying) {
+    // 回放历史时不为每一轮都打请求：先列文件名，点「查看改动」再看完整统计
+    paint(fallback(), false);
+  } else {
+    list.append(changeHint('读取改动中…'));
+    loadRunChangeDetail(ids).then((result) => {
+      if (result.error) {
+        paint(fallback(), false, '读取改动统计失败：' + result.error);
+        return;
+      }
+      paint(result.files.length ? result.files : fallback(), result.gitRepository,
+        result.gitRepository ? '' : '工作区不是 git 仓库：只列出本轮写过的文件。');
+    });
+  }
+  return box;
 }
 
-async function loadRunChangeDetail(runIds, paths, stat, body) {
-  const ids = (runIds || []).filter(Boolean);
-  body.replaceChildren(changeHint('读取改动中…'));
-  if (!ids.length) {
-    stat.textContent = '';
-    body.replaceChildren(runChangeFallback(paths));
+/** 「撤销」= 对本轮每个 run 依次回滚（后发生的先回滚），遇到冲突就停，避免半套状态。 */
+async function undoRunEdits(runIds, box) {
+  if (state.running) {
+    showNotice('任务还在运行，等结束或停止后再撤销。');
     return;
   }
+  const ids = runIds.slice().reverse();
+  if (!window.confirm(`把本轮 ${ids.length} 次运行改过的文件还原到运行前？新建的文件会被删除。`)) {
+    return;
+  }
+  const buttons = [...box.querySelectorAll('button')];
+  buttons.forEach((node) => { node.disabled = true; });
+  const label = box.querySelector('.turn-edits-label');
+  let restored = 0;
+  let deleted = 0;
+  let failed = 0;
+  const conflicts = [];
   try {
-    const reports = await Promise.all(ids.map(async (runId) => {
+    for (const runId of ids) {
+      const response = await apiFetch(`/api/runs/${encodeURIComponent(runId)}/rollback`, { method: 'POST' });
+      if (response.status === 404) {
+        continue; // 这次运行没有快照：没写过文件，或快照已被清理
+      }
+      if (!response.ok) {
+        failed += 1;
+        continue;
+      }
+      const report = await response.json();
+      restored += (report.restored || []).length;
+      deleted += (report.deleted || []).length;
+      failed += (report.failed || []).length;
+      conflicts.push(...(report.conflicts || []));
+      if (conflicts.length) {
+        break;
+      }
+    }
+  } catch (error) {
+    buttons.forEach((node) => { node.disabled = false; });
+    showNotice('撤销失败：' + error.message);
+    return;
+  }
+  if (conflicts.length) {
+    showNotice(`撤销未完成：这些文件在回滚后又被改过 —— ${conflicts.join('、')}`);
+    buttons.forEach((node) => { node.disabled = false; });
+  } else {
+    showNotice(`已撤销本轮改动：还原 ${restored} 个、删除 ${deleted} 个` + (failed ? `、失败 ${failed} 个` : ''));
+    if (label) {
+      label.textContent = '已撤销本轮改动';
+    }
+    box.classList.add('is-undone');
+    box.dataset.undone = '1';
+    const stat = box.querySelector('.turn-edits-stat');
+    if (stat) {
+      stat.replaceChildren();
+    }
+    // 只剩「查看改动」可用：撤销是一次性的
+    buttons.forEach((node) => { node.disabled = node.dataset.action !== 'view-changes'; });
+  }
+  loadChanges();
+  syncComposer();
+}
+
+async function loadRunChangeDetail(runIds) {
+  try {
+    const reports = await Promise.all((runIds || []).map(async (runId) => {
       const response = await apiFetch(`/api/runs/${encodeURIComponent(runId)}/changes`);
       if (!response.ok) {
         throw new Error('HTTP ' + response.status);
       }
       return response.json();
     }));
-    renderRunChangeDetail(mergeRunReports(reports), paths, stat, body);
+    return mergeRunReports(reports);
   } catch (error) {
-    stat.textContent = '';
-    body.replaceChildren(
-      changeHint('读取改动失败：' + error.message),
-      runChangeFallback(paths)
-    );
+    return { files: [], gitRepository: false, error: error.message };
   }
-}
-
-/**
- * 合并一轮里多个 run 的改动：同一文件以最后一次运行的统计为准
- * （最后一次的 diff 本身就是相对 HEAD 的完整改动，直接相加会重复计数）。
- */
-function renderRunChangeDetail(report, paths, stat, body) {
-  const files = Array.isArray(report.files) ? report.files : [];
-  const added = Number(report.added || 0);
-  const removed = Number(report.removed || 0);
-
-  stat.replaceChildren();
-  if (added || removed) {
-    const add = document.createElement('span');
-    add.className = 'add';
-    add.textContent = '+' + added;
-    const del = document.createElement('span');
-    del.className = 'del';
-    del.textContent = '−' + removed;
-    stat.append(add, document.createTextNode(' '), del);
-  }
-
-  body.replaceChildren();
-  if (!files.length) {
-    body.append(runChangeFallback(paths));
-    return;
-  }
-  if (!report.gitRepository) {
-    body.append(changeHint('工作区不是 git 仓库：只能列出本轮写过的文件，没有 diff。'));
-  }
-  for (const file of files) {
-    body.append(runChangeRow(file, report.gitRepository));
-  }
-  if (report.truncated) {
-    body.append(changeHint('改动过多，diff 已截断。'));
-  }
-  // 本轮清单只覆盖 Agent 的写文件工具；命令行改出来的文件要到「改动」面板看
-  const actions = document.createElement('div');
-  actions.className = 'turn-changes-actions';
-  actions.append(button('查看全部改动', 'btn btn-sm', () => selectTab('changes')));
-  body.append(actions);
-}
-
-/** 后端没有快照（老运行或快照已清理）时的兜底：只列文件名。 */
-function runChangeFallback(paths) {
-  const node = document.createElement('div');
-  node.className = 'run-change-flat';
-  node.textContent = paths.length ? paths.join('、') : '本次运行没有改动任何文件。';
-  return node;
 }
 
 function runChangeRow(file, gitRepository) {
   const row = document.createElement('details');
-  row.className = 'diff-file run-change-row';
+  row.className = 'diff-file run-change-row turn-edits-row';
 
   const summary = document.createElement('summary');
-  const status = document.createElement('span');
-  status.className = 'change-status is-' + statusKind(file.status || 'M');
-  status.textContent = file.status || 'M';
+  summary.className = 'turn-edits-summary';
+  if (file.status) {
+    const status = document.createElement('span');
+    status.className = 'change-status is-' + statusKind(file.status);
+    status.textContent = file.status;
+    status.title = statusKind(file.status) === 'added' ? '新增'
+      : statusKind(file.status) === 'deleted' ? '删除' : '修改';
+    summary.append(status);
+  }
+
+  // 目录弱化、文件名保留：长路径被省略时，用户至少还能认出是哪个文件
   const path = document.createElement('span');
   path.className = 'diff-path';
-  path.textContent = file.path;
+  const parts = splitPath(file.path || '');
+  if (parts.dir) {
+    const dir = document.createElement('span');
+    dir.className = 'diff-path-dir';
+    dir.textContent = parts.dir;
+    path.append(dir);
+  }
+  const name = document.createElement('span');
+  name.className = 'diff-path-name';
+  name.textContent = parts.name;
+  path.append(name);
   path.title = file.path;
-  summary.append(status, path);
+  summary.append(path);
 
   if (file.added || file.removed) {
     const stat = document.createElement('span');
@@ -3502,7 +3595,7 @@ function runChangeRow(file, gitRepository) {
     add.textContent = '+' + Number(file.added || 0);
     const del = document.createElement('span');
     del.className = 'del';
-    del.textContent = ' −' + Number(file.removed || 0);
+    del.textContent = '−' + Number(file.removed || 0);
     stat.append(add, del);
     summary.append(stat);
   }
