@@ -339,7 +339,32 @@ public class AgentRunService implements RunStarter {
         int used = ContextCompactor.estimateTokens(history);
         int limit = properties.contextMaxChars();
         return new ContextStatus(history.size(), used, limit, true,
-                history.size() > 3 && used >= 1_000);
+                history.size() > 3 && used >= 1_000, Math.min(100, Math.round(used * 100f / limit)),
+                segments(history));
+    }
+
+    /**
+     * 模型记忆按角色的构成：看得出「什么在占地方」——工具结果通常是大头，
+     * 压缩折叠的也正是它。角色顺序固定（user / assistant / tool / system），
+     * 前端按序叠加成占比条。
+     */
+    private static List<ContextStatus.Segment> segments(List<Message> history) {
+        Map<String, int[]> byRole = new java.util.LinkedHashMap<>();
+        for (Message message : history) {
+            int[] totals = byRole.computeIfAbsent(message.role(), ignored -> new int[3]);
+            totals[0] += 1;
+            totals[1] += message.content() == null ? 0 : message.content().length();
+        }
+        List<ContextStatus.Segment> segments = new ArrayList<>();
+        for (String role : List.of("user", "assistant", "tool", "system")) {
+            int[] totals = byRole.remove(role);
+            if (totals != null) {
+                segments.add(new ContextStatus.Segment(role, totals[0], totals[1]));
+            }
+        }
+        // 罕见的其他角色照实保留，不吞数据
+        byRole.forEach((role, totals) -> segments.add(new ContextStatus.Segment(role, totals[0], totals[1])));
+        return segments;
     }
 
     @Override

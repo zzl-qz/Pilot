@@ -154,12 +154,29 @@ public interface RunStarter {
     }
 
     record ContextStatus(int messages, int usedTokens, int limitTokens,
-                         boolean estimated, boolean canCompact, int percent) {
+                         boolean estimated, boolean canCompact, int percent,
+                         java.util.List<Segment> segments) {
         public ContextStatus(int messages, int usedTokens, int limitTokens,
                              boolean estimated, boolean canCompact) {
             this(messages, usedTokens, limitTokens, estimated, canCompact,
                     Math.min(100, (int) Math.round(Math.max(0, usedTokens) * 100.0
-                            / Math.max(1, limitTokens))));
+                            / Math.max(1, limitTokens))),
+                    java.util.List.of());
+        }
+
+        /** 兼容旧调用：构成未提供时视为空（前端隐藏构成区）。 */
+        public ContextStatus(int messages, int usedTokens, int limitTokens,
+                             boolean estimated, boolean canCompact, int percent) {
+            this(messages, usedTokens, limitTokens, estimated, canCompact, percent, java.util.List.of());
+        }
+
+        /** 模型记忆按角色的构成（条数与字符数），前端叠加成占比条：看得出记忆里什么在占地方。 */
+        public record Segment(String role, int messages, int chars) {
+            public Segment {
+                role = role == null ? "" : role.strip();
+                messages = Math.max(0, messages);
+                chars = Math.max(0, chars);
+            }
         }
 
         public ContextStatus {
@@ -167,6 +184,7 @@ public interface RunStarter {
             usedTokens = Math.max(0, usedTokens);
             limitTokens = Math.max(1, limitTokens);
             percent = Math.max(0, Math.min(100, percent));
+            segments = segments == null ? java.util.List.of() : java.util.List.copyOf(segments);
         }
     }
 
