@@ -15,6 +15,7 @@ import com.pilot.core.tool.GlobFilesTool;
 import com.pilot.core.tool.ListDirTool;
 import com.pilot.core.tool.ReadFileTool;
 import com.pilot.core.tool.ReadTracker;
+import com.pilot.core.tool.RememberTool;
 import com.pilot.core.tool.RunCommandTool;
 import com.pilot.core.tool.SandboxCreateFileTool;
 import com.pilot.core.tool.SandboxEditFileTool;
@@ -186,6 +187,7 @@ public class WorkspaceToolFactory {
         registry.register(new WebFetchTool(webClient));
         registry.register(new EditFileTool(validator, snapshots, reads));
         registry.register(new CreateFileTool(validator, snapshots, reads));
+        registry.register(new RememberTool(validator, snapshots));
         registry.register(new ApplyPatchTool(validator, snapshots, reads));
         registry.register(new RunCommandTool(validator, commandChanges()));
         if (planSink != null) {

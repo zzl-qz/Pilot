@@ -21,6 +21,7 @@ Pilot 是一个以 Java 构建的本地 Coding Agent 原型。用户通过 Web �
 - 回退前展示文件清单并校验后续修改；发现手工修改、缺失快照、链接文件或跨工作区时阻止代码回退。Git 分支可在变更面板单独创建，未提交改动继续保留。
 - 收尾门：默认关闭（与 Codex / OpenCode 一致，模型说完成就完成）；需要时用 `pilot.agent.completion-checks=true` 打开。
 - 项目约定：先加载用户级 `~/.pilot/PILOT.md`、`AGENTS.md`、`CLAUDE.md`（优先级最低），再沿工作区祖先目录逐级加载同名文件，每层按此顺序取首份，标明来源并限制长度后注入系统提示词。
+- 结构化记忆（克制版）：`MEMORY.md` 与约定是两条独立通道——沿工作区祖先目录逐级 + 用户级 `~/.pilot/MEMORY.md` 注入"项目记忆"段（独立 4k 字符预算，不挤占约定）；代理用 `remember` 工具沉淀候选条目到 `.pilot/memory-draft.md`（带日期一行一条），**候选区刻意不注入**，由用户审阅后整理进 `MEMORY.md` 才生效——模型不能把任意内容直接写进自己的记忆。
 - 确定性钩子：`.pilot/settings.json` 的 `hooks` 支持 `PreToolUse` / `PostToolUse`，格式兼容 Claude Code；配置后编辑完自动跑格式化或 lint，结果直接贴在工具结果后面，`blockOnFailure` 可让前置钩子阻止执行。
 - 权限规则：同一份 `.pilot/settings.json` 的 `permissions.allow` / `deny` / `ask` 支持 `Tool` 与 `Tool(specifier)` 两种写法（命令用 `mvn test:*` 前缀，文件用 `src/**` glob），判定顺序 deny → ask → allow，未命中才回落权限档位。
 - 仓库快照：会话首次运行时注入顶层结构、git 分支与未提交改动、识别到的构建方式，模型不用从零摸索。

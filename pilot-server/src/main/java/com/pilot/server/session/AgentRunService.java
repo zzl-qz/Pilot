@@ -856,6 +856,11 @@ public class AgentRunService implements RunStarter {
         if (!rules.isEmpty()) {
             prompt = prompt + "\n\n" + rules;
         }
+        // 记忆注入（独立于约定）：MEMORY.md 是人工审阅后的沉淀，remember 只写不注入的候选区
+        String memory = ProjectRuleLoader.loadMemory(toolFactory.resolve(workspace), PROMPTS);
+        if (!memory.isEmpty()) {
+            prompt = prompt + "\n\n" + memory;
+        }
         String today = PROMPTS.render("system/today",
                 Map.of("today", java.time.LocalDate.now().toString())).strip();
         prompt = prompt + "\n\n" + today;
