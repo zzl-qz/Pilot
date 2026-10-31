@@ -69,6 +69,28 @@ class BrowserRuntimeTest {
         assertTrue(registry.unavailable().get("mcp_tools").contains(".mcp.json"));
     }
 
+    /**
+     * 桌面会话判定不能用 GraphicsEnvironment.isHeadless()（Spring Boot 启动时统一设
+     * java.awt.headless=true，本地有桌面也误降级——实测踩过）。这里锁定真实信号：
+     * Windows 会话类型、Linux 的 DISPLAY。
+     */
+    @Test
+    void desktopDetectionUsesOsSignalsInsteadOfJvmHeadlessFlag() {
+        // Windows：本地控制台 / RDP 会话有桌面，变量缺失按有桌面处理（本地 Web 应用是主流形态）
+        assertTrue(BrowserRuntime.desktopAvailable("Windows 11", "Console", null, null));
+        assertTrue(BrowserRuntime.desktopAvailable("Windows 11", "RDP-Tcp#0", null, null));
+        assertTrue(BrowserRuntime.desktopAvailable("Windows 11", null, null, null));
+        // Windows 服务会话（Session 0）没有交互桌面
+        assertFalse(BrowserRuntime.desktopAvailable("Windows 11", "Service", null, null));
+        // Linux：有 X11 / Wayland 会话才有桌面，CI 与纯 SSH 环境正确降级
+        assertTrue(BrowserRuntime.desktopAvailable("Linux", "", ":0", null));
+        assertTrue(BrowserRuntime.desktopAvailable("Linux", "", null, "wayland-0"));
+        assertFalse(BrowserRuntime.desktopAvailable("Linux", "", null, null));
+        // macOS 本地运行常在桌面
+        assertTrue(BrowserRuntime.desktopAvailable("Mac OS X", null, null, null));
+        assertTrue(BrowserRuntime.desktopAvailable("Darwin", null, null, null));
+    }
+
     @Test
     void realRuntimeBecomesAvailableOnlyAfterTheHandshake() throws Exception {
         Path home = Path.of(System.getProperty("user.dir")).resolveSibling(".pilot").resolve("browser");

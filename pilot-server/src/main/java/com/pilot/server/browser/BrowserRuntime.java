@@ -293,18 +293,39 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     /** 有头/无头的实际生效值：配置值叠加无桌面降级。 */
     private boolean resolveHeadless() {
         if (!headlessConfigured && !desktopAvailable()) {
-            log.warn("配置为有头，但当前环境没有桌面会话（java.awt.headless），自动降级为无头运行");
+            log.warn("配置为有头，但当前环境没有桌面会话（Windows 服务会话 / 无 DISPLAY），自动降级为无头运行");
             return true;
         }
         return headlessConfigured;
     }
 
     private static boolean desktopAvailable() {
-        try {
-            return !java.awt.GraphicsEnvironment.isHeadless();
-        } catch (Throwable error) {
-            return false;
+        return desktopAvailable(System.getProperty("os.name"),
+                System.getenv("SESSIONNAME"), System.getenv("DISPLAY"), System.getenv("WAYLAND_DISPLAY"));
+    }
+
+    /**
+     * 有没有可用的桌面会话——有头窗口能不能真开出来只取决于操作系统层面。
+     *
+     * <p><b>不能用 {@code GraphicsEnvironment.isHeadless()}：</b>Spring Boot 启动时会把
+     * {@code java.awt.headless} 统一设成 {@code true}（Web 应用的标准做法，防止 AWT 意外初始化），
+     * 该标志只约束 JVM 内的 AWT，与子进程 Chromium 能否开窗口无关——用它判断会在
+     * 所有 Spring Boot 部署里误降级，本地有桌面的 Windows 也一样中招（实测踩过）。
+     *
+     * <p>真实信号：Windows 服务会话（Session 0，{@code SESSIONNAME=Service}）没有交互桌面，
+     * 控制台与 RDP 会话都有，变量缺失时按有桌面处理（本地 Web 应用是主流形态）；
+     * Linux 看 {@code DISPLAY} / {@code WAYLAND_DISPLAY}（CI、纯 SSH 环境正确降级）；
+     * macOS 本地运行常在桌面，不额外探测。
+     */
+    static boolean desktopAvailable(String osName, String sessionName, String display, String waylandDisplay) {
+        String os = osName == null ? "" : osName.toLowerCase(Locale.ROOT);
+        if (os.contains("win")) {
+            return !"Service".equalsIgnoreCase(sessionName);
         }
+        if (os.contains("mac") || os.contains("darwin")) {
+            return true;
+        }
+        return display != null || waylandDisplay != null;
     }
 
     /** 空闲回收策略：显式秒数优先；自动模式下无头 10 分钟，有头不回收（用户可能正看着窗口）。 */
