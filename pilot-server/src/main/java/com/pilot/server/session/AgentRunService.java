@@ -12,6 +12,7 @@ import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.Attachment;
+import com.pilot.core.multi.AgentScope;
 import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.loop.Message;
 import com.pilot.core.model.ModelClient;
@@ -813,7 +814,7 @@ public class AgentRunService implements RunStarter {
      * 改在会话首条 run 时作为 user 消息注入一次。
      */
     private String systemPrompt(String sessionId, String workspace, Set<String> availableTools,
-                                SkillCatalog catalog) {
+                                SkillCatalog catalog, ReviewMode review) {
         // skills 变量每次都提供（空目录时传空串）：目录段因 requires:[use_skill] 会被过滤，不会走进来
         Map<String, String> variables = new java.util.LinkedHashMap<>(PromptLibrary.environment(workspace));
         variables.put("skills", skills.catalogText(catalog));
@@ -825,8 +826,25 @@ public class AgentRunService implements RunStarter {
         String today = PROMPTS.render("system/today",
                 Map.of("today", java.time.LocalDate.now().toString())).strip();
         prompt = prompt + "\n\n" + today;
+        // 审查协议追加在段末：工具表已只剩只读，写工具的教学段因 requires 过滤自动消失
+        if (review.active()) {
+            prompt = prompt + "\n\n" + PROMPTS.render("review/protocol",
+                    Map.of("scope", review.scopeText())).strip();
+        }
         String plan = planBrief(sessionId);
         return plan.isEmpty() ? prompt : prompt + "\n\n" + plan;
+    }
+
+    /**
+     * 审查 run 的只读工具表：复用子代理的 scope 裁剪机制（同一条硬隔离路径），
+     * 写文件与派发工具对模型「不存在」而不是「被拒绝」，避免无谓的重试浪费。
+     * 命令保留：git 只读子命令在内置白名单里，写命令照旧走权限门。
+     */
+    private ToolRegistry reviewTools(String workspace) {
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
+                .withTools(List.of("read_*", "list_*", "glob_*", "search_*",
+                        "run_command", "web_search", "web_fetch"), List.of());
+        return toolFactory.registryForScope(workspace, scope, com.pilot.core.tool.SandboxSink.rejectAll());
     }
 
     /**
@@ -1058,9 +1076,12 @@ public class AgentRunService implements RunStarter {
     }
 
     private String execute(String sessionId, String runId, String input, List<Attachment> attachments,
-                           List<Integer> imagePositions, RunHandle handle, boolean continuation) {
+                            List<Integer> imagePositions, RunHandle handle, boolean continuation) {
         List<Message> history = conversations.load(sessionId);
         String workspace = sessions.find(sessionId).map(Session::workspace).orElse(null);
+        // /review 独立审查模式：只读工具表 + 固定审查协议，写文件与派发工具在本 run 里不存在。
+        // 权限语义不变（只读命令照常放行，写命令照旧审批），不新加档位也不影响普通 run。
+        ReviewMode review = ReviewMode.parse(input);
         PlanSink planSink = (items, explanation) -> {
             plans.save(sessionId, items);
             publish(sessionId, runId, new PlanUpdated(
@@ -1069,10 +1090,12 @@ public class AgentRunService implements RunStarter {
                             .toList(),
                     explanation));
         };
-        ToolRegistry tools = sessionTools(sessionId, workspace, planSink);
+        ToolRegistry tools = review.active()
+                ? reviewTools(workspace)
+                : sessionTools(sessionId, workspace, planSink);
         // 技能目录：本 run 内工具注册与目录段共用同一份快照，避免两次扫描之间目录变化造成不一致
         SkillCatalog catalog = skills.catalogFor(workspace);
-        if (!catalog.list().isEmpty()) {
+        if (!review.active() && !catalog.list().isEmpty()) {
             // 无技能时不注册 use_skill：system/skills 段因 requires 过滤自动消失，零 token 成本
             tools.register(new UseSkillTool(catalog));
         }
@@ -1143,14 +1166,14 @@ public class AgentRunService implements RunStarter {
         Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
         AgentLoop.Config config = new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(),
                 properties.repeatAbortAt(),
-                systemPrompt(sessionId, workspace, availableTools, catalog),
+                systemPrompt(sessionId, workspace, availableTools, catalog, review),
                 // 收尾时读一次计划，把「本轮是否真的做完」一并写进 run.completed
                 () -> plans.load(sessionId),
                 // 计划没做完时自动继续，而不是停下来等用户点「继续执行」
                 properties.maxPlanContinues(),
                 properties.contextMaxChars(),
                 properties.completionChecksEnabled());
-        GoalExecutionPolicy goalPolicy = properties.goalModeEnabledValue()
+        GoalExecutionPolicy goalPolicy = !review.active() && properties.goalModeEnabledValue()
                 ? new GoalExecutionPolicy(modelClient, objectMapper, taskControls, sessionId,
                     toolFactory.resolve(workspace), handle.cancelled::get, properties.maxSteps(),
                     properties.directMaxRequests(), properties.directMaxInputTokens(),
@@ -1185,12 +1208,15 @@ public class AgentRunService implements RunStarter {
         };
         // 工作区级 allow/deny/ask 规则优先于档位，未命中时回落到原 gate（对齐 Claude Code settings.json）
         PermissionGate sessionGate = withWorkspaceRules(permissionGate, toolFactory.resolve(workspace));
-        tools.register(new SpawnAgentTool(modelClient, tools, sessionGate, approvals, config,
-                () -> conversations.load(sessionId), sink, handle.cancelled::get, childUsage));
-        // 多智能体调度：父 Agent 只能派活，子 Agent 的改动一律进沙箱
-        if (multiProperties.enabled()) {
-            tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink,
-                    handle.cancelled::get, executionClient));
+        // 审查 run 不派子代理：单一视角审到底，也避免派发工具把只读裁剪绕出去。
+        if (!review.active()) {
+            tools.register(new SpawnAgentTool(modelClient, tools, sessionGate, approvals, config,
+                    () -> conversations.load(sessionId), sink, handle.cancelled::get, childUsage));
+            // 多智能体调度：父 Agent 只能派活，子 Agent 的改动一律进沙箱
+            if (multiProperties.enabled()) {
+                tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink,
+                        handle.cancelled::get, executionClient));
+            }
         }
         // 与会话数据库、快照保持一致，统一落在数据目录（默认项目下的 .pilot）
         JsonlTraceRecorder traceRecorder = new JsonlTraceRecorder(

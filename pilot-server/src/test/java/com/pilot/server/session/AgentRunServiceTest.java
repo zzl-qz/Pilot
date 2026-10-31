@@ -221,6 +221,38 @@ class AgentRunServiceTest {
     }
 
     @Test
+    void reviewRunsUseReadOnlyToolsAndInjectTheProtocol() throws Exception {
+        CopyOnWriteArrayList<List<com.pilot.core.model.ToolDefinition>> toolSets = new CopyOnWriteArrayList<>();
+        CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<>();
+        ModelClient model = (messages, tools) -> {
+            requests.add(messages);
+            toolSets.add(tools);
+            return done();
+        };
+        try (Fixture fixture = new Fixture(model, 8, true)) {
+            fixture.runId = fixture.service.claimRun(fixture.sessionId).orElseThrow();
+            fixture.sessions.publish(fixture.sessionId, fixture.runId, new RunStarted("/review 重点看登录模块"));
+            fixture.service.start(fixture.sessionId, fixture.runId, "/review 重点看登录模块");
+
+            fixture.awaitFinished("COMPLETED");
+
+            // 审查 run 的工具表：读工具在，写工具与派发工具不存在（goals fixture 里 edit_file 也只给普通 run）
+            List<String> names = toolSets.getFirst().stream()
+                    .map(com.pilot.core.model.ToolDefinition::name).toList();
+            assertTrue(names.contains("read_file"), "审查需要读取工具：" + names);
+            assertFalse(names.contains("edit_file"), "审查 run 不提供写工具：" + names);
+            assertFalse(names.contains("spawn_agent"), "审查 run 不派子代理：" + names);
+            // 系统提示词注入固定审查协议与范围说明，且输入原文保留在会话历史里
+            String system = requests.getFirst().getFirst().content();
+            assertTrue(system.contains("审查协议"), "系统提示词缺审查协议：" + system.substring(0, 120));
+            assertTrue(system.contains("重点看登录模块"), "协议范围必须带上用户指定的审查范围");
+            assertTrue(fixture.sessions.events(fixture.sessionId).stream()
+                    .anyMatch(event -> event.payload() instanceof RunStarted started
+                            && "/review 重点看登录模块".equals(started.input())));
+        }
+    }
+
+    @Test
     void countsToolAndCompletionEventsOncePerRun() throws Exception {
         AtomicInteger calls = new AtomicInteger();
         ModelClient model = (messages, tools) -> calls.getAndIncrement() == 0 ? readFile() : done();
@@ -618,6 +650,13 @@ class AgentRunServiceTest {
             commandTasks = new com.pilot.core.tool.CommandTaskManager(dataDir.file("commands"), mapper);
             WorkspaceToolFactory factory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
             when(factory.resolve(anyString())).thenReturn(workspace);
+            when(factory.registryForScope(anyString(), any(com.pilot.core.multi.AgentScope.class),
+                    any(com.pilot.core.tool.SandboxSink.class))).thenAnswer(invocation -> {
+                // /review 独立模式的只读工具表（真实实现里由 AgentScope 裁剪）：测试里至少提供读工具
+                ToolRegistry tools = new ToolRegistry();
+                tools.register(new ReadFileTool(new PathValidator(workspace)));
+                return tools;
+            });
             when(factory.registryFor(anyString(), any(PlanSink.class))).thenAnswer(invocation -> {
                 ToolRegistry tools = new ToolRegistry();
                 tools.register(new ReadFileTool(new PathValidator(workspace)));
