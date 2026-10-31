@@ -30,6 +30,8 @@ import com.pilot.core.multi.TaskSpec;
 import com.pilot.core.multi.TaskStatus;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
+import com.pilot.server.config.AgentProperties;
+import com.pilot.server.config.PermissionSettings;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.SandboxSink;
 import com.pilot.core.tool.ToolRegistry;
@@ -42,6 +44,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -77,6 +80,9 @@ public class MultiAgentService {
     private final MultiAgentProperties properties;
     private final PilotDataDir dataDir;
     private final ObjectMapper objectMapper;
+    /** 子 Agent 只能继承父会话档位并收紧，不能自己放开权限。 */
+    private final PermissionSettings permissions;
+    private final AgentProperties agent;
     /** 依赖层内并行执行子任务。 */
     private final ExecutorService workers;
     /** 同任务多方案并行论证；与 workers 分开，避免嵌套提交互等。 */
@@ -85,7 +91,10 @@ public class MultiAgentService {
     public MultiAgentService(ModelClient modelClient, WorkspaceToolFactory toolFactory,
                              SandboxStore sandboxes, VerificationGate verification,
                              MultiAgentProperties properties, PilotDataDir dataDir,
-                             ObjectMapper objectMapper) {
+                             ObjectMapper objectMapper, PermissionSettings permissions,
+                             AgentProperties agent) {
+        this.permissions = permissions;
+        this.agent = agent;
         this.modelClient = modelClient;
         this.toolFactory = toolFactory;
         this.sandboxes = sandboxes;
@@ -116,7 +125,11 @@ public class MultiAgentService {
      * @param cancelled 父 run 的取消信号，子 Agent 逐个检查
      */
     public record Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
-                           Consumer<SessionEvent> events, BooleanSupplier cancelled) {
+                           Consumer<SessionEvent> events, BooleanSupplier cancelled, ModelClient executionClient) {
+        public Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
+                        Consumer<SessionEvent> events, BooleanSupplier cancelled) {
+            this(sessionId, runId, workspace, specs, events, cancelled, null);
+        }
     }
 
     /** 单个任务的最终结果。 */
@@ -163,7 +176,7 @@ public class MultiAgentService {
             for (TaskSpec spec : ready) {
                 started.add(spec.id());
                 TaskState state = states.get(spec.id());
-                futures.add(workers.submit(() -> execute(spec, state, dispatch)));
+                futures.add(workers.submit(() -> execute(spec, state, dispatch, states)));
             }
             for (Future<?> future : futures) {
                 try {
@@ -237,6 +250,11 @@ public class MultiAgentService {
                 completed = states.values().stream()
                         .allMatch(state -> state.status == TaskStatus.DONE);
             }
+            // 校验结论绑定到每个沙箱当时的产物清单：候选或依赖一变，旧的通过记录自动失效
+            for (DiffSandbox box : boxes) {
+                sandboxes.recordVerification(dispatch.sessionId(), box.id(),
+                        SandboxStore.environmentFingerprint(), verificationReport);
+            }
         }
 
         List<TaskOutcome> outcomes = states.values().stream().map(TaskState::outcome).toList();
@@ -245,7 +263,7 @@ public class MultiAgentService {
         return new Result(completed, outcomes, merge, verificationReport, dissents, arbitrationId, report);
     }
 
-    private void execute(TaskSpec spec, TaskState state, Dispatch dispatch) {
+    private void execute(TaskSpec spec, TaskState state, Dispatch dispatch, Map<String, TaskState> states) {
         if (cancelled(dispatch)) {
             update(state, TaskStatus.CANCELLED, "父运行已取消", dispatch);
             return;
@@ -253,13 +271,13 @@ public class MultiAgentService {
         update(state, TaskStatus.RUNNING, "子 Agent 已启动", dispatch);
         int count = spec.reviewers();
         if (count <= 1) {
-            Attempt attempt = runWithRetry(spec, dispatch);
+            Attempt attempt = runWithRetry(spec, dispatch, states);
             applySingle(spec, state, attempt, dispatch);
             return;
         }
         List<CompletableFuture<Attempt>> futures = new ArrayList<>();
         for (int i = 0; i < count; i++) {
-            futures.add(CompletableFuture.supplyAsync(() -> runWithRetry(spec, dispatch), reviewers));
+            futures.add(CompletableFuture.supplyAsync(() -> runWithRetry(spec, dispatch, states), reviewers));
         }
         List<Attempt> attempts = new ArrayList<>();
         for (CompletableFuture<Attempt> future : futures) {
@@ -289,6 +307,8 @@ public class MultiAgentService {
             return;
         }
         sandboxes.add(dispatch.sessionId(), sandbox);
+        // 登记「这个沙箱依赖哪些上游任务的产物」，上游变化时下游校验才会失效
+        sandboxes.linkTaskDependencies(dispatch.sessionId(), state.spec.dependsOn(), sandbox.id());
         state.track(sandbox);
     }
 
@@ -318,7 +338,7 @@ public class MultiAgentService {
         update(state, TaskStatus.DONE, summary(reports.get(0)), dispatch);
     }
 
-    private Attempt runWithRetry(TaskSpec spec, Dispatch dispatch) {
+    private Attempt runWithRetry(TaskSpec spec, Dispatch dispatch, Map<String, TaskState> states) {
         Attempt last = null;
         int attempts = properties.maxAttempts();
         for (int round = 1; round <= attempts; round++) {
@@ -327,7 +347,7 @@ public class MultiAgentService {
             }
             String note = round == 1 ? "" : "这是第 " + round + " 次尝试，上一次未完成："
                     + (last == null ? "未知原因" : last.failure()) + "。请换一种做法，不要重复同样的调用。";
-            last = runOnce(spec, dispatch, note);
+            last = runOnce(spec, dispatch, note, states);
             if (last.ok()) {
                 return last;
             }
@@ -336,31 +356,58 @@ public class MultiAgentService {
         return last == null ? Attempt.cancelled() : last;
     }
 
-    private Attempt runOnce(TaskSpec spec, Dispatch dispatch, String note) {
+    private Attempt runOnce(TaskSpec spec, Dispatch dispatch, String note, Map<String, TaskState> states) {
         String agentId = "agent_" + randomSuffix();
         String sandboxId = "sbx_" + randomSuffix();
         DiffSandbox sandbox = new DiffSandbox(sandboxId, agentId, spec.id(), "");
-        SandboxSink sink = (path, oldText, newText) -> {
-            SandboxChange change = sandbox.add(path, oldText, newText, oldText != null, spec.risk());
-            if (change != null) {
-                publish(dispatch.events(), new SandboxDiffReady(sandboxId, agentId, spec.id(), change.path(),
-                        change.added(), change.removed()));
+        SandboxSink sink = new SandboxSink() {
+            @Override
+            public void record(String path, String oldText, String newText) {
+                SandboxChange change = sandbox.add(path, oldText, newText, oldText != null, spec.risk());
+                if (change != null) {
+                    publish(dispatch.events(), new SandboxDiffReady(sandboxId, agentId, spec.id(), change.path(),
+                            change.added(), change.removed()));
+                }
+            }
+
+            @Override
+            public String currentText(String path, String baselineText) {
+                return sandbox.currentText(path, baselineText);
+            }
+
+            @Override
+            public boolean proposed(String path) {
+                return sandbox.hasChange(path);
+            }
+
+            @Override
+            public String proposedText(String path) {
+                return sandbox.proposedText(path);
             }
         };
+        PermissionMode mode = effectiveMode(spec.scope());
+        if (mode == PermissionMode.READ_ONLY && spec.scope() != null && spec.scope().writable()) {
+            // 不能让子 Agent 偷偷放开权限完成可写任务：明确告诉用户要切档位
+            return new Attempt(agentId, List.of(), sandbox, null, false,
+                    "会话权限档位为 READ_ONLY，无法派发需要写入或命令的子任务；请先在界面切换到「完全放行」");
+        }
         ToolRegistry tools = toolFactory.registryForScope(dispatch.workspace(), spec.scope(), sink);
-        // 子代理与主会话同款重复调用策略：3 次提醒、5 次中断——硬中断的代价是父级整任务重试
-        AgentLoop.Config config = new AgentLoop.Config(properties.maxSteps(), 3, 5,
-                systemPrompt(spec, dispatch), List::of, 0, 120_000, true);
+        // 上下文预算与收尾门跟随主会话配置，避免子 Agent 用更小的窗口和额外的收尾门做不完任务
+        AgentLoop.Config config = new AgentLoop.Config(agent.maxSteps(), 3, 5,
+                systemPrompt(spec, dispatch), List::of, 0, agent.contextMaxChars(),
+                agent.completionChecksEnabled());
         // 每个子 Agent 单独一份 trace：出问题能按 agentId 回放它自己的工具调用链
-        var trace = new JsonlTraceRecorder(
+        JsonlTraceRecorder trace = new JsonlTraceRecorder(
                 dataDir.file("traces", dispatch.sessionId() + "-" + agentId + ".jsonl"), objectMapper);
-        var loop = new AgentLoop(modelClient, tools, new PolicyPermissionGate(PermissionMode.AUTO),
-                ApprovalBroker.denyAll(), config, () -> cancelled(dispatch), () -> null, trace);
+        AgentLoop loop = new AgentLoop(dispatch.executionClient() == null ? modelClient : dispatch.executionClient(),
+                tools, new PolicyPermissionGate(mode), ApprovalBroker.denyAll(), config,
+                () -> cancelled(dispatch), () -> null, trace);
 
-        publish(dispatch.events(), new SubagentStarted(agentId, oneLine(spec.title() + "：" + spec.goal(), 200)));
+        publish(dispatch.events(), new SubagentStarted(agentId, oneLine(spec.title() + "：" + spec.goal(), 200),
+                oneLine(spec.id() + " " + spec.title(), 40)));
         try {
-            AgentLoop.Result result = loop.run(userPrompt(spec, note), List.of(),
-                    subagentSink(dispatch.events()));
+            AgentLoop.Result result = loop.run(userPrompt(spec, note, dependencyContext(spec, states)), List.of(),
+                    subagentSink(dispatch.events(), agentId));
             if (result.failed()) {
                 String reason = "子 Agent 未完成：" + result.failureCode();
                 publish(dispatch.events(), new SubagentFinished(agentId, reason, false));
@@ -377,15 +424,31 @@ public class MultiAgentService {
     }
 
     /**
+     * 子 Agent 的有效权限：继承父会话档位，只能收紧不能放开（与 Codex 子 Agent 一致）。
+     * 只读任务永远拿不到写权限；父会话档位为 null 时按最保守的 READ_ONLY 处理。
+     */
+    private PermissionMode effectiveMode(com.pilot.core.multi.AgentScope scope) {
+        PermissionMode parent = permissions == null ? null : permissions.mode();
+        if (scope != null && !scope.writable()) return PermissionMode.READ_ONLY;
+        return parent == null ? PermissionMode.READ_ONLY : parent;
+    }
+
+    /**
      * 子 Agent 的事件只放行工具与子代理事件。
      *
      * <p>模型增量、run.completed / run.failed 属于父会话语义，直接放行会把子 Agent 的文字混进父回答、
      * 甚至把整个会话标成失败。
      */
-    private static Consumer<SessionEvent> subagentSink(Consumer<SessionEvent> sink) {
+    private static Consumer<SessionEvent> subagentSink(Consumer<SessionEvent> sink, String agentId) {
         return event -> {
+            if (event instanceof com.pilot.core.event.ToolStarted started) {
+                // 多个子 Agent 并行时必须带归属，前端才分得清哪条操作是谁发起的。
+                sink.accept(started.forAgent(agentId));
+                return;
+            }
             if (event instanceof AssistantDelta || event instanceof AssistantPreview
                     || event instanceof ContextCompacted || event instanceof PlanUpdated
+                    || event instanceof com.pilot.core.event.RunUsageUpdated
                     || event instanceof RunCompleted || event instanceof RunFailed
                     || event instanceof RunCancelled || event instanceof RunContinued
                     || event instanceof RunRetrying || event instanceof ApprovalRequired
@@ -399,7 +462,7 @@ public class MultiAgentService {
     private String systemPrompt(TaskSpec spec, Dispatch dispatch) {
         String workspace = "当前工作区";
         try {
-            var name = toolFactory.resolve(dispatch.workspace()).getFileName();
+            Path name = toolFactory.resolve(dispatch.workspace()).getFileName();
             if (name != null) {
                 workspace = name.toString();
             }
@@ -415,11 +478,36 @@ public class MultiAgentService {
                 "risk", spec.risk().label())).strip();
     }
 
-    private static String userPrompt(TaskSpec spec, String note) {
+    private String dependencyContext(TaskSpec spec, Map<String, TaskState> states) {
+        if (spec.dependsOn().isEmpty()) return "";
+        StringBuilder context = new StringBuilder("上游依赖产物（只读输入）：\n");
+        int chars = 0;
+        for (String dependency : spec.dependsOn()) {
+            TaskState state = states.get(dependency);
+            if (state == null) continue;
+            context.append("\n### ").append(dependency).append("：")
+                    .append(state.report == null ? state.detail : state.report.conclusion()).append('\n');
+            for (DiffSandbox box : state.sandboxRefs) {
+                for (SandboxChange change : box.changes()) {
+                    String artifact = "\n#### 文件 " + change.path() + "\n```\n" + change.newContent() + "\n```\n";
+                    if (chars + artifact.length() > 24000) {
+                        context.append("\n（依赖产物达到 24,000 字符上限，后续内容省略）\n");
+                        return context.toString();
+                    }
+                    context.append(artifact);
+                    chars += artifact.length();
+                }
+            }
+        }
+        return context.toString();
+    }
+
+    private static String userPrompt(TaskSpec spec, String note, String dependencies) {
         return PROMPTS.render("subagent/job", Map.of(
                 "title", spec.title(),
                 "goal", spec.goal(),
-                "note", note == null || note.isBlank() ? "（首次尝试）" : note)).strip();
+                "note", note == null || note.isBlank() ? "（首次尝试）" : note,
+                "dependencies", dependencies == null ? "" : dependencies)).strip();
     }
 
     private void blockDownstream(TaskGraph graph, Map<String, TaskState> states, String taskId,

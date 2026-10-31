@@ -17,6 +17,7 @@ import java.nio.charset.CoderResult;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -40,9 +41,20 @@ import java.util.regex.Pattern;
 /** Owns command processes and their durable, append-only, redacted logs. */
 public final class CommandTaskManager implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(CommandTaskManager.class);
+    /** Windows 中文控制台的默认编码，作为非 UTF-8 输出的回退。 */
+    private static final Charset GBK = Charset.forName("GBK");
     public record Task(String taskId, String sessionId, String command, String workdir, String status,
                        Long pid, Integer exitCode, Instant startedAt, Instant finishedAt,
-                       boolean background, long timeoutSeconds, String reason) { }
+                       boolean background, long timeoutSeconds, String reason,
+                       CommandChangeTracker.Handle changeTracking) {
+        /** Backward-compatible constructor for tests and command records created before change tracking. */
+        public Task(String taskId, String sessionId, String command, String workdir, String status,
+                    Long pid, Integer exitCode, Instant startedAt, Instant finishedAt,
+                    boolean background, long timeoutSeconds, String reason) {
+            this(taskId, sessionId, command, workdir, status, pid, exitCode, startedAt, finishedAt,
+                    background, timeoutSeconds, reason, null);
+        }
+    }
 
     /** Offsets and limits count Unicode code points; callers should reuse nextOffset unchanged. */
     public record LogChunk(String taskId, long offset, long nextOffset, String text,
@@ -51,7 +63,6 @@ public final class CommandTaskManager implements AutoCloseable {
     private static final Pattern SECRET_KEY = Pattern.compile("(?i)(key|token|secret|password|credential|passwd)");
     private static final String REDACTED = "[REDACTED]";
     private static final long DEFAULT_OUTPUT_LIMIT = 10L * 1024 * 1024;
-    private static final Charset GBK = Charset.forName("GBK");
     private final Path storage;
     private final ObjectMapper mapper;
     private final long outputLimit;
@@ -79,6 +90,12 @@ public final class CommandTaskManager implements AutoCloseable {
 
     public synchronized Task start(String sessionId, String displayCommand, ProcessBuilder builder,
                                    boolean background, long timeoutMillis) {
+        return start(sessionId, displayCommand, builder, background, timeoutMillis, null);
+    }
+
+    public synchronized Task start(String sessionId, String displayCommand, ProcessBuilder builder,
+                                   boolean background, long timeoutMillis,
+                                   CommandChangeTracker.Handle changeTracking) {
         sessionDirectory(sessionId);
         Objects.requireNonNull(builder, "builder must not be null");
         if (closed || Files.exists(sessionDirectory(sessionId).resolve(".closed"))) {
@@ -102,6 +119,9 @@ public final class CommandTaskManager implements AutoCloseable {
         String id = "cmd_" + UUID.randomUUID();
         Task task = new Task(id, sessionId, redact(displayCommand, secrets), workdir.toString(), "RUNNING",
                 null, null, Instant.now(), null, background, timeoutMillis / 1000 + (timeoutMillis % 1000 == 0 ? 0 : 1), "");
+        task = new Task(task.taskId(), task.sessionId(), task.command(), task.workdir(), task.status(), task.pid(),
+                task.exitCode(), task.startedAt(), task.finishedAt(), task.background(), task.timeoutSeconds(),
+                task.reason(), changeTracking);
         Entry entry = new Entry(task, secrets);
         try {
             // 元数据先于进程落盘：进程存在之前记录必须已在盘上，崩溃恢复才不会漏掉在跑的命令。
@@ -109,26 +129,28 @@ public final class CommandTaskManager implements AutoCloseable {
             builder.directory(workdir.toFile()).redirectErrorStream(true)
                     .redirectOutput(ProcessBuilder.Redirect.PIPE).redirectInput(ProcessBuilder.Redirect.PIPE);
             entry.process = builder.start();
+            // pid 必须立刻可见：状态查询、进程树停止和所有权判定都依赖它，
+            // 不能等子进程发现做完，否则会读到 pid 为空的运行中任务。
+            entry.task = state(entry.task, "RUNNING", pid(entry.process), null, null, "");
+            persist(entry);
             // Sample before metadata I/O and again before scheduling, reducing the window for short-lived wrappers.
             // Already detached children cannot be recovered portably; callers should run servers in foreground mode.
             entry.discover();
-            Task spawned = state(entry.task, "RUNNING", entry.process.pid(), null, null, "");
-            persist(entry, spawned);
             // 注册放在 spawn 之后：任务一旦对外可见（list/get/stop）就必然带着 pid 与进程引用，
             // 否则「start 后立刻查 list」的调用方会拿到 pid=null 的快照（ProcessHandle.of 会 NPE）。
             // 状态先落盘再发布：观察者看到某个状态时，它的元数据一定已经在盘上。
-            entry.task = spawned;
             entries.put(id, entry);
             entry.process.getOutputStream().close();
             entry.reader = workers.submit(() -> readOutput(entry));
             entry.discover();
             workers.submit(() -> supervise(entry, timeoutMillis));
         } catch (IOException | RuntimeException failure) {
+            log.warn("命令启动失败（{}）：{}", displayCommand, failure.toString());
             if (entry.process != null) {
                 entry.process.descendants().forEach(ProcessHandle::destroyForcibly);
                 entry.process.destroyForcibly();
             }
-            Task failed = state(entry.task, "FAILED", entry.task.pid(), null, Instant.now(),
+            Task failed = state(entry.task, "FAILED", pid(entry.process), null, Instant.now(),
                     redact("命令启动失败：" + failure.getMessage(), secrets));
             persist(entry, failed);
             entry.task = failed;
@@ -241,6 +263,11 @@ public final class CommandTaskManager implements AutoCloseable {
         }
     }
 
+    /**
+     * 增量读取进程输出：读到就写日志，不等换行，也不等进程结束。
+     * 编码先按严格 UTF-8；一旦出现非法字节说明是本地编码（Windows 中文环境常见 GBK），
+     * 之后按 GBK 解码，避免模型与用户看到一串乱码。
+     */
     private void readOutput(Entry entry) {
         StreamingRedactor redactor = new StreamingRedactor(entry.secrets);
         OutputDecoder decoder = new OutputDecoder();
@@ -257,7 +284,6 @@ public final class CommandTaskManager implements AutoCloseable {
                     requestStop(entry, "OUTPUT_LIMIT", "命令输出达到上限 " + outputLimit + " 字节，已终止进程树");
                     break;
                 }
-                if ("OUTPUT_LIMIT".equals(entry.stopStatus)) break;
             }
             if (!"OUTPUT_LIMIT".equals(entry.stopStatus)) {
                 append(entry, redactor.accept(decoder.decode(new byte[0], 0, true), false));
@@ -266,6 +292,9 @@ public final class CommandTaskManager implements AutoCloseable {
             }
         } catch (IOException e) {
             if (entry.stopStatus == null) requestStop(entry, "FAILED", "读取命令输出失败");
+        } catch (RuntimeException e) {
+            log.warn("读取命令输出异常：{}", e.toString());
+            if (entry.stopStatus == null) requestStop(entry, "FAILED", "读取命令输出异常：" + e);
         }
     }
 
@@ -357,10 +386,10 @@ public final class CommandTaskManager implements AutoCloseable {
     private void recover() {
         try {
             Files.createDirectories(storage);
-            try (var sessions = Files.newDirectoryStream(storage)) {
+            try (DirectoryStream<Path> sessions = Files.newDirectoryStream(storage)) {
                 for (Path directory : sessions) {
                     if (!Files.isDirectory(directory) || Files.isSymbolicLink(directory)) continue;
-                    try (var files = Files.newDirectoryStream(directory, "cmd_*.json")) {
+                    try (DirectoryStream<Path> files = Files.newDirectoryStream(directory, "cmd_*.json")) {
                         for (Path file : files) {
                             try {
                                 recoverTask(file);
@@ -405,7 +434,7 @@ public final class CommandTaskManager implements AutoCloseable {
     }
 
     private void prune(int keep) {
-        var oldest = entries.values().stream().filter(entry -> !running(entry.task))
+        List<Entry> oldest = entries.values().stream().filter(entry -> !running(entry.task))
                 .sorted(Comparator.comparing(entry -> entry.task.startedAt())).toList();
         for (Entry entry : oldest) {
             if (entries.size() <= keep) break;
@@ -467,9 +496,19 @@ public final class CommandTaskManager implements AutoCloseable {
         try { return path.toRealPath(); }
         catch (IOException e) { return path.toAbsolutePath().normalize(); }
     }
+    /** 已启动进程的实际 pid；进程不存在或平台不支持时返回 null。 */
+    private static Long pid(Process process) {
+        if (process == null) return null;
+        try {
+            return process.pid();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
     private static Task state(Task previous, String status, Long pid, Integer exit, Instant finished, String reason) {
         return new Task(previous.taskId(), previous.sessionId(), previous.command(), previous.workdir(), status,
-                pid, exit, previous.startedAt(), finished, previous.background(), previous.timeoutSeconds(), reason);
+                pid, exit, previous.startedAt(), finished, previous.background(), previous.timeoutSeconds(), reason,
+                previous.changeTracking());
     }
     private static int readCodePoint(Reader reader) throws IOException {
         int first = reader.read();

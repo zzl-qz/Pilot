@@ -41,8 +41,13 @@ import java.util.regex.Pattern;
  * prompts/completion/verify.md      收尾前的验证要求
  * prompts/completion/review.md      有改动时的收尾自审
  * prompts/completion/review-readonly.md  只读调研任务的自审
+ * prompts/completion/act.md        实现类目标没有任何改动就想收尾时的催办
  * prompts/compact/summary.md        上下文压缩摘要
  * prompts/plan/continue.md          计划未完成时的自动继续（{{openSteps}}）
+ * prompts/goal/continue.md          Goal 跨轮继续合同（目标 / 缺口 / 唯一下一动作）
+ * prompts/goal/review.md            Goal 独立完成核验合同
+ * prompts/loop/stuck-nudge.md       运行时检测停滞后的换路提醒
+ * prompts/loop/budget-wind-down.md  执行段预算收尾合同
  * prompts/subagent/task.md          子代理任务说明（{{task}}）
  * prompts/subagent/base.md          子 Agent 系统提示（{{taskId}} / {{scope}} / {{risk}}）
  * prompts/subagent/job.md           子 Agent 的具体任务（{{title}} / {{goal}} / {{note}}）
@@ -77,6 +82,7 @@ public final class PromptLibrary {
             new SystemSection("system/skills", 250, Set.of("use_skill")),
             new SystemSection("system/tools-spawn", 300, Set.of("spawn_agent")),
             new SystemSection("system/tools-dispatch", 310, Set.of("dispatch_agents")),
+            new SystemSection("system/browser", 350, Set.of("browser")),
             new SystemSection("system/orchestration", 400),
             new SystemSection("system/dispatch", 500, Set.of("dispatch_agents")),
             new SystemSection("system/output", 9000));

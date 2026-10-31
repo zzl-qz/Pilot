@@ -14,7 +14,7 @@ import java.util.List;
  * @param attachments 需要模型侧二次处理的附件（图片等）；文本附件已内联进 content
  */
 public record Message(String role, String content, List<ToolCall> toolCalls, String toolCallId,
-                      List<Attachment> attachments) {
+                      List<Attachment> attachments, List<Integer> imagePositions) {
     public Message {
         if (role == null || role.isBlank()) {
             throw new IllegalArgumentException("role must not be blank");
@@ -22,17 +22,27 @@ public record Message(String role, String content, List<ToolCall> toolCalls, Str
         content = content == null ? "" : content;
         toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
         attachments = attachments == null ? List.of() : List.copyOf(attachments);
+        imagePositions = imagePositions == null ? List.of() : List.copyOf(imagePositions);
+        long imageCount = attachments.stream().filter(Attachment::image).count();
+        if (!imagePositions.isEmpty() && imagePositions.size() != imageCount) {
+            throw new IllegalArgumentException("image positions must match image attachments");
+        }
         if ("tool".equals(role) && (toolCallId == null || toolCallId.isBlank())) {
             throw new IllegalArgumentException("tool message requires toolCallId");
         }
     }
 
+    public Message(String role, String content, List<ToolCall> toolCalls, String toolCallId,
+                   List<Attachment> attachments) {
+        this(role, content, toolCalls, toolCallId, attachments, List.of());
+    }
+
     public Message(String role, String content, List<ToolCall> toolCalls, String toolCallId) {
-        this(role, content, toolCalls, toolCallId, List.of());
+        this(role, content, toolCalls, toolCallId, List.of(), List.of());
     }
 
     public Message(String role, String content) {
-        this(role, content, List.of(), null, List.of());
+        this(role, content, List.of(), null, List.of(), List.of());
     }
 
     public static Message system(String text) {
@@ -47,12 +57,32 @@ public record Message(String role, String content, List<ToolCall> toolCalls, Str
         return new Message("user", text, List.of(), null, attachments);
     }
 
+    public static Message user(String text, List<Attachment> attachments, List<Integer> imagePositions) {
+        return new Message("user", text, List.of(), null, attachments, imagePositions);
+    }
+
     public static Message assistant(String text, List<ToolCall> toolCalls) {
         return new Message("assistant", text, toolCalls, null);
     }
 
     public static Message tool(String toolCallId, String content) {
         return new Message("tool", content, List.of(), toolCallId);
+    }
+
+    /** 工具产出图片的消息前缀；压缩与历史修剪据此识别，不把截图当作用户原图长期固定。 */
+    public static final String TOOL_IMAGE_MARKER = "[工具图片]";
+
+    /**
+     * 工具产出的图片。OpenAI 兼容协议的 tool 消息只能承载文本，所以图片放在本批 tool 结果之后的
+     * 一条 user 消息里；文字部分说明来源，模型据此把图片对应回具体的工具调用。
+     */
+    public static Message toolImages(String description, List<Attachment> images) {
+        String text = TOOL_IMAGE_MARKER + " " + (description == null ? "" : description.strip());
+        return new Message("user", text, List.of(), null, images);
+    }
+
+    public boolean isToolImages() {
+        return "user".equals(role) && content.startsWith(TOOL_IMAGE_MARKER);
     }
 
     public boolean hasToolCalls() {

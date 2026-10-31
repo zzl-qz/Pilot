@@ -16,6 +16,7 @@ import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunStarted;
+import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SubagentFinished;
 import com.pilot.core.event.SubagentStarted;
 import com.pilot.core.event.SessionEvent;
@@ -46,6 +47,8 @@ public class EventCodec {
     public SessionEvent decode(String type, String payload) {
         Class<? extends SessionEvent> target = switch (type) {
             case "run.started" -> RunStarted.class;
+            case "run.usage" -> RunUsageUpdated.class;
+            case "execution.updated" -> com.pilot.core.event.ExecutionUpdated.class;
             case "assistant.delta" -> AssistantDelta.class;
             case "context.compacted" -> ContextCompacted.class;
             case "plan.updated" -> PlanUpdated.class;

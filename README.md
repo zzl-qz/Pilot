@@ -13,14 +13,17 @@ Pilot 是一个以 Java 构建的本地 Coding Agent 原型。用户通过 Web �
 - 运行中发送的消息等待当前任务完成后依次独立执行；失败、取消、暂停、步数触顶、计划未完成或验收未通过时保留队列，等待期间可编辑、删除。
 - 持久保存原始目标、用户约束、验收条件与证据；续跑重新核对任务要求，明确验收条件需要人工勾选并提供证据。
 - 通过 SSE 展示运行进度、工具调用和审批事件。
-- 本地工作区文件浏览、读取、搜索、修改及变更 diff。
+- 本地工作区文件浏览、读取、搜索、修改及变更 diff；同一文件的多处独立精确替换可在一次 `edit_file` 调用中原子提交。
+- 同一轮多个独立的本地读取可并行执行，工具结果仍按模型调用顺序回填；写入、命令与需审批操作保持顺序执行。
 - 后台命令任务：代理可以启动持续运行的构建或服务，在右侧「命令」面板查看状态、增量日志和退出码，并独立停止命令进程树。
 - 可配置的权限模式、命令审批、运行取消和变更回滚。
 - 消息检查点：消息旁「回退 / 分支」可选择只撤代码、只撤对话或一起撤，回到该消息发送前；支持另开对话分支并保留原聊天。
 - 回退前展示文件清单并校验后续修改；发现手工修改、缺失快照、链接文件或跨工作区时阻止代码回退。Git 分支可在变更面板单独创建，未提交改动继续保留。
-- 收尾门：改了代码却没跑验证、有改动但没核对目标、只读调研调用太少就下结论时，自动推回一轮（`pilot.agent.completion-checks=false` 或 `-Dpilot.completion.checks=false` 可关闭）。
-- 项目约定：工作区根目录的 `PILOT.md` / `AGENTS.md` / `CLAUDE.md` 会自动注入系统提示词（取第一个存在的）。
-- 仓库快照：每轮注入顶层结构、git 分支与未提交改动、识别到的构建方式，模型不用从零摸索。
+- 收尾门：默认关闭（与 Codex / OpenCode 一致，模型说完成就完成）；需要时用 `pilot.agent.completion-checks=true` 打开。
+- 项目约定：先加载用户级 `~/.pilot/PILOT.md`、`AGENTS.md`、`CLAUDE.md`（优先级最低），再沿工作区祖先目录逐级加载同名文件，每层按此顺序取首份，标明来源并限制长度后注入系统提示词。
+- 确定性钩子：`.pilot/settings.json` 的 `hooks` 支持 `PreToolUse` / `PostToolUse`，格式兼容 Claude Code；配置后编辑完自动跑格式化或 lint，结果直接贴在工具结果后面，`blockOnFailure` 可让前置钩子阻止执行。
+- 权限规则：同一份 `.pilot/settings.json` 的 `permissions.allow` / `deny` / `ask` 支持 `Tool` 与 `Tool(specifier)` 两种写法（命令用 `mvn test:*` 前缀，文件用 `src/**` glob），判定顺序 deny → ask → allow，未命中才回落权限档位。
+- 仓库快照：会话首次运行时注入顶层结构、git 分支与未提交改动、识别到的构建方式，模型不用从零摸索。
 - OpenAI Chat Completions 兼容模型端点；无模型配置时可使用 Mock 模式体验界面流程。
 - 本地 SQLite 会话数据、快照及 trace 存储。
 
@@ -54,7 +57,7 @@ Windows PowerShell / 命令提示符：
 
 脚本会切换到自身所在的仓库根目录，也可以从其他目录通过完整路径运行，例如 `bash /path/to/pilot/start.sh`。传入参数会交给应用，例如 `bash start.sh --server.port=10001`（Windows 使用 `.\start.cmd --server.port=10001`）。构建前先检查 Java 版本：优先使用 `JAVA_HOME`，未设置时使用 PATH 中的 Java；版本为 25 及以上则保留。macOS 检测到版本过低或不可用时，会尝试已安装的 JDK 25，打印本次切换说明，不修改全局 Java 设置。Windows/Linux 遇到不合适的版本会在 Maven 启动前报错，请将 `JAVA_HOME` 或 PATH 指向 JDK 25 及以上版本。
 
-默认 profile 为 `local`，权限默认为 `READ_ONLY`。默认 Web/API 地址为 `http://localhost:9999`。服务启动后可在浏览器打开该地址。无模型密钥时可使用 Mock 模式体验界面；真实模型运行可用环境变量配置：
+默认 profile 为 `local`，权限默认为 `AUTO`（完全放行；可在界面切到 `AUTO_EDIT` / `ASK` / `READ_ONLY`）。默认 Web/API 地址为 `http://localhost:9999`。服务启动后可在浏览器打开该地址。无模型密钥时可使用 Mock 模式体验界面；真实模型运行可用环境变量配置：
 
 ```sh
 PILOT_MODEL_API_KEY=你的密钥 \
@@ -64,11 +67,11 @@ PILOT_WORKSPACE=/绝对/工作区路径 \
 bash start.sh
 ```
 
-Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环境变量。不要把密钥提交到仓库；也可在被忽略的 `pilot-server/src/main/resources/application-local.yaml` 配置。请先确认工作区路径正确，并从 READ_ONLY 开始。
+Windows PowerShell 中请用 `$env:PILOT_MODEL_API_KEY='…'` 等方式设置环境变量。不要把密钥提交到仓库；也可在被忽略的 `pilot-server/src/main/resources/application-local.yaml` 配置。请先确认工作区路径正确；默认档位是 `AUTO`，若在不可丢弃的工作区里试用，建议先切到 `ASK` 或 `READ_ONLY`。
 
 ### 开发时构建与运行
 
-只运行测试时，在仓库根目录执行 `bash mvnw test`（Windows 使用 `.\mvnw.cmd test`）。若需要 Spring Boot 开发运行方式，先在根目录安装整个服务端依赖链，再单独运行服务端：
+只运行测试时，在仓库根目录执行 `bash mvnw test`；只测服务端也要带上依赖模块：`bash mvnw -pl pilot-server -am test`（Windows 使用 `.\mvnw.cmd`）。若需要 Spring Boot 开发运行方式，先在根目录安装整个服务端依赖链，再单独运行服务端：
 
 ```sh
 bash mvnw -pl pilot-server -am install
@@ -77,12 +80,41 @@ bash mvnw -pl pilot-server spring-boot:run
 
 单独构建或运行 `pilot-server` 会读取本机 Maven 仓库中已安装的 `pilot-core`。修改 core 后若只在服务端执行命令，可能仍读到旧 JAR，出现缺少方法或启动失败；需要重新执行根目录的 `install` 命令更新依赖。`start.sh` / `start.cmd` 每次都会完成这一步并运行测试。Windows 的对应命令将 `bash mvnw` 替换为 `.\mvnw.cmd`。
 
+在 IntelliJ IDEA 中请把仓库根目录的 `pom.xml` 作为 Maven 项目导入，再运行 `PilotServerApplication`，不要只导入 `pilot-server/pom.xml`。日常改代码后用 IDE 重启时，在 **Settings → Build, Execution, Deployment → Build Tools → Maven → Runner** 关闭 **Delegate IDE build/run actions to Maven**；这样运行配置的 **Make** 会使用当前工程中的 `pilot-core` 模块输出，不依赖本机仓库里可能过期的 SNAPSHOT JAR。改完设置后执行一次 **Reload All Maven Projects** 和 **Build Project**。如果选择继续委托 Maven 构建，则先运行上面的 `-pl pilot-server -am install`，单独执行 `-pl pilot-server test` 会读取旧的本机依赖。项目已为 DevTools 配置多模块 restart classloader 与编译静默窗口。重启前还要停止占用同一端口的旧进程；IDE 的运行按钮不会替换从其他终端启动的服务。
+
 ## 权限说明
 
-- `READ_ONLY`：只读工具放行，写文件和命令拒绝（默认）。
-- `ASK`：只读工具放行；每次写入或命令请求用户审批，拒绝/超时不得执行。
+- `AUTO`：注册工具直接执行（默认，与 Codex / OpenCode 一致）。
 - `AUTO_EDIT`：写文件直接执行，命令仍需审批。
-- `AUTO`：注册工具直接执行。仅在可丢弃的隔离工作区使用。
+- `ASK`：只读工具放行；每次写入或命令请求用户审批，拒绝/超时不得执行。
+- `READ_ONLY`：只读工具放行，写文件和命令拒绝（相当于 plan 模式）。
+
+### `.pilot/settings.json`
+
+工作区（或用户级 `~/.pilot/`）的这份配置可以进一步收窄权限、挂上确定性钩子，格式与 Claude Code 一致：
+
+```json
+{
+  "permissions": {
+    "deny":  ["run_command(rm -rf:*)", "read_file(.env)"],
+    "ask":   ["edit_file(docs/*.md)"],
+    "allow": ["run_command(mvn test:*)", "edit_file(src/**)"]
+  },
+  "hooks": {
+    "PostToolUse": [
+      { "matcher": "edit_file|create_file|apply_patch",
+        "hooks": [ { "type": "command", "command": "mvn -q spotless:apply" } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "run_command", "command": "git status --porcelain", "blockOnFailure": false }
+    ]
+  }
+}
+```
+
+- 权限判定顺序为 deny → ask → allow，规则不命中时才回落到档位；命令规则 `mvn test:*` 表示前缀匹配，文件规则支持 `*` 与 `**`。
+- `PostToolUse` 的输出会贴在工具结果后面交给模型（例如格式化后剩下多少问题）；`PreToolUse` 配了 `blockOnFailure` 时，命令退出码非 0 会阻止工具执行。
+- 钩子命令来自配置文件而不是模型，超时默认 60 秒；配置解析失败等同于没有钩子，不会阻断运行。
 
 权限不是操作系统沙箱。工具路径限制和命令白名单不能替代容器/账户隔离；使用真实模型时，审查模型提出的命令、diff 和审批请求。不要把敏感文件放入可访问工作区。
 
@@ -98,7 +130,7 @@ bash mvnw -pl pilot-server spring-boot:run
 
 默认配置位于 `pilot-server/src/main/resources/application.yaml`，本地 profile 覆盖配置可放在 Git 忽略的 `pilot-server/src/main/resources/application-local.yaml`。也可通过环境变量配置模型和运行参数，例如 `PILOT_MODEL_API_KEY`、`PILOT_MODEL_ENDPOINT`、`PILOT_MODEL_MODEL`、`PILOT_WORKSPACE`、`PILOT_PERMISSION_MODE`。
 
-上下文预算默认 120000，按「字符」和「token」两个口径取更满的一个：英文约 96k 字符、中文约 96k 字符（≈96k token）时触发压缩，压缩后回到预算的一半左右再继续。模型窗口够大时可以调高，例如 `PILOT_AGENT_CONTEXT_MAX_CHARS=300000` 或 `-Dpilot.context.max-chars=300000`。
+上下文预算默认 120000，按「字符」和「token」两个口径取更满的一个：英文约 96k 字符、中文约 96k 字符（≈96k token）时触发摘要，以预算约 80% 为目标；摘要仍压不下去且超过 97% 时再硬裁剪旧组。模型窗口够大时可以调高，例如 `PILOT_AGENT_CONTEXT_MAX_CHARS=300000` 或 `-Dpilot.context.max-chars=300000`。
 
 提示词不写在 Java 代码里，正文位于 `pilot-core/src/main/resources/prompts/`：`system/` 下是系统提示词的五段（身份与边界、工作流、工具策略、多智能体调度、结论格式），另有计划注入、压缩摘要、自动继续、子代理任务模板，以及子 Agent 的三段式身份/任务模板（`subagent/base.md`、`subagent/job.md`）。模板变量写作 `{{name}}`，缺失变量会直接报错。调提示词时可用 `PILOT_PROMPTS_DIR`（或系统属性 `pilot.prompts.dir`）指向一个外部目录，同名文件优先于打包资源，只覆盖其中一部分也可以，无需重新打包。
 
@@ -106,7 +138,24 @@ bash mvnw -pl pilot-server spring-boot:run
 
 项目制改造之前创建的会话没有 `project_id`，会显示在侧栏的「未分组」下，数据不会被删除；老库启动时会自动补上 `project_id` 列。
 
-事件、快照和 trace 默认永久保留。设置 `PILOT_RETENTION_DAYS`（或 `pilot.retention.days`）为正数后，服务每天清理一次早于该天数的数据并收缩 WAL；会话本身不会被删除。写文件前的快照对单个文件有 8MB 上限，超过的文件不备份，回滚结果里会把它列为失败而不是静默删除。
+事件、快照和 trace 默认永久保留。设置 `PILOT_RETENTION_DAYS`（或 `pilot.retention.days`）为正数后，服务每天清理一次早于该天数的数据并收缩 WAL；会话本身不会被删除。写文件前的快照对单个文件有 8MB 上限，超过的文件不备份，回滚结果里会把它列为失败而不是静默删除。备份目录与校验证据可以单独设置更短的期限：`PILOT_RETENTION_BACKUPS_DAYS`、`PILOT_RETENTION_VALIDATION_DAYS`。
+
+执行隔离与远程访问是两组独立开关：
+
+| 配置 | 默认 | 作用 |
+| --- | --- | --- |
+| `PILOT_EXECUTION_ISOLATION` | `local` | `container` 时校验命令在容器内执行（`--network=none`、只读根、cap-drop、内存/CPU/进程上限）；容器不可用会显式降级并在 `/api/maintenance/status` 报告原因 |
+| `PILOT_EXECUTION_IMAGE` / `PILOT_EXECUTION_RUNTIME` | temurin 25 / 自动探测 | 容器镜像与运行时（docker/podman） |
+| `PILOT_SECURITY_MODE` | `local` | `token` 允许远程访问，但必须带令牌 |
+| `PILOT_SECURITY_TOKEN` | 空 | 访问令牌；`token` 模式为空会拒绝远程请求 |
+| `PILOT_SECURITY_ALLOWED_ORIGINS` | 空 | 允许的浏览器来源，逗号分隔；默认只允许同源 |
+| `PILOT_SECURITY_RATE_LIMIT` | 600 | 单 IP 每分钟请求上限，`0` 表示关闭 |
+
+令牌可通过 `Authorization: Bearer`、`X-Pilot-Token` 或 SSE 的 `?token=` 传入。浏览器首次用 `http://<host>:8787/?token=<令牌>` 打开后，服务会写入 HttpOnly、SameSite=Strict 的 Cookie，页面内的 `fetch` 与 `EventSource` 随后自动携带，不必改前端代码。被拒绝的请求写入 `.pilot/audit/access.jsonl`，不记录令牌本身。
+
+这只是单令牌边界：没有用户、角色与会话级隔离，适合可信局域网的单人使用。要开放到公网，应在其前面加一层真正的认证代理，并自行处理 TLS。
+
+数据备份用 `POST /api/maintenance/backup`：数据库走 SQLite `VACUUM INTO` 得到事务一致快照，清单、校验证据、命令日志一并复制并写 `manifest.json`（含每个文件的 sha256）。恢复只能停服务后整体覆盖数据目录；不要在服务运行时恢复。
 
 ## API 概览
 
@@ -121,13 +170,18 @@ bash mvnw -pl pilot-server spring-boot:run
 - `GET/PUT /api/sessions/{id}/task`：查看当前任务，或在空闲时保存约束、验收条件与证据；原始目标不可通过此接口修改。
 - `GET /api/sessions/{id}/commands`：列出命令任务；`GET /api/sessions/{id}/commands/{taskId}`：查看状态；`GET .../{taskId}/logs?offset=0&limit=16000`：增量读取日志；`POST .../{taskId}/stop`：停止命令及其子进程。
 - `GET /api/sessions/{id}/history`：读取历史（`limit` + `before` 游标分页，长会话只取尾部一页）；`GET /api/sessions/{id}/diff`：查看会话变更。
+- `GET /api/sessions/{id}/context`：查看持久模型记忆的估算占用；`POST /api/sessions/{id}/context/compact`：空闲时主动压缩早期模型记忆，聊天与审计事件保留不动。
 - `GET /api/metrics`：进程内运行指标（运行数、状态分布、失败码、事件类型计数、平均耗时）。
 - `/api/approvals`：查看和处理待审批工具调用。
 - `/api/settings`：查看或更新模型与权限设置。
 - `/api/health`：服务健康状态。
-- `GET /api/sessions/{id}/multi`：多智能体任务看板、沙箱改动与待仲裁事项。
+- `GET /api/sessions/{id}/multi`：多智能体任务看板、沙箱改动、待仲裁事项与产物清单摘要。
 - `POST /api/sessions/{id}/multi/sandboxes/{sandboxId}/accept|reject`：接受或拒绝某个子 Agent 的改动。
 - `POST /api/sessions/{id}/multi/arbitrations/{arbitrationId}/resolve`：记录人工仲裁结果。
+- `GET /api/sessions/{id}/multi/sandboxes/{sandboxId}/manifest`：当前产物清单、与上一版的差异、校验有效性原因；`.../manifests` 返回版本历史。
+- `GET /api/sessions/{id}/diagnostics`：任务诊断（停在哪一步、上次成功步骤、下一动作、重试状态、耗时与用量、命令、校验覆盖、存储健康、启动恢复）。文本经过脱敏。
+- `GET /api/sessions/{id}/validation`：完成声明对应的校验证据是否仍覆盖当前产物；`GET /api/recovery`：最近一次启动接管的运行清单。
+- `GET /api/maintenance/status`、`POST /api/maintenance/backup`、`POST /api/maintenance/purge`：存储、备份与保留策略。
 
 具体请求结构以 `pilot-server` 控制器实现为准；该列表是入口索引，不替代接口契约文档。
 
@@ -157,6 +211,22 @@ bash mvnw -pl pilot-server spring-boot:run
 ```
 
 运行中的排队消息只接受普通任务文本；结构化要求通过空闲时的新任务请求提交，也可以暂停当前任务后在任务卡中编辑。`GET /task` 在尚未创建任务记录时返回 `null`。
+
+## 自适应执行与 Goal
+
+新任务直接进入普通执行，不先消耗一次模型请求做模式分类。普通执行与 Codex / OpenCode 一致：**模型说完成就完成**，不做二票否决——没有收尾自审、没有“必须跑通验证才能交付”、也不会因为“没有新证据”判成无进展而停下。只有主 Agent 发现任务需要跨轮追踪动态结果、形成调查→修复→复验闭环，或用户明确要求持续推进到结果时，才调用 `promote_goal` 保存完成条件并启用独立核验；Goal 的继续必须同时给出具体缺口、唯一下一动作和预期观察，并由新文件状态、有效验证或后台终态驱动；等待、需要输入、未验证、无进展、核验失败和预算耗尽分别保留状态。
+
+计划只是给模型和用户的进度提示：未完成项会如实报进 `run.completed`，但不拦住收尾，也不再自动催模型继续。是否运行构建、测试以及是否复跑，都由模型自己决定。
+
+执行预算只作高位事故熔断，不在半额度强制改变策略，也没有“读取/搜索 32 次后禁止调查”的业务门。自上次修改或成功验证后累计 16 次读取/搜索时，运行时会提醒模型转入具体实现或定向验证，不禁止必要调查。默认 DIRECT 每段最多 1000 次主执行请求、5000 万输入 token、200 万输出 token 和 8 小时模型活跃时间；Goal 的请求保险丝跟随 `pilot.agent.max-steps`（默认 1000），token 上限相同，活跃时间为 8 小时。触顶后保存进度与证据，用户可继续开启新预算段，历史用量与证据不会清零。核验器另预留最多 2 次请求；任何非取消停止另有一次禁用工具的阶段收尾。
+
+重复调用只注入提醒，不再中断运行；是否换理由模型自己判断。仍在运行的后台状态/日志查询使用更宽的有界观察窗口，长期完全不变才暂停轮询。上下文接近预算时会先占位符化与截断老工具输出，再折叠成摘要，压不动就本地裁剪，不会因为压缩让任务失败。同步 `spawn_agent` 使用冻结且去递归/Goal 控制的工具快照；单次派生最多 8 个工作步和 1 个收尾请求（合计最多 9 次模型请求），同一 run 共享最多 4 次派生、24 次子模型请求的资源池，子请求及 token 用量同时计入父任务的事故熔断。子运行会把改动路径和检查结果结构化交回父任务。完整协议见 [Goal 执行说明](evaluation/GOALS.md)。
+
+## 浏览器验证与 MCP
+
+`browser` 工具在隔离的 Chromium 里打开本机页面（只允许 localhost / 127.0.0.1 / [::1]），支持 DOM 快照、点击、输入、选择、文件上传、截图、控制台与网络记录，用于让代理验证自己改的前端。运行时是固定版本 `playwright-core@1.64.1` 的 Node sidecar，首次启动时自动安装到 `.pilot/browser`，浏览器优先用本机 Chrome / Edge，都没有时下载 Playwright Chromium。可用 `pilot.browser.enabled=false` 关闭，`PILOT_BROWSER_PATH` 指定浏览器可执行文件。握手没通过时模型看不到这个工具，原因保留在工具不可用信息里；本机装好浏览器后约一分钟内自动重测。截图保存在数据目录的 `artifacts/` 下。
+
+MCP 服务器在工作区的 `.mcp.json`（格式同 Claude Code：`{"mcpServers": {"名字": {"command": "npx", "args": [...], "env": {...}}}}`）或数据目录的 `mcp.json` 里配置，目前支持 stdio 传输。模型每次请求只携带 `mcp_tools` 与 `mcp_call` 两个定义，具体工具按需查询；启动服务器等于执行配置里的命令，所以需要审批，声明了 `readOnlyHint` 的工具调用免审批。
 
 ## 后台命令
 
@@ -210,10 +280,24 @@ bash mvnw -pl pilot-server spring-boot:run
 
 ```sh
 cd pilot-web
-node --test src/test/js
+npm test
 ```
 
-Sprint 6 可复现任务规格与任务矩阵、运行命令见 `evaluation/TASKS.md`，记录模板/当前结果见 `evaluation/REPORT.md`。任务包括代码理解、修复、测试、权限拒绝、循环检测和压缩等。脚本化单测验证的是组件行为，不等同于真实模型成功率；真实模型评估还需配置模型并人工记录结果。
+Sprint 6 可复现任务规格与任务矩阵、运行命令见 `evaluation/TASKS.md`，记录模板/当前结果见 `evaluation/REPORT.md`。任务包括代码理解、修复、测试、权限拒绝、循环检测和压缩等。脚本化单测验证的是组件行为，不等同于真实模型成功率。
+
+真实模型评估已有固定任务集与执行器：`evaluation/harness/tasks.json` 定义六个可复制工作区与外部验收命令，`evaluation/harness/runner.mjs` 驱动真实运行并写出 JSONL，`metrics.mjs` 聚合成功率、回归率、成本、耗时、返工与人工接管率，并支持与上次基线比较：
+
+```sh
+node evaluation/harness/runner.mjs --base http://127.0.0.1:8787 \
+  --model <模型> --prompt-version <提示词版本> --tool-version <工具版本> \
+  --fixtures evaluation/harness/fixtures --out evaluation/harness/runs/run1.jsonl
+node --test evaluation/harness/metrics.test.mjs   # 指标聚合的单元测试
+node evaluation/harness/runner.mjs --dry-run --out /tmp/dry.jsonl  # 只验证流程
+```
+
+只有验收命令真的执行为 0 才算成功；`--dry-run` 的数字只用于验证流程，不能当作能力结论。
+
+窄屏回归用 `cd pilot-web && npm run check:viewports -- --base http://127.0.0.1:8787`：在 390/768/1440 三个视口检查横向溢出、输入框与发送按钮可见性、设置面板是否超出屏幕，并输出截图与 `report.json`。需要先 `npm install` 安装 playwright。
 
 ### 浏览器调试产物
 
@@ -227,7 +311,11 @@ Sprint 6 可复现任务规格与任务矩阵、运行命令见 `evaluation/TASK
 ## 已知限制
 
 - 模型的质量、成功率和响应受模型、网络和提示词影响；单元测试不能证明真实端到端质量。
-- token 数是按字符估算的（ASCII 4 字符 1 token，中文 1 字符 1 token），不是模型 tokenizer 的精确计数；压缩摘要可能丢失细节，需复读原文件核实。
+- 模型端点返回 `usage` 时，任务输入/输出 Token 使用模型精确值；不返回时按字符保守估算（ASCII 4 字符 1 token，中文 1 字符 1 token），界面用 `≈` 明示。当前任务统计只覆盖主 Agent 的模型调用，子 Agent 汇总用量仍列为后续能力；上下文占用始终是本地估算。
+- 主动压缩会额外调用一次模型生成交接摘要；压缩只替换模型记忆中的早期内容，不删除聊天和审计记录。摘要可能丢失细节，关键事实仍需复读原文件核实。
 - ASK 依赖运行中的审批服务；等待超时按拒绝处理。不要把审批 UI 当作安全沙箱。
 - 运行时存储、文件写入、命令执行均有本地副作用；先备份并使用可丢弃工作区。
-- 评估集当前是任务规格和自动化测试映射，不包含十份独立仓库快照；评估前应在干净 checkout 执行，并记录提交号。
+- `run_command` 仍以宿主进程执行：容器隔离目前只覆盖多智能体的校验命令，因为后台命令状态、日志与停止都依赖进程归属。`ExecutionBackend` 已抽出，但把它接到完整命令生命周期还要处理路径映射、工具链镜像与停止语义。
+- 检查点、租约与幂等账本解决的是「同一实例重启后安全接管」，不是多实例集群调度：租约存在 SQLite 里，多实例共享同一数据目录才有意义。
+- 远程访问只有单一共享令牌，没有用户、角色与会话级隔离；开放到公网前应在前面加一层真正的认证代理。
+- 评估集当前是任务规格和自动化测试映射，不包含十份独立仓库快照；评估前应在干净 checkout 执行，并记录提交号。`evaluation/harness/fixtures/` 需要按任务补充初始仓库后才能真正跑出成功率。

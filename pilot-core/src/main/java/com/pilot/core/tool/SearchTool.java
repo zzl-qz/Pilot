@@ -16,6 +16,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import java.util.stream.Stream;
 
 /**
  * 在工作区内按正则搜索文本，返回 {@code 路径:行号: 内容}。
@@ -63,6 +64,11 @@ public final class SearchTool implements Tool {
     }
 
     @Override
+    public boolean parallelSafe() {
+        return true;
+    }
+
+    @Override
     public String execute(Map<String, Object> args) {
         String patternText = ToolSupport.stringArg(args, "pattern");
         if (patternText == null) {
@@ -102,7 +108,7 @@ public final class SearchTool implements Tool {
     }
 
     private List<String> runRipgrep(Path base, String regex, String glob) {
-        var command = new ArrayList<>(List.of(
+        ArrayList<String> command = new ArrayList<>(List.of(
                 "rg", "--line-number", "--no-heading", "--color", "never", "--no-messages", "--with-filename"));
         for (String skipped : SKIPPED_DIRECTORIES) {
             command.add("--glob");
@@ -133,7 +139,7 @@ public final class SearchTool implements Tool {
             byte[] bytes = output.get(2, TimeUnit.SECONDS);
             int status = process.exitValue();
             if (status > 1) return null;
-            var matches = new ArrayList<String>();
+            ArrayList<String> matches = new ArrayList<String>();
             String text = new String(bytes, StandardCharsets.UTF_8);
             for (String line : text.lines().toList()) {
                 int first = line.indexOf(':');
@@ -172,7 +178,7 @@ public final class SearchTool implements Tool {
     }
 
     private List<String> fallback(Path base, Pattern pattern, String glob) {
-        var matches = new ArrayList<String>();
+        ArrayList<String> matches = new ArrayList<String>();
         for (Path file : candidateFiles(base, glob)) {
             if (searchFile(file, pattern, matches) && matches.size() > MAX_MATCHES) break;
         }
@@ -183,7 +189,7 @@ public final class SearchTool implements Tool {
         if (Files.isRegularFile(base)) {
             return glob == null || matchesGlob(base.getFileName().toString(), glob) ? List.of(base) : List.of();
         }
-        try (var stream = Files.walk(base)) {
+        try (Stream<Path> stream = Files.walk(base)) {
             return stream.filter(Files::isRegularFile)
                     .filter(paths::allows)
                     .filter(path -> !inSkippedDirectory(base, path))

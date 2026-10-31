@@ -11,10 +11,11 @@
 | `system/` | 系统提示词段落（身份、流程、工具策略、输出格式） | 每次 run 组装，进 system |
 | `tools/` | 每个工具的描述，文件名 = `Tool.name()` | 随工具定义每次请求发送 |
 | `skills/` | 技能的注入模板（activate：用户显式点名技能时的首条 user 消息） | 显式激活时注入一次 |
-| `completion/` | 收尾门自查（verify / review / review-readonly） | 收尾前按需注入 user 消息 |
+| `completion/` | 收尾门自查（verify / review / review-readonly / act），默认关闭 | 收尾前按需注入 user 消息 |
 | `compact/` | 上下文压缩摘要指令 | 压缩时注入 |
-| `plan/` | 计划未完成的自动继续提醒 | 自动续跑时注入 user 消息 |
-| `loop/` | 循环行为提醒（repeat-reminder） | 重复调用达到提醒档时注入 |
+| `plan/` | 计划未完成的自动继续提醒（默认关闭） | 自动续跑时注入 user 消息 |
+| `goal/` | Goal 续轮与独立完成核验合同 | Goal 外循环按需注入 |
+| `loop/` | 停滞纠偏与预算收尾合同 | 运行时状态机触发，使用临时运行指令 |
 | `subagent/` | 子代理的任务与系统提示 | 子代理启动时渲染 |
 | `context/` | 运行期上下文模板（仓库快照） | 会话首条 run 注入一次 |
 
@@ -24,6 +25,8 @@
   `system/` 段落只放跨工具的策略约束。
 - 同一事实出现在第二处时，删掉一处——收尾门等按需注入的模板允许复述场景语义，
   但不复述具体参数值。
+- 运行时纠偏不是新的用户意图；`goal/`、`loop/` 片段应作为临时 runtime 指令注入，
+  不得伪装成用户消息长期写进会话历史。
 
 ## frontmatter 与段落过滤
 
@@ -36,6 +39,7 @@ requires: [dispatch_agents]
 ```
 
 - 只支持 `requires` 一个键；值支持 `a`、`a, b`、`[a, b]` 三种写法；其他键或格式非法抛异常。
+- 能力依赖运行时握手的工具（如 `browser`）对应的段落同样用 `requires` 过滤：能力不可用时，提示词里也不会出现它的用法。
 - 独立工具的使用指导分别放在独立段落中，例如 `tools-spawn` 与 `tools-dispatch`，避免关闭一个工具时连带移除另一个工具的指导。
 - 原 `system/tools-agents.md` 已拆为 `system/tools-spawn.md` 和 `system/tools-dispatch.md`；使用外部目录覆盖旧片段时，也需要按工具拆分到这两个文件。
 - **注册表声明优先**：`PromptLibrary.SYSTEM_SECTIONS`（`SystemSection` 记录）里的

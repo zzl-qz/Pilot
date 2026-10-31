@@ -22,14 +22,20 @@ public final class ReadFileTool implements Tool {
 
     private final PathValidator paths;
     private final ReadGuard reads;
+    private final SandboxSink sandbox;
 
     public ReadFileTool(PathValidator paths) {
         this(paths, ReadGuard.allowAll());
     }
 
     public ReadFileTool(PathValidator paths, ReadGuard reads) {
+        this(paths, reads, null);
+    }
+
+    public ReadFileTool(PathValidator paths, ReadGuard reads, SandboxSink sandbox) {
         this.paths = paths;
         this.reads = reads == null ? ReadGuard.allowAll() : reads;
+        this.sandbox = sandbox;
     }
 
     @Override
@@ -51,7 +57,9 @@ public final class ReadFileTool implements Tool {
                         "start_line", Map.of("type", "integer",
                                 "description", "起始行号。正数从 1 开始，负数从末尾数，-1 是最后一行。默认 1"),
                         "line_count", Map.of("type", "integer",
-                                "description", "最多读取行数，默认 200，最大 2000")),
+                                "description", "最多读取行数，默认 200，最大 2000"),
+                        "pages", Map.of("type", "string",
+                                "description", "仅 PDF：页码或范围，例如 \"3\" 或 \"2-5\"，默认前 10 页，单次最多 30 页")),
                 "required", List.of("path"),
                 "additionalProperties", false);
     }
@@ -59,6 +67,33 @@ public final class ReadFileTool implements Tool {
     @Override
     public boolean readOnly() {
         return true;
+    }
+
+    @Override
+    public boolean parallelSafe() {
+        return true;
+    }
+
+    /** 图片与 PDF 走媒体分支，其余沿用文本读取。 */
+    @Override
+    public ToolResult executeResult(Map<String, Object> args) {
+        String rawPath = ToolSupport.stringArg(args, "path");
+        if (rawPath != null) {
+            try {
+                Path file = paths.resolve(rawPath);
+                if (Files.isRegularFile(file)) {
+                    if (MediaFileReader.isImage(file)) return MediaFileReader.readImage(file, rawPath);
+                    if (MediaFileReader.isPdf(file)) {
+                        return MediaFileReader.readPdf(file, rawPath, args.get("pages"));
+                    }
+                }
+            } catch (RuntimeException e) {
+                // 路径非法的错误文本交给下面的文本分支统一生成
+            } catch (IOException e) {
+                return ToolResult.text("ERROR: 读取失败: " + e.getMessage());
+            }
+        }
+        return ToolResult.text(execute(args));
     }
 
     @Override
@@ -83,17 +118,19 @@ public final class ReadFileTool implements Tool {
         } catch (RuntimeException e) {
             return "ERROR: " + e.getMessage();
         }
-        if (!Files.exists(file)) {
+        String proposal = sandbox == null ? null : sandbox.proposedText(paths.display(file));
+        if (!Files.exists(file) && proposal == null) {
             return "ERROR: 文件不存在: " + rawPath;
         }
-        if (!Files.isRegularFile(file)) {
+        if (proposal == null && !Files.isRegularFile(file)) {
             return "ERROR: 不是普通文件: " + rawPath;
         }
         try {
-            if (looksBinary(file)) {
+            if (proposal == null && looksBinary(file)) {
                 return "ERROR: 二进制文件，无法读取: " + rawPath;
             }
-            ReadResult slice = readSlice(file, startLine, lineCount);
+            ReadResult slice = proposal == null ? readSlice(file, startLine, lineCount)
+                    : readText(proposal, startLine, lineCount);
             // 只有实际返回文件行才解锁编辑，越界读取和空文件提示不算观察过内容。
             if (slice.hasLines()) {
                 reads.observed(file);
@@ -102,6 +139,19 @@ public final class ReadFileTool implements Tool {
         } catch (IOException e) {
             return "ERROR: 读取失败: " + e.getMessage();
         }
+    }
+
+    private static ReadResult readText(String text, int startLine, int lineCount) {
+        List<String> all = text.lines().map(line -> line.length() > MAX_LINE_CHARS
+                ? line.substring(0, MAX_LINE_CHARS) + "…（超长行已截断）" : line).toList();
+        int total = all.size();
+        if (total == 0) return new ReadResult("(空文件，共 0 行)", false);
+        long requested = startLine < 0 ? (long) total + startLine + 1 : startLine;
+        int start = (int) Math.max(1, Math.min(total, requested));
+        int end = Math.min(total, start + lineCount - 1);
+        List<String> selected = all.subList(start - 1, end);
+        String note = startLine < 0 && requested < 1 ? "（负向起点超出文件开头，已从第 1 行读起）" : "";
+        return new ReadResult(render(start, selected, total, "", note), !selected.isEmpty());
     }
 
     private static boolean looksBinary(Path file) throws IOException {

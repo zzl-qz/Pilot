@@ -2,32 +2,37 @@ package com.pilot.server.session;
 
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.AssistantPreview;
+import com.pilot.core.event.ContextCompacted;
+import com.pilot.core.event.PlanUpdated;
+import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.RunContinued;
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunStarted;
+import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.Attachment;
+import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.loop.Message;
 import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ModelUsage;
 import com.pilot.core.permission.PermissionGate;
-import com.pilot.core.event.PlanUpdated;
-import com.pilot.core.event.RunContinued;
-import com.pilot.core.event.RunStarted;
+import com.pilot.core.plan.PlanItem;
 import com.pilot.core.plan.PlanSink;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.skill.SkillCatalog;
-import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.CommandLogsTool;
+import com.pilot.core.tool.CommandStatusTool;
 import com.pilot.core.tool.CommandTaskManager;
 import com.pilot.core.tool.RunCommandTool;
-import com.pilot.core.tool.CommandStatusTool;
-import com.pilot.core.tool.CommandLogsTool;
 import com.pilot.core.tool.StopCommandTool;
+import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.UseSkillTool;
-import com.pilot.core.workspace.PathValidator;
-import tools.jackson.databind.ObjectMapper;
 import com.pilot.core.trace.JsonlTraceRecorder;
+import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.ModelSettings;
 import com.pilot.server.config.MultiAgentProperties;
@@ -41,6 +46,7 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -51,6 +57,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -61,6 +68,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 在独立线程上执行 {@link AgentLoop}，把循环产生的事件写入会话。
@@ -75,9 +83,6 @@ public class AgentRunService implements RunStarter {
     private static final int MAX_AUTO_CONTINUE = 3;
     /** 提示词正文在 {@code prompts/} 资源里，这里只做变量注入与拼接。 */
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
-    /** 项目约定文件，按优先级取第一个存在的。 */
-    private static final List<String> CONVENTION_FILES = List.of("PILOT.md", "AGENTS.md", "CLAUDE.md");
-    private static final int MAX_CONVENTION_CHARS = 8_000;
     /** 仓库快照：顶层条目与未提交改动都限行，避免 system 被大仓库撑爆。 */
     private static final int MAX_TREE_ENTRIES = 30;
     private static final int MAX_GIT_CHANGES = 12;
@@ -112,7 +117,30 @@ public class AgentRunService implements RunStarter {
     private final MultiAgentProperties multiProperties;
     private final com.pilot.server.observability.RunMetrics metrics;
     private final SkillService skills;
+    /** 可恢复调度状态；为空时（测试构造）不做检查点，也不影响执行。 */
+    private final RunStateTracker runStates;
+    private final com.pilot.server.store.ToolCallJournalFactory journals;
+    private final com.pilot.server.validation.ValidationLedger validations;
 
+    /** 兼容旧调用：不启用检查点与幂等账本。 */
+    public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
+                           PermissionGate permissionGate, ApprovalBroker approvals,
+                           AgentProperties properties, ModelSettings modelSettings,
+                           RunSnapshotService snapshots, RunRegistry registry,
+                           com.pilot.core.session.RunRepository runRepository,
+                           ConversationRepository conversations,
+                           com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper,
+                           PilotDataDir dataDir, com.pilot.server.store.QueuedMessageRepository queuedMessages,
+                           MultiAgentService multiAgent, MultiAgentProperties multiProperties,
+                           com.pilot.server.observability.RunMetrics metrics, TaskControlService taskControls,
+                           CommandTaskManager commandTasks) {
+        this(sessions, modelClient, toolFactory, permissionGate, approvals, properties, modelSettings,
+                snapshots, registry, runRepository, conversations, plans, objectMapper, dataDir,
+                queuedMessages, multiAgent, multiProperties, metrics, taskControls, commandTasks,
+                null, null, null, null);
+    }
+
+    /** 技能链路构造：技能可用，检查点与幂等账本关闭；测试与轻量装配用。 */
     public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
                            PermissionGate permissionGate, ApprovalBroker approvals,
                            AgentProperties properties, ModelSettings modelSettings,
@@ -124,7 +152,30 @@ public class AgentRunService implements RunStarter {
                            MultiAgentService multiAgent, MultiAgentProperties multiProperties,
                            com.pilot.server.observability.RunMetrics metrics, TaskControlService taskControls,
                            CommandTaskManager commandTasks, SkillService skills) {
+        this(sessions, modelClient, toolFactory, permissionGate, approvals, properties, modelSettings,
+                snapshots, registry, runRepository, conversations, plans, objectMapper, dataDir,
+                queuedMessages, multiAgent, multiProperties, metrics, taskControls, commandTasks,
+                skills, null, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
+                           PermissionGate permissionGate, ApprovalBroker approvals,
+                           AgentProperties properties, ModelSettings modelSettings,
+                           RunSnapshotService snapshots, RunRegistry registry,
+                           com.pilot.core.session.RunRepository runRepository,
+                           ConversationRepository conversations,
+                           com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper,
+                           PilotDataDir dataDir, com.pilot.server.store.QueuedMessageRepository queuedMessages,
+                           MultiAgentService multiAgent, MultiAgentProperties multiProperties,
+                           com.pilot.server.observability.RunMetrics metrics, TaskControlService taskControls,
+                           CommandTaskManager commandTasks, SkillService skills, RunStateTracker runStates,
+                           com.pilot.server.store.ToolCallJournalFactory journals,
+                           com.pilot.server.validation.ValidationLedger validations) {
         this.sessions = sessions;
+        this.runStates = runStates;
+        this.journals = journals;
+        this.validations = validations;
         this.taskControls = taskControls;
         this.commandTasks = commandTasks;
         this.conversations = conversations;
@@ -152,6 +203,20 @@ public class AgentRunService implements RunStarter {
         });
     }
 
+    /**
+     * 把工作区 {@code .pilot/settings.json} 里的 allow/deny/ask 规则叠在原 gate 前面。
+     * 没有任何规则时原样返回，行为与之前完全一致。
+     */
+    private static PermissionGate withWorkspaceRules(PermissionGate base, java.nio.file.Path workspace) {
+        com.pilot.core.permission.PermissionRules rules = com.pilot.core.permission.PermissionRules.load(workspace);
+        if (rules.isEmpty()) return base;
+        // 规则对只读工具同样生效（例如禁止读 .env），未命中才回落到档位
+        return (call, tool) -> {
+            com.pilot.core.permission.PermissionResult ruled = rules.evaluate(call);
+            return ruled != null ? ruled : base.check(call, tool);
+        };
+    }
+
     @Override
     public void start(String sessionId, String runId, String input) {
         launch(sessionId, runId, input, List.of(), false);
@@ -165,15 +230,29 @@ public class AgentRunService implements RunStarter {
     @Override
     public void start(String sessionId, String runId, String input, List<Attachment> attachments,
                       TaskControlService.Requirements task) {
-        launch(sessionId, runId, input, attachments == null ? List.of() : attachments, false, task);
+        launch(sessionId, runId, input, attachments, List.of(), false, task);
+    }
+
+    @Override
+    public void start(String sessionId, String runId, String input, List<Attachment> attachments,
+                      List<Integer> imagePositions, TaskControlService.Requirements task) {
+        launch(sessionId, runId, input, attachments, imagePositions, false, task);
     }
 
     /** 指定技能启动：技能存在性由控制器校验，指引注入由 run 执行链完成。 */
     @Override
     public void start(String sessionId, String runId, String input, List<Attachment> attachments,
                       TaskControlService.Requirements task, String skill) {
-        launch(sessionId, runId, input, attachments == null ? List.of() : attachments, false, task, false,
+        launch(sessionId, runId, input, attachments == null ? List.of() : attachments, List.of(), false, task, false,
                 skill == null || skill.isBlank() ? null : skill.strip());
+    }
+
+    /** 图片位置与技能同时支持的完整启动：控制器的合并链路走这里。 */
+    @Override
+    public void start(String sessionId, String runId, String input, List<Attachment> attachments,
+                      List<Integer> imagePositions, TaskControlService.Requirements task, String skill) {
+        launch(sessionId, runId, input, attachments == null ? List.of() : attachments, imagePositions, false, task,
+                false, skill == null || skill.isBlank() ? null : skill.strip());
     }
 
     @Override
@@ -190,7 +269,7 @@ public class AgentRunService implements RunStarter {
             RunHandle handle = runId == null ? null : runs.get(runId);
             if (handle == null || !handle.accepting || handle.cancelled.get()) return false;
             taskControls.correct(sessionId, text.strip());
-            var pending = new ArrayList<>(queuedMessages.load("steer:" + sessionId));
+            ArrayList<String> pending = new ArrayList<>(queuedMessages.load("steer:" + sessionId));
             pending.add(text.strip());
             queuedMessages.save("steer:" + sessionId, pending);
             handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
@@ -205,7 +284,7 @@ public class AgentRunService implements RunStarter {
 
     private String pollSteering(String sessionId) {
         synchronized (inbox(sessionId)) {
-            var pending = queuedMessages.load("steer:" + sessionId);
+            List<String> pending = queuedMessages.load("steer:" + sessionId);
             if (pending.isEmpty()) return null;
             queuedMessages.save("steer:" + sessionId, List.of());
             return String.join("\n\n", pending);
@@ -246,17 +325,75 @@ public class AgentRunService implements RunStarter {
     }
 
     @Override
+    public ContextStatus contextStatus(String sessionId) {
+        List<Message> history = conversations.load(sessionId);
+        int used = ContextCompactor.estimateTokens(history);
+        int limit = properties.contextMaxChars();
+        return new ContextStatus(history.size(), used, limit, true,
+                history.size() > 3 && used >= 1_000);
+    }
+
+    @Override
+    public CompactionResult compactContext(String sessionId) {
+        synchronized (inbox(sessionId)) {
+            if (registry.activeRun(sessionId).isPresent()) {
+                throw new IllegalStateException("任务运行中不能压缩，请先暂停或等待本轮结束");
+            }
+            List<Message> history = conversations.load(sessionId);
+            int tokensBefore = ContextCompactor.estimateTokens(history);
+            if (history.size() <= 3 || tokensBefore < 1_000) {
+                return new CompactionResult(false, 0, tokensBefore, tokensBefore,
+                        "当前上下文还很轻，不需要压缩");
+            }
+
+            ArrayList<Message> working = new ArrayList<Message>(history.size() + 1);
+            // ContextCompactor 把 index 0 当 system 保留；真实 system 会在下一次请求时重建。
+            working.add(Message.system("Pilot context boundary"));
+            working.addAll(history);
+            int charsBefore = ContextCompactor.totalChars(working);
+            int targetChars = Math.max(1_000,
+                    Math.min(properties.contextMaxChars() / 2, Math.max(1_000, charsBefore * 2 / 3)));
+            int targetTokens = Math.max(1_000,
+                    Math.min(properties.contextMaxChars() / 2, Math.max(1_000, tokensBefore * 2 / 3)));
+            ContextCompactor.Outcome outcome = new ContextCompactor(modelClient)
+                    .compact(working, targetChars, targetTokens);
+            if (!outcome.compacted()) {
+                return new CompactionResult(false, 0, tokensBefore, tokensBefore,
+                        "没有足够的早期内容可安全折叠，模型记忆保持不变");
+            }
+
+            List<Message> compacted = List.copyOf(working.subList(1, working.size()));
+            conversations.save(sessionId, compacted);
+            int tokensAfter = ContextCompactor.estimateTokens(compacted);
+            String compactRun = "compact_" + java.util.UUID.randomUUID();
+            publish(sessionId, compactRun, new ContextCompacted(outcome.coveredMessages(),
+                    outcome.charactersBefore(), outcome.charactersAfter(), outcome.summary()));
+            return new CompactionResult(true, outcome.coveredMessages(), tokensBefore, tokensAfter,
+                    "已压缩 " + outcome.coveredMessages() + " 条较早消息");
+        }
+    }
+
+    @Override
     public boolean followup(String sessionId, String text) {
-        if (text == null || text.isBlank()) {
+        return followup(sessionId, text, List.of(), List.of());
+    }
+
+    @Override
+    public boolean followup(String sessionId, String text, List<Attachment> attachments,
+                            List<Integer> imagePositions) {
+        boolean hasAttachments = attachments != null && !attachments.isEmpty();
+        if ((text == null || text.isBlank()) && !hasAttachments) {
             return false;
         }
+        String content = text == null ? "" : text.strip();
         Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
             // 与运行结束后的队列交接共用锁，避免检查完活动运行后才入队，消息无人接走。
             if (registry.activeRun(sessionId).isEmpty()) {
                 return false;
             }
-            queue.offer(text.strip());
+            queue.offer(QueuedMessageCodec.encode(
+                    new QueuedMessageCodec.Stored(content, attachments, imagePositions)));
             persistQueue(sessionId, queue);
         }
         return true;
@@ -266,7 +403,18 @@ public class AgentRunService implements RunStarter {
     public List<String> queued(String sessionId) {
         Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
-            return List.copyOf(queue);
+            return queue.stream().map(raw -> QueuedMessageCodec.decode(raw).content()).toList();
+        }
+    }
+
+    @Override
+    public List<QueuedMessage> queuedMessages(String sessionId) {
+        Deque<String> queue = inbox(sessionId);
+        synchronized (queue) {
+            return queue.stream()
+                    .map(QueuedMessageCodec::decode)
+                    .map(item -> new QueuedMessage(item.content(), item.attachments(), item.imagePositions()))
+                    .toList();
         }
     }
 
@@ -278,8 +426,42 @@ public class AgentRunService implements RunStarter {
             if (index < 0 || index >= queue.size()) {
                 return false;
             }
-            var items = new ArrayList<>(queue);
-            items.set(index, text.strip());
+            ArrayList<String> items = new ArrayList<>(queue);
+            // 只改文字，图片附件跟着这条消息走
+            items.set(index, QueuedMessageCodec.encode(
+                    QueuedMessageCodec.decode(items.get(index)).withContent(text.strip())));
+            queue.clear();
+            queue.addAll(items);
+            persistQueue(sessionId, queue);
+            return true;
+        }
+    }
+
+    @Override
+    public boolean moveQueuedUp(String sessionId, int index) {
+        Deque<String> queue = inbox(sessionId);
+        synchronized (queue) {
+            if (index <= 0 || index >= queue.size()) {
+                return false;
+            }
+            ArrayList<String> items = new ArrayList<>(queue);
+            java.util.Collections.swap(items, index - 1, index);
+            queue.clear();
+            queue.addAll(items);
+            persistQueue(sessionId, queue);
+            return true;
+        }
+    }
+
+    @Override
+    public boolean moveQueued(String sessionId, int from, int to) {
+        Deque<String> queue = inbox(sessionId);
+        synchronized (queue) {
+            if (from < 0 || from >= queue.size() || to < 0 || to >= queue.size() || from == to) {
+                return false;
+            }
+            ArrayList<String> items = new ArrayList<>(queue);
+            items.add(to, items.remove(from));
             queue.clear();
             queue.addAll(items);
             persistQueue(sessionId, queue);
@@ -294,7 +476,7 @@ public class AgentRunService implements RunStarter {
             if (index < 0 || index >= queue.size()) {
                 return false;
             }
-            var items = new ArrayList<>(queue);
+            ArrayList<String> items = new ArrayList<>(queue);
             items.remove(index);
             queue.clear();
             queue.addAll(items);
@@ -343,30 +525,40 @@ public class AgentRunService implements RunStarter {
 
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
                         boolean continuation) {
-        launch(sessionId, runId, input, attachments, continuation, null);
+        launch(sessionId, runId, input, attachments, List.of(), continuation, null);
     }
 
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
                         boolean continuation, TaskControlService.Requirements requirements) {
-        launch(sessionId, runId, input, attachments, continuation, requirements, false);
+        launch(sessionId, runId, input, attachments, List.of(), continuation, requirements);
     }
 
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
-                         boolean continuation, TaskControlService.Requirements requirements, boolean regenerate) {
-        launch(sessionId, runId, input, attachments, continuation, requirements, regenerate, null);
+                         List<Integer> imagePositions, boolean continuation,
+                         TaskControlService.Requirements requirements) {
+        launch(sessionId, runId, input, attachments, imagePositions, continuation, requirements, false, null);
     }
 
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
-                         boolean continuation, TaskControlService.Requirements requirements, boolean regenerate,
-                         String skill) {
+                         List<Integer> imagePositions, boolean continuation,
+                         TaskControlService.Requirements requirements, boolean regenerate) {
+        launch(sessionId, runId, input, attachments, imagePositions, continuation, requirements, regenerate, null);
+    }
+
+    private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
+                         List<Integer> imagePositions, boolean continuation,
+                         TaskControlService.Requirements requirements, boolean regenerate, String skill) {
         synchronized (inbox(sessionId)) {
-            var handle = new RunHandle(sessionId, skill);
+            RunHandle handle = new RunHandle(sessionId, skill);
             runs.put(runId, handle);
             try {
                 registry.register(runId, sessionId, sessionWorkspace(sessionId));
+                if (runStates != null) {
+                    runStates.begin(sessionId, runId, sessionWorkspace(sessionId).toString());
+                }
                 snapshots.saveConversation(runId, conversations.load(sessionId), plans.load(sessionId));
                 taskControls.snapshot(sessionId, runId);
-                var previous = taskControls.load(sessionId);
+                TaskControlService.TaskContract previous = taskControls.load(sessionId);
                 if (!continuation && !regenerate) {
                     if (previous != null) plans.delete(sessionId);
                     taskControls.start(sessionId, input,
@@ -374,7 +566,9 @@ public class AgentRunService implements RunStarter {
                             requirements == null ? List.of() : requirements.acceptance());
                     queuedMessages.save("steer:" + sessionId, List.of());
                 } else if (previous != null) {
+                    if (continuation && "BUDGET_LIMITED".equals(previous.status())) taskControls.extendBudget(sessionId);
                     if (regenerate) {
+                        taskControls.reassess(sessionId);
                         plans.delete(sessionId);
                         taskControls.update(sessionId, previous.constraints(), previous.acceptance().stream()
                                 .map(item -> new TaskControlService.Acceptance(item.text(), false, item.evidence())).toList());
@@ -390,7 +584,7 @@ public class AgentRunService implements RunStarter {
                     taskControls.start(sessionId, original, List.of(), List.of());
                 }
                 runRepository.started(runId, sessionId, java.time.Instant.now());
-                handle.future = executor.submit(() -> runOnWorker(sessionId, runId, input, attachments, handle, continuation));
+                handle.future = executor.submit(() -> runOnWorker(sessionId, runId, input, attachments, imagePositions, handle, continuation));
             } catch (RuntimeException e) {
                 runs.remove(runId, handle);
                 registry.unregister(runId);
@@ -401,13 +595,13 @@ public class AgentRunService implements RunStarter {
 
     /** 工作线程主体：无论怎么结束都要注销槽位，否则 /continue 会永久 409。 */
     private void runOnWorker(String sessionId, String runId, String input, List<Attachment> attachments,
-                             RunHandle handle, boolean continuation) {
+                             List<Integer> imagePositions, RunHandle handle, boolean continuation) {
         long startedAt = System.currentTimeMillis();
         String status = "FAILED";
         boolean continued = false;
         try {
-            status = execute(sessionId, runId, input, attachments, handle, continuation);
-            continued = maybeAutoContinue(sessionId, status);
+            status = execute(sessionId, runId, input, attachments, imagePositions, handle, continuation);
+            continued = maybeAutoContinue(sessionId, status, handle);
         } catch (RuntimeException e) {
             log.error("Run {} 收尾失败", runId, e);
             taskControls.status(sessionId, "FAILED");
@@ -419,6 +613,9 @@ public class AgentRunService implements RunStarter {
                 runRepository.finished(runId, status, java.time.Instant.now());
             } catch (RuntimeException e) {
                 log.warn("记录 run {} 结束状态失败", runId, e);
+            }
+            if (runStates != null) {
+                runStates.finish(sessionId, runId, status);
             }
             Deque<String> queue = inbox(sessionId);
             try {
@@ -477,21 +674,30 @@ public class AgentRunService implements RunStarter {
         } catch (RuntimeException e) {
             log.warn("清理会话 {} 的排队消息失败（会话可能已被删除）", sessionId, e);
         }
+        if (runStates != null) {
+            try {
+                runStates.forget(sessionId);
+            } catch (RuntimeException ignored) {
+                // 删除会话时的清理失败不应阻断删除本身
+            }
+        }
     }
 
     /** 当前任务完整结束后，在队列锁内占位并启动下一条；失败、暂停、计划未完成时不消费。 */
     private void drainQueue(String sessionId, Deque<String> queue) {
-        String next = queue.peek();
-        if (next == null) {
+        String raw = queue.peek();
+        if (raw == null) {
             return;
         }
+        QueuedMessageCodec.Stored next = QueuedMessageCodec.decode(raw);
         String runId = claimRun(sessionId).orElse(null);
         if (runId == null) {
             return;
         }
         try {
-            sessions.publish(sessionId, runId, new RunStarted(next));
-            launch(sessionId, runId, next, List.of(), false);
+            sessions.publish(sessionId, runId,
+                    new RunStarted(next.content(), next.attachments(), next.imagePositions()));
+            launch(sessionId, runId, next.content(), next.attachments(), next.imagePositions(), false, null);
         } catch (RuntimeException e) {
             registry.unregister(runId);
             publish(sessionId, runId, new RunFailed("QUEUE_START_FAILED", "排队消息启动失败，消息已保留", false));
@@ -505,7 +711,7 @@ public class AgentRunService implements RunStarter {
     public void requirementsUpdated(String sessionId) {
         Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
-            var task = taskControls.load(sessionId);
+            TaskControlService.TaskContract task = taskControls.load(sessionId);
             if (task == null || !"COMPLETED".equals(task.status())
                     || registry.activeRun(sessionId).isPresent()
                     || plans.load(sessionId).stream().anyMatch(item -> !item.done())) return;
@@ -519,13 +725,13 @@ public class AgentRunService implements RunStarter {
      *
      * <p>两道刹车：最多连续 {@value #MAX_AUTO_CONTINUE} 次；计划状态连续两轮没有变化即视为卡住，停下等人工介入。
      */
-    private boolean maybeAutoContinue(String sessionId, String status) {
-        if (!"MAX_STEPS".equals(status)) {
+    private boolean maybeAutoContinue(String sessionId, String status, RunHandle handle) {
+        if (!"MAX_STEPS".equals(status) || handle.cancelled.get()) {
             autoContinueAttempts.remove(sessionId);
             autoContinueSignature.remove(sessionId);
             return false;
         }
-        var items = plans.load(sessionId);
+        List<PlanItem> items = plans.load(sessionId);
         if (items.stream().allMatch(com.pilot.core.plan.PlanItem::done)) {
             autoContinueAttempts.remove(sessionId);
             autoContinueSignature.remove(sessionId);
@@ -562,7 +768,7 @@ public class AgentRunService implements RunStarter {
     /** 重新生成：先丢掉上一轮对话（含最后一条用户消息），再用同样的输入重跑，避免历史重复。 */
     @Override
     public void regenerate(String sessionId, String runId, String input) {
-        var task = taskControls.load(sessionId);
+        TaskControlService.TaskContract task = taskControls.load(sessionId);
         String originalInput = task == null ? input : task.originalGoal();
         List<Message> history = conversations.load(sessionId);
         int lastUser = -1;
@@ -575,7 +781,7 @@ public class AgentRunService implements RunStarter {
         if (lastUser >= 0) {
             conversations.save(sessionId, history.subList(0, lastUser));
         }
-        launch(sessionId, runId, originalInput, List.of(), false, null, task != null);
+        launch(sessionId, runId, originalInput, List.of(), List.of(), false, null, task != null);
     }
 
     @Override
@@ -586,7 +792,7 @@ public class AgentRunService implements RunStarter {
         }
         handle.accepting = false;
         handle.cancelled.set(true);
-        var future = handle.future;
+        Future<?> future = handle.future;
         if (future != null) {
             future.cancel(true);
         }
@@ -705,7 +911,7 @@ public class AgentRunService implements RunStarter {
     }
 
     private static String workspaceTree(Path root) {
-        try (var entries = Files.list(root)) {
+        try (Stream<Path> entries = Files.list(root)) {
             List<String> names = entries
                     .map(path -> {
                         String name = path.getFileName().toString();
@@ -792,14 +998,25 @@ public class AgentRunService implements RunStarter {
     }
 
     private static String buildHint(Path root) {
+        String childNodeProjects;
+        try (Stream<Path> children = Files.list(root)) {
+            childNodeProjects = children.filter(Files::isDirectory)
+                    .filter(path -> Files.isRegularFile(path.resolve("package.json")))
+                    .map(path -> path.getFileName().toString())
+                    .sorted().limit(8).collect(Collectors.joining("、"));
+        } catch (IOException e) {
+            childNodeProjects = "";
+        }
+        String nodeHint = childNodeProjects.isEmpty() ? ""
+                : "；Node 子项目：" + childNodeProjects + "（先读各自 package.json，运行 npm 命令时设置对应 workdir）";
         if (Files.isRegularFile(root.resolve("pom.xml"))) {
-            return "Maven 项目：优先用工作区的 `mvnw`（Windows 是 `mvnw.cmd`），不要依赖系统 maven";
+            return "Maven 项目：优先用工作区的 `mvnw`，不要依赖系统 maven" + nodeHint;
         }
         if (Files.isRegularFile(root.resolve("build.gradle")) || Files.isRegularFile(root.resolve("build.gradle.kts"))) {
             return "Gradle 项目：用工作区的 `gradlew`";
         }
         if (Files.isRegularFile(root.resolve("package.json"))) {
-            return "Node 项目：先看 package.json 的 scripts，再跑 `npm test` / `npm run build` 这类脚本";
+            return "Node 项目：先看 package.json 的 scripts，再跑 `npm test` / `npm run build` 这类脚本" + nodeHint;
         }
         if (Files.isRegularFile(root.resolve("pyproject.toml"))
                 || Files.isRegularFile(root.resolve("requirements.txt"))) {
@@ -811,13 +1028,10 @@ public class AgentRunService implements RunStarter {
         if (Files.isRegularFile(root.resolve("go.mod"))) {
             return "Go 项目：`go build ./...` / `go test ./...`";
         }
-        return "未识别到构建文件，改动后按项目实际情况验证";
+        return "未识别到根目录构建文件，改动后按项目实际情况验证" + nodeHint;
     }
 
-    /**
-     * 把工作区里的项目约定注入 system：项目规范应该跟着仓库走，而不是写死在代码里。
-     * 目前只读根目录的 {@code PILOT.md} / {@code AGENTS.md} / {@code CLAUDE.md}，取第一个存在的。
-     */
+    /** 把工作区和祖先目录的项目约定注入 system，并保留每份文件的来源。 */
     private String projectRules(String workspace) {
         Path root;
         try {
@@ -825,35 +1039,15 @@ public class AgentRunService implements RunStarter {
         } catch (RuntimeException e) {
             return "";
         }
-        for (String name : CONVENTION_FILES) {
-            Path file = root.resolve(name);
-            if (!Files.isRegularFile(file)) {
-                continue;
-            }
-            try {
-                String rules = Files.readString(file, StandardCharsets.UTF_8).strip();
-                if (rules.isEmpty()) {
-                    continue;
-                }
-                if (rules.length() > MAX_CONVENTION_CHARS) {
-                    rules = rules.substring(0, MAX_CONVENTION_CHARS) + "\n…（约定文件过长，已截断）";
-                }
-                return PROMPTS.render("system/project-rules",
-                        Map.of("source", name, "rules", rules)).strip();
-            } catch (IOException e) {
-                log.warn("读取项目约定文件失败：{}", file, e);
-                return "";
-            }
-        }
-        return "";
+        return ProjectRuleLoader.load(root, PROMPTS);
     }
 
     private String planBrief(String sessionId) {
-        var items = plans.load(sessionId);
+        List<PlanItem> items = plans.load(sessionId);
         if (items.isEmpty()) {
             return "";
         }
-        var open = items.stream().filter(item -> !item.done()).toList();
+        List<PlanItem> open = items.stream().filter(item -> !item.done()).toList();
         if (open.isEmpty()) {
             return PROMPTS.render("system/plan-done", Map.of()).strip();
         }
@@ -864,7 +1058,7 @@ public class AgentRunService implements RunStarter {
     }
 
     private String execute(String sessionId, String runId, String input, List<Attachment> attachments,
-                           RunHandle handle, boolean continuation) {
+                           List<Integer> imagePositions, RunHandle handle, boolean continuation) {
         List<Message> history = conversations.load(sessionId);
         String workspace = sessions.find(sessionId).map(Session::workspace).orElse(null);
         PlanSink planSink = (items, explanation) -> {
@@ -885,8 +1079,15 @@ public class AgentRunService implements RunStarter {
         // 条件注册的 spawn_agent / dispatch_agents 位于 config 构造之后，先算出最终工具名，
         // 让 system prompt 只注入本轮真实可用的工具说明。
         Set<String> availableTools = sessionTools(tools);
+        RunUsageAccumulator runUsage = new RunUsageAccumulator();
+        // 收尾事件里的检查摘要要用于校验证据，sink 里先留一份
+        java.util.concurrent.atomic.AtomicReference<RunCompleted> lastCompleted =
+                new java.util.concurrent.atomic.AtomicReference<>();
         // 事件类型计数：压缩次数、工具调用量、失败码分布都从这里来
         Consumer<SessionEvent> sink = event -> {
+            if (event instanceof RunCompleted completed) {
+                lastCompleted.set(completed);
+            }
             if (event instanceof com.pilot.core.event.ApprovalRequired approval) {
                 handle.pendingApprovals.add(approval.callId());
                 if (handle.cancelled.get() || !queuedMessages.load("steer:" + sessionId).isEmpty()) {
@@ -895,29 +1096,52 @@ public class AgentRunService implements RunStarter {
             } else if (event instanceof com.pilot.core.event.ApprovalResolved approval) {
                 handle.pendingApprovals.remove(approval.callId());
             }
-            SessionEvent delivered = event;
+            SessionEvent delivered = event instanceof RunUsageUpdated usage
+                    ? runUsage.main(usage) : event;
             if (event instanceof com.pilot.core.event.RunCancelled) {
                 taskControls.status(sessionId, handle.paused ? "PAUSED" : "INTERRUPTED");
                 if (handle.paused) delivered = new RunFailed("PAUSED", "任务已暂停，目标、约束、验收条件和排队消息已保留。", true);
-            } else if (event instanceof RunFailed) {
-                taskControls.status(sessionId, "INTERRUPTED");
+                else if (handle.interruptedReason != null) delivered = new RunFailed("INTERRUPTED", handle.interruptedReason, true);
+            } else if (event instanceof RunFailed failed) {
+                String taskStatus = "MAX_STEPS".equals(failed.code()) && properties.goalModeEnabledValue()
+                        ? "BUDGET_LIMITED"
+                        : Set.of("BLOCKED", "BUDGET_LIMITED", "WAITING", "NEED_INPUT",
+                                "UNVERIFIED", "NO_PROGRESS", "REVIEW_UNAVAILABLE", "VERIFICATION_FAILED")
+                                .contains(failed.code()) ? failed.code() : "INTERRUPTED";
+                taskControls.status(sessionId, taskStatus);
             } else if (event instanceof com.pilot.core.event.RunCompleted completed) {
-                var task = completed.openSteps().isEmpty() ? taskControls.finish(sessionId)
-                        : taskControls.status(sessionId, "INTERRUPTED");
+                TaskControlService.TaskContract verified = taskControls.load(sessionId);
+                boolean goalVerified = verified != null && verified.execution() != null
+                        && "VERIFIED".equals(verified.execution().phase());
+                RunCompleted effective = completed;
+                if (goalVerified) {
+                    planSink.update(List.of(), "目标已核验完成，清理执行计划");
+                    if (!completed.openSteps().isEmpty()) {
+                        effective = new RunCompleted(completed.summary(), completed.changedFiles(), completed.checks(),
+                                completed.planTotal(), completed.planTotal(), List.of());
+                    }
+                }
+                // 计划未完成只作为如实上报的信息，不再把正常收尾改判成中断
+                TaskControlService.TaskContract task = taskControls.finish(sessionId);
+                delivered = effective;
                 if (task != null && "AWAITING_REVIEW".equals(task.status())) {
-                    var open = new ArrayList<>(completed.openSteps());
+                    ArrayList<String> open = new ArrayList<>(effective.openSteps());
                     task.acceptance().stream().filter(item -> !item.checked())
                             .forEach(item -> open.add("待验收：" + item.text()));
-                    delivered = new com.pilot.core.event.RunCompleted(completed.summary(), completed.changedFiles(),
-                            completed.checks(), completed.planDone() + (int) task.acceptance().stream().filter(item -> item.checked()).count(),
-                            completed.planTotal() + task.acceptance().size(), open);
+                    delivered = new com.pilot.core.event.RunCompleted(effective.summary(), effective.changedFiles(),
+                            effective.checks(), effective.planDone() + (int) task.acceptance().stream().filter(item -> item.checked()).count(),
+                            effective.planTotal() + task.acceptance().size(), open);
                 }
             }
             metrics.count("event." + delivered.type().wireName());
+            // 事件落库同时推进可恢复检查点，重启后能说清「停在哪、下一步做什么」
+            if (runStates != null) {
+                runStates.onEvent(sessionId, runId, delivered);
+            }
             publish(sessionId, runId, delivered);
         };
         Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
-        var config = new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(),
+        AgentLoop.Config config = new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(),
                 properties.repeatAbortAt(),
                 systemPrompt(sessionId, workspace, availableTools, catalog),
                 // 收尾时读一次计划，把「本轮是否真的做完」一并写进 run.completed
@@ -926,42 +1150,89 @@ public class AgentRunService implements RunStarter {
                 properties.maxPlanContinues(),
                 properties.contextMaxChars(),
                 properties.completionChecksEnabled());
-        // 子代理与父代理共用工具集（其中不含 spawn_agent，避免递归派生）
-        tools.register(new SpawnAgentTool(modelClient, tools, permissionGate, approvals, config,
-                () -> conversations.load(sessionId), sink, handle.cancelled::get));
+        GoalExecutionPolicy goalPolicy = properties.goalModeEnabledValue()
+                ? new GoalExecutionPolicy(modelClient, objectMapper, taskControls, sessionId,
+                    toolFactory.resolve(workspace), handle.cancelled::get, properties.maxSteps(),
+                    properties.directMaxRequests(), properties.directMaxInputTokens(),
+                    properties.directMaxOutputTokens(), properties.directMaxActiveMillis(),
+                    properties.directMaxInvestigationTools(),
+                    properties.goalMaxInputTokens(), properties.goalMaxOutputTokens(),
+                    properties.goalMaxActiveMillis()) : null;
+        if (goalPolicy != null) {
+            goalPolicy.withAvailableTools(availableTools).withUpdates(state -> sink.accept(new com.pilot.core.event.ExecutionUpdated(
+                    state.mode(), state.phase(), state.requests(), state.reason(), state.gap())));
+            tools.register(goalPolicy.promotionTool());
+        }
+        ModelClient executionClient = goalPolicy == null ? modelClient : goalPolicy.budgetedClient();
+        // 子代理在构造时冻结并过滤工具快照，使用 run 级共享池；请求/usage 仍计入父任务事故熔断，
+        // reviewer/finalization 的额外预留不对工作型子请求开放。
+        SpawnAgentTool.UsageSink taskChildUsage = goalPolicy == null
+                ? SpawnAgentTool.UsageSink.none() : goalPolicy.subagentUsageSink();
+        SpawnAgentTool.UsageSink childUsage = new SpawnAgentTool.UsageSink() {
+            @Override public void beforeRequest() {
+                taskChildUsage.beforeRequest();
+            }
+
+            @Override public void afterRequest(long activeMillis, ModelUsage usage) {
+                try {
+                    taskChildUsage.afterRequest(activeMillis, usage);
+                } finally {
+                    RunUsageUpdated merged = runUsage.child(usage);
+                    metrics.count("event." + merged.type().wireName());
+                    publish(sessionId, runId, merged);
+                }
+            }
+        };
+        // 工作区级 allow/deny/ask 规则优先于档位，未命中时回落到原 gate（对齐 Claude Code settings.json）
+        PermissionGate sessionGate = withWorkspaceRules(permissionGate, toolFactory.resolve(workspace));
+        tools.register(new SpawnAgentTool(modelClient, tools, sessionGate, approvals, config,
+                () -> conversations.load(sessionId), sink, handle.cancelled::get, childUsage));
         // 多智能体调度：父 Agent 只能派活，子 Agent 的改动一律进沙箱
         if (multiProperties.enabled()) {
             tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink,
-                    handle.cancelled::get));
+                    handle.cancelled::get, executionClient));
         }
         // 与会话数据库、快照保持一致，统一落在数据目录（默认项目下的 .pilot）
-        var traceRecorder = new JsonlTraceRecorder(
+        JsonlTraceRecorder traceRecorder = new JsonlTraceRecorder(
                 dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
-        var loop = new AgentLoop(modelClient, tools, permissionGate, approvals, config, handle.cancelled::get,
+        AgentLoop loop = new AgentLoop(executionClient, tools, sessionGate, approvals, config, handle.cancelled::get,
                 () -> pollSteering(sessionId), traceRecorder,
                 delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
                 .withTaskContext(() -> taskControls.prompt(sessionId) + commandContext(sessionId))
-                .withCompletionClaim(() -> claimCompletion(sessionId, handle));
+                .withCompletionClaim(() -> claimCompletion(sessionId, handle))
+                // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力
+                .withHooks(com.pilot.core.hook.Hooks.load(toolFactory.resolve(workspace)))
+                // 重启接管后重复的写文件调用不重复落盘
+                .withToolJournal(runId, journals == null
+                        ? com.pilot.core.tool.ToolCallJournal.none()
+                        : journals.forWorkspace(sessionId, toolFactory.resolve(workspace)));
 
+        if (goalPolicy != null) loop.withExecutionPolicy(goalPolicy);
         snapshots.bind(runId, toolFactory.resolve(workspace));
         try {
             // 普通运行时，会话首条消息前注入一次仓库快照（见 withRepositoryBrief）；续跑不注入；
             // 用户点名了技能时，指引作为独立 user 消息在用户输入之前注入（见 withSkillActivation）
+            TaskControlService.TaskContract activeTask = taskControls.load(sessionId);
+            String completionGoal = activeTask == null ? null : activeTask.originalGoal();
             AgentLoop.Result result = continuation
-                    ? loop.resume(history, sink, checkpoint)
-                    : loop.run(input, attachments,
+                    ? loop.resume(history, sink, checkpoint, completionGoal)
+                    : loop.run(input, attachments, imagePositions,
                             withSkillActivation(withRepositoryBrief(history, workspace), workspace, handle),
                             sink, checkpoint);
             conversations.save(sessionId, result.conversation());
             log.info("Agent run {} completed: failureCode={}, messages={}, workspace={}", runId, result.failureCode(),
                     result.conversation().size(), workspace == null ? properties.workspace() : workspace);
             if (result.failureCode() == null) {
-                var task = taskControls.load(sessionId);
+                recordValidation(sessionId, runId, workspace, lastCompleted.get());
+                TaskControlService.TaskContract task = taskControls.load(sessionId);
                 return task == null ? "COMPLETED" : task.status();
             }
             if (handle.paused) return "PAUSED";
             // 步数触顶要单独返回，外层才会按未完成计划自动接下一轮。
             // 以前一律收成 FAILED，自动继续的判断永远进不去。
+            if (Set.of("BLOCKED", "BUDGET_LIMITED", "WAITING", "NEED_INPUT", "UNVERIFIED",
+                    "NO_PROGRESS", "REVIEW_UNAVAILABLE", "VERIFICATION_FAILED")
+                    .contains(result.failureCode())) return result.failureCode();
             if ("CANCELLED".equals(result.failureCode()) || "MAX_STEPS".equals(result.failureCode())) {
                 return result.failureCode();
             }
@@ -981,6 +1252,70 @@ public class AgentRunService implements RunStarter {
         }
     }
 
+    /**
+     * 把「本轮成功」绑定到当前产物指纹、实际检查命令和环境。
+     *
+     * <p>没有产物变化（只回答问题）时不写证据：那不构成对代码的完成声明。
+     * 有变化但没有任何检查记录时记为 {@code skipped}，界面会显示「未经校验」，而不是通过。
+     */
+    private void recordValidation(String sessionId, String runId, String workspace, RunCompleted completed) {
+        if (validations == null) {
+            return;
+        }
+        try {
+            RunSnapshotService.SnapshotMeta meta = snapshots.meta(runId);
+            List<String> files = meta == null ? List.of()
+                    : meta.files().stream().map(RunSnapshotService.SnapshotEntry::path).toList();
+            String candidate = com.pilot.server.validation.WorkspaceFingerprint.of(
+                    toolFactory.resolve(workspace), files);
+            if (candidate.isBlank()) {
+                return;
+            }
+            List<String> checks = completed == null ? List.of() : completed.checks();
+            String status = checks.isEmpty() ? "skipped"
+                    : checks.stream().allMatch(check -> check.endsWith("→ exit 0")) ? "passed" : "failed";
+            validations.record(new com.pilot.server.validation.ValidationEvidence(
+                    "val_" + java.util.UUID.randomUUID(), sessionId, runId, candidate, files, checks,
+                    status, com.pilot.server.multi.SandboxStore.environmentFingerprint(), "run",
+                    java.time.Instant.now()));
+        } catch (RuntimeException e) {
+            log.debug("记录校验证据失败：session={}, run={}", sessionId, runId, e);
+        }
+    }
+
+    /**
+     * UI 的 run.usage 是“当前主循环快照”，子循环的局部累计不能直接转发，否则会把父数值倒退。
+     * 这里保存最后一份主快照并叠加子请求增量，两条来源都只在本 run 内存在。
+     */
+    static final class RunUsageAccumulator {
+        private RunUsageUpdated main = new RunUsageUpdated(0, 0, 0, 0, 1, false);
+        private int childRequests;
+        private long childInputTokens;
+        private long childOutputTokens;
+        private boolean childExact = true;
+
+        synchronized RunUsageUpdated main(RunUsageUpdated usage) {
+            main = Objects.requireNonNull(usage);
+            return combined();
+        }
+
+        synchronized RunUsageUpdated child(ModelUsage usage) {
+            ModelUsage value = usage == null ? ModelUsage.unknown() : usage;
+            childRequests++;
+            childInputTokens += value.inputTokens();
+            childOutputTokens += value.outputTokens();
+            childExact &= value.exact();
+            return combined();
+        }
+
+        private RunUsageUpdated combined() {
+            return new RunUsageUpdated(main.modelRequests() + childRequests,
+                    main.inputTokens() + childInputTokens,
+                    main.outputTokens() + childOutputTokens,
+                    main.contextTokens(), main.contextLimit(), main.exact() && childExact);
+        }
+    }
+
     private static final class RunHandle {
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
         private final Set<String> pendingApprovals = ConcurrentHashMap.newKeySet();
@@ -989,6 +1324,8 @@ public class AgentRunService implements RunStarter {
         private final String skill;
         private volatile boolean accepting = true;
         private volatile boolean paused;
+        /** 非用户取消的中断原因（如服务重启）；为空表示普通取消/暂停。 */
+        private volatile String interruptedReason;
         private volatile Future<?> future;
         private RunHandle(String sessionId, String skill) {
             this.sessionId = sessionId;
@@ -998,18 +1335,21 @@ public class AgentRunService implements RunStarter {
 
     /** 会话命令有独立的任务归属；默认和受限子代理工具集不共享这个入口。 */
     private ToolRegistry sessionTools(String sessionId, String workspace, PlanSink planSink) {
-        var tools = new ToolRegistry();
+        ToolRegistry tools = new ToolRegistry();
         toolFactory.registryFor(workspace, planSink).tools().stream()
                 .filter(tool -> !"run_command".equals(tool.name())).forEach(tools::register);
-        tools.register(new RunCommandTool(new PathValidator(toolFactory.resolve(workspace)), commandTasks, sessionId));
-        tools.register(new CommandStatusTool(commandTasks, sessionId));
+        tools.register(new RunCommandTool(new PathValidator(toolFactory.resolve(workspace)), commandTasks, sessionId,
+                snapshots));
+        tools.register(new CommandStatusTool(commandTasks, sessionId, snapshots));
         tools.register(new CommandLogsTool(commandTasks, sessionId));
         tools.register(new StopCommandTool(commandTasks, sessionId));
+        // 浏览器与 MCP：始终注册，是否可见由工具自己的 availability 在运行时决定。
+        toolFactory.sessionExtras(sessionId, workspace).forEach(tools::register);
         return tools;
     }
 
     private String commandContext(String sessionId) {
-        var tasks = commandTasks.list(sessionId);
+        List<CommandTaskManager.Task> tasks = commandTasks.list(sessionId);
         if (tasks.isEmpty()) return "";
         return "\n\n本会话最近的命令任务（后台命令独立运行，已启动不代表验证通过）：\n"
                 + tasks.stream().limit(10).map(task -> "- " + task.taskId() + " [" + task.status() + "] "
@@ -1041,6 +1381,12 @@ public class AgentRunService implements RunStarter {
 
     @PreDestroy
     void shutdown() {
+        // 先按「服务重启」取消所有在跑的任务，再中断线程：模型请求被 interrupt 后会走取消分支，
+        // 而不是被记成 MODEL_ERROR「模型调用失败」。进度仍会落盘，重启后可继续。
+        for (RunHandle handle : runs.values()) {
+            handle.interruptedReason = "Pilot 服务正在重启或关闭，本轮已中断；进度已保存，恢复后可继续执行。";
+            handle.cancelled.set(true);
+        }
         executor.shutdownNow();
     }
 }

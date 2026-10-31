@@ -50,7 +50,14 @@ class BackgroundCommandRunTest {
             String classes = Path.of(Fixture.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toString();
             String command = "java -cp \"" + classes + "\" " + Fixture.class.getName();
             return (messages, tools) -> {
-                if ("user".equals(messages.getLast().role())) {
+                if (tools.size() == 1 && tools.getFirst().name().equals("submit_decision")) {
+                    return new ModelResponse("", List.of(new ToolCall("assessment", "submit_decision", Map.of(
+                            "mode", "DIRECT", "reason", "启动一个后台服务", "unknowns", List.of(),
+                            "criteria", List.of(Map.of("outcome", "服务已启动", "verification", "托管进程为 RUNNING"))))));
+                }
+                // Runtime guidance is an ephemeral system message and may follow the user message.
+                // The first execution turn is the one that has not observed a tool result yet.
+                if (messages.stream().noneMatch(message -> "tool".equals(message.role()))) {
                     assertTrue(tools.stream().anyMatch(tool -> tool.name().equals("command_status")));
                     return new ModelResponse("启动后台命令", List.of(new ToolCall("background-start", "run_command",
                             Map.of("command", command, "background", true))));
@@ -68,10 +75,10 @@ class BackgroundCommandRunTest {
             mvc.perform(post("/api/sessions/{id}/messages", id).contentType(MediaType.APPLICATION_JSON)
                     .content("{\"content\":\"启动开发服务器\"}")).andExpect(status().isOk());
             await().atMost(Duration.ofSeconds(10)).until(() -> !commands.list(id).isEmpty() && runs.activeRun(id).isEmpty());
-            var task = commands.list(id).getFirst();
+            CommandTaskManager.Task task = commands.list(id).getFirst();
             assertTrue(task.background());
             assertEquals("RUNNING", task.status(), "模型回合结束不能结束后台进程");
-            var completed = sessions.events(id).stream().map(event -> event.payload())
+            RunCompleted completed = sessions.events(id).stream().map(event -> event.payload())
                     .filter(RunCompleted.class::isInstance).map(RunCompleted.class::cast).findFirst().orElseThrow();
             assertTrue(completed.checks().isEmpty(), "后台进程已启动不能记成测试通过");
             await().atMost(Duration.ofSeconds(8)).until(() -> commands.logs(id, task.taskId(), 0, 1024).text().contains("development server ready"));

@@ -2,6 +2,8 @@ package com.pilot.server.session;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class RunRegistryTest {
@@ -9,10 +11,10 @@ class RunRegistryTest {
 
     @Test
     void restoreAndRunsAreMutuallyExclusiveAcrossNestedWorkspaces() throws Exception {
-        var registry = new RunRegistry();
-        var parent = java.nio.file.Files.createDirectories(root.resolve("repo"));
-        var child = java.nio.file.Files.createDirectories(parent.resolve("child"));
-        var sibling = java.nio.file.Files.createDirectories(root.resolve("repo-other"));
+        RunRegistry registry = new RunRegistry();
+        Path parent = java.nio.file.Files.createDirectories(root.resolve("repo"));
+        Path child = java.nio.file.Files.createDirectories(parent.resolve("child"));
+        Path sibling = java.nio.file.Files.createDirectories(root.resolve("repo-other"));
         org.junit.jupiter.api.Assertions.assertTrue(registry.claim("child-run", "one", child));
         org.junit.jupiter.api.Assertions.assertFalse(registry.lockWorkspace("restore", parent));
         registry.unregister("child-run");
@@ -28,7 +30,7 @@ class RunRegistryTest {
 
     @Test
     void unregisteringPreviousRunDoesNotClearAutomaticallyContinuedRun() {
-        var registry = new RunRegistry();
+        RunRegistry registry = new RunRegistry();
         registry.register("run-old", "session");
         registry.register("run-next", "session");
 
@@ -38,8 +40,8 @@ class RunRegistryTest {
     }
     @Test
     void workspaceRestoreBlocksNewRunsAndReleasesLeaseOnAbandon() {
-        var registry = new RunRegistry();
-        var workspace = java.nio.file.Path.of(".").toAbsolutePath();
+        RunRegistry registry = new RunRegistry();
+        Path workspace = java.nio.file.Path.of(".").toAbsolutePath();
         org.junit.jupiter.api.Assertions.assertTrue(registry.claim("run", "one", workspace));
         org.junit.jupiter.api.Assertions.assertFalse(registry.lockWorkspace("restore", workspace));
         registry.unregister("run");

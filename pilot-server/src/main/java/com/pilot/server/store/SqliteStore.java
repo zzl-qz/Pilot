@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
@@ -79,6 +80,8 @@ public final class SqliteStore {
                 content TEXT NOT NULL,
                 tool_calls TEXT,
                 tool_call_id TEXT,
+                attachments TEXT,
+                image_positions TEXT,
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (session_id, seq)
             )""",
@@ -95,7 +98,41 @@ public final class SqliteStore {
             "DROP INDEX IF EXISTS idx_events_session",
             "CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session_id, status)",
             // idx_sessions_project 依赖 migrate() 补的 project_id 列，不能在补列之前建
-            "CREATE TABLE IF NOT EXISTS queued_messages (session_id TEXT NOT NULL, position INTEGER NOT NULL, content TEXT NOT NULL, PRIMARY KEY (session_id, position))"
+            "CREATE TABLE IF NOT EXISTS queued_messages (session_id TEXT NOT NULL, position INTEGER NOT NULL, content TEXT NOT NULL, PRIMARY KEY (session_id, position))",
+            // 可恢复调度状态：重启后靠它判断「做到哪一步、下一步做什么、谁持有租约」。
+            // 事件与消息历史只记录发生过什么，不能替代这份最小接管状态。
+            """
+            CREATE TABLE IF NOT EXISTS run_checkpoints (
+                run_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                phase TEXT NOT NULL,
+                step INTEGER NOT NULL DEFAULT 0,
+                last_tool_call_id TEXT,
+                last_successful_step TEXT,
+                next_action TEXT,
+                workspace TEXT,
+                status TEXT NOT NULL,
+                owner TEXT,
+                lease_expires_at TEXT,
+                heartbeat_at TEXT,
+                updated_at TEXT NOT NULL
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_run_checkpoints_session ON run_checkpoints(session_id, status)",
+            // 工具调用幂等账本：同一运行里参数相同的写文件调用只真正执行一次。
+            """
+            CREATE TABLE IF NOT EXISTS tool_call_journal (
+                run_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                tool TEXT NOT NULL,
+                result TEXT NOT NULL,
+                changed_paths TEXT,
+                checks TEXT,
+                post_hash TEXT,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (run_id, fingerprint)
+            )""",
+            "CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
     };
 
     private final String url;
@@ -157,8 +194,14 @@ public final class SqliteStore {
         addColumnIfMissing(statement, "sessions", "is_blank", "INTEGER NOT NULL DEFAULT 0");
         addColumnIfMissing(statement, "sessions", "archived", "INTEGER NOT NULL DEFAULT 0");
         addColumnIfMissing(statement, "projects", "base_commit", "TEXT");
+        // 图片附件已经由 AttachmentService 复制到稳定的数据目录；这里持久化引用，
+        // 让 checkpoint / resume / 进程重启后仍能重建同一条多模态消息。
+        addColumnIfMissing(statement, "conversation_messages", "attachments", "TEXT");
+        addColumnIfMissing(statement, "conversation_messages", "image_positions", "TEXT");
         // 索引依赖上面补出来的列，必须放在补列之后
         statement.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, created_at)");
+        // 记录结构版本，供数据迁移与备份恢复核对；写不进去不影响运行
+        statement.execute("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '2')");
     }
 
     private static void addColumnIfMissing(Statement statement, String table, String column, String definition)
@@ -171,7 +214,7 @@ public final class SqliteStore {
     }
 
     private static boolean hasColumn(Statement statement, String table, String column) throws SQLException {
-        try (var rows = statement.executeQuery("PRAGMA table_info(" + table + ")")) {
+        try (ResultSet rows = statement.executeQuery("PRAGMA table_info(" + table + ")")) {
             while (rows.next()) {
                 if (column.equals(rows.getString("name"))) {
                     return true;

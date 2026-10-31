@@ -9,25 +9,25 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class PermissionSettingsTest {
     @Test
     void fallsBackToConfiguredModeWhenNothingSaved() {
-        var settings = new PermissionSettings(properties(PermissionMode.READ_ONLY), new InMemorySettingsStore());
+        PermissionSettings settings = new PermissionSettings(properties(PermissionMode.READ_ONLY), new InMemorySettingsStore());
 
         assertEquals(PermissionMode.READ_ONLY, settings.mode());
     }
 
     @Test
     void savedValueWinsOverConfiguredDefault() {
-        var store = new InMemorySettingsStore();
+        InMemorySettingsStore store = new InMemorySettingsStore();
         store.save("agent.permission-mode", "AUTO_EDIT");
 
-        var settings = new PermissionSettings(properties(PermissionMode.READ_ONLY), store);
+        PermissionSettings settings = new PermissionSettings(properties(PermissionMode.READ_ONLY), store);
 
         assertEquals(PermissionMode.AUTO_EDIT, settings.mode());
     }
 
     @Test
     void updateAppliesImmediatelyAndPersists() {
-        var store = new InMemorySettingsStore();
-        var settings = new PermissionSettings(properties(PermissionMode.READ_ONLY), store);
+        InMemorySettingsStore store = new InMemorySettingsStore();
+        PermissionSettings settings = new PermissionSettings(properties(PermissionMode.READ_ONLY), store);
 
         settings.update(PermissionMode.ASK);
 
@@ -38,10 +38,10 @@ class PermissionSettingsTest {
 
     @Test
     void unrecognizedSavedValueFallsBackToConfiguredDefault() {
-        var store = new InMemorySettingsStore();
+        InMemorySettingsStore store = new InMemorySettingsStore();
         store.save("agent.permission-mode", "ROOT");
 
-        var settings = new PermissionSettings(properties(PermissionMode.ASK), store);
+        PermissionSettings settings = new PermissionSettings(properties(PermissionMode.ASK), store);
 
         assertEquals(PermissionMode.ASK, settings.mode());
     }

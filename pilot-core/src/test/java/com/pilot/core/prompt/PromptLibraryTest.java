@@ -51,7 +51,7 @@ class PromptLibraryTest {
 
     @Test
     void skipsSectionsWhoseToolsAreNotRegistered() {
-        var prompts = PromptLibrary.classpathOnly();
+        PromptLibrary prompts = PromptLibrary.classpathOnly();
 
         // spawn_agent 与 dispatch_agents 都在：子代理选择行与调度段都注入
         String full = prompts.system(VARS, java.util.Set.of(
@@ -89,7 +89,7 @@ class PromptLibraryTest {
         Files.writeString(dir.resolve("plan/front.md"),
                 "---\nrequires: [read_file]\n---\n正文内容 {{openSteps}}");
 
-        var prompts = new PromptLibrary(dir);
+        PromptLibrary prompts = new PromptLibrary(dir);
         String rendered = prompts.render("plan/front", Map.of("openSteps", "第一步"));
 
         assertFalse(rendered.contains("---"), "frontmatter 不应进入正文");
@@ -107,9 +107,9 @@ class PromptLibraryTest {
         Files.writeString(dir.resolve("system/no-end-delim.md"),
                 "---\nrequires: [a]\n正文缺结束分隔符");
 
-        var prompts = new PromptLibrary(dir);
+        PromptLibrary prompts = new PromptLibrary(dir);
 
-        var error = assertThrows(IllegalArgumentException.class,
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> prompts.render("system/unknown-key", Map.of()));
         assertTrue(error.getMessage().contains("只支持 requires"));
 
@@ -121,7 +121,7 @@ class PromptLibraryTest {
 
     @Test
     void rendersDynamicSections() {
-        var prompts = PromptLibrary.classpathOnly();
+        PromptLibrary prompts = PromptLibrary.classpathOnly();
 
         String cont = prompts.render("plan/continue", Map.of("openSteps", "- 写测试\n- 跑构建"));
         assertTrue(cont.contains("- 写测试"));
@@ -129,13 +129,45 @@ class PromptLibraryTest {
 
         String brief = prompts.render("system/plan-context", Map.of("planItems", "- [in_progress] 改代码"));
         assertTrue(brief.contains("- [in_progress] 改代码"));
+
+        String goal = prompts.render("goal/continue", Map.of(
+                "contractJson", "{\"untrusted_user_objective\":\"让测试通过\","
+                        + "\"next_action\":\"修复失败断言\",\"expected_observation\":\"测试退出 0\"}"));
+        assertTrue(goal.contains("\"next_action\":\"修复失败断言\""));
+        assertFalse(goal.contains("{{"));
+
+        String stuck = prompts.render("loop/stuck-nudge", Map.of(
+                "pattern", "same-action-same-result",
+                "repeatCount", "3",
+                "unchangedState", "源码版本未变化",
+                "blockedActions", "- 重读同一文件"));
+        assertTrue(stuck.contains("不是新的用户要求"));
+
+        String windDown = prompts.render("loop/budget-wind-down", Map.of(
+                "objective", "完成修复",
+                "completedConditions", "- c1/e17",
+                "changedFiles", "A.java",
+                "verification", "单测未运行",
+                "remaining", "缺少验证",
+                "nextAction", "运行目标单测"));
+        assertTrue(windDown.contains("不代表任务已经完成"));
+    }
+
+    @Test
+    void goalPromptsDoNotPromoteOptionalSuggestionsIntoHardGates() {
+        PromptLibrary prompts = PromptLibrary.classpathOnly();
+
+        String review = prompts.render("goal/review", Map.of());
+
+        assertTrue(review.contains("required=false"));
+        assertTrue(review.contains("空搜索"));
     }
 
     @Test
     void failsLoudlyOnMissingVariable() {
-        var prompts = PromptLibrary.classpathOnly();
+        PromptLibrary prompts = PromptLibrary.classpathOnly();
 
-        var error = assertThrows(IllegalArgumentException.class,
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> prompts.render("plan/continue", Map.of()));
 
         assertTrue(error.getMessage().contains("openSteps"));
@@ -146,7 +178,7 @@ class PromptLibraryTest {
         Files.createDirectories(dir.resolve("system"));
         Files.writeString(dir.resolve("system/base.md"), "覆盖后的身份 {{workspace}}");
 
-        var prompts = new PromptLibrary(dir);
+        PromptLibrary prompts = new PromptLibrary(dir);
 
         assertEquals("覆盖后的身份 {{workspace}}", prompts.get("system/base").strip());
         assertTrue(prompts.render("system/base", VARS).contains("覆盖后的身份 pilot"));
@@ -155,7 +187,7 @@ class PromptLibraryTest {
 
     @Test
     void rejectsPathTraversal() {
-        var prompts = PromptLibrary.classpathOnly();
+        PromptLibrary prompts = PromptLibrary.classpathOnly();
 
         assertThrows(IllegalArgumentException.class, () -> prompts.get("../secrets"));
     }
@@ -163,19 +195,34 @@ class PromptLibraryTest {
     /** 每个工具都要有描述模板，否则工具定义里会出现「找不到提示词资源」。 */
     @Test
     void loadsEveryToolDescription() {
-        var prompts = PromptLibrary.classpathOnly();
-        var variables = Map.of(
-                "executables", "mvn/mvnw",
+        PromptLibrary prompts = PromptLibrary.classpathOnly();
+        Map<String,String> variables = Map.of(
+                "inspection", "ls/cat",
+                "development", "mvn/mvnw",
+                "mutators", "mkdir/touch",
                 "gitReadonly", "status/diff",
                 "gitWrite", "add/commit",
                 "backgroundHelp", "后台返回任务 ID");
 
         for (String tool : List.of("read_file", "list_dir", "search_text", "edit_file",
                 "create_file", "run_command", "command_status", "command_logs", "stop_command",
-                "update_plan", "spawn_agent", "dispatch_agents", "use_skill")) {
+                "update_plan", "spawn_agent", "dispatch_agents", "use_skill", "glob_files", "apply_patch", "browser",
+                "mcp_tools", "mcp_call")) {
             String text = prompts.render("tools/" + tool, variables);
             assertFalse(text.isBlank(), tool);
             assertFalse(text.contains("{{"), tool + " 仍有未替换的变量");
         }
+    }
+
+    /** 浏览器验证段只在 browser 能力可用时注入，避免提示词教模型用不存在的工具。 */
+    @Test
+    void browserGuidanceFollowsCapability() {
+        PromptLibrary prompts = PromptLibrary.classpathOnly();
+
+        String with = prompts.system(VARS, java.util.Set.of("read_file", "run_command", "browser"));
+        String without = prompts.system(VARS, java.util.Set.of("read_file", "run_command"));
+
+        assertTrue(with.contains("## 页面验证"));
+        assertFalse(without.contains("## 页面验证"));
     }
 }

@@ -1,6 +1,8 @@
 package com.pilot.core.tool;
 
 import com.pilot.core.multi.AgentScope;
+import com.pilot.core.multi.DiffSandbox;
+import com.pilot.core.multi.RiskLevel;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.core.workspace.WorkspaceViolationException;
 import org.junit.jupiter.api.Test;
@@ -34,9 +36,9 @@ class SandboxToolsTest {
     @Test
     void editToolOnlyRecordsProposal(@TempDir Path dir) throws IOException {
         Path root = workspace(dir);
-        var proposals = new ArrayList<Proposal>();
+        ArrayList<Proposal> proposals = new ArrayList<Proposal>();
         SandboxSink sink = (path, oldText, newText) -> proposals.add(new Proposal(path, oldText, newText));
-        var tool = new SandboxEditFileTool(new PathValidator(root), sink);
+        SandboxEditFileTool tool = new SandboxEditFileTool(new PathValidator(root), sink);
 
         String result = tool.execute(Map.of(
                 "path", "src/A.java",
@@ -52,10 +54,69 @@ class SandboxToolsTest {
     }
 
     @Test
+    void sandboxBatchProducesOneAtomicProposal(@TempDir Path dir) throws IOException {
+        Path root = workspace(dir);
+        ArrayList<Proposal> proposals = new ArrayList<>();
+        SandboxEditFileTool tool = new SandboxEditFileTool(new PathValidator(root),
+                (path, oldText, newText) -> proposals.add(new Proposal(path, oldText, newText)));
+
+        String result = tool.execute(Map.of("path", "src/A.java", "edits", List.of(
+                Map.of("old_string", "class A", "new_string", "class B"),
+                Map.of("old_string", "int x = 1;", "new_string", "int x = 2;"))));
+
+        assertTrue(result.contains("替换 2 处"), result);
+        assertEquals(1, proposals.size());
+        assertTrue(proposals.get(0).newText().contains("class B"));
+        assertTrue(proposals.get(0).newText().contains("int x = 2;"));
+        assertTrue(Files.readString(root.resolve("src/A.java")).contains("class A"));
+    }
+
+    @Test
+    void consecutiveEditsUseThePreviousSandboxProposal(@TempDir Path dir) throws IOException {
+        Path root = workspace(dir);
+        DiffSandbox sandbox = new DiffSandbox("sbx", "agent", "task", "");
+        ReadTracker reads = new ReadTracker();
+        SandboxSink sink = new SandboxSink() {
+            @Override
+            public void record(String path, String oldText, String newText) {
+                sandbox.add(path, oldText, newText, oldText != null, RiskLevel.LOW);
+            }
+
+            @Override
+            public String currentText(String path, String baselineText) {
+                return sandbox.currentText(path, baselineText);
+            }
+        };
+        SandboxEditFileTool tool = new SandboxEditFileTool(new PathValidator(root), sink, reads);
+        ReadFileTool reader = new ReadFileTool(new PathValidator(root), reads, new SandboxSink() {
+            @Override
+            public void record(String path, String oldText, String newText) {
+                sandbox.add(path, oldText, newText, oldText != null, RiskLevel.LOW);
+            }
+
+            @Override
+            public String proposedText(String path) {
+                return sandbox.proposedText(path);
+            }
+        });
+        reader.execute(Map.of("path", "src/A.java"));
+
+        tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 1;", "new_string", "int x = 2;"));
+        String result = tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 2;", "new_string", "int x = 3;"));
+
+        assertFalse(result.startsWith("ERROR"), result);
+        assertTrue(sandbox.currentText("src/A.java", "").contains("int x = 3;"));
+        assertTrue(sandbox.currentText("src/A.java", "").contains("class A"));
+        assertTrue(Files.readString(root.resolve("src/A.java")).contains("int x = 1;"));
+        String viewed = reader.execute(Map.of("path", "src/A.java"));
+        assertTrue(viewed.contains("int x = 3;"), viewed);
+    }
+
+    @Test
     void createToolRecordsNewFile(@TempDir Path dir) throws IOException {
         Path root = workspace(dir);
-        var proposals = new ArrayList<Proposal>();
-        var tool = new SandboxCreateFileTool(new PathValidator(root),
+        ArrayList<Proposal> proposals = new ArrayList<Proposal>();
+        SandboxCreateFileTool tool = new SandboxCreateFileTool(new PathValidator(root),
                 (path, oldText, newText) -> proposals.add(new Proposal(path, oldText, newText)));
 
         tool.execute(Map.of("path", "src/B.java", "content", "class B {}\n"));
@@ -68,9 +129,9 @@ class SandboxToolsTest {
     @Test
     void scopeBlocksFilesOutsideWhitelist(@TempDir Path dir) throws IOException {
         Path root = workspace(dir);
-        var scope = AgentScope.readOnly(List.of("src/**"), List.of());
-        var validator = new PathValidator(root, scope);
-        var tool = new SandboxEditFileTool(validator, SandboxSink.rejectAll());
+        AgentScope scope = AgentScope.readOnly(List.of("src/**"), List.of());
+        PathValidator validator = new PathValidator(root, scope);
+        SandboxEditFileTool tool = new SandboxEditFileTool(validator, SandboxSink.rejectAll());
 
         String result = tool.execute(Map.of(
                 "path", "secret.txt",
@@ -86,8 +147,8 @@ class SandboxToolsTest {
     @Test
     void listDirHidesFilesOutsideScope(@TempDir Path dir) throws IOException {
         Path root = workspace(dir);
-        var scope = AgentScope.readOnly(List.of("src/**"), List.of());
-        var tool = new ListDirTool(new PathValidator(root, scope));
+        AgentScope scope = AgentScope.readOnly(List.of("src/**"), List.of());
+        ListDirTool tool = new ListDirTool(new PathValidator(root, scope));
 
         String result = tool.execute(Map.of("path", "."));
 
@@ -99,7 +160,7 @@ class SandboxToolsTest {
     void editWithoutUniqueMatchFails(@TempDir Path dir) throws IOException {
         Path root = workspace(dir);
         Files.writeString(root.resolve("src/Dup.java"), "x\nx\n");
-        var tool = new SandboxEditFileTool(new PathValidator(root), SandboxSink.rejectAll());
+        SandboxEditFileTool tool = new SandboxEditFileTool(new PathValidator(root), SandboxSink.rejectAll());
 
         String result = tool.execute(Map.of("path", "src/Dup.java", "old_string", "x", "new_string", "y"));
 

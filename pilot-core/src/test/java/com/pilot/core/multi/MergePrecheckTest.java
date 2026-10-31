@@ -32,8 +32,8 @@ class MergePrecheckTest {
     @Test
     void sameFileSameRegionIsAConflict() {
         String base = numberedFile(30);
-        var one = sandbox("agentA", "T1");
-        var two = sandbox("agentB", "T2");
+        DiffSandbox one = sandbox("agentA", "T1");
+        DiffSandbox two = sandbox("agentB", "T2");
         one.add("src/A.java", base, replaceLine(base, 10, "A-changed"), true, RiskLevel.MEDIUM);
         two.add("src/A.java", base, replaceLine(base, 10, "B-changed"), true, RiskLevel.MEDIUM);
 
@@ -47,8 +47,8 @@ class MergePrecheckTest {
     @Test
     void sameFileDifferentRegionsCanMerge() {
         String base = numberedFile(40);
-        var one = sandbox("agentA", "T1");
-        var two = sandbox("agentB", "T2");
+        DiffSandbox one = sandbox("agentA", "T1");
+        DiffSandbox two = sandbox("agentB", "T2");
         one.add("src/A.java", base, replaceLine(base, 3, "A-changed"), true, RiskLevel.MEDIUM);
         two.add("src/A.java", base, replaceLine(base, 35, "B-changed"), true, RiskLevel.MEDIUM);
 
@@ -59,8 +59,8 @@ class MergePrecheckTest {
 
     @Test
     void twoAgentsCreatingTheSameFileConflicts() {
-        var one = sandbox("agentA", "T1");
-        var two = sandbox("agentB", "T2");
+        DiffSandbox one = sandbox("agentA", "T1");
+        DiffSandbox two = sandbox("agentB", "T2");
         one.add("src/New.java", null, "class New {}", false, RiskLevel.LOW);
         two.add("src/New.java", null, "class New { }", false, RiskLevel.LOW);
 
@@ -73,8 +73,8 @@ class MergePrecheckTest {
     @Test
     void differentFilesNeverConflict() {
         String base = numberedFile(20);
-        var one = sandbox("agentA", "T1");
-        var two = sandbox("agentB", "T2");
+        DiffSandbox one = sandbox("agentA", "T1");
+        DiffSandbox two = sandbox("agentB", "T2");
         one.add("src/A.java", base, replaceLine(base, 5, "A"), true, RiskLevel.MEDIUM);
         two.add("src/B.java", base, replaceLine(base, 5, "B"), true, RiskLevel.MEDIUM);
 
@@ -84,8 +84,8 @@ class MergePrecheckTest {
     @Test
     void mergedChangesKeepEveryPendingFile() {
         String base = numberedFile(10);
-        var one = sandbox("agentA", "T1");
-        var two = sandbox("agentB", "T2");
+        DiffSandbox one = sandbox("agentA", "T1");
+        DiffSandbox two = sandbox("agentB", "T2");
         one.add("src/A.java", base, replaceLine(base, 2, "A"), true, RiskLevel.MEDIUM);
         two.add("src/B.java", base, replaceLine(base, 3, "B"), true, RiskLevel.MEDIUM);
 

@@ -1,6 +1,7 @@
 package com.pilot.server.controller;
 
 import com.pilot.core.event.AssistantDelta;
+import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.loop.Message;
@@ -55,7 +56,7 @@ class CheckpointApiTest {
                 .andExpect(jsonPath("$.code.ready").value(true))
                 .andExpect(jsonPath("$.conversationAvailable").value(true));
         long count = sessions.eventCount(f.id);
-        var memory = conversations.load(f.id);
+        List<Message> memory = conversations.load(f.id);
         restore(f, 1, "code").andExpect(jsonPath("$.applied").value(true));
         assertEquals("before", Files.readString(f.file));
         assertEquals(count, sessions.eventCount(f.id));
@@ -78,7 +79,7 @@ class CheckpointApiTest {
     void combinedRestoreIsAllOrNothingOnConflictAndRestoresBothWhenSafe() throws Exception {
         Fixture f = fixture();
         Files.writeString(f.file, "manual");
-        var memory = conversations.load(f.id);
+        List<Message> memory = conversations.load(f.id);
         restore(f, 1, "both").andExpect(jsonPath("$.applied").value(false))
                 .andExpect(jsonPath("$.code.conflicts[0]").value("a.txt"));
         assertEquals(6, sessions.eventCount(f.id));
@@ -124,7 +125,7 @@ class CheckpointApiTest {
         mvc.perform(post("/api/sessions/{id}/checkpoints/restore", f.id)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"sequence\":1}"))
                 .andExpect(status().isBadRequest());
-        var old = sessions.publish(f.id, "old_" + UUID.randomUUID(), new RunStarted("历史消息"));
+        EventEnvelope old = sessions.publish(f.id, "old_" + UUID.randomUUID(), new RunStarted("历史消息"));
         restore(f, old.sequence(), "both").andExpect(status().isConflict());
         assertEquals("second", Files.readString(f.file));
         assertTrue(runs.activeRun(f.id).isEmpty());

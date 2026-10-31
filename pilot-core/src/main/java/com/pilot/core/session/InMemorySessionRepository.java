@@ -18,7 +18,7 @@ public final class InMemorySessionRepository implements SessionRepository {
     @Override
     public Session create(String sessionId, String title, String workspace, Instant createdAt, String projectId,
                           boolean isBlank) {
-        var state = new State(sessionId, title, workspace, createdAt, projectId, isBlank);
+        State state = new State(sessionId, title, workspace, createdAt, projectId, isBlank);
         sessions.put(sessionId, state);
         return state.snapshot();
     }
@@ -111,7 +111,7 @@ public final class InMemorySessionRepository implements SessionRepository {
     public List<EventEnvelope> eventsAfter(String sessionId, long afterSequence) {
         State state = require(sessionId);
         synchronized (state) {
-            var result = new ArrayList<EventEnvelope>();
+            ArrayList<EventEnvelope> result = new ArrayList<EventEnvelope>();
             for (EventEnvelope envelope : state.events) {
                 if (envelope.sequence() > afterSequence) {
                     result.add(envelope);
@@ -147,7 +147,7 @@ public final class InMemorySessionRepository implements SessionRepository {
                                 SessionStatus status) {
         State state = require(sessionId);
         synchronized (state) {
-            var envelope = EventEnvelope.of(++state.sequence, timestamp, sessionId, runId, event);
+            EventEnvelope envelope = EventEnvelope.of(++state.sequence, timestamp, sessionId, runId, event);
             state.events.add(envelope);
             state.status = status;
             return envelope;

@@ -5,25 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Pilot · 本地编码代理</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23090b11'/%3E%3Cpath d='M11 23V9h6.2a4.8 4.8 0 0 1 0 9.6H14' stroke='%237b8cff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23171717'/%3E%3Ccircle cx='16' cy='16' r='9.5' fill='none' stroke='%238c8c8c' stroke-width='1.8'/%3E%3Cpath d='M16 8.6l4.6 13.6L16 19.4l-4.6 2.8z' fill='%236cb4f0'/%3E%3C/svg%3E">
   <script>
     // 首屏前先落主题与强调色，避免默认值闪一下
     try {
-      var mode = localStorage.getItem('pilot.theme') || 'light';
+      var mode = localStorage.getItem('pilot.theme') || 'dark';
       var dark = mode === 'dark'
         || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
       document.documentElement.dataset.themeMode = mode;
-      document.documentElement.dataset.accent = localStorage.getItem('pilot.accent') || 'blue';
+      document.documentElement.dataset.accent = localStorage.getItem('pilot.accent') || 'sky';
     } catch (error) {
-      document.documentElement.dataset.theme = 'light';
-      document.documentElement.dataset.accent = 'blue';
+      document.documentElement.dataset.theme = 'dark';
+      document.documentElement.dataset.accent = 'sky';
     }
   </script>
-  <link rel="stylesheet" href="/style.css?v=27">
+  <link rel="preload" href="/fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/ibm-plex-sans-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/style.css?v=30">
+  <link rel="stylesheet" href="/shell.css?v=24">
 </head>
 <body>
-<div class="app" id="app">
+<div class="app inspector-collapsed" id="app">
 
   <!-- 左侧：项目导航 -->
   <aside class="sidebar rail" id="sidebar" aria-label="项目导航">
@@ -43,6 +46,11 @@
       <kbd>Ctrl N</kbd>
     </button>
 
+    <label class="session-search" for="session-search">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="m10.2 10.2 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      <input id="session-search" type="search" placeholder="搜索对话" autocomplete="off" spellcheck="false" aria-label="搜索对话">
+    </label>
+
     <div class="rail-scroll">
       <section class="nav-block" aria-label="项目">
         <header class="nav-head">
@@ -56,16 +64,20 @@
         <p id="session-empty" class="nav-empty">还没有项目，点上面「新任务」新建一个。</p>
       </section>
 
-      <section class="nav-block nav-files" aria-label="文件">
-        <header class="nav-head">
-          <span>文件</span>
+      <details class="nav-block nav-files" aria-label="工作区文件">
+        <summary class="nav-head">
+          <span>工作区文件</span>
+          <span class="nav-disclosure" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="file-tree-head">
+          <span>浏览文件</span>
           <button id="tree-refresh" class="icon-btn icon-btn-sm" type="button" title="刷新文件树" aria-label="刷新文件树">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.6V5.4h-2.8" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
-        </header>
+        </div>
         <div id="file-tree" class="file-tree" role="tree" aria-label="工作区文件"></div>
         <p id="tree-empty" class="nav-empty">选择工作区后显示文件。</p>
-      </section>
+      </details>
     </div>
 
     <div class="sidebar-foot rail-foot">
@@ -88,10 +100,11 @@
       <div class="crumbs">
         <button id="workspace-name" class="crumb-root mono" type="button" title="切换该对话使用的文件夹">workspace</button>
         <span class="crumb-sep">/</span>
-        <span id="crumb-title">新任务</span>
+        <h1 id="crumb-title" class="crumb-title">新任务</h1>
       </div>
       <div id="folder-menu" class="perm-menu folder-menu" role="menu" hidden></div>
       <div class="topbar-right">
+        <button id="agents-chip" class="chip agents-chip" type="button" hidden title="本对话用到了多智能体，点击跳到子智能体"></button>
         <span id="session-chip" class="chip mono" hidden></span>
         <span id="run-state" class="run-state state-idle">空闲</span>
         <button id="settings-open" class="icon-btn" type="button" aria-label="设置" title="设置 (Ctrl + ,)">
@@ -101,8 +114,9 @@
           <svg class="icon-sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.1" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M8 1.6v1.3M8 13.1v1.3M1.6 8h1.3M13.1 8h1.3M3.5 3.5l.9.9M11.6 11.6l.9.9M12.5 3.5l-.9.9M4.4 11.6l-.9.9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
           <svg class="icon-moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 9.8A5.4 5.4 0 0 1 6.2 3a5.4 5.4 0 1 0 6.8 6.8Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/></svg>
         </button>
-        <button id="toggle-activity" class="icon-btn" type="button" aria-label="切换右侧面板" aria-pressed="true" title="右侧面板 (Ctrl J)">
+        <button id="toggle-activity" class="icon-btn review-toggle" type="button" aria-label="切换审阅面板" aria-pressed="false" title="审阅面板 (Ctrl J)">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11zM9.5 3.5v9" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/></svg>
+          <span>审阅</span>
         </button>
       </div>
     </header>
@@ -119,6 +133,7 @@
         <div class="task-contract-body">
           <p class="task-field-label">原始目标</p>
           <p id="task-original-goal" class="task-original-goal"></p>
+          <div id="task-execution" class="task-help" aria-live="polite" hidden></div>
           <label class="task-field"><span>用户约束（每行一条）</span><textarea id="task-constraints" rows="2" placeholder="例如：只修改服务端，保持现有接口兼容"></textarea></label>
           <div class="task-field-label">验收条件与证据</div>
           <p class="task-help">逐项核对后勾选，并填写验证证据；任务运行结束不会自动代表通过验收。</p>
@@ -131,35 +146,51 @@
           </div>
         </div>
       </details>
-      <div id="messages" class="thread is-empty" aria-live="polite">
-        <div class="empty" id="empty-state">
-          <span class="empty-logo" aria-hidden="true">P</span>
-          <h1 class="empty-title">今天让 Pilot 做什么？</h1>
-          <p class="empty-sub">在本地工作区里读代码、跑工具、改文件。能力范围由左下角的权限模式决定。</p>
-          <div class="prompts" id="prompts">
-            <button type="button" data-prompt="读取 pom.xml，告诉我这个项目有哪些模块、用什么 Java 版本。">
-              <span class="prompt-title">分析项目结构</span>
-              <span class="prompt-sub">读取 pom.xml 说明模块与版本</span>
-            </button>
-            <button type="button" data-prompt="列出工作区里所有的 Java 文件，并统计每个包的类数量。">
-              <span class="prompt-title">盘点源码</span>
-              <span class="prompt-sub">列出 Java 文件并统计包结构</span>
-            </button>
-            <button type="button" data-prompt="搜索代码里所有 TODO 注释，按文件整理成清单。">
-              <span class="prompt-title">收集 TODO</span>
-              <span class="prompt-sub">搜索注释并整理成清单</span>
-            </button>
+      <div class="thread-scroll-region">
+        <div id="messages" class="thread is-empty" aria-live="polite">
+          <div class="empty" id="empty-state">
+            <span class="empty-logo" aria-hidden="true">P</span>
+            <p class="empty-eyebrow">PILOT · CODING AGENT</p>
+            <h2 class="empty-title">从一个任务开始</h2>
+            <p class="empty-sub">描述你想完成的工作。Pilot 会在所选工作区内执行，并把每一步和改动留给你审阅。</p>
+            <div class="prompts" id="prompts">
+              <button type="button" data-prompt="读取 pom.xml，告诉我这个项目有哪些模块、用什么 Java 版本。">
+                <span class="prompt-title">分析项目结构</span>
+                <span class="prompt-sub">读取 pom.xml 说明模块与版本</span>
+              </button>
+              <button type="button" data-prompt="列出工作区里所有的 Java 文件，并统计每个包的类数量。">
+                <span class="prompt-title">盘点源码</span>
+                <span class="prompt-sub">列出 Java 文件并统计包结构</span>
+              </button>
+              <button type="button" data-prompt="搜索代码里所有 TODO 注释，按文件整理成清单。">
+                <span class="prompt-title">收集 TODO</span>
+                <span class="prompt-sub">搜索注释并整理成清单</span>
+              </button>
+            </div>
+            <p class="empty-keys">
+              <kbd>Ctrl</kbd><kbd>N</kbd> 新任务
+              <span class="sep">·</span>
+              <kbd>@</kbd> 引用文件
+              <span class="sep">·</span>
+              <kbd>/</kbd> 快捷指令
+              <span class="sep">·</span>
+              <kbd>Esc</kbd> 停止
+            </p>
           </div>
-          <p class="empty-keys">
-            <kbd>Ctrl</kbd><kbd>N</kbd> 新任务
-            <span class="sep">·</span>
-            <kbd>@</kbd> 引用文件
-            <span class="sep">·</span>
-            <kbd>/</kbd> 快捷指令
-            <span class="sep">·</span>
-            <kbd>Esc</kbd> 停止
-          </p>
         </div>
+        <section id="agent-thread" class="agent-thread" aria-label="子智能体线程" hidden>
+          <header class="agent-thread-bar">
+            <button id="agent-thread-back" class="btn btn-sm agent-thread-back" type="button">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.8 3.5 5.3 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              返回主对话
+            </button>
+            <div id="agent-thread-head" class="agent-thread-head"></div>
+          </header>
+          <div id="agent-thread-body" class="agent-thread-body"></div>
+        </section>
+        <button id="thread-bottom" class="thread-bottom" type="button" aria-label="回到底部" title="回到底部" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5v12M5.5 11l4.5 4.5 4.5-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
       </div>
 
       <div class="composer-wrap">
@@ -178,19 +209,25 @@
           <button id="task-cancel" class="msg-action" type="button">取消</button>
         </div>
         <div id="task-resume-controls" class="task-live-controls" hidden>
-          <span>继续时保留原始目标、约束、验收条件和纠正记录。</span>
+          <span>保留原目标、约束、验收条件和纠正记录</span>
           <button id="task-resume" class="btn btn-primary btn-sm" type="button">继续当前任务</button>
         </div>
+        <div id="agents-dock" class="agents-dock" hidden></div>
         <div id="message-queue" class="message-queue" hidden></div>
         <div id="approval-dock" class="approval" hidden></div>
         <div id="ref-menu" class="ref-menu" hidden></div>
-        <div id="attachments" class="attachments" hidden></div>
         <form id="composer" class="composer">
-          <label class="visually-hidden" for="input">输入任务</label>
-          <textarea id="input" rows="1" spellcheck="false"
-                    placeholder="描述任务，Enter 发送，Shift + Enter 换行，@ 引用文件，/ 快捷指令"></textarea>
+          <span id="input-label" class="visually-hidden">输入任务</span>
+          <div id="input-flow" class="input-flow" contenteditable="true" role="textbox" aria-multiline="true"
+               aria-labelledby="input-label" spellcheck="false" data-empty="true"
+               data-placeholder="描述任务，Enter 发送，Shift + Enter 换行，@ 引用文件，/ 快捷指令"></div>
+          <input id="file-picker" type="file" multiple hidden tabindex="-1">
           <div class="composer-bar">
             <span class="composer-left">
+              <button id="attach-button" class="attach-button" type="button" aria-label="添加文件或图片"
+                      title="添加文件或图片（也可以拖入或粘贴）">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 7.4 8.1 12.5a3.1 3.1 0 0 1-4.4-4.4l5.3-5.3a2.1 2.1 0 0 1 3 3L6.9 11a1.1 1.1 0 0 1-1.6-1.6l4.8-4.8" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
               <span class="composer-chips">
                 <span class="perm-picker">
                   <button id="perm-chip" class="perm-chip" type="button" hidden
@@ -226,11 +263,33 @@
                     </div>
                   </div>
                 </span>
+                <span class="perm-picker context-picker">
+                  <button id="context-chip" class="perm-chip context-chip" type="button"
+                          aria-haspopup="dialog" aria-expanded="false" title="查看上下文与本轮用量" disabled>
+                    上下文 --
+                  </button>
+                  <div id="context-menu" class="perm-menu context-menu" role="dialog" aria-label="上下文与用量" hidden>
+                    <div class="context-head">
+                      <div><strong>上下文</strong><small id="context-kind">本地估算</small></div>
+                      <span id="context-percent">0%</span>
+                    </div>
+                    <div class="context-meter" aria-hidden="true"><i id="context-meter-fill"></i></div>
+                    <p id="context-summary" class="context-summary">选择会话后显示模型记忆占用。</p>
+                    <dl class="context-stats">
+                      <div><dt>本轮耗时</dt><dd id="context-elapsed">—</dd></div>
+                      <div><dt>模型请求</dt><dd id="context-requests">—</dd></div>
+                      <div><dt>输入 Token</dt><dd id="context-input-tokens">—</dd></div>
+                      <div><dt>输出 Token</dt><dd id="context-output-tokens">—</dd></div>
+                    </dl>
+                    <button id="context-compact" class="btn btn-primary context-compact" type="button" disabled>压缩上下文</button>
+                    <p id="context-hint" class="context-hint" role="status">压缩只折叠模型记忆中的早期内容，不删除聊天和审计记录。</p>
+                  </div>
+                </span>
               </span>
               <span class="composer-hint">
                 <kbd>Enter</kbd> 发送
                 <span class="sep">·</span>
-                拖入文件
+                拖入 / 粘贴文件
                 <span class="sep">·</span>
                 <kbd>@</kbd> 文件
                 <span class="sep">·</span>
@@ -239,7 +298,7 @@
             </span>
             <div class="composer-actions">
               <span id="send-mode-label" class="send-mode-label">发送任务</span>
-              <!-- 运行中发送明确表示排队下一件事；暂停和纠正使用独立入口。 -->
+              <!-- 运行中空草稿显示停止；一旦输入文字或附件，恢复成发送/排队。 -->
               <button id="send" class="send" type="button" disabled aria-label="发送" title="发送 (Ctrl Enter)">
                 <svg class="icon-send" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.8M4.6 7.2 8 3.8l3.4 3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
                 <svg class="icon-stop" viewBox="0 0 16 16" aria-hidden="true"><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.6" fill="currentColor"/></svg>
@@ -253,7 +312,11 @@
     <div class="gutter gutter-right" id="gutter-right" role="separator" aria-orientation="vertical" tabindex="0"></div>
 
     <!-- 右侧：审阅面板 -->
-    <aside id="activity" class="activity inspector" aria-label="审阅面板">
+    <aside id="activity" class="activity inspector is-hidden" aria-label="审阅面板">
+    <div class="inspector-mobile-head">
+      <strong>审阅</strong>
+      <button id="inspector-close" class="icon-btn" type="button" aria-label="关闭审阅面板" title="关闭审阅面板">×</button>
+    </div>
     <div class="inspector-head">
       <div class="tabs" id="panel-tabs" role="tablist" aria-label="面板切换">
         <button class="tab" type="button" data-tab="changes" role="tab" aria-selected="false">
@@ -261,6 +324,7 @@
         </button>
         <button class="tab" type="button" data-tab="preview" role="tab" aria-selected="false">预览</button>
         <button class="tab" type="button" data-tab="commands" role="tab" aria-selected="false">命令<span id="commands-count" class="tab-count" hidden>0</span></button>
+        <button class="tab" type="button" data-tab="capabilities" role="tab" aria-selected="false">能力</button>
         <button class="tab is-on" type="button" data-tab="activity" role="tab" aria-selected="true">活动</button>
       </div>
       <div class="filters" id="filters" role="tablist" aria-label="事件过滤">
@@ -306,14 +370,14 @@
       </div>
     </div>
 
-    <div id="panel-preview" class="panel-body" hidden>
+    <div id="panel-preview" class="panel-body preview-panel is-empty" hidden>
       <div class="preview-bar">
         <span id="preview-path" class="preview-path mono">未选择文件</span>
-        <button id="preview-refresh" class="icon-btn icon-btn-sm" type="button" title="重新读取" aria-label="重新读取">
+        <button id="preview-refresh" class="icon-btn icon-btn-sm" type="button" title="重新读取" aria-label="重新读取" disabled>
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.6V5.4h-2.8" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
       </div>
-      <pre id="preview-body" class="preview-body"><span class="preview-hint">在左侧文件树里点一个文件，或从「变更」里点开 diff 文件。</span></pre>
+      <pre id="preview-body" class="preview-body"><span class="preview-hint"><strong>选择文件开始预览</strong><small>从左侧工作区文件或「变更」中打开一个文件。</small></span></pre>
     </div>
 
     <div id="panel-commands" class="panel-body command-panel" hidden>
@@ -336,6 +400,39 @@
           <button id="command-log-bottom" class="btn btn-sm" type="button">跳到最新</button>
         </div>
         <pre id="command-log" class="command-log" tabindex="0" aria-label="命令输出日志"></pre>
+      </section>
+    </div>
+
+    <div id="panel-capabilities" class="panel-body capability-panel" hidden>
+      <header class="capability-intro">
+        <span class="capability-kicker">PILOT CAPABILITY MAP</span>
+        <h2>下一步值得补什么</h2>
+        <p>已接入的能力显示为“可用”；其余只是清晰标注的产品方向，不会假装功能已经存在。</p>
+      </header>
+      <section class="capability-section">
+        <div class="capability-section-head"><strong>运行控制面</strong><span>已可用</span></div>
+        <ul class="capability-list">
+          <li><div><strong>实时任务用量</strong><p>耗时、模型请求、输入/输出 Token 和上下文占用。</p></div><span class="capability-status is-live">可用</span></li>
+          <li><div><strong>上下文生命周期</strong><p>占用可视化、自动压缩事件和用户主动压缩。</p></div><span class="capability-status is-live">可用</span></li>
+          <li><div><strong>Queue / Steer / Goal</strong><p>排队下一件事、纠正当前任务和持久目标。</p></div><span class="capability-status is-live">可用</span></li>
+        </ul>
+      </section>
+      <section class="capability-section">
+        <div class="capability-section-head"><strong>建议优先确认</strong><span>界面占位</span></div>
+        <ul class="capability-list">
+          <li><div><strong>Side Chat</strong><p>围绕当前工作开轻量问答，不污染主任务上下文。</p></div><span class="capability-status">待确认</span></li>
+          <li><div><strong>Worktree 隔离</strong><p>新任务可选择当前分支或独立 worktree，并管理合并与清理。</p></div><span class="capability-status">待确认</span></li>
+          <li><div><strong>行内审阅意见</strong><p>在 diff 行上评论，再把精确修改意见送回 Agent。</p></div><span class="capability-status">待确认</span></li>
+          <li><div><strong>通知与远程控制</strong><p>任务完成、待审批、失败时通知，并支持跨设备继续操作。</p></div><span class="capability-status">待确认</span></li>
+        </ul>
+      </section>
+      <section class="capability-section">
+        <div class="capability-section-head"><strong>后续增强</strong><span>未接线</span></div>
+        <ul class="capability-list">
+          <li><div><strong>Skills / Plugins 选择器</strong><p>发送前明确看到本轮启用的技能和外部能力。</p></div><span class="capability-status is-later">候选</span></li>
+          <li><div><strong>费率与预算</strong><p>接入模型价格和账户限额后展示真实成本，而不是估算金额。</p></div><span class="capability-status is-later">候选</span></li>
+          <li><div><strong>自动化任务</strong><p>定时运行检查、测试或项目维护任务，并只在有变化时通知。</p></div><span class="capability-status is-later">候选</span></li>
+        </ul>
       </section>
     </div>
     </aside>
@@ -547,6 +644,6 @@
 </div>
 
 <div id="drop-veil" class="drop-veil" hidden>松开以添加文件</div>
-  <script type="module" src="/app.js?v=30"></script>
+  <script type="module" src="/app.js?v=59"></script>
 </body>
 </html>

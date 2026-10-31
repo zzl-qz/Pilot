@@ -19,16 +19,36 @@ class CompletionGateTest {
 
     @Test
     void allowsFinishingWhenNothingChanged() {
-        var gate = new CompletionGate(PROMPTS, true, "解释一下调用链");
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "解释一下调用链");
+
+        assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of()));
+    }
+
+    @Test
+    void actionGoalWithoutAnyChangeIsPushedOnceToActuallyAct() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复登录接口的空指针");
+
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
+
+        assertNotNull(nudge);
+        assertTrue(nudge.reason().contains("动手"), nudge.reason());
+        assertTrue(nudge.prompt().contains("修复登录接口的空指针"), nudge.prompt());
+        // 只推一次，之后放行，避免对确实只需要回答的请求反复催办
+        assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of()));
+    }
+
+    @Test
+    void questionGoalMentioningActionWordsIsNotPushedToAct() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "为什么这里没有修复");
 
         assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of()));
     }
 
     @Test
     void asksForVerificationWhenCodeChangedWithoutPassingCheck() {
-        var gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
 
-        var nudge = gate.evaluate(Set.of("src/A.java"), List.of(), List.of(), List.of());
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(), List.of(), List.of());
 
         assertNotNull(nudge);
         assertTrue(nudge.prompt().contains("src/A.java"), nudge.prompt());
@@ -37,10 +57,10 @@ class CompletionGateTest {
 
     @Test
     void documentationOnlyChangeDoesNotRequireBuild() {
-        var gate = new CompletionGate(PROMPTS, true, "更新文档");
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "更新文档");
 
         // 第一道门（验证）跳过，但第二道门（自审）仍会问一次
-        var nudge = gate.evaluate(Set.of("README.md"), List.of(), List.of(), List.of());
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of("README.md"), List.of(), List.of(), List.of());
 
         assertNotNull(nudge);
         assertTrue(nudge.reason().contains("自审"), nudge.reason());
@@ -48,12 +68,70 @@ class CompletionGateTest {
 
     @Test
     void passingCheckSkipsVerificationPrompt() {
-        var gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
 
-        var nudge = gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"), List.of(), List.of());
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"), List.of(), List.of());
 
         assertNotNull(nudge);
         assertTrue(nudge.reason().contains("自审"), nudge.reason());
+    }
+
+    @Test
+    void independentReviewerAvoidsDuplicateSelfReview() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+
+        assertNull(gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"),
+                List.of(), List.of(), true));
+    }
+
+    @Test
+    void independentReviewerStillRequiresCodeVerification() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(),
+                List.of(), List.of(), true);
+        assertNotNull(nudge);
+        assertTrue(nudge.reason().contains("未验证"), nudge.reason());
+    }
+
+    @Test
+    void unrelatedSuccessfulCommandsDoNotVerifyCodeChanges() {
+        for (String check : List.of(
+                "git status --short → exit 0",
+                "git diff → exit 0",
+                "node --version → exit 0",
+                "java -version → exit 0",
+                "npm --version → exit 0",
+                "cargo metadata → exit 0")) {
+            CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+
+            CompletionGate.Nudge nudge = gate.evaluate(
+                    Set.of("src/A.java"), List.of(check), List.of(), List.of());
+
+            assertNotNull(nudge, check);
+            assertTrue(nudge.reason().contains("未验证"), check + ": " + nudge.reason());
+        }
+    }
+
+    @Test
+    void successfulBuildTestLintAndFormatChecksVerifyCodeChanges() {
+        for (String check : List.of(
+                "mvnw -q test → exit 0",
+                "gradlew :app:build → exit 0",
+                "npm run lint → exit 0",
+                "node --test → exit 0",
+                "python3 -m pytest -q → exit 0",
+                "cargo check → exit 0",
+                "go vet ./... → exit 0",
+                "git diff --check → exit 0")) {
+            CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+
+            CompletionGate.Nudge nudge = gate.evaluate(
+                    Set.of("src/A.java"), List.of(check), List.of(), List.of());
+
+            assertNotNull(nudge, check);
+            assertTrue(nudge.reason().contains("自审"), check + ": " + nudge.reason());
+        }
     }
 
     @Test
@@ -62,27 +140,27 @@ class CompletionGateTest {
                 "node -e process.exit(1) exit 0 → exit 1",
                 "node -e process.exit(1) exit 0 → RUNNING",
                 "node -e process.exit(1) exit 0 → TIMED_OUT（进程退出码 0）")) {
-            var gate = new CompletionGate(PROMPTS, true, "修一个 bug");
-            var nudge = gate.evaluate(Set.of("src/A.java"), List.of(check), List.of(), List.of());
+            CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+            CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(check), List.of(), List.of());
             assertNotNull(nudge, check);
             assertTrue(nudge.reason().contains("未验证"), check + ": " + nudge.reason());
         }
-        var gate = new CompletionGate(PROMPTS, true, "修一个 bug");
-        var passed = gate.evaluate(Set.of("src/A.java"),
-                List.of("node -e process.exit(0) exit 1 → exit 0"), List.of(), List.of());
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+        CompletionGate.Nudge passed = gate.evaluate(Set.of("src/A.java"),
+                List.of("mvn -Dlabel=exit_1 test → exit 0"), List.of(), List.of());
         assertNotNull(passed);
         assertTrue(passed.reason().contains("自审"), passed.reason());
     }
 
     @Test
     void verificationIsAskedAtMostTwiceThenFallsThroughToReview() {
-        var gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
         Set<String> changed = Set.of("src/A.java");
 
-        var first = gate.evaluate(changed, List.of(), List.of(), List.of());
-        var second = gate.evaluate(changed, List.of(), List.of(), List.of());
-        var third = gate.evaluate(changed, List.of(), List.of(), List.of());
-        var fourth = gate.evaluate(changed, List.of(), List.of(), List.of());
+        CompletionGate.Nudge first = gate.evaluate(changed, List.of(), List.of(), List.of());
+        CompletionGate.Nudge second = gate.evaluate(changed, List.of(), List.of(), List.of());
+        CompletionGate.Nudge third = gate.evaluate(changed, List.of(), List.of(), List.of());
+        CompletionGate.Nudge fourth = gate.evaluate(changed, List.of(), List.of(), List.of());
 
         assertEquals(1, first.attempt());
         assertEquals(2, second.attempt());
@@ -93,11 +171,11 @@ class CompletionGateTest {
 
     @Test
     void readonlyResearchWithTooFewToolCallsGetsReviewed() {
-        var gate = new CompletionGate(PROMPTS, true, "梳理一下请求调用链");
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "梳理一下请求调用链");
         gate.countToolCall();
         gate.countToolCall();
 
-        var nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
 
         assertNotNull(nudge);
         assertTrue(nudge.reason().contains("自审"));
@@ -105,7 +183,7 @@ class CompletionGateTest {
 
     @Test
     void readonlyTaskThatIsNotResearchFinishesQuietly() {
-        var gate = new CompletionGate(PROMPTS, true, "你好");
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "你好");
         gate.countToolCall();
         gate.countToolCall();
 
@@ -114,21 +192,42 @@ class CompletionGateTest {
 
     @Test
     void recordsInspectedPathsForReadonlyReview() {
-        var gate = new CompletionGate(PROMPTS, true, "分析这个模块");
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "分析这个模块");
         gate.countToolCall();
         gate.countToolCall();
         gate.recordTarget(new ToolCall("call_1", "read_file", Map.of("path", "src/A.java")));
         gate.recordTarget(new ToolCall("call_2", "search_text", Map.of("query", "A")));
 
-        var nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
 
         assertNotNull(nudge);
         assertTrue(nudge.prompt().contains("src/A.java"), nudge.prompt());
     }
 
     @Test
+    void restoresInspectedPathsAndToolCountFromPersistedHistory() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "分析这个模块的调用链");
+        List<Message> history = List.of(
+                Message.user("分析这个模块的调用链"),
+                Message.assistant("", List.of(new ToolCall("call_1", "read_file", Map.of("path", "src/A.java")))),
+                Message.tool("call_1", "class A {}"),
+                Message.assistant("", List.of(new ToolCall("call_2", "read_file", Map.of("path", "src/B.java")))),
+                Message.tool("call_2", "class B {}"),
+                Message.assistant("", List.of(new ToolCall("call_3", "read_file", Map.of("path", "src/Skipped.java")))),
+                Message.tool("call_3", "SKIPPED: 用户已纠正当前任务"));
+
+        gate.restoreFrom(history);
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
+
+        assertNotNull(nudge);
+        assertTrue(nudge.prompt().contains("src/A.java"), nudge.prompt());
+        assertTrue(nudge.prompt().contains("src/B.java"), nudge.prompt());
+        assertTrue(!nudge.prompt().contains("Skipped.java"), nudge.prompt());
+    }
+
+    @Test
     void disabledGateNeverNudges() {
-        var gate = new CompletionGate(PROMPTS, false, "修一个 bug");
+        CompletionGate gate = new CompletionGate(PROMPTS, false, "修一个 bug");
         gate.countToolCall();
         gate.countToolCall();
 
@@ -137,10 +236,10 @@ class CompletionGateTest {
 
     @Test
     void planProgressAppearsInReviewPrompt() {
-        var gate = new CompletionGate(PROMPTS, true, "做三件事");
-        var plan = List.of(new PlanItem("第一步", PlanItem.COMPLETED), new PlanItem("第二步", PlanItem.PENDING));
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "做三件事");
+        List<PlanItem> plan = List.of(new PlanItem("第一步", PlanItem.COMPLETED), new PlanItem("第二步", PlanItem.PENDING));
 
-        var nudge = gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"), plan, List.of("第二步"));
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"), plan, List.of("第二步"));
 
         assertNotNull(nudge);
         assertTrue(nudge.prompt().contains("1/2"), nudge.prompt());

@@ -19,13 +19,15 @@ public class ModelClientConfiguration {
      */
     @Bean
     ModelClient modelClient(ModelSettings settings, ObjectMapper objectMapper,
-                            @Value("${pilot.model.timeout-seconds:90}") long timeoutSeconds) {
+                            @Value("${pilot.model.timeout-seconds:90}") long timeoutSeconds,
+                            @Value("${pilot.model.prompt-caching:false}") boolean promptCaching) {
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
         Duration timeout = Duration.ofSeconds(Math.max(5, timeoutSeconds));
+        // 显式缓存标记只给支持 cache_control 的端点；OpenAI 官方端点自动缓存，保持默认关闭
         return new ModelClientProvider(settings, snapshot -> new OpenAiCompatibleModelClient(
                 httpClient, objectMapper, URI.create(snapshot.endpoint()), snapshot.apiKey(),
-                snapshot.model(), timeout));
+                snapshot.model(), timeout).withPromptCaching(promptCaching));
     }
 }

@@ -29,10 +29,37 @@ public interface Tool {
     boolean readOnly();
 
     /**
+     * 按本次调用的参数判断是否只读。默认等于 {@link #readOnly()}；
+     * 一个工具里既有查询又有改动的动作时（命令、浏览器、外部工具）覆盖它，
+     * 让权限层对「看」放行、对「改」审批，而不是整个工具一刀切。
+     */
+    default boolean readOnly(Map<String, Object> args) {
+        return readOnly();
+    }
+
+    /** 运行时能力。依赖外部进程的工具覆盖；不可用时不向模型声明。 */
+    default Availability availability() {
+        return Availability.ready();
+    }
+
+    /** 同一模型回复中的多个此类调用能否并行执行；只读并不自动意味着并行安全。 */
+    default boolean parallelSafe() {
+        return false;
+    }
+
+    /**
      * 执行工具。
      *
      * @param args 已解析的参数
      * @return 返回给模型的文本结果；失败时以 {@code ERROR: } 开头说明原因
      */
     String execute(Map<String, Object> args);
+
+    /**
+     * 需要把多个改动路径或验证项传给父执行循环的工具可覆盖此方法。
+     * 普通工具仍只需实现 {@link #execute(Map)}，行为保持不变。
+     */
+    default ToolResult executeResult(Map<String, Object> args) {
+        return ToolResult.text(execute(args));
+    }
 }

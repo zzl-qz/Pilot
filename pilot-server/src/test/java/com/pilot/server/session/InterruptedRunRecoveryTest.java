@@ -4,7 +4,9 @@ import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.session.InterruptedRun;
+import com.pilot.core.session.Run;
 import com.pilot.core.session.RunRepository;
+import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
 import org.junit.jupiter.api.Test;
@@ -22,9 +24,9 @@ class InterruptedRunRecoveryTest {
 
     @Test
     void marksSessionInterruptedWhenRunSurvivesRestart() throws Exception {
-        var sessions = new SessionService(Clock.systemUTC());
-        var session = sessions.createSession("重启收敛");
-        var run = sessions.sendMessage(session.id(), "跑一个长任务");
+        SessionService sessions = new SessionService(Clock.systemUTC());
+        Session session = sessions.createSession("重启收敛");
+        Run run = sessions.sendMessage(session.id(), "跑一个长任务");
         assertEquals(SessionStatus.RUNNING, sessions.find(session.id()).orElseThrow().status());
 
         recovery(sessions, List.of(new InterruptedRun(run.runId(), session.id())))
@@ -32,8 +34,8 @@ class InterruptedRunRecoveryTest {
 
         // 会话不能停在 RUNNING，否则界面永远显示「正在处理」
         assertEquals(SessionStatus.INTERRUPTED, sessions.find(session.id()).orElseThrow().status());
-        var last = lastEvent(sessions, session.id());
-        var failed = assertInstanceOf(RunFailed.class, last.payload());
+        EventEnvelope last = lastEvent(sessions, session.id());
+        RunFailed failed = assertInstanceOf(RunFailed.class, last.payload());
         assertEquals("INTERRUPTED", failed.code());
         assertTrue(failed.retryable(), "重启中断应允许继续");
         assertEquals(run.runId(), last.runId());
@@ -41,8 +43,8 @@ class InterruptedRunRecoveryTest {
 
     @Test
     void closesSessionEvenWhenRunRowIsMissing() throws Exception {
-        var sessions = new SessionService(Clock.systemUTC());
-        var session = sessions.createSession("事件丢失");
+        SessionService sessions = new SessionService(Clock.systemUTC());
+        Session session = sessions.createSession("事件丢失");
         sessions.sendMessage(session.id(), "任务");
 
         // runs 表里没有对应记录时也要收敛，避免留下僵死的 RUNNING
@@ -53,11 +55,11 @@ class InterruptedRunRecoveryTest {
 
     @Test
     void leavesTerminalSessionAlone() throws Exception {
-        var sessions = new SessionService(Clock.systemUTC());
-        var session = sessions.createSession("已完成");
-        var run = sessions.sendMessage(session.id(), "任务");
+        SessionService sessions = new SessionService(Clock.systemUTC());
+        Session session = sessions.createSession("已完成");
+        Run run = sessions.sendMessage(session.id(), "任务");
         sessions.publish(session.id(), run.runId(), new RunCompleted("完成", List.of(), List.of()));
-        var before = sessions.events(session.id()).size();
+        int before = sessions.events(session.id()).size();
 
         recovery(sessions, List.of()).run(new DefaultApplicationArguments());
 
@@ -84,7 +86,7 @@ class InterruptedRunRecoveryTest {
     }
 
     private static EventEnvelope lastEvent(SessionService sessions, String sessionId) {
-        var events = sessions.events(sessionId);
+        List<EventEnvelope> events = sessions.events(sessionId);
         return events.get(events.size() - 1);
     }
 }

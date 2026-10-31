@@ -3,8 +3,8 @@ package com.pilot.server.runtime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
 import org.springframework.context.SmartLifecycle;
+import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -15,6 +15,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 /**
  * 给技能脚本准备 Python 3.12 和 Node 22。
@@ -161,7 +162,7 @@ public class BundledRuntime implements SmartLifecycle {
         if (findBin(unpack, unixName, windowsName) != null) {
             return unpack;
         }
-        try (var children = Files.list(unpack)) {
+        try (Stream<Path> children = Files.list(unpack)) {
             for (Path child : children.toList()) {
                 if (Files.isDirectory(child) && findBin(child, unixName, windowsName) != null) {
                     return child;
@@ -271,7 +272,7 @@ public class BundledRuntime implements SmartLifecycle {
         if (root == null || Files.notExists(root)) {
             return;
         }
-        try (var walk = Files.walk(root)) {
+        try (Stream<Path> walk = Files.walk(root)) {
             walk.sorted(Comparator.reverseOrder()).forEach(path -> {
                 try {
                     Files.deleteIfExists(path);

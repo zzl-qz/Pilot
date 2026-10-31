@@ -18,10 +18,10 @@ class TaskControlRecoveryTest {
 
     @Test
     void restartOnlyInterruptsActiveTasksAndPreservesPausedRequirements() {
-        var sessions = new SessionService();
-        var mapper = JsonMapper.builder().build();
-        var data = new PilotDataDir(directory.toString());
-        var original = new TaskControlService(mapper, data);
+        SessionService sessions = new SessionService();
+        JsonMapper mapper = JsonMapper.builder().build();
+        PilotDataDir data = new PilotDataDir(directory.toString());
+        TaskControlService original = new TaskControlService(mapper, data);
         Map<String, String> ids = new LinkedHashMap<>();
         for (String status : List.of("ACTIVE", "PAUSED", "AWAITING_REVIEW", "COMPLETED", "FAILED")) {
             String id = sessions.createSession(status).id();
@@ -32,11 +32,11 @@ class TaskControlRecoveryTest {
             original.status(id, status);
         }
         String blank = sessions.createSession("没有任务记录").id();
-        var restarted = new TaskControlService(mapper, data);
-        var recovery = new TaskControlRecovery(sessions, restarted);
+        TaskControlService restarted = new TaskControlService(mapper, data);
+        TaskControlRecovery recovery = new TaskControlRecovery(sessions, restarted);
         recovery.run(null);
-        for (var entry : ids.entrySet()) {
-            var task = restarted.load(entry.getValue());
+        for (Map.Entry<String,String> entry : ids.entrySet()) {
+            TaskControlService.TaskContract task = restarted.load(entry.getValue());
             assertEquals(entry.getKey().equals("ACTIVE") ? "INTERRUPTED" : entry.getKey(), task.status());
             assertEquals("恢复后仍需满足的原目标", task.originalGoal());
             assertEquals(List.of("不能改数据库"), task.constraints());

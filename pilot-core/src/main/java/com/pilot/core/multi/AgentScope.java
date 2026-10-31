@@ -367,7 +367,7 @@ public final class AgentScope {
         if (values == null) {
             return List.of();
         }
-        var seen = new LinkedHashSet<String>();
+        LinkedHashSet<String> seen = new LinkedHashSet<String>();
         for (String value : values) {
             if (value == null || value.isBlank()) {
                 continue;
@@ -381,7 +381,7 @@ public final class AgentScope {
         if (values == null) {
             return List.of();
         }
-        var seen = new LinkedHashSet<String>();
+        LinkedHashSet<String> seen = new LinkedHashSet<String>();
         for (String value : values) {
             if (value == null || value.isBlank()) {
                 continue;
@@ -396,7 +396,7 @@ public final class AgentScope {
         if (values == null) {
             return Set.of();
         }
-        var seen = new LinkedHashSet<String>();
+        LinkedHashSet<String> seen = new LinkedHashSet<String>();
         for (String value : values) {
             if (value == null || value.isBlank()) {
                 continue;

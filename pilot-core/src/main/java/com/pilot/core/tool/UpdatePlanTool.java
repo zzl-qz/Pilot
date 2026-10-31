@@ -70,7 +70,7 @@ public final class UpdatePlanTool implements Tool {
         if (!(raw instanceof List<?> list)) {
             return "ERROR: plan 必须是数组";
         }
-        var items = new ArrayList<PlanItem>();
+        ArrayList<PlanItem> items = new ArrayList<PlanItem>();
         for (Object entry : list) {
             if (!(entry instanceof Map<?, ?> map)) {
                 return "ERROR: plan 的每一项必须是对象";

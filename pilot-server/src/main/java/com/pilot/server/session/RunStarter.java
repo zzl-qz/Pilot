@@ -33,8 +33,46 @@ public interface RunStarter {
         start(sessionId, runId, input, attachments, task);
     }
 
+    default void start(String sessionId, String runId, String input, List<Attachment> attachments,
+                       List<Integer> imagePositions, TaskControlService.Requirements task) {
+        start(sessionId, runId, input, attachments, task);
+    }
+
+    /**
+     * 图片位置与技能同时支持的完整启动，控制器的合并链路走这里。
+     * 默认忽略技能，测试里的空实现不用改。
+     */
+    default void start(String sessionId, String runId, String input, List<Attachment> attachments,
+                       List<Integer> imagePositions, TaskControlService.Requirements task, String skill) {
+        start(sessionId, runId, input, attachments, imagePositions, task);
+    }
+
+    /** 排队中的一条消息：正文已经内联了文本文件，这里只额外带需要多模态编码的图片。 */
+    record QueuedMessage(String content, List<Attachment> attachments, List<Integer> imagePositions) {
+        public QueuedMessage {
+            content = content == null ? "" : content;
+            attachments = attachments == null ? List.of() : List.copyOf(attachments);
+            imagePositions = imagePositions == null ? List.of() : List.copyOf(imagePositions);
+        }
+    }
+
+    /** 带附件信息的排队清单，顺序与 queued 一致。 */
+    default List<QueuedMessage> queuedMessages(String sessionId) {
+        return queued(sessionId).stream().map(text -> new QueuedMessage(text, List.of(), List.of())).toList();
+    }
+
     /** 普通追加仅排队；保留默认转发以兼容已有启动器。 */
     default boolean followup(String sessionId, String text) { return steer(sessionId, text); }
+
+    /**
+     * 带图片附件的追加。默认实现只认纯文本，带附件时返回 false，
+     * 这样不支持附件的启动器不会悄悄丢掉用户的图片。
+     */
+    default boolean followup(String sessionId, String text, List<Attachment> attachments,
+                             List<Integer> imagePositions) {
+        boolean plain = attachments == null || attachments.isEmpty();
+        return plain && followup(sessionId, text);
+    }
 
     /** 暂停在当前安全步骤结束后生效，保留任务及排队消息。 */
     default boolean pause(String runId) { return false; }
@@ -105,6 +143,43 @@ public interface RunStarter {
         return false;
     }
 
+    /** 当前模型记忆的上下文占用；token 是保守估算，端点 usage 不适合反推整段记忆。 */
+    default ContextStatus contextStatus(String sessionId) {
+        return new ContextStatus(0, 0, 1, true, false);
+    }
+
+    /** 用户主动压缩已落盘的模型记忆；聊天事件历史不删除。 */
+    default CompactionResult compactContext(String sessionId) {
+        return new CompactionResult(false, 0, 0, 0, "当前运行器不支持主动压缩");
+    }
+
+    record ContextStatus(int messages, int usedTokens, int limitTokens,
+                         boolean estimated, boolean canCompact, int percent) {
+        public ContextStatus(int messages, int usedTokens, int limitTokens,
+                             boolean estimated, boolean canCompact) {
+            this(messages, usedTokens, limitTokens, estimated, canCompact,
+                    Math.min(100, (int) Math.round(Math.max(0, usedTokens) * 100.0
+                            / Math.max(1, limitTokens))));
+        }
+
+        public ContextStatus {
+            messages = Math.max(0, messages);
+            usedTokens = Math.max(0, usedTokens);
+            limitTokens = Math.max(1, limitTokens);
+            percent = Math.max(0, Math.min(100, percent));
+        }
+    }
+
+    record CompactionResult(boolean compacted, int coveredMessages,
+                            int tokensBefore, int tokensAfter, String message) {
+        public CompactionResult {
+            coveredMessages = Math.max(0, coveredMessages);
+            tokensBefore = Math.max(0, tokensBefore);
+            tokensAfter = Math.max(0, tokensAfter);
+            message = message == null ? "" : message;
+        }
+    }
+
     /**
      * 立即纠正当前任务：在下一个安全步骤注入，不创建独立任务。
      *
@@ -131,6 +206,16 @@ public interface RunStarter {
 
     /** 改队列里的某一句。下标从 0 开始。 */
     default boolean editQueued(String sessionId, int index, String text) {
+        return false;
+    }
+
+    /** 把某一句往前挪一位（和前一句交换）。文字和图片作为一个整体移动。 */
+    default boolean moveQueuedUp(String sessionId, int index) {
+        return false;
+    }
+
+    /** 把某一句挪到指定位置（拖拽排序用），一次完成。文字和图片作为一个整体移动。下标从 0 开始。 */
+    default boolean moveQueued(String sessionId, int from, int to) {
         return false;
     }
 

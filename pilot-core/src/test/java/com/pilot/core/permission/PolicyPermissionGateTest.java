@@ -18,7 +18,7 @@ class PolicyPermissionGateTest {
 
     @Test
     void readOnlyDeniesEverythingThatHasSideEffects() {
-        var gate = new PolicyPermissionGate(PermissionMode.READ_ONLY);
+        PolicyPermissionGate gate = new PolicyPermissionGate(PermissionMode.READ_ONLY);
 
         assertEquals(PermissionDecision.ALLOW, gate.check(CALL, readTool).decision());
         assertEquals(PermissionDecision.DENY, gate.check(CALL, writeTool).decision());
@@ -27,7 +27,7 @@ class PolicyPermissionGateTest {
 
     @Test
     void askRequiresApprovalForWritesAndCommands() {
-        var gate = new PolicyPermissionGate(PermissionMode.ASK);
+        PolicyPermissionGate gate = new PolicyPermissionGate(PermissionMode.ASK);
 
         assertEquals(PermissionDecision.ALLOW, gate.check(CALL, readTool).decision());
         assertEquals(PermissionDecision.ASK, gate.check(CALL, writeTool).decision());
@@ -37,7 +37,7 @@ class PolicyPermissionGateTest {
     /** 像 Codex 一样改文件不再逐次打断，但命令有快照无法回滚的副作用，仍需确认。 */
     @Test
     void autoEditAppliesWritesButStillAsksForCommands() {
-        var gate = new PolicyPermissionGate(PermissionMode.AUTO_EDIT);
+        PolicyPermissionGate gate = new PolicyPermissionGate(PermissionMode.AUTO_EDIT);
 
         assertEquals(PermissionDecision.ALLOW, gate.check(CALL, readTool).decision());
         assertEquals(PermissionDecision.ALLOW, gate.check(CALL, writeTool).decision());
@@ -46,7 +46,7 @@ class PolicyPermissionGateTest {
 
     @Test
     void autoAllowsRegisteredTools() {
-        var gate = new PolicyPermissionGate(PermissionMode.AUTO);
+        PolicyPermissionGate gate = new PolicyPermissionGate(PermissionMode.AUTO);
 
         assertEquals(PermissionDecision.ALLOW, gate.check(CALL, writeTool).decision());
         assertEquals(PermissionDecision.ALLOW, gate.check(CALL, commandTool).decision());

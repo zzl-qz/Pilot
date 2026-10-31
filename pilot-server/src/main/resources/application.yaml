@@ -24,6 +24,16 @@ spring:
     livereload:
       # 浏览器自动刷新那条附加服务用不上，关掉以免多占一个端口
       enabled: false
+    restart:
+      # IDEA 会分批写入多模块的 class 文件。给编译留出完整落盘时间，避免只看到 server、
+      # 尚未看到 core 时就提前重启，产生 SnapshotSink.class 等短暂缺失。
+      #
+      # 注意：重启会中断正在执行的任务（模型请求被打断，本轮按「服务重启」收尾）。
+      # Agent 自己在任务里跑 mvn 也会改写 target/classes 并触发重启，跑长任务时建议关掉：
+      # 环境变量 PILOT_DEVTOOLS_RESTART=false，或启动参数 -Dspring.devtools.restart.enabled=false。
+      enabled: ${PILOT_DEVTOOLS_RESTART:true}
+      poll-interval: 2s
+      quiet-period: 1s
 
 pilot:
   data:
@@ -38,21 +48,39 @@ pilot:
     api-key: ${PILOT_MODEL_API_KEY:}
     # 单次模型请求超时（秒）。中转站可能更早返回 504
     timeout-seconds: 90
+    # 给 system 提示词打 cache_control 显式缓存标记：只对支持该字段的端点（Anthropic 兼容网关）开启。
+    # OpenAI 官方端点按前缀自动缓存，保持 false 即可，避免第三方端点拒绝未知字段。
+    prompt-caching: ${PILOT_MODEL_PROMPT_CACHING:false}
   agent:
+    goal-mode-enabled: ${PILOT_AGENT_GOAL_MODE_ENABLED:true}
     # 工具能碰到的根目录，默认是进程工作目录。建议显式指到项目根
     workspace: ${PILOT_WORKSPACE:${user.dir}}
-    # 单轮步数上限，只当保险丝。触顶后界面可以继续接着跑
-    max-steps: ${PILOT_AGENT_MAX_STEPS:120}
-    # 计划没做完就收尾时，自动催模型再做几轮。设成 0 会每写完一段就停下来问
-    max-plan-continues: ${PILOT_AGENT_MAX_PLAN_CONTINUES:8}
+    # 单轮步数上限，只当事故熔断。触顶后界面可以继续接着跑
+    max-steps: ${PILOT_AGENT_MAX_STEPS:1000}
+    # 执行预算只是高位事故熔断，不作为日常收尾条件，也不在半额度强制改变策略。
+    # 触发后保留进度、证据、待执行动作和预期观察；继续才开启新的预算段。
+    direct-max-requests: ${PILOT_AGENT_DIRECT_MAX_REQUESTS:1000}
+    direct-max-input-tokens: ${PILOT_AGENT_DIRECT_MAX_INPUT_TOKENS:50000000}
+    direct-max-output-tokens: ${PILOT_AGENT_DIRECT_MAX_OUTPUT_TOKENS:2000000}
+    direct-max-active-millis: ${PILOT_AGENT_DIRECT_MAX_ACTIVE_MILLIS:28800000}
+    # 兼容旧配置的高位调查诊断值；运行时不据此拒绝合法的读取和搜索。
+    direct-max-investigation-tools: ${PILOT_AGENT_DIRECT_MAX_INVESTIGATION_TOOLS:512}
+    # Goal 长任务的高位事故熔断。
+    goal-max-input-tokens: ${PILOT_AGENT_GOAL_MAX_INPUT_TOKENS:50000000}
+    goal-max-output-tokens: ${PILOT_AGENT_GOAL_MAX_OUTPUT_TOKENS:2000000}
+    goal-max-active-millis: ${PILOT_AGENT_GOAL_MAX_ACTIVE_MILLIS:28800000}
+    # 计划只作为给模型和用户的进度提示，不因为没写完就拦住收尾
+    max-plan-continues: ${PILOT_AGENT_MAX_PLAN_CONTINUES:0}
     # 上下文预算（字符估算）。太小会频繁压缩、丢细节；128k 窗口的模型可以开到 300000 左右
-    context-max-chars: ${PILOT_AGENT_CONTEXT_MAX_CHARS:120000}
-    # 连续相同工具调用：第 3 次注入提醒并跳过执行（给模型纠错机会），第 5 次中断运行。提醒设 0 关闭
+    context-max-chars: ${PILOT_AGENT_CONTEXT_MAX_CHARS:400000}
+    # 连续相同工具调用只注入提醒，不再中断运行
     repeat-remind-at: 3
-    repeat-abort-at: 5
-    # READ_ONLY 拒绝写入；ASK 逐次批准；AUTO_EDIT 写入直接生效、命令仍批准；AUTO 全部放行
-    permission-mode: ${PILOT_PERMISSION_MODE:READ_ONLY}
+    # READ_ONLY 只读（对应 Codex/OpenCode 的 plan 模式）；ASK 逐次批准；
+    # AUTO_EDIT 写入直接生效、命令仍批准；AUTO 全部放行（默认，与 Codex/OpenCode 一致）
+    permission-mode: ${PILOT_PERMISSION_MODE:AUTO}
     approval-timeout-seconds: 300
+    # 收尾门默认关闭：模型说完成就完成，不再额外要求验证或自审（与 Codex/OpenCode 一致）
+    completion-checks: ${PILOT_AGENT_COMPLETION_CHECKS:false}
     # 同时能跑的任务数。一个任务卡住时，不要把后面的任务全堵死
     run-threads: ${PILOT_AGENT_RUN_THREADS:4}
   web-search:
@@ -71,7 +99,29 @@ pilot:
   skills:
     # false 时整条链退化：use_skill 不注册、目录段不注入、/api/skills 返回空
     enabled: true
+  # 命令执行的隔离级别。local 只做应用层检查；container 会在容器里跑校验命令，
+  # 需要本机有 Docker/Podman 和包含项目工具链的镜像。容器不可用时不会静默降级，
+  # /api/maintenance/status 会显示降级原因。
+  execution:
+    isolation: ${PILOT_EXECUTION_ISOLATION:local}
+    image: ${PILOT_EXECUTION_IMAGE:eclipse-temurin:25-jdk}
+    runtime: ${PILOT_CONTAINER_RUNTIME:}
+    network: ${PILOT_EXECUTION_NETWORK:false}
+    memory-mb: ${PILOT_EXECUTION_MEMORY_MB:2048}
+    cpus: ${PILOT_EXECUTION_CPUS:2}
+    pids-limit: ${PILOT_EXECUTION_PIDS_LIMIT:512}
+  # 远程访问边界。local 只允许本机回环；token 允许远程，但必须带访问令牌。
+  # SSE 的 EventSource 不能加请求头，因此令牌也接受 ?token=，务必配合来源校验与限流使用。
+  security:
+    mode: ${PILOT_SECURITY_MODE:local}
+    token: ${PILOT_SECURITY_TOKEN:}
+    allowed-origins: ${PILOT_SECURITY_ALLOWED_ORIGINS:}
+    rate-limit-per-minute: ${PILOT_SECURITY_RATE_LIMIT:600}
+    audit: ${PILOT_SECURITY_AUDIT:true}
   # 运行期数据保留：事件、快照、trace 默认只增不减。设成正数后每天清理一次早于 N 天的数据，
   # 0 表示关闭（保留全部）。会话本身不会被删。
   retention:
     days: ${PILOT_RETENTION_DAYS:0}
+    # 备份与校验证据通常不需要长期保留，可以单独设置更短的期限
+    backups-days: ${PILOT_RETENTION_BACKUPS_DAYS:0}
+    validation-days: ${PILOT_RETENTION_VALIDATION_DAYS:0}

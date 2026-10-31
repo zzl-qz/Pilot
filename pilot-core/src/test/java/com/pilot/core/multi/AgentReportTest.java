@@ -59,9 +59,9 @@ class AgentReportTest {
 
     @Test
     void dissentComparesConclusionsNotWording() {
-        var a = new AgentReport("a", "T1", "用方案一：加白名单校验", List.of("A.java:10"), List.of(), false);
-        var b = new AgentReport("b", "T1", "用方案一: 加白名单校验！", List.of("A.java:10"), List.of(), false);
-        var c = new AgentReport("c", "T1", "用反射绕开校验", List.of("B.java:20"), List.of(), false);
+        AgentReport a = new AgentReport("a", "T1", "用方案一：加白名单校验", List.of("A.java:10"), List.of(), false);
+        AgentReport b = new AgentReport("b", "T1", "用方案一: 加白名单校验！", List.of("A.java:10"), List.of(), false);
+        AgentReport c = new AgentReport("c", "T1", "用反射绕开校验", List.of("B.java:20"), List.of(), false);
 
         assertFalse(DissentReport.differs(List.of(a, b)));
         assertTrue(DissentReport.differs(List.of(a, c)));
@@ -69,9 +69,9 @@ class AgentReportTest {
 
     @Test
     void dissentReportListsEveryOptionForHumanDecision() {
-        var a = new AgentReport("agentA", "T1", "方案一", List.of("A.java:10"), List.of("风险一"), false);
-        var b = new AgentReport("agentB", "T1", "方案二", List.of("B.java:20"), List.of(), true);
-        var report = new DissentReport("T1", "改路径校验", List.of(a, b), "- 证据强度接近");
+        AgentReport a = new AgentReport("agentA", "T1", "方案一", List.of("A.java:10"), List.of("风险一"), false);
+        AgentReport b = new AgentReport("agentB", "T1", "方案二", List.of("B.java:20"), List.of(), true);
+        DissentReport report = new DissentReport("T1", "改路径校验", List.of(a, b), "- 证据强度接近");
 
         String text = report.toText();
 

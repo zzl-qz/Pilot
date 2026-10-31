@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /** 列出工作区内的一个目录，标记子目录与文件大小。 */
 public final class ListDirTool implements Tool {
@@ -45,6 +46,11 @@ public final class ListDirTool implements Tool {
     }
 
     @Override
+    public boolean parallelSafe() {
+        return true;
+    }
+
+    @Override
     public String execute(Map<String, Object> args) {
         String rawPath = ToolSupport.stringArg(args, "path");
         String target = rawPath == null ? "." : rawPath;
@@ -57,7 +63,7 @@ public final class ListDirTool implements Tool {
         if (!Files.isDirectory(dir)) {
             return "ERROR: 不是目录: " + target;
         }
-        try (var stream = Files.list(dir)) {
+        try (Stream<Path> stream = Files.list(dir)) {
             List<Path> entries = stream
                     // 白名单之外的文件在子 Agent 眼里直接不存在，而不是「列出来但读不了」
                     .filter(entry -> Files.isDirectory(entry) ? paths.allowsDirectory(entry) : paths.allows(entry))

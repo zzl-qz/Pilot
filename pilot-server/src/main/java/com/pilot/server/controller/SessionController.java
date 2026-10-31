@@ -18,6 +18,8 @@ import com.pilot.server.workspace.WorkspaceService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -36,6 +38,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -106,7 +109,7 @@ public class SessionController {
         Project project = projectId == null ? null : requireProject(projectId);
 
         if (project != null) {
-            var existingBlank = sessions.findBlank(projectId);
+            Optional<Session> existingBlank = sessions.findBlank(projectId);
             if (existingBlank.isPresent()) {
                 if (request == null || request.replaceBlank() == null || !request.replaceBlank()) {
                     throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -263,6 +266,24 @@ public class SessionController {
         return new ActiveRunResponse(id, runStarter.activeRun(id).orElse(null));
     }
 
+    /** Cursor/Codex 风格的上下文占用视图：读取的是模型记忆，不是聊天事件条数。 */
+    @GetMapping("/{id}/context")
+    public RunStarter.ContextStatus context(@PathVariable String id) {
+        requireSession(id);
+        return runStarter.contextStatus(id);
+    }
+
+    /** 主动压缩只改模型记忆；人可见的聊天与审计事件完整保留。 */
+    @PostMapping("/{id}/context/compact")
+    public RunStarter.CompactionResult compactContext(@PathVariable String id) {
+        requireSession(id);
+        try {
+            return runStarter.compactContext(id);
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
+    }
+
     /** 用上一次的用户输入重跑一轮，历史里不会重复这条用户消息。 */
     @PostMapping("/{id}/regenerate")
     public MessageResponse regenerate(@PathVariable String id) {
@@ -320,7 +341,46 @@ public class SessionController {
     @GetMapping("/{id}/queue")
     public QueueResponse queue(@PathVariable String id) {
         requireSession(id);
-        return new QueueResponse(runStarter.queued(id));
+        return queueResponse(id);
+    }
+
+    private QueueResponse queueResponse(String id) {
+        List<RunStarter.QueuedMessage> messages = runStarter.queuedMessages(id);
+        return new QueueResponse(
+                messages.stream().map(RunStarter.QueuedMessage::content).toList(),
+                messages.stream()
+                        .map(message -> new QueueEntry(message.content(),
+                                attachments.displayAttachments(id, message.attachments())))
+                        .toList());
+    }
+
+    /**
+     * 取回随消息上传的图片，用于历史记录和排队列表里的缩略图。
+     * 只放行图片：其余落盘文件是给模型工具读的，不该经浏览器暴露。
+     */
+    @GetMapping("/{id}/attachments/{file}")
+    public ResponseEntity<Resource> attachment(@PathVariable String id, @PathVariable String file) {
+        requireSession(id);
+        java.nio.file.Path path;
+        try {
+            path = attachments.resolveImage(id, file);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在");
+        }
+        String lower = file.toLowerCase(java.util.Locale.ROOT);
+        MediaType type = lower.endsWith(".png") ? MediaType.IMAGE_PNG
+                : lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? MediaType.IMAGE_JPEG
+                : lower.endsWith(".gif") ? MediaType.IMAGE_GIF
+                : lower.endsWith(".webp") ? MediaType.parseMediaType("image/webp")
+                : null;
+        if (type == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "附件不是图片");
+        }
+        return ResponseEntity.ok()
+                .contentType(type)
+                .header("X-Content-Type-Options", "nosniff")
+                .header("Cache-Control", "private, max-age=86400")
+                .body(new FileSystemResource(path));
     }
 
     /** 改队列里的某一句，下标从 0 开始。还没轮到的才能改。 */
@@ -334,7 +394,27 @@ public class SessionController {
         if (!runStarter.editQueued(id, index, request.content())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列里没有这一句");
         }
-        return new QueueResponse(runStarter.queued(id));
+        return queueResponse(id);
+    }
+
+    /** 往前排一位。整条消息（含图片）一起移动，所以不能靠前端互换两条的文字。 */
+    @PostMapping("/{id}/queue/{index}/up")
+    public QueueResponse moveQueuedUp(@PathVariable String id, @PathVariable int index) {
+        requireSession(id);
+        if (!runStarter.moveQueuedUp(id, index)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "这一句已经在最前面，或已经不在队列里");
+        }
+        return queueResponse(id);
+    }
+
+    /** 拖拽排序：把 index 这一句挪到 to 的位置，整条消息（含图片）一起移动。 */
+    @PostMapping("/{id}/queue/{index}/move")
+    public QueueResponse moveQueued(@PathVariable String id, @PathVariable int index, @RequestParam int to) {
+        requireSession(id);
+        if (!runStarter.moveQueued(id, index, to)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "位置无效，或这一句已经不在队列里");
+        }
+        return queueResponse(id);
     }
 
     @DeleteMapping("/{id}/queue/{index}")
@@ -343,7 +423,7 @@ public class SessionController {
         if (!runStarter.removeQueued(id, index)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列里没有这一句");
         }
-        return new QueueResponse(runStarter.queued(id));
+        return queueResponse(id);
     }
 
     /**
@@ -449,37 +529,38 @@ public class SessionController {
                         "技能 " + skill + " 不可用：" + reason);
             }
         }
-        // 运行中只接受纯文本追加；先检查状态，避免被拒绝的附件请求产生文件副作用。
+        // 运行中的消息进队列，附件随消息保存；独立验收条件只属于一次新任务的启动，技能是启动期行为，都不能排队。
+        // 先检查状态，避免被拒绝的请求产生文件副作用。
         String activeRun = runStarter.activeRun(id).orElse(null);
-        if (activeRun != null && (hasAttachments || request.task() != null || skill != null)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "排队消息暂不支持附件、独立验收条件和技能，请等本轮结束后再发");
+        if (activeRun != null && (request.task() != null || skill != null)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "排队消息暂不支持独立验收条件和技能，请等本轮结束后再发");
         }
         AttachmentService.Prepared prepared;
         try {
-            prepared = attachments.prepare(id, request.content(), request.attachments());
+            prepared = attachments.prepare(id, request.content(), request.attachments(), request.imagePositions());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
         if (activeRun != null) {
-            if (runStarter.followup(id, prepared.content())) {
+            if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions())) {
                 return ResponseEntity.accepted().body(new MessageResponse(id, activeRun));
             }
         }
         // 检查与启动之间可能刚好起了一个 run：抢占失败就退化成追加输入
         String runId = runStarter.claimRun(id).orElse(null);
         if (runId == null) {
-            if (hasAttachments || request.task() != null || skill != null) {
+            if (request.task() != null || skill != null) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "运行状态已变化，请结束当前任务后重试");
             }
-            if (runStarter.followup(id, prepared.content())) {
+            if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions())) {
                 return ResponseEntity.accepted()
                         .body(new MessageResponse(id, runStarter.activeRun(id).orElse(null)));
             }
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行");
         }
         launch(runId, () -> {
-            sessions.publish(id, runId, new RunStarted(prepared.content()));
-            runStarter.start(id, runId, prepared.content(), prepared.attachments(), request.task(), skill);
+            sessions.publish(id, runId, new RunStarted(prepared.content(), prepared.attachments(), prepared.imagePositions()));
+            runStarter.start(id, runId, prepared.content(), prepared.attachments(), prepared.imagePositions(), request.task(), skill);
         });
         return ResponseEntity.ok().body(new MessageResponse(id, runId));
     }
@@ -520,10 +601,10 @@ public class SessionController {
                                              @RequestHeader(name = "Last-Event-ID", required = false) Long lastEventId) {
         requireSession(id);
         long cursor = after != null ? after : lastEventId != null ? lastEventId : 0L;
-        var emitter = new SseEmitter(0L);
-        var closed = new AtomicBoolean(false);
-        var subscription = new AtomicReference<EventSubscription>();
-        var heartbeat = new AtomicReference<ScheduledFuture<?>>();
+        SseEmitter emitter = new SseEmitter(0L);
+        AtomicBoolean closed = new AtomicBoolean(false);
+        AtomicReference<EventSubscription> subscription = new AtomicReference<EventSubscription>();
+        AtomicReference<ScheduledFuture<?>> heartbeat = new AtomicReference<ScheduledFuture<?>>();
 
         // 浏览器刷新、切换会话或关页面都会让连接失效；这属于正常生命周期，
         // 不能把写入失败当成异常抛给上层，否则每个事件都会刷一份堆栈。
@@ -614,13 +695,24 @@ public class SessionController {
 
     public record MessageRequest(String content, List<AttachmentService.Inbound> attachments,
                                  com.pilot.server.session.TaskControlService.Requirements task,
-                                 String skill) { }
+                                 String skill, List<Integer> imagePositions) {
+        public MessageRequest(String content, List<AttachmentService.Inbound> attachments,
+                              com.pilot.server.session.TaskControlService.Requirements task) {
+            this(content, attachments, task, null, List.of());
+        }
+    }
 
     public record ResendRequest(Long sequence, String content) { }
 
     public record QueueEditRequest(String content) { }
 
-    public record QueueResponse(List<String> items) { }
+    /**
+     * @param items   排队消息正文，顺序即执行顺序（保持旧契约）
+     * @param entries 同一批消息的结构化版本，额外带上图片附件，界面据此画缩略图
+     */
+    public record QueueResponse(List<String> items, List<QueueEntry> entries) { }
+
+    public record QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments) { }
 
     public record MessageResponse(String sessionId, String runId) { }
 

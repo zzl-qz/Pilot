@@ -44,15 +44,7 @@ public final class SandboxEditFileTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "path", Map.of("type", "string", "description", "工作区内的相对文件路径"),
-                        "old_string", Map.of("type", "string", "description",
-                                "要被替换的原文，必须唯一匹配；找不到或匹配多处时会返回相近片段，按片段修正，不要凭印象重写整段"),
-                        "new_string", Map.of("type", "string", "description", "替换后的内容，可为空字符串表示删除")),
-                "required", List.of("path", "old_string", "new_string"),
-                "additionalProperties", false);
+        return EditFileTool.schema();
     }
 
     @Override
@@ -66,16 +58,12 @@ public final class SandboxEditFileTool implements Tool {
         if (rawPath == null) {
             return "ERROR: 缺少参数 path";
         }
-        Object oldValue = args == null ? null : args.get("old_string");
-        Object newValue = args == null ? null : args.get("new_string");
-        if (oldValue == null || oldValue.toString().isEmpty()) {
-            return "ERROR: 缺少参数 old_string（不能为空）";
+        List<ExactEditBatch.Edit> edits;
+        try {
+            edits = ExactEditBatch.parse(args);
+        } catch (IllegalArgumentException e) {
+            return "ERROR: " + e.getMessage();
         }
-        if (newValue == null) {
-            return "ERROR: 缺少参数 new_string";
-        }
-        String oldString = oldValue.toString();
-        String newString = newValue.toString();
 
         Path file;
         try {
@@ -99,26 +87,17 @@ public final class SandboxEditFileTool implements Tool {
             if (ToolSupport.isBinary(bytes)) {
                 return "ERROR: 二进制文件，无法编辑: " + rawPath;
             }
-            String content = new String(bytes, StandardCharsets.UTF_8);
-            String search = oldString;
-            String replacement = newString;
-            int index = content.indexOf(search);
-            if (index < 0 && content.contains("\r\n")) {
-                search = toCrlf(oldString);
-                replacement = toCrlf(newString);
-                index = content.indexOf(search);
+            String content = sandbox.currentText(paths.display(file), new String(bytes, StandardCharsets.UTF_8));
+            ExactEditBatch.Applied applied;
+            try {
+                applied = ExactEditBatch.apply(content, edits);
+            } catch (IllegalArgumentException e) {
+                return "ERROR: " + e.getMessage();
             }
-            if (index < 0) {
-                return "ERROR: 未找到 old_string。请先用 read_file 确认原文与缩进。";
-            }
-            if (content.indexOf(search, index + search.length()) >= 0) {
-                return "ERROR: old_string 匹配到多处，无法唯一定位。请提供更多上下文后重试。";
-            }
-            String updated = content.substring(0, index) + replacement + content.substring(index + search.length());
-            sandbox.record(paths.display(file), content, updated);
+            sandbox.record(paths.display(file), content, applied.content());
             reads.observed(file);
-            return "已提交到沙箱 " + paths.display(file) + "：替换 1 处（"
-                    + (int) search.lines().count() + " 行 → " + (int) replacement.lines().count() + " 行）";
+            return "已提交到沙箱 " + paths.display(file) + "：替换 " + applied.count() + " 处（"
+                    + applied.oldLines() + " 行 → " + applied.newLines() + " 行）";
         } catch (IOException e) {
             return "ERROR: 读取失败: " + e.getMessage();
         } catch (RuntimeException e) {
@@ -126,7 +105,4 @@ public final class SandboxEditFileTool implements Tool {
         }
     }
 
-    private static String toCrlf(String text) {
-        return text.replace("\r\n", "\n").replace("\n", "\r\n");
-    }
 }

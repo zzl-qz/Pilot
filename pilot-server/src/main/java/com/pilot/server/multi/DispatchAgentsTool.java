@@ -23,6 +23,7 @@ import java.util.function.Consumer;
 public final class DispatchAgentsTool implements Tool {
     private static final int MAX_TASKS = 12;
 
+    private final com.pilot.core.model.ModelClient executionClient;
     private final MultiAgentService service;
     private final String sessionId;
     private final String runId;
@@ -32,6 +33,11 @@ public final class DispatchAgentsTool implements Tool {
 
     public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
                               Consumer<SessionEvent> events, BooleanSupplier cancelled) {
+        this(service, sessionId, runId, workspace, events, cancelled, null);
+    }
+    public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
+                              Consumer<SessionEvent> events, BooleanSupplier cancelled, com.pilot.core.model.ModelClient executionClient) {
+        this.executionClient = executionClient;
         this.service = Objects.requireNonNull(service, "service must not be null");
         this.sessionId = Objects.requireNonNull(sessionId, "sessionId must not be null");
         this.runId = Objects.requireNonNull(runId, "runId must not be null");
@@ -105,7 +111,7 @@ public final class DispatchAgentsTool implements Tool {
         }
         try {
             MultiAgentService.Result result = service.dispatch(
-                    new MultiAgentService.Dispatch(sessionId, runId, workspace, specs, events, cancelled));
+                    new MultiAgentService.Dispatch(sessionId, runId, workspace, specs, events, cancelled, executionClient));
             return result.report();
         } catch (IllegalArgumentException e) {
             return "ERROR: 任务计划不合法：" + e.getMessage();

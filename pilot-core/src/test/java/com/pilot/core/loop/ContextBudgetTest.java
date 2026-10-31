@@ -20,10 +20,10 @@ class ContextBudgetTest {
 
     @Test
     void leavesHistoryAloneWellUnderBudget() {
-        var messages = textHistory(3, 100);
-        var calls = new AtomicInteger();
-        var budget = new ContextBudget(recording(calls, covered(5)));
-        var events = new ArrayList<SessionEvent>();
+        List<Message> messages = textHistory(3, 100);
+        AtomicInteger calls = new AtomicInteger();
+        ContextBudget budget = new ContextBudget(recording(calls, covered(5)));
+        ArrayList<SessionEvent> events = new ArrayList<SessionEvent>();
 
         boolean compacted = budget.apply(messages, 100_000, events::add);
 
@@ -35,13 +35,13 @@ class ContextBudgetTest {
 
     @Test
     void compactsAndReportsWhenOverTheThreshold() {
-        var messages = textHistory(4, 1_000);
+        List<Message> messages = textHistory(4, 1_000);
         int before = ContextCompactor.totalChars(messages);
         // usage ≈ 0.85：越过预压缩水位，但没到强制档，只压一轮
         int limit = (int) (before / 0.85);
-        var calls = new AtomicInteger();
-        var budget = new ContextBudget(recording(calls, covered(5)));
-        var events = new ArrayList<SessionEvent>();
+        AtomicInteger calls = new AtomicInteger();
+        ContextBudget budget = new ContextBudget(recording(calls, covered(5)));
+        ArrayList<SessionEvent> events = new ArrayList<SessionEvent>();
 
         boolean compacted = budget.apply(messages, limit, events::add);
 
@@ -54,11 +54,11 @@ class ContextBudgetTest {
     /** 摘要没有收益时不要每步都重试：退避到上下文再涨 5% 之后。 */
     @Test
     void backsOffAfterAFruitlessCompaction() {
-        var messages = textHistory(4, 1_000);
+        List<Message> messages = textHistory(4, 1_000);
         int limit = (int) (ContextCompactor.totalChars(messages) / 0.85);
-        var calls = new AtomicInteger();
+        AtomicInteger calls = new AtomicInteger();
         // covered == 0 表示压不动（摘要不比原文短、或模型失败）
-        var budget = new ContextBudget(recording(calls, notCompacted()));
+        ContextBudget budget = new ContextBudget(recording(calls, notCompacted()));
 
         boolean first = budget.apply(messages, limit, event -> { });
         assertFalse(first, "没有收益的压缩不算压缩");
@@ -71,10 +71,10 @@ class ContextBudgetTest {
 
     @Test
     void retriesAfterContextGrowsPastTheBackoffWatermark() {
-        var messages = textHistory(4, 1_000);
+        List<Message> messages = textHistory(4, 1_000);
         int limit = (int) (ContextCompactor.totalChars(messages) / 0.85);
-        var calls = new AtomicInteger();
-        var budget = new ContextBudget(recording(calls, notCompacted()));
+        AtomicInteger calls = new AtomicInteger();
+        ContextBudget budget = new ContextBudget(recording(calls, notCompacted()));
 
         budget.apply(messages, limit, event -> { });
         assertEquals(1, calls.get());
@@ -87,14 +87,49 @@ class ContextBudgetTest {
         assertEquals(2, calls.get(), "上下文继续增长后应重新尝试压缩");
     }
 
+    @Test
+    void opensCircuitAfterThreeFruitlessCompactions() {
+        List<Message> messages = textHistory(4, 1_000);
+        AtomicInteger calls = new AtomicInteger();
+        ContextBudget budget = new ContextBudget(recording(calls, notCompacted()));
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            int limit = (int) (ContextCompactor.totalChars(messages) / 0.85);
+            budget.apply(messages, limit, event -> { });
+            messages.add(Message.assistant("新内容".repeat(300), List.of()));
+            messages.add(Message.user("新观察".repeat(300)));
+        }
+        assertEquals(3, calls.get());
+
+        int limit = (int) (ContextCompactor.totalChars(messages) / 0.85);
+        budget.apply(messages, limit, event -> { });
+
+        assertEquals(3, calls.get(), "连续三次无收益后应熔断摘要请求");
+    }
+
+    @Test
+    void opensCircuitAfterThreeRapidRefills() {
+        List<Message> messages = textHistory(4, 1_000);
+        int limit = (int) (ContextCompactor.totalChars(messages) / 0.85);
+        AtomicInteger calls = new AtomicInteger();
+        ContextBudget budget = new ContextBudget(recording(calls, covered(5)));
+
+        budget.apply(messages, limit, event -> { });
+        budget.apply(messages, limit, event -> { });
+        budget.apply(messages, limit, event -> { });
+        budget.apply(messages, limit, event -> { });
+
+        assertEquals(3, calls.get(), "第三次快速回填后应停止继续摘要");
+    }
+
     /** 摘要失败也必须有兜底，否则下一次请求直接超窗。 */
     @Test
     void hardDropsWhenCompactionIsNotEnough() {
-        var messages = toolHistory(30, 8_000);
+        List<Message> messages = toolHistory(30, 8_000);
         ModelClient failing = (request, tools) -> {
             throw new ModelClientException("摘要模型挂了");
         };
-        var budget = new ContextBudget(new ContextCompactor(failing, 2)::compact);
+        ContextBudget budget = new ContextBudget(new ContextCompactor(failing, 2)::compact);
 
         budget.apply(messages, 60_000, event -> { });
 
@@ -109,8 +144,8 @@ class ContextBudgetTest {
 
     @Test
     void usageTakesTheFullerOfCharsAndTokens() {
-        var ascii = List.of(Message.user("a".repeat(400)));
-        var chinese = List.of(Message.user("中".repeat(400)));
+        List<Message> ascii = List.of(Message.user("a".repeat(400)));
+        List<Message> chinese = List.of(Message.user("中".repeat(400)));
 
         // 同样 400 字符：英文约 100 token，中文约 400 token。字符预算宽松时取 token 口径
         assertTrue(ContextBudget.usage(chinese, 10_000, 1_000) > ContextBudget.usage(ascii, 10_000, 1_000));
@@ -120,7 +155,7 @@ class ContextBudgetTest {
 
     /** 纯文本历史：prune / truncate 只处理 tool 消息，这里可以精确控制水位。 */
     private static List<Message> textHistory(int groups, int chars) {
-        var messages = new ArrayList<Message>();
+        ArrayList<Message> messages = new ArrayList<Message>();
         messages.add(Message.system("sys"));
         for (int i = 0; i < groups; i++) {
             messages.add(Message.assistant("a".repeat(chars), List.of()));
@@ -130,7 +165,7 @@ class ContextBudgetTest {
     }
 
     private static List<Message> toolHistory(int groups, int charsPerTool) {
-        var messages = new ArrayList<Message>();
+        ArrayList<Message> messages = new ArrayList<Message>();
         messages.add(Message.system("sys"));
         for (int i = 0; i < groups; i++) {
             messages.add(Message.assistant("step " + i,

@@ -28,7 +28,7 @@ public final class InMemorySettingsStore implements SettingsStore {
         if (updates == null || updates.isEmpty()) {
             return;
         }
-        var next = new HashMap<>(values);
+        HashMap<String,String> next = new HashMap<>(values);
         next.putAll(updates);
         // Map.copyOf 拒绝 null 键值：属于调用方错误，直接抛出且不动原快照
         values = Map.copyOf(next);

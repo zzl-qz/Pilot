@@ -1,9 +1,17 @@
 package com.pilot.server.workspace;
 
+import com.pilot.core.browser.BrowserBackend;
+import com.pilot.core.browser.BrowserTool;
+import com.pilot.core.mcp.McpCallTool;
+import com.pilot.core.mcp.McpManager;
+import com.pilot.core.mcp.McpToolsTool;
 import com.pilot.core.multi.AgentScope;
 import com.pilot.core.plan.PlanSink;
+import com.pilot.core.tool.ApplyPatchTool;
 import com.pilot.core.tool.CreateFileTool;
+import com.pilot.core.tool.CommandChangeTracker;
 import com.pilot.core.tool.EditFileTool;
+import com.pilot.core.tool.GlobFilesTool;
 import com.pilot.core.tool.ListDirTool;
 import com.pilot.core.tool.ReadFileTool;
 import com.pilot.core.tool.ReadTracker;
@@ -13,19 +21,22 @@ import com.pilot.core.tool.SandboxEditFileTool;
 import com.pilot.core.tool.SandboxSink;
 import com.pilot.core.tool.SearchTool;
 import com.pilot.core.tool.SnapshotSink;
+import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.UpdatePlanTool;
 import com.pilot.core.tool.WebFetchTool;
 import com.pilot.core.tool.WebSearchTool;
 import com.pilot.core.workspace.PathValidator;
-import tools.jackson.databind.ObjectMapper;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.WebSearchProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
 import java.net.http.HttpClient;
-import java.time.Duration;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -47,6 +58,9 @@ public class WorkspaceToolFactory {
             .followRedirects(HttpClient.Redirect.NEVER)
             .build();
     private final ConcurrentMap<String, ToolRegistry> cache = new ConcurrentHashMap<>();
+    /** 可选能力：测试里手工构造本工厂时不注入，对应工具就不存在。 */
+    private BrowserBackend browser;
+    private McpManager mcp;
 
     public WorkspaceToolFactory(AgentProperties properties, WebSearchProperties webSearchProperties,
                                 SnapshotSink snapshots, ObjectMapper mapper) {
@@ -54,6 +68,34 @@ public class WorkspaceToolFactory {
         this.webSearchProperties = webSearchProperties;
         this.snapshots = snapshots;
         this.mapper = mapper;
+    }
+
+    @Autowired(required = false)
+    public void setBrowser(BrowserBackend browser) {
+        this.browser = browser;
+    }
+
+    @Autowired(required = false)
+    public void setMcp(McpManager mcp) {
+        this.mcp = mcp;
+    }
+
+    /**
+     * 只在「某个会话的某次运行」里才有意义的外部能力：浏览器按会话隔离，MCP 按工作区查配置。
+     * 工具本身始终注册，是否对模型可见由各自的 {@code availability()} 在运行时决定——
+     * 浏览器没装好、没有配置 MCP 服务器时，模型看不到它们。
+     */
+    public List<Tool> sessionExtras(String sessionId, String workspace) {
+        List<Tool> extras = new java.util.ArrayList<>();
+        Path root = resolve(workspace);
+        if (browser != null) {
+            extras.add(new BrowserTool(browser, sessionId, new PathValidator(root)));
+        }
+        if (mcp != null) {
+            extras.add(new McpToolsTool(mcp, root));
+            extras.add(new McpCallTool(mcp, root));
+        }
+        return extras;
     }
 
     /** @param workspace 会话工作区；为空时回退到配置中的默认工作区 */
@@ -67,7 +109,7 @@ public class WorkspaceToolFactory {
      * 会话级工具集：额外注册 {@code update_plan}（以及调用方随后追加的 spawn_agent）。
      *
      * <p>刻意不缓存：工具实例会捕获本次 run 的事件出口，复用上一轮的工具会把事件发到旧的 run 上。
-     * 每次运行新建 7 个无状态对象，开销可以忽略。
+     * 每次运行新建若干无状态对象，开销可以忽略。
      */
     public ToolRegistry registryFor(String workspace, PlanSink planSink) {
         return create(resolve(workspace), planSink);
@@ -92,15 +134,18 @@ public class WorkspaceToolFactory {
      */
     public ToolRegistry registryForScope(String workspace, AgentScope scope, SandboxSink sandbox) {
         AgentScope view = scope == null ? AgentScope.readOnly(java.util.List.of(), java.util.List.of()) : scope;
-        var validator = new PathValidator(resolve(workspace), view);
-        var registry = new ToolRegistry();
+        PathValidator validator = new PathValidator(resolve(workspace), view);
+        ToolRegistry registry = new ToolRegistry();
         // 每个子 Agent 一份「先读后改」记录，与父级互不共享
-        var reads = new ReadTracker();
+        ReadTracker reads = new ReadTracker();
         if (view.allowsTool("read_file")) {
-            registry.register(new ReadFileTool(validator, reads));
+            registry.register(new ReadFileTool(validator, reads, sandbox));
         }
         if (view.allowsTool("list_dir")) {
             registry.register(new ListDirTool(validator));
+        }
+        if (view.allowsTool("glob_files")) {
+            registry.register(new GlobFilesTool(validator));
         }
         if (view.allowsTool("search_text")) {
             registry.register(new SearchTool(validator));
@@ -112,7 +157,7 @@ public class WorkspaceToolFactory {
             registry.register(new WebFetchTool(webClient));
         }
         if (view.allowsTool("run_command")) {
-            registry.register(new RunCommandTool(validator));
+            registry.register(new RunCommandTool(validator, commandChanges()));
         }
         if (view.writable() && view.allowsTool("edit_file")) {
             registry.register(new SandboxEditFileTool(validator, sandbox, reads));
@@ -128,22 +173,28 @@ public class WorkspaceToolFactory {
     }
 
     private ToolRegistry create(Path root, PlanSink planSink) {
-        var validator = new PathValidator(root);
-        var registry = new ToolRegistry();
+        PathValidator validator = new PathValidator(root);
+        ToolRegistry registry = new ToolRegistry();
         // 每次 run 一份「先读后改」记录：read_file 登记过的文件才允许 edit_file
         // （刚创建或刚编辑过的文件同样登记，连续编辑不受影响）
-        var reads = new ReadTracker();
+        ReadTracker reads = new ReadTracker();
         registry.register(new ReadFileTool(validator, reads));
         registry.register(new ListDirTool(validator));
+        registry.register(new GlobFilesTool(validator));
         registry.register(new SearchTool(validator));
         registry.register(searchTool());
         registry.register(new WebFetchTool(webClient));
         registry.register(new EditFileTool(validator, snapshots, reads));
         registry.register(new CreateFileTool(validator, snapshots, reads));
-        registry.register(new RunCommandTool(validator));
+        registry.register(new ApplyPatchTool(validator, snapshots, reads));
+        registry.register(new RunCommandTool(validator, commandChanges()));
         if (planSink != null) {
             registry.register(new UpdatePlanTool(planSink));
         }
         return registry;
+    }
+
+    private CommandChangeTracker commandChanges() {
+        return snapshots instanceof CommandChangeTracker tracker ? tracker : CommandChangeTracker.none();
     }
 }

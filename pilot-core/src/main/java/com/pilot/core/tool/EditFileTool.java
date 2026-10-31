@@ -46,14 +46,23 @@ public final class EditFileTool implements Tool, WritesFiles {
 
     @Override
     public Map<String, Object> parameters() {
+        return schema();
+    }
+
+    static Map<String, Object> schema() {
         return Map.of(
                 "type", "object",
                 "properties", Map.of(
                         "path", Map.of("type", "string", "description", "工作区内的相对文件路径"),
                         "old_string", Map.of("type", "string", "description",
-                                "要被替换的原文，必须唯一匹配；找不到或匹配多处时会返回相近片段，按片段修正，不要凭印象重写整段"),
-                        "new_string", Map.of("type", "string", "description", "替换后的内容，可为空字符串表示删除")),
-                "required", List.of("path", "old_string", "new_string"),
+                                "单处替换的原文，必须唯一匹配；与 edits 二选一"),
+                        "new_string", Map.of("type", "string", "description", "单处替换的新内容，可为空；与 edits 二选一"),
+                        "edits", Map.of("type", "array", "description", "同一文件内多处互不重叠的替换；均匹配原文件，整体成功或整体失败",
+                                "items", Map.of("type", "object", "properties", Map.of(
+                                        "old_string", Map.of("type", "string", "description", "唯一匹配的原文"),
+                                        "new_string", Map.of("type", "string", "description", "替换后的内容，可为空")),
+                                        "required", List.of("old_string", "new_string"), "additionalProperties", false))),
+                "required", List.of("path"),
                 "additionalProperties", false);
     }
 
@@ -68,13 +77,11 @@ public final class EditFileTool implements Tool, WritesFiles {
         if (rawPath == null) {
             return "ERROR: 缺少参数 path";
         }
-        String oldString = raw(args, "old_string");
-        String newString = raw(args, "new_string");
-        if (oldString == null || oldString.isEmpty()) {
-            return "ERROR: 缺少参数 old_string（不能为空）";
-        }
-        if (newString == null) {
-            return "ERROR: 缺少参数 new_string";
+        List<ExactEditBatch.Edit> edits;
+        try {
+            edits = ExactEditBatch.parse(args);
+        } catch (IllegalArgumentException e) {
+            return "ERROR: " + e.getMessage();
         }
 
         Path file;
@@ -104,34 +111,18 @@ public final class EditFileTool implements Tool, WritesFiles {
             if (ToolSupport.isBinary(bytes)) {
                 return "ERROR: 二进制文件，无法编辑: " + rawPath;
             }
-            String content = new String(bytes, StandardCharsets.UTF_8);
-
-            String search = oldString;
-            String replacement = newString;
-            int index = content.indexOf(search);
-            if (index < 0 && content.contains("\r\n")) {
-                search = toCrlf(oldString);
-                replacement = toCrlf(newString);
-                index = content.indexOf(search);
+            ExactEditBatch.Applied applied;
+            try {
+                applied = ExactEditBatch.apply(new String(bytes, StandardCharsets.UTF_8), edits);
+            } catch (IllegalArgumentException e) {
+                return "ERROR: " + e.getMessage();
             }
-            if (index < 0) {
-                return "ERROR: 未找到 old_string。最接近的文件片段：\n" + closestExcerpt(content, oldString)
-                        + "\n请基于该片段提供更精确的旧内容，不要猜测缩进。";
-            }
-
-            int next = content.indexOf(search, index + search.length());
-            if (next >= 0) {
-                int count = countMatches(content, search);
-                return "ERROR: old_string 匹配到 " + count + " 处，无法唯一定位。请提供更多上下文后重试。";
-            }
-
-            String updated = content.substring(0, index) + replacement + content.substring(index + search.length());
             snapshots.beforeWrite(file);
-            Files.writeString(file, updated, StandardCharsets.UTF_8);
+            Files.writeString(file, applied.content(), StandardCharsets.UTF_8);
             snapshots.afterWrite(file);
             reads.observed(file);
-            return "已修改 " + paths.display(file) + "：替换 1 处（"
-                    + lineCount(search) + " 行 → " + lineCount(replacement) + " 行）";
+            return "已修改 " + paths.display(file) + "：替换 " + applied.count() + " 处（"
+                    + applied.oldLines() + " 行 → " + applied.newLines() + " 行）";
         } catch (IOException e) {
             return "ERROR: 写入失败: " + e.getMessage();
         }
@@ -150,61 +141,4 @@ public final class EditFileTool implements Tool, WritesFiles {
         }
     }
 
-    private static String raw(Map<String, Object> args, String key) {
-        Object value = args == null ? null : args.get(key);
-        return value == null ? null : value.toString();
-    }
-
-    private static String toCrlf(String text) {
-        return text.replace("\r\n", "\n").replace("\n", "\r\n");
-    }
-
-    private static int countMatches(String content, String search) {
-        int count = 0;
-        int from = 0;
-        while (true) {
-            int index = content.indexOf(search, from);
-            if (index < 0) {
-                return count;
-            }
-            count++;
-            from = index + search.length();
-        }
-    }
-
-    private static String closestExcerpt(String content, String search) {
-        String[] sourceLines = content.split("\\R", -1);
-        String[] searchLines = search.split("\\R", -1);
-        String needle = searchLines.length == 0 ? search : searchLines[0].strip();
-        int bestLine = 0;
-        int bestScore = -1;
-        for (int i = 0; i < sourceLines.length; i++) {
-            String candidate = sourceLines[i].strip();
-            int score = commonPrefix(candidate, needle);
-            if (!needle.isEmpty() && candidate.contains(needle)) score += needle.length();
-            if (score > bestScore) {
-                bestScore = score;
-                bestLine = i;
-            }
-        }
-        int from = Math.max(0, bestLine - 2);
-        int to = Math.min(sourceLines.length, bestLine + 3);
-        StringBuilder excerpt = new StringBuilder();
-        for (int i = from; i < to; i++) {
-            if (excerpt.length() > 0) excerpt.append('\n');
-            excerpt.append(i + 1).append(": ").append(sourceLines[i]);
-        }
-        return excerpt.toString();
-    }
-
-    private static int commonPrefix(String left, String right) {
-        int length = Math.min(left.length(), right.length());
-        int index = 0;
-        while (index < length && left.charAt(index) == right.charAt(index)) index++;
-        return index;
-    }
-
-    private static int lineCount(String text) {
-        return (int) text.lines().count();
-    }
 }

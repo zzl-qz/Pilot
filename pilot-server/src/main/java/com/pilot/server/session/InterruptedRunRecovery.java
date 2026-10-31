@@ -2,11 +2,13 @@ package com.pilot.server.session;
 
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.session.InterruptedRun;
+import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
@@ -24,6 +26,9 @@ import java.util.UUID;
  * 会话会永远停在 RUNNING，客户端回放历史后一直显示「正在处理」。
  * 这里对每个被中断的运行补一条 {@code RunFailed("INTERRUPTED")}，事件驱动状态迁移到
  * {@code SessionStatus.INTERRUPTED}，界面即可显示「已中断 · 可继续」。
+ *
+ * <p>第二轮收敛检查点：释放上次遗留的租约、把状态标成 INTERRUPTED，并记录「停在第几步、
+ * 下一步是什么」。这一步只做安全接管准备，不自动重放工具调用——真正的继续仍由用户触发。
  */
 @Component
 public class InterruptedRunRecovery implements ApplicationRunner {
@@ -32,10 +37,21 @@ public class InterruptedRunRecovery implements ApplicationRunner {
 
     private final RunRepository runs;
     private final SessionService sessions;
+    private final RunStateTracker tracker;
+    private final RecoveryReportService report;
 
+    /** 兼容测试与无检查点场景。 */
     public InterruptedRunRecovery(RunRepository runs, SessionService sessions) {
+        this(runs, sessions, null, null);
+    }
+
+    @Autowired
+    public InterruptedRunRecovery(RunRepository runs, SessionService sessions, RunStateTracker tracker,
+                                  RecoveryReportService report) {
         this.runs = runs;
         this.sessions = sessions;
+        this.tracker = tracker;
+        this.report = report;
     }
 
     @Override
@@ -52,7 +68,22 @@ public class InterruptedRunRecovery implements ApplicationRunner {
             if (session.status().terminal() || handled.contains(session.id())) {
                 continue;
             }
-            closeSession(session.id(), "run_recovered-" + UUID.randomUUID());
+            // 有检查点时用检查点里的 runId，界面才能把「继续」关联到同一次运行
+            String runId = tracker == null ? null : tracker.current(session.id())
+                    .map(RunCheckpoint::runId).orElse(null);
+            closeSession(session.id(), runId == null ? "run_recovered-" + UUID.randomUUID() : runId);
+        }
+        if (tracker == null || report == null) {
+            return;
+        }
+        try {
+            List<RunStateTracker.RecoveryEntry> entries = tracker.recoverAfterRestart();
+            String note = entries.isEmpty() ? "没有需要接管的遗留运行" : "已收敛 " + entries.size() + " 个遗留运行";
+            report.record(tracker.instanceId(), entries, note);
+            log.info("启动恢复完成：{}", note);
+        } catch (RuntimeException e) {
+            log.warn("启动恢复检查点失败", e);
+            report.record(tracker.instanceId(), List.of(), "检查点恢复失败：" + e.getMessage());
         }
     }
 

@@ -1,9 +1,12 @@
 package com.pilot.server.config;
 
 import com.pilot.server.store.InMemorySettingsStore;
+import com.pilot.server.store.SettingsStore;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -18,7 +21,7 @@ class ModelSettingsTest {
 
     @Test
     void fallsBackToConfiguredProperties() {
-        var settings = new ModelSettings(defaults, store);
+        ModelSettings settings = new ModelSettings(defaults, store);
 
         assertEquals("gpt-default", settings.snapshot().model());
         assertEquals("https://api.example.com/v1", settings.snapshot().endpoint());
@@ -27,11 +30,11 @@ class ModelSettingsTest {
 
     @Test
     void updatePersistsAndSurvivesRestart() {
-        var settings = new ModelSettings(defaults, store);
+        ModelSettings settings = new ModelSettings(defaults, store);
 
         settings.update("https://gateway.test/v1", "gpt-new", "sk-new-key");
 
-        var restarted = new ModelSettings(defaults, store);
+        ModelSettings restarted = new ModelSettings(defaults, store);
         assertEquals("gpt-new", restarted.snapshot().model());
         assertEquals("https://gateway.test/v1", restarted.snapshot().endpoint());
         assertEquals("sk-new-key", restarted.snapshot().apiKey());
@@ -39,7 +42,7 @@ class ModelSettingsTest {
 
     @Test
     void blankFieldsKeepPreviousValues() {
-        var settings = new ModelSettings(defaults, store);
+        ModelSettings settings = new ModelSettings(defaults, store);
 
         settings.update(null, "only-model", "   ");
 
@@ -50,7 +53,7 @@ class ModelSettingsTest {
 
     @Test
     void explicitlyClearsApiKeyAndPersistsTheClear() {
-        var settings = new ModelSettings(defaults, store);
+        ModelSettings settings = new ModelSettings(defaults, store);
         settings.update(null, null, null, true);
 
         assertFalse(settings.snapshot().hasApiKey());
@@ -59,7 +62,7 @@ class ModelSettingsTest {
 
     @Test
     void failedAtomicSaveDoesNotPublishNewSnapshot() {
-        var failingStore = new com.pilot.server.store.SettingsStore() {
+        SettingsStore failingStore = new com.pilot.server.store.SettingsStore() {
             @Override
             public java.util.Optional<String> find(String key) {
                 return java.util.Optional.empty();
@@ -75,7 +78,7 @@ class ModelSettingsTest {
                 throw new IllegalStateException("write failed");
             }
         };
-        var settings = new ModelSettings(defaults, failingStore);
+        ModelSettings settings = new ModelSettings(defaults, failingStore);
 
         assertThrows(IllegalStateException.class,
                 () -> settings.update("https://gateway.test/v1", "new-model", "new-key"));
@@ -87,8 +90,8 @@ class ModelSettingsTest {
     /** 端点/模型/密钥必须在一次 saveAll 里落盘，否则崩溃时可能留下半套配置。 */
     @Test
     void persistsAllModelKeysInOneAtomicWrite() {
-        var batches = new java.util.ArrayList<java.util.Map<String, String>>();
-        var recording = new com.pilot.server.store.SettingsStore() {
+        ArrayList<Map<String,String>> batches = new java.util.ArrayList<java.util.Map<String, String>>();
+        SettingsStore recording = new com.pilot.server.store.SettingsStore() {
             private final java.util.Map<String, String> values = new java.util.HashMap<>();
 
             @Override
@@ -107,7 +110,7 @@ class ModelSettingsTest {
                 values.putAll(updates);
             }
         };
-        var settings = new ModelSettings(defaults, recording);
+        ModelSettings settings = new ModelSettings(defaults, recording);
 
         settings.update("https://gateway.test/v1", "gpt-new", "sk-1");
 
@@ -119,7 +122,7 @@ class ModelSettingsTest {
 
     @Test
     void rejectsNonHttpEndpoint() {
-        var settings = new ModelSettings(defaults, store);
+        ModelSettings settings = new ModelSettings(defaults, store);
 
         assertThrows(IllegalArgumentException.class,
                 () -> settings.update("file:/etc/passwd", null, null));
@@ -128,10 +131,10 @@ class ModelSettingsTest {
 
     @Test
     void masksApiKeyForDisplay() {
-        var settings = new ModelSettings(defaults, store);
+        ModelSettings settings = new ModelSettings(defaults, store);
         settings.update(null, null, "sk-1234567890abcdef");
 
-        var snapshot = settings.snapshot();
+        ModelSettings.Snapshot snapshot = settings.snapshot();
         assertTrue(snapshot.hasApiKey());
         assertFalse(snapshot.maskedApiKey().contains("1234567890abcdef"), "掩码不能泄露完整 Key");
         assertTrue(snapshot.maskedApiKey().endsWith("cdef"));
@@ -139,7 +142,7 @@ class ModelSettingsTest {
 
     @Test
     void reportsMissingKeyWhenBlank() {
-        var settings = new ModelSettings(
+        ModelSettings settings = new ModelSettings(
                 new ModelProperties("", "https://api.example.com/v1", "m", List.of("m")), store);
 
         assertFalse(settings.snapshot().hasApiKey());

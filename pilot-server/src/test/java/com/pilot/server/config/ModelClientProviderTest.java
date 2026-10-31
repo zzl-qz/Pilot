@@ -14,11 +14,11 @@ class ModelClientProviderTest {
 
     @Test
     void rebuildsDelegateOnlyWhenSettingsChange() {
-        var store = new InMemorySettingsStore();
-        var settings = new ModelSettings(
+        InMemorySettingsStore store = new InMemorySettingsStore();
+        ModelSettings settings = new ModelSettings(
                 new ModelProperties("sk-1", "https://api.example.com/v1", "model-a",
                         List.of("model-a", "model-b")), store);
-        var built = new ArrayList<ModelSettings.Snapshot>();
+        ArrayList<ModelSettings.Snapshot> built = new ArrayList<ModelSettings.Snapshot>();
         ModelClient client = new ModelClientProvider(settings, snapshot -> {
             built.add(snapshot);
             return (messages, tools) -> new ModelResponse(snapshot.model(), List.of());

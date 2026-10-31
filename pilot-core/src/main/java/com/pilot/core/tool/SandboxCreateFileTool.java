@@ -72,7 +72,7 @@ public final class SandboxCreateFileTool implements Tool {
         } catch (RuntimeException e) {
             return "ERROR: " + e.getMessage();
         }
-        if (Files.exists(file)) {
+        if (Files.exists(file) || sandbox.proposed(paths.display(file))) {
             return "ERROR: 文件已存在: " + rawPath + "，请改用 edit_file 修改。";
         }
         try {

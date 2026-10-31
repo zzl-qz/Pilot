@@ -71,9 +71,9 @@ public final class WebSearchTool implements Tool {
                 if (lines.size() == count) {
                     break;
                 }
-                String title = item.path("title").asText("").strip();
-                String url = item.path("url").asText("").strip();
-                String snippet = item.path("content").asText("").strip();
+                String title = item.path("title").asString("").strip();
+                String url = item.path("url").asString("").strip();
+                String snippet = item.path("content").asString("").strip();
                 if (title.isEmpty() && url.isEmpty()) {
                     continue;
                 }

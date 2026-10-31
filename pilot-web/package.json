@@ -3,7 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test src/test/js",
-    "check": "node --check src/main/resources/static/app.js"
+    "test": "node --test src/test/js/*.test.js",
+    "check": "node --check src/main/resources/static/app.js",
+    "check:viewports": "node src/test/viewport/check-viewports.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
   }
 }

@@ -4,15 +4,15 @@ import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolSupport;
+import com.pilot.core.tool.VerificationCheck;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
  * <p>两道门，各最多催几次：
  * <ol>
  *   <li>验证：改了代码，却没有任何退出码为 0 的构建 / 测试记录；</li>
- *   <li>自审：有文件改动（或只读任务读得太少），让模型对照原始目标和计划再核对一遍有没有缩水。</li>
+ *   <li>自审：没有独立审查时，有文件改动（或只读任务读得太少），让模型核对原始目标。</li>
  * </ol>
  *
  * <p>抽成独立类是因为它有自己的状态（催了几次、看过哪些路径、调了几次工具），
@@ -32,6 +32,13 @@ final class CompletionGate {
     private static final int MAX_VERIFY_PROMPTS = 2;
     /** 收尾自审只做一次，再多就变成来回客套。 */
     private static final int MAX_REVIEW_PROMPTS = 1;
+    /** 实现类目标却没有任何改动就想收尾时，只推一次让它直接动手。 */
+    private static final int MAX_ACTION_PROMPTS = 1;
+    /** 目标像「修复 / 实现 / 修改」时，没有任何改动就收尾通常是半途停手，而不是完成。 */
+    private static final List<String> ACTION_HINTS = List.of(
+            "修复", "修改", "实现", "添加", "增加", "新增", "重构", "优化", "改成", "改为", "开发", "落地");
+    private static final List<String> ACTION_HINTS_EN = List.of(
+            "fix", "implement", "add ", "change", "refactor", "update", "build");
     /** 只改这些后缀的文档不算「改了代码」，不强制跑构建。 */
     private static final Set<String> DOC_SUFFIXES = Set.of(".md", ".txt", ".rst", ".adoc");
     /** 目标像「调研 / 解释 / 定位」时，只读任务也要核对覆盖范围，不能读两个文件就下结论。 */
@@ -40,9 +47,6 @@ final class CompletionGate {
             "审查", "评估", "调研", "看一下", "读一下", "哪些", "对比", "定位");
     private static final List<String> RESEARCH_HINTS_EN = List.of(
             "explain", "analyze", "analyse", "review", "how does", "why", "walk through");
-    /** 只认工具附加的最终退出码，命令参数里的 exit 0 不能充当通过证据。 */
-    private static final Pattern EXIT_CODE = Pattern.compile("→ exit (-?\\d+)\\z");
-
     /** @param attempt 第几次提醒；{@code max} 是这类提醒的上限 */
     record Nudge(String prompt, String reason, int attempt, int max) {
     }
@@ -52,6 +56,7 @@ final class CompletionGate {
     private final String goal;
     private int verifyPrompts;
     private int reviewPrompts;
+    private int actionPrompts;
     private int toolCalls;
     private final Set<String> inspected = new LinkedHashSet<>();
 
@@ -82,6 +87,35 @@ final class CompletionGate {
     }
 
     /**
+     * 续跑时从已持久化的对话恢复只读覆盖事实。工具调用本身已经发生过，不能因为
+     * 新建了一个 AgentLoop 就把调研任务重新当成“没有检查过任何东西”。跳过调用不计入。
+     */
+    void restoreFrom(List<Message> history) {
+        if (history == null || history.isEmpty()) {
+            return;
+        }
+        Map<String, String> results = new HashMap<>();
+        for (Message message : history) {
+            if ("tool".equals(message.role()) && message.toolCallId() != null) {
+                results.put(message.toolCallId(), message.content());
+            }
+        }
+        for (Message message : history) {
+            if (!"assistant".equals(message.role())) {
+                continue;
+            }
+            for (ToolCall call : message.toolCalls()) {
+                String result = results.get(call.callId());
+                if (result != null && result.startsWith("SKIPPED:")) {
+                    continue;
+                }
+                countToolCall();
+                recordTarget(call);
+            }
+        }
+    }
+
+    /**
      * 判断是否该在收尾前再催一轮。
      *
      * @param changedFiles 本轮改过的文件
@@ -91,12 +125,25 @@ final class CompletionGate {
      * @return {@code null} 表示可以收尾
      */
     Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps) {
+        return evaluate(changedFiles, checks, plan, openSteps, false);
+    }
+
+    Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps,
+                   boolean independentReview) {
         if (!enabled) {
             return null;
         }
         boolean changed = !changedFiles.isEmpty();
         // 只读任务没有改动，但「目标像调研、工具却只用了两三次」同样要核对覆盖范围
         boolean researching = !changed && toolCalls >= 2 && looksLikeResearch(goal);
+        // 实现类目标却一个文件都没改就想收尾，多半是只给了方案或反问了一句，而不是真的做完
+        if (!changed && !researching && actionPrompts < MAX_ACTION_PROMPTS && looksLikeAction(goal)
+                && !looksLikeResearch(goal)) {
+            actionPrompts++;
+            String prompt = prompts.render("completion/act",
+                    Map.of("goal", ToolSupport.oneLine(goal, 500))).strip();
+            return new Nudge(prompt, "实现类目标尚无任何改动，已要求直接动手", actionPrompts, MAX_ACTION_PROMPTS);
+        }
         if (!changed && !researching) {
             return null;
         }
@@ -108,7 +155,7 @@ final class CompletionGate {
                     "checks", checks.isEmpty() ? "（本轮没有跑过构建或测试）" : bullets(checks))).strip();
             return new Nudge(prompt, "改动未验证，已要求先跑构建或测试", verifyPrompts, MAX_VERIFY_PROMPTS);
         }
-        if (reviewPrompts < MAX_REVIEW_PROMPTS) {
+        if (!independentReview && reviewPrompts < MAX_REVIEW_PROMPTS) {
             reviewPrompts++;
             String goalText = goal == null ? "（续跑，无原始输入）" : ToolSupport.oneLine(goal, 500);
             String prompt;
@@ -135,6 +182,15 @@ final class CompletionGate {
         return null;
     }
 
+    private static boolean looksLikeAction(String goal) {
+        if (goal == null || goal.isBlank()) {
+            return false;
+        }
+        String lower = goal.toLowerCase(Locale.ROOT);
+        return ACTION_HINTS.stream().anyMatch(goal::contains)
+                || ACTION_HINTS_EN.stream().anyMatch(lower::contains);
+    }
+
     private static boolean looksLikeResearch(String goal) {
         if (goal == null || goal.isBlank()) {
             return false;
@@ -157,12 +213,7 @@ final class CompletionGate {
     }
 
     private static boolean hasPassingCheck(List<String> checks) {
-        for (String check : checks) {
-            Matcher matcher = EXIT_CODE.matcher(check);
-            if (matcher.find() && "0".equals(matcher.group(1))) {
-                return true;
-            }
-        }
-        return false;
+        return checks.stream().map(VerificationCheck::passingKind)
+                .anyMatch(VerificationCheck.Kind::qualifies);
     }
 }

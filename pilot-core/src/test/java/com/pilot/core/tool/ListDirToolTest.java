@@ -19,7 +19,7 @@ class ListDirToolTest {
     void listsDirectoryWithTypeMarkers() throws IOException {
         Files.writeString(workspace.resolve("app.js"), "console.log(1)");
         Files.createDirectories(workspace.resolve("src"));
-        var tool = new ListDirTool(new PathValidator(workspace));
+        ListDirTool tool = new ListDirTool(new PathValidator(workspace));
 
         String result = tool.execute(Map.of());
 
@@ -32,7 +32,7 @@ class ListDirToolTest {
     void listsNestedDirectory() throws IOException {
         Files.createDirectories(workspace.resolve("src/main"));
         Files.writeString(workspace.resolve("src/main/App.java"), "class App {}");
-        var tool = new ListDirTool(new PathValidator(workspace));
+        ListDirTool tool = new ListDirTool(new PathValidator(workspace));
 
         String result = tool.execute(Map.of("path", "src/main"));
 
@@ -42,7 +42,7 @@ class ListDirToolTest {
 
     @Test
     void rejectsPathOutsideWorkspace() {
-        var tool = new ListDirTool(new PathValidator(workspace));
+        ListDirTool tool = new ListDirTool(new PathValidator(workspace));
 
         String result = tool.execute(Map.of("path", ".."));
 
@@ -51,7 +51,7 @@ class ListDirToolTest {
 
     @Test
     void reportsMissingDirectory() {
-        var tool = new ListDirTool(new PathValidator(workspace));
+        ListDirTool tool = new ListDirTool(new PathValidator(workspace));
 
         String result = tool.execute(Map.of("path", "nope"));
 

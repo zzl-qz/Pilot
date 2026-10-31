@@ -24,7 +24,7 @@ public class TaskControlController {
     @GetMapping
     public Object get(@PathVariable String id) {
         requireSession(id);
-        var task = tasks.load(id);
+        TaskControlService.TaskContract task = tasks.load(id);
         return task == null ? tools.jackson.databind.node.NullNode.getInstance() : task;
     }
 
@@ -37,8 +37,8 @@ public class TaskControlController {
                 "任务正在运行，请用立即纠正调整方向，或暂停后编辑约束和验收条件"));
         boolean completedTransition;
         try {
-            var before = tasks.load(id);
-            var updated = tasks.update(id, request.constraints(), request.acceptance());
+            TaskControlService.TaskContract before = tasks.load(id);
+            TaskControlService.TaskContract updated = tasks.update(id, request.constraints(), request.acceptance());
             completedTransition = "COMPLETED".equals(updated.status())
                     && (before == null || !"COMPLETED".equals(before.status()));
         } catch (IllegalArgumentException e) {

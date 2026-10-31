@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -50,21 +51,21 @@ class ManagedCommandToolsTest {
 
     @Test
     void backgroundReturnsTaskImmediatelyAndLogsContinueUntilActualCompletion() throws Exception {
-        try (var manager = manager()) {
-            var run = run(manager);
-            var call = new ToolCall("background", "run_command", Map.of("command", command("wait"), "background", true));
+        try (CommandTaskManager manager = manager()) {
+            RunCommandTool run = run(manager);
+            ToolCall call = new ToolCall("background", "run_command", Map.of("command", command("wait"), "background", true));
             long started = System.nanoTime();
             String initial = run.execute(call.args());
             assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < 2000, initial);
-            var task = manager.list(SESSION).getFirst();
+            CommandTaskManager.Task task = manager.list(SESSION).getFirst();
             assertTrue(initial.contains("任务ID: " + task.taskId()), initial);
             assertTrue(initial.contains("状态: RUNNING"), initial);
             assertEquals(0, task.timeoutSeconds());
             assertNull(run.checkSummary(call, initial));
-            var status = new CommandStatusTool(manager, SESSION);
+            CommandStatusTool status = new CommandStatusTool(manager, SESSION);
             assertNull(status.checkSummary(null, status.execute(Map.of("taskId", task.taskId()))));
             await(() -> manager.logs(SESSION, task.taskId(), 0, 1000).text().contains("READY"));
-            var first = manager.logs(SESSION, task.taskId(), 0, 1000);
+            CommandTaskManager.LogChunk first = manager.logs(SESSION, task.taskId(), 0, 1000);
             assertFalse(first.eof());
             assertTrue(new CommandLogsTool(manager, SESSION).execute(Map.of("taskId", task.taskId(), "limit", 1000))
                     .contains("READY"));
@@ -83,7 +84,7 @@ class ManagedCommandToolsTest {
 
     @Test
     void managedForegroundExposesLiveTaskAndInterruptionStopsItsProcess() throws Exception {
-        try (var manager = manager()) {
+        try (CommandTaskManager manager = manager()) {
             AtomicReference<String> result = new AtomicReference<>();
             CountDownLatch done = new CountDownLatch(1);
             Thread caller = Thread.ofVirtual().start(() -> {
@@ -92,7 +93,7 @@ class ManagedCommandToolsTest {
             });
             try {
                 await(() -> !manager.list(SESSION).isEmpty());
-                var task = manager.list(SESSION).getFirst();
+                CommandTaskManager.Task task = manager.list(SESSION).getFirst();
                 assertFalse(task.background());
                 assertEquals(120, task.timeoutSeconds());
                 await(() -> manager.logs(SESSION, task.taskId(), 0, 1000).text().contains("READY"));
@@ -101,25 +102,27 @@ class ManagedCommandToolsTest {
                 assertTrue(done.await(5, TimeUnit.SECONDS));
                 assertTrue(result.get().startsWith("ERROR: 命令执行被中断"), result.get());
                 await(() -> !CommandToolSupport.running(manager.get(SESSION, task.taskId())));
-                assertEquals("CANCELLED", manager.get(SESSION, task.taskId()).status());
-                assertFalse(ProcessHandle.of(task.pid()).map(ProcessHandle::isAlive).orElse(false));
+                CommandTaskManager.Task stopped = manager.get(SESSION, task.taskId());
+                assertEquals("CANCELLED", stopped.status());
+                assertNotNull(stopped.pid(), "运行过的命令必须记录真实 pid，否则无法管理进程树");
+                assertFalse(ProcessHandle.of(stopped.pid()).map(ProcessHandle::isAlive).orElse(false));
             } finally { caller.interrupt(); }
         }
     }
 
     @Test
     void foregroundSuccessAndBackgroundFailureRecordRealExitCodes() {
-        try (var manager = manager()) {
-            var run = run(manager);
-            var call = new ToolCall("foreground", "run_command", Map.of("command", "java -version"));
+        try (CommandTaskManager manager = manager()) {
+            RunCommandTool run = run(manager);
+            ToolCall call = new ToolCall("foreground", "run_command", Map.of("command", "java -version"));
             String result = run.execute(call.args());
             assertTrue(result.contains("任务ID:"), result);
             assertTrue(result.contains("退出码: 0"), result);
             assertTrue(result.contains("输出:"), result);
             assertEquals("java -version → exit 0", run.checkSummary(call, result));
             run.execute(Map.of("command", command("failure"), "background", true));
-            var failed = manager.list(SESSION).stream().filter(task -> task.command().endsWith("failure")).findFirst().orElseThrow();
-            var status = new CommandStatusTool(manager, SESSION);
+            CommandTaskManager.Task failed = manager.list(SESSION).stream().filter(task -> task.command().endsWith("failure")).findFirst().orElseThrow();
+            CommandStatusTool status = new CommandStatusTool(manager, SESSION);
             String failure = status.execute(Map.of("taskId", failed.taskId(), "waitSeconds", 5));
             assertTrue(failure.startsWith("ERROR:"), failure);
             assertTrue(failure.contains("状态: FAILED"), failure);
@@ -129,11 +132,11 @@ class ManagedCommandToolsTest {
 
     @Test
     void explicitBackgroundTimeoutIsHonoredAndCannotPassVerification() {
-        try (var manager = manager()) {
+        try (CommandTaskManager manager = manager()) {
             run(manager).execute(Map.of("command", command("wait"), "background", true, "timeoutSeconds", 1));
-            var task = manager.list(SESSION).getFirst();
+            CommandTaskManager.Task task = manager.list(SESSION).getFirst();
             assertEquals(1, task.timeoutSeconds());
-            var status = new CommandStatusTool(manager, SESSION);
+            CommandStatusTool status = new CommandStatusTool(manager, SESSION);
             String result = status.execute(Map.of("taskId", task.taskId(), "waitSeconds", 5));
             assertTrue(result.contains("状态: TIMED_OUT"), result);
             String check = status.checkSummary(null, result);
@@ -143,18 +146,18 @@ class ManagedCommandToolsTest {
 
     @Test
     void securityValidationAndAgentScopeApplyBeforeBothExecutionModes() {
-        try (var manager = manager()) {
-            var legacy = new RunCommandTool(new PathValidator(workspace));
-            var managed = run(manager);
-            for (String command : List.of("rm -rf /", "/bin/java -version", "git status && java -version",
+        try (CommandTaskManager manager = manager()) {
+            RunCommandTool legacy = new RunCommandTool(new PathValidator(workspace));
+            RunCommandTool managed = run(manager);
+            for (String command : List.of("rm -rf /", "/bin/java -version", "git status && rm -rf build",
                     "git reset --hard HEAD", "git add ../outside", "git commit")) {
                 String expected = legacy.execute(Map.of("command", command));
                 assertTrue(expected.startsWith("ERROR:"), expected);
                 assertEquals(expected, managed.execute(Map.of("command", command, "background", true)));
                 assertEquals(expected, managed.execute(Map.of("command", command)));
             }
-            var scope = AgentScope.readOnly(List.of(), List.of()).withCommands(List.of("git status"), List.of());
-            var scoped = new RunCommandTool(new PathValidator(workspace, scope), manager, SESSION);
+            AgentScope scope = AgentScope.readOnly(List.of(), List.of()).withCommands(List.of("git status"), List.of());
+            RunCommandTool scoped = new RunCommandTool(new PathValidator(workspace, scope), manager, SESSION);
             assertTrue(scoped.execute(Map.of("command", "java -version", "background", true))
                     .startsWith("ERROR: 命令 java -version 不在你的命令白名单内"));
             assertTrue(manager.list(SESSION).isEmpty());
@@ -165,14 +168,14 @@ class ManagedCommandToolsTest {
 
     @Test
     void readOnlyAndApprovalPoliciesTreatBackgroundAsCommandAndQueriesAsReads() {
-        try (var manager = manager()) {
-            var run = run(manager);
-            var stop = new StopCommandTool(manager, SESSION);
-            var status = new CommandStatusTool(manager, SESSION);
-            var logs = new CommandLogsTool(manager, SESSION);
-            var call = new ToolCall("command", "run_command", Map.of("command", "java -version", "background", true));
+        try (CommandTaskManager manager = manager()) {
+            RunCommandTool run = run(manager);
+            StopCommandTool stop = new StopCommandTool(manager, SESSION);
+            CommandStatusTool status = new CommandStatusTool(manager, SESSION);
+            CommandLogsTool logs = new CommandLogsTool(manager, SESSION);
+            ToolCall call = new ToolCall("command", "run_command", Map.of("command", "java -version", "background", true));
             for (PermissionMode mode : PermissionMode.values()) {
-                var policy = new PolicyPermissionGate(mode);
+                PolicyPermissionGate policy = new PolicyPermissionGate(mode);
                 PermissionDecision expected = switch (mode) {
                     case READ_ONLY -> PermissionDecision.DENY;
                     case ASK, AUTO_EDIT -> PermissionDecision.ASK;
@@ -183,11 +186,11 @@ class ManagedCommandToolsTest {
                 assertEquals(PermissionDecision.ALLOW, policy.check(call, status).decision());
                 assertEquals(PermissionDecision.ALLOW, policy.check(call, logs).decision());
             }
-            var registry = new ToolRegistry();
+            ToolRegistry registry = new ToolRegistry();
             registry.register(run);
-            var executor = new ToolExecutor(registry, new PolicyPermissionGate(PermissionMode.READ_ONLY),
+            ToolExecutor executor = new ToolExecutor(registry, new PolicyPermissionGate(PermissionMode.READ_ONLY),
                     new InMemoryApprovalBroker(Duration.ofSeconds(1)));
-            var denied = executor.execute(call, ignored -> { });
+            ToolExecutor.Outcome denied = executor.execute(call, ignored -> { });
             assertTrue(denied.result().startsWith("ERROR: 权限拒绝"));
             assertNull(denied.check());
             assertTrue(manager.list(SESSION).isEmpty());
@@ -196,17 +199,17 @@ class ManagedCommandToolsTest {
 
     @Test
     void queriesAndStopAreSessionScopedAndArgumentsAreBounded() throws Exception {
-        try (var manager = manager()) {
+        try (CommandTaskManager manager = manager()) {
             run(manager).execute(Map.of("command", command("wait"), "background", true, "timeoutSeconds", 900));
-            var task = manager.list(SESSION).getFirst();
+            CommandTaskManager.Task task = manager.list(SESSION).getFirst();
             assertEquals(600, task.timeoutSeconds());
             for (Tool tool : List.of(new CommandStatusTool(manager, "other"), new CommandLogsTool(manager, "other"),
                     new StopCommandTool(manager, "other"))) {
                 assertTrue(tool.execute(Map.of("taskId", task.taskId())).startsWith("ERROR:"));
             }
             assertTrue(CommandToolSupport.running(manager.get(SESSION, task.taskId())));
-            var status = new CommandStatusTool(manager, SESSION);
-            var logs = new CommandLogsTool(manager, SESSION);
+            CommandStatusTool status = new CommandStatusTool(manager, SESSION);
+            CommandLogsTool logs = new CommandLogsTool(manager, SESSION);
             assertTrue(status.execute(Map.of("taskId", task.taskId(), "waitSeconds", 6)).startsWith("ERROR:"));
             assertTrue(logs.execute(Map.of("taskId", task.taskId(), "offset", -1)).startsWith("ERROR:"));
             assertTrue(logs.execute(Map.of("taskId", task.taskId(), "limit", 32001)).startsWith("ERROR:"));
@@ -223,14 +226,48 @@ class ManagedCommandToolsTest {
         Path wrapper = workspace.resolve("gradlew");
         Files.writeString(wrapper, "#!/bin/sh\nprintf 'wrapper-build:%s\\n' \"$1\"\n");
         assertFalse(Files.isExecutable(wrapper));
-        try (var manager = manager()) {
+        try (CommandTaskManager manager = manager()) {
             String initial = run(manager).execute(Map.of("command", "gradle test", "background", true));
-            var task = manager.list(SESSION).getFirst();
+            CommandTaskManager.Task task = manager.list(SESSION).getFirst();
             assertTrue(initial.contains("任务ID: " + task.taskId()), initial);
             String result = new CommandStatusTool(manager, SESSION).execute(Map.of("taskId", task.taskId(), "waitSeconds", 5));
             assertTrue(result.contains("状态: COMPLETED"), result);
             assertEquals(0, manager.get(SESSION, task.taskId()).exitCode());
             assertTrue(manager.logs(SESSION, task.taskId(), 0, 1000).text().contains("wrapper-build:test"));
+        }
+    }
+
+    @Test
+    void foregroundAndTerminalBackgroundResultsReturnStructuredCommandChanges() {
+        class FakeChanges implements CommandChangeTracker {
+            final AtomicInteger begins = new AtomicInteger();
+            final AtomicInteger finishes = new AtomicInteger();
+            @Override public Handle begin(Path root) {
+                begins.incrementAndGet();
+                return new Handle("run", "command_123");
+            }
+            @Override public Result finish(Handle handle) {
+                finishes.incrementAndGet();
+                return new Result(List.of("src/Generated.java"), true, "");
+            }
+        }
+        FakeChanges changes = new FakeChanges();
+        try (CommandTaskManager manager = manager()) {
+            RunCommandTool run = new RunCommandTool(new PathValidator(workspace), manager, SESSION, changes);
+            ToolResult foreground = run.executeResult(Map.of("command", "java ManagedCommandFixture.java"));
+            assertEquals(List.of("src/Generated.java"), foreground.changedPaths());
+
+            ToolResult launched = run.executeResult(Map.of("command", command("wait"), "background", true));
+            assertTrue(launched.changedPaths().isEmpty(), "running command has no terminal diff yet");
+            CommandTaskManager.Task task = manager.list(SESSION).getFirst();
+            assertNotNull(task.changeTracking());
+            try { Files.writeString(workspace.resolve("release"), "go"); }
+            catch (java.io.IOException e) { throw new java.io.UncheckedIOException(e); }
+            ToolResult terminal = new CommandStatusTool(manager, SESSION, changes)
+                    .executeResult(Map.of("taskId", task.taskId(), "waitSeconds", 5));
+            assertEquals(List.of("src/Generated.java"), terminal.changedPaths());
+            assertEquals(2, changes.begins.get());
+            assertEquals(2, changes.finishes.get());
         }
     }
 

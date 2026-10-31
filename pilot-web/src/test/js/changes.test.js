@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { mergeRunReports, sortChangeFiles, statusKind } from '../../main/resources/static/lib/changes.js';
+import {
+  editSummary, mergeRunReports, sortChangeFiles, splitPath, statusKind
+} from '../../main/resources/static/lib/changes.js';
 
 test('mergeRunReports 合并多轮 run 并把增删行数加起来', () => {
   const merged = mergeRunReports([
@@ -51,6 +53,49 @@ test('sortChangeFiles 用规范化后的路径匹配（Windows 反斜杠也能�
   const sorted = sortChangeFiles([{ path: 'src\\A.java' }, { path: 'src/B.java' }], ['src/A.java']);
 
   assert.deepEqual(sorted.map((file) => file.path), ['src\\A.java', 'src/B.java']);
+});
+
+test('editSummary 默认只露三条，其余收进「展开」', () => {
+  const summary = editSummary([
+    { path: 'a/A.java', added: 3, removed: 1 },
+    { path: 'b/B.java', added: 2, removed: 0 },
+    { path: 'c/C.java', added: 0, removed: 4 },
+    { path: 'd/D.java', added: 3, removed: 3 }
+  ]);
+
+  assert.equal(summary.label, '已编辑 4 个文件');
+  assert.equal(summary.total, 4);
+  assert.equal(summary.added, 8);
+  assert.equal(summary.removed, 8);
+  assert.deepEqual(summary.visible.map((file) => file.path), ['a/A.java', 'b/B.java', 'c/C.java']);
+  assert.deepEqual(summary.hidden.map((file) => file.path), ['d/D.java']);
+});
+
+test('editSummary 文件不超过上限时没有折叠项', () => {
+  const summary = editSummary([{ path: 'a/A.java', added: 1, removed: 0 }]);
+
+  assert.equal(summary.hidden.length, 0);
+  assert.equal(summary.visible.length, 1);
+});
+
+test('editSummary 空列表给出明确文案而不是「已编辑 0 个文件」', () => {
+  assert.equal(editSummary([]).label, '本轮没有改动文件');
+  assert.equal(editSummary(undefined).total, 0);
+});
+
+test('editSummary 归一化 Windows 路径并容忍缺失的增删行', () => {
+  const summary = editSummary([{ path: 'src\\A.java' }]);
+
+  assert.equal(summary.visible[0].path, 'src/A.java');
+  assert.equal(summary.added, 0);
+  assert.equal(summary.removed, 0);
+});
+
+test('splitPath 把目录与文件名分开，长路径省略时仍能看到文件名', () => {
+  assert.deepEqual(splitPath('pilot-core/src/main/A.java'),
+    { dir: 'pilot-core/src/main/', name: 'A.java' });
+  assert.deepEqual(splitPath('A.java'), { dir: '', name: 'A.java' });
+  assert.deepEqual(splitPath('src\\A.java'), { dir: 'src/', name: 'A.java' });
 });
 
 test('statusKind 区分新增、删除与修改', () => {

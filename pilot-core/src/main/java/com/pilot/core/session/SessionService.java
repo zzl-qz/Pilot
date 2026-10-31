@@ -20,6 +20,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -261,7 +262,7 @@ public final class SessionService {
     public EventSubscription subscribe(String sessionId, long afterSequence, Consumer<EventEnvelope> listener,
                                        Runnable onClosed) {
         Objects.requireNonNull(listener, "listener must not be null");
-        var self = new java.util.concurrent.atomic.AtomicReference<EventDelivery>();
+        AtomicReference<EventDelivery> self = new java.util.concurrent.atomic.AtomicReference<EventDelivery>();
         EventDelivery delivery = new EventDelivery(envelope -> listener.accept(envelope), () -> {
             EventDelivery current = self.get();
             if (current != null) {

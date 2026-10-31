@@ -66,7 +66,7 @@ class SearchToolTest {
 
     @Test
     void searchesLargeFilesWithRipgrepAndSkipsThemInTheFallback() throws IOException {
-        var body = new StringBuilder();
+        StringBuilder body = new StringBuilder();
         body.append("x".repeat(1024 * 1024 + 5)).append('\n').append("large-marker\n");
         Files.writeString(workspace.resolve("large.txt"), body.toString());
 

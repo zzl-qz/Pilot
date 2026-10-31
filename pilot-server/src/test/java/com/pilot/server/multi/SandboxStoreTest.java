@@ -32,14 +32,14 @@ class SandboxStoreTest {
     private DiffSandbox proposal() throws IOException {
         Files.createDirectories(workspace.resolve("src"));
         Files.writeString(workspace.resolve("src/A.java"), ORIGINAL);
-        var sandbox = new DiffSandbox("sbx_1", "agent_1", "T1", "");
+        DiffSandbox sandbox = new DiffSandbox("sbx_1", "agent_1", "T1", "");
         sandbox.add("src/A.java", ORIGINAL, "a\nCHANGED\nc\n", true, RiskLevel.MEDIUM);
         return sandbox;
     }
 
     @Test
     void acceptWritesSandboxContentToWorkspace() throws IOException {
-        var store = store();
+        SandboxStore store = store();
         store.add("ses_1", proposal());
         assertEquals(ORIGINAL, Files.readString(workspace.resolve("src/A.java")), "接受之前不能落盘");
 
@@ -52,7 +52,7 @@ class SandboxStoreTest {
 
     @Test
     void acceptRefusesToOverwriteAFileThatChangedMeanwhile() throws IOException {
-        var store = store();
+        SandboxStore store = store();
         store.add("ses_1", proposal());
         Files.writeString(workspace.resolve("src/A.java"), "a\n用户改过了\nc\n");
 
@@ -65,7 +65,7 @@ class SandboxStoreTest {
 
     @Test
     void rejectLeavesWorkspaceUntouched() throws IOException {
-        var store = store();
+        SandboxStore store = store();
         store.add("ses_1", proposal());
 
         assertTrue(store.reject("ses_1", "sbx_1"));
@@ -77,8 +77,8 @@ class SandboxStoreTest {
 
     @Test
     void refusesToWriteOutsideWorkspace() throws IOException {
-        var store = store();
-        var sandbox = new DiffSandbox("sbx_2", "agent_2", "T2", "");
+        SandboxStore store = store();
+        DiffSandbox sandbox = new DiffSandbox("sbx_2", "agent_2", "T2", "");
         sandbox.add("../../escape.txt", null, "boom", false, RiskLevel.MEDIUM);
         store.add("ses_1", sandbox);
 
@@ -86,5 +86,58 @@ class SandboxStoreTest {
 
         assertFalse(report.ok());
         assertFalse(Files.exists(workspace.getParent().resolve("escape.txt")));
+    }
+
+    @Test
+    void restoresSandboxAndVerificationAfterStoreRecreation() throws IOException {
+        SandboxStore first = store();
+        DiffSandbox sandbox = proposal();
+        first.add("ses_restart", sandbox);
+        first.recordTasks("ses_restart", java.util.List.of(new SandboxStore.TaskView(
+                "T1", "任务一", "agent_1", "DONE", "产物完成", 1)));
+        first.raise("ses_restart", new SandboxStore.Arbitration(
+                "arb_1", "dissent", "T1", java.util.List.of("方案 A"), "需要人工确认"));
+        first.recordVerification("ses_restart", "sbx_1",
+                VerificationGate.Report.passed(java.util.List.of("mvn test")));
+
+        SandboxStore restored = store();
+
+        assertEquals(1, restored.sandboxes("ses_restart").size());
+        assertEquals("a\nCHANGED\nc\n",
+                restored.find("ses_restart", "sbx_1").orElseThrow().changes().get(0).newContent());
+        assertTrue(restored.verification("ses_restart", "sbx_1").ok());
+        assertEquals("DONE", restored.tasks("ses_restart").get(0).status());
+        assertEquals("arb_1", restored.arbitrations("ses_restart").get(0).id());
+    }
+
+    @Test
+    void verificationIsInvalidatedWhenCandidateChanges() throws IOException {
+        SandboxStore store = store();
+        DiffSandbox sandbox = proposal();
+        store.add("ses_candidate", sandbox);
+        store.recordVerification("ses_candidate", "sbx_1",
+                VerificationGate.Report.passed(java.util.List.of("test")));
+        assertTrue(store.verification("ses_candidate", "sbx_1").ok());
+
+        sandbox.add("src/A.java", "a\nCHANGED\nc\n", "a\nNEWER\nc\n", true, RiskLevel.MEDIUM);
+        store.add("ses_candidate", sandbox);
+
+        assertTrue(store.verification("ses_candidate", "sbx_1") == null,
+                "旧候选的通过结果不能用于新候选");
+    }
+
+    @Test
+    void resetRemovesPersistedSessionAndRepeatedRestoreDoesNotDuplicateSandbox() throws IOException {
+        SandboxStore first = store();
+        first.add("ses_cleanup", proposal());
+
+        SandboxStore restored = store();
+        assertEquals(1, restored.sandboxes("ses_cleanup").size());
+        assertEquals(1, restored.sandboxes("ses_cleanup").size());
+
+        restored.reset("ses_cleanup");
+
+        assertEquals(0, restored.sandboxes("ses_cleanup").size());
+        assertEquals(0, Files.list(dataDir.resolve("multi")).toList().size());
     }
 }

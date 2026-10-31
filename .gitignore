@@ -49,3 +49,9 @@ identifier.sqlite
 
 ### 本地机制文档：按机制整理的实现说明，只在本机维护，不进版本库 ###
 /docs/
+
+### 评估与窄屏检查产物 ###
+.pilot-eval/
+evaluation/harness/runs/
+pilot-web/target/viewport/
+pilot-web/node_modules/

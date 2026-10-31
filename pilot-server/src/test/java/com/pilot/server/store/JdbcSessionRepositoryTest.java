@@ -47,7 +47,7 @@ class JdbcSessionRepositoryTest {
                 new RunCompleted("完成", List.of("a.txt"), List.of("mvn -q test → exit 0")), SessionStatus.COMPLETED);
 
         // 重新打开同一个库，验证真的落盘而不是内存
-        var reopened = new JdbcSessionRepository(new SqliteStore(database),
+        JdbcSessionRepository reopened = new JdbcSessionRepository(new SqliteStore(database),
                 new EventCodec(JsonMapper.builder().build()));
         List<EventEnvelope> events = reopened.events("ses_1");
 
@@ -121,7 +121,7 @@ class JdbcSessionRepositoryTest {
     @Test
     void deletingExpiredEventsKeepsSessions() {
         SqliteStore store = new SqliteStore(database);
-        var repo = new JdbcSessionRepository(store, new EventCodec(JsonMapper.builder().build()));
+        JdbcSessionRepository repo = new JdbcSessionRepository(store, new EventCodec(JsonMapper.builder().build()));
         repo.create("ses_1", "保留策略", null, Instant.parse("2020-01-01T00:00:00Z"));
         repo.append("ses_1", "run_1", Instant.parse("2020-01-02T00:00:00Z"), new RunStarted("旧"),
                 SessionStatus.RUNNING);

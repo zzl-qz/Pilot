@@ -30,7 +30,7 @@ class JdbcProjectRepositoryTest {
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
         repository.create("prj_1", "pilot", List.of("E:\\work\\pilot\\server", "E:\\work\\pilot\\web"), now);
 
-        var reopened = new JdbcProjectRepository(new SqliteStore(database));
+        JdbcProjectRepository reopened = new JdbcProjectRepository(new SqliteStore(database));
         Project project = reopened.find("prj_1").orElseThrow();
 
         assertEquals("pilot", project.name());

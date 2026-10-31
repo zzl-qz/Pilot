@@ -8,9 +8,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -22,27 +24,28 @@ class CommandTaskManagerTest {
     void logsArriveBeforeExitWithoutNewlinesAndUnicodePaginationPreservesTrailingOutput() throws Exception {
         Path release = workspace.resolve("release");
         String id;
-        try (var manager = manager()) {
-            var task = manager.start("session_a", "live unicode", process("live", release.toString()), true, 10_000);
+        try (CommandTaskManager manager = manager()) {
+            CommandTaskManager.Task task = manager.start("session_a", "live unicode", process("live", release.toString()), true, 10_000);
             id = task.taskId();
             waitUntil(() -> manager.logs("session_a", id, 0, 100).text().contains("你好🧪live"));
             assertEquals("RUNNING", manager.get("session_a", id).status());
             assertTrue(manager.hasRunningInWorkspace(workspace));
-            var first = manager.logs("session_a", id, 0, 3);
+            CommandTaskManager.LogChunk first = manager.logs("session_a", id, 0, 3);
             assertEquals("你好🧪", first.text());
             assertEquals(3, first.nextOffset());
             assertFalse(first.eof());
             Files.createFile(release);
-            var completed = awaitDone(manager, "session_a", id);
+            CommandTaskManager.Task completed = awaitDone(manager, "session_a", id);
             assertEquals("COMPLETED", completed.status());
             assertEquals(0, completed.exitCode());
-            var last = manager.logs("session_a", id, first.nextOffset(), 100);
+            CommandTaskManager.LogChunk last = manager.logs("session_a", id, first.nextOffset(), 100);
+
             assertEquals("live尾部完成", last.text());
             assertTrue(last.eof());
             assertFalse(last.truncated());
             assertFalse(manager.hasRunningInWorkspace(workspace));
         }
-        try (var reloaded = manager()) {
+        try (CommandTaskManager reloaded = manager()) {
             assertEquals("COMPLETED", reloaded.get("session_a", id).status());
             assertEquals("你好🧪live尾部完成", reloaded.logs("session_a", id, 0, 100).text());
         }
@@ -50,13 +53,13 @@ class CommandTaskManagerTest {
 
     @Test
     void explicitFailureAndStartFailureRetainTerminalEvidence() throws Exception {
-        try (var manager = manager()) {
-            var task = manager.start("session_a", "fails", process("failure"), false, 10_000);
-            var result = awaitDone(manager, "session_a", task.taskId());
+        try (CommandTaskManager manager = manager()) {
+            CommandTaskManager.Task task = manager.start("session_a", "fails", process("failure"), false, 10_000);
+            CommandTaskManager.Task result = awaitDone(manager, "session_a", task.taskId());
             assertEquals("FAILED", result.status());
             assertEquals(7, result.exitCode());
             assertEquals("failed-tail", manager.logs("session_a", task.taskId(), 0, 100).text());
-            var missing = manager.start("session_a", "missing", new ProcessBuilder(workspace.resolve("missing-program").toString())
+            CommandTaskManager.Task missing = manager.start("session_a", "missing", new ProcessBuilder(workspace.resolve("missing-program").toString())
                     .directory(workspace.toFile()), false, 1_000);
             assertEquals("FAILED", missing.status());
             assertNull(missing.pid());
@@ -81,12 +84,12 @@ class CommandTaskManagerTest {
 
     @Test
     void timeoutStopsTreeAndManualStopIsSessionScoped() throws Exception {
-        try (var manager = manager()) {
-            var timed = manager.start("session_a", "timeout", process("hold"), true, 400);
+        try (CommandTaskManager manager = manager()) {
+            CommandTaskManager.Task timed = manager.start("session_a", "timeout", process("hold"), true, 400);
             assertEquals("TIMED_OUT", awaitDone(manager, "session_a", timed.taskId()).status());
             assertFalse(ProcessHandle.of(timed.pid()).map(ProcessHandle::isAlive).orElse(false));
             Path childPidFile = workspace.resolve("child.pid");
-            var tree = manager.start("session_a", "tree", process("tree", childPidFile.toString()), true, 10_000);
+            CommandTaskManager.Task tree = manager.start("session_a", "tree", process("tree", childPidFile.toString()), true, 10_000);
             waitUntil(() -> hasContent(childPidFile));
             long childPid = Long.parseLong(Files.readString(childPidFile).strip());
             assertTrue(ProcessHandle.of(childPid).orElseThrow().isAlive());
@@ -105,9 +108,9 @@ class CommandTaskManagerTest {
 
     @Test
     void trackedDescendantRemainsOwnedAfterParentExits() throws Exception {
-        try (var manager = manager()) {
+        try (CommandTaskManager manager = manager()) {
             Path childPidFile = workspace.resolve("orphan.pid");
-            var task = manager.start("session_a", "parent exits", process("orphan", childPidFile.toString()), true, 10_000);
+            CommandTaskManager.Task task = manager.start("session_a", "parent exits", process("orphan", childPidFile.toString()), true, 10_000);
             waitUntil(() -> hasContent(childPidFile));
             long childPid = Long.parseLong(Files.readString(childPidFile).strip());
             waitUntil(() -> !ProcessHandle.of(task.pid()).map(ProcessHandle::isAlive).orElse(false));
@@ -122,17 +125,17 @@ class CommandTaskManagerTest {
     void secretSplitAcrossReadsIsNeverPersistedAndMetadataIsRedacted() throws Exception {
         String secret = "split-private-credential-value";
         Path release = workspace.resolve("secret-release");
-        try (var manager = manager()) {
+        try (CommandTaskManager manager = manager()) {
             ProcessBuilder builder = process("secret", release.toString());
             builder.environment().put("TASK_TEST_SECRET", secret);
-            var task = manager.start("session_a", "print " + secret, builder, true, 10_000);
+            CommandTaskManager.Task task = manager.start("session_a", "print " + secret, builder, true, 10_000);
             assertEquals("print [REDACTED]", task.command());
             waitUntil(() -> manager.logs("session_a", task.taskId(), 0, 100).text().contains("prefix:"));
             assertEquals("prefix:", manager.logs("session_a", task.taskId(), 0, 100).text());
             Files.createFile(release);
             assertEquals("COMPLETED", awaitDone(manager, "session_a", task.taskId()).status());
             assertEquals("prefix:[REDACTED]:suffix", manager.logs("session_a", task.taskId(), 0, 100).text());
-            try (var files = Files.walk(storage)) {
+            try (Stream<Path> files = Files.walk(storage)) {
                 for (Path file : files.filter(Files::isRegularFile).toList()) {
                     String text = Files.readString(file);
                     assertFalse(text.contains(secret), file.toString());
@@ -144,10 +147,10 @@ class CommandTaskManagerTest {
 
     @Test
     void outputCapTerminatesProcessAndNeverGrowsPastConfiguredDiskLimit() throws Exception {
-        try (var manager = new CommandTaskManager(storage, JsonMapper.builder().build(), 1024, 2, 4)) {
-            var task = manager.start("session_a", "noisy", process("noisy"), true, 10_000);
+        try (CommandTaskManager manager = new CommandTaskManager(storage, JsonMapper.builder().build(), 1024, 2, 4)) {
+            CommandTaskManager.Task task = manager.start("session_a", "noisy", process("noisy"), true, 10_000);
             assertEquals("OUTPUT_LIMIT", awaitDone(manager, "session_a", task.taskId()).status());
-            var logs = manager.logs("session_a", task.taskId(), 0, 10_000);
+            CommandTaskManager.LogChunk logs = manager.logs("session_a", task.taskId(), 0, 10_000);
             assertTrue(logs.truncated());
             assertTrue(logs.eof());
             Path log = storage.resolve("session_a").resolve(task.taskId() + ".log");
@@ -158,13 +161,13 @@ class CommandTaskManagerTest {
 
     @Test
     void restartMarksUnownedPidInterruptedWithoutSignallingIt() throws Exception {
-        var mapper = JsonMapper.builder().build();
+        JsonMapper mapper = JsonMapper.builder().build();
         Path session = Files.createDirectories(storage.resolve("session_a"));
-        var stale = new CommandTaskManager.Task("cmd_stale", "session_a", "previous command", workspace.toString(),
+        CommandTaskManager.Task stale = new CommandTaskManager.Task("cmd_stale", "session_a", "previous command", workspace.toString(),
                 "RUNNING", ProcessHandle.current().pid(), null, Instant.now(), null, true, 60, "");
         Files.writeString(session.resolve("cmd_stale.json"), mapper.writeValueAsString(stale));
         Files.writeString(session.resolve("cmd_stale.log"), "saved🧪");
-        try (var manager = manager()) {
+        try (CommandTaskManager manager = manager()) {
             assertEquals("INTERRUPTED", manager.get("session_a", "cmd_stale").status());
             assertTrue(ProcessHandle.current().isAlive());
             assertFalse(manager.hasRunningInWorkspace(workspace));
@@ -178,12 +181,12 @@ class CommandTaskManagerTest {
         Path session = Files.createDirectories(storage.resolve("session_a"));
         Files.writeString(session.resolve("cmd_broken.json"), "{\"taskId\":");
         Files.writeString(session.resolve("cmd_incomplete.json"), "{\"taskId\":\"cmd_incomplete\"}");
-        var valid = new CommandTaskManager.Task("cmd_good", "session_a", "prior command", workspace.toString(),
+        CommandTaskManager.Task valid = new CommandTaskManager.Task("cmd_good", "session_a", "prior command", workspace.toString(),
                 "COMPLETED", 123L, 0, Instant.now(), Instant.now(), true, 60, "");
         Files.writeString(session.resolve("cmd_good.json"), JsonMapper.builder().build().writeValueAsString(valid));
-        try (var manager = manager()) {
+        try (CommandTaskManager manager = manager()) {
             assertEquals(List.of(valid), manager.list("session_a"));
-            var fresh = manager.start("session_a", "new command", process("done"), true, 10_000);
+            CommandTaskManager.Task fresh = manager.start("session_a", "new command", process("done"), true, 10_000);
             assertEquals("COMPLETED", awaitDone(manager, "session_a", fresh.taskId()).status());
         }
     }
@@ -191,8 +194,8 @@ class CommandTaskManagerTest {
     @Test
     void closingManagerStopsOwnedProcessesAndDeletedSessionCannotRestart() throws Exception {
         Long pid;
-        try (var manager = manager()) {
-            var task = manager.start("session_a", "hold", process("hold"), true, 10_000);
+        try (CommandTaskManager manager = manager()) {
+            CommandTaskManager.Task task = manager.start("session_a", "hold", process("hold"), true, 10_000);
             pid = task.pid();
             manager.stopSession("session_a");
             assertThrows(IllegalStateException.class,
@@ -202,7 +205,7 @@ class CommandTaskManagerTest {
         }
         long stopped = pid;
         waitUntil(() -> !ProcessHandle.of(stopped).map(ProcessHandle::isAlive).orElse(false));
-        try (var manager = manager()) {
+        try (CommandTaskManager manager = manager()) {
             assertThrows(IllegalStateException.class,
                     () -> manager.start("session_a", "late", process("hold"), true, 10_000));
             assertEquals("INTERRUPTED", manager.list("session_b").getFirst().status());
@@ -211,8 +214,8 @@ class CommandTaskManagerTest {
 
     @Test
     void backgroundZeroTimeoutRemainsRunningUntilExplicitStop() throws Exception {
-        try (var manager = manager()) {
-            var task = manager.start("session_a", "persistent server", process("hold"), true, 0);
+        try (CommandTaskManager manager = manager()) {
+            CommandTaskManager.Task task = manager.start("session_a", "persistent server", process("hold"), true, 0);
             assertEquals(0, task.timeoutSeconds());
             Thread.sleep(150);
             assertEquals("RUNNING", manager.get("session_a", task.taskId()).status());
@@ -223,14 +226,14 @@ class CommandTaskManagerTest {
 
     @Test
     void limitsConcurrencyAndRetainedHistoryWithoutDeletingLiveTasks() throws Exception {
-        try (var manager = new CommandTaskManager(storage, JsonMapper.builder().build(), 1024, 1, 2)) {
-            var first = manager.start("session_a", "hold", process("hold"), true, 10_000);
+        try (CommandTaskManager manager = new CommandTaskManager(storage, JsonMapper.builder().build(), 1024, 1, 2)) {
+            CommandTaskManager.Task first = manager.start("session_a", "hold", process("hold"), true, 10_000);
             assertThrows(IllegalStateException.class,
                     () -> manager.start("session_a", "another", process("hold"), true, 10_000));
             manager.stop("session_a", first.taskId());
             awaitDone(manager, "session_a", first.taskId());
             for (int count = 0; count < 3; count++) {
-                var task = manager.start("session_a", "done", process("done"), true, 10_000);
+                CommandTaskManager.Task task = manager.start("session_a", "done", process("done"), true, 10_000);
                 awaitDone(manager, "session_a", task.taskId());
             }
             assertEquals(2, manager.list("session_a").size());
@@ -240,10 +243,10 @@ class CommandTaskManagerTest {
 
     private CommandTaskManager manager() { return new CommandTaskManager(storage, JsonMapper.builder().build()); }
     private ProcessBuilder process(String... args) {
-        var command = new java.util.ArrayList<>(List.of(javaBinary(),
-                // 分页断言按 UTF-8 计码点；不锁定子进程输出编码的话，中文 Windows 控制台会按 GBK 输出，
-                // 🧪 这类字符在 GBK 下不可表示，断言在本机永远不成立。
-                "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8",
+        // Windows 上子进程的 stdout/stderr 默认按本地编码输出，这里显式要求 UTF-8，
+        // 否则同一条命令会混成两种编码，emoji 与分页边界都无法验证
+        ArrayList<String> command = new java.util.ArrayList<>(List.of(javaBinary(),
+                "-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8",
                 "-cp", System.getProperty("java.class.path"), Child.class.getName()));
         command.addAll(List.of(args));
         return new ProcessBuilder(command).directory(workspace.toFile());

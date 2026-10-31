@@ -6,8 +6,8 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
-import java.time.Duration;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -31,7 +31,7 @@ class WebToolsTest {
         });
         server.start();
         try {
-            var tool = new WebSearchTool(HttpClient.newHttpClient(), mapper,
+            WebSearchTool tool = new WebSearchTool(HttpClient.newHttpClient(), mapper,
                     java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
             String result = tool.execute(Map.of("query", "example"));
             assertTrue(result.contains("https://example.com"));
@@ -44,14 +44,14 @@ class WebToolsTest {
 
     @Test
     void searchSaysWhenLocalEngineIsDown() {
-        var tool = new WebSearchTool(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(), mapper,
+        WebSearchTool tool = new WebSearchTool(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(), mapper,
                 java.net.URI.create("http://127.0.0.1:1"));
         assertTrue(tool.execute(Map.of("query", "pilot")).contains("本地搜索未启动"));
     }
 
     @Test
     void fetchRejectsLocalAndNonHttpUrls() {
-        var tool = new WebFetchTool(HttpClient.newHttpClient());
+        WebFetchTool tool = new WebFetchTool(HttpClient.newHttpClient());
         assertTrue(tool.execute(Map.of("url", "http://127.0.0.1/secret")).startsWith("ERROR:"));
         assertTrue(tool.execute(Map.of("url", "file:///etc/passwd")).startsWith("ERROR:"));
     }

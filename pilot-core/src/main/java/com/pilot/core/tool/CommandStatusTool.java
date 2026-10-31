@@ -9,10 +9,16 @@ import java.util.concurrent.TimeUnit;
 public final class CommandStatusTool implements Tool, ProducesCheck {
     private final CommandTaskManager tasks;
     private final String sessionId;
+    private final CommandChangeTracker changes;
 
     public CommandStatusTool(CommandTaskManager tasks, String sessionId) {
+        this(tasks, sessionId, CommandChangeTracker.none());
+    }
+
+    public CommandStatusTool(CommandTaskManager tasks, String sessionId, CommandChangeTracker changes) {
         this.tasks = Objects.requireNonNull(tasks);
         this.sessionId = Objects.requireNonNull(sessionId);
+        this.changes = changes == null ? CommandChangeTracker.none() : changes;
     }
 
     public String name() { return "command_status"; }
@@ -27,21 +33,38 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
     }
 
     public String execute(Map<String, Object> args) {
+        return executeResult(args).text();
+    }
+
+    @Override public ToolResult executeResult(Map<String, Object> args) {
         String id = ToolSupport.stringArg(args, "taskId");
-        if (id == null) return "ERROR: 缺少参数 taskId";
+        if (id == null) return ToolResult.text("ERROR: 缺少参数 taskId");
         try {
             long wait = CommandToolSupport.integerArg(args, "waitSeconds", 0, 0, 5);
-            var task = tasks.get(sessionId, id);
+            CommandTaskManager.Task task = tasks.get(sessionId, id);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(wait);
             while (CommandToolSupport.running(task) && System.nanoTime() < deadline) {
                 Thread.sleep(50);
                 task = tasks.get(sessionId, id);
             }
-            return CommandToolSupport.render(task);
+            String rendered = CommandToolSupport.render(task);
+            if (task == null || CommandToolSupport.running(task) || task.changeTracking() == null
+                    || !task.changeTracking().active()) return ToolResult.text(rendered);
+            CommandChangeTracker.Result result;
+            try {
+                result = changes.finish(task.changeTracking());
+            } catch (RuntimeException e) {
+                result = new CommandChangeTracker.Result(List.of(), false, String.valueOf(e.getMessage()));
+            }
+            if (!result.complete()) {
+                rendered = "ERROR: 命令已结束，但无法完整确认其工作区变更；不得据此宣称验证通过："
+                        + result.warning() + "\n" + rendered;
+            }
+            return new ToolResult(rendered, result.changedPaths(), List.of());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return "ERROR: 状态等待被中断；命令仍可用原 taskId 查询";
-        } catch (IllegalArgumentException e) { return "ERROR: " + e.getMessage(); }
+            return ToolResult.text("ERROR: 状态等待被中断；命令仍可用原 taskId 查询");
+        } catch (IllegalArgumentException e) { return ToolResult.text("ERROR: " + e.getMessage()); }
     }
 
     public String checkSummary(ToolCall call, String result) {

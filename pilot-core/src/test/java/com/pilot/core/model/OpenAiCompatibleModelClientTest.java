@@ -9,6 +9,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -60,9 +61,9 @@ class OpenAiCompatibleModelClientTest {
 
     @Test
     void parsesToolCallsFromResponse() throws IOException {
-        var captured = new AtomicReference<String>();
+        AtomicReference<String> captured = new AtomicReference<String>();
         HttpServer server = startServer(captured, 200, """
-                {"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[
+                {"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[
                   {"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\\"path\\":\\"pom.xml\\"}"}},
                   {"id":"call_2","type":"function","function":{"name":"list_dir","arguments":"{\\"path\\":\\".\\"}"}}]}}]}
                 """);
@@ -78,6 +79,7 @@ class OpenAiCompatibleModelClientTest {
             assertEquals("read_file", response.toolCalls().get(0).name());
             assertEquals("pom.xml", response.toolCalls().get(0).args().get("path"));
             assertEquals("list_dir", response.toolCalls().get(1).name());
+            assertEquals(ModelResponse.FinishReason.TOOL_CALLS, response.finishReason());
 
             JsonNode request = json.readTree(captured.get());
             assertEquals("test-model", request.get("model").asText());
@@ -89,14 +91,36 @@ class OpenAiCompatibleModelClientTest {
     }
 
     @Test
+    void parsesStreamingLengthFinishReason() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200, """
+                data: {"choices":[{"delta":{"content":"部分结果"},"finish_reason":null}]}
+
+                data: {"choices":[{"delta":{},"finish_reason":"length"}]}
+
+                data: [DONE]
+
+                """);
+        server.start();
+        try {
+            StringBuilder streamed = new StringBuilder();
+            ModelResponse response = client(server).chat(List.of(Message.user("开始")), List.of(), streamed::append);
+            assertEquals("部分结果", response.content());
+            assertEquals("部分结果", streamed.toString());
+            assertEquals(ModelResponse.FinishReason.LENGTH, response.finishReason());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void serializesAssistantToolCallsAndToolResults() throws IOException {
-        var captured = new AtomicReference<String>();
+        AtomicReference<String> captured = new AtomicReference<String>();
         HttpServer server = startServer(captured, 200, """
                 {"choices":[{"message":{"role":"assistant","content":"已完成"}}]}
                 """);
         server.start();
         try {
-            var call = new ToolCall("call_1", "read_file", Map.of("path", "pom.xml"));
+            ToolCall call = new ToolCall("call_1", "read_file", Map.of("path", "pom.xml"));
             ModelResponse response = client(server).chat(
                     List.of(
                             Message.user("读 pom.xml"),
@@ -118,10 +142,26 @@ class OpenAiCompatibleModelClientTest {
     }
 
     @Test
+    void keepsExactTokenUsageWhenEndpointReportsIt() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200, """
+                {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+                 "usage":{"prompt_tokens":321,"completion_tokens":17,
+                   "completion_tokens_details":{"reasoning_tokens":9}}}
+                """);
+        server.start();
+        try {
+            ModelResponse response = client(server).chat(List.of(Message.user("开始")), List.of());
+            assertEquals(new ModelUsage(321, 17, 9, true), response.usage());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void sendsImageAttachmentAsMultimodalParts() throws IOException {
         Path image = Files.createTempFile("pilot-attach", ".png");
         Files.write(image, new byte[]{(byte) 0x89, 'P', 'N', 'G'});
-        var captured = new AtomicReference<String>();
+        AtomicReference<String> captured = new AtomicReference<String>();
         HttpServer server = startServer(captured, 200, """
                 {"choices":[{"message":{"role":"assistant","content":"看到了"}}]}
                 """);
@@ -148,11 +188,27 @@ class OpenAiCompatibleModelClientTest {
     }
 
     @Test
+    void preservesImagePositionBetweenText() throws IOException {
+        Path image = Files.createTempFile("pilot-position", ".png");
+        Files.write(image, new byte[] { 1, 2, 3 });
+        try {
+            Message message = Message.user("beforeafter",
+                    List.of(new Attachment("image.png", "image/png", image.toString())), List.of(6));
+            JsonNode content = json.valueToTree(OpenAiCompatibleModelClient.contentFor(message));
+            assertEquals("before", content.get(0).get("text").asText());
+            assertEquals("image_url", content.get(1).get("type").asText());
+            assertEquals("after", content.get(2).get("text").asText());
+        } finally {
+            Files.deleteIfExists(image);
+        }
+    }
+
+    @Test
     void surfacesHttpErrorStatus() throws IOException {
         HttpServer server = startServer(new AtomicReference<>(), 503, "{\"error\":\"overloaded\"}");
         server.start();
         try {
-            var exception = assertThrows(ModelClientException.class,
+            ModelClientException exception = assertThrows(ModelClientException.class,
                     () -> client(server).chat(List.of(Message.user("hi")), List.of()));
             assertTrue(exception.getMessage().contains("503"), exception.getMessage());
         } finally {
@@ -168,7 +224,7 @@ class OpenAiCompatibleModelClientTest {
                 """);
         server.start();
         try {
-            var exception = assertThrows(ModelClientException.class,
+            ModelClientException exception = assertThrows(ModelClientException.class,
                     () -> client(server).chat(List.of(Message.user("hi")), List.of()));
             assertTrue(exception.getMessage().contains("工具调用参数"), exception.getMessage());
         } finally {
@@ -181,7 +237,7 @@ class OpenAiCompatibleModelClientTest {
         HttpServer server = startServer(new AtomicReference<>(), 200, "{\"error\":{\"message\":\"bad key\"}}");
         server.start();
         try {
-            var exception = assertThrows(ModelClientException.class,
+            ModelClientException exception = assertThrows(ModelClientException.class,
                     () -> client(server).chat(List.of(Message.user("hi")), List.of()));
             assertTrue(exception.getMessage().contains("choices"), exception.getMessage());
         } finally {
@@ -206,7 +262,7 @@ class OpenAiCompatibleModelClientTest {
             byte[] bytes = responseBody.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(status, bytes.length);
-            try (var out = exchange.getResponseBody()) {
+            try (OutputStream out = exchange.getResponseBody()) {
                 out.write(bytes);
             }
         });

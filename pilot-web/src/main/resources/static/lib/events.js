@@ -34,7 +34,7 @@ export function applyRule(event, cursor) {
 }
 
 /**
- * run.failed 的语义分档：取消、步数触顶（可继续）、服务重启中断（可继续）、真失败。
+ * run.failed 的语义分档：取消、暂停/中断、目标阻塞、预算用尽和真失败。
  *
  * <p>「步数触顶」和「中断」都不是任务失败——历史还在，继续跑就行，
  * 界面上要显示成暂停而不是红色错误。
@@ -44,11 +44,18 @@ export function classifyRunFailure(code) {
   const cancelled = value === 'CANCELLED';
   const paused = value === 'MAX_STEPS' || value === 'PAUSED';
   const interrupted = value === 'INTERRUPTED';
+  const blocked = value === 'BLOCKED';
+  const budgetLimited = value === 'BUDGET_LIMITED';
+  const outcome = ['WAITING', 'NEED_INPUT', 'UNVERIFIED', 'NO_PROGRESS', 'REVIEW_UNAVAILABLE']
+    .includes(value) ? value : '';
   return {
     cancelled,
     paused,
     interrupted,
-    resumable: paused || interrupted
+    blocked,
+    budgetLimited,
+    outcome,
+    resumable: paused || interrupted || blocked || budgetLimited || Boolean(outcome)
   };
 }
 

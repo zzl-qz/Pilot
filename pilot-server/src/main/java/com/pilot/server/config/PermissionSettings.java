@@ -10,7 +10,7 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 当前生效的权限档位。
+ * 当前生效的权限档位。默认与 Codex / OpenCode 一致：完全放行（{@code AUTO}）。
  *
  * <p>优先级：库中保存的用户选择 &gt; 配置文件 {@code pilot.agent.permission-mode}。
  * 通过 {@code PUT /api/settings/permission-mode} 切换后立即生效并落盘，重启后仍然保留；
@@ -23,6 +23,7 @@ public class PermissionSettings {
 
     private final SettingsStore store;
     private final AtomicReference<PermissionMode> mode;
+    private final AtomicReference<PermissionMode> lastReported = new AtomicReference<>();
 
     public PermissionSettings(AgentProperties properties, SettingsStore store) {
         this.store = store;
@@ -31,7 +32,15 @@ public class PermissionSettings {
 
     public PermissionMode mode() {
         PermissionMode current = mode.get();
-        return current == null ? PermissionMode.READ_ONLY : current;
+        PermissionMode effective = current == null ? PermissionMode.AUTO : current;
+        // 只读档位下每次写入与命令都会被拒绝，任务几乎不可能做完；档位变化时提示一次即可。
+        if (effective != lastReported.getAndSet(effective)) {
+            log.info("权限档位生效值: {}", effective);
+            if (effective == PermissionMode.READ_ONLY) {
+                log.warn("READ_ONLY 下写入与命令都会被拒绝，实现类任务无法完成；请在界面切换到「完全放行」。");
+            }
+        }
+        return effective;
     }
 
     /** 保存并立即生效；返回切换前的档位。 */

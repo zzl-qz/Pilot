@@ -48,6 +48,25 @@ public final class DiffSandbox {
         return changes.isEmpty();
     }
 
+    public synchronized boolean hasChange(String path) {
+        return changes.stream().anyMatch(change -> samePath(change.path(), path));
+    }
+
+    public synchronized String currentText(String path, String baselineText) {
+        return changes.stream().filter(change -> samePath(change.path(), path))
+                .findFirst().map(SandboxChange::newContent).orElse(baselineText);
+    }
+
+    public synchronized String proposedText(String path) {
+        return changes.stream().filter(change -> samePath(change.path(), path))
+                .findFirst().map(SandboxChange::newContent).orElse(null);
+    }
+
+    private static boolean samePath(String left, String right) {
+        return left != null && right != null
+                && left.replace('\\', '/').equalsIgnoreCase(right.replace('\\', '/'));
+    }
+
     /**
      * 记一次改动。同一路径被同一子 Agent 再次修改时，用最新内容覆盖旧条目，
      * 但 diff 始终相对「基线 + 本沙箱此前改动」的最终状态，避免一条路径出现两份互相矛盾的补丁。
@@ -76,6 +95,14 @@ public final class DiffSandbox {
 
     public synchronized int fileCount() {
         return changes.size();
+    }
+
+    public synchronized String candidateHash() {
+        String canonical = changes.stream().sorted(java.util.Comparator.comparing(SandboxChange::path))
+                .map(change -> change.path() + "\0" + change.baseHash() + "\0" + change.newContent()
+                        + "\0" + change.status().wireName())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        return fingerprint(canonical);
     }
 
     /** 审阅后回写状态用；保持顺序不变。 */

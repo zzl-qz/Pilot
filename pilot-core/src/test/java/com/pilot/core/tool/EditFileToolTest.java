@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -59,8 +60,8 @@ class EditFileToolTest {
     void rejectsEditingUnreadFile() throws IOException {
         Path file = workspace.resolve("sample.txt");
         Files.writeString(file, "header\ntarget line\nfooter\n");
-        var reads = new ReadTracker();
-        var guarded = new EditFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
+        ReadTracker reads = new ReadTracker();
+        EditFileTool guarded = new EditFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
 
         String denied = guarded.execute(Map.of(
                 "path", "sample.txt", "old_string", "target line", "new_string", "replaced"));
@@ -70,7 +71,7 @@ class EditFileToolTest {
         assertEquals("header\ntarget line\nfooter\n", Files.readString(file), "未读文件不应被改动");
 
         // read_file 之后放行；错误信息里教的补救动作真实有效
-        var reader = new ReadFileTool(new PathValidator(workspace), reads);
+        ReadFileTool reader = new ReadFileTool(new PathValidator(workspace), reads);
         assertTrue(reader.execute(Map.of("path", "sample.txt")).contains("target line"));
         String allowed = guarded.execute(Map.of(
                 "path", "sample.txt", "old_string", "target line", "new_string", "replaced"));
@@ -81,11 +82,11 @@ class EditFileToolTest {
     void outOfRangeReadDoesNotUnlockEditing() throws IOException {
         Path file = workspace.resolve("sample.txt");
         Files.writeString(file, "target line\n");
-        var paths = new PathValidator(workspace);
-        var reads = new ReadTracker();
-        var reader = new ReadFileTool(paths, reads);
-        var editor = new EditFileTool(paths, SnapshotSink.none(), reads);
-        var edit = Map.<String, Object>of(
+        PathValidator paths = new PathValidator(workspace);
+        ReadTracker reads = new ReadTracker();
+        ReadFileTool reader = new ReadFileTool(paths, reads);
+        EditFileTool editor = new EditFileTool(paths, SnapshotSink.none(), reads);
+        Map<String,Object> edit = Map.<String, Object>of(
                 "path", "sample.txt", "old_string", "target line", "new_string", "replaced");
 
         assertTrue(reader.execute(Map.of("path", "sample.txt", "start_line", 9999))
@@ -103,9 +104,9 @@ class EditFileToolTest {
     /** 刚创建或刚编辑过的文件视为已读：连续编辑不被误伤。 */
     @Test
     void treatsJustWrittenFileAsObserved() throws IOException {
-        var reads = new ReadTracker();
-        var creator = new CreateFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
-        var editor = new EditFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
+        ReadTracker reads = new ReadTracker();
+        CreateFileTool creator = new CreateFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
+        EditFileTool editor = new EditFileTool(new PathValidator(workspace), SnapshotSink.none(), reads);
 
         assertTrue(creator.execute(Map.of(
                 "path", "fresh.txt", "content", "one\ntwo\n")).startsWith("已创建 "));
@@ -129,5 +130,37 @@ class EditFileToolTest {
                 "path", "legacy.txt", "old_string", "before", "new_string", "after"));
 
         assertTrue(result.startsWith("已修改 "), result);
+    }
+
+    @Test
+    void appliesDisjointEditsAgainstOriginalFileInOneWrite() throws IOException {
+        Path file = workspace.resolve("sample.txt");
+        Files.writeString(file, "\uFEFFfirst\r\nkeep\r\nlast\r\n");
+
+        String result = tool.execute(Map.of("path", "sample.txt", "edits", List.of(
+                Map.of("old_string", "last", "new_string", "end"),
+                Map.of("old_string", "first", "new_string", "start"))));
+
+        assertTrue(result.contains("替换 2 处"), result);
+        assertEquals("\uFEFFstart\r\nkeep\r\nend\r\n", Files.readString(file));
+    }
+
+    @Test
+    void rejectedBatchLeavesFileUntouched() throws IOException {
+        Path file = workspace.resolve("sample.txt");
+        String original = "header\nvalue\nfooter\n";
+        Files.writeString(file, original);
+
+        String missing = tool.execute(Map.of("path", "sample.txt", "edits", List.of(
+                Map.of("old_string", "header", "new_string", "title"),
+                Map.of("old_string", "absent", "new_string", "other"))));
+        assertTrue(missing.contains("edits[1] 未找到"), missing);
+        assertEquals(original, Files.readString(file));
+
+        String overlap = tool.execute(Map.of("path", "sample.txt", "edits", List.of(
+                Map.of("old_string", "header\nvalue", "new_string", "first"),
+                Map.of("old_string", "value", "new_string", "second"))));
+        assertTrue(overlap.contains("重叠或嵌套"), overlap);
+        assertEquals(original, Files.readString(file));
     }
 }
