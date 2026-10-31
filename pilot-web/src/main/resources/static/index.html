@@ -325,6 +325,7 @@
         <button class="tab" type="button" data-tab="preview" role="tab" aria-selected="false">预览</button>
         <button class="tab" type="button" data-tab="commands" role="tab" aria-selected="false">命令<span id="commands-count" class="tab-count" hidden>0</span></button>
         <button class="tab" type="button" data-tab="capabilities" role="tab" aria-selected="false">能力</button>
+        <button class="tab" type="button" data-tab="browser" role="tab" aria-selected="false">浏览器<span id="browser-dot" class="tab-dot" hidden></span></button>
         <button class="tab is-on" type="button" data-tab="activity" role="tab" aria-selected="true">活动</button>
       </div>
       <div class="filters" id="filters" role="tablist" aria-label="事件过滤">
@@ -332,6 +333,23 @@
         <button class="filter" type="button" data-filter="tool" aria-selected="false">工具</button>
         <button class="filter" type="button" data-filter="approval" aria-selected="false">审批</button>
         <button class="filter" type="button" data-filter="run" aria-selected="false">运行</button>
+      </div>
+    </div>
+
+    <div id="panel-browser" class="panel-body browser-panel" hidden>
+      <div class="mirror-state">
+        <span id="mirror-dot" class="mirror-dot" aria-hidden="true"></span>
+        <span id="mirror-url" class="mirror-url mono">等待智能体打开页面…</span>
+        <span id="mirror-latency" class="mirror-latency"></span>
+      </div>
+      <div id="mirror-stage" class="mirror-stage" aria-label="浏览器页面实时镜像">
+        <img id="mirror-frame" class="mirror-frame" alt="浏览器页面镜像" hidden>
+        <div id="mirror-overlay" class="mirror-overlay" aria-hidden="true"></div>
+        <p id="mirror-empty" class="mirror-empty">智能体使用 browser 工具后，这里会实时显示页面画面。</p>
+      </div>
+      <div class="mirror-actions">
+        <button id="mirror-focus" class="btn btn-sm" type="button" title="把浏览器窗口置前（不会持续抢焦点）">置前窗口</button>
+        <span id="mirror-hint" class="mirror-hint">镜像为只读；操作请到浏览器窗口或让智能体执行</span>
       </div>
     </div>
 

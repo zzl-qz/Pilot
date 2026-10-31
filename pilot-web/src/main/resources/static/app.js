@@ -25,6 +25,7 @@ import {
 } from './lib/agents.js';
 import { editSummary, mergeRunReports, sortChangeFiles, splitPath, statusKind } from './lib/changes.js';
 import { applyRule, classifyRunFailure, planProgressLabel } from './lib/events.js';
+import { frameSrc, latencyLabel, nextMirrorMode, ripplePosition, shouldAutoSwitch, urlLabel } from './lib/browser-mirror.js';
 import { groupSessionsByProject, resolveFolders, samePath } from './lib/projects.js';
 import { commandStatusLabel, isCommandActive, mergeCommandLog } from './lib/command-tasks.js';
 import { estimateTextTokens, languageLabel, parseCallout, resolveFileReference } from './lib/content-format.js';
@@ -201,6 +202,16 @@ const el = {
   panelChanges: document.querySelector('#panel-changes'),
   panelCommands: document.querySelector('#panel-commands'),
   panelCapabilities: document.querySelector('#panel-capabilities'),
+  panelBrowser: document.querySelector('#panel-browser'),
+  browserDot: document.querySelector('#browser-dot'),
+  mirrorDot: document.querySelector('#mirror-dot'),
+  mirrorUrl: document.querySelector('#mirror-url'),
+  mirrorLatency: document.querySelector('#mirror-latency'),
+  mirrorStage: document.querySelector('#mirror-stage'),
+  mirrorFrame: document.querySelector('#mirror-frame'),
+  mirrorOverlay: document.querySelector('#mirror-overlay'),
+  mirrorEmpty: document.querySelector('#mirror-empty'),
+  mirrorFocus: document.querySelector('#mirror-focus'),
   commandsCount: document.querySelector('#commands-count'),
   commandsState: document.querySelector('#commands-state'),
   commandsRefresh: document.querySelector('#commands-refresh'),
@@ -468,6 +479,15 @@ const commandView = {
   stopController: null, stoppingId: null, loadingLog: false, loaded: false
 };
 
+/** 浏览器镜像：瞬态 SSE（/browser/stream），与会话事件流分开，帧不回放不落库。 */
+const mirrorView = {
+  source: null,
+  mode: 'idle',
+  frameW: 1280,
+  frameH: 800,
+  autoSwitched: false
+};
+
 const THEME_KEY = 'pilot.theme';
 const ACCENT_KEY = 'pilot.accent';
 
@@ -707,6 +727,16 @@ function init() {
   el.filters.addEventListener('click', onFilterClick);
   el.prompts.addEventListener('click', onPromptClick);
   el.panelTabs.addEventListener('click', onTabClick);
+  el.mirrorFocus.addEventListener('click', async () => {
+    if (!state.sessionId) {
+      return;
+    }
+    try {
+      await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/browser/focus`, { method: 'POST' });
+    } catch {
+      // 置前失败不影响主流程
+    }
+  });
   el.commandsRefresh.addEventListener('click', restartCommandPolling);
   el.commandStop.addEventListener('click', stopSelectedCommand);
   el.commandLogBottom.addEventListener('click', () => { el.commandLog.scrollTop = el.commandLog.scrollHeight; });
@@ -2429,6 +2459,7 @@ async function activate(sessionId, title, workspace) {
   state.reconnectAttempt = 0;
   stopRunClock();
   state.sessionId = sessionId;
+  resetMirrorView();
   // 让旧会话尚未返回的分页请求失效，避免切换会话后覆盖新会话的 loading 状态。
   state.historyLoadId += 1;
   state.historyLoading = false;
@@ -3349,6 +3380,10 @@ function onAssistantDelta(event) {
 function onToolStarted(event) {
   // 调工具前那句「我先去看…」是思考，不是结论。收进思考块并保持展开。
   absorbReplyIntoThinking();
+  // 智能体开始用浏览器：先亮徽标提醒（真正切过去等有画面，见 markBrowserActivity）
+  if (event.payload.name === 'browser') {
+    el.browserDot.hidden = false;
+  }
   const action = toolLabel(event.payload.name);
   if (thinkingLive()) {
     state.turnShell.thinkingBlock._action = action || '';
@@ -6337,11 +6372,140 @@ function selectTab(tab) {
   el.panelPreview.hidden = tab !== 'preview';
   el.panelCommands.hidden = tab !== 'commands';
   el.panelCapabilities.hidden = tab !== 'capabilities';
+  el.panelBrowser.hidden = tab !== 'browser';
   el.filters.hidden = tab !== 'activity';
+  if (tab === 'browser') {
+    connectMirror();
+  } else {
+    // 切走即断开：服务端最后一个订阅者断开时会自动停 screencast，侧栏折叠/切页零流量。
+    disconnectMirror();
+  }
   if (tab === 'changes') {
     loadChanges();
   }
   syncCommandPolling();
+}
+
+/* ---------- 浏览器镜像 ---------- */
+
+function connectMirror() {
+  if (!state.sessionId || mirrorView.source) {
+    return;
+  }
+  const source = new EventSource(`/api/sessions/${encodeURIComponent(state.sessionId)}/browser/stream`);
+  mirrorView.source = source;
+  source.addEventListener('state', onMirrorState);
+  source.addEventListener('frame', onMirrorFrame);
+  source.addEventListener('action', onMirrorAction);
+  source.addEventListener('nav', (message) => {
+    try {
+      setMirrorUrl(JSON.parse(message.data).url);
+    } catch {
+      // 坏帧忽略
+    }
+  });
+  source.addEventListener('closed', () => setMirrorMode('closed'));
+  // EventSource 自带重连；镜像通道不落库，重连后服务端补发缓存帧，画面秒回
+}
+
+function disconnectMirror() {
+  if (!mirrorView.source) {
+    return;
+  }
+  mirrorView.source.close();
+  mirrorView.source = null;
+}
+
+function onMirrorState(message) {
+  try {
+    const payload = JSON.parse(message.data);
+    el.mirrorLatency.textContent = payload.available ? '' : '浏览器未就绪';
+  } catch {
+    // 忽略
+  }
+}
+
+function onMirrorFrame(message) {
+  let payload;
+  try {
+    payload = JSON.parse(message.data);
+  } catch {
+    return;
+  }
+  const src = frameSrc(payload);
+  if (!src) {
+    return; // 帧体缺失：跳过本次渲染，不用旧帧闪屏
+  }
+  if (Number(payload.w) > 0) {
+    mirrorView.frameW = payload.w;
+  }
+  if (Number(payload.h) > 0) {
+    mirrorView.frameH = payload.h;
+  }
+  el.mirrorFrame.src = src;
+  el.mirrorFrame.hidden = false;
+  el.mirrorEmpty.hidden = true;
+  setMirrorUrl(payload.url);
+  el.mirrorLatency.textContent = latencyLabel(Date.now(), Number(payload.ts));
+  setMirrorMode('frame');
+  markBrowserActivity();
+}
+
+function onMirrorAction(message) {
+  let action;
+  try {
+    action = JSON.parse(message.data);
+  } catch {
+    return;
+  }
+  const position = ripplePosition(action, mirrorView.frameW, mirrorView.frameH, el.mirrorStage.clientWidth);
+  if (!position) {
+    return;
+  }
+  const ripple = document.createElement('span');
+  ripple.className = 'mirror-ripple';
+  ripple.style.left = position.x + 'px';
+  ripple.style.top = position.y + 'px';
+  el.mirrorOverlay.appendChild(ripple);
+  setTimeout(() => ripple.remove(), 1000);
+}
+
+function setMirrorMode(kind) {
+  mirrorView.mode = nextMirrorMode(mirrorView.mode, kind);
+  el.mirrorStage.classList.toggle('is-closed', mirrorView.mode === 'closed');
+  el.mirrorDot.classList.toggle('is-live', mirrorView.mode === 'live');
+}
+
+function setMirrorUrl(url) {
+  el.mirrorUrl.textContent = urlLabel(url);
+  el.mirrorUrl.title = url || '';
+}
+
+/** 有真实镜像帧了：点亮 tab 徽标，并按用户偏好自动切过去看一次。 */
+function markBrowserActivity() {
+  el.browserDot.hidden = false;
+  if (shouldAutoSwitch(localStorage.getItem('pilot-mirror-autoswitch'), mirrorView.autoSwitched)) {
+    mirrorView.autoSwitched = true;
+    selectTab('browser');
+  }
+}
+
+/** 会话切换时复位镜像：断开连接、清空画面与徽标（新会话重新自动唤起一次）。 */
+function resetMirrorView() {
+  disconnectMirror();
+  mirrorView.mode = 'idle';
+  mirrorView.frameW = 1280;
+  mirrorView.frameH = 800;
+  mirrorView.autoSwitched = false;
+  el.browserDot.hidden = true;
+  el.mirrorFrame.hidden = true;
+  el.mirrorFrame.removeAttribute('src');
+  el.mirrorOverlay.replaceChildren();
+  el.mirrorEmpty.hidden = false;
+  el.mirrorLatency.textContent = '';
+  el.mirrorDot.classList.remove('is-live');
+  el.mirrorStage.classList.remove('is-closed');
+  setMirrorUrl('');
 }
 
 /* ---------- 会话命令任务：只在当前可见面板轮询，日志用服务端游标增量读取 ---------- */
