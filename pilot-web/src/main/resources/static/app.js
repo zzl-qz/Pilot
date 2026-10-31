@@ -25,7 +25,7 @@ import {
 } from './lib/agents.js';
 import { editSummary, mergeRunReports, sortChangeFiles, splitPath, statusKind } from './lib/changes.js';
 import { applyRule, classifyRunFailure, planProgressLabel } from './lib/events.js';
-import { frameSrc, latencyLabel, nextMirrorMode, ripplePosition, shouldAutoSwitch, urlLabel } from './lib/browser-mirror.js';
+import { frameSrc, latencyLabel, nextMirrorMode, pauseToggleLabel, ripplePosition, shouldAutoSwitch, urlLabel } from './lib/browser-mirror.js';
 import { groupSessionsByProject, resolveFolders, samePath } from './lib/projects.js';
 import { commandStatusLabel, isCommandActive, mergeCommandLog } from './lib/command-tasks.js';
 import { estimateTextTokens, languageLabel, parseCallout, resolveFileReference } from './lib/content-format.js';
@@ -212,6 +212,7 @@ const el = {
   mirrorOverlay: document.querySelector('#mirror-overlay'),
   mirrorEmpty: document.querySelector('#mirror-empty'),
   mirrorFocus: document.querySelector('#mirror-focus'),
+  mirrorPause: document.querySelector('#mirror-pause'),
   commandsCount: document.querySelector('#commands-count'),
   commandsState: document.querySelector('#commands-state'),
   commandsRefresh: document.querySelector('#commands-refresh'),
@@ -485,7 +486,8 @@ const mirrorView = {
   mode: 'idle',
   frameW: 1280,
   frameH: 800,
-  autoSwitched: false
+  autoSwitched: false,
+  paused: false
 };
 
 const THEME_KEY = 'pilot.theme';
@@ -735,6 +737,18 @@ function init() {
       await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/browser/focus`, { method: 'POST' });
     } catch {
       // 置前失败不影响主流程
+    }
+  });
+  el.mirrorPause.addEventListener('click', async () => {
+    if (!state.sessionId) {
+      return;
+    }
+    // 按目标态发请求，按钮文案等服务端 state 事件回推后再变
+    const action = mirrorView.paused ? 'resume' : 'pause';
+    try {
+      await apiFetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/browser/${action}`, { method: 'POST' });
+    } catch {
+      // 接管失败不影响主流程
     }
   });
   el.commandsRefresh.addEventListener('click', restartCommandPolling);
@@ -6420,6 +6434,9 @@ function onMirrorState(message) {
   try {
     const payload = JSON.parse(message.data);
     el.mirrorLatency.textContent = payload.available ? '' : '浏览器未就绪';
+    // 接管按钮态以服务端回推为准（唯一事实源），不本地翻转
+    mirrorView.paused = Boolean(payload.paused);
+    el.mirrorPause.textContent = pauseToggleLabel(mirrorView.paused);
   } catch {
     // 忽略
   }
@@ -6497,12 +6514,14 @@ function resetMirrorView() {
   mirrorView.frameW = 1280;
   mirrorView.frameH = 800;
   mirrorView.autoSwitched = false;
+  mirrorView.paused = false;
   el.browserDot.hidden = true;
   el.mirrorFrame.hidden = true;
   el.mirrorFrame.removeAttribute('src');
   el.mirrorOverlay.replaceChildren();
   el.mirrorEmpty.hidden = false;
   el.mirrorLatency.textContent = '';
+  el.mirrorPause.textContent = pauseToggleLabel(false);
   el.mirrorDot.classList.remove('is-live');
   el.mirrorStage.classList.remove('is-closed');
   setMirrorUrl('');

@@ -100,3 +100,11 @@ export function urlLabel(url) {
   const text = String(url || '').trim();
   return text || '等待智能体打开页面…';
 }
+
+/**
+ * 接管按钮文案。服务端 paused 是唯一事实源，按钮只是它的投影：
+ * 点击后不本地翻转，等 state 事件回推再变，双击/多端不会不一致。
+ */
+export function pauseToggleLabel(paused) {
+  return paused ? '恢复智能体操作' : '暂停智能体操作';
+}

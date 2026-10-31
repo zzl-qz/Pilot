@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  frameSrc, latencyLabel, nextMirrorMode, ripplePosition, shouldAutoSwitch, urlLabel
+  frameSrc, latencyLabel, nextMirrorMode, pauseToggleLabel, ripplePosition, shouldAutoSwitch, urlLabel
 } from '../../main/resources/static/lib/browser-mirror.js';
 
 test('frameSrc 拼 dataURL，帧体缺失返回 null', () => {
@@ -57,4 +57,9 @@ test('urlLabel 空地址给可读占位', () => {
   assert.equal(urlLabel(''), '等待智能体打开页面…');
   assert.equal(urlLabel(undefined), '等待智能体打开页面…');
   assert.equal(urlLabel('   '), '等待智能体打开页面…');
+});
+
+test('pauseToggleLabel 随服务端状态翻转，按钮只是投影', () => {
+  assert.equal(pauseToggleLabel(false), '暂停智能体操作');
+  assert.equal(pauseToggleLabel(true), '恢复智能体操作');
 });
