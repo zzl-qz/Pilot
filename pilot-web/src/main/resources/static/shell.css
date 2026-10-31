@@ -2361,3 +2361,50 @@ html[data-theme] .usage-session-meta {
   color: var(--ink-faint, #999);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- 上下文构成：按角色叠加的占比条 ---------- */
+
+html[data-theme] .context-composition {
+  margin: 8px 0 4px;
+}
+
+html[data-theme] .context-composition-bar {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+html[data-theme] .context-segment.is-user { background: #4fa3ea; }
+html[data-theme] .context-segment.is-assistant { background: #f08a52; }
+html[data-theme] .context-segment.is-tool { background: #8fc6f2; }
+html[data-theme] .context-segment.is-system { background: #b9b9b9; }
+html[data-theme] .context-segment.is-other { background: #cfcfcf; }
+
+html[data-theme] .context-composition-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+html[data-theme] .context-composition-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--ink-soft, #666);
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-theme] .context-composition-row i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+html[data-theme] .context-composition-row b {
+  font-weight: 550;
+  color: var(--ink);
+}

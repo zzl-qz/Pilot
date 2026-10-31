@@ -122,6 +122,8 @@ const el = {
   modelSave: document.querySelector('#model-save'),
   contextChip: document.querySelector('#context-chip'),
   contextMenu: document.querySelector('#context-menu'),
+  contextComposition: document.querySelector('#context-composition'),
+  contextComposition: document.querySelector('#context-composition'),
   contextKind: document.querySelector('#context-kind'),
   contextPercent: document.querySelector('#context-percent'),
   contextMeterFill: document.querySelector('#context-meter-fill'),
@@ -1599,6 +1601,7 @@ function renderContextStatus() {
   const canCompact = Boolean(context?.canCompact) && !state.running && !state.compactingContext;
   el.contextCompact.disabled = !canCompact;
   el.contextCompact.textContent = state.compactingContext ? '压缩中…' : '压缩上下文';
+  renderContextComposition(context?.segments);
   if (state.running) {
     el.contextHint.textContent = '任务运行中不能主动压缩；可以先暂停，自动压缩仍会按阈值执行。';
   } else if (!context?.canCompact) {
@@ -1606,6 +1609,46 @@ function renderContextStatus() {
   } else {
     el.contextHint.textContent = '压缩会调用一次模型生成交接摘要；聊天和审计记录完整保留。';
   }
+}
+
+/** 记忆构成：按角色叠加占比条，看得出什么在占地方（工具结果通常是大头）。 */
+const CONTEXT_ROLE_LABELS = { user: '用户', assistant: '助手', tool: '工具结果', system: '系统与摘要' };
+
+function renderContextComposition(segments) {
+  if (!el.contextComposition) {
+    return;
+  }
+  const items = Array.isArray(segments) ? segments.filter((item) => Number(item.chars) > 0) : [];
+  if (items.length === 0) {
+    el.contextComposition.hidden = true;
+    el.contextComposition.replaceChildren();
+    return;
+  }
+  const total = items.reduce((sum, item) => sum + Number(item.chars), 0) || 1;
+  const bar = document.createElement('div');
+  bar.className = 'context-composition-bar';
+  const list = document.createElement('div');
+  list.className = 'context-composition-list';
+  for (const item of items) {
+    const label = CONTEXT_ROLE_LABELS[item.role] || item.role;
+    const width = Math.max(2, Math.round((Number(item.chars) / total) * 100));
+    const piece = document.createElement('span');
+    piece.className = 'context-segment is-' + (CONTEXT_ROLE_LABELS[item.role] ? item.role : 'other');
+    piece.style.width = width + '%';
+    bar.append(piece);
+    const row = document.createElement('span');
+    row.className = 'context-composition-row';
+    const dot = document.createElement('i');
+    dot.className = 'context-segment is-' + (CONTEXT_ROLE_LABELS[item.role] ? item.role : 'other');
+    const name = document.createElement('span');
+    name.textContent = `${label} ${Number(item.messages)} 条`;
+    const meta = document.createElement('b');
+    meta.textContent = `${Math.round(width)}%`;
+    row.append(dot, name, meta);
+    list.append(row);
+  }
+  el.contextComposition.replaceChildren(bar, list);
+  el.contextComposition.hidden = false;
 }
 
 async function compactContext() {
