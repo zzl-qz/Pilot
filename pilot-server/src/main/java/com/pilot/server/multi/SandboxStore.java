@@ -19,6 +19,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -59,6 +61,18 @@ public class SandboxStore {
     private final ConcurrentMap<String, VerificationGate.Report> verifications = new ConcurrentHashMap<>();
     private final ObjectMapper mapper;
     private final PilotDataDir dataDir;
+    private final Set<String> restoredSessions = ConcurrentHashMap.newKeySet();
+
+    private record SandboxPayload(String sandboxId, String agentId, String taskId, String baseCommit,
+                                  List<SandboxChange> changes) {
+    }
+
+    private record TaskPayload(String taskId, String title, String agentId, String status,
+                               String detail, int files) {
+    }
+
+    private record VerificationPayload(String status, List<String> checks, String detail) {
+    }
 
     public SandboxStore(ObjectMapper mapper, PilotDataDir dataDir) {
         this.mapper = mapper;
@@ -70,24 +84,31 @@ public class SandboxStore {
         tasks.remove(sessionId);
         arbitrations.remove(sessionId);
         verifications.keySet().removeIf(key -> key.startsWith(sessionId + "/"));
+        restoredSessions.remove(sessionId);
     }
 
     /** 记录最近一次硬校验结果，供界面说明「为什么不能接受」。 */
     public void recordVerification(String sessionId, String sandboxId, VerificationGate.Report report) {
-        if (report != null) verifications.put(sessionId + "/" + sandboxId, report);
+        if (report != null) {
+            verifications.put(sessionId + "/" + sandboxId, report);
+            persistVerification(sessionId, sandboxId, report);
+        }
     }
 
     /** 没有跑过校验时返回 null，调用方必须按「未校验」处理，不能当成通过。 */
     public VerificationGate.Report verification(String sessionId, String sandboxId) {
+        restore(sessionId);
         return verifications.get(sessionId + "/" + sandboxId);
     }
 
     public void add(String sessionId, DiffSandbox sandbox) {
+        restoredSessions.add(sessionId);
         sandboxes.computeIfAbsent(sessionId, key -> new CopyOnWriteArrayList<>()).add(sandbox);
         persist(sessionId, sandbox);
     }
 
     public List<DiffSandbox> sandboxes(String sessionId) {
+        restore(sessionId);
         return List.copyOf(sandboxes.getOrDefault(sessionId, List.of()));
     }
 
@@ -114,17 +135,21 @@ public class SandboxStore {
 
     public void recordTasks(String sessionId, List<TaskView> views) {
         tasks.put(sessionId, List.copyOf(views));
+        persistTasks(sessionId, views);
     }
 
     public List<TaskView> tasks(String sessionId) {
+        restore(sessionId);
         return List.copyOf(tasks.getOrDefault(sessionId, List.of()));
     }
 
     public void raise(String sessionId, Arbitration arbitration) {
         arbitrations.computeIfAbsent(sessionId, key -> new CopyOnWriteArrayList<>()).add(arbitration);
+        persistArbitrations(sessionId);
     }
 
     public List<Arbitration> arbitrations(String sessionId) {
+        restore(sessionId);
         return List.copyOf(arbitrations.getOrDefault(sessionId, List.of()));
     }
 
@@ -238,6 +263,111 @@ public class SandboxStore {
         } catch (IOException e) {
             // 审计副本失败不影响主流程，但要在日志里留痕
             log.warn("写入沙箱审计副本失败: session={}, sandbox={}", sessionId, sandbox.id(), e);
+        }
+    }
+
+    private void persistTasks(String sessionId, List<TaskView> views) {
+        Path file = dataDir.file("multi", sanitize(sessionId), "tasks.json");
+        try {
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, mapper.writeValueAsString(views.stream()
+                    .map(view -> new TaskPayload(view.taskId(), view.title(), view.agentId(), view.status(),
+                            view.detail(), view.files())).toList()));
+        } catch (IOException e) {
+            log.warn("写入多 Agent 任务状态失败: session={}", sessionId, e);
+        }
+    }
+
+    private void persistVerification(String sessionId, String sandboxId, VerificationGate.Report report) {
+        Path file = dataDir.file("multi", sanitize(sessionId), "verification-" + sanitize(sandboxId) + ".json");
+        try {
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, mapper.writeValueAsString(
+                    new VerificationPayload(report.status(), report.checks(), report.detail())));
+        } catch (IOException e) {
+            log.warn("写入多 Agent 校验状态失败: session={}, sandbox={}", sessionId, sandboxId, e);
+        }
+    }
+
+    private void persistArbitrations(String sessionId) {
+        Path file = dataDir.file("multi", sanitize(sessionId), "arbitrations.json");
+        try {
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, mapper.writeValueAsString(arbitrations.getOrDefault(sessionId, List.of())));
+        } catch (IOException e) {
+            log.warn("写入多 Agent 仲裁状态失败: session={}", sessionId, e);
+        }
+    }
+
+    private void restore(String sessionId) {
+        if (!restoredSessions.add(sessionId)) return;
+        Path dir = dataDir.file("multi", sanitize(sessionId));
+        if (!Files.isDirectory(dir)) return;
+        try (var files = Files.list(dir)) {
+            files.filter(file -> file.getFileName().toString().endsWith(".json"))
+                    .filter(file -> !file.getFileName().toString().equals("tasks.json"))
+                    .filter(file -> !file.getFileName().toString().equals("arbitrations.json"))
+                    .filter(file -> !file.getFileName().toString().startsWith("verification-"))
+                    .forEach(file -> restoreSandbox(sessionId, file));
+        } catch (IOException e) {
+            log.warn("读取多 Agent 沙箱状态失败: session={}", sessionId, e);
+        }
+        restoreTasks(sessionId, dir.resolve("tasks.json"));
+        restoreArbitrations(sessionId, dir.resolve("arbitrations.json"));
+        try (var files = Files.list(dir)) {
+            files.filter(file -> file.getFileName().toString().startsWith("verification-"))
+                    .forEach(file -> restoreVerification(sessionId, file));
+        } catch (IOException e) {
+            log.warn("读取多 Agent 校验状态失败: session={}", sessionId, e);
+        }
+    }
+
+    private void restoreSandbox(String sessionId, Path file) {
+        try {
+            SandboxPayload payload = mapper.readValue(Files.readString(file), SandboxPayload.class);
+            if (payload == null || payload.sandboxId() == null) return;
+            DiffSandbox sandbox = new DiffSandbox(payload.sandboxId(), payload.agentId(), payload.taskId(), payload.baseCommit());
+            if (payload.changes() != null) sandbox.replaceAll(payload.changes());
+            sandboxes.computeIfAbsent(sessionId, key -> new CopyOnWriteArrayList<>()).add(sandbox);
+        } catch (Exception e) {
+            log.warn("忽略损坏的沙箱状态文件: {}", file, e);
+        }
+    }
+
+    private void restoreTasks(String sessionId, Path file) {
+        if (!Files.isRegularFile(file)) return;
+        try {
+            TaskPayload[] payloads = mapper.readValue(Files.readString(file), TaskPayload[].class);
+            List<TaskView> views = new ArrayList<>();
+            if (payloads != null) for (TaskPayload payload : payloads) {
+                views.add(new TaskView(payload.taskId(), payload.title(), payload.agentId(), payload.status(),
+                        payload.detail(), payload.files()));
+            }
+            tasks.put(sessionId, List.copyOf(views));
+        } catch (Exception e) {
+            log.warn("忽略损坏的任务状态文件: {}", file, e);
+        }
+    }
+
+    private void restoreArbitrations(String sessionId, Path file) {
+        if (!Files.isRegularFile(file)) return;
+        try {
+            Arbitration[] payloads = mapper.readValue(Files.readString(file), Arbitration[].class);
+            arbitrations.put(sessionId, new CopyOnWriteArrayList<>(payloads == null ? List.of() : List.of(payloads)));
+        } catch (Exception e) {
+            log.warn("忽略损坏的仲裁状态文件: {}", file, e);
+        }
+    }
+
+    private void restoreVerification(String sessionId, Path file) {
+        try {
+            VerificationPayload payload = mapper.readValue(Files.readString(file), VerificationPayload.class);
+            String name = file.getFileName().toString();
+            String sandboxId = name.substring("verification-".length(), name.length() - ".json".length());
+            verifications.put(sessionId + "/" + sandboxId,
+                    new VerificationGate.Report(payload.status(), payload.checks(), payload.detail()));
+        } catch (Exception e) {
+            log.warn("忽略损坏的校验状态文件: {}", file, e);
         }
     }
 

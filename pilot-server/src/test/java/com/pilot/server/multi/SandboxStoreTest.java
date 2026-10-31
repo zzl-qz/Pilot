@@ -87,4 +87,26 @@ class SandboxStoreTest {
         assertFalse(report.ok());
         assertFalse(Files.exists(workspace.getParent().resolve("escape.txt")));
     }
+
+    @Test
+    void restoresSandboxAndVerificationAfterStoreRecreation() throws IOException {
+        SandboxStore first = store();
+        DiffSandbox sandbox = proposal();
+        first.add("ses_restart", sandbox);
+        first.recordTasks("ses_restart", java.util.List.of(new SandboxStore.TaskView(
+                "T1", "任务一", "agent_1", "DONE", "产物完成", 1)));
+        first.raise("ses_restart", new SandboxStore.Arbitration(
+                "arb_1", "dissent", "T1", java.util.List.of("方案 A"), "需要人工确认"));
+        first.recordVerification("ses_restart", "sbx_1",
+                VerificationGate.Report.passed(java.util.List.of("mvn test")));
+
+        SandboxStore restored = store();
+
+        assertEquals(1, restored.sandboxes("ses_restart").size());
+        assertEquals("a\nCHANGED\nc\n",
+                restored.find("ses_restart", "sbx_1").orElseThrow().changes().get(0).newContent());
+        assertTrue(restored.verification("ses_restart", "sbx_1").ok());
+        assertEquals("DONE", restored.tasks("ses_restart").get(0).status());
+        assertEquals("arb_1", restored.arbitrations("ses_restart").get(0).id());
+    }
 }
