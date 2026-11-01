@@ -5,7 +5,7 @@ import {
   filterPaletteActions,
   filterQuickCommands,
   QUICK_COMMANDS
-} from '../../main/resources/static/lib/commands.js';
+} from '../../../frontend/src/lib/commands.js';
 
 test('quick commands can be found by name, alias, label, or hint', () => {
   assert.equal(filterQuickCommands('review')[0].name, '/review');

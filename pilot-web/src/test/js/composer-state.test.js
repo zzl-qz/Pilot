@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveComposerAction } from '../../main/resources/static/lib/composer-state.js';
+import { resolveComposerAction } from '../../../frontend/src/lib/composer-state.js';
 
 test('运行中且输入为空时主按钮切换为停止', () => {
   assert.deepEqual(resolveComposerAction({ running: true, composerEnabled: true }), {

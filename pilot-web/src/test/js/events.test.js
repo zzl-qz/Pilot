@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyRule, classifyRunFailure, planProgressLabel } from '../../main/resources/static/lib/events.js';
+import { applyRule, classifyRunFailure, planProgressLabel } from '../../../frontend/src/lib/events.js';
 
 test('applyRule 推进游标并应用新事件', () => {
   assert.deepEqual(applyRule({ type: 'tool.started', sequence: 5 }, 4), { apply: true, cursor: 5 });

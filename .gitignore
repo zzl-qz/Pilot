@@ -55,3 +55,16 @@ identifier.sqlite
 evaluation/harness/runs/
 pilot-web/target/viewport/
 pilot-web/node_modules/
+pilot-web/frontend/node_modules/
+
+### 前端构建产物：vite 每次构建都会换 hash 文件名，不入库 ###
+pilot-web/src/main/resources/static/assets/
+
+### 前端构建临时目录与本地截图脚本 ###
+pilot-web/frontend/.tmp-check/
+pilot-web/frontend/shot*.cjs
+
+### 本机启动日志与调试截图 ###
+mvn-run.log
+mvn-run.err
+/shot-*.png

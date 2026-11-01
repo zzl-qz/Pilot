@@ -44,6 +44,11 @@ if [[ "$pilot_major" == unavailable || "$pilot_major" -lt 25 ]]; then
   exit 1
 fi
 
+# Ask whether to refresh the frontend dependencies before building.
+if command -v node >/dev/null 2>&1; then
+  node "$pilot_root/tools/ask-frontend-deps.mjs" || true
+fi
+
 # Install all reactor dependencies so server-only builds cannot use stale core jars.
 bash ./mvnw -pl pilot-server -am install
 exec "$pilot_java" --enable-native-access=ALL-UNNAMED \

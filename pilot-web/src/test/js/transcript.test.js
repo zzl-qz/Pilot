@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTranscript, transcriptFileName } from '../../main/resources/static/lib/transcript.js';
+import { buildTranscript, transcriptFileName } from '../../../frontend/src/lib/transcript.js';
 
 test('transcript renders turns in order with a tool summary', () => {
   const md = buildTranscript({

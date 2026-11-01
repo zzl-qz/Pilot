@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import {
   commandStatusLabel,
   isCommandActive,
-  mergeCommandLog
-} from '../../main/resources/static/lib/command-tasks.js';
+  mergeCommandLog,
+  stripAnsi
+} from '../../../frontend/src/lib/command-tasks.js';
 
 const empty = () => ({ text: '', offset: 0, trimmed: 0, truncated: false, eof: false });
 
@@ -88,4 +89,13 @@ test('缺失或无效游标不破坏已显示内容', () => {
   const current = { ...empty(), text: 'abc', offset: 3 };
   assert.deepEqual(mergeCommandLog(current, null), current);
   assert.deepEqual(mergeCommandLog(current, { offset: 4, nextOffset: 2, text: 'x' }), current);
+});
+
+test('终端颜色与光标序列在展示前被剥掉，正文和换行保留', () => {
+  assert.equal(stripAnsi('\u001b[32mgreen\u001b[0m text'), 'green text');
+  assert.equal(stripAnsi('\u001b[2K\u001b[1Gdownloading 10%'), 'downloading 10%');
+  assert.equal(stripAnsi('\u001b]0;title\u0007line'), 'line');
+  assert.equal(stripAnsi('a\rb\nc'), 'ab\nc', '进度条回车去掉，真正的换行保留');
+  assert.equal(stripAnsi('a\r\nb'), 'a\r\nb');
+  assert.equal(stripAnsi(null), '');
 });

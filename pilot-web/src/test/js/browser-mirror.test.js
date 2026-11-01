@@ -2,14 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  frameSrc, latencyLabel, nextMirrorMode, pauseToggleLabel, ripplePosition, shouldAutoSwitch, urlLabel
-} from '../../main/resources/static/lib/browser-mirror.js';
+  frameSrc, keyCommand, latencyLabel, nextMirrorMode, pauseToggleLabel, pointFromEvent,
+  ripplePosition, shouldAutoSwitch, urlLabel
+} from '../../../frontend/src/lib/browser-mirror.js';
 
 test('frameSrc 拼 dataURL，帧体缺失返回 null', () => {
   assert.equal(frameSrc({ frame: 'QUJD' }), 'data:image/jpeg;base64,QUJD');
   assert.equal(frameSrc({}), null);
   assert.equal(frameSrc(null), null);
   assert.equal(frameSrc({ frame: '' }), null);
+});
+
+test('frameSrc 也接受裸 base64：面板直接传 mirror.frame 时不会拿到 null', () => {
+  assert.equal(frameSrc('QUJD'), 'data:image/jpeg;base64,QUJD');
+  assert.equal(frameSrc(''), null);
+  assert.equal(frameSrc(undefined), null);
 });
 
 test('latencyLabel 分档：实时 / 毫秒 / 秒前 / 无时间戳', () => {
@@ -62,4 +69,32 @@ test('urlLabel 空地址给可读占位', () => {
 test('pauseToggleLabel 随服务端状态翻转，按钮只是投影', () => {
   assert.equal(pauseToggleLabel(false), '暂停智能体操作');
   assert.equal(pauseToggleLabel(true), '恢复智能体操作');
+});
+
+test('pointFromEvent 按页面视口换算，扣掉 letterbox 留白', () => {
+  // 640×400 的显示框正好是 1280×800 的一半：中点映射到页面中点
+  assert.deepEqual(pointFromEvent(320, 200, { left: 0, top: 0, width: 640, height: 400 }), { x: 640, y: 400 });
+  // 显示框比画面高：上下各留 100px 黑边，同一个中心点仍落在页面中心
+  assert.deepEqual(pointFromEvent(320, 300, { left: 0, top: 0, width: 640, height: 600 }), { x: 640, y: 400 });
+  // 右上角夹在视口内（1279 / 0），不会越界
+  assert.deepEqual(pointFromEvent(640, 100, { left: 0, top: 0, width: 640, height: 600 }), { x: 1279, y: 0 });
+  // 框有偏移时按偏移扣
+  assert.deepEqual(pointFromEvent(340, 220, { left: 20, top: 20, width: 640, height: 400 }), { x: 640, y: 400 });
+  assert.equal(pointFromEvent(Number.NaN, 10, { left: 0, top: 0, width: 640, height: 400 }), null);
+  assert.equal(pointFromEvent(10, 10, null), null);
+});
+
+test('keyCommand 区分整键、字符与不该转发的键', () => {
+  assert.deepEqual(keyCommand({ key: 'a' }), { text: 'a' });
+  assert.deepEqual(keyCommand({ key: ' ' }), { text: ' ' });
+  assert.deepEqual(keyCommand({ key: 'Enter' }), { key: 'Enter' });
+  assert.deepEqual(keyCommand({ key: 'Backspace' }), { key: 'Backspace' });
+  assert.deepEqual(keyCommand({ key: 'c', ctrlKey: true }), { key: 'Control+C' });
+  assert.deepEqual(keyCommand({ key: 'v', metaKey: true }), { key: 'Meta+V' });
+  // 输入法组合中、纯修饰键、功能键都不转发
+  assert.equal(keyCommand({ key: 'a', isComposing: true }), null);
+  assert.equal(keyCommand({ key: 'Shift' }), null);
+  assert.equal(keyCommand({ key: 'F5' }), null);
+  assert.equal(keyCommand({ key: 'Control', ctrlKey: true }), null);
+  assert.equal(keyCommand(null), null);
 });

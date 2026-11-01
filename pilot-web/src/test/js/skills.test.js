@@ -8,8 +8,8 @@ import {
   skillEntry,
   summarizeInstallResults,
   toSkillCommands
-} from '../../main/resources/static/lib/skills.js';
-import { QUICK_COMMANDS } from '../../main/resources/static/lib/commands.js';
+} from '../../../frontend/src/lib/skills.js';
+import { QUICK_COMMANDS } from '../../../frontend/src/lib/commands.js';
 
 const SKILLS = [
   {

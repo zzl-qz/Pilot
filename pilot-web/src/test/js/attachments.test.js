@@ -12,7 +12,7 @@ import {
   joinAttachmentMarkers,
   layoutMessageParts,
   splitAttachmentMarkers
-} from '../../main/resources/static/lib/attachments.js';
+} from '../../../frontend/src/lib/attachments.js';
 
 test('文件徽标按扩展名分类', () => {
   assert.deepEqual(fileBadge('App.java'), { label: 'JAVA', tone: 'code' });

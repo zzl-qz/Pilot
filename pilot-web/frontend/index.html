@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Pilot · 本地编码代理</title>
+    <link id="favicon" rel="icon" href="/favicon.svg" />
+    <script>
+      /*
+       * 白屏兜底：构建会换掉入口的 hash 文件名。浏览器里如果还留着上一版 index.html，
+       * 它引用的 /assets/index-<旧hash>.js 已经不在了，模块脚本 404 → 页面上什么都没有。
+       * 这里只做一件事：load 之后 1.5s 根节点仍是空的，就重载一次拿新的 index.html；
+       * 用 sessionStorage 记一次，避免服务端真坏了的时候无限刷新。
+       */
+      (function () {
+        var KEY = 'pilot.boot-retry';
+        window.addEventListener('load', function () {
+          setTimeout(function () {
+            var root = document.getElementById('root');
+            if (root && root.childElementCount > 0) {
+              try { sessionStorage.removeItem(KEY); } catch (e) { /* 隐私模式忽略 */ }
+              return;
+            }
+            try {
+              if (sessionStorage.getItem(KEY)) {
+                return;
+              }
+              sessionStorage.setItem(KEY, '1');
+            } catch (e) { /* 存不下就只重试这一轮 */ }
+            location.reload();
+          }, 1500);
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -6,7 +6,7 @@ import {
   partitionSessions,
   resolveFolders,
   samePath
-} from '../../main/resources/static/lib/projects.js';
+} from '../../../frontend/src/lib/projects.js';
 
 test('samePath 忽略分隔符、大小写与末尾斜杠', () => {
   assert.equal(samePath('E:\\Pilot\\web', 'e:/pilot/web'), true);
@@ -72,7 +72,7 @@ test('groupSessionsByProject 按项目分组，历史会话进未分组', () => 
   assert.deepEqual(groups[2].active.map((item) => item.id), ['s3']);
 });
 
-test('groupSessionsByProject 每个组单独算空白对话', () => {
+test('groupSessionsByProject 空白对话不进侧栏', () => {
   const groups = groupSessionsByProject(
     [{ id: 'p1' }, { id: 'p2' }],
     [
@@ -81,8 +81,11 @@ test('groupSessionsByProject 每个组单独算空白对话', () => {
     ]
   );
 
-  assert.equal(groups[0].blank.id, 'b1');
-  assert.equal(groups[1].blank.id, 'b2');
+  // 空白对话是「先建后聊」的遗留，不再进侧栏，连分组都不该被它撑出来
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].blank, null);
+  assert.equal(groups[1].blank, null);
+  assert.deepEqual(groups[0].active, []);
 });
 
 test('groupSessionsByProject 空输入返回空数组', () => {

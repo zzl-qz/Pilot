@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { normalizePath, parseDiff, totalDiffLines } from '../../main/resources/static/lib/diff.js';
+import { normalizePath, parseDiff, totalDiffLines } from '../../../frontend/src/lib/diff.js';
 
 test('把补丁拆成文件与行，并统计增删', () => {
   const diff = [

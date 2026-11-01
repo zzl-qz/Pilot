@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSubsequence, rankFileMatches } from '../../main/resources/static/lib/mention.js';
+import { isSubsequence, rankFileMatches } from '../../../frontend/src/lib/mention.js';
 
 const FILES = [
   'pilot-core/src/main/java/com/pilot/core/tool/SearchTool.java',

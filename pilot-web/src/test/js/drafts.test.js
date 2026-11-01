@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dropDraft, readDraft, writeDraft } from '../../main/resources/static/lib/drafts.js';
+import { dropDraft, readDraft, writeDraft } from '../../../frontend/src/lib/drafts.js';
 
 function memoryStorage() {
   const map = new Map();
@@ -31,10 +31,15 @@ test('blank drafts remove the key instead of storing empty entries', () => {
   assert.equal(storage.map.size, 0);
 });
 
-test('drafts without a session id are ignored and storage failures are swallowed', () => {
+test('新对话的草稿共用一个固定槽位，存储异常被吞掉', () => {
   const storage = memoryStorage();
+  // 还没拿到会话 ID 的新对话共用 __new__ 槽位：刷新或切走再回来都不该丢字
   writeDraft(storage, null, 'x');
-  assert.equal(storage.map.size, 0);
+  assert.equal(storage.map.size, 1);
+  assert.equal(readDraft(storage, null), 'x');
+  writeDraft(storage, 'ses_1', 'y');
+  assert.equal(storage.map.size, 2);
+
   const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('full'); }, removeItem() { throw new Error('x'); } };
   assert.doesNotThrow(() => writeDraft(broken, 'a', 'x'));
   assert.equal(readDraft(broken, 'a'), '');

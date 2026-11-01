@@ -9,6 +9,12 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
     <artifactId>pilot-server</artifactId>
+    <properties>
+        <!-- 后端构建时是否跳过前端构建；纯后端迭代可用 -DskipFrontend=true -->
+        <skipFrontend>false</skipFrontend>
+        <!-- 前端工程目录（相对 pilot-server） -->
+        <frontendDir>${project.basedir}/../pilot-web/frontend</frontendDir>
+    </properties>
     <dependencies>
         <dependency>
             <groupId>com.pilot</groupId>
@@ -51,6 +57,49 @@
             </resource>
         </resources>
         <plugins>
+            <!-- 前端依赖与构建：
+                 validate 阶段先问「要不要重新拉取前端依赖」（受 skipFrontend 之外的独立开关控制，
+                 所以 IDE 里跑 spring-boot:run 也一定会看到），
+                 generate-resources 阶段再 npm run build 进 static/。 -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <configuration>
+                    <skip>${skipFrontend}</skip>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>frontend-deps-ask</id>
+                        <phase>validate</phase>
+                        <goals><goal>exec</goal></goals>
+                        <configuration>
+                            <!-- 覆盖插件级的 skip：即使 -DskipFrontend=true 也要问一次 -->
+                            <skip>false</skip>
+                            <!-- 继承 Maven 的 stdin，IDE 运行控制台里也能输入选择 -->
+                            <inheritIo>true</inheritIo>
+                            <workingDirectory>${project.basedir}/..</workingDirectory>
+                            <executable>node</executable>
+                            <arguments><argument>tools/ask-frontend-deps.mjs</argument></arguments>
+                            <!-- 没装 Node 的环境（纯后端迭代）直接跳过，不要把构建搞挂 -->
+                            <successCodes>0,127,9009</successCodes>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>frontend-build</id>
+                        <phase>generate-resources</phase>
+                        <goals><goal>exec</goal></goals>
+                        <configuration>
+                            <workingDirectory>${frontendDir}</workingDirectory>
+                            <executable>npm</executable>
+                            <arguments><argument>run</argument><argument>build</argument></arguments>
+                            <environmentVariables>
+                                <CI>true</CI>
+                            </environmentVariables>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

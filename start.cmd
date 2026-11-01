@@ -14,6 +14,10 @@ for /f "tokens=1 delims=." %%V in ("%PILOT_START_MAJOR%") do set "PILOT_START_MA
 for /f "delims=0123456789" %%V in ("%PILOT_START_MAJOR%") do goto java_unsupported
 if %PILOT_START_MAJOR% LSS 25 goto java_unsupported
 
+rem Ask whether to refresh the frontend dependencies before building.
+where node >nul 2>nul
+if not errorlevel 1 node "tools\ask-frontend-deps.mjs"
+
 rem Install reactor dependencies and run tests before starting the application.
 call mvnw.cmd -pl pilot-server -am install
 set "PILOT_START_EXIT=%ERRORLEVEL%"

@@ -8,7 +8,7 @@ import {
   describeModelSaved,
   describeModelsFetched,
   errorText
-} from '../../main/resources/static/lib/model-settings.js';
+} from '../../../frontend/src/lib/model-settings.js';
 
 test('默认不清除密钥，字段两端空格被去掉', () => {
   assert.deepEqual(

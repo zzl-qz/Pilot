@@ -1,0 +1,27 @@
+/** SSE 事件类型清单（与旧版 EVENT_TYPES 一致，另含回放专用的 user.message）。 */
+export const EVENT_TYPES = [
+  'run.started',
+  'run.usage',
+  'execution.updated',
+  'assistant.delta',
+  'assistant.preview',
+  'assistant.reasoning',
+  'context.compacted',
+  'plan.updated',
+  'run.steered',
+  'run.continued',
+  'run.retrying',
+  'subagent.started',
+  'subagent.finished',
+  'task.updated',
+  'sandbox.diff',
+  'arbitration.required',
+  'arbitration.resolved',
+  'tool.started',
+  'approval.required',
+  'approval.resolved',
+  'tool.completed',
+  'run.failed',
+  'run.cancelled',
+  'run.completed'
+];

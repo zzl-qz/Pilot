@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { faviconHref, shouldNotify, tabTitle } from '../../main/resources/static/lib/attention.js';
+import { faviconHref, shouldNotify, tabTitle } from '../../../frontend/src/lib/attention.js';
 
 test('tab title carries the run state', () => {
   assert.equal(tabTitle('修复登录', 'idle'), '修复登录');

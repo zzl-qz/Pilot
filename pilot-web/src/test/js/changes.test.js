@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   editSummary, mergeRunReports, sortChangeFiles, splitPath, statusKind
-} from '../../main/resources/static/lib/changes.js';
+} from '../../../frontend/src/lib/changes.js';
 
 test('mergeRunReports 合并多轮 run 并把增删行数加起来', () => {
   const merged = mergeRunReports([

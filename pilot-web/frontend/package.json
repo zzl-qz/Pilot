@@ -1,0 +1,22 @@
+{
+  "name": "pilot-web-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:ui": "vite",
+    "build": "node scripts/build.mjs",
+    "check": "vite build 2>&1 | Select-String 'built in|error'"
+  },
+  "dependencies": {
+    "immer": "^10.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "use-stick-to-bottom": "^1.1.6",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "playwright-core": "^1.64.1",
+    "vite": "^6.0.7"
+  }
+}

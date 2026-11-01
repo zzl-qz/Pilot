@@ -8,7 +8,7 @@ import {
   parseCallout,
   resolveFileReference,
   safeImageSource
-} from '../../main/resources/static/lib/content-format.js';
+} from '../../../frontend/src/lib/content-format.js';
 
 test('parseCallout 识别 GitHub 风格提示并保留正文', () => {
   assert.deepEqual(parseCallout(['[!WARNING]', '先保存改动。']), {
