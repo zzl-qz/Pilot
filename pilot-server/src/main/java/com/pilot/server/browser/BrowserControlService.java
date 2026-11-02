@@ -87,7 +87,8 @@ public class BrowserControlService implements BrowserEventListener {
                 "capable", runtime.mirrorCapable(),
                 "available", availability.available(),
                 "reason", availability.reason(),
-                "paused", runtime.interactionsPaused(sessionId));
+                "paused", runtime.interactionsPaused(sessionId),
+                "headless", runtime.headless());
     }
 
     /** 订阅某个会话的镜像帧；连接建立即补发当前状态与最新一帧。 */
@@ -252,7 +253,8 @@ public class BrowserControlService implements BrowserEventListener {
         return mapper.writeValueAsString(Map.of(
                 "sessionId", sessionId,
                 "paused", runtime.interactionsPaused(sessionId),
-                "available", runtime.availability().available()));
+                "available", runtime.availability().available(),
+                "headless", runtime.headless()));
     }
 
     private static int clamp(int value, int min, int max) {

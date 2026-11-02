@@ -76,6 +76,8 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     private volatile String pendingReason = "浏览器运行时尚未启动";
     private volatile boolean running;
     private volatile Thread worker;
+    /** 最近一次装配实际生效的 headless（含无桌面降级）：前端据此判断有没有窗口可置前。 */
+    private volatile boolean lastHeadless = true;
     /** 镜像订阅方注册的监听者：backend 异步重建时随实例转移。 */
     private volatile BrowserEventListener eventListener;
     /** 用户接管开关（会话级内存态，不落库）：BrowserTool 据此拦截交互类动作。 */
@@ -164,6 +166,11 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         if (current != null) current.focusPage(sessionId);
     }
 
+    /** 最近一次装配实际生效的 headless（含无桌面降级）：前端据此判断有没有窗口可置前。 */
+    public boolean headless() {
+        return lastHeadless;
+    }
+
     /** sidecar 是否声明了镜像事件能力（握手协商结果；未就绪时为 false）。 */
     public boolean mirrorCapable() {
         PlaywrightBackend current = backend;
@@ -219,6 +226,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
                 }
             }
             boolean headless = resolveHeadless();
+            lastHeadless = headless;
             PlaywrightBackend candidate = new PlaywrightBackend(node, script, home, mapper,
                     idleMillis(headless), sidecarEnvironment(home, headless));
             candidate.setEventListener(eventListener);

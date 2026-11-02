@@ -40,6 +40,8 @@ const RECONNECT_MAX_MS = 15000;
 function emptyMirror() {
   return {
     mode: 'idle', frame: null, url: '', embed: true, frameOptions: '', latency: 0, paused: false,
+    // 实际生效的 headless（含无桌面降级）：后台模式没有窗口可置前，提示文案也跟着换
+    headless: true,
     frameW: 1280, frameH: 800, canGoBack: false, canGoForward: false
   };
 }
@@ -2108,6 +2110,9 @@ function connectMirror(get, set) {
       const payload = JSON.parse(message.data);
       set((draft) => {
         draft.ui.mirror.paused = Boolean(payload.paused);
+        if (typeof payload.headless === 'boolean') {
+          draft.ui.mirror.headless = payload.headless;
+        }
         if (payload.url) {
           draft.ui.mirror.url = payload.url;
         }

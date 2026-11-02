@@ -2091,7 +2091,9 @@ function BrowserPanel() {
           <p id="mirror-hint" className="mirror-hint">
             {desktopState?.emulated
               ? `设备模拟 ${desktopState.emulated.width}×${desktopState.emulated.height}`
-              : '完整浏览器需要桌面壳。'}
+              : mirror.headless
+                ? '浏览器在后台无窗口运行；需要真实窗口时把 pilot.browser.headless 设为 false 重启。'
+                : '完整浏览器需要桌面壳；有头模式下窗口与镜像是同一个页面。'}
             {desktopState?.emulated && (
               <button type="button" className="browser-reset" onClick={() => window.pilotDesktop.resetEmulation()}>还原</button>
             )}

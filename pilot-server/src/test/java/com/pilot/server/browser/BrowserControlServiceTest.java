@@ -131,6 +131,7 @@ class BrowserControlServiceTest {
     void statusReflectsCapabilityAndPauseState() {
         when(runtime.mirrorCapable()).thenReturn(true);
         when(runtime.interactionsPaused("s1")).thenReturn(true);
+        when(runtime.headless()).thenReturn(true);
 
         var status = service.status("s1");
 
@@ -138,6 +139,8 @@ class BrowserControlServiceTest {
         org.junit.jupiter.api.Assertions.assertEquals(true, status.get("capable"));
         org.junit.jupiter.api.Assertions.assertEquals(true, status.get("available"));
         org.junit.jupiter.api.Assertions.assertEquals(true, status.get("paused"));
+        // 后台模式标记：前端据此隐藏「置前窗口」（没有窗口可置前）
+        org.junit.jupiter.api.Assertions.assertEquals(true, status.get("headless"));
     }
 
     @Test
