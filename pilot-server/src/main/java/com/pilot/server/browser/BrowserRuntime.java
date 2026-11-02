@@ -42,8 +42,10 @@ import java.util.concurrent.TimeUnit;
  * 优先于系统 Chrome / Edge 使用——版本配套、行为跨机器一致；
  * {@code pilot.browser.prefer-bundled=false} 可反转。
  *
- * <p>默认有头运行（{@code pilot.browser.headless=false}），窗口真实可见，用户可与智能体共看同一页面；
- * 无桌面会话时自动降级无头。空闲回收：无头 10 分钟，有头默认不回收（可用
+ * <p>默认无头运行（{@code pilot.browser.headless=true}）：页面只在右侧「浏览器」面板里显示，
+ * 地址栏与点击/滚轮/键盘都在面板内完成，不再额外弹一个浏览器窗口。想用系统窗口直接接管时
+ * 设 {@code PILOT_BROWSER_HEADLESS=false}；无桌面会话时配置的有头也会自动降级无头。
+ * 空闲回收：无头 10 分钟（面板正在显示该页面时不回收），有头默认不回收（可用
  * {@code pilot.browser.idle-shutdown-seconds} 显式控制）。
  *
  * <p>运行时目录放在仓库的 {@code .pilot/browser}（与内置 Node/Python 同处，不进 git），找不到仓库根则用数据目录。
@@ -83,7 +85,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
                           @Value("${pilot.browser.enabled:true}") boolean enabled,
                           @Value("${pilot.browser.provision:true}") boolean provision,
                           @Value("${pilot.browser.download-chromium:true}") boolean downloadChromium,
-                          @Value("${pilot.browser.headless:false}") boolean headless,
+                          @Value("${pilot.browser.headless:true}") boolean headless,
                           @Value("${pilot.browser.prefer-bundled:true}") boolean preferBundled,
                           @Value("${pilot.browser.browsers-dir:}") String browsersDir,
                           @Value("${pilot.browser.idle-shutdown-seconds:-1}") long idleShutdownSeconds) {

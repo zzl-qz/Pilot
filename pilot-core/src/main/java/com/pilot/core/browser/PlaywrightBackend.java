@@ -72,6 +72,8 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     private final AtomicLong ids = new AtomicLong(1);
     private final Map<Long, CompletableFuture<JsonNode>> pending = new ConcurrentHashMap<>();
     private final Map<String, Long> sessionGeneration = new ConcurrentHashMap<>();
+    /** 正在被右侧面板镜像的会话：有人看就不做空闲回收。 */
+    private final java.util.Set<String> mirroredSessions = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean probing = new AtomicBoolean();
 
     private Process process;
@@ -172,6 +174,7 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     @Override
     public void closeSession(String sessionId) {
         sessionGeneration.remove(sessionId);
+        mirroredSessions.remove(sessionId);
         synchronized (lifecycle) {
             if (process == null || !process.isAlive()) return;
         }
@@ -201,6 +204,14 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
 
     @Override
     public void mirrorControl(String sessionId, boolean start, int maxWidth, int quality) {
+        // 订阅期间视为「有人在看」，空闲回收跳过（见 startReaper）
+        if (sessionId != null) {
+            if (start) {
+                mirroredSessions.add(sessionId);
+            } else {
+                mirroredSessions.remove(sessionId);
+            }
+        }
         Map<String, Object> arguments = new LinkedHashMap<>();
         arguments.put("maxWidth", maxWidth);
         arguments.put("quality", quality);
@@ -374,6 +385,11 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
                     Thread.sleep(interval);
                 } catch (InterruptedException e) {
                     return;
+                }
+                // 面板正在显示某一页（镜像订阅中）就不算空闲：用户盯着页面看，不能把浏览器回收掉
+                if (!mirroredSessions.isEmpty()) {
+                    lastUsed = System.currentTimeMillis();
+                    continue;
                 }
                 boolean idle = System.currentTimeMillis() - lastUsed > idleShutdownMs;
                 if (idle && pending.isEmpty()) {

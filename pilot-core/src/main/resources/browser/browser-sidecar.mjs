@@ -92,9 +92,11 @@ function candidateExecutables() {
     system.push('/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium',
       '/usr/bin/chromium-browser', '/snap/bin/chromium', '/usr/bin/microsoft-edge');
   }
-  // 内置缓存优先（版本配套、行为跨机器一致）；用户可用 PILOT_BROWSER_PREFER_BUNDLED=false 反转。
+  // 只认内置缓存（版本配套、行为跨机器一致）：优先内置时不再回退系统 Chrome / Edge，
+  // 内置缺失就报「没有找到可用的…」，由 Java 端触发下载。用户要救急可以设
+  // PILOT_BROWSER_PREFER_BUNDLED=false 显式放行系统浏览器，或 PILOT_BROWSER_PATH 直接指路径。
   const preferBundled = (process.env.PILOT_BROWSER_PREFER_BUNDLED ?? 'true') !== 'false';
-  list.push(...(preferBundled ? [...bundled, ...system] : [...system, ...bundled]));
+  list.push(...(preferBundled ? bundled : [...system, ...bundled]));
   return list.filter((path) => {
     try {
       return existsSync(path) && statSync(path).isFile();
@@ -118,7 +120,13 @@ async function launchBrowser() {
   const { chromium } = loadPlaywright();
   const executables = candidateExecutables();
   if (executables.length === 0) {
-    throw new Error('没有找到可用的 Chrome / Edge / Chromium。请安装其中之一，或设置环境变量 PILOT_BROWSER_PATH 指向浏览器可执行文件。');
+    let expected = '';
+    try {
+      expected = loadPlaywright().chromium.executablePath();
+    } catch {
+      // playwright-core 不可用时不强求给出期望路径
+    }
+    throw new Error(`没有找到可用的内置 Chromium${expected ? `（期望位置：${expected}）` : ''}。首次启动会自动下载完整版 Chromium（约 400MB）；也可以用 PILOT_BROWSER_PATH 指向已有的浏览器可执行文件。`);
   }
   const headless = headlessMode();
   const failures = [];
@@ -160,7 +168,7 @@ function attachPage(session, page) {
   session.page = page;
   page.on('framenavigated', (frame) => {
     if (frame !== page.mainFrame()) return;
-    send({ event: 'nav', session: session.id, url: frame.url(), ts: Date.now() });
+    reportNavigation(session, frame.url()).catch(() => {});
   });
   page.on('console', (message) => {
     const location = message.location();
@@ -205,6 +213,33 @@ function attachPage(session, page) {
   if (session.mirror) ensureScreencast(session).catch(() => {});
 }
 
+/*
+ * 页面跳转时把 URL 和「能不能前进/后退」一起推给前端——地址栏与按钮状态都靠它，
+ * 前端不需要自己猜历史。CDP 会话按页面缓存，创建失败就只报 URL（按钮保持上次状态）。
+ */
+async function navigationState(session) {
+  try {
+    const page = session.page;
+    if (!page || page.isClosed()) return {};
+    if (!session.historyCdp || session.historyCdpPage !== page) {
+      session.historyCdp = await session.context.newCDPSession(page);
+      session.historyCdpPage = page;
+    }
+    const history = await session.historyCdp.send('Page.getNavigationHistory');
+    return {
+      canGoBack: Number(history.currentIndex) > 0,
+      canGoForward: Number(history.currentIndex) < history.entries.length - 1
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function reportNavigation(session, url) {
+  const state = await navigationState(session);
+  send({ event: 'nav', session: session.id, url, ...state, ts: Date.now() });
+}
+
 async function createSession(id) {
   const browser = await getBrowser();
   const context = await browser.newContext({
@@ -216,7 +251,7 @@ async function createSession(id) {
   context.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
   const session = { id, context, page: null, console: [], network: [], dead: false,
     mirror: mirrorRequested.has(id), mirrorWidth: 960, mirrorQuality: 55,
-    cdp: null, cdpPage: null, lastFrameAt: 0 };
+    cdp: null, cdpPage: null, lastFrameAt: 0, historyCdp: null, historyCdpPage: null };
   // 主框架导航只允许回环地址，页面里的链接也不能把它带去外网。
   await context.route('**/*', (route) => {
     const request = route.request();
@@ -275,6 +310,35 @@ async function ensureScreencast(session) {
     session.cdp = null;
     session.cdpPage = null;
     process.stderr.write('screencast 启动失败: ' + String(error && error.message || error) + '\n');
+  }
+}
+
+/**
+ * 主动推一帧当前画面。
+ *
+ * <p>screencast 只在页面有变化时才推帧；改完视口如果页面是静态的，前端就会一直停在
+ * 旧尺寸的帧上（看着像「画面没变」）。这里补一帧，让尺寸立刻跟上。
+ */
+async function publishSnapshot(session) {
+  if (!session.mirror || session.dead) return;
+  const page = session.page;
+  if (!page || page.isClosed()) return;
+  try {
+    const viewport = page.viewportSize() || { width: 1280, height: 800 };
+    const shot = await page.screenshot({ type: 'jpeg', quality: session.mirrorQuality });
+    if (!session.mirror || session.dead || session.page !== page) return;
+    session.lastFrameAt = Date.now();
+    send({
+      event: 'mirror-frame',
+      session: session.id,
+      frame: shot.toString('base64'),
+      w: viewport.width,
+      h: viewport.height,
+      url: page.url(),
+      ts: Date.now()
+    });
+  } catch {
+    // 下一帧 screencast 会补上
   }
 }
 
@@ -449,6 +513,63 @@ const SNAPSHOT_SCRIPT = `(limits) => {
   return { title: document.title, url: location.href, lines, interactive: counter, truncated };
 }`;
 
+// ---- 元素拾取 ------------------------------------------------------------------------------
+// 面板里点「选择元素」后，下一次点击不再转发给页面，而是把点到的东西描述成可粘贴的引用。
+const PICK_SCRIPT = `(x, y) => {
+  const INTERACTIVE = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY', 'LABEL', 'OPTION']);
+  const ROLES = new Set(['button', 'link', 'checkbox', 'radio', 'tab', 'menuitem', 'switch',
+    'textbox', 'combobox', 'option', 'slider', 'searchbox']);
+  const clean = (value, max = 160) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
+  const interactive = (el) => INTERACTIVE.has(el.tagName)
+    || ROLES.has((el.getAttribute('role') || '').toLowerCase())
+    || el.isContentEditable;
+  const label = (el) => clean(el.getAttribute('aria-label')
+    || (el.labels && el.labels[0] ? el.labels[0].textContent : '')
+    || el.innerText || el.value || el.getAttribute('placeholder') || '', 80);
+  const part = (el) => {
+    const tag = el.tagName.toLowerCase();
+    const id = el.id ? '#' + el.id : '';
+    const cls = Array.from(el.classList || []).slice(0, 2).map((name) => '.' + name).join('');
+    return tag + id + cls;
+  };
+  const path = (el) => {
+    const parts = [];
+    let node = el;
+    for (let i = 0; i < 4 && node && node.nodeType === 1; i++) {
+      parts.unshift(part(node));
+      node = node.parentElement;
+      if (node === document.body) {
+        parts.unshift('body');
+        break;
+      }
+    }
+    return parts.join(' > ');
+  };
+  const hit = document.elementFromPoint(x, y);
+  if (!hit) return null;
+  let target = hit;
+  // 点到的是按钮里的文字/图标：往上找一个真正可交互、或者有意义的容器
+  for (let i = 0; i < 4 && target.parentElement && !interactive(target); i++) {
+    target = target.parentElement;
+  }
+  // 点在页面空白处只会命中 body：这种引用没有意义，交给前端提示换个位置
+  if (target === document.body || target === document.documentElement) return null;
+  const rect = target.getBoundingClientRect();
+  const attrs = {};
+  for (const name of ['type', 'name', 'href', 'placeholder', 'aria-label', 'role', 'value', 'data-testid']) {
+    const value = target.getAttribute(name);
+    if (value) attrs[name] = clean(value, 80);
+  }
+  return {
+    tag: target.tagName.toLowerCase(),
+    role: (target.getAttribute('role') || '').toLowerCase() || null,
+    text: label(target),
+    selector: path(target),
+    rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+    attrs
+  };
+}`;
+
 async function snapshot(current) {
   const page = pageOf(current);
   const result = await page.evaluate(`(${SNAPSHOT_SCRIPT})`.concat(`(${JSON.stringify({ nodes: MAX_SNAPSHOT_NODES, chars: MAX_SNAPSHOT_CHARS })})`));
@@ -537,19 +658,117 @@ const handlers = {
       throw new Error(`打开 ${args.url} 失败：${text}`);
     }
     const status = response ? response.status() : 0;
-    return { text: `已打开，HTTP ${status || '未知'}\n${await describePage(current)}` };
+    return { text: `已打开，HTTP ${status || '未知'}\n${await describePage(current)}`, url: page.url() };
   },
 
   async reload(args, current) {
     const page = pageOf(current);
     await page.reload({ waitUntil: 'load', timeout: NAVIGATION_TIMEOUT_MS });
-    return { text: `已刷新\n${await describePage(current)}` };
+    return { text: `已刷新\n${await describePage(current)}`, url: page.url() };
   },
 
   async back(args, current) {
     const page = pageOf(current);
     const response = await page.goBack({ waitUntil: 'load', timeout: NAVIGATION_TIMEOUT_MS });
-    return { text: (response ? '已后退' : '没有可后退的历史') + `\n${await describePage(current)}` };
+    return { text: (response ? '已后退' : '没有可后退的历史') + `\n${await describePage(current)}`, url: page.url() };
+  },
+
+  async forward(args, current) {
+    const page = pageOf(current);
+    const response = await page.goForward({ waitUntil: 'load', timeout: NAVIGATION_TIMEOUT_MS });
+    return { text: (response ? '已前进' : '没有可前进的历史') + `\n${await describePage(current)}`, url: page.url() };
+  },
+
+  /*
+   * 用户在面板里直接操作页面（内置浏览器）：坐标是页面坐标系（与镜像帧同尺度）。
+   * 与智能体的 click 分开：用户动作不打 reportAction 涟漪，也不该被「接管」开关拦截。
+   */
+  async mouse(args, current) {
+    const page = pageOf(current);
+    const x = Math.round(Number(args.x) || 0);
+    const y = Math.round(Number(args.y) || 0);
+    const action = String(args.action || 'click');
+    if (action === 'move') {
+      await page.mouse.move(x, y);
+      return { text: '已移动', url: page.url() };
+    }
+    if (action === 'wheel') {
+      await page.mouse.move(x, y);
+      await page.mouse.wheel(Number(args.deltaX) || 0, Number(args.deltaY) || 0);
+      await settle(page);
+      return { text: '已滚动', url: page.url() };
+    }
+    await page.mouse.click(x, y, { button: args.button === 'right' ? 'right' : 'left' });
+    await settle(page);
+    return { text: '已点击', url: page.url() };
+  },
+
+  /** 面板里的「选择元素」：返回点击位置元素的描述，用户可以把这段当引用发给模型。 */
+  async pick(args, current) {
+    const page = pageOf(current);
+    const info = await page.evaluate(`(${PICK_SCRIPT})(${Math.round(Number(args.x) || 0)}, ${Math.round(Number(args.y) || 0)})`);
+    if (!info) throw new Error('这个位置没有取到元素');
+    const attrs = Object.entries(info.attrs || {}).map(([name, value]) => `${name}=${JSON.stringify(value)}`).join(' ');
+    const lines = [
+      `页面元素：${info.tag}${info.role ? `（role=${info.role}）` : ''}${info.text ? ` 文本 ${JSON.stringify(info.text)}` : ''}`,
+      `选择器：${info.selector}`
+    ];
+    if (info.rect) lines.push(`位置与尺寸：(${info.rect.x}, ${info.rect.y}) ${info.rect.w}×${info.rect.h}`);
+    if (attrs) lines.push(`属性：${attrs}`);
+    return { text: lines.join('\n') };
+  },
+
+  /**
+   * 面板尺寸变化：把页面视口设成面板大小。
+   *
+   * <p>内嵌浏览器的关键一步——视口跟着面板走，页面按真实宽度做响应式排版，
+   * 镜像帧的比例也就等于面板比例，画面铺满而不留大片空白，点击坐标还能 1:1 对上。
+   */
+  async resize(args, current) {
+    const page = pageOf(current);
+    const width = Math.min(1920, Math.max(280, Math.round(Number(args.width) || 0)));
+    const height = Math.min(1600, Math.max(220, Math.round(Number(args.height) || 0)));
+    const existing = page.viewportSize();
+    if (existing && existing.width === width && existing.height === height) {
+      return { text: '尺寸未变', url: page.url() };
+    }
+    await page.setViewportSize({ width, height });
+    // 视口变化会让原来的 screencast 停在旧画面上：重开一次，并立刻补一帧
+    if (current.mirror) {
+      await stopScreencast(current);
+      await ensureScreencast(current);
+      await publishSnapshot(current);
+    }
+    await settle(page);
+    return { text: `视口已调整为 ${width}×${height}`, url: page.url() };
+  },
+
+  /** 面板里的「停止加载」：SPA 里 window.stop() 也能把挂起的请求停掉。 */
+  async stop(args, current) {
+    const page = pageOf(current);
+    try {
+      await page.evaluate('window.stop()');
+    } catch {
+      // 页面正在销毁或还没就绪：当作已经停了
+    }
+    return { text: '已停止加载', url: page.url() };
+  },
+
+  /** 面板里的键盘输入：按键（Enter/Backspace/方向键…）与整段文本分别走 press / insertText。 */
+  async keys(args, current) {
+    const page = pageOf(current);
+    const presses = Array.isArray(args.keys) ? args.keys : [];
+    for (const key of presses) {
+      await page.keyboard.press(String(key));
+    }
+    if (typeof args.text === 'string' && args.text) {
+      await page.keyboard.insertText(args.text);
+    }
+    if (args.key) {
+      await page.keyboard.press(String(args.key));
+    }
+    await settle(page);
+    return { text: '已输入', url: page.url() };
   },
 
   async snapshot(args, current) {

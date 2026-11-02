@@ -1,5 +1,6 @@
 package com.pilot.server.browser;
 
+import com.pilot.core.browser.BrowserBackend;
 import com.pilot.core.browser.BrowserEventListener;
 import com.pilot.core.tool.Availability;
 import org.slf4j.Logger;
@@ -13,6 +14,8 @@ import tools.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -55,7 +58,7 @@ public class BrowserControlService implements BrowserEventListener {
 
     public BrowserControlService(BrowserRuntime runtime, ObjectMapper mapper,
                                  @Value("${pilot.browser.mirror.enabled:true}") boolean enabled,
-                                 @Value("${pilot.browser.mirror.max-width:960}") int maxWidth,
+                                 @Value("${pilot.browser.mirror.max-width:1280}") int maxWidth,
                                  @Value("${pilot.browser.mirror.quality:55}") int quality) {
         this.runtime = runtime;
         this.mapper = mapper;
@@ -124,6 +127,35 @@ public class BrowserControlService implements BrowserEventListener {
     /** 把某个会话的浏览器窗口置前（不置顶循环）。 */
     public void focus(String sessionId) {
         controls.execute(() -> runtime.focusPage(sessionId));
+    }
+
+    /**
+     * 用户在内置浏览器面板里发起的动作：导航（navigate/back/forward/reload）与页面交互
+     * （mouse/keys）。这些是本机用户自己的操作，不受「接管」开关与工具审批约束——
+     * 接管正是为了让用户自己动手；面板与智能体操作的是同一个页面。
+     *
+     * @param op   sidecar 协议里的操作名
+     * @param args 该操作的参数（坐标、文本、URL…）
+     * @return 给前端的结果（成功与否、文本提示）
+     */
+    public Map<String, Object> userAction(String sessionId, String op, Map<String, Object> args) {
+        Map<String, Object> command = new LinkedHashMap<>();
+        command.put("op", op);
+        if (args != null) {
+            command.putAll(args);
+        }
+        try {
+            BrowserBackend.Reply reply = runtime.execute(sessionId, command, Duration.ofSeconds(45));
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("ok", true);
+            result.put("text", reply.text() == null ? "" : reply.text());
+            return result;
+        } catch (RuntimeException e) {
+            Map<String, Object> failure = new LinkedHashMap<>();
+            failure.put("ok", false);
+            failure.put("error", e.getMessage() == null ? "浏览器操作失败" : e.getMessage());
+            return failure;
+        }
     }
 
     /**
