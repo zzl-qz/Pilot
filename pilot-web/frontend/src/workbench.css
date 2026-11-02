@@ -295,10 +295,32 @@ html[data-theme] .voice-button { width: 32px; height: 32px; display: grid; place
 html[data-theme] .voice-button:hover { background: var(--panel-3); color: var(--ink); }
 html[data-theme] .voice-button.is-recording { color: var(--danger, #e66a6a); background: var(--panel-3); }
 html[data-theme] .voice-button:disabled { opacity: .4; cursor: default; }
-html[data-theme] .voice-panel { position: absolute; right: -38px; bottom: 42px; width: min(320px, calc(100vw - 60px)); z-index: 40; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); box-shadow: 0 4px 24px #0002; }
-html[data-theme] .voice-status { font-size: 13px; line-height: 1.5; font-variant-numeric: tabular-nums; }
-html[data-theme] .voice-panel p { margin: 6px 0 12px; color: var(--muted); font-size: 12px; }
-html[data-theme] .voice-panel-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+html[data-theme] .voice-panel { position: absolute; right: -38px; bottom: 46px; width: min(360px, calc(100vw - 60px)); z-index: 40; padding: 12px 14px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); box-shadow: 0 10px 32px #00000066; }
+@media (max-width: 720px) {
+  html[data-theme] .voice-panel { right: 0; }
+}
+html[data-theme] .voice-panel.is-recording { border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
+html[data-theme] .voice-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+html[data-theme] .voice-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--err); animation: voice-pulse 1.5s ease-out infinite; }
+@keyframes voice-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--err) 55%, transparent); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+html[data-theme] .voice-status { font-size: 13px; line-height: 1.5; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* 整行倍数收口：max-height 不是行高整数倍时最后一行会被裁掉半截 */
+html[data-theme] .voice-panel.is-error .voice-status { max-height: 7.5em; overflow-y: auto; padding-right: 2px; font-weight: 500; line-height: 1.5; color: var(--err); }
+html[data-theme] .voice-timer { margin-left: auto; flex: none; font-family: var(--mono); font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+html[data-theme] .voice-meter { height: 3px; margin-top: 10px; border-radius: 999px; background: var(--panel-3); overflow: hidden; }
+html[data-theme] .voice-meter span { display: block; height: 100%; min-width: 6px; border-radius: inherit; background: var(--err); transition: width .45s linear; }
+html[data-theme] .voice-meter.is-busy span { width: 38% !important; background: var(--accent); animation: voice-slide 1.1s ease-in-out infinite; }
+@keyframes voice-slide {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(280%); }
+}
+html[data-theme] .voice-hint { margin: 8px 0 0; color: var(--dim); font-size: 11.5px; line-height: 1.5; }
+html[data-theme] .voice-panel.is-error .voice-panel-actions { margin-top: 12px; }
+html[data-theme] .voice-panel-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }
 html[data-theme] .voice-settings { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
 html[data-theme] .voice-settings summary { cursor: pointer; font-size: 13px; color: var(--ink); margin-bottom: 12px; }
 @media (max-width: 600px) {

@@ -518,10 +518,11 @@ function VoiceSettings() {
   const load = () => api.voiceSettings().then(setValue).catch(error => setHint(error.message));
   useEffect(() => { load(); }, []);
   return <details className="voice-settings"><summary>语音输入</summary>
-    <p className="task-help">录音完成后发送到语音服务，转写文字加入草稿。默认沿用聊天服务的端点和 Key；该服务需支持音频转写。</p>
+    <p className="task-help">录音完成后发送到语音服务，转写文字加入草稿。默认沿用聊天服务的端点和 Key；该服务需支持音频转写。若提示「服务不可用」，通常是聊天端点是中转站、没有转写能力：在下面填写独立端点（例如 https://api.openai.com/v1）与对应模型。</p>
     {value ? <>
-      <label className="task-field">语音模型<input value={value.model || ''} onChange={e => setValue({ ...value, model: e.target.value })} /></label>
+      <label className="task-field">语音模型<input placeholder="gpt-4o-mini-transcribe" value={value.model || ''} onChange={e => setValue({ ...value, model: e.target.value })} /></label>
       <label className="task-field">独立语音端点（可选）<input placeholder="留空沿用聊天服务" value={value.endpoint || ''} onChange={e => setValue({ ...value, endpoint: e.target.value })} /></label>
+      {value.effectiveEndpoint && <p className="task-help">当前实际请求：{value.effectiveEndpoint}</p>}
       <label className="task-field">语音 API Key（可选）<input type="password" value={key} placeholder={value.apiKeySet ? '已保存（不填沿用）' : '独立服务请填写对应 Key'} onChange={e => setKey(e.target.value)} /></label>
       <div className="chip-menu-actions">
         <button type="button" className="btn" disabled={busy || !value.model?.trim()} onClick={async () => {

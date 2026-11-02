@@ -5,7 +5,51 @@ export function voiceFormat(Recorder) {
   return FORMATS.find(type => Recorder?.isTypeSupported?.(type)) || '';
 }
 export function voiceFilename(type) {
+  if (type?.includes('wav')) return 'recording.wav';
   return `recording.${type?.includes('mp4') ? 'mp4' : type?.includes('ogg') ? 'ogg' : 'webm'}`;
+}
+
+/** 转写统一用 16k 单声道：多数服务只认 mp3/wav，webm/opus 会被判「不支持当前文件格式」。 */
+export const VOICE_SAMPLE_RATE = 16000;
+
+function wavBytes(samples, rate) {
+  const bytes = new Uint8Array(44 + samples.length * 2);
+  const view = new DataView(bytes.buffer);
+  const ascii = (offset, text) => { for (let i = 0; i < text.length; i++) bytes[offset + i] = text.charCodeAt(i); };
+  ascii(0, 'RIFF'); view.setUint32(4, 36 + samples.length * 2, true); ascii(8, 'WAVE');
+  ascii(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  ascii(36, 'data'); view.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const sample = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(44 + i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+  }
+  return bytes;
+}
+
+/**
+ * 把 MediaRecorder 的 webm/mp4 解成 16k 单声道 WAV。
+ * 解码失败（老浏览器、罕见编码）时原样返回，让服务端给出明确报错，而不是静默丢录音。
+ */
+export async function toWav(blob, environment = globalThis) {
+  const Ctx = environment.AudioContext || environment.webkitAudioContext;
+  const Offline = environment.OfflineAudioContext || environment.webkitOfflineAudioContext;
+  if (!Ctx || !Offline || typeof blob.arrayBuffer !== 'function') return blob;
+  const context = new Ctx();
+  try {
+    const decoded = await context.decodeAudioData(await blob.arrayBuffer());
+    if (!decoded?.length) return blob;
+    const frames = Math.max(1, Math.ceil(decoded.duration * VOICE_SAMPLE_RATE));
+    const offline = new Offline(1, frames, VOICE_SAMPLE_RATE);
+    const source = offline.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offline.destination);
+    source.start();
+    const rendered = await offline.startRendering();
+    return new Blob([wavBytes(rendered.getChannelData(0), VOICE_SAMPLE_RATE)], { type: 'audio/wav' });
+  } finally {
+    context.close?.();
+  }
 }
 export function voiceError(error) {
   return ({ NotAllowedError: '麦克风权限被拒绝。请在浏览器或系统设置中允许 Pilot 使用麦克风。',
@@ -36,7 +80,11 @@ export function createVoiceInput({ environment = globalThis, transcribe, onState
   async function upload(token) {
     controller = new AbortController(); emit('transcribing');
     try {
-      const result = await transcribe(recording, controller.signal);
+      let audio = recording;
+      try { audio = await toWav(recording, environment); }
+      catch { /* 解码不了就按原格式上传，服务端会给出明确原因 */ }
+      if (token !== generation) return;
+      const result = await transcribe(audio, controller.signal);
       if (token !== generation) return;
       const text = result?.text?.trim();
       if (!text) throw new Error('没有识别到文字，可以重试或重新录音。');

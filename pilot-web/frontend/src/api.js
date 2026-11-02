@@ -32,7 +32,11 @@ export async function apiJson(url, init, timeoutMs) {
     let message = `HTTP ${response.status}`;
     try {
       const body = await response.json();
-      message = body.error || body.message || message;
+      // Spring 的错误响应体固定带 error（HTTP 状态短语，如「Bad Gateway」），
+      // 真正的原因在 message 里。优先 message，否则界面只会显示 "Bad Gateway" 这类英文短语。
+      const detail = typeof body?.message === 'string' ? body.message.trim() : '';
+      const fallback = typeof body?.error === 'string' ? body.error.trim() : '';
+      message = detail && detail !== 'No message available' ? detail : fallback || message;
     } catch { /* 保持 HTTP 状态码文案 */ }
     throw new Error(message);
   }

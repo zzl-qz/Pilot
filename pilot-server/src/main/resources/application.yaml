@@ -7,6 +7,8 @@ server:
   error:
     # 4xx 把校验原因带回响应体，界面能直接看到「端点必须是 http/https」这类说明
     include-message: always
+    # 堆栈只写日志，不回给前端（本机接口也可能通过远程访问开关暴露出去）
+    include-stacktrace: never
 
 spring:
   servlet:
@@ -63,7 +65,9 @@ pilot:
       # JPEG 质量（20-90）
       quality: ${PILOT_BROWSER_MIRROR_QUALITY:55}
   voice:
-    model: ${PILOT_VOICE_MODEL:gpt-transcribe}
+    # 转写（STT）是独立于聊天的能力，模型名各家不同：OpenAI 用 gpt-4o-mini-transcribe /
+    # gpt-4o-transcribe / whisper-1，其它兼容服务按它自己的名字填（设置 → 模型 → 语音输入可覆盖）。
+    model: ${PILOT_VOICE_MODEL:gpt-4o-mini-transcribe}
   model:
     # endpoint 可以写服务根地址，也可以写完整的 /v1/chat/completions
     endpoint: ${PILOT_MODEL_ENDPOINT:https://api.openai.com/v1/chat/completions}

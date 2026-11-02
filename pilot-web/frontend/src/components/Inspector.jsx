@@ -1490,7 +1490,7 @@ function BrowserPanel() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const detail = data.error || data.message;
+        const detail = data.message || data.error;
         setError(detail ? `${detail}（HTTP ${response.status}）` : `浏览器接口不可用（HTTP ${response.status}）`);
         return null;
       }
