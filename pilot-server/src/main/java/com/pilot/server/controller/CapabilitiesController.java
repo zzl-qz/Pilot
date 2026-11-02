@@ -11,6 +11,7 @@ import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.ModelSettings;
 import com.pilot.server.config.PermissionSettings;
+import com.pilot.server.workspace.WorkspaceToolFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,17 +42,20 @@ public class CapabilitiesController {
     private final PermissionSettings permissionSettings;
     private final ModelSettings modelSettings;
     private final ObjectProvider<ToolRegistry> toolRegistry;
+    private final ObjectProvider<WorkspaceToolFactory> toolFactory;
     private final ObjectProvider<McpManager> mcpManager;
 
     public CapabilitiesController(SessionService sessions, AgentProperties agentProperties,
                                   PermissionSettings permissionSettings, ModelSettings modelSettings,
                                   ObjectProvider<ToolRegistry> toolRegistry,
+                                  ObjectProvider<WorkspaceToolFactory> toolFactory,
                                   ObjectProvider<McpManager> mcpManager) {
         this.sessions = sessions;
         this.agentProperties = agentProperties;
         this.permissionSettings = permissionSettings;
         this.modelSettings = modelSettings;
         this.toolRegistry = toolRegistry;
+        this.toolFactory = toolFactory;
         this.mcpManager = mcpManager;
     }
 
@@ -64,13 +68,32 @@ public class CapabilitiesController {
                 : session.workspace();
         Path root = Path.of(workspace);
 
-        ToolRegistry registry = toolRegistry.getIfAvailable();
-        List<ToolPayload> tools = registry == null
-                ? List.of()
-                : registry.tools().stream().map(CapabilitiesController::payload).toList();
-
         return new CapabilitiesResponse(root.toString(), modelSettings.snapshot().model(),
-                permissionSettings.mode().name(), tools, servers(root));
+                permissionSettings.mode().name(), tools(id, workspace), servers(root));
+    }
+
+    /**
+     * 工具清单要和模型真正拿到的一致：默认注册表之外，还有按会话装配的浏览器与 MCP 工具
+     * （{@link WorkspaceToolFactory#sessionExtras}），否则能力页签里看不到最显眼的 browser。
+     */
+    private List<ToolPayload> tools(String sessionId, String workspace) {
+        ArrayList<Tool> all = new ArrayList<>();
+        ToolRegistry registry = toolRegistry.getIfAvailable();
+        if (registry != null) {
+            all.addAll(registry.tools());
+        }
+        WorkspaceToolFactory factory = toolFactory.getIfAvailable();
+        if (factory != null) {
+            all.addAll(factory.sessionExtras(sessionId, workspace));
+        }
+        ArrayList<ToolPayload> result = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (Tool tool : all) {
+            if (seen.add(tool.name())) {
+                result.add(payload(tool));
+            }
+        }
+        return List.copyOf(result);
     }
 
     /**

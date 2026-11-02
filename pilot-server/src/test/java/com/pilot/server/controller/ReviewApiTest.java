@@ -152,6 +152,19 @@ class ReviewApiTest {
                 .andExpect(jsonPath("$.mcpServers").isArray());
     }
 
+    /**
+     * 浏览器是按会话装配的工具，不在默认注册表里；
+     * 能力清单漏掉它，页签上就看不到「浏览器能不能用」。
+     */
+    @Test
+    void capabilitiesIncludeSessionScopedBrowserTool() throws Exception {
+        String id = sessions.createSession("浏览器能力", workspace.toString()).id();
+
+        mvc.perform(get("/api/sessions/{id}/capabilities", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tools[?(@.name=='browser')]").isNotEmpty());
+    }
+
     private void commit() {
         git("-c", "user.name=pilot", "-c", "user.email=pilot@example.com", "commit", "-q", "-m", "init");
     }
