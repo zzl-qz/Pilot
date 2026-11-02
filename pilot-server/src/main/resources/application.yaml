@@ -39,8 +39,9 @@ pilot:
     # 会话库、快照、trace、附件默认放在项目下的 .pilot
     # 要换位置：环境变量 PILOT_DATA_DIR，或启动参数 -Dpilot.data.dir=...
     dir: ${PILOT_DATA_DIR:${user.dir}/.pilot}
-  # 浏览器验证工具（browser）：内置 Chromium + 默认有头。
-  # 完整设计见 docs/PLAN-browser-builtin-headed-mirror.md
+  # 浏览器验证工具（browser）：内置 Chromium + 默认后台无窗口。
+  # 完整设计见 docs/PLAN-browser-background-mode.md（默认形态）
+  # 与 docs/PLAN-browser-builtin-headed-mirror.md（内置化与镜像链路）
   browser:
     # false 时 browser 工具不注册
     enabled: true
@@ -48,8 +49,9 @@ pilot:
     provision: true
     # 本机没有任何可用浏览器时，自动下载内置 Chromium（完整版约 400MB，仅此一次）
     download-chromium: true
-    # 默认有头：窗口真实可见，可与智能体共看同一页面、手动接管；无桌面环境自动降级无头
-    headless: ${PILOT_BROWSER_HEADLESS:false}
+    # 默认后台运行：智能体使用浏览器时不开任何窗口，画面只在侧边栏镜像里显示；
+    # 设为 false 切回有头窗口（共看同一页面、手动接管）；无桌面环境自动降级无头
+    headless: ${PILOT_BROWSER_HEADLESS:true}
     # 内置 Chromium 优先于系统 Chrome / Edge（版本配套、行为跨机器一致）；false = 系统浏览器优先
     prefer-bundled: ${PILOT_BROWSER_PREFER_BUNDLED:true}
     # 内置 Chromium 落盘目录；留空 = <仓库根>/.pilot/browser/browsers

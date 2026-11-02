@@ -42,9 +42,10 @@ import java.util.concurrent.TimeUnit;
  * 优先于系统 Chrome / Edge 使用——版本配套、行为跨机器一致；
  * {@code pilot.browser.prefer-bundled=false} 可反转。
  *
- * <p>默认有头运行（{@code pilot.browser.headless=false}），窗口真实可见，用户可与智能体共看同一页面；
- * 无桌面会话时自动降级无头。空闲回收：无头 10 分钟，有头默认不回收（可用
- * {@code pilot.browser.idle-shutdown-seconds} 显式控制）。
+ * <p>默认后台运行（{@code pilot.browser.headless=true}）：智能体使用浏览器时不开任何窗口，
+ * 画面只走侧边栏镜像（CDP screencast 在无头下已实测可用）；{@code pilot.browser.headless=false}
+ * 切回有头窗口（共看同一页面、手动接管）。无桌面会话时显式有头会自动降级无头。
+ * 空闲回收：无头 10 分钟，有头默认不回收（可用 {@code pilot.browser.idle-shutdown-seconds} 显式控制）。
  *
  * <p>运行时目录放在仓库的 {@code .pilot/browser}（与内置 Node/Python 同处，不进 git），找不到仓库根则用数据目录。
  */
@@ -74,6 +75,8 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     private volatile String pendingReason = "浏览器运行时尚未启动";
     private volatile boolean running;
     private volatile Thread worker;
+    /** 最近一次装配实际生效的 headless（含无桌面降级）；镜像面板据此隐藏「置前窗口」。 */
+    private volatile boolean lastHeadless = true;
     /** 镜像订阅方注册的监听者：backend 异步重建时随实例转移。 */
     private volatile BrowserEventListener eventListener;
     /** 用户接管开关（会话级内存态，不落库）：BrowserTool 据此拦截交互类动作。 */
@@ -83,7 +86,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
                           @Value("${pilot.browser.enabled:true}") boolean enabled,
                           @Value("${pilot.browser.provision:true}") boolean provision,
                           @Value("${pilot.browser.download-chromium:true}") boolean downloadChromium,
-                          @Value("${pilot.browser.headless:false}") boolean headless,
+                          @Value("${pilot.browser.headless:true}") boolean headless,
                           @Value("${pilot.browser.prefer-bundled:true}") boolean preferBundled,
                           @Value("${pilot.browser.browsers-dir:}") String browsersDir,
                           @Value("${pilot.browser.idle-shutdown-seconds:-1}") long idleShutdownSeconds) {
@@ -162,6 +165,11 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         return current != null && current.mirrorCapable();
     }
 
+    /** 最近一次装配实际生效的 headless（含无桌面降级）：镜像面板据此隐藏「置前窗口」。 */
+    public boolean headless() {
+        return lastHeadless;
+    }
+
     @Override
     public void start() {
         running = true;
@@ -211,6 +219,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
                 }
             }
             boolean headless = resolveHeadless();
+            lastHeadless = headless;
             PlaywrightBackend candidate = new PlaywrightBackend(node, script, home, mapper,
                     idleMillis(headless), sidecarEnvironment(home, headless));
             candidate.setEventListener(eventListener);

@@ -236,9 +236,9 @@ bash mvnw -pl pilot-server spring-boot:run
 
 ## 浏览器验证与 MCP
 
-`browser` 工具在隔离的 Chromium 里打开本机页面（只允许 localhost / 127.0.0.1 / [::1]），支持 DOM 快照、点击、输入、选择、文件上传、截图、控制台与网络记录，用于让代理验证自己改的前端。运行时是固定版本 `playwright-core@1.64.1` 的 Node sidecar，首次启动时自动安装到 `.pilot/browser`；浏览器优先用收进 `.pilot/browser/browsers` 的内置 Chromium（版本配套、行为跨机器一致，没有了才降级本机 Chrome / Edge，首次自动下载约 400MB，`--no-shell` 跳过用不上的 headless-shell），删 `.pilot` 即全量清理。默认**有头运行**：窗口真实可见，可与代理共看同一页面、手动接管；无桌面环境自动降级无头。空闲回收：无头 10 分钟，有头默认不回收（`pilot.browser.idle-shutdown-seconds` 可改）。可用 `pilot.browser.enabled=false` 关闭，`PILOT_BROWSER_PATH` 显式指定浏览器可执行文件。握手没通过时模型看不到这个工具，原因保留在工具不可用信息里；本机装好浏览器后约一分钟内自动重测。截图保存在数据目录的 `artifacts/` 下。
+`browser` 工具在隔离的 Chromium 里打开本机页面（只允许 localhost / 127.0.0.1 / [::1]），支持 DOM 快照、点击、输入、选择、文件上传、截图、控制台与网络记录，用于让代理验证自己改的前端。运行时是固定版本 `playwright-core@1.64.1` 的 Node sidecar，首次启动时自动安装到 `.pilot/browser`；浏览器优先用收进 `.pilot/browser/browsers` 的内置 Chromium（版本配套、行为跨机器一致，没有了才降级本机 Chrome / Edge，首次自动下载约 400MB，`--no-shell` 跳过用不上的 headless-shell），删 `.pilot` 即全量清理。默认**后台无窗口运行**（headless）：代理使用浏览器时不开任何窗口，画面只在右侧镜像里显示（无头下 CDP screencast 已实测可用）；需要真实窗口共看/手动接管时设 `pilot.browser.headless: false` 重启。无桌面环境自动降级无头。空闲回收：无头 10 分钟，有头默认不回收（`pilot.browser.idle-shutdown-seconds` 可改）。可用 `pilot.browser.enabled=false` 关闭，`PILOT_BROWSER_PATH` 显式指定浏览器可执行文件。握手没通过时模型看不到这个工具，原因保留在工具不可用信息里；本机装好浏览器后约一分钟内自动重测。截图保存在数据目录的 `artifacts/` 下。
 
-右侧审阅面板的「浏览器」tab 提供实时镜像（CDP screencast，页面变化才推帧、静态页面零流量）：代理一碰 browser 工具即点亮徽标，按偏好自动唤起一次；帧走独立的瞬态 SSE（不落库、断线重连补发缓存帧），切走 tab 或折叠面板即停止推帧。镜像为只读 `<img>`，用户在侧栏里的点击不会触达页面；「置前窗口」把浏览器窗口带到前台，「暂停智能体操作」把页面留给用户（代理的交互与导航被温和拦截并提示等待，snapshot 等观察动作仍可用），恢复即续。
+右侧审阅面板的「浏览器」tab 提供实时镜像（CDP screencast，页面变化才推帧、静态页面零流量）：代理一碰 browser 工具即点亮徽标，按偏好自动唤起一次；帧走独立的瞬态 SSE（不落库、断线重连补发缓存帧），切走 tab 或折叠面板即停止推帧。镜像为只读 `<img>`，用户在侧栏里的点击不会触达页面；「暂停智能体操作」把页面留给用户（代理的交互与导航被温和拦截并提示等待，snapshot 等观察动作仍可用），恢复即续。后台模式下「置前窗口」自动隐藏（没有窗口可置前）；有头模式下它把浏览器窗口带到前台。
 
 MCP 服务器在工作区的 `.mcp.json`（格式同 Claude Code：`{"mcpServers": {"名字": {"command": "npx", "args": [...], "env": {...}}}}`）或数据目录的 `mcp.json` 里配置，目前支持 stdio 传输。模型每次请求只携带 `mcp_tools` 与 `mcp_call` 两个定义，具体工具按需查询；启动服务器等于执行配置里的命令，所以需要审批，声明了 `readOnlyHint` 的工具调用免审批。
 
