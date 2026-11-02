@@ -95,6 +95,25 @@ class RunStateTrackerTest {
         assertFalse(recovered.leasedByOther("instance-new", Instant.now()));
     }
 
+    /**
+     * 上次启动已经收敛过的运行（检查点标成 INTERRUPTED）不该在每次启动时重复上报：
+     * 否则同一条旧账会在每一轮启动日志里出现，把真正的新中断淹掉。
+     */
+    @Test
+    void recoveryDoesNotReportAlreadyConvergedRunsAgain() {
+        RunCheckpointRepository repository = new InMemoryRunCheckpointRepository();
+        repository.save(RunCheckpoint.start("run_old", "ses_old", "/work/old", "instance-old",
+                Instant.now().minusSeconds(5), Duration.ofSeconds(30)));
+        RunStateTracker tracker = new RunStateTracker(repository, "instance-new");
+
+        assertEquals(1, tracker.recoverAfterRestart().size(), "第一次恢复要上报遗留运行");
+        assertEquals(0, tracker.recoverAfterRestart().size(), "已经收敛过的不再重复上报");
+
+        // 检查点本身保留：用户还要看得到「上次做到哪一步」
+        RunCheckpoint checkpoint = repository.find("run_old").orElseThrow();
+        assertEquals(RunCheckpoint.STATUS_INTERRUPTED, checkpoint.status());
+    }
+
     @Test
     void leaseLossIsVisibleToDiagnostics() {
         RunCheckpointRepository repository = new InMemoryRunCheckpointRepository();

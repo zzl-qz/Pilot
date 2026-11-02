@@ -192,11 +192,16 @@ public class RunStateTracker {
      * 启动恢复：把上次遗留的运行标记为中断并释放租约，返回可接管的运行清单。
      *
      * <p>不删除检查点：用户需要看到「上次做到哪一步、下一步本来要做什么」。
+     *
+     * <p>只上报「上次退出时确实在跑」的运行（RUNNING / PAUSED）。检查点被标成 INTERRUPTED
+     * 说明上一次启动已经收敛过它，再报一次只是噪音——同一条记录会在每次启动时重复出现，
+     * 让真正的新中断淹没在旧账里。这类检查点只顺手释放可能残留的租约，不进清单。
      */
     public List<RecoveryEntry> recoverAfterRestart() {
         Instant now = Instant.now();
         List<RecoveryEntry> entries = new ArrayList<>();
         for (RunCheckpoint checkpoint : resumable()) {
+            boolean alreadyConverged = RunCheckpoint.STATUS_INTERRUPTED.equals(checkpoint.status());
             String leaseState;
             try {
                 boolean leasedByOther = checkpoint.leasedByOther(instanceId, now);
@@ -206,6 +211,9 @@ public class RunStateTracker {
                         : "已释放本机遗留租约";
             } catch (RuntimeException e) {
                 leaseState = "租约收敛失败：" + e.getMessage();
+            }
+            if (alreadyConverged) {
+                continue;
             }
             entries.add(new RecoveryEntry(checkpoint.runId(), checkpoint.sessionId(),
                     "第 " + checkpoint.step() + " 步", checkpoint.lastSuccessfulStep(),
