@@ -8,6 +8,7 @@ import { TaskContract, Modals } from './Modals.jsx';
 import { SelectionQuote } from './SideChat.jsx';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { resolveFolders, samePath } from '../lib/projects.js';
+import { shortcut, runPhase } from '../lib/interaction.js';
 import { api } from '../api.js';
 import { dragWidth, readLayout, writeLayout } from '../lib/layout.js';
 
@@ -22,6 +23,8 @@ export default function App() {
   const sessionTitle = useStore((state) => state.sessionTitle);
   const workspace = useStore((state) => state.workspace);
   const agents = useStore((state) => state.agents);
+  const phase = useStore(runPhase);
+  const reviewExpanded = useStore(state => state.ui.reviewExpanded && state.ui.inspectorOpen && state.ui.inspectorTab === 'changes');
   const inspectorOpen = useStore((state) => state.ui.inspectorOpen);
   const embedded = useStore((state) => state.embeddedSessionId);
   const sessionId = useStore((state) => state.sessionId);
@@ -58,6 +61,13 @@ export default function App() {
     return () => media.removeEventListener?.('change', onChange);
   }, [embedded]);
 
+  useEffect(() => {
+    const narrow = window.matchMedia('(max-width: 960px)');
+    const collapse = () => { if (narrow.matches) useStore.getState().setUi({ sidebarOpen: false }); };
+    collapse(); narrow.addEventListener('change', collapse);
+    return () => narrow.removeEventListener('change', collapse);
+  }, []);
+
   /* Side chat 内嵌页：整页只留对话区，侧栏与审阅面板收起（旧版 body.side-chat-embedded）。 */
   useEffect(() => {
     if (!embedded) {
@@ -74,7 +84,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (event) => {
       // 内嵌页不接管快捷键：Ctrl K / Ctrl N 之类在侧边对话里应当留给浏览器与输入框
-      if (embedded) {
+      if (embedded || event.defaultPrevented) {
         return;
       }
       const mod = event.ctrlKey || event.metaKey;
@@ -96,7 +106,8 @@ export default function App() {
       // Ctrl N：旧版是「新任务（先选工作区）」，沿用
       if (mod && event.key.toLowerCase() === 'n') {
         event.preventDefault();
-        useStore.getState().setUi({ picker: { title: '新建对话 · 选择工作区' } });
+        useStore.getState().startNewSession();
+        requestAnimationFrame(() => useStore.getState().composerApi?.focus());
         return;
       }
       if (mod && event.key.toLowerCase() === 'b') {
@@ -122,6 +133,9 @@ export default function App() {
         || state.ui.paletteOpen || state.ui.checkpointDialog || state.ui.skillsInstall || state.ui.confirm);
       if (overlayOpen) {
         return;
+      }
+      if (state.ui.reviewExpanded && state.ui.inspectorOpen) {
+        event.preventDefault(); state.setUi({ reviewExpanded: false }); return;
       }
       if (state.running) {
         event.preventDefault();
@@ -190,11 +204,12 @@ export default function App() {
   return (
     <div
       ref={appRef}
-      className={`app${sidebarOpen ? '' : ' sidebar-collapsed'}${inspectorOpen ? '' : ' inspector-collapsed'}${embedded ? ' side-chat-embedded-app' : ''}${resizing ? ' is-resizing' : ''}`}
+      className={`app${sidebarOpen ? ' sidebar-open' : ' sidebar-collapsed'}${inspectorOpen ? '' : ' inspector-collapsed'}${embedded ? ' side-chat-embedded-app' : ''}${resizing ? ' is-resizing' : ''}${reviewExpanded ? ' review-expanded' : ''}`}
       style={appStyle}
     >
       {/* 各区块单独兜底：任何一块渲染异常都不该把整页卸载成白屏 */}
       <ErrorBoundary name="侧栏"><Sidebar /></ErrorBoundary>
+      {sidebarOpen && <button type="button" className="sidebar-scrim" aria-label="关闭导航" onClick={() => useStore.getState().setUi({ sidebarOpen: false })} />}
       <div
         id="gutter-left"
         className="gutter gutter-left"
@@ -211,7 +226,7 @@ export default function App() {
               type="button"
               className="icon-btn"
               id="sidebar-toggle"
-              title="切换侧栏 (Ctrl B)"
+              title={`切换侧栏 (${shortcut('B')})`}
               aria-label="切换侧栏"
               onClick={() => useStore.getState().setUi((ui) => ({ sidebarOpen: !ui.sidebarOpen }))}
             >
@@ -269,11 +284,11 @@ export default function App() {
               className={`run-state state-${running ? 'running' : 'idle'}${running && stalled ? ' is-stalled' : ''}`}
               title={stalled ? `已经 ${idleSeconds} 秒没有新事件，可能卡住了` : undefined}
             >
-              {running ? '运行中' : '空闲'}
+              {phase}
               {running && runStartedAt ? ` · ${Math.round((Date.now() - runStartedAt) / 1000)}s` : ''}
               {stalled ? ` · ${idleSeconds}s 无新事件` : ''}
             </span>
-            <button type="button" id="settings-open" className="icon-btn" aria-label="设置" title="设置 (Ctrl + ,)" onClick={() => useStore.getState().setUi({ settingsOpen: true })}>
+            <button type="button" id="settings-open" className="icon-btn" aria-label="设置" title={`设置 (${shortcut(',')})`} onClick={() => useStore.getState().setUi({ settingsOpen: true })}>
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h3.2M9.4 4.5h4.1M2.5 8h4.2M10.1 8h3.4M2.5 11.5h2.2M8 11.5h5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /><circle cx="7.7" cy="4.5" r="1.5" stroke="currentColor" strokeWidth="1.4" fill="none" /><circle cx="8.4" cy="8" r="1.5" stroke="currentColor" strokeWidth="1.4" fill="none" /><circle cx="6.3" cy="11.5" r="1.5" stroke="currentColor" strokeWidth="1.4" fill="none" /></svg>
             </button>
             <button
@@ -298,7 +313,7 @@ export default function App() {
                 className="icon-btn review-toggle"
                 aria-label="切换审阅面板"
                 aria-pressed={inspectorOpen}
-                title={eventCount ? `审阅面板 · ${eventCount} 条事件 (Ctrl J)` : '审阅面板 (Ctrl J)'}
+                title={`审阅面板 (${shortcut('J')})`}
                 onClick={() => useStore.getState().setUi((ui) => ({ inspectorOpen: !ui.inspectorOpen }))}
               >
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11zM9.5 3.5v9" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round" /></svg>
@@ -310,7 +325,7 @@ export default function App() {
         {notice && (
           <div id="notice" className="notice" role="status">
             <span id="notice-text">{notice.text}</span>
-            <button type="button" id="notice-close" onClick={() => useStore.getState().hideNotice()}>✕</button>
+            <button type="button" id="notice-close" aria-label="关闭通知" onClick={() => useStore.getState().hideNotice()}>×</button>
           </div>
         )}
         <div className="stage">
@@ -352,8 +367,12 @@ function WorkspaceMenu({ onClose }) {
   // 点外面就收起：菜单是绝对定位的浮层，没有遮罩可以点
   useEffect(() => {
     const onDown = () => onClose();
+    const onKey = (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); onClose(); document.getElementById('workspace-name')?.focus(); }
+    };
+    document.addEventListener('keydown', onKey, true);
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey, true); };
   }, [onClose]);
 
   // 当前目录是不是某个 worktree：是的话给出分支与清理入口，否则遗留目录只能手工 rm

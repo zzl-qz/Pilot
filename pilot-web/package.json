@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test src/test/js/",
+    "test": "node --test src/test/js/*.test.js",
     "web:dev:ui": "npm --prefix frontend run dev:ui",
     "web:build": "npm --prefix frontend run build"
   }

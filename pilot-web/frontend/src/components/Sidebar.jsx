@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { shortcut } from '../lib/interaction.js';
+import React, { useMemo, useState } from 'react';
 import { useStore } from '../store.js';
-import { api } from '../api.js';
+import { WorkspaceTree } from './WorkspaceTree.jsx';
 import { groupSessionsByProject } from '../lib/projects.js';
 
 /** 左侧导航：项目分组的会话列表 + 工作区文件树 + 连接状态。 */
@@ -14,8 +15,6 @@ export function Sidebar() {
   const sideItems = sideChats?.items || [];
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState(() => new Set());
-  const [treeOpen, setTreeOpen] = useState(false);
-  const [tree, setTree] = useState([]);
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -26,14 +25,6 @@ export function Sidebar() {
     // 注意参数顺序：projects 在前、sessions 在后
     return groupSessionsByProject(projects, filtered);
   }, [sessions, projects, query]);
-
-  useEffect(() => {
-    if (treeOpen && workspace && sessionId) {
-      api.files(useStore.getState().sessionId, '').then((data) => {
-        setTree(data?.entries || data || []);
-      }).catch(() => setTree([]));
-    }
-  }, [treeOpen, workspace, sessionId]);
 
   function toggleProject(key) {
     setCollapsed((prev) => {
@@ -52,7 +43,7 @@ export function Sidebar() {
           id="rail-toggle"
           className="icon-btn"
           type="button"
-          title="收起侧栏 (Ctrl B)"
+          title={`收起侧栏 (${shortcut('B')})`}
           aria-label="收起侧栏"
           onClick={() => useStore.getState().setUi((ui) => ({ sidebarOpen: !ui.sidebarOpen }))}
         >
@@ -63,7 +54,7 @@ export function Sidebar() {
       <button id="new-session" className="new-task" type="button" onClick={() => useStore.getState().startNewSession()}>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
         <span>新任务</span>
-        <kbd>Ctrl N</kbd>
+        <kbd>{shortcut('N')}</kbd>
       </button>
 
       <label className="session-search" htmlFor="session-search">
@@ -138,39 +129,16 @@ export function Sidebar() {
           </section>
         )}
 
-        <details className="nav-block nav-files" aria-label="工作区文件" open={treeOpen} onToggle={(event) => setTreeOpen(event.target.open)}>
-          <summary className="nav-head">
-            <span>工作区文件</span>
-            <span className="nav-disclosure" aria-hidden="true">⌄</span>
-          </summary>
-          <div className="file-tree-head">
-            <span>浏览文件</span>
-            <button
-              id="tree-refresh"
-              className="icon-btn icon-btn-sm"
-              type="button"
-              title="刷新文件树"
-              aria-label="刷新文件树"
-              onClick={() => {
-                api.files(useStore.getState().sessionId, '').then((data) => setTree(data?.entries || data || [])).catch(() => setTree([]));
-              }}
-            >
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.6V5.4h-2.8" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </button>
-          </div>
-          <div id="file-tree" className="file-tree" role="tree" aria-label="工作区文件">
-            <FileTree entries={tree} />
-          </div>
-          {!tree.length && <p id="tree-empty" className="nav-empty">选择工作区后显示文件。</p>}
-        </details>
+
       </div>
 
+      <WorkspaceTree />
       <div className="sidebar-foot rail-foot">
         <div id="connection" className={`conn is-${connection.status}`} role="status">
           <span className="dot" aria-hidden="true" />
           <span id="connection-text">{connection.text}</span>
         </div>
-        <button id="workspace-chip" className="workspace-chip mono" type="button" hidden={!workspace} title="切换工作区">
+        <button id="workspace-chip" className="workspace-chip mono" type="button" hidden={!workspace} title={workspace || '切换工作区'} onClick={() => useStore.getState().setUi({ picker: { title: '切换工作区' } })}>
           {workspace ? workspace.split(/[\\/]/).filter(Boolean).pop() : ''}
         </button>
       </div>
@@ -301,44 +269,7 @@ function SessionRow({ session, activeId }) {
             onConfirm: () => useStore.getState().deleteSession(session.id)
           });
         }}
-      >✕</button>
+      >×</button>
     </li>
   );
-}
-
-function FileTree({ entries, depth = 0 }) {
-  if (!entries?.length) {
-    return null;
-  }
-  return (
-    <ul className="file-tree-list" style={{ paddingLeft: depth ? 12 : 0 }}>
-      {entries.map((entry) => (
-        <li key={entry.path || entry.name}>
-          {entry.type === 'dir' || entry.directory ? (
-            <details>
-              <summary className="tree-row">{entry.name || entry.path}</summary>
-              <LazyDir path={entry.path} depth={depth + 1} />
-            </details>
-          ) : (
-            <button type="button" className="tree-row" onClick={() => useStore.getState().openPreview(entry.path)}>
-              {entry.name || entry.path}
-            </button>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function LazyDir({ path, depth }) {
-  const [entries, setEntries] = useState(null);
-  useEffect(() => {
-    api.files(useStore.getState().sessionId, path).then((data) => {
-      setEntries(data?.entries || data || []);
-    }).catch(() => setEntries([]));
-  }, [path]);
-  if (entries == null) {
-    return <p className="nav-empty">加载中…</p>;
-  }
-  return <FileTree entries={entries} depth={depth} />;
 }

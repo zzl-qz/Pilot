@@ -1,10 +1,11 @@
+import { modifierKey, duplicateResult } from '../lib/interaction.js';
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useStickToBottom } from 'use-stick-to-bottom';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { historyPrefetchDistance } from '../lib/history.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
-import { TOOL_ICONS, TOOL_STATUS_TITLES, toolLabel } from '../lib/tool-meta.js';
+import { TOOL_ICONS, TOOL_STATUS_TITLES, toolArgsText, toolLabel } from '../lib/tool-meta.js';
 import { agentMeta, agentTitle, manifestFacts, splitSubagentResult } from '../lib/agents.js';
 import { splitAttachmentMarkers, layoutMessageParts, attachmentUrl, isImageAttachment, formatBytes } from '../lib/attachments.js';
 import { changeFileTitle, splitPath, statusKind } from '../lib/changes.js';
@@ -130,7 +131,7 @@ export function Thread() {
             <RetryRow label="加载更早失败，点击重试" onClick={() => requestEarlierHistory({ force: true })} />
           )}
           {rows.map((row, index) => (
-            <RowView key={row.key} row={row} isLast={index === rows.length - 1} />
+            <RowView key={row.key} row={row} duplicate={row.type === 'result' && duplicateResult(rows, index)} isLast={!rows.slice(index + 1).some(item => item.type === 'turn' || item.type === 'user')} />
           ))}
           {history.hasNewer && history.forwardError && (
             <RetryRow label="加载更新失败，点击重试" onClick={() => requestLaterHistory({ force: true })} />
@@ -168,10 +169,18 @@ function RetryRow({ label, onClick }) {
 }
 
 function EmptyState() {
+  const workspace = useStore(state => state.workspace || state.draftSession?.workspace || '');
+  const project = useStore(state => state.projects.find(item => item.id === state.currentProjectId));
+  const [scope, setScope] = useState(null);
+  useEffect(() => {
+    let alive = true; setScope(null);
+    if (workspace) api.worktreeInfo(workspace).then(info => { if (alive) setScope(info); }).catch(() => {});
+    return () => { alive = false; };
+  }, [workspace]);
   const prompts = [
-    { title: '分析项目结构', sub: '读取 pom.xml 说明模块与版本', prompt: '读取 pom.xml，告诉我这个项目有哪些模块、用什么 Java 版本。' },
-    { title: '盘点源码', sub: '列出工作区里所有的 Java 文件，并统计每个包的类数量。', prompt: '列出工作区里所有的 Java 文件，并统计每个包的类数量。' },
-    { title: '收集 TODO', sub: '搜索代码里所有的 TODO 注释，按文件整理成清单。', prompt: '搜索代码里所有的 TODO 注释，按文件整理成清单。' }
+    { title: '了解项目', sub: '识别技术栈、入口与运行方式', prompt: '分析当前工作区的结构、技术栈和启动方式，先读取项目实际配置和说明。' },
+    { title: '检查改动', sub: '检查工作区改动中的潜在问题', prompt: '审阅当前工作区的未提交改动，重点检查逻辑错误、边界情况和缺失测试。' },
+    { title: '完善测试', sub: '找到测试入口和未覆盖的边界', prompt: '查看项目现有测试，找到关键流程缺少的边界用例，补充测试并实际运行。' }
   ];
   return (
     <div className="thread-scroll-region">
@@ -179,9 +188,14 @@ function EmptyState() {
         <div className="thread-column">
           <div className="empty" id="empty-state">
             <span className="empty-logo" aria-hidden="true">P</span>
-            <p className="empty-eyebrow">PILOT · CODING AGENT</p>
             <h2 className="empty-title">从一个任务开始</h2>
             <p className="empty-sub">描述你想完成的工作。Pilot 会在所选工作区内执行，并把每一步和改动留给你审阅。</p>
+            <div className="task-scope">
+              <strong>{project?.name || '当前工作区'}</strong>
+              <span title={workspace}>{workspace || '尚未选择工作区'}</span>
+              <span>{scope?.branch ? `${scope.worktree ? '源分支' : 'Git 分支'} · ${scope.branch}` : 'Git 分支 · 未获取'} · {scope?.worktree ? '独立 worktree' : '在所选目录执行'}</span>
+              <button type="button" className="btn" onClick={() => useStore.getState().setUi({ picker: { title: '选择任务工作区' } })}>选择工作区</button>
+            </div>
             <div className="prompts">
               {prompts.map((item) => (
                 <button
@@ -193,7 +207,7 @@ function EmptyState() {
                     if (!state.sessionId && !state.draftSession) {
                       state.startNewSession();
                     }
-                    state.composerApi?.setText(item.prompt);
+                    state.composerApi?.appendText((state.composerApi.getText().trim() ? '\n' : '') + item.prompt);
                     state.composerApi?.focus();
                   }}
                 >
@@ -203,7 +217,7 @@ function EmptyState() {
               ))}
             </div>
             <p className="empty-keys">
-              <kbd>Ctrl</kbd><kbd>N</kbd> 新任务
+              <kbd>{modifierKey}</kbd><kbd>N</kbd> 新任务
               <span className="sep">·</span>
               <kbd>@</kbd> 引用文件
               <span className="sep">·</span>
@@ -218,13 +232,13 @@ function EmptyState() {
   );
 }
 
-const RowView = memo(function RowView({ row, isLast }) {
+const RowView = memo(function RowView({ row, isLast, duplicate }) {
   switch (row.type) {
     case 'user': return <UserMessage row={row} />;
     case 'turn': return <Turn row={row} isLast={isLast} />;
     case 'plan': return <PlanCard row={row} />;
     case 'compaction': return <CompactionCard row={row} />;
-    case 'result': return <ResultCard row={row} />;
+    case 'result': return <ResultCard row={row} duplicate={duplicate} />;
     case 'sandbox': return <SandboxCard row={row} />;
     case 'arb': return <ArbitrationCard row={row} />;
     default: return null;
@@ -305,8 +319,16 @@ function UserMessage({ row }) {
 }
 
 function beginEdit(row) {
+  if (row.attachments?.length) {
+    useStore.getState().showNotice('带附件的历史消息请作为新消息补充要求，原附件仍保留在对话中。');
+    return;
+  }
   const composerApi = useStore.getState().composerApi;
   const plain = row.text || '';
+  if (composerApi?.getText().trim() || composerApi?.attachmentIds().length) {
+    useStore.getState().showNotice('输入框还有未发送的草稿，请先处理草稿再编辑历史消息。');
+    composerApi?.focus(); return;
+  }
   composerApi?.setText(plain);
   for (const file of row.attachments || []) {
     composerApi?.insertAttachments([{ id: file.id || file.name, name: file.name, kind: isImageAttachment(file) ? 'image' : 'file', url: attachmentUrl(useStore.getState().sessionId, file) }]);
@@ -426,13 +448,14 @@ const Turn = memo(function Turn({ row, isLast }) {
  */
 const ToolGroup = memo(function ToolGroup({ tools }) {
   const running = tools.filter((tool) => tool.status === 'run').length;
+  const needsAttention = tools.some(tool => ['error', 'wait', 'interrupted'].includes(tool.status));
   const ref = useRef(null);
   // 只在「是否还在跑」变化时改 open，别把用户手动折叠的状态每帧冲掉
   useEffect(() => {
     if (ref.current) {
-      ref.current.open = running > 0;
+      ref.current.open = running > 0 || needsAttention;
     }
-  }, [running > 0]);
+  }, [running > 0, needsAttention]);
   return (
     <details className="tool-group" ref={ref}>
       <summary className="tool-group-head">
@@ -474,23 +497,29 @@ function toolCounts(tools) {
  * 转圈会被当成卡死，用户只能干等。
  */
 const ToolRow = memo(function ToolRow({ tool }) {
-  const [open, setOpen] = useState(true);
+  const body = String(tool.body || '').trim();
+  const [open, setOpen] = useState(['error', 'wait', 'interrupted'].includes(tool.status));
+  useEffect(() => { if (['error', 'wait', 'interrupted'].includes(tool.status)) setOpen(true); }, [tool.status]);
   const running = tool.status === 'run';
   useSecondTick(running);
   const seconds = running ? elapsedSeconds(tool.startedAt) : 0;
-  const meta = running && seconds >= 3 ? `执行中 ${seconds}s` : (tool.meta || '');
+  const meta = running && seconds >= 3
+    ? `执行中 ${seconds}s`
+    : (tool.meta === '未返回结果' ? '' : (tool.meta || ''));
+  const args = toolArgsText(tool.name, tool.args);
+  const title = tool.name === 'run_command' ? '' : (toolLabel(tool.name));
   return (
-    <div className={`tool-row${open ? ' is-open' : ''}`}>
-      <button type="button" onClick={() => setOpen((value) => !value)}>
+    <div className={`tool-row${open && body ? ' is-open' : ''}`}>
+      <button type="button" onClick={() => body && setOpen((value) => !value)} aria-expanded={open && Boolean(body)}>
         <span className={`tool-status is-${tool.status}`} title={TOOL_STATUS_TITLES[tool.status] || ''}>
-          {running ? '…' : tool.status === 'ok' ? '✓' : tool.status === 'error' ? '✕' : '!'}
+          {running ? '…' : tool.status === 'ok' ? <StatusMark /> : tool.status === 'error' ? <StatusMark failed /> : '!'}
         </span>
         <span className="tool-icon">{TOOL_ICONS[tool.name] || '·'}</span>
-        <span className="tool-name">{tool.name || 'tool'}</span>
-        <span className="tool-args">{tool.args || ''}</span>
-        <span className={`tool-meta${running && seconds >= 10 ? ' is-slow' : ''}`}>{meta}</span>
+        {title && <span className="tool-name">{title}</span>}
+        <span className="tool-args">{args}</span>
+        {meta && <span className={`tool-meta${running && seconds >= 10 ? ' is-slow' : ''}`}>{meta}</span>}
       </button>
-      <div className="tool-body"><pre>{tool.body || ''}</pre></div>
+      {body && <div className="tool-body"><pre>{body}</pre></div>}
     </div>
   );
 });
@@ -526,7 +555,7 @@ const LiveWork = memo(function LiveWork({ tools, thinking }) {
                 <div key={tool.callId} className={`live-work-tool is-${tool.status}`}>
                   <span className={`live-work-dot is-${tool.status}`} />
                   <span>{toolLabel(tool.name)}</span>
-                  <span className="live-work-tool-args">{tool.args || ''}</span>
+                  <span className="live-work-tool-args">{toolArgsText(tool.name, tool.args)}</span>
                 </div>
               ))}
             </div>
@@ -610,7 +639,7 @@ const AgentCard = memo(function AgentCard({ agent }) {
           {(agent.tools || []).map((tool, index) => (
             <div key={index} className="tool-row">
               <button type="button">
-                <span className={`tool-status is-${tool.status}`}>{tool.status === 'run' ? '…' : tool.status === 'ok' ? '✓' : '✕'}</span>
+                <span className={`tool-status is-${tool.status}`}>{tool.status === 'run' ? '…' : tool.status === 'ok' ? <StatusMark /> : <StatusMark failed />}</span>
                 <span className="tool-icon">{TOOL_ICONS[tool.name] || '·'}</span>
                 <span className="tool-name">{tool.name}</span>
                 <span className="tool-args">{tool.args}</span>
@@ -684,7 +713,7 @@ const TurnStats = memo(function TurnStats({ stats }) {
   const used = Number(stats.contextTokens) || 0;
   const crowded = limit > 0 && used / limit >= 0.85;
   return (
-    <div className="turn-stats">
+    <details className="turn-stats-detail"><summary>{elapsed != null ? `${elapsed}s · ` : ''}用量详情</summary><div className="turn-stats">
       {elapsed != null && <span className="turn-stat"><span>耗时</span><b>{elapsed}s</b></span>}
       <span className="turn-stat"><span>请求</span><b>{stats.modelRequests ?? '—'}</b></span>
       <span className="turn-stat" title={stats.inputTokens ?? ''}><span>输入</span><b>{mark}{formatCount(stats.inputTokens)}</b></span>
@@ -693,14 +722,15 @@ const TurnStats = memo(function TurnStats({ stats }) {
         <span>上下文</span><b>{formatCount(stats.contextTokens)}</b>
       </span>
       <span className="turn-stat-note">{stats.exact === false ? '主任务 · Token 为估算' : '主任务 · 模型实测用量'}</span>
-    </div>
+    </div></details>
   );
 });
 
 /* ---------- 卡片 ---------- */
 
 const PlanCard = memo(function PlanCard({ row }) {
-  const items = row.items || [];
+  const items = (row.items || []).filter(item => (item.step || item.text || '').trim());
+  if (!items.length) return null;
   const done = items.filter((item) => item.status === 'completed' || item.status === 'done').length;
   const finished = items.length > 0 && done === items.length;
   return (
@@ -713,7 +743,7 @@ const PlanCard = memo(function PlanCard({ row }) {
       <ol className="plan-list">
         {items.map((item, index) => (
           <li key={index} className="plan-item">
-            <span className="plan-index">{String(index + 1).padStart(2, '0')}</span>
+            <span className="plan-index">{index + 1}</span>
             <span className="plan-text">{item.step || item.text || ''}</span>
             <span className={`plan-status is-${item.status || 'pending'}`}>{planStatusLabel(item.status)}</span>
           </li>
@@ -744,16 +774,16 @@ function CompactionCard({ row }) {
   );
 }
 
-function ResultCard({ row }) {
+function ResultCard({ row, duplicate }) {
   const rollbackRun = useStore((state) => state.rollbackRun);
   const continueRun = useStore((state) => state.continueRun);
   return (
-    <article className={`turn-card is-${row.tone}`}>
+    <article className={`turn-card is-${row.tone}${(!row.detail || duplicate) && !row.changedFiles?.length && !row.resumable ? ' is-compact' : ''}`}>
       <div className="turn-card-head">
         <span className="turn-card-title">{row.title}</span>
         {row.continued && <span className="turn-resolved">已继续执行</span>}
       </div>
-      {row.detail && (
+      {row.detail && !duplicate && (
         String(row.detail).length > 280
           ? (
             <details className="turn-card-more">
@@ -873,3 +903,7 @@ function ArbitrationCard({ row }) {
 }
 
 export { formatTime };
+
+function StatusMark({failed = false}) {
+  return <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d={failed ? 'M4 4l8 8M12 4l-8 8' : 'M3 8l3 3 7-7'} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>;
+}

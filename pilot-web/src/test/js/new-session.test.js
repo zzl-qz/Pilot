@@ -60,6 +60,7 @@ function reset() {
   calls = [];
   useStore.setState({
     sessionId: null,
+    currentProjectId: null,
     draftSession: null,
     sessionTitle: '',
     workspace: '',
@@ -129,4 +130,38 @@ test('新对话草稿有自己的存储槽，刷新不丢', () => {
   writeDraft(memory, null, '还没发出去的想法');
   assert.equal(readDraft(memory, null), '还没发出去的想法');
   assert.equal(readDraft(memory, 'ses_1'), '');
+});
+
+
+test('新任务保留当前项目和工作区，显式空值可清除范围', () => {
+  reset();
+  useStore.setState({sessionId:'old',workspace:'/workspace/demo',currentProjectId:'p'});
+  useStore.getState().startNewSession();
+  assert.deepEqual(useStore.getState().draftSession,{projectId:'p',workspace:'/workspace/demo'});
+  useStore.getState().startNewSession({projectId:null,workspace:null});
+  assert.deepEqual(useStore.getState().draftSession,{projectId:null,workspace:null});
+});
+
+
+test('草稿态切换工作区会更新实际创建参数', async () => {
+  reset(); useStore.getState().startNewSession({workspace:'/old'});
+  await useStore.getState().switchWorkspace('/selected');
+  await useStore.getState().submitInput('检查');
+  assert.equal(sessionsPosts()[0].body.workspace,'/selected');
+});
+
+test('创建会话期间切换任务，旧请求不能覆盖当前会话或继续发送', async () => {
+  reset(); useStore.getState().startNewSession({workspace:'/old'});
+  const {api} = await import('../../../frontend/src/api.js');
+  const create = api.createSession; let resolveCreate;
+  api.createSession = () => new Promise(resolve => {resolveCreate=resolve;});
+  try {
+    const sending = useStore.getState().submitInput('旧任务');
+    useStore.getState().startNewSession({workspace:'/new'});
+    resolveCreate({id:'old-created',workspace:'/old'});
+    assert.equal(await sending,false);
+    assert.equal(useStore.getState().sessionId,null);
+    assert.equal(useStore.getState().workspace,'/new');
+    assert.equal(calls.filter(call=>call.url.includes('/messages')).length,0);
+  } finally { api.createSession=create; }
 });

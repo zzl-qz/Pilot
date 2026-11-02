@@ -24,6 +24,21 @@ function toolLabel(name) {
   return TOOL_LABELS[name] || name || '操作';
 }
 
+/** 行里只留人能读的那一段：命令显示命令本身，文件类显示路径。 */
+function toolArgsText(name, args) {
+  const raw = String(args || '').trim();
+  if (!raw) return '';
+  const field = (key) => {
+    const match = raw.match(new RegExp(`(?:^|[{,\\s])${key}=([^,}]+)`));
+    return match ? match[1].trim() : '';
+  };
+  if (name === 'run_command') return field('command') || raw;
+  if (name === 'read_file' || name === 'edit_file' || name === 'create_file' || name === 'list_dir' || name === 'search_text' || name === 'glob_files') {
+    return field('path') || field('query') || raw;
+  }
+  return raw.replace(/^\{|\}$/g, '');
+}
+
 function refreshToolGroup(turn) {
   if (!turn || turn.total <= 0) {
     if (turn) {
@@ -67,4 +82,4 @@ const TOOL_ICONS = {
 };
 
 
-export { eventTimestamp, toolLabel, TOOL_STATUS_TITLES, TOOL_ICONS };
+export { eventTimestamp, toolLabel, toolArgsText, TOOL_STATUS_TITLES, TOOL_ICONS };

@@ -48,3 +48,16 @@ test('空值不会抛异常', async () => {
   await writeClipboard(null, { navigator: { clipboard: { writeText: async (value) => { written.push(value); } } } });
   assert.deepEqual(written, ['']);
 });
+
+import { readTransferFiles } from '../../../frontend/src/lib/clipboard.js';
+test('粘贴文件优先读取 files，不重复读取 items', () => {
+  const file = { name: 'a.txt' };
+  assert.deepEqual(readTransferFiles({ files: [file], items: [{ kind: 'file', getAsFile: () => file }] }), [file]);
+});
+test('兼容只有 items 的剪贴板，忽略文本和无法读取的项目', () => {
+  const file = { name: 'a.png' };
+  assert.deepEqual(readTransferFiles({ items: [
+    { kind: 'string' }, { kind: 'file', getAsFile: () => null }, { kind: 'file', getAsFile: () => file }
+  ] }), [file]);
+  assert.deepEqual(readTransferFiles(null), []);
+});

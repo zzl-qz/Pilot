@@ -35,3 +35,13 @@ export async function writeClipboard(text, env = {}) {
     return false;
   }
 }
+
+/** 两种浏览器剪贴板表示择一读取，避免同一文件重复加入。 */
+export function readTransferFiles(data) {
+  if (!data) return [];
+  const files = Array.from(data.files || []);
+  if (files.length) return files;
+  return Array.from(data.items || [])
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.getAsFile()).filter(Boolean);
+}

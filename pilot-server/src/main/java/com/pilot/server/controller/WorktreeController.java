@@ -59,7 +59,8 @@ public class WorktreeController {
     @GetMapping
     public Info info(@RequestParam("path") String path) {
         return worktrees.findByPath(Path.of(path)).map(meta -> new Info(true, meta.id(), meta.path(),
-                meta.base(), meta.branch(), meta.commit())).orElseGet(() -> new Info(false, "", "", "", "", ""));
+                meta.base(), meta.branch(), meta.commit())).orElseGet(() -> new Info(false, "", path, "",
+                        worktrees.currentBranch(Path.of(path)), ""));
     }
 
     @PostMapping("/handoff")

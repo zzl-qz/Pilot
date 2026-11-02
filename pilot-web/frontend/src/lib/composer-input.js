@@ -1,3 +1,4 @@
+import { readTransferFiles } from './clipboard.js';
 import { fileBadge, formatBytes, isImageAttachment } from './attachments.js';
 
 /**
@@ -13,6 +14,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
   // 不能用 plaintext-only：它会在第一次键入时把 DOM 压平成纯文本，芯片就变成了一串字。
   // 用普通可编辑，粘贴时自己剥掉格式（见下面的 paste 处理）。
   root.contentEditable = 'true';
+  const listeners = new AbortController();
 
   function walk(parent, out) {
     for (const node of parent.childNodes) {
@@ -70,7 +72,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
       return null;
     }
     const range = selection.getRangeAt(0);
-    return root.contains(range.endContainer) ? range : null;
+    return root.contains(range.startContainer) && root.contains(range.endContainer) ? range : null;
   }
 
   function placeCaret(node, offset) {
@@ -90,6 +92,37 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     const selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
+  }
+
+  // 只替换光标前的触发词，保留两边文字、附件和已有引用；兼容浏览器拆开的文字节点。
+  function selectTrigger(marker) {
+    const caret = selectionRange();
+    if (!caret || !caret.collapsed) return false;
+    const probe = document.createRange();
+    probe.selectNodeContents(root);
+    probe.setEnd(caret.endContainer, caret.endOffset);
+    const text = serialize(probe.cloneContents(), true).text;
+    const match = text.match(marker === '@' ? /(?:^|\s)(@[^\s@\uFFFC]*)$/ : /(?:^|\s)(\/[^\s/\uFFFC]*)$/);
+    if (!match) return false;
+    const target = text.length - match[1].length;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.parentElement.closest('[data-chip]')) continue;
+      const prefix = document.createRange();
+      prefix.selectNodeContents(root);
+      prefix.setEnd(node, 0);
+      const start = serialize(prefix.cloneContents(), true).text.length;
+      if (target >= start && target < start + node.length) {
+        const range = caret.cloneRange();
+        range.setStart(node, target - start);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        return true;
+      }
+    }
+    return false;
   }
 
   /** 把节点放到光标处（光标不在输入框里就追加到末尾），并把光标移到它们后面。 */
@@ -201,16 +234,16 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
       onRemove(id);
     }
     onChange();
-  });
+  }, { signal: listeners.signal });
 
   root.addEventListener('input', () => {
     refresh();
     onChange();
-  });
+  }, { signal: listeners.signal });
 
   root.addEventListener('paste', (event) => {
     const data = event.clipboardData;
-    if (!data || (data.files && data.files.length)) {
+    if (!data || readTransferFiles(data).length) {
       return;
     }
     // 文件交给外面的粘贴处理；文字一律按纯文本插入，不把网页的样式和结构带进输入框
@@ -220,12 +253,14 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     }
     event.preventDefault();
     document.execCommand('insertText', false, text.replace(/\r\n?/g, '\n'));
-  });
+  }, { signal: listeners.signal });
 
   refresh();
 
   return {
     root,
+    destroy() { listeners.abort(); },
+    notifyChange() { refresh(); onChange(); },
 
     getText() {
       return serialize(root).text;
@@ -249,6 +284,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     setText(text) {
       root.replaceChildren(...(text ? [document.createTextNode(String(text))] : []));
       refresh();
+      onChange();
     },
 
     /** 在草稿末尾追加文字，已有的芯片保持不动。 */
@@ -258,6 +294,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
       }
       root.append(document.createTextNode(String(text)));
       refresh();
+      onChange();
     },
 
     focus() {
@@ -304,6 +341,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
       if (nodes.length) {
         insertAtCaret(nodes);
         refresh();
+        onChange();
       }
     },
 
@@ -314,22 +352,18 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     insertMention(path) {
       const chip = mentionChip(path);
       const gap = document.createTextNode(' ');
-      const range = selectionRange();
-      const node = range && range.endContainer;
-      if (node && node.nodeType === Node.TEXT_NODE) {
-        const match = /@([^\s@]*)$/.exec(node.nodeValue.slice(0, range.endOffset));
-        if (match) {
-          const query = document.createRange();
-          query.setStart(node, match.index);
-          query.setEnd(node, range.endOffset);
-          query.deleteContents();
-          const selection = window.getSelection();
-          selection.removeAllRanges();
-          selection.addRange(query);
-        }
-      }
+      selectTrigger('@');
       insertAtCaret([chip, gap]);
       refresh();
+      onChange();
+    },
+
+    replaceCommand(text) {
+      if (!selectTrigger('/')) return false;
+      insertAtCaret([document.createTextNode(text)]);
+      refresh();
+      onChange();
+      return true;
     },
 
     /** 把整个草稿节点摘下来保存（编辑排队消息期间腾出输入框）；之后用 restore 原样放回。 */

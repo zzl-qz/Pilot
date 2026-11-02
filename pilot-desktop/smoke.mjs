@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
+import { prepareDevelopmentHost } from './brand-host.mjs';
 import { createServer } from 'node:http';
 import net from 'node:net';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -13,7 +14,7 @@ const root = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(join(root, '../pilot-web/frontend/package.json'));
 const { chromium } = require('playwright-core');
 const home = mkdtempSync(join(tmpdir(), 'pilot-desktop-'));
-const electron = join(root, 'node_modules', '.bin', 'electron');
+const electron = prepareDevelopmentHost();
 const cdpPort = await new Promise((resolve, reject) => {
   const server = net.createServer();
   server.once('error', reject);
@@ -50,6 +51,13 @@ try {
       listing = readdirSync(home).map((name) => `${name}=${readFileSync(joinPath(home, name), 'utf8')}`).join(' | ');
     } catch (error) { listing = error.message; }
     throw new Error(`桌面壳没有写出端点，进程 ${child.exitCode}，目录 ${listing}\n` + logs);
+  }
+  if (process.platform === 'darwin') {
+    const name = execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e',
+      `ObjC.import('AppKit'); $.NSRunningApplication.runningApplicationWithProcessIdentifier(${info.pid}).localizedName.js`
+    ], { encoding: 'utf8' }).trim();
+    if (name !== 'Pilot') throw new Error('macOS 识别的应用名称不对：' + name);
+    console.log('MACOS_APP_NAME_OK: ' + name);
   }
   const created = await fetch(`http://127.0.0.1:${info.controlPort}/tabs`, {
     method: 'POST',

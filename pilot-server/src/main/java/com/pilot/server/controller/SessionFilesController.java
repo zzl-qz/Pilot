@@ -59,7 +59,11 @@ public class SessionFilesController {
     /** 目录树的一层：目录在前、文件在后，按名称排序。 */
     @GetMapping("/{id}/files")
     public TreeResponse tree(@PathVariable String id, @RequestParam(name = "path", required = false) String path) {
-        PathValidator paths = paths(id);
+        return treeWorkspace(paths(id).root(), path);
+    }
+
+    static TreeResponse treeWorkspace(Path workspace, String path) {
+        PathValidator paths = new PathValidator(workspace);
         Path root = paths.root();
         Path directory = path == null || path.isBlank() ? root : paths.resolve(path);
         if (!Files.isDirectory(directory)) {
@@ -104,8 +108,11 @@ public class SessionFilesController {
     @GetMapping("/{id}/files/flat")
     public FlatResponse flat(@PathVariable String id,
                              @RequestParam(name = "limit", required = false) Integer limit) {
-        PathValidator paths = paths(id);
-        Path root = paths.root();
+        return flatWorkspace(paths(id).root(), limit);
+    }
+
+    /** 草稿态与已有会话共用索引规则，不跟随符号链接。 */
+    static FlatResponse flatWorkspace(Path root, Integer limit) {
         int max = limit == null || limit < 1 ? MAX_FLAT_ENTRIES : Math.min(limit, MAX_FLAT_LIMIT);
         List<String> files = new ArrayList<>();
         boolean[] truncated = {false};
@@ -152,7 +159,11 @@ public class SessionFilesController {
     /** 只读预览；二进制或超大文件返回标记，不返回内容。 */
     @GetMapping("/{id}/file")
     public FileResponse file(@PathVariable String id, @RequestParam("path") String path) {
-        PathValidator paths = paths(id);
+        return fileWorkspace(paths(id).root(), path);
+    }
+
+    static FileResponse fileWorkspace(Path workspace, String path) {
+        PathValidator paths = new PathValidator(workspace);
         Path file = paths.resolve(path);
         if (!Files.isRegularFile(file)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不是文件: " + path);

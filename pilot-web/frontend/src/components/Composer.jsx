@@ -6,9 +6,12 @@ import { resolveComposerAction } from '../lib/composer-state.js';
 import { rankFileMatches } from '../lib/mention.js';
 import { filterQuickCommands, expandQuickCommand } from '../lib/commands.js';
 import { stepHistory } from '../lib/input-history.js';
+import { readTransferFiles } from '../lib/clipboard.js';
+import { readAttachmentFile } from '../lib/attachment-input.js';
 import { checkIncomingFile } from '../lib/attachments.js';
 import { writeDraft, readDraft, dropDraft } from '../lib/drafts.js';
-import { isImageAttachment } from '../lib/attachments.js';
+import { splitAttachmentMarkers } from '../lib/attachments.js';
+import { queueHeader, resumeBar } from '../lib/queue.js';
 import { PERMISSION_MODES, permissionLabel, permissionHint } from '../lib/permission.js';
 import { buildModelProbe, buildModelUpdate, describeModelsFetched } from '../lib/model-settings.js';
 import {
@@ -21,6 +24,8 @@ import {
  */
 export function Composer() {
   const sessionId = useStore((state) => state.sessionId);
+  const sessionEpoch = useStore(state => state.sessionEpoch);
+  const workspace = useStore(state => state.workspace);
   const running = useStore((state) => state.running);
   const lastOutcome = useStore((state) => state.lastOutcome);
   const queueHeld = useStore((state) => state.queueHeld);
@@ -40,6 +45,9 @@ export function Composer() {
   const editTarget = useStore((state) => state._editTarget);
 
   const flowRef = useRef(null);
+  const referenceRequest = useRef(0);
+  const followUpRef = useRef('queue');
+  const [followUp, setFollowUp] = useState('queue');
   const inputRef = useRef(null);
   const fileRef = useRef(null);
   const [sendAction, setSendAction] = useState({ mode: 'send', stop: false, disabled: true, label: '发送', ariaLabel: '发送任务', title: '发送任务 (Enter)' });
@@ -51,6 +59,16 @@ export function Composer() {
   const [menuIndex, setMenuIndex] = useState(0);
   const menuRef = useRef(null);
   const draftFilesRef = useRef(new Map());
+  const fileQueueRef = useRef(Promise.resolve());
+  const pendingFilesRef = useRef(0);
+  const submittingRef = useRef(false);
+  const submittingEpoch = useRef(null);
+  const [pendingFiles, setPendingFiles] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const dragDepthRef = useRef(0);
+  const sessionDraftsRef = useRef(new Map());
+  const previousSessionRef = useRef(sessionId);
 
   /*
    * contenteditable 桥接：只在挂载时创建一次。
@@ -81,6 +99,7 @@ export function Composer() {
       focus: () => input.focus()
     } });
     return () => {
+      input.destroy();
       inputRef.current = null;
       useStore.setState({ composerApi: null });
     };
@@ -88,7 +107,28 @@ export function Composer() {
 
   /* 切换会话 / 草稿落库成真实会话后，把对应草稿回填（没有草稿就是清空）。 */
   useEffect(() => {
-    inputRef.current?.setText(readDraft(localStorage, sessionId));
+    const input = inputRef.current;
+    const previous = previousSessionRef.current;
+    // 首条消息落库时保留编辑器；真正切换会话才换草稿。
+    if (previous == null && sessionId && submittingRef.current && submittingEpoch.current === useStore.getState().sessionEpoch) {
+      previousSessionRef.current = sessionId;
+      return;
+    }
+    if (previous !== sessionId && input) {
+      sessionDraftsRef.current.set(previous, {
+        html: input.root.innerHTML, files: new Map(draftFilesRef.current)
+      });
+    }
+    const saved = sessionDraftsRef.current.get(sessionId);
+    if (saved && input) {
+      input.root.innerHTML = saved.html;
+      draftFilesRef.current = new Map(saved.files);
+      input.notifyChange();
+    } else {
+      draftFilesRef.current.clear();
+      input?.setText(readDraft(localStorage, sessionId));
+    }
+    previousSessionRef.current = sessionId;
   }, [sessionId]);
 
   function sendState() {
@@ -96,7 +136,8 @@ export function Composer() {
     const text = inputRef.current?.getText() || '';
     return resolveComposerAction({
       running: state.running,
-      editing: Boolean(state.ui.queueEdit),
+      editing: state._editTarget != null,
+      followUp: followUpRef.current,
       hasText: Boolean(text.trim()),
       attachmentCount: inputRef.current ? (inputRef.current.attachmentIds?.()?.length || 0) : 0,
       composerEnabled: state.ui.composerEnabled !== false,
@@ -109,92 +150,92 @@ export function Composer() {
 
   useEffect(() => {
     setSendAction(sendState());
-  }, [running, queueHeld, lastOutcome, pendingInputs.length]);
+  }, [running, queueHeld, lastOutcome, pendingInputs.length, steering, pausing, cancelling, followUp, editTarget]);
 
   /* 附件上传：选择 / 拖放 / 粘贴共用 */
-  async function addFiles(fileList) {
+  function addFiles(fileList) {
+    if (submittingRef.current) return;
     const files = Array.from(fileList || []);
-    for (const file of files) {
-      const problem = checkIncomingFile(file);
-      if (problem) {
-        useStore.getState().showNotice(problem);
-        continue;
-      }
-      try {
-        // 附件必须挂在会话上；草稿态下附件本身就是「我要发东西」的明确信号，这时候落库
-        let targetId = useStore.getState().sessionId;
-        if (!targetId) {
-          targetId = await useStore.getState().ensureSession();
+    const owner = useStore.getState().sessionId;
+    const epoch = useStore.getState().sessionEpoch;
+    pendingFilesRef.current += files.length;
+    setPendingFiles(pendingFilesRef.current);
+    fileQueueRef.current = fileQueueRef.current.then(async () => {
+      for (const file of files) {
+        try {
+          if ((useStore.getState().sessionId !== owner || useStore.getState().sessionEpoch !== epoch)) continue;
+          const existing = (inputRef.current?.attachmentIds() || [])
+            .map((id) => draftFilesRef.current.get(id)).filter(Boolean);
+          const result = checkIncomingFile(existing, file);
+          if (!result.ok) {
+            if (!result.silent) useStore.getState().showNotice(result.reason);
+            continue;
+          }
+          const item = await readAttachmentFile(file);
+          if ((useStore.getState().sessionId !== owner || useStore.getState().sessionEpoch !== epoch) || !inputRef.current) continue;
+          draftFilesRef.current.set(item.id, item);
+          inputRef.current.insertAttachments([item]);
+        } catch (error) {
+          useStore.getState().showNotice('读取附件失败：' + error.message);
+        } finally {
+          pendingFilesRef.current -= 1;
+          setPendingFiles(pendingFilesRef.current);
         }
-        if (!targetId) {
-          useStore.getState().showNotice('附件上传失败：还没有可用的对话');
-          continue;
-        }
-        const uploaded = await api.uploadAttachment(targetId, file);
-        const id = uploaded.id || uploaded.fileId || uploaded.name;
-        draftFilesRef.current.set(id, uploaded);
-        inputRef.current?.insertAttachments([{
-          id,
-          name: uploaded.name || file.name,
-          kind: isImageAttachment(uploaded) ? 'image' : 'file',
-          size: file.size
-        }]);
-      } catch (error) {
-        useStore.getState().showNotice('附件上传失败：' + error.message);
       }
-    }
+    });
   }
 
   async function submit() {
     const input = inputRef.current;
+    if (pendingFilesRef.current || submittingRef.current || sendState().disabled) return;
     if (!input) {
       return;
     }
     const { text, imagePositions } = input.getDraft();
     const attachments = input.attachmentIds().map((id) => draftFilesRef.current.get(id)).filter(Boolean);
     const state = useStore.getState();
-    if (state.ui.queueEdit != null) {
-      await state.saveQueueItem(state.ui.queueEdit, text);
-      state.setUi({ queueEdit: null });
-      input.setText('');
-      return;
-    }
-    if (editTarget != null && state._editTarget != null) {
-      await state.resendMessage(editTarget, text, attachments);
-      useStore.setState((draft) => { draft._editTarget = null; });
-      input.setText('');
-      return;
-    }
     if (!text.trim() && !attachments.length) {
       return;
     }
-    if (state.running) {
-      if (queueHeld) {
-        await state.steer(text, attachments);
-      } else {
-        await state.submitInput(text, attachments, imagePositions);
-      }
-    } else if (state.lastOutcome === 'NEED_INPUT') {
-      await state.continueRun();
-      await state.submitInput(text, attachments, imagePositions);
-    } else {
-      await state.submitInput(text, attachments, imagePositions);
-    }
-    input.setText('');
-    draftFilesRef.current.clear();
-    dropDraftSafe();
-  }
-
-  function dropDraftSafe() {
+    submittingRef.current = true;
+    submittingEpoch.current = state.sessionEpoch;
+    setSubmitting(true);
+    let sent;
     try {
-      dropDraft(localStorage, sessionId);
-    } catch { /* 忽略 */ }
+      if (state._editTarget != null) {
+        sent = await state.resendMessage(state._editTarget, text, attachments);
+        if (sent) useStore.setState({ _editTarget: null });
+      } else if (state.running) {
+        if (followUpRef.current === 'steer') {
+          sent = await state.steer(text, attachments);
+        } else {
+          sent = await state.submitInput(text, attachments, imagePositions);
+        }
+
+      } else {
+        sent = await state.submitInput(text, attachments, imagePositions);
+      }
+      if (sent !== true) return;
+      if (useStore.getState().sessionEpoch === state.sessionEpoch &&
+          (useStore.getState().sessionId === state.sessionId || !state.sessionId)) {
+        input.setText('');
+        draftFilesRef.current.clear();
+        sessionDraftsRef.current.delete(state.sessionId);
+        dropDraft(localStorage, useStore.getState().sessionId);
+      } else {
+        sessionDraftsRef.current.delete(state.sessionId);
+      }
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   }
 
   /* @ 引用菜单：按光标前文本过滤 */
   function onInput() {
     const textBefore = inputRef.current?.textBeforeCaret?.() || '';
-    const atMatch = textBefore.match(/(^|\s)@([\w./-]*)$/);
+    referenceRequest.current += 1;
+    const atMatch = textBefore.match(/(^|\s)@([^\s@\uFFFC]*)$/);
     if (atMatch) {
       openRefMenu(atMatch[2]);
       return;
@@ -214,47 +255,87 @@ export function Composer() {
 
   async function openRefMenu(query) {
     const state = useStore.getState();
-    // 草稿态还没有会话，取不到文件索引：等第一条消息落库后 @ 再用
-    if (!sessionId) {
+    const owner = state.sessionId;
+    const workspace = state.workspace || state.draftSession?.workspace;
+    const key = owner || workspace ? `${owner || 'draft'}:${workspace || ''}` : '';
+    const request = ++referenceRequest.current;
+    setSlashMenu(null);
+    setMenuIndex(0);
+    if (!key) {
+      setRefMenu({ items: [], message: '先选择工作区，再引用文件' });
       return;
     }
-    if (state.fileIndex.sessionId !== sessionId) {
-      set((draft) => { draft.fileIndex.loading = true; });
-      try {
-        const data = await api.filesFlat(sessionId);
-        useStore.setState((draft) => {
-          draft.fileIndex = { items: data?.files || data || [], sessionId, loading: false };
-        });
-      } catch {
-        useStore.setState((draft) => { draft.fileIndex = { items: [], sessionId, loading: false, failed: true }; });
+    setRefMenu({ items: [], loading: true });
+    try {
+      let items = state.fileIndex.key === key ? state.fileIndex.items : null;
+      if (!items) {
+        const data = owner ? await api.filesFlat(owner) : await api.workspaceFiles(workspace);
+        items = data?.files || (Array.isArray(data) ? data : []);
+        if (request !== referenceRequest.current) return;
+        useStore.setState({ fileIndex: { items, key, sessionId: owner, loading: false } });
       }
+      if (request === referenceRequest.current) setRefMenu({ items: rankFileMatches(items, query).slice(0, 8) });
+    } catch {
+      if (request === referenceRequest.current) setRefMenu({ items: [], message: '读取文件失败，请重新输入 @ 重试' });
     }
-    const matches = rankFileMatches(useStore.getState().fileIndex.items || [], query).slice(0, 8);
-    setSlashMenu(null);
-    setRefMenu({ items: matches });
-    setMenuIndex(0);
   }
 
   function pickRef(path) {
-    const before = inputRef.current?.textBeforeCaret?.() || '';
-    const after = inputRef.current?.textAfterCaret?.() || '';
-    const trimmed = before.replace(/@([\w./-]*)$/, '@' + path + ' ');
-    inputRef.current?.setText(trimmed + after);
+    inputRef.current?.insertMention(path);
     inputRef.current?.focus();
+    referenceRequest.current += 1;
     setRefMenu(null);
   }
 
   function pickSlash(command) {
-    // 技能命令只补指令名（它没有本地展开模板，发送时由后端注入指引）；快捷指令展开成自然语言
     const expansion = command.skill
-      ? `${command.name} `
-      : expandQuickCommand(command, slashMenu?.query || '');
-    if (expansion) {
-      inputRef.current?.setText(expansion);
-    }
+      ? `${command.name.startsWith('/') ? command.name : '/' + command.name} `
+      : expandQuickCommand(command, '');
+    if (expansion) inputRef.current?.replaceCommand(expansion);
     setSlashMenu(null);
     inputRef.current?.focus();
   }
+
+  useEffect(() => {
+    referenceRequest.current += 1;
+    setRefMenu(null); setSlashMenu(null);
+    setPermOpen(false); setModelOpen(false); setContextOpen(false);
+    followUpRef.current = 'queue'; setFollowUp('queue');
+  }, [sessionId, sessionEpoch, workspace]);
+
+  useEffect(() => {
+    if (!permOpen && !modelOpen && !contextOpen && !refMenu && !slashMenu) return;
+    const close = () => {
+      referenceRequest.current += 1;
+      setPermOpen(false); setModelOpen(false); setContextOpen(false);
+      setRefMenu(null); setSlashMenu(null);
+    };
+    const key = (event) => {
+      if (permOpen && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+        const items = [...document.querySelectorAll('#perm-menu button')];
+        if (items.length) {
+          event.preventDefault();
+          const index = items.indexOf(document.activeElement);
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length;
+          items[next].focus();
+        }
+        return;
+      }
+      if (event.key !== 'Escape' || event.isComposing) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      const trigger = permOpen ? 'perm-chip' : modelOpen ? 'model-chip' : contextOpen ? 'context-chip' : 'input-flow';
+      close(); document.getElementById(trigger)?.focus();
+    };
+    const outside = (event) => {
+      if (!event.target.closest('.perm-picker, .ref-menu, #input-flow')) close();
+    };
+    document.addEventListener('keydown', key, true);
+    document.addEventListener('pointerdown', outside, true);
+    return () => {
+      document.removeEventListener('keydown', key, true);
+      document.removeEventListener('pointerdown', outside, true);
+    };
+  }, [permOpen, modelOpen, contextOpen, Boolean(refMenu), Boolean(slashMenu)]);
 
   /* 菜单只有 250px 高，选中的那项滚出可视区就相当于没选中 */
   useEffect(() => {
@@ -296,11 +377,12 @@ export function Composer() {
 
   function onComposerKeydown(event) {
     // 中文输入法组字期间的回车不是发送
-    if (event.isComposing || event.keyCode === 229) {
+    if (event.isComposing || event.nativeEvent?.isComposing || event.keyCode === 229) {
       return;
     }
     const items = refMenu ? (refMenu.items || []) : slashMenu ? (slashMenu.items || []) : [];
     if (refMenu || slashMenu) {
+      if (refMenu?.loading && (event.key === 'Enter' || event.key === 'Tab')) { event.preventDefault(); return; }
       if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && items.length) {
         event.preventDefault();
         const delta = event.key === 'ArrowDown' ? 1 : -1;
@@ -341,23 +423,25 @@ export function Composer() {
     }
   }
 
-  const composerEnabled = true;
-
   return (
     <div className="composer-wrap">
+      {editTarget != null && <div className="send-mode-label">正在编辑历史消息 · 发送将重新执行<button type="button" className="btn" onClick={() => useStore.setState({ _editTarget: null })}>作为新消息发送</button></div>}
+      <ResumeBar />
       <ApprovalDock />
       <MessageQueue />
       <AgentDock />
       {refMenu && (
         <div className="ref-menu" role="listbox" ref={menuRef}>
           {refMenu.loading || (refMenu.items || []).length === 0
-            ? <div className="ref-empty">没有匹配的文件</div>
+            ? <div className="ref-empty" role="status">{refMenu.loading ? '正在读取文件…' : refMenu.message || '没有匹配的文件'}</div>
             : refMenu.items.map((item, index) => (
               <button
                 key={item.path || item}
                 type="button"
                 className={`ref-item${index === menuIndex ? ' is-on' : ''}`}
-                onMouseEnter={() => setMenuIndex(index)}
+                onMouseDown={(event) => event.preventDefault()}
+                role="option" aria-selected={index === menuIndex}
+              onMouseEnter={() => setMenuIndex(index)}
                 onClick={() => pickRef(item.path || item)}
               >
                 {item.path || item}
@@ -372,6 +456,8 @@ export function Composer() {
               key={command.name}
               type="button"
               className={`ref-item${index === menuIndex ? ' is-on' : ''}`}
+              onMouseDown={(event) => event.preventDefault()}
+              role="option" aria-selected={index === menuIndex}
               onMouseEnter={() => setMenuIndex(index)}
               onClick={() => pickSlash(command)}
             >
@@ -380,25 +466,46 @@ export function Composer() {
           ))}
         </div>
       )}
+      {(running || queueHeld) && (
+        <p className="send-mode-label">
+          {running ? `任务运行中 · ${followUp === 'steer' ? '立即纠正当前任务（仅文字）' : '发送后排队，当前任务结束后执行'}` : '任务已停止 · 新消息开始执行，已有排队消息暂时保留'}
+        </p>
+      )}
       <form
         id="composer"
-        className="composer"
+        className={`composer${dragging ? ' is-dragging' : ''}`}
         onSubmit={(event) => { event.preventDefault(); submit(); }}
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => {
+        onDragEnter={(event) => {
+          if (!Array.from(event.dataTransfer?.types || []).includes('Files')) return;
           event.preventDefault();
-          if (event.dataTransfer?.files?.length) {
-            addFiles(event.dataTransfer.files);
-          }
+          dragDepthRef.current += 1;
+          setDragging(true);
+        }}
+        onDragLeave={() => {
+          dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+          if (!dragDepthRef.current) setDragging(false);
+        }}
+        onDragOver={(event) => {
+          if (!Array.from(event.dataTransfer?.types || []).includes('Files')) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+        }}
+        onDrop={(event) => {
+          const files = readTransferFiles(event.dataTransfer);
+          dragDepthRef.current = 0;
+          setDragging(false);
+          if (files.length) { event.preventDefault(); addFiles(files); }
         }}
         onPaste={(event) => {
-          if (event.clipboardData?.files?.length) {
-            event.preventDefault();
-            addFiles(event.clipboardData.files);
-          }
+          const files = readTransferFiles(event.clipboardData);
+          if (files.length) { event.preventDefault(); addFiles(files); }
         }}
       >
-        <div id="input-flow" className="input-flow" contentEditable
+        {(pendingFiles > 0 || dragging) && <div className="attachment-status" role="status">
+          {dragging ? '松开以添加文件' : `正在读取 ${pendingFiles} 个附件…`}
+        </div>}
+        <div id="input-flow" className="input-flow" contentEditable={!submitting}
+          role="textbox" aria-label="消息输入框" aria-multiline="true" aria-busy={pendingFiles > 0 || submitting}
           ref={flowRef}
           data-placeholder="描述任务，@ 引用文件，/ 使用技能，附件直接拖进来"
           onInput={onInput}
@@ -411,6 +518,7 @@ export function Composer() {
               type="button"
               className="attach-button"
               id="attach-button"
+              disabled={submitting}
               aria-label="添加文件或图片"
               title="添加文件或图片（也可以拖入或粘贴）"
               onClick={() => fileRef.current?.click()}
@@ -426,7 +534,7 @@ export function Composer() {
                   aria-haspopup="menu"
                   aria-expanded={permOpen}
                   title={`${permissionHint(permissionMode)} · 点击切换`}
-                  onClick={() => setPermOpen((open) => !open)}
+                  onClick={() => { setPermOpen(!permOpen); setModelOpen(false); setContextOpen(false); }}
                 >
                   {permissionLabel(permissionMode)}
                 </button>
@@ -465,7 +573,7 @@ export function Composer() {
                   aria-haspopup="dialog"
                   aria-expanded={modelOpen}
                   title={currentModel ? `当前模型：${currentModel} · 点击切换` : '选择模型'}
-                  onClick={() => setModelOpen((open) => !open)}
+                  onClick={() => { setModelOpen(!modelOpen); setPermOpen(false); setContextOpen(false); }}
                 >
                   {currentModel || '模型'}
                 </button>
@@ -486,7 +594,7 @@ export function Composer() {
                   aria-haspopup="dialog"
                   aria-expanded={contextOpen}
                   title={`上下文已用 ${contextPercent(contextStatus)} · 点击查看构成与压缩`}
-                  onClick={() => { setContextOpen((open) => !open); useStore.getState().refreshContext(); }}
+                  onClick={() => { setContextOpen(!contextOpen); setPermOpen(false); setModelOpen(false); useStore.getState().refreshContext(); }}
                 >
                   上下文 · {contextPercent(contextStatus)}
                 </button>
@@ -501,14 +609,22 @@ export function Composer() {
             </span>
           </span>
           <div className="composer-actions">
-            <span id="send-mode-label" className="send-mode-label">
-              {running ? (queueHeld ? '暂停中 · 发送即纠正' : '运行中 · 发送即排队') : sendAction.label}
-            </span>
+            {running && <>
+              <select aria-label="运行中发送方式" value={followUp} disabled={submitting}
+                onChange={(event) => { followUpRef.current = event.target.value; setFollowUp(event.target.value); }}>
+                <option value="queue">排队发送</option>
+                <option value="steer">立即纠正</option>
+              </select>
+              <button type="button" id="stop-task" className="btn btn-danger" disabled={cancelling}
+                aria-label="停止当前任务" title="停止当前任务 (Esc)"
+                onClick={() => useStore.getState().cancelRun()}>{cancelling ? '停止中…' : '停止'}</button>
+            </>}
+
             <button
               type="submit"
               className={`send${sendAction.stop ? ' is-running' : ''}`}
               id="send"
-              disabled={sendAction.disabled}
+              disabled={sendAction.disabled || pendingFiles > 0 || submitting}
               aria-label={sendAction.ariaLabel}
               title={sendAction.title}
             >
@@ -555,11 +671,12 @@ function ModelMenu({ onClose, models, initialModel = '', initialEndpoint = '' })
   const [key, setKey] = useState('');
   const [hint, setHint] = useState('');
   const [probing, setProbing] = useState(false);
+  const [savingModel, setSavingModel] = useState(false);
   return (
-    <div className="chip-menu model-menu" id="model-menu">
+    <div className="chip-menu model-menu" id="model-menu" role="dialog" aria-label="模型设置">
       <p className="menu-head">模型</p>
       <label>模型名称<input value={name} onChange={(event) => setName(event.target.value)} placeholder="如 deepseek-chat" /></label>
-      <label>端点<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="https://api.example.com/v1" /></label>
+      <label>端点<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="模型服务地址，以 /v1 结尾" /></label>
       <label>API Key<input type="password" value={key} onChange={(event) => setKey(event.target.value)} placeholder="不填则沿用已保存的" /></label>
       <div className="chip-menu-actions">
         <button type="button" className="btn" disabled={probing} onClick={async () => {
@@ -573,9 +690,11 @@ function ModelMenu({ onClose, models, initialModel = '', initialEndpoint = '' })
             setProbing(false);
           }
         }}>{probing ? '探测中…' : '探测模型'}</button>
-        <button type="button" className="btn btn-primary" onClick={async () => {
-          await useStore.getState().saveModel(buildModelUpdate({ model: name, endpoint, apiKey: key }));
-          onClose();
+        <button type="button" className="btn btn-primary" disabled={savingModel || !name.trim()} onClick={async () => {
+          setSavingModel(true);
+          try {
+            if (await useStore.getState().saveModel(buildModelUpdate({ model: name, endpoint, apiKey: key }))) onClose();
+          } finally { setSavingModel(false); }
         }}>保存</button>
       </div>
       {models?.length > 0 && (
@@ -608,7 +727,7 @@ function ContextMenu({ status, compacting }) {
   const segments = usageSegments(status);
   const remaining = remainingTokens(status);
   return (
-    <div className="chip-menu context-menu" id="context-menu">
+    <div className="chip-menu context-menu" id="context-menu" role="dialog" aria-label="上下文使用详情">
       <div className="context-head">
         <p className="menu-head">上下文</p>
         <span className={`context-percent level-${level}`}>{percent}%</span>
@@ -651,26 +770,40 @@ function ContextMenu({ status, compacting }) {
   );
 }
 
-/** 运行控制条：暂停 / 取消 / 继续，只在有活跃 run 时出现。 */
+/** 运行控制条：暂停 / 取消。继续单独放在输入框上方。 */
 function TaskControls() {
   const running = useStore((state) => state.running);
   const pausing = useStore((state) => state.pausing);
   const cancelling = useStore((state) => state.cancelling);
-  const lastOutcome = useStore((state) => state.lastOutcome);
-  if (!running && lastOutcome !== 'NEED_INPUT') {
+  if (!running) {
     return null;
   }
   return (
     <div id="task-live-controls" className="task-controls">
-      {running && (
-        <>
-          <button type="button" className="btn" disabled={pausing} onClick={() => useStore.getState().pauseRun()}>{pausing ? '暂停中…' : '暂停'}</button>
-          <button type="button" className="btn btn-danger" disabled={cancelling} onClick={() => useStore.getState().cancelRun()}>{cancelling ? '取消中…' : '取消任务'}</button>
-        </>
-      )}
-      {!running && lastOutcome === 'NEED_INPUT' && (
-        <button type="button" className="btn btn-primary" onClick={() => useStore.getState().continueRun()}>继续当前任务</button>
-      )}
+      <button type="button" className="btn" disabled={pausing} onClick={() => useStore.getState().pauseRun()}>{pausing ? '暂停中…' : '暂停'}</button>
+    </div>
+  );
+}
+
+/** 输入框上方只留一个继续入口。结果卡上的同名按钮由 has-resume-bar 收起。 */
+function ResumeBar() {
+  const running = useStore((state) => state.running);
+  const lastOutcome = useStore((state) => state.lastOutcome);
+  const rows = useStore((state) => state.thread?.rows || []);
+  const resumable = rows.some((row) => row.type === 'result' && row.resumable && !row.continued);
+  const bar = resumeBar({ running, needInput: lastOutcome === 'NEED_INPUT', resumable });
+  const barKey = bar ? bar.label : '';
+  useEffect(() => {
+    document.body.classList.toggle('has-resume-bar', Boolean(barKey));
+    return () => document.body.classList.remove('has-resume-bar');
+  }, [barKey]);
+  if (!bar) {
+    return null;
+  }
+  return (
+    <div id="task-resume-controls" className="task-live-controls">
+      <span>{bar.text}</span>
+      <button id="task-resume" type="button" onClick={() => useStore.getState().continueRun()}>{bar.label}</button>
     </div>
   );
 }
@@ -699,35 +832,38 @@ function ApprovalDock() {
   );
 }
 
-/** 排队消息：编辑 / 删除 / 上下移。 */
+/** 排队：贴在输入框上。取消后即使没有条目，也要说明下一条是纠正。 */
 function MessageQueue() {
   const entries = useStore((state) => state.queueEntries);
   const queueEdit = useStore((state) => state.ui.queueEdit);
   const collapsed = useStore((state) => state.ui.queueCollapsed);
-  if (!entries.length) {
+  const queueHeld = useStore((state) => state.queueHeld);
+  const header = queueHeader({ count: entries.length, held: queueHeld });
+  if (!header) {
     return null;
   }
   return (
-    <QueueList entries={entries} queueEdit={queueEdit} collapsed={collapsed} />
+    <QueueList entries={entries} queueEdit={queueEdit} collapsed={collapsed} header={header} />
   );
 }
 
-function QueueList({ entries, queueEdit, collapsed }) {
+function QueueList({ entries, queueEdit, collapsed, header }) {
   const [dragFrom, setDragFrom] = useState(null);
   return (
     <div id="message-queue" className="message-queue">
       <header className="queue-head" onClick={() => useStore.getState().setUi({ queueCollapsed: !collapsed })}>
-        <span>{entries.length} 条排队</span>
-        <span className="queue-toggle">{collapsed ? '展开' : '收起'}</span>
+        <span className="queue-title">{header.title}</span>
+        <span className={`queue-head-meta${header.meta.startsWith('下一条会纠正') ? ' is-idle' : ''}`}>{header.meta}</span>
+        {!!entries.length && <span className="queue-toggle">{collapsed ? '展开' : '收起'}</span>}
       </header>
-      {!collapsed && (
+      {!collapsed && !!entries.length && (
         <ol className="queue-list">
           {entries.map((entry, index) => {
-            const text = entry.text ?? entry;
+            const text = entry.text ?? entry.content ?? '';
             return (
               <li
-                key={index}
-                className="queue-entry"
+                key={`${index}-${text}`}
+                className={`queue-item${dragFrom === index ? ' is-dragging' : ''}`}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={() => {
                   if (dragFrom == null || dragFrom === index) return;
@@ -738,20 +874,7 @@ function QueueList({ entries, queueEdit, collapsed }) {
                 {queueEdit === index ? (
                   <QueueEditor index={index} text={text} />
                 ) : (
-                  <>
-                    <button
-                      type="button"
-                      className="queue-grip"
-                      draggable
-                      aria-label="拖动调整顺序"
-                      title="拖动调整顺序"
-                      onDragStart={() => setDragFrom(index)}
-                    >
-                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6h8M4 10h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
-                    </button>
-                    <button type="button" className="queue-text" title={text} onClick={() => useStore.getState().setUi({ queueEdit: index })}>{text}</button>
-                    <button type="button" className="queue-icon" title="删除" aria-label="删除" onClick={() => useStore.getState().removeQueueItem(index)}>×</button>
-                  </>
+                  <QueueRow entry={entry} index={index} onDragStart={() => setDragFrom(index)} />
                 )}
               </li>
             );
@@ -762,15 +885,55 @@ function QueueList({ entries, queueEdit, collapsed }) {
   );
 }
 
+function QueueRow({ entry, index, onDragStart }) {
+  const text = entry.text ?? entry.content ?? '';
+  const spoken = splitAttachmentMarkers(text);
+  const images = Array.isArray(entry.attachments) ? entry.attachments : [];
+  const files = spoken.files || [];
+  const label = spoken.body || (images.length ? '图片' : text);
+  return (
+    <>
+      <span className="queue-dot" aria-hidden="true" />
+      <button
+        type="button"
+        className="queue-grip"
+        draggable
+        aria-label="拖动调整顺序"
+        title="拖动调整顺序"
+        onDragStart={onDragStart}
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6h8M4 10h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+      </button>
+      <div className="queue-main">
+        <button type="button" className="queue-text" title={label} onClick={() => useStore.getState().setUi({ queueEdit: index })}>{label}</button>
+        {(images.length > 0 || files.length > 0) && (
+          <span className="attach-strip">
+            {images.map((image) => (
+              <img key={image.url || image.name} className="queue-thumb" src={image.url} alt={image.name || '图片'} />
+            ))}
+            {files.map((file) => (
+              <span key={file.raw || file.name} className="queue-file" title={file.name}>{file.name}</span>
+            ))}
+          </span>
+        )}
+      </div>
+      <button type="button" className="queue-icon" title="删除" aria-label="删除这条排队" onClick={() => useStore.getState().removeQueueItem(index)}>×</button>
+    </>
+  );
+}
+
 function QueueEditor({ index, text }) {
   const [value, setValue] = useState(text);
+  const [saving, setSaving] = useState(false);
   return (
     <div id="queue-edit" className="queue-edit">
-      <textarea value={value} onChange={(event) => setValue(event.target.value)} rows={2} />
+      <textarea aria-label="编辑排队消息" disabled={saving} value={value} onChange={(event) => setValue(event.target.value)} rows={2} />
       <div className="queue-edit-actions">
-        <button type="button" className="btn btn-primary" onClick={async () => {
-          await useStore.getState().saveQueueItem(index, value);
-          useStore.getState().setUi({ queueEdit: null });
+        <button type="button" className="btn btn-primary" disabled={saving || !value.trim()} onClick={async () => {
+          setSaving(true);
+          try {
+            if (await useStore.getState().saveQueueItem(index, value)) useStore.getState().setUi({ queueEdit: null });
+          } finally { setSaving(false); }
         }}>保存</button>
         <button type="button" className="btn" onClick={() => useStore.getState().setUi({ queueEdit: null })}>取消</button>
       </div>

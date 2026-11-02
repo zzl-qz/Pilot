@@ -252,3 +252,57 @@ Applied corrections:
 - `git diff --check`: passed.
 
 final result: passed
+
+## Web 与桌面工作台统一优化（2026-11-02）
+
+### 范围与设计依据
+
+本轮按用户扩大的范围检查整个共享工作台：项目与会话导航、工作区选择和文件树、任务正文与输入区、对话/变更/预览/命令/能力/浏览器/活动七个面板，以及外观/模型/权限/技能/用量/诊断/关于七个设置页。桌面壳另测启动失败、重新连接、原生菜单与剪贴板。
+
+保留原有三栏结构、Pilot 标识和中性深灰主题，统一文字层级、控件尺寸、焦点、边框与选中态。使用现有 design-taste-frontend 与 product-design:audit 技能，无需安装额外技能。
+
+参考与取舍：
+
+- [VS Code Views UX](https://code.visualstudio.com/api/ux-guidelines/views)：工作区树采用文件夹/文件图标、层级缩进、行选中与紧凑工具栏。
+- [Cursor Agents Window](https://cursor.com/docs/agent/agents-window)：借鉴任务、导航和审阅的分工，保留 Pilot 现有功能结构。
+- [Codex Code Review](https://learn.chatgpt.com/docs/code-review)：将检查改动与正文阅读区分，代码预览有内容时恢复合理宽度。
+- [Electron 原生菜单](https://www.electronjs.org/docs/latest/tutorial/menus)：缩放与编辑采用标准 role，让快捷键跟随平台。
+
+### 主要问题与实现
+
+1. 文件树原先是接近纯文本的清单，没有连接到已有图标样式。现在独立成 WorkspaceTree，加入目录展开图标、文件类型图标、28px 行高、选中态、长名称省略和完整路径提示；支持方向键、Home/End、字符定位、空目录、读取失败重试与刷新后焦点恢复。
+2. 会话列表与文件树分开滚动，标题保留在可见位置；空列表不再占据固定的大块高度。悬停操作不再一直占用会话标题宽度。
+3. 文件打开后自动显示预览，修复遗漏的 has-content 状态，已加载代码获得更宽的面板。预览响应按请求/会话/工作区隔离，切换或新建任务时清理旧文件内容与加载状态。
+4. 工作区选择器原来把后端根数组当成 roots 对象，并读取错误的 entries 字段。现在匹配真实 roots / directories 返回格式，支持空文件夹、无效路径、异步浏览防串页、切换失败留在弹窗。补充无会话的目录树与文件预览接口，复用已有路径和大小限制。
+5. 七个面板采用持续可见的名称、说明和关闭动作，图标配短标签；支持键盘切换。取消已显示标签旁重复出现的自定义气泡。
+6. 设置统一为导航与独立内容滚动区，标题和导航不再随长诊断内容消失；表单占满合理宽度，长路径和命令换行。主题预览展示简化工作台，窄屏改为横向分类；Tab/Shift-Tab 留在弹窗，Escape 关闭并返回触发控件。
+7. 简短且重复的任务完成信息收敛为状态行，保留有独立内容、文件改动或续跑动作的结果卡。正文与输入区域统一字号和间距。
+8. 桌面新增标准界面缩放菜单；服务不可用时展示实际服务地址和“重新连接”，失败后仍可重试，无需关闭重开应用。
+9. 新增 workbench.css 作为本轮组件样式归属，清理旧样式中对应的文件树、设置、弹窗、主题预览等重复规则；保留已有未提交功能改动。
+
+### 验证结果
+
+| 验证 | 结果与覆盖 |
+| --- | --- |
+| `npm --prefix pilot-web test` | 227/227 通过，包含预览乱序响应、工作区切换、失败保留状态与新任务清理 |
+| `npm --prefix pilot-web/frontend run test:composer` | Chrome / Electron 通过：粘贴、拖入、文件选择、大小/数量限制、去重、草稿、失败保留、纯附件、缩略图、IME、换行；macOS 原生文件剪贴板 + Cmd+V 两端通过 |
+| `npm --prefix pilot-web/frontend run test:interaction` | Chrome / Electron 通过：引用补全、菜单、排队、发送竞态、差异引用；文件树键盘/空目录/删除焦点条目/失败重试；真实接口格式的选择器、失败不关闭；七个设置页、弹窗焦点、主题、面板键盘；1440/768/390 宽度与 900×420 短窗口 |
+| `SessionFilesApiTest` | Java 25 下 10/10 通过，覆盖草稿/会话文件接口、中文与空格路径、排序、二进制、数量边界、路径穿越和符号链接越界 |
+| 独立真实服务 HTTP 与 UI | 临时数据目录、19099 端口：roots/browse/files/file 正常，越界 400；浏览器实测首条消息发送前选择工作区并预览文件，未创建空会话 |
+| `npm --prefix pilot-desktop test` | 11/11 通过 |
+| `npm --prefix pilot-desktop run smoke` | Pilot 品牌宿主、浏览器控制与本地页面加载通过 |
+| `npm --prefix pilot-desktop run test:ui` | 实际品牌 Electron 主进程：离线页、连续重试失败、服务恢复后重连成功、原生菜单项通过 |
+| `build` / `check` / `git diff --check` | 通过；check 使用跨平台临时目录且不覆盖运行产物 |
+| 新增样式/文件树/图标的 app 模式设计 lint | 0 FAIL；9 WARN 为静态规则对 none、真实弹窗阴影/遮罩以及主题缩略图线条绘制的提示，已人工检查 |
+
+浏览器手工复核七个工作区面板均正常渲染；控制台无错误。390px 模型设置页文档宽度与视口同为 390px，内容区域无横向溢出。自动化功能测试使用固定 API 响应以免修改个人会话；真实接口另用独立服务验证。
+
+### 视觉证据与边界
+
+证据目录：`/Users/smt/.codex/visualizations/2026/11/02/01a19b15-eceb-7c02-9620-9e6f0e2253b6/pilot-polish/`。
+
+- 修改前：before-appearance.png、before-settings-诊断.png、before-panel-*.png 等。
+- 修改后：after-start.png、after-appearance.png、after-diagnostics.png、after-draft-preview.png、after-mobile-settings.png、after-panel-*.png、after-desktop-offline.png。
+- 同目录保存本轮测试日志。桌面截图为 Retina 分辨率，Web 常规视口为 1280×720；窄屏为 390×844。起始页与历史任务页用于验证各自状态，不作像素级同内容对比。
+
+本轮没有调用付费模型来评测任务生成质量，没有实机验证 Windows/Linux 原生剪贴板，也没有把安装打包、自动更新或所有历史样式文件重写算作已完成。当前 IDE 启动的 9999 服务及既有桌面进程仍是旧后端/旧主进程；前端产物已构建，新草稿文件 API 和桌面菜单需重启服务及桌面窗口后使用。新后端已通过独立服务验证。

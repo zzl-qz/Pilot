@@ -5,10 +5,11 @@
   "type": "module",
   "main": "main.mjs",
   "scripts": {
-    "start": "electron .",
+    "start": "node start.mjs",
     "postinstall": "node brand-host.mjs",
-    "test": "node --test protocol.test.mjs",
-    "smoke": "node smoke.mjs"
+    "test": "node --test *.test.mjs",
+    "smoke": "node smoke.mjs",
+    "test:ui": "node ui-smoke.mjs"
   },
   "devDependencies": {
     "electron": "45.2.1"

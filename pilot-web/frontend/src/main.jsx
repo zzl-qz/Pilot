@@ -5,6 +5,7 @@ import { setMarkdownNotifier, setMarkdownContext } from './lib/markdown-render.j
 import './styles.css';
 import './shell-vanilla.css';
 import './styles-addendum.css';
+import './workbench.css';
 
 setMarkdownNotifier((text) => {
   // 延迟注入：避免渲染引擎与 store 循环依赖

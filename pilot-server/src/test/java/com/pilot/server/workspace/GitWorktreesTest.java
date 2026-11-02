@@ -18,6 +18,15 @@ class GitWorktreesTest {
     Path root;
 
     @Test
+    void detectsUnbornBranchAndNonRepositoryWithoutChangingFiles() throws Exception {
+        GitWorktrees service = new GitWorktrees(new PilotDataDir(root.resolve("data").toString()));
+        assertEquals("", service.currentBranch(root));
+        assertEquals("", service.currentBranch(root.resolve("missing")));
+        git(root, "init", "--initial-branch=feature/ui");
+        assertEquals("feature/ui", service.currentBranch(root));
+    }
+
+    @Test
     void opensADetachedCheckoutAndHandsChangesBack() throws Exception {
         Path repo = root.resolve("repo");
         Files.createDirectories(repo);
@@ -30,6 +39,8 @@ class GitWorktreesTest {
 
         GitWorktrees worktrees = new GitWorktrees(new PilotDataDir(root.resolve("data").toString()));
         GitWorktrees.Created created = worktrees.create(repo, "");
+
+        assertTrue(worktrees.currentBranch(Path.of(created.path())).startsWith("detached @ "));
 
         assertFalse(created.path().startsWith(repo.toString()));
         assertEquals("one\n", Files.readString(Path.of(created.path(), "A.txt")));

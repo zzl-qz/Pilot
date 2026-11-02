@@ -1,6 +1,8 @@
+import { reviewQuote } from '../lib/interaction.js';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
+import { Icon } from './Icon.jsx';
 import { normalizePath, parseDiff } from '../lib/diff.js';
 import { sortChangeFiles, splitPath, statusKind } from '../lib/changes.js';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
@@ -35,7 +37,7 @@ export function Inspector() {
    * 切换后把它滚回可见区域，用户才知道自己在哪一页。
    */
   useEffect(() => {
-    const active = navRef.current?.querySelector('.tab.is-on');
+    const active = navRef.current?.querySelector('[aria-selected="true"]');
     active?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [tab]);
 
@@ -43,10 +45,11 @@ export function Inspector() {
     return null;
   }
   return (
-    <aside id="activity" className="activity inspector is-rail">
+    <aside id="activity" className="activity inspector is-rail is-open" aria-label="工作区面板">
       <div className="inspector-main">
+      <header className="inspector-panel-head"><div><strong>{TABS.find(item => item.id === tab)?.label}</strong><span>{tab === 'preview' ? '只读文件预览' : tab === 'changes' ? '检查工作区的代码改动' : tab === 'commands' ? '命令状态与输出' : tab === 'activity' ? '任务执行记录' : tab === 'capabilities' ? '当前可用的工具与技能' : tab === 'browser' ? '浏览页面与引用内容' : '独立于主任务的对话'}</span></div><button type="button" className="icon-btn" aria-label="关闭工作区面板" onClick={() => useStore.getState().setUi({ inspectorOpen: false, reviewExpanded: false })}><Icon name="close" /></button></header>
       {tab === 'activity' && <div className="inspector-head"><Filters /></div>}
-      <div className="inspector-body">
+      <div className="inspector-body" id={`inspector-panel-${tab}`} role="tabpanel" aria-labelledby={`inspector-tab-${tab}`}>
         {/* 每个面板单独兜底：某个页签渲染出错时只废掉这一块，别把整页卸载成白屏 */}
         <ErrorBoundary key={tab} name={TABS.find((item) => item.id === tab)?.label || '面板'} onReset={() => useStore.getState().setUi({ inspectorTab: 'activity' })}>
           {tab === 'chat' && <SideChatPanel />}
@@ -59,19 +62,30 @@ export function Inspector() {
         </ErrorBoundary>
       </div>
       </div>
-      <nav id="panel-tabs" className="inspector-rail" role="tablist" aria-label="面板切换" ref={navRef}>
+      <nav id="panel-tabs" className="inspector-rail" role="tablist" aria-label="面板切换" aria-orientation="vertical" ref={navRef} onKeyDown={event => {
+        const keys = ['ArrowUp', 'ArrowDown', 'Home', 'End'];
+        if (!keys.includes(event.key)) return;
+        event.preventDefault();
+        const buttons = [...navRef.current.querySelectorAll('[role="tab"]')];
+        const index = buttons.indexOf(event.target);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+        buttons[next].click(); buttons[next].focus();
+      }}>
         {TABS.map((item) => (
           <button
             key={item.id}
             type="button"
             className={tab === item.id ? 'is-on' : ''}
             role="tab"
+            id={`inspector-tab-${item.id}`}
+            aria-controls={`inspector-panel-${item.id}`}
+            tabIndex={tab === item.id ? 0 : -1}
             title={item.title}
             aria-label={item.label}
             aria-selected={tab === item.id}
             onClick={() => useStore.getState().setUi({ inspectorTab: item.id })}
           >
-            <RailIcon id={item.id} />
+            <RailIcon id={item.id} /><span className="rail-tab-label">{item.label}</span>
             {item.id === 'changes' && <ChangeBadge />}
             {item.id === 'commands' && <CommandDot />}
             {item.id === 'browser' && <BrowserDot />}
@@ -294,7 +308,14 @@ function ApprovalInline({ callId }) {
 /* ---------- 变更面板 ---------- */
 
 function ChangesPanel() {
-  const report = useStore((state) => state.changeReport);
+  const workspaceReport = useStore((state) => state.changeReport);
+  const expanded = useStore(state => state.ui.reviewExpanded);
+  const lastRunId = useStore(state => state.lastRunId || state.runId);
+  const [scope, setScope] = useState('workspace');
+  const [runReport, setRunReport] = useState(null);
+  const [runError, setRunError] = useState('');
+  const [refresh, setRefresh] = useState(0);
+  const report = scope === 'run' ? runReport : workspaceReport;
   const state = useStore((state) => state.changesState);
   const sessionId = useStore((state) => state.sessionId);
   const view = useStore((state) => state.ui.changeView);
@@ -338,6 +359,19 @@ function ChangesPanel() {
     }
   }, [sessionId]);
 
+  useEffect(() => {
+    setScope('workspace'); setRunReport(null); setRunError(''); setQuery(''); setConfirm(null);
+  }, [sessionId]);
+  useEffect(() => {
+    if (scope !== 'run' || !lastRunId) return;
+    let alive = true; setRunReport(null); setRunError('');
+    api.runChanges(lastRunId).then(data => {
+      if (alive && data.error) setRunError(data.error);
+      if (alive) setRunReport({ ...data, diff: (data.files || []).map(file => file.diff || '').join('\n') });
+    }).catch(() => { if (alive) setRunError('读取任务改动失败，请刷新重试'); });
+    return () => { alive = false; };
+  }, [scope, lastRunId, sessionId, refresh]);
+
   // 换了文件就把上一行的「确认撤销」收起来，免得确认框停在一个已经不显示的文件上
   useEffect(() => {
     setConfirm((current) => (current?.type === 'one' && current.path !== view ? null : current));
@@ -361,7 +395,7 @@ function ChangesPanel() {
         return;
       }
       if (event.key === 'Escape') {
-        event.preventDefault();
+        event.preventDefault(); event.stopImmediatePropagation();
         if (confirm) {
           setConfirm(null);
         } else {
@@ -379,8 +413,8 @@ function ChangesPanel() {
         : Math.max(0, current - 1);
       useStore.getState().setUi({ changeView: trackedPaths[next] });
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [view, viewIndex, trackedPaths, confirm]);
 
   const restore = async (paths, all) => {
@@ -394,12 +428,24 @@ function ChangesPanel() {
   }
 
   return (
-    <div id="panel-changes" className="panel">
+    <div id="panel-changes" className={`panel${expanded ? ' is-expanded' : ''}`}>
+      <div className="review-toolbar">
+        <label>审阅范围 <select aria-label="审阅范围" value={scope} onChange={event => {
+          setScope(event.target.value); setConfirm(null); useStore.getState().setUi({ changeView: null });
+        }}>
+          <option value="workspace">工作区全部改动</option>
+          <option value="run" disabled={!lastRunId}>最近任务涉及的文件</option>
+        </select></label>
+        <button type="button" className="btn" aria-pressed={expanded} onClick={() => useStore.getState().setUi({ reviewExpanded: !expanded })}>{expanded ? '退出全屏审阅' : '全屏审阅'}</button>
+      </div>
+      <p className="review-scope-note">{scope === 'run' ? '仅筛选最近任务涉及的文件；差异仍相对 HEAD，可能包含你或其他任务的修改。' : '显示所有未提交改动，包含你或其他任务的修改。撤销会影响实际文件。'}</p>
+      {runError && scope === 'run' && <p role="alert">{runError}</p>}
+      {scope === 'run' && !runReport && !runError && <p role="status">正在读取任务改动…</p>}
       <div className="changes-bar">
         <div className="changes-meta">
           {empty ? (
             <span id="changes-totals" className="changes-totals">
-              <span className="changes-count">{isGit ? '没有改动' : '不是 git 仓库'}</span>
+              <span className="changes-count">{scope === 'workspace' && state === 'error' ? '变更读取失败' : scope === 'workspace' && state === 'loading' ? '读取中…' : isGit ? '没有改动' : '不是 git 仓库'}</span>
             </span>
           ) : (
             <>
@@ -432,8 +478,8 @@ function ChangesPanel() {
             <>
               <input
                 className="branch-input"
-                placeholder="新分支"
-                aria-label="新分支名"
+                placeholder="新 Git 分支"
+                aria-label="新 Git 分支名"
                 value={branchName}
                 onChange={(event) => setBranchName(event.target.value)}
                 onKeyDown={(event) => {
@@ -443,8 +489,8 @@ function ChangesPanel() {
                   }
                 }}
               />
-              <button type="button" className="btn" id="branch-create" disabled={!branchName} onClick={() => { useStore.getState().createBranch(branchName); setBranchName(''); }}>建分支</button>
-              {!empty && (
+              <button type="button" className="btn" id="branch-create" disabled={!branchName} onClick={() => { useStore.getState().createBranch(branchName); setBranchName(''); }}>建 Git 分支</button>
+              {!empty && scope === 'workspace' && (
                 <button
                   type="button"
                   className="btn btn-danger"
@@ -461,7 +507,7 @@ function ChangesPanel() {
                 title="刷新变更"
                 aria-label="刷新变更"
                 disabled={restoring}
-                onClick={() => useStore.getState().loadChanges()}
+                onClick={() => { useStore.getState().loadChanges(); setRefresh(value => value + 1); }}
               >
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.6V5.4h-2.8" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
               </button>
@@ -494,7 +540,7 @@ function ChangesPanel() {
                 file={file}
                 active={view === file.path}
                 confirming={confirm?.type === 'one' && confirm.path === file.path}
-                busy={restoring}
+                busy={restoring || scope !== 'workspace'}
                 onAskUndo={() => setConfirm({ type: 'one', path: file.path })}
                 onCancelUndo={() => setConfirm(null)}
                 onUndo={() => restore([file.path], false)}
@@ -522,7 +568,7 @@ function ChangesPanel() {
                 active={view === file.path}
                 untracked
                 confirming={confirm?.type === 'one' && confirm.path === file.path}
-                busy={restoring}
+                busy={restoring || scope !== 'workspace'}
                 onAskUndo={() => setConfirm({ type: 'one', path: file.path })}
                 onCancelUndo={() => setConfirm(null)}
                 onUndo={() => restore([file.path], false)}
@@ -539,13 +585,16 @@ function ChangesPanel() {
         {view
           ? (
             <DiffView
+              key={`${sessionId}:${scope}:${view}`}
+              report={report}
+              scoped={scope === 'run'}
               path={view}
               status={files.find((file) => file.path === view)?.status}
               prevPath={viewIndex > 0 ? trackedPaths[viewIndex - 1] : null}
               nextPath={viewIndex >= 0 && viewIndex < trackedPaths.length - 1 ? trackedPaths[viewIndex + 1] : null}
               index={viewIndex >= 0 ? viewIndex + 1 : 0}
               total={trackedPaths.length}
-              busy={restoring}
+              busy={restoring || scope !== 'workspace'}
               onUndo={() => restore([view], false)}
             />
           )
@@ -619,8 +668,7 @@ function statusLetter(status) {
   return raw.slice(0, 1).toUpperCase();
 }
 
-function DiffView({ path, status, prevPath, nextPath, index, total, busy, onUndo }) {
-  const report = useStore((state) => state.changeReport);
+function DiffView({ report, scoped, path, status, prevPath, nextPath, index, total, busy, onUndo }) {
   const sessionId = useStore((state) => state.sessionId);
   const untracked = status === '??';
   /*
@@ -636,9 +684,11 @@ function DiffView({ path, status, prevPath, nextPath, index, total, busy, onUndo
   const [patchState, setPatchState] = useState('');
   /** 未跟踪文件不在补丁里，直接展示正文。 */
   const [content, setContent] = useState(null);
+  const [selection, setSelection] = useState(null);
+  const [feedback, setFeedback] = useState('');
 
   useEffect(() => {
-    if (summaryFile || !sessionId) {
+    if (summaryFile || !sessionId || scoped) {
       setPatch(null);
       setPatchState('');
       return undefined;
@@ -669,9 +719,21 @@ function DiffView({ path, status, prevPath, nextPath, index, total, busy, onUndo
         }
       });
     return () => { alive = false; };
-  }, [summaryFile, path, sessionId, untracked]);
+  }, [summaryFile, path, sessionId, untracked, scoped, report]);
 
   const file = summaryFile || patch?.file || null;
+  const lines = (file?.lines || []).filter(line => line.kind !== 'meta').slice(0, DIFF_LINE_LIMIT);
+  useEffect(() => { setSelection(null); setFeedback(''); }, [path, report]);
+  const selected = selection ? lines.slice(Math.min(selection.anchor, selection.end), Math.max(selection.anchor, selection.end) + 1) : [];
+  const addFeedback = () => {
+    const state = useStore.getState();
+    const quote = reviewQuote(path, selected, feedback);
+    if (!quote || !state.composerApi) return;
+    state.composerApi.appendText(quote);
+    state.setUi({ reviewExpanded: false });
+    setSelection(null); setFeedback('');
+    requestAnimationFrame(() => state.composerApi?.focus());
+  };
   const close = () => useStore.getState().setUi({ changeView: '' });
   const select = (target) => {
     setConfirming(false);
@@ -719,24 +781,31 @@ function DiffView({ path, status, prevPath, nextPath, index, total, busy, onUndo
             onClick={() => setConfirming(true)}
           >撤销</button>
         )}
-        <button type="button" className="icon-btn change-view-close" title="关闭差异" aria-label="关闭差异" onClick={close}>✕</button>
+        <button type="button" className="icon-btn change-view-close" title="关闭差异" aria-label="关闭差异" onClick={close}>×</button>
       </div>
+      <p className="review-line-hint">点击行号选择，Shift + 点击选择多行，再添加审阅意见。</p>
+      {selection && <div className="review-feedback" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setSelection(null); } }}>
+        <label>对选中代码的意见<textarea aria-label="审阅意见" value={feedback} onChange={event => setFeedback(event.target.value)} placeholder="描述需要调整的地方" rows={2} /></label>
+        <button type="button" className="btn" onClick={addFeedback}>引用到输入框</button>
+        <button type="button" className="btn" onClick={() => { setSelection(null); setFeedback(''); }}>取消选择</button>
+      </div>}
       <div id="change-diff" className="change-diff">
         {file
           ? (
             <>
               {/* index/---/+++ 这些补丁元信息对读代码没帮助，Codex 也不展示 */}
-              {file.lines
-                .filter((line) => line.kind !== 'meta')
-                .slice(0, DIFF_LINE_LIMIT)
-                .map((line, index) => (
-                  <div key={index} className={`diff-line is-${line.kind}`}>
-                    <span className={`n${line.kind === 'del' ? ' is-old' : ''}`}>
-                      {line.kind === 'hunk' ? '' : (line.kind === 'del' ? line.old : line.next)}
-                    </span>
-                    <code>{line.text}</code>
-                  </div>
-                ))}
+              {lines.map((line, index) => (
+                <div key={index} className={`diff-line is-${line.kind}${selection && index >= Math.min(selection.anchor, selection.end) && index <= Math.max(selection.anchor, selection.end) ? ' is-selected' : ''}`}>
+                  {line.kind === 'hunk' ? <span className="n" /> : <button type="button"
+                    className={`n${line.kind === 'del' ? ' is-old' : ''}`}
+                    aria-label={`选择${line.kind === 'del' ? '原文件' : '现文件'}第 ${line.kind === 'del' ? line.old : line.next} 行`}
+                    aria-pressed={Boolean(selection && index >= Math.min(selection.anchor, selection.end) && index <= Math.max(selection.anchor, selection.end))}
+                    onClick={event => setSelection(current => ({ anchor: event.shiftKey && current ? current.anchor : index, end: index }))}>
+                    {line.kind === 'del' ? line.old : line.next}
+                  </button>}
+                  <code>{line.text}</code>
+                </div>
+              ))}
               {/* 生成出来的大文件动辄上万行，全铺出来会卡住滚动；先给一个明确的截断提示 */}
               {file.lines.length > DIFF_LINE_LIMIT && (
                 <p className="diff-truncated">
@@ -787,7 +856,7 @@ function PreviewPanel() {
   };
 
   return (
-    <div id="panel-preview" className="panel">
+    <div id="panel-preview" className={`panel${data && !data.binary ? ' has-content' : ''}`}>
       <div className="panel-toolbar">
         <input
           id="preview-path"

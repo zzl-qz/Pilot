@@ -1,3 +1,4 @@
+import { shortcut } from '../../../frontend/src/lib/interaction.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -30,5 +31,5 @@ test('/review 直发命令原文，让服务端进入独立审查模式而不是
 
 test('command palette actions search keywords and shortcuts', () => {
   assert.equal(filterPaletteActions('workspace')[0].action, 'new-session');
-  assert.equal(filterPaletteActions('Ctrl B')[0].action, 'toggle-activity');
+  assert.equal(filterPaletteActions(shortcut('J'))[0].action, 'toggle-activity');
 });

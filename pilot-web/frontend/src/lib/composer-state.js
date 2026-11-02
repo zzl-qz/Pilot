@@ -1,13 +1,8 @@
-/**
- * 解析输入区主按钮的唯一动作。
- *
- * 运行中没有草稿时，按钮用于停止当前任务；一旦用户输入文字或加入附件，
- * 它立即恢复为发送按钮，把内容排到当前任务之后。队列编辑拥有更高优先级，
- * 避免编辑到一半误触停止。
- */
+/** 主按钮只负责发送；停止始终是独立按钮，草稿和附件不会改变停止入口。 */
 export function resolveComposerAction({
   running = false,
   editing = false,
+  followUp = 'queue',
   hasText = false,
   attachmentCount = 0,
   composerEnabled = false,
@@ -16,21 +11,11 @@ export function resolveComposerAction({
   cancelling = false
 } = {}) {
   const hasDraft = Boolean(hasText) || Number(attachmentCount) > 0;
-  const mode = editing ? 'save' : running && !hasDraft ? 'stop' : running ? 'queue' : 'send';
-
-  if (mode === 'stop') {
-    return {
-      mode,
-      stop: true,
-      disabled: cancelling || pausing || steering,
-      label: cancelling ? '正在停止' : '停止当前',
-      ariaLabel: cancelling ? '正在停止当前任务' : '停止当前任务',
-      title: cancelling ? '正在停止当前任务' : '停止当前任务 (Esc)'
-    };
-  }
+  const mode = editing ? 'save' : running ? (followUp === 'steer' ? 'steer' : 'queue') : 'send';
 
   const labels = {
-    save: ['保存排队消息', '保存排队消息', '保存排队消息 (Enter)'],
+    save: ['重新发送', '重新发送', '重新发送 (Enter)'],
+    steer: ['立即纠正', '立即纠正当前任务', '立即纠正当前任务 (Enter)'],
     queue: ['排队下一件事', '排队下一件事', '排队下一件事 (Enter)'],
     send: ['发送任务', '发送任务', '发送任务 (Enter)']
   };
@@ -38,7 +23,7 @@ export function resolveComposerAction({
   return {
     mode,
     stop: false,
-    disabled: steering || (!running && !composerEnabled) || !hasDraft,
+    disabled: cancelling || pausing || steering || (!running && !composerEnabled) || !hasDraft,
     label,
     ariaLabel,
     title

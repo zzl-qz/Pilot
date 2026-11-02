@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
+import { Icon, FileIcon } from './Icon.jsx';
+import { shortcut } from '../lib/interaction.js';
 import { filterPaletteActions } from '../lib/commands.js';
 import { PERMISSION_MODES } from '../lib/permission.js';
 import { emptySkillsHint, parseInstallSource, summarizeInstallResults } from '../lib/skills.js';
@@ -185,23 +187,43 @@ function ConfirmDialog() {
 }
 
 function Modal({ id, title, onClose, children, wide }) {
-  // Esc 关闭：旧版任何弹层都能一键退出，之前新版只能用鼠标点 ✕
+  const container = useRef(null);
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
-    const onKey = (event) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        onClose();
+    const previous = document.activeElement;
+    const node = container.current;
+    const focusable = () => [...node.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"]')].filter(el => el.getClientRects().length);
+    const topmost = () => [...document.querySelectorAll('.modal')].at(-1) === node;
+    const frame = requestAnimationFrame(() => (node.querySelector('input:not([disabled]), textarea, [aria-current="page"]') || focusable()[0] || node).focus());
+    const onKey = event => {
+      if (!topmost()) return;
+      if (event.key === 'Escape' && !event.isComposing) {
+        event.preventDefault(); event.stopImmediatePropagation(); close.current();
+      } else if (event.key === 'Tab') {
+        const items = focusable();
+        if (!items.length) { event.preventDefault(); node.focus(); return; }
+        const first = items[0], last = items.at(-1);
+        if (event.shiftKey && (document.activeElement === first || !node.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && (document.activeElement === last || !node.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
       }
     };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    const onFocus = event => { if (topmost() && !node.contains(event.target)) (focusable()[0] || node).focus(); };
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('focusin', onFocus);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('focusin', onFocus);
+      if (previous?.isConnected) previous.focus();
+    };
+  }, []);
   return (
-    <div className="modal" id={id} role="dialog" aria-modal="true" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="modal" id={id} ref={container} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
       <div className={`modal-box${wide ? ' is-wide' : ''}`}>
         <header className="modal-head">
-          <h2>{title}</h2>
-          <button type="button" className="icon-action" onClick={onClose}>✕</button>
+          <h2 id={`${id}-title`}>{title}</h2>
+          <button type="button" className="icon-action" aria-label="关闭弹窗" onClick={onClose}><Icon name="close" /></button>
         </header>
         {children}
       </div>
@@ -212,72 +234,61 @@ function Modal({ id, title, onClose, children, wide }) {
 /* ---------- 工作区选择 ---------- */
 
 function WorkspacePicker() {
-  const picker = useStore((state) => state.ui.picker);
+  const picker = useStore(state => state.ui.picker);
+  const workspace = useStore(state => state.workspace);
   const [roots, setRoots] = useState([]);
   const [entries, setEntries] = useState([]);
-  const [path, setPath] = useState('');
+  const [path, setPath] = useState(workspace || '');
+  const [directory, setDirectory] = useState(null);
   const [error, setError] = useState('');
-  const [selected, setSelected] = useState(null);
-
+  const [busy, setBusy] = useState(true);
+  const version = useRef(0);
   useEffect(() => {
-    api.workspaceRoots().then((data) => {
-      setRoots(data?.roots || []);
-      const first = data?.roots?.[0]?.path || data?.roots?.[0];
-      if (first) {
-        browse(first);
-      }
-    }).catch((err) => setError(err.message));
+    let active = true;
+    api.workspaceRoots().then(data => {
+      if (!active) return;
+      const roots = Array.isArray(data) ? data : data?.roots || [];
+      setRoots(roots);
+      browse(workspace || roots[0]?.path || '');
+    }).catch(err => { if (active) { setError(err.message); setBusy(false); } });
+    return () => { active = false; version.current++; };
   }, []);
-
   async function browse(target) {
-    setError('');
+    const request = ++version.current;
+    setBusy(true); setError('');
     try {
       const data = await api.workspaceBrowse(target);
-      setEntries(data?.entries || []);
-      setPath(data?.path || target);
-    } catch (err) {
-      setError(err.message);
-    }
+      if (request !== version.current) return;
+      setEntries(data?.directories || data?.entries || []);
+      setPath(data.path); setDirectory(data);
+    } catch (err) { if (request === version.current) setError(err.message); }
+    finally { if (request === version.current) setBusy(false); }
   }
-
-  return (
-    <Modal id="picker" title={picker?.title || '选择工作区'} onClose={() => useStore.getState().setUi({ picker: null })}>
-      <div className="picker-toolbar">
-        <button type="button" className="btn" id="picker-up" onClick={() => browse(path.replace(/[\\/][^\\/]+$/, '') || '/')}>上一级</button>
-        <input id="picker-path" value={path} onChange={(event) => setPath(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') browse(path); }} />
-        <button type="button" className="btn" id="picker-go" onClick={() => browse(path)}>前往</button>
-      </div>
-      <ul id="picker-list" className="picker-list">
-        {(entries || []).map((entry) => (
-          <li key={entry.path}>
-            <button type="button" className="picker-item" onClick={() => browse(entry.path)} onDoubleClick={() => setSelected(entry.path)}>
-              <span className="picker-kind">{entry.directory ? '📁' : '📄'}</span>
-              {entry.name || entry.path}
-            </button>
-          </li>
-        ))}
-      </ul>
-      {error && <p id="picker-error" className="picker-error">{error}</p>}
-      <footer className="modal-foot">
-        <span id="picker-selected">{selected || path}</span>
-        <button
-          type="button"
-          className="btn btn-primary"
-          id="picker-confirm"
-          onClick={async () => {
-            const target = selected || path;
-            if (picker?.onPick) {
-              picker.onPick(target);
-            } else if (useStore.getState().sessionId) {
-              await api.switchWorkspace(useStore.getState().sessionId, target);
-              await useStore.getState().activate(useStore.getState().sessionId);
-            }
-            useStore.getState().setUi({ picker: null });
-          }}
-        >确认</button>
-      </footer>
-    </Modal>
-  );
+  return <Modal id="picker" title={picker?.title || '选择工作区'} onClose={() => useStore.getState().setUi({ picker: null })}>
+    <div className="picker-roots">{roots.map(root => <button key={root.path} type="button" className="btn" onClick={() => browse(root.path)}>{root.label || root.name || root.path}</button>)}</div>
+    <form className="picker-toolbar" onSubmit={event => { event.preventDefault(); browse(path); }}>
+      <button type="button" className="btn" id="picker-up" disabled={busy || !directory?.parent} onClick={() => browse(directory.parent)}>上一级</button>
+      <input id="picker-path" aria-label="工作区路径" value={path} onChange={event => setPath(event.target.value)} />
+      <button type="submit" className="btn" id="picker-go" disabled={busy}>前往</button>
+    </form>
+    <ul id="picker-list" className="picker-list" aria-label="文件夹" aria-busy={busy}>
+      {entries.map(entry => <li key={entry.path}><button type="button" className="picker-item" onClick={() => browse(entry.path)}><FileIcon directory /><span>{entry.name || entry.path}</span><Icon name="chevron" /></button></li>)}
+      {!busy && !error && !entries.length && <li className="panel-empty">这个文件夹没有子目录，可以直接选择。</li>}
+    </ul>
+    {busy && <p className="chip-hint" role="status">正在读取文件夹…</p>}
+    {error && <p id="picker-error" className="picker-error" role="alert">{error}</p>}
+    <footer className="modal-foot">
+      <span id="picker-selected" title={directory?.path}>{directory?.path || '选择一个文件夹'}</span>
+      <button type="button" className="btn btn-primary" id="picker-confirm" disabled={busy || !!error || !directory?.path || path.trim() !== directory.path} onClick={async () => {
+        setBusy(true); setError('');
+        try {
+          if (picker?.onPick) await picker.onPick(directory.path);
+          else await useStore.getState().switchWorkspace(directory.path, { throwOnError: true });
+          useStore.getState().setUi({ picker: null });
+        } catch (err) { setError(err.message); setBusy(false); }
+      }}>选择此文件夹</button>
+    </footer>
+  </Modal>;
 }
 
 /* ---------- 项目编辑 ---------- */
@@ -330,17 +341,28 @@ const SETTINGS_SECTIONS = [
   ['skills', '技能'], ['usage', '用量'], ['diagnostics', '诊断'], ['about', '关于']
 ];
 
+const SETTINGS_META = {
+  appearance: ['palette', '选择适合你的工作环境的主题与强调色。更改即时生效。'],
+  model: ['model', '配置模型与连接信息，保存后用于后续请求。'],
+  permission: ['shield', '决定哪些操作需要你确认。'],
+  skills: ['skill', '管理当前工作区与用户级技能。'],
+  usage: ['chart', '查看模型请求与 Token 用量，了解任务开销。'],
+  diagnostics: ['pulse', '检查连接、运行记录和本地数据状态。'],
+  about: ['info', '当前工作环境与常用快捷键。'],
+};
+
 function SettingsModal() {
   const section = useStore((state) => state.ui.settingsSection);
   return (
     <Modal id="settings" title="设置" onClose={() => useStore.getState().setUi({ settingsOpen: false })} wide>
       <div className="settings-layout">
-        <nav className="settings-nav">
+        <nav className="settings-nav" aria-label="设置分类">
           {SETTINGS_SECTIONS.map(([id, label]) => (
             <button
               key={id}
               type="button"
               className={`settings-nav-item${section === id ? ' is-active' : ''}`}
+              aria-current={section === id ? 'page' : undefined}
               onClick={() => {
                 useStore.getState().setUi({ settingsSection: id });
                 if (id === 'usage') {
@@ -350,10 +372,11 @@ function SettingsModal() {
                   useStore.getState().loadSkills();
                 }
               }}
-            >{label}</button>
+            ><Icon name={SETTINGS_META[id][0]} /><span>{label}</span></button>
           ))}
         </nav>
-        <div className="settings-body">
+        <div className="settings-body" key={section}>
+          <header className="settings-section-head"><h3>{SETTINGS_SECTIONS.find(([id]) => id === section)?.[1]}</h3><p>{SETTINGS_META[section]?.[1]}</p></header>
           {section === 'appearance' && <AppearanceSettings />}
           {section === 'model' && <ModelSettings />}
           {section === 'permission' && <PermissionSettings />}
@@ -396,15 +419,14 @@ function AppearanceSettings() {
   return (
     <div className="settings-appearance">
       <h3>主题</h3>
-      <div className="theme-options" id="theme-options" role="radiogroup" aria-label="主题">
+      <div className="theme-options" id="theme-options" role="group" aria-label="主题">
         {THEME_MODES.map((item) => {
           const on = themeMode === item.mode;
           return (
             <button
               key={item.mode}
               type="button"
-              role="radio"
-              aria-checked={on}
+              aria-pressed={on}
               title={item.hint}
               className={`theme-card${on ? ' is-on' : ''}`}
               onClick={() => useStore.getState().setTheme(item.mode)}
@@ -417,13 +439,12 @@ function AppearanceSettings() {
         })}
       </div>
       <h3>强调色</h3>
-      <div className="accent-options" id="accent-options" role="radiogroup" aria-label="强调色">
+      <div className="accent-options" id="accent-options" role="group" aria-label="强调色">
         {ACCENTS.map((item) => (
           <button
             key={item.name}
             type="button"
-            role="radio"
-            aria-checked={accent === item.name}
+            aria-pressed={accent === item.name}
             aria-label={item.label}
             title={item.label}
             className={`accent-dot is-${item.name}${accent === item.name ? ' is-on' : ''}`}
@@ -445,7 +466,7 @@ function ModelSettings() {
   const [hint, setHint] = useState('');
   return (
     <div>
-      <h3>模型</h3>
+
       <label className="task-field">模型名称<input id="settings-model-name" value={name} onChange={(event) => setName(event.target.value)} /></label>
       <label className="task-field">API 端点<input id="settings-model-endpoint" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
       <label className="task-field">
@@ -492,13 +513,12 @@ function PermissionSettings() {
   return (
     <div>
       <h3>权限模式</h3>
-      <div className="perm-cards" id="permission-options">
+      <div className="perm-cards" id="permission-options" role="group" aria-label="权限模式">
         {PERMISSION_MODES.map((item) => (
           <button
             key={item.mode}
             type="button"
-            role="radio"
-            aria-checked={mode === item.mode}
+            aria-pressed={mode === item.mode}
             className={`perm-card${mode === item.mode ? ' is-on' : ''}`}
             onClick={() => useStore.getState().savePermissionMode(item.mode)}
           >
@@ -752,7 +772,7 @@ function UsageSettings() {
   const maxTokens = Math.max(...daily.map((day) => (day.inputTokens || 0) + (day.outputTokens || 0)), 1);
   return (
     <div>
-      <h3>用量</h3>
+
       <div className="option-row" id="usage-range">
         {[7, 14, 30].map((value) => (
           <button key={value} type="button" className={`option${days === value ? ' is-active' : ''}`} onClick={() => useStore.getState().loadUsage(value)}>{value} 天</button>
@@ -779,7 +799,7 @@ function UsageSettings() {
               <div
                 className="usage-bar"
                 style={{
-                  height: `${Math.max(4, Math.round((total / maxTokens) * 56))}px`,
+                  height: `${Math.round((total / maxTokens) * 56)}px`,
                   '--bar-out': `${(day.outputTokens / Math.max(total, 1)) * 100}%`
                 }}
               />
@@ -985,9 +1005,11 @@ function AboutSettings() {
   const permissionMode = useStore((state) => state.permissionMode);
   return (
     <div id="settings-about" className="about">
+      <div className="about-brand"><span className="logo" aria-hidden="true">P</span><div><strong>Pilot</strong><span>本地编码工作区</span></div></div>
       <p><b>工作区：</b><span id="settings-about-workspace">{workspace || '未选择'}</span></p>
       <p><b>连接：</b><span id="settings-about-connection">{connection.text}</span></p>
       <p><b>权限：</b><span id="settings-about-permission">{permissionMode}</span></p>
+      <dl className="shortcut-list">{[['新任务','N'],['命令面板','K'],['展开侧栏','B'],['审阅面板','J'],['设置',',']].map(([label,key]) => <div key={key}><dt>{label}</dt><dd><kbd>{shortcut(key)}</kbd></dd></div>)}</dl>
     </div>
   );
 }
@@ -1074,7 +1096,7 @@ function runPaletteAction(action) {
   const state = useStore.getState();
   switch (action) {
     case 'new-session':
-      state.setUi({ picker: { title: '选择工作区' } });
+      state.startNewSession();
       break;
     case 'open-context':
       state.setUi({ inspectorOpen: true, inspectorTab: 'context' });
@@ -1195,7 +1217,7 @@ function CheckpointDialog() {
         <>
           <blockquote className="checkpoint-excerpt">{info.input || '（这条消息没有可回填的文本）'}</blockquote>
           <p className="checkpoint-hint">
-            将回退这条消息及之后的 {info.runs ?? 0} 轮任务，涉及 {(code.files || []).length} 个文件；新建的文件会被删除。
+            将回退这条消息及之后的 {info.runs ?? 0} 轮任务，涉及 {(code.files || []).length} 个文件。{(code.files || []).length > 0 ? '选择还原文件时，这些改动中新建的文件会被删除。' : '没有文件需要还原。'}
           </p>
           {!!(code.conflicts || []).length && (
             <div className="checkpoint-block">
@@ -1237,7 +1259,7 @@ function CheckpointDialog() {
               </label>
             ))}
           </fieldset>
-          <p className="checkpoint-hint">另开对话分支：保留原聊天，从此处历史开始一条新对话；文件继续共用。</p>
+          <p className="checkpoint-hint">另开对话：保留原聊天，从此处历史开始新对话，共用现有文件。此操作不创建 Git 分支。</p>
         </>
       )}
       <footer className="modal-foot">
@@ -1248,7 +1270,7 @@ function CheckpointDialog() {
           id="checkpoint-fork"
           disabled={!info || !canConversation || busy}
           onClick={() => useStore.getState().forkCheckpoint(dialog.sequence, info?.revision)}
-        >另开分支</button>
+        >另开对话</button>
         <button
           type="button"
           className="btn btn-danger"

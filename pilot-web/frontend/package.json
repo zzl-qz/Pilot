@@ -3,9 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:composer": "node scripts/composer-smoke.mjs",
     "dev:ui": "vite",
     "build": "node scripts/build.mjs",
-    "check": "vite build 2>&1 | Select-String 'built in|error'"
+    "check": "node scripts/check.mjs",
+    "test:interaction": "node scripts/interaction-smoke.mjs"
   },
   "dependencies": {
     "immer": "^10.1.1",

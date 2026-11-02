@@ -94,7 +94,10 @@ export const api = {
   rollbackRun: (runId) => apiJson(`/api/runs/${encodeURIComponent(runId)}/rollback`, { method: 'POST' }),
   branch: (id, name) => apiJson(`/api/sessions/${encodeURIComponent(id)}/branch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
   files: (id, path) => apiJson(`/api/sessions/${encodeURIComponent(id)}/files?path=${encodeURIComponent(path || '')}`),
+  workspaceTree: (root, path = '') => apiJson(`/api/workspaces/files?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`),
+  workspaceFile: (root, path) => apiJson(`/api/workspaces/file?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`),
   filesFlat: (id) => apiJson(`/api/sessions/${encodeURIComponent(id)}/files/flat`),
+  workspaceFiles: (path) => apiJson(`/api/workspaces/files/flat?path=${encodeURIComponent(path)}`),
   file: (id, path) => apiJson(`/api/sessions/${encodeURIComponent(id)}/file?path=${encodeURIComponent(path)}`),
   projects: () => apiJson('/api/projects'),
   createProject: (body) => apiJson('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
@@ -127,10 +130,5 @@ export const api = {
   regenerate: (id) => apiJson(`/api/sessions/${encodeURIComponent(id)}/regenerate`, { method: 'POST' }),
   deleteSession: (id) => apiJson(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   browserFocus: (id) => apiFetch(`/api/sessions/${encodeURIComponent(id)}/browser/focus`, { method: 'POST' }),
-  browserToggle: (id, paused) => apiFetch(`/api/sessions/${encodeURIComponent(id)}/browser/${paused ? 'resume' : 'pause'}`, { method: 'POST' }),
-  uploadAttachment: (sessionId, file) => {
-    const form = new FormData();
-    form.append('file', file);
-    return apiJson(`/api/sessions/${encodeURIComponent(sessionId)}/attachments`, { method: 'POST', body: form }, 60000);
-  }
+  browserToggle: (id, paused) => apiFetch(`/api/sessions/${encodeURIComponent(id)}/browser/${paused ? 'resume' : 'pause'}`, { method: 'POST' })
 };

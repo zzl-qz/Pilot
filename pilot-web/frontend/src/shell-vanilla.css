@@ -181,9 +181,6 @@ html[data-theme] .nav-files > summary:hover { background: var(--panel-2); color:
 .nav-files[open] .nav-disclosure { transform: rotate(180deg); }
 .nav-files:not([open]) > :not(summary) { display: none !important; }
 html[data-theme] .nav-files[open] { display: flex; flex-direction: column; max-height: min(48vh, 440px); }
-.file-tree-head { display: flex; align-items: center; justify-content: space-between; padding: 3px 8px 5px; color: var(--dim); font-size: 11px; }
-html[data-theme] .file-tree { overflow-y: auto; }
-html[data-theme] .tree-row:hover { background: var(--panel-2); }
 
 html[data-theme] .sidebar-foot.rail-foot { border-top: 1px solid var(--line-soft); padding: 9px 13px; }
 html[data-theme] .conn { color: var(--dim); }
@@ -202,8 +199,6 @@ html[data-theme] .crumb-root { flex: 0 1 24ch; color: var(--dim); font-size: 11p
 html[data-theme] #crumb-title { flex: 1 1 auto; max-width: none; color: var(--ink-2); font-size: 12px; font-weight: 550; }
 html[data-theme] .crumb-sep { color: var(--dim); }
 html[data-theme] .topbar-right { flex: 0 0 auto; gap: 5px; }
-html[data-theme] .icon-btn { border-radius: 6px; color: var(--muted); }
-html[data-theme] .icon-btn:hover { border-color: var(--line); background: var(--panel-2); color: var(--ink); }
 html[data-theme] .run-state,
 html[data-theme] .chip { border-radius: 5px; background: var(--panel-2); color: var(--muted); }
 
@@ -587,14 +582,10 @@ html[data-theme] .bubble .md-task-item { display: flex; align-items: flex-start;
 html[data-theme] .md-task-item input { width: 14px; height: 14px; margin: 4px 0 0; accent-color: var(--accent); }
 html[data-theme] .task-contract { margin-inline: max(24px, calc((100% - 760px) / 2)); }
 
-html[data-theme] .modal-box,
 html[data-theme] .palette-box,
 html[data-theme] .perm-menu,
 html[data-theme] .ref-menu,
 html[data-theme] .model-menu { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow-pop); }
-html[data-theme] .btn { border-radius: 6px; }
-html[data-theme] .btn-primary { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
-html[data-theme] .btn-primary:hover { background: color-mix(in srgb, var(--accent) 20%, var(--panel)); }
 
 html[data-theme] .capability-panel { padding: 18px 16px 28px; overflow-y: auto; }
 html[data-theme] .capability-intro { padding: 2px 2px 15px; border-bottom: 1px solid var(--line-soft); }
@@ -613,9 +604,6 @@ html[data-theme] .capability-list p { margin: 3px 0 0; color: var(--dim); font-s
 html[data-theme] .capability-status { flex: none; padding: 2px 6px; border: 1px solid var(--accent-line); border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; }
 html[data-theme] .capability-status.is-live { border-color: color-mix(in srgb, var(--ok) 38%, var(--line)); background: color-mix(in srgb, var(--ok) 8%, var(--panel)); color: var(--ok); }
 html[data-theme] .capability-status.is-later { border-color: var(--line); background: var(--panel-2); color: var(--dim); }
-
-html[data-theme] .theme-preview.is-dark span:last-child { background: #1a1d24; }
-html[data-theme] .theme-preview.is-dark span:first-child { background: #121419; }
 
 /* Only views that contain code consume reading width. Empty preview and activity stay compact. */
 @media (min-width: 1180px) {
@@ -651,7 +639,6 @@ html[data-theme] .theme-preview.is-dark span:first-child { background: #121419; 
     color: var(--ink);
     font-size: 12px;
   }
-  .inspector-mobile-head .icon-btn { font-size: 22px; line-height: 1; }
 }
 
 @media (max-width: 700px) {
@@ -942,8 +929,6 @@ html[data-theme] .nav-files { border-top: 1px solid var(--line-soft); }
 html[data-theme] .topbar { height: 48px; padding: 0 16px; border-bottom: 1px solid transparent; background: var(--bg); }
 html[data-theme] .crumb-root { color: var(--dim); }
 html[data-theme] #crumb-title { color: var(--ink); font-size: 13px; font-weight: 500; }
-html[data-theme] .icon-btn { border: 1px solid transparent; border-radius: 8px; }
-html[data-theme] .icon-btn:hover { border-color: transparent; background: color-mix(in srgb, var(--ink) 8%, transparent); }
 html[data-theme] .run-state,
 html[data-theme] .chip { height: 24px; border: 0; border-radius: 999px; background: var(--panel-2); font-size: 11px; }
 html[data-theme] .review-toggle { border: 0; border-radius: 8px; background: transparent; color: var(--muted); }
@@ -1071,7 +1056,13 @@ html[data-theme] .composer .context-chip.is-high { color: var(--warn); }
 html[data-theme] .composer .context-chip:disabled { opacity: .5; }
 html[data-theme] .composer-hint { color: var(--dim); font-size: 11px; }
 html[data-theme] .composer-hint kbd { border: 0; background: color-mix(in srgb, var(--ink) 9%, transparent); color: var(--muted); }
-html[data-theme] .send-mode-label { display: none; }
+html[data-theme] .send-mode-label {
+  display: block;
+  margin: 0 2px 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
 
 /* 发送：白底深箭头的实心圆（浅色主题反过来），一眼就是主操作 */
 html[data-theme] .send,
@@ -1114,13 +1105,7 @@ html[data-theme] .perm-menu,
 html[data-theme] .ref-menu,
 html[data-theme] .model-menu,
 html[data-theme] .context-menu { border: 0; border-radius: 16px; background: var(--panel-2); box-shadow: var(--shadow-pop); }
-html[data-theme] .modal-box,
 html[data-theme] .palette-box { border: 0; border-radius: 18px; background: var(--panel); box-shadow: var(--shadow-pop); }
-html[data-theme] .modal { backdrop-filter: blur(6px); }
-html[data-theme] .btn { border: 1px solid var(--line-soft); background: var(--panel-2); color: var(--ink-2); }
-html[data-theme] .btn:hover { background: var(--panel-3); }
-html[data-theme] .btn-primary { border: 0; background: var(--ink); color: var(--bg); }
-html[data-theme] .btn-primary:hover { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
 html[data-theme] .settings-field input,
 html[data-theme] .model-row input,
 html[data-theme] .picker-path { border: 1px solid var(--line-soft); border-radius: 10px; background: var(--bg-soft); }
@@ -1191,7 +1176,6 @@ html[data-theme] .project-name { color: var(--ink-2); font-weight: 550; }
 html[data-theme] .project-count { border: 0; background: color-mix(in srgb, var(--ink) 9%, transparent); color: var(--dim); }
 
 /* 工作区文件树、输入候选菜单 */
-html[data-theme] .tree-row { border-radius: 7px; }
 html[data-theme] .ref-item { border-radius: 9px; }
 html[data-theme] .ref-item.is-on,
 html[data-theme] .ref-item:hover { background: color-mix(in srgb, var(--ink) 9%, transparent); }
@@ -1339,7 +1323,6 @@ html[data-theme] .sidebar,
 html[data-theme] .topbar,
 html[data-theme] .activity.inspector,
 html[data-theme] .composer,
-html[data-theme] .modal-box,
 html[data-theme] .palette-box,
 html[data-theme] .turn-card,
 html[data-theme] .ctx-card,
@@ -1381,7 +1364,6 @@ html[data-theme] .run-state { font-weight: 500; }
   html[data-theme] .empty-keys { display: none; }
   html[data-theme] .empty .empty-title { font-size: 24px; }
   html[data-theme] .task-draft > summary { min-height: 32px; }
-  html[data-theme] .icon-btn { min-width: 36px; min-height: 36px; }
 }
 
 /* ---------- 阅读字号：正文与数据 13px 起，11–12px 只给副标题和元信息 ---------- */
@@ -1424,11 +1406,6 @@ html[data-theme] .turn-card.is-error .turn-mark { --mark-icon: url("data:image/s
 html[data-theme] .crumb-root { flex: 0 1 auto; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 设置里的主题预览与强调色色块：颜色与真实界面一致，平涂 */
-.theme-preview.is-light span:last-child { background: #ffffff; }
-.theme-preview.is-light span:first-child { background: #f6f6f6; }
-.theme-preview.is-dark span:last-child { background: #171717; }
-.theme-preview.is-dark span:first-child { background: #1c1c1c; }
-.theme-preview.is-system { background: linear-gradient(100deg, #f6f6f6 0 50%, #1c1c1c 50% 100%); }
 .accent-dot.is-sky { background: #4fa3ea; }
 .accent-dot.is-blue { background: #5b74ff; }
 .accent-dot.is-violet { background: #8a63e8; }
@@ -1442,47 +1419,6 @@ html[data-theme] .crumb-root { flex: 0 1 auto; max-width: 24ch; overflow: hidden
  * ========================================================================== */
 
 /* ---------- 图标按钮 + 悬停气泡 ---------- */
-html[data-theme] .icon-action {
-  position: relative;
-  display: inline-grid;
-  flex: none;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--dim);
-  cursor: pointer;
-  transition: background .14s ease, color .14s ease, transform .14s cubic-bezier(.3, 1.6, .5, 1);
-}
-html[data-theme] .icon-action:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
-html[data-theme] .icon-action:active { transform: scale(.88); }
-html[data-theme] .icon-action:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 1px; }
-html[data-theme] .icon-action svg { display: block; }
-html[data-theme] .icon-action[data-tip]::after {
-  content: attr(data-tip);
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  z-index: 40;
-  padding: 4px 8px;
-  border-radius: 7px;
-  background: var(--ink);
-  color: var(--bg);
-  font-size: 11.5px;
-  font-weight: 500;
-  line-height: 1.3;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transform: translate(-50%, 3px);
-  transition: opacity .12s ease, transform .12s ease;
-}
-html[data-theme] .icon-action[data-tip]:hover::after,
-html[data-theme] .icon-action[data-tip]:focus-visible::after { opacity: 1; transform: translate(-50%, 0); transition-delay: .35s; }
 
 /* 用户消息：操作藏在气泡下面，鼠标靠近才滑出 */
 html[data-theme] .msg-user .msg-actions {
@@ -1567,7 +1503,6 @@ html[data-theme] .prompts button:hover { transform: translateY(-2px); }
   html[data-theme] .msg-assistant,
   html[data-theme] .turn-card,
   html[data-theme] .copy-control.is-done svg { animation: none; }
-  html[data-theme] .icon-action,
   html[data-theme] .session-item,
   html[data-theme] .prompts button { transition: none; }
   html[data-theme] .session-item:not(.is-active):hover,
@@ -1576,7 +1511,6 @@ html[data-theme] .prompts button:hover { transform: translateY(-2px); }
 
 /* 用户消息的操作行占位更紧凑，不撑开消息之间的间距 */
 html[data-theme] .msg-user .msg-actions { height: 26px; margin-bottom: -6px; }
-html[data-theme] .msg-user .icon-action { width: 26px; height: 26px; }
 
 /* ==========================================================================
  * v11：输入框上方的叠层整理

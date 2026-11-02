@@ -76,7 +76,7 @@ export function formatBytes(bytes) {
 export function checkIncomingFile(existing, file) {
   const name = (file && file.name) || '未命名文件';
   const list = Array.isArray(existing) ? existing : [];
-  const mime = String((file && file.mimeType) || '').toLowerCase();
+  const mime = String((file && (file.mimeType || file.type)) || '').toLowerCase();
   const image = mime.startsWith('image/') || IMAGE_EXTENSIONS.has(extensionOf(name));
   if (!image && list.some((item) => item.name === name && item.size === file.size)) {
     return { ok: false, silent: true, reason: '' };

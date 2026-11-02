@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostname } from 'node:os';
 import { formatPageLogs, markerPath, partitionName, snapBounds, userPageUrl } from './protocol.mjs';
+import { offlinePage } from './offline-page.mjs';
 
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -711,12 +712,22 @@ function installMenu() {
       ]
     },
     {
-      label: '窗口',
+      label: '视图',
       submenu: [
         { role: 'reload', label: '重新载入' },
+        { type: 'separator' },
+        { role: 'zoomIn', label: '放大界面' },
+        { role: 'zoomOut', label: '缩小界面' },
+        { role: 'resetZoom', label: '恢复实际大小' },
+        { type: 'separator' },
+        { role: 'togglefullscreen', label: '进入全屏' }
+      ]
+    },
+    {
+      label: '窗口',
+      submenu: [
         { role: 'minimize', label: '最小化' },
-        { role: 'zoom', label: '缩放' },
-        { role: 'togglefullscreen', label: '进入全屏' },
+        { role: 'zoom', label: '调整窗口大小' },
         { type: 'separator' },
         { role: 'close', label: '关闭窗口' }
       ]
@@ -746,11 +757,10 @@ app.whenReady().then(async () => {
     }
   });
   shell.webContents.on('did-fail-load', (_event, code, _desc, _url, isMainFrame) => {
-    if (!isMainFrame || code === -3 || smoke) return;
-    const message = 'Pilot 服务没有在 127.0.0.1:9999 上运行。先启动服务，再重新打开这个窗口。';
-    shell.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<p style="font:14px sans-serif;padding:24px">${message}</p>`)}`);
+    if (!isMainFrame || code === -3 || smoke || _url?.startsWith('data:')) return;
+    shell.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(offlinePage(shellUrl()))}`).catch(() => {});
   });
-  if (!smoke) shell.loadURL(shellUrl());
+  if (!smoke) shell.loadURL(shellUrl()).catch(() => {});
   else shell.loadURL('about:blank');
   writeEndpoint();
   shell.on('closed', () => {

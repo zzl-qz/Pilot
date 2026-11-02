@@ -31,6 +31,15 @@ public class GitWorktrees {
         this.dataDir = dataDir;
     }
 
+    /** 只读展示执行位置；尚无提交的分支也能识别，detached HEAD 明示提交。 */
+    public String currentBranch(Path workspace) {
+        if (!Files.isDirectory(workspace)) return "";
+        Exec branch = git(workspace, "symbolic-ref", "--short", "-q", "HEAD");
+        if (branch.exit == 0) return branch.output.strip();
+        Exec commit = git(workspace, "rev-parse", "--short", "HEAD");
+        return commit.exit == 0 ? "detached @ " + commit.output.strip() : "";
+    }
+
     public Created create(Path workspace, String branch) {
         Path root = toplevel(workspace);
         String selected = branch == null ? "" : branch.strip();

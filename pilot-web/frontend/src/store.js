@@ -25,6 +25,7 @@ import { nextMirrorMode } from './lib/browser-mirror.js';
 import { classifyModelError, describeModelSaved } from './lib/model-settings.js';
 import { sameUserInput } from './thread-utils.js';
 import { readSideChats, writeSideChats, readEmbeddedSession } from './lib/side-chat.js';
+import { normalizeQueue } from './lib/queue.js';
 
 const RECONNECT_BASE_MS = 800;
 const RECONNECT_MAX_MS = 15000;
@@ -121,7 +122,19 @@ function discardQueuedEvents() {
  * 清空当前会话的全部界面状态：切换会话与「开新对话」共用同一套重置。
  * 放在模块级是为了让 startNewSession / activate 不会各写一份、漏字段。
  */
+function resetFilePreview(draft) {
+  draft._previewRequest = (draft._previewRequest || 0) + 1;
+  draft._previewData = null;
+  draft._previewLoading = false;
+  draft.ui.previewPath = '';
+}
+
 function resetSessionState(draft) {
+  resetFilePreview(draft);
+  draft.sessionEpoch = (draft.sessionEpoch || 0) + 1;
+  draft._editTarget = null;
+  draft.steering = false;
+  draft.pausing = false;
   draft.sessionId = null;
   draft.thread = initialThread();
   draft.timeline = [];
@@ -150,6 +163,7 @@ function resetSessionState(draft) {
   draft.ui.mirror = emptyMirror();
   draft.ui.agentsDockOpen = false;
   draft.ui.queueEdit = null;
+  if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 960px)').matches) draft.ui.sidebarOpen = false;
   draft.ui.draftFiles = [];
   draft.ui.checkpointDialog = null;
   draft.ui.changeView = null;
@@ -166,9 +180,10 @@ export const initialUi = () => ({
   noticeTimer: null,
   themeMode: localStorage.getItem('pilot.theme') || 'dark',
   accent: localStorage.getItem('pilot.accent') || 'sky',
-  sidebarOpen: true,
-  inspectorOpen: true,
-  inspectorTab: 'activity',
+  sidebarOpen: typeof window.matchMedia === 'function' ? !window.matchMedia('(max-width: 960px)').matches : true,
+  inspectorOpen: false,
+  inspectorTab: 'changes',
+  reviewExpanded: false,
   filters: 'all',
   settingsSection: 'appearance',
   settingsOpen: false,
@@ -201,6 +216,7 @@ export const useStore = create(immer((set, get) => {
   return {
   /* ---------- 会话 / 项目 ---------- */
   sessionId: null,
+  sessionEpoch: 0,
   /** 草稿态的新对话：{ projectId, workspace }，还没有对应会话记录。 */
   draftSession: null,
   /** 非空表示自己是 Side chat 内嵌页：只显示这一个会话，也不许再开嵌套面板。 */
@@ -375,19 +391,20 @@ export const useStore = create(immer((set, get) => {
    * 和 Codex 那种「发第一条消息才产生会话」的手感不一样。现在真正创建放到 {@link ensureSession}，
    * 由第一条消息触发；在此之前它只是一个草稿态（draftSession）。
    */
-  startNewSession({ projectId = null, workspace = null } = {}) {
+  startNewSession(options = {}) {
+    const current = get();
+    const projectId = options.projectId !== undefined ? options.projectId : (current.currentProjectId || current.draftSession?.projectId || null);
+    const workspace = options.workspace !== undefined ? options.workspace : (current.workspace || current.draftSession?.workspace || null);
     closeStreams();
     discardQueuedEvents();
     set((draft) => {
       resetSessionState(draft);
       draft.draftSession = { projectId: projectId || null, workspace: workspace || null };
       draft.workspace = workspace || '';
+      draft.currentProjectId = projectId;
       draft.sessionTitle = '';
+      draft.ui.reviewExpanded = false;
     });
-    const restored = readDraft(localStorage, null);
-    if (restored) {
-      get().composerApi?.setText(restored);
-    }
     return null;
   },
 
@@ -398,7 +415,7 @@ export const useStore = create(immer((set, get) => {
    * @returns {Promise<string|null>} 会话 ID；拿不到时返回 null（调用方负责提示）
    */
   async ensureSession({ title = '' } = {}) {
-    const { sessionId, draftSession } = get();
+    const { sessionId, draftSession, sessionEpoch } = get();
     if (sessionId) {
       return sessionId;
     }
@@ -418,6 +435,7 @@ export const useStore = create(immer((set, get) => {
     }
     const created = await api.createSession(body);
     const id = created?.sessionId || created?.id;
+    if (get().sessionEpoch !== sessionEpoch) throw new Error('会话已切换，原草稿已保留，请回到原会话重试');
     if (!id) {
       throw new Error('后端没有返回会话 ID');
     }
@@ -427,6 +445,7 @@ export const useStore = create(immer((set, get) => {
       draft.workspace = created.workspace || draft.workspace;
       draft.sessionTitle = created.title || draft.sessionTitle;
     });
+    writeDraft(localStorage, id, readDraft(localStorage, null));
     dropDraft(localStorage, null);
     get().loadSessions();
     get().connectSse(id, 0);
@@ -847,6 +866,9 @@ export const useStore = create(immer((set, get) => {
     if (['run.started', 'run.steered', 'run.continued', 'run.completed', 'run.failed', 'run.cancelled', 'tool.completed', 'execution.updated'].includes(event.type)) {
       get().loadTask();
     }
+    if (['run.started', 'run.completed', 'run.failed', 'run.cancelled'].includes(event.type)) {
+      get().loadQueue();
+    }
     // 一轮结束后拉取本次 run 的变更
     if (after.runChangesFetch) {
       const runId = after.runChangesFetch;
@@ -887,20 +909,21 @@ export const useStore = create(immer((set, get) => {
   composerApi: null,
 
   async submitInput(text, attachments, imagePositions) {
-    if (!text) {
-      return;
+    if (!text?.trim() && !attachments?.length) {
+      return false;
     }
     // 草稿态：第一条消息就是创建会话的时机，标题直接用这句话开头
+    const ownerEpoch = get().sessionEpoch;
     let sessionId = get().sessionId;
     if (!sessionId) {
       try {
         sessionId = await get().ensureSession({ title: text });
       } catch (error) {
         get().showNotice('创建对话失败：' + error.message);
-        return;
+        return false;
       }
-      if (!sessionId) {
-        return;
+      if (!sessionId || get().sessionEpoch !== ownerEpoch) {
+        return false;
       }
     }
     // /技能名 参数 → 服务端期望 content=参数 + skill=技能名（旧版 resolveSkillCommand 同语义）
@@ -913,21 +936,34 @@ export const useStore = create(immer((set, get) => {
       body.skill = skillCall.skill;
     }
     const remembered = rememberInput(localStorage, sessionId, text);
-    set((draft) => {
-      draft.pendingInputs.push(payloadContent);
-      appendUserRow(draft, payloadContent, null, { attachments, imagePositions, pendingKey: `pending:${Date.now()}` });
-      draft.ui.bottomSignal += 1;
-      if (remembered) {
+    const queueInstead = get().running;
+    if (!queueInstead) {
+      set((draft) => {
+        draft.pendingInputs.push(payloadContent);
+        appendUserRow(draft, payloadContent, null, { attachments, imagePositions, pendingKey: `pending:${Date.now()}` });
+        draft.ui.bottomSignal += 1;
+        if (remembered) {
+          draft.inputHistory = remembered;
+          draft.inputHistoryIndex = -1;
+          draft.inputHistoryDraft = '';
+        }
+      });
+    } else if (remembered) {
+      set((draft) => {
         draft.inputHistory = remembered;
         draft.inputHistoryIndex = -1;
         draft.inputHistoryDraft = '';
-      }
-    });
-    dropDraft(localStorage, sessionId);
+      });
+    }
     try {
       await api.sendMessage(sessionId, body);
+      if (queueInstead && get().sessionId === sessionId) {
+        await get().loadQueue();
+      }
+      dropDraft(localStorage, sessionId);
+      return true;
     } catch (error) {
-      set((draft) => {
+      if (get().sessionId === sessionId) set((draft) => {
         draft.pendingInputs = draft.pendingInputs.filter((item) => !sameUserInput(item, payloadContent));
         const rows = draft.thread.rows;
         const index = rows.map((row) => row.text).lastIndexOf(payloadContent);
@@ -936,18 +972,25 @@ export const useStore = create(immer((set, get) => {
         }
       });
       get().showNotice('发送失败：' + error.message);
+      return false;
     }
   },
 
   async steer(text, attachments) {
+    if (attachments?.length) {
+      get().showNotice('纠正消息暂不支持附件，请移除附件后发送，或恢复任务后排队发送。');
+      return false;
+    }
     const { sessionId, runId } = get();
     set((draft) => { draft.steering = true; });
     try {
       await api.steer(sessionId, { content: text, runId });
       set((draft) => { draft.steering = false; });
+      return true;
     } catch (error) {
       set((draft) => { draft.steering = false; });
       get().showNotice('纠正失败：' + error.message);
+      return false;
     }
   },
 
@@ -991,11 +1034,17 @@ export const useStore = create(immer((set, get) => {
   },
 
   async resendMessage(sequence, text, attachments) {
+    if (attachments?.length) {
+      get().showNotice('编辑历史消息暂不支持新增附件。附件已保留，可取消编辑后作为新消息发送。');
+      return false;
+    }
     const { sessionId } = get();
     try {
       await api.resend(sessionId, { sequence, content: text });
+      return true;
     } catch (error) {
       get().showNotice('重新发送失败：' + error.message);
+      return false;
     }
   },
 
@@ -1064,20 +1113,24 @@ export const useStore = create(immer((set, get) => {
     }
     try {
       const data = await api.queue(sessionId);
+      const normalized = normalizeQueue(data);
       set((draft) => {
-        draft.queue = (data?.messages || []).map((item) => item.text ?? item);
-        draft.queueEntries = data?.messages || [];
+        draft.queue = normalized.texts;
+        draft.queueEntries = normalized.rows;
       });
     } catch { /* 队列读取失败不阻塞 */ }
   },
 
   async saveQueueItem(index, text) {
+    if (!text?.trim()) { get().showNotice('排队消息不能为空'); return false; }
     const { sessionId } = get();
     try {
       await api.updateQueueItem(sessionId, index, { content: text });
       await get().loadQueue();
+      return true;
     } catch (error) {
       get().showNotice('修改排队消息失败：' + error.message);
+      return false;
     }
   },
 
@@ -1377,10 +1430,15 @@ export const useStore = create(immer((set, get) => {
   },
 
   /* ---------- 工作区 / worktree ---------- */
-  async switchWorkspace(workspace) {
+  async switchWorkspace(workspace, { throwOnError = false } = {}) {
     const { sessionId } = get();
     if (!sessionId) {
-      set((draft) => { draft.workspace = workspace; });
+      set((draft) => {
+        draft.workspace = workspace;
+        draft.draftSession = { ...draft.draftSession, workspace };
+        draft.fileIndex = { items: [], sessionId: null };
+        resetFilePreview(draft);
+      });
       return;
     }
     try {
@@ -1388,6 +1446,7 @@ export const useStore = create(immer((set, get) => {
       await get().activate(sessionId);
     } catch (error) {
       get().showNotice('切换文件夹失败：' + error.message);
+      if (throwOnError) throw error;
     }
   },
 
@@ -1491,12 +1550,14 @@ export const useStore = create(immer((set, get) => {
     set((draft) => { draft.changesState = 'loading'; });
     try {
       const report = await api.diff(sessionId);
+      if (get().sessionId !== sessionId) return;
       set((draft) => {
         draft.changeReport = report;
         draft.changesState = '';
         draft.ui.changeCount = (report.files || []).length;
       });
     } catch (error) {
+      if (get().sessionId !== sessionId) return;
       set((draft) => { draft.changesState = 'error'; });
       get().showNotice('读取变更失败：' + error.message);
     }
@@ -1568,22 +1629,29 @@ export const useStore = create(immer((set, get) => {
     }
   },
   async openPreview(path) {
-    const { sessionId } = get();
+    const { sessionId, workspace, sessionEpoch } = get();
     const target = String(path || '').trim();
-    if (!sessionId || !target) {
-      return;
-    }
+    if ((!sessionId && !workspace) || !target) return;
+    const request = (get()._previewRequest || 0) + 1;
     set((draft) => {
+      draft._previewRequest = request;
       draft.ui.previewPath = target;
       draft.ui.inspectorTab = 'preview';
+      draft.ui.inspectorOpen = true;
+      draft.ui.reviewExpanded = false;
+      draft._previewData = null;
       draft._previewLoading = true;
     });
+    const current = () => get()._previewRequest === request && get().sessionId === sessionId
+      && get().workspace === workspace && get().sessionEpoch === sessionEpoch;
     try {
-      const data = await api.file(sessionId, target);
-      set((draft) => { draft._previewData = data; draft._previewLoading = false; });
+      const data = sessionId ? await api.file(sessionId, target) : await api.workspaceFile(workspace, target);
+      if (current()) set((draft) => { draft._previewData = data; draft._previewLoading = false; });
     } catch (error) {
-      set((draft) => { draft._previewLoading = false; });
-      get().showNotice('读取文件失败：' + error.message);
+      if (current()) {
+        set((draft) => { draft._previewLoading = false; });
+        get().showNotice('读取文件失败：' + error.message);
+      }
     }
   },
 
@@ -1785,8 +1853,11 @@ export const useStore = create(immer((set, get) => {
       if (get().capabilities) {
         await get().loadCapabilities();
       }
+      return true;
     } catch (error) {
-      get().showNotice(classifyModelError(error));
+      const problem = classifyModelError(error?.message || error);
+      get().showNotice(problem.hint || '保存模型失败：' + error.message);
+      return false;
     }
   },
   async probeModels(body) {

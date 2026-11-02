@@ -31,6 +31,72 @@ class SessionFilesApiTest {
     Path workspace;
 
     @Test
+    void draftWorkspaceIndexSupportsUnicodeAndSkipsBuildArtifacts() throws Exception {
+        Files.createDirectories(workspace.resolve("源码"));
+        Files.createDirectories(workspace.resolve("node_modules"));
+        Files.writeString(workspace.resolve("源码/测试 file.txt"), "内容");
+        Files.writeString(workspace.resolve("node_modules/ignored.js"), "ignored");
+        mvc.perform(get("/api/workspaces/files/flat").param("path", workspace.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.files.length()").value(1))
+                .andExpect(jsonPath("$.files[0]").value("源码/测试 file.txt"));
+    }
+
+    @Test
+    void draftWorkspaceIndexValidatesPathAndHonorsLimits() throws Exception {
+        Files.writeString(workspace.resolve("a.txt"), "a");
+        Files.writeString(workspace.resolve("b.txt"), "b");
+        mvc.perform(get("/api/workspaces/files/flat").param("path", workspace.toString()).param("limit", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.files.length()").value(1))
+                .andExpect(jsonPath("$.truncated").value(true));
+        for (String invalid : new String[]{"", workspace.resolve("missing").toString(), workspace.resolve("a.txt").toString()}) {
+            mvc.perform(get("/api/workspaces/files/flat").param("path", invalid)).andExpect(status().isBadRequest());
+        }
+    }
+
+    @Test
+    void draftWorkspaceIndexDoesNotFollowSymlinks() throws Exception {
+        Path outside = Files.createTempDirectory("pilot-outside-");
+        try {
+            Files.writeString(outside.resolve("private.txt"), "outside");
+            try { Files.createSymbolicLink(workspace.resolve("link"), outside); }
+            catch (UnsupportedOperationException | java.nio.file.FileSystemException e) { return; }
+            mvc.perform(get("/api/workspaces/files/flat").param("path", workspace.toString()))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.files.length()").value(0));
+            mvc.perform(get("/api/workspaces/files").param("root", workspace.toString()).param("path", "link"))
+                    .andExpect(status().isBadRequest());
+            mvc.perform(get("/api/workspaces/file").param("root", workspace.toString()).param("path", "link/private.txt"))
+                    .andExpect(status().isBadRequest());
+        } finally {
+            Files.deleteIfExists(workspace.resolve("link"));
+            Files.deleteIfExists(outside.resolve("private.txt"));
+            Files.deleteIfExists(outside);
+        }
+    }
+
+    @Test
+    void draftTreeAndPreviewShareSessionPathValidation() throws Exception {
+        Files.createDirectories(workspace.resolve("源码"));
+        Files.writeString(workspace.resolve("源码/测试 文件.md"), "内容");
+        mvc.perform(get("/api/workspaces/files").param("root", workspace.toString()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.entries[0].directory").value(true));
+        mvc.perform(get("/api/workspaces/files").param("root", workspace.toString()).param("path", "源码"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.entries[0].path").value("源码/测试 文件.md"));
+        mvc.perform(get("/api/workspaces/file").param("root", workspace.toString()).param("path", "源码/测试 文件.md"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content").value("内容"));
+        for (String endpoint : new String[]{"files", "file"}) {
+            mvc.perform(get("/api/workspaces/" + endpoint).param("root", workspace.toString()).param("path", "../outside"))
+                    .andExpect(status().isBadRequest());
+        }
+        mvc.perform(get("/api/workspaces/file").param("root", workspace.toString()).param("path", "源码"))
+                .andExpect(status().isBadRequest());
+        Files.write(workspace.resolve("binary.bin"), new byte[]{0, 1, 2});
+        mvc.perform(get("/api/workspaces/file").param("root", workspace.toString()).param("path", "binary.bin"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.binary").value(true));
+    }
+
+    @Test
     void listsDirectoriesBeforeFiles() throws Exception {
         Files.createDirectories(workspace.resolve("src"));
         Files.writeString(workspace.resolve("README.md"), "# demo");

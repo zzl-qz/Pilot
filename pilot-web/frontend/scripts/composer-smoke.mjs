@@ -1,0 +1,111 @@
+import { createServer } from 'vite';
+import { chromium, _electron } from 'playwright-core';
+import assert from 'node:assert/strict';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = fileURLToPath(new URL('..', import.meta.url));
+const temp = await mkdtemp(join(tmpdir(), 'pilot-composer-'));
+const server = await createServer({ root, server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'composer-fixture', configureServer(server) {
+  server.middlewares.use('/__composer', async (_req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    res.end(await server.transformIndexHtml('/__composer', `<html><head><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
+      import React from 'react';
+      import {createRoot} from 'react-dom/client';
+      import {Composer} from '/src/components/Composer.jsx';
+      import {useStore} from '/src/store.js';
+      import {api} from '/src/api.js';
+      import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
+      document.documentElement.dataset.theme='dark'; window.store=useStore; window.api=api; window.sent=[];
+      api.sendMessage=async (id, body)=>{window.sent.push({id, body}); if(window.failSend) throw Error('test failure');};
+      useStore.setState({sessionId:'test-a'});
+      createRoot(document.getElementById('root')).render(React.createElement(Composer));
+    </script></body></html>`));
+  });
+} }] });
+let browser, electron;
+async function run(page, name) {
+  const errors=[]; page.on('pageerror', e=>{errors.push(e.message); console.error(e.message);});
+  page.on('console',m=>{if(m.type()==='error') console.error(m.text());}); await page.goto(url);
+  const input=page.locator('#input-flow'); await input.waitFor();
+  const chips=page.locator('[data-chip="attachment"]');
+  async function transfer(kind, fileName, content='hello', type='text/plain') {
+    await input.evaluate((el, {kind,fileName,content,type})=>{
+      const data=new DataTransfer(); data.items.add(new File([content],fileName,{type}));
+      el.dispatchEvent(kind==='paste' ? new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}) : new DragEvent('drop',{dataTransfer:data,bubbles:true,cancelable:true}));
+    },{kind,fileName,content,type});
+    await page.waitForFunction(()=>document.querySelector('#input-flow').getAttribute('aria-busy')==='false');
+  }
+  await input.fill('请检查附件');
+  await transfer('paste','paste.txt'); assert.equal(await chips.count(),1);
+  assert.equal(await input.innerText().then(t=>t.includes('请检查附件')),true);
+  assert.equal(await page.locator('#send').isEnabled(),true);
+  await transfer('paste','paste.txt'); assert.equal(await chips.count(),1,'去重');
+  await transfer('drop','drop.txt'); assert.equal(await chips.count(),2);
+  await page.locator('input[type=file]').setInputFiles({name:'picker.txt',mimeType:'text/plain',buffer:Buffer.from('picker')});
+  await page.waitForFunction(()=>document.querySelectorAll('[data-chip="attachment"]').length===3);
+  await transfer('paste','empty.txt',''); assert.equal(await chips.count(),3);
+  await transfer('paste','large.txt','x'.repeat(2*1024*1024+1)); assert.equal(await chips.count(),3);
+  await page.evaluate(()=>store.setState({sessionId:'test-b'})); await page.waitForTimeout(50); assert.equal(await chips.count(),0);
+  await page.evaluate(()=>store.setState({sessionId:'test-a'})); await page.waitForTimeout(50); assert.equal(await chips.count(),3,'切换会话保留附件');
+  await page.evaluate(()=>window.failSend=true);
+  await page.locator('#send').click(); await page.waitForFunction(()=>!document.querySelector('#send').disabled);
+  assert.equal(await chips.count(),3,'失败保留附件');
+  await page.evaluate(()=>window.failSend=false);
+  await page.locator('#send').click(); await page.waitForFunction(()=>document.querySelectorAll('[data-chip="attachment"]').length===0);
+  const body=await page.evaluate(()=>sent.at(-1).body); assert.equal(body.attachments.length,3); assert.match(body.attachments[0].dataBase64,/^data:text\/plain;base64,/);
+  assert.equal(await page.locator('#send').isDisabled(),true);
+  await transfer('paste','only.txt'); await page.locator('#send').click();
+  await page.waitForFunction(()=>document.querySelectorAll('[data-chip="attachment"]').length===0);
+  assert.equal(await page.evaluate(()=>sent.at(-1).body.attachments[0].name),'only.txt');
+  await transfer('paste','screen.png','image','image/png');
+  assert.equal(await page.locator('.chip-thumb').count(),1);
+  await page.locator('.chip-remove').click(); assert.equal(await chips.count(),0);
+  await input.fill('中文'); const before=await page.evaluate(()=>sent.length);
+  await input.evaluate(el=>el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true})));
+  assert.equal(await page.evaluate(()=>sent.length),before,'输入法不发送');
+  await input.press('Shift+Enter'); await input.press('a'); assert.equal(await page.evaluate(()=>sent.length),before);
+  await page.setViewportSize({width:390,height:844}); await page.screenshot({path:join(temp,`${name}-mobile.png`)});
+  await page.setViewportSize({width:1440,height:900}); await page.screenshot({path:join(temp,`${name}-desktop.png`)});
+  assert.deepEqual(errors,[]); console.log(`${name}: PASS (paste/drop/picker/limits/dedup/drafts/failure/attachment-only/thumbnail/IME/newline)`);
+}
+let url;
+try {
+  await server.listen(); url=`http://127.0.0.1:${server.httpServer.address().port}/__composer`;
+  browser=await chromium.launch({channel:'chrome',headless:true}); await run(await browser.newPage(),'chromium'); await browser.close(); browser=null;
+  const main=join(temp,'main.cjs');
+  await writeFile(main,`const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
+  const env={...process.env}; delete env.ELECTRON_RUN_AS_NODE;
+  electron=await _electron.launch({executablePath:resolve(root,'../../pilot-desktop/node_modules/.bin/electron'),args:[main],env});
+  await run(await electron.firstWindow(),'electron');
+  // macOS 原生文件剪贴板 + 真实快捷键；保存并恢复原有剪贴板格式。
+  if (process.platform === 'darwin') {
+    const file = join(temp, 'native-clipboard.txt'); await writeFile(file, 'native clipboard test');
+    await electron.evaluate(async ({clipboard, ClipboardItem}) => {
+      globalThis.savedClipboard = await Promise.all((await clipboard.read()).map(async item =>
+        new ClipboardItem(Object.fromEntries(await Promise.all(item.types.map(async type => [type, await item.getType(type)]))))));
+    });
+    try {
+      await electron.evaluate(async ({clipboard, ClipboardItem}, path) => {
+        await clipboard.write([new ClipboardItem({
+          'electron application/osclipboard;format="NSFilenamesPboardType"': new Blob([`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><array><string>${path}</string></array></plist>`])
+        })]);
+      }, file);
+      const page = await electron.firstWindow();
+      await page.locator('#input-flow').focus(); await page.keyboard.press('Meta+v');
+      await page.waitForFunction(()=>document.querySelector('[data-chip="attachment"]')?.textContent.includes('native-clipboard.txt'));
+      console.log('electron: PASS native macOS file clipboard + Cmd+V');
+      browser=await chromium.launch({channel:'chrome',headless:false});
+      const web=await browser.newPage(); await web.goto(url); await web.locator('#input-flow').focus(); await web.keyboard.press('Meta+v');
+      await web.waitForFunction(()=>document.querySelector('[data-chip="attachment"]')?.textContent.includes('native-clipboard.txt'));
+      console.log('chromium: PASS native macOS file clipboard + Cmd+V');
+    } finally {
+      await electron.evaluate(async ({clipboard}) => {
+        if (globalThis.savedClipboard.length) await clipboard.write(globalThis.savedClipboard);
+        else clipboard.clear();
+      });
+    }
+  }
+  console.log(`Screenshots: ${temp}`);
+} finally { await browser?.close(); await electron?.close(); await server.close(); }

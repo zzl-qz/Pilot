@@ -8,9 +8,11 @@ import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -62,6 +64,7 @@ public class DesktopWindowLauncher {
             if (!Files.exists(logFile)) {
                 Files.createFile(logFile);
             }
+            electron = prepareDesktopBinary(root, electron, logFile);
             ProcessBuilder builder = new ProcessBuilder(electron.toString(), root.resolve("pilot-desktop").toString());
             builder.directory(root.resolve("pilot-desktop").toFile());
             builder.environment().remove("ELECTRON_RUN_AS_NODE");
@@ -139,6 +142,38 @@ public class DesktopWindowLauncher {
             return dist.resolve("electron.exe");
         }
         return dist.resolve("electron");
+    }
+
+    /** 使用 Electron 自带的 Node 准备开发壳，IDEA 不需要额外配置 node 的 PATH。 */
+    static Path prepareDesktopBinary(Path root, Path electron, Path logFile) throws IOException {
+        if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac")) {
+            return electron;
+        }
+        ProcessBuilder prepare = new ProcessBuilder(electron.toString(),
+                root.resolve("pilot-desktop").resolve("brand-host.mjs").toString());
+        prepare.directory(root.resolve("pilot-desktop").toFile());
+        prepare.environment().put("ELECTRON_RUN_AS_NODE", "1");
+        prepare.redirectError(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
+        Process process = prepare.start();
+        try {
+            if (!process.waitFor(90, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new IOException("准备 Pilot 开发壳超时，请查看 " + logFile);
+            }
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+            if (process.exitValue() != 0 || output.isEmpty()) {
+                throw new IOException("准备 Pilot 开发壳失败，请查看 " + logFile);
+            }
+            Path binary = Path.of(output);
+            if (!Files.isExecutable(binary)) {
+                throw new IOException("Pilot 开发壳不可执行：" + binary);
+            }
+            return binary;
+        } catch (InterruptedException e) {
+            process.destroyForcibly();
+            Thread.currentThread().interrupt();
+            throw new IOException("准备 Pilot 开发壳被中断", e);
+        }
     }
 
     static boolean alreadyOpen(Path root) {
