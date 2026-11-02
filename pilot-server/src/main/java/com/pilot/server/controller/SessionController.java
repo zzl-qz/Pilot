@@ -11,9 +11,7 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
 import com.pilot.server.config.AgentProperties;
-import com.pilot.server.session.AttachmentService;
-import com.pilot.server.session.RunStarter;
-import com.pilot.server.session.SkillService;
+import com.pilot.server.session.*;
 import com.pilot.server.workspace.WorkspaceService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -36,8 +34,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -70,14 +70,14 @@ public class SessionController {
     private final PlanRepository plans;
     private final AttachmentService attachments;
     private final ProjectRepository projects;
-    private final com.pilot.server.session.SessionCleanupService cleanup;
+    private final SessionCleanupService cleanup;
     private final SkillService skills;
 
     public SessionController(SessionService sessions, RunStarter runStarter, ObjectMapper objectMapper,
                              WorkspaceService workspaces, AgentProperties agentProperties,
                              PlanRepository plans, AttachmentService attachments,
                              ProjectRepository projects,
-                             com.pilot.server.session.SessionCleanupService cleanup,
+                             SessionCleanupService cleanup,
                              SkillService skills) {
         this.sessions = sessions;
         this.runStarter = runStarter;
@@ -98,7 +98,7 @@ public class SessionController {
      * 由界面问用户「归档旧的再新建」还是「回去用旧的」——不静默复用，
      * 也不允许把空白对话堆起来（用户看不见的会话最难收拾）。
      *
-     * @param replaceBlank 为 true 时表示用户已确认「归档旧空白对话并新建」
+     * @param request 为 true 时表示用户已确认「归档旧空白对话并新建」
      */
     @PostMapping
     public SessionResponse create(@RequestBody(required = false) CreateSessionRequest request) {
@@ -161,14 +161,14 @@ public class SessionController {
 
     /** 把路径规范化为项目里登记的写法；不属于该项目时 400。 */
     private String insideProject(Project project, String raw) {
-        java.nio.file.Path candidate;
+        Path candidate;
         try {
-            candidate = java.nio.file.Path.of(raw).toAbsolutePath().normalize();
+            candidate = Path.of(raw).toAbsolutePath().normalize();
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "路径不合法: " + raw);
         }
         for (String folder : project.folders()) {
-            if (java.nio.file.Path.of(folder).toAbsolutePath().normalize().equals(candidate)) {
+            if (Path.of(folder).toAbsolutePath().normalize().equals(candidate)) {
                 return folder;
             }
         }
@@ -362,13 +362,13 @@ public class SessionController {
     @GetMapping("/{id}/attachments/{file}")
     public ResponseEntity<Resource> attachment(@PathVariable String id, @PathVariable String file) {
         requireSession(id);
-        java.nio.file.Path path;
+        Path path;
         try {
             path = attachments.resolveImage(id, file);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在");
         }
-        String lower = file.toLowerCase(java.util.Locale.ROOT);
+        String lower = file.toLowerCase(Locale.ROOT);
         MediaType type = lower.endsWith(".png") ? MediaType.IMAGE_PNG
                 : lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? MediaType.IMAGE_JPEG
                 : lower.endsWith(".gif") ? MediaType.IMAGE_GIF
@@ -567,7 +567,7 @@ public class SessionController {
     }
 
     private String workspaceOf(String sessionId) {
-        return sessions.find(sessionId).map(com.pilot.core.session.Session::workspace).orElse(null);
+        return sessions.find(sessionId).map(Session::workspace).orElse(null);
     }
 
     /**
@@ -578,15 +578,24 @@ public class SessionController {
      * 历史事件分页：界面首屏只取尾部一页，避免长会话一次性回放上千条事件。
      *
      * @param before 只返回序号小于它的历史，便于向上翻页
+     * @param after  只返回序号大于它的历史，便于窗口回收后向下翻页
      */
     @GetMapping("/{id}/history")
     public HistoryResponse history(@PathVariable String id,
                                    @RequestParam(name = "limit", defaultValue = "60") int limit,
-                                   @RequestParam(name = "before", required = false) Long before) {
+                                   @RequestParam(name = "before", required = false) Long before,
+                                   @RequestParam(name = "after", required = false) Long after) {
         requireSession(id);
+        if (before != null && after != null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "before 和 after 不能同时使用");
+        }
         int capped = Math.max(1, Math.min(limit, 500));
-        List<EventEnvelope> page = sessions.eventsPage(id, before, capped);
-        boolean hasMore = !page.isEmpty() && page.get(0).sequence() > 1;
+        List<EventEnvelope> page = after != null
+                ? sessions.eventsPageAfter(id, after, capped)
+                : sessions.eventsPage(id, before, capped);
+        boolean hasMore = after != null
+                ? !page.isEmpty() && page.get(page.size() - 1).sequence() < sessions.latestSequence(id)
+                : !page.isEmpty() && page.get(0).sequence() > 1;
         return new HistoryResponse(page, hasMore, countOf(id));
     }
 
@@ -695,10 +704,10 @@ public class SessionController {
     public record RenameRequest(String title) { }
 
     public record MessageRequest(String content, List<AttachmentService.Inbound> attachments,
-                                 com.pilot.server.session.TaskControlService.Requirements task,
+                                 TaskControlService.Requirements task,
                                  String skill, List<Integer> imagePositions) {
         public MessageRequest(String content, List<AttachmentService.Inbound> attachments,
-                              com.pilot.server.session.TaskControlService.Requirements task) {
+                              TaskControlService.Requirements task) {
             this(content, attachments, task, null, List.of());
         }
     }
@@ -720,11 +729,13 @@ public class SessionController {
 
     public record ActiveRunResponse(String sessionId, String runId) { }
 
-    public record SessionResponse(String sessionId, String title, Instant createdAt, SessionStatus status,
+    public record SessionResponse(String id, String sessionId, String title, Instant createdAt, SessionStatus status,
                                   String workspace, String projectId, boolean isBlank, boolean archived,
                                   int eventCount) {
         static SessionResponse of(Session session, int eventCount) {
-            return new SessionResponse(session.id(), session.title(), session.createdAt(), session.status(),
+            // 同时保留 id 与 sessionId：前端界面（含 React 版）统一按 id 读取会话标识，
+            // 旧版 app.js 仍按 sessionId 读取，二者并存避免任一侧取到 undefined。
+            return new SessionResponse(session.id(), session.id(), session.title(), session.createdAt(), session.status(),
                     session.workspace(), session.projectId(), session.isBlank(), session.archived(), eventCount);
         }
     }

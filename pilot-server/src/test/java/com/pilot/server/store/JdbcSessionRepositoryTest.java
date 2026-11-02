@@ -109,6 +109,11 @@ class JdbcSessionRepositoryTest {
         List<EventEnvelope> latest = repository.eventsPage("ses_1", null, 5);
         assertEquals(List.of(6L, 7L, 8L, 9L, 10L), latest.stream().map(EventEnvelope::sequence).toList());
 
+        // 向下恢复被窗口回收的新消息时按索引正向取一页
+        List<EventEnvelope> later = repository.eventsPageAfter("ses_1", 5L, 3);
+        assertEquals(List.of(6L, 7L, 8L), later.stream().map(EventEnvelope::sequence).toList());
+        assertTrue(repository.eventsPageAfter("ses_1", 10L, 5).isEmpty());
+
         // 往前翻：序号 1..5
         List<EventEnvelope> earlier = repository.eventsPage("ses_1", 6L, 5);
         assertEquals(List.of(1L, 2L, 3L, 4L, 5L), earlier.stream().map(EventEnvelope::sequence).toList());

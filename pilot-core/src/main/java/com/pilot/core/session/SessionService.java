@@ -217,6 +217,10 @@ public final class SessionService {
         return repository.eventCount(sessionId);
     }
 
+    public long latestSequence(String sessionId) {
+        return repository.latestSequence(sessionId);
+    }
+
     /**
      * 指定序号区间的事件，供历史分页使用。
      *
@@ -225,6 +229,10 @@ public final class SessionService {
      */
     public List<EventEnvelope> eventsPage(String sessionId, Long before, int limit) {
         return repository.eventsPage(sessionId, before, limit);
+    }
+
+    public List<EventEnvelope> eventsPageAfter(String sessionId, long after, int limit) {
+        return repository.eventsPageAfter(sessionId, after, limit);
     }
 
     /**

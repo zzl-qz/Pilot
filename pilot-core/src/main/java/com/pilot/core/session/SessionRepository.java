@@ -90,6 +90,11 @@ public interface SessionRepository {
         return List.copyOf(all.subList(start, end));
     }
 
+    /** 游标之后的历史页，按 sequence 升序。 */
+    default List<EventEnvelope> eventsPageAfter(String sessionId, long after, int limit) {
+        return eventsAfter(sessionId, after).stream().limit(Math.max(1, limit)).toList();
+    }
+
     /** 当前已落库的最大序号。还没有事件时返回 0。 */
     long latestSequence(String sessionId);
 

@@ -303,6 +303,19 @@ class SessionApiTest {
                 .andExpect(jsonPath("$.events[0].sequence").value(2))
                 .andExpect(jsonPath("$.events[1].sequence").value(3))
                 .andExpect(jsonPath("$.hasMore").value(true));
+
+        mvc.perform(get("/api/sessions/{id}/history", sessionId)
+                        .param("limit", "2")
+                        .param("after", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.events[0].sequence").value(3))
+                .andExpect(jsonPath("$.events[1].sequence").value(4))
+                .andExpect(jsonPath("$.hasMore").value(true));
+
+        mvc.perform(get("/api/sessions/{id}/history", sessionId)
+                        .param("before", "4")
+                        .param("after", "2"))
+                .andExpect(status().isBadRequest());
     }
 
     /** 同一项目下不允许出现第二条空白对话；要求确认后可以「归档旧的再新建」。 */

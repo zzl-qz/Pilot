@@ -192,6 +192,26 @@ public final class JdbcSessionRepository implements SessionRepository {
     }
 
     @Override
+    public List<EventEnvelope> eventsPageAfter(String sessionId, long after, int limit) {
+        String sql = "SELECT sequence, run_id, type, payload, created_at FROM events WHERE session_id = ?"
+                + " AND sequence > ? ORDER BY sequence ASC LIMIT ?";
+        try (Connection connection = store.open(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sessionId);
+            statement.setLong(2, after);
+            statement.setInt(3, Math.max(1, limit));
+            ArrayList<EventEnvelope> page = new ArrayList<EventEnvelope>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    page.add(mapEvent(rows, sessionId));
+                }
+            }
+            return List.copyOf(page);
+        } catch (SQLException e) {
+            throw new IllegalStateException("读取更新历史分页失败: " + sessionId, e);
+        }
+    }
+
+    @Override
     public long latestSequence(String sessionId) {
         return JdbcSupport.query(store, "SELECT sequence FROM sessions WHERE id = ?",
                 statement -> statement.setString(1, sessionId),
