@@ -13,6 +13,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -349,6 +350,89 @@ class ChangeServiceTest {
         assertEquals("??", untracked.status());
         assertEquals(3, untracked.added());
         assertEquals(0, untracked.removed());
+    }
+
+    /** 撤销：已跟踪文件回到 HEAD，未跟踪文件直接删掉，越界路径一律拒绝。 */
+    @Test
+    void restoresTrackedFileAndDeletesUntracked() throws IOException {
+        assumeTrue(git("--version"), "需要本机可用的 git");
+        git("init", "-q");
+        git("config", "core.autocrlf", "false");
+        Path tracked = workspace.resolve("a.txt");
+        Files.writeString(tracked, "old\n");
+        git("add", ".");
+        commit();
+
+        Files.writeString(tracked, "agent change\n");
+        Path created = workspace.resolve("new.txt");
+        Files.writeString(created, "hello\n");
+
+        ChangeService.RestoreReport report = changes.restore(workspace,
+                List.of("a.txt", "new.txt", "../escape.txt"), false);
+
+        assertEquals(List.of("a.txt"), report.restored());
+        assertEquals(List.of("new.txt"), report.deleted());
+        assertEquals(1, report.failed().size(), "越界路径要被拒绝并给出原因");
+        assertEquals("../escape.txt", report.failed().get(0).path());
+        assertEquals("old\n", Files.readString(tracked));
+        assertFalse(Files.exists(created));
+        assertNull(report.error());
+    }
+
+    /** 已暂存的新增文件撤销后既不在 index 里也不在磁盘上，否则重新打开面板还会看到它。 */
+    @Test
+    void restoresStagedNewFileByDeletingIt() throws IOException {
+        assumeTrue(git("--version"), "需要本机可用的 git");
+        git("init", "-q");
+        git("config", "core.autocrlf", "false");
+        Files.writeString(workspace.resolve("keep.txt"), "keep\n");
+        git("add", ".");
+        commit();
+
+        Path added = workspace.resolve("Added.java");
+        Files.writeString(added, "class A {}\n");
+        git("add", "Added.java");
+
+        ChangeService.RestoreReport report = changes.restore(workspace, List.of("Added.java"), false);
+
+        assertEquals(List.of("Added.java"), report.deleted());
+        assertFalse(Files.exists(added));
+        assertFalse(changes.inspect(workspace).files().stream()
+                .anyMatch(file -> file.path().equals("Added.java")));
+    }
+
+    /** 「撤销全部」覆盖同一份 git status 里的所有条目，撤销完面板应该变空。 */
+    @Test
+    void restoresEverythingWhenAllRequested() throws IOException {
+        assumeTrue(git("--version"), "需要本机可用的 git");
+        git("init", "-q");
+        git("config", "core.autocrlf", "false");
+        Path tracked = workspace.resolve("a.txt");
+        Files.writeString(tracked, "old\n");
+        git("add", ".");
+        commit();
+
+        Files.writeString(tracked, "changed\n");
+        Files.writeString(workspace.resolve("b.txt"), "new\n");
+
+        ChangeService.RestoreReport report = changes.restore(workspace, List.of(), true);
+
+        assertEquals(List.of("a.txt"), report.restored());
+        assertEquals(List.of("b.txt"), report.deleted());
+        assertTrue(report.failed().isEmpty(), report.failed().toString());
+        assertTrue(changes.inspect(workspace).files().isEmpty());
+    }
+
+    /** 不是 git 仓库时给出可读原因，而不是让界面显示「撤销成功」。 */
+    @Test
+    void refusesRestoreOutsideGitRepository() throws IOException {
+        Files.writeString(workspace.resolve("a.txt"), "hello\n");
+
+        ChangeService.RestoreReport report = changes.restore(workspace, List.of("a.txt"), false);
+
+        assertNotNull(report.error());
+        assertTrue(report.restored().isEmpty());
+        assertTrue(Files.exists(workspace.resolve("a.txt")), "非 git 工作区不能删用户文件");
     }
 
     private static ChangeService.FileChange sessionFile(ChangeService.ChangeReport report, String path) {

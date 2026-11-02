@@ -65,6 +65,26 @@ public class ChangeService {
                                   boolean truncated, String error) {
     }
 
+    /**
+     * 撤销单个文件失败的原因。
+     *
+     * @param reason 直接展示给用户的说明（git 报错原文或界面侧的原因）
+     */
+    public record RestoreFailure(String path, String reason) {
+    }
+
+    /**
+     * 撤销结果。
+     *
+     * @param restored 已回退到 HEAD 的已跟踪文件
+     * @param deleted  已删除的未跟踪/新增文件
+     * @param failed   没能撤销的文件与原因
+     * @param error    整体失败（例如不是 git 仓库）时非空，此时三个列表都是空的
+     */
+    public record RestoreReport(List<String> restored, List<String> deleted,
+                                List<RestoreFailure> failed, String error) {
+    }
+
     public ChangeReport inspect(Path workspace) {
         String root = workspace.toString();
         if (!Files.isDirectory(workspace.resolve(".git"))) {
@@ -212,6 +232,160 @@ public class ChangeService {
 
         return new RunChangeReport(runId, root.toString(), true, List.copyOf(files),
                 addedTotal, removedTotal, truncated, null);
+    }
+
+    /**
+     * 单个文件的文本差异。
+     *
+     * <p>整份补丁有 200k 字符上限，改动很多时后面的文件会被截掉（只剩文件名和行数）。
+     * 界面点开这些文件时按需再取一次，避免把整份文件正文当成 diff 展示。
+     *
+     * @param path 工作区内的相对路径；越界路径直接拒绝
+     */
+    public FilePatch fileDiff(Path workspace, String path) {
+        Path root = workspace.toAbsolutePath().normalize();
+        String relative = safeRelative(path);
+        if (relative == null) {
+            throw new IllegalArgumentException("路径不在工作区内：" + path);
+        }
+        if (!Files.isDirectory(root.resolve(".git"))) {
+            return new FilePatch(relative, "M", 0, 0, "", false);
+        }
+
+        boolean head = hasHead(root);
+        StatusScan scan = statuses(root);
+        String status = scan.codes().get(relative);
+        // 重命名的补丁头写的是旧路径 → 新路径，只带新路径会被 git 过滤掉
+        Set<String> wanted = new LinkedHashSet<>();
+        wanted.add(relative);
+        if (status != null && status.indexOf('R') >= 0) {
+            wanted.addAll(scan.renameSources());
+        }
+
+        String chunk = diffChunks(root, List.copyOf(wanted), head).get(relative);
+        if (chunk != null && isBinaryPatch(chunk)) {
+            chunk = "";
+        }
+        int[] stat;
+        if (chunk != null) {
+            stat = countLines(chunk);
+        } else if ("??".equals(status) || "A".equals(status) || (!head && status == null)) {
+            // 未跟踪/新增文件不在 git diff 里，按当前内容合成一份全新增补丁
+            SyntheticDiff synthetic = untrackedDiff(root.resolve(relative), relative);
+            chunk = synthetic.text();
+            stat = new int[]{synthetic.added(), 0};
+        } else {
+            chunk = "";
+            stat = new int[]{0, 0};
+        }
+
+        boolean truncated = chunk.length() > MAX_FILE_DIFF_CHARS;
+        String body = truncated ? chunk.substring(0, MAX_FILE_DIFF_CHARS) : chunk;
+        return new FilePatch(relative, status == null ? "M" : status, stat[0], stat[1], body, truncated);
+    }
+
+    /**
+     * 单文件补丁。
+     *
+     * @param status    单字符状态，与列表里的徽标一致
+     * @param truncated diff 是否因为过大被截断
+     */
+    public record FilePatch(String path, String status, int added, int removed, String diff, boolean truncated) {
+    }
+
+    /**
+     * 撤销改动：已跟踪文件回退到 HEAD，未跟踪/新增文件直接删除。
+     *
+     * <p>这是审阅面板里唯一会写仓库的操作，因此只接受工作区内的相对路径：
+     * 越界路径一律剔除，不做任何 git 之外的文件系统操作。
+     *
+     * @param paths 要撤销的相对路径；{@code all=true} 时忽略该参数，撤销全部改动
+     */
+    public RestoreReport restore(Path workspace, List<String> paths, boolean all) {
+        Path root = workspace.toAbsolutePath().normalize();
+        if (!Files.isDirectory(root.resolve(".git"))) {
+            return new RestoreReport(List.of(), List.of(), List.of(), "工作区不是 git 仓库，无法撤销改动");
+        }
+
+        StatusScan scan = statuses(root);
+        Map<String, String> codes = scan.codes();
+        ArrayList<String> restored = new ArrayList<>();
+        ArrayList<String> deleted = new ArrayList<>();
+        ArrayList<RestoreFailure> failed = new ArrayList<>();
+        List<String> wanted;
+        if (all) {
+            wanted = List.copyOf(codes.keySet());
+        } else {
+            ArrayList<String> filtered = new ArrayList<>();
+            Set<String> seen = new LinkedHashSet<>();
+            for (String raw : paths == null ? List.<String>of() : paths) {
+                String path = safeRelative(raw);
+                if (path == null) {
+                    failed.add(new RestoreFailure(String.valueOf(raw), "路径不在工作区内，已拒绝"));
+                } else if (seen.add(path)) {
+                    filtered.add(path);
+                }
+            }
+            wanted = List.copyOf(filtered);
+        }
+        if (wanted.isEmpty()) {
+            return new RestoreReport(List.of(), List.of(), List.copyOf(failed), null);
+        }
+
+        boolean head = hasHead(root);
+        for (String path : wanted) {
+            String code = codes.get(path);
+            if (code == null) {
+                failed.add(new RestoreFailure(path, "没有未提交的改动"));
+                continue;
+            }
+            // 未跟踪文件不在 HEAD 里，撤销就是删掉它；新增（A）同理，先出暂存区再删文件
+            if (code.indexOf('?') >= 0 || code.indexOf('A') >= 0) {
+                if (code.indexOf('A') >= 0) {
+                    run(root, List.of("git", "rm", "--cached", "--force", "--", ":(literal)" + path));
+                }
+                try {
+                    if (Files.deleteIfExists(root.resolve(path))) {
+                        deleted.add(path);
+                    } else {
+                        failed.add(new RestoreFailure(path, "文件已不存在"));
+                    }
+                } catch (IOException e) {
+                    failed.add(new RestoreFailure(path, "删除失败：" + e.getMessage()));
+                }
+                continue;
+            }
+            if (!head) {
+                failed.add(new RestoreFailure(path, "仓库还没有提交，没有可回退的版本"));
+                continue;
+            }
+            CommandResult result = run(root, List.of("git", "restore", "--source=HEAD",
+                    "--staged", "--worktree", "--", ":(literal)" + path));
+            if (result.exitCode() != 0) {
+                // git 2.23 之前没有 restore；路径不在 HEAD 里时也会失败，退回 checkout 再试一次
+                result = run(root, List.of("git", "checkout", "HEAD", "--", ":(literal)" + path));
+            }
+            if (result.exitCode() == 0) {
+                restored.add(path);
+            } else {
+                failed.add(new RestoreFailure(path, firstLine(result.output())));
+            }
+        }
+        return new RestoreReport(List.copyOf(restored), List.copyOf(deleted),
+                List.copyOf(failed), null);
+    }
+
+    /** git 输出可能有很多行，界面上的失败原因只留第一行有用信息。 */
+    private static String firstLine(String output) {
+        if (output == null || output.isBlank()) {
+            return "git 撤销失败";
+        }
+        for (String line : output.lines().toList()) {
+            if (!line.isBlank() && !line.startsWith("warning: ")) {
+                return line.strip();
+            }
+        }
+        return "git 撤销失败";
     }
 
     /** 把工具给的展示路径收敛成工作区内的相对路径；越界或绝对路径一律拒绝。 */
@@ -557,7 +731,15 @@ public class ChangeService {
      * <p>超时由独立的看门狗线程负责杀进程：读流本身是阻塞的，只在读完之后再 {@code waitFor}
      * 会让超时形同虚设。
      */
+    /** @param exitCode 超时或启动失败时为 -1，{@code output} 可能为空 */
+    private record CommandResult(int exitCode, String output) {
+    }
+
     private static String exec(Path workspace, List<String> command) {
+        return run(workspace, command).output();
+    }
+
+    private static CommandResult run(Path workspace, List<String> command) {
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(workspace.toFile());
         builder.redirectErrorStream(true);
@@ -589,14 +771,14 @@ public class ChangeService {
             watchdog.interrupt();
             process.waitFor(1, TimeUnit.SECONDS);
             if (timedOut.get()) {
-                return "";
+                return new CommandResult(-1, "");
             }
-            return collected.toString(StandardCharsets.UTF_8);
+            return new CommandResult(process.exitValue(), collected.toString(StandardCharsets.UTF_8));
         } catch (IOException e) {
-            return "";
+            return new CommandResult(-1, "");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return "";
+            return new CommandResult(-1, "");
         }
     }
 }
