@@ -39,7 +39,7 @@ public class RemoteAccessFilter extends OncePerRequestFilter {
         this.properties = properties;
         this.control = new AccessControl(properties);
         this.audit = audit;
-        this.limiter = properties.rateLimitPerMinute() > 0
+        this.limiter = properties.tokenMode() && properties.rateLimitPerMinute() > 0
                 ? new SlidingWindowRateLimiter(properties.rateLimitPerMinute(), Duration.ofMinutes(1))
                 : null;
     }
