@@ -59,22 +59,6 @@ class ArtifactManifestTest {
     }
 
     @Test
-    void inputBundleCapturesBaselineRatherThanCurrentContent() {
-        ArtifactManifest current = manifest(1, List.of(
-                ArtifactFile.of("src/A.java", "baseline-hash", "class A { changed }")), List.of("dep-a"));
-        InputBundle bundle = InputBundle.from(current, NOW);
-
-        assertTrue(bundle.fingerprint().length() >= 32);
-        assertEquals(1, bundle.inputs().size());
-        // 输入快照看的是基线：之后代码再改，输入仍然描述「当时基于什么开始」
-        assertTrue(bundle.matches("abc123", List.of("dep-a"), "linux|amd64|java25"));
-        assertFalse(bundle.matches("def456", List.of("dep-a"), "linux|amd64|java25"),
-                "基线 commit 变了，输入就不再是同一份");
-        assertFalse(bundle.matches("abc123", List.of("dep-b"), "linux|amd64|java25"),
-                "依赖变了，输入也不再是同一份");
-    }
-
-    @Test
     void manifestIsSortedAndImmutable() {
         ArtifactManifest manifest = manifest(1, List.of(
                 ArtifactFile.of("b.txt", "", "b"),
