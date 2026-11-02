@@ -1556,12 +1556,12 @@ export const useStore = create(immer((set, get) => {
 
   /* ---------- 变更 / 预览 ---------- */
   async loadChanges() {
-    const { sessionId, sessionEpoch } = get();
+    const { sessionId, sessionEpoch, workspace } = get();
     if (!sessionId || get().changesState === 'restoring') {
       return;
     }
     const request = (get()._changesRequest || 0) + 1;
-    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get()._changesRequest === request;
+    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().workspace === workspace && get()._changesRequest === request;
     set((draft) => { draft.changesState = 'loading'; draft._changesRequest = request; });
     try {
       const report = await api.diff(sessionId);
@@ -1582,11 +1582,11 @@ export const useStore = create(immer((set, get) => {
    * 失败文件逐条回报，别把「撤销没成」显示成成功。
    */
   async restoreChanges(paths, all = false) {
-    const { sessionId, sessionEpoch } = get();
+    const { sessionId, sessionEpoch, workspace } = get();
     if (!sessionId || get().changesState === 'restoring') {
       return null;
     }
-    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
+    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().workspace === workspace;
     set((draft) => { draft.changesState = 'restoring'; draft._changesRequest = (draft._changesRequest || 0) + 1; });
     try {
       const report = await api.restoreChanges(sessionId, { paths: paths || [], all });
@@ -1640,11 +1640,11 @@ export const useStore = create(immer((set, get) => {
     }
   },
   async createBranch(name) {
-    const { sessionId, sessionEpoch } = get();
+    const { sessionId, sessionEpoch, workspace } = get();
     if (!sessionId) return { ok: false, error: '请先打开一个会话。' };
     try {
       await api.branch(sessionId, name);
-      if (get().sessionId === sessionId && get().sessionEpoch === sessionEpoch) {
+      if (get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().workspace === workspace) {
         get().showNotice(`已创建并切换分支 ${name}`);
         await get().loadChanges();
       }

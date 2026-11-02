@@ -100,9 +100,12 @@ export async function checkReview(page, name, temp) {
   });
   assert.equal(await page.evaluate(() => store.getState().changeReport.files[0].path), 'new.txt');
   await page.evaluate(async () => {
+    const prior = store.getState();
     api.restoreChanges = () => new Promise(resolve => window.staleRestore = resolve);
     window.restoringOld = store.getState().restoreChanges(['new.txt']);
-    store.setState({ sessionEpoch: store.getState().sessionEpoch + 1, changesState: 'loading' });
+    store.getState().startNewSession();
+    if (store.getState().changesState !== '') throw Error('新会话仍被旧撤销状态锁住');
+    store.setState({ sessionId: prior.sessionId, sessionTitle: prior.sessionTitle, thread: prior.thread, lastRunId: prior.lastRunId, changesState: 'loading' });
     staleRestore({ restored: ['new.txt'] }); await restoringOld;
   });
   assert.equal(await page.evaluate(() => store.getState().changesState), 'loading');

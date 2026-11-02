@@ -366,3 +366,15 @@ Windows/macOS/Linux 的 Web 与 Electron 共享 getUserMedia + MediaRecorder，�
 证据目录：`/Users/smt/.codex/visualizations/2026/11/02/01a19b15-eceb-7c02-9620-9e6f0e2253b6/pilot-queue-voice/`。其中队列截图为隔离测试场景，避免影响真实任务；录音截图使用测试音源。
 
 参考：[Codex Queue/Steer 语义](https://developers.openai.com/blog/mastering-codex-remote-for-engineering)、[OpenAI 文件转写](https://developers.openai.com/api/docs/guides/speech-to-text)、[MediaRecorder 格式探测](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder/isTypeSupported_static)、[Electron 媒体权限](https://github.com/electron/electron/blob/main/docs/api/session.md)、[Electron macOS 麦克风授权](https://github.com/electron/electron/blob/main/docs/api/system-preferences.md)。
+
+
+## 2026-11-02 审阅工具栏收敛
+
+- 文件统计、增删行和未跟踪数量保留在工具栏，常驻操作仅刷新与更多；文件总数包含未跟踪文件，增删行仍只统计已跟踪文件。
+- 创建并切换分支移入按需弹窗，说明未提交改动会保留；空白名称不可提交，中文输入法确认不触发提交，请求中防重复，失败保留名称并显示原因。
+- 撤销全部移入更多菜单，弹窗列明已跟踪文件恢复到 HEAD、未跟踪文件删除以及不可撤回的影响。只提交确认时的文件路径，避免把随后新增文件纳入撤销；部分失败保留提示，要求重新检查后确认。
+- 菜单支持方向键、Home/End、Esc、点击外部关闭；弹窗焦点圈定并恢复。任务运行中不允许在此入口创建分支或撤销全部。刷新失败说明当前展示旧数据；刷新与撤销响应按会话、工作区、请求顺序隔离。
+- 新增 `scripts/review-cases.mjs`，集成进 Web / Electron 交互回归：正常分支创建、空值、中文输入法、失败保留、请求中重复操作、取消撤销、网络失败重试、部分失败、确认后新增文件、非 Git、无改动、仅未跟踪、任务文件范围、运行中菜单、刷新乱序、切换会话及 1440 / 768 / 390 px 布局。
+- 验证通过：247 项 Web 单元测试；Chrome 与 Electron 整套交互回归（含队列、语音、文件树、设置与本次审阅场景）；生产构建；`git diff --check`。设计 lint 为 0 FAIL、13 WARN，警告来自既有样式及菜单/弹窗等实际浮层阴影。
+- 兼容处理：Web 与 Electron 共用 React、标准 DOM 事件和响应式 CSS，覆盖 Windows/macOS/Linux；本次实机范围为 macOS 上的 Chrome、Electron 与本地服务页面。Git 写操作使用隔离 API 模拟，没有创建真实分支或撤销实际工作区文件；未宣称 Windows/Linux 实机验证。
+- 截图与测试日志：`/Users/smt/.codex/visualizations/2026/11/02/01a19b15-eceb-7c02-9620-9e6f0e2253b6/pilot-review/`。
