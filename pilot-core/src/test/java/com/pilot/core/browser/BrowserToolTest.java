@@ -148,11 +148,12 @@ class BrowserToolTest {
     void classifiesActionsForPermissions() {
         BrowserTool tool = tool();
         for (String action : List.of("navigate", "snapshot", "screenshot", "console", "network", "wait", "reload",
-                "back", "close")) {
+                "back", "forward", "close", "text", "links", "tabs")) {
             assertTrue(tool.readOnly(Map.of("action", action)), action);
             assertFalse(tool.localInteraction(Map.of("action", action)), action);
         }
-        for (String action : List.of("click", "fill", "type", "press", "select", "upload")) {
+        for (String action : List.of("click", "dblclick", "right_click", "hover", "fill", "type", "press",
+                "select", "upload", "download", "switch_tab", "close_tab")) {
             assertFalse(tool.readOnly(Map.of("action", action)), action);
             assertTrue(tool.localInteraction(Map.of("action", action)), action);
         }
@@ -169,8 +170,9 @@ class BrowserToolTest {
         backend.paused = true;
         BrowserTool tool = tool();
 
-        for (String action : List.of("click", "fill", "type", "press", "select", "upload",
-                "navigate", "reload", "back", "close", "evaluate")) {
+        for (String action : List.of("click", "dblclick", "right_click", "hover", "fill", "type", "press",
+                "select", "upload", "download", "switch_tab", "close_tab",
+                "navigate", "reload", "back", "forward", "close", "evaluate")) {
             String result = tool.execute(Map.of("action", action, "url", "http://localhost:1",
                     "ref", "e1", "text", "x", "key", "Enter", "values", List.of("a"), "files", List.of("a.txt"),
                     "expression", "1"));

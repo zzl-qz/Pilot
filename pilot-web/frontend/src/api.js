@@ -44,6 +44,7 @@ export async function apiJson(url, init, timeoutMs) {
 
 export const api = {
   health: () => apiFetch('/api/health'),
+  openBrowserWindow: () => apiJson('/api/desktop/browser-window', { method: 'POST' }, 70000),
   sessions: () => apiJson('/api/sessions'),
   session: (id) => apiJson(`/api/sessions/${encodeURIComponent(id)}`),
   createSession: (body) => apiJson('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }),

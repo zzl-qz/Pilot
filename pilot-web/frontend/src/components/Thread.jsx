@@ -9,7 +9,8 @@ import { agentMeta, agentTitle, manifestFacts, splitSubagentResult } from '../li
 import { splitAttachmentMarkers, layoutMessageParts, attachmentUrl, isImageAttachment, formatBytes } from '../lib/attachments.js';
 import { changeFileTitle, splitPath, statusKind } from '../lib/changes.js';
 import { writeClipboard } from '../lib/clipboard.js';
-import { formatTime } from '../thread-utils.js';
+import { formatCount, formatTime } from '../thread-utils.js';
+import { messagePeek } from '../lib/side-chat.js';
 
 /* 回到底部的弹簧参数：库的默认值在长距离上要 1s 以上，这里压到 ~200ms 收敛。 */
 const BACK_TO_LATEST = { stiffness: 0.2, damping: 0.9, mass: 1 };
@@ -234,7 +235,10 @@ const RowView = memo(function RowView({ row, isLast }) {
 
 function UserMessage({ row }) {
   const text = row.text || '';
+  const [open, setOpen] = useState(false);
   const parts = splitAttachmentMarkers(text);
+  const peek = messagePeek(parts.body || text);
+  const canPeek = peek.collapsed && !(parts.images || []).length && !(parts.files || []).length;
   const attachments = row.attachments || [];
   /*
    * 操作只放图标：文字按钮会在气泡下方挤成一块黑板（旧版就是图标 + data-tip 气泡）。
@@ -274,11 +278,27 @@ function UserMessage({ row }) {
       )}
     </div>
   );
+  if (canPeek && !open) {
+    return (
+      <article className="msg msg-user" data-sequence={row.sequence ?? undefined}>
+        <button type="button" className="msg-peek" aria-expanded="false" title="展开这条消息" onClick={() => setOpen(true)}>
+          <span className="msg-peek-grip" aria-hidden="true">
+            <svg viewBox="0 0 16 16"><path d="M3 6.5h10M3 9.5h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+          </span>
+          <span className="msg-peek-text">{peek.preview}</span>
+        </button>
+        {actions}
+      </article>
+    );
+  }
   return (
     <article className="msg msg-user" data-sequence={row.sequence ?? undefined}>
       <div className="bubble">
         <div className="bubble-flow">{renderMessageBody(parts.body, parts.files, parts.images, row.imagePositions)}</div>
       </div>
+      {canPeek && (
+        <button type="button" className="msg-peek-fold" onClick={() => setOpen(false)}>收起</button>
+      )}
       {actions}
     </article>
   );
@@ -350,11 +370,21 @@ const Turn = memo(function Turn({ row, isLast }) {
    * 只在最后一轮、且没有任务在跑时给入口，避免对中间轮次重放出错乱的历史。
    */
   const canRegenerate = isLast && !running && !row.reply.live && Boolean(replyText);
+  const toolsRunning = row.tools.some((tool) => tool.status === 'run');
+  const thinkingLive = Boolean(row.thinking?.live);
+  // 还在跑或还在想：用 Cursor / Codex 那一块（命令状态 + 思考卡片），收起后再回到折叠摘要。
+  const liveWork = toolsRunning || thinkingLive;
   return (
     <div className="turn-shell" data-run={row.runIds?.join(',') || undefined}>
-      {row.tools.length > 0 && <ToolGroup tools={row.tools} />}
+      {liveWork
+        ? <LiveWork tools={row.tools} thinking={row.thinking} />
+        : (
+          <>
+            {row.tools.length > 0 && <ToolGroup tools={row.tools} />}
+            {row.thinking && <ThinkingBlock thinking={row.thinking} />}
+          </>
+        )}
       {Object.values(row.agents || {}).map((agent) => <AgentCard key={agent.id} agent={agent} />)}
-      {row.thinking && <ThinkingBlock thinking={row.thinking} />}
       {(replyText || row.reply.live) && (
         <article className={`msg msg-assistant${row.reply.live ? ' is-streaming' : ''}`}>
           <div className="who"><span className="who-mark">P</span>Pilot</div>
@@ -461,6 +491,52 @@ const ToolRow = memo(function ToolRow({ tool }) {
         <span className={`tool-meta${running && seconds >= 10 ? ' is-slow' : ''}`}>{meta}</span>
       </button>
       <div className="tool-body"><pre>{tool.body || ''}</pre></div>
+    </div>
+  );
+});
+
+/**
+ * 进行中的回合：和 Cursor、Codex 一样，命令收成一行，思考原文放在卡片里。
+ * 点「正在执行」能展开每条命令；这一轮结束后改回折叠摘要。
+ */
+const LiveWork = memo(function LiveWork({ tools, thinking }) {
+  const runningTools = tools.filter((tool) => tool.status === 'run');
+  const live = Boolean(thinking?.live);
+  const cardRef = useRef(null);
+  useSecondTick(live || runningTools.length > 0);
+  useEffect(() => {
+    const card = cardRef.current;
+    if (card && live) {
+      card.scrollTop = card.scrollHeight;
+    }
+  }, [thinking?.text, live]);
+  const commandsOnly = runningTools.length > 0 && runningTools.every((tool) => tool.name === 'run_command');
+  const status = runningTools.length > 0
+    ? (commandsOnly ? `正在执行 ${runningTools.length} 条命令` : `正在执行 ${runningTools.length} 项`)
+    : '';
+  return (
+    <div className="live-work">
+      <div className="live-work-rail" aria-hidden="true" />
+      <div className="live-work-main">
+        {tools.length > 0 && (
+          <details className="live-work-tools">
+            <summary>{status || `${tools.length} 项操作`}</summary>
+            <div className="live-work-tool-list">
+              {tools.map((tool) => (
+                <div key={tool.callId} className={`live-work-tool is-${tool.status}`}>
+                  <span className={`live-work-dot is-${tool.status}`} />
+                  <span>{toolLabel(tool.name)}</span>
+                  <span className="live-work-tool-args">{tool.args || ''}</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+        {live && <p className="live-work-label">思考中</p>}
+        {live && thinking?.text && (
+          <div className="live-work-card" ref={cardRef}>{thinking.text}</div>
+        )}
+      </div>
     </div>
   );
 });
@@ -604,13 +680,18 @@ const TurnStats = memo(function TurnStats({ stats }) {
   const elapsed = stats.startedAt ? elapsedSeconds(stats.startedAt, stats.finishedAt) : null;
   // 没有模型实测用量时是估算值，加 ≈（旧版 formatTokenCount 的 exact 语义）
   const mark = stats.exact === false ? '≈' : '';
+  const limit = Number(stats.contextLimit) || 0;
+  const used = Number(stats.contextTokens) || 0;
+  const crowded = limit > 0 && used / limit >= 0.85;
   return (
     <div className="turn-stats">
       {elapsed != null && <span className="turn-stat"><span>耗时</span><b>{elapsed}s</b></span>}
       <span className="turn-stat"><span>请求</span><b>{stats.modelRequests ?? '—'}</b></span>
-      <span className="turn-stat"><span>输入</span><b>{mark}{stats.inputTokens ?? '—'}</b></span>
-      <span className="turn-stat"><span>输出</span><b>{mark}{stats.outputTokens ?? '—'}</b></span>
-      <span className="turn-stat is-context"><span>上下文</span><b>{stats.contextTokens ?? '—'}</b></span>
+      <span className="turn-stat" title={stats.inputTokens ?? ''}><span>输入</span><b>{mark}{formatCount(stats.inputTokens)}</b></span>
+      <span className="turn-stat" title={stats.outputTokens ?? ''}><span>输出</span><b>{mark}{formatCount(stats.outputTokens)}</b></span>
+      <span className={`turn-stat is-context${crowded ? ' is-hot' : ''}`} title={stats.contextTokens ?? ''}>
+        <span>上下文</span><b>{formatCount(stats.contextTokens)}</b>
+      </span>
       <span className="turn-stat-note">{stats.exact === false ? '主任务 · Token 为估算' : '主任务 · 模型实测用量'}</span>
     </div>
   );
@@ -621,12 +702,14 @@ const TurnStats = memo(function TurnStats({ stats }) {
 const PlanCard = memo(function PlanCard({ row }) {
   const items = row.items || [];
   const done = items.filter((item) => item.status === 'completed' || item.status === 'done').length;
+  const finished = items.length > 0 && done === items.length;
   return (
     <aside className="plan-card">
-      <header className="plan-head">
+      <details open={!finished}>
+      <summary className="plan-head">
         <span className="plan-title">执行计划</span>
         <span className="plan-progress">{items.length ? `${done}/${items.length}` : ''}</span>
-      </header>
+      </summary>
       <ol className="plan-list">
         {items.map((item, index) => (
           <li key={index} className="plan-item">
@@ -636,6 +719,7 @@ const PlanCard = memo(function PlanCard({ row }) {
           </li>
         ))}
       </ol>
+      </details>
     </aside>
   );
 });
@@ -669,7 +753,16 @@ function ResultCard({ row }) {
         <span className="turn-card-title">{row.title}</span>
         {row.continued && <span className="turn-resolved">已继续执行</span>}
       </div>
-      {row.detail && <p className="turn-card-detail">{row.detail}</p>}
+      {row.detail && (
+        String(row.detail).length > 280
+          ? (
+            <details className="turn-card-more">
+              <summary>查看结论</summary>
+              <div className="turn-card-detail"><MarkdownBody text={row.detail} /></div>
+            </details>
+          )
+          : <div className="turn-card-detail"><MarkdownBody text={row.detail} /></div>
+      )}
       {!!(row.changedFiles || []).length && (
         <div className="turn-card-files">
           {row.changedFiles.map((file) => (

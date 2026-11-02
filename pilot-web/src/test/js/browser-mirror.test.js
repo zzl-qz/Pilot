@@ -2,9 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  frameSrc, keyCommand, latencyLabel, nextMirrorMode, pauseToggleLabel, pointFromEvent,
-  ripplePosition, shouldAutoSwitch, urlLabel
+  embeddablePageUrl, frameSrc, keyCommand, latencyLabel, nextMirrorMode, pauseToggleLabel,
+  pointFromEvent, ripplePosition, shouldAutoSwitch, shouldEmbedPage, urlLabel, userPageUrl
 } from '../../../frontend/src/lib/browser-mirror.js';
+
+test('地址栏：本机用 http，外网用 https', () => {
+  assert.equal(userPageUrl('localhost:5173'), 'http://localhost:5173/');
+  assert.equal(userPageUrl('example.com'), 'https://example.com/');
+  assert.equal(userPageUrl('javascript:alert(1)'), null);
+});
+
+test('本机页面直接嵌，外网和明确禁止嵌的退回截图', () => {
+  assert.equal(embeddablePageUrl('http://localhost:5173/app'), 'http://localhost:5173/app');
+  assert.equal(embeddablePageUrl('localhost:3000'), 'http://localhost:3000/');
+  assert.equal(embeddablePageUrl('http://127.0.0.1:8080/x'), 'http://127.0.0.1:8080/x');
+  assert.equal(embeddablePageUrl('http://[::1]:9999/'), 'http://[::1]:9999/');
+  assert.equal(embeddablePageUrl('https://example.com'), null);
+  assert.equal(embeddablePageUrl('about:blank'), null);
+  assert.equal(shouldEmbedPage('http://localhost:5173/', undefined), true);
+  assert.equal(shouldEmbedPage('http://localhost:5173/', false), false);
+  assert.equal(shouldEmbedPage('', true), false);
+});
 
 test('frameSrc 拼 dataURL，帧体缺失返回 null', () => {
   assert.equal(frameSrc({ frame: 'QUJD' }), 'data:image/jpeg;base64,QUJD');

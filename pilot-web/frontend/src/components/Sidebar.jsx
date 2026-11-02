@@ -10,6 +10,8 @@ export function Sidebar() {
   const sessionId = useStore((state) => state.sessionId);
   const workspace = useStore((state) => state.workspace);
   const connection = useStore((state) => state.ui.connection);
+  const sideChats = useStore((state) => state.sideChats);
+  const sideItems = sideChats?.items || [];
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [treeOpen, setTreeOpen] = useState(false);
@@ -112,6 +114,29 @@ export function Sidebar() {
             </p>
           )}
         </section>
+
+        {sideItems.length > 0 && (
+          <section className="nav-block" aria-label="侧边对话">
+            <header className="nav-head">
+              <span>侧边对话</span>
+              <span className="nav-count">{sideItems.length}</span>
+            </header>
+            <ul className="session-list">
+              {sideItems.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className={`session-item${item.id === sideChats.activeId ? ' is-active' : ''}`}
+                    title={item.title || '侧边对话'}
+                    onClick={() => useStore.getState().selectSideChat(item.id)}
+                  >
+                    <span className="session-title">{item.title || '侧边对话'}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <details className="nav-block nav-files" aria-label="工作区文件" open={treeOpen} onToggle={(event) => setTreeOpen(event.target.open)}>
           <summary className="nav-head">

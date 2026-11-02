@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 /** 进程内存储：默认实现，也是测试用的轻量实现。重启后数据丢失。 */
-public final class InMemorySessionRepository implements SessionRepository {
+public class InMemorySessionRepository implements SessionRepository {
     private final ConcurrentMap<String, State> sessions = new ConcurrentHashMap<>();
 
     @Override

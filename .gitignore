@@ -56,6 +56,7 @@ evaluation/harness/runs/
 pilot-web/target/viewport/
 pilot-web/node_modules/
 pilot-web/frontend/node_modules/
+pilot-desktop/node_modules/
 
 ### 前端构建产物：vite 每次构建都会换 hash 文件名，不入库 ###
 pilot-web/src/main/resources/static/assets/
@@ -67,4 +68,19 @@ pilot-web/frontend/shot*.cjs
 ### 本机启动日志与调试截图 ###
 mvn-run.log
 mvn-run.err
+*.log
+*.err
 /shot-*.png
+
+### 系统与崩溃转储 ###
+.DS_Store
+Thumbs.db
+hs_err_pid*
+replay_pid*
+*.pid
+
+### 桌面壳打包产物（源码和 lock 要入库，二进制不要） ###
+pilot-desktop/dist/
+pilot-desktop/out/
+coverage/
+.cache/

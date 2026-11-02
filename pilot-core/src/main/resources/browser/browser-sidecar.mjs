@@ -15,8 +15,8 @@
 //   PLAYWRIGHT_BROWSERS_PATH      内置缓存目录（chromium.executablePath() 由此解析）。
 
 import { createRequire } from 'node:module';
-import { existsSync, statSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 // 把 console.* 全部改道到 stderr，避免污染协议通道。
@@ -38,8 +38,10 @@ const sessions = new Map();
 const queues = new Map();
 // 前端订阅过镜像的会话：浏览器尚未启动时先登记，会话建立时自动开始推帧。
 const mirrorRequested = new Set();
-// 镜像帧限流：前端只需看清页面，12fps 足够，视频页也不至于冲爆 SSE。
-const MIRROR_MIN_FRAME_MS = 80;
+// 订阅还在、但面板已经直接嵌页面：不要再推截图。缺省仍推帧。
+const mirrorCapture = new Map();
+// 截图退路的限流。直接嵌页面时这条链路是停着的。
+const MIRROR_MIN_FRAME_MS = 50;
 
 function send(message) {
   process.stdout.write(JSON.stringify(message) + '\n');
@@ -111,8 +113,12 @@ function launchArgs() {
   return ['--disable-dev-shm-usage', '--no-first-run', '--no-default-browser-check', ...extra];
 }
 
+let presentHeaded = false;
+let headedPromise = null;
+
 function headlessMode() {
-  // 只有显式收到 'false' 才有头：环境变量缺失时保持无头（老行为），避免误开窗口。
+  // 网页里点「打开内置浏览器」后，这一进程改为有头。否则只有显式 false 才开窗口。
+  if (presentHeaded) return false;
   return (process.env.PILOT_BROWSER_HEADLESS ?? 'true') !== 'false';
 }
 
@@ -149,6 +155,52 @@ async function launchBrowser() {
   throw new Error('浏览器启动失败：' + failures.join('；'));
 }
 
+async function launchHeadedBrowser() {
+  const { chromium } = loadPlaywright();
+  const executables = candidateExecutables();
+  if (executables.length === 0) {
+    throw new Error('没有找到可用的内置 Chromium。首次启动会自动下载完整版 Chromium（约 180MB）。');
+  }
+  const failures = [];
+  for (const executablePath of executables) {
+    try {
+      const browser = await chromium.launch({
+        executablePath,
+        headless: false,
+        args: launchArgs(),
+        timeout: 20000
+      });
+      browser.__executable = executablePath;
+      browser.__headless = false;
+      browser.on('disconnected', () => {
+        headedPromise = null;
+        presentHeaded = false;
+        for (const [id, session] of sessions) {
+          if (!session.desktop) {
+            session.dead = true;
+            sessions.delete(id);
+          }
+        }
+        send({ event: 'browser-closed', reason: 'disconnected' });
+      });
+      return browser;
+    } catch (error) {
+      failures.push(`${executablePath}: ${String(error.message || error).split('\n')[0]}`);
+    }
+  }
+  throw new Error('浏览器启动失败：' + failures.join('；'));
+}
+
+function getHeadedBrowser() {
+  if (!headedPromise) {
+    headedPromise = launchHeadedBrowser().catch((error) => {
+      headedPromise = null;
+      throw error;
+    });
+  }
+  return headedPromise;
+}
+
 function getBrowser() {
   if (!browserPromise) {
     browserPromise = launchBrowser().catch((error) => {
@@ -172,11 +224,13 @@ function attachPage(session, page) {
   });
   page.on('console', (message) => {
     const location = message.location();
-    pushLimited(session.console, {
+    const entry = {
       type: message.type(),
       text: message.text(),
       at: location && location.url ? `${location.url}:${location.lineNumber}` : ''
-    });
+    };
+    pushLimited(session.console, entry);
+    appendLog(session, `[console] [${entry.type}] ${entry.text}${entry.at ? ' @ ' + entry.at : ''}`);
   });
   page.on('pageerror', (error) => {
     pushLimited(session.console, { type: 'pageerror', text: String(error.message || error), at: '' });
@@ -203,14 +257,39 @@ function attachPage(session, page) {
   });
   page.on('response', (response) => {
     const entry = response.request().__entry;
-    if (entry) entry.status = response.status();
+    if (entry) {
+      entry.status = response.status();
+      appendLog(session, `[network] ${entry.method} ${entry.url} → ${response.status()}`);
+    }
+    const request = response.request();
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+      const policy = framePolicy(response.headers());
+      session.embed = policy.embed;
+      session.frameOptions = policy.frameOptions;
+    }
   });
   page.on('requestfailed', (request) => {
     const entry = request.__entry;
     if (entry) entry.failure = request.failure() ? request.failure().errorText : 'failed';
   });
-  // 镜像开着：page 切换（popup/新标签）时把 screencast 跟到新页面上。
-  if (session.mirror) ensureScreencast(session).catch(() => {});
+  // 镜像开着且面板还在看截图：page 切换时把 screencast 跟到新页面上。
+  if (session.mirror && session.capture !== false) ensureScreencast(session).catch(() => {});
+}
+
+/**
+ * DENY 和收紧的 frame-ancestors 不能嵌。
+ * SAMEORIGIN 先放行标记，由面板按自己的源再判断（同源可以嵌，跨端口不行）。
+ */
+function framePolicy(headers) {
+  const xfo = String(headers['x-frame-options'] || '').toLowerCase();
+  const csp = String(headers['content-security-policy'] || '');
+  const ancestors = csp.match(/frame-ancestors\s+([^;]+)/i);
+  if (ancestors && !ancestors[1].toLowerCase().split(/\s+/).includes('*')) {
+    return { embed: false, frameOptions: '' };
+  }
+  if (/\bdeny\b/.test(xfo)) return { embed: false, frameOptions: 'deny' };
+  if (/\bsameorigin\b/.test(xfo)) return { embed: true, frameOptions: 'sameorigin' };
+  return { embed: true, frameOptions: '' };
 }
 
 /*
@@ -237,11 +316,142 @@ async function navigationState(session) {
 
 async function reportNavigation(session, url) {
   const state = await navigationState(session);
-  send({ event: 'nav', session: session.id, url, ...state, ts: Date.now() });
+  send({
+    event: 'nav',
+    session: session.id,
+    url,
+    embed: session.embed !== false,
+    frameOptions: session.frameOptions || '',
+    ...state,
+    ts: Date.now()
+  });
+}
+
+function readDesktop() {
+  const file = process.env.PILOT_DESKTOP_ENDPOINT || join(process.cwd(), 'desktop-browser.json');
+  if (!existsSync(file)) return null;
+  try {
+    const data = JSON.parse(readFileSync(file, 'utf8'));
+    if (!data || !data.token || !data.controlPort || !data.cdpPort || !data.pid) return null;
+    process.kill(data.pid, 0);
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+async function connectDesktop(desktop) {
+  if (!browserPromise) {
+    const playwright = loadPlaywright();
+    browserPromise = playwright.chromium.connectOverCDP(`http://127.0.0.1:${desktop.cdpPort}`).catch((error) => {
+      browserPromise = null;
+      throw error;
+    });
+  }
+  return browserPromise;
+}
+
+async function waitForDesktopPage(browser, tabId, alsoUrl) {
+  const marker = `/marker/${tabId}`;
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    for (const context of browser.contexts()) {
+      for (const page of context.pages()) {
+        const url = page.url();
+        if (url.includes(marker) || (alsoUrl && url.startsWith(alsoUrl))) return page;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error('桌面浏览器里没有出现这个标签。先打开 Pilot 桌面壳。');
+}
+
+async function createDesktopSession(id, desktop) {
+  const response = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-pilot-token': desktop.token },
+    body: JSON.stringify({ sessionId: id })
+  });
+  if (!response.ok) throw new Error(`桌面浏览器没有接上这个会话（HTTP ${response.status}）`);
+  const created = await response.json();
+  const browser = await connectDesktop(desktop);
+  const page = await waitForDesktopPage(browser, created.tabId);
+  const session = {
+    id, context: page.context(), page, console: [], network: [], dead: false, desktop: true,
+    mirror: false, capture: false, embed: true, frameOptions: '', mirrorWidth: 960, mirrorQuality: 55,
+    cdp: null, cdpPage: null, lastFrameAt: 0, historyCdp: null, historyCdpPage: null
+  };
+  page.context().setDefaultTimeout(ACTION_TIMEOUT_MS);
+  page.context().setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
+  attachPage(session, page);
+  sessions.set(id, session);
+  return session;
+}
+
+/** 桌面里人已经打开的 http(s) 页面，智能体可以操作。无头浏览器仍只许本机源。 */
+function agentMayTouchPage(url, desktop) {
+  if (!url || String(url).includes('/marker/')) return true;
+  let parsed;
+  try {
+    parsed = new URL(String(url));
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  return Boolean(desktop) || loopbackUrl(url);
+}
+
+function refuseOffAllowlist(current) {
+  const page = current.page;
+  if (!page || page.isClosed()) return;
+  if (agentMayTouchPage(page.url(), current.desktop)) return;
+  throw new Error(`当前页面不在智能体允许的源站上（${page.url()}）。人可以继续浏览；智能体的点击、输入和跳转已停用。`);
+}
+
+async function showAgentCursor(page, locator) {
+  const box = await locator.boundingBox().catch(() => null);
+  if (!box) return;
+  const x = Math.round(box.x + Math.min(box.width, 24) / 2);
+  const y = Math.round(box.y + Math.min(box.height, 24) / 2);
+  await page.evaluate(({ x, y }) => {
+    let mark = document.getElementById('pilot-agent-cursor');
+    if (!mark) {
+      mark = document.createElement('div');
+      mark.id = 'pilot-agent-cursor';
+      mark.style.cssText = 'position:fixed;z-index:2147483647;width:16px;height:16px;margin:-8px 0 0 -8px;border:2px solid #e8a54b;border-radius:50%;box-shadow:0 0 0 4px rgba(232,165,75,.25);pointer-events:none';
+      (document.documentElement || document.body).appendChild(mark);
+    }
+    mark.style.left = x + 'px';
+    mark.style.top = y + 'px';
+    clearTimeout(mark._hide);
+    mark._hide = setTimeout(() => mark.remove(), 900);
+  }, { x, y }).catch(() => {});
+}
+
+function appendLog(session, line) {
+  try {
+    const dir = join(process.cwd(), 'browser-logs');
+    mkdirSync(dir, { recursive: true });
+    const name = String(session.id || 'session').replace(/[^a-zA-Z0-9_-]/g, '_');
+    appendFileSync(join(dir, `${name}.log`), line + '\n');
+  } catch {
+    // 日志写失败不影响页面操作
+  }
 }
 
 async function createSession(id) {
+  // 网页上点过「打开内置浏览器」之后，新会话用那个有头窗口。没点过时桌面壳照旧。
+  if (presentHeaded) {
+    const browser = await getHeadedBrowser();
+    return createLocalSession(id, browser);
+  }
+  const desktop = readDesktop();
+  if (desktop) return createDesktopSession(id, desktop);
   const browser = await getBrowser();
+  return createLocalSession(id, browser);
+}
+
+async function createLocalSession(id, browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     acceptDownloads: false,
@@ -250,7 +460,8 @@ async function createSession(id) {
   context.setDefaultTimeout(ACTION_TIMEOUT_MS);
   context.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
   const session = { id, context, page: null, console: [], network: [], dead: false,
-    mirror: mirrorRequested.has(id), mirrorWidth: 960, mirrorQuality: 55,
+    mirror: mirrorRequested.has(id), capture: mirrorCapture.get(id) !== false,
+    embed: true, frameOptions: '', mirrorWidth: 960, mirrorQuality: 55,
     cdp: null, cdpPage: null, lastFrameAt: 0, historyCdp: null, historyCdpPage: null };
   // 主框架导航只允许回环地址，页面里的链接也不能把它带去外网。
   await context.route('**/*', (route) => {
@@ -299,11 +510,13 @@ async function ensureScreencast(session) {
         ts: now
       });
     });
+    const viewport = page.viewportSize() || { width: session.mirrorWidth, height: 800 };
     await cdp.send('Page.startScreencast', {
       format: 'jpeg',
       quality: session.mirrorQuality,
-      maxWidth: session.mirrorWidth,
-      maxHeight: Math.round(session.mirrorWidth * 0.75),
+      // 按视口 1:1 出帧。旧的 maxHeight = 宽×0.75 会把高页面缩小，底部像被裁掉。
+      maxWidth: viewport.width,
+      maxHeight: viewport.height,
       everyNthFrame: 1
     });
   } catch (error) {
@@ -588,6 +801,27 @@ function locatorFor(current, args) {
   throw new Error('需要 ref（来自 snapshot）或 selector。');
 }
 
+/** 页面跳走或关掉时，正在等的点击/输入立刻停，不等超时。 */
+function stopIfPageGone(page, work) {
+  let gone = false;
+  let timer;
+  const mark = () => { gone = true; };
+  page.once('framenavigated', mark);
+  page.once('close', mark);
+  const watch = new Promise((_, reject) => {
+    timer = setInterval(() => {
+      if (!gone && !page.isClosed()) return;
+      clearInterval(timer);
+      reject(new Error('页面已跳转或浏览器已关闭，操作已停止'));
+    }, 40);
+  });
+  return Promise.race([work(), watch]).finally(() => {
+    clearInterval(timer);
+    page.off('framenavigated', mark);
+    page.off('close', mark);
+  });
+}
+
 async function settle(page) {
   try {
     await page.waitForLoadState('domcontentloaded', { timeout: 3000 });
@@ -618,6 +852,19 @@ async function elementMissing(error, args) {
 
 // ---- 操作 -------------------------------------------------------------------------------
 const handlers = {
+  async open_window() {
+    presentHeaded = true;
+    const browser = await getHeadedBrowser();
+    const pages = browser.contexts().flatMap((context) => context.pages());
+    if (!pages.length) {
+      const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+      await context.newPage();
+    } else {
+      await pages[0].bringToFront().catch(() => {});
+    }
+    return { text: '已打开浏览器窗口。智能体会操作这个窗口。' };
+  },
+
   async ping() {
     let version = 'unknown';
     try {
@@ -630,6 +877,16 @@ const handlers = {
   },
 
   async probe() {
+    const desktop = readDesktop();
+    if (desktop) {
+      const browser = await connectDesktop(desktop);
+      return {
+        text: `桌面浏览器可用（CDP ${desktop.cdpPort}）`,
+        version: browser.version(),
+        capabilities: ['mirror'],
+        desktop: true
+      };
+    }
     loadPlaywright();
     const browser = await getBrowser();
     const version = browser.version();
@@ -646,10 +903,28 @@ const handlers = {
     if (!args.url || !loopbackUrl(args.url)) {
       throw new Error(`只允许打开本机地址（http(s)://localhost、127.0.0.1、[::1]）：${args.url}`);
     }
-    const page = pageOf(current);
+    let page = pageOf(current);
+    if (current.desktop && page.url() && !page.url().includes('/marker/')) {
+      const desktop = readDesktop();
+      if (desktop) {
+        const opened = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-pilot-token': desktop.token },
+          body: JSON.stringify({ sessionId: current.id, fresh: true, url: String(args.url) })
+        });
+        if (opened.ok) {
+          const created = await opened.json();
+          const browser = await connectDesktop(desktop);
+          page = await waitForDesktopPage(browser, created.tabId, String(args.url));
+          current.page = page;
+        }
+      }
+    }
     let response;
     try {
-      response = await page.goto(String(args.url), { waitUntil: 'load', timeout: NAVIGATION_TIMEOUT_MS });
+      if (!page.url().startsWith(String(args.url))) {
+        response = await page.goto(String(args.url), { waitUntil: 'load', timeout: NAVIGATION_TIMEOUT_MS });
+      }
     } catch (error) {
       const text = String(error.message || error).split('\n')[0];
       if (/ERR_CONNECTION_REFUSED/.test(text)) {
@@ -695,11 +970,9 @@ const handlers = {
     if (action === 'wheel') {
       await page.mouse.move(x, y);
       await page.mouse.wheel(Number(args.deltaX) || 0, Number(args.deltaY) || 0);
-      await settle(page);
       return { text: '已滚动', url: page.url() };
     }
     await page.mouse.click(x, y, { button: args.button === 'right' ? 'right' : 'left' });
-    await settle(page);
     return { text: '已点击', url: page.url() };
   },
 
@@ -733,6 +1006,16 @@ const handlers = {
       return { text: '尺寸未变', url: page.url() };
     }
     await page.setViewportSize({ width, height });
+    if (current.desktop) {
+      const desktop = readDesktop();
+      if (desktop) {
+        await fetch(`http://127.0.0.1:${desktop.controlPort}/emulate`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-pilot-token': desktop.token },
+          body: JSON.stringify({ width, height })
+        }).catch(() => {});
+      }
+    }
     // 视口变化会让原来的 screencast 停在旧画面上：重开一次，并立刻补一帧
     if (current.mirror) {
       await stopScreencast(current);
@@ -767,7 +1050,6 @@ const handlers = {
     if (args.key) {
       await page.keyboard.press(String(args.key));
     }
-    await settle(page);
     return { text: '已输入', url: page.url() };
   },
 
@@ -776,18 +1058,106 @@ const handlers = {
   },
 
   async click(args, current) {
+    refuseOffAllowlist(current);
+    const page = pageOf(current);
     const locator = locatorFor(current, args);
     await reportAction(current, 'click', args);
+    await showAgentCursor(page, locator);
+    const button = args.button === 'right' ? 'right' : 'left';
+    const clickCount = Number(args.clickCount) === 2 ? 2 : 1;
     try {
-      await locator.click({ timeout: ACTION_TIMEOUT_MS });
+      await stopIfPageGone(page, () => locator.click({ timeout: ACTION_TIMEOUT_MS, button, clickCount }));
     } catch (error) {
       throw await elementMissing(error, args);
     }
-    await settle(pageOf(current));
     return { text: `已点击 ${args.ref || args.selector}\n${await describePage(current)}` };
   },
 
+  async hover(args, current) {
+    refuseOffAllowlist(current);
+    const page = pageOf(current);
+    const locator = locatorFor(current, args);
+    await showAgentCursor(page, locator);
+    try {
+      await stopIfPageGone(page, () => locator.hover({ timeout: ACTION_TIMEOUT_MS }));
+    } catch (error) {
+      throw await elementMissing(error, args);
+    }
+    return { text: `已悬停 ${args.ref || args.selector}\n${await describePage(current)}` };
+  },
+
+  async text(args, current) {
+    const page = pageOf(current);
+    const text = await page.locator('body').innerText({ timeout: ACTION_TIMEOUT_MS }).catch(() => '');
+    const clipped = text.length > 8000 ? text.slice(0, 8000) + '\n…（已截断）' : text;
+    return { text: clipped || '页面没有可读文本', url: page.url() };
+  },
+
+  async links(args, current) {
+    const page = pageOf(current);
+    const links = await page.evaluate(() => Array.from(document.querySelectorAll('a[href]')).slice(0, 80).map((node) => ({
+      text: (node.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+      href: node.href
+    })));
+    const lines = links.map((link) => `${link.text || '(无文本)'}  ${link.href}`);
+    return { text: lines.length ? lines.join('\n') : '页面上没有链接', url: page.url() };
+  },
+
+  async tabs(args, current) {
+    const desktop = readDesktop();
+    if (!desktop) return { text: '当前不是桌面浏览器，没有多标签。' };
+    const response = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
+      headers: { 'x-pilot-token': desktop.token }
+    });
+    const body = await response.json();
+    const mine = (body.tabs || []).filter((tab) => tab.sessionId === current.id);
+    if (!mine.length) return { text: '还没有标签。' };
+    return { text: mine.map((tab) => `${tab.id}${tab.id === body.activeId ? '  当前' : ''}  ${tab.title}  ${tab.url}`).join('\n') };
+  },
+
+  async switch_tab(args, current) {
+    const desktop = readDesktop();
+    if (!desktop) throw new Error('只有桌面浏览器可以切换标签。');
+    if (!args.tabId) throw new Error('switch_tab 需要 tabId。');
+    const response = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
+      headers: { 'x-pilot-token': desktop.token }
+    });
+    const body = await response.json();
+    const tab = (body.tabs || []).find((item) => item.id === String(args.tabId));
+    if (!tab) throw new Error('没有这个标签。');
+    const browser = await connectDesktop(desktop);
+    const page = await waitForDesktopPage(browser, tab.id, tab.url && !String(tab.url).includes('/marker/') ? String(tab.url) : '');
+    current.page = page;
+    return { text: `已在后台使用标签 ${tab.id}。你正在看的页面没有被换掉。` };
+  },
+
+  async close_tab(args, current) {
+    const desktop = readDesktop();
+    if (!desktop) throw new Error('只有桌面浏览器可以关闭标签。');
+    if (!args.tabId) throw new Error('close_tab 需要 tabId。');
+    await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs/close`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-pilot-token': desktop.token },
+      body: JSON.stringify({ tabId: String(args.tabId) })
+    });
+    return { text: `已关闭标签 ${args.tabId}` };
+  },
+
+  async download(args, current) {
+    refuseOffAllowlist(current);
+    if (!args.path) throw new Error('download 需要 path。');
+    const page = pageOf(current);
+    const locator = locatorFor(current, args);
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: ACTION_TIMEOUT_MS }),
+      locator.click({ timeout: ACTION_TIMEOUT_MS })
+    ]);
+    await download.saveAs(String(args.path));
+    return { text: `已下载到 ${args.path}`, url: page.url() };
+  },
+
   async fill(args, current) {
+    refuseOffAllowlist(current);
     if (typeof args.text !== 'string') throw new Error('fill 需要 text。');
     const locator = locatorFor(current, args);
     await reportAction(current, 'fill', args);
@@ -802,6 +1172,7 @@ const handlers = {
   },
 
   async type(args, current) {
+    refuseOffAllowlist(current);
     if (typeof args.text !== 'string') throw new Error('type 需要 text。');
     const locator = locatorFor(current, args);
     await reportAction(current, 'type', args);
@@ -817,6 +1188,7 @@ const handlers = {
   },
 
   async press(args, current) {
+    refuseOffAllowlist(current);
     if (!args.key) throw new Error('press 需要 key，例如 Enter、Escape、Control+A。');
     await pageOf(current).keyboard.press(String(args.key));
     await settle(pageOf(current));
@@ -824,6 +1196,7 @@ const handlers = {
   },
 
   async select(args, current) {
+    refuseOffAllowlist(current);
     const values = Array.isArray(args.values) ? args.values.map(String) : [];
     if (values.length === 0) throw new Error('select 需要 values。');
     const locator = locatorFor(current, args);
@@ -839,6 +1212,7 @@ const handlers = {
   },
 
   async upload(args, current) {
+    refuseOffAllowlist(current);
     const files = Array.isArray(args.files) ? args.files.map(String) : [];
     if (files.length === 0) throw new Error('upload 需要 files（绝对路径）。');
     for (const file of files) {
@@ -881,9 +1255,10 @@ const handlers = {
     const entries = current.console.slice();
     if (args.clear) current.console.length = 0;
     const filtered = args.level ? entries.filter((entry) => entry.type === args.level) : entries;
-    if (filtered.length === 0) return { text: '控制台没有记录。' };
+    const file = join(process.cwd(), 'browser-logs', `${String(current.id).replace(/[^a-zA-Z0-9_-]/g, '_')}.log`);
+    if (filtered.length === 0) return { text: `控制台没有记录。\n完整日志: ${file}` };
     const shown = filtered.slice(-100);
-    return { text: `控制台记录 ${filtered.length} 条（显示最近 ${shown.length} 条）：\n`
+    return { text: `控制台记录 ${filtered.length} 条（显示最近 ${shown.length} 条）。完整日志: ${file}\n`
       + shown.map((entry) => `[${entry.type}] ${entry.text}${entry.at ? ' @ ' + entry.at : ''}`).join('\n') };
   },
 
@@ -895,9 +1270,10 @@ const handlers = {
       entries = entries.filter((entry) => entry.url.toLowerCase().includes(needle));
     }
     if (args.clear) current.network.length = 0;
-    if (entries.length === 0) return { text: '没有匹配的网络请求。' };
+    const file = join(process.cwd(), 'browser-logs', `${String(current.id).replace(/[^a-zA-Z0-9_-]/g, '_')}.log`);
+    if (entries.length === 0) return { text: `没有匹配的网络请求。\n完整日志: ${file}` };
     const shown = entries.slice(-100);
-    return { text: `网络请求 ${entries.length} 条（显示最近 ${shown.length} 条）：\n`
+    return { text: `网络请求 ${entries.length} 条（显示最近 ${shown.length} 条）。完整日志: ${file}\n`
       + shown.map((entry) => `${entry.method} ${entry.url} → ${entry.failure ? 'FAILED ' + entry.failure
         : entry.status === null ? '(等待响应)' : entry.status} [${entry.type}]`).join('\n') };
   },
@@ -926,6 +1302,7 @@ const handlers = {
   },
 
   async evaluate(args, current) {
+    refuseOffAllowlist(current);
     if (!args.expression) throw new Error('evaluate 需要 expression。');
     const page = pageOf(current);
     const value = await page.evaluate(String(args.expression));
@@ -944,8 +1321,10 @@ const handlers = {
     current.mirrorWidth = Math.min(1920, Math.max(320, Math.round(Number(args.maxWidth) || 960)));
     current.mirrorQuality = Math.min(90, Math.max(20, Math.round(Number(args.quality) || 55)));
     current.mirror = true;
-    await ensureScreencast(current);
-    return { text: '镜像已开启' };
+    current.capture = args.capture !== false;
+    if (current.capture) await ensureScreencast(current);
+    else await stopScreencast(current);
+    return { text: current.capture ? '镜像已开启' : '截图已暂停' };
   },
 
   async 'mirror-stop'(args, current) {
@@ -962,7 +1341,7 @@ const handlers = {
 
 async function dispatch(request) {
   const op = request.op;
-  if (op === 'ping' || op === 'probe') return handlers[op]();
+  if (op === 'ping' || op === 'probe' || op === 'open_window') return handlers[op]();
   if (op === 'close') {
     const existing = sessions.get(request.session);
     if (existing) {
@@ -981,8 +1360,14 @@ async function dispatch(request) {
   }
   // 镜像控制与置前只作用于已存在的会话：浏览器没起来时不强制拉起（免得开面板即开窗）。
   if (op === 'mirror-start' || op === 'mirror-stop' || op === 'focus') {
-    if (op === 'mirror-start') mirrorRequested.add(request.session);
-    if (op === 'mirror-stop') mirrorRequested.delete(request.session);
+    if (op === 'mirror-start') {
+      mirrorRequested.add(request.session);
+      mirrorCapture.set(request.session, request.capture !== false);
+    }
+    if (op === 'mirror-stop') {
+      mirrorRequested.delete(request.session);
+      mirrorCapture.delete(request.session);
+    }
     const existing = sessions.get(request.session);
     if (!existing || existing.dead) {
       return { text: op === 'mirror-start' ? '镜像已登记，浏览器启动后自动开始' : '没有活动页面' };

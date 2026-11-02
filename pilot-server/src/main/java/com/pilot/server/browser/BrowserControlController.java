@@ -114,6 +114,15 @@ public class BrowserControlController {
         return ResponseEntity.noContent().build();
     }
 
+    /** 直接嵌页面时关掉截图流；页面禁止被嵌入时再打开。 */
+    @PostMapping("/{id}/browser/capture")
+    public ResponseEntity<Void> capture(@PathVariable String id, @RequestBody(required = false) Map<String, Object> body) {
+        requireSession(id);
+        boolean on = body != null && Boolean.TRUE.equals(body.get("capture"));
+        browser.setCapture(id, on);
+        return ResponseEntity.noContent().build();
+    }
+
     /** 恢复智能体的页面操作。 */
     @PostMapping("/{id}/browser/resume")
     public ResponseEntity<Void> resume(@PathVariable String id) {
@@ -216,7 +225,8 @@ public class BrowserControlController {
                 args.put("level", String.valueOf(body.get("level")));
             }
         }
-        return browser.userAction(id, "console", args);
+        String op = body != null && Boolean.TRUE.equals(body.get("network")) ? "network" : "console";
+        return browser.userAction(id, op, args);
     }
 
     /** 面板里的键盘动作：key 单键（Enter / Backspace / ArrowDown…）或 text 整段文本。 */

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  readSideChats, writeSideChats, sideChatFrameSrc, quoteMarkdown, appendQuote
+  readSideChats, writeSideChats, quoteMarkdown, appendQuote,
+  showSidePieceNav, messagePeek, simplifyTranscript, reduceSideChat, lastEventSequence
 } from '../../../frontend/src/lib/side-chat.js';
 
 /** 最小的 localStorage 桩：侧边对话的标签页持久化只依赖这四个方法。 */
@@ -50,10 +51,6 @@ test('broken or partial payloads degrade to an empty list', () => {
   assert.deepEqual(readSideChats(storage), { items: [], activeId: null });
 });
 
-test('iframe src carries the session id and stays on the app root', () => {
-  assert.equal(sideChatFrameSrc('ses_1'), '/?sideChat=1&session=ses_1');
-});
-
 test('quoted selection becomes a markdown block and appends after existing text', () => {
   assert.equal(quoteMarkdown('a\nb'), '> a\n> b');
 
@@ -70,4 +67,48 @@ test('blank selections are ignored', () => {
   let text = 'keep';
   assert.equal(appendQuote(() => text, (next) => { text = next; }, '   '), false);
   assert.equal(text, 'keep');
+});
+
+test('side piece nav hides while the sidebar is open', () => {
+  assert.equal(showSidePieceNav(true), false);
+  assert.equal(showSidePieceNav(false), true);
+});
+
+test('long user text becomes a four-line peek and short text stays open', () => {
+  const short = messagePeek('只要一行');
+  assert.equal(short.collapsed, false);
+  assert.equal(short.preview, '只要一行');
+
+  const long = messagePeek(['第一行', '第二行', '第三行', '第四行', '第五行被收起'].join('\n'));
+  assert.equal(long.collapsed, true);
+  assert.equal(long.preview.split('\n').length, 4);
+  assert.equal(long.preview.includes('第五行'), false);
+});
+
+test('side chat keeps only the user line and the reply, once each', () => {
+  const messages = simplifyTranscript([
+    { type: 'user.message', sequence: 1, payload: { input: '帮我看一下' } },
+    { type: 'run.started', sequence: 2, payload: { input: '帮我看一下' } },
+    { type: 'tool.started', sequence: 3, payload: { name: 'read_file' } },
+    { type: 'assistant.delta', sequence: 4, payload: { text: '看过了' } },
+    { type: 'assistant.delta', sequence: 5, payload: { text: '，没有问题。' } },
+    { type: 'run.completed', sequence: 6, payload: {} }
+  ]);
+  assert.deepEqual(messages, [
+    { role: 'user', text: '帮我看一下' },
+    { role: 'assistant', text: '看过了，没有问题。' }
+  ]);
+  assert.equal(lastEventSequence(messages) , 0);
+  assert.equal(lastEventSequence([{ sequence: 4 }, { sequence: 9 }]), 9);
+});
+
+test('a live preview does not get glued onto the saved reply', () => {
+  const started = reduceSideChat({ messages: [], live: '' }, {
+    type: 'assistant.preview', payload: { text: '还在想' }
+  });
+  assert.equal(started.live, '还在想');
+  assert.deepEqual(started.messages, []);
+  const saved = reduceSideChat(started, { type: 'assistant.delta', payload: { text: '想好了' } });
+  assert.equal(saved.live, '');
+  assert.equal(saved.messages[0].text, '想好了');
 });

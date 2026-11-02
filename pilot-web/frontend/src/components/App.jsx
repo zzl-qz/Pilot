@@ -9,7 +9,6 @@ import { SelectionQuote } from './SideChat.jsx';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { resolveFolders, samePath } from '../lib/projects.js';
 import { api } from '../api.js';
-import { deliverSideChatQuotes, markSideChatReady } from '../lib/side-chat.js';
 import { dragWidth, readLayout, writeLayout } from '../lib/layout.js';
 
 /** 应用外壳：左栏 + 主区（topbar / 通知 / 对话 / 输入） + 右侧工作区 + 弹层。 */
@@ -71,36 +70,6 @@ export default function App() {
       document.documentElement.classList.remove('side-chat-document');
     };
   }, [embedded]);
-
-  /* 会话加载完成后才告诉父窗口可以收引用了：早报的话草稿回填会把刚贴进去的引用冲掉。 */
-  useEffect(() => {
-    if (!embedded || sessionId !== embedded) {
-      return;
-    }
-    window.parent?.postMessage({ type: 'pilot:side-chat-ready', sessionId: embedded }, window.location.origin);
-  }, [embedded, sessionId]);
-
-  /* 父窗口收到 ready 后补投排队中的引用。 */
-  useEffect(() => {
-    const onMessage = (event) => {
-      if (event.origin !== window.location.origin || !event.data || typeof event.data !== 'object') {
-        return;
-      }
-      if (event.data.type !== 'pilot:side-chat-ready') {
-        return;
-      }
-      const frames = Array.from(document.querySelectorAll('iframe[data-side-chat-frame]'));
-      const frame = frames.find((candidate) => candidate.contentWindow === event.source);
-      const frameSessionId = frame?.dataset.sideChatFrame;
-      if (!frameSessionId || event.data.sessionId !== frameSessionId) {
-        return;
-      }
-      markSideChatReady(frameSessionId);
-      deliverSideChatQuotes(frameSessionId);
-    };
-    window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
-  }, []);
 
   useEffect(() => {
     const onKey = (event) => {

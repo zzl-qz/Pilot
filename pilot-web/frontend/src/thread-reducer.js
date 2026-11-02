@@ -38,14 +38,109 @@ export function isUserMessageType(event) {
   return event.type === 'user.message';
 }
 
+/** 计划跟着当前这段用户消息走。上一问的计划卡片留在原处，不再被后来的更新改掉。 */
+function planInOpenSegment(draft) {
+  const rows = draft.thread.rows;
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (row.type === 'user') {
+      return null;
+    }
+    if (row.type === 'plan') {
+      return row;
+    }
+  }
+  return null;
+}
+
+/** 子智能体可能挂在更早的回合上，完成事件不能只看最后一轮。 */
+function turnWithAgent(draft, id) {
+  if (!id) {
+    return null;
+  }
+  const rows = draft.thread.rows;
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (row.type === 'turn' && row.agents?.[id]) {
+      return row;
+    }
+  }
+  return null;
+}
+
+function openTurn(draft) {
+  const rows = draft.thread.rows;
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (row.type === 'user') {
+      return null;
+    }
+    if (row.type === 'turn') {
+      return row;
+    }
+  }
+  return null;
+}
+
+/** 按 runId 找回那一次运行的回合。对不上就留空，不拿「最后一轮」凑。 */
+function turnForRun(draft, runId) {
+  if (!runId) {
+    return null;
+  }
+  const rows = draft.thread.rows;
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (row.type === 'turn' && row.runIds?.includes(runId)) {
+      return row;
+    }
+  }
+  return null;
+}
+
+/** 结束、失败、取消只收自己那一轮。runId 对不上时，才落到当前这段还开着的回合。 */
+function turnToClose(draft, runId) {
+  return turnForRun(draft, runId) || openTurn(draft);
+}
+
+/** 工具结果要回到发起它的那一轮。新一轮已经开了之后，不能写到更靠后的空回合上。 */
+function turnOwning(draft, callId) {
+  const rows = draft.thread.rows;
+  if (callId) {
+    for (let i = rows.length - 1; i >= 0; i -= 1) {
+      const row = rows[i];
+      if (row.type === 'turn' && row.toolIndex?.[callId]) {
+        return row;
+      }
+    }
+  }
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    if (rows[i].type === 'turn') {
+      return rows[i];
+    }
+  }
+  return null;
+}
+
 function ensureTurn(draft) {
   const thread = draft.thread;
-  let turn = [...thread.rows].reverse().find((row) => row.type === 'turn');
+  const rows = thread.rows;
+  // 从末尾往前找。中间夹了用户消息，说明上一轮已经结束，不能把新工具接回去。
+  let turn = null;
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (row.type === 'user') {
+      break;
+    }
+    if (row.type === 'turn') {
+      turn = row;
+      break;
+    }
+  }
   if (!turn) {
     turn = {
-      key: `turn:${draft.runId || 'live'}`,
+      key: `turn:${draft.runId || 'live'}:${thread.cursor}`,
       type: 'turn',
-      runIds: [],
+      runIds: draft.runId ? [draft.runId] : [],
       start: thread.cursor,
       end: thread.cursor,
       tools: [],
@@ -56,6 +151,8 @@ function ensureTurn(draft) {
       agents: {}
     };
     thread.rows.push(turn);
+  } else if (draft.runId && !turn.runIds.includes(draft.runId)) {
+    turn.runIds.push(draft.runId);
   }
   return turn;
 }
@@ -74,6 +171,33 @@ function settleUnfinishedTools(turn, event) {
       tool.status = 'interrupted';
       tool.meta = tool.meta || '未返回结果';
       tool.finishedAt = finishedAt;
+    }
+  }
+}
+
+/**
+ * 这一轮已经结束。用量上的结束时间要写回这一轮自己的统计，
+ * 否则界面会拿「现在」继续加秒，看起来像还在跑。
+ */
+function finishTurnClock(draft, turn, event) {
+  const finishedAt = eventTimestamp(event);
+  if (draft.runUsage) {
+    draft.runUsage.finishedAt = finishedAt;
+  }
+  if (!turn) {
+    return;
+  }
+  if (turn.stats || draft.runUsage) {
+    turn.stats = { ...(turn.stats || draft.runUsage), finishedAt };
+  }
+  if (turn.thinking?.live) {
+    turn.thinking.live = false;
+    turn.thinking.finishedAt = finishedAt;
+  }
+  for (const agent of Object.values(turn.agents || {})) {
+    if (agent.status === 'running') {
+      agent.status = 'interrupted';
+      agent.finishedAt = agent.finishedAt || finishedAt;
     }
   }
 }
@@ -297,8 +421,8 @@ export function applyEvent(draft, event, { live }) {
 
     case 'tool.started': {
       const turn = ensureTurn(draft);
-      // 调工具前那句「我先去看…」是思考，不是结论：收进思考块。
-      if (turn.reply.text) {
+      // 调工具前那句还在往外吐的「我先去看…」是思考，不是结论。已经收住的回复不能再挪走。
+      if (turn.reply.live && turn.reply.text) {
         if (!turn.thinking) {
           turn.thinking = { text: '', live: true, action: '', startedAt: eventTimestamp(event) };
         }
@@ -339,7 +463,7 @@ export function applyEvent(draft, event, { live }) {
     }
 
     case 'tool.completed': {
-      const turn = [...draft.thread.rows].reverse().find((row) => row.type === 'turn');
+      const turn = turnOwning(draft, event.payload?.callId);
       const failed = String(event.payload?.resultSummary || '').startsWith('ERROR');
       const row = turn?.toolIndex?.[event.payload?.callId];
       if (row) {
@@ -391,7 +515,7 @@ export function applyEvent(draft, event, { live }) {
           draft.ui.attentionKind = Object.keys(draft.pendingApprovals).length ? 'attention' : 'running';
         }
       }
-      const turn = [...draft.thread.rows].reverse().find((row) => row.type === 'turn');
+      const turn = turnOwning(draft, event.payload?.callId);
       const row = turn?.toolIndex?.[event.payload?.callId];
       if (row) {
         row.status = approved ? 'run' : 'error';
@@ -405,14 +529,12 @@ export function applyEvent(draft, event, { live }) {
     }
 
     case 'run.completed': {
-      const turn = [...draft.thread.rows].reverse().find((row) => row.type === 'turn');
+      const turn = turnToClose(draft, event.runId);
       draft.running = false;
       draft.cancelling = false;
       draft.runStartedAt = 0;
       draft.queueHeld = false;
-      if (draft.runUsage) {
-        draft.runUsage.finishedAt = eventTimestamp(event);
-      }
+      finishTurnClock(draft, turn, event);
       if (turn) {
         turn.reply.live = false;
         turn.end = event.sequence;
@@ -436,7 +558,7 @@ export function applyEvent(draft, event, { live }) {
     }
 
     case 'run.failed': {
-      const turn = [...draft.thread.rows].reverse().find((row) => row.type === 'turn');
+      const turn = turnToClose(draft, event.runId);
       draft.running = false;
       draft.cancelling = false;
       draft.runStartedAt = 0;
@@ -459,6 +581,7 @@ export function applyEvent(draft, event, { live }) {
         : failure.paused ? '可继续' : failure.interrupted ? '已中断' : failure.cancelled ? '已取消' : '失败');
       const tone = failure.resumable || failure.cancelled ? 'warn' : 'error';
       draft.lastOutcome = failure.outcome || code;
+      finishTurnClock(draft, turn, event);
       if (turn) {
         turn.reply.live = false;
         turn.end = event.sequence;
@@ -486,10 +609,11 @@ export function applyEvent(draft, event, { live }) {
     }
 
     case 'run.cancelled': {
-      const turn = [...draft.thread.rows].reverse().find((row) => row.type === 'turn');
+      const turn = turnToClose(draft, event.runId);
       draft.running = false;
       draft.cancelling = false;
       draft.runStartedAt = 0;
+      finishTurnClock(draft, turn, event);
       if (turn) {
         turn.reply.live = false;
         turn.end = event.sequence;
@@ -538,8 +662,11 @@ export function applyEvent(draft, event, { live }) {
           break;
         }
       }
-      const turn = [...draft.thread.rows].reverse().find((row) => row.type === 'turn');
-      if (turn && event.runId && !turn.runIds.includes(event.runId)) {
+      if (event.runId) {
+        draft.runId = event.runId;
+      }
+      const turn = ensureTurn(draft);
+      if (event.runId && !turn.runIds.includes(event.runId)) {
         turn.runIds.push(event.runId);
       }
       draft.running = true;
@@ -565,12 +692,12 @@ export function applyEvent(draft, event, { live }) {
 
     case 'plan.updated': {
       const items = Array.isArray(event.payload?.plan) ? event.payload.plan : [];
-      const existing = draft.thread.rows.find((row) => row.type === 'plan');
+      const existing = planInOpenSegment(draft);
       if (existing) {
         existing.items = items;
         existing.end = event.sequence;
       } else {
-        pushRow(draft, { key: 'plan', type: 'plan', items, start: event.sequence, end: event.sequence });
+        pushRow(draft, { key: `plan:${event.sequence}`, type: 'plan', items, start: event.sequence, end: event.sequence });
       }
       draft.planItems = items;
       const done = items.filter((item) => (item.status || '') === 'completed' || item.status === 'done').length;
@@ -601,8 +728,8 @@ export function applyEvent(draft, event, { live }) {
     }
 
     case 'subagent.finished': {
-      const turn = [...draft.thread.rows].reverse().find((row) => row.type === 'turn');
       const id = event.payload?.agentId || event.payload?.id;
+      const turn = turnWithAgent(draft, id);
       const agent = turn?.agents?.[id] || draft.agents[id];
       if (agent) {
         agent.status = event.payload?.ok === false ? 'failed' : 'done';
@@ -709,6 +836,23 @@ export function prependHistoryPage(draft, events) {
  * 在隔离区里重放一页事件，产出的行收集进 bucket，不污染现有行，
  * 也不会误写根级状态（running/pendingApprovals 等）——历史重放只负责产出行。
  */
+/** 翻历史时不能借用当前这次运行的 runId，否则旧回合会被盖上新运行的编号。 */
+function replayRunId(bucket, event) {
+  if (event.runId) {
+    return event.runId;
+  }
+  for (let i = bucket.length - 1; i >= 0; i -= 1) {
+    const row = bucket[i];
+    if (row.type === 'user') {
+      break;
+    }
+    if (row.type === 'turn' && row.runIds?.length) {
+      return row.runIds[row.runIds.length - 1];
+    }
+  }
+  return null;
+}
+
 function applyEventInto(root, event, bucket) {
   const thread = root.thread;
   const isolated = {
@@ -722,7 +866,7 @@ function applyEventInto(root, event, bucket) {
     },
     running: root.running,
     cancelling: root.cancelling,
-    runId: root.runId,
+    runId: replayRunId(bucket, event),
     turnRuns: root.turnRuns,
     runUsage: root.runUsage,
     liveOutputTokens: root.liveOutputTokens,

@@ -141,3 +141,24 @@ test('一轮结束时还没结果的工具收成中断，不再永远转圈', ()
   assert.equal(tool.meta, '未返回结果');
   assert.equal(state.running, false);
 });
+
+test('一轮结束后用量计时停住，思考也不再显示思考中', () => {
+  const state = draft();
+  applyEvent(state, {
+    type: 'run.usage', sequence: 1, runId: 'run_1', timestamp: '2026-11-02T00:00:00Z',
+    payload: { modelRequests: 2, inputTokens: 100, outputTokens: 20, contextTokens: 80, contextLimit: 1000, exact: true }
+  }, { live: true });
+  applyEvent(state, {
+    type: 'assistant.reasoning', sequence: 2, timestamp: '2026-11-02T00:00:01Z',
+    payload: { text: '先看目录' }
+  }, { live: true });
+  applyEvent(state, {
+    type: 'run.completed', sequence: 3, runId: 'run_1', timestamp: '2026-11-02T00:01:00Z',
+    payload: { summary: '完成' }
+  }, { live: true });
+
+  const turn = turnOf(state);
+  assert.ok(turn.stats.finishedAt > turn.stats.startedAt);
+  assert.equal(turn.thinking.live, false);
+  assert.ok(turn.thinking.finishedAt > 0);
+});

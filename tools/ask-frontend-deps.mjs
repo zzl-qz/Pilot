@@ -169,8 +169,9 @@ async function main() {
     return;
   }
 
-  // CI / 重定向：不打扰
-  if (process.env.CI === 'true' || process.env.PILOT_SKIP_DEPS_ASK === '1') {
+  // CI、IDEA 构建控制台、管道：没有真正的终端，不要等输入。
+  // IDEA 会把 stdin 接进来且一直不关，等输入会让这次启动停住。
+  if (process.env.CI === 'true' || process.env.PILOT_SKIP_DEPS_ASK === '1' || !process.stdin.isTTY) {
     return;
   }
 
@@ -196,4 +197,8 @@ async function main() {
   install();
 }
 
-await main();
+try {
+  await main();
+} finally {
+  process.exit(0);
+}

@@ -80,9 +80,7 @@ bash mvnw -pl pilot-server -am install
 bash mvnw -pl pilot-server spring-boot:run
 ```
 
-单独构建或运行 `pilot-server` 会读取本机 Maven 仓库中已安装的 `pilot-core`。修改 core 后若只在服务端执行命令，可能仍读到旧 JAR，出现缺少方法或启动失败；需要重新执行根目录的 `install` 命令更新依赖。`start.sh` / `start.cmd` 每次都会完成这一步并运行测试。Windows 的对应命令将 `bash mvnw` 替换为 `.\mvnw.cmd`。
-
-在 IntelliJ IDEA 中请把仓库根目录的 `pom.xml` 作为 Maven 项目导入，再运行 `PilotServerApplication`，不要只导入 `pilot-server/pom.xml`。日常改代码后用 IDE 重启时，在 **Settings → Build, Execution, Deployment → Build Tools → Maven → Runner** 关闭 **Delegate IDE build/run actions to Maven**；这样运行配置的 **Make** 会使用当前工程中的 `pilot-core` 模块输出，不依赖本机仓库里可能过期的 SNAPSHOT JAR。改完设置后执行一次 **Reload All Maven Projects** 和 **Build Project**。如果选择继续委托 Maven 构建，则先运行上面的 `-pl pilot-server -am install`，单独执行 `-pl pilot-server test` 会读取旧的本机依赖。项目已为 DevTools 配置多模块 restart classloader 与编译静默窗口。重启前还要停止占用同一端口的旧进程；IDE 的运行按钮不会替换从其他终端启动的服务。
+只构建 `pilot-server` 时，同一次编译会带上 `pilot-core` 的源码，不依赖本机仓库里可能过期的 JAR，也不另起一次 Maven。IDEA 里运行 `PilotServerApplication` 即可。项目不使用 Spring Boot DevTools，改了 Java 后由你再点一次运行。若 9999 仍被旧进程占用，先停掉那个进程。
 
 ## 权限说明
 

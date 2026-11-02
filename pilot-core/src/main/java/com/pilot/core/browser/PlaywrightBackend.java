@@ -204,6 +204,14 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
 
     @Override
     public void mirrorControl(String sessionId, boolean start, int maxWidth, int quality) {
+        mirrorControl(sessionId, start, maxWidth, quality, true);
+    }
+
+    /**
+     * @param capture 是否推截图帧。页面能直接嵌进面板时关掉，避免 JPEG 流把界面拖卡；
+     *                会话仍算「有人在看」，空闲回收不会把浏览器收掉。
+     */
+    public void mirrorControl(String sessionId, boolean start, int maxWidth, int quality, boolean capture) {
         // 订阅期间视为「有人在看」，空闲回收跳过（见 startReaper）
         if (sessionId != null) {
             if (start) {
@@ -215,6 +223,7 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
         Map<String, Object> arguments = new LinkedHashMap<>();
         arguments.put("maxWidth", maxWidth);
         arguments.put("quality", quality);
+        arguments.put("capture", capture);
         try {
             request(sessionId, start ? "mirror-start" : "mirror-stop", arguments, Duration.ofSeconds(10));
         } catch (BrowserException ignored) {

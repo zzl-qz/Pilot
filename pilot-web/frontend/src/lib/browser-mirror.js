@@ -13,6 +13,75 @@
  * 就不会因为多套一层而拿到 null（那会让 <img> 没有 src，画面区只剩 alt 文本）。
  * 帧体缺失或不是 base64 时返回 null：调用方跳过本次渲染，避免用旧帧闪屏。
  */
+/**
+ * 本机 http(s) 页面可以交给浏览器自己画（和 Cursor 的内置浏览器一样是真页面，不是截图）。
+ * 没写协议的 `localhost:5173` 补上 http。外网地址返回 null。
+ */
+/** 人在地址栏输入的地址。本机没写协议时用 http，其它主机用 https。 */
+export function userPageUrl(input) {
+  const text = String(input || '').trim();
+  if (!text) return null;
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text);
+  let url;
+  try {
+    url = new URL(hasScheme ? text : `http://${text}`);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  if (!hasScheme) {
+    const host = url.hostname.replace(/^\[|\]$/g, '');
+    const local = host === 'localhost' || host.endsWith('.localhost')
+      || host === '127.0.0.1' || host === '::1' || /^127\.\d+\.\d+\.\d+$/.test(host);
+    if (!local) url.protocol = 'https:';
+  }
+  return url.href;
+}
+
+export function embeddablePageUrl(url) {
+  const text = String(url || '').trim();
+  if (!text || text === 'about:blank') {
+    return null;
+  }
+  const withScheme = /^https?:\/\//i.test(text) ? text : `http://${text}`;
+  let parsed;
+  try {
+    parsed = new URL(withScheme);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return null;
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/g, '');
+  if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1') {
+    return null;
+  }
+  return parsed.href;
+}
+
+/**
+ * 面板是否直接嵌页面。
+ * 服务端明确说嵌不了（DENY / frame-ancestors）时退回截图。
+ * SAMEORIGIN 只有页面和面板同源才嵌。
+ */
+export function shouldEmbedPage(url, embed, frameOptions) {
+  if (embed === false) {
+    return false;
+  }
+  const page = embeddablePageUrl(url);
+  if (!page) {
+    return false;
+  }
+  if (String(frameOptions || '').toLowerCase() === 'sameorigin') {
+    if (typeof location === 'undefined' || !location.origin) {
+      return false;
+    }
+    return new URL(page).origin === location.origin;
+  }
+  return true;
+}
+
 export function frameSrc(payload) {
   const frame = typeof payload === 'string' ? payload : payload && payload.frame;
   if (typeof frame !== 'string' || !frame) {

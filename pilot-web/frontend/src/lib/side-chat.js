@@ -1,17 +1,10 @@
 /**
- * 侧边对话（Side chat）的纯逻辑：标签页持久化、内嵌页判定、引用投递。
- *
- * <p>旧版每个 Side chat 都是「同一份前端 + ?sideChat=1&session=<id>」的 iframe：
- * 内嵌页收起侧栏与审阅面板，只显示那一个会话；父窗口用 postMessage 把选中的文本递过去。
- * 这里把同一套做法搬到 React 上，只把 DOM 操作换成查询 iframe + postMessage。
+ * 侧边对话的纯逻辑：标签页持久化、旧链接的内嵌页判定、选中文本的引用格式。
+ * 引用直接交给当前页的侧边对话，不再经过 iframe。
  */
 
 const STORAGE_KEY = 'pilot.side-chats';
 const QUERY_KEY = 'sideChat';
-
-/** 内存里的待投递引用与已就绪帧：iframe 还没加载完时先排队。 */
-const pendingQuotes = new Map();
-const readyFrames = new Set();
 
 /**
  * 默认存储：拿不到 localStorage（隐私模式、Node 测试）时降级成 null，
@@ -36,7 +29,7 @@ export function readSideChats(storage = defaultStorage()) {
       .filter((item) => item && item.id && item.workspace)
       .map((item) => ({
         id: item.id,
-        title: item.title || 'Side chat',
+        title: item.title || '侧边对话',
         workspace: item.workspace,
         projectId: item.projectId || null
       }));
@@ -80,9 +73,78 @@ export function readEmbeddedSession(search) {
   return params.get('session') || null;
 }
 
-/** iframe 地址：同一份前端，带上侧边对话参数（与旧版一致）。 */
-export function sideChatFrameSrc(sessionId) {
-  return `/?${QUERY_KEY}=1&session=${encodeURIComponent(sessionId)}`;
+/**
+ * 侧边栏已经列出对话时，侧片自己的顶栏导航就不再显示。
+ * 侧边栏收起后，顶栏才出现，否则没法切换。
+ */
+export function showSidePieceNav(sidebarOpen) {
+  return !sidebarOpen;
+}
+
+/** 长消息收成可展开的侧片。短消息保持原样。 */
+export function messagePeek(text, maxLines = 4) {
+  const raw = String(text || '').replace(/\s+$/, '');
+  const lines = raw.split(/\r?\n/);
+  const clipped = lines.length > maxLines || raw.length > 280;
+  const preview = (lines.length > maxLines ? lines.slice(0, maxLines) : lines).join('\n');
+  return {
+    preview: clipped && lines.length <= maxLines && raw.length > 280 ? `${raw.slice(0, 280)}…` : preview,
+    collapsed: clipped
+  };
+}
+
+function sameText(left, right) {
+  return String(left || '').replace(/\s+/g, ' ').trim() === String(right || '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 侧边对话只留人话和回复。工具、计划和用量都不进这张简易对话框。
+ * user.message 与随后的 run.started 会带同一句输入，只留一次。
+ */
+export function reduceSideChat(state, event) {
+  const current = {
+    messages: Array.isArray(state?.messages) ? state.messages.slice() : [],
+    live: state?.live || ''
+  };
+  const type = event?.type;
+  const payload = event?.payload || {};
+  if (type === 'user.message' || type === 'run.started') {
+    const text = String(payload.input || payload.text || '');
+    if (!text.trim()) {
+      return current;
+    }
+    const last = current.messages[current.messages.length - 1];
+    if (last?.role === 'user' && sameText(last.text, text)) {
+      return { ...current, live: '' };
+    }
+    current.messages.push({ role: 'user', text });
+    return { messages: current.messages, live: '' };
+  }
+  if (type === 'assistant.delta') {
+    const text = payload.text || '';
+    const last = current.messages[current.messages.length - 1];
+    if (last?.role === 'assistant') {
+      current.messages[current.messages.length - 1] = { role: 'assistant', text: last.text + text };
+    } else if (text) {
+      current.messages.push({ role: 'assistant', text });
+    }
+    return { messages: current.messages, live: '' };
+  }
+  if (type === 'assistant.preview') {
+    return { messages: current.messages, live: current.live + (payload.text || '') };
+  }
+  if (type === 'run.completed' || type === 'run.failed' || type === 'run.cancelled') {
+    return { messages: current.messages, live: '' };
+  }
+  return current;
+}
+
+export function simplifyTranscript(events) {
+  return (events || []).reduce((state, event) => reduceSideChat(state, event), { messages: [], live: '' }).messages;
+}
+
+export function lastEventSequence(events) {
+  return (events || []).reduce((max, event) => Math.max(max, Number(event?.sequence) || 0), 0);
 }
 
 /** 被选中的文本 → markdown 引用块（多行逐行加 >）。空白内容返回空串。 */
@@ -109,44 +171,3 @@ export function appendQuote(getText, appendText, text) {
   return true;
 }
 
-function frameSelector(sessionId) {
-  return `iframe[data-side-chat-frame="${String(sessionId).replace(/["\\]/g, '\\$&')}"]`;
-}
-
-function postQuote(frame, sessionId, text) {
-  frame?.contentWindow?.postMessage({ type: 'pilot:side-chat-quote', sessionId, text }, window.location.origin);
-}
-
-export function markSideChatReady(sessionId) {
-  readyFrames.add(sessionId);
-}
-
-export function forgetSideChat(sessionId) {
-  readyFrames.delete(sessionId);
-  pendingQuotes.delete(sessionId);
-}
-
-export function queueSideChatQuote(sessionId, text) {
-  const list = pendingQuotes.get(sessionId) || [];
-  list.push(text);
-  pendingQuotes.set(sessionId, list);
-}
-
-/**
- * 尝试投递该会话排队的引用。
- *
- * @returns {boolean} 帧还没就绪时返回 false，引用继续留在队列里，等 ready 消息再补投
- */
-export function deliverSideChatQuotes(sessionId) {
-  if (!readyFrames.has(sessionId)) {
-    return false;
-  }
-  const frame = document.querySelector(frameSelector(sessionId));
-  if (!frame) {
-    return false;
-  }
-  const quotes = pendingQuotes.get(sessionId) || [];
-  pendingQuotes.delete(sessionId);
-  quotes.forEach((text) => postQuote(frame, sessionId, text));
-  return true;
-}

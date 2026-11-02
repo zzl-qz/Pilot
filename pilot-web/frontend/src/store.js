@@ -21,13 +21,10 @@ import { QUICK_COMMANDS, filterQuickCommands, expandQuickCommand } from './lib/c
 import { groupSessionsByProject, samePath } from './lib/projects.js';
 import { mergeRunReports, sortChangeFiles } from './lib/changes.js';
 import { isCommandActive, commandStatusLabel, mergeCommandLog } from './lib/command-tasks.js';
-import { frameSrc, latencyLabel, nextMirrorMode, pauseToggleLabel, urlLabel } from './lib/browser-mirror.js';
+import { nextMirrorMode } from './lib/browser-mirror.js';
 import { classifyModelError, describeModelSaved } from './lib/model-settings.js';
 import { sameUserInput } from './thread-utils.js';
-import {
-  readSideChats, writeSideChats, readEmbeddedSession, queueSideChatQuote,
-  deliverSideChatQuotes, forgetSideChat
-} from './lib/side-chat.js';
+import { readSideChats, writeSideChats, readEmbeddedSession } from './lib/side-chat.js';
 
 const RECONNECT_BASE_MS = 800;
 const RECONNECT_MAX_MS = 15000;
@@ -40,7 +37,7 @@ const RECONNECT_MAX_MS = 15000;
  */
 function emptyMirror() {
   return {
-    mode: 'idle', frame: null, url: '', latency: 0, paused: false,
+    mode: 'idle', frame: null, url: '', embed: true, frameOptions: '', latency: 0, paused: false,
     frameW: 1280, frameH: 800, canGoBack: false, canGoForward: false
   };
 }
@@ -50,6 +47,16 @@ const NOTIFY_KEY = 'pilot.notify';
 let eventSource = null;
 let reconnectTimer = null;
 let mirrorSource = null;
+/** 截图帧直接画到面板上，不进 store。JPEG 进 React 状态会把整页拖卡。 */
+let paintMirrorFrame = null;
+let lastMirrorPayload = null;
+
+export function setMirrorPainter(painter) {
+  paintMirrorFrame = painter;
+  if (painter && lastMirrorPayload) {
+    painter(lastMirrorPayload);
+  }
+}
 let commandTimer = null;
 let runClockTimer = null;
 let usageRefreshTimer = null;
@@ -209,6 +216,8 @@ export const useStore = create(immer((set, get) => {
   currentProjectId: null,
   /** 侧边对话标签页：{ items: [{ id, title, workspace, projectId }], activeId }。 */
   sideChats: readSideChats(),
+  /** 选中文本要贴进侧边对话时暂存一句，面板取走后清空。 */
+  sideQuote: null,
   runId: null,
   lastRunId: null,
   running: false,
@@ -1020,11 +1029,27 @@ export const useStore = create(immer((set, get) => {
       const data = await api.plan(sessionId);
       if (Array.isArray(data?.plan) && data.plan.length) {
         set((draft) => {
-          const existing = draft.thread.rows.find((row) => row.type === 'plan');
+          let existing = null;
+          for (let i = draft.thread.rows.length - 1; i >= 0; i -= 1) {
+            const row = draft.thread.rows[i];
+            if (row.type === 'user') {
+              break;
+            }
+            if (row.type === 'plan') {
+              existing = row;
+              break;
+            }
+          }
           if (existing) {
             existing.items = data.plan;
           } else {
-            draft.thread.rows.unshift({ key: 'plan', type: 'plan', items: data.plan, start: 0, end: 0 });
+            draft.thread.rows.push({
+              key: `plan:live:${draft.thread.cursor}`,
+              type: 'plan',
+              items: data.plan,
+              start: draft.thread.cursor,
+              end: draft.thread.cursor
+            });
           }
           draft.planItems = data.plan;
         });
@@ -1248,14 +1273,14 @@ export const useStore = create(immer((set, get) => {
     const project = state.currentProject() || (state.projects || [])[0] || null;
     const workspace = state.workspace || project?.folders?.[0];
     if (!workspace) {
-      state.showNotice('先选择一个已绑定工作区的项目，再创建 Side chat');
+      state.showNotice('先选择一个已绑定工作区的项目，再开侧边对话');
       return null;
     }
     try {
-      const session = await api.createSession({ title: 'Side chat', projectId: null, workspace, replaceBlank: false });
+      const session = await api.createSession({ title: '侧边对话', projectId: null, workspace, replaceBlank: false });
       const item = {
         id: session?.sessionId || session?.id,
-        title: session?.title || 'Side chat',
+        title: session?.title || '侧边对话',
         workspace: session?.workspace || workspace,
         projectId: null
       };
@@ -1272,7 +1297,7 @@ export const useStore = create(immer((set, get) => {
       await Promise.all([get().loadSessions(), get().loadProjects()]);
       return item;
     } catch (error) {
-      get().showNotice('创建 Side chat 失败：' + error.message);
+      get().showNotice('创建侧边对话失败：' + error.message);
       return null;
     }
   },
@@ -1302,7 +1327,6 @@ export const useStore = create(immer((set, get) => {
         draft.ui.inspectorTab = 'activity';
       }
     });
-    forgetSideChat(id);
     persistSideChats();
   },
 
@@ -1323,7 +1347,7 @@ export const useStore = create(immer((set, get) => {
     state.setUi({ inspectorOpen: true, inspectorTab: 'chat' });
   },
 
-  /** 把选中的文本带进侧边对话：帧就绪就直接投，否则排队等它 ready。 */
+  /** 把选中的文本带进当前页的侧边对话。 */
   async askSideChat(text) {
     if (!String(text || '').trim() || get().embeddedSessionId) {
       return;
@@ -1340,8 +1364,16 @@ export const useStore = create(immer((set, get) => {
       draft.ui.inspectorOpen = true;
       draft.ui.inspectorTab = 'chat';
     });
-    queueSideChatQuote(id, text);
-    deliverSideChatQuotes(id);
+    set((draft) => { draft.sideQuote = { id, text, nonce: Date.now() }; });
+  },
+
+  takeSideQuote(id) {
+    const quote = get().sideQuote;
+    if (!quote || quote.id !== id) {
+      return null;
+    }
+    set((draft) => { draft.sideQuote = null; });
+    return quote.text;
   },
 
   /* ---------- 工作区 / worktree ---------- */
@@ -1929,6 +1961,7 @@ function closeStreams() {
     mirrorSource.close();
     mirrorSource = null;
   }
+  lastMirrorPayload = null;
   clearInterval(commandTimer);
   commandTimer = null;
   clearTimeout(reconnectTimer);
@@ -1948,22 +1981,31 @@ function connectMirror(get, set) {
   const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/browser/stream`);
   mirrorSource = source;
   source.addEventListener('frame', (message) => {
+    let payload;
     try {
-      const payload = JSON.parse(message.data);
-      set((draft) => {
-        draft.ui.mirror.mode = nextMirrorMode(draft.ui.mirror.mode, 'frame');
-        draft.ui.mirror.frame = payload.frame || payload.image || payload;
-        draft.ui.mirror.latency = payload.latencyMs || 0;
-        draft.ui.mirror.url = payload.url || draft.ui.mirror.url;
-        // 帧被服务端按 maxWidth 缩过：坐标换算必须用帧自己的尺寸，否则点击会整体偏移
-        if (Number(payload.w) > 0) {
-          draft.ui.mirror.frameW = Number(payload.w);
-        }
-        if (Number(payload.h) > 0) {
-          draft.ui.mirror.frameH = Number(payload.h);
-        }
-      });
-    } catch { /* 帧解析失败忽略 */ }
+      payload = JSON.parse(message.data);
+    } catch {
+      return;
+    }
+    lastMirrorPayload = payload;
+    if (paintMirrorFrame) {
+      paintMirrorFrame(payload);
+    }
+    const mirror = get().ui.mirror;
+    const mode = nextMirrorMode(mirror.mode, 'frame');
+    const url = payload.url || mirror.url;
+    const frameW = Number(payload.w) > 0 ? Number(payload.w) : mirror.frameW;
+    const frameH = Number(payload.h) > 0 ? Number(payload.h) : mirror.frameH;
+    if (mirror.mode === mode && mirror.url === url && mirror.frameW === frameW && mirror.frameH === frameH) {
+      return;
+    }
+    set((draft) => {
+      draft.ui.mirror.mode = mode;
+      draft.ui.mirror.url = url;
+      draft.ui.mirror.frameW = frameW;
+      draft.ui.mirror.frameH = frameH;
+      draft.ui.mirror.frame = null;
+    });
   });
   source.addEventListener('status', (message) => {
     try {
@@ -1986,6 +2028,14 @@ function connectMirror(get, set) {
         }
         draft.ui.mirror.canGoBack = Boolean(payload.canGoBack);
         draft.ui.mirror.canGoForward = Boolean(payload.canGoForward);
+        if (payload.embed === false) {
+          draft.ui.mirror.embed = false;
+        } else if (payload.embed === true) {
+          draft.ui.mirror.embed = true;
+        }
+        if (typeof payload.frameOptions === 'string') {
+          draft.ui.mirror.frameOptions = payload.frameOptions;
+        }
         if (draft.ui.mirror.mode === 'closed' && payload.url !== 'about:blank') {
           draft.ui.mirror.mode = 'live';
         }

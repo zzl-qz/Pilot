@@ -124,6 +124,14 @@ public class BrowserControlService implements BrowserEventListener {
         }
     }
 
+    /**
+     * 面板正在直接嵌页面时关掉截图；嵌不进去再打开。
+     * 仍然保持订阅，浏览器不会因为没人看截图就被空闲回收。
+     */
+    public void setCapture(String sessionId, boolean capture) {
+        controls.execute(() -> runtime.mirrorCapture(sessionId, capture, maxWidth, quality));
+    }
+
     /** 把某个会话的浏览器窗口置前（不置顶循环）。 */
     public void focus(String sessionId) {
         controls.execute(() -> runtime.focusPage(sessionId));

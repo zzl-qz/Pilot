@@ -20,21 +20,11 @@ spring:
         cachecontrol:
           # 本地改前端后，浏览器每次重新校验，避免刷新仍看到旧 JS/CSS
           no-cache: true
-  devtools:
-    livereload:
-      # 浏览器自动刷新那条附加服务用不上，关掉以免多占一个端口
-      enabled: false
-    restart:
-      # IDEA 会分批写入多模块的 class 文件。给编译留出完整落盘时间，避免只看到 server、
-      # 尚未看到 core 时就提前重启，产生 SnapshotSink.class 等短暂缺失。
-      #
-      # 默认关掉。Agent 跑 mvn 会改写 target/classes，开着就会把整个服务重启一遍，
-      # 任务被打断，CPU 和风扇也会跟着飙。改 Pilot 自己的代码时再设 PILOT_DEVTOOLS_RESTART=true。
-      enabled: ${PILOT_DEVTOOLS_RESTART:false}
-      poll-interval: 2s
-      quiet-period: 1s
 
 pilot:
+  desktop:
+    # 服务起来后打开桌面窗口。浏览器访问同一端口仍然可用。测试里关掉。
+    launch: ${PILOT_DESKTOP_LAUNCH:true}
   data:
     # 会话库、快照、trace、附件默认放在项目下的 .pilot
     # 要换位置：环境变量 PILOT_DATA_DIR，或启动参数 -Dpilot.data.dir=...

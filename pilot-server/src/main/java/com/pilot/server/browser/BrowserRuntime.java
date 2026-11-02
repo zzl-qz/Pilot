@@ -152,6 +152,12 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         if (current != null) current.mirrorControl(sessionId, start, maxWidth, quality);
     }
 
+    /** 开/关截图推帧，但不把会话从「有人在看」里摘掉。 */
+    public void mirrorCapture(String sessionId, boolean capture, int maxWidth, int quality) {
+        PlaywrightBackend current = backend;
+        if (current != null) current.mirrorControl(sessionId, true, maxWidth, quality, capture);
+    }
+
     @Override
     public void focusPage(String sessionId) {
         PlaywrightBackend current = backend;

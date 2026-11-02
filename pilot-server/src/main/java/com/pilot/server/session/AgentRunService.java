@@ -125,10 +125,16 @@ public class AgentRunService implements RunStarter {
     private final com.pilot.server.validation.ValidationLedger validations;
     /** 自定义子代理目录；测试轻量装配不注入时，spawn/dispatch 的 agent 引用只能拿到空目录。 */
     private volatile AgentProfileService agentProfiles;
+    private volatile com.pilot.server.desktop.DesktopViewportReset viewportReset;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setAgentProfiles(AgentProfileService agentProfiles) {
         this.agentProfiles = agentProfiles;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setViewportReset(com.pilot.server.desktop.DesktopViewportReset viewportReset) {
+        this.viewportReset = viewportReset;
     }
 
     /** 兼容旧调用：不启用检查点与幂等账本。 */
@@ -1317,6 +1323,10 @@ public class AgentRunService implements RunStarter {
                 snapshots.finish();
             } finally {
                 snapshots.clear();
+            }
+            com.pilot.server.desktop.DesktopViewportReset reset = viewportReset;
+            if (reset != null) {
+                reset.clear();
             }
         }
     }

@@ -400,7 +400,7 @@ html[data-theme] .turn-stats {
 html[data-theme] .turn-stats[hidden] { display: none; }
 html[data-theme] .turn-stat { display: inline-flex; align-items: baseline; gap: 4px; }
 html[data-theme] .turn-stat b { color: var(--muted); font-family: var(--mono); font-weight: 520; }
-html[data-theme] .turn-stat.is-context b { color: var(--accent); }
+html[data-theme] .turn-stat.is-context.is-hot b { color: var(--warn); }
 html[data-theme] .turn-stat-note { margin-left: auto; color: var(--dim); }
 
 /* Response content is a small document system: prose, evidence, code and notices stay distinct. */
@@ -512,7 +512,7 @@ html[data-theme] .bubble .md-code pre {
   overflow: auto;
 }
 html[data-theme] .bubble .md-code pre.is-capped { max-height: 420px; }
-html[data-theme] .bubble .md-code pre code { display: block; min-width: max-content; white-space: pre; }
+html[data-theme] .bubble .md-code pre code { display: block; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 html[data-theme] .md-code-head { gap: 8px; }
 html[data-theme] .md-code-toggle,
 html[data-theme] .md-code-more {

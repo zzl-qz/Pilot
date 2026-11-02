@@ -38,15 +38,21 @@ import java.util.stream.Stream;
  */
 public final class BrowserTool implements Tool, LocalInteraction {
     private static final Set<String> OBSERVATIONS = Set.of(
-            "navigate", "reload", "back", "snapshot", "screenshot", "console", "network", "wait", "close");
-    private static final Set<String> INTERACTIONS = Set.of("click", "fill", "type", "press", "select", "upload");
+            "navigate", "reload", "back", "forward", "snapshot", "screenshot", "console", "network", "wait",
+            "close", "text", "links", "tabs");
+    private static final Set<String> INTERACTIONS = Set.of(
+            "click", "dblclick", "right_click", "hover", "fill", "type", "press", "select", "upload",
+            "download", "switch_tab", "close_tab");
     /** 用户接管（paused）时拦截的动作：交互类 + 会打断用户的导航/关闭/脚本。观察类放行。 */
     private static final Set<String> PAUSED_BLOCKS = Set.of(
-            "navigate", "reload", "back", "close", "evaluate",
-            "click", "fill", "type", "press", "select", "upload");
+            "navigate", "reload", "back", "forward", "close", "evaluate",
+            "click", "dblclick", "right_click", "hover", "fill", "type", "press", "select", "upload",
+            "download", "switch_tab", "close_tab");
     private static final List<String> ACTIONS = List.of(
-            "navigate", "reload", "back", "snapshot", "click", "fill", "type", "press", "select", "upload",
-            "screenshot", "console", "network", "wait", "evaluate", "close");
+            "navigate", "reload", "back", "forward", "snapshot", "click", "dblclick", "right_click", "hover",
+            "fill", "type", "press", "select", "upload", "download",
+            "screenshot", "console", "network", "text", "links", "tabs", "switch_tab", "close_tab",
+            "wait", "evaluate", "close");
     private static final int MAX_SCREENSHOTS_KEPT = 40;
     private static final int MAX_UPLOAD_FILES = 10;
 
@@ -189,6 +195,30 @@ public final class BrowserTool implements Tool, LocalInteraction {
             }
             case "click" -> {
                 return target(args, command);
+            }
+            case "dblclick" -> {
+                command.put("op", "click");
+                command.put("clickCount", 2);
+                return target(args, command);
+            }
+            case "right_click" -> {
+                command.put("op", "click");
+                command.put("button", "right");
+                return target(args, command);
+            }
+            case "hover", "download" -> {
+                String problem = target(args, command);
+                if (problem != null) return problem;
+                if ("download".equals(action)) {
+                    Path file = nextScreenshot().resolveSibling("download-" + shots.get() + ".bin");
+                    command.put("path", file.toString());
+                }
+                return null;
+            }
+            case "switch_tab", "close_tab" -> {
+                String tabId = ToolSupport.stringArg(args, "tabId");
+                if (tabId == null) return action + " 需要 tabId";
+                command.put("tabId", tabId);
             }
             case "fill", "type" -> {
                 String problem = target(args, command);

@@ -25,12 +25,6 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
-        <!-- 开发时改 Java 自动重启。打包成 jar 时插件会把它排除，不影响正式运行 -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-devtools</artifactId>
-            <optional>true</optional>
-        </dependency>
         <dependency>
             <groupId>org.xerial</groupId>
             <artifactId>sqlite-jdbc</artifactId>
@@ -49,6 +43,11 @@
     </dependencies>
     <build>
         <resources>
+            <!-- 只构建本模块时，classpath 上的 pilot-core 是仓库里的 jar，可能落后于源码。
+                 把 core 的资源一并打进本模块，运行时以这里的为准。 -->
+            <resource>
+                <directory>../pilot-core/src/main/resources</directory>
+            </resource>
             <resource>
                 <directory>../pilot-web/src/main/resources</directory>
             </resource>
@@ -99,6 +98,34 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+            <!-- 同一进程里编译 core 源码，不再另起一次 Maven 去 install。
+                 另起的 Maven 会和 IDEA 这次构建抢 ~/.m2 的锁，启动直接失败。 -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <id>add-core-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals><goal>add-source</goal></goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.basedir}/../pilot-core/src/main/java</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- 根 pom 的 argLine 会盖掉默认值。JDK 25 上 Mockito 若中途自己挂 agent，
+                         全量测试里两个 mock maker 会冲突，桩 default 方法时直接断言失败。 -->
+                    <argLine>-javaagent:${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar --enable-native-access=ALL-UNNAMED</argLine>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

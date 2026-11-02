@@ -9,7 +9,6 @@ import { stepHistory } from '../lib/input-history.js';
 import { checkIncomingFile } from '../lib/attachments.js';
 import { writeDraft, readDraft, dropDraft } from '../lib/drafts.js';
 import { isImageAttachment } from '../lib/attachments.js';
-import { appendQuote } from '../lib/side-chat.js';
 import { PERMISSION_MODES, permissionLabel, permissionHint } from '../lib/permission.js';
 import { buildModelProbe, buildModelUpdate, describeModelsFetched } from '../lib/model-settings.js';
 import {
@@ -39,7 +38,6 @@ export function Composer() {
   const contextStatus = useStore((state) => state.contextStatus);
   const compacting = useStore((state) => state.compactingContext);
   const editTarget = useStore((state) => state._editTarget);
-  const embeddedSessionId = useStore((state) => state.embeddedSessionId);
 
   const flowRef = useRef(null);
   const inputRef = useRef(null);
@@ -92,31 +90,6 @@ export function Composer() {
   useEffect(() => {
     inputRef.current?.setText(readDraft(localStorage, sessionId));
   }, [sessionId]);
-
-  /* 侧边对话内嵌页：父窗口把选中的文本作为引用贴进输入框（旧版 onSideChatParentMessage）。 */
-  useEffect(() => {
-    if (!embeddedSessionId) {
-      return undefined;
-    }
-    const onMessage = (event) => {
-      if (event.origin !== window.location.origin || event.source !== window.parent) {
-        return;
-      }
-      const data = event.data;
-      if (data?.type !== 'pilot:side-chat-quote' || data.sessionId !== embeddedSessionId || typeof data.text !== 'string') {
-        return;
-      }
-      const input = inputRef.current;
-      if (!input) {
-        return;
-      }
-      if (appendQuote(input.getText, input.appendText, data.text)) {
-        input.focus();
-      }
-    };
-    window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
-  }, [embeddedSessionId]);
 
   function sendState() {
     const state = useStore.getState();
@@ -735,30 +708,54 @@ function MessageQueue() {
     return null;
   }
   return (
+    <QueueList entries={entries} queueEdit={queueEdit} collapsed={collapsed} />
+  );
+}
+
+function QueueList({ entries, queueEdit, collapsed }) {
+  const [dragFrom, setDragFrom] = useState(null);
+  return (
     <div id="message-queue" className="message-queue">
       <header className="queue-head" onClick={() => useStore.getState().setUi({ queueCollapsed: !collapsed })}>
-        <span>排队消息 · {entries.length}</span>
+        <span>{entries.length} 条排队</span>
         <span className="queue-toggle">{collapsed ? '展开' : '收起'}</span>
       </header>
       {!collapsed && (
         <ol className="queue-list">
-          {entries.map((entry, index) => (
-            <li key={index} className="queue-entry">
-              {queueEdit === index ? (
-                <QueueEditor index={index} text={entry.text ?? entry} />
-              ) : (
-                <>
-                  <span className="queue-text">{entry.text ?? entry}</span>
-                  <span className="queue-actions">
-                    <button type="button" title="编辑" onClick={() => useStore.getState().setUi({ queueEdit: index })}>编辑</button>
-                    <button type="button" title="上移" disabled={index === 0} onClick={() => useStore.getState().moveQueueItem(index, index - 1)}>↑</button>
-                    <button type="button" title="下移" disabled={index === entries.length - 1} onClick={() => useStore.getState().moveQueueItem(index, index + 1)}>↓</button>
-                    <button type="button" title="删除" onClick={() => useStore.getState().removeQueueItem(index)}>✕</button>
-                  </span>
-                </>
-              )}
-            </li>
-          ))}
+          {entries.map((entry, index) => {
+            const text = entry.text ?? entry;
+            return (
+              <li
+                key={index}
+                className="queue-entry"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => {
+                  if (dragFrom == null || dragFrom === index) return;
+                  useStore.getState().moveQueueItem(dragFrom, index);
+                  setDragFrom(null);
+                }}
+              >
+                {queueEdit === index ? (
+                  <QueueEditor index={index} text={text} />
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="queue-grip"
+                      draggable
+                      aria-label="拖动调整顺序"
+                      title="拖动调整顺序"
+                      onDragStart={() => setDragFrom(index)}
+                    >
+                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6h8M4 10h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+                    </button>
+                    <button type="button" className="queue-text" title={text} onClick={() => useStore.getState().setUi({ queueEdit: index })}>{text}</button>
+                    <button type="button" className="queue-icon" title="删除" aria-label="删除" onClick={() => useStore.getState().removeQueueItem(index)}>×</button>
+                  </>
+                )}
+              </li>
+            );
+          })}
         </ol>
       )}
     </div>
