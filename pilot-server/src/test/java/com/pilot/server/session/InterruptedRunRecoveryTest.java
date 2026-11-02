@@ -67,6 +67,35 @@ class InterruptedRunRecoveryTest {
         assertEquals(before, sessions.events(session.id()).size(), "终态会话不应再补事件");
     }
 
+    @Test
+    void leavesBlankSessionAlone() throws Exception {
+        SessionService sessions = new SessionService(Clock.systemUTC());
+        // 刚建好、还没发过任何消息的对话：重启不该让它变成「运行已中断」
+        Session session = sessions.createSession("还没开始", null, null, true);
+
+        recovery(sessions, List.of(new InterruptedRun("run_blank", session.id())))
+                .run(new DefaultApplicationArguments());
+
+        assertEquals(SessionStatus.CREATED, sessions.find(session.id()).orElseThrow().status());
+        assertEquals(0, sessions.events(session.id()).size(), "空白对话不应被补中断事件");
+    }
+
+    @Test
+    void leavesIdleSessionAloneEvenWhenRunRowSurvives() throws Exception {
+        SessionService sessions = new SessionService(Clock.systemUTC());
+        Session session = sessions.createSession("已完成一轮");
+        Run run = sessions.sendMessage(session.id(), "任务");
+        sessions.publish(session.id(), run.runId(), new RunCompleted("完成", List.of(), List.of()));
+        int before = sessions.events(session.id()).size();
+
+        // runs 表里残留一条 RUNNING（历史脏数据）也不该给已结束的会话再造中断卡片
+        recovery(sessions, List.of(new InterruptedRun("run_stale", session.id())))
+                .run(new DefaultApplicationArguments());
+
+        assertEquals(SessionStatus.COMPLETED, sessions.find(session.id()).orElseThrow().status());
+        assertEquals(before, sessions.events(session.id()).size());
+    }
+
     private static InterruptedRunRecovery recovery(SessionService sessions, List<InterruptedRun> interrupted) {
         RunRepository runs = new RunRepository() {
             @Override

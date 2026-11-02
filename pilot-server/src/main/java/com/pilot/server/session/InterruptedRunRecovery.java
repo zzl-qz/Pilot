@@ -6,6 +6,7 @@ import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.session.SessionStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -60,12 +61,17 @@ public class InterruptedRunRecovery implements ApplicationRunner {
         List<InterruptedRun> interrupted = runs.markInterrupted(now);
         Set<String> handled = new HashSet<>();
         for (InterruptedRun run : interrupted) {
+            // 空白会话（从未发过消息）没有被中断的运行可言：给它补 run.failed 只会在界面上
+            // 凭空造出一张「运行已中断 · 继续执行」的卡片，所以直接跳过，状态留原样。
+            if (skippable(run.sessionId())) {
+                continue;
+            }
             handled.add(run.sessionId());
             closeSession(run.sessionId(), run.runId());
         }
         // runs 表可能压根没有对应记录（例如 run 行没写成或事件丢失），仍要收敛会话状态
         for (Session session : sessions.list()) {
-            if (session.status().terminal() || handled.contains(session.id())) {
+            if (session.status().terminal() || handled.contains(session.id()) || !inFlight(session)) {
                 continue;
             }
             // 有检查点时用检查点里的 runId，界面才能把「继续」关联到同一次运行
@@ -85,6 +91,19 @@ public class InterruptedRunRecovery implements ApplicationRunner {
             log.warn("启动恢复检查点失败", e);
             report.record(tracker.instanceId(), List.of(), "检查点恢复失败：" + e.getMessage());
         }
+    }
+
+    /** 会话有没有「正在进行中」的一轮：只有这种状态才可能被重启打断。 */
+    private static boolean inFlight(Session session) {
+        if (session.isBlank()) {
+            return false;
+        }
+        return session.status() == SessionStatus.RUNNING || session.status() == SessionStatus.WAITING_APPROVAL;
+    }
+
+    /** 空白会话（或状态本来就不在进行中）跳过收敛：避免给从没跑过的对话补中断事件。 */
+    private boolean skippable(String sessionId) {
+        return sessions.find(sessionId).map(session -> !inFlight(session)).orElse(true);
     }
 
     private void closeSession(String sessionId, String runId) {
