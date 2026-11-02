@@ -54,7 +54,7 @@ function buildIcon(source, contents, staging) {
 
 export function prepareDevelopmentHost(root = desktopRoot) {
   const sourceBinary = electronBinary(root);
-  if (!existsSync(sourceBinary)) throw new Error('还没有安装桌面壳，请执行 npm --prefix pilot-desktop install。');
+  if (!existsSync(sourceBinary)) throw new Error('还没有安装桌面壳，请进入 pilot-desktop 目录执行 npm install。');
   if (process.platform !== 'darwin') return sourceBinary;
 
   const sourceApp = resolve(sourceBinary, '../../..');

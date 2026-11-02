@@ -29,6 +29,9 @@ pilot:
   desktop:
     # 服务起来后打开桌面窗口。浏览器访问同一端口仍然可用。测试里关掉。
     launch: ${PILOT_DESKTOP_LAUNCH:true}
+    # 桌面壳（pilot-desktop 的 Electron）没装时后台自动 npm install（官方源失败换 npmmirror），
+    # 装好自动开窗。false = 只提示手动安装命令。
+    provision: ${PILOT_DESKTOP_PROVISION:true}
   data:
     # 会话库、快照、trace、附件默认放在项目下的 .pilot
     # 要换位置：环境变量 PILOT_DATA_DIR，或启动参数 -Dpilot.data.dir=...

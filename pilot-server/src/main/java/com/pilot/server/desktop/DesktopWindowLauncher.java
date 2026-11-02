@@ -18,6 +18,7 @@ import java.util.regex.Pattern;
 
 /**
  * 服务起来后打开桌面窗口。浏览器访问同一个端口仍然可用。
+ * 桌面壳没装时交给 {@link DesktopShellInstaller} 后台安装，装好自动开窗。
  * 测试和打包后的 jar 不打开窗口。
  */
 @Component
@@ -26,9 +27,11 @@ public class DesktopWindowLauncher {
     private static final Pattern PID = Pattern.compile("\"pid\"\\s*:\\s*(\\d+)");
 
     private final Environment environment;
+    private final DesktopShellInstaller installer;
 
-    public DesktopWindowLauncher(Environment environment) {
+    public DesktopWindowLauncher(Environment environment, DesktopShellInstaller installer) {
         this.environment = environment;
+        this.installer = installer;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -36,12 +39,20 @@ public class DesktopWindowLauncher {
         if (!environment.getProperty("pilot.desktop.launch", Boolean.class, true)) {
             return;
         }
-        LaunchResult result = launch();
+        report(launch());
+    }
+
+    private void report(LaunchResult result) {
         if (result.started()) {
             log.info("已打开桌面窗口 {}", result.message());
         } else {
             log.info("{}", result.message());
         }
+    }
+
+    /** 后台装完桌面壳之后再走一遍完整检查（可能期间已经有人开过窗口）。 */
+    private void launchAfterInstall() {
+        report(launch());
     }
 
     /** 服务启动时打开桌面窗口。窗口已经在就不再开第二个。 */
@@ -54,16 +65,20 @@ public class DesktopWindowLauncher {
             if (alreadyOpen(root)) {
                 return LaunchResult.already("桌面窗口已经在运行，请切换到那个窗口使用内置浏览器。");
             }
-            Path electron = electronBinary(root);
-            if (!Files.isExecutable(electron)) {
-                return LaunchResult.unavailable("还没有安装桌面壳。在仓库里执行一次 npm --prefix pilot-desktop install。");
-            }
-            String url = "http://127.0.0.1:" + port();
             Path logFile = root.resolve(".pilot").resolve("browser").resolve("desktop-launch.log");
             Files.createDirectories(logFile.getParent());
             if (!Files.exists(logFile)) {
                 Files.createFile(logFile);
             }
+            Path electron = electronBinary(root);
+            if (!Files.isExecutable(electron)) {
+                String pending = installer.ensureInstalled(root, this::launchAfterInstall);
+                if (pending != null) {
+                    return LaunchResult.installing(pending);
+                }
+                electron = electronBinary(root);
+            }
+            String url = "http://127.0.0.1:" + port();
             electron = prepareDesktopBinary(root, electron, logFile);
             ProcessBuilder builder = new ProcessBuilder(electron.toString(), root.resolve("pilot-desktop").toString());
             builder.directory(root.resolve("pilot-desktop").toFile());
@@ -93,6 +108,11 @@ public class DesktopWindowLauncher {
 
         static LaunchResult unavailable(String message) {
             return new LaunchResult("unavailable", message);
+        }
+
+        /** 桌面壳缺失且已触发后台安装：窗口还没开，但也不是失败。 */
+        static LaunchResult installing(String message) {
+            return new LaunchResult("installing", message);
         }
 
         static LaunchResult failed(String message) {
