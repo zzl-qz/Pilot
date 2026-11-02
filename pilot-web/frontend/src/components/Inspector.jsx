@@ -1842,6 +1842,11 @@ function BrowserPanel() {
               {launching ? '正在打开…' : (/已打开|窗口已/.test(launchNote) ? '显示窗口' : '打开内置浏览器')}
             </button>
             {launchNote && <p className="browser-web-note">{launchNote}</p>}
+            {!launchNote && mirror.headless && (
+              <p className="browser-web-note">
+                智能体的浏览器在后台无窗口运行；需要真实窗口共看时把 pilot.browser.headless 设为 false 重启。
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -2091,9 +2096,7 @@ function BrowserPanel() {
           <p id="mirror-hint" className="mirror-hint">
             {desktopState?.emulated
               ? `设备模拟 ${desktopState.emulated.width}×${desktopState.emulated.height}`
-              : mirror.headless
-                ? '浏览器在后台无窗口运行；需要真实窗口时把 pilot.browser.headless 设为 false 重启。'
-                : '完整浏览器需要桌面壳；有头模式下窗口与镜像是同一个页面。'}
+              : '完整浏览器需要桌面壳。'}
             {desktopState?.emulated && (
               <button type="button" className="browser-reset" onClick={() => window.pilotDesktop.resetEmulation()}>还原</button>
             )}
