@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -26,6 +26,8 @@ public final class SearchTool implements Tool {
     private static final int MAX_MATCHES = 200;
     private static final long MAX_FILE_BYTES = 1024 * 1024;
     private static final int MAX_LINE_CHARS = 300;
+    /** 兜底扫描的时间预算：到点就交出手上已有的匹配，别把整轮对话吊死。 */
+    private static final int FALLBACK_BUDGET_SECONDS = 8;
     private static final Set<String> SKIPPED_DIRECTORIES =
             Set.of(".git", ".idea", ".gradle", "target", "build", "node_modules", "out", "dist");
 
@@ -177,27 +179,50 @@ public final class SearchTool implements Tool {
         }
     }
 
+    /**
+     * rg 不可用（或超时）时的兜底扫描。
+     *
+     * <p>以前先把整棵树 collect 成 List 再逐个读，Windows 上扫一个模块目录要二十几秒；
+     * 而且完全没有时间上限——真撞上卡住的目录，整轮对话就停在这一格。现在边遍历边匹配，
+     * 到预算就把已找到的结果交出去。
+     */
     private List<String> fallback(Path base, Pattern pattern, String glob) {
         ArrayList<String> matches = new ArrayList<String>();
-        for (Path file : candidateFiles(base, glob)) {
-            if (searchFile(file, pattern, matches) && matches.size() > MAX_MATCHES) break;
+        if (Files.isRegularFile(base)) {
+            if (glob == null || matchesGlob(base.getFileName().toString(), glob)) {
+                searchFile(base, pattern, matches);
+            }
+            return matches;
+        }
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(FALLBACK_BUDGET_SECONDS);
+        try (Stream<Path> stream = Files.walk(base)) {
+            Iterator<Path> files = stream.iterator();
+            while (matches.size() <= MAX_MATCHES) {
+                if (System.nanoTime() > deadline) {
+                    break;
+                }
+                Path file;
+                try {
+                    if (!files.hasNext()) {
+                        break;
+                    }
+                    file = files.next();
+                } catch (RuntimeException e) {
+                    // 某个子目录没权限时 walk 会抛 UncheckedIOException：放弃剩余部分
+                    break;
+                }
+                if (!Files.isRegularFile(file) || inSkippedDirectory(base, file) || !paths.allows(file)) {
+                    continue;
+                }
+                if (glob != null && !matchesGlob(base.relativize(file).toString().replace('\\', '/'), glob)) {
+                    continue;
+                }
+                searchFile(file, pattern, matches);
+            }
+        } catch (IOException e) {
+            return matches;
         }
         return matches;
-    }
-
-    private List<Path> candidateFiles(Path base, String glob) {
-        if (Files.isRegularFile(base)) {
-            return glob == null || matchesGlob(base.getFileName().toString(), glob) ? List.of(base) : List.of();
-        }
-        try (Stream<Path> stream = Files.walk(base)) {
-            return stream.filter(Files::isRegularFile)
-                    .filter(paths::allows)
-                    .filter(path -> !inSkippedDirectory(base, path))
-                    .filter(path -> glob == null || matchesGlob(base.relativize(path).toString().replace('\\', '/'), glob))
-                    .sorted(Comparator.comparing(paths::display)).toList();
-        } catch (IOException e) {
-            return List.of();
-        }
     }
 
     private static boolean matchesGlob(String path, String glob) {
