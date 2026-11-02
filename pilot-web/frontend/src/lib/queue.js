@@ -17,10 +17,10 @@ export function normalizeQueue(data) {
   return { texts, rows };
 }
 
-/** 排队标题：取消后下一条是纠正，运行中才是按顺序发送。 */
+/** 排队标题：运行中按顺序发送，停止后保留队列。 */
 export function queueHeader({ count = 0, held = false } = {}) {
   const n = Number(count) || 0;
-  if (!n && !held) {
+  if (!n) {
     return null;
   }
   return {

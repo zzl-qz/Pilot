@@ -32,19 +32,21 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install desktop dependencies
+        working-directory: pilot-desktop
+        run: npm ci
+
       # 三个平台都跑完整测试：路径大小写、符号链接、换行、进程清理的差异只会在跨平台时暴露
       - name: Maven verify
         shell: bash
         run: ./mvnw -B -ntp verify
 
       - name: Web unit tests
-        if: runner.os != 'Windows'
         working-directory: pilot-web
         run: npm test
 
-      - name: Web unit tests (Windows)
-        if: runner.os == 'Windows'
-        working-directory: pilot-web
+      - name: Desktop unit tests
+        working-directory: pilot-desktop
         run: npm test
 
       - name: Evaluation metrics tests

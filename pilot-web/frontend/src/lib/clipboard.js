@@ -21,18 +21,33 @@ export async function writeClipboard(text, env = {}) {
   if (!doc || typeof doc.createElement !== 'function' || typeof doc.execCommand !== 'function') {
     return false;
   }
+  const previous = doc.activeElement;
+  const selection = doc.getSelection?.();
+  const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index).cloneRange()) : [];
+  let area;
   try {
-    const area = doc.createElement('textarea');
+    area = doc.createElement('textarea');
     area.value = value;
     area.setAttribute('readonly', '');
     area.style.cssText = 'position:fixed;top:-1000px;opacity:0';
-    doc.body.append(area);
+    // 放在当前弹窗内，避免焦点约束把临时文本框的选区移走。
+    (previous?.closest?.('[role="dialog"]') || doc.body).append(area);
+    area.focus?.({ preventScroll: true });
     area.select();
+    area.setSelectionRange?.(0, value.length);
     const ok = doc.execCommand('copy');
-    area.remove();
     return ok === true;
   } catch {
     return false;
+  } finally {
+    area?.remove();
+    try {
+      if (previous?.isConnected !== false) previous?.focus?.({ preventScroll: true });
+      if (selection && ranges.length) {
+        selection.removeAllRanges();
+        for (const range of ranges) selection.addRange(range);
+      }
+    } catch { /* 复制期间原控件可能已卸载，不能把复制成功改成失败 */ }
   }
 }
 
@@ -43,5 +58,15 @@ export function readTransferFiles(data) {
   if (files.length) return files;
   return Array.from(data.items || [])
     .filter((item) => item.kind === 'file')
-    .map((item) => item.getAsFile()).filter(Boolean);
+    .map((item) => { try { return item.getAsFile?.(); } catch { return null; } }).filter(Boolean);
+}
+
+/** File 不可读时识别传输标记和 URI；部分 Linux 文件管理器只提供这些。普通路径文本仍可粘贴。 */
+export function hasFileTransferHint(data) {
+  if (Array.from(data?.types || []).includes('Files')) return true;
+  if (!data?.getData) return false;
+  try {
+    return ['text/uri-list', 'x-special/gnome-copied-files'].some(type =>
+      /(?:^|[\r\n])file:\/\//i.test(data.getData(type) || ''));
+  } catch { return false; }
 }

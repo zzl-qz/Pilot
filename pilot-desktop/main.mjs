@@ -1,4 +1,5 @@
-import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, nativeImage } from 'electron';
+import { installMicrophonePermissions } from './media-permission.mjs';
+import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, nativeImage, systemPreferences } from 'electron';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
@@ -7,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { hostname } from 'node:os';
 import { formatPageLogs, markerPath, partitionName, snapBounds, userPageUrl } from './protocol.mjs';
 import { offlinePage } from './offline-page.mjs';
+import { windowSizeMenuItem } from './platform-menu.mjs';
 
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -727,7 +729,7 @@ function installMenu() {
       label: '窗口',
       submenu: [
         { role: 'minimize', label: '最小化' },
-        { role: 'zoom', label: '调整窗口大小' },
+        windowSizeMenuItem(),
         { type: 'separator' },
         { role: 'close', label: '关闭窗口' }
       ]
@@ -756,6 +758,7 @@ app.whenReady().then(async () => {
       sandbox: true
     }
   });
+  installMicrophonePermissions(shell.webContents, shellUrl(), systemPreferences);
   shell.webContents.on('did-fail-load', (_event, code, _desc, _url, isMainFrame) => {
     if (!isMainFrame || code === -3 || smoke || _url?.startsWith('data:')) return;
     shell.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(offlinePage(shellUrl()))}`).catch(() => {});

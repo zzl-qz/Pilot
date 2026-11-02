@@ -83,6 +83,13 @@ class SessionApiTest {
         }
 
         @Override
+        public boolean steerQueued(String sessionId, String runId, int index, String revision) {
+            if (!activeRun(sessionId).filter(runId::equals).isPresent()
+                    || !RunStarter.queueRevision(queuedMessages(sessionId)).equals(revision)) return false;
+            return removeQueued(sessionId, index);
+        }
+
+        @Override
         public List<String> queued(String sessionId) {
             return List.copyOf(queue);
         }
@@ -596,6 +603,25 @@ class SessionApiTest {
         } finally {
             runStarter.setRunning(false);
         }
+    }
+
+    @Test
+    void guidesQueuedMessageWithoutRestartAndRejectsStaleQueueOrRun() throws Exception {
+        String id = createSession(); runStarter.setRunning(true);
+        try {
+            runStarter.followup(id, "引导当前任务"); runStarter.followup(id, "稍后再做");
+            String revision = RunStarter.queueRevision(runStarter.queuedMessages(id));
+            mvc.perform(post("/api/sessions/{id}/queue/0/steer", id).contentType(MediaType.APPLICATION_JSON)
+                    .content("{}")).andExpect(status().isBadRequest());
+            mvc.perform(post("/api/sessions/{id}/queue/0/steer", id).contentType(MediaType.APPLICATION_JSON)
+                    .content(json.writeValueAsString(Map.of("runId", "old", "revision", revision)))).andExpect(status().isConflict());
+            mvc.perform(post("/api/sessions/{id}/queue/0/steer", id).contentType(MediaType.APPLICATION_JSON)
+                    .content(json.writeValueAsString(Map.of("runId", "run_active", "revision", revision))))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.items[0]").value("稍后再做"));
+            mvc.perform(post("/api/sessions/{id}/queue/0/steer", id).contentType(MediaType.APPLICATION_JSON)
+                    .content(json.writeValueAsString(Map.of("runId", "run_active", "revision", revision)))).andExpect(status().isConflict());
+            assertEquals(List.of("稍后再做"), runStarter.queued(id));
+        } finally { runStarter.setRunning(false); }
     }
 
     /** 运行中再发的话进队列，发出去之前可以改、可以删。 */

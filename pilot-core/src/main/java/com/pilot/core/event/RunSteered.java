@@ -1,20 +1,16 @@
 package com.pilot.core.event;
 
-/**
- * 运行中追加的用户输入被消费。
- *
- * @param input 追加的指令原文
- */
-public record RunSteered(String input) implements SessionEvent {
-    public RunSteered {
-        if (input == null || input.isBlank()) {
-            throw new IllegalArgumentException("input must not be blank");
-        }
-        input = input.strip();
-    }
+import com.pilot.core.loop.Attachment;
+import java.util.List;
 
-    @Override
-    public EventType type() {
-        return EventType.RUN_STEERED;
+/** 当前运行在安全边界消费的引导消息，包含原始图片与位置。 */
+public record RunSteered(String input, List<Attachment> attachments, List<Integer> imagePositions) implements SessionEvent {
+    public RunSteered(String input) { this(input, List.of(), List.of()); }
+    public RunSteered {
+        attachments = attachments == null ? List.of() : List.copyOf(attachments);
+        imagePositions = imagePositions == null ? List.of() : List.copyOf(imagePositions);
+        input = input == null ? "" : input.strip();
+        if (input.isBlank() && attachments.isEmpty()) throw new IllegalArgumentException("input must not be blank");
     }
+    @Override public EventType type() { return EventType.RUN_STEERED; }
 }

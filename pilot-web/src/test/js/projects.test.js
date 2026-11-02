@@ -17,6 +17,15 @@ test('samePath 忽略分隔符、大小写与末尾斜杠', () => {
   assert.equal(samePath(null, ''), false);
 });
 
+test('Windows UNC 忽略大小写，POSIX 不合并大小写不同的路径或丢失根目录', () => {
+  assert.equal(samePath('\\\\Server\\Share\\Folder', '//server/share/folder/'), true);
+  assert.equal(samePath('/home/me/Project', '/home/me/project'), false);
+  assert.equal(samePath('src/App.jsx', 'src/app.jsx'), false);
+  assert.equal(samePath('/', '/'), true);
+  assert.equal(samePath('/', ''), false);
+  assert.equal(samePath('/home/me/Project/', '/home/me/Project'), true);
+});
+
 test('resolveFolders 保留项目顺序，并把当前目录补到最前', () => {
   const project = { folders: ['a', 'b'] };
   assert.deepEqual(resolveFolders(project, 'b'), ['a', 'b']);

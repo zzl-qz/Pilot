@@ -13,6 +13,20 @@ class QueuedMessageRepositoryTest {
     Path tempDir;
 
     @Test
+    void movingQueueAndSteeringPersistsTogetherAndRollsBackOnFailure() {
+        var repository = new QueuedMessageRepository(new SqliteStore(tempDir.resolve("atomic.db")));
+        repository.save("s", List.of("guide", "next"));
+        repository.saveAll(java.util.Map.of("s", List.of("next"), "steer:s", List.of("guide")));
+        assertEquals(List.of("next"), repository.load("s"));
+        assertEquals(List.of("guide"), repository.load("steer:s"));
+        var invalid = new java.util.LinkedHashMap<String, List<String>>();
+        invalid.put("s", List.of()); invalid.put("steer:s", java.util.Arrays.asList((String) null));
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, () -> repository.saveAll(invalid));
+        assertEquals(List.of("next"), repository.load("s"));
+        assertEquals(List.of("guide"), repository.load("steer:s"));
+    }
+
+    @Test
     void memoryRepositoryStoresAndRemovesQueues() {
         QueuedMessageRepository repository = new QueuedMessageRepository();
         repository.save("session-1", List.of("first"));

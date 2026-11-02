@@ -352,7 +352,7 @@ public class SessionController {
                         .map(message -> new QueueEntry(message.content(),
                                 attachments.displayAttachments(id, message.attachments()),
                                 message.imagePositions()))
-                        .toList());
+                        .toList(), RunStarter.queueRevision(messages));
     }
 
     /**
@@ -392,8 +392,8 @@ public class SessionController {
         if (request == null || request.content() == null || request.content().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
         }
-        if (!runStarter.editQueued(id, index, request.content())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列里没有这一句");
+        if (!runStarter.editQueued(id, index, request.content(), request.revision())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列已变化或消息不存在，请刷新后重试");
         }
         return queueResponse(id);
     }
@@ -410,22 +410,37 @@ public class SessionController {
 
     /** 拖拽排序：把 index 这一句挪到 to 的位置，整条消息（含图片）一起移动。 */
     @PostMapping("/{id}/queue/{index}/move")
-    public QueueResponse moveQueued(@PathVariable String id, @PathVariable int index, @RequestParam int to) {
+    public QueueResponse moveQueued(@PathVariable String id, @PathVariable int index, @RequestParam int to, @RequestParam(required = false) String revision) {
         requireSession(id);
-        if (!runStarter.moveQueued(id, index, to)) {
+        if (!runStarter.moveQueued(id, index, to, revision)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "位置无效，或这一句已经不在队列里");
         }
         return queueResponse(id);
     }
 
     @DeleteMapping("/{id}/queue/{index}")
-    public QueueResponse removeQueued(@PathVariable String id, @PathVariable int index) {
+    public QueueResponse removeQueued(@PathVariable String id, @PathVariable int index, @RequestParam(required = false) String revision) {
         requireSession(id);
-        if (!runStarter.removeQueued(id, index)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列里没有这一句");
+        if (!runStarter.removeQueued(id, index, revision)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列已变化或消息不存在，请刷新后重试");
         }
         return queueResponse(id);
     }
+
+    @PostMapping("/{id}/queue/{index}/steer")
+    public QueueResponse steerQueued(@PathVariable String id, @PathVariable int index,
+                                     @RequestBody QueueSteerRequest request) {
+        requireSession(id);
+        if (request == null || request.runId() == null || request.revision() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少运行或队列版本，请刷新后重试");
+        }
+        if (!runStarter.steerQueued(id, request.runId(), index, request.revision())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "任务或队列已变化，引导未发送，请查看最新队列");
+        }
+        return queueResponse(id);
+    }
+
+    public record QueueSteerRequest(String runId, String revision) { }
 
     /**
      * 改已经发出去的一句并重跑。这句以及它后面的回复都会拿掉，再用新内容开一轮。
@@ -498,11 +513,11 @@ public class SessionController {
     public ResponseEntity<MessageResponse> steer(@PathVariable String id, @RequestBody SteerRequest request) {
         requireSession(id);
         if (request == null || request.content() == null || request.content().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "纠正内容不能为空");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "引导内容不能为空");
         }
         String runId = request.runId() == null ? runStarter.activeRun(id).orElse(null) : request.runId();
         if (runId == null || !runStarter.steer(id, runId, request.content())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "当前任务已结束或正在暂停，纠正未发送，请续跑后再纠正");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "当前任务已结束或正在停止，引导未发送");
         }
         return ResponseEntity.accepted().body(new MessageResponse(id, runId));
     }
@@ -714,13 +729,13 @@ public class SessionController {
 
     public record ResendRequest(Long sequence, String content) { }
 
-    public record QueueEditRequest(String content) { }
+    public record QueueEditRequest(String content, String revision) { }
 
     /**
      * @param items   排队消息正文，顺序即执行顺序（保持旧契约）
      * @param entries 同一批消息的结构化版本，额外带上图片附件和它们在正文里的位置
      */
-    public record QueueResponse(List<String> items, List<QueueEntry> entries) { }
+    public record QueueResponse(List<String> items, List<QueueEntry> entries, String revision) { }
 
     public record QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments,
                               List<Integer> imagePositions) { }

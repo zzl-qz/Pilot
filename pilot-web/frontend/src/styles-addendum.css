@@ -283,16 +283,6 @@
 .event-foot { margin-top: 2px; color: var(--dim); font-size: 11px; }
 
 .changes-totals { flex: 1; color: var(--muted); font-size: 12px; }
-.branch-input {
-  width: 110px;
-  padding: 4px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--panel);
-  color: var(--ink);
-  font: inherit;
-  font-size: 12px;
-}
 .change-files { display: flex; flex-direction: column; overflow: auto; }
 .change-file {
   display: flex;
@@ -1344,18 +1334,6 @@ html .app:has(#panel-changes) { --activity-w: clamp(440px, 40vw, 680px); }
 }
 .changes-untracked:hover { border-color: var(--line-2, var(--line)); color: var(--ink-2); }
 .changes-untracked.is-on { border-color: var(--accent-line); background: var(--accent-soft); color: var(--ink-2); }
-.branch-input {
-  width: 80px;
-  height: 23px;
-  padding: 0 7px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--ink);
-  font: inherit;
-  font-size: 11px;
-}
-.branch-input:focus { outline: none; border-color: var(--accent-line); }
 #changes-refresh { width: 23px; height: 23px; }
 #changes-refresh svg { width: 13px; height: 13px; }
 
@@ -1505,7 +1483,6 @@ html[data-theme] .activity.inspector { overflow: hidden; }
 
 /* ---------- 变更面板：撤销与筛选 ---------- */
 .changes-progress { margin: 6px 12px 0; color: var(--muted); font-size: 11px; }
-.changes-confirm-hint { flex: none; color: var(--ink-2); font-size: 11px; white-space: nowrap; }
 .changes-filter { display: flex; align-items: center; gap: 8px; padding: 6px 10px 0; }
 .changes-search {
   flex: 1;
@@ -1521,7 +1498,6 @@ html[data-theme] .activity.inspector { overflow: hidden; }
 }
 .changes-search:focus { outline: none; border-color: var(--accent-line); }
 .changes-filter-count { flex: none; color: var(--dim); font-family: var(--mono); font-size: 11px; }
-#changes-undo-all { height: 23px; padding: 0 8px; font-size: 11px; }
 
 .change-row-wrap { position: relative; display: flex; align-items: stretch; }
 .change-row-wrap .change-row { flex: 1; min-width: 0; padding-right: 48px; }
@@ -1708,8 +1684,7 @@ html[data-theme] .tab-dot.is-pulse { animation: pulse 1.4s ease-in-out infinite;
 /* 运行中但长时间没有事件：提示可能卡住，别让人干等 */
 .run-state.is-stalled { border-color: rgba(242, 181, 68, 0.45); color: var(--warn); }
 .folder-menu-row { display: flex; align-items: center; gap: 6px; }
-.folder-menu-row .branch-input { flex: 1; width: auto; min-width: 0; }
-.folder-menu-row .perm-item { flex: none; padding: 4px 8px; }
+.folder-menu-row .folder-menu-row .perm-item { flex: none; padding: 4px 8px; }
 .folder-menu .perm-item.is-danger { color: var(--err); }
 .folder-menu .perm-item.is-danger:hover { background: rgba(255, 111, 111, 0.12); }
 

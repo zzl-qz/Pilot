@@ -1,3 +1,4 @@
+import { voiceFilename } from './lib/voice-input.js';
 /**
  * 统一请求入口：带超时与取消（与旧版 apiFetch 行为一致）。
  * 后端卡住或网络断开时抛可读错误，界面据此提示。
@@ -7,16 +8,21 @@ const REQUEST_TIMEOUT_MS = 20000;
 
 export async function apiFetch(input, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (init.signal?.aborted) controller.abort();
+  init.signal?.addEventListener('abort', abort, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await NATIVE_FETCH(input, { ...init, signal: controller.signal });
   } catch (error) {
+    if (init.signal?.aborted) throw new DOMException('请求已取消', 'AbortError');
     if (error && error.name === 'AbortError') {
       throw new Error(`请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
     }
     throw error;
   } finally {
     clearTimeout(timer);
+    init.signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -43,6 +49,12 @@ export async function apiJson(url, init, timeoutMs) {
 }
 
 export const api = {
+  voiceSettings: () => apiJson('/api/voice/settings'),
+  saveVoiceSettings: body => apiJson('/api/voice/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  transcribeVoice: (blob, signal) => {
+    const body = new FormData(); body.append('file', blob, voiceFilename(blob.type));
+    return apiJson('/api/voice/transcriptions', { method: 'POST', body, signal }, 75000);
+  },
   health: () => apiFetch('/api/health'),
   openBrowserWindow: () => apiJson('/api/desktop/browser-window', { method: 'POST' }, 70000),
   sessions: () => apiJson('/api/sessions'),
@@ -74,8 +86,9 @@ export const api = {
   saveTask: (id, body) => apiJson(`/api/sessions/${encodeURIComponent(id)}/task`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   queue: (id) => apiJson(`/api/sessions/${encodeURIComponent(id)}/queue`),
   updateQueueItem: (id, index, body) => apiJson(`/api/sessions/${encodeURIComponent(id)}/queue/${index}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-  deleteQueueItem: (id, index) => apiJson(`/api/sessions/${encodeURIComponent(id)}/queue/${index}`, { method: 'DELETE' }),
-  moveQueueItem: (id, from, to) => apiJson(`/api/sessions/${encodeURIComponent(id)}/queue/${from}/move?to=${to}`, { method: 'POST' }),
+  deleteQueueItem: (id, index, revision) => apiJson(`/api/sessions/${encodeURIComponent(id)}/queue/${index}?revision=${encodeURIComponent(revision || '')}`, { method: 'DELETE' }),
+  moveQueueItem: (id, from, to, revision) => apiJson(`/api/sessions/${encodeURIComponent(id)}/queue/${from}/move?to=${to}&revision=${encodeURIComponent(revision || '')}`, { method: 'POST' }),
+  steerQueueItem: (id, index, body) => apiJson(`/api/sessions/${encodeURIComponent(id)}/queue/${index}/steer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   plan: (id) => apiJson(`/api/sessions/${encodeURIComponent(id)}/plan`),
   context: (id) => apiJson(`/api/sessions/${encodeURIComponent(id)}/context`),
   compactContext: (id) => apiJson(`/api/sessions/${encodeURIComponent(id)}/context/compact`, { method: 'POST' }),

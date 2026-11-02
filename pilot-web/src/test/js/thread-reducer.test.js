@@ -162,3 +162,19 @@ test('一轮结束后用量计时停住，思考也不再显示思考中', () =>
   assert.equal(turn.thinking.live, false);
   assert.ok(turn.thinking.finishedAt > 0);
 });
+
+
+test('引导回放保留正文和图片，后续回复仍属于原运行且显示在引导后', () => {
+  const state = draft();
+  applyEvent(state, { type: 'run.started', runId: 'r1', sequence: 1, payload: { input: '原任务' } }, { live: true });
+  applyEvent(state, { type: 'assistant.preview', runId: 'r1', payload: { text: '旧方向预览' } }, { live: true });
+  const image = { name: '图.png', path: 'C:\\attachments\\图.png', mimeType: 'image/png' };
+  applyEvent(state, { type: 'run.steered', runId: 'r1', sequence: 2, payload: { input: '请参考图', attachments: [image], imagePositions: [2] } }, { live: true });
+  assert.equal(state.running, true);
+  const row = state.thread.rows.at(-1);
+  assert.equal(row.type, 'user'); assert.deepEqual(row.attachments, [image]); assert.deepEqual(row.imagePositions, [2]);
+  assert.equal(state.thread.rows.find(r => r.type === 'turn').reply.preview, '');
+  applyEvent(state, { type: 'assistant.delta', runId: 'r1', sequence: 3, payload: { text: '按照新要求继续' } }, { live: true });
+  assert.deepEqual(state.thread.rows.at(-1).runIds, ['r1']);
+  assert.equal(state.thread.rows.at(-1).reply.text, '按照新要求继续');
+});

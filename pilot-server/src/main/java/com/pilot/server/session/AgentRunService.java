@@ -297,12 +297,36 @@ public class AgentRunService implements RunStarter {
         synchronized (inbox(sessionId)) { queuedMessages.save("steer:" + sessionId, List.of()); }
     }
 
-    private String pollSteering(String sessionId) {
+    @Override
+    public boolean steerQueued(String sessionId, String expectedRunId, int index, String revision) {
+        Deque<String> queue = inbox(sessionId);
+        synchronized (queue) {
+            String runId = registry.activeRun(sessionId).orElse(null);
+            RunHandle handle = runId == null ? null : runs.get(runId);
+            if (runId == null || !runId.equals(expectedRunId) || handle == null
+                    || !handle.accepting || handle.cancelled.get() || index < 0 || index >= queue.size()
+                    || !RunStarter.queueRevision(queuedMessages(sessionId)).equals(revision)) return false;
+            ArrayList<String> remaining = new ArrayList<>(queue);
+            String raw = remaining.remove(index);
+            var item = QueuedMessageCodec.decode(raw);
+            ArrayList<String> pending = new ArrayList<>(queuedMessages.load("steer:" + sessionId));
+            pending.add(raw);
+            queuedMessages.saveAll(Map.of(sessionId, remaining, "steer:" + sessionId, pending));
+            queue.clear();
+            queue.addAll(remaining);
+            taskControls.correct(sessionId, item.content().isBlank() ? "请参考补充的图片" : item.content());
+            handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
+            return true;
+        }
+    }
+
+    private Message pollSteering(String sessionId) {
         synchronized (inbox(sessionId)) {
             List<String> pending = queuedMessages.load("steer:" + sessionId);
             if (pending.isEmpty()) return null;
-            queuedMessages.save("steer:" + sessionId, List.of());
-            return String.join("\n\n", pending);
+            var item = QueuedMessageCodec.decode(pending.getFirst());
+            queuedMessages.save("steer:" + sessionId, pending.subList(1, pending.size()));
+            return Message.user(item.content(), item.attachments(), item.imagePositions());
         }
     }
 
@@ -455,6 +479,25 @@ public class AgentRunService implements RunStarter {
                     .map(QueuedMessageCodec::decode)
                     .map(item -> new QueuedMessage(item.content(), item.attachments(), item.imagePositions()))
                     .toList();
+        }
+    }
+
+    @Override
+    public boolean editQueued(String sessionId, int index, String text, String revision) {
+        synchronized (inbox(sessionId)) {
+            return (revision == null || RunStarter.queueRevision(queuedMessages(sessionId)).equals(revision)) && editQueued(sessionId, index, text);
+        }
+    }
+    @Override
+    public boolean moveQueued(String sessionId, int from, int to, String revision) {
+        synchronized (inbox(sessionId)) {
+            return (revision == null || RunStarter.queueRevision(queuedMessages(sessionId)).equals(revision)) && moveQueued(sessionId, from, to);
+        }
+    }
+    @Override
+    public boolean removeQueued(String sessionId, int index, String revision) {
+        synchronized (inbox(sessionId)) {
+            return (revision == null || RunStarter.queueRevision(queuedMessages(sessionId)).equals(revision)) && removeQueued(sessionId, index);
         }
     }
 
@@ -1269,8 +1312,9 @@ public class AgentRunService implements RunStarter {
         JsonlTraceRecorder traceRecorder = new JsonlTraceRecorder(
                 dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
         AgentLoop loop = new AgentLoop(executionClient, tools, sessionGate, approvals, config, handle.cancelled::get,
-                () -> pollSteering(sessionId), traceRecorder,
+                () -> null, traceRecorder,
                 delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
+                .withPendingMessages(() -> pollSteering(sessionId))
                 .withLiveReasoning(delta -> sessions.preview(sessionId, runId,
                         new com.pilot.core.event.AssistantReasoning(delta)))
                 .withTaskContext(() -> taskControls.prompt(sessionId) + commandContext(sessionId))

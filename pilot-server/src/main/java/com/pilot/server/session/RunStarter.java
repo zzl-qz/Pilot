@@ -212,6 +212,16 @@ public interface RunStarter {
         return activeRun(sessionId).filter(expectedRunId::equals).isPresent() && steer(sessionId, text);
     }
 
+    /** 从用户所见队列原子转入当前运行；版本或运行变化时保留原消息。 */
+    default boolean steerQueued(String sessionId, String runId, int index, String revision) { return false; }
+
+    static String queueRevision(List<QueuedMessage> messages) {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(messages.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+    }
+
     /** 最后一项验收完成并释放编辑槽位后，尝试启动等待中的下一件事。 */
     default void requirementsUpdated(String sessionId) { }
 
@@ -225,6 +235,16 @@ public interface RunStarter {
     /** 改队列里的某一句。下标从 0 开始。 */
     default boolean editQueued(String sessionId, int index, String text) {
         return false;
+    }
+
+    default boolean editQueued(String sessionId, int index, String text, String revision) {
+        return (revision == null || queueRevision(queuedMessages(sessionId)).equals(revision)) && editQueued(sessionId, index, text);
+    }
+    default boolean moveQueued(String sessionId, int from, int to, String revision) {
+        return (revision == null || queueRevision(queuedMessages(sessionId)).equals(revision)) && moveQueued(sessionId, from, to);
+    }
+    default boolean removeQueued(String sessionId, int index, String revision) {
+        return (revision == null || queueRevision(queuedMessages(sessionId)).equals(revision)) && removeQueued(sessionId, index);
     }
 
     /** 把某一句往前挪一位（和前一句交换）。文字和图片作为一个整体移动。 */

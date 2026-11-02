@@ -8,8 +8,9 @@ import { TaskContract, Modals } from './Modals.jsx';
 import { SelectionQuote } from './SideChat.jsx';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { resolveFolders, samePath } from '../lib/projects.js';
-import { shortcut, runPhase } from '../lib/interaction.js';
+import { shortcut, runPhase, isShortcutModifier } from '../lib/interaction.js';
 import { api } from '../api.js';
+import { writeClipboard } from '../lib/clipboard.js';
 import { dragWidth, readLayout, writeLayout } from '../lib/layout.js';
 
 /** 应用外壳：左栏 + 主区（topbar / 通知 / 对话 / 输入） + 右侧工作区 + 弹层。 */
@@ -87,7 +88,7 @@ export default function App() {
       if (embedded || event.defaultPrevented) {
         return;
       }
-      const mod = event.ctrlKey || event.metaKey;
+      const mod = isShortcutModifier(event);
       if (mod && event.altKey && event.key.toLowerCase() === 's') {
         event.preventDefault();
         useStore.getState().toggleSideChatPane();
@@ -271,7 +272,7 @@ export default function App() {
                 title={`点击复制会话 ID：${sessionId}`}
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(sessionId);
+                    if (!await writeClipboard(sessionId)) throw new Error('clipboard unavailable');
                     useStore.getState().showNotice(`已复制会话 ID：${sessionId}`);
                   } catch {
                     useStore.getState().showNotice('复制失败');

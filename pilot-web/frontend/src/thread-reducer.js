@@ -637,6 +637,9 @@ export function applyEvent(draft, event, { live }) {
     }
 
     case 'run.steered': {
+      const previous = openTurn(draft);
+      if (previous) { settleThinking(previous, event); previous.reply.live = false; previous.reply.preview = ''; }
+      appendUserRow(draft, event.payload?.input || '', event.sequence, { attachments: event.payload?.attachments || [], imagePositions: event.payload?.imagePositions || [] }).steered = true;
       draft.queueHeld = false;
       // 旧的「继续执行」按钮作废
       for (const row of draft.thread.rows) {
@@ -644,7 +647,7 @@ export function applyEvent(draft, event, { live }) {
           row.continued = true;
         }
       }
-      record(draft, event, { kind: 'run', tone: 'ok', status: '纠正', title: '纠正已生效', detail: event.payload?.message || null });
+      record(draft, event, { kind: 'run', tone: 'ok', status: '引导', title: '引导已生效', detail: event.payload?.message || null });
       break;
     }
 

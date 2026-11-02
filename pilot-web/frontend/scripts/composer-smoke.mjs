@@ -1,10 +1,11 @@
+import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
 import { createServer } from 'vite';
 import { chromium, _electron } from 'playwright-core';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const temp = await mkdtemp(join(tmpdir(), 'pilot-composer-'));
 const server = await createServer({ root, server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'composer-fixture', configureServer(server) {
@@ -38,6 +39,16 @@ async function run(page, name) {
     await page.waitForFunction(()=>document.querySelector('#input-flow').getAttribute('aria-busy')==='false');
   }
   await input.fill('请检查附件');
+  const beforeUriPaste = await page.evaluate(() => store.getState().composerApi.getText());
+  // URI-only 剪贴板（如部分 Linux 文件管理器）不伪装成附件，也不污染原输入。
+  await input.evaluate(el => {
+    const data = new DataTransfer(); data.setData('text/uri-list', 'file:///home/demo/local.txt'); data.setData('text/plain', 'file:///home/demo/local.txt');
+    el.dispatchEvent(new ClipboardEvent('paste', {clipboardData:data,bubbles:true,cancelable:true}));
+  });
+  assert.equal(await page.evaluate(() => store.getState().composerApi.getText()), beforeUriPaste); assert.equal(await chips.count(), 0);
+  assert.match(await page.evaluate(() => store.getState().ui.notice.text), /未提供文件内容/);
+  // 普通 HTTP / 受限 WebView 不一定提供 randomUUID，附件读取仍应完成。
+  await page.evaluate(() => Object.defineProperty(crypto, 'randomUUID', { configurable:true, value:undefined }));
   await transfer('paste','paste.txt'); assert.equal(await chips.count(),1);
   assert.equal(await input.innerText().then(t=>t.includes('请检查附件')),true);
   assert.equal(await page.locator('#send').isEnabled(),true);
@@ -77,10 +88,11 @@ try {
   const main=join(temp,'main.cjs');
   await writeFile(main,`const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
   const env={...process.env}; delete env.ELECTRON_RUN_AS_NODE;
-  electron=await _electron.launch({executablePath:resolve(root,'../../pilot-desktop/node_modules/.bin/electron'),args:[main],env});
+  electron=await _electron.launch({executablePath:electronBinary(),args:[main],env});
   await run(await electron.firstWindow(),'electron');
-  // macOS 原生文件剪贴板 + 真实快捷键；保存并恢复原有剪贴板格式。
-  if (process.platform === 'darwin') {
+  // Electron 将 text/uri-list 映射到三平台原生文件格式；保存并恢复所有原有格式。
+  {
+    const pasteShortcut = process.platform === 'darwin' ? 'Meta+v' : 'Control+v';
     const file = join(temp, 'native-clipboard.txt'); await writeFile(file, 'native clipboard test');
     await electron.evaluate(async ({clipboard, ClipboardItem}) => {
       globalThis.savedClipboard = await Promise.all((await clipboard.read()).map(async item =>
@@ -89,17 +101,17 @@ try {
     try {
       await electron.evaluate(async ({clipboard, ClipboardItem}, path) => {
         await clipboard.write([new ClipboardItem({
-          'electron application/osclipboard;format="NSFilenamesPboardType"': new Blob([`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><array><string>${path}</string></array></plist>`])
+          'text/uri-list': new Blob([path + '\r\n'], {type:'text/uri-list'})
         })]);
-      }, file);
+      }, pathToFileURL(file).href);
       const page = await electron.firstWindow();
-      await page.locator('#input-flow').focus(); await page.keyboard.press('Meta+v');
+      await page.locator('#input-flow').focus(); await page.keyboard.press(pasteShortcut);
       await page.waitForFunction(()=>document.querySelector('[data-chip="attachment"]')?.textContent.includes('native-clipboard.txt'));
-      console.log('electron: PASS native macOS file clipboard + Cmd+V');
+      console.log(`electron: PASS native ${process.platform} file clipboard + ${pasteShortcut}`);
       browser=await chromium.launch({channel:'chrome',headless:false});
-      const web=await browser.newPage(); await web.goto(url); await web.locator('#input-flow').focus(); await web.keyboard.press('Meta+v');
+      const web=await browser.newPage(); await web.goto(url); await web.locator('#input-flow').focus(); await web.keyboard.press(pasteShortcut);
       await web.waitForFunction(()=>document.querySelector('[data-chip="attachment"]')?.textContent.includes('native-clipboard.txt'));
-      console.log('chromium: PASS native macOS file clipboard + Cmd+V');
+      console.log(`chromium: PASS native ${process.platform} file clipboard + ${pasteShortcut}`);
     } finally {
       await electron.evaluate(async ({clipboard}) => {
         if (globalThis.savedClipboard.length) await clipboard.write(globalThis.savedClipboard);

@@ -787,11 +787,6 @@ html[data-theme] .queue-head + .queue-item .queue-dot { border-color: var(--acce
 html[data-theme] .queue-text { font-size: 12.5px; color: var(--ink-2); -webkit-line-clamp: 1; }
 html[data-theme] .queue-text:has(.bubble-images) { -webkit-line-clamp: unset; overflow: visible; }
 html[data-theme] .queue-item.is-editing .queue-text { color: var(--ink); }
-html[data-theme] .queue-actions { opacity: 0; transition: opacity .12s ease; }
-html[data-theme] .queue-item:hover .queue-actions,
-html[data-theme] .queue-item:focus-within .queue-actions,
-html[data-theme] .queue-item.is-editing .queue-actions { opacity: 1; }
-@media (hover: none) { html[data-theme] .queue-actions { opacity: 1; } }
 html[data-theme] .queue-edit { margin: 0 18px 0; padding: 5px 12px; border-radius: 0; background: var(--accent-soft); color: var(--accent); }
 html[data-theme] .queue-edit-cancel { color: var(--accent); }
 

@@ -2,15 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveComposerAction } from '../../../frontend/src/lib/composer-state.js';
 
-test('主按钮只发送，运行中空草稿禁用，停止是独立动作', () => {
+test('运行中空草稿主按钮为停止', () => {
   const action = resolveComposerAction({ running: true, composerEnabled: true });
-  assert.equal(action.mode, 'queue'); assert.equal(action.stop, false); assert.equal(action.disabled, true);
+  assert.equal(action.mode, 'stop'); assert.equal(action.stop, true); assert.equal(action.disabled, false);
 });
-test('文字或附件均可排队；显式选择纠正', () => {
+test('文字或附件均可排队；旧发送方式不改变默认行为', () => {
   for (const draft of [{hasText:true}, {attachmentCount:1}]) {
     assert.equal(resolveComposerAction({running:true, ...draft}).disabled, false);
   }
-  assert.equal(resolveComposerAction({running:true, hasText:true, followUp:'steer'}).mode, 'steer');
+  assert.equal(resolveComposerAction({running:true, hasText:true, followUp:'steer'}).mode, 'queue');
 });
 test('请求进行中禁止重复发送', () => {
   for (const key of ['steering', 'pausing', 'cancelling']) {

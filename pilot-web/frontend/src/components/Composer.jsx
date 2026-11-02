@@ -1,16 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
+import { Icon } from './Icon.jsx';
+import { VoiceInput } from './VoiceInput.jsx';
 import { createComposerInput } from '../lib/composer-input.js';
 import { resolveComposerAction } from '../lib/composer-state.js';
 import { rankFileMatches } from '../lib/mention.js';
 import { filterQuickCommands, expandQuickCommand } from '../lib/commands.js';
 import { stepHistory } from '../lib/input-history.js';
-import { readTransferFiles } from '../lib/clipboard.js';
+import { readTransferFiles, hasFileTransferHint } from '../lib/clipboard.js';
 import { readAttachmentFile } from '../lib/attachment-input.js';
 import { checkIncomingFile } from '../lib/attachments.js';
 import { writeDraft, readDraft, dropDraft } from '../lib/drafts.js';
-import { splitAttachmentMarkers } from '../lib/attachments.js';
+import { splitAttachmentMarkers, joinAttachmentMarkers } from '../lib/attachments.js';
 import { queueHeader, resumeBar } from '../lib/queue.js';
 import { PERMISSION_MODES, permissionLabel, permissionHint } from '../lib/permission.js';
 import { buildModelProbe, buildModelUpdate, describeModelsFetched } from '../lib/model-settings.js';
@@ -46,8 +48,6 @@ export function Composer() {
 
   const flowRef = useRef(null);
   const referenceRequest = useRef(0);
-  const followUpRef = useRef('queue');
-  const [followUp, setFollowUp] = useState('queue');
   const inputRef = useRef(null);
   const fileRef = useRef(null);
   const [sendAction, setSendAction] = useState({ mode: 'send', stop: false, disabled: true, label: '发送', ariaLabel: '发送任务', title: '发送任务 (Enter)' });
@@ -65,6 +65,7 @@ export function Composer() {
   const submittingEpoch = useRef(null);
   const [pendingFiles, setPendingFiles] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [voiceBusy, setVoiceBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const dragDepthRef = useRef(0);
   const sessionDraftsRef = useRef(new Map());
@@ -137,7 +138,6 @@ export function Composer() {
     return resolveComposerAction({
       running: state.running,
       editing: state._editTarget != null,
-      followUp: followUpRef.current,
       hasText: Boolean(text.trim()),
       attachmentCount: inputRef.current ? (inputRef.current.attachmentIds?.()?.length || 0) : 0,
       composerEnabled: state.ui.composerEnabled !== false,
@@ -150,7 +150,7 @@ export function Composer() {
 
   useEffect(() => {
     setSendAction(sendState());
-  }, [running, queueHeld, lastOutcome, pendingInputs.length, steering, pausing, cancelling, followUp, editTarget]);
+  }, [running, queueHeld, lastOutcome, pendingInputs.length, steering, pausing, cancelling, editTarget]);
 
   /* 附件上传：选择 / 拖放 / 粘贴共用 */
   function addFiles(fileList) {
@@ -187,7 +187,7 @@ export function Composer() {
 
   async function submit() {
     const input = inputRef.current;
-    if (pendingFilesRef.current || submittingRef.current || sendState().disabled) return;
+    if (voiceBusy || pendingFilesRef.current || submittingRef.current || sendState().disabled) return;
     if (!input) {
       return;
     }
@@ -205,13 +205,6 @@ export function Composer() {
       if (state._editTarget != null) {
         sent = await state.resendMessage(state._editTarget, text, attachments);
         if (sent) useStore.setState({ _editTarget: null });
-      } else if (state.running) {
-        if (followUpRef.current === 'steer') {
-          sent = await state.steer(text, attachments);
-        } else {
-          sent = await state.submitInput(text, attachments, imagePositions);
-        }
-
       } else {
         sent = await state.submitInput(text, attachments, imagePositions);
       }
@@ -300,7 +293,6 @@ export function Composer() {
     referenceRequest.current += 1;
     setRefMenu(null); setSlashMenu(null);
     setPermOpen(false); setModelOpen(false); setContextOpen(false);
-    followUpRef.current = 'queue'; setFollowUp('queue');
   }, [sessionId, sessionEpoch, workspace]);
 
   useEffect(() => {
@@ -466,17 +458,12 @@ export function Composer() {
           ))}
         </div>
       )}
-      {(running || queueHeld) && (
-        <p className="send-mode-label">
-          {running ? `任务运行中 · ${followUp === 'steer' ? '立即纠正当前任务（仅文字）' : '发送后排队，当前任务结束后执行'}` : '任务已停止 · 新消息开始执行，已有排队消息暂时保留'}
-        </p>
-      )}
       <form
         id="composer"
         className={`composer${dragging ? ' is-dragging' : ''}`}
         onSubmit={(event) => { event.preventDefault(); submit(); }}
         onDragEnter={(event) => {
-          if (!Array.from(event.dataTransfer?.types || []).includes('Files')) return;
+          if (!Array.from(event.dataTransfer?.types || []).some(type => ['Files', 'text/uri-list', 'x-special/gnome-copied-files'].includes(type))) return;
           event.preventDefault();
           dragDepthRef.current += 1;
           setDragging(true);
@@ -486,7 +473,7 @@ export function Composer() {
           if (!dragDepthRef.current) setDragging(false);
         }}
         onDragOver={(event) => {
-          if (!Array.from(event.dataTransfer?.types || []).includes('Files')) return;
+          if (!Array.from(event.dataTransfer?.types || []).some(type => ['Files', 'text/uri-list', 'x-special/gnome-copied-files'].includes(type))) return;
           event.preventDefault();
           event.dataTransfer.dropEffect = 'copy';
         }}
@@ -495,10 +482,18 @@ export function Composer() {
           dragDepthRef.current = 0;
           setDragging(false);
           if (files.length) { event.preventDefault(); addFiles(files); }
+          else if (hasFileTransferHint(event.clipboardData || event.dataTransfer)) {
+            event.preventDefault();
+            useStore.getState().showNotice('当前环境未提供文件内容，请拖入文件或使用“添加文件或图片”。');
+          }
         }}
         onPaste={(event) => {
           const files = readTransferFiles(event.clipboardData);
           if (files.length) { event.preventDefault(); addFiles(files); }
+          else if (hasFileTransferHint(event.clipboardData || event.dataTransfer)) {
+            event.preventDefault();
+            useStore.getState().showNotice('当前环境未提供文件内容，请拖入文件或使用“添加文件或图片”。');
+          }
         }}
       >
         {(pendingFiles > 0 || dragging) && <div className="attachment-status" role="status">
@@ -601,30 +596,17 @@ export function Composer() {
                 {contextOpen && <ContextMenu status={contextStatus} compacting={compacting} />}
               </span>
             </span>
-            <span className="composer-hint">
-              <kbd>Enter</kbd> 发送
-              <span className="sep">·</span> 拖入 / 粘贴文件
-              <span className="sep">·</span> <kbd>@</kbd> 文件
-              <span className="sep">·</span> <kbd>/</kbd> 命令
-            </span>
           </span>
           <div className="composer-actions">
-            {running && <>
-              <select aria-label="运行中发送方式" value={followUp} disabled={submitting}
-                onChange={(event) => { followUpRef.current = event.target.value; setFollowUp(event.target.value); }}>
-                <option value="queue">排队发送</option>
-                <option value="steer">立即纠正</option>
-              </select>
-              <button type="button" id="stop-task" className="btn btn-danger" disabled={cancelling}
-                aria-label="停止当前任务" title="停止当前任务 (Esc)"
-                onClick={() => useStore.getState().cancelRun()}>{cancelling ? '停止中…' : '停止'}</button>
-            </>}
+            <VoiceInput ownerKey={`${sessionEpoch}:${sessionId || ''}:${workspace}`} disabled={submitting}
+              onBusy={setVoiceBusy} onText={(text) => { const input = inputRef.current; input?.appendText((input.getText().trim() ? '\n' : '') + text); input?.focus(); }} />
 
             <button
-              type="submit"
+              type={sendAction.stop ? "button" : "submit"}
+              onClick={sendAction.stop ? () => useStore.getState().cancelRun() : undefined}
               className={`send${sendAction.stop ? ' is-running' : ''}`}
               id="send"
-              disabled={sendAction.disabled || pendingFiles > 0 || submitting}
+              disabled={sendAction.disabled || (!sendAction.stop && (pendingFiles > 0 || submitting || voiceBusy))}
               aria-label={sendAction.ariaLabel}
               title={sendAction.title}
             >
@@ -634,7 +616,6 @@ export function Composer() {
           </div>
         </div>
       </form>
-      <TaskControls />
     </div>
   );
 }
@@ -770,21 +751,6 @@ function ContextMenu({ status, compacting }) {
   );
 }
 
-/** 运行控制条：暂停 / 取消。继续单独放在输入框上方。 */
-function TaskControls() {
-  const running = useStore((state) => state.running);
-  const pausing = useStore((state) => state.pausing);
-  const cancelling = useStore((state) => state.cancelling);
-  if (!running) {
-    return null;
-  }
-  return (
-    <div id="task-live-controls" className="task-controls">
-      <button type="button" className="btn" disabled={pausing} onClick={() => useStore.getState().pauseRun()}>{pausing ? '暂停中…' : '暂停'}</button>
-    </div>
-  );
-}
-
 /** 输入框上方只留一个继续入口。结果卡上的同名按钮由 has-resume-bar 收起。 */
 function ResumeBar() {
   const running = useStore((state) => state.running);
@@ -832,7 +798,7 @@ function ApprovalDock() {
   );
 }
 
-/** 排队：贴在输入框上。取消后即使没有条目，也要说明下一条是纠正。 */
+/** 排队消息紧贴输入框，所有操作跟随消息本身。 */
 function MessageQueue() {
   const entries = useStore((state) => state.queueEntries);
   const queueEdit = useStore((state) => state.ui.queueEdit);
@@ -851,11 +817,11 @@ function QueueList({ entries, queueEdit, collapsed, header }) {
   const [dragFrom, setDragFrom] = useState(null);
   return (
     <div id="message-queue" className="message-queue">
-      <header className="queue-head" onClick={() => useStore.getState().setUi({ queueCollapsed: !collapsed })}>
+      <button type="button" className="queue-head" aria-expanded={!collapsed} onClick={() => useStore.getState().setUi({ queueCollapsed: !collapsed })}>
         <span className="queue-title">{header.title}</span>
-        <span className={`queue-head-meta${header.meta.startsWith('下一条会纠正') ? ' is-idle' : ''}`}>{header.meta}</span>
+        <span className="queue-head-meta">{header.meta}</span>
         {!!entries.length && <span className="queue-toggle">{collapsed ? '展开' : '收起'}</span>}
-      </header>
+      </button>
       {!collapsed && !!entries.length && (
         <ol className="queue-list">
           {entries.map((entry, index) => {
@@ -866,7 +832,7 @@ function QueueList({ entries, queueEdit, collapsed, header }) {
                 className={`queue-item${dragFrom === index ? ' is-dragging' : ''}`}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={() => {
-                  if (dragFrom == null || dragFrom === index) return;
+                  if (dragFrom == null || dragFrom === index || useStore.getState().queueBusy) return;
                   useStore.getState().moveQueueItem(dragFrom, index);
                   setDragFrom(null);
                 }}
@@ -874,7 +840,7 @@ function QueueList({ entries, queueEdit, collapsed, header }) {
                 {queueEdit === index ? (
                   <QueueEditor index={index} text={text} />
                 ) : (
-                  <QueueRow entry={entry} index={index} onDragStart={() => setDragFrom(index)} />
+                  <QueueRow entry={entry} index={index} count={entries.length} onDragStart={() => setDragFrom(index)} onDragEnd={() => setDragFrom(null)} />
                 )}
               </li>
             );
@@ -885,7 +851,23 @@ function QueueList({ entries, queueEdit, collapsed, header }) {
   );
 }
 
-function QueueRow({ entry, index, onDragStart }) {
+function QueueRow({ entry, index, count, onDragStart, onDragEnd }) {
+  const running = useStore(state => state.running);
+  const busy = useStore(state => state.queueBusy || state.cancelling || state.pausing);
+  const [more, setMore] = useState(false);
+  const moreRef = useRef(null);
+  useEffect(() => {
+    if (!more) return;
+    const close = event => {
+      if (event.type === 'keydown' && event.key !== 'Escape') return;
+      if (event.type === 'pointerdown' && moreRef.current?.contains(event.target)) return;
+      if (event.type === 'keydown') { event.preventDefault(); event.stopPropagation(); moreRef.current?.querySelector('button')?.focus(); }
+      setMore(false);
+    };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', close, true);
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', close, true); };
+  }, [more]);
   const text = entry.text ?? entry.content ?? '';
   const spoken = splitAttachmentMarkers(text);
   const images = Array.isArray(entry.attachments) ? entry.attachments : [];
@@ -893,11 +875,12 @@ function QueueRow({ entry, index, onDragStart }) {
   const label = spoken.body || (images.length ? '图片' : text);
   return (
     <>
-      <span className="queue-dot" aria-hidden="true" />
       <button
         type="button"
         className="queue-grip"
-        draggable
+        draggable={!busy}
+        disabled={busy}
+        onDragEnd={onDragEnd}
         aria-label="拖动调整顺序"
         title="拖动调整顺序"
         onDragStart={onDragStart}
@@ -905,7 +888,7 @@ function QueueRow({ entry, index, onDragStart }) {
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6h8M4 10h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
       </button>
       <div className="queue-main">
-        <button type="button" className="queue-text" title={label} onClick={() => useStore.getState().setUi({ queueEdit: index })}>{label}</button>
+        <button type="button" className="queue-text" disabled={busy} title={label} onClick={() => useStore.getState().setUi({ queueEdit: index })}>{label}</button>
         {(images.length > 0 || files.length > 0) && (
           <span className="attach-strip">
             {images.map((image) => (
@@ -917,22 +900,43 @@ function QueueRow({ entry, index, onDragStart }) {
           </span>
         )}
       </div>
-      <button type="button" className="queue-icon" title="删除" aria-label="删除这条排队" onClick={() => useStore.getState().removeQueueItem(index)}>×</button>
+      <div className="queue-actions">
+        {running && <button type="button" className="queue-steer" disabled={busy}
+          title="立即引导当前任务" aria-label="引导这条排队消息"
+          onClick={() => useStore.getState().steerQueueItem(index)}><Icon name="steer" />引导</button>}
+        <button type="button" className="queue-icon" disabled={busy} title="编辑" aria-label="编辑这条排队消息"
+          onClick={() => useStore.getState().setUi({ queueEdit: index })}><Icon name="edit" /></button>
+        <button type="button" className="queue-icon" disabled={busy} title="删除" aria-label="删除这条排队"
+          onClick={() => useStore.getState().removeQueueItem(index)}><Icon name="trash" /></button>
+        {count > 1 && <span className="queue-more" ref={moreRef}>
+          <button type="button" className="queue-icon" aria-label="更多排队操作" aria-expanded={more} disabled={busy}
+            onClick={() => setMore(!more)}><Icon name="more" /></button>
+          {more && <div className="queue-more-menu">
+            <button type="button" disabled={index === 0 || busy} onClick={() => { setMore(false); useStore.getState().moveQueueItem(index, index - 1); }}>上移</button>
+            <button type="button" disabled={index === count - 1 || busy} onClick={() => { setMore(false); useStore.getState().moveQueueItem(index, index + 1); }}>下移</button>
+          </div>}
+        </span>}
+      </div>
     </>
   );
 }
 
 function QueueEditor({ index, text }) {
-  const [value, setValue] = useState(text);
+  const spoken = splitAttachmentMarkers(text);
+  const [value, setValue] = useState(spoken.body);
   const [saving, setSaving] = useState(false);
   return (
-    <div id="queue-edit" className="queue-edit">
+    <div id="queue-edit" className="queue-edit" onKeyDown={event => {
+      if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+        event.preventDefault(); event.stopPropagation(); useStore.getState().setUi({ queueEdit: null });
+      }
+    }}>
       <textarea aria-label="编辑排队消息" disabled={saving} value={value} onChange={(event) => setValue(event.target.value)} rows={2} />
       <div className="queue-edit-actions">
-        <button type="button" className="btn btn-primary" disabled={saving || !value.trim()} onClick={async () => {
+        <button type="button" className="btn btn-primary" disabled={saving || (!value.trim() && !spoken.files.length)} onClick={async () => {
           setSaving(true);
           try {
-            if (await useStore.getState().saveQueueItem(index, value)) useStore.getState().setUi({ queueEdit: null });
+            if (await useStore.getState().saveQueueItem(index, joinAttachmentMarkers(value, spoken.files))) useStore.getState().setUi({ queueEdit: null });
           } finally { setSaving(false); }
         }}>保存</button>
         <button type="button" className="btn" onClick={() => useStore.getState().setUi({ queueEdit: null })}>取消</button>

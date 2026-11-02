@@ -3,6 +3,7 @@ import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { Icon, FileIcon } from './Icon.jsx';
 import { shortcut } from '../lib/interaction.js';
+import { writeClipboard } from '../lib/clipboard.js';
 import { filterPaletteActions } from '../lib/commands.js';
 import { PERMISSION_MODES } from '../lib/permission.js';
 import { emptySkillsHint, parseInstallSource, summarizeInstallResults } from '../lib/skills.js';
@@ -80,7 +81,7 @@ export function TaskContract() {
         )}
         {(task.corrections || []).length > 0 && (
           <div id="task-corrections" className="task-corrections">
-            <p className="task-help">已记录的纠正</p>
+            <p className="task-help">已记录的引导</p>
             <ol>{task.corrections.map((text, index) => <li key={index}>{text}</li>)}</ol>
           </div>
         )}
@@ -186,7 +187,7 @@ function ConfirmDialog() {
   );
 }
 
-function Modal({ id, title, onClose, children, wide }) {
+export function Modal({ id, title, onClose, children, wide }) {
   const container = useRef(null);
   const close = useRef(onClose);
   close.current = onClose;
@@ -504,8 +505,39 @@ function ModelSettings() {
         >清除 Key</button>
       </div>
       {hint && <p id="settings-model-hint" className="chip-hint">{hint}</p>}
+      <VoiceSettings />
     </div>
   );
+}
+
+function VoiceSettings() {
+  const [value, setValue] = useState(null);
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [hint, setHint] = useState('');
+  const load = () => api.voiceSettings().then(setValue).catch(error => setHint(error.message));
+  useEffect(() => { load(); }, []);
+  return <details className="voice-settings"><summary>语音输入</summary>
+    <p className="task-help">录音完成后发送到语音服务，转写文字加入草稿。默认沿用聊天服务的端点和 Key；该服务需支持音频转写。</p>
+    {value ? <>
+      <label className="task-field">语音模型<input value={value.model || ''} onChange={e => setValue({ ...value, model: e.target.value })} /></label>
+      <label className="task-field">独立语音端点（可选）<input placeholder="留空沿用聊天服务" value={value.endpoint || ''} onChange={e => setValue({ ...value, endpoint: e.target.value })} /></label>
+      <label className="task-field">语音 API Key（可选）<input type="password" value={key} placeholder={value.apiKeySet ? '已保存（不填沿用）' : '独立服务请填写对应 Key'} onChange={e => setKey(e.target.value)} /></label>
+      <div className="chip-menu-actions">
+        <button type="button" className="btn" disabled={busy || !value.model?.trim()} onClick={async () => {
+          setBusy(true);
+          try { setValue(await api.saveVoiceSettings({ endpoint: value.endpoint, model: value.model, apiKey: key })); setKey(''); setHint('语音设置已保存'); }
+          catch (error) { setHint(error.message); } finally { setBusy(false); }
+        }}>{busy ? '保存中…' : '保存语音设置'}</button>
+        {value.apiKeySet && <button type="button" className="btn" disabled={busy} onClick={async () => {
+          setBusy(true);
+          try { setValue(await api.saveVoiceSettings({ clearApiKey: true })); setKey(''); setHint('已清除独立语音 Key'); }
+          catch (error) { setHint(error.message); } finally { setBusy(false); }
+        }}>清除语音 Key</button>}
+      </div>
+    </> : <button type="button" className="btn" onClick={load}>重新加载语音设置</button>}
+    {hint && <p className="chip-hint" role="status">{hint}</p>}
+  </details>;
 }
 
 function PermissionSettings() {
@@ -1112,10 +1144,7 @@ function runPaletteAction(action) {
       break;
     case 'copy-session-id':
       if (state.sessionId) {
-        navigator.clipboard?.writeText(state.sessionId).then(
-          () => state.showNotice('会话 ID 已复制'),
-          () => state.showNotice('复制失败')
-        );
+        writeClipboard(state.sessionId).then(ok => state.showNotice(ok ? '会话 ID 已复制' : '复制失败'));
       }
       break;
     case 'reset-view':

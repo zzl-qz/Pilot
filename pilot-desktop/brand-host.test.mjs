@@ -28,6 +28,7 @@ test('macOS 开发壳有独立身份和有效签名，重复准备复用产物�
   assert.equal(value(plist, 'CFBundleIdentifier'), 'com.pilot.desktop.dev');
   assert.equal(value(plist, 'CFBundleExecutable'), 'Pilot');
   assert.equal(value(plist, 'CFBundleIconFile'), 'Pilot.icns');
+  assert.match(value(plist, 'NSMicrophoneUsageDescription'), /麦克风/);
   assert.ok(statSync(join(app, 'Contents/Resources/Pilot.icns')).size > 0);
   for (const suffix of ['', ' (GPU)', ' (Plugin)', ' (Renderer)']) {
     const helper = join(app, `Contents/Frameworks/Pilot Helper${suffix}.app/Contents`);

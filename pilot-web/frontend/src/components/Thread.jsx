@@ -252,13 +252,15 @@ function UserMessage({ row }) {
   const [open, setOpen] = useState(false);
   const parts = splitAttachmentMarkers(text);
   const peek = messagePeek(parts.body || text);
-  const canPeek = peek.collapsed && !(parts.images || []).length && !(parts.files || []).length;
   const attachments = row.attachments || [];
+  const images = attachments.filter(isImageAttachment);
+  const files = [...(parts.files || []), ...attachments.filter(item => !isImageAttachment(item))];
+  const canPeek = peek.collapsed && !images.length && !files.length;
   /*
    * 操作只放图标：文字按钮会在气泡下方挤成一块黑板（旧版就是图标 + data-tip 气泡）。
    * SVG 路径与旧版 ACTION_ICONS 的 edit / branch 保持一致。
    */
-  const actions = (
+  const actions = row.steered ? null : (
     <div className="msg-actions">
       <button
         type="button"
@@ -308,7 +310,7 @@ function UserMessage({ row }) {
   return (
     <article className="msg msg-user" data-sequence={row.sequence ?? undefined}>
       <div className="bubble">
-        <div className="bubble-flow">{renderMessageBody(parts.body, parts.files, parts.images, row.imagePositions)}</div>
+        <div className="bubble-flow">{renderMessageBody(parts.body, files, images, row.imagePositions)}</div>
       </div>
       {canPeek && (
         <button type="button" className="msg-peek-fold" onClick={() => setOpen(false)}>收起</button>
@@ -339,27 +341,11 @@ function beginEdit(row) {
 
 /** 消息正文：文本 + 图片缩略 + 文件卡（与旧版 layoutMessageParts 顺序一致）。 */
 function renderMessageBody(body, files = [], images = [], imagePositions = []) {
-  const nodes = [];
-  const segments = String(body || '').split('\n');
-  segments.forEach((line, index) => {
-    if (index > 0) {
-      nodes.push(<br key={`br${index}`} />);
-    }
-    if (line) {
-      nodes.push(<span key={`t${index}`}>{line}</span>);
-    }
-    const position = imagePositions?.find?.((item) => item.index === index);
-    if (position) {
-      const image = images[position.image];
-      if (image) {
-        nodes.push(<ImageThumb key={`img${index}`} image={image} />);
-      }
-    }
+  return layoutMessageParts(body, images, files, imagePositions).map((part, index) => {
+    if (part.type === 'text') return <span key={index}>{part.text}</span>;
+    if (part.type === 'image') return <ImageThumb key={index} image={part.image} />;
+    return <React.Fragment key={index}>{part.files.map((file, fileIndex) => <FileCard key={fileIndex} file={file} />)}</React.Fragment>;
   });
-  for (const file of files || []) {
-    nodes.push(<FileCard key={file.name || file.id} file={file} />);
-  }
-  return nodes;
 }
 
 function ImageThumb({ image }) {
@@ -373,8 +359,10 @@ function ImageThumb({ image }) {
 
 function FileCard({ file }) {
   const sessionId = useStore((state) => state.sessionId);
+  const url = attachmentUrl(sessionId, file);
+  if (!url) return <span className="file-card" title={file.name}><span className="file-card-name">{file.name || file.id}</span></span>;
   return (
-    <a className="file-card" href={attachmentUrl(sessionId, file)} target="_blank" rel="noreferrer">
+    <a className="file-card" href={url} target="_blank" rel="noreferrer">
       <span className="file-card-name">{file.name || file.id}</span>
       <span className="file-card-size">{formatBytes(file.size)}</span>
     </a>

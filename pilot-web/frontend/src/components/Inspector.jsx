@@ -3,6 +3,8 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
+import { ReviewActions } from './ReviewActions.jsx';
+import { writeClipboard } from '../lib/clipboard.js';
 import { normalizePath, parseDiff } from '../lib/diff.js';
 import { sortChangeFiles, splitPath, statusKind } from '../lib/changes.js';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
@@ -319,10 +321,11 @@ function ChangesPanel() {
   const state = useStore((state) => state.changesState);
   const sessionId = useStore((state) => state.sessionId);
   const view = useStore((state) => state.ui.changeView);
-  const [branchName, setBranchName] = useState('');
+  const sessionEpoch = useStore(state => state.sessionEpoch);
+  const workspace = useStore(state => state.workspace);
   const [showUntracked, setShowUntracked] = useState(false);
   const [query, setQuery] = useState('');
-  /** 待确认的撤销：{ type: 'one', path } | { type: 'all' }，撤销是不可逆操作，必须二次确认。 */
+  /** 单文件撤销的行内确认。 */
   const [confirm, setConfirm] = useState(null);
 
   /*
@@ -383,12 +386,12 @@ function ChangesPanel() {
    */
   useEffect(() => {
     const onKey = (event) => {
-      if (event.altKey || event.ctrlKey || event.metaKey) {
+      if (event.altKey || event.ctrlKey || event.metaKey || document.querySelector('.modal')) {
         return;
       }
       const panel = document.getElementById('panel-changes');
       const active = document.activeElement;
-      if (!panel || !active || !panel.contains(active)) {
+      if (!panel || !active || !panel.contains(active) || active.closest('[role="menu"], [role="dialog"]') || active.closest('.changes-actions')?.querySelector('[aria-expanded="true"]')) {
         return;
       }
       if (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable) {
@@ -438,7 +441,7 @@ function ChangesPanel() {
         </select></label>
         <button type="button" className="btn" aria-pressed={expanded} onClick={() => useStore.getState().setUi({ reviewExpanded: !expanded })}>{expanded ? '退出全屏审阅' : '全屏审阅'}</button>
       </div>
-      <p className="review-scope-note">{scope === 'run' ? '仅筛选最近任务涉及的文件；差异仍相对 HEAD，可能包含你或其他任务的修改。' : '显示所有未提交改动，包含你或其他任务的修改。撤销会影响实际文件。'}</p>
+      <p className="review-scope-note">{scope === 'run' ? '仅筛选最近任务涉及的文件；差异仍相对 HEAD，可能包含你或其他任务的修改。' : '包含你和其他任务的未提交改动。'}</p>
       {runError && scope === 'run' && <p role="alert">{runError}</p>}
       {scope === 'run' && !runReport && !runError && <p role="status">正在读取任务改动…</p>}
       <div className="changes-bar">
@@ -450,15 +453,15 @@ function ChangesPanel() {
           ) : (
             <>
               <span id="changes-totals" className="changes-totals">
-                <span className="changes-count">{tracked.length} 个文件</span>
-                <span className="add">+{totals.added}</span>
-                <span className="del">−{totals.removed}</span>
+                <span className="changes-count">{files.length} 个文件</span>
+                {tracked.length > 0 && <span className="changes-line-counts" title="已跟踪文件的增删行数"><span className="add">+{totals.added}</span><span className="del">−{totals.removed}</span></span>}
               </span>
               {untracked.length > 0 && (
                 <button
                   type="button"
                   className={`changes-untracked${showUntracked ? ' is-on' : ''}`}
-                  title="git 里还没纳入版本管理的文件，不计入增删行"
+                  title="未纳入 Git 版本管理的文件，不计入增删行"
+                  aria-expanded={showUntracked}
                   onClick={() => setShowUntracked((open) => !open)}
                 >
                   未跟踪 {untracked.length}
@@ -467,55 +470,15 @@ function ChangesPanel() {
             </>
           )}
         </div>
-        <div className="changes-actions">
-          {confirm?.type === 'all' ? (
-            <>
-              <span className="changes-confirm-hint">撤销全部 {files.length} 个改动？</span>
-              <button type="button" className="btn btn-danger" disabled={restoring} onClick={() => restore([], true)}>确认撤销</button>
-              <button type="button" className="btn" disabled={restoring} onClick={() => setConfirm(null)}>取消</button>
-            </>
-          ) : (
-            <>
-              <input
-                className="branch-input"
-                placeholder="新 Git 分支"
-                aria-label="新 Git 分支名"
-                value={branchName}
-                onChange={(event) => setBranchName(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && branchName) {
-                    useStore.getState().createBranch(branchName);
-                    setBranchName('');
-                  }
-                }}
-              />
-              <button type="button" className="btn" id="branch-create" disabled={!branchName} onClick={() => { useStore.getState().createBranch(branchName); setBranchName(''); }}>建 Git 分支</button>
-              {!empty && scope === 'workspace' && (
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  id="changes-undo-all"
-                  title="把所有改动恢复成 HEAD 的样子（未跟踪文件会被删除）"
-                  disabled={restoring}
-                  onClick={() => { setConfirm({ type: 'all' }); setShowUntracked(false); }}
-                >撤销全部</button>
-              )}
-              <button
-                type="button"
-                className="icon-btn"
-                id="changes-refresh"
-                title="刷新变更"
-                aria-label="刷新变更"
-                disabled={restoring}
-                onClick={() => { useStore.getState().loadChanges(); setRefresh(value => value + 1); }}
-              >
-                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.6V5.4h-2.8" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              </button>
-            </>
-          )}
-        </div>
+        <ReviewActions
+          key={`${sessionId}:${sessionEpoch}:${workspace}:${scope}`}
+          files={files} isGit={isGit} canUndo={!empty && scope === 'workspace' && state !== 'error'}
+          loading={state === 'loading'} restoring={restoring}
+          onRefresh={() => { useStore.getState().loadChanges(); setRefresh(value => value + 1); }}
+        />
       </div>
       {restoring && <p className="changes-progress">撤销中…</p>}
+      {state === 'error' && scope === 'workspace' && <p className="changes-progress" role="alert">读取失败，请刷新重试。{!empty && '当前显示上次读取的改动。'}</p>}
       {tracked.length > 5 && (
         <div className="changes-filter">
           <input
@@ -848,7 +811,7 @@ function PreviewPanel() {
       return;
     }
     try {
-      await navigator.clipboard.writeText(content);
+      if (!await writeClipboard(content)) throw new Error('clipboard unavailable');
       useStore.getState().showNotice('已复制文件内容');
     } catch {
       useStore.getState().showNotice('复制失败，请手动选择内容');
@@ -1010,7 +973,7 @@ function CommandsPanel() {
 
   const copyLog = async () => {
     try {
-      await navigator.clipboard.writeText(logText);
+      if (!await writeClipboard(logText)) throw new Error('clipboard unavailable');
       useStore.getState().showNotice('已复制命令输出');
     } catch {
       useStore.getState().showNotice('复制失败，请手动选择输出');

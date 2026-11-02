@@ -1,6 +1,12 @@
 import React from 'react';
 
 const paths = {
+  branch: 'M4 5v6 M12 5v2a4 4 0 0 1-4 4H6 M4 1a2 2 0 1 0 0 4 2 2 0 0 0 0-4 M12 1a2 2 0 1 0 0 4 2 2 0 0 0 0-4 M4 11a2 2 0 1 0 0 4 2 2 0 0 0 0-4',
+  mic: 'M6 3a2 2 0 0 1 4 0v5a2 2 0 0 1-4 0Z M3.5 7v1a4.5 4.5 0 0 0 9 0V7 M8 12.5V15 M5.5 15h5',
+  steer: 'M3 3v3a3 3 0 0 0 3 3h7 m-3-3 3 3-3 3',
+  edit: 'm10 2 4 4-8 8H2v-4Z M8 4l4 4',
+  trash: 'M2 4h12 M6 4V2h4v2 M4 4l1 10h6l1-10 M7 7v4 M9 7v4',
+  more: 'M3 8h.01 M8 8h.01 M13 8h.01',
   chevron: 'm6 3 5 5-5 5',
   folder: 'M2 4h4l2 2h6v7H2Z M2 4V3h4l2 2h6v1',
   folderOpen: 'M2 6V3h4l2 2h6v2 M2 7h13l-2 6H2Z',

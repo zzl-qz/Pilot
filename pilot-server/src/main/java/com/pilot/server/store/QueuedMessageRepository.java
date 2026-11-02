@@ -30,29 +30,34 @@ public final class QueuedMessageRepository {
     }
 
     public void save(String sessionId, List<String> messages) {
+        saveAll(java.util.Map.of(sessionId, messages));
+    }
+
+    /** 一次事务移动普通队列与引导队列，失败时两个队列一起回滚。 */
+    public synchronized void saveAll(java.util.Map<String, List<String>> queues) {
         if (store == null) {
-            if (messages.isEmpty()) {
-                memory.remove(sessionId);
-            } else {
-                memory.put(sessionId, List.copyOf(messages));
-            }
+            queues.forEach((id, values) -> memory.put(id, List.copyOf(values)));
             return;
         }
-        List<JdbcSupport.Binder> rows = new ArrayList<>();
-        for (int position = 0; position < messages.size(); position++) {
-            String content = messages.get(position);
-            int index = position;
-            rows.add(statement -> {
-                statement.setString(1, sessionId);
-                statement.setInt(2, index);
-                statement.setString(3, content);
-            });
-        }
         JdbcSupport.inTransaction(store, connection -> {
-            JdbcSupport.exec(connection, "DELETE FROM queued_messages WHERE session_id = ?",
-                    statement -> statement.setString(1, sessionId));
-            JdbcSupport.batch(connection,
-                    "INSERT INTO queued_messages(session_id, position, content) VALUES (?, ?, ?)", rows);
+            for (var entry : queues.entrySet()) {
+                String sessionId = entry.getKey();
+                List<String> messages = entry.getValue();
+                List<JdbcSupport.Binder> rows = new ArrayList<>();
+                for (int position = 0; position < messages.size(); position++) {
+                    String content = messages.get(position);
+                    int index = position;
+                    rows.add(statement -> {
+                        statement.setString(1, sessionId);
+                        statement.setInt(2, index);
+                        statement.setString(3, content);
+                    });
+                }
+                JdbcSupport.exec(connection, "DELETE FROM queued_messages WHERE session_id = ?",
+                        statement -> statement.setString(1, sessionId));
+                JdbcSupport.batch(connection,
+                        "INSERT INTO queued_messages(session_id, position, content) VALUES (?, ?, ?)", rows);
+            }
         }, "保存排队消息失败");
     }
 }

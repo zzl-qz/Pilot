@@ -16,13 +16,14 @@ const assets = path.resolve(root, '../src/main/resources/static/assets');
 const listAssets = () => (fs.existsSync(assets) ? fs.readdirSync(assets) : []);
 
 const startedAt = Date.now();
-const vite = path.join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
-// Windows 上 .cmd 必须走 shell 才能执行
-const result = spawnSync(vite, ['build'], { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' });
+const vite = path.join(root, 'node_modules', 'vite', 'bin', 'vite.js');
+// 直接用 Node 启动 CLI，三个平台都不经过 shell，项目路径含空格也不会被拆开。
+const result = spawnSync(process.execPath, [vite, 'build'], { cwd: root, stdio: 'inherit' });
 if (result.error) {
   console.error(result.error.message);
   process.exit(1);
 }
+if (result.status !== 0) process.exit(result.status ?? 1);
 
 // vite 不会清空 outDir，所以上一版的产物会一直堆在这儿：按修改时间把「本次没产出的」删掉。
 // 删的是构建开始之前就存在的文件，构建期间旧文件还在，打开着的页面不会 404 白屏。

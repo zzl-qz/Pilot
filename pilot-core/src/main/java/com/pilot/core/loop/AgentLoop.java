@@ -174,7 +174,7 @@ public final class AgentLoop {
     private final ToolExecutor toolExecutor;
     private final Config config;
     private final Cancellation cancellation;
-    private final Supplier<String> pendingInput;
+    private Supplier<Message> pendingInput;
     private final TraceRecorder traceRecorder;
     private final Pause retryPause;
     /** 正在生成的文字，只给界面看。为空表示不推预览。 */
@@ -189,6 +189,12 @@ public final class AgentLoop {
     /** 把模型的推理增量推到界面。不影响最终回答。 */
     public AgentLoop withLiveReasoning(Consumer<String> reasoning) {
         liveReasoning = reasoning == null ? ignored -> { } : reasoning;
+        return this;
+    }
+
+    /** 引导与普通输入一样保留图片及其在正文中的位置。仅在启动循环前配置。 */
+    public AgentLoop withPendingMessages(Supplier<Message> input) {
+        pendingInput = Objects.requireNonNull(input);
         return this;
     }
 
@@ -286,7 +292,11 @@ public final class AgentLoop {
               ApprovalBroker approvals, Config config, Cancellation cancellation,
               Supplier<String> pendingInput, TraceRecorder traceRecorder, Pause retryPause,
               Consumer<String> liveText) {
-        this.pendingInput = Objects.requireNonNull(pendingInput, "pendingInput must not be null");
+        Objects.requireNonNull(pendingInput, "pendingInput must not be null");
+        this.pendingInput = () -> {
+            String text = pendingInput.get();
+            return text == null || text.isBlank() ? null : Message.user(text.strip());
+        };
         this.traceRecorder = Objects.requireNonNull(traceRecorder, "traceRecorder must not be null");
         this.retryPause = retryPause == null ? Thread::sleep : retryPause;
         this.liveText = liveText;
@@ -418,7 +428,7 @@ public final class AgentLoop {
 
                 String content = response.content() == null ? "" : response.content();
                 List<ToolCall> calls = response.toolCalls() == null ? List.of() : response.toolCalls();
-                String correction = pendingInput.get();
+                Message correction = pendingInput.get();
                 if (hasInput(correction)) {
                     // 模型返回时已经有纠正：旧方案的工具都不执行，补齐协议结果后重新规划。
                     messages.add(Message.assistant(content, calls));
@@ -531,7 +541,7 @@ public final class AgentLoop {
                 ArrayList<ToolExecutor.Outcome> stepOutcomes = new ArrayList<ToolExecutor.Outcome>();
                 boolean batchInterrupted = false;
                 if (parallelReadBatch(calls)) {
-                    String beforeBatch = pendingInput.get();
+                    Message beforeBatch = pendingInput.get();
                     if (hasInput(beforeBatch)) {
                         skipCalls(messages, calls, 0, "用户已纠正当前任务，本次调用未执行，请重新规划。");
                         applySteering(messages, events, beforeBatch);
@@ -540,7 +550,7 @@ public final class AgentLoop {
                         repeated = 0;
                         batchInterrupted = true;
                     } else {
-                        AtomicReference<String> correctionDuringBatch = new AtomicReference<>();
+                        AtomicReference<Message> correctionDuringBatch = new AtomicReference<>();
                         Consumer<SessionEvent> serializedEvents = event -> {
                             synchronized (events) { events.accept(event); }
                         };
@@ -550,7 +560,7 @@ public final class AgentLoop {
                                 if (hasInput(correctionDuringBatch.get())) {
                                     return "用户已纠正当前任务，本次调用未执行，请重新规划。";
                                 }
-                                String queuedCorrection = pendingInput.get();
+                                Message queuedCorrection = pendingInput.get();
                                 if (hasInput(queuedCorrection)) {
                                     correctionDuringBatch.set(queuedCorrection);
                                     return "用户已纠正当前任务，本次调用未执行，请重新规划。";
@@ -596,7 +606,7 @@ public final class AgentLoop {
                             skipCalls(messages, calls, index, "运行已暂停或取消，本次调用未执行。");
                             return cancel(messages, events);
                         }
-                        String nextCorrection = pendingInput.get();
+                        Message nextCorrection = pendingInput.get();
                         if (hasInput(nextCorrection)) {
                             skipCalls(messages, calls, index, "用户已纠正当前任务，本次调用未执行，请重新规划。");
                             applySteering(messages, events, nextCorrection);
@@ -712,8 +722,8 @@ public final class AgentLoop {
         return new Result(finalText, code, conversation(messages));
     }
 
-    private static boolean hasInput(String input) {
-        return input != null && !input.isBlank();
+    private static boolean hasInput(Message input) {
+        return input != null && (!input.content().isBlank() || input.hasAttachments());
     }
 
     private boolean parallelReadBatch(List<ToolCall> calls) {
@@ -764,7 +774,7 @@ public final class AgentLoop {
 
     /** 审批通过不等于仍可执行；开始产生副作用前再消费一次控制信号。 */
     private final class ToolStartGuard implements Supplier<String> {
-        private String correction;
+        private Message correction;
 
         @Override
         public String get() {
@@ -775,10 +785,10 @@ public final class AgentLoop {
         }
     }
 
-    private static boolean applySteering(List<Message> messages, Consumer<SessionEvent> events, String input) {
+    private static boolean applySteering(List<Message> messages, Consumer<SessionEvent> events, Message input) {
         if (!hasInput(input)) return false;
-        messages.add(Message.user(input.strip()));
-        events.accept(new RunSteered(input.strip()));
+        messages.add(input);
+        events.accept(new RunSteered(input.content(), input.attachments(), input.imagePositions()));
         return true;
     }
 

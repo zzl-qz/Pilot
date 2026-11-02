@@ -87,6 +87,7 @@ export function prepareDevelopmentHost(root = desktopRoot) {
       brandBundle(helper, oldName, newName, `${bundleId}.helper${suffix ? '.' + suffix : ''}`);
       renameSync(helper, join(frameworks, newName + '.app'));
     }
+    setPlist(join(contents, 'Info.plist'), 'NSMicrophoneUsageDescription', 'Pilot 使用麦克风将你的语音转为消息草稿。');
     buildIcon(icon, contents, staging);
     execFileSync('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', bundle], { stdio: 'pipe' });
     execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', bundle], { stdio: 'pipe' });

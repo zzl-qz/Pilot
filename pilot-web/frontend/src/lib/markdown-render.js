@@ -3,6 +3,7 @@
  * katex / mermaid 依旧从 /vendor 下的静态脚本加载，行为与旧版一致。
  */
 
+import { writeClipboard as tryWriteClipboard } from './clipboard.js';
 import { parseCallout, resolveFileReference, languageLabel, outputKind, safeImageSource } from './content-format.js';
 
 let notify = () => {};
@@ -42,24 +43,9 @@ function actionIcon(label, icon, className, onClick) {
 }
 
 
-/** 优先用异步剪贴板；权限被拒或非安全上下文时退回 execCommand，保证复制一定能用。 */
+/** 复用同一复制兼容路径；UI 层仍保留已有的成功/失败反馈。 */
 async function writeClipboard(value) {
-  try {
-    await navigator.clipboard.writeText(value);
-    return;
-  } catch (error) {
-    const area = document.createElement('textarea');
-    area.value = value;
-    area.setAttribute('readonly', '');
-    area.style.cssText = 'position:fixed;top:-1000px;opacity:0';
-    document.body.append(area);
-    area.select();
-    const ok = document.execCommand('copy');
-    area.remove();
-    if (!ok) {
-      throw error;
-    }
-  }
+  if (!await tryWriteClipboard(value)) throw new Error('当前环境不支持复制，请手动选择文本');
 }
 
 

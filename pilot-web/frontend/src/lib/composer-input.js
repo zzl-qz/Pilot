@@ -1,4 +1,4 @@
-import { readTransferFiles } from './clipboard.js';
+import { readTransferFiles, hasFileTransferHint } from './clipboard.js';
 import { fileBadge, formatBytes, isImageAttachment } from './attachments.js';
 
 /**
@@ -207,7 +207,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     chip.title = path;
     const name = document.createElement('span');
     name.className = 'chip-name';
-    name.textContent = path.slice(path.lastIndexOf('/') + 1) || path;
+    name.textContent = path.split(/[\\/]/).at(-1) || path;
     chip.append(badge(path), name);
     return chip;
   }
@@ -243,7 +243,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
 
   root.addEventListener('paste', (event) => {
     const data = event.clipboardData;
-    if (!data || readTransferFiles(data).length) {
+    if (!data || readTransferFiles(data).length || hasFileTransferHint(data)) {
       return;
     }
     // 文件交给外面的粘贴处理；文字一律按纯文本插入，不把网页的样式和结构带进输入框

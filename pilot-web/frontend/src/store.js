@@ -27,6 +27,7 @@ import { sameUserInput } from './thread-utils.js';
 import { readSideChats, writeSideChats, readEmbeddedSession } from './lib/side-chat.js';
 import { normalizeQueue } from './lib/queue.js';
 
+let queueLoadSequence = 0;
 const RECONNECT_BASE_MS = 800;
 const RECONNECT_MAX_MS = 15000;
 
@@ -134,6 +135,8 @@ function resetSessionState(draft) {
   draft.sessionEpoch = (draft.sessionEpoch || 0) + 1;
   draft._editTarget = null;
   draft.steering = false;
+  draft.queueBusy = false;
+  draft.queueRevision = null;
   draft.pausing = false;
   draft.sessionId = null;
   draft.thread = initialThread();
@@ -168,6 +171,7 @@ function resetSessionState(draft) {
   draft.ui.checkpointDialog = null;
   draft.ui.changeView = null;
   draft.changeReport = null;
+  draft.changesState = '';
   draft.runChanges = null;
   draft.commandTasks = [];
   draft.commandDetail = null;
@@ -240,6 +244,8 @@ export const useStore = create(immer((set, get) => {
   cancelling: false,
   pausing: false,
   steering: false,
+  queueBusy: false,
+  queueRevision: null,
   runStartedAt: 0,
   lastEventAt: 0,
   modelRetryUntil: 0,
@@ -978,7 +984,7 @@ export const useStore = create(immer((set, get) => {
 
   async steer(text, attachments) {
     if (attachments?.length) {
-      get().showNotice('纠正消息暂不支持附件，请移除附件后发送，或恢复任务后排队发送。');
+      get().showNotice('请将带附件的消息加入队列，再点击该消息的‘引导’。');
       return false;
     }
     const { sessionId, runId } = get();
@@ -989,7 +995,7 @@ export const useStore = create(immer((set, get) => {
       return true;
     } catch (error) {
       set((draft) => { draft.steering = false; });
-      get().showNotice('纠正失败：' + error.message);
+      get().showNotice('引导失败：' + error.message);
       return false;
     }
   },
@@ -1107,51 +1113,57 @@ export const useStore = create(immer((set, get) => {
   },
 
   async loadQueue() {
-    const { sessionId } = get();
+    const { sessionId, sessionEpoch } = get();
     if (!sessionId) {
       return;
     }
+    const request = ++queueLoadSequence;
     try {
       const data = await api.queue(sessionId);
+      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch || request !== queueLoadSequence) return;
       const normalized = normalizeQueue(data);
       set((draft) => {
         draft.queue = normalized.texts;
         draft.queueEntries = normalized.rows;
+        draft.queueRevision = data.revision || null;
       });
     } catch { /* 队列读取失败不阻塞 */ }
   },
 
+  async mutateQueue(operation, failure) {
+    const { sessionId, sessionEpoch, queueRevision, queueBusy } = get();
+    if (!sessionId || queueBusy) return false;
+    set(draft => { draft.queueBusy = true; });
+    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
+    try {
+      await operation(sessionId, queueRevision);
+      if (current()) await get().loadQueue();
+      return current();
+    } catch (error) {
+      if (current()) {
+        get().showNotice(failure + error.message);
+        await get().loadQueue();
+      }
+      return false;
+    } finally {
+      if (current()) set(draft => { draft.queueBusy = false; });
+    }
+  },
+
+  async steerQueueItem(index) {
+    const { runId, running } = get();
+    if (!running || !runId) return false;
+    return get().mutateQueue((id, revision) => api.steerQueueItem(id, index, { runId, revision }), '引导未发送：');
+  },
   async saveQueueItem(index, text) {
     if (!text?.trim()) { get().showNotice('排队消息不能为空'); return false; }
-    const { sessionId } = get();
-    try {
-      await api.updateQueueItem(sessionId, index, { content: text });
-      await get().loadQueue();
-      return true;
-    } catch (error) {
-      get().showNotice('修改排队消息失败：' + error.message);
-      return false;
-    }
+    return get().mutateQueue((id, revision) => api.updateQueueItem(id, index, { content: text, revision }), '修改排队消息失败：');
   },
-
   async removeQueueItem(index) {
-    const { sessionId } = get();
-    try {
-      await api.deleteQueueItem(sessionId, index);
-      await get().loadQueue();
-    } catch (error) {
-      get().showNotice('删除排队消息失败：' + error.message);
-    }
+    return get().mutateQueue((id, revision) => api.deleteQueueItem(id, index, revision), '删除排队消息失败：');
   },
-
   async moveQueueItem(from, to) {
-    const { sessionId } = get();
-    try {
-      await api.moveQueueItem(sessionId, from, to);
-      await get().loadQueue();
-    } catch (error) {
-      get().showNotice('调整顺序失败：' + error.message);
-    }
+    return get().mutateQueue((id, revision) => api.moveQueueItem(id, from, to, revision), '调整顺序失败：');
   },
 
   async loadTask() {
@@ -1542,22 +1554,25 @@ export const useStore = create(immer((set, get) => {
     }
   },
 
-  /* ---------- 变更 / 预览 ---------- */  async loadChanges() {
-    const { sessionId } = get();
-    if (!sessionId) {
+  /* ---------- 变更 / 预览 ---------- */
+  async loadChanges() {
+    const { sessionId, sessionEpoch } = get();
+    if (!sessionId || get().changesState === 'restoring') {
       return;
     }
-    set((draft) => { draft.changesState = 'loading'; });
+    const request = (get()._changesRequest || 0) + 1;
+    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get()._changesRequest === request;
+    set((draft) => { draft.changesState = 'loading'; draft._changesRequest = request; });
     try {
       const report = await api.diff(sessionId);
-      if (get().sessionId !== sessionId) return;
+      if (!current()) return;
       set((draft) => {
         draft.changeReport = report;
         draft.changesState = '';
         draft.ui.changeCount = (report.files || []).length;
       });
     } catch (error) {
-      if (get().sessionId !== sessionId) return;
+      if (!current()) return;
       set((draft) => { draft.changesState = 'error'; });
       get().showNotice('读取变更失败：' + error.message);
     }
@@ -1567,13 +1582,15 @@ export const useStore = create(immer((set, get) => {
    * 失败文件逐条回报，别把「撤销没成」显示成成功。
    */
   async restoreChanges(paths, all = false) {
-    const { sessionId } = get();
-    if (!sessionId) {
+    const { sessionId, sessionEpoch } = get();
+    if (!sessionId || get().changesState === 'restoring') {
       return null;
     }
-    set((draft) => { draft.changesState = 'restoring'; });
+    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
+    set((draft) => { draft.changesState = 'restoring'; draft._changesRequest = (draft._changesRequest || 0) + 1; });
     try {
       const report = await api.restoreChanges(sessionId, { paths: paths || [], all });
+      if (!current()) return report;
       const failed = Array.isArray(report?.failed) ? report.failed : [];
       const done = (report?.restored?.length || 0) + (report?.deleted?.length || 0);
       if (report?.error) {
@@ -1597,14 +1614,17 @@ export const useStore = create(immer((set, get) => {
       if (previewTarget && (all || (paths || []).some((path) => samePath(path, previewTarget)))) {
         try {
           const fresh = await api.file(sessionId, previewTarget);
+          if (!current()) return report;
           set((draft) => { draft._previewData = fresh; });
         } catch {
+          if (!current()) return report;
           set((draft) => { draft._previewData = null; });
         }
       }
       await get().loadChanges();
       return report;
     } catch (error) {
+      if (!current()) return null;
       set((draft) => { draft.changesState = ''; });
       get().showNotice('撤销失败：' + error.message);
       return null;
@@ -1620,12 +1640,17 @@ export const useStore = create(immer((set, get) => {
     }
   },
   async createBranch(name) {
-    const { sessionId } = get();
+    const { sessionId, sessionEpoch } = get();
+    if (!sessionId) return { ok: false, error: '请先打开一个会话。' };
     try {
       await api.branch(sessionId, name);
-      get().showNotice(`已创建并切换分支 ${name}`);
+      if (get().sessionId === sessionId && get().sessionEpoch === sessionEpoch) {
+        get().showNotice(`已创建并切换分支 ${name}`);
+        await get().loadChanges();
+      }
+      return { ok: true };
     } catch (error) {
-      get().showNotice('创建分支失败：' + error.message);
+      return { ok: false, error: '创建分支失败：' + error.message };
     }
   },
   async openPreview(path) {

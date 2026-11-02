@@ -29,11 +29,11 @@ test('queue entries keep image attachments for the list', () => {
   assert.deepEqual(normalized.rows[0].imagePositions, [0]);
 });
 
-test('queue header explains steer after cancel and order while running', () => {
+test('queue header shows only nonempty queues and retains stopped entries', () => {
   assert.equal(queueHeader({ count: 0, held: false }), null);
   assert.equal(queueHeader({ count: 2, held: false }).title, '2 条排队');
   assert.match(queueHeader({ count: 2, held: false }).meta, /按顺序/);
-  assert.match(queueHeader({ count: 0, held: true }).meta, /等待继续执行/);
+  assert.equal(queueHeader({ count: 0, held: true }), null);
   assert.match(queueHeader({ count: 1, held: true }).meta, /已暂停/);
 });
 

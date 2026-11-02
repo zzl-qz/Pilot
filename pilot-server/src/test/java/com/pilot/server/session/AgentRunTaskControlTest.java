@@ -57,6 +57,45 @@ class AgentRunTaskControlTest {
     @TempDir Path workspace;
     @TempDir Path dataRoot;
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"按这张图调整", ""})
+    void queuedGuidanceMovesAttachmentsAtomicallyAndRejectsStaleOrDuplicateClicks(String input) throws Exception {
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<>();
+        ModelClient model = (messages, tools) -> {
+            requests.add(List.copyOf(messages));
+            if (requests.size() == 1) { entered.countDown(); await(release); }
+            return done();
+        };
+        try (Fixture f = new Fixture(model, null)) {
+            f.start(new TaskControlService.Requirements(List.of(), List.of())); await(entered);
+            var image = new com.pilot.core.loop.Attachment("参考.png", "image/png", workspace.resolve("参考.png").toString());
+            assertTrue(f.service.followup(f.id, input, List.of(image), List.of(0)));
+            String revision = RunStarter.queueRevision(f.service.queuedMessages(f.id));
+            assertFalse(f.service.steerQueued(f.id, "old-run", 0, revision));
+            assertTrue(f.service.followup(f.id, "然后运行测试"));
+            assertFalse(f.service.steerQueued(f.id, f.firstRun, 0, revision), "队列变化时不得按旧下标引导");
+            assertFalse(f.service.editQueued(f.id, 0, "不应修改", revision));
+            assertFalse(f.service.moveQueued(f.id, 0, 1, revision));
+            assertFalse(f.service.removeQueued(f.id, 0, revision));
+            revision = RunStarter.queueRevision(f.service.queuedMessages(f.id));
+            assertFalse(f.service.steerQueued(f.id, f.firstRun, -1, revision));
+            String taskId = f.tasks.load(f.id).taskId();
+            assertTrue(f.service.steerQueued(f.id, f.firstRun, 0, revision));
+            assertFalse(f.service.steerQueued(f.id, f.firstRun, 0, revision), "重复点击不能取走下一条");
+            assertEquals(List.of("然后运行测试"), f.service.queued(f.id));
+            assertEquals(taskId, f.tasks.load(f.id).taskId(), "引导不创建新任务");
+            release.countDown(); f.finished("COMPLETED", "COMPLETED");
+            Message guide = requests.get(1).stream().filter(m -> m.content().equals(input)).findFirst().orElseThrow();
+            assertEquals(List.of(image), guide.attachments()); assertEquals(List.of(0), guide.imagePositions());
+            List<EventEnvelope> events = f.sessions.events(f.id);
+            var steered = events.stream().filter(e -> e.payload() instanceof RunSteered).toList();
+            assertEquals(1, steered.size()); assertEquals(f.firstRun, steered.getFirst().runId());
+            assertEquals(List.of(image), ((RunSteered) steered.getFirst().payload()).attachments());
+            assertFalse(f.service.steerQueued(f.id, f.firstRun, 0, revision), "已结束运行不能引导");
+        } finally { release.countDown(); }
+    }
+
     @Test
     void followupCreatesIndependentTaskWhileSteerChangesTheCurrentRun() throws Exception {
         CountDownLatch firstEntered = new CountDownLatch(1);

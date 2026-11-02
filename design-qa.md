@@ -306,3 +306,63 @@ final result: passed
 - 同目录保存本轮测试日志。桌面截图为 Retina 分辨率，Web 常规视口为 1280×720；窄屏为 390×844。起始页与历史任务页用于验证各自状态，不作像素级同内容对比。
 
 本轮没有调用付费模型来评测任务生成质量，没有实机验证 Windows/Linux 原生剪贴板，也没有把安装打包、自动更新或所有历史样式文件重写算作已完成。当前 IDE 启动的 9999 服务及既有桌面进程仍是旧后端/旧主进程；前端产物已构建，新草稿文件 API 和桌面菜单需重启服务及桌面窗口后使用。新后端已通过独立服务验证。
+
+## 三平台兼容补充（2026-11-02）
+
+本轮“三个平台”按 Windows、macOS、Linux 处理，范围包含它们运行的 Web 和 Electron 桌面工作台；平台兼容要求同时记录在 AGENTS.md。
+
+| 项目 | Windows | macOS | Linux |
+| --- | --- | --- | --- |
+| 快捷键与输入法 | Ctrl，识别 AltGr/IME，避免误触动作 | Cmd，识别 IME | Ctrl，识别 AltGr/IME |
+| 文件与图片输入 | 标准 File/DataTransfer 的 files/items 路径 | 同一标准路径 | 同一标准路径；仅 URI/文件标记时提示使用文件选择或拖入 |
+| 复制代码、会话 ID、文件与日志 | 统一 Clipboard API + execCommand 回退 | 同左 | 同左 |
+| 目录比较 | 盘符与 UNC 路径忽略大小写 | POSIX 路径保留大小写，使用服务端规范化结果 | POSIX 大小写不同的目录保持独立 |
+| 桌面启动 | electron.exe | Pilot.app 品牌宿主 | electron 可执行文件 |
+| 窗口尺寸动作 | 最大化/还原 | 原生 Zoom | 最大化/还原 |
+| 构建与测试入口 | 直接调用 Node/Vite 和真实 Electron 可执行文件 | 同左 | 同左 |
+
+具体修补：
+
+- 所有文字复制入口使用同一兼容实现；在弹窗内部执行复制回退，成功或失败都清理临时控件，并恢复原焦点与选区。
+- 原始剪贴板只含文件 URI 或不可读取文件标记时，显示替代操作，不把本地路径文字当成已添加的附件；单个 getAsFile 失败不会中断其他条目。
+- 附件本地编号支持缺少 randomUUID、受限 crypto 的环境，不会因普通 HTTP / WebView 能力缺失而卡在读取中。
+- 前端目录比较按路径格式处理 Windows 盘符/UNC 与 POSIX，保留根目录；后端目录快捷入口按本机 Path 语义去重，避免 Linux 大小写不同的目录被合并。
+- Vite 构建改为 process.execPath 启动 CLI，去除 .cmd/shell 及带空格路径的解析差异；构建失败不清理上一版可用产物。
+- GUI 回归脚本采用真实的平台 Electron 二进制入口；原生文件剪贴板测试使用 text/uri-list，由 Electron 映射到各平台格式，再分别按 Meta+V / Control+V。
+- 原有三平台 CI 矩阵新增桌面依赖安装和单测，安装排在 Maven 之前，供桌面启动相关 Java 测试使用。
+
+依据：[MDN Clipboard API](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API)、[Electron 文件剪贴板格式](https://www.electronjs.org/docs/latest/api/clipboard-item#files-the-texturi-list-mime-type)、[Node 子进程与 Windows 脚本差异](https://nodejs.org/api/child_process.html)、[Electron 窗口 API](https://www.electronjs.org/docs/latest/api/base-window)。
+
+验证：前端 234/234，桌面 14/14，后端 WorkspaceServiceTest / SessionFilesApiTest / DesktopWindowLauncherTest 共 17/17；构建、check 与 diff 检查通过。Chrome 和 Electron 的输入及交互回归通过，包括 URI-only 粘贴不污染草稿、缺少 randomUUID 时文件读取，以及 macOS 真实文件剪贴板快捷键。新增平台分支使用模拟输入验证；Windows/Linux 没有实机验收，远程 CI 矩阵也尚未执行。GUI 脚本需要已安装 Chrome 和可用图形会话，不能把普通无显示环境当成剪贴板实测环境。浏览器可能保留部分全局快捷键，对应界面按钮和命令入口仍可使用。
+
+
+## 2026-11-02 输入区、队列引导与语音输入
+
+按用户给的 Codex 图 3 收敛操作，保留当前工作台布局和黑灰配色。主要交互如下：
+
+- 运行中有文字或附件时，Enter/发送按钮默认加入队列；空草稿时同一个主按钮显示停止。Esc 保留停止当前任务的能力。去掉“排队/立即纠正”下拉框、常驻说明文字、独立停止及暂停按钮。
+- 队列每一行常显“引导”、编辑、删除；多条消息的更多菜单提供上移/下移，同时保留桌面拖动排序。标题可通过键盘折叠。
+- “引导”直接进入当前运行的安全边界，不取消或重建任务。后端核对 runId 和队列版本，在同一次存储事务中移出普通队列、移入引导队列；文字、图片、纯图片及图片位置都保留。修改/排序/删除也校验队列版本，客户端防止重复提交和迟到读取覆盖新队列。
+- 引导事件会在消息流中显示正文和图片；后续回复属于同一运行。引导消息不展示仅适用于原任务起点的重新发送/检查点按钮。修正原图片消息组件未使用附件及字符位置的问题。
+- 排队消息编辑只改正文，内联文件块保留；Esc 只退出编辑，不误停任务。
+- 麦克风按钮：申请权限 → 录音（最多 2 分钟/10 MB）→ 完成后转写 → 加入原草稿，不自动发消息。已有文字、附件保留。取消、会话/工作区变化、权限超时后的迟到结果均不会回填；失败时可重试转写。
+- 语音通过服务端 OpenAI 兼容音频转写接口上传。默认沿用聊天端点与密钥，默认模型为 gpt-transcribe；在“设置 → 模型 → 语音输入”可配置独立端点、模型和 Key。独立端点不会自动继承聊天服务密钥。音频不持久保存，服务错误不透传原始敏感响应；不自动跟随带认证请求的重定向。
+
+### 三平台处理
+
+Windows/macOS/Linux 的 Web 与 Electron 共享 getUserMedia + MediaRecorder，实现按能力选择 WebM/MP4/Ogg；不依赖仅部分浏览器提供的 SpeechRecognition。非安全页面/无编码支持、权限拒绝、无设备、设备被占用均有明确提示，键盘输入仍可使用。macOS 品牌宿主补充 NSMicrophoneUsageDescription 和系统麦克风授权；Windows/Linux 使用标准媒体权限。桌面仅允许 Pilot 主页面申请音频，不放行摄像头或外部页面；授权过程中页面离开 Pilot 时拒绝迟到授权。
+
+### 已完成验证
+
+- 前端单元测试 **247/247**，包括录音格式、权限拒绝/超时、取消后迟到 stream、转写中取消、空结果、重试、2 分钟及体积上限、音轨释放、外部 AbortSignal，以及引导回放/图片顺序。
+- Java **133/133**：AgentLoopTest 49、AgentLoopControlTest 10；SessionApiTest 25、VoiceServiceTest 5、EventCodecNewEventsTest 12、QueuedMessageRepositoryTest 3、AgentRunTaskControlTest 11、AgentRunServiceTest 18。覆盖旧 run/旧队列、重复引导、文字与纯图片引导、同一任务标识、存储事务回滚、HTTP multipart 转写、空/超大/未知格式、错误响应脱敏、独立服务凭据隔离。
+- 桌面单元测试 **19/19**，含 Windows/macOS/Linux 权限分支、macOS 拒绝、授权期间导航和麦克风用途声明。
+- Chromium 与 Electron 交互回归均通过：实际 MediaRecorder + 测试音源产生音频，FormData 上传到拦截的本地测试响应；回填保留草稿/附件，不自动发送；拒绝、失败重试、切换会话、Esc 边界；队列并发、乱序读取、文件保留、图片显示，1440/768/390 三种宽度及更多菜单边界。
+- 两端文件粘贴/拖放/选择回归通过；macOS 原生文件剪贴板 Cmd+V 通过。品牌桌面离线重试与原生菜单 UI 回归通过。
+- 生产构建及 git diff --check 通过。设计静态检查 0 FAIL；13 个提示为计时器补零、浮层阴影及已有清除阴影/模糊的声明。人工截图检查确认队列操作常显、窄屏无横向溢出。
+
+实机环境为 **macOS**。Windows/Linux 做了兼容实现和分支模拟，未做两平台实机验证；未调用真实付费语音供应商、未采集人的麦克风。转写接口用本地 HTTP 服务验证；真实语音识别质量和用户当前供应商的转写可用性尚未验证。后端接口及桌面麦克风权限声明需重启后端/桌面壳后生效，未中断用户当前运行中的应用。
+
+证据目录：`/Users/smt/.codex/visualizations/2026/11/02/01a19b15-eceb-7c02-9620-9e6f0e2253b6/pilot-queue-voice/`。其中队列截图为隔离测试场景，避免影响真实任务；录音截图使用测试音源。
+
+参考：[Codex Queue/Steer 语义](https://developers.openai.com/blog/mastering-codex-remote-for-engineering)、[OpenAI 文件转写](https://developers.openai.com/api/docs/guides/speech-to-text)、[MediaRecorder 格式探测](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder/isTypeSupported_static)、[Electron 媒体权限](https://github.com/electron/electron/blob/main/docs/api/session.md)、[Electron macOS 麦克风授权](https://github.com/electron/electron/blob/main/docs/api/system-preferences.md)。

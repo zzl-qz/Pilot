@@ -6,9 +6,13 @@
  * 历史会话没有 project_id、空白对话与归档对话的归类。
  */
 
-/** 路径比较：统一分隔符与大小写，去掉末尾斜杠。 */
+/** 以服务端路径格式判断：Windows 盘符/UNC 忽略大小写，POSIX 保留大小写。 */
 export function samePath(left, right) {
-  const normalize = (value) => String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const normalize = value => {
+    const path = String(value || '').replace(/\\/g, '/');
+    const normalized = path.replace(/\/+$/, '') || (path.startsWith('/') ? '/' : '');
+    return /^(?:[a-z]:\/|\/\/)/i.test(path) ? normalized.toLowerCase() : normalized;
+  };
   const a = normalize(left);
   return a !== '' && a === normalize(right);
 }

@@ -1,18 +1,22 @@
+import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
 import { createServer } from 'vite';
 import { chromium, _electron } from 'playwright-core';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkQueue } from './queue-cases.mjs';
+import { checkVoice } from './voice-cases.mjs';
 import { checkWorkbench } from './workbench-cases.mjs';
+import { checkReview } from './review-cases.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const temp = await mkdtemp(join(tmpdir(), 'pilot-interaction-'));
 const fixture = `<html><head><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react'; import {createRoot} from 'react-dom/client';
 import App from '/src/components/App.jsx'; import {useStore} from '/src/store.js'; import {api} from '/src/api.js';
 import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
-document.documentElement.dataset.theme='dark'; window.store=useStore; window.api=api; window.calls=[];
+document.documentElement.dataset.theme='dark'; window.store=useStore; window.api=api; window.realTranscribe=api.transcribeVoice; window.calls=[];
 for(const name of Object.keys(api)) if(typeof api[name]==='function') api[name]=async (...args)=>{calls.push({name,args});return {};};
 api.worktreeInfo=async()=>({branch:'feature/ui',worktree:false});
 api.filesFlat=api.workspaceFiles=async()=>({files:['src/组件.jsx','src/App.jsx','src/space file.js']});
@@ -21,6 +25,18 @@ window.diff='diff --git a/src/App.jsx b/src/App.jsx\\n--- a/src/App.jsx\\n+++ b/
 window.report={gitRepository:true,files:[{path:'src/App.jsx',status:'M',added:1,removed:1}],diff:window.diff};
 api.diff=async()=>window.report; api.runChanges=async()=>({...window.report,files:[{...window.report.files[0],diff:window.diff}]});
 useStore.setState({init:async()=>{},sessionId:'test-a',workspace:'/workspace/demo',currentProjectId:'p',sessionTitle:'审阅输入与交互',projects:[{id:'p',name:'Pilot',folders:['/workspace/demo']}],lastRunId:'run-a',sessionEpoch:1});
+if (new URL(location.href).searchParams.has('queue')) {
+  let entries=[{content:'按照参考图精简按钮，把操作放到消息队列里'},{content:'完成后检查粘贴附件、语音和窄屏布局'}];
+  const snapshot=()=>({entries:entries.map(e=>({...e})),revision:String(entries.length)});
+  api.queue=async()=>snapshot();
+  api.steerQueueItem=async(_id,index)=>{entries.splice(index,1);return snapshot();};
+  api.deleteQueueItem=api.steerQueueItem;
+  api.updateQueueItem=async(_id,index,body)=>{entries[index]={content:body.content};return snapshot();};
+  api.moveQueueItem=async(_id,from,to)=>{entries.splice(to,0,entries.splice(from,1)[0]);return snapshot();};
+  api.sendMessage=async(_id,body)=>{entries.push({content:body.content});return {};};
+  api.cancelRun=async()=>{useStore.setState({running:false,queueHeld:true});};
+  useStore.setState({running:true,runId:'run-a',sessionTitle:'精简输入与队列交互',settingsData:{model:'gpt-6-sol'},queueEntries:entries.map(e=>({...e})),queueRevision:'2',thread:{...useStore.getState().thread,rows:[{key:'u',type:'user',text:'按参考图优化输入区，加入语音输入'},{key:'t',type:'turn',runIds:['run-a'],tools:[],reply:{text:'正在整理输入区的操作与队列交互。'},stats:{}}],cursor:1}});
+}
 createRoot(document.getElementById('root')).render(React.createElement(App));
 </script></body></html>`;
 const server = await createServer({ root, server:{host:'127.0.0.1',port:0,proxy:{}},plugins:[{name:'interaction-fixture',configureServer(server){
@@ -86,21 +102,29 @@ async function run(page,name,url) {
   await input.fill('暂停请求中不能发'); await page.evaluate(()=>store.setState({pausing:true}));
   await input.press('Enter');assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='sendMessage').length),0);
   await page.evaluate(()=>store.setState({pausing:false}));
-  // Stop independent of draft, pending file read and send mode. Explicit queue / steer routing.
-  await clear();await page.locator('#stop-task').click();assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='cancelRun').length),1);
+  // One primary action: stop with empty draft, queue with text/files; steer lives on its queue row.
+  await clear();await page.getByRole('button',{name:'停止当前任务',exact:true}).click();
+  assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='cancelRun').length),1);
+  assert.equal(await page.getByLabel('运行中发送方式').count(),0);
+  assert.equal(await page.locator('#task-live-controls').count(),0);
   await input.fill('排队要求');await page.locator('#send').click();
   assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='sendMessage').length),1);
-  await input.fill('立即纠正');await page.getByLabel('运行中发送方式').selectOption('steer');await page.locator('#send').click();
-  assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='steer').length),1);
-  await paste();await page.locator('#send').click();assert.equal(await chips.count(),1,'不支持附件的纠正保留草稿并提示');
-  assert.match(await page.locator('#notice').innerText(),/纠正消息暂不支持附件/);
-  await page.locator('#stop-task').click();assert.equal(await chips.count(),1);
+  await page.evaluate(()=>{store.setState({queueEntries:[{text:'按图优化'}],queueRevision:'v1'});api.steerQueueItem=async(...args)=>{calls.push({name:'steerQueueItem',args});};});
+  await page.getByRole('button',{name:'引导这条排队消息'}).click();
+  assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='steerQueueItem').length),1);
+  assert.deepEqual(await page.evaluate(()=>calls.find(c=>c.name==='steerQueueItem').args),['test-a',0,{runId:'run-a',revision:'v1'}]);
+  await page.evaluate(()=>{store.setState({queueEntries:[{text:'失败时保留'}],queueRevision:'v2'});api.queue=async()=>({entries:[{content:'失败时保留'}],revision:'v2'});api.steerQueueItem=async()=>{throw Error('任务已结束');};});
+  await page.getByRole('button',{name:'引导这条排队消息'}).click();await page.waitForFunction(()=>!store.getState().queueBusy);
+  assert.match(await page.locator('.queue-text').innerText(),/失败时保留/);
+  assert.match(await page.locator('#notice').innerText(),/引导未发送/);
+  await page.evaluate(()=>api.queue=async()=>({items:[]}));
+  await paste();await input.press('Escape');assert.equal(await chips.count(),1,'停止任务保留草稿附件');
   // Queue edit failure / blank / success, then draft remains usable.
-  await clear();await page.evaluate(()=>{store.setState({running:false,queueEntries:[{text:'queued'}]});api.updateQueueItem=async()=>{throw Error('offline');};});
+  await clear();await page.evaluate(()=>{store.setState({running:false,queueEntries:[{text:'queued'}]});api.queue=async()=>({entries:[{text:'queued'}]});api.updateQueueItem=async()=>{throw Error('offline');};});
   await page.locator('.queue-text').click();await page.getByLabel('编辑排队消息').fill('changed');await page.locator('#queue-edit').getByText('保存',{exact:true}).click();
   assert.equal(await page.getByLabel('编辑排队消息').inputValue(),'changed');
   await page.getByLabel('编辑排队消息').fill(' ');assert.equal(await page.locator('#queue-edit').getByText('保存',{exact:true}).isDisabled(),true);
-  await page.getByLabel('编辑排队消息').fill('saved');await page.evaluate(()=>api.updateQueueItem=async()=>({}));
+  await page.getByLabel('编辑排队消息').fill('saved');await page.evaluate(()=>{api.updateQueueItem=async()=>({});api.queue=async()=>({items:[]});});
   await page.locator('#queue-edit').getByText('保存',{exact:true}).click();await page.waitForFunction(()=>store.getState().ui.queueEdit===null);
   // In-flight send, switch session, late failure cannot mutate the new conversation or lose original draft.
   await input.fill('slow original');await paste('slow.txt');
@@ -143,6 +167,9 @@ async function run(page,name,url) {
     assert.equal((await page.locator('#checkpoint-dialog').innerText()).includes('新建的文件会被删除'),false);
     await page.keyboard.press('Escape');
   }
+  await checkReview(page, name, temp);
+  await checkVoice(page, name, temp);
+  await checkQueue(page, name, temp);
   await checkWorkbench(page, name, temp).catch(async error => {
     console.error('Page errors:', errors);
     console.error(await page.locator('body').innerText());
@@ -159,8 +186,8 @@ async function run(page,name,url) {
     await page.screenshot({path:join(temp,`${name}-${width}.png`)});
     if(width===390) {
       await page.evaluate(()=>store.setState({running:true,runId:'run-a'}));
-      await page.waitForFunction(()=>document.querySelector('#stop-task')?.getBoundingClientRect().right<=innerWidth);
-      assert.ok(await page.locator('#stop-task').isVisible());
+      await page.waitForFunction(()=>document.querySelector('#send')?.getBoundingClientRect().right<=innerWidth);
+      assert.ok(await page.locator('#send').isVisible());
       await page.screenshot({path:join(temp,`${name}-mobile-running.png`)});
       await page.evaluate(()=>store.setState({running:false}));
     }
@@ -176,10 +203,10 @@ async function run(page,name,url) {
 try {
   await server.listen();const url=`http://127.0.0.1:${server.httpServer.address().port}/__interaction`;
   if(process.argv.includes('--serve')) { console.log('Fixture:',url); await new Promise(()=>{}); }
-  browser=await chromium.launch({channel:'chrome',headless:true});await run(await browser.newPage(), 'chromium',url);await browser.close();browser=null;
-  const main=join(temp,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
+  browser=await chromium.launch({channel:'chrome',headless:true,args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});await run(await browser.newPage(), 'chromium',url);await browser.close();browser=null;
+  const main=join(temp,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.commandLine.appendSwitch('use-fake-device-for-media-stream');app.commandLine.appendSwitch('use-fake-ui-for-media-stream');app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
-  electron=await _electron.launch({executablePath:resolve(root,'../../pilot-desktop/node_modules/.bin/electron'),args:[main],env});
+  electron=await _electron.launch({executablePath:electronBinary(),args:[main],env});
   await run(await electron.firstWindow(),'electron',url);
   console.log('Screenshots:',temp);
 } finally {await browser?.close();await electron?.close();await server.close();}

@@ -1,6 +1,15 @@
 /** 平台快捷键文案与界面派生状态，保持事件数据本身不变。 */
-export const modifierKey = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform || '') ? '⌘' : 'Ctrl';
+export function platformModifier(nav = globalThis.navigator) {
+  return /Mac|iPhone|iPad/i.test(nav?.userAgentData?.platform || nav?.platform || '') ? '⌘' : 'Ctrl';
+}
+export const modifierKey = platformModifier();
 export function shortcut(key) { return `${modifierKey} ${key}`; }
+
+// Windows 的 AltGr 可能同时报告 Ctrl+Alt；输入法候选键也不能触发全局动作。
+export function isShortcutModifier(event) {
+  return Boolean(event && !event.isComposing && event.keyCode !== 229
+    && !event.getModifierState?.('AltGraph') && (event.ctrlKey || event.metaKey));
+}
 
 export function runPhase({running, cancelling, pausing, queueHeld, pendingApprovals = {}, thread, lastOutcome}) {
   if (cancelling) return '正在停止';

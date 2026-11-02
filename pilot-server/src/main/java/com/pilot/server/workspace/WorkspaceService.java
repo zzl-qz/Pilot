@@ -43,14 +43,19 @@ public class WorkspaceService {
 
     /** 快捷入口：盘符或根、用户主目录。 */
     public List<RootEntry> roots() {
-        Map<String, RootEntry> entries = new LinkedHashMap<>();
         Path home = Path.of(System.getProperty("user.home", ".")).toAbsolutePath().normalize();
+        Path startup = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+        List<Path> roots = java.util.Arrays.stream(java.io.File.listRoots()).map(java.io.File::toPath).toList();
+        return roots(home, startup, roots);
+    }
+
+    static List<RootEntry> roots(Path home, Path startup, List<Path> roots) {
+        Map<Path, RootEntry> entries = new LinkedHashMap<>();
         entries.put(key(home), new RootEntry(home.toString(), "主目录"));
-        for (java.io.File root : java.io.File.listRoots()) {
-            Path path = root.toPath().toAbsolutePath().normalize();
+        for (Path root : roots) {
+            Path path = root.toAbsolutePath().normalize();
             entries.putIfAbsent(key(path), new RootEntry(path.toString(), path.toString()));
         }
-        Path startup = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
         entries.putIfAbsent(key(startup), new RootEntry(startup.toString(), "启动目录"));
         return List.copyOf(entries.values());
     }
@@ -133,7 +138,8 @@ public class WorkspaceService {
         return fileName == null ? path.toString() : fileName.toString();
     }
 
-    private static String key(Path path) {
-        return path.toString().toLowerCase(Locale.ROOT);
+    private static Path key(Path path) {
+        // Path.equals 使用服务端文件系统语义：Windows 不区分大小写，POSIX 区分。
+        return path.normalize();
     }
 }

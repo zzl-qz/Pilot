@@ -44,3 +44,23 @@ test('错误状态把 message 透出来', async () => {
   });
   await assert.rejects(() => apiJson('/api/x'), /路径不在工作区内/);
 });
+
+
+test('外部取消会中止录音上传，不误报请求超时', async () => {
+  handler = (_, { signal }) => new Promise((resolve, reject) => {
+    const abort = () => reject(new DOMException('aborted', 'AbortError'));
+    if (signal.aborted) abort(); else signal.addEventListener('abort', abort, { once: true });
+  });
+  const controller = new AbortController();
+  const pending = apiJson('/api/voice/transcriptions', { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(pending, error => error.name === 'AbortError' && !error.message.includes('超时'));
+  await assert.rejects(apiJson('/api/voice/transcriptions', { signal: controller.signal }), { name: 'AbortError' });
+});
+
+test('请求超时仍给出可读说明', async () => {
+  handler = (_, { signal }) => new Promise((resolve, reject) => {
+    signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+  });
+  await assert.rejects(apiJson('/api/voice/transcriptions', {}, 5), /请求超时/);
+});

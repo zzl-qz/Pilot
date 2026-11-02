@@ -9,6 +9,10 @@ server:
     include-message: always
 
 spring:
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
   application:
     name: Pilot
   # 本机密钥放在同目录的 application-local.yaml（已被 git 忽略），或用环境变量 PILOT_PROFILE 换一套
@@ -55,6 +59,8 @@ pilot:
       max-width: ${PILOT_BROWSER_MIRROR_MAX_WIDTH:1280}
       # JPEG 质量（20-90）
       quality: ${PILOT_BROWSER_MIRROR_QUALITY:55}
+  voice:
+    model: ${PILOT_VOICE_MODEL:gpt-transcribe}
   model:
     # endpoint 可以写服务根地址，也可以写完整的 /v1/chat/completions
     endpoint: ${PILOT_MODEL_ENDPOINT:https://api.openai.com/v1/chat/completions}
