@@ -99,7 +99,12 @@ html[data-theme] .crumb h1 { font-size: 14px; font-weight: 500; }
 html[data-theme] .session-chip { font-size: 11px; opacity: .8; }
 html[data-theme] .thread .bubble-md { font-size: 15px; line-height: 1.75; }
 html[data-theme] .who { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
-html[data-theme] .turn-card.is-compact { padding: 6px 0; border: 0; background: transparent; box-shadow: none; border-radius: 0; margin: 8px 0 20px; }
+/* 单行结果（「任务完成」）只占一行高度：上下留白交给列 gap，别再叠自己的margin */
+html[data-theme] .turn-card.is-compact { padding: 2px 0; border: 0; background: transparent; box-shadow: none; border-radius: 0; margin: 0; }
+/* 复制 / 重新生成：hover 才出现，不常驻占 28px 高度（一句话回复因此矮一半） */
+html[data-theme] .msg-assistant { position: relative; }
+html[data-theme] .msg-assistant .reply-actions { position: absolute; top: -3px; right: 0; margin: 0; height: 22px; align-items: center; }
+html[data-theme] .msg-assistant .reply-actions .icon-action { height: 22px; width: 22px; }
 .turn-card.is-compact .turn-card-title { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); font-weight: 400; }
 .turn-card.is-compact.is-warn .turn-card-title::before { background: var(--warn); }
 .turn-card.is-compact.is-error .turn-card-title::before, .turn-card.is-compact.is-err .turn-card-title::before { background: var(--err); }

@@ -1839,7 +1839,8 @@ html[data-theme="dark"] .file-ref-line { color: #d0d0d0; background: #333; }
 .task-scope strong { color: var(--ink); }
 .task-scope span { overflow-wrap: anywhere; }
 .task-scope button { justify-self: start; margin-top: 6px; }
-.turn-stats-detail { margin: 8px 0 16px; font-size: 12px; color: var(--ink-2); }
+/* 与正文的间距交给 .turn-shell 的 gap；下方留白交给线程列的 gap，避免三段间距叠加 */
+.turn-stats-detail { margin: 6px 0 0; font-size: 12px; color: var(--ink-2); }
 .turn-stats-detail > summary { cursor: pointer; width: fit-content; padding: 4px 0; }
 .turn-stats-detail .turn-stats { flex-wrap: wrap; padding-top: 8px; }
 .review-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; }
