@@ -215,6 +215,7 @@ const el = {
   mirrorEmpty: document.querySelector('#mirror-empty'),
   mirrorFocus: document.querySelector('#mirror-focus'),
   mirrorPause: document.querySelector('#mirror-pause'),
+  mirrorHint: document.querySelector('#mirror-hint'),
   commandsCount: document.querySelector('#commands-count'),
   commandsState: document.querySelector('#commands-state'),
   commandsRefresh: document.querySelector('#commands-refresh'),
@@ -6601,6 +6602,12 @@ function onMirrorState(message) {
     // 接管按钮态以服务端回推为准（唯一事实源），不本地翻转
     mirrorView.paused = Boolean(payload.paused);
     el.mirrorPause.textContent = pauseToggleLabel(mirrorView.paused);
+    // 后台模式没有窗口可置前：按钮隐藏（不是置灰，避免用户疑惑）；hint 同步改写
+    const headless = payload.headless === true;
+    el.mirrorFocus.hidden = headless;
+    el.mirrorHint.textContent = headless
+      ? '浏览器在后台运行；需要窗口时把 pilot.browser.headless 设为 false 重启'
+      : '镜像为只读；操作请到浏览器窗口或让智能体执行';
   } catch {
     // 忽略
   }
@@ -6686,6 +6693,8 @@ function resetMirrorView() {
   el.mirrorEmpty.hidden = false;
   el.mirrorLatency.textContent = '';
   el.mirrorPause.textContent = pauseToggleLabel(false);
+  el.mirrorFocus.hidden = false;
+  el.mirrorHint.textContent = '浏览器在后台运行；需要窗口时把 pilot.browser.headless 设为 false 重启';
   el.mirrorDot.classList.remove('is-live');
   el.mirrorStage.classList.remove('is-closed');
   setMirrorUrl('');
