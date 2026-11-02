@@ -236,9 +236,9 @@ bash mvnw -pl pilot-server spring-boot:run
 
 ## 浏览器验证与 MCP
 
-`browser` 工具在隔离的 Chromium 里打开本机页面（只允许 localhost / 127.0.0.1 / [::1]），支持 DOM 快照、点击、输入、选择、文件上传、截图、控制台与网络记录，用于让代理验证自己改的前端。运行时是固定版本 `playwright-core@1.64.1` 的 Node sidecar，首次启动时自动安装到 `.pilot/browser`；浏览器优先用收进 `.pilot/browser/browsers` 的内置 Chromium（版本配套、行为跨机器一致，没有了才降级本机 Chrome / Edge，首次自动下载约 400MB，`--no-shell` 跳过用不上的 headless-shell），删 `.pilot` 即全量清理。默认**有头运行**：窗口真实可见，可与代理共看同一页面、手动接管；无桌面环境自动降级无头。空闲回收：无头 10 分钟，有头默认不回收（`pilot.browser.idle-shutdown-seconds` 可改）。可用 `pilot.browser.enabled=false` 关闭，`PILOT_BROWSER_PATH` 显式指定浏览器可执行文件。握手没通过时模型看不到这个工具，原因保留在工具不可用信息里；本机装好浏览器后约一分钟内自动重测。截图保存在数据目录的 `artifacts/` 下。
+`browser` 工具在隔离的 Chromium 里打开本机页面（只允许 localhost / 127.0.0.1 / [::1]），支持 DOM 快照、点击、输入、选择、文件上传、截图、控制台与网络记录，用于让代理验证自己改的前端。运行时是固定版本 `playwright-core@1.64.1` 的 Node sidecar，首次启动时自动安装到 `.pilot/browser`；浏览器**只用**收进 `.pilot/browser/browsers` 的内置 Chromium（版本配套、行为跨机器一致，缺失时自动下载约 400MB，`--no-shell` 跳过用不上的 headless-shell），删 `.pilot` 即全量清理。不会去用用户本机安装的 Chrome / Edge：确实需要救急时才显式设 `PILOT_BROWSER_PREFER_BUNDLED=false`，或用 `PILOT_BROWSER_PATH` 指到一个可执行文件。默认**无头运行**：不弹独立窗口，页面只镜像到右侧面板里（`PILOT_BROWSER_HEADLESS=false` 恢复有头窗口，用于调试或手动接管）；无桌面环境自动降级。空闲回收：无头 10 分钟、有头默认不回收（`pilot.browser.idle-shutdown-seconds` 可改），面板正在显示某一页时不回收。可用 `pilot.browser.enabled=false` 关闭。握手没通过时模型看不到这个工具，原因保留在工具不可用信息里；本机装好浏览器后约一分钟内自动重测。截图保存在数据目录的 `artifacts/` 下。
 
-右侧审阅面板的「浏览器」tab 提供实时镜像（CDP screencast，页面变化才推帧、静态页面零流量）：代理一碰 browser 工具即点亮徽标，按偏好自动唤起一次；帧走独立的瞬态 SSE（不落库、断线重连补发缓存帧），切走 tab 或折叠面板即停止推帧。镜像为只读 `<img>`，用户在侧栏里的点击不会触达页面；「置前窗口」把浏览器窗口带到前台，「暂停智能体操作」把页面留给用户（代理的交互与导航被温和拦截并提示等待，snapshot 等观察动作仍可用），恢复即续。
+右侧审阅面板的「浏览器」tab 就是一个**内置浏览器**，而且默认不弹独立窗口：浏览器在无头模式跑，页面只镜像到面板里（`PILOT_BROWSER_HEADLESS=false` 才回到有头窗口，用于调试）。顶部有地址栏与后退 / 前进 / 刷新（加载中变成停止），输入 `localhost:5173` 这类本机地址即可打开页面（简写自动补 `http://`，仍只允许回环地址）；画面是 CDP screencast 的实时帧（页面变化才推帧、静态页面零流量），面板里的点击、滚轮与键盘按页面视口换算后转发过去，和代理操作的是同一个页面。另外三个面板内能力：**选择元素**（点画面里的元素，把它描述成引用直接进输入框）、**页面控制台**（读 console 记录）、**暂停智能体操作**（代理的交互与导航被温和拦截，snapshot 等观察动作仍可用）。帧走独立的瞬态 SSE（不落库、断线重连补发缓存帧），切走 tab 或折叠面板即停止推帧；面板正在显示某一页时浏览器不会被空闲回收。
 
 MCP 服务器在工作区的 `.mcp.json`（格式同 Claude Code：`{"mcpServers": {"名字": {"command": "npx", "args": [...], "env": {...}}}}`）或数据目录的 `mcp.json` 里配置，目前支持 stdio 传输。模型每次请求只携带 `mcp_tools` 与 `mcp_call` 两个定义，具体工具按需查询；启动服务器等于执行配置里的命令，所以需要审批，声明了 `readOnlyHint` 的工具调用免审批。
 
