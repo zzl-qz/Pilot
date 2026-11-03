@@ -181,10 +181,10 @@ async function run(page,name,url) {
   // Final responsive evidence; reject page-level overflow and hidden stop action.
   await page.evaluate(()=>store.getState().setUi({inspectorOpen:false,sidebarOpen:false}));
   for(const width of [1440,768,390]) {
-    await page.setViewportSize({width,height:900});await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().width >= innerWidth - 2);
+    await page.setViewportSize({width,height:900});await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().width >= innerWidth - (innerWidth > 960 ? 52 : 0) - 2);
     if(width<=960) await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().right<=1);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,`${width}px 不横向溢出`);
-    assert.ok(await page.locator('.main').evaluate(el=>el.getBoundingClientRect().width)>=width-2,`${width}px 主区占满可用宽度`);
+    assert.ok(await page.locator('.main').evaluate(el=>el.getBoundingClientRect().width)>=width-(width>960?52:0)-2,`${width}px 主区占满可用宽度`);
     await page.screenshot({path:join(temp,`${name}-${width}.png`)});
     if(width===390) {
       await page.evaluate(()=>store.setState({running:true,runId:'run-a'}));

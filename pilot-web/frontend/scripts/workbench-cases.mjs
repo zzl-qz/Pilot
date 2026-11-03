@@ -101,7 +101,7 @@ export async function checkWorkbench(page, name, output) {
   assert.equal(await page.locator('.modal-box').evaluate(el => el.getBoundingClientRect().bottom <= innerHeight), true, '短窗口仍能容纳完整弹窗');
   assert.equal(await page.locator('.settings-body').evaluate(el => el.clientHeight > 100 && el.getBoundingClientRect().bottom <= innerHeight), true);
   await page.keyboard.press('Escape');
-  assert.equal(await page.evaluate(() => document.activeElement.id), 'settings-open');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'sidebar-toggle', '窄屏收起全局入口后返回可见的导航开关');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole('tab', { name: '预览', exact: true }).press('Home');
   assert.equal(await page.getByRole('tab', { name: '对话', exact: true }).getAttribute('aria-selected'), 'true');

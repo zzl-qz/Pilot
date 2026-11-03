@@ -1,3 +1,4 @@
+import { restoreFocus } from '../lib/interaction.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { ModelRuntimeSettings } from './ModelRuntimeSettings.jsx';
 import { formatCache, totalCost } from '../lib/request-usage.js';
@@ -216,7 +217,7 @@ export function Modal({ id, title, onClose, children, wide }) {
       cancelAnimationFrame(frame);
       document.removeEventListener('keydown', onKey, true);
       document.removeEventListener('focusin', onFocus);
-      if (previous?.isConnected) previous.focus();
+      restoreFocus(previous);
     };
   }, []);
   return (

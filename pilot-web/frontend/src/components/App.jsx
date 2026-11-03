@@ -5,6 +5,8 @@ import ResultInbox from './ResultInbox.jsx';
 import Schedules from './Schedules.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
+import { NavigationRail } from './NavigationRail.jsx';
+import { Icon } from './Icon.jsx';
 import { Sidebar } from './Sidebar.jsx';
 import { Thread } from './Thread.jsx';
 import { Composer } from './Composer.jsx';
@@ -23,7 +25,6 @@ export default function App() {
   const init = useStore((state) => state.init);
   const notice = useStore((state) => state.ui.notice);
   const sidebarOpen = useStore((state) => state.ui.sidebarOpen);
-  const themeMode = useStore((state) => state.ui.themeMode);
   const running = useStore((state) => state.running);
   const runStartedAt = useStore((state) => state.runStartedAt);
   const sessionTitle = useStore((state) => state.sessionTitle);
@@ -38,6 +39,7 @@ export default function App() {
   const lastEventAt = useStore((state) => state.lastEventAt);
   const [, setTick] = useState(0);
   const [folderMenu, setFolderMenu] = useState(false);
+  const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 960px)').matches);
   /** 两侧面板宽度：拖过分才写内联变量，没拖过就用 CSS 里的默认/自适应值。 */
   const [layout, setLayout] = useState(readLayout);
   const [resizing, setResizing] = useState(null);
@@ -69,10 +71,41 @@ export default function App() {
 
   useEffect(() => {
     const narrow = window.matchMedia('(max-width: 960px)');
-    const collapse = () => { if (narrow.matches) useStore.getState().setUi({ sidebarOpen: false }); };
+    const collapse = () => {
+      setNarrowViewport(narrow.matches);
+      if (narrow.matches) useStore.getState().setUi({ sidebarOpen: false });
+    };
     collapse(); narrow.addEventListener('change', collapse);
     return () => narrow.removeEventListener('change', collapse);
   }, []);
+
+  // 抽屉打开时键盘留在导航内；折叠后不把焦点遗留在隐藏的项目按钮上。
+  useEffect(() => {
+    if (embedded) return;
+    const sidebar = document.getElementById('sidebar');
+    const toggle = document.getElementById('sidebar-toggle');
+    const rail = document.querySelector('.navigation-rail');
+    const main = appRef.current?.querySelector('.main');
+    const narrow = narrowViewport;
+    if (!sidebarOpen) {
+      if (sidebar?.contains(document.activeElement) || (narrow && rail?.contains(document.activeElement))) toggle?.focus();
+      return;
+    }
+    if (!narrow) return;
+    main?.setAttribute('inert', '');
+    const frame = requestAnimationFrame(() => document.getElementById('new-session')?.focus());
+    const onKey = event => {
+      if (event.key !== 'Tab' || event.defaultPrevented || document.querySelector('.modal, dialog[open]')) return;
+      const items = [toggle, ...document.querySelectorAll('.navigation-rail button, #sidebar button:not([disabled]):not([tabindex="-1"]), #sidebar input, #sidebar summary, #sidebar [tabindex="0"]')]
+        .filter(el => el && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
+      const index = items.indexOf(document.activeElement);
+      event.preventDefault();
+      const next = index < 0 ? 0 : (index + (event.shiftKey ? -1 : 1) + items.length) % items.length;
+      items[next]?.focus();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { cancelAnimationFrame(frame); main?.removeAttribute('inert'); document.removeEventListener('keydown', onKey); };
+  }, [sidebarOpen, embedded, narrowViewport]);
 
   /* Side chat 内嵌页：整页只留对话区，侧栏与审阅面板收起（旧版 body.side-chat-embedded）。 */
   useEffect(() => {
@@ -136,8 +169,15 @@ export default function App() {
       }
       const state = useStore.getState();
       const overlayOpen = Boolean(state.ui.picker || state.ui.projectEditor || state.ui.settingsOpen
+        || state.ui.searchOpen || state.ui.resultsOpen || state.ui.schedulesOpen || state.ui.recurringOpen
         || state.ui.paletteOpen || state.ui.checkpointDialog || state.ui.skillsInstall || state.ui.confirm);
       if (overlayOpen) {
+        return;
+      }
+      if (state.ui.sidebarOpen && window.matchMedia('(max-width: 960px)').matches) {
+        event.preventDefault();
+        state.setUi({ sidebarOpen: false });
+        document.getElementById('sidebar-toggle')?.focus();
         return;
       }
       if (state.ui.reviewExpanded && state.ui.inspectorOpen) {
@@ -162,7 +202,7 @@ export default function App() {
     }
     document.body.classList.add('is-resizing');
     const onMove = (event) => {
-      const width = appRef.current?.getBoundingClientRect().width || window.innerWidth;
+      const width = (appRef.current?.getBoundingClientRect().width || window.innerWidth) - 52;
       const key = resizing.kind === 'sidebar' ? 'sidebarW' : 'activityW';
       setLayout((current) => ({
         ...current,
@@ -214,8 +254,9 @@ export default function App() {
       style={appStyle}
     >
       {/* 各区块单独兜底：任何一块渲染异常都不该把整页卸载成白屏 */}
+      {!embedded && <NavigationRail />}
       <ErrorBoundary name="侧栏"><Sidebar /></ErrorBoundary>
-      {sidebarOpen && <button type="button" className="sidebar-scrim" aria-label="关闭导航" onClick={() => useStore.getState().setUi({ sidebarOpen: false })} />}
+      {sidebarOpen && <button type="button" className="sidebar-scrim" tabIndex={-1} aria-label="关闭导航" onClick={() => useStore.getState().setUi({ sidebarOpen: false })} />}
       <div
         id="gutter-left"
         className="gutter gutter-left"
@@ -224,8 +265,8 @@ export default function App() {
         title="拖动调整会话栏宽度"
         onPointerDown={(event) => startResize('sidebar', event)}
       />
-      <main className="main">
-        <header className="topbar">
+      <header className="topbar">
+        {!embedded && <div className="shell-brand"><span className="logo" aria-hidden="true">P</span><strong>Pilot</strong></div> }
           {/* 内嵌的 side chat 里侧栏恒为隐藏，切换按钮点了没反应，直接不渲染 */}
           {!embedded && (
             <button
@@ -234,16 +275,18 @@ export default function App() {
               id="sidebar-toggle"
               title={`切换侧栏 (${shortcut('B')})`}
               aria-label="切换侧栏"
+              aria-expanded={sidebarOpen}
+              aria-controls="sidebar"
               onClick={() => useStore.getState().setUi((ui) => ({ sidebarOpen: !ui.sidebarOpen }))}
             >
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+              <Icon name="sidebar" />
             </button>
           )}
           <div className="crumbs">
             <button
               type="button"
               id="workspace-name"
-              className="crumb-root mono"
+              className="crumb-root"
               title="切换该对话使用的文件夹"
               aria-haspopup="menu"
               aria-expanded={folderMenu}
@@ -251,7 +294,8 @@ export default function App() {
               onMouseDown={(event) => event.stopPropagation()}
               onClick={() => setFolderMenu((open) => !open)}
             >
-              {workspace ? workspace.split(/[\\/]/).filter(Boolean).pop() : 'workspace'}
+              <Icon name="folder" />
+              {workspace ? workspace.split(/[\\/]/).filter(Boolean).pop() : '选择工作区'}
             </button>
             <span className="crumb-sep">/</span>
             <h1 id="crumb-title" className="crumb-title" title={sessionTitle}>{sessionTitle || '新任务'}</h1>
@@ -273,7 +317,8 @@ export default function App() {
               <button
                 type="button"
                 id="session-chip"
-                className="chip session-chip mono"
+                className="icon-btn session-chip"
+                aria-label="复制会话 ID"
                 title={`点击复制会话 ID：${sessionId}`}
                 onClick={async () => {
                   try {
@@ -283,7 +328,7 @@ export default function App() {
                     useStore.getState().showNotice('复制失败');
                   }
                 }}
-              >{sessionId.slice(0, 12)}</button>
+              ><Icon name="copy" /></button>
             )}
             <span
               id="run-state"
@@ -294,23 +339,6 @@ export default function App() {
               {running && runStartedAt ? ` · ${Math.round((Date.now() - runStartedAt) / 1000)}s` : ''}
               {stalled ? ` · ${idleSeconds}s 无新事件` : ''}
             </span>
-            <button type="button" id="settings-open" className="icon-btn" aria-label="设置" title={`设置 (${shortcut(',')})`} onClick={() => useStore.getState().setUi({ settingsOpen: true })}>
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h3.2M9.4 4.5h4.1M2.5 8h4.2M10.1 8h3.4M2.5 11.5h2.2M8 11.5h5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /><circle cx="7.7" cy="4.5" r="1.5" stroke="currentColor" strokeWidth="1.4" fill="none" /><circle cx="8.4" cy="8" r="1.5" stroke="currentColor" strokeWidth="1.4" fill="none" /><circle cx="6.3" cy="11.5" r="1.5" stroke="currentColor" strokeWidth="1.4" fill="none" /></svg>
-            </button>
-            <button
-              type="button"
-              id="theme-toggle"
-              className="icon-btn"
-              aria-label="切换明暗主题"
-              title="切换明暗主题"
-              onClick={() => {
-                const mode = themeMode === 'dark' ? 'light' : 'dark';
-                useStore.getState().setTheme(mode);
-              }}
-            >
-              <svg className="icon-sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.1" stroke="currentColor" strokeWidth="1.4" fill="none" /><path d="M8 1.6v1.3M8 13.1v1.3M1.6 8h1.3M13.1 8h1.3M3.5 3.5l.9.9M11.6 11.6l.9.9M12.5 3.5l-.9.9M4.4 11.6l-.9.9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
-              <svg className="icon-moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 9.8A5.4 5.4 0 0 1 6.2 3a5.4 5.4 0 1 0 6.8 6.8Z" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round" /></svg>
-            </button>
             {/* 内嵌页再展开审阅面板会把窄 iframe 挤成两栏，这里不给入口 */}
             {!embedded && (
               <button
@@ -327,7 +355,8 @@ export default function App() {
               </button>
             )}
           </div>
-        </header>
+      </header>
+      <main className="main">
         {notice && (
           <div id="notice" className="notice" role="status">
             <span id="notice-text">{notice.text}</span>

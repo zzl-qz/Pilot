@@ -1,3 +1,4 @@
+import { restoreFocus } from '../lib/interaction.js';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
@@ -62,7 +63,7 @@ function ScheduleDialog({ seed }) {
     ref.current.showModal(); refresh();
     api.templates().then(rows => { if (alive.current) setTemplates(Array.isArray(rows) ? rows : []); }).catch(e => { if (alive.current) setError(`读取模板失败：${e.message}`); });
     const timer = setInterval(refresh, 5000);
-    return () => { alive.current = false; clearInterval(timer); previous?.focus?.(); };
+    return () => { alive.current = false; clearInterval(timer); restoreFocus(previous); };
   }, [refresh]);
   const job = jobs.find(j => j.id === selected);
   const visible = jobs.filter(j => filter === 'all' || (filter === 'active' ? !ended(j) : j.state === 'NEEDS_ATTENTION'));

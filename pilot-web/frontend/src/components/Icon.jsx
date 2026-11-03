@@ -1,6 +1,14 @@
 import React from 'react';
 
 const paths = {
+  home: 'M2 7 8 2l6 5v7H9v-4H7v4H2Z',
+  sidebar: 'M2 3h12v10H2Z M6 3v10',
+  inbox: 'M3 3h10l2 7v4H1v-4Z M1 10h4l1 2h4l1-2h4',
+  clock: 'M8 4v4l3 2 M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0',
+  settings: 'M2 4h4m4 0h4 M2 8h7m4 0h1 M2 12h2m4 0h6 M6 2v4 M9 6v4 M4 10v4',
+  sun: 'M8 1v1 M8 14v1 M1 8h1 M14 8h1 M3 3l1 1 M12 12l1 1 M13 3l-1 1 M4 12l-1 1 M11 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0',
+  moon: 'M13 10A6 6 0 0 1 6 3a6 6 0 1 0 7 7Z',
+  copy: 'M6 6h8v8H6Z M10 3V2H2v8h1',
   branch: 'M4 5v6 M12 5v2a4 4 0 0 1-4 4H6 M4 1a2 2 0 1 0 0 4 2 2 0 0 0 0-4 M12 1a2 2 0 1 0 0 4 2 2 0 0 0 0-4 M4 11a2 2 0 1 0 0 4 2 2 0 0 0 0-4',
   mic: 'M6 3a2 2 0 0 1 4 0v5a2 2 0 0 1-4 0Z M3.5 7v1a4.5 4.5 0 0 0 9 0V7 M8 12.5V15 M5.5 15h5',
   steer: 'M3 3v3a3 3 0 0 0 3 3h7 m-3-3 3 3-3 3',

@@ -1,3 +1,4 @@
+import { restoreFocus } from '../lib/interaction.js';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
@@ -33,7 +34,7 @@ function InboxDialog({ target }) {
   useEffect(() => {
     const previous = document.activeElement; alive.current = true; ref.current.showModal(); refresh();
     const timer = setInterval(refresh, 15000);
-    return () => { alive.current = false; request.current++; clearInterval(timer); previous?.focus?.(); };
+    return () => { alive.current = false; request.current++; clearInterval(timer); restoreFocus(previous); };
   }, [refresh]);
   useEffect(() => {
     const token = ++request.current; setDetail(null); setPreview(null); setDiff(null); setError(''); setDetailLoading(!!selected);

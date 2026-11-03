@@ -1,3 +1,4 @@
+import { checkShell } from './shell-cases.mjs';
 import { build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
@@ -12,7 +13,7 @@ const entry = `.navigation-fixture-${process.pid}.html`, file = join(root, entry
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pilot 对话导航</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js';
 import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
-document.documentElement.dataset.theme='dark';window.store=useStore;window.cancelled=0;
+document.documentElement.dataset.theme='dark';window.store=useStore;window.api=api;window.cancelled=0;
 for(const name of Object.keys(api))if(typeof api[name]==='function')api[name]=async()=>({});api.schedules=async()=>[];api.worktreeInfo=async()=>({});api.queue=async()=>({items:[]});api.filesFlat=async()=>({files:[]});
 api.bookmarks=async(session)=>JSON.parse(localStorage.getItem('mock-server-bookmarks:'+session)||'[]');
 api.saveBookmark=async(session,sequence)=>{const values=await api.bookmarks(session);const row={sequence,title:'已收藏的消息 '+sequence,preview:'同步书签'};if(!values.some(b=>b.sequence===sequence))values.push(row);localStorage.setItem('mock-server-bookmarks:'+session,JSON.stringify(values));return row;};
@@ -76,6 +77,7 @@ async function run(page,name) {
     await page.keyboard.press('Escape');
   }
   await page.evaluate(()=>document.documentElement.dataset.theme='light');await page.getByRole('button',{name:'打开对话导航和书签'}).click();await page.screenshot({path:join(output,`${name}-390-light.png`)});
+  await checkShell(page,name,output);
   assert.deepEqual(errors,[]);console.log(name+': PASS preview/jump/bookmarks/persistence/history/streaming/keyboard/errors/session/responsive');
 }
 try {

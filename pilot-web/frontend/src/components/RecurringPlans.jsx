@@ -1,3 +1,4 @@
+import { restoreFocus } from '../lib/interaction.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
@@ -9,7 +10,7 @@ function Dialog() {
   const [rows, setRows] = useState([]), [error, setError] = useState(''), [busy, setBusy] = useState(false), [loading, setLoading] = useState(true);
   const close = () => useStore.getState().setUi({ recurringOpen: false });
   async function refresh() { try { const data = await api.recurring(); if (alive.current) { setRows(Array.isArray(data) ? data : []); setError(''); } } catch (e) { if (alive.current) setError(e.message); } finally { if (alive.current) setLoading(false); } }
-  useEffect(() => { const previous = document.activeElement; alive.current = true; ref.current.showModal(); refresh(); const timer = setInterval(refresh, 10000); return () => { alive.current = false; clearInterval(timer); previous?.focus?.(); }; }, []);
+  useEffect(() => { const previous = document.activeElement; alive.current = true; ref.current.showModal(); refresh(); const timer = setInterval(refresh, 10000); return () => { alive.current = false; clearInterval(timer); restoreFocus(previous); }; }, []);
   async function action(row, action) { setBusy(true); setError(''); try { await api.controlRecurring(row.id, { version: row.version, action }); await refresh(); } catch (e) { setError(e.message); } finally { setBusy(false); } }
   return <dialog className="schedule-dialog" ref={ref} aria-labelledby="recurring-title" onCancel={e => { e.preventDefault(); close(); }} onKeyDown={e => e.stopPropagation()}>
     <header className="schedule-header"><div><span className="schedule-product">Pilot / 自动执行</span><h1 id="recurring-title">周期计划</h1></div><div className="schedule-actions"><button className="btn btn-primary" onClick={() => { close(); useStore.getState().setUi({ schedulesOpen: true, scheduleDraft: '', scheduleRepeat: true }); }}>新建周期计划</button><button className="icon-btn" aria-label="关闭周期计划" onClick={close}>×</button></div></header>

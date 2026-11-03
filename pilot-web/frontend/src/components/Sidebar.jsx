@@ -3,6 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../store.js';
 import { WorkspaceTree } from './WorkspaceTree.jsx';
 import { groupSessionsByProject } from '../lib/projects.js';
+import { Icon } from './Icon.jsx';
 import { sideChatsFor } from '../lib/side-chat.js';
 
 /** 左侧导航：项目分组的会话列表 + 工作区文件树 + 连接状态。 */
@@ -11,7 +12,6 @@ export function Sidebar() {
   const projects = useStore((state) => state.projects);
   const sessionId = useStore((state) => state.sessionId);
   const workspace = useStore((state) => state.workspace);
-  const unread = useStore(state => state.ui.resultUnread || 0);
   const connection = useStore((state) => state.ui.connection);
   const sideChats = useStore((state) => state.sideChats);
   const [query, setQuery] = useState('');
@@ -30,7 +30,8 @@ export function Sidebar() {
         || (session.workspace || '').toLowerCase().includes(q))
       : visible;
     // 注意参数顺序：projects 在前、sessions 在后
-    return groupSessionsByProject(projects, filtered);
+    const grouped = groupSessionsByProject(projects, filtered);
+    return q ? grouped.filter(group => group.active.length || group.archived.length) : grouped;
   }, [sessions, projects, query, sideIds]);
 
   function toggleProject(key) {
@@ -43,36 +44,12 @@ export function Sidebar() {
 
   return (
     <aside id="sidebar" className="sidebar rail" aria-label="项目导航">
-      <div className="sidebar-head rail-head">
-        <span className="logo" aria-hidden="true">P</span>
-        <span className="logo-text"><strong>Pilot</strong></span>
-        <button
-          id="rail-toggle"
-          className="icon-btn"
-          type="button"
-          title={`收起侧栏 (${shortcut('B')})`}
-          aria-label="收起侧栏"
-          onClick={() => useStore.getState().setUi((ui) => ({ sidebarOpen: !ui.sidebarOpen }))}
-        >
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 4 5.5 8l4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </button>
-      </div>
-
       <button id="new-session" className="new-task" type="button" onClick={() => useStore.getState().startNewSession()}>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
         <span>新任务</span>
         <kbd>{shortcut('N')}</kbd>
       </button>
 
-      <button className="schedule-nav" type="button" onClick={() => useStore.getState().setUi({ searchOpen: true })}>
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>搜索消息与书签</span>
-      </button>
-      <button className="schedule-nav" type="button" onClick={() => useStore.getState().setUi({ resultsOpen: true, resultTarget: null })}>
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M3 3h10v10H3zM3 9h3l1 2h2l1-2h3" /></svg><span>任务收件箱</span>{unread > 0 && <span className="result-count" aria-label={`${unread} 条未读`}>{unread}</span>}
-      </button>
-      <button className="schedule-nav" type="button" onClick={() => useStore.getState().setUi({ schedulesOpen: true, scheduleDraft: null })}>
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.5V8l2.5 1.5"/></svg>定时任务
-      </button>
       <label className="session-search" htmlFor="session-search">
         <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2" stroke="currentColor" strokeWidth="1.4" fill="none" /><path d="m10.2 10.2 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
         <input
@@ -117,7 +94,7 @@ export function Sidebar() {
           </ul>
           {!groups.length && (
             <p id="session-empty" className="nav-empty">
-              {query ? `没有标题包含「${query}」的对话。` : '还没有项目，点上面「新任务」新建一个。'}
+              {query ? `没有标题或路径包含「${query}」的对话。` : '还没有项目，点上面「新任务」新建一个。'}
             </p>
           )}
         </section>
@@ -185,6 +162,7 @@ function ProjectGroup({ group, activeId, collapsed, onToggle }) {
           title={project.folders && project.folders.length ? project.folders.join('\n') : project.name}
           onClick={onToggle}
         >
+          <Icon name="folder" />
           <span className="project-label">{project.name}</span>
           <span className="project-count">{count}</span>
         </button>
@@ -227,7 +205,7 @@ function ProjectGroup({ group, activeId, collapsed, onToggle }) {
       </ul>
 
       {archived.length > 0 && (
-        <details className="project-archived">
+        <details className="project-archived" hidden={collapsed}>
           <summary>{`已归档 ${archived.length}`}</summary>
           <ul className="project-sessions">
             {archived.map((session) => <SessionRow key={session.id} session={session} activeId={activeId} />)}
@@ -246,6 +224,7 @@ function SessionRow({ session, activeId }) {
       <button
         type="button"
         className={`session-item${session.id === activeId ? ' is-active' : ''}${blank ? ' is-blank' : ''}${session.archived ? ' is-archived' : ''}`}
+        aria-current={session.id === activeId ? 'page' : undefined}
         title={blank ? '新对话：还没有消息，发送第一条后自动变成历史对话' : (session.workspace ? `${session.title}\n${session.workspace}` : session.title)}
         onClick={() => useStore.getState().activate(session.id)}
       >

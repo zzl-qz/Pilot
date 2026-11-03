@@ -5,6 +5,14 @@ export function platformModifier(nav = globalThis.navigator) {
 export const modifierKey = platformModifier();
 export function shortcut(key) { return `${modifierKey} ${key}`; }
 
+/** 弹窗期间窗口可能变窄，使原入口折进导航抽屉；此时返回可见的侧栏开关。 */
+export function restoreFocus(previous) {
+  const visible = element => element?.isConnected && element.getClientRects().length
+    && getComputedStyle(element).visibility !== 'hidden' && !element.closest('[inert]');
+  const target = visible(previous) ? previous : document.getElementById('sidebar-toggle') || document.getElementById('input-flow');
+  target?.focus();
+}
+
 // Windows 的 AltGr 可能同时报告 Ctrl+Alt；输入法候选键也不能触发全局动作。
 export function isShortcutModifier(event) {
   return Boolean(event && !event.isComposing && event.keyCode !== 229

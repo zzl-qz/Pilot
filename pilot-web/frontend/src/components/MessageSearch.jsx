@@ -1,3 +1,4 @@
+import { restoreFocus } from '../lib/interaction.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
@@ -11,7 +12,7 @@ function Dialog() {
   const [query, setQuery] = useState(''), [scope, setScope] = useState('all'), [saved, setSaved] = useState(false);
   const [page, setPage] = useState({ items: [], hasMore: false, nextOffset: 0 }), [error, setError] = useState(''), [busy, setBusy] = useState(false), [searched, setSearched] = useState(false);
   const close = () => useStore.getState().setUi({ searchOpen: false });
-  useEffect(() => { const previous = document.activeElement; alive.current = true; ref.current.showModal(); input.current.focus(); migrate(); return () => { alive.current = false; revision.current++; previous?.focus?.(); }; }, []);
+  useEffect(() => { const previous = document.activeElement; alive.current = true; ref.current.showModal(); input.current.focus(); migrate(); return () => { alive.current = false; revision.current++; restoreFocus(previous); }; }, []);
   async function migrate() {
     setSyncing(true);
     try { const data = await migrateLocalBookmarks(); if (alive.current) setMigration(data.failed.length ? `${data.failed.length} 个对话的旧书签同步失败，备份仍在此设备，可重试。` : data.count ? `已迁移 ${data.count} 个对话的旧书签。` : '旧书签已同步。'); }
