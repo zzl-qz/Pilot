@@ -98,6 +98,19 @@ class MultiAgentControllerTest {
         assertTrue(error.getReason().contains("arb_1"), error.getReason());
     }
 
+    @Test void resolvingPersistsDecisionAndDoesNotApplyFilesOrReplayWork() {
+        store.raise("s1", new SandboxStore.Arbitration("arb", "conflict", "t1", List.of("重新生成", "人工修改"), "choose"));
+        var request = new MultiAgentController.ResolveRequest("人工修改");
+        assertEquals(204, controller.resolve("s1", "arb", request).getStatusCode().value());
+        assertEquals(204, controller.resolve("s1", "arb", request).getStatusCode().value());
+        assertTrue(store.arbitrations("s1").isEmpty());
+        assertFalse(Files.exists(workspace.resolve("a.txt")), "仲裁回执不能自动写文件");
+        var conflict = assertThrows(ResponseStatusException.class, () -> controller.resolve("s1", "arb", new MultiAgentController.ResolveRequest("重新生成")));
+        assertEquals(409, conflict.getStatusCode().value());
+        var missing = assertThrows(ResponseStatusException.class, () -> controller.resolve("s1", "missing", request));
+        assertEquals(404, missing.getStatusCode().value());
+    }
+
     private static void assertFalse(boolean condition, String message) {
         org.junit.jupiter.api.Assertions.assertFalse(condition, message);
     }

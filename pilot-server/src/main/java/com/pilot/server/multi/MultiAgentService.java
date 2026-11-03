@@ -230,6 +230,7 @@ public class MultiAgentService {
                     TaskStatus.PENDING.wireName(), "已加入调度计划"));
         }
 
+        recordBoard(dispatch, states);
         Set<String> finished = new HashSet<>();
         Set<String> started = new HashSet<>();
         boolean halted = false;
@@ -303,12 +304,12 @@ public class MultiAgentService {
         if (!dissents.isEmpty()) {
             arbitrationId = "arb_" + randomSuffix();
             DissentReport first = dissents.get(0);
-            publish(dispatch.events(), new ArbitrationRequired(arbitrationId, "dissent", first.taskId(),
+            raiseArbitration(dispatch, new ArbitrationRequired(arbitrationId, "dissent", first.taskId(),
                     DissentReport.options(first.sides().size()), first.toText()));
         } else if (merge.hasConflict()) {
             markConflicts(merge, states, dispatch);
             arbitrationId = "arb_" + randomSuffix();
-            publish(dispatch.events(), new ArbitrationRequired(arbitrationId, "conflict", "",
+            raiseArbitration(dispatch, new ArbitrationRequired(arbitrationId, "conflict", "",
                     List.of("调整任务顺序重新生成", "放弃其中一份变更", "人工修改后重跑"),
                     "## 🔴 变更冲突\n\n" + merge.describe()
                             + "\n\n> 父 Agent 不会自动合并冲突文件，请决定调整顺序、重新生成或放弃某份变更。"));
@@ -325,7 +326,7 @@ public class MultiAgentService {
             }
             if (verificationReport.status().equals(VerificationGate.Report.FAILED)) {
                 arbitrationId = "arb_" + randomSuffix();
-                publish(dispatch.events(), new ArbitrationRequired(arbitrationId, "verification", "",
+                raiseArbitration(dispatch, new ArbitrationRequired(arbitrationId, "verification", "",
                         List.of("让子 Agent 重新生成改动", "人工修复后重跑校验", "放弃本次变更"),
                         "## ❌ 硬校验未通过\n\n" + verificationReport.detail()
                                 + "\n\n已执行：" + String.join("；", verificationReport.checks())));
@@ -400,6 +401,12 @@ public class MultiAgentService {
     }
 
     /** 沙箱进仓库并登记到任务上；空沙箱（纯调研任务）不登记，免得看板堆一堆空目录。 */
+    private void raiseArbitration(Dispatch dispatch, ArbitrationRequired event) {
+        sandboxes.raise(dispatch.sessionId(), new SandboxStore.Arbitration(event.arbitrationId(),
+                event.kind(), event.taskId(), event.options(), event.report()));
+        publish(dispatch.events(), event);
+    }
+
     private void collect(Dispatch dispatch, TaskState state, DiffSandbox sandbox) {
         if (sandbox == null || sandbox.isEmpty()) {
             return;
@@ -473,10 +480,16 @@ public class MultiAgentService {
         DiffSandbox sandbox = new DiffSandbox(sandboxId, agentId, spec.id(), "");
         // 本任务自己的改动出口
         SandboxSink own = new SandboxSink() {
+            @Override public Map<String, String> proposedFiles() {
+                Map<String, String> files = new LinkedHashMap<>();
+                sandbox.changes().forEach(change -> files.put(change.path(), change.newContent()));
+                return files;
+            }
             @Override
             public void record(String path, String oldText, String newText) {
                 SandboxChange change = sandbox.add(path, oldText, newText, oldText != null, spec.risk());
                 if (change != null) {
+                    sandboxes.checkpoint(dispatch.sessionId(), sandbox);
                     publish(dispatch.events(), new SandboxDiffReady(sandboxId, agentId, spec.id(), change.path(),
                             change.added(), change.removed()));
                 }
@@ -539,6 +552,7 @@ public class MultiAgentService {
             }
             AgentReport report = AgentReport.parse(agentId, spec.id(), result.finalText());
             if (!finish(lease, "succeeded", "", meter.snapshot())) {
+                sandboxes.discardCheckpoint(dispatch.sessionId(), sandboxId);
                 String reason = "执行租约已失效，已丢弃晚到产物";
                 publish(dispatch.events(), new SubagentFinished(agentId, reason, false));
                 return new Attempt(agentId, List.of(), null, null, false, reason, meter.snapshot());
@@ -717,6 +731,11 @@ public class MultiAgentService {
             return null;
         }
         return new SandboxSink() {
+            @Override public Map<String, String> proposedFiles() {
+                Map<String, String> files = new LinkedHashMap<>();
+                for (DiffSandbox box : boxes) box.changes().forEach(change -> files.put(change.path(), change.newContent()));
+                return files;
+            }
             @Override
             public void record(String path, String oldText, String newText) {
                 throw new IllegalStateException("上游产物只读，不能在这里写入: " + path);

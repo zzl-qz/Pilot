@@ -12,7 +12,7 @@ import java.util.Set;
  * 容器执行后端。
  *
  * <p>容器提供的是 Pilot 自己实现不了的那部分边界：独立文件系统、可关闭的网络、CPU/内存/进程数上限、
- * 丢弃 capabilities、禁止提权。工作区以卷挂载，容器销毁后宿主不留副作用。
+ * 丢弃 capabilities、禁止提权。挂载目录仍然可写，调用方必须传入临时副本；容器本身不隔离 bind mount 的写入。
  *
  * <p>可用性必须实测：没有 Docker/Podman、守护进程没启动、镜像不存在时明确报告原因，
  * 而不是悄悄退化成普通子进程。{@link #available()} 只探测运行时，镜像是否就绪在第一次执行时才暴露。
@@ -69,9 +69,9 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         if (probed) {
             return;
         }
-        probed = true;
         if (runtime.isBlank()) {
             unavailableReason = "没有找到 Docker 或 Podman 可执行文件；设置 PILOT_CONTAINER_RUNTIME 指向容器运行时";
+            probed = true;
             return;
         }
         ExecutionResult version = cli.run(new ExecutionRequest(
@@ -81,6 +81,7 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
             unavailableReason = "容器运行时不可用（" + runtime + " info 失败）："
                     + firstLine(version.error().isEmpty() ? version.output() : version.error());
         }
+        probed = true;
     }
 
     @Override
@@ -88,8 +89,13 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         if (!available()) {
             return ExecutionResult.failure(id(), isolation(), "容器隔离不可用：" + unavailableReason);
         }
-        Path workdir = request.workdir().toAbsolutePath().normalize();
-        Path root = request.workspaceRoot().toAbsolutePath().normalize();
+        Path workdir, root;
+        try {
+            workdir = request.workdir().toRealPath();
+            root = request.workspaceRoot().toRealPath();
+        } catch (java.io.IOException e) {
+            return ExecutionResult.failure(id(), isolation(), "无法解析容器工作区：" + e.getMessage());
+        }
         if (!workdir.startsWith(root)) {
             return ExecutionResult.failure(id(), isolation(),
                     "工作目录不在允许挂载的工作区内：" + workdir + "（工作区 " + root + "）");
@@ -100,11 +106,22 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         String relative = root.relativize(workdir).toString().replace('\\', '/');
         String workingDir = relative.isEmpty() ? containerWorkspace : containerWorkspace + "/" + relative;
 
-        List<String> argv = argv(request, root, workingDir);
+        String name = "pilot-exec-" + java.util.UUID.randomUUID();
+        List<String> argv = new ArrayList<>(argv(request, root, workingDir));
+        argv.addAll(2, List.of("--name", name, "--label", "pilot.execution=true"));
         ExecutionLimits limits = request.limits();
-        ExecutionResult cliResult = cli.run(new ExecutionRequest(argv, "", root, root, Map.of(), false,
-                new ExecutionLimits(Math.max(30, limits.timeoutSeconds() + 30), limits.maxOutputBytes(),
-                        limits.memoryMb(), limits.cpus(), limits.pidsLimit())));
+        ExecutionResult cliResult;
+        try {
+            cliResult = cli.run(new ExecutionRequest(argv, "", root, root, Map.of(), false,
+                    new ExecutionLimits(Math.max(1, limits.timeoutSeconds()), limits.maxOutputBytes(),
+                            limits.memoryMb(), limits.cpus(), limits.pidsLimit())));
+        } finally {
+            // 杀掉 docker 客户端不等于终止容器。只清理本次生成的名字，不接触用户容器。
+            boolean interrupted = Thread.interrupted();
+            try { cli.run(new ExecutionRequest(List.of(runtime, "rm", "-f", name), "", root, root, Map.of(), false,
+                    new ExecutionLimits(10, 10000, 256, 0.5, 64))); }
+            finally { if (interrupted) Thread.currentThread().interrupt(); }
+        }
         if (!cliResult.error().isEmpty()) {
             return ExecutionResult.failure(id(), isolation(), "容器启动失败：" + cliResult.error());
         }
@@ -121,6 +138,7 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         argv.add(runtime);
         argv.add("run");
         argv.add("--rm");
+        argv.add("--pull=never");
         argv.add("--init");
         argv.add("--network=" + (request.network() ? "bridge" : "none"));
         argv.add("--read-only");
@@ -136,12 +154,12 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         argv.add(request.limits().memoryMb() + "m");
         argv.add("--cpus");
         argv.add(String.valueOf(request.limits().cpus()));
-        if (!containerUser.isEmpty()) {
-            argv.add("--user");
-            argv.add(containerUser);
-        }
-        argv.add("-v");
-        argv.add(root + ":" + containerWorkspace + ":rw");
+        // Linux bind mount 的构建输出必须归宿主工作区所有者，避免留下 root 所有且无法清理的目录。
+        argv.add("--user");
+        argv.add(containerUser.isEmpty() ? workspaceOwner(root) : containerUser);
+        argv.add("--mount");
+        argv.add("type=bind,\"source=" + root.toString().replace("\"", "\"\"") + "\",\"target="
+                + containerWorkspace.replace("\"", "\"\"") + "\"");
         argv.add("-w");
         argv.add(workingDir);
         for (Map.Entry<String, String> entry : sanitizedEnv(request.env()).entrySet()) {
@@ -185,7 +203,18 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         if (!request.script().isEmpty()) {
             return request.script();
         }
-        return String.join(" ", request.argv());
+        return String.join(" ", request.argv().stream().map(word -> "'" + word.replace("'", "'\\''") + "'").toList());
+    }
+
+    private static String workspaceOwner(Path root) {
+        try {
+            Object uid = java.nio.file.Files.getAttribute(root, "unix:uid");
+            Object gid = java.nio.file.Files.getAttribute(root, "unix:gid");
+            return uid + ":" + gid;
+        } catch (java.io.IOException | UnsupportedOperationException | IllegalArgumentException e) {
+            // Windows / 非 POSIX 文件系统：Docker Desktop 映射目录，使用普通容器用户。
+            return "1000:1000";
+        }
     }
 
     private static String detectRuntime() {

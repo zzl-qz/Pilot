@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SandboxStoreTest {
 
@@ -123,8 +124,7 @@ class SandboxStoreTest {
                 VerificationGate.Report.passed(java.util.List.of("mvn test")));
 
         assertTrue(store.accept("ses_partial", "sbx_1", workspace).ok());
-        // 接受成功后由 MultiAgentController 递增：只接受一部分改动后，剩下的必须重新校验
-        store.bumpWorkspaceRevision("ses_partial");
+        assertEquals(1, store.workspaceRevision("ses_partial"), "写入与校验失效必须由接受入口一起记账");
 
         SandboxStore.VerificationState state = store.verificationState("ses_partial", "sbx_2");
         assertFalse(state.current(), "工作区已被改写，其余沙箱的旧结论不能继续放行");
@@ -160,5 +160,98 @@ class SandboxStoreTest {
 
         assertEquals(0, restored.sandboxes("ses_cleanup").size());
         assertEquals(0, Files.list(dataDir.resolve("multi")).toList().size());
+    }
+
+    @Test void addingBeforeFirstReadRestoresOldArtifactsAndDeduplicatesIds() throws Exception {
+        store().add("ses", proposal());
+        var second = store(); var next = new DiffSandbox("sbx_2", "agent_2", "T2", "");
+        second.add("ses", next); second.add("ses", next);
+        assertEquals(2, second.sandboxes("ses").size());
+        assertEquals(2, store().sandboxes("ses").size());
+    }
+
+    @Test void restartCancelsUnownedExecutionButKeepsTerminalTaskStates() {
+        var first = store();
+        first.recordTasks("ses", java.util.List.of(
+                new SandboxStore.TaskView("t1", "one", "a", "running", "executing", 1),
+                new SandboxStore.TaskView("t2", "two", "a", "READY", "ready", 0),
+                new SandboxStore.TaskView("t3", "three", "a", "done", "done", 1)));
+        var restored = store().tasks("ses");
+        assertEquals(java.util.List.of("cancelled", "cancelled", "done"), restored.stream().map(SandboxStore.TaskView::status).toList());
+        assertTrue(restored.getFirst().detail().contains("重新派发"));
+        assertEquals(restored, store().tasks("ses"));
+    }
+
+    @Test void runningCheckpointsAreNotAcceptableUntilRecoveredAndRevalidated() throws Exception {
+        var first = store(); first.checkpoint("ses", proposal());
+        assertTrue(first.sandboxes("ses").isEmpty());
+        assertFalse(first.accept("ses", "sbx_1", workspace).ok());
+        var restored = store(); assertEquals(1, restored.sandboxes("ses").size());
+        assertFalse(restored.verificationState("ses", "sbx_1").ok());
+        restored.add("ses", restored.find("ses", "sbx_1").orElseThrow());
+        assertFalse(Files.exists(dataDir.resolve("multi/ses/checkpoints/sbx_1.json")));
+        assertEquals(1, store().sandboxes("ses").size());
+        assertEquals(ORIGINAL, Files.readString(workspace.resolve("src/A.java")));
+    }
+
+    @Test void arbitrationDecisionsSurviveRestartAndConflictingReceiptsAreRejected() {
+        var item = new SandboxStore.Arbitration("arb", "conflict", "T1", java.util.List.of("A", "B"), "choose");
+        var first = store(); first.raise("ses", item); first.raise("ses", item);
+        assertEquals(1, first.arbitrations("ses").size());
+        assertThrows(IllegalArgumentException.class, () -> first.resolve("ses", "arb", "invalid"));
+        assertThrows(java.util.NoSuchElementException.class, () -> first.resolve("ses", "missing", "A"));
+        assertTrue(first.resolve("ses", "arb", "A"));
+        var restored = store(); assertTrue(restored.arbitrations("ses").isEmpty());
+        assertFalse(restored.resolve("ses", "arb", "A"));
+        assertThrows(IllegalStateException.class, () -> restored.resolve("ses", "arb", "B"));
+        restored.raise("ses", new SandboxStore.Arbitration("arb2", "verification", "T2", java.util.List.of("retry"), "failed"));
+        assertEquals("arb2", store().arbitrations("ses").getFirst().id());
+    }
+
+    @Test void corruptedStateFailsClosedAndCanBeRetriedAfterRepair() throws Exception {
+        var first = store(); first.add("ses", proposal());
+        Path file = dataDir.resolve("multi/ses/arbitrations.json"); Files.writeString(file, "{broken");
+        var restored = store(); assertThrows(IllegalStateException.class, () -> restored.sandboxes("ses"));
+        assertThrows(IllegalStateException.class, () -> restored.arbitrations("ses"));
+        Files.writeString(file, "null");
+        assertThrows(IllegalStateException.class, () -> restored.arbitrations("ses"), "合法 JSON 的空值也不能被当作没有待决仲裁");
+        Files.writeString(file, "[]"); assertEquals(1, restored.sandboxes("ses").size());
+    }
+
+    @Test void rejectsPathTraversalAndReportsPersistenceFailure() throws Exception {
+        var first = store();
+        for (String id : java.util.List.of("..", "../outside", "a/b", "a\\b", ""))
+            assertThrows(IllegalArgumentException.class, () -> first.sandboxes(id));
+        Files.writeString(dataDir.resolve("multi"), "not a directory");
+        assertThrows(java.io.UncheckedIOException.class, () -> first.add("ses", proposal()));
+        assertTrue(first.sandboxes("ses").isEmpty(), "写入失败不能被报告为已保存的产物");
+    }
+
+    @Test void concurrentFirstReadsNeverObservePartialRestoreOrDuplicates() throws Exception {
+        var first = store(); first.add("ses", proposal());
+        first.raise("ses", new SandboxStore.Arbitration("arb", "conflict", "t", java.util.List.of("A"), "choose"));
+        var restored = store();
+        try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var futures = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+            for (int i = 0; i < 30; i++) futures.add(executor.submit(() -> {
+                assertEquals(1, restored.sandboxes("ses").size()); assertEquals(1, restored.arbitrations("ses").size());
+            }));
+            for (var future : futures) future.get();
+        }
+    }
+
+    @Test void partialAcceptancePersistsOnlyWrittenFilesAndInvalidatesOldChecks() throws Exception {
+        var first = store(); var box = proposal();
+        box.add("conflict", null, "proposed", false, RiskLevel.LOW);
+        Files.writeString(workspace.resolve("conflict"), "user content"); first.add("ses", box);
+        var report = first.accept("ses", "sbx_1", workspace);
+        assertFalse(report.ok()); assertEquals(java.util.List.of("src/A.java"), report.written());
+        var restored = store();
+        assertEquals(1, restored.workspaceRevision("ses"));
+        assertEquals("accepted", restored.diffs("ses").getFirst().status());
+        assertEquals("pending", restored.diffs("ses").get(1).status());
+        var retry = restored.accept("ses", "sbx_1", workspace);
+        assertTrue(retry.written().isEmpty()); assertEquals(1, retry.skipped().size());
+        assertEquals("user content", Files.readString(workspace.resolve("conflict")));
     }
 }

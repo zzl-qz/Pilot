@@ -30,8 +30,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * 会话级的沙箱与任务看板存储。
  *
- * <p>沙箱改动只保存在内存并同步写一份 JSON 审计副本（{@code .pilot/multi/<session>/}），
- * 真实工作区在用户点「接受变更」之前始终保持只读。
+ * <p>沙箱、任务与仲裁状态原子持久化为 JSON，内存只作进程缓存（{@code .pilot/multi/<session>/}），
+ * 持久化或恢复失败会阻止操作；重启不会自动重放命令。
  */
 @Component
 public class SandboxStore {
@@ -91,6 +91,7 @@ public class SandboxStore {
             new ConcurrentHashMap<>();
     /** 会话 → 工作区版本；沙箱被接受一次就递增，用来让其余沙箱的旧校验失效。 */
     private final ConcurrentMap<String, Long> workspaceRevisions = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Map<String, String>> decisions = new ConcurrentHashMap<>();
     private final ObjectMapper mapper;
     private final PilotDataDir dataDir;
     private final Set<String> restoredSessions = ConcurrentHashMap.newKeySet();
@@ -118,10 +119,11 @@ public class SandboxStore {
         this.dataDir = dataDir;
     }
 
-    public void reset(String sessionId) {
+    public synchronized void reset(String sessionId) {
         sandboxes.remove(sessionId);
         tasks.remove(sessionId);
         arbitrations.remove(sessionId);
+        decisions.remove(sessionId);
         verifications.keySet().removeIf(key -> key.startsWith(sessionId + "/"));
         manifests.keySet().removeIf(key -> key.startsWith(sessionId + "/"));
         dependencies.keySet().removeIf(key -> key.startsWith(sessionId + "/"));
@@ -140,7 +142,7 @@ public class SandboxStore {
     }
 
     /** 记录最近一次硬校验结果，供界面说明「为什么不能接受」。 */
-    public void recordVerification(String sessionId, String sandboxId, VerificationGate.Report report) {
+    public synchronized void recordVerification(String sessionId, String sandboxId, VerificationGate.Report report) {
         recordVerification(sessionId, sandboxId, environmentFingerprint(), report);
     }
 
@@ -150,7 +152,7 @@ public class SandboxStore {
      * <p>任何一项变化都会让旧结果失效：候选内容变了说明验的不是这份代码；
      * 上游依赖变了说明下游是拿旧接口验的；环境变了（工具链、命令）说明结论不可复现。
      */
-    public void recordVerification(String sessionId, String sandboxId, String environmentFingerprint,
+    public synchronized void recordVerification(String sessionId, String sandboxId, String environmentFingerprint,
                                    VerificationGate.Report report) {
         if (report == null) {
             return;
@@ -169,13 +171,13 @@ public class SandboxStore {
     }
 
     /** 没有跑过校验、或校验针对的已经不是当前产物时返回 null。 */
-    public VerificationGate.Report verification(String sessionId, String sandboxId) {
+    public synchronized VerificationGate.Report verification(String sessionId, String sandboxId) {
         VerificationState state = verificationState(sessionId, sandboxId);
         return state.current() ? verifications.get(sessionId + "/" + sandboxId) : null;
     }
 
     /** 校验为什么可用/不可用：界面和接受接口都要能说清楚。 */
-    public VerificationState verificationState(String sessionId, String sandboxId) {
+    public synchronized VerificationState verificationState(String sessionId, String sandboxId) {
         restore(sessionId);
         DiffSandbox sandbox = find(sessionId, sandboxId).orElse(null);
         if (sandbox == null) {
@@ -213,7 +215,7 @@ public class SandboxStore {
     /**
      * 当前候选清单。依赖取自登记的依赖关系，环境指纹默认用当前 JVM 与操作系统标识。
      */
-    public com.pilot.core.multi.ArtifactManifest manifest(String sessionId, String sandboxId,
+    public synchronized com.pilot.core.multi.ArtifactManifest manifest(String sessionId, String sandboxId,
                                                           String environmentFingerprint) {
         DiffSandbox sandbox = find(sessionId, sandboxId).orElseThrow(
                 () -> new IllegalArgumentException("没有这个沙箱: " + sandboxId));
@@ -234,7 +236,7 @@ public class SandboxStore {
     }
 
     /** 登记下游沙箱依赖哪些上游沙箱；上游候选变化时下游校验自动失效。 */
-    public void linkDependency(String sessionId, String upstreamSandboxId, String downstreamSandboxId) {
+    public synchronized void linkDependency(String sessionId, String upstreamSandboxId, String downstreamSandboxId) {
         if (upstreamSandboxId == null || downstreamSandboxId == null
                 || upstreamSandboxId.isBlank() || downstreamSandboxId.isBlank()) {
             return;
@@ -249,7 +251,7 @@ public class SandboxStore {
      * 按任务依赖登记沙箱依赖：{@code dependsOn} 里的任务若已有沙箱，就把它们记为上游。
      * 同一任务有多个沙箱（重试、多方案）时全部登记，任一上游变化都会让下游重新校验。
      */
-    public void linkTaskDependencies(String sessionId, List<String> dependsOn, String downstreamSandboxId) {
+    public synchronized void linkTaskDependencies(String sessionId, List<String> dependsOn, String downstreamSandboxId) {
         if (dependsOn == null || dependsOn.isEmpty()) {
             return;
         }
@@ -262,12 +264,12 @@ public class SandboxStore {
         }
     }
 
-    public List<String> dependenciesOf(String sessionId, String sandboxId) {
+    public synchronized List<String> dependenciesOf(String sessionId, String sandboxId) {
         restore(sessionId);
         return List.copyOf(dependencies.getOrDefault(sessionId + "/" + sandboxId, new java.util.LinkedHashSet<>()));
     }
 
-    public List<ArtifactView> manifestHistory(String sessionId, String sandboxId) {
+    public synchronized List<ArtifactView> manifestHistory(String sessionId, String sandboxId) {
         restore(sessionId);
         List<com.pilot.core.multi.ArtifactManifest> history = manifests.getOrDefault(sessionId + "/" + sandboxId,
                 List.of());
@@ -275,7 +277,8 @@ public class SandboxStore {
     }
 
     /** 最近两版的差异；只有一版时返回空差异。 */
-    public com.pilot.core.multi.ArtifactDiff manifestDiff(String sessionId, String sandboxId) {
+    public synchronized com.pilot.core.multi.ArtifactDiff manifestDiff(String sessionId, String sandboxId) {
+        restore(sessionId);
         List<com.pilot.core.multi.ArtifactManifest> history = manifests.getOrDefault(sessionId + "/" + sandboxId,
                 List.of());
         if (history.size() < 2) {
@@ -355,13 +358,14 @@ public class SandboxStore {
      * <p>校验结论是「在某一版工作区上跑出来的」。用户只接受一部分改动时，剩余沙箱面对的
      * 已经是另一个工作区，旧的通过结论不能继续用来放行。
      */
-    public long workspaceRevision(String sessionId) {
+    public synchronized long workspaceRevision(String sessionId) {
         restore(sessionId);
         return workspaceRevisions.getOrDefault(sessionId, 0L);
     }
 
     /** 有变更真正写入工作区后调用；返回递增后的版本。 */
-    public long bumpWorkspaceRevision(String sessionId) {
+    public synchronized long bumpWorkspaceRevision(String sessionId) {
+        restore(sessionId);
         long next = workspaceRevisions.merge(sessionId, 1L, Long::sum);
         persistWorkspaceRevision(sessionId);
         return next;
@@ -374,7 +378,8 @@ public class SandboxStore {
             atomicWrite(file, mapper.writeValueAsString(
                     Map.of("workspaceRevision", workspaceRevisions.getOrDefault(sessionId, 0L))));
         } catch (IOException e) {
-            log.warn("写入工作区版本失败: session={}", sessionId, e);
+            restoredSessions.remove(sessionId);
+            throw new java.io.UncheckedIOException("多 Agent 状态持久化失败", e);
         }
     }
 
@@ -386,35 +391,54 @@ public class SandboxStore {
             Map<String, Object> payload = mapper.readValue(Files.readString(file),
                     new tools.jackson.core.type.TypeReference<Map<String, Object>>() { });
             Object value = payload == null ? null : payload.get("workspaceRevision");
-            if (value instanceof Number number) {
-                workspaceRevisions.put(sessionId, number.longValue());
-            }
+            if (!(value instanceof Number number) || number.longValue() < 0 || number.doubleValue() != number.longValue())
+                throw new IllegalArgumentException("工作区版本无效");
+            workspaceRevisions.put(sessionId, number.longValue());
         } catch (Exception e) {
-            log.warn("忽略损坏的工作区版本文件: {}", file, e);
+            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
         }
     }
 
-    public void add(String sessionId, DiffSandbox sandbox) {
-        restoredSessions.add(sessionId);
-        sandboxes.computeIfAbsent(sessionId, key -> new CopyOnWriteArrayList<>()).add(sandbox);
+    public synchronized void add(String sessionId, DiffSandbox sandbox) {
+        restore(sessionId);
         persist(sessionId, sandbox);
+        List<DiffSandbox> boxes = sandboxes.computeIfAbsent(sessionId, key -> new CopyOnWriteArrayList<>());
+        boxes.removeIf(existing -> existing.id().equals(sandbox.id()));
+        boxes.add(sandbox);
+        discardCheckpoint(sessionId, sandbox.id());
     }
 
-    public List<DiffSandbox> sandboxes(String sessionId) {
+    /** 执行中的提案只写检查点，不能被接受接口看作已完成产物。 */
+    public synchronized void checkpoint(String sessionId, DiffSandbox sandbox) {
+        restore(sessionId);
+        Path file = sessionDir(sessionId).resolve("checkpoints").resolve(sanitize(sandbox.id()) + ".json");
+        try {
+            Files.createDirectories(file.getParent());
+            atomicWrite(file, mapper.writeValueAsString(new SandboxPayload(sandbox.id(), sandbox.agentId(),
+                    sandbox.taskId(), sandbox.baseCommit(), sandbox.changes())));
+        } catch (IOException e) { throw new java.io.UncheckedIOException("保存执行检查点失败", e); }
+    }
+
+    public synchronized void discardCheckpoint(String sessionId, String sandboxId) {
+        try { Files.deleteIfExists(sessionDir(sessionId).resolve("checkpoints").resolve(sanitize(sandboxId) + ".json")); }
+        catch (IOException e) { throw new java.io.UncheckedIOException("清理执行检查点失败", e); }
+    }
+
+    public synchronized List<DiffSandbox> sandboxes(String sessionId) {
         restore(sessionId);
         return List.copyOf(sandboxes.getOrDefault(sessionId, List.of()));
     }
 
-    public Optional<DiffSandbox> find(String sessionId, String sandboxId) {
+    public synchronized Optional<DiffSandbox> find(String sessionId, String sandboxId) {
         return sandboxes(sessionId).stream().filter(box -> box.id().equals(sandboxId)).findFirst();
     }
 
     /** 某次调度涉及的沙箱（按沙箱 id 前缀关联）。 */
-    public List<DiffSandbox> sandboxesOf(String sessionId, List<String> sandboxIds) {
+    public synchronized List<DiffSandbox> sandboxesOf(String sessionId, List<String> sandboxIds) {
         return sandboxes(sessionId).stream().filter(box -> sandboxIds.contains(box.id())).toList();
     }
 
-    public List<DiffView> diffs(String sessionId) {
+    public synchronized List<DiffView> diffs(String sessionId) {
         List<DiffView> views = new ArrayList<>();
         for (DiffSandbox sandbox : sandboxes(sessionId)) {
             for (SandboxChange change : sandbox.changes()) {
@@ -426,24 +450,65 @@ public class SandboxStore {
         return List.copyOf(views);
     }
 
-    public void recordTasks(String sessionId, List<TaskView> views) {
-        tasks.put(sessionId, List.copyOf(views));
+    public synchronized void recordTasks(String sessionId, List<TaskView> views) {
+        restore(sessionId);
         persistTasks(sessionId, views);
+        tasks.put(sessionId, List.copyOf(views));
     }
 
-    public List<TaskView> tasks(String sessionId) {
+    public synchronized List<TaskView> tasks(String sessionId) {
         restore(sessionId);
         return List.copyOf(tasks.getOrDefault(sessionId, List.of()));
     }
 
-    public void raise(String sessionId, Arbitration arbitration) {
-        arbitrations.computeIfAbsent(sessionId, key -> new CopyOnWriteArrayList<>()).add(arbitration);
-        persistArbitrations(sessionId);
+    public synchronized void raise(String sessionId, Arbitration arbitration) {
+        restore(sessionId);
+        validateArbitration(arbitration);
+        List<Arbitration> current = arbitrations.getOrDefault(sessionId, List.of());
+        Arbitration previous = current.stream().filter(item -> item.id().equals(arbitration.id())).findFirst().orElse(null);
+        if (previous != null) {
+            if (!previous.equals(arbitration)) throw new IllegalStateException("仲裁标识已存在，内容不一致");
+            return;
+        }
+        List<Arbitration> updated = new ArrayList<>(current);
+        updated.add(arbitration);
+        persistArbitrations(sessionId, updated);
+        arbitrations.put(sessionId, new CopyOnWriteArrayList<>(updated));
     }
 
-    public List<Arbitration> arbitrations(String sessionId) {
+    public synchronized List<Arbitration> arbitrations(String sessionId) {
         restore(sessionId);
-        return List.copyOf(arbitrations.getOrDefault(sessionId, List.of()));
+        return arbitrations.getOrDefault(sessionId, List.of()).stream()
+                .filter(item -> !decisions.getOrDefault(sessionId, Map.of()).containsKey(item.id())).toList();
+    }
+
+    private static void validateArbitration(Arbitration arbitration) {
+        if (arbitration == null || arbitration.id() == null || arbitration.id().isBlank() || arbitration.options() == null
+                || arbitration.options().stream().anyMatch(option -> option == null || option.isBlank()))
+            throw new IllegalArgumentException("仲裁内容无效");
+    }
+
+    /** 同一决定可以重放；更改既有决定必须重新发起仲裁，避免晚到回执覆盖。 */
+    public synchronized boolean resolve(String sessionId, String arbitrationId, String choice) {
+        restore(sessionId);
+        Arbitration item = arbitrations.getOrDefault(sessionId, List.of()).stream()
+                .filter(value -> value.id().equals(arbitrationId)).findFirst().orElseThrow(
+                        () -> new java.util.NoSuchElementException("没有这个仲裁: " + arbitrationId));
+        if (choice == null || choice.isBlank() || (!item.options().isEmpty() && !item.options().contains(choice)))
+            throw new IllegalArgumentException("请选择仲裁中的有效选项");
+        Map<String, String> updated = new LinkedHashMap<>(decisions.getOrDefault(sessionId, Map.of()));
+        String previous = updated.putIfAbsent(arbitrationId, choice);
+        if (previous != null) {
+            if (!previous.equals(choice)) throw new IllegalStateException("此仲裁已有不同决定，请重新发起仲裁");
+            return false;
+        }
+        Path file = sessionDir(sessionId).resolve("decisions.json");
+        try {
+            Files.createDirectories(file.getParent());
+            atomicWrite(file, mapper.writeValueAsString(updated));
+        } catch (IOException e) { throw new java.io.UncheckedIOException("保存仲裁决定失败", e); }
+        decisions.put(sessionId, Map.copyOf(updated));
+        return true;
     }
 
     /**
@@ -452,7 +517,7 @@ public class SandboxStore {
      * <p>写入前重新校验路径与内容指纹：如果文件在子 Agent 读取之后被用户或其他改动修改过，
      * 直接拒绝而不是静默覆盖。
      */
-    public ApplyReport accept(String sessionId, String sandboxId, Path workspace) {
+    public synchronized ApplyReport accept(String sessionId, String sandboxId, Path workspace) {
         DiffSandbox sandbox = find(sessionId, sandboxId).orElse(null);
         if (sandbox == null) {
             return new ApplyReport(false, List.of(), List.of(), List.of(), "没有这个沙箱: " + sandboxId);
@@ -474,6 +539,12 @@ public class SandboxStore {
             }
             try {
                 Path file = paths.resolve(change.path());
+                // 上次写入后、状态落盘前退出时允许安全重试：内容相同不重复改文件。
+                if (Files.isRegularFile(file) && Files.readString(file, StandardCharsets.UTF_8).equals(change.newContent())) {
+                    replace(sandbox, change.withStatus(ChangeStatus.ACCEPTED));
+                    written.add(change.path());
+                    continue;
+                }
                 if (change.existed()) {
                     String current = Files.isRegularFile(file)
                             ? Files.readString(file, StandardCharsets.UTF_8)
@@ -491,9 +562,15 @@ public class SandboxStore {
                 }
                 Files.writeString(file, change.newContent(), StandardCharsets.UTF_8);
                 written.add(change.path());
+                replace(sandbox, change.withStatus(ChangeStatus.ACCEPTED));
             } catch (IOException | RuntimeException e) {
                 failed.add(change.path() + "（" + e.getMessage() + "）");
             }
+        }
+        if (!written.isEmpty()) {
+            // 部分文件成功也会改变工作区，不能保留其他候选的旧校验或把已写文件再次提交。
+            bumpWorkspaceRevision(sessionId);
+            persist(sessionId, sandbox);
         }
         boolean ok = failed.isEmpty();
         String message = ok ? "已接受 " + written.size() + " 个文件改动" : "部分文件未写入，请检查后重试";
@@ -503,7 +580,7 @@ public class SandboxStore {
     }
 
     /** 拒绝某个沙箱：只改状态，不碰工作区。 */
-    public boolean reject(String sessionId, String sandboxId) {
+    public synchronized boolean reject(String sessionId, String sandboxId) {
         DiffSandbox sandbox = find(sessionId, sandboxId).orElse(null);
         if (sandbox == null) {
             return false;
@@ -518,7 +595,7 @@ public class SandboxStore {
     }
 
     /** 标记某沙箱已被接受（落盘成功后调用）。 */
-    public void markAccepted(String sessionId, String sandboxId) {
+    public synchronized void markAccepted(String sessionId, String sandboxId) {
         find(sessionId, sandboxId).ifPresent(sandbox -> {
             for (SandboxChange change : sandbox.changes()) {
                 if (change.status() == ChangeStatus.PENDING) {
@@ -552,10 +629,10 @@ public class SandboxStore {
             payload.put("taskId", sandbox.taskId());
             payload.put("baseCommit", sandbox.baseCommit());
             payload.put("changes", sandbox.changes());
-            atomicWrite(dir.resolve(sandbox.id() + ".json"), mapper.writeValueAsString(payload));
+            atomicWrite(dir.resolve(sanitize(sandbox.id()) + ".json"), mapper.writeValueAsString(payload));
         } catch (IOException e) {
-            // 审计副本失败不影响主流程，但要在日志里留痕
-            log.warn("写入沙箱审计副本失败: session={}, sandbox={}", sessionId, sandbox.id(), e);
+            restoredSessions.remove(sessionId);
+            throw new java.io.UncheckedIOException("多 Agent 状态持久化失败", e);
         }
     }
 
@@ -567,7 +644,8 @@ public class SandboxStore {
                     .map(view -> new TaskPayload(view.taskId(), view.title(), view.agentId(), view.status(),
                             view.detail(), view.files())).toList()));
         } catch (IOException e) {
-            log.warn("写入多 Agent 任务状态失败: session={}", sessionId, e);
+            restoredSessions.remove(sessionId);
+            throw new java.io.UncheckedIOException("多 Agent 状态持久化失败", e);
         }
     }
 
@@ -582,7 +660,8 @@ public class SandboxStore {
                     validationHash(manifest.candidateHash(), manifest.environmentFingerprint(), report.checks()),
                     report.status(), report.checks(), report.detail(), workspaceRevision(sessionId))));
         } catch (IOException e) {
-            log.warn("写入多 Agent 校验状态失败: session={}, sandbox={}", sessionId, sandboxId, e);
+            restoredSessions.remove(sessionId);
+            throw new java.io.UncheckedIOException("多 Agent 状态持久化失败", e);
         }
     }
 
@@ -593,7 +672,8 @@ public class SandboxStore {
             atomicWrite(file, mapper.writeValueAsString(
                     manifests.getOrDefault(sessionId + "/" + sandboxId, List.of())));
         } catch (IOException e) {
-            log.warn("写入产物清单历史失败: session={}, sandbox={}", sessionId, sandboxId, e);
+            restoredSessions.remove(sessionId);
+            throw new java.io.UncheckedIOException("多 Agent 状态持久化失败", e);
         }
     }
 
@@ -610,27 +690,45 @@ public class SandboxStore {
             });
             atomicWrite(file, mapper.writeValueAsString(payload));
         } catch (IOException e) {
-            log.warn("写入依赖关系失败: session={}", sessionId, e);
+            restoredSessions.remove(sessionId);
+            throw new java.io.UncheckedIOException("多 Agent 状态持久化失败", e);
         }
     }
 
-    private void persistArbitrations(String sessionId) {
+    private void persistArbitrations(String sessionId, List<Arbitration> updated) {
         Path file = dataDir.file("multi", sanitize(sessionId), "arbitrations.json");
         try {
             Files.createDirectories(file.getParent());
-            atomicWrite(file, mapper.writeValueAsString(arbitrations.getOrDefault(sessionId, List.of())));
+            atomicWrite(file, mapper.writeValueAsString(updated));
         } catch (IOException e) {
-            log.warn("写入多 Agent 仲裁状态失败: session={}", sessionId, e);
+            restoredSessions.remove(sessionId);
+            throw new java.io.UncheckedIOException("多 Agent 状态持久化失败", e);
         }
     }
 
     private void restore(String sessionId) {
-        if (!restoredSessions.add(sessionId)) return;
         Path dir = sessionDir(sessionId);
+        if (!restoredSessions.add(sessionId)) return;
+        clearCached(sessionId);
+        try { restoreFiles(sessionId, dir); }
+        catch (RuntimeException e) { restoredSessions.remove(sessionId); clearCached(sessionId); throw e; }
+    }
+
+    private void clearCached(String sessionId) {
+        sandboxes.remove(sessionId); tasks.remove(sessionId); arbitrations.remove(sessionId); decisions.remove(sessionId);
+        workspaceRevisions.remove(sessionId);
+        String prefix = sessionId + "/";
+        verifications.keySet().removeIf(key -> key.startsWith(prefix));
+        manifests.keySet().removeIf(key -> key.startsWith(prefix));
+        dependencies.keySet().removeIf(key -> key.startsWith(prefix));
+    }
+
+    private void restoreFiles(String sessionId, Path dir) {
         if (!Files.isDirectory(dir)) return;
         try (var files = Files.list(dir)) {
             files.filter(file -> file.getFileName().toString().endsWith(".json"))
                     .filter(file -> !file.getFileName().toString().equals("tasks.json"))
+                    .filter(file -> !file.getFileName().toString().equals("decisions.json"))
                     .filter(file -> !file.getFileName().toString().equals("arbitrations.json"))
                     .filter(file -> !file.getFileName().toString().equals("dependencies.json"))
                     .filter(file -> !file.getFileName().toString().equals("workspace.json"))
@@ -638,7 +736,21 @@ public class SandboxStore {
                     .filter(file -> !file.getFileName().toString().startsWith("manifests-"))
                     .forEach(file -> restoreSandbox(sessionId, file));
         } catch (IOException e) {
-            log.warn("读取多 Agent 沙箱状态失败: session={}", sessionId, e);
+            throw new java.io.UncheckedIOException("读取多 Agent 沙箱状态失败", e);
+        }
+        Path decisionsFile = dir.resolve("decisions.json");
+        if (Files.isRegularFile(decisionsFile)) {
+            try {
+                decisions.put(sessionId, Map.copyOf(mapper.readValue(Files.readString(decisionsFile),
+                        new tools.jackson.core.type.TypeReference<Map<String, String>>() { })));
+            } catch (Exception e) { throw new IllegalStateException("仲裁决定损坏，拒绝继续操作", e); }
+        }
+        Path checkpoints = dir.resolve("checkpoints");
+        if (Files.isDirectory(checkpoints)) {
+            try (var files = Files.list(checkpoints)) {
+                for (Path file : files.filter(path -> path.getFileName().toString().endsWith(".json")).toList())
+                    restoreSandbox(sessionId, file);
+            } catch (IOException e) { throw new java.io.UncheckedIOException("读取执行检查点失败", e); }
         }
         restoreTasks(sessionId, dir.resolve("tasks.json"));
         restoreArbitrations(sessionId, dir.resolve("arbitrations.json"));
@@ -651,7 +763,7 @@ public class SandboxStore {
             entries.stream().filter(file -> file.getFileName().toString().startsWith("verification-"))
                     .forEach(file -> restoreVerification(sessionId, file));
         } catch (IOException e) {
-            log.warn("读取多 Agent 校验状态失败: session={}", sessionId, e);
+            throw new java.io.UncheckedIOException("读取多 Agent 校验状态失败", e);
         }
     }
 
@@ -661,11 +773,12 @@ public class SandboxStore {
                     com.pilot.core.multi.ArtifactManifest[].class);
             String name = file.getFileName().toString();
             String sandboxId = name.substring("manifests-".length(), name.length() - ".json".length());
-            if (payloads != null && payloads.length > 0) {
+            if (payloads == null) throw new IllegalArgumentException("产物清单为空值");
+            if (payloads.length > 0) {
                 manifests.put(sessionId + "/" + sandboxId, new CopyOnWriteArrayList<>(List.of(payloads)));
             }
         } catch (Exception e) {
-            log.warn("忽略损坏的产物清单文件: {}", file, e);
+            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
         }
     }
 
@@ -677,7 +790,7 @@ public class SandboxStore {
             Map<String, List<String>> payload = mapper.readValue(Files.readString(file),
                     new tools.jackson.core.type.TypeReference<Map<String, List<String>>>() { });
             if (payload == null) {
-                return;
+                throw new IllegalArgumentException("依赖关系为空值");
             }
             payload.forEach((sandboxId, upstream) -> {
                 if (upstream != null && !upstream.isEmpty()) {
@@ -685,20 +798,22 @@ public class SandboxStore {
                 }
             });
         } catch (Exception e) {
-            log.warn("忽略损坏的依赖关系文件: {}", file, e);
+            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
         }
     }
 
     private void restoreSandbox(String sessionId, Path file) {
         try {
             SandboxPayload payload = mapper.readValue(Files.readString(file), SandboxPayload.class);
-            if (payload == null || payload.sandboxId() == null) return;
+            if (payload == null || payload.sandboxId() == null || payload.changes() == null)
+                throw new IllegalArgumentException("沙箱内容无效");
+            sanitize(payload.sandboxId());
             DiffSandbox sandbox = new DiffSandbox(payload.sandboxId(), payload.agentId(), payload.taskId(), payload.baseCommit());
             if (payload.changes() != null) sandbox.replaceAll(payload.changes());
             List<DiffSandbox> restored = sandboxes.computeIfAbsent(sessionId, key -> new CopyOnWriteArrayList<>());
             if (restored.stream().noneMatch(existing -> existing.id().equals(sandbox.id()))) restored.add(sandbox);
         } catch (Exception e) {
-            log.warn("忽略损坏的沙箱状态文件: {}", file, e);
+            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
         }
     }
 
@@ -706,14 +821,19 @@ public class SandboxStore {
         if (!Files.isRegularFile(file)) return;
         try {
             TaskPayload[] payloads = mapper.readValue(Files.readString(file), TaskPayload[].class);
+            if (payloads == null) throw new IllegalArgumentException("任务列表为空值");
             List<TaskView> views = new ArrayList<>();
             if (payloads != null) for (TaskPayload payload : payloads) {
-                views.add(new TaskView(payload.taskId(), payload.title(), payload.agentId(), payload.status(),
-                        payload.detail(), payload.files()));
+                boolean abandoned = payload.status() != null && Set.of("pending", "ready", "running", "verifying")
+                        .contains(payload.status().toLowerCase(java.util.Locale.ROOT));
+                views.add(new TaskView(payload.taskId(), payload.title(), payload.agentId(),
+                        abandoned ? "cancelled" : payload.status(),
+                        abandoned ? "服务已重启，原执行者失效；保留产物，请重新派发任务" : payload.detail(), payload.files()));
             }
+            persistTasks(sessionId, views);
             tasks.put(sessionId, List.copyOf(views));
         } catch (Exception e) {
-            log.warn("忽略损坏的任务状态文件: {}", file, e);
+            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
         }
     }
 
@@ -721,9 +841,11 @@ public class SandboxStore {
         if (!Files.isRegularFile(file)) return;
         try {
             Arbitration[] payloads = mapper.readValue(Files.readString(file), Arbitration[].class);
-            arbitrations.put(sessionId, new CopyOnWriteArrayList<>(payloads == null ? List.of() : List.of(payloads)));
+            if (payloads == null) throw new IllegalArgumentException("仲裁列表为空值");
+            for (Arbitration item : payloads) validateArbitration(item);
+            arbitrations.put(sessionId, new CopyOnWriteArrayList<>(List.of(payloads)));
         } catch (Exception e) {
-            log.warn("忽略损坏的仲裁状态文件: {}", file, e);
+            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
         }
     }
 
@@ -746,7 +868,7 @@ public class SandboxStore {
                         new VerificationGate.Report(payload.status(), payload.checks(), payload.detail()));
             }
         } catch (Exception e) {
-            log.warn("忽略损坏的校验状态文件: {}", file, e);
+            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
         }
     }
 
@@ -756,8 +878,7 @@ public class SandboxStore {
         try {
             return mapper.readValue(Files.readString(file), VerificationPayload.class);
         } catch (Exception e) {
-            log.warn("忽略损坏的校验状态文件: {}", file, e);
-            return null;
+            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
         }
     }
 
@@ -785,7 +906,9 @@ public class SandboxStore {
     }
 
     private static String sanitize(String value) {
-        return value == null ? "unknown" : value.replaceAll("[^A-Za-z0-9._-]", "_");
+        if (value == null || !value.matches("[A-Za-z0-9_-][A-Za-z0-9._-]{0,199}"))
+            throw new IllegalArgumentException("多 Agent 状态标识无效");
+        return value;
     }
 
     private Path sessionDir(String sessionId) {
@@ -795,7 +918,12 @@ public class SandboxStore {
     private static void atomicWrite(Path file, String content) throws IOException {
         Path temporary = file.resolveSibling(file.getFileName() + "." + UUID.randomUUID() + ".tmp");
         try {
-            Files.writeString(temporary, content, StandardCharsets.UTF_8);
+            try (var channel = java.nio.channels.FileChannel.open(temporary,
+                    java.nio.file.StandardOpenOption.CREATE_NEW, java.nio.file.StandardOpenOption.WRITE)) {
+                var bytes = java.nio.ByteBuffer.wrap(content.getBytes(StandardCharsets.UTF_8));
+                while (bytes.hasRemaining()) channel.write(bytes);
+                channel.force(true);
+            }
             try {
                 Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             } catch (AtomicMoveNotSupportedException e) {

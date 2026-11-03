@@ -18,15 +18,13 @@ import java.util.Objects;
 public record ExecutionRequest(List<String> argv, String script, Path workdir, Path workspaceRoot,
                                Map<String, String> env, boolean network, ExecutionLimits limits) {
     public ExecutionRequest {
-        argv = argv == null ? List.of() : argv.stream()
-                .filter(Objects::nonNull)
-                .map(String::strip)
-                .filter(value -> !value.isEmpty())
-                .toList();
+        // argv 是已分词参数，空参数和首尾空格都有语义，不能像命令文本一样裁剪。
+        argv = argv == null ? List.of() : List.copyOf(argv);
         script = script == null || script.isBlank() ? "" : script.strip();
         if (argv.isEmpty() && script.isEmpty()) {
             throw new IllegalArgumentException("argv or script must not be empty");
         }
+        if (!argv.isEmpty() && argv.getFirst().isBlank()) throw new IllegalArgumentException("executable must not be blank");
         Objects.requireNonNull(workdir, "workdir must not be null");
         workspaceRoot = workspaceRoot == null ? workdir : workspaceRoot;
         env = env == null ? Map.of() : Map.copyOf(env);

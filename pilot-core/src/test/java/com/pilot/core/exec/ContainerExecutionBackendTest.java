@@ -36,8 +36,9 @@ class ContainerExecutionBackendTest {
         assertTrue(argv.contains("1024m"));
         assertTrue(argv.contains("--cpus"));
         assertTrue(argv.contains("1.5"));
-        assertTrue(argv.contains("-v"));
-        assertTrue(argv.contains(root + ":/workspace:rw"));
+        assertTrue(argv.contains("--mount"));
+        assertTrue(argv.contains("type=bind,\"source=" + root + "\",\"target=/workspace\""));
+        assertTrue(argv.contains("--pull=never"));
         assertTrue(argv.contains("-w"));
         assertTrue(argv.contains("/workspace/sub"));
         assertTrue(argv.contains("pilot/java:25"));

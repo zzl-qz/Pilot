@@ -62,6 +62,10 @@ public class WorkspaceToolFactory {
     /** 可选能力：测试里手工构造本工厂时不注入，对应工具就不存在。 */
     private BrowserBackend browser;
     private McpManager mcp;
+    private com.pilot.core.exec.ExecutionBackends.Selection execution;
+
+    @Autowired(required = false)
+    public void setExecution(com.pilot.core.exec.ExecutionBackends.Selection execution) { this.execution = execution; }
 
     public WorkspaceToolFactory(AgentProperties properties, WebSearchProperties webSearchProperties,
                                 SnapshotSink snapshots, ObjectMapper mapper) {
@@ -160,7 +164,7 @@ public class WorkspaceToolFactory {
         // 只读任务默认不注册通用命令：命令白名单为空时 run_command 会退回内置可执行白名单，
         // 那已经超出「只读调研」的范围。需要跑命令的调研任务必须显式声明 commands。
         if ((view.writable() || !view.allowCommands().isEmpty()) && view.allowsTool("run_command")) {
-            registry.register(new RunCommandTool(validator, commandChanges()));
+            registry.register(new com.pilot.core.tool.SandboxCommandTool(validator, sandbox, execution));
         }
         if (view.writable() && view.allowsTool("edit_file")) {
             registry.register(new SandboxEditFileTool(validator, sandbox, reads));

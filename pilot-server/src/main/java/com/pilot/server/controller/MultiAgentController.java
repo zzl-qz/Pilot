@@ -159,13 +159,7 @@ public class MultiAgentController {
                                 + "。确认要接受时请带 acknowledgeUnverified=true。");
             }
         }
-        SandboxStore.ApplyReport applied = sandboxes.accept(id, sandboxId, workspaceOf(session));
-        if (applied.ok()) {
-            sandboxes.markAccepted(id, sandboxId);
-            // 工作区已经被改写：其余沙箱的旧校验结论不再适用，必须重新组装候选后重跑
-            sandboxes.bumpWorkspaceRevision(id);
-        }
-        return applied;
+        return sandboxes.accept(id, sandboxId, workspaceOf(session));
     }
 
     /** @param acknowledgeUnverified 用户明确接受未通过或未执行校验的改动 */
@@ -190,8 +184,18 @@ public class MultiAgentController {
         if (choice.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "choice must not be blank");
         }
-        sessions.publish(id, "run_arbitration_" + UUID.randomUUID(),
-                new ArbitrationResolved(arbitrationId, choice));
+        try {
+            if (sandboxes.resolve(id, arbitrationId, choice)) {
+                sessions.publish(id, "run_arbitration_" + UUID.randomUUID(),
+                        new ArbitrationResolved(arbitrationId, choice));
+            }
+        } catch (java.util.NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
         return ResponseEntity.noContent().build();
     }
 

@@ -227,6 +227,8 @@ class MultiAgentServiceTest {
         assertTrue(events.stream().anyMatch(event -> event instanceof ArbitrationRequired required
                 && "dissent".equals(required.kind())));
         assertTrue(result.report().contains("立即停止推进"), result.report());
+        var restored = new SandboxStore(JsonMapper.builder().build(), new PilotDataDir(dataDir.toString()));
+        assertEquals(result.arbitrationId(), restored.arbitrations("ses_test").getFirst().id());
     }
 
     /** 预算超了要停住并说清原因，而不是继续烧钱，也不丢已完成的产物。 */
