@@ -1,0 +1,34 @@
+{
+  "originalBaseline": 45209239,
+  "latestUsed": 45356459,
+  "maxQuota": 4000000,
+  "spent": 147220,
+  "pendingReserved": 3848878,
+  "remaining": 3902,
+  "spentCny": 0.29444,
+  "measuredTrials": 16,
+  "totalTrials": 20,
+  "additionalRuns": 18,
+  "fullPriceP95PerTrial": 350962,
+  "headroom": 1.5,
+  "plannedQuota": 9475974,
+  "verdict": "needs_reconciliation",
+  "reasons": [
+    "预算保护已锁定或仍有在途请求，先人工核对再启动",
+    "仍有未结算预留，不能按观测折扣释放",
+    "真实完整用量样本不足，预测只供排期",
+    "可用保守预算不足以覆盖计划"
+  ],
+  "note": "离线估算不授权付费请求，不改变保护上限；p95 不是未来费用上界，运行时仍需逐请求预留。",
+  "observedAt": "2026-11-03T09:53:06.261616+00:00",
+  "source": "历史账单快照；本轮未新增模型请求",
+  "usageSources": [
+    "2026-11-03-gpt-screening/p0.jsonl",
+    "2026-11-03-gpt-screening/p1.jsonl",
+    "2026-11-03-gpt-screening/p2.jsonl",
+    "postcommit-6e39416-2026-11-03/smoke.jsonl"
+  ],
+  "inputQuotaPerMillion": 2000000,
+  "outputQuotaPerMillion": 6000000,
+  "assessment": "原 18/36 screening 仍不充分；观测全价用于排期，不改变费用硬上限"
+}

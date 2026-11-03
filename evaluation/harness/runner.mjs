@@ -40,7 +40,7 @@ export function parseArgs(argv) {
     fixtures: "",
     token: process.env.PILOT_SECURITY_TOKEN ?? "",
     timeoutMinutes: 30,
-    dryRun: false,
+    dryRun: false, resume: false,
     baseline: "",
     strict: false,
     verifyFixtures: false,
@@ -70,6 +70,7 @@ export function parseArgs(argv) {
       case "--prompt-dir": args.promptDir = value; index++; break;
       case "--runtime-source": args.runtimeSources.push(value); index++; break;
       case "--dry-run": args.dryRun = true; break;
+      case "--resume": args.resume = true; break;
       case "--strict": args.strict = true; break;
       case "--verify-fixtures": args.verifyFixtures = true; break;
       case "--help":
@@ -82,6 +83,7 @@ export function parseArgs(argv) {
   }
   if (!Number.isFinite(args.timeoutMinutes) || args.timeoutMinutes <= 0) throw new Error("超时必须为正数");
   if (!Number.isInteger(args.repeat) || args.repeat < 1 || args.repeat > 100) throw new Error("--repeat 必须是 1 到 100 的整数");
+  if (args.resume && args.dryRun) throw new Error("--resume 只用于真实评估记录");
   if (!args.runtimeSources.length) args.runtimeSources = ["pilot-core/src/main/java", "pilot-server/src/main/java"];
   if (args.strict && (!args.baseline || args.dryRun)) throw new Error("--strict 需要真实运行和 --baseline，不能使用 dry-run");
   return args;
@@ -92,9 +94,10 @@ function helpText() {
     "runner.mjs --base <url> --out <jsonl> [--model M] [--prompt-version P] [--tool-version T]",
     "           [--tasks tasks.json] [--fixtures dir] [--token T] [--timeout-minutes N]",
     "           [--baseline 上次的 jsonl] [--dry-run] [--strict] [--repeat N] [--task id,id]",
-    "           [--environment label] [--prompt-dir dir] [--runtime-source dir ...]",
+    "           [--resume] [--environment label] [--prompt-dir dir] [--runtime-source dir ...]",
     "",
     "  --baseline  与上次记录比较；严格门禁至少 20 个任务，每项两组至少 3 次。",
+    "  --resume    在相同版本与任务合同下补齐缺少的轮次；已记录失败不会被重跑替换。",
     "  --repeat    每项重复次数，轮次之间交错任务，默认 1。",
     "  --task      只运行选中任务，可逗号分隔或重复传入；子集结果不能冒充全套。",
     "  --model     核对服务已配置的模型，不修改全局模型；不传时使用服务模型。",
@@ -474,6 +477,25 @@ async function verifyFixtures(args, tasks) {
   if (broken > 0) process.exit(1);
 }
 
+/** 续跑只能补空位：失败也是有效观测，不能挑结果、重复付费或混合版本。 */
+export function resumePlan(records, tasks, repeat, metadata) {
+  const selected = new Map(tasks.map(task => [task.id, task]));
+  const seen = new Set(), sessions = new Set();
+  const keys = ['schemaVersion', 'model', 'modelConfigHash', 'promptHash', 'runtimeHash',
+    'environmentVersion', 'fixtureVersion', 'taskVersion', 'promptVersion', 'toolVersion'];
+  for (const record of records) {
+    const expected = metadata.get(record.taskId);
+    if (!selected.has(record.taskId) || !Number.isInteger(record.attempt) || record.attempt < 1 || record.attempt > repeat)
+      throw new Error('续跑记录包含计划外的任务或轮次');
+    if (record.dryRun || !expected || keys.some(key => expected[key] == null || record[key] !== expected[key]))
+      throw new Error(`${record.taskId} 的版本、模型或任务合同已变化，不能续跑旧评估`);
+    const key = `${record.taskId}:${record.attempt}`;
+    if (seen.has(key) || (record.sessionId && sessions.has(record.sessionId))) throw new Error('续跑记录有重复尝试或会话');
+    seen.add(key); if (record.sessionId) sessions.add(record.sessionId);
+  }
+  return expandRuns(tasks, repeat).filter(({ task, attempt }) => !seen.has(`${task.id}:${attempt}`));
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const tasksFile = JSON.parse(await readFile(args.tasks, "utf8"));
@@ -490,69 +512,89 @@ async function main() {
     const selected = new Set(tasks.map(t => t.id));
     if (baseline.some(r => !selected.has(r.taskId))) throw new Error('选中任务缺少基线任务，不能启动不完整的严格对照');
   }
+  const metadata = new Map();
   if (!args.dryRun) {
     args.runContext = await createRunContext(args);
     args.model = args.runContext.model;
     // Validate all fixture versions before the first paid request.
     for (const task of tasks) {
-      const metadata = await recordMetadata(args, task);
+      const currentMetadata = { ...await recordMetadata(args, task), promptVersion: args.promptVersion, toolVersion: args.toolVersion };
+      metadata.set(task.id, currentMetadata);
       if (args.strict && baseline.some(r => r.taskId === task.id &&
-          ['fixtureVersion', 'taskVersion', 'environmentVersion', 'modelConfigHash'].some(key => r[key] !== metadata[key]))) {
+          ['fixtureVersion', 'taskVersion', 'environmentVersion', 'modelConfigHash'].some(key => r[key] !== currentMetadata[key]))) {
         throw new Error(`${task.id} 的模型/环境/任务条件与基线不一致`);
       }
     }
   }
   await mkdir(dirname(args.out), { recursive: true });
-  // Preserve completed trials even if a later run crashes; never overwrite a previous run silently.
-  await writeFile(args.out, '', { encoding: 'utf8', flag: 'wx' });
-  const records = [];
-  const persist = async record => { records.push(record); await appendFile(args.out, JSON.stringify(record) + '\n', 'utf8'); };
-  if (args.dryRun) {
-    for (const record of dryRunRecords(tasks, args)) await persist(record);
-  } else {
-    for (const { task, attempt } of expandRuns(tasks, args.repeat)) {
-      process.stdout.write(`▶ ${task.id} [${attempt}/${args.repeat}] ... `);
-      const started = Date.now();
-      try {
-        const record = await runTask({ ...args, attempt }, task);
+  // A lock prevents two runners from paying for the same missing slot. Crash locks require manual reconciliation.
+  const lock = `${args.out}.lock`, inflight = `${args.out}.inflight.json`;
+  await writeFile(lock, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }), { flag: 'wx' })
+    .catch(() => { throw new Error(`评估输出已锁定：${lock}；先确认原进程结束及未结算请求，再移除锁`); });
+  try {
+    let records = [], planned = expandRuns(tasks, args.repeat);
+    if (args.resume) {
+      const contents = await readFile(args.out, 'utf8');
+      if (contents && !contents.endsWith('\n')) throw new Error('评估文件末行不完整，请先保留原件并核对，不会自动丢弃');
+      records = contents.split('\n').filter(Boolean).map(line => JSON.parse(line));
+      planned = resumePlan(records, tasks, args.repeat, metadata);
+    } else await writeFile(args.out, '', { encoding: 'utf8', flag: 'wx' });
+    try {
+      await readFile(inflight, 'utf8');
+      throw new Error(`存在未结算尝试：${inflight}；核对服务终态、费用并补齐结果前禁止重复调用`);
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    const persist = async record => { await appendFile(args.out, JSON.stringify(record) + '\n', 'utf8'); records.push(record); };
+    if (args.dryRun) {
+      for (const record of dryRunRecords(tasks, args)) await persist(record);
+    } else {
+      for (const { task, attempt } of planned) {
+        await writeFile(inflight, JSON.stringify({ taskId: task.id, attempt, ...metadata.get(task.id), startedAt: new Date().toISOString() }), { flag: 'wx' });
+        process.stdout.write(`▶ ${task.id} [${attempt}/${args.repeat}] ... `);
+        const started = Date.now();
+        let record;
+        try {
+          record = await runTask({ ...args, attempt }, task);
+          console.log(record.success ? 'PASS' : 'FAIL');
+        } catch (error) {
+          record = { ...await recordMetadata(args, task).catch(() => args.runContext),
+            taskId: task.id, attempt, model: args.model, requestedModel: args.model, resolvedModel: null,
+            promptVersion: args.promptVersion, toolVersion: args.toolVersion, success: false, acceptanceRan: false,
+            terminalStatus: null, reportedComplete: null, evaluationError: true,
+            durationSeconds: (Date.now() - started) / 1000, rework: null, takeover: null,
+            costUsd: null, costKnown: false, inputTokens: null, outputTokens: null, notes: String(error) };
+          console.log(`ERROR ${error.message}`);
+        }
+        // A disk failure must leave the in-flight marker, not append a second result for the same trial.
         await persist(record);
-        console.log(record.success ? 'PASS' : 'FAIL');
-      } catch (error) {
-        await persist({ ...await recordMetadata(args, task).catch(() => args.runContext),
-          taskId: task.id, attempt, model: args.model, requestedModel: args.model, resolvedModel: null,
-          promptVersion: args.promptVersion, toolVersion: args.toolVersion, success: false, acceptanceRan: false,
-          terminalStatus: null, reportedComplete: null, evaluationError: true,
-          durationSeconds: (Date.now() - started) / 1000, rework: null, takeover: null,
-          costUsd: null, costKnown: false, inputTokens: null, outputTokens: null, notes: String(error) });
-        console.log(`ERROR ${error.message}`);
+        await rm(inflight);
       }
     }
-  }
-  const compared = baseline ? compare(baseline, records) : records;
-  const decision = baseline ? gate(baseline, compared) : null;
-  const summary = { generatedAt: new Date().toISOString(), dryRun: args.dryRun,
-    selectedTasks: tasks.map(t => t.id), repeat: args.repeat,
-    groups: aggregate(compared), overall: summarize(compared), gate: decision };
-  const summaryPath = args.out.endsWith('.jsonl') ? args.out.replace(/\.jsonl$/, '.summary.json') : `${args.out}.summary.json`;
-  await writeFile(summaryPath, JSON.stringify(summary, null, 2), { encoding: 'utf8', flag: 'wx' });
-  const display = (value, digits = 1) => value == null ? '未知' : value.toFixed(digits);
-  const percent = value => value == null ? '未知' : `${(value * 100).toFixed(1)}%`;
-  console.log('\n结果：');
-  for (const group of summary.groups) {
-    console.log(`  ${group.key}  ${group.uniqueTasks} 个任务 / ${group.tasks} 次运行  成功率 ${percent(group.successRate)}  ` +
-      `正常收尾但外部验收失败率 ${percent(group.falseCompletionRate)}  p50/p95 ${display(group.p50DurationSeconds)}/${display(group.p95DurationSeconds)}s  ` +
-      `每成功任务成本 ${display(group.costPerSuccessfulTaskUsd, 4)}`);
-  }
-  if (args.dryRun) console.log('  dry-run：未运行模型或验收，不产生能力和成本结论。');
-  if (decision) {
-    const m = decision.metrics;
-    console.log(`\n门禁：${decision.verdict.toUpperCase()}（${decision.comparisonScope === 'prompt' ? '相同运行时的提示对照' : '提示与运行时组合变化'}）`);
-    console.log(`  可比任务 ${m.pairedTasks} 个（下限 ${m.minTasks}）  通过率 ${percent(m.baselineSuccessRate)} → ${percent(m.currentSuccessRate)}  ` +
-      `成本 ${display(m.baselineCostUsd, 3)} → ${display(m.currentCostUsd, 3)}  缓存命中 ${percent(m.baselineCacheHitRate)} → ${percent(m.currentCacheHitRate)}`);
-    for (const reason of decision.reasons) console.log(`  - ${reason}`);
-    if (decision.verdict === 'pass') console.log('  本轮可比样本未观察到退化；不代表所有任务或后续运行均有保证。');
-    if (args.strict && decision.verdict !== 'pass') process.exitCode = 1;
-  }
+    const compared = baseline ? compare(baseline, records) : records;
+    const decision = baseline ? gate(baseline, compared) : null;
+    const summary = { generatedAt: new Date().toISOString(), dryRun: args.dryRun,
+      selectedTasks: tasks.map(t => t.id), repeat: args.repeat,
+      groups: aggregate(compared), overall: summarize(compared), gate: decision };
+    const summaryPath = args.out.endsWith('.jsonl') ? args.out.replace(/\.jsonl$/, '.summary.json') : `${args.out}.summary.json`;
+    await writeFile(summaryPath, JSON.stringify(summary, null, 2), { encoding: 'utf8', flag: args.resume ? 'w' : 'wx' });
+    const display = (value, digits = 1) => value == null ? '未知' : value.toFixed(digits);
+    const percent = value => value == null ? '未知' : `${(value * 100).toFixed(1)}%`;
+    console.log('\n结果：');
+    for (const group of summary.groups) {
+      console.log(`  ${group.key}  ${group.uniqueTasks} 个任务 / ${group.tasks} 次运行  成功率 ${percent(group.successRate)}  ` +
+        `正常收尾但外部验收失败率 ${percent(group.falseCompletionRate)}  p50/p95 ${display(group.p50DurationSeconds)}/${display(group.p95DurationSeconds)}s  ` +
+        `每成功任务成本 ${display(group.costPerSuccessfulTaskUsd, 4)}`);
+    }
+    if (args.dryRun) console.log('  dry-run：未运行模型或验收，不产生能力和成本结论。');
+    if (decision) {
+      const m = decision.metrics;
+      console.log(`\n门禁：${decision.verdict.toUpperCase()}（${decision.comparisonScope === 'prompt' ? '相同运行时的提示对照' : '提示与运行时组合变化'}）`);
+      console.log(`  可比任务 ${m.pairedTasks} 个（下限 ${m.minTasks}）  通过率 ${percent(m.baselineSuccessRate)} → ${percent(m.currentSuccessRate)}  ` +
+        `成本 ${display(m.baselineCostUsd, 3)} → ${display(m.currentCostUsd, 3)}  缓存命中 ${percent(m.baselineCacheHitRate)} → ${percent(m.currentCacheHitRate)}`);
+      for (const reason of decision.reasons) console.log(`  - ${reason}`);
+      if (decision.verdict === 'pass') console.log('  本轮可比样本未观察到退化；不代表所有任务或后续运行均有保证。');
+      if (args.strict && decision.verdict !== 'pass') process.exitCode = 1;
+    }
+  } finally { await rm(lock, { force: true }); }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main().catch((error) => {

@@ -147,12 +147,15 @@ bash mvnw -pl pilot-server spring-boot:run
 
 | 配置 | 默认 | 作用 |
 | --- | --- | --- |
-| `PILOT_EXECUTION_ISOLATION` | `local` | `container` 时校验命令在容器内执行（`--network=none`、只读根、cap-drop、内存/CPU/进程上限）；容器不可用会显式降级并在 `/api/maintenance/status` 报告原因 |
-| `PILOT_EXECUTION_IMAGE` / `PILOT_EXECUTION_RUNTIME` | temurin 25 / 自动探测 | 容器镜像与运行时（docker/podman） |
+| `PILOT_EXECUTION_ISOLATION` | `local` | 子任务命令和提案硬校验必须为 `container` 且可用，使用临时副本；`local` 或容器不可用时明确拒绝这些命令，不回退宿主执行。状态见 `/api/maintenance/status` |
+| `PILOT_EXECUTION_IMAGE` / `PILOT_EXECUTION_RUNTIME` | temurin 25 / 自动探测 | 镜像须预先安装，含项目工具链与依赖；运行时 docker/podman；执行时不自动拉取镜像 |
+| `PILOT_EXECUTION_NETWORK` | `false` | 子任务校验容器网络；仅在明确需要时开启 |
 | `PILOT_SECURITY_MODE` | `local` | `token` 允许远程访问，但必须带令牌 |
 | `PILOT_SECURITY_TOKEN` | 空 | 访问令牌；`token` 模式为空会拒绝远程请求 |
 | `PILOT_SECURITY_ALLOWED_ORIGINS` | 空 | 允许的浏览器来源，逗号分隔；默认只允许同源 |
 | `PILOT_SECURITY_RATE_LIMIT` | 600 | 单 IP 每分钟请求上限，`0` 表示关闭 |
+
+子任务执行副本不含 `.git`、`.pilot` 或 scope 禁止的文件；拒绝可见符号链接、特殊文件及超限快照（32 MiB/文件、256 MiB/副本、50,000 文件）。命令生成物不合入提案，源文件修改请用编辑工具。主会话的命令执行保持原配置；这些限制不代表主会话命令已全部容器化。详见 [隔离和恢复验证记录](evaluation/RELIABILITY_2026-11-03.md)。
 
 令牌可通过 `Authorization: Bearer`、`X-Pilot-Token` 或 SSE 的 `?token=` 传入。浏览器首次用 `http://<host>:8787/?token=<令牌>` 打开后，服务会写入 HttpOnly、SameSite=Strict 的 Cookie，页面内的 `fetch` 与 `EventSource` 随后自动携带，不必改前端代码。被拒绝的请求写入 `.pilot/audit/access.jsonl`，不记录令牌本身。
 

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createRunContext, dryRunRecords, expandRuns, hashSources, parseArgs, prepareWorkspace, recordMetadata, runCommand, runTask, selectTasks, serverIdentity, traceMetrics, waitForTerminal } from './runner.mjs';
+import { resumePlan, createRunContext, dryRunRecords, expandRuns, hashSources, parseArgs, prepareWorkspace, recordMetadata, runCommand, runTask, selectTasks, serverIdentity, traceMetrics, waitForTerminal } from './runner.mjs';
 import { cacheHitRate, gate } from './metrics.mjs';
 
 async function fixture(t) {
@@ -296,4 +296,60 @@ test('strict使用独立基线预检，合法基线可进入服务核对而重�
   await writeFile(baselinePath, records.map(r => JSON.stringify({ ...r, sessionId: 'duplicated' })).join('\n') + '\n');
   await assert.rejects(promisify(execFile)(process.execPath, argv), /基线尚不满足严格对照条件/);
   assert.equal(mock.requests.length, count, '重复身份应在请求服务前拒绝');
+});
+
+function resumeFixture() {
+  const tasks = [{ id: 'a' }, { id: 'b' }];
+  const data = { schemaVersion: 2, model: 'model', modelConfigHash: 'model-hash', promptHash: 'prompt-hash',
+    runtimeHash: 'runtime-hash', environmentVersion: 'env', fixtureVersion: 'fixture', taskVersion: 'task',
+    promptVersion: 'p1', toolVersion: 't1' };
+  const metadata = new Map(tasks.map(t => [t.id, data]));
+  return { tasks, data, metadata };
+}
+
+test('续跑只补缺失轮次，已记录的失败和基础设施异常不被覆盖', () => {
+  const { tasks, data, metadata } = resumeFixture();
+  const records = [{ ...data, taskId: 'a', attempt: 1, success: false, evaluationError: true },
+    { ...data, taskId: 'b', attempt: 1, success: true, sessionId: 's1' }];
+  assert.deepEqual(resumePlan(records, tasks, 2, metadata).map(r => [r.task.id, r.attempt]), [['a', 2], ['b', 2]]);
+});
+
+test('续跑拒绝版本混合、重复轮次、重复会话、dry-run 和越界计划', () => {
+  const { tasks, data, metadata } = resumeFixture();
+  const record = { ...data, taskId: 'a', attempt: 1, success: false, sessionId: 's1' };
+  for (const mutation of [{ runtimeHash: 'new' }, { fixtureVersion: 'new' }, { modelConfigHash: 'new' },
+    { taskVersion: 'new' }, { promptHash: 'new' }, { dryRun: true }, { attempt: 0 }, { attempt: 3 }, { taskId: 'c' }])
+    assert.throws(() => resumePlan([{ ...record, ...mutation }], tasks, 2, metadata));
+  assert.throws(() => resumePlan([record, record], tasks, 2, metadata));
+  assert.throws(() => resumePlan([record, { ...record, taskId: 'b' }], tasks, 2, metadata));
+  assert.throws(() => parseArgs(['--resume', '--dry-run']));
+});
+
+test('真实执行入口续跑仅补空位，完整结果不重复调用且拒绝未结算和损坏尾行', async t => {
+  const { root, args, task } = await fixture(t);
+  let workspace, sessions = 0;
+  const mock = await server(t, async (path, body) => {
+    if (path === '/api/settings') return { model: 'fixture-model', permissionMode: 'AUTO' };
+    if (path === '/api/sessions') { workspace = body.workspace; return { sessionId: `s-${++sessions}` }; }
+    if (path.endsWith('/messages')) await writeFile(join(workspace, 'src.cjs'), 'module.exports = 2;');
+    return { sessionStatus: 'COMPLETED', usageExact: true, inputTokens: 10, outputTokens: 2 };
+  });
+  const tasks = join(root, 'tasks.json'), out = join(root, 'results.jsonl');
+  await writeFile(tasks, JSON.stringify({ tasks: [task] }));
+  const cli = ['evaluation/harness/runner.mjs', '--base', mock.base, '--tasks', tasks, '--fixtures', args.fixtures,
+    '--out', out, '--prompt-version', 'p1', '--tool-version', 't1'];
+  const run = extra => promisify(execFile)(process.execPath, [...cli, ...extra]);
+  await run(['--repeat', '1']); assert.equal(sessions, 1);
+  await run(['--repeat', '2', '--resume']); assert.equal(sessions, 2);
+  await run(['--repeat', '2', '--resume']); assert.equal(sessions, 2);
+  const contents = await readFile(out, 'utf8');
+  assert.deepEqual(contents.trim().split('\n').map(line => JSON.parse(line).attempt), [1, 2]);
+  await writeFile(`${out}.inflight.json`, JSON.stringify({ taskId: 'bug', attempt: 3 }));
+  await assert.rejects(run(['--repeat', '3', '--resume']), /未结算尝试/); assert.equal(sessions, 2);
+  await rm(`${out}.inflight.json`);
+  await writeFile(out, contents.trimEnd());
+  await assert.rejects(run(['--repeat', '3', '--resume']), /末行不完整/); assert.equal(sessions, 2);
+  await writeFile(out, contents);
+  await writeFile(`${out}.lock`, '{}');
+  await assert.rejects(run(['--repeat', '3', '--resume']), /已锁定/); assert.equal(sessions, 2);
 });

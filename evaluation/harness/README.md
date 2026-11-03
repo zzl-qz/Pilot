@@ -50,6 +50,16 @@ node evaluation/harness/runner.mjs --dry-run --repeat 3 --task fix-failing-unit-
 
 每次任务完成立即追加 JSONL；后续中断不会丢失先前记录。已有输出文件拒绝覆盖，summary 使用独立路径。错误记录保留失败事实，未知成本不填 0。超时尝试取消本执行器创建的运行，不会继续验收正在修改的工作区。现有固定 Node 验收使用 argv；自定义字符串验收仍交系统 shell 执行，需要按目标平台编写。
 
+## 安全续跑与预算规划
+
+中断后可以在**同一任务合同、模型配置、提示词/运行时代码、环境和版本标签**下给原命令加 `--resume`，并保留原 `--out`。它只补缺少的 attempt；失败、超时和基础设施错误不会被重跑成功替换。更改版本要新建输出，不能往旧 screening 混入当前源码的结果。
+
+执行器用 `.lock` 阻止同一输出并发运行，每次付费任务前写 `.inflight.json`。异常退出留下的锁或在途标记必须先核对原进程、服务终态和费用，再人工补齐真实记录；不会自动再次请求。截断尾行、重复 attempt/会话、混合版本都拒绝续跑。汇总文件由完整 JSONL 重建，历史记录不覆盖。
+
+`node evaluation/harness/budget-plan.mjs <plan-input.json>` 只做离线规划，不调用模型。输入包含原预算保护 `state`（initialUsed/lastUsed/maxQuota/pendingReserved/locked/busy）、最新已观测累计额度 `latestUsed`、真实 `records`、配置全价 `inputQuotaPerMillion`/`outputQuotaPerMillion` 和计划补跑数量 `additionalRuns`；可选 `quotaPerCny` 与 `headroom`（默认 1.5）。未知用量不算零，失败样本也计入；用观测用量的全价 p95 加余量估计下一批规模。它不降低运行时单请求预留，不能用缓存折扣推断费用硬上界。
+
+新账单增量最多结算等额预留。计数不动不代表欠费已结算；不得重置累计额度基线或丢弃未知费用预留。若存在锁定、未结算或预算不足，结果为 `needs_reconciliation`。本轮[历史预算复核](baselines/2026-11-03-reliability/budget-review.json)仍需核对，不追加付费请求；原 18/36 screening 保持证据不足。
+
 ## 场景覆盖
 
 只有运行状态 `COMPLETED`、外部验收通过、必需场景实际触发时才记成功。中途引导通过当前 `runId` 的 `/steer` 投递，不排队创建新任务。记录引导是否投递、接收的运行 ID、投递时步数和实际延迟；若模型在投递前已经完成，即使最终代码通过测试，也不能声称测过中途引导。两条内置引导场景在 1 秒后尝试，使用更短轮询；未投递的记录为场景未覆盖，需要重新设计或复测该场景。
