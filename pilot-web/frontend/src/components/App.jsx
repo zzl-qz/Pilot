@@ -25,6 +25,7 @@ export default function App() {
   const init = useStore((state) => state.init);
   const notice = useStore((state) => state.ui.notice);
   const sidebarOpen = useStore((state) => state.ui.sidebarOpen);
+  const agentsDockOpen = useStore((state) => state.ui.agentsDockOpen);
   const running = useStore((state) => state.running);
   const runStartedAt = useStore((state) => state.runStartedAt);
   const sessionTitle = useStore((state) => state.sessionTitle);
@@ -307,7 +308,9 @@ export default function App() {
                 type="button"
                 id="agents-chip"
                 className="chip agents-chip"
-                title="本对话用到了多智能体"
+                title="查看本对话的子智能体"
+                aria-expanded={agentsDockOpen}
+                aria-controls="agents-dock"
                 onClick={() => useStore.getState().setUi({ agentsDockOpen: !useStore.getState().ui.agentsDockOpen })}
               >
                 子智能体 · {Object.keys(agents).length}

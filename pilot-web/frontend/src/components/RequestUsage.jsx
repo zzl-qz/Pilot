@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { formatTokens } from '../lib/context-usage.js';
-import { formatCache, formatCost, totalCost, requestContext, REQUEST_PURPOSES } from '../lib/request-usage.js';
+import { formatCache, formatCost, totalCost, requestContext, REQUEST_PURPOSES, groupRequests } from '../lib/request-usage.js';
 import './request-usage.css';
 
 const CHANGE_LABELS = { initial: '首次请求', append_only: '历史前缀保持一致', instructions_changed: '系统内容已变化',
@@ -8,10 +8,25 @@ const CHANGE_LABELS = { initial: '首次请求', append_only: '历史前缀保�
 
 export function RequestList({ reports = [] }) {
   if (!reports.length) return <p className="request-empty">还没有请求明细。后续模型请求会在这里记录。</p>;
+  return <div className="request-groups">
+    {groupRequests(reports).map(group => <details key={group.purpose} className="request-group" data-purpose={group.purpose}>
+      <summary>
+        <span className="request-group-title">{REQUEST_PURPOSES[group.purpose] || '其他'}请求 <span className="request-count">{group.reports.length} 次</span></span>
+        {group.failed > 0 && <span className="request-failure">{group.failed} 次失败</span>}
+        <span className="request-cost">{group.pricedRequests ? `≈ ${totalCost(group)}${group.pricedRequests < group.reports.length ? ' · 部分' : ''}` : '未计价'}</span>
+      </summary>
+      {group.purpose === 'subagent' && <p className="request-note request-group-note">同一子智能体可多次请求模型，此处按请求计数。</p>}
+      <RequestRows reports={group.reports} />
+    </details>)}
+  </div>;
+}
+
+function RequestRows({ reports }) {
   return <ol className="request-list">
-    {[...reports].reverse().map(report => <li key={report.id}>
+    {[...reports].reverse().map((report, index) => <li key={report.id || index}>
       <details className="request-item">
-        <summary><span className="request-identity">{REQUEST_PURPOSES[report.purpose] || '模型请求'}<small>{report.model || '模型未提供'}{report.status !== 'completed' ? ' · 请求失败' : ''}</small></span>
+        <summary><span className="request-number">第 {reports.length - index} 次</span><span className="request-identity" title={report.model}>{report.model || '模型未提供'}</span>
+          {report.status === 'failed' && <span className="request-failure">请求失败</span>}
           <span className="request-cost">{report.cost?.total != null ? '≈ ' : ''}{formatCost(report.cost?.total, report.cost?.currency)}</span></summary>
         <dl className="request-values">
           <div><dt>输入 / 输出</dt><dd>{report.usage?.exact ? '' : '≈ '}{formatTokens(report.usage?.inputTokens)} / {formatTokens(report.usage?.outputTokens)} tokens</dd></div>

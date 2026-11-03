@@ -341,6 +341,32 @@ html[data-theme] .voice-settings summary { cursor: pointer; font-size: 13px; col
 html[data-theme] .bubble-image { display: inline-flex; max-width: min(100%, 240px); vertical-align: middle; margin: 4px; }
 html[data-theme] .bubble-image img { max-width: 100%; max-height: 240px; object-fit: contain; border-radius: 6px; }
 
+/* 智能体与请求都先给摘要；展开长列表时在自身区域滚动，不拉长整段对话。 */
+html[data-theme] .agent-group { margin: 6px 0; }
+html[data-theme] .agent-group > .agent-group-head { min-height: 32px; padding: 4px 0; cursor: pointer; list-style: none; }
+html[data-theme] .agent-group > summary::-webkit-details-marker { display: none; }
+html[data-theme] .agent-group[open] > summary .tool-group-chevron { transform: rotate(90deg); }
+html[data-theme] .agent-group-list { max-height: 280px; overflow: auto; overscroll-behavior: contain; padding-left: 12px; }
+html[data-theme] .agent-group .agent-card { margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+html[data-theme] .agent-group .agent-head { min-height: 36px; padding: 6px 4px; }
+html[data-theme] .agent-group .agent-body { padding: 4px 8px 12px; }
+html[data-theme] .agent-group .agent-name { font-weight: 500; }
+html[data-theme] .agent-group .agent-head .tool-group-count { font-family: var(--sans); font-size: 12px; }
+html[data-theme] .agent-state { flex: none; font-size: 12px; color: var(--muted); }
+html[data-theme] .agent-card.is-failed .agent-state { color: var(--err); }
+html[data-theme] .agents-dock-list { max-height: 180px; overflow: auto; overscroll-behavior: contain; }
+html[data-theme] .agents-dock-head .queue-toggle { margin-left: auto; }
+html[data-theme] .agents-chip { color: var(--muted); background: var(--panel-2); }
+html[data-theme] .agents-chip:hover { background: var(--ui-hover); color: var(--ink); }
+html[data-theme] .turn-stats-detail { min-width: 0; }
+html[data-theme] .turn-stats-detail .turn-stats { opacity: 1; font-size: 12px; gap: 8px 16px; padding: 8px 0; margin: 0; }
+html[data-theme] .turn-stats-detail .turn-stat b { font-family: var(--sans); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+html[data-theme] .turn-stats-detail .turn-stat-note { width: 100%; margin: 0; color: var(--muted); }
+@media (max-width: 640px) {
+  html[data-theme] .agent-group > .agent-group-head, html[data-theme] .agent-group .agent-head, html[data-theme] .agents-dock-head { min-height: 44px; }
+  html[data-theme] .agent-group .agent-head .tool-group-count { display: none; }
+}
+
 /* Global shell: 52px function rail + 240px project column + remaining workspace.
  * The 44px toolbar spans all columns; native window controls stay with the OS. */
 html[data-theme] .app {

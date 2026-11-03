@@ -9,7 +9,7 @@ import { api } from '../api.js';
 import { historyPrefetchDistance } from '../lib/history.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
 import { TOOL_ICONS, TOOL_STATUS_TITLES, toolArgsText, toolLabel } from '../lib/tool-meta.js';
-import { agentMeta, agentTitle, manifestFacts, splitSubagentResult } from '../lib/agents.js';
+import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel } from '../lib/agents.js';
 import { splitAttachmentMarkers, layoutMessageParts, attachmentUrl, isImageAttachment, formatBytes } from '../lib/attachments.js';
 import { changeFileTitle, splitPath, statusKind } from '../lib/changes.js';
 import { writeClipboard } from '../lib/clipboard.js';
@@ -404,7 +404,7 @@ const Turn = memo(function Turn({ row, isLast }) {
             {row.thinking && <ThinkingBlock thinking={row.thinking} />}
           </>
         )}
-      {Object.values(row.agents || {}).map((agent) => <AgentCard key={agent.id} agent={agent} />)}
+      <AgentGroup agents={row.agents} />
       {(replyText || row.reply.live) && (
         <article className={`msg msg-assistant${row.reply.live ? ' is-streaming' : ''}`}>
           <div className="who"><span className="who-mark">P</span>Pilot</div>
@@ -435,7 +435,7 @@ const Turn = memo(function Turn({ row, isLast }) {
           )}
         </article>
       )}
-      <TurnStats stats={row.stats} reports={row.requests} />
+      <TurnStats stats={row.stats} reports={row.requests} agentCount={Object.keys(row.agents || {}).length} />
     </div>
   );
 });
@@ -614,6 +614,16 @@ function elapsedSeconds(startedAt, finishedAt) {
   return Math.max(0, Math.round(((finishedAt || Date.now()) - startedAt) / 1000));
 }
 
+const AgentGroup = memo(function AgentGroup({ agents }) {
+  const list = Object.values(agents || {});
+  if (!list.length) return null;
+  const summary = summarizeAgents(list);
+  return <details className="agent-group">
+    <summary className="agent-group-head"><span className="tool-group-chevron" aria-hidden="true" /><span>{summary.text}</span></summary>
+    <div className="agent-group-list">{list.map(agent => <AgentCard key={agent.id} agent={agent} />)}</div>
+  </details>;
+});
+
 const AgentCard = memo(function AgentCard({ agent }) {
   useSecondTick(agent.status === 'running');
   // 回传正文末尾的 <subagent_result> 是给父模型合并用的清单，不该原样糊在界面上
@@ -622,13 +632,14 @@ const AgentCard = memo(function AgentCard({ agent }) {
   const tools = (agent.tools || []).length;
   const ms = agent.startedAt ? (agent.finishedAt || Date.now()) - agent.startedAt : null;
   return (
-    <details className={`tool-group agent-card${agent.status === 'running' ? ' is-running' : ''}`}>
+    <details className={`tool-group agent-card is-${agent.status || 'stopped'}`}>
       <summary className="tool-group-head agent-head">
         <span className="tool-group-chevron" aria-hidden="true" />
         <span className="agent-dot" aria-hidden="true" />
         <span className="tool-group-label agent-name" title={agent.task}>
           {agent.name || agentTitle(agent.task) || agent.id}
         </span>
+        <span className="agent-state">{agentStatusLabel(agent.status)}</span>
         <span className="tool-group-count">{agentMeta({ tools, ms, status: agent.status })}</span>
       </summary>
       <div className="agent-body">
@@ -698,7 +709,7 @@ const CopyControl = memo(function CopyControl({ text, label = '复制', tip = '�
   );
 });
 
-const TurnStats = memo(function TurnStats({ stats, reports }) {
+const TurnStats = memo(function TurnStats({ stats, reports, agentCount }) {
   const running = Boolean(stats?.startedAt) && !stats?.finishedAt;
   useSecondTick(running);
   if (!stats) {
@@ -715,7 +726,8 @@ const TurnStats = memo(function TurnStats({ stats, reports }) {
   return (
     <details className="turn-stats-detail"><summary>{elapsed != null ? `${elapsed}s · ` : ''}用量详情</summary><div className="turn-stats">
       {elapsed != null && <span className="turn-stat"><span>耗时</span><b>{elapsed}s</b></span>}
-      <span className="turn-stat"><span>请求</span><b>{stats.modelRequests ?? '—'}</b></span>
+      <span className="turn-stat"><span>模型请求</span><b>{stats.modelRequests ?? '—'} 次</b></span>
+      {agentCount > 0 && <span className="turn-stat"><span>子智能体</span><b>{agentCount} 个</b></span>}
       <span className="turn-stat" title={stats.inputTokens ?? ''}><span>输入</span><b>{mark}{formatCount(stats.inputTokens)}</b></span>
       <span className="turn-stat" title={stats.outputTokens ?? ''}><span>输出</span><b>{mark}{formatCount(stats.outputTokens)}</b></span>
       <span className="turn-stat" title={`命中缓存 ${formatCount(stats.cachedInputTokens)} / 总输入 ${formatCount(stats.inputTokens)}`}>

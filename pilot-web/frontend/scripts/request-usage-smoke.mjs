@@ -84,7 +84,8 @@ async function run(page,name){
   await page.evaluate(()=>document.documentElement.dataset.theme='light');
   await page.screenshot({path:join(temp,`${name}-light-compact.png`)});
   await page.setViewportSize({width:390,height:900}); await page.evaluate(()=>document.documentElement.dataset.theme='dark');
-  await panel.getByRole('button',{name:'查看请求明细'}).click(); await panel.locator('summary').click();
+  await panel.getByRole('button',{name:'查看请求明细'}).click();
+  await panel.locator('.request-group > summary').click(); await panel.locator('.request-item > summary').click();
   assert.match(await panel.innerText(),/缓存读取/); assert.match(await panel.innerText(),/0.32s/); assert.match(await panel.innerText(),/实际缓存命中以端点用量为准/);
   await page.keyboard.press('Escape'); await panel.waitFor({state:'hidden'}); assert.equal(await page.locator('#context-chip').evaluate(el=>el===document.activeElement),true);
   const failed={...report,id:'failed',purpose:'subagent',status:'failed',usage:{inputTokens:100,outputTokens:0,exact:false},cost:{total:null},startedAt:101};

@@ -19,6 +19,7 @@ import { queueHeader, resumeBar } from '../lib/queue.js';
 import { PERMISSION_MODES, permissionLabel, permissionHint } from '../lib/permission.js';
 import { buildModelProbe, buildModelUpdate, describeModelsFetched } from '../lib/model-settings.js';
 import { usageLevel, usagePercent } from '../lib/context-usage.js';
+import { agentStatusLabel, summarizeAgents } from '../lib/agents.js';
 
 /**
  * 输入区：contenteditable 桥接旧版 composer-input（附件芯片 / @ 引用 / 粘贴纯文本），
@@ -918,20 +919,26 @@ function AgentDock() {
   if (!list.length) {
     return null;
   }
-  const running = list.filter((agent) => agent.status === 'running').length;
+  const summary = summarizeAgents(list);
+  // 已结束的子任务留在线程中；只有用户点顶部入口时才重开底部列表。
+  if (!open && !summary.running) return null;
+  const toggle = () => {
+    useStore.getState().setUi({ agentsDockOpen: !open });
+    if (open && !summary.running) document.getElementById('agents-chip')?.focus();
+  };
   return (
     <div id="agents-dock" className="agents-dock">
-      <header className="agents-dock-head" onClick={() => useStore.getState().setUi({ agentsDockOpen: !open })}>
-        <span>子智能体 · {list.length}{running ? ` · ${running} 个运行中` : ''}</span>
+      <button type="button" className="agents-dock-head" aria-expanded={open} aria-controls="agents-dock-list" onClick={toggle}>
+        <span>{summary.text}</span>
         <span className="queue-toggle">{open ? '收起' : '展开'}</span>
-      </header>
+      </button>
       {open && (
-        <ul className="agents-dock-list">
+        <ul id="agents-dock-list" className="agents-dock-list">
           {list.map((agent) => (
             <li key={agent.id}>
               <span className={`agent-status is-${agent.status}`} />
-              <span className="agent-name">{agent.name || agent.id}</span>
-              <span className="agent-latest">{agent.latest || agent.task?.slice(0, 48) || ''}</span>
+              <span className="agent-name" title={agent.task}>{agent.name || agent.task || agent.id}</span>
+              <span className="agent-state">{agentStatusLabel(agent.status)}</span>
             </li>
           ))}
         </ul>

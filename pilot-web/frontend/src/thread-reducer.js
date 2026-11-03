@@ -196,9 +196,11 @@ function finishTurnClock(draft, turn, event) {
   }
   for (const agent of Object.values(turn.agents || {})) {
     if (agent.status === 'running') {
-      agent.status = 'interrupted';
+      agent.status = 'stopped';
       agent.finishedAt = agent.finishedAt || finishedAt;
     }
+    // Immer 在后续事件中会分离两个路径的引用，不能依赖最初赋值的对象别名同步状态。
+    if (draft.agents[agent.id]) draft.agents[agent.id] = { ...agent };
   }
 }
 
@@ -765,6 +767,7 @@ export function applyEvent(draft, event, { live }) {
         agent.status = event.payload?.ok === false ? 'failed' : 'done';
         agent.result = event.payload?.result || agent.result || '';
         agent.finishedAt = eventTimestamp(event);
+        if (draft.agents[id]) draft.agents[id] = { ...agent };
       }
       record(draft, event, { kind: 'run', tone: 'ok', status: '完成', title: `子智能体完成 · ${id}`, detail: preview(event.payload?.result || '', 160) });
       break;

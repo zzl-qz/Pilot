@@ -29,7 +29,7 @@ export function summarizeAgents(agents) {
   const count = (status) => list.filter((agent) => agent.status === status).length;
   const running = count('running');
   const failed = count('failed');
-  const stopped = count('stopped');
+  const stopped = count('stopped') + count('interrupted');
   const done = count('done');
   const bits = [`${list.length} 个子智能体`];
   if (running) bits.push(`${running} 运行中`);
@@ -37,6 +37,10 @@ export function summarizeAgents(agents) {
   if (stopped) bits.push(`${stopped} 已中止`);
   if (list.length && done === list.length) bits.push('全部完成');
   return { total: list.length, running, failed, stopped, done, text: bits.join(' · ') };
+}
+
+export function agentStatusLabel(status) {
+  return { running: '运行中', done: '已完成', failed: '失败', stopped: '已中止', interrupted: '已中止' }[status] || '状态未知';
 }
 
 /** 毫秒 → 「850ms」「12s」「2m 05s」。 */

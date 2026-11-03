@@ -29,6 +29,26 @@ export function totalCost(details) {
 
 export const REQUEST_PURPOSES = { main: '主任务', subagent: '子代理', compaction: '上下文压缩', review: '核验', finalization: '收尾' };
 
+/** 按请求用途归类，不能用子代理请求次数推算智能体个数。未知价格不记为零，不混加币种。 */
+export function groupRequests(reports = []) {
+  const groups = new Map(), seen = new Set();
+  for (const report of reports) {
+    if (!report || (report.id && seen.has(report.id))) continue;
+    if (report.id) seen.add(report.id);
+    const purpose = Object.hasOwn(REQUEST_PURPOSES, report.purpose) ? report.purpose : 'other';
+    if (!groups.has(purpose)) groups.set(purpose, { purpose, reports: [], failed: 0, pricedRequests: 0, costs: {} });
+    const group = groups.get(purpose);
+    group.reports.push(report);
+    if (report.status === 'failed') group.failed++;
+    const amount = report.cost?.total, currency = report.cost?.currency || 'USD';
+    if (amount != null && amount !== '' && Number.isFinite(Number(amount)) && Number(amount) >= 0) {
+      group.pricedRequests++;
+      group.costs[currency] = (group.costs[currency] || 0) + Number(amount);
+    }
+  }
+  return ['main', 'subagent', 'compaction', 'review', 'finalization', 'other'].flatMap(key => groups.has(key) ? [groups.get(key)] : []);
+}
+
 export function requestContext(status, report) {
   const parts = Array.isArray(report?.context?.parts) ? report.context.parts.filter(p => Number(p.tokens) > 0) : [];
   const used = parts.length ? parts.reduce((sum, item) => sum + Number(item.tokens), 0)

@@ -37,18 +37,32 @@ html[data-theme] .composer .request-usage-panel ul.context-composition-list { li
 .request-overview dd { margin: 2px 0 0; font-size: 14px; overflow-wrap: anywhere; }
 .request-price-link { text-align: left; }
 .request-panel-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--border); padding-top: 10px; color: var(--muted); }
-.request-list { margin: 0; padding: 0; list-style: none; }
-.request-item { border-top: 1px solid var(--border); }
-.request-item > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; cursor: pointer; list-style: none; }
-.request-item > summary::after { content: '⌄'; color: var(--muted); }
-.request-item[open] > summary::after { content: '⌃'; }
-.request-identity { min-width: 0; flex: 1; }
-.request-identity small { display: block; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
-.request-cost { flex: none; font-variant-numeric: tabular-nums; font-size: 12px; }
+.request-groups { min-width: 0; margin-top: 8px; }
+.request-group { min-width: 0; border-top: 1px solid var(--line-soft); }
+.request-group > summary, .request-item > summary {
+  display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 6px 4px;
+  cursor: pointer; list-style: none; font-size: 12px; line-height: 20px; color: var(--ink-2);
+}
+.request-group > summary::-webkit-details-marker, .request-item > summary::-webkit-details-marker { display: none; }
+.request-group > summary::before, .request-item > summary::before {
+  content: ''; width: 5px; height: 5px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg); flex: none; margin-right: 3px;
+}
+.request-group[open] > summary::before, .request-item[open] > summary::before { transform: rotate(45deg); }
+.request-group > summary:hover, .request-item > summary:hover { background: var(--ui-hover); }
+.request-group-title { flex: 1; min-width: 0; }
+.request-count { color: var(--muted); white-space: nowrap; margin-left: 4px; }
+.request-group-note { padding: 2px 4px 8px 20px; }
+.request-list { max-height: 320px; overflow: auto; overscroll-behavior: contain; margin: 0; padding: 0 4px 0 16px; list-style: none; }
+.request-item { border-top: 1px solid var(--line-soft); }
+.request-identity { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.request-number { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.request-cost { min-width: 0; max-width: 45%; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); }
+.request-failure { flex: none; color: var(--err); font-size: 12px; }
 .request-values { display: grid; gap: 6px; margin: 0 0 10px; }
 .request-values > div { display: flex; justify-content: space-between; gap: 16px; }
-.request-values dt { color: var(--muted); }
-.request-values dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.request-values dt { color: var(--muted); flex: none; }
+.request-values dd { min-width: 0; margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .request-item > .request-note { margin-bottom: 10px; }
 .request-runtime-settings { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 16px; }
 .request-runtime-settings > summary { cursor: pointer; font-weight: 500; }
@@ -56,7 +70,7 @@ html[data-theme] .composer .request-usage-panel ul.context-composition-list { li
 .request-runtime-settings .task-field { margin-top: 12px; }
 .request-setting-status { margin-top: 10px; color: var(--muted); font-size: 12px; }
 .request-runtime-settings input, .request-runtime-settings select { min-width: 0; width: 100%; }
-.request-usage-panel button:focus-visible, .request-item > summary:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.request-usage-panel button:focus-visible, .request-group > summary:focus-visible, .request-item > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 @media (max-width: 900px) {
   html[data-theme] .composer .request-usage-panel { position: fixed; left: 16px; right: 16px; bottom: 140px; width: auto; max-height: calc(100dvh - 190px); }
 }
@@ -65,4 +79,7 @@ html[data-theme] .composer .request-usage-panel ul.context-composition-list { li
   .request-usage-panel button { min-height: 36px; }
   .request-capacity { flex-wrap: wrap; gap: 4px 12px; }
   .request-prices { grid-template-columns: 1fr; }
+  .request-group > summary, .request-item > summary { min-height: 44px; gap: 6px; flex-wrap: wrap; }
+  .request-group > summary > .request-cost { flex-basis: 100%; max-width: none; text-align: left; padding-left: 16px; }
+  .request-list { padding-left: 8px; }
 }
