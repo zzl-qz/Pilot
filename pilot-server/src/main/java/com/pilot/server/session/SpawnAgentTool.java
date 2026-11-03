@@ -160,10 +160,13 @@ public final class SpawnAgentTool implements Tool {
         return text.toString();
     }
 
-    /** 子代理可能写文件，按写操作对待，走当前权限档位的审批。 */
+    /**
+     * 按只读对待：子代理的工具表在构造时就被裁剪成父级只读工具，写文件、命令、派生和 Goal 控制
+     * 都不在表里，因此它在 READ_ONLY 会话里也是安全的，不需要每次额外审批。
+     */
     @Override
     public boolean readOnly() {
-        return false;
+        return true;
     }
 
     @Override

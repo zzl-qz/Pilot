@@ -152,6 +152,21 @@ class SpawnAgentToolTest {
         assertFalse(visible.get(0).contains("late_parent_tool"));
     }
 
+    /** 子代理工具表已经裁剪成只读，工具本身也应声明只读：READ_ONLY 会话里不该被整体拒绝。 */
+    @Test
+    void readOnlySubagentPassesTheReadOnlyGate() {
+        ToolRegistry parent = new ToolRegistry();
+        parent.register(named("read_file"));
+        SpawnAgentTool tool = new SpawnAgentTool((request, tools) -> new ModelResponse("ok", List.of()),
+                parent, new PolicyPermissionGate(PermissionMode.READ_ONLY), ApprovalBroker.denyAll(),
+                new AgentLoop.Config(8, 0, 4, "sys"), List::of, event -> { }, () -> false);
+
+        assertTrue(tool.readOnly());
+        assertTrue(new PolicyPermissionGate(PermissionMode.READ_ONLY)
+                        .check(new ToolCall("call_1", "spawn_agent", Map.of("task", "只读盘点")), tool).isAllowed(),
+                "只读会话应允许派生只读子代理");
+    }
+
     @Test
     void exploreChildDoesNotReceiveWriteTools() {
         ToolRegistry parent = new ToolRegistry();
