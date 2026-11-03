@@ -1,0 +1,45 @@
+/* 对话刻度独立于消息布局，不改变原有滚动锚点。 */
+.thread-navigator { position: absolute; z-index: 8; left: 4px; top: 50%; transform: translateY(-50%); width: 28px; max-height: 75%; display: flex; flex-direction: column; align-items: center; color: var(--ink-2); }
+.thread-navigator button, .thread-nav-preview button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+.thread-nav-menu { width: 28px; min-height: 32px; display: grid; place-items: center; opacity: .65; }
+.thread-nav-menu:hover, .thread-nav-menu[aria-expanded=true] { opacity: 1; color: var(--ink); }
+.thread-navigator svg, .thread-nav-preview svg { width: 16px; height: 16px; flex: none; }
+.thread-nav-track { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; width: 28px; padding-block: 4px; }
+.thread-nav-track::-webkit-scrollbar { display: none; }
+.thread-nav-tick { display: flex; align-items: center; justify-content: flex-start; width: 28px; height: 12px; padding: 0 8px; }
+.thread-nav-tick span { display: block; width: 7px; height: 2px; background: var(--ink-2); opacity: .4; transition: width .12s, opacity .12s; }
+.thread-nav-tick.is-saved span { width: 13px; opacity: .75; }
+.thread-nav-tick.is-current span, .thread-nav-tick:hover span, .thread-nav-tick:focus-visible span { width: 20px; background: var(--ink); opacity: 1; }
+.thread-navigator :focus-visible, .thread-nav-preview :focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; border-radius: 3px; }
+.thread-nav-preview, .thread-nav-panel { color: var(--ink); background: var(--panel-2, var(--bg-soft)); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 22px rgb(0 0 0 / .16); font-size: 13px; text-align: left; }
+.thread-nav-preview { position: fixed; z-index: 70; padding: 12px; max-height: 190px; overflow: auto; }
+.thread-nav-preview > div { display: flex; gap: 8px; align-items: start; }
+.thread-nav-preview-title { padding: 0; min-width: 0; flex: 1; font-weight: 600 !important; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 24px; }
+.thread-nav-save { display: grid; place-items: center; padding: 3px; min-width: 24px; min-height: 24px; }
+.thread-nav-preview p { margin: 5px 0 8px; color: var(--ink-2); line-height: 1.65; white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.thread-nav-preview small, .thread-nav-panel small { color: var(--ink-2); font-size: 12px; line-height: 1.5; }
+.thread-nav-panel { position: absolute; left: 32px; top: 50%; transform: translateY(-50%); width: min(350px, calc(100vw - 70px)); max-height: min(520px, 65dvh); display: flex; flex-direction: column; padding: 12px; }
+.thread-nav-panel header { display: flex; align-items: center; justify-content: space-between; }
+.thread-nav-panel header button { width: 30px; height: 30px; font-size: 20px; }
+.thread-nav-filters { display: flex; gap: 16px; margin: 8px 0; }
+.thread-nav-filters button { min-height: 32px; padding: 0; color: var(--ink-2); }
+.thread-nav-filters [aria-pressed=true] { color: var(--ink); text-decoration: underline; text-underline-offset: 7px; }
+.thread-nav-list { overflow: auto; overscroll-behavior: contain; min-height: 0; }
+.thread-nav-item { display: flex; align-items: center; border-bottom: 1px solid var(--line-soft); }
+.thread-nav-item > button:first-child { flex: 1; min-width: 0; text-align: left; padding: 12px 4px; overflow-wrap: anywhere; }
+.thread-nav-item small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: 3px; }
+.thread-nav-item > button:last-child { width: 36px; min-height: 44px; flex: none; }
+.thread-nav-item:hover { background: var(--bg-soft); }
+.thread-nav-panel footer { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
+.thread-nav-panel footer button { text-align: left; text-decoration: underline; min-height: 28px; }
+.is-navigation-target .bubble, .is-navigation-target .msg-peek { outline: 1px solid var(--ink-2); outline-offset: 5px; border-radius: 8px; }
+html[data-theme] .thread-scroll-region:has(.thread-navigator) > .thread { padding-left: max(44px, calc((100% - 760px) / 2)); }
+@media (max-width: 640px), (pointer: coarse) {
+  .thread-navigator { width: 40px; left: 0; top: 8px; transform: none; max-height: none; }
+  .thread-nav-menu { width: 40px; min-height: 44px; background: var(--bg); opacity: 1; border-radius: 6px; }
+  .thread-nav-track { display: none; }
+  .thread-nav-panel { top: 48px; left: 8px; transform: none; width: min(350px, calc(100vw - 32px)); max-height: min(520px, 60dvh); }
+  .thread-nav-filters button, .thread-nav-panel header button { min-height: 44px; }
+  .thread-nav-item > button:last-child { width: 44px; }
+}
+@media (prefers-reduced-motion: reduce) { .thread-nav-tick span { transition: none; } }

@@ -1,3 +1,4 @@
+import ThreadNavigator from './ThreadNavigator.jsx';
 import { modifierKey, duplicateResult } from '../lib/interaction.js';
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useStickToBottom } from 'use-stick-to-bottom';
@@ -39,7 +40,7 @@ export function Thread() {
    * initial / resize 都用 'instant'：首屏直接落在最新消息；流式输出时底部内容持续长高，
    * 每帧瞬时贴底。用弹簧动画追赶会稳定落后一两百像素，还会让「回到底部」按钮反复闪烁。
    */
-  const { scrollRef, contentRef, scrollToBottom, isAtBottom } = useStickToBottom({
+  const { scrollRef, contentRef, scrollToBottom, isAtBottom, stopScroll } = useStickToBottom({
     initial: 'instant',
     resize: 'instant'
   });
@@ -57,6 +58,11 @@ export function Thread() {
   const lastScrollTop = useRef(0);
   const armed = useRef(false);
   const earlierTimer = useRef(null);
+  const navigationUntil = useRef(0);
+  const beforeNavigation = useCallback(() => {
+    clearTimeout(earlierTimer.current);
+    navigationUntil.current = performance.now() + 250;
+  }, []);
   const scheduleEarlier = useCallback(() => {
     clearTimeout(earlierTimer.current);
     earlierTimer.current = setTimeout(() => requestEarlierHistory(), 140);
@@ -71,6 +77,7 @@ export function Thread() {
     const goingUp = toTop < lastScrollTop.current;
     const goingDown = toTop > lastScrollTop.current;
     lastScrollTop.current = toTop;
+    if (performance.now() < navigationUntil.current) return;
     if (toTop > threshold) {
       // 退出去才重新武装：一次进入只预取一次，避开「插入 → 仍在区内 → 再预取」的连锁
       armed.current = false;
@@ -138,6 +145,7 @@ export function Thread() {
           )}
         </div>
       </div>
+      <ThreadNavigator rows={rows} scrollRef={scrollRef} contentRef={contentRef} stopFollowing={stopScroll} beforeJump={beforeNavigation} />
       <ThreadBottomButton visible={!isAtBottom} onJump={() => scrollToBottom({ animation: BACK_TO_LATEST })} />
     </div>
   );
@@ -296,7 +304,7 @@ function UserMessage({ row }) {
   );
   if (canPeek && !open) {
     return (
-      <article className="msg msg-user" data-sequence={row.sequence ?? undefined}>
+      <article className="msg msg-user" data-nav-key={row.key} data-sequence={row.sequence ?? undefined}>
         <button type="button" className="msg-peek" aria-expanded="false" title="展开这条消息" onClick={() => setOpen(true)}>
           <span className="msg-peek-grip" aria-hidden="true">
             <svg viewBox="0 0 16 16"><path d="M3 6.5h10M3 9.5h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
@@ -308,7 +316,7 @@ function UserMessage({ row }) {
     );
   }
   return (
-    <article className="msg msg-user" data-sequence={row.sequence ?? undefined}>
+    <article className="msg msg-user" data-nav-key={row.key} data-sequence={row.sequence ?? undefined}>
       <div className="bubble">
         <div className="bubble-flow">{renderMessageBody(parts.body, files, images, row.imagePositions)}</div>
       </div>
