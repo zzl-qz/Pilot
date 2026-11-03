@@ -196,6 +196,26 @@ class MultiAgentServiceTest {
         assertTrue(result.report().contains("立即停止推进"), result.report());
     }
 
+    /** 预算超了要停住并说清原因，而不是继续烧钱，也不丢已完成的产物。 */
+    @Test
+    void budgetPausesRemainingTasksWithAnExplanation() throws IOException {
+        ModelClient client = (messages, tools) -> new ModelResponse(REPORT, List.of(),
+                new com.pilot.core.model.ModelUsage(4_000, 500, 0, true));
+        MultiAgentService service = service(client);
+        service.setBudgetLimits(new com.pilot.server.config.MultiAgentBudget(600, 1_000));
+        TaskSpec upstream = TaskSpec.readOnly("T1", "调研一", "盘点第一段代码", List.of(), List.of("src/**"));
+        TaskSpec downstream = TaskSpec.readOnly("T2", "调研二", "接着盘点第二段", List.of("T1"), List.of("src/**"));
+
+        MultiAgentService.Result result = service.dispatch(dispatch(List.of(upstream, downstream)));
+
+        assertFalse(result.completed(), "预算耗尽不能算整批通过");
+        assertEquals(TaskStatus.DONE, result.outcomes().get(0).status(), "已完成的产物要保留");
+        assertEquals(TaskStatus.BLOCKED, result.outcomes().get(1).status());
+        assertTrue(result.outcomes().get(1).detail().contains("预算"), result.outcomes().get(1).detail());
+        assertTrue(events.stream().anyMatch(event -> event instanceof TaskUpdated updated
+                && "blocked".equals(updated.status())), "界面要能看到被暂停的任务");
+    }
+
     @Test
     void downstreamReadsUpstreamArtifactThroughTools() throws IOException {
         AtomicInteger requests = new AtomicInteger();

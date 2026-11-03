@@ -15,7 +15,9 @@
 
 - 基线提交：`6657b82`
 - 环境：Windows 11 / JDK 25（corretto-25.0.5）/ Maven 3.9.6
-- 全量测试：`pilot-core` 511 例、`pilot-server` 424 例
+- 全量测试：`pilot-core` 511 例、`pilot-server` 425 例
+- per-agent 用量：`GET /api/sessions/{id}/multi/dispatches` 的 `attempts` 里按任务给出
+  输入/输出 token 与请求数；`exact=false` 表示端点没返回 usage，是本地估算，不能当 0
 
 既有失败（**环境限制，与本次改动无关，不要当成回归**）：
 

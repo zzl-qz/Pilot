@@ -32,12 +32,34 @@ public final class JdbcDispatchStore {
     /** 单次尝试；{@code generation} 是租约代次，旧执行者的晚到结果写不进来。 */
     public record AttemptRow(String attemptId, String dispatchId, String taskId, String agentId,
                              String sandboxId, int generation, String status, String failure,
-                             String startedAt, String finishedAt) {
+                             String startedAt, String finishedAt, Usage usage) {
     }
 
     /** 新开一次尝试时拿到的租约：代次越大越新。 */
     public record Lease(String attemptId, int generation) {
         public static final Lease NONE = new Lease("", 0);
+    }
+
+    /**
+     * 一次尝试的模型用量（per-agent 归集的最小单位）。
+     *
+     * @param exact false 表示端点没返回 usage、这里是本地估算，界面必须标成「估算」而不是 0
+     */
+    public record Usage(long inputTokens, long outputTokens, long requests, boolean exact) {
+        public static final Usage EMPTY = new Usage(0, 0, 0, true);
+
+        public Usage merge(Usage other) {
+            if (other == null) {
+                return this;
+            }
+            return new Usage(inputTokens + other.inputTokens, outputTokens + other.outputTokens,
+                    requests + other.requests, exact && other.exact);
+        }
+
+        /** 预算口径：输入 + 输出。 */
+        public long total() {
+            return inputTokens + outputTokens;
+        }
     }
 
     private static final String[] SCHEMA = {
@@ -79,10 +101,22 @@ public final class JdbcDispatchStore {
                 status TEXT NOT NULL,
                 failure TEXT,
                 started_at TEXT NOT NULL,
-                finished_at TEXT
+                finished_at TEXT,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                requests INTEGER NOT NULL DEFAULT 0,
+                exact INTEGER NOT NULL DEFAULT 1
             )""",
             "CREATE INDEX IF NOT EXISTS idx_dispatches_session ON dispatches(session_id, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_task_attempts_task ON task_attempts(task_id, generation)"
+    };
+
+    /** 后补的列：表结构演进时只往后加，不改已有列。 */
+    private static final String[][] ADDED_COLUMNS = {
+            {"task_attempts", "input_tokens", "INTEGER NOT NULL DEFAULT 0"},
+            {"task_attempts", "output_tokens", "INTEGER NOT NULL DEFAULT 0"},
+            {"task_attempts", "requests", "INTEGER NOT NULL DEFAULT 0"},
+            {"task_attempts", "exact", "INTEGER NOT NULL DEFAULT 1"}
     };
 
     private final SqliteStore store;
@@ -94,6 +128,19 @@ public final class JdbcDispatchStore {
             for (String ddl : SCHEMA) {
                 JdbcSupport.update(resolved, ddl, statement -> { }, "初始化派发表失败");
             }
+            // 老库补列：表已经存在时 CREATE TABLE IF NOT EXISTS 不会改动它
+            for (String[] column : ADDED_COLUMNS) {
+                addColumnIfMissing(resolved, column[0], column[1], column[2]);
+            }
+        }
+    }
+
+    private static void addColumnIfMissing(SqliteStore store, String table, String column, String definition) {
+        boolean present = JdbcSupport.query(store, "PRAGMA table_info(" + table + ")", statement -> { },
+                rows -> rows.getString("name"), "检查派发表结构失败").contains(column);
+        if (!present) {
+            JdbcSupport.update(store, "ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition,
+                    statement -> { }, "补充派发表列失败");
         }
     }
 
@@ -208,20 +255,26 @@ public final class JdbcDispatchStore {
      *
      * @return {@code false} 表示这次回执来得太晚（旧执行者、被取消或已被新尝试取代），调用方应丢弃结果
      */
-    public boolean finishAttempt(String attemptId, int generation, String status, String failure) {
+    public boolean finishAttempt(String attemptId, int generation, String status, String failure, Usage usage) {
         if (!available() || attemptId == null || attemptId.isBlank()) {
             return true;
         }
+        Usage counted = usage == null ? Usage.EMPTY : usage;
         int updated = JdbcSupport.update(store, """
-                        UPDATE task_attempts SET status = ?, failure = ?, finished_at = ?
+                        UPDATE task_attempts SET status = ?, failure = ?, finished_at = ?,
+                                input_tokens = ?, output_tokens = ?, requests = ?, exact = ?
                         WHERE attempt_id = ? AND generation = ? AND status = 'running'
                         """,
                 statement -> {
                     statement.setString(1, status);
                     statement.setString(2, failure == null ? "" : failure);
                     statement.setString(3, java.time.Instant.now().toString());
-                    statement.setString(4, attemptId);
-                    statement.setInt(5, generation);
+                    statement.setLong(4, counted.inputTokens());
+                    statement.setLong(5, counted.outputTokens());
+                    statement.setLong(6, counted.requests());
+                    statement.setInt(7, counted.exact() ? 1 : 0);
+                    statement.setString(8, attemptId);
+                    statement.setInt(9, generation);
                 }, "结算任务尝试失败");
         return updated > 0;
     }
@@ -283,14 +336,16 @@ public final class JdbcDispatchStore {
         }
         return JdbcSupport.query(store, """
                         SELECT attempt_id, dispatch_id, task_id, agent_id, sandbox_id, generation, status, failure,
-                               started_at, finished_at
+                               started_at, finished_at, input_tokens, output_tokens, requests, exact
                         FROM task_attempts WHERE dispatch_id = ? ORDER BY task_id, generation
                         """,
                 statement -> statement.setString(1, dispatchId),
                 rows -> new AttemptRow(rows.getString("attempt_id"), rows.getString("dispatch_id"),
                         rows.getString("task_id"), rows.getString("agent_id"), rows.getString("sandbox_id"),
                         rows.getInt("generation"), rows.getString("status"), rows.getString("failure"),
-                        rows.getString("started_at"), rows.getString("finished_at")),
+                        rows.getString("started_at"), rows.getString("finished_at"),
+                        new Usage(rows.getLong("input_tokens"), rows.getLong("output_tokens"),
+                                rows.getLong("requests"), rows.getInt("exact") == 1)),
                 "查询任务尝试失败");
     }
 }

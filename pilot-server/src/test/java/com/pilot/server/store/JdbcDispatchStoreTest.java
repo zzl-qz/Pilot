@@ -46,7 +46,8 @@ class JdbcDispatchStoreTest {
         store.updateNode("dsp_1", "T1", "done", "agent_1", "完成", 1);
 
         JdbcDispatchStore.Lease lease = store.startAttempt("dsp_1", "T1", "agent_1", "sbx_1");
-        assertTrue(store.finishAttempt(lease.attemptId(), lease.generation(), "succeeded", ""));
+        assertTrue(store.finishAttempt(lease.attemptId(), lease.generation(), "succeeded", "",
+                new JdbcDispatchStore.Usage(1200, 300, 2, true)));
 
         List<JdbcDispatchStore.DispatchRow> dispatches = store.dispatches("ses_1");
         assertEquals(1, dispatches.size());
@@ -62,6 +63,10 @@ class JdbcDispatchStoreTest {
         assertEquals(1, attempts.size());
         assertEquals("succeeded", attempts.get(0).status());
         assertEquals("sbx_1", attempts.get(0).sandboxId());
+        assertEquals(1200, attempts.get(0).usage().inputTokens(), "用量要能按尝试查回来");
+        assertEquals(300, attempts.get(0).usage().outputTokens());
+        assertEquals(2, attempts.get(0).usage().requests());
+        assertTrue(attempts.get(0).usage().exact());
     }
 
     @Test
@@ -70,15 +75,19 @@ class JdbcDispatchStoreTest {
         store.saveDispatch("dsp_1", "ses_1", "run_1", "/tmp/ws", "running");
         JdbcDispatchStore.Lease first = store.startAttempt("dsp_1", "T1", "agent_1", "sbx_1");
 
-        assertTrue(store.finishAttempt(first.attemptId(), first.generation(), "succeeded", ""));
-        assertFalse(store.finishAttempt(first.attemptId(), first.generation(), "succeeded", ""),
+        assertTrue(store.finishAttempt(first.attemptId(), first.generation(), "succeeded", "",
+                JdbcDispatchStore.Usage.EMPTY));
+        assertFalse(store.finishAttempt(first.attemptId(), first.generation(), "succeeded", "",
+                        JdbcDispatchStore.Usage.EMPTY),
                 "同一代次的回执只能结算一次");
 
         JdbcDispatchStore.Lease second = store.startAttempt("dsp_1", "T1", "agent_2", "sbx_2");
         assertTrue(second.generation() > first.generation(), "重试必须拿到更大的代次");
-        assertFalse(store.finishAttempt(first.attemptId(), first.generation(), "failed", "旧执行者"),
+        assertFalse(store.finishAttempt(first.attemptId(), first.generation(), "failed", "旧执行者",
+                        JdbcDispatchStore.Usage.EMPTY),
                 "旧执行者的晚到结果不能改写状态");
-        assertTrue(store.finishAttempt(second.attemptId(), second.generation(), "succeeded", ""));
+        assertTrue(store.finishAttempt(second.attemptId(), second.generation(), "succeeded", "",
+                JdbcDispatchStore.Usage.EMPTY));
     }
 
     @Test
