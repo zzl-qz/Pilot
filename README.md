@@ -11,7 +11,8 @@ Pilot 是一个以 Java 构建的本地 Coding Agent 原型。用户通过 Web �
 - 项目记录建项目时的 git 基线（`baseCommit`），改文件夹只影响之后新建的对话，老对话保留自己的文件视图。
 - 多轮会话、运行历史、任务继续/重新生成与排队消息；运行中可分别选择排队下一件事、纠正当前任务或暂停后续跑。
 - 运行中发送的消息等待当前任务完成后依次独立执行；失败、取消、暂停、步数触顶、计划未完成或验收未通过时保留队列，等待期间可编辑、删除。
-- 持久保存原始目标、用户约束、验收条件与证据；续跑重新核对任务要求，明确验收条件需要人工勾选并提供证据。
+- 持久保存原始目标、用户约束、验收条件与证据；续跑重新核对任务要求，普通任务的明确验收条件需要人工勾选并提供证据，定时任务由 Goal 独立核验后自动验收。
+- 定时任务：侧栏管理计划，输入框时钟按钮带入文字草稿；支持一次性到期执行、改期、暂停/恢复、取消、模型预约唤醒及执行记录。
 - 通过 SSE 展示运行进度、工具调用和审批事件。
 - 本地工作区文件浏览、读取、搜索、修改及变更 diff；同一文件的多处独立精确替换可在一次 `edit_file` 调用中原子提交。
 - 同一轮多个独立的本地读取可并行执行，工具结果仍按模型调用顺序回填；写入、命令与需审批操作保持顺序执行。
@@ -186,6 +187,20 @@ bash mvnw -pl pilot-server spring-boot:run
 - `GET /api/maintenance/status`、`POST /api/maintenance/backup`、`POST /api/maintenance/purge`：存储、备份与保留策略。
 
 具体请求结构以 `pilot-server` 控制器实现为准；该列表是入口索引，不替代接口契约文档。
+
+## 定时任务
+
+侧栏「定时任务」可填写目标、验收条件、约束、技能及执行时间，使用当前工作区，在独立对话中执行。支持一次性计划；模型可通过 `wait_until` 保存状态并预约下一次检查，无需占住线程等待。完成和需要处理时显示站内提示。
+
+计划复用 SQLite、RunStarter、AgentRunService、任务检查点和 Goal 核验。设计参考 [OpenClaw cron](https://docs.openclaw.ai/automation/cron-jobs/how-it-works) 的持久计划与独立上下文、[管理界面](https://docs.openclaw.ai/automation/cron-jobs/managing-jobs)的状态和执行历史，以及 [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence) 的恢复边界；未另建模型执行循环。
+
+定时任务默认授予本任务全部已提供工具的执行权限，不改全局设置；子任务继承授权但保留 scope、工作区和沙箱限制。创建时可取消自主执行，沿用原有审批规则。所有定时任务都必须先读取开源仓库，通过 `record_research` 记录可追溯的来源、复用决定和许可证检查说明，之后才能写入、运行命令或派发子代理。仅有搜索结果不能解除门禁。目标、约束与验收条件通过独立核验后才能完成。
+
+后端需要保持运行；休眠、关机或后端关闭期间不执行，恢复后补投到期任务。中断自动恢复最多 3 次（30/60/120 秒），首次启动后的总时限 24 小时，最多 100 次唤醒，并保留原有模型预算。人工暂停不自动恢复，未知投递和预算耗尽进入「需要处理」。目前只支持单后端实例与文字目标/工作区文件，不支持周期 cron、云端代跑或附件投递，也不承诺外部副作用全局 exactly-once。
+
+接口为 `GET/POST /api/schedules` 与 `POST /api/schedules/{id}/control`；控制动作包括 `pause`、`resume`、`cancel`、`reschedule`。时间使用 UTC Instant 存储，界面按 IANA 时区显示。
+
+验证：相关后端回归 165 项通过；`npm run test:schedules -- --production` 在 macOS 的 Chromium/Electron 验证创建、改期、暂停、恢复、取消、结果入口、草稿保留、错误反馈和三种屏幕宽度。时钟、模型与 UI API 使用测试替身；Windows/Linux 尚未实机验证，未做真实模型长时间无人值守验证。
 
 ## 任务控制
 

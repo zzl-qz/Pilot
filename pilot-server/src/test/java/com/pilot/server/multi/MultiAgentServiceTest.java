@@ -159,6 +159,23 @@ class MultiAgentServiceTest {
     }
 
     @Test
+    void explicitParentAuthorizationAppliesToChildrenWithoutChangingGlobalMode() throws IOException {
+        AtomicInteger calls = new AtomicInteger();
+        MultiAgentService service = service((messages, tools) -> {
+            calls.incrementAndGet();
+            return new ModelResponse(REPORT, List.of());
+        }, PermissionMode.READ_ONLY);
+        TaskSpec spec = TaskSpec.editable("authorized", "修改", "修改 src/A.java",
+                List.of(), List.of("src/**"), com.pilot.core.multi.RiskLevel.LOW);
+        var authorized = dispatch(List.of(spec)).withParentPermission(PermissionMode.AUTO);
+        assertEquals(PermissionMode.AUTO, authorized.withDispatchId("persisted").parentPermission());
+        assertTrue(service.dispatch(authorized).completed());
+        assertEquals(1, calls.get());
+        assertFalse(service.dispatch(dispatch(List.of(spec))).completed());
+        assertEquals(1, calls.get());
+    }
+
+    @Test
     void failedTaskBlocksItsDownstreamOnly() throws IOException {
         ModelClient failing = (messages, tools) -> {
             throw new IllegalStateException("boom");

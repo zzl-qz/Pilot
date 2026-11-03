@@ -1,3 +1,4 @@
+import Schedules from './Schedules.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { Sidebar } from './Sidebar.jsx';
@@ -347,6 +348,7 @@ export default function App() {
         </div>
       </main>
       <SelectionQuote />
+      <ErrorBoundary name="定时任务"><Schedules /></ErrorBoundary>
       <ErrorBoundary name="弹层"><Modals /></ErrorBoundary>
     </div>
   );

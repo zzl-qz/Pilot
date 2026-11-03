@@ -415,6 +415,94 @@ class AgentRunTaskControlTest {
         }
     }
 
+    @Test void unattendedUsesTaskPermissionAndAutomaticallyAcceptsOnlyVerifiedEvidence() throws Exception {
+        AtomicReference<TaskControlService> taskRef = new AtomicReference<>();
+        AtomicReference<String> sessionRef = new AtomicReference<>();
+        AtomicInteger effects = new AtomicInteger();
+        Tool action = new Tool() {
+            public String name() { return "local_action"; }
+            public String description() { return "测试无人值守权限"; }
+            public Map<String, Object> parameters() { return Map.of("type", "object", "properties", Map.of()); }
+            public boolean readOnly() { return false; }
+            public boolean confirm(Map<String, Object> args) { return true; }
+            public String execute(Map<String, Object> args) { effects.incrementAndGet(); return "操作成功，结果已验证"; }
+        };
+        AtomicInteger requests = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            if (tools.stream().anyMatch(t -> "submit_decision".equals(t.name()))) {
+                var state = taskRef.get().load(sessionRef.get()).execution();
+                String evidence = state.evidence().stream().filter(e -> "local_action".equals(e.tool())).findFirst().orElseThrow().id();
+                var coverage = java.util.stream.IntStream.range(0, state.criteria().size())
+                        .mapToObj(i -> Map.of("criterion", i, "satisfied", true, "evidence", List.of(evidence))).toList();
+                return new ModelResponse("", List.of(new ToolCall("review", "submit_decision", Map.of(
+                        "decision", "COMPLETE", "gap", "", "next_action", "", "expected_observation", "", "coverage", coverage))));
+            }
+            if (requests.incrementAndGet() == 1) return new ModelResponse("", List.of(new ToolCall("action", "local_action", Map.of())));
+            return done();
+        };
+        try (Fixture f = new Fixture(model, action)) {
+            taskRef.set(f.tasks); sessionRef.set(f.id);
+            f.start(new TaskControlService.Requirements(List.of(), List.of(new TaskControlService.Acceptance("操作成功", false, "")),
+                    new TaskControlService.Automation("scheduled", true, false)));
+            f.finished("COMPLETED");
+            assertEquals(1, effects.get());
+            assertEquals("COMPLETED", f.tasks.load(f.id).status());
+            assertTrue(f.tasks.load(f.id).acceptance().getFirst().checked());
+            assertTrue(f.tasks.load(f.id).acceptance().getFirst().evidence().contains("证据"));
+        }
+    }
+
+    @Test void unattendedReviewCannotSkipTheResearchPolicy() throws Exception {
+        CountDownLatch inspected = new CountDownLatch(1), release = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicBoolean hasPolicy = new java.util.concurrent.atomic.AtomicBoolean();
+        ModelClient model = (messages, tools) -> {
+            hasPolicy.set(tools.stream().anyMatch(t -> "record_research".equals(t.name())));
+            inspected.countDown(); await(release); return done();
+        };
+        try (Fixture f = new Fixture(model, null)) {
+            String run = f.service.claimRun(f.id).orElseThrow();
+            f.sessions.publish(f.id, run, new RunStarted("/review 检查调度"));
+            f.service.start(f.id, run, "/review 检查调度", List.of(),
+                    new TaskControlService.Requirements(List.of(), List.of(), new TaskControlService.Automation("scheduled", true, true)));
+            await(inspected);
+            assertTrue(hasPolicy.get());
+            assertEquals("GOAL", f.tasks.load(f.id).execution().mode());
+            f.service.cancel(run); release.countDown(); f.finished("CANCELLED");
+            assertEquals("PAUSED", f.tasks.load(f.id).status());
+        } finally { release.countDown(); }
+    }
+
+    @Test void shutdownLeavesUnattendedTaskInterruptedForRecovery() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        ModelClient model = (messages, tools) -> { entered.countDown(); await(release); return done(); };
+        try (Fixture f = new Fixture(model, null)) {
+            f.start(new TaskControlService.Requirements(List.of(), List.of(),
+                    new TaskControlService.Automation("scheduled", true, true)));
+            await(entered); f.service.shutdown(); release.countDown();
+            assertNotNull(f.finished.poll(8, TimeUnit.SECONDS));
+            assertEquals("INTERRUPTED", f.tasks.load(f.id).status());
+        } finally { release.countDown(); }
+    }
+
+    @Test void cancellingQueuedWorkerStillReleasesItsSessionSlot() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            calls.incrementAndGet(); entered.countDown(); await(release); return done();
+        };
+        try (Fixture f = new Fixture(model, null)) {
+            f.start(null); await(entered);
+            String second = f.sessions.createSession("等待线程", workspace.toString()).id();
+            String queuedRun = f.service.claimRun(second).orElseThrow();
+            f.sessions.publish(second, queuedRun, new RunStarted("等待执行"));
+            f.service.start(second, queuedRun, "等待执行");
+            assertTrue(f.service.cancel(queuedRun));
+            release.countDown(); f.finished("COMPLETED", "CANCELLED");
+            assertTrue(f.service.activeRun(second).isEmpty());
+            assertEquals(1, calls.get());
+        } finally { release.countDown(); }
+    }
+
     private class Fixture implements AutoCloseable {
         final SessionService sessions = new SessionService();
         final InMemoryPlanRepository plans = new InMemoryPlanRepository();
@@ -440,6 +528,11 @@ class AgentRunTaskControlTest {
                 ToolRegistry tools = new ToolRegistry();
                 tools.register(new ReadFileTool(new PathValidator(workspace)));
                 if (additional != null) tools.register(additional);
+                return tools;
+            });
+            when(factory.registryForScope(anyString(), any(), any())).thenAnswer(invocation -> {
+                ToolRegistry tools = new ToolRegistry();
+                tools.register(new ReadFileTool(new PathValidator(workspace)));
                 return tools;
             });
             RunMetrics metrics = new RunMetrics() {

@@ -128,6 +128,8 @@ class SpawnAgentToolTest {
         ToolRegistry parent = new ToolRegistry();
         parent.register(named("read_file"));
         parent.register(named("promote_goal"));
+        parent.register(named("wait_until"));
+        parent.register(named("record_research"));
         parent.register(named("dispatch_agents"));
         ArrayList<Set<String>> visible = new ArrayList<>();
         ModelClient client = (request, definitions) -> {

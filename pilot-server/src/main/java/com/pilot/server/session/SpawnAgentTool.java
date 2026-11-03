@@ -54,7 +54,7 @@ public final class SpawnAgentTool implements Tool {
     private static final int MAX_SUBAGENT_REQUESTS_PER_RUN = 24;
     private static final Set<String> FORBIDDEN_TOOLS = Set.of(
             "spawn_agent", "dispatch_agents", "promote_goal", "create_goal", "update_goal",
-            "update_plan", "stop_command");
+            "update_plan", "stop_command", "wait_until", "record_research");
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
 
     private final ModelClient client;

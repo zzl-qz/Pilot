@@ -27,6 +27,12 @@ public final class DispatchAgentsTool implements Tool {
     private static final int MAX_TASKS = 12;
 
     private final com.pilot.core.model.ModelClient executionClient;
+    private com.pilot.core.permission.PermissionMode parentPermission;
+    public DispatchAgentsTool withParentPermission(com.pilot.core.permission.PermissionMode permission) {
+        this.parentPermission = permission;
+        return this;
+    }
+
     private final MultiAgentService service;
     private final String sessionId;
     private final String runId;
@@ -150,7 +156,7 @@ public final class DispatchAgentsTool implements Tool {
         try {
             MultiAgentService.Result result = service.dispatch(
                     new MultiAgentService.Dispatch(sessionId, runId, workspace, specs, events, cancelled,
-                            executionClient, usageSink));
+                            executionClient, usageSink).withParentPermission(parentPermission));
             return result.report();
         } catch (IllegalArgumentException e) {
             return "ERROR: 任务计划不合法：" + e.getMessage();

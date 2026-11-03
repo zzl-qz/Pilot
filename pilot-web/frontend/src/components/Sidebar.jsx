@@ -63,6 +63,9 @@ export function Sidebar() {
         <kbd>{shortcut('N')}</kbd>
       </button>
 
+      <button className="schedule-nav" type="button" onClick={() => useStore.getState().setUi({ schedulesOpen: true, scheduleDraft: null })}>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.5V8l2.5 1.5"/></svg>定时任务
+      </button>
       <label className="session-search" htmlFor="session-search">
         <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2" stroke="currentColor" strokeWidth="1.4" fill="none" /><path d="m10.2 10.2 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
         <input

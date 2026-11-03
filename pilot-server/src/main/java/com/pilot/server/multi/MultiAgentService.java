@@ -154,7 +154,18 @@ public class MultiAgentService {
      */
     public record Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
                            Consumer<SessionEvent> events, BooleanSupplier cancelled, ModelClient executionClient,
-                           com.pilot.server.session.SpawnAgentTool.UsageSink usageSink, String dispatchId) {
+                           com.pilot.server.session.SpawnAgentTool.UsageSink usageSink, String dispatchId, PermissionMode parentPermission) {
+        public Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
+                        Consumer<SessionEvent> events, BooleanSupplier cancelled, ModelClient executionClient,
+                        com.pilot.server.session.SpawnAgentTool.UsageSink usageSink, String dispatchId) {
+            this(sessionId, runId, workspace, specs, events, cancelled, executionClient, usageSink, dispatchId, null);
+        }
+
+        /** 父 run 的显式授权快照；模型参数不能设置该字段。 */
+        public Dispatch withParentPermission(PermissionMode permission) {
+            return new Dispatch(sessionId, runId, workspace, specs, events, cancelled, executionClient,
+                    usageSink, dispatchId, permission);
+        }
         public Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
                         Consumer<SessionEvent> events, BooleanSupplier cancelled) {
             this(sessionId, runId, workspace, specs, events, cancelled, null, null, "");
@@ -174,7 +185,7 @@ public class MultiAgentService {
         /** 绑定持久化编号：调度开始时才生成，之前为空表示「还没落库」。 */
         public Dispatch withDispatchId(String id) {
             return new Dispatch(sessionId, runId, workspace, specs, events, cancelled, executionClient,
-                    usageSink, id == null ? "" : id);
+                    usageSink, id == null ? "" : id, parentPermission);
         }
 
         com.pilot.server.session.SpawnAgentTool.UsageSink usageSinkOrNull() {
@@ -488,7 +499,7 @@ public class MultiAgentService {
         };
         // 读取时叠加上游产物：下游读文件看到的是上游改过的内容，而不是磁盘上的旧版本
         SandboxSink sink = own.overlay(upstreamView(spec, states));
-        PermissionMode mode = effectiveMode(spec.scope());
+        PermissionMode mode = effectiveMode(spec.scope(), dispatch.parentPermission());
         if (mode == PermissionMode.READ_ONLY && spec.scope() != null && spec.scope().writable()) {
             // 不能让子 Agent 偷偷放开权限完成可写任务：明确告诉用户要切档位
             return new Attempt(agentId, List.of(), sandbox, null, false,
@@ -559,8 +570,8 @@ public class MultiAgentService {
      * 子 Agent 的有效权限：继承父会话档位，只能收紧不能放开（与 Codex 子 Agent 一致）。
      * 只读任务永远拿不到写权限；父会话档位为 null 时按最保守的 READ_ONLY 处理。
      */
-    private PermissionMode effectiveMode(com.pilot.core.multi.AgentScope scope) {
-        PermissionMode parent = permissions == null ? null : permissions.mode();
+    private PermissionMode effectiveMode(com.pilot.core.multi.AgentScope scope, PermissionMode authorizedParent) {
+        PermissionMode parent = authorizedParent != null ? authorizedParent : permissions == null ? null : permissions.mode();
         if (scope != null && !scope.writable()) return PermissionMode.READ_ONLY;
         return parent == null ? PermissionMode.READ_ONLY : parent;
     }

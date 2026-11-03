@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:schedules": "node scripts/schedule-smoke.mjs",
     "test:composer": "node scripts/composer-smoke.mjs",
     "dev:ui": "vite",
     "build": "node scripts/build.mjs",

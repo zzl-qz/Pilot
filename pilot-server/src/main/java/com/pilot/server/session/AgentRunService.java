@@ -125,6 +125,8 @@ public class AgentRunService implements RunStarter {
     private final com.pilot.server.validation.ValidationLedger validations;
     /** 自定义子代理目录；测试轻量装配不注入时，spawn/dispatch 的 agent 引用只能拿到空目录。 */
     private volatile AgentProfileService agentProfiles;
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<com.pilot.server.schedule.ScheduleService> scheduleService;
     private volatile com.pilot.server.desktop.DesktopViewportReset viewportReset;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -647,9 +649,11 @@ public class AgentRunService implements RunStarter {
                     taskControls.start(sessionId, input,
                             requirements == null ? List.of() : requirements.constraints(),
                             requirements == null ? List.of() : requirements.acceptance());
+                    if (requirements != null && requirements.automation() != null)
+                        taskControls.configureAutomation(sessionId, requirements.automation());
                     queuedMessages.save("steer:" + sessionId, List.of());
                 } else if (previous != null) {
-                    if (continuation && "BUDGET_LIMITED".equals(previous.status())) taskControls.extendBudget(sessionId);
+                    if (continuation && previous.automation() == null && "BUDGET_LIMITED".equals(previous.status())) taskControls.extendBudget(sessionId);
                     if (regenerate) {
                         taskControls.reassess(sessionId);
                         plans.delete(sessionId);
@@ -679,6 +683,7 @@ public class AgentRunService implements RunStarter {
     /** 工作线程主体：无论怎么结束都要注销槽位，否则 /continue 会永久 409。 */
     private void runOnWorker(String sessionId, String runId, String input, List<Attachment> attachments,
                              List<Integer> imagePositions, RunHandle handle, boolean continuation) {
+        synchronized (handle) { handle.workerThread = Thread.currentThread(); }
         long startedAt = System.currentTimeMillis();
         String status = "FAILED";
         boolean continued = false;
@@ -690,7 +695,7 @@ public class AgentRunService implements RunStarter {
             taskControls.status(sessionId, "FAILED");
             publish(sessionId, runId, new RunFailed("INTERNAL_ERROR", "执行失败：" + e.getMessage(), true));
         } finally {
-            handle.accepting = false;
+            synchronized (handle) { handle.workerThread = null; handle.accepting = false; }
             runs.remove(runId, handle);
             try {
                 runRepository.finished(runId, status, java.time.Instant.now());
@@ -873,11 +878,11 @@ public class AgentRunService implements RunStarter {
         if (handle == null) {
             return false;
         }
-        handle.accepting = false;
-        handle.cancelled.set(true);
-        Future<?> future = handle.future;
-        if (future != null) {
-            future.cancel(true);
+        synchronized (handle) {
+            handle.accepting = false;
+            handle.cancelled.set(true);
+            Thread worker = handle.workerThread;
+            if (worker != null) worker.interrupt();
         }
         handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
         log.info("Run {} cancel requested", runId);
@@ -1168,7 +1173,9 @@ public class AgentRunService implements RunStarter {
         String workspace = sessions.find(sessionId).map(Session::workspace).orElse(null);
         // /review 独立审查模式：只读工具表 + 固定审查协议，写文件与派发工具在本 run 里不存在。
         // 权限语义不变（只读命令照常放行，写命令照旧审批），不新加档位也不影响普通 run。
-        ReviewMode review = ReviewMode.parse(input);
+        TaskControlService.TaskContract executionTask = taskControls.load(sessionId);
+        boolean unattended = executionTask != null && executionTask.automation() != null;
+        ReviewMode review = ReviewMode.parse(unattended ? executionTask.originalGoal() : input);
         PlanSink planSink = (items, explanation) -> {
             plans.save(sessionId, items);
             publish(sessionId, runId, new PlanUpdated(
@@ -1190,6 +1197,8 @@ public class AgentRunService implements RunStarter {
         // 让 system prompt 只注入本轮真实可用的工具说明。
         // 审查 run 用 reviewTools 的最终名单：它既不注册也不允许派发工具，
         // 不能再补 spawn_agent / dispatch_agents，否则提示词会介绍本轮根本调不到的工具。
+        if (unattended && scheduleService != null)
+            tools.register(scheduleService.getObject().wakeTool(sessionId));
         Set<String> availableTools = review.active() ? tools.names() : sessionTools(tools);
         RunUsageAccumulator runUsage = new RunUsageAccumulator();
         // 收尾事件里的检查摘要要用于校验证据，sink 里先留一份
@@ -1211,7 +1220,8 @@ public class AgentRunService implements RunStarter {
             SessionEvent delivered = event instanceof RunUsageUpdated usage
                     ? runUsage.main(usage) : event;
             if (event instanceof com.pilot.core.event.RunCancelled) {
-                taskControls.status(sessionId, handle.paused ? "PAUSED" : "INTERRUPTED");
+                var stoppedTask = taskControls.load(sessionId);
+                taskControls.status(sessionId, handle.paused || (handle.interruptedReason == null && stoppedTask != null && stoppedTask.automation() != null) ? "PAUSED" : "INTERRUPTED");
                 if (handle.paused) delivered = new RunFailed("PAUSED", "任务已暂停，目标、约束、验收条件和排队消息已保留。", true);
                 else if (handle.interruptedReason != null) delivered = new RunFailed("INTERRUPTED", handle.interruptedReason, true);
             } else if (event instanceof RunFailed failed) {
@@ -1262,7 +1272,7 @@ public class AgentRunService implements RunStarter {
                 properties.maxPlanContinues(),
                 properties.contextMaxChars(),
                 properties.completionChecksEnabled());
-        GoalExecutionPolicy goalPolicy = !review.active() && properties.goalModeEnabledValue()
+        GoalExecutionPolicy goalPolicy = (unattended || (!review.active() && properties.goalModeEnabledValue()))
                 ? new GoalExecutionPolicy(modelClient, objectMapper, taskControls, sessionId,
                     toolFactory.resolve(workspace), handle.cancelled::get, properties.maxSteps(),
                     properties.directMaxRequests(), properties.directMaxInputTokens(),
@@ -1274,6 +1284,7 @@ public class AgentRunService implements RunStarter {
             goalPolicy.withAvailableTools(availableTools).withUpdates(state -> sink.accept(new com.pilot.core.event.ExecutionUpdated(
                     state.mode(), state.phase(), state.requests(), state.reason(), state.gap())));
             tools.register(goalPolicy.promotionTool());
+            if (taskControls.load(sessionId).automation() != null) tools.register(goalPolicy.researchTool());
         }
         ModelClient executionClient = goalPolicy == null ? modelClient : goalPolicy.budgetedClient();
         // 子代理在构造时冻结并过滤工具快照，使用 run 级共享池；请求/usage 仍计入父任务事故熔断，
@@ -1295,8 +1306,11 @@ public class AgentRunService implements RunStarter {
                 }
             }
         };
-        // 工作区级 allow/deny/ask 规则优先于档位，未命中时回落到原 gate（对齐 Claude Code settings.json）
-        PermissionGate sessionGate = withWorkspaceRules(permissionGate, toolFactory.resolve(workspace));
+        // 用户创建自动任务时单独授权全工具访问；普通任务仍沿用工作区 allow/deny/ask。
+        // 自动任务的调研门禁在 ExecutionPolicy 中执行，不被这里的工具权限绕过。
+        PermissionGate sessionGate = unattended && executionTask.automation().fullAccess()
+                ? (call, tool) -> com.pilot.core.permission.PermissionResult.allow()
+                : withWorkspaceRules(permissionGate, toolFactory.resolve(workspace));
         // 本 run 可用的自定义代理目录（两级扫描，热更新）；测试未注入时为空目录
         AgentProfileCatalog profiles = agentProfiles == null
                 ? AgentProfileCatalog.EMPTY : agentProfiles.catalogFor(workspace);
@@ -1307,7 +1321,9 @@ public class AgentRunService implements RunStarter {
             // 多智能体调度：父 Agent 只能派活，子 Agent 的改动一律进沙箱
             if (multiProperties.enabled()) {
                 tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink,
-                        handle.cancelled::get, executionClient, profiles, childUsage));
+                        handle.cancelled::get, executionClient, profiles, childUsage)
+                        .withParentPermission(unattended && executionTask.automation().fullAccess()
+                                ? com.pilot.core.permission.PermissionMode.AUTO : null));
             }
         }
         // 与会话数据库、快照保持一致，统一落在数据目录（默认项目下的 .pilot）
@@ -1455,6 +1471,7 @@ public class AgentRunService implements RunStarter {
         /** 非用户取消的中断原因（如服务重启）；为空表示普通取消/暂停。 */
         private volatile String interruptedReason;
         private volatile Future<?> future;
+        volatile Thread workerThread;
         private RunHandle(String sessionId, String skill) {
             this.sessionId = sessionId;
             this.skill = skill == null || skill.isBlank() ? null : skill.strip();

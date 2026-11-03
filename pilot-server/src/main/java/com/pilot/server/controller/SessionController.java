@@ -611,10 +611,8 @@ public class SessionController {
             }
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行");
         }
-        launch(runId, () -> {
-            sessions.publish(id, runId, new RunStarted(prepared.content(), prepared.attachments(), prepared.imagePositions()));
-            runStarter.start(id, runId, prepared.content(), prepared.attachments(), prepared.imagePositions(), request.task(), skill);
-        });
+        RunSubmissionService.start(sessions, runStarter, id, runId, prepared.content(),
+                prepared.attachments(), prepared.imagePositions(), request.task(), skill);
         return ResponseEntity.ok().body(new MessageResponse(id, runId));
     }
 

@@ -22,6 +22,7 @@ public final class SqliteStore {
     private static final Logger log = LoggerFactory.getLogger(SqliteStore.class);
 
     private static final String[] SCHEMA = {
+            "CREATE TABLE IF NOT EXISTS scheduled_tasks (id TEXT PRIMARY KEY, version INTEGER NOT NULL, payload TEXT NOT NULL)",
             """
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,

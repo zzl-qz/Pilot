@@ -598,6 +598,14 @@ export function Composer() {
             </span>
           </span>
           <div className="composer-actions">
+            <button type="button" className="icon-btn schedule-compose" aria-label="定时执行" title="安排稍后执行" disabled={pendingFiles > 0 || submitting}
+              onClick={() => {
+                const state = useStore.getState();
+                if (state.composerApi?.attachmentIds()?.length) { state.showNotice('定时入口暂不携带附件。请将文件放入工作区，在目标中注明相对路径；当前草稿与附件已保留。'); return; }
+                state.setUi({ schedulesOpen: true, scheduleDraft: state.composerApi?.getText() || '' });
+              }}>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.5V8l2.5 1.5"/></svg>
+            </button>
             <VoiceInput ownerKey={`${sessionEpoch}:${sessionId || ''}:${workspace}`} disabled={submitting}
               onBusy={setVoiceBusy} onText={(text) => { const input = inputRef.current; input?.appendText((input.getText().trim() ? '\n' : '') + text); input?.focus(); }} />
 

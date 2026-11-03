@@ -76,6 +76,38 @@ class GoalExecutionPolicyTest {
                 Set.of("edit_file", "create_file").contains(tool) ? path : null, check));
     }
 
+    @Test void unattendedResearchIsRequiredAndSurvivesRestart() {
+        tasks.configureAutomation("s", new TaskControlService.Automation("scheduled", true, true));
+        var p = policy((messages, tools) -> complete(), 20);
+        p.beforeRequest(history);
+        assertEquals("GOAL", tasks.load("s").execution().mode());
+        var write = new ToolCall("write", "edit_file", Map.of("path", "a.java"));
+        assertFalse(p.permits(write));
+        Map<String, Object> report = Map.of("sources", List.of("https://github.com/openclaw/openclaw"),
+                "decision", "复用已有任务投递与检查点机制，不重新实现 agent 循环", "license", "已检查 MIT 许可");
+        assertTrue(p.researchTool().execute(report).startsWith("ERROR:"));
+        ToolCall fetch = new ToolCall("fetch", "web_fetch", Map.of("url", "https://github.com/openclaw/openclaw"));
+        p.beforeTool(fetch); p.observed(fetch, new ToolExecutor.Outcome("web_fetch", "开源仓库文档", null, null));
+        String result = p.researchTool().execute(report);
+        assertFalse(result.startsWith("ERROR:"));
+        observe(p, "record_research", "", result, null);
+        assertTrue(p.permits(write));
+        var resumed = policy((messages, tools) -> complete(), 20); resumed.beforeRequest(history);
+        assertTrue(resumed.permits(write));
+        tasks.correct("s", "新的要求仍需调研和核验"); resumed.beforeRequest(history);
+        assertEquals("GOAL", tasks.load("s").execution().mode());
+        assertFalse(resumed.permits(write));
+    }
+
+    @Test void scheduledWaitStopsRequestsAndRemainingToolCalls() {
+        tasks.configureAutomation("s", new TaskControlService.Automation("scheduled", true, false));
+        var p = policy((messages, tools) -> complete(), 20); p.beforeRequest(history);
+        tasks.status("s", "WAITING");
+        assertThrows(ExecutionPolicy.Stop.class, () -> p.beforeRequest(history));
+        assertThrows(ExecutionPolicy.Stop.class, () -> p.review(history, Set.of(), List.of()));
+        assertFalse(p.permits(new ToolCall("later", "run_command", Map.of("command", "echo hello"))));
+    }
+
     @Test void directStartsWithoutSeparateAssessmentModelCall() {
         AtomicInteger calls = new AtomicInteger();
         GoalExecutionPolicy policy = policy((messages, tools) -> {

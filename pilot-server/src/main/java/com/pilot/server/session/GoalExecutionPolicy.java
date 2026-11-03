@@ -142,8 +142,15 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private TaskControlService.TaskContract task() { return tasks.load(session); }
 
     private TaskControlService.Execution initial() {
-        return new TaskControlService.Execution("DIRECT", "普通任务直接执行；需要跨轮追踪时由执行模型升级 Goal",
-                List.of(), List.of(), 0, 0, List.of(), "EXECUTING", "", 0, "",
+        TaskControlService.TaskContract current = task();
+        boolean automated = current != null && current.automation() != null;
+        List<TaskControlService.Criterion> criteria = automated
+                ? java.util.stream.Stream.concat(java.util.stream.Stream.of(current.originalGoal()),
+                    java.util.stream.Stream.concat(current.acceptance().stream().map(TaskControlService.Acceptance::text), current.constraints().stream()))
+                    .map(c -> new TaskControlService.Criterion(c, "引用真实工具结果与当前版本验证证据", true)).toList()
+                : List.of();
+        return new TaskControlService.Execution(automated ? "GOAL" : "DIRECT", automated ? "无人值守目标须独立核验" : "普通任务直接执行；需要跨轮追踪时由执行模型升级 Goal",
+                criteria, List.of(), 0, 0, List.of(), "EXECUTING", "", 0, "",
                 0, 0L, POLICY_VERSION, TaskControlService.Usage.empty(), List.of(), "", "", 0);
     }
 
@@ -166,11 +173,15 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         attachments = history.stream().filter(Message::hasAttachments).reduce((a, b) -> b)
                 .map(Message::attachments).orElse(List.of());
         initializeOrMigrate();
+        if (researchRouteUnavailable && needsResearch()) throw new Stop("NEED_INPUT", "开源调研路径连续失败；请恢复网络或检索工具后继续，尚未跳过调研开始实现。");
+        if (task() != null && "WAITING".equals(task().status())) throw new Stop("WAITING", "已预约后续唤醒");
         if (!finalizing) checkBudget();
     }
 
     @Override public String requestGuidance() {
         TaskControlService.Execution state = state();
+        if (needsResearch()) return "本任务必须先参考开源产品。先用 web_search 查找相关仓库，再用 web_fetch 阅读源码或文档，"
+                + "然后调用 record_research 记录实际阅读的仓库链接、复用决定、许可证与不复用的原因。调研完成前不能修改文件、运行命令或派发子代理。";
         String investigation = investigationGuidance(state);
         if (investigation != null) return investigation;
         if (!"GOAL".equals(state.mode()) || state.nextAction().isBlank()
@@ -204,6 +215,13 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         TaskControlService.Execution old = task.execution();
         if (old == null) {
             if (tasks.execution(session, task, initial())) updates.accept(state());
+            return;
+        }
+        if (task.automation() != null && !"GOAL".equals(old.mode())) {
+            var fresh = initial();
+            tasks.execution(session, task, new TaskControlService.Execution("GOAL", fresh.reason(), fresh.criteria(),
+                    List.of(), old.requests(), old.activeMillis(), old.evidence(), "EXECUTING", "", 0, "",
+                    old.requestAllowance(), old.timeAllowanceMillis(), POLICY_VERSION, old.usage(), old.changedPaths(), "", "", old.budgetSegments()));
             return;
         }
         if (old.assessmentVersionValue() >= POLICY_VERSION
@@ -369,6 +387,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 List<TaskControlService.Criterion> criteria = conditions.stream()
                         .map(value -> new TaskControlService.Criterion(value,
                                 "用与该结果直接相关的工具输出、当前版本验证或可观察结果核验", true)).toList();
+                if (task.automation() != null) criteria = state.criteria();
                 if (criteria.isEmpty() && !task.acceptance().isEmpty()) {
                     criteria = task.acceptance().stream().map(a -> new TaskControlService.Criterion(a.text(),
                             "用用户验收条件要求的实际结果核验", true)).toList();
@@ -390,15 +409,48 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         };
     }
 
+    private boolean needsResearch() {
+        var t = task();
+        return t != null && t.automation() != null && t.automation().requireResearch()
+                && state().evidence().stream().noneMatch(e -> "record_research".equals(e.tool()) && "SUCCESS".equals(e.status()));
+    }
+
+    Tool researchTool() {
+        return new Tool() {
+            public String name() { return "record_research"; }
+            public boolean readOnly() { return true; }
+            public String description() { return "记录已实际阅读的开源仓库和复用分析。sources 必须对应本任务成功 web_fetch 的 github.com、gitlab.com 或 codeberg.org 仓库链接；decision 说明复用或自研理由，license 说明许可证检查结果。"; }
+            public Map<String, Object> parameters() { return object(Map.of("sources", array(str()), "decision", str(), "license", str()), "sources", "decision", "license"); }
+            public String execute(Map<String, Object> args) {
+                List<String> sources = strings(args.get("sources"));
+                String decision = string(args, "decision"), license = string(args, "license");
+                if (sources.isEmpty() || decision.length() < 10 || license.isBlank()) return "ERROR: 请提交仓库链接、具体复用分析和许可证检查结果";
+                for (String source : sources) {
+                    java.net.URI uri;
+                    try { uri = java.net.URI.create(source); } catch (IllegalArgumentException e) { return "ERROR: 无效链接"; }
+                    if (!"https".equals(uri.getScheme()) || !Set.of("github.com", "gitlab.com", "codeberg.org", "raw.githubusercontent.com").contains(Objects.toString(uri.getHost(), ""))
+                            || uri.getPath() == null || uri.getPath().split("/").length < 3) return "ERROR: 请提供具体的开源仓库或源码链接";
+                    if (state().evidence().stream().noneMatch(e -> "web_fetch".equals(e.tool()) && "SUCCESS".equals(e.status()) && source.equals(e.target())))
+                        return "ERROR: 链接还没有成功读取，请先用 web_fetch 阅读：" + source;
+                }
+                return mapper.writeValueAsString(Map.of("sources", sources, "decision", decision, "license", license));
+            }
+        };
+    }
+
     @Override public void beforeTool(ToolCall call) { toolStartVersions.put(call.callId(), sourceVersion()); }
 
     @Override public boolean permits(ToolCall call) {
+        if (task() != null && "WAITING".equals(task().status())) return false;
+        if (needsResearch() && !Set.of("web_search", "web_fetch", "read_file", "list_dir", "search_text", "glob_files", "record_research", "use_skill", "update_plan", "promote_goal").contains(call.name())) return false;
         if (RESEARCH_TOOLS.contains(call.name()) && researchRouteUnavailable) return false;
         // 调查次数与精确重复只用于运行时停滞诊断；不能误伤大型仓库中的合法探索。
         return true;
     }
 
     @Override public String denialReason(ToolCall call) {
+        if (task() != null && "WAITING".equals(task().status())) return "已预约唤醒，本轮不再执行工具";
+        if (needsResearch()) return "请先检索并阅读相关开源项目，再通过 record_research 提交可追溯的复用分析。";
         if (RESEARCH_TOOLS.contains(call.name()) && researchRouteUnavailable) {
             return "当前外部检索路径已连续失败；请基于已有证据交付、改用不同证据路径，或明确说明资料限制。";
         }
@@ -415,7 +467,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 researchRouteUnavailable = consecutiveResearchFailures >= MAX_CONSECUTIVE_RESEARCH_FAILURES;
             }
         }
-        String path = Objects.toString(call.args() == null ? null : call.args().get("path"), "").strip();
+        String path = Objects.toString(call.args() == null ? null : call.args().get(
+                "web_fetch".equals(call.name()) ? "url" : "path"), "").strip();
         changedPaths.addAll(outcome.changedPaths());
         String startVersion = toolStartVersions.remove(call.callId());
         if (startVersion == null) startVersion = sourceVersion();
@@ -512,6 +565,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
      */
     @Override public String review(List<Message> history, Set<String> changedFiles, List<String> checks) {
         if (cancelled.getAsBoolean()) throw new Stop("CANCELLED", "任务已暂停");
+        if (task() != null && "WAITING".equals(task().status())) throw new Stop("WAITING", "已预约后续唤醒");
+        if (needsResearch()) return "尚未完成开源调研；请阅读开源仓库并调用 record_research。不能将任务标记完成。";
         if (changedFiles != null) changedPaths.addAll(changedFiles.stream()
                 .filter(Objects::nonNull).map(String::strip).filter(value -> !value.isBlank()).toList());
         TaskControlService.Execution state = state();

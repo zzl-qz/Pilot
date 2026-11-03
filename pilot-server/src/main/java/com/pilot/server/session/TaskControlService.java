@@ -44,7 +44,10 @@ public class TaskControlService {
         }
     }
 
-    public record Requirements(List<String> constraints, List<Acceptance> acceptance) {
+    public record Automation(String scheduleId, boolean fullAccess, boolean requireResearch) { }
+
+    public record Requirements(List<String> constraints, List<Acceptance> acceptance, Automation automation) {
+        public Requirements(List<String> constraints, List<Acceptance> acceptance) { this(constraints, acceptance, null); }
         public Requirements {
             constraints = normalizeConstraints(constraints);
             acceptance = acceptance == null ? List.of() : List.copyOf(acceptance);
@@ -164,7 +167,11 @@ public class TaskControlService {
     }
 
     public record TaskContract(String taskId, String originalGoal, List<String> constraints,
-                               List<Acceptance> acceptance, List<String> corrections, String status, Execution execution) {
+                               List<Acceptance> acceptance, List<String> corrections, String status, Execution execution, Automation automation) {
+        public TaskContract(String id, String goal, List<String> constraints, List<Acceptance> acceptance,
+                            List<String> corrections, String status, Execution execution) {
+            this(id, goal, constraints, acceptance, corrections, status, execution, null);
+        }
         public TaskContract(String id, String goal, List<String> constraints, List<Acceptance> acceptance,
                             List<String> corrections, String status) {
             this(id, goal, constraints, acceptance, corrections, status, null);
@@ -188,6 +195,12 @@ public class TaskControlService {
                 constraints, acceptance, List.of(), "ACTIVE");
         save(sessionId, task);
         return task;
+    }
+
+    public synchronized void configureAutomation(String sessionId, Automation automation) {
+        TaskContract t = requireTask(sessionId);
+        save(sessionId, new TaskContract(t.taskId(), t.originalGoal(), t.constraints(), t.acceptance(),
+                t.corrections(), t.status(), t.execution(), automation));
     }
 
     public synchronized TaskContract load(String sessionId) {
@@ -215,7 +228,7 @@ public class TaskControlService {
                 requirements.acceptance(), task.corrections(), status,
                 task.constraints().equals(requirements.constraints())
                         && task.acceptance().stream().map(Acceptance::text).toList().equals(requirements.acceptance().stream().map(Acceptance::text).toList())
-                        ? task.execution() : invalidate(task.execution()));
+                        ? task.execution() : invalidate(task.execution()), task.automation());
         save(sessionId, updated);
         return updated;
     }
@@ -224,7 +237,7 @@ public class TaskControlService {
         TaskContract task = load(sessionId);
         if (task == null) return null;
         TaskContract updated = new TaskContract(task.taskId(), task.originalGoal(), task.constraints(),
-                task.acceptance(), task.corrections(), status, task.execution());
+                task.acceptance(), task.corrections(), status, task.execution(), task.automation());
         save(sessionId, updated);
         return updated;
     }
@@ -234,6 +247,15 @@ public class TaskControlService {
         TaskContract task = load(sessionId);
         if (task != null && task.execution() != null && !"VERIFIED".equals(task.execution().phase()))
             return status(sessionId, "INTERRUPTED");
+        if (task != null && task.automation() != null && task.execution() != null
+                && "VERIFIED".equals(task.execution().phase())) {
+            String evidence = "自动核验通过；证据：" + task.execution().evidence().stream()
+                    .filter(e -> "SUCCESS".equals(e.status())).map(Evidence::id).collect(java.util.stream.Collectors.joining(", "));
+            save(sessionId, new TaskContract(task.taskId(), task.originalGoal(), task.constraints(),
+                    task.acceptance().stream().map(a -> new Acceptance(a.text(), true, evidence)).toList(),
+                    task.corrections(), "COMPLETED", task.execution(), task.automation()));
+            return load(sessionId);
+        }
         return task == null ? null : status(sessionId, allChecked(task.acceptance()) ? "COMPLETED" : "AWAITING_REVIEW");
     }
 
@@ -245,7 +267,7 @@ public class TaskControlService {
         List<Acceptance> acceptance = task.acceptance().stream()
                 .map(item -> new Acceptance(item.text(), false, item.evidence())).toList();
         TaskContract updated = new TaskContract(task.taskId(), task.originalGoal(), task.constraints(),
-                acceptance, corrections, "ACTIVE", invalidate(task.execution()));
+                acceptance, corrections, "ACTIVE", invalidate(task.execution()), task.automation());
         save(sessionId, updated);
         return updated;
     }
@@ -287,7 +309,7 @@ public class TaskControlService {
         TaskContract current = requireTask(sessionId);
         if (!current.equals(expected)) return false;
         save(sessionId, new TaskContract(current.taskId(), current.originalGoal(), current.constraints(),
-                current.acceptance(), current.corrections(), current.status(), execution));
+                current.acceptance(), current.corrections(), current.status(), execution, current.automation()));
         return true;
     }
 
@@ -348,7 +370,8 @@ public class TaskControlService {
     public synchronized void copy(String sourceSessionId, String targetSessionId) {
         TaskContract task = load(sourceSessionId);
         if (task == null) delete(targetSessionId);
-        else save(targetSessionId, task);
+        else save(targetSessionId, new TaskContract(task.taskId(), task.originalGoal(), task.constraints(),
+                task.acceptance(), task.corrections(), task.status(), task.execution()));
     }
 
     public synchronized void delete(String sessionId) {
