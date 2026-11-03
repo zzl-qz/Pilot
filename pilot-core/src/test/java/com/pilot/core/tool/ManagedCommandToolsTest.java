@@ -150,12 +150,14 @@ class ManagedCommandToolsTest {
             RunCommandTool legacy = new RunCommandTool(new PathValidator(workspace));
             RunCommandTool managed = run(manager);
             for (String command : List.of("rm -rf /", "/bin/java -version", "git status && rm -rf build",
-                    "git reset --hard HEAD", "git add ../outside", "git commit")) {
+                    "git add ../outside", "git commit")) {
                 String expected = legacy.execute(Map.of("command", command));
                 assertTrue(expected.startsWith("ERROR:"), expected);
                 assertEquals(expected, managed.execute(Map.of("command", command, "background", true)));
                 assertEquals(expected, managed.execute(Map.of("command", command)));
             }
+            assertTrue(legacy.confirm(Map.of("command", "git reset --hard HEAD")));
+            assertTrue(managed.confirm(Map.of("command", "git reset --hard HEAD", "background", true)));
             AgentScope scope = AgentScope.readOnly(List.of(), List.of()).withCommands(List.of("git status"), List.of());
             RunCommandTool scoped = new RunCommandTool(new PathValidator(workspace, scope), manager, SESSION);
             assertTrue(scoped.execute(Map.of("command", "java -version", "background", true))

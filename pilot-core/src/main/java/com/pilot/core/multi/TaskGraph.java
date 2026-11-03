@@ -211,7 +211,7 @@ public final class TaskGraph {
         int cut = text.length();
         for (int i = 0; i < text.length(); i++) {
             char current = text.charAt(i);
-            if (current == '*' || current == '?' || current == '{') {
+            if (current == '*' || current == '?' || current == '{' || current == '[') {
                 cut = i;
                 break;
             }

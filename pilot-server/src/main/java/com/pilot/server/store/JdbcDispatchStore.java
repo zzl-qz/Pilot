@@ -97,6 +97,7 @@ public final class JdbcDispatchStore {
                 task_id TEXT NOT NULL,
                 agent_id TEXT,
                 sandbox_id TEXT,
+                lane TEXT NOT NULL DEFAULT 'main',
                 generation INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 failure TEXT,
@@ -116,7 +117,8 @@ public final class JdbcDispatchStore {
             {"task_attempts", "input_tokens", "INTEGER NOT NULL DEFAULT 0"},
             {"task_attempts", "output_tokens", "INTEGER NOT NULL DEFAULT 0"},
             {"task_attempts", "requests", "INTEGER NOT NULL DEFAULT 0"},
-            {"task_attempts", "exact", "INTEGER NOT NULL DEFAULT 1"}
+            {"task_attempts", "exact", "INTEGER NOT NULL DEFAULT 1"},
+            {"task_attempts", "lane", "TEXT NOT NULL DEFAULT 'main'"}
     };
 
     private final SqliteStore store;
@@ -224,19 +226,41 @@ public final class JdbcDispatchStore {
 
     /** 开一次新的尝试：同一任务每重试一次，代次加一，旧代次的完成回执会被拒绝。 */
     public Lease startAttempt(String dispatchId, String taskId, String agentId, String sandboxId) {
+        return startAttempt(dispatchId, taskId, agentId, sandboxId, "main");
+    }
+
+    /** 同任务的并行方案各有 lane；只替换同一方案的旧重试，不能取消其他审阅者。 */
+    public Lease startAttempt(String dispatchId, String taskId, String agentId, String sandboxId, String lane) {
         if (!available()) {
             return Lease.NONE;
         }
-        int generation = JdbcSupport.queryOne(store,
-                        "SELECT COALESCE(MAX(generation), 0) AS gen FROM task_attempts WHERE task_id = ?",
-                        statement -> statement.setString(1, taskId),
-                        rows -> rows.getInt("gen"), "查询尝试代次失败")
-                .orElse(0) + 1;
-        String attemptId = "att_" + taskId + "_" + generation + "_" + Long.toHexString(System.nanoTime());
-        JdbcSupport.update(store, """
+        int[] generation = {0};
+        String attemptId = "att_" + java.util.UUID.randomUUID();
+        JdbcSupport.inTransaction(store, connection -> {
+            // 先取 SQLite 写锁并使旧执行者失效，再在同一事务内分配代次。
+            JdbcSupport.exec(connection, """
+                    UPDATE task_attempts SET status = 'interrupted', failure = '已被新尝试取代', finished_at = ?
+                    WHERE dispatch_id = ? AND task_id = ? AND lane = ? AND status = 'running'
+                    """, statement -> {
+                statement.setString(1, java.time.Instant.now().toString());
+                statement.setString(2, dispatchId);
+                statement.setString(3, taskId);
+                statement.setString(4, lane);
+            });
+            try (var statement = connection.prepareStatement(
+                    "SELECT COALESCE(MAX(generation), 0) + 1 AS gen FROM task_attempts WHERE dispatch_id = ? AND task_id = ? AND lane = ?")) {
+                statement.setString(1, dispatchId);
+                statement.setString(2, taskId);
+                statement.setString(3, lane);
+                try (var rows = statement.executeQuery()) {
+                    rows.next();
+                    generation[0] = rows.getInt("gen");
+                }
+            }
+            JdbcSupport.exec(connection, """
                         INSERT INTO task_attempts (attempt_id, dispatch_id, task_id, agent_id, sandbox_id,
-                                                   generation, status, failure, started_at, finished_at)
-                        VALUES (?, ?, ?, ?, ?, ?, 'running', '', ?, NULL)
+                                                   generation, status, failure, started_at, finished_at, lane)
+                        VALUES (?, ?, ?, ?, ?, ?, 'running', '', ?, NULL, ?)
                         """,
                 statement -> {
                     statement.setString(1, attemptId);
@@ -244,10 +268,12 @@ public final class JdbcDispatchStore {
                     statement.setString(3, taskId);
                     statement.setString(4, agentId == null ? "" : agentId);
                     statement.setString(5, sandboxId == null ? "" : sandboxId);
-                    statement.setInt(6, generation);
+                    statement.setInt(6, generation[0]);
                     statement.setString(7, java.time.Instant.now().toString());
-                }, "记录任务尝试失败");
-        return new Lease(attemptId, generation);
+                    statement.setString(8, lane);
+                });
+        }, "记录任务尝试失败");
+        return new Lease(attemptId, generation[0]);
     }
 
     /**
@@ -285,7 +311,9 @@ public final class JdbcDispatchStore {
             return 0;
         }
         String now = java.time.Instant.now().toString();
-        return JdbcSupport.update(store, """
+        int[] count = {0};
+        JdbcSupport.inTransaction(store, connection -> {
+            count[0] = JdbcSupport.exec(connection, """
                         UPDATE task_attempts SET status = 'interrupted', failure = '进程重启，执行者已失效',
                                 finished_at = ?
                         WHERE status = 'running' AND dispatch_id IN (
@@ -294,7 +322,28 @@ public final class JdbcDispatchStore {
                 statement -> {
                     statement.setString(1, now);
                     statement.setString(2, sessionId);
-                }, "收敛中断的尝试失败");
+                });
+            JdbcSupport.exec(connection, """
+                    UPDATE task_nodes SET status = 'cancelled', detail = '进程重启，需重新派发', updated_at = ?
+                    WHERE status IN ('pending', 'running', 'ready', 'verifying') AND dispatch_id IN (
+                        SELECT dispatch_id FROM dispatches WHERE session_id = ? AND status = 'running')
+                    """, statement -> { statement.setString(1, now); statement.setString(2, sessionId); });
+            JdbcSupport.exec(connection, """
+                    UPDATE dispatches SET status = 'interrupted', updated_at = ?
+                    WHERE session_id = ? AND status = 'running'
+                    """, statement -> { statement.setString(1, now); statement.setString(2, sessionId); });
+        }, "收敛中断的派发失败");
+        return count[0];
+    }
+
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void recoverInterrupted() {
+        if (!available()) return;
+        for (String session : JdbcSupport.query(store,
+                "SELECT DISTINCT session_id FROM dispatches WHERE status = 'running'", statement -> { },
+                rows -> rows.getString("session_id"), "查询待收敛派发失败")) {
+            interruptStale(session);
+        }
     }
 
     public List<DispatchRow> dispatches(String sessionId) {

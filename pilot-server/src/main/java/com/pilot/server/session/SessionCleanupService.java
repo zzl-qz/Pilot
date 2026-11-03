@@ -54,6 +54,10 @@ public class SessionCleanupService {
      * @return 会话是否存在并已被删除
      */
     public boolean delete(String sessionId) {
+        // 子会话不在主列表里，不能依赖某个浏览器的本地标签替服务器做清理。
+        for (com.pilot.core.session.Session child : sessions.list()) {
+            if (sessionId.equals(child.parentSessionId())) delete(child.id());
+        }
         commandTasks.stopSession(sessionId);
         com.pilot.core.browser.BrowserBackend backend = browser.getIfAvailable();
         if (backend != null) backend.closeSession(sessionId);

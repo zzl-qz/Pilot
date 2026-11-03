@@ -44,7 +44,7 @@ class DesktopShellInstallerTest {
                 (dir, command, env, log, timeout) -> {
                     attempts.incrementAndGet();
                     assertEquals(root.resolve("pilot-desktop"), dir);
-                    assertTrue(command.toString().contains("install --no-audit --no-fund"),
+                    assertTrue(String.join(" ", command).contains("install --no-audit --no-fund"),
                             "安装命令应执行 npm install：" + command);
                     electron(root);
                     return 0;

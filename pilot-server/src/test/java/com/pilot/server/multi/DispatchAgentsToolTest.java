@@ -61,6 +61,13 @@ class DispatchAgentsToolTest {
     }
 
     @Test
+    void characterClassGlobCannotBypassSingleWriterCheck() {
+        assertThrows(IllegalArgumentException.class, () -> DispatchAgentsTool.parseTasks(Map.of("tasks", List.of(
+                Map.of("id", "T1", "goal", "改文件", "files", List.of("src/[AB].java"), "writable", true),
+                Map.of("id", "T2", "goal", "改同一个文件", "files", List.of("src/A.java"), "writable", true)))));
+    }
+
+    @Test
     void allowsDisjointFileRanges() {
         List<TaskSpec> specs = DispatchAgentsTool.parseTasks(Map.of("tasks", List.of(
                 Map.of("id", "T1", "goal", "改后端", "files", List.of("server/**"), "writable", true),

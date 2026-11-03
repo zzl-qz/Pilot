@@ -10,6 +10,7 @@ import { checkQueue } from './queue-cases.mjs';
 import { checkVoice } from './voice-cases.mjs';
 import { checkWorkbench } from './workbench-cases.mjs';
 import { checkReview } from './review-cases.mjs';
+import { checkSideChat } from './side-chat-cases.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const temp = await mkdtemp(join(tmpdir(), 'pilot-interaction-'));
 const fixture = `<html><head><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
@@ -168,6 +169,7 @@ async function run(page,name,url) {
     await page.keyboard.press('Escape');
   }
   await checkReview(page, name, temp);
+  await checkSideChat(page, name, temp);
   await checkVoice(page, name, temp);
   await checkQueue(page, name, temp);
   await checkWorkbench(page, name, temp).catch(async error => {

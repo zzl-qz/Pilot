@@ -27,7 +27,6 @@ import com.pilot.core.multi.AgentReport;
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.DissentReport;
 import com.pilot.core.multi.MergePrecheck;
-import com.pilot.core.model.ModelUsage;
 import com.pilot.core.multi.SandboxChange;
 import com.pilot.core.multi.TaskGraph;
 import com.pilot.core.multi.TaskSpec;
@@ -201,11 +200,10 @@ public class MultiAgentService {
 
     public Result dispatch(Dispatch dispatch) {
         TaskGraph graph = new TaskGraph(dispatch.specs());
-        // 先落库再推进：图、节点和权限快照持久化成功后才有 dispatchId，重启后能找回待办
+        // 先落库再推进：记录图与节点摘要，重启后可查中断位置；完整权限快照与续调度另行实现。
         String dispatchId = "dsp_" + randomSuffix();
         dispatch = dispatch.withDispatchId(dispatchId);
         if (dispatchStore != null) {
-            dispatchStore.interruptStale(dispatch.sessionId());
             dispatchStore.saveDispatch(dispatchId, dispatch.sessionId(), dispatch.runId(),
                     dispatch.workspace(), "running");
             dispatchStore.saveNodes(dispatchId, graph.specs());
@@ -323,7 +321,8 @@ public class MultiAgentService {
             } else {
                 // 只有「每个任务都完成 + 硬校验没有失败」才算整批通过
                 completed = states.values().stream()
-                        .allMatch(state -> state.status == TaskStatus.DONE);
+                        .allMatch(state -> state.status == TaskStatus.DONE)
+                        && (merged.isEmpty() || verificationReport.ok());
             }
             // 校验结论绑定到每个沙箱当时的产物清单：候选或依赖一变，旧的通过记录自动失效
             for (DiffSandbox box : boxes) {
@@ -429,6 +428,7 @@ public class MultiAgentService {
     private Attempt runWithRetry(TaskSpec spec, Dispatch dispatch, Map<String, TaskState> states,
                                  Budget budget) {
         Attempt last = null;
+        String lane = "lane_" + randomSuffix();
         int attempts = properties.maxAttempts();
         for (int round = 1; round <= attempts; round++) {
             // 重试也要看预算：已经超了就停在这一次的结果上，不再发起新一轮请求
@@ -444,7 +444,7 @@ public class MultiAgentService {
             if (tracked != null) {
                 tracked.attempts = round;
             }
-            last = runOnce(spec, dispatch, note, states);
+            last = runOnce(spec, dispatch, note, states, lane);
             if (budget != null && last != null) {
                 budget.add(last.usage());
             }
@@ -456,7 +456,7 @@ public class MultiAgentService {
         return last == null ? Attempt.cancelled() : last;
     }
 
-    private Attempt runOnce(TaskSpec spec, Dispatch dispatch, String note, Map<String, TaskState> states) {
+    private Attempt runOnce(TaskSpec spec, Dispatch dispatch, String note, Map<String, TaskState> states, String lane) {
         String agentId = "agent_" + randomSuffix();
         String sandboxId = "sbx_" + randomSuffix();
         DiffSandbox sandbox = new DiffSandbox(sandboxId, agentId, spec.id(), "");
@@ -515,7 +515,7 @@ public class MultiAgentService {
         // 每次尝试都拿一份新租约：重试时代次递增，旧执行者的晚到结果写不进来
         JdbcDispatchStore.Lease lease = dispatchStore == null || dispatch.dispatchId().isBlank()
                 ? JdbcDispatchStore.Lease.NONE
-                : dispatchStore.startAttempt(dispatch.dispatchId(), spec.id(), agentId, sandboxId);
+                : dispatchStore.startAttempt(dispatch.dispatchId(), spec.id(), agentId, sandboxId, lane);
         try {
             AgentLoop.Result result = loop.run(userPrompt(spec, note, dependencyContext(spec, states)), List.of(),
                     subagentSink(dispatch.events(), agentId));
@@ -527,7 +527,11 @@ public class MultiAgentService {
                         meter.snapshot());
             }
             AgentReport report = AgentReport.parse(agentId, spec.id(), result.finalText());
-            finish(lease, "succeeded", "", meter.snapshot());
+            if (!finish(lease, "succeeded", "", meter.snapshot())) {
+                String reason = "执行租约已失效，已丢弃晚到产物";
+                publish(dispatch.events(), new SubagentFinished(agentId, reason, false));
+                return new Attempt(agentId, List.of(), null, null, false, reason, meter.snapshot());
+            }
             publish(dispatch.events(), new SubagentFinished(agentId, report.headline(), true));
             return new Attempt(agentId, List.of(sandboxId), sandbox, report, true, "", meter.snapshot());
         } catch (RuntimeException e) {
@@ -539,14 +543,16 @@ public class MultiAgentService {
     }
 
     /** 结算尝试；代次过期（被新尝试取代）时记一条日志，绝不让旧执行者改写状态。 */
-    private void finish(JdbcDispatchStore.Lease lease, String status, String failure,
+    private boolean finish(JdbcDispatchStore.Lease lease, String status, String failure,
                         JdbcDispatchStore.Usage usage) {
         if (dispatchStore == null || lease == null || lease.attemptId().isEmpty()) {
-            return;
+            return true;
         }
         if (!dispatchStore.finishAttempt(lease.attemptId(), lease.generation(), status, failure, usage)) {
             log.warn("尝试 {} 的回执已过期（代次 {}），结果被丢弃", lease.attemptId(), lease.generation());
+            return false;
         }
+        return true;
     }
 
     /**
@@ -572,11 +578,22 @@ public class MultiAgentService {
             public ModelResponse chat(java.util.List<com.pilot.core.loop.Message> messages,
                                       java.util.List<ToolDefinition> tools,
                                       java.util.function.Consumer<String> textDelta) {
-                ModelResponse response = delegate.chat(messages, tools, textDelta);
-                if (response != null) {
-                    meter.record(response.usage());
+                ModelResponse response = null;
+                try {
+                    response = delegate.chat(messages, tools, textDelta);
+                    return response;
+                } finally {
+                    ModelUsage usage = response == null ? null : response.usage();
+                    // 缺失 usage 和失败请求也必须记账，否则端点不报用量就能绕过派发预算。
+                    long input = usage != null && usage.inputTokens() > 0 ? usage.inputTokens()
+                            : com.pilot.core.loop.ContextCompactor.estimateTokens(messages)
+                              + com.pilot.core.loop.ContextCompactor.estimateTokens(String.valueOf(tools));
+                    long output = usage != null && usage.present() ? usage.outputTokens()
+                            : response == null ? 0 : com.pilot.core.loop.ContextCompactor.estimateTokens(
+                                    response.content() + String.valueOf(response.toolCalls()));
+                    meter.record(new ModelUsage(input, output, 0,
+                            usage != null && usage.exact() && usage.inputTokens() > 0));
                 }
-                return response;
             }
         };
     }
@@ -720,6 +737,7 @@ public class MultiAgentService {
             return;
         }
         for (String dependency : state.spec.dependsOn()) {
+            if (visited.contains(dependency)) continue;
             collectUpstream(dependency, states, visited, boxes);
             TaskState upstream = states.get(dependency);
             if (upstream != null) {

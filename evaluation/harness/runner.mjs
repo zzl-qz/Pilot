@@ -7,7 +7,7 @@
  *     --base http://127.0.0.1:8787 \
  *     --out evaluation/harness/runs/$(date +%Y%m%d-%H%M).jsonl \
  *     --model gpt-5-codex --prompt-version P12 --tool-version T7 \
- *     --fixtures evaluation/harness/fixtures
+ *     --fixtures evaluation/harness
  *
  * 每个任务：复制初始工作区 → 建会话 → 发提示词 → 轮询诊断直到终态 →
  * 在**工作区之外**用验收命令独立验证 → 写一条记录。
@@ -20,13 +20,14 @@
  * 没有真实端点时可以 `--dry-run`：只验证聚合与产物格式，不产生能力结论。
  */
 import { spawn } from "node:child_process";
-import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { aggregate, compare, gate, summarize } from "./metrics.mjs";
 
-const TERMINAL = new Set(["COMPLETED", "INTERRUPTED", "FAILED", "ARCHIVED"]);
+const TERMINAL = new Set(["COMPLETED", "INTERRUPTED", "FAILED", "CANCELLED", "PAUSED", "ARCHIVED"]);
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = {
     base: "http://127.0.0.1:8787",
     out: `evaluation/harness/runs/${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`,
@@ -42,9 +43,12 @@ function parseArgs(argv) {
     strict: false,
     verifyFixtures: false
   };
+  const valued = new Set(['--base', '--out', '--tasks', '--model', '--prompt-version', '--tool-version',
+    '--fixtures', '--token', '--baseline', '--timeout-minutes']);
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
     const value = argv[index + 1];
+    if (valued.has(flag) && (!value || value.startsWith('--'))) throw new Error(`${flag} 缺少参数值`);
     switch (flag) {
       case "--base": args.base = value; index++; break;
       case "--out": args.out = value; index++; break;
@@ -67,6 +71,8 @@ function parseArgs(argv) {
         if (flag.startsWith("--")) throw new Error(`未知参数: ${flag}`);
     }
   }
+  if (!Number.isFinite(args.timeoutMinutes) || args.timeoutMinutes <= 0) throw new Error("超时必须为正数");
+  if (args.strict && (!args.baseline || args.dryRun)) throw new Error("--strict 需要真实运行和 --baseline，不能使用 dry-run");
   return args;
 }
 
@@ -90,6 +96,7 @@ function headers(token) {
 
 async function api(args, path, init = {}) {
   const response = await fetch(`${args.base}${path}`, {
+    signal: AbortSignal.timeout(args.requestTimeoutMs ?? 30_000),
     ...init,
     headers: { ...headers(args.token), ...(init.headers ?? {}) }
   });
@@ -101,31 +108,45 @@ async function api(args, path, init = {}) {
   return type.includes("application/json") ? response.json() : response.text();
 }
 
-function runCommand(command, cwd, timeoutMs) {
+export function runCommand(command, cwd, timeoutMs) {
   return new Promise((resolvePromise) => {
     const started = Date.now();
+    const env = { ...process.env, CI: "true", PILOT_EVAL: "1" };
+    // node:test 的内部标记会令子进程跳过测试发现，制造退出码 0 的假通过。
+    delete env.NODE_TEST_CONTEXT;
     const child = spawn(command, {
       cwd,
       shell: true,
-      env: { ...process.env, CI: "true", PILOT_EVAL: "1" },
+      detached: process.platform !== "win32",
+      env,
       stdio: ["ignore", "pipe", "pipe"]
     });
     let output = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-    child.stdout.on("data", (chunk) => { output += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { output += chunk.toString(); });
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      if (process.platform === "win32") {
+        const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+        killer.on("error", () => child.kill());
+      } else {
+        try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+      }
+    }, timeoutMs);
+    const capture = chunk => { output = (output + chunk.toString()).slice(-64 * 1024); };
+    child.stdout.on("data", capture);
+    child.stderr.on("data", capture);
     child.on("error", (error) => {
       clearTimeout(timer);
       resolvePromise({ exitCode: -1, output: String(error), seconds: 0 });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolvePromise({ exitCode: code ?? -1, output, seconds: (Date.now() - started) / 1000 });
+      resolvePromise({ exitCode: timedOut ? -1 : code ?? -1, timedOut, output, seconds: (Date.now() - started) / 1000 });
     });
   });
 }
 
-async function acceptanceResult(task, workspace) {
+export async function acceptanceResult(task, workspace) {
   if (!workspace) {
     return { ran: false, ok: false, detail: "没有 fixture 工作区，未执行验收" };
   }
@@ -140,42 +161,67 @@ async function acceptanceResult(task, workspace) {
   return { ran: true, ok: details.length > 0, detail: details.join("；") };
 }
 
-async function waitForTerminal(args, sessionId, steer) {
+export async function waitForTerminal(args, sessionId, steer) {
   const started = Date.now();
   const deadline = started + args.timeoutMinutes * 60 * 1000;
   let last = null;
   let steered = false;
   while (Date.now() < deadline) {
-    // 中途纠正：跑到指定秒数时追加一条消息，模拟用户中途改主意
-    if (steer && !steered && (Date.now() - started) / 1000 >= steer.afterSeconds) {
-      steered = true;
-      await api(args, `/api/sessions/${sessionId}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ content: steer.content })
-      });
-    }
     last = await api(args, `/api/sessions/${sessionId}/diagnostics`);
     if (TERMINAL.has(last.sessionStatus)) return last;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 3000));
+    // 引导必须进入当前运行；追加 messages 会排队成为下一项任务。
+    if (steer && !steered && last.activeRunId && (Date.now() - started) / 1000 >= steer.afterSeconds) {
+      await api(args, `/api/sessions/${sessionId}/steer`, {
+        method: "POST",
+        body: JSON.stringify({ content: steer.content, runId: last.activeRunId })
+      });
+      steered = true;
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, Math.min(args.pollMs ?? 3000, Math.max(0, deadline - Date.now()))));
   }
-  return last;
+  throw new Error(`任务超时，未达到终态（${last?.sessionStatus ?? "未知"}），不能执行验收`);
 }
 
-async function prepareWorkspace(args, task) {
-  if (!args.fixtures) return null;
-  const source = resolve(args.fixtures, task.fixture ?? task.id);
-  try {
-    await stat(source);
-  } catch {
-    return null;
-  }
-  const target = resolve(`.pilot-eval/${Date.now()}/${task.id}`);
+export async function prepareWorkspace(args, task) {
+  const source = resolve(args.fixtures || dirname(args.tasks), task.fixture ?? task.id);
+  if (!(await stat(source).catch(() => null))?.isDirectory()) throw new Error(`fixture 不存在：${source}`);
+  const root = resolve(args.workRoot ?? ".pilot-eval");
+  await mkdir(root, { recursive: true });
+  const target = await mkdtemp(join(root, "run-"));
   await cp(source, target, { recursive: true });
   return target;
 }
 
-async function runTask(args, task) {
+async function snapshotTests(directory, prefix = "") {
+  const files = [];
+  for (const item of await readdir(directory, { withFileTypes: true })) {
+    const name = join(prefix, item.name);
+    if (item.isDirectory()) files.push(...await snapshotTests(join(directory, item.name), name));
+    else if (item.isFile()) files.push([name, await readFile(join(directory, item.name))]);
+    else throw new Error(`验收测试不允许符号链接：${name}`);
+  }
+  return files;
+}
+
+export async function verifyCandidate(task, workspace, tests) {
+  const candidate = await mkdtemp(join(dirname(workspace), "verify-"));
+  try {
+    await cp(workspace, candidate, { recursive: true });
+    // 使用发给模型前保存的测试；模型删除/改写工作区测试不能制造假通过。
+    await rm(join(candidate, "test"), { recursive: true, force: true });
+    for (const [name, bytes] of tests) {
+      await mkdir(dirname(join(candidate, "test", name)), { recursive: true });
+      await writeFile(join(candidate, "test", name), bytes);
+    }
+    return await acceptanceResult(task, candidate);
+  } finally {
+    await rm(candidate, { recursive: true, force: true });
+  }
+}
+
+export async function runTask(args, task) {
   const workspace = await prepareWorkspace(args, task);
+  const tests = await snapshotTests(join(workspace, "test"));
   const started = Date.now();
   const session = await api(args, "/api/sessions", {
     method: "POST",
@@ -183,12 +229,26 @@ async function runTask(args, task) {
   });
   // 接口返回 { sessionId, ... }；保留 id 兼容字段以便旧版本也能跑
   const sessionId = session.sessionId ?? session.id;
-  await api(args, `/api/sessions/${sessionId}/messages`, {
+  let diagnostics;
+  try {
+    await api(args, `/api/sessions/${sessionId}/messages`, {
     method: "POST",
     body: JSON.stringify({ content: task.prompt })
-  });
-  const diagnostics = await waitForTerminal(args, sessionId, task.steer);
-  const acceptance = await acceptanceResult(task, workspace);
+    });
+    diagnostics = await waitForTerminal({ ...args, timeoutMinutes: Math.min(args.timeoutMinutes, task.maxMinutes ?? args.timeoutMinutes) }, sessionId, task.steer);
+  } catch (error) {
+    // 只清理本次执行器创建的会话；超时或网络失败后不让模型继续悄悄运行。
+    try {
+      const active = await api(args, `/api/sessions/${sessionId}/diagnostics`);
+      if (active.activeRunId && !TERMINAL.has(active.sessionStatus)) {
+        await api(args, `/api/runs/${encodeURIComponent(active.activeRunId)}/cancel`, { method: "POST" });
+      }
+    } catch (cancelError) {
+      throw new Error(`${error.message}；取消失败：${cancelError.message}（会话 ${sessionId}）`);
+    }
+    throw error;
+  }
+  const acceptance = await verifyCandidate(task, workspace, tests);
   const durationSeconds = (Date.now() - started) / 1000;
   const failedCommands = (diagnostics?.commands ?? []).filter((item) => (item.exitCode ?? 0) !== 0);
 
@@ -199,16 +259,17 @@ async function runTask(args, task) {
     model: args.model,
     promptVersion: args.promptVersion,
     toolVersion: args.toolVersion,
-    success: acceptance.ok,
+    success: diagnostics.sessionStatus === "COMPLETED" && acceptance.ok,
     acceptanceRan: acceptance.ran,
     durationSeconds,
     rework: failedCommands.length,
-    takeover: diagnostics?.sessionStatus === "INTERRUPTED",
+    takeover: diagnostics?.sessionStatus !== "COMPLETED",
     costUsd: 0,
     costKnown: false,
     inputTokens: diagnostics?.inputTokens ?? 0,
     outputTokens: diagnostics?.outputTokens ?? 0,
     cachedInputTokens: diagnostics?.cachedInputTokens ?? 0,
+    usageExact: diagnostics?.usageExact === true,
     validationCovered: diagnostics?.validation?.covered ?? false,
     acceptanceDetail: acceptance.detail,
     storageHealth: diagnostics?.storageHealth ?? "",
@@ -216,7 +277,7 @@ async function runTask(args, task) {
   };
 }
 
-function dryRunRecords(tasks, args) {
+export function dryRunRecords(tasks, args) {
   return tasks.map((task, index) => ({
     taskId: task.id,
     title: task.title,
@@ -224,8 +285,9 @@ function dryRunRecords(tasks, args) {
     model: args.model,
     promptVersion: args.promptVersion,
     toolVersion: args.toolVersion,
-    success: index % 2 === 0,
-    acceptanceRan: true,
+    dryRun: true,
+    success: false,
+    acceptanceRan: false,
     durationSeconds: 60 + index * 15,
     rework: index % 3,
     takeover: index === 4,
@@ -249,7 +311,7 @@ function dryRunRecords(tasks, args) {
 async function verifyFixtures(args, tasks) {
   let broken = 0;
   for (const task of tasks) {
-    const workspace = await prepareWorkspace(args, task);
+    const workspace = await prepareWorkspace(args, task).catch(() => null);
     if (!workspace) {
       console.log(`✗ ${task.id}：fixture 不存在（${task.fixture ?? task.id}）`);
       broken += 1;
@@ -282,6 +344,12 @@ async function main() {
     return;
   }
 
+  // 在启动付费任务之前确认基线可读，避免跑完才发现无法比较。
+  const baseline = args.baseline
+    ? (await readFile(args.baseline, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line))
+    : null;
+  if (baseline && baseline.length === 0) throw new Error("基线为空");
+
   let records;
   if (args.dryRun) {
     records = dryRunRecords(tasks, args);
@@ -305,9 +373,6 @@ async function main() {
     }
   }
 
-  const baseline = args.baseline
-    ? (await readFile(args.baseline, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line))
-    : null;
   const compared = baseline ? compare(baseline, records) : records;
   const decision = baseline ? gate(baseline, compared) : null;
 
@@ -317,7 +382,7 @@ async function main() {
     generatedAt: new Date().toISOString(), dryRun: args.dryRun,
     groups: aggregate(compared), overall: summarize(compared), gate: decision
   };
-  await writeFile(args.out.replace(/\.jsonl$/, ".summary.json"), JSON.stringify(summary, null, 2), "utf8");
+  await writeFile(args.out.endsWith(".jsonl") ? args.out.replace(/\.jsonl$/, ".summary.json") : `${args.out}.summary.json`, JSON.stringify(summary, null, 2), "utf8");
 
   console.log("\n结果：");
   for (const group of summary.groups) {
@@ -347,7 +412,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main().catch((error) => {
   console.error(error);
   process.exit(1);
 });

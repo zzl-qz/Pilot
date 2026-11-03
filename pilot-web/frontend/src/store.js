@@ -31,7 +31,8 @@ import { normalizeQueue } from './lib/queue.js';
 
 let queueLoadSequence = 0;
 /** 侧边对话正在创建：打开面板的同时又点「新开」时共用一个请求，别建出两条。 */
-let sideChatPending = null;
+const sideChatPending = new Map();
+const sideChatClosing = new Map();
 const RECONNECT_BASE_MS = 800;
 const RECONNECT_MAX_MS = 15000;
 
@@ -1356,58 +1357,53 @@ export const useStore = create(immer((set, get) => {
    */
   async createSideChat({ force = false } = {}) {
     const state = get();
-    if (state.embeddedSessionId) {
-      return null;
-    }
-    const { sessionId } = state;
+    const { sessionId, sessionEpoch, workspace } = state;
+    if (state.embeddedSessionId) return null;
     if (!sessionId) {
       state.showNotice('先发一条消息开始任务，再开侧边对话');
       return null;
     }
-    const existing = (state.sideChats.items || []).find((item) => item.parentId === sessionId);
+    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().workspace === workspace;
+    const owned = sideChatsFor(state.sideChats, { sessionId, workspace });
+    const existing = owned.items.find(item => item.id === owned.activeId);
     if (existing && !force) {
-      set((draft) => {
-        draft.sideChats.activeId = existing.id;
-        draft.ui.inspectorOpen = true;
-        draft.ui.inspectorTab = 'chat';
-      });
+      set(draft => { draft.sideChats.activeId = existing.id; draft.ui.inspectorOpen = true; draft.ui.inspectorTab = 'chat'; });
       persistSideChats();
       return existing;
     }
-    if (sideChatPending) {
-      return sideChatPending;
-    }
-    sideChatPending = (async () => {
-      const session = await api.createSideChat(sessionId);
-      const item = {
-        id: session?.sessionId || session?.id,
-        parentId: session?.parentSessionId || sessionId,
-        title: sideChatTitle(state.sideChats.items, sessionId),
-        workspace: session?.workspace || state.workspace || null,
-        projectId: session?.projectId || null
-      };
-      if (!item.id) {
-        throw new Error('后端没有返回会话 ID');
+    const key = JSON.stringify([sessionId, sessionEpoch, workspace]);
+    if (sideChatPending.has(key)) return sideChatPending.get(key);
+    const request = (async () => {
+      try {
+        const session = await api.createSideChat(sessionId);
+        const item = {
+          id: session?.sessionId || session?.id,
+          parentId: session?.parentSessionId || sessionId,
+          title: sideChatTitle(get().sideChats.items, sessionId),
+          workspace: session?.workspace || workspace || null,
+          projectId: session?.projectId || null
+        };
+        if (!item.id) throw new Error('后端没有返回会话 ID');
+        set(draft => {
+          if (!draft.sideChats.items.some(existing => existing.id === item.id)) draft.sideChats.items.push(item);
+          if (current()) {
+            draft.sideChats.activeId = item.id;
+            draft.ui.inspectorOpen = true;
+            draft.ui.inspectorTab = 'chat';
+          }
+        });
+        persistSideChats();
+        get().loadSessions();
+        return current() ? item : null;
+      } catch (error) {
+        if (current()) get().showNotice('创建侧边对话失败：' + error.message);
+        return null;
+      } finally {
+        sideChatPending.delete(key);
       }
-      set((draft) => {
-        draft.sideChats.items.push(item);
-        draft.sideChats.activeId = item.id;
-        draft.ui.inspectorOpen = true;
-        draft.ui.inspectorTab = 'chat';
-      });
-      persistSideChats();
-      // 侧边会话不进主列表；刷新一次把旧版本遗留的重复项也一并清掉
-      get().loadSessions();
-      return item;
     })();
-    try {
-      return await sideChatPending;
-    } catch (error) {
-      get().showNotice('创建侧边对话失败：' + error.message);
-      return null;
-    } finally {
-      sideChatPending = null;
-    }
+    sideChatPending.set(key, request);
+    return request;
   },
 
   selectSideChat(id) {
@@ -1426,20 +1422,34 @@ export const useStore = create(immer((set, get) => {
    * 关闭侧边对话 = 丢弃（Codex 的侧边对话本来就不进历史）。
    * 后端会话连同事件与记忆一起删掉，主对话不受影响。
    */
-  closeSideChat(id) {
-    const closing = (get().sideChats.items || []).find((item) => item.id === id);
-    set((draft) => {
-      draft.sideChats.items = draft.sideChats.items.filter((item) => item.id !== id);
-      draft.sideChats.activeId = sideChatsFor(draft.sideChats, {
-        sessionId: draft.sessionId, workspace: draft.workspace
-      }).activeId;
+  async closeSideChat(id) {
+    if (sideChatClosing.has(id)) return sideChatClosing.get(id);
+    if (!get().sideChats.items.some(item => item.id === id)) return false;
+    const request = (async () => {
+      try {
+        try { await api.deleteSession(id); } catch (error) { if (error.status !== 404) throw error; }
+        set(draft => {
+          draft.sideChats.items = draft.sideChats.items.filter(item => item.id !== id);
+          draft.sideChats.activeId = sideChatsFor(draft.sideChats, { sessionId: draft.sessionId, workspace: draft.workspace }).activeId;
+          if (draft.sideDrafts) delete draft.sideDrafts[id];
+          if (draft.sideQuote?.id === id) draft.sideQuote = null;
+        });
+        persistSideChats();
+        return true;
+      } catch (error) {
+        get().showNotice('侧边对话未能关闭，已保留，请重试：' + error.message);
+        return false;
+      } finally { sideChatClosing.delete(id); }
+    })();
+    sideChatClosing.set(id, request);
+    return request;
+  },
+
+  setSideDraft(id, value) {
+    set(draft => {
+      draft.sideDrafts ||= {};
+      draft.sideDrafts[id] = typeof value === 'function' ? value(draft.sideDrafts[id] || '') : value;
     });
-    persistSideChats();
-    if (closing) {
-      api.deleteSession(id).catch(() => {
-        // 会话可能已经被别处删掉，前端标签移除即可
-      });
-    }
   },
 
   /** Ctrl+Alt+S：已经停在对话页就收起，否则开/切到当前任务的侧边对话。 */

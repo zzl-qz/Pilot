@@ -38,7 +38,9 @@ export async function apiJson(url, init, timeoutMs) {
       const fallback = typeof body?.error === 'string' ? body.error.trim() : '';
       message = detail && detail !== 'No message available' ? detail : fallback || message;
     } catch { /* 保持 HTTP 状态码文案 */ }
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
   // 204 / 空响应没有 JSON 正文：直接 return response.json() 会抛「Unexpected end of JSON input」，
   // 让删除会话、删除项目这类「成功但无返回体」的接口看起来全部失败

@@ -97,7 +97,11 @@ class BrowserIntegrationTest {
         try (InputStream in = getClass().getResourceAsStream("/browser/browser-sidecar.mjs")) {
             Files.copy(in, script, StandardCopyOption.REPLACE_EXISTING);
         }
-        backend = new PlaywrightBackend(node, script, home, new ObjectMapper());
+        // 测试只操作独立浏览器，不能捡到真实桌面壳遗留的 CDP 连接信息。
+        backend = new PlaywrightBackend(node, script, artifacts, new ObjectMapper(), 120_000,
+                Map.of("PILOT_DESKTOP_ENDPOINT", artifacts.resolve("no-desktop.json").toString(),
+                        "PILOT_BROWSER_PREFER_BUNDLED", "false",
+                        "PILOT_BROWSER_HEADLESS", "true"));
         Assumptions.assumeTrue(backend.probe().available(), "本机没有可用的 Chrome：" + backend.availability().reason());
 
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
@@ -137,7 +141,8 @@ class BrowserIntegrationTest {
             ImageIO.write(new BufferedImage(40, 40, BufferedImage.TYPE_INT_RGB), "png", workspace.resolve(name).toFile());
         }
 
-        assertTrue(run("navigate", "url", base).startsWith("已打开，HTTP 200"));
+        String navigation = run("navigate", "url", base);
+        assertTrue(navigation.startsWith("已打开，HTTP 200"), navigation);
         String snapshot = run("snapshot");
         assertTrue(snapshot.contains("消息队列"), snapshot);
         String titleRef = ref(snapshot, "textbox|input", "消息内容");

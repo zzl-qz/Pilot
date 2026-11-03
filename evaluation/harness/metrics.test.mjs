@@ -96,6 +96,31 @@ function tasks(count, overrides = {}) {
   return Array.from({ length: count }, (_, index) => record({ taskId: `t${index}`, ...overrides }));
 }
 
+test("重复同一任务 20 次不能冒充 20 个可比任务", () => {
+  const records = Array.from({ length: 20 }, () => record());
+  assert.equal(gate(records, records).verdict, 'insufficient');
+});
+
+test("删掉基线任务不能绕过回归门禁", () => {
+  assert.equal(gate(tasks(21), tasks(20)).verdict, 'reject');
+});
+
+test("相同任务重复次数减少不能掩盖单次成本翻倍", () => {
+  const baseline = [...tasks(20), ...tasks(20)];
+  assert.equal(gate(baseline, tasks(20, { costUsd: 0.2 })).verdict, 'reject');
+});
+
+test("部分价格未知不能靠已知的便宜样本判定成本下降", () => {
+  const current = tasks(20, { inputTokens: 2000, costKnown: false });
+  current[0] = record({ taskId: 't0', costKnown: true, costUsd: 0.01, inputTokens: 2000 });
+  assert.equal(gate(tasks(20), current).verdict, 'reject');
+});
+
+test("汇总回归沿用基线曾经成功过的口径", () => {
+  const [result] = compare([record(), record({ success: false })], [record({ success: false })]);
+  assert.equal(result.regression, true);
+});
+
 test("一个任务从成功变失败就拒绝，哪怕整体通过率没降", () => {
   const current = tasks(3).map((item, index) => (index === 0 ? { ...item, success: false } : item));
   const decision = gate(tasks(3), current, { minTasks: 3 });

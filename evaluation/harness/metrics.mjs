@@ -65,10 +65,10 @@ export function aggregate(records) {
 
 /** 缓存命中率（0~1）；没有任何输入或没有缓存观测时为 0。 */
 export function cacheHitRate(items) {
-  const known = items.filter((item) => Number(item.cachedInputTokens) > 0 || Number(item.inputTokens) > 0);
+  const known = items.filter((item) => item.usageExact !== false && Number(item.inputTokens) > 0);
   const input = known.reduce((sum, item) => sum + (Number(item.inputTokens) || 0), 0);
   if (input <= 0) return 0;
-  return known.reduce((sum, item) => sum + (Number(item.cachedInputTokens) || 0), 0) / input;
+  return known.reduce((sum, item) => sum + Math.min(Number(item.inputTokens), Math.max(0, Number(item.cachedInputTokens) || 0)), 0) / input;
 }
 
 /**
@@ -79,7 +79,7 @@ export function compare(baselineRecords, currentRecords) {
   const baselineSuccess = new Map();
   for (const record of baselineRecords) {
     const key = `${record.taskId}|${record.model ?? "unknown"}`;
-    baselineSuccess.set(key, record.success === true && record.acceptanceRan === true);
+    baselineSuccess.set(key, baselineSuccess.get(key) === true || (record.success === true && record.acceptanceRan === true));
   }
   return currentRecords.map((record) => {
     const key = `${record.taskId}|${record.model ?? "unknown"}`;
@@ -87,7 +87,7 @@ export function compare(baselineRecords, currentRecords) {
     return {
       ...record,
       regression: wasSuccessful === true && !(record.success === true && record.acceptanceRan === true),
-      improved: wasSuccessful === false && record.success === true
+      improved: wasSuccessful === false && record.success === true && record.acceptanceRan === true
     };
   });
 }
@@ -155,16 +155,32 @@ export function gate(baselineRecords, currentRecords, options = {}) {
   const baselineTakeover = rate(baselineRecords, (item) => item.takeover === true);
   const currentTakeover = rate(currentRecords, (item) => item.takeover === true);
 
-  const priced = (records) => records.filter((item) => item.costKnown !== false);
-  const baselineCost = priced(baselineRecords).reduce((sum, item) => sum + (Number(item.costUsd) || 0), 0);
-  const currentCost = priced(currentRecords).reduce((sum, item) => sum + (Number(item.costUsd) || 0), 0);
-  const sumOf = (records, pick) => records.reduce((sum, item) => sum + (Number(pick(item)) || 0), 0);
-  const baselineInputTokens = sumOf(baselineRecords, (item) => item.inputTokens);
-  const currentInputTokens = sumOf(currentRecords, (item) => item.inputTokens);
-  const costComparable = priced(baselineRecords).length > 0 && priced(currentRecords).length > 0;
+  // 成本按同一任务的一次运行比较，不能用减少重跑次数制造降本。
+  const currentKeys = new Set(currentRecords.map(keyOf));
+  const sharedKeys = new Set([...everSucceeded.keys()].filter(key => currentKeys.has(key)));
+  const missing = [...everSucceeded.keys()].filter(key => !currentKeys.has(key));
+  const baselineComparable = baselineRecords.filter(item => sharedKeys.has(keyOf(item)));
+  const currentComparable = currentRecords.filter(item => sharedKeys.has(keyOf(item)));
+  const perTaskTotal = (records, field) => {
+    const groups = new Map();
+    for (const item of records) {
+      const key = keyOf(item);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(Math.max(0, Number(item[field]) || 0));
+    }
+    return [...groups.values()].reduce((sum, values) => sum + mean(values), 0);
+  };
+  const priced = item => item.costKnown === true && Number.isFinite(item.costUsd) && item.costUsd >= 0;
+  const baselineCost = perTaskTotal(baselineComparable.filter(priced), 'costUsd');
+  const currentCost = perTaskTotal(currentComparable.filter(priced), 'costUsd');
+  const baselineInputTokens = perTaskTotal(baselineComparable, 'inputTokens');
+  const currentInputTokens = perTaskTotal(currentComparable, 'inputTokens');
+  const costComparable = sharedKeys.size > 0 && baselineComparable.every(priced) && currentComparable.every(priced);
   const tolerance = options.inputTokenTolerance ?? 0.05;
 
   const reasons = [];
+  if ([...baselineRecords, ...currentRecords].some(item => item.dryRun === true)) reasons.push("dry-run 记录不能用于能力门禁");
+  if (missing.length) reasons.push(`本次缺少 ${missing.length} 个基线任务：${missing.join('、')}，不能跳过任务后宣称无退化`);
   if (regressions.length > 0) {
     reasons.push(`${regressions.length} 个任务从成功变成失败：${regressions.map((item) => item.record.taskId).join("、")}`);
   }
@@ -191,16 +207,16 @@ export function gate(baselineRecords, currentRecords, options = {}) {
   let verdict = "pass";
   if (reasons.length > 0) {
     verdict = "reject";
-  } else if (paired.length < minTasks) {
+  } else if (sharedKeys.size < minTasks) {
     verdict = "insufficient";
-    reasons.push(`可比任务 ${paired.length} 个，低于 ${minTasks} 个的下限：样本太小，通过率差异落在噪音里，不能据此断定「没有退化」`);
+    reasons.push(`可比任务 ${sharedKeys.size} 个，低于 ${minTasks} 个的下限：样本太小，通过率差异落在噪音里，不能据此断定「没有退化」`);
   }
 
   return {
     verdict,
     reasons,
     metrics: {
-      pairedTasks: paired.length,
+      pairedTasks: sharedKeys.size,
       minTasks,
       regressions: regressions.length,
       improvements: improvements.length,

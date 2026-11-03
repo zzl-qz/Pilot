@@ -50,7 +50,7 @@ jobs:
         run: npm test
 
       - name: Evaluation metrics tests
-        run: node --test evaluation/harness/metrics.test.mjs
+        run: node --test evaluation/harness/*.test.mjs
 
       - name: Upload test reports
         if: always()

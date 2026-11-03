@@ -21,7 +21,12 @@ export async function checkVoice(page, name, temp) {
     const request = route.request();
     assert.match(request.headers()['content-type'], /multipart\/form-data; boundary=/);
     assert.ok(request.postDataBuffer().length > 100);
-    assert.match(request.postDataBuffer().toString(), /filename="recording.webm"/);
+    const payload = request.postDataBuffer().toString('latin1');
+    assert.match(payload.slice(0, 300), /filename="recording\.(wav|webm|mp4|ogg)"/);
+    if (payload.includes('filename="recording.wav"')) {
+      assert.match(payload.slice(0, 300), /Content-Type: audio\/wav/);
+      assert.ok(payload.includes('RIFF') && payload.includes('WAVE'), 'WAV 上传应包含真实音频头');
+    }
     await route.fulfill({ json: { text: '请检查粘贴和队列边界' } });
   });
   const sent = await page.evaluate(() => calls.filter(c => c.name === 'sendMessage').length);

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import {
-  lastEventSequence, quoteMarkdown, reduceSideChat, sideChatsFor, simplifyTranscript
+  appendQuote, lastEventSequence, quoteMarkdown, reduceSideChat, sideChatsFor, simplifyTranscript
 } from '../lib/side-chat.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
 
@@ -37,17 +37,18 @@ export function SideChatPanel() {
    * 只在这一页刚打开时尝试一次——用户手动关掉后留在空态，反复重建会很吵。
    */
   useEffect(() => {
-    if (openedFor.current === 'ready') {
+    const owner = JSON.stringify([sessionId, workspace]);
+    if (openedFor.current === owner) {
       return;
     }
     if (!sessionId || embedded) {
       return;
     }
-    openedFor.current = 'ready';
+    openedFor.current = owner;
     if (!items.length) {
       create();
     }
-  }, [sessionId, embedded, items.length, create]);
+  }, [sessionId, workspace, embedded, items.length, create]);
 
   return (
     <div id="panel-side-chat" className="panel side-chat-panel">
@@ -96,7 +97,7 @@ export function SideChatPanel() {
       )}
       <div className="side-chat-content">
         {activeId
-          ? <SimpleSideChat sessionId={activeId} />
+          ? <SimpleSideChat key={activeId} sessionId={activeId} />
           : (
             <div className="side-chat-empty">
               <p>
@@ -119,10 +120,17 @@ export function SideChatPanel() {
 function SimpleSideChat({ sessionId }) {
   const quote = useStore((state) => state.sideQuote);
   const [thread, setThread] = useState({ messages: [], live: '' });
-  const [draft, setDraft] = useState('');
+  const draft = useStore(state => state.sideDrafts?.[sessionId] || '');
+  const setDraft = useCallback(value => useStore.getState().setSideDraft(sessionId, value), [sessionId]);
+  const alive = useRef(true);
+  const pending = useRef(false);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const [sending, setSending] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const runRef = useRef('');
+  const stopRequested = useRef(false);
+  const stopping = useRef(false);
   const [error, setError] = useState('');
   const listRef = useRef(null);
   const stickRef = useRef(true);
@@ -133,9 +141,13 @@ function SimpleSideChat({ sessionId }) {
     setThread({ messages: [], live: '' });
     setError('');
     stickRef.current = true;
-    api.history(sessionId, { limit: 80 }).then((data) => {
+    Promise.all([api.history(sessionId, { limit: 80 }), api.activeRun(sessionId)]).then(([data, active]) => {
       if (cancelled) return;
       const events = data?.events || [];
+      let sequence = lastEventSequence(events);
+      runRef.current = active?.runId || '';
+      setBusy(!!runRef.current);
+      setLoading(false);
       setThread({ messages: simplifyTranscript(events), live: '' });
       source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/events?after=${lastEventSequence(events)}`);
       const onEvent = (message) => {
@@ -145,20 +157,27 @@ function SimpleSideChat({ sessionId }) {
         } catch {
           return;
         }
+        if (cancelled) return;
+        if (event.sequence && event.sequence <= sequence) return;
+        sequence = Math.max(sequence, Number(event.sequence) || 0);
         setThread((current) => reduceSideChat(current, event));
         if (event.type === 'run.started') {
           setBusy(true);
           runRef.current = event.runId || '';
+          if (stopRequested.current) stop();
         }
         if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
-          setBusy(false);
+          setBusy(false); runRef.current = '';
+          if (event.type === 'run.failed') setError(event.payload?.message || event.payload?.reason || '侧边任务失败，请重试。');
         }
       };
       for (const type of ['user.message', 'run.started', 'assistant.delta', 'assistant.preview', 'run.completed', 'run.failed', 'run.cancelled']) {
         source.addEventListener(type, onEvent);
       }
+      source.onerror = () => { if (!cancelled) setError('侧边对话连接中断，正在重连…'); };
+      source.onopen = () => { if (!cancelled) setError(current => current === '侧边对话连接中断，正在重连…' ? '' : current); };
     }).catch((failure) => {
-      if (!cancelled) setError(failure.message || '读不到这条侧边对话');
+      if (!cancelled) { setLoading(false); setError(failure.message || '读不到这条侧边对话'); }
     });
     return () => {
       cancelled = true;
@@ -182,25 +201,38 @@ function SimpleSideChat({ sessionId }) {
   async function send(event) {
     event.preventDefault();
     const text = draft.trim();
-    if (!text || sending || busy) return;
+    if (!text || pending.current || busy || loading) return;
+    pending.current = true;
+    runRef.current = '';
+    stopRequested.current = false;
     setSending(true);
     setError('');
     setDraft('');
     setBusy(true);
-    setThread((current) => reduceSideChat(current, { type: 'user.message', payload: { input: text } }));
     try {
-      await api.sendMessage(sessionId, { content: text, attachments: [], imagePositions: [] });
+      const result = await api.sendMessage(sessionId, { content: text, attachments: [], imagePositions: [] });
+      if (alive.current) {
+        runRef.current = result?.runId || runRef.current;
+        if (stopRequested.current) await stop();
+      }
     } catch (failure) {
-      setError(failure.message || '发送失败');
-      setDraft(text);
-      setBusy(false);
+      setDraft(current => current ? `${text}\n\n${current}` : text);
+      if (alive.current) { setError(failure.message || '发送失败'); setBusy(false); }
     } finally {
-      setSending(false);
+      pending.current = false;
+      if (alive.current) setSending(false);
     }
   }
 
-  function stop() {
-    if (runRef.current) api.cancelRun(runRef.current);
+  async function stop() {
+    stopRequested.current = true;
+    if (!runRef.current) return;
+    if (stopping.current) return;
+    stopping.current = true;
+    stopRequested.current = false;
+    try { await api.cancelRun(runRef.current); }
+    catch (failure) { if (alive.current) setError(failure.message || '停止失败，请重试。'); }
+    finally { stopping.current = false; }
   }
 
   const rows = visibleSideMessages(thread);
@@ -230,7 +262,7 @@ function SimpleSideChat({ sessionId }) {
           </p>
         )}
       </div>
-      {error && <p className="side-chat-error">{error}</p>}
+      {error && <p className="side-chat-error" role="alert">{error}</p>}
       <form className="side-chat-compose" onSubmit={send}>
         <textarea
           rows={2}
@@ -239,7 +271,7 @@ function SimpleSideChat({ sessionId }) {
           aria-label="侧边对话输入"
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
               event.preventDefault();
               if (!busy) event.currentTarget.form?.requestSubmit();
             }
@@ -252,7 +284,7 @@ function SimpleSideChat({ sessionId }) {
             </button>
           )
           : (
-            <button type="submit" className="side-chat-send" aria-label="发送" title="发送" disabled={sending || !draft.trim()}>
+            <button type="submit" className="side-chat-send" aria-label="发送" title="发送" disabled={loading || sending || !draft.trim()}>
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.5M4.8 6.4 8 3.2l3.2 3.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </button>
           )}

@@ -55,6 +55,11 @@ class MultiAgentServiceTest {
     }
 
     private MultiAgentService service(ModelClient client, PermissionMode mode) throws IOException {
+        return service(client, mode, null);
+    }
+
+    private MultiAgentService service(ModelClient client, PermissionMode mode,
+                                      com.pilot.server.store.JdbcDispatchStore dispatchStore) throws IOException {
         Files.createDirectories(workspace.resolve("src"));
         Files.writeString(workspace.resolve("src/A.java"), "class A {}\n");
         AgentProperties agent = new AgentProperties(workspace.toString(), mode, 8, 3, 5, 300, 2, 1, 60_000, true);
@@ -67,7 +72,7 @@ class MultiAgentServiceTest {
         events = new CopyOnWriteArrayList<>();
         return new MultiAgentService(client, factory, store, gate, properties,
                 new PilotDataDir(dataDir.toString()), JsonMapper.builder().build(),
-                new com.pilot.server.config.PermissionSettings(agent, permissionStore()), agent);
+                new com.pilot.server.config.PermissionSettings(agent, permissionStore()), agent, dispatchStore);
     }
 
     /** 会话权限档位：默认完全放行，可被单个用例覆盖，用来验证子 Agent 只继承不扩权。 */
@@ -175,13 +180,22 @@ class MultiAgentServiceTest {
     @Test
     void differingConclusionsTriggerHumanArbitration() throws IOException {
         AtomicInteger calls = new AtomicInteger();
+        var both = new java.util.concurrent.CountDownLatch(2);
         ModelClient client = (messages, tools) -> {
             int index = calls.getAndIncrement();
+            both.countDown();
+            try { assertTrue(both.await(5, java.util.concurrent.TimeUnit.SECONDS)); }
+            catch (InterruptedException e) { throw new RuntimeException(e); }
             String conclusion = index % 2 == 0 ? "应该删除空类" : "应该保留空类并补测试";
             return new ModelResponse("【结论】\n" + conclusion
                     + "\n\n【证据清单】\n- src/A.java:1 空类\n\n【风险评估】\n- 无\n", List.of());
         };
-        MultiAgentService service = service(client);
+        var sqlite = new com.pilot.server.store.SqliteStore(dataDir.resolve("dispatch.db"));
+        var persisted = new com.pilot.server.store.JdbcDispatchStore(new org.springframework.beans.factory.ObjectProvider<>() {
+            @Override public com.pilot.server.store.SqliteStore getObject() { return sqlite; }
+            @Override public com.pilot.server.store.SqliteStore getIfAvailable() { return sqlite; }
+        });
+        MultiAgentService service = service(client, PermissionMode.AUTO, persisted);
         TaskSpec spec = TaskSpec.readOnly("T1", "空类处置", "判断空类去留", List.of(), List.of("src/**"))
                 .withReviewers(2);
 
@@ -191,6 +205,8 @@ class MultiAgentServiceTest {
         assertEquals(TaskStatus.DISSENT, result.outcomes().get(0).status());
         assertEquals(1, result.dissents().size());
         assertFalse(result.arbitrationId().isBlank());
+        assertEquals(2, persisted.attempts(result.dispatchId()).stream().filter(row -> row.status().equals("succeeded")).count(),
+                "并行方案不能被彼此的租约取代");
         assertTrue(events.stream().anyMatch(event -> event instanceof ArbitrationRequired required
                 && "dissent".equals(required.kind())));
         assertTrue(result.report().contains("立即停止推进"), result.report());
@@ -214,6 +230,75 @@ class MultiAgentServiceTest {
         assertTrue(result.outcomes().get(1).detail().contains("预算"), result.outcomes().get(1).detail());
         assertTrue(events.stream().anyMatch(event -> event instanceof TaskUpdated updated
                 && "blocked".equals(updated.status())), "界面要能看到被暂停的任务");
+    }
+
+    @Test
+    void missingUsageStillConsumesBudget() throws IOException {
+        MultiAgentService service = service((messages, tools) -> new ModelResponse(REPORT, List.of()));
+        service.setBudgetLimits(new com.pilot.server.config.MultiAgentBudget(600, 1));
+        var result = service.dispatch(dispatch(List.of(
+                TaskSpec.readOnly("T1", "调研一", "读取代码", List.of(), List.of("src/**")),
+                TaskSpec.readOnly("T2", "调研二", "继续读取", List.of("T1"), List.of("src/**")))));
+        assertFalse(result.completed());
+        assertEquals(TaskStatus.BLOCKED, result.outcomes().get(1).status());
+        assertTrue(result.outcomes().get(1).detail().contains("预算"));
+    }
+
+    @Test
+    void changedFilesWithoutVerificationCannotReportCompleted() throws IOException {
+        AtomicInteger requests = new AtomicInteger();
+        MultiAgentService service = service((messages, tools) -> requests.getAndIncrement() == 0
+                ? new ModelResponse("", List.of(new com.pilot.core.tool.ToolCall("create", "create_file",
+                        Map.of("path", "src/New.java", "content", "class New {}\n"))))
+                : new ModelResponse(REPORT, List.of()));
+        var result = service.dispatch(dispatch(List.of(TaskSpec.editable("T1", "新增文件", "新增类",
+                List.of(), List.of("src/**"), com.pilot.core.multi.RiskLevel.LOW))));
+        assertFalse(result.completed(), "跳过校验不能报告整批通过");
+        assertEquals("skipped", result.verification().status());
+        assertFalse(Files.exists(workspace.resolve("src/New.java")));
+    }
+
+    @Test
+    void expiredLeaseCannotPublishSuccessfulResult() throws IOException {
+        var persisted = org.mockito.Mockito.mock(com.pilot.server.store.JdbcDispatchStore.class);
+        org.mockito.Mockito.when(persisted.startAttempt(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(new com.pilot.server.store.JdbcDispatchStore.Lease("expired", 1));
+        // false 是 mock 的默认结算结果，模拟新尝试已把旧租约替换。
+        var service = service((messages, tools) -> new ModelResponse(REPORT, List.of()), PermissionMode.AUTO, persisted);
+        var result = service.dispatch(dispatch(List.of(TaskSpec.readOnly("T1", "读取", "读取代码", List.of(), List.of("src/**")))));
+        assertFalse(result.completed());
+        assertTrue(events.stream().filter(com.pilot.core.event.SubagentFinished.class::isInstance)
+                .map(com.pilot.core.event.SubagentFinished.class::cast).noneMatch(com.pilot.core.event.SubagentFinished::ok));
+        org.mockito.Mockito.verify(persisted, org.mockito.Mockito.never()).interruptStale(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void diamondDependencyDoesNotOverlayOldAncestorTwice() throws IOException {
+        var requests = new java.util.concurrent.ConcurrentHashMap<String, AtomicInteger>();
+        var seen = new CopyOnWriteArrayList<String>();
+        ModelClient client = (messages, tools) -> {
+            var match = java.util.regex.Pattern.compile("任务编号：(T[1-4])").matcher(messages.get(0).content());
+            assertTrue(match.find());
+            String task = match.group(1);
+            int request = requests.computeIfAbsent(task, ignored -> new AtomicInteger()).getAndIncrement();
+            if (task.equals("T1") && request == 0) return new ModelResponse("", List.of(new com.pilot.core.tool.ToolCall(
+                    "create", "create_file", Map.of("path", "src/Api.java", "content", "interface Api { int oldVersion(); }\n"))));
+            if ((task.equals("T2") || task.equals("T4")) && request == 0) return new ModelResponse("", List.of(new com.pilot.core.tool.ToolCall(
+                    "read", "read_file", Map.of("path", "src/Api.java"))));
+            if (task.equals("T2") && request == 1) return new ModelResponse("", List.of(new com.pilot.core.tool.ToolCall(
+                    "edit", "edit_file", Map.of("path", "src/Api.java", "old_string", "oldVersion", "new_string", "newVersion"))));
+            if (task.equals("T4")) messages.stream().filter(m -> m.role().equals("tool")).forEach(m -> seen.add(m.content()));
+            return new ModelResponse(REPORT, List.of());
+        };
+        var service = service(client);
+        service.dispatch(dispatch(List.of(
+                TaskSpec.editable("T1", "创建", "创建接口", List.of(), List.of("src/**"), com.pilot.core.multi.RiskLevel.LOW),
+                TaskSpec.editable("T2", "修改", "修改接口", List.of("T1"), List.of("src/**"), com.pilot.core.multi.RiskLevel.LOW),
+                TaskSpec.readOnly("T3", "旁支", "检查", List.of("T1"), List.of("src/**")),
+                TaskSpec.readOnly("T4", "汇总", "读取接口", List.of("T2", "T3"), List.of("src/**")))));
+        assertTrue(seen.stream().anyMatch(text -> text.contains("newVersion")), "汇总应看到 T2 的最新产物：" + seen);
     }
 
     @Test

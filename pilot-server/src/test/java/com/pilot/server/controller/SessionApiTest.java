@@ -225,6 +225,18 @@ class SessionApiTest {
     }
 
     @Test
+    void deletingParentAlsoDeletesSideChatsUnknownToTheBrowser() throws Exception {
+        String parent = createSession();
+        String body = mvc.perform(post("/api/sessions/{id}/side", parent))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String side = json.readTree(body).get("sessionId").asText();
+        conversations.save(side, List.of(com.pilot.core.loop.Message.user("独立侧边记忆")));
+        mvc.perform(delete("/api/sessions/{id}", parent)).andExpect(status().isNoContent());
+        mvc.perform(get("/api/sessions/{id}", side)).andExpect(status().isNotFound());
+        assertTrue(conversations.load(side).isEmpty());
+    }
+
+    @Test
     void exposesContextUsageAndManualCompaction() throws Exception {
         String sessionId = createSession();
 

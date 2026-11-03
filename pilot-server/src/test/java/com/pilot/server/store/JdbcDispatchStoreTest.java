@@ -104,6 +104,65 @@ class JdbcDispatchStoreTest {
     }
 
     @Test
+    void startingRetryFencesStillRunningAttemptAndScopesGenerationToDispatch() {
+        JdbcDispatchStore store = store();
+        store.saveDispatch("d1", "s", "r", "", "running");
+        store.saveDispatch("d2", "s", "r", "", "running");
+        var first = store.startAttempt("d1", "T1", "a1", "");
+        var retry = store.startAttempt("d1", "T1", "a2", "");
+        var independent = store.startAttempt("d2", "T1", "a3", "");
+        assertEquals(1, independent.generation());
+        assertEquals(2, retry.generation());
+        assertFalse(store.finishAttempt(first.attemptId(), first.generation(), "succeeded", "",
+                JdbcDispatchStore.Usage.EMPTY), "旧执行者尚未完成就被重试取代，其结果也必须拒绝");
+        assertTrue(store.finishAttempt(retry.attemptId(), retry.generation(), "succeeded", "", JdbcDispatchStore.Usage.EMPTY));
+        assertTrue(store.finishAttempt(independent.attemptId(), independent.generation(), "succeeded", "", JdbcDispatchStore.Usage.EMPTY));
+    }
+
+    @Test
+    void parallelReviewLanesDoNotFenceEachOther() {
+        var store = store();
+        var left = store.startAttempt("d", "T1", "a", "s1", "left");
+        var right = store.startAttempt("d", "T1", "b", "s2", "right");
+        var retried = store.startAttempt("d", "T1", "c", "s3", "left");
+        assertEquals(1, right.generation());
+        assertEquals(2, retried.generation());
+        assertFalse(store.finishAttempt(left.attemptId(), left.generation(), "succeeded", "", JdbcDispatchStore.Usage.EMPTY));
+        assertTrue(store.finishAttempt(right.attemptId(), right.generation(), "succeeded", "", JdbcDispatchStore.Usage.EMPTY));
+        assertTrue(store.finishAttempt(retried.attemptId(), retried.generation(), "succeeded", "", JdbcDispatchStore.Usage.EMPTY));
+    }
+
+    @Test
+    void startupRecoveryClosesDispatchAndUnfinishedNodesWithoutNewDispatch() {
+        JdbcDispatchStore store = store();
+        store.saveDispatch("d1", "s", "r", "", "running");
+        store.saveNodes("d1", List.of(node("T1"), node("T2"), node("T3")));
+        store.updateNode("d1", "T1", "done", "a", "", 1);
+        store.updateNode("d1", "T2", "running", "b", "", 1);
+        store.startAttempt("d1", "T2", "b", "");
+        store.recoverInterrupted();
+        assertEquals("interrupted", store.dispatches("s").get(0).status());
+        assertEquals(List.of("done", "cancelled", "cancelled"), store.nodes("d1").stream().map(JdbcDispatchStore.NodeRow::status).toList());
+        assertEquals("interrupted", store.attempts("d1").get(0).status());
+    }
+
+    @Test
+    void oldAttemptTableIsMigratedWithoutLosingUsage() throws Exception {
+        var original = store();
+        var first = original.startAttempt("d", "T1", "a", "s");
+        original.finishAttempt(first.attemptId(), first.generation(), "succeeded", "",
+                new JdbcDispatchStore.Usage(100, 20, 1, false));
+        try (var connection = new SqliteStore(dir.resolve("pilot.db")).open();
+             var statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE task_attempts DROP COLUMN lane");
+        }
+        var upgraded = store();
+        assertEquals(2, upgraded.startAttempt("d", "T1", "b", "s2").generation());
+        assertEquals(100, upgraded.attempts("d").get(0).usage().inputTokens());
+        assertFalse(upgraded.attempts("d").get(0).usage().exact());
+    }
+
+    @Test
     void worksWithoutPersistedStore() {
         JdbcDispatchStore absent = new JdbcDispatchStore(null);
 
