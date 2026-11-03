@@ -1,0 +1,50 @@
+diff --git a/src/greeting.js b/src/greeting.js
+--- a/src/greeting.js
++++ b/src/greeting.js
+@@ -1,10 +1,10 @@
+ 'use strict';
+ 
+-const { getUserName, isActive } = require('./userService.js');
++const { displayNameOf, isActive } = require('./userService.js');
+ 
+ function greet(user) {
+-  if (!isActive(user)) return `你好，${getUserName(user)}（未激活）`;
+-  return `欢迎回来，${getUserName(user)}`;
++  if (!isActive(user)) return `你好，${displayNameOf(user)}（未激活）`;
++  return `欢迎回来，${displayNameOf(user)}`;
+ }
+ 
+ module.exports = { greet };
+diff --git a/src/report.js b/src/report.js
+--- a/src/report.js
++++ b/src/report.js
+@@ -1,9 +1,9 @@
+ 'use strict';
+ 
+-const { getUserName } = require('./userService.js');
++const { displayNameOf } = require('./userService.js');
+ 
+ function reportLine(user) {
+-  return `${getUserName(user)} 本月下单 0 次`;
++  return `${displayNameOf(user)} 本月下单 0 次`;
+ }
+ 
+ module.exports = { reportLine };
+diff --git a/src/userService.js b/src/userService.js
+--- a/src/userService.js
++++ b/src/userService.js
+@@ -1,7 +1,7 @@
+ 'use strict';
+ 
+ // 取名函数被三个模块引用，现在要统一改名。
+-function getUserName(user) {
++function displayNameOf(user) {
+   if (!user) return '未知用户';
+   return user.nickname ? `${user.nickname}（${user.name}）` : user.name;
+ }
+@@ -10,4 +10,4 @@
+   return Boolean(user && user.active);
+ }
+ 
+-module.exports = { getUserName, isActive };
++module.exports = { displayNameOf, isActive };

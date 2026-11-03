@@ -11,14 +11,14 @@ const output = await mkdtemp(join(tmpdir(), 'pilot-results-ui-'));
 const fixture = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react'; import {createRoot} from 'react-dom/client'; import App from '/src/components/App.jsx'; import {useStore} from '/src/store.js'; import {api} from '/src/api.js';
 import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
-document.documentElement.dataset.theme='dark'; window.store=useStore; window.calls=[]; window.fail=false; window.previewFail=false; window.handoffFail=false; window.pendingDetail=null;
+document.documentElement.dataset.theme='dark'; window.store=useStore; window.calls=[]; window.fail=false; window.previewFail=false; window.handoffFail=false; window.pendingDetail=null; window.verificationPhase='VERIFIED';
 for(const name of Object.keys(api)) if(typeof api[name]==='function') api[name]=async()=>({});
 const at='2026-11-03T03:00:00Z';
 window.rows=[{id:'schedule-1',revision:'v1',sessionId:'scheduled-session',title:'修复调度恢复并完成验证',source:'SCHEDULE',state:'COMPLETED',summary:'复用现有投递链路，修复任务重启后的恢复逻辑。相关测试通过，改动保存在独立工作区。',at,runId:'run-1',scheduleId:'schedule-1',read:false,handled:false,changedFiles:['src/schedule/dispatch.java','src/schedule/recovery.java'],checks:['恢复流程与重复投递测试通过'],openSteps:[],workspace:{mode:'ISOLATED',path:'/workspace/pilot-worktrees/任务 01',base:'/workspace/pilot',commit:'a46f98117f',handedOffAt:null}},
 {id:'run-2',revision:'v2',sessionId:'session-2',title:'核对跨平台文件行为',source:'CHAT',state:'NEEDS_ATTENTION',summary:'环境缺少 Windows 运行器，保留进度等待补充验证。',at,runId:'run-2',read:false,handled:false,changedFiles:[],checks:[],openSteps:['Windows 实机验证'],workspace:null}];
 window.research=[{id:'research-1',sources:['https://github.com/OpenHands/OpenHands','javascript:alert(1)'],decision:'沿用已有执行器与 worktree；参考独立执行上下文，只补结果投递与恢复边界。',license:'未复制外部源码；复用前核对具体依赖许可证。',sourceEvidence:['e_fetch_1'],observedAt:1793674800000,structured:true,raw:''}];
 api.results=async()=>{if(window.fail)throw Error('模拟连接断开');return {items:structuredClone(window.rows),truncated:false};};
-api.result=async(id)=>{if(window.pendingDetail)await window.pendingDetail;return {item:structuredClone(rows.find(i=>i.id===id)),research:id==='schedule-1'?research:[],verification:id==='schedule-1'?'VERIFIED':'UNKNOWN',acceptance:[{text:'恢复后不重复执行',checked:true,evidence:'单元测试通过'}]};};
+api.result=async(id)=>{if(window.pendingDetail)await window.pendingDetail;return {item:structuredClone(rows.find(i=>i.id===id)),research:id==='schedule-1'?research:[],verification:id==='schedule-1'?window.verificationPhase:'UNKNOWN',acceptance:[{text:'恢复后不重复执行',checked:true,evidence:'单元测试通过'}]};};
 api.resultReceipt=async(id,body)=>{calls.push({type:'receipt',id,...body});const row=rows.find(i=>i.id===id);if(body.revision!==row.revision)throw Error('结果已更新，请刷新');if(body.action==='read')row.read=true;if(body.action==='unread')row.read=false;if(body.action==='handle'){row.read=true;row.handled=true;}if(body.action==='reopen'){row.read=true;row.handled=false;}return structuredClone(row);};
 api.scheduleHandoffPreview=async()=>{calls.push({type:'preview'});return {base:'/workspace/pilot',path:rows[0].workspace.path,commit:'a46f98117f',files:['src/schedule/dispatch.java'],diff:'diff --git a/src/schedule/dispatch.java b/src/schedule/dispatch.java\\n- duplicate();\\n+ claimOnce();',revision:'patch-v1',truncated:false,conflict:window.previewFail?'原目录存在冲突，尚未交回任何改动':''};};
 api.scheduleHandoff=async(id,body)=>{calls.push({type:'handoff',id,...body});if(window.handoffFail)throw Error('预览后文件已变化，请重新预览再交回');rows[0].workspace.handedOffAt=at;return {};};
@@ -83,6 +83,15 @@ async function run(page, name, url) {
   await page.evaluate(()=>{window.resolveDetail();window.pendingDetail=null;});
   await page.getByRole('heading',{name:'核对跨平台文件行为',exact:true}).waitFor();
   assert.equal(await page.locator('.result-detail h2').innerText(),'核对跨平台文件行为');
+  for (const [phase, label] of [['CHECKS_PASSED','记录的检查通过'],['CHECKS_FAILED','检查未通过'],['CHECKS_STALE','验证依据已变化，需重新验证'],['UNVERIFIED','尚未验证'],['COMPLETED','执行已结束'],['FUTURE_PHASE','验证状态未知'],['VERIFIED','目标核验通过']]) {
+    await page.evaluate(value => { window.verificationPhase=value; }, phase);
+    await page.locator('.result-row').last().click();
+    await page.getByRole('heading',{name:'核对跨平台文件行为',exact:true}).waitFor();
+    await page.locator('.result-row').first().click();
+    await page.locator(`[data-verification-phase="${phase}"]`).waitFor();
+    assert.equal(await page.locator('[data-verification-phase]').innerText(),label);
+    if (phase !== 'VERIFIED') assert.equal(await page.getByText('目标核验通过',{exact:true}).count(),0);
+  }
   await page.keyboard.press('Escape');
   await page.evaluate(()=>store.getState().setUi({inspectorOpen:true,inspectorTab:'research'}));
   await page.getByText('当前任务的调研依据',{exact:true}).waitFor();
@@ -96,7 +105,7 @@ async function run(page, name, url) {
     await page.screenshot({path:join(output,`${name}-${width}-detail.png`)});
   }
   await page.evaluate(()=>document.documentElement.dataset.theme='light'); await page.screenshot({path:join(output,`${name}-390-light.png`)});
-  assert.deepEqual(errors,[]); console.log(`${name}: PASS receipts/filter/research/handoff/conflict/stale-preview/stale-response/error/responsive`);
+  assert.deepEqual(errors,[]); console.log(`${name}: PASS verification-states/receipts/filter/research/handoff/conflict/stale-preview/stale-response/error/responsive`);
 }
 
 try {

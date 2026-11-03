@@ -103,11 +103,12 @@ pilot:
     context-max-chars: ${PILOT_AGENT_CONTEXT_MAX_CHARS:400000}
     # 连续相同工具调用只注入提醒，不再中断运行
     repeat-remind-at: 3
-    # READ_ONLY 只读（对应 Codex/OpenCode 的 plan 模式）；ASK 逐次批准；
-    # AUTO_EDIT 写入直接生效、命令仍批准；AUTO 全部放行（默认，与 Codex/OpenCode 一致）
+    # READ_ONLY 只读；ASK 写入与命令逐次批准；
+    # AUTO_EDIT 写入直接生效、命令仍批准；AUTO 全部放行（Pilot 默认，工作区边界仍生效）
     permission-mode: ${PILOT_PERMISSION_MODE:AUTO}
     approval-timeout-seconds: 300
-    # 收尾门默认关闭：模型说完成就完成，不再额外要求验证或自审（与 Codex/OpenCode 一致）
+    # 通用收尾提醒门默认关闭；Direct 按实际证据报告检查通过、失败、陈旧或未验证。
+    # 执行结束不代表已核验；Goal 独立核验不受此开关影响。
     completion-checks: ${PILOT_AGENT_COMPLETION_CHECKS:false}
     # 同时能跑的任务数。一个任务卡住时，不要把后面的任务全堵死
     run-threads: ${PILOT_AGENT_RUN_THREADS:4}

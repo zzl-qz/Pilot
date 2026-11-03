@@ -10,6 +10,7 @@ import { filterPaletteActions } from '../lib/commands.js';
 import { PERMISSION_MODES } from '../lib/permission.js';
 import { emptySkillsHint, parseInstallSource, summarizeInstallResults } from '../lib/skills.js';
 import { buildModelProbe, buildModelUpdate, describeModelsFetched } from '../lib/model-settings.js';
+import { verificationLabel, verificationHint } from '../lib/verification.js';
 
 /** 任务契约状态 → 中文（与旧版 renderTaskContract 的映射一致）。 */
 const TASK_STATUS_LABELS = {
@@ -20,10 +21,6 @@ const TASK_STATUS_LABELS = {
   UNVERIFIED: '结果未验证', NO_PROGRESS: '暂无有效进展', REVIEW_UNAVAILABLE: '核验暂不可用'
 };
 const EXECUTION_MODES = { DIRECT: '普通执行', GOAL: '持续推进目标', PROBE: '旧版探查任务', UNASSESSED: '旧版待迁移任务' };
-const EXECUTION_PHASES = {
-  ASSESSING: '准备执行', EXPLORING: '探查中', EXECUTING: '执行中', VERIFYING: '核验中',
-  UNVERIFIED: '尚未验证'
-};
 
 /** 任务契约：目标 / 约束 / 验收记录 / 执行评估，随事件更新，可手动补充约束。 */
 export function TaskContract() {
@@ -49,7 +46,7 @@ export function TaskContract() {
   const status = String(task.status || '').toUpperCase();
   // 没有验收条件时 COMPLETED 只代表正常收尾，不能显示成「已验收」
   const lifecycle = status === 'COMPLETED' && !items.length
-    ? '已完成'
+    ? '执行结束'
     : (TASK_STATUS_LABELS[status] || status || '已保存');
   const execution = task.execution || null;
   return (
@@ -65,10 +62,11 @@ export function TaskContract() {
             <p className="task-help">
               {EXECUTION_MODES[execution.mode] || execution.mode}
               {' · '}
-              {EXECUTION_PHASES[execution.phase] || execution.phase}
+              {verificationLabel(execution.phase)}
               {execution.requests != null ? ` · 已调用模型 ${execution.requests} 次` : ''}
             </p>
             {execution.reason && <p className="task-help">{execution.reason}</p>}
+            {verificationHint(execution.phase) && <p className="task-help">{verificationHint(execution.phase)}</p>}
             {(execution.criteria || []).length > 0 && (
               <ul className="task-criteria">
                 {execution.criteria.map((criterion, index) => (
@@ -1014,8 +1012,8 @@ function DiagnosticsSettings() {
         </>
       )}
       {validation?.report && (
-        <p className={`chip-hint${validation.report.covered ? '' : ' is-error'}`}>
-          校验证据：{validation.report.covered ? '已覆盖当前产物' : '未覆盖当前产物'}
+        <p className={`chip-hint${validation.report.current ? '' : ' is-error'}`}>
+          校验证据：{validation.report.current ? '已覆盖当前产物' : '未覆盖当前产物'}
           {validation.report.reason ? `（${validation.report.reason}）` : ''}
         </p>
       )}

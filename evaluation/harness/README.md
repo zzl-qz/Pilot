@@ -1,68 +1,87 @@
-# 评估执行器
+# 真实任务评估执行器
 
-固定任务集 + 外部验收。执行器在发任务前保存 `test/`，结束后把候选代码复制到独立验收目录并还原这份测试，再运行验收命令；删改工作区断言不能制造通过。模型自述「测试通过」不构成成功证据。
+固定任务集、重复运行、独立验收。发任务前保存原始 `test/`；结束后将候选代码复制到独立目录并恢复这些测试，再执行验收。删改断言不能制造成功，模型自述也不作为验收证据。参考解位于 `references/`，不会复制进模型任务的 fixture。
 
-## 命令
+## 先验证任务可解
 
 ```bash
-# 跑一遍（需要本机已启动 Pilot，并接到真实模型端点）
-node evaluation/harness/runner.mjs --base http://127.0.0.1:8787 \
-  --model <模型> --prompt-version P1 --tool-version T1 \
-  --fixtures evaluation/harness --out evaluation/harness/runs/20261103.jsonl
-
-# 与上次结果比较，并给出优化门禁结论
-node evaluation/harness/runner.mjs ... --baseline evaluation/harness/runs/上次.jsonl --strict
-
-# 只检查 fixture（不需要启动服务）
-node evaluation/harness/runner.mjs --verify-fixtures --fixtures evaluation/harness
-
-# 不启动服务，只验证流程与产物格式（不能当作能力结论）
-node evaluation/harness/runner.mjs --dry-run --fixtures evaluation/harness
+node evaluation/harness/reference-verifier.mjs
+node --test evaluation/harness/reference-verifier.test.mjs
 ```
 
-`--strict` 下门禁不是 `pass` 就以非零退出码结束，用于 CI 拦住会造成能力退化的「优化」。
-`--strict` 必须同时指定可读的 `--baseline`，不能与 `--dry-run` 一起使用。dry-run 记录明确标为未验收，门禁会拒绝它们。
-未提供 `--fixtures` 时相对于任务集文件定位 fixture；缺少 fixture 会在请求服务前失败，绝不回退到默认工作区。
+逐项要求初始 fixture 的测试断言实际失败、参考解在相同原始测试下通过；命令启动失败、超时、没有测试断言不能算有分辨力。24 项参考解按 `references/<task.id>/src/` 存放，文件迁移用可选 `reference.json` 的 `remove` 列表。验证器拒绝测试覆盖、路径逃逸和符号链接，在临时目录执行，使用 `process.execPath` 和 argv，无需平台专用 shell。
 
-## 任务集规范
+`node evaluation/harness/runner.mjs --verify-fixtures` 保留为仅验证初始失败的轻量入口；完整可解性检查使用上面的 reference-verifier。
 
-`tasks.json` 每个任务给：
+## 运行与对照
 
-- `fixture`：可复制的初始工作区
-- `prompt`：发给模型的任务
-- `acceptance`：验收命令数组，全部退出码为 0 才算通过
-- `steer`（可选）：`{ afterSeconds, content }`，跑到指定秒数时通过 `/steer` 引导当前 run
+先在独立数据目录启动接入真实模型的 Pilot。A/B 使用同一模型、供应商端点、权限、工具开关、预算和任务集；只改变本轮计划评估的因素。`--model` **核对**服务模型，不替换全局模型设置。未传时读取服务配置。当前服务尚未暴露上游解析后的模型别名，因此 `requestedModel` 有值、`resolvedModel` 为 `null`。
 
-fixture 统一是**零依赖的 Node 工程**：跨平台、不联网、验收秒级完成（不用 `mvn -q -o test` 那种几十秒还要碰离线仓库的方式）。
-目录约定是 `src/` 放待修代码、`test/` 放验收测试。
-Node 验收使用 `node --test` 自动发现测试，不使用在 Node 22 下会被解析成模块路径的 `node --test test/`。
-只有 `COMPLETED` 且外部验收通过才记为成功；取消、暂停、失败不会被误记成功。超时不执行验收，并尝试取消执行器创建的运行；取消失败写明会话 ID。
+```bash
+# 完整基线：24 个任务，每项 3 次，共 72 次运行
+node evaluation/harness/runner.mjs --base http://127.0.0.1:8787 \
+  --model <服务中已配置的模型> --repeat 3 \
+  --prompt-version P0 --tool-version T0 --environment <固定环境与预算标签> \
+  --prompt-dir <服务实际加载的prompts目录> \
+  --runtime-source <服务对应的pilot-core/src/main/java目录> \
+  --runtime-source <服务对应的pilot-server/src/main/java目录> \
+  --out evaluation/harness/runs/baseline.jsonl
 
-两条硬要求，缺一个任务就白给：
+# 候选：切换到候选服务及其对应源码，再使用相同任务集与重复次数
+node evaluation/harness/runner.mjs --base http://127.0.0.1:8788 \
+  --model <同一模型> --repeat 3 --prompt-version P1 --tool-version T1 \
+  --environment <同一环境与预算标签> \
+  --baseline evaluation/harness/runs/baseline.jsonl --strict \
+  --out evaluation/harness/runs/candidate.jsonl
 
-1. **未修复时验收必须失败。** 初始就通过的任务没有分辨力——模型什么都不做也能拿到 PASS。
-2. **必须可解。** 断言如果根本无法满足，任务就是恒定失败。新增任务时先写一份参考解确认能跑绿。
+# 有界试跑或将任务拆给多个进程（每个进程必须有独立输出路径）
+node evaluation/harness/runner.mjs --repeat 3 \
+  --task fix-failing-unit-test,async-race-condition \
+  --out evaluation/harness/runs/smoke.jsonl
 
-这两条都会让门禁空转：基线上全是失败的任务，永远报不出退化（因为判定的是「从成功变成失败」）。
+# 只检查输出流程；没有模型调用、成本或能力结论
+node evaluation/harness/runner.mjs --dry-run --repeat 3 --task fix-failing-unit-test \
+  --out evaluation/harness/runs/dry-run.jsonl
+```
 
-用 `--verify-fixtures` 检查第 1 条；第 2 条目前靠人工写参考解验证。
+`--task` 支持逗号分隔或重复传入。`--repeat` 为 1–100，默认 1；不同任务按重复轮次交错，避免先完整跑完一个任务的所有重复再处理下一个。默认任务文件为 `evaluation/harness/tasks.json`，默认 fixture 根目录为任务文件所在目录；缺 fixture、未知任务、任务 ID 重复在付费运行前报错。
 
-## 门禁：`metrics.mjs` 的 `gate()`
+`--prompt-dir` 默认项目的 prompts 目录，`--runtime-source` 默认 core/server 的 Java 源码目录。记录相对文件名和内容 SHA256，而不依赖机器的绝对路径。操作者须保证这些目录与服务实际加载的构建和提示词一致；本地源码 hash 不能证明远程服务加载了它。环境记录包含 OS、架构、Node 版本及 `--environment` 标签；Java 版本、模型推理参数、并发度和服务预算等未由接口暴露的条件应写入标签并保持一致。运行时 hash 不同会明确标为 `combined`，不能将组合变化归因于提示词。
 
-判定顺序是**能力优先、成本其次**：
+每次任务完成立即追加 JSONL；后续中断不会丢失先前记录。已有输出文件拒绝覆盖，summary 使用独立路径。错误记录保留失败事实，未知成本不填 0。超时尝试取消本执行器创建的运行，不会继续验收正在修改的工作区。现有固定 Node 验收使用 argv；自定义字符串验收仍交系统 shell 执行，需要按目标平台编写。
 
-| 检查 | 为什么单独列 |
+## 场景覆盖
+
+只有运行状态 `COMPLETED`、外部验收通过、必需场景实际触发时才记成功。中途引导通过当前 `runId` 的 `/steer` 投递，不排队创建新任务。记录引导是否投递、接收的运行 ID、投递时步数和实际延迟；若模型在投递前已经完成，即使最终代码通过测试，也不能声称测过中途引导。两条内置引导场景在 1 秒后尝试，使用更短轮询；未投递的记录为场景未覆盖，需要重新设计或复测该场景。
+
+## 指标口径
+
+| 指标 | 口径 |
 |---|---|
-| 任一任务从「基线成功过」变失败 → 拒 | 逐任务 Pareto 判定。只看平均通过率会漏掉「放弃难题换整体好看」 |
-| 通过率下降 → 拒 | — |
-| 验收执行率下降 → 拒 | 少跑验收既省钱又不会拉低通过率，是最隐蔽的退化 |
-| 人工接管率上升 → 拒 | — |
-| 成本上升 → 拒 | 没有价格表时退化为用输入 token 当代理，涨幅超 5% 视为变贵 |
-| 可比任务 < 20 → insufficient | 「看不出退化」不等于「没有退化」，样本不足不算通过 |
+| 成功率 | 运行完成且独立验收通过、必需场景已覆盖 / 全部尝试 |
+| 正常收尾但外部验收失败率 | 运行终态为 COMPLETED 但外部验收失败 / 正常收尾且执行外部验收的样本；同时报告收尾验收覆盖率 |
+| 每成功任务成本 | 全部尝试成本（包含失败尝试）/ 成功尝试数；任何价格缺失或无成功任务时为 `null` |
+| p50/p95 耗时 | 观测到的总执行与验收耗时分位数；另保留模型执行阶段耗时 |
+| 工具调用与模型重试 | 分页读取结构化历史事件计数；历史不可用时为 `null` |
+| 失败命令数 | 有明确非零退出码或 FAILED 状态的命令，不等于返工次数 |
+| 人工接管、返工 | 当前没有可靠自动观测，保持 `null`；非完成、脚本引导或工具失败不能伪装成人工接管/返工 |
+| 缓存命中率 | 只使用有真实缓存观测的输入 token；缺失不当零命中 |
 
-样本数量按不同的 `taskId + model` 计算；同一个任务重跑 20 次仍只有一个可比任务。
-缺少基线中的任务会拒绝。成本使用同任务每次运行的均值，只有全部可比记录都有价格才按金额比较，否则使用输入 token；减少重跑次数和只记录便宜样本不能制造降本。
+`falseCompletionRate` / `falseCompletionCount` 保留为兼容字段名，`reportedComplete` 仅表示运行正常收尾，不表示模型文字声称成功。模型可能明确说明“未完成”后正常结束；本指标不判断诚实性。汇总同时提供明确的中文标签；该比率上升需要复核任务结果和终态语义，不能直接称为模型说谎。
 
-基线的能力取「曾经成功过」而不是「最后一次」：同一任务跑多次时，只要做到过一次，本次做不到就算退化。
+金额全部可观测时才给总金额和成功成本；部分已知金额单独放 `knownCostUsd`，不能当总成本。没有价格时，门禁可使用完整输入 token 作为代理指标，明确它不等于账单成本。
 
-结果写进 `*.summary.json` 的 `gate` 字段，也打印在标准输出。
+## 对照门禁
+
+严格门禁要求相同的任务合同、fixture、环境和模型配置指纹，每个任务两组至少 3 次独立运行、至少 20 个不同任务。重复 `attempt`、复用同一 `sessionId` 冒充独立运行、结果字段互相矛盾、混合版本、缺元数据的旧记录、样本不足、重复次数不一致、必需场景未触发均不能得到 `pass`。旧记录仍能汇总查看。
+
+- 缺掉基线任务、混入 dry-run、降低外部验收执行率：拒绝。
+- 每个任务比较两组成功率。单次失败或历史偶然成功仅形成待复测信号；成功率下降但证据不足时返回 `insufficient`，不会放行。
+- 使用单侧 Fisher 精确检验，并按可比任务数做 Bonferroni 校正；重复样本显示显著退化时拒绝，其他任务的进步不能抵消该任务退化。
+- 两组全部未成功不能建立可用能力基线。所有样本必须有外部验收结果；任务失败或基础设施异常不可通过删记录隐藏。
+- 比较每项任务的平均成本，而非总运行次数；默认金额或 token 代理允许 5% 波动。部分成本未知时不能只比较便宜的已知子集。
+- `pass` 仅表示当前可比样本未观察到退化，并非证明模型在所有任务上能力不下降。三次重复是最小操作门槛，不是统计充分性的保证；边界结果要增加重复次数。
+
+`--strict` 必须指定已满足完整版本与重复条件的基线，不能与 dry-run 同用；门禁非 pass 时进程非零退出。小规模试跑应不加 strict，结果明确为证据不足。
+
+本轮自动化测试在 macOS 运行；路径、命令调用和临时目录使用 Node 跨平台 API，Windows/Linux 尚未实机验证。

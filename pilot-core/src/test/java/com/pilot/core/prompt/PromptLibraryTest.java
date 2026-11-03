@@ -225,4 +225,41 @@ class PromptLibraryTest {
         assertTrue(with.contains("## 页面验证"));
         assertFalse(without.contains("## 页面验证"));
     }
+
+    @Test
+    void stableSystemPrefixDoesNotDependOnDateOrTaskState() {
+        PromptLibrary prompts = PromptLibrary.classpathOnly();
+        var tools = java.util.Set.of("read_file", "run_command");
+        var first = new java.util.HashMap<>(VARS);
+        first.put("planItems", "第一轮计划");
+        first.put("contractJson", "第一轮状态");
+        var next = new java.util.HashMap<>(first);
+        next.put("today", "2026-11-04");
+        next.put("planItems", "用户纠正后的计划");
+        next.put("contractJson", "新的验证证据");
+        next.remove("skills");
+
+        assertEquals(prompts.system(first, tools), prompts.system(next, tools),
+                "日期、计划与任务状态应单独注入，不能污染稳定系统前缀；不可用技能也不应要求目录变量");
+    }
+
+    @Test
+    void externalPromptVariantsReloadWithoutChangingOtherSections(@TempDir Path dir) throws IOException {
+        Files.createDirectories(dir.resolve("system"));
+        Path workflow = dir.resolve("system/workflow.md");
+        Files.writeString(workflow, "候选流程 A");
+        PromptLibrary prompts = new PromptLibrary(dir);
+        var tools = java.util.Set.of("read_file", "run_command");
+        var before = prompts.systemParts(VARS, tools);
+
+        Files.writeString(workflow, "候选流程 B");
+        var after = prompts.systemParts(VARS, tools);
+
+        assertEquals(before.size(), after.size());
+        assertEquals(before.getFirst(), after.getFirst(), "行为实验不应重写身份与环境");
+        assertEquals("候选流程 A", before.get(1).text());
+        assertEquals("候选流程 B", after.get(1).text());
+        assertEquals(before.subList(2, before.size()), after.subList(2, after.size()),
+                "单段覆盖应保留其余工具能力与规则，便于独立对照");
+    }
 }

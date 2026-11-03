@@ -1,0 +1,7 @@
+{
+  "initialPlannedRuns": 36,
+  "effectivePlannedRuns": 18,
+  "reason": "Finish the six-task first pass within the remaining conservative reservation budget; retain all failures; do not add second repetitions.",
+  "resumeAfterCompletedAttempts": 15,
+  "sameModelAndRuntime": true
+}

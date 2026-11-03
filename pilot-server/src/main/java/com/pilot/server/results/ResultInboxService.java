@@ -27,7 +27,8 @@ public class ResultInboxService {
     public record Page(List<Item> items, boolean truncated) { }
     public record Research(String id, List<String> sources, String decision, String license, List<String> sourceEvidence,
                            long observedAt, boolean structured, String raw) { }
-    public record Detail(Item item, List<Research> research, String verification, List<TaskControlService.Acceptance> acceptance) { }
+    public record Detail(Item item, List<Research> research, String verification, List<TaskControlService.Acceptance> acceptance,
+                         String verificationDetail) { }
 
     public Page list() { return page(500, Instant.EPOCH); }
     /** 通知不能因 UI 的最近 500 条窗口而漏掉离线结果。 */
@@ -59,7 +60,9 @@ public class ResultInboxService {
             if (end.payload() instanceof RunCancelled) continue;
             var session = sessionIndex.get(end.sessionId()); if (session == null) continue;
             var completed = end.payload() instanceof RunCompleted c ? c : null;
-            String state = completed == null ? "NEEDS_ATTENTION" : completed.openSteps().isEmpty() ? "COMPLETED" : "AWAITING_REVIEW";
+            var resultTask = tasks.result(end.runId());
+            String state = completed == null || verificationNeedsAttention(resultTask, completed) ? "NEEDS_ATTENTION"
+                    : completed.openSteps().isEmpty() ? "COMPLETED" : "AWAITING_REVIEW";
             String summary = completed == null ? ((RunFailed) end.payload()).message() : completed.summary();
             String revision = end.sessionId() + ":" + end.sequence();
             var receipt = receipt(receipts, end.runId(), revision);
@@ -69,6 +72,16 @@ public class ResultInboxService {
         }
         items.sort(Comparator.comparing(Item::at).reversed().thenComparing(Item::id));
         return new Page(items.stream().filter(item -> !item.at().isBefore(since)).limit(limit).toList(), endings.size() > limit || items.size() > limit);
+    }
+    private static boolean verificationNeedsAttention(TaskControlService.TaskContract task, RunCompleted completed) {
+        if (task == null || task.execution() == null) return false;
+        var execution = task.execution();
+        if (Set.of("CHECKS_FAILED", "CHECKS_STALE").contains(execution.phase())) return true;
+        if (!"UNVERIFIED".equals(execution.phase())) return false;
+        // 问答与文档修改可以正常交付；代码改动缺证据则需要关注，不能冒充验证完成。
+        return java.util.stream.Stream.concat(execution.changedPaths().stream(), completed.changedFiles().stream())
+                .anyMatch(path -> path != null && !path.isBlank() && !path.matches("(?i).*\\.(md|txt|rst|adoc)$"))
+                || execution.evidence().stream().anyMatch(e -> "RUNNING".equals(e.status()) && e.check() != null);
     }
     private static String scheduleSummary(ScheduledTask job, EventEnvelope end) {
         String result = end == null ? "" : end.payload() instanceof RunCompleted c ? c.summary()
@@ -98,7 +111,7 @@ public class ResultInboxService {
             if (current != null && Objects.equals(current.taskId(), job.taskId())) task = current;
         }
         return new Detail(item, research(task), task == null || task.execution() == null ? "UNKNOWN" : task.execution().phase(),
-                task == null ? List.of() : task.acceptance());
+                task == null ? List.of() : task.acceptance(), task == null || task.execution() == null ? "" : task.execution().gap());
     }
     public List<Research> sessionResearch(String sessionId) {
         if (sessions.find(sessionId).isEmpty()) throw new IllegalArgumentException("会话不存在");

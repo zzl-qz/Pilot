@@ -1252,6 +1252,7 @@ public class AgentRunService implements RunStarter {
             } else if (event instanceof com.pilot.core.event.RunCompleted completed) {
                 TaskControlService.TaskContract verified = taskControls.load(sessionId);
                 boolean goalVerified = verified != null && verified.execution() != null
+                        && "GOAL".equals(verified.execution().mode())
                         && "VERIFIED".equals(verified.execution().phase());
                 RunCompleted effective = completed;
                 if (goalVerified) {
@@ -1308,6 +1309,7 @@ public class AgentRunService implements RunStarter {
                     properties.goalMaxInputTokens(), properties.goalMaxOutputTokens(),
                     properties.goalMaxActiveMillis()) : null;
         if (goalPolicy != null) {
+            goalPolicy.withCommandLookup(id -> commandTasks.get(sessionId, id));
             goalPolicy.withAvailableTools(availableTools).withUpdates(state -> sink.accept(new com.pilot.core.event.ExecutionUpdated(
                     state.mode(), state.phase(), state.requests(), state.reason(), state.gap())));
             tools.register(goalPolicy.promotionTool());
@@ -1440,8 +1442,13 @@ public class AgentRunService implements RunStarter {
                 return;
             }
             List<String> checks = completed == null ? List.of() : completed.checks();
-            String status = checks.isEmpty() ? "skipped"
-                    : checks.stream().allMatch(check -> check.endsWith("→ exit 0")) ? "passed" : "failed";
+            TaskControlService.TaskContract task = taskControls.load(sessionId);
+            String phase = task == null || task.execution() == null ? "UNVERIFIED" : task.execution().phase();
+            // 使用已绑定当前源码版本的账本判断，不能把旧检查或普通 exit 0 重新包装成通过。
+            boolean qualifying = checks.stream().anyMatch(check ->
+                    com.pilot.core.tool.VerificationCheck.passingKind(check).qualifies());
+            String status = "CHECKS_FAILED".equals(phase) ? "failed"
+                    : qualifying && Set.of("CHECKS_PASSED", "VERIFIED").contains(phase) ? "passed" : "skipped";
             validations.record(new com.pilot.server.validation.ValidationEvidence(
                     "val_" + java.util.UUID.randomUUID(), sessionId, runId, candidate, files, checks,
                     status, com.pilot.server.multi.SandboxStore.environmentFingerprint(), "run",

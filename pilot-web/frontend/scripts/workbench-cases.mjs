@@ -63,11 +63,24 @@ export async function checkWorkbench(page, name, output) {
   assert.equal(await page.evaluate(() => document.activeElement.classList.contains('workspace-chip')), true);
 
   // 每个设置页必须留在视口内；Tab/Shift-Tab 被约束在弹窗，Escape 返回触发按钮。
+  await page.evaluate(() => {
+    api.validation = async () => ({ report: { current: true, reason: '当前检查已通过' } });
+  });
   await page.locator('#settings-open').click();
   for (const section of ['外观', '模型', '权限', '技能', '用量', '诊断', '关于']) {
     await page.locator('.settings-nav').getByRole('button', { name: section, exact: true }).click();
     assert.equal(await page.locator('.settings-body').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true, section + ' 无横向溢出');
   }
+  await page.locator('.settings-nav').getByRole('button', { name: '诊断', exact: true }).click();
+  const validation = page.getByText('校验证据：', { exact: false });
+  await validation.waitFor();
+  assert.match(await validation.innerText(), /已覆盖当前产物/);
+  assert.equal(await validation.evaluate(el => el.classList.contains('is-error')), false);
+  await page.evaluate(() => { api.validation = async () => ({ report: { current: false, reason: '产物已变化' } }); });
+  await page.locator('.settings-nav').getByRole('button', { name: '关于', exact: true }).click();
+  await page.locator('.settings-nav').getByRole('button', { name: '诊断', exact: true }).click();
+  await page.getByText('校验证据：未覆盖当前产物（产物已变化）', { exact: true }).waitFor();
+  assert.equal(await validation.evaluate(el => el.classList.contains('is-error')), true);
   for (let i = 0; i < 14; i++) await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => !!document.activeElement.closest('#settings')), true);
   for (let i = 0; i < 14; i++) await page.keyboard.press('Shift+Tab');

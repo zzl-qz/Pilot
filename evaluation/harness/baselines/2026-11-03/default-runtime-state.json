@@ -1,0 +1,65 @@
+[
+  {
+    "taskId": "fix-failing-unit-test",
+    "sessionId": "ses_a3dec1ef-9bd9-44af-b6c9-004563339a3d",
+    "success": true,
+    "taskStatus": "COMPLETED",
+    "executionPhase": "CHECKS_STALE",
+    "verificationDetail": "部分检查早于当前代码或用户要求，不能用旧结果证明当前版本。",
+    "validation": {
+      "covered": false,
+      "reason": "最近一次校验没有通过（skipped）",
+      "candidateHash": "ce14b4f840ce60365b4b51ac7c2307276117b188ab96e9a2b344acc716375881",
+      "status": "skipped",
+      "checks": [
+        "find . -type f -not -path */node_modules/* | head -100 → exit 0",
+        "node --test test/ → exit 1",
+        "node --test test/pricing.test.js → exit 1",
+        "node --test test/pricing.test.js → exit 0"
+      ],
+      "recordedAt": "2026-11-03T07:27:07.860743Z",
+      "runId": "run_a33d29c7-387e-4a84-854c-9b834199528e"
+    }
+  },
+  {
+    "taskId": "long-file-targeted-edit",
+    "sessionId": "ses_b7481cb2-b2dd-4335-a63d-0b39b6cf7018",
+    "success": true,
+    "taskStatus": "COMPLETED",
+    "executionPhase": "CHECKS_STALE",
+    "verificationDetail": "部分检查早于当前代码或用户要求，不能用旧结果证明当前版本。",
+    "validation": {
+      "covered": false,
+      "reason": "最近一次校验没有通过（skipped）",
+      "candidateHash": "612f0ffbccfa2e9377305bba6661ebe1220e0d1ab6915963a112cbc792c41de1",
+      "status": "skipped",
+      "checks": [
+        "node --test test/ → exit 1",
+        "node --test test/ledger.test.js → exit 1",
+        "node --test test/ledger.test.js → exit 0"
+      ],
+      "recordedAt": "2026-11-03T07:27:22.724096Z",
+      "runId": "run_899c7bbf-4be0-4e29-a0bd-a24e052ae0e1"
+    }
+  },
+  {
+    "taskId": "steer-constraint-hold",
+    "sessionId": "ses_437cabda-cad1-4a72-ba24-5f0b4c454dea",
+    "success": true,
+    "taskStatus": "COMPLETED",
+    "executionPhase": "CHECKS_FAILED",
+    "verificationDetail": "当前版本仍有未通过的检查；执行已结束，不能声称验证通过。",
+    "validation": {
+      "covered": false,
+      "reason": "最近一次校验没有通过（failed）",
+      "candidateHash": "bc67b778e9c8321a6f3bfa2869902afecc674e035a118534e139e38d2f56dcb2",
+      "status": "failed",
+      "checks": [
+        "node --test test/ → exit 1",
+        "node --test test/*.test.js → exit 0"
+      ],
+      "recordedAt": "2026-11-03T07:27:38.390024Z",
+      "runId": "run_f8c25ada-86ad-4cdd-a949-7a44ec017ab6"
+    }
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "requestedModel": "gpt-6.1-sol",
+  "reportedModel": "gpt-6.1-sol",
+  "seconds": 33.531,
+  "usage": {
+    "prompt_tokens": 4428,
+    "completion_tokens": 18,
+    "total_tokens": 4446
+  },
+  "finishReason": "tool_calls",
+  "toolNames": [
+    "ping"
+  ]
+}

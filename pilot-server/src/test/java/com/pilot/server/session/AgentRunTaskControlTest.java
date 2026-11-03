@@ -372,7 +372,7 @@ class AgentRunTaskControlTest {
     }
 
     @Test
-    void verifiedExecutionSupersedesStaleInternalPlanWithoutMarkingTaskInterrupted() throws Exception {
+    void ordinaryExecutionKeepsOpenPlanAndDoesNotClaimVerification() throws Exception {
         ModelClient model = (messages, tools) -> done();
         try (Fixture f = new Fixture(model, null, true)) {
             f.plans.save(f.id, List.of(new com.pilot.core.plan.PlanItem(
@@ -382,12 +382,46 @@ class AgentRunTaskControlTest {
             f.finished("COMPLETED");
 
             assertEquals("COMPLETED", f.tasks.load(f.id).status());
-            assertTrue(f.plans.load(f.id).isEmpty(), "核验通过后旧的内部计划应被清理");
+            assertFalse(f.plans.load(f.id).isEmpty(), "普通收尾不能假装核验已覆盖未完成计划");
+            assertEquals("UNVERIFIED", f.tasks.load(f.id).execution().phase());
             RunCompleted completed = f.sessions.events(f.id).stream().map(EventEnvelope::payload)
                     .filter(RunCompleted.class::isInstance).map(RunCompleted.class::cast)
                     .findFirst().orElseThrow();
-            assertTrue(completed.openSteps().isEmpty(),
-                    "最终事件不能再携带已被核验结果取代的旧 openSteps");
+            assertFalse(completed.openSteps().isEmpty(), "未完成步骤仍应如实显示");
+        }
+    }
+
+    @Test
+    void onlyIndependentlyVerifiedGoalClearsStaleInternalPlan() throws Exception {
+        java.nio.file.Files.writeString(workspace.resolve("known.txt"), "实际资料");
+        AtomicInteger mainCalls = new AtomicInteger();
+        AtomicReference<TaskControlService> tasks = new AtomicReference<>();
+        AtomicReference<String> session = new AtomicReference<>();
+        ModelClient model = (messages, tools) -> {
+            if (tools.size() == 1 && "submit_decision".equals(tools.getFirst().name())) {
+                String evidence = tasks.get().load(session.get()).execution().evidence().stream()
+                        .filter(e -> "read_file".equals(e.tool()) && "SUCCESS".equals(e.status()))
+                        .findFirst().orElseThrow().id();
+                return new ModelResponse("", List.of(new ToolCall("review", "submit_decision", Map.of(
+                        "decision", "COMPLETE", "gap", "", "next_action", "", "expected_observation", "",
+                        "coverage", List.of(Map.of("criterion", 0, "satisfied", true, "evidence", List.of(evidence)))))));
+            }
+            return switch (mainCalls.getAndIncrement()) {
+                case 0 -> new ModelResponse("", List.of(new ToolCall("goal", "promote_goal", Map.of(
+                        "reason", "核对真实资料", "completion_conditions", List.of("读取实际资料")))));
+                case 1 -> new ModelResponse("", List.of(new ToolCall("read", "read_file", Map.of("path", "known.txt"))));
+                default -> done();
+            };
+        };
+        try (Fixture f = new Fixture(model, null, true)) {
+            tasks.set(f.tasks); session.set(f.id);
+            f.plans.save(f.id, List.of(new com.pilot.core.plan.PlanItem("读取资料", com.pilot.core.plan.PlanItem.PENDING)));
+            f.start(null); f.finished("COMPLETED");
+            assertEquals("VERIFIED", f.tasks.load(f.id).execution().phase());
+            assertTrue(f.plans.load(f.id).isEmpty());
+            assertTrue(f.sessions.events(f.id).stream().map(EventEnvelope::payload).filter(RunCompleted.class::isInstance)
+                    .map(RunCompleted.class::cast).allMatch(e -> e.openSteps().isEmpty()));
+            assertEquals("VERIFIED", f.tasks.result(f.firstRun).execution().phase());
         }
     }
 

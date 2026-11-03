@@ -1,37 +1,73 @@
-/**
- * 评估指标聚合。
- *
- * 单次运行说明不了模型是否稳定：必须看固定任务集上的成功率、回归率、成本、耗时、
- * 返工次数和人工接管率，并按模型/提示词/工具版本分组比较。
- *
- * 记录格式（runner.mjs 写出，一行一条）：
- * {
- *   taskId, model, promptVersion, toolVersion, runId, sessionId,
- *   success: boolean,          // 外部验收命令是否通过
- *   acceptanceRan: boolean,    // 是否真的执行了验收命令（没有执行就不算成功）
- *   durationSeconds: number,
- *   rework: number,            // 同一任务内失败重试/返工次数
- *   takeover: boolean,         // 是否需要人工接管（中断后继续、手工改代码）
- *   costUsd: number,           // 未知填 0 并置 costKnown=false
- *   costKnown: boolean,
- *   inputTokens: number, outputTokens: number,
- *   cachedInputTokens: number,  // 命中缓存的输入 token（与 inputTokens 同口径）；端点不返回时为 0
- *   notes?: string
- * }
- */
+/** Repeated, externally accepted task evaluation. Missing observations stay unknown. */
+export const GATE_MIN_TASKS = 20;
+export const GATE_MIN_REPEATS = 3;
+const succeeded = r => r.success === true && r.acceptanceRan === true
+  && (r.schemaVersion !== 2 || (r.acceptancePassed === true && r.terminalStatus === 'COMPLETED'
+    && r.reportedComplete === true && r.scenarioCovered === true));
+const keyOf = r => `${r.taskId}|${r.model ?? 'unknown'}`;
+const number = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+const priced = r => r.costKnown === true && number(r.costUsd);
+const mean = values => values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+const rate = (rows, predicate) => rows.length ? rows.filter(predicate).length / rows.length : null;
+const observedMean = (rows, key) => mean(rows.map(r => r[key]).filter(number));
+const byTask = rows => {
+  const groups = new Map();
+  for (const row of rows) { const key = keyOf(row); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(row); }
+  return groups;
+};
 
 export function groupKey(record) {
-  return [record.model ?? "unknown", record.promptVersion ?? "-", record.toolVersion ?? "-"].join("|");
+  return [record.model ?? 'unknown', record.promptVersion ?? '-', record.toolVersion ?? '-'].join('|');
 }
 
-function mean(values) {
-  if (values.length === 0) return 0;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
+/** Nearest-rank percentile; zero is a valid observed duration, missing is not. */
+export function percentile(values, p) {
+  const sorted = values.filter(number).sort((a, b) => a - b);
+  return sorted.length ? sorted[Math.max(0, Math.ceil(p * sorted.length) - 1)] : null;
 }
 
-function rate(records, predicate) {
-  if (records.length === 0) return 0;
-  return records.filter(predicate).length / records.length;
+function observations(rows) {
+  const knownCosts = rows.filter(priced);
+  const totalCostUsd = rows.length && knownCosts.length === rows.length
+    ? knownCosts.reduce((sum, r) => sum + r.costUsd, 0) : null;
+  const successes = rows.filter(succeeded).length;
+  const completionObserved = rows.filter(r => typeof r.reportedComplete === 'boolean' || typeof r.terminalStatus === 'string');
+  const completed = completionObserved.filter(r => r.reportedComplete === true || r.terminalStatus === 'COMPLETED');
+  const checkedCompletions = completed.filter(r => r.acceptanceRan === true);
+  const falseCompletions = checkedCompletions.filter(r => typeof r.acceptancePassed === 'boolean' ? !r.acceptancePassed : !succeeded(r));
+  const takeoverObserved = rows.filter(r => typeof r.takeover === 'boolean');
+  return {
+    totalCostUsd,
+    knownCostUsd: knownCosts.reduce((sum, r) => sum + r.costUsd, 0),
+    pricedRuns: knownCosts.length,
+    avgCostUsd: mean(knownCosts.map(r => r.costUsd)),
+    costPerSuccessfulTaskUsd: totalCostUsd !== null && successes > 0 ? totalCostUsd / successes : null,
+    // Compatibility field: normal run completion followed by failed external acceptance.
+    // It does not inspect the answer and must not be described as a dishonest success claim.
+    falseCompletionMetric: 'normal_completion_external_acceptance_failure',
+    falseCompletionLabel: '正常收尾但外部验收失败率',
+    falseCompletionCount: falseCompletions.length,
+    falseCompletionRate: checkedCompletions.length ? falseCompletions.length / checkedCompletions.length : null,
+    completionVerificationCoverage: completed.length ? checkedCompletions.length / completed.length : null,
+    incompleteRate: rate(completionObserved, r => !(r.reportedComplete === true || r.terminalStatus === 'COMPLETED')),
+    scenarioCoverage: rate(rows.filter(r => typeof r.scenarioCovered === 'boolean'), r => r.scenarioCovered),
+    takeoverRate: rate(takeoverObserved, r => r.takeover === true),
+    takeoverObservedRuns: takeoverObserved.length,
+    avgDurationSeconds: observedMean(rows, 'durationSeconds'),
+    p50DurationSeconds: percentile(rows.map(r => r.durationSeconds), 0.5),
+    p95DurationSeconds: percentile(rows.map(r => r.durationSeconds), 0.95),
+    avgExecutionSeconds: observedMean(rows, 'executionSeconds'),
+    p95ExecutionSeconds: percentile(rows.map(r => r.executionSeconds), 0.95),
+    avgModelRequests: observedMean(rows, 'modelRequestCount'),
+    avgRework: observedMean(rows, 'rework'),
+    avgToolCalls: observedMean(rows, 'toolCallCount'),
+    avgFailedCommands: observedMean(rows, 'failedCommandCount'),
+    avgModelRetries: observedMean(rows, 'modelRetryCount'),
+    inputTokens: rows.reduce((sum, r) => sum + (number(r.inputTokens) ? r.inputTokens : 0), 0),
+    outputTokens: rows.reduce((sum, r) => sum + (number(r.outputTokens) ? r.outputTokens : 0), 0),
+    cachedInputTokens: rows.reduce((sum, r) => sum + (number(r.cachedInputTokens) ? r.cachedInputTokens : 0), 0),
+    cacheHitRate: cacheHitRate(rows)
+  };
 }
 
 export function aggregate(records) {
@@ -42,28 +78,14 @@ export function aggregate(records) {
     groups.get(key).push(record);
   }
   return [...groups.entries()].map(([key, items]) => ({
-    key,
-    model: items[0].model ?? "unknown",
-    promptVersion: items[0].promptVersion ?? "-",
-    toolVersion: items[0].toolVersion ?? "-",
-    tasks: items.length,
-    // 「成功」必须有外部验收证据；只凭模型自述完成的记录一律不算
-    successRate: rate(items, (item) => item.success === true && item.acceptanceRan === true),
-    regressionRate: rate(items, (item) => item.regression === true),
-    avgDurationSeconds: mean(items.map((item) => Number(item.durationSeconds) || 0)),
-    avgRework: mean(items.map((item) => Number(item.rework) || 0)),
-    takeoverRate: rate(items, (item) => item.takeover === true),
-    totalCostUsd: items.reduce((sum, item) => sum + (Number(item.costUsd) || 0), 0),
-    avgCostUsd: mean(items.filter((item) => item.costKnown !== false).map((item) => Number(item.costUsd) || 0)),
-    inputTokens: items.reduce((sum, item) => sum + (Number(item.inputTokens) || 0), 0),
-    outputTokens: items.reduce((sum, item) => sum + (Number(item.outputTokens) || 0), 0),
-    cachedInputTokens: items.reduce((sum, item) => sum + (Number(item.cachedInputTokens) || 0), 0),
-    // 命中率只在有真实用量观测的记录上算：全是估算的记录没有缓存字段，算出来会虚低
-    cacheHitRate: cacheHitRate(items)
+    key, model: items[0].model ?? 'unknown', promptVersion: items[0].promptVersion ?? '-',
+    toolVersion: items[0].toolVersion ?? '-', tasks: items.length, uniqueTasks: new Set(items.map(keyOf)).size,
+    successRate: rate(items, succeeded), regressionRate: rate(items, r => r.regression === true),
+    ...observations(items)
   }));
 }
 
-/** 缓存命中率（0~1）；没有缓存观测时为 null，缺失不能伪装成实测零命中。 */
+/** No cache usage observation is different from observed zero hits. */
 export function cacheHitRate(items) {
   let input = 0, cached = 0;
   for (const item of items) {
@@ -77,172 +99,194 @@ export function cacheHitRate(items) {
   return input > 0 ? cached / input : null;
 }
 
-/**
- * 与基线比较：回归 = 基线里成功、本次失败的任务。
- * 只比较同一 taskId，避免任务集变化被误读成能力下降。
- */
-export function compare(baselineRecords, currentRecords) {
-  const baselineSuccess = new Map();
-  for (const record of baselineRecords) {
-    const key = `${record.taskId}|${record.model ?? "unknown"}`;
-    baselineSuccess.set(key, baselineSuccess.get(key) === true || (record.success === true && record.acceptanceRan === true));
+/** One-sided exact test of a lower candidate success probability, conditional on total successes. */
+export function regressionProbability(baseline, current) {
+  const a = baseline.filter(succeeded).length, b = current.filter(succeeded).length;
+  const n = baseline.length, m = current.length, total = a + b;
+  const logChoose = (size, count) => {
+    if (count < 0 || count > size) return -Infinity;
+    let value = 0;
+    for (let i = 1; i <= Math.min(count, size - count); i++) value += Math.log(size - i + 1) - Math.log(i);
+    return value;
+  };
+  let probability = 0;
+  for (let candidateSuccess = Math.max(0, total - n); candidateSuccess <= Math.min(b, m, total); candidateSuccess++) {
+    probability += Math.exp(logChoose(m, candidateSuccess) + logChoose(n, total - candidateSuccess) - logChoose(n + m, total));
   }
-  return currentRecords.map((record) => {
-    const key = `${record.taskId}|${record.model ?? "unknown"}`;
-    const wasSuccessful = baselineSuccess.get(key);
-    return {
-      ...record,
-      regression: wasSuccessful === true && !(record.success === true && record.acceptanceRan === true),
-      improved: wasSuccessful === false && record.success === true && record.acceptanceRan === true
-    };
+  return Math.min(1, probability);
+}
+
+function taskComparisons(baseline, current, options = {}) {
+  const old = byTask(baseline), next = byTask(current);
+  const keys = [...old.keys()].filter(key => next.has(key));
+  // Multiple per-task comparisons must not manufacture significance as the suite grows.
+  const alpha = (options.alpha ?? 0.05) / Math.max(1, keys.length);
+  const minRepeats = options.minRepeats ?? GATE_MIN_REPEATS;
+  return keys.map(key => {
+    const a = old.get(key), b = next.get(key);
+    const baselineRate = rate(a, succeeded), currentRate = rate(b, succeeded);
+    const enough = a.length >= minRepeats && b.length >= minRepeats;
+    const probability = regressionProbability(a, b);
+    const decrease = currentRate < baselineRate;
+    return { key, baselineRuns: a.length, currentRuns: b.length, baselineRate, currentRate,
+      probability, alpha, enough, decrease, regression: enough && decrease && probability <= alpha + 1e-12,
+      improved: enough && currentRate > baselineRate };
+  });
+}
+
+/** A single failed sample is an observation requiring replication, not a proven regression. */
+export function compare(baselineRecords, currentRecords, options = {}) {
+  const pairs = new Map(taskComparisons(baselineRecords, currentRecords, options).map(r => [r.key, r]));
+  return currentRecords.map(record => {
+    const result = pairs.get(keyOf(record));
+    return { ...record, regression: result?.regression ?? false, improved: result?.improved ?? false,
+      regressionSuspected: result?.decrease ?? false, baselineSuccessRate: result?.baselineRate ?? null,
+      currentTaskSuccessRate: result?.currentRate ?? null };
   });
 }
 
 export function summarize(records) {
-  return {
-    total: records.length,
-    successRate: rate(records, (item) => item.success === true && item.acceptanceRan === true),
-    regressions: records.filter((item) => item.regression === true).length,
-    takeovers: records.filter((item) => item.takeover === true).length,
-    costUsd: records.reduce((sum, item) => sum + (Number(item.costUsd) || 0), 0),
-    cacheHitRate: cacheHitRate(records)
-  };
+  const stats = observations(records);
+  return { total: records.length, uniqueTasks: new Set(records.map(keyOf)).size,
+    successRate: rate(records, succeeded),
+    regressions: new Set(records.filter(r => r.regression).map(keyOf)).size,
+    suspectedRegressions: new Set(records.filter(r => r.regressionSuspected).map(keyOf)).size,
+    takeovers: stats.takeoverObservedRuns ? records.filter(r => r.takeover === true).length : null,
+    costUsd: stats.totalCostUsd, ...stats };
 }
 
-/** 能判定「没有退化」所需的最小可比任务数；低于这个数，通过率差异基本落在噪音里。 */
-export const GATE_MIN_TASKS = 20;
+/** Schema-v2 records are produced by one fresh session per trial, not by relabeling a run. */
+function invalidRecordIssues(baseline, current) {
+  const issues = [];
+  for (const [label, records] of [['基线', baseline], ['候选', current]]) {
+    const sessions = new Set();
+    for (const r of records) {
+      if (r.schemaVersion !== 2) continue; // Legacy records remain readable but fail comparability checks.
+      if (typeof r.sessionId !== 'string' || !r.sessionId.trim()) {
+        if (!r.evaluationError) issues.push(`${label} ${r.taskId} 缺少实际会话身份，不能证明独立运行`);
+      } else if (sessions.has(r.sessionId)) {
+        issues.push(`${label}重复使用会话 ${r.sessionId}，修改 attempt 不能伪装独立运行`);
+      } else sessions.add(r.sessionId);
+      if (r.evaluationError) {
+        if (r.success === true || r.acceptanceRan === true) issues.push(`${label} ${r.taskId} 的执行器错误记录不能同时宣称验收成功`);
+        continue;
+      }
+      const booleanFields = ['success', 'acceptanceRan', 'acceptancePassed', 'reportedComplete', 'scenarioCovered'];
+      if (booleanFields.some(key => typeof r[key] !== 'boolean') || typeof r.terminalStatus !== 'string') {
+        issues.push(`${label} ${r.taskId} 缺少完整结果或场景覆盖字段`);
+        continue;
+      }
+      const normalEnd = r.terminalStatus === 'COMPLETED';
+      const expectedSuccess = normalEnd && r.acceptanceRan && r.acceptancePassed && r.scenarioCovered;
+      if (r.reportedComplete !== normalEnd || (r.acceptancePassed && !r.acceptanceRan)
+          || r.success !== expectedSuccess) {
+        issues.push(`${label} ${r.taskId} 的 success、终态、外部验收或场景覆盖字段互相矛盾`);
+      }
+    }
+  }
+  return [...new Set(issues)];
+}
 
-/**
- * 优化门禁：判断一次「省钱优化」能不能合入。
- *
- * <p>唯一要防的是「为了省钱把能力也省掉了」，所以判定顺序是能力优先、成本其次：
- * <ol>
- *   <li>任何任务从「基线里成功过」变成「本次失败」——直接拒绝。这是逐任务的 Pareto 判定，
- *       不看平均分：平均分能掩盖「放弃几个难题换整体好看」的作弊解。</li>
- *   <li>通过率下降、验收执行率下降、接管率上升——拒绝。验收执行率单独看，是因为
- *       「少跑一次验收命令」既省钱又不会被通过率发现，是最隐蔽的一种退化。</li>
- *   <li>成本上升——拒绝。</li>
- *   <li>可比任务数不足——判「证据不足」。这一条不算通过：样本太小的时候，
- *       「看不出退化」不等于「没有退化」。</li>
- * </ol>
- *
- * 基线的能力判定取「曾经成功过」而不是「最后一次」：同一任务跑多次时，
- * 只要基线做到过一次，本次做不到就算退化。
- */
+/** Strict comparisons require recorded conditions, not merely matching user-provided labels. */
+function comparisonIssues(baseline, current) {
+  const issues = [];
+  const fields = ['fixtureVersion', 'taskVersion', 'environmentVersion', 'modelConfigHash', 'promptHash', 'runtimeHash'];
+  const all = [...baseline, ...current];
+  if (all.some(r => r.schemaVersion !== 2 || fields.some(key => typeof r[key] !== 'string' || !r[key].trim())
+      || !r.model || r.model === 'unknown' || r.configurationChanged)) {
+    issues.push('缺少完整版本/环境元数据，或运行中模型配置变化；旧记录可查看但不能用于严格对照');
+  }
+  for (const [label, records] of [['基线', baseline], ['候选', current]]) {
+    for (const field of ['promptHash', 'runtimeHash', 'environmentVersion', 'modelConfigHash']) {
+      if (new Set(records.map(r => r[field])).size > 1) issues.push(`${label}混合了不同 ${field}，应分别评估`);
+    }
+    for (const [key, rows] of byTask(records)) {
+      const attempts = rows.map(r => r.attempt);
+      if (attempts.some(n => !Number.isInteger(n) || n < 1) || new Set(attempts).size !== attempts.length) {
+        issues.push(`${label} ${key} 缺少独立 attempt，或同次运行重复入账`);
+      }
+    }
+  }
+  const old = byTask(baseline), next = byTask(current);
+  for (const [key, rows] of old) {
+    if (!next.has(key)) continue;
+    const paired = [...rows, ...next.get(key)];
+    for (const field of ['fixtureVersion', 'taskVersion', 'environmentVersion', 'modelConfigHash']) {
+      if (new Set(paired.map(r => r[field])).size > 1) issues.push(`${key} 的 ${field} 不一致，不能把不同条件当成提示词收益`);
+    }
+  }
+  return issues;
+}
+
+/** Baseline self-validation is not an A/B comparison and cannot prove candidate improvement. */
+export function validateBaseline(records, options = {}) {
+  return evaluateGate(records, records, options, true);
+}
+
 export function gate(baselineRecords, currentRecords, options = {}) {
-  const minTasks = options.minTasks ?? GATE_MIN_TASKS;
-  const succeeded = (item) => item.success === true && item.acceptanceRan === true;
-  const keyOf = (record) => `${record.taskId}|${record.model ?? "unknown"}`;
-
-  const everSucceeded = new Map();
-  for (const record of baselineRecords) {
-    const key = keyOf(record);
-    if (succeeded(record)) {
-      everSucceeded.set(key, true);
-    } else if (!everSucceeded.has(key)) {
-      everSucceeded.set(key, false);
-    }
-  }
-
-  const paired = [];
-  for (const record of currentRecords) {
-    const key = keyOf(record);
-    if (everSucceeded.has(key)) {
-      paired.push({ record, wasSuccessful: everSucceeded.get(key) === true });
-    }
-  }
-  const regressions = paired.filter((item) => item.wasSuccessful && !succeeded(item.record));
-  const improvements = paired.filter((item) => !item.wasSuccessful && succeeded(item.record));
-
-  const baselineSuccessRate = rate(baselineRecords, succeeded);
-  const currentSuccessRate = rate(currentRecords, succeeded);
-  const baselineAcceptance = rate(baselineRecords, (item) => item.acceptanceRan === true);
-  const currentAcceptance = rate(currentRecords, (item) => item.acceptanceRan === true);
-  const baselineTakeover = rate(baselineRecords, (item) => item.takeover === true);
-  const currentTakeover = rate(currentRecords, (item) => item.takeover === true);
-
-  // 成本按同一任务的一次运行比较，不能用减少重跑次数制造降本。
-  const currentKeys = new Set(currentRecords.map(keyOf));
-  const sharedKeys = new Set([...everSucceeded.keys()].filter(key => currentKeys.has(key)));
-  const missing = [...everSucceeded.keys()].filter(key => !currentKeys.has(key));
-  const baselineComparable = baselineRecords.filter(item => sharedKeys.has(keyOf(item)));
-  const currentComparable = currentRecords.filter(item => sharedKeys.has(keyOf(item)));
-  const perTaskTotal = (records, field) => {
-    const groups = new Map();
-    for (const item of records) {
-      const key = keyOf(item);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(Math.max(0, Number(item[field]) || 0));
-    }
-    return [...groups.values()].reduce((sum, values) => sum + mean(values), 0);
-  };
-  const priced = item => item.costKnown === true && Number.isFinite(item.costUsd) && item.costUsd >= 0;
-  const baselineCost = perTaskTotal(baselineComparable.filter(priced), 'costUsd');
-  const currentCost = perTaskTotal(currentComparable.filter(priced), 'costUsd');
-  const baselineInputTokens = perTaskTotal(baselineComparable, 'inputTokens');
-  const currentInputTokens = perTaskTotal(currentComparable, 'inputTokens');
-  const costComparable = sharedKeys.size > 0 && baselineComparable.every(priced) && currentComparable.every(priced);
-  const tolerance = options.inputTokenTolerance ?? 0.05;
-
-  const reasons = [];
-  if ([...baselineRecords, ...currentRecords].some(item => item.dryRun === true)) reasons.push("dry-run 记录不能用于能力门禁");
-  if (missing.length) reasons.push(`本次缺少 ${missing.length} 个基线任务：${missing.join('、')}，不能跳过任务后宣称无退化`);
-  if (regressions.length > 0) {
-    reasons.push(`${regressions.length} 个任务从成功变成失败：${regressions.map((item) => item.record.taskId).join("、")}`);
-  }
-  if (currentSuccessRate < baselineSuccessRate) {
-    reasons.push(`通过率下降：${pct(baselineSuccessRate)} → ${pct(currentSuccessRate)}`);
-  }
-  if (currentAcceptance < baselineAcceptance) {
-    reasons.push(`验收执行率下降：${pct(baselineAcceptance)} → ${pct(currentAcceptance)}（少跑验收既省钱又不会拉低通过率，必须单独看）`);
-  }
-  if (currentTakeover > baselineTakeover) {
-    reasons.push(`人工接管率上升：${pct(baselineTakeover)} → ${pct(currentTakeover)}`);
-  }
-  // 价格表（T0.2）做出来之前 costUsd 恒为未知，这时用输入 token 当成本代理：
-  // 缓存优化如果失效，最先涨的就是 inputTokens，不能因为还没做价格表就放过去。
-  if (costComparable) {
-    if (currentCost > baselineCost + 1e-9) {
-      reasons.push(`成本上升：$${baselineCost.toFixed(3)} → $${currentCost.toFixed(3)}`);
-    }
-  } else if (currentInputTokens > baselineInputTokens * (1 + tolerance)) {
-    reasons.push(`输入 token 上升 ${baselineInputTokens} → ${currentInputTokens}` +
-      `（还没有价格表，先用 token 当成本代理；涨幅超过 ${Math.round(tolerance * 100)}% 视为变贵）`);
-  }
-
-  let verdict = "pass";
-  if (reasons.length > 0) {
-    verdict = "reject";
-  } else if (sharedKeys.size < minTasks) {
-    verdict = "insufficient";
-    reasons.push(`可比任务 ${sharedKeys.size} 个，低于 ${minTasks} 个的下限：样本太小，通过率差异落在噪音里，不能据此断定「没有退化」`);
-  }
-
-  return {
-    verdict,
-    reasons,
-    metrics: {
-      pairedTasks: sharedKeys.size,
-      minTasks,
-      regressions: regressions.length,
-      improvements: improvements.length,
-      baselineSuccessRate,
-      currentSuccessRate,
-      baselineAcceptance,
-      currentAcceptance,
-      baselineTakeover,
-      currentTakeover,
-      baselineCostUsd: baselineCost,
-      currentCostUsd: currentCost,
-      costComparable,
-      baselineInputTokens,
-      currentInputTokens,
-      baselineCacheHitRate: cacheHitRate(baselineRecords),
-      currentCacheHitRate: cacheHitRate(currentRecords)
-    }
-  };
+  return evaluateGate(baselineRecords, currentRecords, options, false);
 }
 
-function pct(value) {
-  return `${Math.round((Number(value) || 0) * 100)}%`;
+function evaluateGate(baselineRecords, currentRecords, options, baselineOnly) {
+  const minTasks = options.minTasks ?? GATE_MIN_TASKS, minRepeats = options.minRepeats ?? GATE_MIN_REPEATS;
+  const baseline = byTask(baselineRecords), current = byTask(currentRecords);
+  const missing = [...baseline.keys()].filter(key => !current.has(key));
+  const added = [...current.keys()].filter(key => !baseline.has(key));
+  const pairs = taskComparisons(baselineRecords, currentRecords, { ...options, minRepeats });
+  const shared = new Set(pairs.map(r => r.key));
+  const old = baselineRecords.filter(r => shared.has(keyOf(r))), next = currentRecords.filter(r => shared.has(keyOf(r)));
+  const balancedRate = (rows, predicate) => mean([...byTask(rows).values()].map(items => rate(items, predicate)));
+  const baselineSuccessRate = balancedRate(old, succeeded), currentSuccessRate = balancedRate(next, succeeded);
+  const baselineAcceptance = balancedRate(old, r => r.acceptanceRan === true), currentAcceptance = balancedRate(next, r => r.acceptanceRan === true);
+  const baselineStats = observations(old), currentStats = observations(next);
+  const failures = invalidRecordIssues(baselineRecords, currentRecords), comparabilityIssues = comparisonIssues(baselineRecords, currentRecords);
+  if (!baselineOnly) {
+    const baselineSessions = new Set(baselineRecords.filter(r => r.schemaVersion === 2 && typeof r.sessionId === 'string').map(r => r.sessionId));
+    const reused = new Set(currentRecords.filter(r => r.schemaVersion === 2 && baselineSessions.has(r.sessionId)).map(r => r.sessionId));
+    if (reused.size) failures.push(`基线与候选复用了 ${reused.size} 个会话，跨组复制记录不构成两次独立运行`);
+  }
+  const insufficient = [...comparabilityIssues];
+  if ([...baselineRecords, ...currentRecords].some(r => r.dryRun)) failures.push('dry-run 记录不能用于能力门禁');
+  if (missing.length) failures.push(`本次缺少 ${missing.length} 个基线任务：${missing.join('、')}`);
+  if (added.length) insufficient.push(`本次新增 ${added.length} 个任务没有基线，应单独报告`);
+  if ([...old, ...next].some(r => r.scenarioCovered === false)) insufficient.push('存在必需场景未触发的样本，例如任务在中途引导投递前结束');
+  if (currentAcceptance < baselineAcceptance) failures.push('验收执行率下降，不能通过省略验收制造优化');
+  const regressions = pairs.filter(p => p.regression);
+  if (!insufficient.length && regressions.length) failures.push(`重复对照显示 ${regressions.length} 个任务显著退化：${regressions.map(p => p.key).join('、')}（单侧精确检验并校正多重比较）`);
+  const suspected = pairs.filter(p => p.decrease && !p.regression);
+  if (suspected.length) insufficient.push(`${suspected.length} 个任务成功率下降但证据不足，需增加重复评测，不能判定无退化`);
+  if (shared.size < minTasks) insufficient.push(`可比任务 ${shared.size} 个，低于 ${minTasks} 个下限`);
+  if (pairs.some(p => !p.enough)) insufficient.push(`每个任务两组至少需要 ${minRepeats} 次独立运行`);
+  if (pairs.some(p => p.baselineRuns !== p.currentRuns)) insufficient.push('两组重复次数不一致，需补齐配对样本');
+  if (baselineAcceptance !== 1 || currentAcceptance !== 1) insufficient.push('并非所有样本都有外部验收结果');
+  if (baselineSuccessRate === 0 || currentSuccessRate === 0) insufficient.push('没有成功任务，无法建立可用的能力或成功成本基线');
+  const costComparable = old.length > 0 && [...old, ...next].every(priced);
+  const perTaskMeanTotal = (rows, field) => [...byTask(rows).values()].reduce((sum, items) => sum + mean(items.map(r => r[field])), 0);
+  const baselineCost = costComparable ? perTaskMeanTotal(old, 'costUsd') : null;
+  const currentCost = costComparable ? perTaskMeanTotal(next, 'costUsd') : null;
+  const tokenComparable = old.length > 0 && [...old, ...next].every(r => number(r.inputTokens));
+  const baselineInputTokens = tokenComparable ? perTaskMeanTotal(old, 'inputTokens') : null;
+  const currentInputTokens = tokenComparable ? perTaskMeanTotal(next, 'inputTokens') : null;
+  const tolerance = options.inputTokenTolerance ?? 0.05;
+  if (!comparabilityIssues.length && costComparable && currentCost > baselineCost * (1 + (options.costTolerance ?? 0.05)) + 1e-9) failures.push(`每任务平均成本上升：$${baselineCost.toFixed(3)} → $${currentCost.toFixed(3)}`);
+  else if (!comparabilityIssues.length && !costComparable && tokenComparable && currentInputTokens > baselineInputTokens * (1 + tolerance)) failures.push(`输入 token 上升 ${baselineInputTokens} → ${currentInputTokens}，超过代理指标容差`);
+  else if (!costComparable && !tokenComparable) insufficient.push('缺少完整成本及 token 观测，不能作效率结论');
+  if (!comparabilityIssues.length && baselineStats.falseCompletionRate !== null && currentStats.falseCompletionRate !== null
+      && currentStats.falseCompletionRate > baselineStats.falseCompletionRate) {
+    insufficient.push('正常收尾但外部验收失败率上升，需复核任务结果和终态语义；该指标不判断答复是否声称成功');
+  }
+  if (baselineStats.takeoverRate !== null && currentStats.takeoverRate !== null && currentStats.takeoverRate > baselineStats.takeoverRate) insufficient.push('已观测人工接管率上升，需复核原因');
+  const scope = baselineOnly ? 'baseline_validation'
+    : new Set([...baselineRecords, ...currentRecords].map(r => r.runtimeHash)).size === 1 ? 'prompt' : 'combined';
+  return { verdict: failures.length ? 'reject' : insufficient.length ? 'insufficient' : 'pass', reasons: [...failures, ...insufficient],
+    comparisonScope: scope, taskComparisons: pairs,
+    metrics: { pairedTasks: shared.size, minTasks, minRepeats, regressions: regressions.length,
+      suspectedRegressions: suspected.length, improvements: pairs.filter(p => p.improved).length,
+      baselineSuccessRate, currentSuccessRate, baselineAcceptance, currentAcceptance,
+      baselineTakeover: baselineStats.takeoverRate, currentTakeover: currentStats.takeoverRate,
+      baselineCostUsd: baselineCost, currentCostUsd: currentCost, costComparable,
+      baselineInputTokens, currentInputTokens,
+      baselineCostPerSuccessUsd: baselineStats.costPerSuccessfulTaskUsd, currentCostPerSuccessUsd: currentStats.costPerSuccessfulTaskUsd,
+      baselineFalseCompletionRate: baselineStats.falseCompletionRate, currentFalseCompletionRate: currentStats.falseCompletionRate,
+      baselineCacheHitRate: cacheHitRate(old), currentCacheHitRate: cacheHitRate(next) } };
 }

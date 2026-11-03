@@ -20,10 +20,12 @@
  * 没有真实端点时可以 `--dry-run`：只验证聚合与产物格式，不产生能力结论。
  */
 import { spawn } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { platform, arch } from "node:os";
+import { appendFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { aggregate, compare, gate, summarize } from "./metrics.mjs";
+import { aggregate, compare, gate, summarize, validateBaseline } from "./metrics.mjs";
 
 const TERMINAL = new Set(["COMPLETED", "INTERRUPTED", "FAILED", "CANCELLED", "PAUSED", "ARCHIVED"]);
 
@@ -41,10 +43,12 @@ export function parseArgs(argv) {
     dryRun: false,
     baseline: "",
     strict: false,
-    verifyFixtures: false
+    verifyFixtures: false,
+    repeat: 1, taskIds: [], environment: "",
+    promptDir: "pilot-core/src/main/resources/prompts", runtimeSources: []
   };
   const valued = new Set(['--base', '--out', '--tasks', '--model', '--prompt-version', '--tool-version',
-    '--fixtures', '--token', '--baseline', '--timeout-minutes']);
+    '--fixtures', '--token', '--baseline', '--timeout-minutes', '--repeat', '--task', '--environment', '--prompt-dir', '--runtime-source']);
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -60,6 +64,11 @@ export function parseArgs(argv) {
       case "--token": args.token = value; index++; break;
       case "--baseline": args.baseline = value; index++; break;
       case "--timeout-minutes": args.timeoutMinutes = Number(value); index++; break;
+      case "--repeat": args.repeat = Number(value); index++; break;
+      case "--task": args.taskIds.push(...value.split(",").map(v => v.trim()).filter(Boolean)); index++; break;
+      case "--environment": args.environment = value; index++; break;
+      case "--prompt-dir": args.promptDir = value; index++; break;
+      case "--runtime-source": args.runtimeSources.push(value); index++; break;
       case "--dry-run": args.dryRun = true; break;
       case "--strict": args.strict = true; break;
       case "--verify-fixtures": args.verifyFixtures = true; break;
@@ -72,6 +81,8 @@ export function parseArgs(argv) {
     }
   }
   if (!Number.isFinite(args.timeoutMinutes) || args.timeoutMinutes <= 0) throw new Error("超时必须为正数");
+  if (!Number.isInteger(args.repeat) || args.repeat < 1 || args.repeat > 100) throw new Error("--repeat 必须是 1 到 100 的整数");
+  if (!args.runtimeSources.length) args.runtimeSources = ["pilot-core/src/main/java", "pilot-server/src/main/java"];
   if (args.strict && (!args.baseline || args.dryRun)) throw new Error("--strict 需要真实运行和 --baseline，不能使用 dry-run");
   return args;
 }
@@ -80,9 +91,14 @@ function helpText() {
   return [
     "runner.mjs --base <url> --out <jsonl> [--model M] [--prompt-version P] [--tool-version T]",
     "           [--tasks tasks.json] [--fixtures dir] [--token T] [--timeout-minutes N]",
-    "           [--baseline 上次的 jsonl] [--dry-run] [--strict]",
+    "           [--baseline 上次的 jsonl] [--dry-run] [--strict] [--repeat N] [--task id,id]",
+    "           [--environment label] [--prompt-dir dir] [--runtime-source dir ...]",
     "",
-    "  --baseline  与上次记录比较，并给出优化门禁结论。",
+    "  --baseline  与上次记录比较；严格门禁至少 20 个任务，每项两组至少 3 次。",
+    "  --repeat    每项重复次数，轮次之间交错任务，默认 1。",
+    "  --task      只运行选中任务，可逗号分隔或重复传入；子集结果不能冒充全套。",
+    "  --model     核对服务已配置的模型，不修改全局模型；不传时使用服务模型。",
+    "  --prompt-dir / --runtime-source  对实际提示词与运行时源码生成版本指纹。",
     "  --strict    门禁不是 pass 就以非零退出码结束（用于 CI 拦住会造成能力退化的「优化」）。",
     "  --dry-run   只验证流程与产物格式，不产生能力结论。",
     "  --verify-fixtures  只检查每个 fixture 在「未修复」状态下验收必须失败（有分辨力）。"
@@ -114,9 +130,11 @@ export function runCommand(command, cwd, timeoutMs) {
     const env = { ...process.env, CI: "true", PILOT_EVAL: "1" };
     // node:test 的内部标记会令子进程跳过测试发现，制造退出码 0 的假通过。
     delete env.NODE_TEST_CONTEXT;
-    const child = spawn(command, {
+    const executable = Array.isArray(command) ? (command[0] === "node" ? process.execPath : command[0]) : command;
+    const commandArgs = Array.isArray(command) ? command.slice(1) : [];
+    const child = spawn(executable, commandArgs, {
       cwd,
-      shell: true,
+      shell: !Array.isArray(command),
       detached: process.platform !== "win32",
       env,
       stdio: ["ignore", "pipe", "pipe"]
@@ -152,7 +170,8 @@ export async function acceptanceResult(task, workspace) {
   }
   const details = [];
   for (const command of task.acceptance ?? []) {
-    const result = await runCommand(command, workspace, 20 * 60 * 1000);
+    const argv = command === "node --test" ? [process.execPath, "--test"] : command;
+    const result = await runCommand(argv, workspace, 20 * 60 * 1000);
     details.push(`${command} → exit ${result.exitCode}（${result.seconds.toFixed(1)}s）`);
     if (result.exitCode !== 0) {
       return { ran: true, ok: false, detail: `${details.join("；")}\n${result.output.slice(-1500)}` };
@@ -165,25 +184,118 @@ export async function waitForTerminal(args, sessionId, steer) {
   const started = Date.now();
   const deadline = started + args.timeoutMinutes * 60 * 1000;
   let last = null;
-  let steered = false;
+  let steered = false, steerRunId = null, steerAtStep = null, steerDeliveredAtSeconds = null;
+  const timeout = () => new Error(`任务超时，未在期限内取得终态（${last?.sessionStatus ?? "未知"}），不能执行验收`);
+  async function beforeDeadline(path, init) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw timeout();
+    const configuredTimeout = args.requestTimeoutMs ?? 30_000;
+    try {
+      const result = await api({ ...args, requestTimeoutMs: Math.max(1, Math.ceil(Math.min(configuredTimeout, remaining))) }, path, init);
+      // A poll sent before the deadline can arrive afterwards. Even COMPLETED must be timely.
+      if (Date.now() >= deadline) throw timeout();
+      return result;
+    } catch (error) {
+      if (Date.now() >= deadline || (remaining <= configuredTimeout && error.name === 'TimeoutError')) throw timeout();
+      throw error;
+    }
+  }
   while (Date.now() < deadline) {
-    last = await api(args, `/api/sessions/${sessionId}/diagnostics`);
-    if (TERMINAL.has(last.sessionStatus)) return last;
+    last = await beforeDeadline(`/api/sessions/${sessionId}/diagnostics`);
+    if (TERMINAL.has(last.sessionStatus)) return { ...last, steerDelivered: steer ? steered : null, steerRunId, steerAtStep, steerDeliveredAtSeconds };
     // 引导必须进入当前运行；追加 messages 会排队成为下一项任务。
     if (steer && !steered && last.activeRunId && (Date.now() - started) / 1000 >= steer.afterSeconds) {
-      await api(args, `/api/sessions/${sessionId}/steer`, {
+      await beforeDeadline(`/api/sessions/${sessionId}/steer`, {
         method: "POST",
         body: JSON.stringify({ content: steer.content, runId: last.activeRunId })
       });
-      steered = true;
+      steered = true; steerRunId = last.activeRunId; steerAtStep = last.step ?? null;
+      steerDeliveredAtSeconds = (Date.now() - started) / 1000;
     }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, Math.min(args.pollMs ?? 3000, Math.max(0, deadline - Date.now()))));
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, Math.min(args.pollMs ?? (steer ? 250 : 3000), Math.max(0, deadline - Date.now()))));
   }
-  throw new Error(`任务超时，未达到终态（${last?.sessionStatus ?? "未知"}），不能执行验收`);
+  throw timeout();
+}
+
+const sha256 = value => createHash('sha256').update(value).digest('hex');
+
+export function fixturePath(args, task) {
+  const root = resolve(args.fixtures || dirname(args.tasks));
+  const source = resolve(root, task.fixture ?? task.id);
+  const inside = relative(root, source);
+  if (isAbsolute(inside) || inside === '..' || inside.startsWith(`..${sep}`)) throw new Error('fixture 路径不能越出夹具目录');
+  return source;
+}
+
+/** Stable relative filenames + bytes; rejects links instead of fingerprinting another workspace. */
+export async function hashSources(paths) {
+  const hash = createHash('sha256');
+  async function visit(file, name) {
+    const info = await lstat(file);
+    if (info.isSymbolicLink()) throw new Error(`版本快照不允许符号链接：${name}`);
+    hash.update(JSON.stringify(name));
+    if (info.isDirectory()) {
+      hash.update('dir');
+      for (const child of (await readdir(file)).sort()) await visit(join(file, child), `${name}/${child}`);
+    } else if (info.isFile()) {
+      const bytes = await readFile(file); hash.update(`file:${bytes.length}:`); hash.update(bytes);
+    } else throw new Error(`版本快照不支持此文件类型：${name}`);
+  }
+  for (let index = 0; index < paths.length; index++) await visit(resolve(paths[index]), String(index));
+  return hash.digest('hex');
+}
+
+export async function serverIdentity(args) {
+  const settings = await api(args, '/api/settings');
+  if (typeof settings.model !== 'string' || !settings.model.trim()) throw new Error('服务未返回可核对的模型配置');
+  if (args.model && args.model !== 'unknown' && args.model !== settings.model) throw new Error(`模型不匹配：请求核对 ${args.model}，服务配置 ${settings.model}`);
+  // Hash endpoint/config, never write API keys, masked keys, or endpoint URLs into evaluation records.
+  return { model: settings.model, modelConfigHash: sha256(JSON.stringify({
+    model: settings.model, endpoint: settings.modelEndpoint ?? '', permissionMode: settings.permissionMode ?? ''
+  })) };
+}
+
+export async function createRunContext(args) {
+  const identity = await serverIdentity(args);
+  return { ...identity, schemaVersion: 2,
+    promptHash: await hashSources([args.promptDir]),
+    runtimeHash: await hashSources(args.runtimeSources),
+    environmentVersion: sha256(JSON.stringify({ label: args.environment, platform: platform(), arch: arch(), node: process.version })),
+    environment: { label: args.environment, platform: platform(), arch: arch(), node: process.version }
+  };
+}
+
+export async function recordMetadata(args, task) {
+  return { ...args.runContext, fixtureVersion: await hashSources([fixturePath(args, task)]),
+    taskVersion: sha256(JSON.stringify({ prompt: task.prompt, acceptance: task.acceptance, steer: task.steer,
+      timeoutMinutes: Math.min(args.timeoutMinutes, task.maxMinutes ?? args.timeoutMinutes) })) };
+}
+
+/** Only count structured events; tool output prose is not a reliable error/repair label. */
+export async function traceMetrics(args, sessionId) {
+  let after = 0, toolCallCount = 0, modelRetryCount = 0;
+  const seen = new Set();
+  try {
+    for (let page = 0; page < 100; page++) {
+      const history = await api(args, `/api/sessions/${sessionId}/history?after=${after}&limit=500`);
+      if (!Array.isArray(history.events)) throw new Error('历史事件不可用');
+      for (const event of history.events) {
+        if (!Number.isSafeInteger(event.sequence) || event.sequence <= after || seen.has(event.sequence)) continue;
+        seen.add(event.sequence);
+        if (event.type === 'tool.started') toolCallCount++;
+        if (event.type === 'run.retrying') modelRetryCount++;
+      }
+      const cursor = Math.max(after, ...history.events.map(e => e.sequence).filter(Number.isSafeInteger));
+      if (!history.hasMore) return { traceObserved: true, toolCallCount, modelRetryCount };
+      if (cursor <= after) throw new Error('历史游标没有前进');
+      after = cursor;
+    }
+  } catch { /* Optional diagnostics failure must not invent zero tool work. */ }
+  return { traceObserved: false, toolCallCount: null, modelRetryCount: null };
 }
 
 export async function prepareWorkspace(args, task) {
-  const source = resolve(args.fixtures || dirname(args.tasks), task.fixture ?? task.id);
+  const source = fixturePath(args, task);
   if (!(await stat(source).catch(() => null))?.isDirectory()) throw new Error(`fixture 不存在：${source}`);
   const root = resolve(args.workRoot ?? ".pilot-eval");
   await mkdir(root, { recursive: true });
@@ -223,9 +335,14 @@ export async function runTask(args, task) {
   const workspace = await prepareWorkspace(args, task);
   const tests = await snapshotTests(join(workspace, "test"));
   const started = Date.now();
+  const metadata = args.runContext ? await recordMetadata(args, task) : {};
+  if (args.runContext) {
+    const current = await serverIdentity(args);
+    if (current.modelConfigHash !== args.runContext.modelConfigHash) throw new Error("模型配置已改变，请重建评测基线");
+  }
   const session = await api(args, "/api/sessions", {
     method: "POST",
-    body: JSON.stringify({ title: `eval:${task.id}`, workspace })
+    body: JSON.stringify({ title: `eval:${task.id}:${args.attempt ?? 1}`, workspace })
   });
   // 接口返回 { sessionId, ... }；保留 id 兼容字段以便旧版本也能跑
   const sessionId = session.sessionId ?? session.id;
@@ -248,28 +365,50 @@ export async function runTask(args, task) {
     }
     throw error;
   }
+  const executionSeconds = (Date.now() - started) / 1000;
   const acceptance = await verifyCandidate(task, workspace, tests);
+  const trace = await traceMetrics(args, sessionId);
+  const after = args.runContext ? await serverIdentity(args).catch(() => null) : null;
   const durationSeconds = (Date.now() - started) / 1000;
-  const failedCommands = (diagnostics?.commands ?? []).filter((item) => (item.exitCode ?? 0) !== 0);
+  const failedCommands = Array.isArray(diagnostics?.commands) ? diagnostics.commands.filter(item =>
+    (typeof item.exitCode === "number" && item.exitCode !== 0) || item.status === "FAILED") : null;
 
   return {
+    ...metadata,
     taskId: task.id,
     title: task.title,
     sessionId,
-    model: args.model,
+    attempt: args.attempt ?? 1,
+    terminalStatus: diagnostics.sessionStatus,
+    reportedComplete: diagnostics.sessionStatus === "COMPLETED",
+    acceptancePassed: acceptance.ok,
+    executionSeconds,
+    configurationChanged: args.runContext ? after?.modelConfigHash !== args.runContext.modelConfigHash : false,
+    ...trace,
+    model: args.runContext?.model ?? args.model,
+    requestedModel: args.runContext?.model ?? args.model,
+    resolvedModel: null, // 当前服务记录的是请求模型，未暴露提供商解析后的别名。
     promptVersion: args.promptVersion,
     toolVersion: args.toolVersion,
-    success: diagnostics.sessionStatus === "COMPLETED" && acceptance.ok,
+    success: diagnostics.sessionStatus === "COMPLETED" && acceptance.ok && (!task.steer || diagnostics.steerDelivered === true),
+    scenarioCovered: !task.steer || diagnostics.steerDelivered === true,
+    steerDelivered: diagnostics.steerDelivered,
+    steerRunId: diagnostics.steerRunId,
+    steerAtStep: diagnostics.steerAtStep,
+    steerDeliveredAtSeconds: diagnostics.steerDeliveredAtSeconds,
     acceptanceRan: acceptance.ran,
     durationSeconds,
-    rework: failedCommands.length,
-    takeover: diagnostics?.sessionStatus !== "COMPLETED",
-    costUsd: diagnostics?.usageDetails?.costs?.USD ?? 0,
-    costKnown: diagnostics?.usageDetails?.requests > 0
+    rework: null, // 失败命令不等于返工；没有人工标注时保持未知。
+    takeover: null, // 非完成不是人工接管。脚本引导也不是人工接管。
+    failedCommandCount: failedCommands?.length ?? null,
+    modelRequestCount: diagnostics?.modelRequests ?? null,
+    costUsd: diagnostics?.usageDetails?.costs?.USD ?? null,
+    costKnown: typeof diagnostics?.usageDetails?.costs?.USD === "number"
+      && diagnostics.usageDetails.requests > 0
       && diagnostics.usageDetails.pricedRequests === diagnostics.usageDetails.requests
       && Object.keys(diagnostics.usageDetails.costs || {}).every(currency => currency === 'USD'),
-    inputTokens: diagnostics?.inputTokens ?? 0,
-    outputTokens: diagnostics?.outputTokens ?? 0,
+    inputTokens: diagnostics?.inputTokens ?? null,
+    outputTokens: diagnostics?.outputTokens ?? null,
     cachedInputTokens: diagnostics?.cachedInputTokens ?? 0,
     usageExact: diagnostics?.usageExact === true,
     usageDetails: diagnostics?.usageDetails ?? null,
@@ -277,33 +416,30 @@ export async function runTask(args, task) {
     validationCovered: diagnostics?.validation?.covered ?? false,
     acceptanceDetail: acceptance.detail,
     storageHealth: diagnostics?.storageHealth ?? "",
-    notes: ""
+    notes: task.steer && !diagnostics.steerDelivered ? "任务在引导投递前结束：验收结果不代表中途引导场景已覆盖" : ""
   };
 }
 
+export function selectTasks(tasks, ids = []) {
+  if (new Set(tasks.map(t => t.id)).size !== tasks.length) throw new Error("任务 ID 重复");
+  const selected = new Set(ids);
+  const missing = [...selected].filter(id => !tasks.some(t => t.id === id));
+  if (missing.length) throw new Error(`未知任务：${missing.join('、')}`);
+  return selected.size ? tasks.filter(t => selected.has(t.id)) : tasks;
+}
+
+export function expandRuns(tasks, repeat = 1) {
+  return Array.from({ length: repeat }, (_, i) => tasks.map(task => ({ task, attempt: i + 1 }))).flat();
+}
+
 export function dryRunRecords(tasks, args) {
-  return tasks.map((task, index) => ({
-    taskId: task.id,
-    title: task.title,
-    sessionId: `dry-${index}`,
-    model: args.model,
-    promptVersion: args.promptVersion,
-    toolVersion: args.toolVersion,
-    dryRun: true,
-    success: false,
-    acceptanceRan: false,
-    durationSeconds: 60 + index * 15,
-    rework: index % 3,
-    takeover: index === 4,
-    costUsd: 0.02 * (index + 1),
-    costKnown: true,
-    inputTokens: 1200 * (index + 1),
-    outputTokens: 400 * (index + 1),
-    cachedInputTokens: 300 * (index + 1),
-    cacheReadObserved: true,
-    validationCovered: true,
-    acceptanceDetail: "dry-run（未执行真实命令）",
-    notes: "dry-run 记录不能用于能力结论"
+  return expandRuns(tasks, args.repeat ?? 1).map(({ task, attempt }, index) => ({
+    taskId: task.id, title: task.title, sessionId: `dry-${index}`, attempt,
+    model: args.model, promptVersion: args.promptVersion, toolVersion: args.toolVersion,
+    dryRun: true, success: false, acceptanceRan: false, acceptancePassed: false,
+    durationSeconds: null, rework: null, takeover: null, costUsd: null, costKnown: false,
+    inputTokens: null, outputTokens: null, cachedInputTokens: null, cacheReadObserved: false,
+    acceptanceDetail: "dry-run（未执行真实命令）", notes: "dry-run 记录不能用于能力结论"
   }));
 }
 
@@ -341,79 +477,81 @@ async function verifyFixtures(args, tasks) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const tasksFile = JSON.parse(await readFile(args.tasks, "utf8"));
-  const tasks = tasksFile.tasks ?? [];
-  if (tasks.length === 0) throw new Error("任务集为空");
-
-  if (args.verifyFixtures) {
-    await verifyFixtures(args, tasks);
-    return;
-  }
-
-  // 在启动付费任务之前确认基线可读，避免跑完才发现无法比较。
+  const tasks = selectTasks(tasksFile.tasks ?? [], args.taskIds);
+  if (!tasks.length) throw new Error("任务集为空");
+  if (args.verifyFixtures) { await verifyFixtures(args, tasks); return; }
   const baseline = args.baseline
-    ? (await readFile(args.baseline, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line))
-    : null;
-  if (baseline && baseline.length === 0) throw new Error("基线为空");
-
-  let records;
-  if (args.dryRun) {
-    records = dryRunRecords(tasks, args);
-  } else {
-    records = [];
+    ? (await readFile(args.baseline, "utf8")).split("\n").filter(Boolean).map(line => JSON.parse(line)) : null;
+  if (baseline && !baseline.length) throw new Error("基线为空");
+  if (args.strict) {
+    const check = validateBaseline(baseline);
+    if (check.verdict !== 'pass') throw new Error(`基线尚不满足严格对照条件：${check.reasons.join('；')}`);
+    if (args.repeat < 3) throw new Error('--strict 需要 --repeat 至少为 3');
+    const selected = new Set(tasks.map(t => t.id));
+    if (baseline.some(r => !selected.has(r.taskId))) throw new Error('选中任务缺少基线任务，不能启动不完整的严格对照');
+  }
+  if (!args.dryRun) {
+    args.runContext = await createRunContext(args);
+    args.model = args.runContext.model;
+    // Validate all fixture versions before the first paid request.
     for (const task of tasks) {
-      process.stdout.write(`▶ ${task.id} ... `);
+      const metadata = await recordMetadata(args, task);
+      if (args.strict && baseline.some(r => r.taskId === task.id &&
+          ['fixtureVersion', 'taskVersion', 'environmentVersion', 'modelConfigHash'].some(key => r[key] !== metadata[key]))) {
+        throw new Error(`${task.id} 的模型/环境/任务条件与基线不一致`);
+      }
+    }
+  }
+  await mkdir(dirname(args.out), { recursive: true });
+  // Preserve completed trials even if a later run crashes; never overwrite a previous run silently.
+  await writeFile(args.out, '', { encoding: 'utf8', flag: 'wx' });
+  const records = [];
+  const persist = async record => { records.push(record); await appendFile(args.out, JSON.stringify(record) + '\n', 'utf8'); };
+  if (args.dryRun) {
+    for (const record of dryRunRecords(tasks, args)) await persist(record);
+  } else {
+    for (const { task, attempt } of expandRuns(tasks, args.repeat)) {
+      process.stdout.write(`▶ ${task.id} [${attempt}/${args.repeat}] ... `);
+      const started = Date.now();
       try {
-        const record = await runTask(args, task);
-        records.push(record);
-        console.log(record.success ? "PASS" : "FAIL");
+        const record = await runTask({ ...args, attempt }, task);
+        await persist(record);
+        console.log(record.success ? 'PASS' : 'FAIL');
       } catch (error) {
-        records.push({
-          taskId: task.id, model: args.model, promptVersion: args.promptVersion,
-          toolVersion: args.toolVersion, success: false, acceptanceRan: false,
-          durationSeconds: 0, rework: 0, takeover: true, costUsd: 0, costKnown: false,
-          inputTokens: 0, outputTokens: 0, notes: String(error)
-        });
+        await persist({ ...await recordMetadata(args, task).catch(() => args.runContext),
+          taskId: task.id, attempt, model: args.model, requestedModel: args.model, resolvedModel: null,
+          promptVersion: args.promptVersion, toolVersion: args.toolVersion, success: false, acceptanceRan: false,
+          terminalStatus: null, reportedComplete: null, evaluationError: true,
+          durationSeconds: (Date.now() - started) / 1000, rework: null, takeover: null,
+          costUsd: null, costKnown: false, inputTokens: null, outputTokens: null, notes: String(error) });
         console.log(`ERROR ${error.message}`);
       }
     }
   }
-
   const compared = baseline ? compare(baseline, records) : records;
   const decision = baseline ? gate(baseline, compared) : null;
-
-  await mkdir(dirname(args.out), { recursive: true });
-  await writeFile(args.out, compared.map((record) => JSON.stringify(record)).join("\n") + "\n", "utf8");
-  const summary = {
-    generatedAt: new Date().toISOString(), dryRun: args.dryRun,
-    groups: aggregate(compared), overall: summarize(compared), gate: decision
-  };
-  await writeFile(args.out.endsWith(".jsonl") ? args.out.replace(/\.jsonl$/, ".summary.json") : `${args.out}.summary.json`, JSON.stringify(summary, null, 2), "utf8");
-
-  console.log("\n结果：");
+  const summary = { generatedAt: new Date().toISOString(), dryRun: args.dryRun,
+    selectedTasks: tasks.map(t => t.id), repeat: args.repeat,
+    groups: aggregate(compared), overall: summarize(compared), gate: decision };
+  const summaryPath = args.out.endsWith('.jsonl') ? args.out.replace(/\.jsonl$/, '.summary.json') : `${args.out}.summary.json`;
+  await writeFile(summaryPath, JSON.stringify(summary, null, 2), { encoding: 'utf8', flag: 'wx' });
+  const display = (value, digits = 1) => value == null ? '未知' : value.toFixed(digits);
+  const percent = value => value == null ? '未知' : `${(value * 100).toFixed(1)}%`;
+  console.log('\n结果：');
   for (const group of summary.groups) {
-    console.log(`  ${group.key}  成功率 ${(group.successRate * 100).toFixed(1)}%  ` +
-      `回归 ${(group.regressionRate * 100).toFixed(1)}%  平均耗时 ${group.avgDurationSeconds.toFixed(0)}s  ` +
-      `返工 ${group.avgRework.toFixed(1)}  接管 ${(group.takeoverRate * 100).toFixed(1)}%`);
+    console.log(`  ${group.key}  ${group.uniqueTasks} 个任务 / ${group.tasks} 次运行  成功率 ${percent(group.successRate)}  ` +
+      `正常收尾但外部验收失败率 ${percent(group.falseCompletionRate)}  p50/p95 ${display(group.p50DurationSeconds)}/${display(group.p95DurationSeconds)}s  ` +
+      `每成功任务成本 ${display(group.costPerSuccessfulTaskUsd, 4)}`);
   }
-  if (args.dryRun) console.log("  ⚠ dry-run：这些数字只用于验证流程，不能当作模型能力结论。");
-
+  if (args.dryRun) console.log('  dry-run：未运行模型或验收，不产生能力和成本结论。');
   if (decision) {
     const m = decision.metrics;
-    console.log(`\n门禁：${decision.verdict.toUpperCase()}`);
-    console.log(`  可比任务 ${m.pairedTasks} 个（下限 ${m.minTasks}）  ` +
-      `通过率 ${(m.baselineSuccessRate * 100).toFixed(1)}% → ${(m.currentSuccessRate * 100).toFixed(1)}%  ` +
-      `成本 $${m.baselineCostUsd.toFixed(3)} → $${m.currentCostUsd.toFixed(3)}  ` +
-      `缓存命中 ${(m.baselineCacheHitRate * 100).toFixed(0)}% → ${(m.currentCacheHitRate * 100).toFixed(0)}%`);
-    for (const reason of decision.reasons) {
-      console.log(`  - ${reason}`);
-    }
-    if (decision.verdict === "pass") {
-      console.log("  可以合入：能力没有下降，成本也没有上升。");
-    }
-    if (args.strict && decision.verdict !== "pass") {
-      console.error("  --strict：门禁未通过，按失败退出。");
-      process.exit(1);
-    }
+    console.log(`\n门禁：${decision.verdict.toUpperCase()}（${decision.comparisonScope === 'prompt' ? '相同运行时的提示对照' : '提示与运行时组合变化'}）`);
+    console.log(`  可比任务 ${m.pairedTasks} 个（下限 ${m.minTasks}）  通过率 ${percent(m.baselineSuccessRate)} → ${percent(m.currentSuccessRate)}  ` +
+      `成本 ${display(m.baselineCostUsd, 3)} → ${display(m.currentCostUsd, 3)}  缓存命中 ${percent(m.baselineCacheHitRate)} → ${percent(m.currentCacheHitRate)}`);
+    for (const reason of decision.reasons) console.log(`  - ${reason}`);
+    if (decision.verdict === 'pass') console.log('  本轮可比样本未观察到退化；不代表所有任务或后续运行均有保证。');
+    if (args.strict && decision.verdict !== 'pass') process.exitCode = 1;
   }
 }
 

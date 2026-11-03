@@ -1,0 +1,392 @@
+[
+  {
+    "type": "model.request",
+    "report": {
+      "id": "65f8cecf-502e-4329-86bb-d82fe5a5ef2f",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "completed",
+      "durationMs": 4205,
+      "usage": {
+        "inputTokens": 10602,
+        "outputTokens": 117,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": true,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "c761cd6c-9608-4e53-81d9-0293a2266bed",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "completed",
+      "durationMs": 5518,
+      "usage": {
+        "inputTokens": 10807,
+        "outputTokens": 90,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": true,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "2a568c27-c005-4bcb-a1aa-04a9db0ede88",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "completed",
+      "durationMs": 3152,
+      "usage": {
+        "inputTokens": 11491,
+        "outputTokens": 123,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": true,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "ef0f100d-e766-484b-bef0-4223a2b903f7",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "completed",
+      "durationMs": 5624,
+      "usage": {
+        "inputTokens": 12136,
+        "outputTokens": 438,
+        "reasoningTokens": 253,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": true,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "61d8b307-631d-43fe-9485-f3f09457df92",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "failed",
+      "durationMs": 13337,
+      "usage": {
+        "inputTokens": 9332,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": false,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "run.retrying",
+    "payload": {
+      "attempt": 1,
+      "delayMs": 568,
+      "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"budget_guard\",\"code\":\"budget_guard_stopped\",\"message\":\"budget_guard_stopped\"}}",
+      "elapsedMs": 0,
+      "remainingMs": 1800000,
+      "maxAttempts": 60
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "eaace72c-417b-4af4-a53a-bea9375c7937",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "failed",
+      "durationMs": 2,
+      "usage": {
+        "inputTokens": 9332,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": false,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "run.retrying",
+    "payload": {
+      "attempt": 2,
+      "delayMs": 1538,
+      "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"budget_guard\",\"code\":\"budget_guard_stopped\",\"message\":\"budget_guard_stopped\"}}",
+      "elapsedMs": 607,
+      "remainingMs": 1799393,
+      "maxAttempts": 60
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "c4e8e4e1-1119-4dbc-8306-46044d0ac618",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "failed",
+      "durationMs": 1,
+      "usage": {
+        "inputTokens": 9332,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": false,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "run.retrying",
+    "payload": {
+      "attempt": 3,
+      "delayMs": 2940,
+      "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"budget_guard\",\"code\":\"budget_guard_stopped\",\"message\":\"budget_guard_stopped\"}}",
+      "elapsedMs": 2190,
+      "remainingMs": 1797810,
+      "maxAttempts": 60
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "6cb0d432-a5fa-4922-9d45-c605e85aa983",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "failed",
+      "durationMs": 1,
+      "usage": {
+        "inputTokens": 9332,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": false,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "run.retrying",
+    "payload": {
+      "attempt": 4,
+      "delayMs": 5290,
+      "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"budget_guard\",\"code\":\"budget_guard_stopped\",\"message\":\"budget_guard_stopped\"}}",
+      "elapsedMs": 5200,
+      "remainingMs": 1794800,
+      "maxAttempts": 60
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "71aba92e-d649-4a4d-8b3b-e135ed09f5f4",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "failed",
+      "durationMs": 2,
+      "usage": {
+        "inputTokens": 9332,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": false,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "run.retrying",
+    "payload": {
+      "attempt": 5,
+      "delayMs": 13075,
+      "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"budget_guard\",\"code\":\"budget_guard_stopped\",\"message\":\"budget_guard_stopped\"}}",
+      "elapsedMs": 10604,
+      "remainingMs": 1789396,
+      "maxAttempts": 60
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "17769625-ec68-4de4-8116-a34c42453ac7",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "failed",
+      "durationMs": 2,
+      "usage": {
+        "inputTokens": 9332,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": false,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "run.retrying",
+    "payload": {
+      "attempt": 6,
+      "delayMs": 21218,
+      "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"budget_guard\",\"code\":\"budget_guard_stopped\",\"message\":\"budget_guard_stopped\"}}",
+      "elapsedMs": 23913,
+      "remainingMs": 1776087,
+      "maxAttempts": 60
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "03f7b894-c7a9-4cec-8654-67814a361ef3",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "failed",
+      "durationMs": 1,
+      "usage": {
+        "inputTokens": 9332,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": false,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "run.retrying",
+    "payload": {
+      "attempt": 7,
+      "delayMs": 24937,
+      "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"budget_guard\",\"code\":\"budget_guard_stopped\",\"message\":\"budget_guard_stopped\"}}",
+      "elapsedMs": 45500,
+      "remainingMs": 1754500,
+      "maxAttempts": 60
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "a6545a40-a1a4-45e6-8a08-96757dac34dc",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "failed",
+      "durationMs": 2,
+      "usage": {
+        "inputTokens": 9332,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": false,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "run.retrying",
+    "payload": {
+      "attempt": 8,
+      "delayMs": 23839,
+      "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"budget_guard\",\"code\":\"budget_guard_stopped\",\"message\":\"budget_guard_stopped\"}}",
+      "elapsedMs": 70840,
+      "remainingMs": 1729160,
+      "maxAttempts": 60
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "0ed8421b-4ff9-4963-9fb9-d6fe7e5fec7b",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "failed",
+      "durationMs": 1,
+      "usage": {
+        "inputTokens": 9332,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": false,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "run.retrying",
+    "payload": {
+      "attempt": 9,
+      "delayMs": 29548,
+      "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"budget_guard\",\"code\":\"budget_guard_stopped\",\"message\":\"budget_guard_stopped\"}}",
+      "elapsedMs": 95048,
+      "remainingMs": 1704952,
+      "maxAttempts": 60
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "a5879d81-57ea-4099-980f-0b31fd8ee5ec",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "failed",
+      "durationMs": 1,
+      "usage": {
+        "inputTokens": 9332,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": false,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "run.retrying",
+    "payload": {
+      "attempt": 10,
+      "delayMs": 25152,
+      "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"budget_guard\",\"code\":\"budget_guard_stopped\",\"message\":\"budget_guard_stopped\"}}",
+      "elapsedMs": 125092,
+      "remainingMs": 1674908,
+      "maxAttempts": 60
+    }
+  }
+]

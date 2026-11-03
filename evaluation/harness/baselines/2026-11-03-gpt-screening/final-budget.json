@@ -1,0 +1,13 @@
+{
+  "initialUsed": 45209239,
+  "lastUsed": 45329166,
+  "spent": 119927,
+  "maxQuota": 4000000,
+  "remaining": 667050,
+  "locked": false,
+  "busy": false,
+  "requests": 21,
+  "pendingReserved": 3213023,
+  "nextUsageAt": 1793697250909,
+  "rateLimitedUntil": 0
+}

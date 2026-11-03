@@ -1,0 +1,248 @@
+{
+  "createdAt": "2026-11-03T08:35:07.717Z",
+  "model": "gpt-6.1-sol",
+  "purpose": "budget-limited prompt screening, not a final capability ranking",
+  "seed": 20261103,
+  "plannedRuns": 36,
+  "taskIds": [
+    "fix-failing-unit-test",
+    "rename-across-files",
+    "async-race-condition",
+    "long-file-targeted-edit",
+    "case-insensitive-path",
+    "steer-constraint-hold"
+  ],
+  "repeat": 2,
+  "concurrency": 1,
+  "schedule": [
+    {
+      "variant": "p0",
+      "taskId": "async-race-condition",
+      "attempt": 1,
+      "position": 0
+    },
+    {
+      "variant": "p1",
+      "taskId": "async-race-condition",
+      "attempt": 1,
+      "position": 1
+    },
+    {
+      "variant": "p2",
+      "taskId": "async-race-condition",
+      "attempt": 1,
+      "position": 2
+    },
+    {
+      "variant": "p1",
+      "taskId": "rename-across-files",
+      "attempt": 1,
+      "position": 0
+    },
+    {
+      "variant": "p2",
+      "taskId": "rename-across-files",
+      "attempt": 1,
+      "position": 1
+    },
+    {
+      "variant": "p0",
+      "taskId": "rename-across-files",
+      "attempt": 1,
+      "position": 2
+    },
+    {
+      "variant": "p2",
+      "taskId": "case-insensitive-path",
+      "attempt": 1,
+      "position": 0
+    },
+    {
+      "variant": "p0",
+      "taskId": "case-insensitive-path",
+      "attempt": 1,
+      "position": 1
+    },
+    {
+      "variant": "p1",
+      "taskId": "case-insensitive-path",
+      "attempt": 1,
+      "position": 2
+    },
+    {
+      "variant": "p0",
+      "taskId": "steer-constraint-hold",
+      "attempt": 1,
+      "position": 0
+    },
+    {
+      "variant": "p1",
+      "taskId": "steer-constraint-hold",
+      "attempt": 1,
+      "position": 1
+    },
+    {
+      "variant": "p2",
+      "taskId": "steer-constraint-hold",
+      "attempt": 1,
+      "position": 2
+    },
+    {
+      "variant": "p1",
+      "taskId": "long-file-targeted-edit",
+      "attempt": 1,
+      "position": 0
+    },
+    {
+      "variant": "p2",
+      "taskId": "long-file-targeted-edit",
+      "attempt": 1,
+      "position": 1
+    },
+    {
+      "variant": "p0",
+      "taskId": "long-file-targeted-edit",
+      "attempt": 1,
+      "position": 2
+    },
+    {
+      "variant": "p2",
+      "taskId": "fix-failing-unit-test",
+      "attempt": 1,
+      "position": 0
+    },
+    {
+      "variant": "p0",
+      "taskId": "fix-failing-unit-test",
+      "attempt": 1,
+      "position": 1
+    },
+    {
+      "variant": "p1",
+      "taskId": "fix-failing-unit-test",
+      "attempt": 1,
+      "position": 2
+    },
+    {
+      "variant": "p1",
+      "taskId": "fix-failing-unit-test",
+      "attempt": 2,
+      "position": 0
+    },
+    {
+      "variant": "p2",
+      "taskId": "fix-failing-unit-test",
+      "attempt": 2,
+      "position": 1
+    },
+    {
+      "variant": "p0",
+      "taskId": "fix-failing-unit-test",
+      "attempt": 2,
+      "position": 2
+    },
+    {
+      "variant": "p2",
+      "taskId": "steer-constraint-hold",
+      "attempt": 2,
+      "position": 0
+    },
+    {
+      "variant": "p0",
+      "taskId": "steer-constraint-hold",
+      "attempt": 2,
+      "position": 1
+    },
+    {
+      "variant": "p1",
+      "taskId": "steer-constraint-hold",
+      "attempt": 2,
+      "position": 2
+    },
+    {
+      "variant": "p0",
+      "taskId": "rename-across-files",
+      "attempt": 2,
+      "position": 0
+    },
+    {
+      "variant": "p1",
+      "taskId": "rename-across-files",
+      "attempt": 2,
+      "position": 1
+    },
+    {
+      "variant": "p2",
+      "taskId": "rename-across-files",
+      "attempt": 2,
+      "position": 2
+    },
+    {
+      "variant": "p1",
+      "taskId": "case-insensitive-path",
+      "attempt": 2,
+      "position": 0
+    },
+    {
+      "variant": "p2",
+      "taskId": "case-insensitive-path",
+      "attempt": 2,
+      "position": 1
+    },
+    {
+      "variant": "p0",
+      "taskId": "case-insensitive-path",
+      "attempt": 2,
+      "position": 2
+    },
+    {
+      "variant": "p2",
+      "taskId": "long-file-targeted-edit",
+      "attempt": 2,
+      "position": 0
+    },
+    {
+      "variant": "p0",
+      "taskId": "long-file-targeted-edit",
+      "attempt": 2,
+      "position": 1
+    },
+    {
+      "variant": "p1",
+      "taskId": "long-file-targeted-edit",
+      "attempt": 2,
+      "position": 2
+    },
+    {
+      "variant": "p0",
+      "taskId": "async-race-condition",
+      "attempt": 2,
+      "position": 0
+    },
+    {
+      "variant": "p1",
+      "taskId": "async-race-condition",
+      "attempt": 2,
+      "position": 1
+    },
+    {
+      "variant": "p2",
+      "taskId": "async-race-condition",
+      "attempt": 2,
+      "position": 2
+    }
+  ],
+  "initialBudget": {
+    "initialUsed": 45209239,
+    "lastUsed": 45217683,
+    "spent": 8444,
+    "maxQuota": 4000000,
+    "remaining": 3991556,
+    "locked": false,
+    "busy": false,
+    "requests": 0,
+    "pendingReserved": 0,
+    "nextUsageAt": 1793695024758,
+    "rateLimitedUntil": 0
+  }
+}

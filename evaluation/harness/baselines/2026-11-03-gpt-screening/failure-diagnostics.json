@@ -1,0 +1,18 @@
+{
+  "sessionStatus": "RUNNING",
+  "activeRunId": "run_5d893ae6-2df5-4631-87e4-967f1dd92bd2",
+  "modelRequests": 14,
+  "inputTokens": 138356,
+  "outputTokens": 768,
+  "usageExact": false,
+  "usageDetails": {
+    "requests": 14,
+    "observedCacheRequests": 0,
+    "observedCacheInputTokens": 0,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 0,
+    "pricedRequests": 0,
+    "costs": {},
+    "exact": false
+  }
+}

@@ -1,0 +1,75 @@
+diff --git a/src/csv.js b/src/csv.js
+--- a/src/csv.js
++++ b/src/csv.js
+@@ -1,8 +1,47 @@
+ 'use strict';
+ 
+-// CSV 解析。当前只做了最朴素的逗号切分，引号里的逗号会切错。
+ function parse(text) {
+-  return text.trim().split('\n').map((line) => line.split(','));
++  const rows = [];
++  let row = [];
++  let field = '';
++  let inQuotes = false;
++
++  for (let i = 0; i < text.length; i += 1) {
++    const char = text[i];
++
++    if (inQuotes) {
++      if (char === '"') {
++        if (text[i + 1] === '"') {
++          field += '"';
++          i += 1;
++        } else {
++          inQuotes = false;
++        }
++      } else {
++        field += char;
++      }
++    } else if (char === '"' && field.length === 0) {
++      inQuotes = true;
++    } else if (char === ',') {
++      row.push(field);
++      field = '';
++    } else if (char === '\n' || char === '\r') {
++      row.push(field);
++      rows.push(row);
++      row = [];
++      field = '';
++      if (char === '\r' && text[i + 1] === '\n') i += 1;
++    } else {
++      field += char;
++    }
++  }
++
++  if (inQuotes) throw new Error('CSV contains an unterminated quoted field');
++  if (field.length > 0 || row.length > 0 || (text.length > 0 && text[text.length - 1] !== '\n' && text[text.length - 1] !== '\r')) {
++    row.push(field);
++    rows.push(row);
++  }
++  return rows;
+ }
+ 
+ module.exports = { parse };
+diff --git a/test/csv.test.js b/test/csv.test.js
+--- a/test/csv.test.js
++++ b/test/csv.test.js
+@@ -17,6 +17,18 @@
+   assert.deepEqual(parse('a,"第一行\n第二行"'), [['a', '第一行\n第二行']]);
+ });
+ 
++test('支持双引号转义、CRLF 和末尾换行', () => {
++  assert.deepEqual(parse('a,b\r\n"他说""你好",x\r\n'), [['a', 'b'], ['他说"你好', 'x']]);
++});
++
++test('保留字段内及字段外空白，并解析空字段', () => {
++  assert.deepEqual(parse(' a ,," b "'), [[' a ', '', ' b ']]);
++});
++
++test('未闭合的引号字段报错', () => {
++  assert.throws(() => parse('a,"b'), /unterminated quoted field/);
++});
++
+ test('没有引入任何第三方依赖', () => {
+   const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
+   assert.deepEqual(pkg.dependencies ?? {}, {}, '依赖必须保持为空');

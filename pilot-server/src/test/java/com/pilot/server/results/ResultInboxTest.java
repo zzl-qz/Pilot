@@ -99,4 +99,41 @@ class ResultInboxTest {
         assertEquals(2, detail.research().size()); assertEquals("复用既有链路", detail.research().getFirst().decision());
         assertFalse(detail.research().get(1).structured()); assertTrue(service.sessionResearch(id).isEmpty());
     }
+
+    @Test void separatesExecutionCompletionFromVerificationAndKeepsHistoricalDetails() {
+        String id = sessions.createSession("验证状态").id();
+        for (String phase : List.of("CHECKS_PASSED", "CHECKS_FAILED", "CHECKS_STALE", "UNVERIFIED")) {
+            tasks.start(id, "修改代码", List.of(), List.of());
+            tasks.execution(id, tasks.load(id), new TaskControlService.Execution("DIRECT", "", List.of(), List.of(), 1, 0,
+                    List.of(), phase, "检查详情 " + phase, 0, ""));
+            tasks.finish(id); tasks.snapshotResult(id, phase);
+            sessions.publish(id, phase, new RunCompleted("执行结束", List.of("src/app.js"), List.of()));
+            assertEquals("CHECKS_PASSED".equals(phase) ? "COMPLETED" : "NEEDS_ATTENTION", service.get(phase).state());
+            assertEquals(phase, service.detail(phase).verification());
+            assertEquals("检查详情 " + phase, service.detail(phase).verificationDetail());
+        }
+        tasks.start(id, "文档修改", List.of(), List.of());
+        tasks.execution(id, tasks.load(id), new TaskControlService.Execution("DIRECT", "", List.of(), List.of(), 1, 0,
+                List.of(), "UNVERIFIED", "不需要代码测试", 0, ""));
+        tasks.finish(id); tasks.snapshotResult(id, "docs");
+        sessions.publish(id, "docs", new RunCompleted("文档已更新", List.of("README.md"), List.of()));
+        assertEquals("COMPLETED", service.get("docs").state(), "无验证的文档交付不必被强制挂起");
+        assertEquals("UNVERIFIED", service.detail("docs").verification());
+        assertEquals("CHECKS_FAILED", service.detail("CHECKS_FAILED").verification(), "后续任务不能覆盖旧结果的检查状态");
+    }
+
+    @Test void verificationMetadataDoesNotChangeHistoricalReceiptOrNotificationIdentity() {
+        String id = sessions.createSession("旧任务").id();
+        sessions.publish(id, "old-run", new RunCompleted("已完成", List.of(), List.of()));
+        var before = service.get("old-run");
+        service.mark(before.id(), before.revision(), "read");
+        service.mark(before.id(), before.revision(), "handle");
+        tasks.start(id, "旧任务", List.of(), List.of());
+        tasks.execution(id, tasks.load(id), new TaskControlService.Execution("GOAL", "", List.of(), List.of(), 1, 0,
+                List.of(), "VERIFIED", "", 0, ""));
+        tasks.snapshotResult(id, "old-run");
+        var after = service.get("old-run");
+        assertEquals(before.revision(), after.revision(), "通知幂等键必须与旧结果保持一致");
+        assertTrue(after.read()); assertTrue(after.handled());
+    }
 }

@@ -184,7 +184,7 @@
       "fixture": "fixtures/steer-mid-run",
       "prompt": "提取 Markdown 标题大纲，先按你现在的理解实现，跑一遍测试看看。",
       "steer": {
-        "afterSeconds": 90,
+        "afterSeconds": 1,
         "content": "补充要求：outline 改成返回对象数组，每一项带 level（# 的个数）和 line（从 1 开始的行号），导出名保持不变，代码块里的 # 不算标题。"
       },
       "acceptance": ["node --test"],
@@ -196,7 +196,7 @@
       "fixture": "fixtures/steer-constraint-hold",
       "prompt": "实现 CSV 解析，支持引号内的逗号与换行，先按你现在的理解实现。",
       "steer": {
-        "afterSeconds": 90,
+        "afterSeconds": 1,
         "content": "补充约束：不要引入任何第三方依赖，也不要在 src 和 test 之外新建目录或文件。"
       },
       "acceptance": ["node --test"],

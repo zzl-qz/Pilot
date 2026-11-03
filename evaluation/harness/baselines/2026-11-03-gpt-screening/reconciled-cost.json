@@ -1,0 +1,12 @@
+{
+  "observedAt": "2026-11-03T09:14:55.620921+00:00",
+  "initialUsed": 45209239,
+  "finalUsed": 45340045,
+  "totalQuotaDelta": 130806,
+  "preflightAndCalibrationQuotaDelta": 8444,
+  "controlledQuotaDelta": 122362,
+  "quotaPerDisplayUnit": 500000,
+  "totalDisplayUnits": 0.261612,
+  "currencyBasis": "CNY per user confirmation; API currency symbol is generic",
+  "perTrialCostKnown": false
+}

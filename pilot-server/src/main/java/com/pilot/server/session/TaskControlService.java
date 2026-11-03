@@ -21,6 +21,8 @@ import java.util.UUID;
 /** 独立于压缩后的对话记忆保存任务目标、边界、验收证据和纠正记录。 */
 @Component
 public class TaskControlService {
+    private static final Set<String> DIRECT_FINISHED_PHASES = Set.of(
+            "CHECKS_PASSED", "CHECKS_FAILED", "CHECKS_STALE", "UNVERIFIED");
     private static final Set<String> STATUSES = Set.of("ACTIVE", "PAUSED", "INTERRUPTED",
             "AWAITING_REVIEW", "COMPLETED", "FAILED", "BLOCKED", "BUDGET_LIMITED",
             "WAITING", "NEED_INPUT", "UNVERIFIED", "NO_PROGRESS", "REVIEW_UNAVAILABLE",
@@ -152,6 +154,11 @@ public class TaskControlService {
             requestAllowance = requestAllowance == null ? 0 : requestAllowance;
             timeAllowanceMillis = timeAllowanceMillis == null ? 0L : timeAllowanceMillis;
             assessmentVersion = assessmentVersion == null ? 0 : assessmentVersion;
+            // 旧版 Direct 无条件写 VERIFIED；历史快照不能继续展示为独立核验通过。
+            if ("DIRECT".equals(mode) && "VERIFIED".equals(phase)) {
+                phase = "UNVERIFIED";
+                gap = "旧版普通执行仅记录模型收尾，未独立核验；历史检查请查看实际证据。";
+            }
             usage = usage == null ? Usage.empty() : usage;
             changedPaths = changedPaths == null ? List.of() : changedPaths.stream()
                     .filter(Objects::nonNull).map(String::strip).filter(value -> !value.isBlank())
@@ -163,6 +170,10 @@ public class TaskControlService {
 
         public int assessmentVersionValue() {
             return assessmentVersion;
+        }
+
+        public boolean directFinished() {
+            return "DIRECT".equals(mode) && DIRECT_FINISHED_PHASES.contains(phase);
         }
     }
 
@@ -245,7 +256,8 @@ public class TaskControlService {
     /** 模型运行完成和用户验收完成分别记录；未勾选的明确验收条件不会自动通过。 */
     public synchronized TaskContract finish(String sessionId) {
         TaskContract task = load(sessionId);
-        if (task != null && task.execution() != null && !"VERIFIED".equals(task.execution().phase()))
+        if (task != null && task.execution() != null && !"VERIFIED".equals(task.execution().phase())
+                && !task.execution().directFinished())
             return status(sessionId, "INTERRUPTED");
         if (task != null && task.automation() != null && task.execution() != null
                 && "VERIFIED".equals(task.execution().phase())) {

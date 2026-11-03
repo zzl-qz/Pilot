@@ -1,0 +1,57 @@
+diff --git a/src/csv.js b/src/csv.js
+--- a/src/csv.js
++++ b/src/csv.js
+@@ -1,8 +1,51 @@
+ 'use strict';
+ 
+-// CSV 解析。当前只做了最朴素的逗号切分，引号里的逗号会切错。
+ function parse(text) {
+-  return text.trim().split('\n').map((line) => line.split(','));
++  if (text.length === 0) return [];
++
++  const rows = [];
++  let row = [];
++  let field = '';
++  let quoted = false;
++
++  for (let i = 0; i < text.length; i += 1) {
++    const char = text[i];
++
++    if (quoted) {
++      if (char === '"') {
++        if (text[i + 1] === '"') {
++          field += '"';
++          i += 1;
++        } else {
++          quoted = false;
++        }
++      } else {
++        field += char;
++      }
++      continue;
++    }
++
++    if (char === '"' && field.length === 0) {
++      quoted = true;
++    } else if (char === ',') {
++      row.push(field);
++      field = '';
++    } else if (char === '\n' || char === '\r') {
++      row.push(field);
++      rows.push(row);
++      row = [];
++      field = '';
++      if (char === '\r' && text[i + 1] === '\n') i += 1;
++    } else {
++      field += char;
++    }
++  }
++
++  if (field.length > 0 || row.length > 0 || !/[\r\n]$/.test(text)) {
++    row.push(field);
++    rows.push(row);
++  }
++  return rows;
+ }
+ 
+ module.exports = { parse };

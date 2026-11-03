@@ -65,4 +65,9 @@ requires: [dispatch_agents]
 `PILOT_PROMPTS_DIR`（或系统属性 `pilot.prompts.dir`）指向的外部目录按同名覆盖
 classpath 版本，缺失文件回落；外部文件每次读盘，改完无需重新打包。
 
+当前默认提示词保留原版本。P2 流程候选尚未通过推广门禁，未默认启用；冻结内容位于
+[`evaluation/prompt-variants/p2-flow`](../../../../../evaluation/prompt-variants/p2-flow)，
+仅在对照评测或明确选择试用时，将 `PILOT_PROMPTS_DIR` 设为该目录的绝对路径。
+启用前提、回滚方法与评测报告见[候选说明](../../../../../evaluation/prompt-variants/README.md)。
+
 > AI生成

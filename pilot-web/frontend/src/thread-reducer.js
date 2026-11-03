@@ -569,7 +569,7 @@ export function applyEvent(draft, event, { live }) {
       draft.lastOutcome = 'completed';
       pushRow(draft, {
         key: `result:${event.runId || event.sequence}`,
-        type: 'result', tone: 'ok', title: '任务完成',
+        type: 'result', tone: 'text', title: '执行结束',
         detail: event.payload?.summary || null,
         changedFiles: [],
         runIds: turn?.runIds?.length ? turn.runIds : (event.runId ? [event.runId] : []),
@@ -579,7 +579,7 @@ export function applyEvent(draft, event, { live }) {
         draft.ui.attentionKind = 'idle';
         draft.runChangesFetch = event.runId;
       }
-      record(draft, event, { kind: 'run', tone: 'ok', status: '完成', title: '运行结束', detail: event.payload?.summary || null });
+      record(draft, event, { kind: 'run', tone: 'text', status: '结束', title: '运行结束', detail: event.payload?.summary || null });
       break;
     }
 

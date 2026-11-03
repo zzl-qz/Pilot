@@ -1,0 +1,24 @@
+diff --git a/src/dedupe.js b/src/dedupe.js
+--- a/src/dedupe.js
++++ b/src/dedupe.js
+@@ -5,7 +5,19 @@
+  * Windows 与 macOS 默认大小写不敏感，Linux 敏感，所以必须按平台判断。
+  */
+ function isSamePath(left, right, platform) {
+-  return left === right;
++  const separators = platform === 'win32' ? /[\\/]+$/ : /\/+$/;
++  const trimTrailingSeparators = (path) => {
++    const normalized = path.replace(separators, '');
++    if (normalized) return normalized;
++    return path.charAt(0);
++  };
++  const normalizedLeft = trimTrailingSeparators(left);
++  const normalizedRight = trimTrailingSeparators(right);
++
++  if (platform === 'win32' || platform === 'darwin') {
++    return normalizedLeft.toLowerCase() === normalizedRight.toLowerCase();
++  }
++  return normalizedLeft === normalizedRight;
+ }
+ 
+ module.exports = { isSamePath };

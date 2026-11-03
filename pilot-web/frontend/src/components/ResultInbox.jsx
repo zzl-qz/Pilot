@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
 import { ResearchRecords } from './ResearchPanel.jsx';
+import { verificationLabel, verificationHint } from '../lib/verification.js';
 import './schedules.css';
 import './results.css';
 
-const labels = { COMPLETED: '已完成', NEEDS_ATTENTION: '需要处理', AWAITING_REVIEW: '待验收' };
-const phases = { COMPLETE: '核验完成', COMPLETED: '核验完成', VERIFIED: '核验完成', VERIFYING: '核验中', EXECUTING: '执行中', UNKNOWN: '未保存核验记录' };
+const labels = { COMPLETED: '执行结束', NEEDS_ATTENTION: '需要处理', AWAITING_REVIEW: '待验收' };
 function count(items) { useStore.getState().setUi({ resultUnread: items.filter(i => !i.read && !i.handled).length }); }
 export default function ResultInbox() {
   const open = useStore(s => s.ui.resultsOpen);
@@ -78,7 +78,9 @@ function InboxDialog({ target }) {
         {item && <><h2>{item.title || '未命名任务'}</h2><p>{labels[item.state] || item.state} · {item.handled ? '已处理' : '待处理'}</p><p className="schedule-goal">{item.summary || '暂无摘要，请打开执行对话查看。'}</p>
           <div className="schedule-actions"><button className={`btn${preview ? '' : ' btn-primary'}`} disabled={busy} onClick={() => receipt(item.handled ? 'reopen' : 'handle')}>{item.handled ? '重新打开' : '标记已处理'}</button><button className="btn" disabled={busy} onClick={() => receipt(item.read ? 'unread' : 'read')}>{item.read ? '标记未读' : '标记已读'}</button><button className="btn" disabled={busy} onClick={() => act(async () => { await useStore.getState().activate(item.sessionId); close(); })}>打开执行对话</button></div>
           <nav className="result-sections" aria-label="结果内容导航">{[['verification', '验收'], ['changes', '改动'], ...(item.workspace ? [['workspace', '工作区']] : []), ['research', '开源参考']].map(([key, text]) => <button key={key} onClick={() => ref.current.querySelector(`#result-${key}`)?.scrollIntoView({ block: 'start' })}>{text}</button>)}</nav>
-          <h3 id="result-verification">验收与验证</h3><p>{phases[detail.verification] || `核验阶段：${detail.verification}`}</p>
+          <h3 id="result-verification">验收与验证</h3><p data-verification-phase={detail.verification}>{verificationLabel(detail.verification)}</p>
+          {verificationHint(detail.verification) && <p className="task-help">{verificationHint(detail.verification)}</p>}
+          {detail.verificationDetail && <p className="task-help">{detail.verificationDetail}</p>}
           {!!detail.acceptance?.length && <ul>{detail.acceptance.map((a, i) => <li key={i}>{a.checked ? '已满足' : '待核对'} · {a.text}{a.evidence && <small>{a.evidence}</small>}</li>)}</ul>}
           <ResultList title="记录的验证项" rows={item.checks} empty="没有记录验证项。" />
           {!!item.openSteps.length && <ResultList title="未完成事项" rows={item.openSteps} />}

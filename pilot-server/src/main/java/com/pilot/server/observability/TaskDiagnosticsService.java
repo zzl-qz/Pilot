@@ -86,7 +86,9 @@ public class TaskDiagnosticsService {
                                 : Duration.between(task.startedAt(), Instant.now()).toSeconds()))
                 .toList();
 
-        ValidationEvidence latestEvidence = validations.recent(sessionId).stream().findFirst().orElse(null);
+        // 账本按写入顺序保留旧到新的证据，与 ValidationLedger.report 的选取保持一致。
+        List<ValidationEvidence> recentEvidence = validations.recent(sessionId);
+        ValidationEvidence latestEvidence = recentEvidence.isEmpty() ? null : recentEvidence.getLast();
         String currentCandidate = latestEvidence == null ? ""
                 : WorkspaceFingerprint.of(workspaceOf(session), latestEvidence.files());
         ValidationLedger.Report report = validations.report(sessionId, currentCandidate);

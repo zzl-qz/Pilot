@@ -1,0 +1,20 @@
+{
+  "initialQuotaUsed": 45209239,
+  "preflightAndSetupQuotaDelta": 8444,
+  "formalQuotaCap": 2953190,
+  "overallQuotaCap": 4000000,
+  "quotaPerDisplayUnit": 500000,
+  "displayExchangeRate": 1,
+  "maxOutputTokens": 4096,
+  "inputReservationMarginTokens": 16384,
+  "inputQuotaPerMillion": 2000000,
+  "outputQuotaPerMillion": 6000000,
+  "note": "Converted using gateway quota display settings; account statement remains authoritative.",
+  "priorActualQuotaDeltaAtResume": 45015,
+  "proxyCapUsesGlobalBaseline": true,
+  "usageQueryIntervalMs": 120000,
+  "unusedReservationsRecycled": false,
+  "pendingCarriedFromPriorStages": 1001795,
+  "budgetProtocol": "reported-usage-upper-bound-terminal402",
+  "reservationReplacementCondition": "complete provider-reported usage; no cache discounts; missing usage keeps byte reservation"
+}

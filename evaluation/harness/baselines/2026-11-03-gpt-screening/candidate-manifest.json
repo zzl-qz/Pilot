@@ -1,0 +1,924 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-11-03T09:15:05.562568+00:00",
+  "sourceFrozen": true,
+  "scope": "Original GPT screening records, first attempt only; current terminal synthetic candidates compared to original fingerprint-verified fixtures.",
+  "recordCount": 18,
+  "recordCounts": {
+    "p0": 6,
+    "p1": 6,
+    "p2": 6
+  },
+  "expectedFinalCount": 18,
+  "sourceRecordRoot": "adjacent published JSONL files",
+  "databaseReadMode": "SQLite mode=ro&immutable=1, query_only=ON",
+  "archiveBoundary": ".pilot-eval",
+  "format": "UTF-8 unified diff; empty patch means no included text changes.",
+  "policy": {
+    "followSymlinks": false,
+    "copyBinary": false,
+    "copyNodeModules": false,
+    "copySensitiveFiles": false,
+    "modifyCandidatesOrTests": false,
+    "runAcceptanceAgain": false,
+    "maxFileBytes": 2000000
+  },
+  "records": [
+    {
+      "variant": "p0",
+      "taskId": "async-race-condition",
+      "attempt": 1,
+      "sessionId": "ses_80379bcb-f8c1-4139-8819-d43523f33a80",
+      "sessionTitle": "eval:async-race-condition:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p0.jsonl",
+        "line": 1,
+        "sha256": "82ae3b6506f95092ea025c6a96d3e74e1b7b3f587b2480025fdd4ecf866a0a6b",
+        "rawSha256": "82ae3b6506f95092ea025c6a96d3e74e1b7b3f587b2480025fdd4ecf866a0a6b"
+      },
+      "workspace": ".pilot-eval/run-ZPvYp0",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/async-race-condition",
+      "fixtureVersion": "3daa9b1ffbded4bef4d6c3547b42aa5170dd68c044214fc0f206e067b14e322c",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p0--async-race-condition--attempt-1.patch",
+      "diffSha256": "6b6250a7146b675f86e2ef9f93d6229dea58b1a079d17765de42abb1a6c0937f",
+      "diffBytes": 716,
+      "changedFileCount": 1,
+      "fixtureTextFileCount": 2,
+      "candidateTextFileCount": 2,
+      "changes": [
+        {
+          "path": "src/fetchAll.js",
+          "change": "modified",
+          "beforeSha256": "b278969cebeff9147042bdb5bbbb32718b8aa6ae162d682904e47603b3f78d09",
+          "afterSha256": "28d183b9222a878a739c50649b270b97aa95e0038091605c2c026915735036fd"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.2s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p0",
+      "taskId": "rename-across-files",
+      "attempt": 1,
+      "sessionId": "ses_522d2a10-dfa8-4aca-b99b-d65a2519156c",
+      "sessionTitle": "eval:rename-across-files:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p0.jsonl",
+        "line": 2,
+        "sha256": "34e224b8eade7ad561e84481d56ac3ecd2d8db23df44ec4e3e4e7d0dd085a7e3",
+        "rawSha256": "34e224b8eade7ad561e84481d56ac3ecd2d8db23df44ec4e3e4e7d0dd085a7e3"
+      },
+      "workspace": ".pilot-eval/run-thkGTz",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/rename-across-files",
+      "fixtureVersion": "36a46dd09473ba9b33fa9427e6a28a1413bf409a80ce12df7ce91afb660fcec2",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p0--rename-across-files--attempt-1.patch",
+      "diffSha256": "7b20370b0c1b5884d971c5131990e81cf7284bb9ac0d38e3f9076bc7d8b9113f",
+      "diffBytes": 1514,
+      "changedFileCount": 3,
+      "fixtureTextFileCount": 4,
+      "candidateTextFileCount": 4,
+      "changes": [
+        {
+          "path": "src/greeting.js",
+          "change": "modified",
+          "beforeSha256": "b924736d1e9958b98ba47dba80893a471d548a2c87b28b7a3e0c74c22dbea9d0",
+          "afterSha256": "a04e4bb3c3c8fa6b736dbbaabfebe06a5df39df298060cbb5434fc4c24a87be7"
+        },
+        {
+          "path": "src/report.js",
+          "change": "modified",
+          "beforeSha256": "1b73efd8806c28befaf5eb0304a1fa25c9c4ec2327dfab519fe749f09da18496",
+          "afterSha256": "33b8bdab9b9879801b91d2070d7468dc07d953fdfe40eb52bcf1c7313099a187"
+        },
+        {
+          "path": "src/userService.js",
+          "change": "modified",
+          "beforeSha256": "ef90710d57877279e5881f2fba98d8ca1d5672a5a5967a6c37172499bf9a60fe",
+          "afterSha256": "1e87b41c84c25236fd866db97f7f916e2ae0de4a50aad8474c186ddbc77fc514"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.1s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p0",
+      "taskId": "case-insensitive-path",
+      "attempt": 1,
+      "sessionId": "ses_e192dda5-94b9-4559-90b1-c7fb682a092a",
+      "sessionTitle": "eval:case-insensitive-path:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p0.jsonl",
+        "line": 3,
+        "sha256": "2d1e4c1d9458da277fd198ab5c35580112fc736c93ecd3051bdfa8454a61bdbc",
+        "rawSha256": "2d1e4c1d9458da277fd198ab5c35580112fc736c93ecd3051bdfa8454a61bdbc"
+      },
+      "workspace": ".pilot-eval/run-lYWl38",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/case-insensitive-path",
+      "fixtureVersion": "d8fc9c3eb31ba4a17566e329a0103e64400cc7a4c6418955918849763925d719",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p0--case-insensitive-path--attempt-1.patch",
+      "diffSha256": "931a0a8125fc4ec9817cd6ac2e049ca0dfda17dee1cc4df5882d68de962d2ef8",
+      "diffBytes": 717,
+      "changedFileCount": 1,
+      "fixtureTextFileCount": 2,
+      "candidateTextFileCount": 2,
+      "changes": [
+        {
+          "path": "src/dedupe.js",
+          "change": "modified",
+          "beforeSha256": "ea88996cd6446e9680d1c8bb3131b9770f044d5e7325bd13c7a156115e453770",
+          "afterSha256": "f6e056006b4f6186480486994b14d599c6c42e8c1c342dd19be788666c6be7cf"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.1s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p0",
+      "taskId": "steer-constraint-hold",
+      "attempt": 1,
+      "sessionId": "ses_717bb46f-118c-4f0c-92f1-b483c9744078",
+      "sessionTitle": "eval:steer-constraint-hold:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p0.jsonl",
+        "line": 4,
+        "sha256": "a77f5ebfa555363491cb30fff61e0d4c40c74ffa1d7db497578e479609b818fa",
+        "rawSha256": "a77f5ebfa555363491cb30fff61e0d4c40c74ffa1d7db497578e479609b818fa"
+      },
+      "workspace": ".pilot-eval/run-elIuhR",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/steer-constraint-hold",
+      "fixtureVersion": "0d7d9b5f8b35990d4a37e8ab698fbd9df42a12dab41699ef2ace748d14c0ee1e",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p0--steer-constraint-hold--attempt-1.patch",
+      "diffSha256": "b1932e9ef96c27ddf2cf9c1f0c7dae74565e4ece4abdb8014eb4583435235abf",
+      "diffBytes": 2243,
+      "changedFileCount": 2,
+      "fixtureTextFileCount": 3,
+      "candidateTextFileCount": 3,
+      "changes": [
+        {
+          "path": "src/csv.js",
+          "change": "modified",
+          "beforeSha256": "aeccce5b27857ed6f9428c4d7f918bba12df2b1d66fe28c09e561e9870366624",
+          "afterSha256": "c317db00d2bb6e0c45c058d0ceeb79662abda162cb468d459d3ad8e755db060e"
+        },
+        {
+          "path": "test/csv.test.js",
+          "change": "modified",
+          "beforeSha256": "b55f103132f12bd03923e242f97366c80b4ee05a71d392e9139c6b560e35f389",
+          "afterSha256": "f10d616bdf918f2c6490fc68abed823e4b0aae6647ad86f1e988d20a0fcb8228"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.1s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p0",
+      "taskId": "long-file-targeted-edit",
+      "attempt": 1,
+      "sessionId": "ses_78167c14-bf29-4284-b751-e624448348c6",
+      "sessionTitle": "eval:long-file-targeted-edit:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p0.jsonl",
+        "line": 5,
+        "sha256": "c54d87d03f5a3c4595a1bc0fc2328fd476ee8de6adb92334bfa39dad2987d273",
+        "rawSha256": "2f631c76b3e854466407b9b7375044f84ebc39a12c1e0ef387a0ecbd389a668a"
+      },
+      "workspace": ".pilot-eval/run-R35k8L",
+      "workspaceStatusAtArchive": "FAILED",
+      "fixture": "evaluation/harness/fixtures/long-file-targeted-edit",
+      "fixtureVersion": "030051aa9e92d6f928d4222212f8bb8d04e72a778ce4f5e25172c872029e2e04",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p0--long-file-targeted-edit--attempt-1.patch",
+      "diffSha256": "bcd7ba56949cd42d73d3091f34bc548611075181a874e19635508b0944545067",
+      "diffBytes": 419,
+      "changedFileCount": 1,
+      "fixtureTextFileCount": 2,
+      "candidateTextFileCount": 2,
+      "changes": [
+        {
+          "path": "src/ledger.js",
+          "change": "modified",
+          "beforeSha256": "d9ecf89a79bfa8e2ef318085ae440eca1fe31a87d10ccf6f4cffd1e249157f56",
+          "afterSha256": "3127ac100a4a8f1e69f849fcea5690352584360703eff0f6b16bf83668e84cfe"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": false,
+        "acceptanceRan": true,
+        "acceptancePassed": false,
+        "acceptanceDetail": "node --test → exit 1（0.1s）\nst.run (node:internal/test_runner/test:1101:12)\n    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)\n  ...\n# Subtest: 折扣大于小计时合计可以为负，符号位置正确\nok 3 - 折扣大于小计时合计可以为负，符号位置正确\n  ---\n  duration_ms: 0.04425\n  type: 'test'\n  ...\n# Subtest: 其余格式函数行为保持不变\nok 4 - 其余格式函数行为保持不变\n  ---\n  duration_ms: 0.090541\n  type: 'test'\n  ...\n# Subtest: 整张账单仍然渲染得出来\nnot ok 5 - 整张账单仍然渲染得出来\n  ---\n  duration_ms: 0.703333\n  type: 'test'\n  location: '<REPO>/.pilot-eval/verify-v3yt7f/test/ledger.test.js:41:1'\n  failureType: 'testCodeFailure'\n  error: |-\n    测试账单  打印于 2026-11-03 17:06\n    NO.00000007\n    阿七\n    杭州 文一西路\n    \n    键盘           1 件 ¥399.00\n    \n    小计 ¥399.00\n    折扣 ¥39.90\n    税 ¥31.92\n    运费 ¥12.00\n    合计 ¥399.82.80000000000291\n    共 1 项\n    状态 已支付\n    渠道 网页\n    支付 电子钱包\n    备注：无\n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  expected: true\n  actual: false\n  operator: '=='\n  stack: |-\n    TestContext.<anonymous> (<REPO>/.pilot-eval/verify-v3yt7f/test/ledger.test.js:55:10)\n    Test.runInAsyncScope (node:async_hooks:214:14)\n    Test.run (node:internal/test_runner/test:1047:25)\n    Test.processPendingSubtests (node:internal/test_runner/test:744:18)\n    Test.postRun (node:internal/test_runner/test:1173:19)\n    Test.run (node:internal/test_runner/test:1101:12)\n    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)\n  ...\n1..5\n# tests 5\n# suites 0\n# pass 2\n# fail 3\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 57.478417\n",
+        "terminalStatus": "FAILED",
+        "reportedComplete": false,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p0",
+      "taskId": "fix-failing-unit-test",
+      "attempt": 1,
+      "sessionId": "ses_b971255d-af14-4c5d-a278-b5b85020fa6c",
+      "sessionTitle": "eval:fix-failing-unit-test:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p0.jsonl",
+        "line": 6,
+        "sha256": "abd4eaf279d78c2c77c9e73f9ac35ad4848fe4761b741e340bc0725ba4331bf9",
+        "rawSha256": "abd4eaf279d78c2c77c9e73f9ac35ad4848fe4761b741e340bc0725ba4331bf9"
+      },
+      "workspace": ".pilot-eval/run-xSetsv",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/fix-failing-unit-test",
+      "fixtureVersion": "0f36adc8919bafa79fd000daae4263c6211ce3c4b68d64289afed4e6f2301e42",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p0--fix-failing-unit-test--attempt-1.patch",
+      "diffSha256": "72164705017a11c3fba34d4d1c291485f7dc7e08d3926c2722e3732e471831ec",
+      "diffBytes": 408,
+      "changedFileCount": 1,
+      "fixtureTextFileCount": 2,
+      "candidateTextFileCount": 2,
+      "changes": [
+        {
+          "path": "src/pricing.js",
+          "change": "modified",
+          "beforeSha256": "7b4b234db70f3066fea8d8b935f8fbc75343831f7679576f4181524dc696447a",
+          "afterSha256": "f9da76ba9d5810bdc674b7ec15d5fee40f41dea6c9a06df2ea1166ad507dec79"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.1s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p1",
+      "taskId": "async-race-condition",
+      "attempt": 1,
+      "sessionId": "ses_fbcd2abc-0028-466e-9272-e67614e7f2ac",
+      "sessionTitle": "eval:async-race-condition:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p1.jsonl",
+        "line": 1,
+        "sha256": "114bcab6935d58233ee081c41997b335b3afec55cbd714dbde9a33e97e359ff6",
+        "rawSha256": "114bcab6935d58233ee081c41997b335b3afec55cbd714dbde9a33e97e359ff6"
+      },
+      "workspace": ".pilot-eval/run-yaNxB7",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/async-race-condition",
+      "fixtureVersion": "3daa9b1ffbded4bef4d6c3547b42aa5170dd68c044214fc0f206e067b14e322c",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p1--async-race-condition--attempt-1.patch",
+      "diffSha256": "6b6250a7146b675f86e2ef9f93d6229dea58b1a079d17765de42abb1a6c0937f",
+      "diffBytes": 716,
+      "changedFileCount": 1,
+      "fixtureTextFileCount": 2,
+      "candidateTextFileCount": 2,
+      "changes": [
+        {
+          "path": "src/fetchAll.js",
+          "change": "modified",
+          "beforeSha256": "b278969cebeff9147042bdb5bbbb32718b8aa6ae162d682904e47603b3f78d09",
+          "afterSha256": "28d183b9222a878a739c50649b270b97aa95e0038091605c2c026915735036fd"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.2s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p1",
+      "taskId": "rename-across-files",
+      "attempt": 1,
+      "sessionId": "ses_69f481c1-8ce1-4718-ae1e-cb859a9c5bef",
+      "sessionTitle": "eval:rename-across-files:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p1.jsonl",
+        "line": 2,
+        "sha256": "a1c5cd036ac802575093779652ce710e95d987684f6222f16144f7a1738d24ae",
+        "rawSha256": "a1c5cd036ac802575093779652ce710e95d987684f6222f16144f7a1738d24ae"
+      },
+      "workspace": ".pilot-eval/run-aSapzU",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/rename-across-files",
+      "fixtureVersion": "36a46dd09473ba9b33fa9427e6a28a1413bf409a80ce12df7ce91afb660fcec2",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p1--rename-across-files--attempt-1.patch",
+      "diffSha256": "7b20370b0c1b5884d971c5131990e81cf7284bb9ac0d38e3f9076bc7d8b9113f",
+      "diffBytes": 1514,
+      "changedFileCount": 3,
+      "fixtureTextFileCount": 4,
+      "candidateTextFileCount": 4,
+      "changes": [
+        {
+          "path": "src/greeting.js",
+          "change": "modified",
+          "beforeSha256": "b924736d1e9958b98ba47dba80893a471d548a2c87b28b7a3e0c74c22dbea9d0",
+          "afterSha256": "a04e4bb3c3c8fa6b736dbbaabfebe06a5df39df298060cbb5434fc4c24a87be7"
+        },
+        {
+          "path": "src/report.js",
+          "change": "modified",
+          "beforeSha256": "1b73efd8806c28befaf5eb0304a1fa25c9c4ec2327dfab519fe749f09da18496",
+          "afterSha256": "33b8bdab9b9879801b91d2070d7468dc07d953fdfe40eb52bcf1c7313099a187"
+        },
+        {
+          "path": "src/userService.js",
+          "change": "modified",
+          "beforeSha256": "ef90710d57877279e5881f2fba98d8ca1d5672a5a5967a6c37172499bf9a60fe",
+          "afterSha256": "1e87b41c84c25236fd866db97f7f916e2ae0de4a50aad8474c186ddbc77fc514"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.1s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p1",
+      "taskId": "case-insensitive-path",
+      "attempt": 1,
+      "sessionId": "ses_addb71b7-0961-4a90-aa54-d9a2a3d21ca0",
+      "sessionTitle": "eval:case-insensitive-path:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p1.jsonl",
+        "line": 3,
+        "sha256": "e551815e0470c6c6b4eaa50d22f26108681dc3b6e3b680ebf813818e3c0516b5",
+        "rawSha256": "e551815e0470c6c6b4eaa50d22f26108681dc3b6e3b680ebf813818e3c0516b5"
+      },
+      "workspace": ".pilot-eval/run-d5J86T",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/case-insensitive-path",
+      "fixtureVersion": "d8fc9c3eb31ba4a17566e329a0103e64400cc7a4c6418955918849763925d719",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p1--case-insensitive-path--attempt-1.patch",
+      "diffSha256": "0a9020c8a87dbbc2dd74b7bf95d3b9b834fb8138125d2b35843c4968f80c838e",
+      "diffBytes": 849,
+      "changedFileCount": 1,
+      "fixtureTextFileCount": 2,
+      "candidateTextFileCount": 2,
+      "changes": [
+        {
+          "path": "src/dedupe.js",
+          "change": "modified",
+          "beforeSha256": "ea88996cd6446e9680d1c8bb3131b9770f044d5e7325bd13c7a156115e453770",
+          "afterSha256": "765a4a2bcd80c364b2ec1bda0f3d59f614e93cffdb6901f591064fefeb586aa8"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.1s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p1",
+      "taskId": "steer-constraint-hold",
+      "attempt": 1,
+      "sessionId": "ses_9dc25519-d157-4b76-a6f5-2be750f1eeb4",
+      "sessionTitle": "eval:steer-constraint-hold:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p1.jsonl",
+        "line": 4,
+        "sha256": "5846e9c75dcb3aeba4a4b429486342cd4c518d66ce2dc6c0391609c84f7389b8",
+        "rawSha256": "5846e9c75dcb3aeba4a4b429486342cd4c518d66ce2dc6c0391609c84f7389b8"
+      },
+      "workspace": ".pilot-eval/run-8xMjdJ",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/steer-constraint-hold",
+      "fixtureVersion": "0d7d9b5f8b35990d4a37e8ab698fbd9df42a12dab41699ef2ace748d14c0ee1e",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p1--steer-constraint-hold--attempt-1.patch",
+      "diffSha256": "ebea2cba63b1153e4e75fcb5c28c43fff62b21bad1eaf7db320ce57dc0667dd2",
+      "diffBytes": 1290,
+      "changedFileCount": 1,
+      "fixtureTextFileCount": 3,
+      "candidateTextFileCount": 3,
+      "changes": [
+        {
+          "path": "src/csv.js",
+          "change": "modified",
+          "beforeSha256": "aeccce5b27857ed6f9428c4d7f918bba12df2b1d66fe28c09e561e9870366624",
+          "afterSha256": "960bdcad1c03bf2d4a023f5130e5bf1bf7a05bfe83178a12f723de3328574095"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.1s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p1",
+      "taskId": "long-file-targeted-edit",
+      "attempt": 1,
+      "sessionId": "ses_5e066148-83db-484e-bca9-a953b8d8cec7",
+      "sessionTitle": "eval:long-file-targeted-edit:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p1.jsonl",
+        "line": 5,
+        "sha256": "2f474f07b6060eac22b3ff2dcccf3319e2d36281978a47b63c31c4ed3701434f",
+        "rawSha256": "2f474f07b6060eac22b3ff2dcccf3319e2d36281978a47b63c31c4ed3701434f"
+      },
+      "workspace": ".pilot-eval/run-pQadC2",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/long-file-targeted-edit",
+      "fixtureVersion": "030051aa9e92d6f928d4222212f8bb8d04e72a778ce4f5e25172c872029e2e04",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p1--long-file-targeted-edit--attempt-1.patch",
+      "diffSha256": "0dbd48768dfbcd930962030746d01cad5b6db95f958028bd0029a6cacda1598f",
+      "diffBytes": 431,
+      "changedFileCount": 1,
+      "fixtureTextFileCount": 2,
+      "candidateTextFileCount": 2,
+      "changes": [
+        {
+          "path": "src/ledger.js",
+          "change": "modified",
+          "beforeSha256": "d9ecf89a79bfa8e2ef318085ae440eca1fe31a87d10ccf6f4cffd1e249157f56",
+          "afterSha256": "026021f5b0476b4ac745c7c43b3aec9f715370b4a15cb6e489269990224e2005"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.1s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p1",
+      "taskId": "fix-failing-unit-test",
+      "attempt": 1,
+      "sessionId": "ses_630be4c7-32d8-4920-904b-377a4a54457c",
+      "sessionTitle": "eval:fix-failing-unit-test:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p1.jsonl",
+        "line": 6,
+        "sha256": "ccf59ee80c5bdfac95efe56b8622d9cb5bef223dc3ff21abd59de5934773e01b",
+        "rawSha256": "ccf59ee80c5bdfac95efe56b8622d9cb5bef223dc3ff21abd59de5934773e01b"
+      },
+      "workspace": ".pilot-eval/run-UBbEiG",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/fix-failing-unit-test",
+      "fixtureVersion": "0f36adc8919bafa79fd000daae4263c6211ce3c4b68d64289afed4e6f2301e42",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p1--fix-failing-unit-test--attempt-1.patch",
+      "diffSha256": "72164705017a11c3fba34d4d1c291485f7dc7e08d3926c2722e3732e471831ec",
+      "diffBytes": 408,
+      "changedFileCount": 1,
+      "fixtureTextFileCount": 2,
+      "candidateTextFileCount": 2,
+      "changes": [
+        {
+          "path": "src/pricing.js",
+          "change": "modified",
+          "beforeSha256": "7b4b234db70f3066fea8d8b935f8fbc75343831f7679576f4181524dc696447a",
+          "afterSha256": "f9da76ba9d5810bdc674b7ec15d5fee40f41dea6c9a06df2ea1166ad507dec79"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.1s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p2",
+      "taskId": "async-race-condition",
+      "attempt": 1,
+      "sessionId": "ses_03db10d7-4f8b-42d8-8ea9-2950454e69d0",
+      "sessionTitle": "eval:async-race-condition:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p2.jsonl",
+        "line": 1,
+        "sha256": "7c75332ef8a51720825ff7592cc0ee3f8611bbd8fe34bde5af08ef9c0fcdb891",
+        "rawSha256": "7c75332ef8a51720825ff7592cc0ee3f8611bbd8fe34bde5af08ef9c0fcdb891"
+      },
+      "workspace": ".pilot-eval/run-3CP2U4",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/async-race-condition",
+      "fixtureVersion": "3daa9b1ffbded4bef4d6c3547b42aa5170dd68c044214fc0f206e067b14e322c",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p2--async-race-condition--attempt-1.patch",
+      "diffSha256": "bad82b308600e8cf0b34be63d6b478cd25f73e1c6ef822427e8be8a02db39eb2",
+      "diffBytes": 716,
+      "changedFileCount": 1,
+      "fixtureTextFileCount": 2,
+      "candidateTextFileCount": 2,
+      "changes": [
+        {
+          "path": "src/fetchAll.js",
+          "change": "modified",
+          "beforeSha256": "b278969cebeff9147042bdb5bbbb32718b8aa6ae162d682904e47603b3f78d09",
+          "afterSha256": "a67c900c1249dbb4f0fe425448655c8cfa3746c9c3d9b39678d13456306f4b2e"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.2s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p2",
+      "taskId": "rename-across-files",
+      "attempt": 1,
+      "sessionId": "ses_aec08e16-d6e9-4c21-be63-afb135d9657d",
+      "sessionTitle": "eval:rename-across-files:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p2.jsonl",
+        "line": 2,
+        "sha256": "10dcc6836f60af3773344daaae15cccbe643d056cc365dd9af3a3d415b7f8837",
+        "rawSha256": "10dcc6836f60af3773344daaae15cccbe643d056cc365dd9af3a3d415b7f8837"
+      },
+      "workspace": ".pilot-eval/run-KLOc1q",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/rename-across-files",
+      "fixtureVersion": "36a46dd09473ba9b33fa9427e6a28a1413bf409a80ce12df7ce91afb660fcec2",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p2--rename-across-files--attempt-1.patch",
+      "diffSha256": "7b20370b0c1b5884d971c5131990e81cf7284bb9ac0d38e3f9076bc7d8b9113f",
+      "diffBytes": 1514,
+      "changedFileCount": 3,
+      "fixtureTextFileCount": 4,
+      "candidateTextFileCount": 4,
+      "changes": [
+        {
+          "path": "src/greeting.js",
+          "change": "modified",
+          "beforeSha256": "b924736d1e9958b98ba47dba80893a471d548a2c87b28b7a3e0c74c22dbea9d0",
+          "afterSha256": "a04e4bb3c3c8fa6b736dbbaabfebe06a5df39df298060cbb5434fc4c24a87be7"
+        },
+        {
+          "path": "src/report.js",
+          "change": "modified",
+          "beforeSha256": "1b73efd8806c28befaf5eb0304a1fa25c9c4ec2327dfab519fe749f09da18496",
+          "afterSha256": "33b8bdab9b9879801b91d2070d7468dc07d953fdfe40eb52bcf1c7313099a187"
+        },
+        {
+          "path": "src/userService.js",
+          "change": "modified",
+          "beforeSha256": "ef90710d57877279e5881f2fba98d8ca1d5672a5a5967a6c37172499bf9a60fe",
+          "afterSha256": "1e87b41c84c25236fd866db97f7f916e2ae0de4a50aad8474c186ddbc77fc514"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.1s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p2",
+      "taskId": "case-insensitive-path",
+      "attempt": 1,
+      "sessionId": "ses_69472b01-6477-413f-9c9a-591ffc1e1184",
+      "sessionTitle": "eval:case-insensitive-path:1",
+      "sessionMappingRecovered": true,
+      "sourceRecord": {
+        "file": "p2.jsonl",
+        "line": 3,
+        "sha256": "618310138102db195e71ba958ee635cca67ba962f1bbe23517a993f50e327858",
+        "rawSha256": "618310138102db195e71ba958ee635cca67ba962f1bbe23517a993f50e327858"
+      },
+      "workspace": ".pilot-eval/run-8TfO37",
+      "workspaceStatusAtArchive": "CANCELLED",
+      "fixture": "evaluation/harness/fixtures/case-insensitive-path",
+      "fixtureVersion": "d8fc9c3eb31ba4a17566e329a0103e64400cc7a4c6418955918849763925d719",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p2--case-insensitive-path--attempt-1.patch",
+      "diffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "diffBytes": 0,
+      "changedFileCount": 0,
+      "fixtureTextFileCount": 2,
+      "candidateTextFileCount": 2,
+      "changes": [],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": false,
+        "acceptanceRan": false,
+        "terminalStatus": null,
+        "reportedComplete": null,
+        "evaluationError": true,
+        "notes": "Error: 任务超时，未在期限内取得终态（RUNNING），不能执行验收"
+      },
+      "sessionMappingEvidence": {
+        "basis": "failure-diagnostics session + activeRunId, failure-history events, unique DB title and runs row",
+        "runId": "run_5d893ae6-2df5-4631-87e4-967f1dd92bd2",
+        "diagnosticsFile": "failure-diagnostics.json",
+        "diagnosticsSha256": "8aec0ee5a4f5e304d1b7313ee7fe9cfcda37ffc3ab44fe9e4f525a88063a4c12",
+        "historySource": "controlled/failure-history.json",
+        "historySha256": "71fa8d702e14901d3ecea67ea54d431218f572798fce524b3ac04d436752939e",
+        "originalJsonlUnchanged": true
+      }
+    },
+    {
+      "variant": "p2",
+      "taskId": "steer-constraint-hold",
+      "attempt": 1,
+      "sessionId": "ses_ba243063-2188-4214-b0f1-98c5384ec086",
+      "sessionTitle": "eval:steer-constraint-hold:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p2.jsonl",
+        "line": 4,
+        "sha256": "d2a5f5d48598c74f2f1e50b15e14e04075a0e7f1b4b16f9b05e3288ccfbcb873",
+        "rawSha256": "d2a5f5d48598c74f2f1e50b15e14e04075a0e7f1b4b16f9b05e3288ccfbcb873"
+      },
+      "workspace": ".pilot-eval/run-Yn7VEK",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/steer-constraint-hold",
+      "fixtureVersion": "0d7d9b5f8b35990d4a37e8ab698fbd9df42a12dab41699ef2ace748d14c0ee1e",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p2--steer-constraint-hold--attempt-1.patch",
+      "diffSha256": "6da4b70541fb5ee62fdfec2be916f078e26416f720f514b7c86ff86b3858494b",
+      "diffBytes": 2215,
+      "changedFileCount": 2,
+      "fixtureTextFileCount": 3,
+      "candidateTextFileCount": 3,
+      "changes": [
+        {
+          "path": "src/csv.js",
+          "change": "modified",
+          "beforeSha256": "aeccce5b27857ed6f9428c4d7f918bba12df2b1d66fe28c09e561e9870366624",
+          "afterSha256": "0963431cfa15e62a3dda8ac6f740c79b3f4158b103993460b27a044b6752e910"
+        },
+        {
+          "path": "test/csv.test.js",
+          "change": "modified",
+          "beforeSha256": "b55f103132f12bd03923e242f97366c80b4ee05a71d392e9139c6b560e35f389",
+          "afterSha256": "87502f863261435db1e665ae45315882c1217a55afc1ef3156a5c3ab7077e16e"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.1s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p2",
+      "taskId": "long-file-targeted-edit",
+      "attempt": 1,
+      "sessionId": "ses_e18ac16b-c837-45e7-affc-a0108f35d290",
+      "sessionTitle": "eval:long-file-targeted-edit:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p2.jsonl",
+        "line": 5,
+        "sha256": "c538c6d59fe42f2b3755c774a205a753ebf23eb9e6703725cf1e8103843ef16f",
+        "rawSha256": "c538c6d59fe42f2b3755c774a205a753ebf23eb9e6703725cf1e8103843ef16f"
+      },
+      "workspace": ".pilot-eval/run-02il2V",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/long-file-targeted-edit",
+      "fixtureVersion": "030051aa9e92d6f928d4222212f8bb8d04e72a778ce4f5e25172c872029e2e04",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p2--long-file-targeted-edit--attempt-1.patch",
+      "diffSha256": "0dbd48768dfbcd930962030746d01cad5b6db95f958028bd0029a6cacda1598f",
+      "diffBytes": 431,
+      "changedFileCount": 1,
+      "fixtureTextFileCount": 2,
+      "candidateTextFileCount": 2,
+      "changes": [
+        {
+          "path": "src/ledger.js",
+          "change": "modified",
+          "beforeSha256": "d9ecf89a79bfa8e2ef318085ae440eca1fe31a87d10ccf6f4cffd1e249157f56",
+          "afterSha256": "026021f5b0476b4ac745c7c43b3aec9f715370b4a15cb6e489269990224e2005"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.1s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    },
+    {
+      "variant": "p2",
+      "taskId": "fix-failing-unit-test",
+      "attempt": 1,
+      "sessionId": "ses_29ae52ab-cc96-4b96-aa19-78189923933b",
+      "sessionTitle": "eval:fix-failing-unit-test:1",
+      "sessionMappingRecovered": false,
+      "sourceRecord": {
+        "file": "p2.jsonl",
+        "line": 6,
+        "sha256": "874c7c860babc99b817cbae4a4ea3b7241f05987ba2b14e1e7b91b6381f1900d",
+        "rawSha256": "874c7c860babc99b817cbae4a4ea3b7241f05987ba2b14e1e7b91b6381f1900d"
+      },
+      "workspace": ".pilot-eval/run-e8OcsL",
+      "workspaceStatusAtArchive": "COMPLETED",
+      "fixture": "evaluation/harness/fixtures/fix-failing-unit-test",
+      "fixtureVersion": "0f36adc8919bafa79fd000daae4263c6211ce3c4b68d64289afed4e6f2301e42",
+      "fixtureVersionMatchesOriginal": true,
+      "diff": "candidate-diffs/p2--fix-failing-unit-test--attempt-1.patch",
+      "diffSha256": "72164705017a11c3fba34d4d1c291485f7dc7e08d3926c2722e3732e471831ec",
+      "diffBytes": 408,
+      "changedFileCount": 1,
+      "fixtureTextFileCount": 2,
+      "candidateTextFileCount": 2,
+      "changes": [
+        {
+          "path": "src/pricing.js",
+          "change": "modified",
+          "beforeSha256": "7b4b234db70f3066fea8d8b935f8fbc75343831f7679576f4181524dc696447a",
+          "afterSha256": "f9da76ba9d5810bdc674b7ec15d5fee40f41dea6c9a06df2ea1166ad507dec79"
+        }
+      ],
+      "exclusions": {
+        "fixture": [],
+        "candidate": []
+      },
+      "originalResult": {
+        "success": true,
+        "acceptanceRan": true,
+        "acceptancePassed": true,
+        "acceptanceDetail": "node --test → exit 0（0.1s）",
+        "terminalStatus": "COMPLETED",
+        "reportedComplete": true,
+        "scenarioCovered": true,
+        "notes": ""
+      }
+    }
+  ],
+  "rawSourceRecordRoot": "controlled/p0.jsonl,p1.jsonl,p2.jsonl",
+  "pathNormalization": "Private repository prefix in originalResult replaced with <REPO>; sourceRecord.sha256 refers to published sanitized line, rawSha256 retains original controlled-source checksum."
+}

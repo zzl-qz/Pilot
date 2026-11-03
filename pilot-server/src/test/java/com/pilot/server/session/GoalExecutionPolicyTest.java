@@ -136,7 +136,8 @@ class GoalExecutionPolicyTest {
         assertEquals("DIRECT", tasks.load("s").execution().mode());
         assertEquals(0, calls.get());
         assertNull(policy.review(history, Set.of(), List.of()));
-        assertEquals("VERIFIED", tasks.load("s").execution().phase());
+        assertEquals("UNVERIFIED", tasks.load("s").execution().phase());
+        assertEquals("COMPLETED", tasks.finish("s").status(), "没有检查的回答仍可结束，不能虚报已核验");
     }
 
     @Test void mainAgentExplicitlyPromotesGoalWithCompletionConditions() {
@@ -195,7 +196,7 @@ class GoalExecutionPolicyTest {
         assertEquals("", migrated.nextAction());
         assertEquals("", migrated.progress());
         assertEquals(0, migrated.idleReviews(), "旧策略的停滞计数不能继续压制升级后的首轮执行");
-        assertEquals(6, migrated.assessmentVersionValue());
+        assertEquals(7, migrated.assessmentVersionValue());
     }
 
 
@@ -415,8 +416,8 @@ class GoalExecutionPolicyTest {
         assertEquals(Set.of("A.java"), resumed.priorChangedPaths());
         assertNull(resumed.reverificationCall(), "是否复跑验证由模型决定，策略不再自动插入");
         assertNull(resumed.review(history, Set.of(), List.of()),
-                "普通执行没有验证也能收尾，与 Codex / OpenCode 一致");
-        assertEquals("VERIFIED", tasks.load("s").execution().phase());
+                "普通执行没有验证也能收尾，检查状态单独记录");
+        assertEquals("UNVERIFIED", tasks.load("s").execution().phase());
     }
 
     @Test void ordinaryTaskFinishesWithoutAnyReviewerCall() {
@@ -430,8 +431,8 @@ class GoalExecutionPolicyTest {
         assertNull(policy.review(history, Set.of("A.java", "B.java"), List.of()));
         TaskControlService.Execution state = tasks.load("s").execution();
         assertEquals("DIRECT", state.mode());
-        assertEquals("VERIFIED", state.phase());
-        assertEquals("", state.gap());
+        assertEquals("UNVERIFIED", state.phase());
+        assertTrue(state.gap().contains("未记录"));
         assertEquals("", state.nextAction());
     }
 
@@ -535,6 +536,161 @@ class GoalExecutionPolicyTest {
                 "后台测试必须绑定启动时源码，不能偷换成查询终态时的新版本");
         assertNull(policy.review(history, Set.of("A.java"), List.of()),
                 "旧版本结果不再阻断收尾，是否重跑由模型决定");
+        assertEquals("CHECKS_STALE", tasks.load("s").execution().phase());
+    }
+
+    private void check(GoalExecutionPolicy policy, String command, String workdir, int exit) {
+        ToolCall call = new ToolCall(UUID.randomUUID().toString(), "run_command", Map.of("command", command, "workdir", workdir));
+        policy.beforeTool(call);
+        policy.observed(call, new ToolExecutor.Outcome("run_command", "退出码: " + exit, null, command + " → exit " + exit));
+    }
+
+    @Test void directChecksRequireCurrentEvidenceAndNeverTrustCallerSummary() throws Exception {
+        Files.writeString(root.resolve("A.java"), "v1");
+        var policy = policy((messages, tools) -> fail("no extra model call"), 20);
+        policy.beforeRequest(history); observe(policy, "edit_file", "A.java", "updated", null);
+        check(policy, "git status", ".", 0);
+        assertNull(policy.review(history, Set.of(), List.of("mvn test → exit 0")));
+        assertEquals("UNVERIFIED", tasks.load("s").execution().phase(), "调用方的显示摘要不是权威检查证据");
+        check(policy, "mvn test", ".", 0);
+        assertNull(policy.review(history, Set.of(), List.of()));
+        assertEquals("CHECKS_PASSED", tasks.load("s").execution().phase());
+        assertEquals("COMPLETED", tasks.finish("s").status());
+        Files.writeString(root.resolve("A.java"), "v2");
+        assertNull(policy.review(history, Set.of(), List.of()));
+        assertEquals("CHECKS_STALE", tasks.load("s").execution().phase());
+        check(policy, "mvn test", ".", 0);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_PASSED", tasks.load("s").execution().phase());
+    }
+
+    @Test void differentCommandsAndWorkdirsCannotHideFailedCheckButSameCheckCanRecover() {
+        var policy = policy((messages, tools) -> fail("no extra model call"), 20);
+        policy.beforeRequest(history);
+        check(policy, "npm test", "web", 1);
+        check(policy, "npm test", "server", 0);
+        check(policy, "npm run test:unit", "web", 0);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_FAILED", tasks.load("s").execution().phase());
+        check(policy, "npm test", "./web", 0);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_PASSED", tasks.load("s").execution().phase(), "同一目录的路径别名仍是同一次检查身份");
+        check(policy, "npm run test:unit", "web", 1);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_FAILED", tasks.load("s").execution().phase(), "旧的成功不能覆盖新失败");
+    }
+
+    @Test void pendingCheckDoesNotCountAsPassedAndBackgroundResultKeepsWorkdir() {
+        var policy = policy((messages, tools) -> fail("no extra model call"), 20);
+        policy.beforeRequest(history);
+        check(policy, "npm test", "web", 0);
+        ToolCall launch = new ToolCall("background", "run_command", Map.of("command", "npm test", "workdir", "server", "background", true));
+        policy.beforeTool(launch);
+        policy.observed(launch, new ToolExecutor.Outcome("run_command", "任务ID: checks-job\n状态: RUNNING",
+                List.of(), List.of(), ToolExecutor.OutcomeStatus.RUNNING));
+        policy.review(history, Set.of(), List.of());
+        assertEquals("UNVERIFIED", tasks.load("s").execution().phase());
+        assertTrue(tasks.load("s").execution().gap().contains("后台运行"));
+        ToolCall status = new ToolCall("status", "command_status", Map.of("taskId", "checks-job"));
+        policy.beforeTool(status);
+        policy.observed(status, new ToolExecutor.Outcome("command_status", "任务ID: checks-job\n状态: COMPLETED", null, "npm test → exit 0"));
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_PASSED", tasks.load("s").execution().phase());
+        assertTrue(tasks.load("s").execution().evidence().stream().anyMatch(e -> "command_status".equals(e.tool())
+                && e.check() != null && "server".equals(e.target())));
+        for (int i = 0; i < 250; i++) observe(policy, "read_file", "background-note-" + i, "observed", null);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_PASSED", tasks.load("s").execution().phase(), "裁剪不能让已结束的后台检查重新变成运行中");
+    }
+
+    @Test void correctionDuringCheckAndUnknownBackgroundLaunchCannotVerifyNewRequirements() {
+        var policy = policy((messages, tools) -> fail("no extra model call"), 20);
+        policy.beforeRequest(history);
+        ToolCall call = new ToolCall("test", "run_command", Map.of("command", "mvn test"));
+        policy.beforeTool(call);
+        tasks.correct("s", "还需覆盖服务器重启");
+        policy.observed(call, new ToolExecutor.Outcome("run_command", "通过", null, "mvn test → exit 0"));
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_STALE", tasks.load("s").execution().phase());
+        tasks.correct("s", "新的验收条件");
+        ToolCall status = new ToolCall("status", "command_status", Map.of("taskId", "old-job"));
+        policy.beforeTool(status);
+        policy.observed(status, new ToolExecutor.Outcome("command_status", "任务ID: old-job\n状态: COMPLETED", null, "mvn test → exit 0"));
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_STALE", tasks.load("s").execution().phase(), "丢失启动版本不能把旧后台结果绑定新要求");
+        check(policy, "mvn test", ".", 0);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_PASSED", tasks.load("s").execution().phase());
+    }
+
+    @Test void backgroundLaunchedAcrossCorrectionStaysStaleAfterItsTerminalResult() {
+        var policy = policy((messages, tools) -> fail("no extra model call"), 20);
+        policy.beforeRequest(history);
+        ToolCall launch = new ToolCall("launch", "run_command", Map.of("command", "mvn test", "background", true));
+        policy.beforeTool(launch);
+        tasks.correct("s", "还需覆盖新要求");
+        policy.observed(launch, new ToolExecutor.Outcome("run_command", "任务ID: stale-job\n状态: RUNNING",
+                List.of(), List.of(), ToolExecutor.OutcomeStatus.RUNNING));
+        ToolCall status = new ToolCall("status", "command_status", Map.of("taskId", "stale-job"));
+        policy.beforeTool(status);
+        policy.observed(status, new ToolExecutor.Outcome("command_status", "任务ID: stale-job\n状态: COMPLETED", null, "mvn test → exit 0"));
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_STALE", tasks.load("s").execution().phase());
+        assertTrue(tasks.load("s").execution().evidence().stream().filter(e -> e.check() != null)
+                .allMatch(e -> "STALE".equals(e.status())), "旧启动的要求版本必须传递到新查询结果");
+    }
+
+    @Test void failedCheckSurvivesEvidenceTrimmingAndOrdinaryReads() {
+        var policy = policy((messages, tools) -> fail("no extra model call"), 1000);
+        policy.beforeRequest(history);
+        check(policy, "npm test", "web", 1);
+        for (int i = 0; i < 250; i++) observe(policy, "read_file", "file-" + i, "observed", null);
+        check(policy, "mvn test", ".", 0);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_FAILED", tasks.load("s").execution().phase(), "不能因截短账本而忘记未修复的验证失败");
+        check(policy, "npm test", "web", 0);
+        for (int i = 0; i < 230; i++) check(policy, "npm run test:case" + i, "web", 0);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_PASSED", tasks.load("s").execution().phase(), "固定保留记录的顺序不能使旧失败覆盖新通过");
+    }
+
+    private com.pilot.core.tool.CommandTaskManager.Task commandTask(String id, String command, String directory, String status, Integer exit) {
+        return new com.pilot.core.tool.CommandTaskManager.Task(id, "s", command, root.resolve(directory).toString(), status,
+                null, exit, java.time.Instant.EPOCH, "RUNNING".equals(status) ? null : java.time.Instant.now(), true, 60, "");
+    }
+
+    private void managedCheck(GoalExecutionPolicy policy, String id, String raw, String result, String check, ToolExecutor.OutcomeStatus status) {
+        ToolCall call = new ToolCall(id, "run_command", Map.of("command", raw));
+        policy.beforeTool(call);
+        policy.observed(call, new ToolExecutor.Outcome("run_command", "任务ID: " + id + "\n状态: " + result,
+                List.of(), check == null ? List.of() : List.of(check), status));
+    }
+
+    @Test void managedCommandsUseFullActualCommandAndEffectiveDirectoryIncludingInlineCd() {
+        String common = "node --test " + "long-test-directory/".repeat(8);
+        Map<String, com.pilot.core.tool.CommandTaskManager.Task> commands = Map.of(
+                "web", commandTask("web", "npm test", "web", "FAILED", 1),
+                "server", commandTask("server", "npm test", "server", "COMPLETED", 0),
+                "retry", commandTask("retry", "npm test", "web", "COMPLETED", 0),
+                "long-a", commandTask("long-a", common + "a.test.js", "web", "FAILED", 1),
+                "long-b", commandTask("long-b", common + "b.test.js", "web", "COMPLETED", 0),
+                "pending", commandTask("pending", "npm test", "server", "RUNNING", null));
+        var policy = policy((messages, tools) -> fail("no extra model call"), 20).withCommandLookup(commands::get);
+        policy.beforeRequest(history);
+        managedCheck(policy, "web", "cd web && npm test", "FAILED", "npm test → exit 1", ToolExecutor.OutcomeStatus.PERMANENT_FAILURE);
+        managedCheck(policy, "server", "cd server && npm test", "COMPLETED", "npm test → exit 0", ToolExecutor.OutcomeStatus.SUCCESS);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_FAILED", tasks.load("s").execution().phase(), "不同有效工作目录不能相互覆盖");
+        managedCheck(policy, "retry", "cd web && npm test", "COMPLETED", "npm test → exit 0", ToolExecutor.OutcomeStatus.SUCCESS);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_PASSED", tasks.load("s").execution().phase());
+        managedCheck(policy, "pending", "cd server && npm test", "RUNNING", null, ToolExecutor.OutcomeStatus.RUNNING);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("UNVERIFIED", tasks.load("s").execution().phase(), "inline cd 不能隐藏正在运行的验证");
+        managedCheck(policy, "long-a", common + "a.test.js", "FAILED", common.substring(0, 90) + "… → exit 1", ToolExecutor.OutcomeStatus.PERMANENT_FAILURE);
+        managedCheck(policy, "long-b", common + "b.test.js", "COMPLETED", common.substring(0, 90) + "… → exit 0", ToolExecutor.OutcomeStatus.SUCCESS);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_FAILED", tasks.load("s").execution().phase(), "显示截断相同的两个检查仍须保持不同身份");
     }
 
     @Test void reviewerRetriesOneTransientFailureButNotPermanentFailure() {

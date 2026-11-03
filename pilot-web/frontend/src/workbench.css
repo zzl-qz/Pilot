@@ -109,6 +109,7 @@ html[data-theme] .msg-assistant .reply-actions .icon-action { height: 22px; widt
 .turn-card.is-compact.is-warn .turn-card-title::before { background: var(--warn); }
 .turn-card.is-compact.is-error .turn-card-title::before, .turn-card.is-compact.is-err .turn-card-title::before { background: var(--err); }
 .turn-card.is-compact .turn-card-title::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--ok); }
+.turn-card.is-text .turn-card-title::before { background: var(--muted); }
 html[data-theme] .composer { border-radius: 12px; border: 1px solid var(--line); background: var(--panel); padding: 12px 14px 10px; box-shadow: 0 3px 14px #0000000a; }
 html[data-theme] .composer:focus-within { border-color: var(--muted); box-shadow: none; }
 html[data-theme] .input-flow { font-size: 14px; line-height: 1.65; min-height: 44px; padding: 2px 0 8px; }

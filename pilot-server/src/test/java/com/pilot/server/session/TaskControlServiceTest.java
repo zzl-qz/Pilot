@@ -174,4 +174,38 @@ class TaskControlServiceTest {
         assertTrue(corrected.evidence().isEmpty(), "旧验证不能在要求变更后继续放行");
         assertEquals("", corrected.nextAction());
     }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"UNVERIFIED", "CHECKS_PASSED", "CHECKS_FAILED", "CHECKS_STALE"})
+    void directExecutionCanEndWithoutPretendingGoalWasVerified(String phase) {
+        var task = tasks.start("session", "解释代码", List.of(), List.of());
+        var execution = new TaskControlService.Execution("DIRECT", "", List.of(), List.of(), 1, 0,
+                List.of(), phase, "实际检查结果", 0, "");
+        assertTrue(tasks.execution("session", task, execution));
+        assertEquals("COMPLETED", tasks.finish("session").status());
+        assertEquals(phase, tasks.load("session").execution().phase());
+        tasks.update("session", List.of(), List.of(new TaskControlService.Acceptance("用户验收", false, "")));
+        assertEquals("INTERRUPTED", tasks.load("session").status(), "新增要求仍会重新打开任务");
+        var pendingReview = tasks.start("review", "解释代码", List.of(),
+                List.of(new TaskControlService.Acceptance("用户验收", false, "")));
+        tasks.execution("review", pendingReview, execution);
+        assertEquals("AWAITING_REVIEW", tasks.finish("review").status());
+    }
+
+    @Test
+    void unfinishedGoalStillCannotFinishAndOldDirectVerifiedIsNotTrusted() throws Exception {
+        var task = tasks.start("session", "修改代码", List.of(), List.of());
+        tasks.execution("session", task, new TaskControlService.Execution("GOAL", "", List.of(), List.of(), 1, 0,
+                List.of(), "EXECUTING", "", 0, ""));
+        assertEquals("INTERRUPTED", tasks.finish("session").status());
+        Path old = directory.resolve("tasks/legacy/current.json"); Files.createDirectories(old.getParent());
+        Files.writeString(old, """
+                {"taskId":"old","originalGoal":"旧任务","constraints":[],"acceptance":[],"corrections":[],
+                 "status":"COMPLETED","execution":{"mode":"DIRECT","reason":"","criteria":[],"unknowns":[],
+                 "requests":1,"activeMillis":0,"evidence":[],"phase":"VERIFIED","gap":"","idleReviews":0,"progress":"","assessmentVersion":6}}
+                """);
+        assertEquals("UNVERIFIED", tasks.load("legacy").execution().phase());
+        assertEquals("COMPLETED", tasks.load("legacy").status(), "历史执行状态仍保留");
+        assertTrue(tasks.load("legacy").execution().gap().contains("旧版"));
+    }
 }

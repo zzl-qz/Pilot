@@ -1,0 +1,181 @@
+[
+  {
+    "type": "model.request",
+    "report": {
+      "id": "e500f75f-7263-49b9-b7bf-e5e2bc21314b",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "completed",
+      "durationMs": 3066,
+      "usage": {
+        "inputTokens": 11502,
+        "outputTokens": 94,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": true,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "c2600f11-7579-405c-9975-6efc49934446",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "completed",
+      "durationMs": 3090,
+      "usage": {
+        "inputTokens": 11635,
+        "outputTokens": 21,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 11392,
+        "cacheWriteTokens": 0,
+        "exact": true,
+        "cacheReadObserved": true,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "87d96bac-e594-43a6-bef3-f8563a2f8943",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "completed",
+      "durationMs": 5305,
+      "usage": {
+        "inputTokens": 13551,
+        "outputTokens": 158,
+        "reasoningTokens": 33,
+        "cachedInputTokens": 11520,
+        "cacheWriteTokens": 0,
+        "exact": true,
+        "cacheReadObserved": true,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "de9730f0-a2f8-4ad5-ab56-37bd75fd97fd",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "completed",
+      "durationMs": 5981,
+      "usage": {
+        "inputTokens": 13711,
+        "outputTokens": 80,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": true,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "f3b4c54a-37e6-44b9-b53a-7d2adf867628",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "completed",
+      "durationMs": 9592,
+      "usage": {
+        "inputTokens": 14168,
+        "outputTokens": 198,
+        "reasoningTokens": 84,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": true,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "766fa6b2-927a-495d-8ad8-440ad899043c",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "failed",
+      "durationMs": 60907,
+      "usage": {
+        "inputTokens": 11540,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": false,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "run.retrying",
+    "payload": {
+      "attempt": 1,
+      "delayMs": 869,
+      "reason": "模型接口返回 HTTP 504：<!DOCTYPE html> <!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <![endif]--> <!--[if IE 7]> <html class=\"no-js ie7 oldie\" lang=\"en-US\"> <![endif]--> <!--[if IE 8]> <html class=\"no-js ie8 oldie\" lang=\"en-US\"> <![endif]--> <!--[if gt IE 8]><!--> <html class=\"no-js\" lang=\"…",
+      "elapsedMs": 0,
+      "remainingMs": 1800000,
+      "maxAttempts": 60
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "cdbf2e72-21d5-42c7-99b9-fac119ae117c",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "failed",
+      "durationMs": 2,
+      "usage": {
+        "inputTokens": 11540,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": false,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "model.request",
+    "report": {
+      "id": "bf66bed9-ca26-4f4c-960e-9d5061206c92",
+      "model": "gpt-6.1-sol",
+      "provider": "generic",
+      "status": "failed",
+      "durationMs": 1,
+      "usage": {
+        "inputTokens": 6216,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteTokens": 0,
+        "exact": false,
+        "cacheReadObserved": false,
+        "cacheWriteObserved": false
+      }
+    }
+  },
+  {
+    "type": "run.failed",
+    "payload": {
+      "code": "MODEL_ERROR",
+      "message": "模型调用失败：模型接口返回 HTTP 402：{\"error\":{\"type\":\"budget_guard\",\"code\":\"budget_guard_stopped\",\"message\":\"budget_guard_stopped\"}}",
+      "retryable": true
+    }
+  }
+]

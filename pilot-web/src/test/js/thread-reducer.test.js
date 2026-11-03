@@ -163,6 +163,20 @@ test('一轮结束后用量计时停住，思考也不再显示思考中', () =>
   assert.ok(turn.thinking.finishedAt > 0);
 });
 
+test('正常收尾保留未通过的验证事实，不渲染为任务验收成功', () => {
+  for (const phase of ['CHECKS_FAILED', 'CHECKS_STALE', 'UNVERIFIED']) {
+    const state = draft();
+    state.task = { execution: { mode: 'DIRECT', phase } };
+    state.running = true;
+    applyEvent(state, { type: 'run.completed', sequence: 1, runId: 'run_1', payload: { summary: '实现已结束' } }, { live: true });
+    const result = state.thread.rows.find(row => row.type === 'result');
+    assert.equal(state.running, false);
+    assert.equal(state.task.execution.phase, phase);
+    assert.equal(result.title, '执行结束');
+    assert.equal(result.tone, 'text');
+  }
+});
+
 
 test('run.usage 带上缓存命中，端点不返回时按 0 处理', () => {
   const state = draft();

@@ -1,0 +1,51 @@
+{
+  "runtimeJarSha256": "5dfd4348f2bd2e77a5c3b0ec675ce03bf0e1cfa3adabcfb69068e2776c49d0c4",
+  "formalPaidRequests": 122,
+  "calibrationPaidRequests": 8,
+  "preflightPaidRequests": 1,
+  "defaultPromptChanged": false,
+  "harnessTests": 51,
+  "limitations": [
+    "Only macOS real execution",
+    "Endpoint-reported model identity, not independently authenticated upstream identity",
+    "Quota display unit interpreted as CNY per user confirmation",
+    "Budget bounds depend on complete provider usage and configured tariff bounds",
+    "Two interrupted formal trials retained; original 36-run plan narrowed to an 18-run first pass; no second repetitions"
+  ],
+  "scriptHashes": {
+    "proxy-usage-aware.test.mjs": "4a7eacc998a536daa63193741022c7d6ee1835e6665bb0e62015b8ac4e7e1868",
+    "proxy-throttled.mjs": "ad0812097388bc5ea76a98452fe0c6dc28060512852a4de908c405c816be13f5",
+    "proxy.mjs": "2821498492c7304b5e6f07fba6b6c07b47a5a6b750e85a6091d0246ccbe1b833",
+    "proxy-usage-final.test.mjs": "86f3ac579dbeaf49828f54d70d6865e233bedefbd675aa3f40ec16dc34abd2cb",
+    "proxy-usage-final.mjs": "21584a8630db77d3c9fbfc6f4ec4cb5666c77f78bfd259bf1ab9075bd09479f7",
+    "proxy.test.mjs": "421a85b792cda81dd0b7967fc614636eefd5c71b6a2d56ff4807686b36f0c654",
+    "proxy-usage-aware.mjs": "35ecf7f58eb4878680556c352c475df989a5231e8e91c1f9d16451006e5e98a9",
+    "proxy-throttled.test.mjs": "cad447e6d1540ac6cbf457e71598f0cc57353c9bb3ad106af99c0dda8331dfd4"
+  },
+  "executedScriptHashes": {
+    "budget-proxy.executed.mjs": "21584a8630db77d3c9fbfc6f4ec4cb5666c77f78bfd259bf1ab9075bd09479f7",
+    "calibration/budget-proxy.executed.mjs": "83a9c942a6601c56490ef312216b105201d67d88b6dd7cc8926b98749a56ead7",
+    "stage1/budget-proxy.executed.mjs": "ad0812097388bc5ea76a98452fe0c6dc28060512852a4de908c405c816be13f5",
+    "stage2/budget-proxy.executed.mjs": "6b6229f5abdd951137a7d3c54293d42cc359274f092c5f47fe5d9cf199857bea",
+    "stage3/budget-proxy.executed.mjs": "21584a8630db77d3c9fbfc6f4ec4cb5666c77f78bfd259bf1ab9075bd09479f7"
+  },
+  "supportScriptProvenance": "support contains final tested helper revisions; exact executed revisions are separate *.executed.mjs snapshots. Final phase executed the exact tested proxy-usage-final.mjs.",
+  "actualRuns": 18,
+  "initialPlannedRuns": 36,
+  "effectivePlannedRuns": 18,
+  "finalBudgetHelperTests": 40,
+  "historicalHelperTests": 92,
+  "promptProvenance": "prompt-provenance.json",
+  "offlineArtifactChecks": {
+    "publishedSummariesAndGatesReproduced": true,
+    "candidateResultsAnd18PatchHashesVerified": true,
+    "allThreePromptHashesReconstructed": true,
+    "noConfiguredApiKeyOrPrivateAbsolutePathsFound": true,
+    "isolatedPortsClosed": [
+      18200,
+      18201,
+      18202,
+      18203
+    ]
+  }
+}

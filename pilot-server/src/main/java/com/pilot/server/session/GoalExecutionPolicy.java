@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
  * 自适应任务执行策略：普通请求直接执行；主 Agent 明确升级 Goal 后才跨轮核验。
  */
 final class GoalExecutionPolicy implements ExecutionPolicy {
-    private static final int POLICY_VERSION = 6;
+    private static final int POLICY_VERSION = 7;
     private static final int DEFAULT_DIRECT_MAX_REQUESTS = 120;
     private static final long DEFAULT_DIRECT_MAX_INPUT_TOKENS = 8_000_000L;
     private static final long DEFAULT_DIRECT_MAX_OUTPUT_TOKENS = 500_000L;
@@ -76,6 +76,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     /** Null in isolated policy tests; production supplies the actual per-run registry. */
     private Set<String> availableTools;
     private final Map<String, String> toolStartVersions = new LinkedHashMap<>();
+    private final Map<String, TaskControlService.TaskContract> toolStartRequirements = new LinkedHashMap<>();
+    private java.util.function.Function<String, com.pilot.core.tool.CommandTaskManager.Task> commandLookup = ignored -> null;
     private java.util.function.Consumer<TaskControlService.Execution> updates = ignored -> { };
     private List<Attachment> attachments = List.of();
     private int consecutiveResearchFailures;
@@ -136,6 +138,11 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
 
     GoalExecutionPolicy withAvailableTools(Set<String> availableTools) {
         this.availableTools = availableTools == null ? null : Set.copyOf(availableTools);
+        return this;
+    }
+
+    GoalExecutionPolicy withCommandLookup(java.util.function.Function<String, com.pilot.core.tool.CommandTaskManager.Task> lookup) {
+        this.commandLookup = lookup == null ? ignored -> null : lookup;
         return this;
     }
 
@@ -450,7 +457,10 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         };
     }
 
-    @Override public void beforeTool(ToolCall call) { toolStartVersions.put(call.callId(), sourceVersion()); }
+    @Override public void beforeTool(ToolCall call) {
+        toolStartVersions.put(call.callId(), sourceVersion());
+        toolStartRequirements.put(call.callId(), task());
+    }
 
     @Override public boolean permits(ToolCall call) {
         if (task() != null && "WAITING".equals(task().status())) return false;
@@ -481,13 +491,19 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         }
         String path = Objects.toString(call.args() == null ? null : call.args().get(
                 "web_fetch".equals(call.name()) ? "url" : "path"), "").strip();
+        var command = commandMetadata(call, outcome.result());
+        if ("run_command".equals(call.name())) path = commandWorkdir(command == null
+                ? Objects.toString(call.args() == null ? null : call.args().get("workdir"), "") : command.workdir());
         changedPaths.addAll(outcome.changedPaths());
         String startVersion = toolStartVersions.remove(call.callId());
         if (startVersion == null) startVersion = sourceVersion();
         String endVersion = sourceVersion();
+        boolean knownCommandLaunch = true;
         if ("command_status".equals(call.name())) {
             String taskId = Objects.toString(call.args() == null ? null : call.args().get("taskId"), "");
             String launched = launchedVersion(taskId);
+            path = command == null ? launchedWorkdir(taskId) : commandWorkdir(command.workdir());
+            knownCommandLaunch = !launched.isBlank();
             // 普通后台测试只能证明启动时版本；不能在测试运行期间编辑源码后，把旧测试误绑到新版本。
             // formatter/codegen 若确实改了受跟踪源码，command_status 会结构化返回 changedPaths，
             // 此时结果才绑定命令结束后的版本。
@@ -498,21 +514,43 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         }
         TaskControlService.TaskContract task = task();
         if (task == null) return;
+        TaskControlService.TaskContract startedFor = toolStartRequirements.remove(call.callId());
+        boolean currentRequirements = knownCommandLaunch && (startedFor == null || sameRequirements(startedFor, task));
         TaskControlService.Execution state = state();
         ArrayList<TaskControlService.Evidence> evidence = new ArrayList<>(state.evidence());
         // 工具本身的执行结果和它汇总的验证是两类事实。不能把首个失败 check 套上外层
         // SUCCESS，也不能因为子代理最终失败就丢掉它此前真正跑成功的 check。
+        String actualCommand = command == null
+                ? Objects.toString(call.args() == null ? null : call.args().get("command"), "").strip() : command.command();
         String operation = operationKey(call);
+        if (Set.of("run_command", "command_status").contains(call.name())) {
+            if (!actualCommand.isBlank()) operation = "command:" + hash(path + "\n" + actualCommand);
+            else if ("command_status".equals(call.name())) {
+                String launchedOperation = launchedOperation(Objects.toString(call.args().get("taskId"), ""));
+                if (!launchedOperation.isBlank()) operation = launchedOperation;
+            }
+        }
         evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), call.name(), path,
                 ("record_research".equals(call.name()) ? Objects.toString(outcome.result(), "") : clip(outcome.result() == null ? "" : outcome.result(), 3_000)), endVersion, null,
-                outcome.status().name(), startVersion, endVersion, System.currentTimeMillis(), operation));
+                currentRequirements ? outcome.status().name() : "STALE", startVersion, endVersion, System.currentTimeMillis(), operation));
         // 结构化工具（例如 spawn_agent）可能汇总多次真实检查；从第 0 条起逐条入账。
         for (int index = 0; index < outcome.checks().size(); index++) {
             String check = outcome.checks().get(index);
-            String status = check.matches("(?s).+ → exit 0") ? "SUCCESS" : "PERMANENT_FAILURE";
+            String status = !currentRequirements ? "STALE"
+                    : outcome.status() == ToolExecutor.OutcomeStatus.RUNNING ? "RUNNING"
+                    : check.matches("(?s).+ → exit 0") ? "SUCCESS" : "PERMANENT_FAILURE";
+            String checkResult = "command_status".equals(call.name())
+                    ? "任务ID: " + Objects.toString(call.args().get("taskId"), "") + "\n" + check : check;
             evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), call.name(), path,
-                    check, endVersion, check, status, startVersion, endVersion,
+                    checkResult, endVersion, check, status, startVersion, endVersion,
                     System.currentTimeMillis(), operation + ":check:" + index));
+        }
+        String launchedCheck = actualCommand;
+        if ("run_command".equals(call.name()) && outcome.status() == ToolExecutor.OutcomeStatus.RUNNING
+                && VerificationCheck.classifyCommand(launchedCheck).qualifies()) {
+            evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), call.name(), path,
+                    outcome.result(), startVersion, launchedCheck, currentRequirements ? "RUNNING" : "STALE",
+                    startVersion, startVersion, System.currentTimeMillis(), operation + ":pending-check"));
         }
         evidence = trimEvidence(evidence);
         tasks.execution(session, task, copy(state, state.mode(), "EXECUTING", state.gap(), evidence,
@@ -529,7 +567,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 .collect(Collectors.toSet());
         all.stream().filter(e -> Set.of("edit_file", "create_file", "apply_patch").contains(e.tool())
                         || ("record_research".equals(e.tool()) && "SUCCESS".equals(e.status()))
-                        || isQualifyingVerification(e)
+                        || isVerificationAttempt(e)
                         || ("run_command".equals(e.tool()) && isBackgroundLaunch(e)
                         && !completedTasks.contains(taskId(e))))
                 .forEach(e -> retained.put(e.id(), e));
@@ -543,12 +581,15 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                         && !completedTasks.contains(taskId(e))).toList();
         LinkedHashMap<String, TaskControlService.Evidence> bounded = new LinkedHashMap<>();
         pending.forEach(e -> bounded.put(e.id(), e));
+        latestChecks(all).values().forEach(e -> bounded.put(e.id(), e));
         result.stream().filter(e -> "record_research".equals(e.tool()) && "SUCCESS".equals(e.status()))
                 .reduce((a, b) -> b).ifPresent(e -> bounded.put(e.id(), e));
         int remaining = Math.max(0, 220 - bounded.size());
         result.subList(Math.max(0, result.size() - remaining), result.size())
                 .forEach(e -> bounded.put(e.id(), e));
-        return new ArrayList<>(bounded.values());
+        // 固定保留的检查仍按原始时间顺序输出，不能让旧失败在裁剪后覆盖较新的通过。
+        return all.stream().filter(e -> bounded.containsKey(e.id()))
+                .collect(Collectors.toCollection(ArrayList::new));
     }
 
     private static boolean isBackgroundLaunch(TaskControlService.Evidence evidence) {
@@ -568,28 +609,78 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private String launchedVersion(String taskId) {
         if (taskId == null || taskId.isBlank()) return "";
         return state().evidence().stream().filter(e -> "run_command".equals(e.tool()))
+                .filter(e -> !"STALE".equals(e.status()))
                 .filter(e -> {
                     Matcher matcher = TASK_ID.matcher(e.result());
                     return matcher.find() && taskId.equals(matcher.group(1));
                 }).map(TaskControlService.Evidence::startVersion).findFirst().orElse("");
     }
 
+    private String launchedWorkdir(String taskId) {
+        if (taskId == null || taskId.isBlank()) return "";
+        return state().evidence().stream().filter(e -> "run_command".equals(e.tool()))
+                .filter(e -> taskId.equals(taskId(e)))
+                .map(TaskControlService.Evidence::target).findFirst().orElse("");
+    }
+
+    private String launchedOperation(String id) {
+        return state().evidence().stream().filter(e -> "run_command".equals(e.tool()) && id.equals(taskId(e)))
+                .map(TaskControlService.Evidence::operationKey).filter(key -> key.startsWith("command:")).findFirst().orElse("");
+    }
+
+    private com.pilot.core.tool.CommandTaskManager.Task commandMetadata(ToolCall call, String result) {
+        if (!Set.of("run_command", "command_status").contains(call.name())) return null;
+        Matcher id = TASK_ID.matcher(Objects.toString(result, ""));
+        String taskId = "command_status".equals(call.name()) ? Objects.toString(call.args().get("taskId"), "")
+                : id.find() ? id.group(1) : "";
+        if (taskId.isBlank()) return null;
+        try { return commandLookup.apply(taskId); } catch (RuntimeException unavailable) { return null; }
+    }
+
+    private String commandWorkdir(String value) {
+        try { return root.relativize(root.resolve(value).normalize()).toString().replace('\\', '/'); }
+        catch (RuntimeException invalid) { return value; }
+    }
+
     /**
-     * 与 Codex / OpenCode 一致：普通执行不设二道核验，模型说完成就完成，只把状态标记为已核验。
-     * 只有主 Agent 显式升级的 Goal 才走独立核验器。
+     * 普通执行不增加模型核验或强制续跑；收尾只归纳真实检查状态。
+     * CHECKS_PASSED 仅表示已记录检查通过，VERIFIED 仅用于 Goal 的逐项完成核验。
      */
     @Override public String review(List<Message> history, Set<String> changedFiles, List<String> checks) {
         if (cancelled.getAsBoolean()) throw new Stop("CANCELLED", "任务已暂停");
-        if (task() != null && "WAITING".equals(task().status())) throw new Stop("WAITING", "已预约后续唤醒");
+        TaskControlService.TaskContract requirements = task();
+        if (requirements != null && "WAITING".equals(requirements.status())) throw new Stop("WAITING", "已预约后续唤醒");
         if (needsResearch()) return "尚未完成开源调研；请阅读开源仓库并调用 record_research。不能将任务标记完成。";
         if (changedFiles != null) changedPaths.addAll(changedFiles.stream()
                 .filter(Objects::nonNull).map(String::strip).filter(value -> !value.isBlank()).toList());
-        TaskControlService.Execution state = state();
+        TaskControlService.Execution state = requirements == null || requirements.execution() == null
+                ? state() : requirements.execution();
         if (!"GOAL".equals(state.mode())) {
-            if (!"VERIFIED".equals(state.phase())) updatePhase(state, "VERIFIED", "");
-            return null;
+            return finishDirect(state, requirements) ? null : "用户要求已变更，请重新核对目标。";
         }
         return reviewGoal(history, state);
+    }
+
+    private boolean finishDirect(TaskControlService.Execution state, TaskControlService.TaskContract requirements) {
+        Map<String, TaskControlService.Evidence> checks = latestChecks(state.evidence());
+        String version = sourceVersion();
+        boolean failed = checks.values().stream().anyMatch(e -> version.equals(e.endVersion())
+                && !Set.of("STALE", "RUNNING").contains(e.status()) && !isQualifyingVerification(e));
+        boolean running = checks.values().stream().anyMatch(e -> "RUNNING".equals(e.status()));
+        boolean stale = checks.values().stream().anyMatch(e -> "STALE".equals(e.status())
+                || !version.equals(e.endVersion()));
+        String phase = failed ? "CHECKS_FAILED" : running ? "UNVERIFIED" : stale ? "CHECKS_STALE"
+                : checks.isEmpty() ? "UNVERIFIED" : "CHECKS_PASSED";
+        String detail = failed ? "当前版本仍有未通过的检查；执行已结束，不能声称验证通过。"
+                : running ? "验证命令仍在后台运行，尚未取得终态与退出码。"
+                : stale ? "部分检查早于当前代码或用户要求，不能用旧结果证明当前版本。"
+                : checks.isEmpty() ? "未记录测试、构建或静态检查证据；执行结束不等于已核验。"
+                : "已记录的当前版本检查通过；结果仅覆盖实际检查范围，不代表全部目标已独立验收。";
+        var finished = copy(state, state.mode(), phase, detail, state.evidence(),
+                state.idleReviews(), state.progress(), state.usage());
+        if (!tasks.executionForRequirements(session, requirements, finished)) return false;
+        updates.accept(finished);
+        return true;
     }
 
     /** 不再自动复跑历史检查：是否再跑一次验证由模型自己决定。 */
@@ -833,21 +924,36 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     }
 
     private boolean passingCurrentCheck(TaskControlService.Execution state) {
-        Map<VerificationCheck.Kind, TaskControlService.Evidence> latest = latestCurrentChecks(state);
+        Map<String, TaskControlService.Evidence> latest = latestCurrentChecks(state);
         return !latest.isEmpty() && latest.values().stream().allMatch(GoalExecutionPolicy::isQualifyingVerification);
     }
 
-    /** 同一源码版本每类验证只看最近一次结果；旧的目录错误不能否定修正后的成功。 */
-    private Map<VerificationCheck.Kind, TaskControlService.Evidence> latestCurrentChecks(TaskControlService.Execution state) {
-        String version = sourceVersion();
-        Map<VerificationCheck.Kind, TaskControlService.Evidence> latest = new LinkedHashMap<>();
-        for (TaskControlService.Evidence evidence : state.evidence()) {
-            if (!version.equals(evidence.endVersion()) || !isVerificationAttempt(evidence)) continue;
+    /** 每个命令和工作目录只保留最近结果；不同测试不能相互掩盖失败。 */
+    private static Map<String, TaskControlService.Evidence> latestChecks(List<TaskControlService.Evidence> evidenceList) {
+        Map<String, TaskControlService.Evidence> latest = new LinkedHashMap<>();
+        Set<String> completedTasks = evidenceList.stream()
+                .filter(e -> "command_status".equals(e.tool()) && terminalCommandObservation(e))
+                .map(GoalExecutionPolicy::taskId).filter(value -> !value.isBlank()).collect(Collectors.toSet());
+        for (TaskControlService.Evidence evidence : evidenceList) {
+            if (!isVerificationAttempt(evidence)) continue;
+            if ("RUNNING".equals(evidence.status()) && completedTasks.contains(taskId(evidence))) continue;
             String check = Objects.toString(evidence.check(), "");
             int arrow = check.lastIndexOf(" → exit ");
-            String command = arrow < 0 ? check : check.substring(0, arrow);
-            latest.put(VerificationCheck.classifyCommand(command), evidence);
+            String command = (arrow < 0 ? check : check.substring(0, arrow)).strip();
+            String operation = evidence.operationKey();
+            String identity = operation.startsWith("command:")
+                    ? operation.replaceFirst(":(?:check:[0-9]+|pending-check)$", "")
+                    : "command:" + hash(Objects.toString(evidence.target(), "") + "\n" + command);
+            latest.put(identity, evidence);
         }
+        return latest;
+    }
+
+    private Map<String, TaskControlService.Evidence> latestCurrentChecks(TaskControlService.Execution state) {
+        String version = sourceVersion();
+        Map<String, TaskControlService.Evidence> latest = latestChecks(state.evidence());
+        latest.entrySet().removeIf(entry -> !version.equals(entry.getValue().endVersion())
+                || "STALE".equals(entry.getValue().status()));
         return latest;
     }
 
