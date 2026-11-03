@@ -432,6 +432,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             public String execute(Map<String, Object> args) {
                 List<String> sources = strings(args.get("sources"));
                 String decision = string(args, "decision"), license = string(args, "license");
+                if (sources.size() > 8 || sources.stream().anyMatch(url -> url.length() > 1000)
+                        || decision.length() > 6000 || license.length() > 1000) return "ERROR: 最多 8 个来源，复用分析最多 6000 字，许可证说明最多 1000 字";
                 if (sources.isEmpty() || decision.length() < 10 || license.isBlank()) return "ERROR: 请提交仓库链接、具体复用分析和许可证检查结果";
                 for (String source : sources) {
                     java.net.URI uri;
@@ -441,7 +443,9 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                     if (state().evidence().stream().noneMatch(e -> "web_fetch".equals(e.tool()) && "SUCCESS".equals(e.status()) && source.equals(e.target())))
                         return "ERROR: 链接还没有成功读取，请先用 web_fetch 阅读：" + source;
                 }
-                return mapper.writeValueAsString(Map.of("sources", sources, "decision", decision, "license", license));
+                return mapper.writeValueAsString(Map.of("sources", sources, "decision", decision, "license", license,
+                        "sourceEvidence", state().evidence().stream().filter(e -> "web_fetch".equals(e.tool())
+                                && "SUCCESS".equals(e.status()) && sources.contains(e.target())).map(TaskControlService.Evidence::id).toList()));
             }
         };
     }
@@ -500,7 +504,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         // SUCCESS，也不能因为子代理最终失败就丢掉它此前真正跑成功的 check。
         String operation = operationKey(call);
         evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), call.name(), path,
-                clip(outcome.result() == null ? "" : outcome.result(), 3_000), endVersion, null,
+                ("record_research".equals(call.name()) ? Objects.toString(outcome.result(), "") : clip(outcome.result() == null ? "" : outcome.result(), 3_000)), endVersion, null,
                 outcome.status().name(), startVersion, endVersion, System.currentTimeMillis(), operation));
         // 结构化工具（例如 spawn_agent）可能汇总多次真实检查；从第 0 条起逐条入账。
         for (int index = 0; index < outcome.checks().size(); index++) {
@@ -524,6 +528,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 .map(GoalExecutionPolicy::taskId).filter(value -> !value.isBlank())
                 .collect(Collectors.toSet());
         all.stream().filter(e -> Set.of("edit_file", "create_file", "apply_patch").contains(e.tool())
+                        || ("record_research".equals(e.tool()) && "SUCCESS".equals(e.status()))
                         || isQualifyingVerification(e)
                         || ("run_command".equals(e.tool()) && isBackgroundLaunch(e)
                         && !completedTasks.contains(taskId(e))))
@@ -538,6 +543,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                         && !completedTasks.contains(taskId(e))).toList();
         LinkedHashMap<String, TaskControlService.Evidence> bounded = new LinkedHashMap<>();
         pending.forEach(e -> bounded.put(e.id(), e));
+        result.stream().filter(e -> "record_research".equals(e.tool()) && "SUCCESS".equals(e.status()))
+                .reduce((a, b) -> b).ifPresent(e -> bounded.put(e.id(), e));
         int remaining = Math.max(0, 220 - bounded.size());
         result.subList(Math.max(0, result.size() - remaining), result.size())
                 .forEach(e -> bounded.put(e.id(), e));

@@ -13,6 +13,7 @@ import React from 'react'; import {createRoot} from 'react-dom/client'; import A
 import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
 document.documentElement.dataset.theme='dark'; window.store=useStore; window.jobs=[]; window.calls=[]; window.fail=false;
 for(const name of Object.keys(api)) if(typeof api[name]==='function') api[name]=async()=>({});
+api.templates=async()=>[];api.scheduleTimes=async(body)=>({runAt:new Date(body.localTime).toISOString(),next:[new Date(body.localTime).toISOString()]});
 api.schedules=async()=>{if(window.fail)throw Error('模拟连接断开');return structuredClone(window.jobs);};
 api.createSchedule=async(body)=>{calls.push(body);const row={...body,id:'schedule-'+calls.length,sessionId:'scheduled-session',state:'SCHEDULED',message:'等待执行',history:[]};jobs.unshift(row);return row;};
 api.controlSchedule=async(id,body)=>{const row=jobs.find(j=>j.id===id);row.state={pause:'PAUSED',resume:'SCHEDULED',cancel:'CANCELLED'}[body.action]||row.state;if(body.runAt)row.runAt=body.runAt;return row;};
@@ -50,7 +51,7 @@ async function run(page, name, url) {
   await page.getByRole('button',{name:'创建计划',exact:true}).click();
   await page.getByRole('heading',{name:'升级依赖并验证',exact:true}).waitFor();
   const request=await page.evaluate(()=>calls[0]);
-  assert.equal(request.requirements.acceptance.length,2); assert.equal(request.fullAccess,true); assert.ok(new Date(request.runAt)>new Date());
+  assert.equal(request.requirements.acceptance.length,2); assert.equal(request.fullAccess,true); assert.equal(request.isolated,true); assert.ok(new Date(request.runAt)>new Date());
   const changed = new Date(Date.now()+7200000);
   const local = await page.evaluate(at=>{const d=new Date(at);return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-')+'T'+[d.getHours(),d.getMinutes()].map(v=>String(v).padStart(2,'0')).join(':');},changed.toISOString());
   await page.getByLabel(/^修改执行时间/).fill(local);

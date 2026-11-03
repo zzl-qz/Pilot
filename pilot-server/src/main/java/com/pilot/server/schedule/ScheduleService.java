@@ -22,25 +22,44 @@ public class ScheduleService {
     private final TaskControlService tasks;
     private final SkillService skills;
     private final Clock clock;
+    private final com.pilot.server.workspace.GitWorktrees worktrees;
+    private final com.pilot.server.workspace.WorkspaceToolFactory toolFactory;
     private volatile boolean ready;
     private static final Set<String> TERMINAL = Set.of("COMPLETED", "CANCELLED", "NEEDS_ATTENTION");
     public record Create(String name, String sourceSessionId, String content, Instant runAt, String timezone,
-                         TaskControlService.Requirements requirements, String skill, Boolean fullAccess) { }
+                         TaskControlService.Requirements requirements, String skill, Boolean fullAccess, Boolean isolated) {
+        public Create(String name, String sourceSessionId, String content, Instant runAt, String timezone,
+                      TaskControlService.Requirements requirements, String skill, Boolean fullAccess) {
+            this(name, sourceSessionId, content, runAt, timezone, requirements, skill, fullAccess, false);
+        }
+    }
     @org.springframework.beans.factory.annotation.Autowired
     public ScheduleService(ScheduleRepository repository, SessionService sessions, RunStarter runs,
-                           TaskControlService tasks, SkillService skills) {
-        this(repository, sessions, runs, tasks, skills, Clock.systemUTC());
+                           TaskControlService tasks, SkillService skills, com.pilot.server.workspace.GitWorktrees worktrees,
+                           com.pilot.server.workspace.WorkspaceToolFactory toolFactory) {
+        this(repository, sessions, runs, tasks, skills, Clock.systemUTC(), worktrees, toolFactory);
     }
     public ScheduleService(ScheduleRepository repository, SessionService sessions, RunStarter runs,
                            TaskControlService tasks, SkillService skills, Clock clock) {
+        this(repository, sessions, runs, tasks, skills, clock, null, null);
+    }
+    public ScheduleService(ScheduleRepository repository, SessionService sessions, RunStarter runs,
+                           TaskControlService tasks, SkillService skills, Clock clock,
+                           com.pilot.server.workspace.GitWorktrees worktrees, com.pilot.server.workspace.WorkspaceToolFactory toolFactory) {
         this.repository = repository; this.sessions = sessions; this.runs = runs;
         this.tasks = tasks; this.skills = skills; this.clock = clock;
+        this.worktrees = worktrees; this.toolFactory = toolFactory;
     }
     @EventListener(ApplicationReadyEvent.class)
     public void ready() { ready = true; }
     public List<ScheduledTask> list() { return repository.list(); }
+    public Optional<ScheduledTask> findOccurrence(String id) { return repository.find(id); }
     public ScheduledTask get(String id) { return repository.find(id).orElseThrow(() -> new IllegalArgumentException("定时任务不存在")); }
-    public synchronized ScheduledTask create(Create request) {
+    public synchronized ScheduledTask create(Create request) { return createOccurrence(request, "schedule_" + UUID.randomUUID()); }
+    /** 周期触发使用稳定的实例 ID；重启后重复投递只返回原任务。 */
+    synchronized ScheduledTask createOccurrence(Create request, String occurrenceId) {
+        var existing = repository.find(occurrenceId);
+        if (existing.isPresent()) return existing.get();
         if (request == null || request.content() == null || request.content().isBlank()) throw new IllegalArgumentException("请填写任务目标");
         if (request.content().length() > 100_000) throw new IllegalArgumentException("任务目标过长");
         Instant now = clock.instant();
@@ -54,18 +73,36 @@ public class ScheduleService {
         if (name.length() > 120) throw new IllegalArgumentException("任务名称最多 120 个字符");
         String skill = request.skill() == null || request.skill().isBlank() ? null : request.skill().strip();
         if (skill != null && skills.catalogFor(source.workspace()).find(skill).isEmpty()) throw new IllegalArgumentException("指定技能不存在");
-        String id = "schedule_" + UUID.randomUUID();
+        String id = occurrenceId;
         var req = request.requirements() == null ? new TaskControlService.Requirements(List.of(), List.of()) : request.requirements();
         var requirements = new TaskControlService.Requirements(req.constraints(), req.acceptance().stream()
                 .map(a -> new TaskControlService.Acceptance(a.text(), false, "")).toList(),
                 new TaskControlService.Automation(id, !Boolean.FALSE.equals(request.fullAccess()), true));
         // 独立会话已经有计划内容，不占普通「空白对话」名额。
-        Session target = sessions.createSession(name, source.workspace(), source.projectId(), false);
-        var task = new ScheduledTask(id, name, target.id(), null, request.content().strip(), requirements, skill,
-                request.runAt(), zone, "SCHEDULED", null, 0, 0, null, "等待执行", List.of(), 0);
-        try { repository.insert(task); }
-        catch (RuntimeException e) { sessions.delete(target.id()); throw e; }
-        return task;
+        com.pilot.server.workspace.GitWorktrees.Created isolated = null;
+        Session target = null;
+        try {
+            String path = source.workspace();
+            ScheduledTask.Workspace executionWorkspace;
+            if (!Boolean.FALSE.equals(request.isolated())) {
+                if (worktrees == null || toolFactory == null) throw new IllegalStateException("独立工作区服务不可用");
+                isolated = worktrees.create(toolFactory.resolve(path), "HEAD");
+                path = isolated.path();
+                if (skill != null && skills.catalogFor(path).find(skill).isEmpty())
+                    throw new IllegalArgumentException("独立工作区缺少所选技能；请先将项目技能提交到 Git，或改用原目录执行");
+                executionWorkspace = new ScheduledTask.Workspace("ISOLATED", path, isolated.base(), isolated.branch(), isolated.commit(), null);
+            } else executionWorkspace = new ScheduledTask.Workspace("SHARED", path, path, "", "", null);
+            target = sessions.createSession(name, path, source.projectId(), false);
+            var task = new ScheduledTask(id, name, target.id(), null, request.content().strip(), requirements, skill,
+                    request.runAt(), zone, "SCHEDULED", null, 0, 0, null, "等待执行", List.of(), 0, executionWorkspace);
+            repository.insert(task);
+            return task;
+        } catch (RuntimeException e) {
+            if (target != null) sessions.delete(target.id());
+            if (isolated != null) try { worktrees.remove(java.nio.file.Path.of(isolated.path())); }
+            catch (RuntimeException cleanup) { e.addSuppressed(cleanup); }
+            throw e;
+        }
     }
     public synchronized ScheduledTask control(String id, String action, Instant runAt) {
         var job = get(id);
@@ -108,6 +145,13 @@ public class ScheduleService {
     private void advance(ScheduledTask job) {
         if (TERMINAL.contains(job.state()) || "PAUSED".equals(job.state())) return;
         if (sessions.find(job.sessionId()).isEmpty()) { change(job, "CANCELLED", "目标对话已删除", job.runAt()); return; }
+        if (job.workspace() != null && "ISOLATED".equals(job.workspace().mode())) {
+            String path = sessions.find(job.sessionId()).orElseThrow().workspace();
+            if (!Objects.equals(path, job.workspace().path()) || !java.nio.file.Files.isDirectory(java.nio.file.Path.of(path))
+                    || !java.nio.file.Files.isRegularFile(java.nio.file.Path.of(path).resolve(".git"))) {
+                change(job, "NEEDS_ATTENTION", "独立工作区已移动或缺失，未切回原目录执行", job.runAt()); return;
+            }
+        }
         Instant now = clock.instant();
         if (job.deadline() != null && !now.isBefore(job.deadline())) {
             change(job, "NEEDS_ATTENTION", "已达 24 小时总执行时限，进度已保存", job.runAt());
@@ -181,12 +225,43 @@ public class ScheduleService {
             change(latest, "NEEDS_ATTENTION", "投递失败：" + e.getMessage(), latest.runAt());
         }
     }
+    public com.pilot.server.workspace.GitWorktrees.Preview handoffPreview(String id) {
+        var job = handoffJob(id);
+        return worktrees.preview(java.nio.file.Path.of(job.workspace().path()));
+    }
+    public synchronized ScheduledTask handoff(String id, String revision) {
+        if (revision == null || revision.isBlank()) throw new IllegalArgumentException("请先预览改动");
+        var job = handoffJob(id);
+        worktrees.handoff(java.nio.file.Path.of(job.workspace().path()), revision);
+        return handedOff(id, job.version());
+    }
+    private ScheduledTask handoffJob(String id) {
+        var job = get(id);
+        if (!Set.of("COMPLETED", "NEEDS_ATTENTION").contains(job.state()) || runs.activeRun(job.sessionId()).isPresent())
+            throw new IllegalStateException("任务还在运行或等待，请结束执行后交回");
+        if (worktrees == null || job.workspace() == null || !"ISOLATED".equals(job.workspace().mode()))
+            throw new IllegalArgumentException("该任务未使用独立工作区");
+        if (job.workspace().handedOffAt() != null) throw new IllegalStateException("改动已经交回，请在原目录查看");
+        var current = sessions.find(job.sessionId()).orElseThrow(() -> new IllegalArgumentException("执行对话不存在"));
+        if (!Objects.equals(current.workspace(), job.workspace().path())) throw new IllegalStateException("执行位置已变化，请打开对话检查");
+        return job;
+    }
+    private synchronized ScheduledTask handedOff(String id, long expectedVersion) {
+        var job = get(id);
+        if (job.version() != expectedVersion) throw new IllegalStateException("计划已变化，请重新检查交回结果");
+        var w = job.workspace();
+        var next = job.withWorkspace(new ScheduledTask.Workspace(w.mode(), w.path(), w.base(), w.branch(), w.commit(), clock.instant()));
+        if (!repository.replace(job, next)) throw new IllegalStateException("交回已执行，但计划状态写入冲突，请核对原目录");
+        return next;
+    }
     private List<ScheduledTask.Invocation> finishHistory(ScheduledTask job, String status) {
         return job.history().stream().map(h -> "RUNNING".equals(h.status()) ? new ScheduledTask.Invocation(h.runId(), h.startedAt(), status) : h).toList();
     }
     private void change(ScheduledTask job, String state, String message, Instant at) {
         var history = Set.of("COMPLETED", "CANCELLED", "PAUSED", "NEEDS_ATTENTION", "WAITING").contains(state) ? finishHistory(job, state) : job.history();
-        if (!repository.replace(job, job.change(state, job.taskId(), job.runId(), at, job.deadline(), job.attempts(), job.recoveries(), message, history)))
+        var next = job.change(state, job.taskId(), job.runId(), at, job.deadline(), job.attempts(), job.recoveries(), message, history);
+        if (TERMINAL.contains(state)) next = next.ended(clock.instant());
+        if (!repository.replace(job, next))
             throw new IllegalStateException("任务状态已变化，请刷新后重试");
     }
     public Tool wakeTool(String sessionId) {

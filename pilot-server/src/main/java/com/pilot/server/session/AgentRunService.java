@@ -697,8 +697,11 @@ public class AgentRunService implements RunStarter {
         long startedAt = System.currentTimeMillis();
         String status = "FAILED";
         boolean continued = false;
+        boolean resultCaptured = false;
         try {
             status = execute(sessionId, runId, input, attachments, imagePositions, handle, continuation);
+            captureResult(sessionId, runId);
+            resultCaptured = true;
             continued = maybeAutoContinue(sessionId, status, handle);
         } catch (RuntimeException e) {
             log.error("Run {} 收尾失败", runId, e);
@@ -715,6 +718,7 @@ public class AgentRunService implements RunStarter {
             if (runStates != null) {
                 runStates.finish(sessionId, runId, status);
             }
+            if (!resultCaptured) captureResult(sessionId, runId);
             Deque<String> queue = inbox(sessionId);
             try {
                 synchronized (queue) {
@@ -731,6 +735,11 @@ public class AgentRunService implements RunStarter {
                 metrics.recordRun(status, System.currentTimeMillis() - startedAt);
             }
         }
+    }
+
+    private void captureResult(String sessionId, String runId) {
+        try { taskControls.snapshotResult(sessionId, runId); }
+        catch (RuntimeException e) { log.warn("保存运行 {} 的结果快照失败", runId, e); }
     }
 
     @Override

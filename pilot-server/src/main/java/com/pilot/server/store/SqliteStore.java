@@ -22,6 +22,9 @@ public final class SqliteStore {
     private static final Logger log = LoggerFactory.getLogger(SqliteStore.class);
 
     private static final String[] SCHEMA = {
+            "CREATE TABLE IF NOT EXISTS automation_documents (kind TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(kind,id))",
+            "CREATE INDEX IF NOT EXISTS idx_automation_state ON automation_documents(kind, json_extract(payload,'$.state'))",
+            "CREATE TABLE IF NOT EXISTS result_receipts (id TEXT PRIMARY KEY, revision TEXT NOT NULL, seen INTEGER NOT NULL DEFAULT 0, handled INTEGER NOT NULL DEFAULT 0)",
             "CREATE TABLE IF NOT EXISTS scheduled_tasks (id TEXT PRIMARY KEY, version INTEGER NOT NULL, payload TEXT NOT NULL)",
             """
             CREATE TABLE IF NOT EXISTS sessions (
@@ -134,6 +137,8 @@ public final class SqliteStore {
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (run_id, fingerprint)
             )""",
+            "CREATE INDEX IF NOT EXISTS idx_events_result_time ON events(type, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_events_run_sequence ON events(run_id, sequence DESC)",
             "CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
     };
 
@@ -206,8 +211,24 @@ public final class SqliteStore {
         statement.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, created_at)");
         // 按父会话找侧边对话（关闭父对话时一并清理）走这条索引
         statement.execute("CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)");
+        initializeSearch(statement);
         // 记录结构版本，供数据迁移与备份恢复核对；写不进去不影响运行
-        statement.execute("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '3')");
+        statement.execute("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '4')");
+    }
+
+    private static void initializeSearch(Statement s) throws SQLException {
+        s.execute("CREATE TABLE IF NOT EXISTS bookmark_imports (session_id TEXT NOT NULL, fingerprint TEXT NOT NULL, PRIMARY KEY(session_id,fingerprint))");
+        s.execute("CREATE TABLE IF NOT EXISTS message_bookmarks (session_id TEXT NOT NULL, sequence INTEGER NOT NULL, title TEXT NOT NULL, preview TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(session_id,sequence))");
+        s.execute("CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(session_id UNINDEXED, sequence UNINDEXED, text, tokenize='trigram')");
+        String types = "'run.started','run.steered','assistant.delta'";
+        s.execute("CREATE TRIGGER IF NOT EXISTS message_search_insert AFTER INSERT ON events WHEN new.type IN (" + types + ") BEGIN "
+                + "INSERT INTO message_search(rowid,session_id,sequence,text) VALUES(new.rowid,new.session_id,new.sequence,COALESCE(json_extract(new.payload,'$.input'),json_extract(new.payload,'$.text'),'')); END");
+        s.execute("CREATE TRIGGER IF NOT EXISTS message_search_delete AFTER DELETE ON events BEGIN DELETE FROM message_search WHERE rowid=old.rowid; DELETE FROM message_bookmarks WHERE session_id=old.session_id AND sequence=old.sequence; END");
+        s.execute("CREATE TRIGGER IF NOT EXISTS message_search_update AFTER UPDATE ON events BEGIN DELETE FROM message_search WHERE rowid=old.rowid; "
+                + "INSERT INTO message_search(rowid,session_id,sequence,text) SELECT new.rowid,new.session_id,new.sequence,COALESCE(json_extract(new.payload,'$.input'),json_extract(new.payload,'$.text'),'') WHERE new.type IN (" + types + "); END");
+        try(var marker=s.executeQuery("SELECT value FROM schema_meta WHERE key='message_search_v1'")) { if(marker.next())return; }
+        s.execute("INSERT OR REPLACE INTO message_search(rowid,session_id,sequence,text) SELECT rowid,session_id,sequence,COALESCE(json_extract(payload,'$.input'),json_extract(payload,'$.text'),'') FROM events WHERE type IN ("+types+")");
+        s.execute("INSERT INTO schema_meta(key,value) VALUES('message_search_v1','1')");
     }
 
     private static void addColumnIfMissing(Statement statement, String table, String column, String definition)

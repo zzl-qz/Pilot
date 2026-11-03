@@ -1,3 +1,7 @@
+import RecurringPlans from './RecurringPlans.jsx';
+import MessageSearch from './MessageSearch.jsx';
+import Notifications from './Notifications.jsx';
+import ResultInbox from './ResultInbox.jsx';
 import Schedules from './Schedules.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
@@ -349,6 +353,10 @@ export default function App() {
       </main>
       <SelectionQuote />
       <ErrorBoundary name="定时任务"><Schedules /></ErrorBoundary>
+      <ErrorBoundary name="任务收件箱"><ResultInbox /></ErrorBoundary>
+      <ErrorBoundary name="周期计划"><RecurringPlans /></ErrorBoundary>
+      <ErrorBoundary name="消息搜索"><MessageSearch /></ErrorBoundary>
+      <ErrorBoundary name="结果通知"><Notifications /></ErrorBoundary>
       <ErrorBoundary name="弹层"><Modals /></ErrorBoundary>
     </div>
   );

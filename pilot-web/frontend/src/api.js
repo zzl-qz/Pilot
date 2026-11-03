@@ -54,7 +54,26 @@ export async function apiJson(url, init, timeoutMs) {
   return response.json();
 }
 
+const jsonBody = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 export const api = {
+  recurring: () => apiJson('/api/automation/series'),
+  createRecurring: body => apiJson('/api/automation/series', jsonBody('POST', body)),
+  controlRecurring: (id, body) => apiJson(`/api/automation/series/${encodeURIComponent(id)}`, jsonBody('POST', body)),
+  scheduleTimes: body => apiJson('/api/automation/times', jsonBody('POST', body)),
+  templates: () => apiJson('/api/automation/templates'),
+  saveTemplate: body => apiJson('/api/automation/templates', jsonBody('POST', body)),
+  deleteTemplate: (id, version) => apiJson(`/api/automation/templates/${encodeURIComponent(id)}?version=${version}`, { method: 'DELETE' }),
+  searchMessages: ({ q = '', sessionId = '', saved = false, offset = 0 }) => apiJson('/api/library/search?' + new URLSearchParams({ q, sessionId, saved, offset })),
+  bookmarks: session => apiJson(`/api/library/${encodeURIComponent(session)}/bookmarks`),
+  saveBookmark: (session, sequence) => apiJson(`/api/library/${encodeURIComponent(session)}/bookmarks/${sequence}`, { method: 'PUT' }),
+  deleteBookmark: (session, sequence) => apiJson(`/api/library/${encodeURIComponent(session)}/bookmarks/${sequence}`, { method: 'DELETE' }),
+  importBookmarks: (session, sequences) => apiJson(`/api/library/${encodeURIComponent(session)}/bookmarks/import`, jsonBody('POST', { sequences })),
+  deliverySettings: () => apiJson('/api/deliveries/settings'),
+  saveDeliverySettings: body => apiJson('/api/deliveries/settings', jsonBody('PUT', body)),
+  deliveries: () => apiJson('/api/deliveries'),
+  claimDelivery: () => apiJson('/api/deliveries/claim', { method: 'POST' }),
+  deliveryReceipt: (id, body) => apiJson(`/api/deliveries/${encodeURIComponent(id)}/receipt`, jsonBody('POST', body)),
+  retryDelivery: (id, version) => apiJson(`/api/deliveries/${encodeURIComponent(id)}/retry`, jsonBody('POST', { version })),
   voiceSettings: () => apiJson('/api/voice/settings'),
   saveVoiceSettings: body => apiJson('/api/voice/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   transcribeVoice: (blob, signal) => {
@@ -149,6 +168,12 @@ export const api = {
   maintenanceStatus: () => apiJson('/api/maintenance/status'),
   backupNow: () => apiJson('/api/maintenance/backup', { method: 'POST' }, 120000),
   purgeNow: () => apiJson('/api/maintenance/purge', { method: 'POST' }, 120000),
+  results: () => apiJson('/api/results'),
+  result: (id) => apiJson(`/api/results/${encodeURIComponent(id)}`),
+  resultReceipt: (id, body) => apiJson(`/api/results/${encodeURIComponent(id)}/receipt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  sessionResearch: (id) => apiJson(`/api/results/research/${encodeURIComponent(id)}`),
+  scheduleHandoffPreview: (id) => apiJson(`/api/schedules/${encodeURIComponent(id)}/handoff`),
+  scheduleHandoff: (id, body) => apiJson(`/api/schedules/${encodeURIComponent(id)}/handoff`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   schedules: () => apiJson('/api/schedules'),
   createSchedule: (body) => apiJson('/api/schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   controlSchedule: (id, body) => apiJson(`/api/schedules/${encodeURIComponent(id)}/control`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),

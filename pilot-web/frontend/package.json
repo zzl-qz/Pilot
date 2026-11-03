@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "test:usage": "node --test scripts/request-usage.test.mjs && node scripts/request-usage-smoke.mjs",
+    "test:automation": "node scripts/p1-smoke.mjs",
+    "test:results": "node scripts/results-smoke.mjs",
     "test:schedules": "node scripts/schedule-smoke.mjs",
     "test:composer": "node scripts/composer-smoke.mjs",
     "dev:ui": "vite",

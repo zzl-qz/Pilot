@@ -146,6 +146,8 @@ class AgentRunTaskControlTest {
             assertFalse(events.stream().anyMatch(e -> "tool.started".equals(e.type())), "返回的旧方案工具不能继续执行");
             TaskControlService.TaskContract next = f.tasks.load(f.id);
             assertNotEquals(taskId, next.taskId());
+            assertEquals(taskId, f.tasks.result(f.firstRun).taskId());
+            assertEquals("修复断线重连", f.tasks.result(f.firstRun).originalGoal());
             assertEquals("下一件事：整理文档", next.originalGoal());
             assertTrue(next.constraints().isEmpty(), "下一件独立任务不能继承上一件的范围约束");
             assertTrue(next.corrections().isEmpty());

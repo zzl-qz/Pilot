@@ -11,6 +11,7 @@ export function Sidebar() {
   const projects = useStore((state) => state.projects);
   const sessionId = useStore((state) => state.sessionId);
   const workspace = useStore((state) => state.workspace);
+  const unread = useStore(state => state.ui.resultUnread || 0);
   const connection = useStore((state) => state.ui.connection);
   const sideChats = useStore((state) => state.sideChats);
   const [query, setQuery] = useState('');
@@ -63,6 +64,12 @@ export function Sidebar() {
         <kbd>{shortcut('N')}</kbd>
       </button>
 
+      <button className="schedule-nav" type="button" onClick={() => useStore.getState().setUi({ searchOpen: true })}>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>搜索消息与书签</span>
+      </button>
+      <button className="schedule-nav" type="button" onClick={() => useStore.getState().setUi({ resultsOpen: true, resultTarget: null })}>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M3 3h10v10H3zM3 9h3l1 2h2l1-2h3" /></svg><span>任务收件箱</span>{unread > 0 && <span className="result-count" aria-label={`${unread} 条未读`}>{unread}</span>}
+      </button>
       <button className="schedule-nav" type="button" onClick={() => useStore.getState().setUi({ schedulesOpen: true, scheduleDraft: null })}>
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.5V8l2.5 1.5"/></svg>定时任务
       </button>

@@ -349,6 +349,17 @@ public class TaskControlService {
         write(snapshotFile(runId), new TaskSnapshot(load(sessionId)));
     }
 
+    /** 收尾快照与运行前检查点分开；收件箱不能用后来任务覆盖历史核验和调研。 */
+    public synchronized void snapshotResult(String sessionId, String runId) {
+        write(data.file("snapshots", id(runId), "result-task.json"), new TaskSnapshot(load(sessionId)));
+    }
+    public synchronized TaskContract result(String runId) {
+        Path file = data.file("snapshots", id(runId), "result-task.json");
+        if (!Files.isRegularFile(file)) return null;
+        try { return mapper.readValue(Files.readString(file), TaskSnapshot.class).task(); }
+        catch (IOException e) { throw new UncheckedIOException("读取结果快照失败", e); }
+    }
+
     /** 检查点属于 runId；从对话分支引用原运行时也可以恢复到该状态。 */
     public synchronized void restoreTo(String sessionId, String runId) {
         Path file = snapshotFile(runId);

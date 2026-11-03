@@ -14,6 +14,10 @@ import React from 'react';import {createRoot} from 'react-dom/client';import App
 import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
 document.documentElement.dataset.theme='dark';window.store=useStore;window.cancelled=0;
 for(const name of Object.keys(api))if(typeof api[name]==='function')api[name]=async()=>({});api.schedules=async()=>[];api.worktreeInfo=async()=>({});api.queue=async()=>({items:[]});api.filesFlat=async()=>({files:[]});
+api.bookmarks=async(session)=>JSON.parse(localStorage.getItem('mock-server-bookmarks:'+session)||'[]');
+api.saveBookmark=async(session,sequence)=>{const values=await api.bookmarks(session);const row={sequence,title:'已收藏的消息 '+sequence,preview:'同步书签'};if(!values.some(b=>b.sequence===sequence))values.push(row);localStorage.setItem('mock-server-bookmarks:'+session,JSON.stringify(values));return row;};
+api.deleteBookmark=async(session,sequence)=>localStorage.setItem('mock-server-bookmarks:'+session,JSON.stringify((await api.bookmarks(session)).filter(b=>b.sequence!==sequence)));
+api.importBookmarks=async(session,sequences)=>{for(const seq of sequences)await api.saveBookmark(session,seq);return{bookmarks:await api.bookmarks(session),skipped:[]};};
 const topics=['复用现有任务执行链路','加入持久化的到期计划','核对重启后的恢复边界','实现定时任务管理界面','保持人工暂停的状态','验证 Windows 和 Linux 路径','补充开源调研门禁','完成自动核验与结果通知','调整会话导航和消息书签','检查长对话中的滚动行为','验证浅色与窄屏布局','整理最终验证记录'];
 window.makeRows=()=>topics.flatMap((title,i)=>[{type:'user',key:'message:'+i,sequence:i+1,text:title+'\\n请结合现有代码和成熟开源实现，说明复用理由。\\n保留工作区约束，并验证正常、失败及边界情况。'}, {type:'turn',key:'turn:'+i,runIds:['run:'+i],tools:[],reply:{text:'已检查「'+title+'」涉及的现有实现。\\n\\n'+Array(3).fill('执行与验证继续沿用原有链路。对应的测试、错误反馈和恢复路径已记录，可在这轮消息中查看。').join('\\n\\n'),live:false},stats:{}}]);
 useStore.setState({init:async()=>{},sessionId:'nav-test',sessionTitle:'完善无人值守任务与对话导航',workspace:'/workspace/pilot',cancelRun:()=>window.cancelled++,thread:{...useStore.getState().thread,rows:makeRows(),history:{...useStore.getState().thread.history,hasMore:false}},projects:[]});

@@ -70,6 +70,8 @@ public class WorktreeController {
         GitWorktrees.Handoff handed;
         try {
             handed = worktrees.handoff(Path.of(session.workspace()));
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }

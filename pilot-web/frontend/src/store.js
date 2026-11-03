@@ -30,6 +30,7 @@ import {
 import { normalizeQueue } from './lib/queue.js';
 
 let queueLoadSequence = 0;
+let activationSequence = 0;
 /** 侧边对话正在创建：打开面板的同时又点「新开」时共用一个请求，别建出两条。 */
 const sideChatPending = new Map();
 const sideChatClosing = new Map();
@@ -331,18 +332,20 @@ export const useStore = create(immer((set, get) => {
     applyTheme(get().ui.themeMode, accent);
   },
   /** 桌面通知开关：打开时顺手申请一次浏览器权限（旧版 toggleNotifications 同语义）。 */
-  toggleNotify() {
+  async toggleNotify() {
     const next = !get().notifyEnabled;
-    set((draft) => { draft.notifyEnabled = next; });
     try {
-      localStorage.setItem(NOTIFY_KEY, next ? '1' : '0');
-    } catch {
-      // 存不下只影响下次启动
-    }
-    if (next && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-      Notification.requestPermission().catch(() => {});
-    }
-    get().showNotice(next ? '已开启桌面通知（页面在后台时提醒）' : '已关闭桌面通知');
+      if (next) {
+        if (typeof Notification === 'undefined') throw new Error('此环境不支持系统通知，请使用收件箱或配置 Webhook。');
+        const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+        if (permission !== 'granted') throw new Error('通知权限未获授权，请在浏览器或系统设置中允许。');
+      }
+      const current = await api.deliverySettings();
+      await api.saveDeliverySettings({ ...current, desktop: next });
+      set(draft => { draft.notifyEnabled = next; });
+      try { localStorage.setItem(NOTIFY_KEY, next ? '1' : '0'); } catch { /* 当前设备仍生效 */ }
+      get().showNotice(next ? '已开启可靠桌面通知，可在收件箱查看投递状态。' : '已关闭桌面通知');
+    } catch (e) { get().showNotice(e.message); }
   },
   setUi(patch) {
     set((draft) => { Object.assign(draft.ui, typeof patch === 'function' ? patch(draft.ui) : patch); });
@@ -485,6 +488,8 @@ export const useStore = create(immer((set, get) => {
   },
 
   async activate(sessionId) {
+    const activation = ++activationSequence;
+    const current = () => activation === activationSequence && get().sessionId === sessionId;
     closeStreams();
     discardQueuedEvents();
     set((draft) => {
@@ -496,8 +501,10 @@ export const useStore = create(immer((set, get) => {
     try {
       detail = await api.session(sessionId);
     } catch (error) {
-      get().showNotice('读取会话失败：' + error.message);
+      if (current()) get().showNotice('读取会话失败：' + error.message);
+      return false;
     }
+    if (!current()) return false;
     set((draft) => {
       draft.workspace = detail?.workspace || '';
       draft.sessionTitle = detail?.title || '';
@@ -511,6 +518,7 @@ export const useStore = create(immer((set, get) => {
       }).activeId;
     });
     await get().loadHistory();
+    if (!current()) return false;
     // 历史窗口就绪后再按当前游标续订，避免事件落在重建窗口之前被覆盖
     get().connectSse(sessionId, get().thread.cursor);
     await Promise.all([
@@ -518,6 +526,7 @@ export const useStore = create(immer((set, get) => {
       // 技能按工作区解析（项目级技能随仓库走），换会话后 / 菜单必须跟着换
       get().loadSkills()
     ]);
+    if (!current()) return false;
     const draftText = readDraft(localStorage, sessionId);
     if (draftText) {
       get().composerApi?.setText(draftText);
@@ -530,6 +539,7 @@ export const useStore = create(immer((set, get) => {
     connectMirror(get, set);
     connectCommandTasks(get, set);
     get().refreshActiveRun();
+    return true;
   },
 
   /* ---------- 历史 ---------- */
@@ -2098,7 +2108,7 @@ function applyAttention(kind, title) {
   // 只有页面在后台、用户开了通知、浏览器已授权、且这类信号值得打扰时才弹
   const permission = typeof Notification === 'undefined' ? 'denied' : Notification.permission;
   const enabled = useStore.getState().notifyEnabled;
-  if (!shouldNotify({ kind, hidden: document.hidden, enabled, permission })) {
+  if (kind !== 'attention' || !shouldNotify({ kind, hidden: document.hidden, enabled, permission })) {
     return;
   }
   try {

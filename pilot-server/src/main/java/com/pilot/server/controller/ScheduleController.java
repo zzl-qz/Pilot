@@ -15,6 +15,11 @@ public class ScheduleController {
     public ScheduleController(ScheduleService schedules) { this.schedules = schedules; }
     @GetMapping public List<ScheduledTask> list() { return schedules.list(); }
     @PostMapping public ScheduledTask create(@RequestBody ScheduleService.Create request) { return schedules.create(request); }
+    @GetMapping("/{id}/handoff") public Object handoffPreview(@PathVariable String id) { return schedules.handoffPreview(id); }
+    public record Handoff(String revision) { }
+    @PostMapping("/{id}/handoff") public ScheduledTask handoff(@PathVariable String id, @RequestBody Handoff body) {
+        return schedules.handoff(id, body == null ? null : body.revision());
+    }
     public record Control(String action, Instant runAt) { }
     @PostMapping("/{id}/control") public ScheduledTask control(@PathVariable String id, @RequestBody Control body) {
         if (body == null || body.action() == null) throw new IllegalArgumentException("缺少操作");

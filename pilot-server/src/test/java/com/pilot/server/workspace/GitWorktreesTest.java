@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 class GitWorktreesTest {
 
@@ -57,6 +57,74 @@ class GitWorktreesTest {
 
         worktrees.remove(Path.of(created.path()));
         assertTrue(worktrees.findByPath(Path.of(created.path())).isEmpty());
+    }
+
+    private Path repository() throws Exception {
+        Path repo = Files.createDirectories(root.resolve("原项目 with spaces"));
+        git(repo, "init"); git(repo, "config", "user.email", "t@example.com"); git(repo, "config", "user.name", "test");
+        Files.writeString(repo.resolve("A.txt"), "one\n"); Files.writeString(repo.resolve("删除.txt"), "old\n");
+        git(repo, "add", "."); git(repo, "commit", "-m", "初始版本"); return repo;
+    }
+    @Test void previewIncludesCommitsBinaryDeletionAndNewFilesWithoutChangingRealIndex() throws Exception {
+        Path repo = repository(); var service = new GitWorktrees(new PilotDataDir(root.resolve("data").toString()));
+        Path copy = Path.of(service.create(repo, "HEAD").path());
+        Files.writeString(copy.resolve("A.txt"), "committed\n"); git(copy, "add", "."); git(copy, "commit", "-m", "提交任务改动");
+        Files.delete(copy.resolve("删除.txt"));
+        byte[] binary = new byte[]{0, 1, -1, 0, 50}; Files.write(copy.resolve("新增 文件.bin"), binary);
+        Path index = Path.of(Files.readString(copy.resolve(".git")).strip().substring(8)).resolve("index");
+        byte[] before = Files.readAllBytes(index);
+        var preview = service.preview(copy);
+        assertTrue(preview.files().containsAll(java.util.List.of("A.txt", "删除.txt", "新增 文件.bin")));
+        assertEquals("", preview.conflict()); assertArrayEquals(before, Files.readAllBytes(index));
+        assertEquals("one\n", Files.readString(repo.resolve("A.txt")));
+        service.handoff(copy, preview.revision());
+        assertEquals("committed\n", Files.readString(repo.resolve("A.txt")));
+        assertArrayEquals(binary, Files.readAllBytes(repo.resolve("新增 文件.bin"))); assertFalse(Files.exists(repo.resolve("删除.txt")));
+        assertArrayEquals(before, Files.readAllBytes(index));
+    }
+    @Test void conflictAndStalePreviewNeverPartiallyApply() throws Exception {
+        Path repo = repository(); var service = new GitWorktrees(new PilotDataDir(root.resolve("data").toString()));
+        Path copy = Path.of(service.create(repo, "HEAD").path());
+        Files.writeString(copy.resolve("A.txt"), "changed\n"); Files.writeString(copy.resolve("new.txt"), "agent\n");
+        var clean = service.preview(copy);
+        Files.writeString(repo.resolve("new.txt"), "user\n");
+        assertThrows(IllegalStateException.class, () -> service.handoff(copy, clean.revision()));
+        var conflict = service.preview(copy); assertFalse(conflict.conflict().isBlank());
+        assertThrows(IllegalArgumentException.class, () -> service.handoff(copy, conflict.revision()));
+        assertEquals("one\n", Files.readString(repo.resolve("A.txt"))); assertEquals("user\n", Files.readString(repo.resolve("new.txt")));
+        Files.delete(repo.resolve("new.txt")); var preview = service.preview(copy); Files.writeString(copy.resolve("A.txt"), "later\n");
+        assertThrows(IllegalStateException.class, () -> service.handoff(copy, preview.revision()));
+        assertEquals("one\n", Files.readString(repo.resolve("A.txt")));
+    }
+    @Test void activeWorkspaceRefusesHandoffAndReleasesPartialLock() throws Exception {
+        Path repo = repository(); var registry = new com.pilot.server.session.RunRegistry();
+        var service = new GitWorktrees(new PilotDataDir(root.resolve("data").toString()), registry);
+        Path copy = Path.of(service.create(repo, "HEAD").path()); Files.writeString(copy.resolve("A.txt"), "changed\n");
+        assertTrue(registry.lockWorkspace("busy", repo));
+        assertThrows(IllegalStateException.class, () -> service.handoff(copy));
+        assertTrue(registry.lockWorkspace("probe", copy)); registry.unregister("probe"); registry.unregister("busy");
+        service.handoff(copy); assertEquals("changed\n", Files.readString(repo.resolve("A.txt")));
+    }
+
+    @Test void backgroundCommandsBlockHandoffEvenAfterAgentEnds() throws Exception {
+        Path repo = repository(); var registry = new com.pilot.server.session.RunRegistry();
+        var commands = org.mockito.Mockito.mock(com.pilot.core.tool.CommandTaskManager.class);
+        var service = new GitWorktrees(new PilotDataDir(root.resolve("data").toString()), registry, commands);
+        Path copy = Path.of(service.create(repo, "HEAD").path()); Files.writeString(copy.resolve("A.txt"), "finished\n");
+        org.mockito.Mockito.when(commands.hasRunningInWorkspace(copy)).thenReturn(true);
+        assertThrows(IllegalStateException.class, () -> service.handoff(copy));
+        assertEquals("one\n", Files.readString(repo.resolve("A.txt")));
+        org.mockito.Mockito.when(commands.hasRunningInWorkspace(copy)).thenReturn(false);
+        service.handoff(copy); assertEquals("finished\n", Files.readString(repo.resolve("A.txt")));
+    }
+    @Test void symlinkDestinationIsRejectedWithoutWritingOutsideWorkspace() throws Exception {
+        Path repo = repository(); var service = new GitWorktrees(new PilotDataDir(root.resolve("data").toString()));
+        Path copy = Path.of(service.create(repo, "HEAD").path()); Files.writeString(copy.resolve("A.txt"), "changed\n");
+        Path outside = root.resolve("outside.txt"); Files.writeString(outside, "outside"); Files.delete(repo.resolve("A.txt"));
+        try { Files.createSymbolicLink(repo.resolve("A.txt"), outside); }
+        catch (UnsupportedOperationException | java.nio.file.FileSystemException e) { org.junit.jupiter.api.Assumptions.abort("平台不允许创建符号链接"); }
+        assertThrows(IllegalArgumentException.class, () -> service.preview(copy));
+        assertEquals("outside", Files.readString(outside));
     }
 
     private static void git(Path directory, String... args) throws Exception {

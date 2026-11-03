@@ -50,6 +50,7 @@ class ScheduleServiceTest {
         assertEquals(task.taskId(), service.get(job.id()).taskId());
         finish(job, "COMPLETED"); service.tick();
         assertEquals("COMPLETED", service.get(job.id()).state());
+        assertEquals(clock.instant(), service.get(job.id()).endedAt());
         assertEquals("COMPLETED", service.get(job.id()).history().getFirst().status());
         var reopened = new ScheduleRepository(new SqliteStore(root.resolve("schedules.db")), JsonMapper.builder().build());
         assertEquals(service.get(job.id()), reopened.find(job.id()).orElseThrow());
@@ -148,6 +149,89 @@ class ScheduleServiceTest {
         service.control(job.id(), "reschedule", at);
         assertEquals(Instant.parse("2026-11-04T01:00:00Z"), service.get(job.id()).runAt());
         assertEquals("Asia/Shanghai", service.get(job.id()).timezone());
+    }
+    @Test void defaultIsolationUsesCommittedHeadAndHandoffKeepsExecutionSession() throws Exception {
+        Path repo = java.nio.file.Files.createDirectories(root.resolve("仓库 spaces"));
+        git(repo, "init"); git(repo, "config", "user.email", "t@example.com"); git(repo, "config", "user.name", "test");
+        java.nio.file.Files.writeString(repo.resolve("a.txt"), "baseline"); git(repo, "add", "."); git(repo, "commit", "-m", "初始版本");
+        java.nio.file.Files.writeString(repo.resolve("untracked.txt"), "不要复制");
+        sessions.moveToWorkspace(source, repo.toString());
+        var factory = org.mockito.Mockito.mock(com.pilot.server.workspace.WorkspaceToolFactory.class);
+        org.mockito.Mockito.when(factory.resolve(repo.toString())).thenReturn(repo);
+        var worktrees = new com.pilot.server.workspace.GitWorktrees(new PilotDataDir(root.resolve("isolated-data").toString()));
+        service = new ScheduleService(repository, sessions, runner, tasks, null, clock, worktrees, factory);
+        var job = service.create(new ScheduleService.Create("独立执行", source, "修复", clock.instant().plusSeconds(60), "UTC", null, null, true, null));
+        assertEquals("ISOLATED", job.workspace().mode()); Path copy = Path.of(job.workspace().path());
+        assertFalse(java.nio.file.Files.exists(copy.resolve("untracked.txt")));
+        assertEquals(copy.toString(), sessions.find(job.sessionId()).orElseThrow().workspace());
+        assertThrows(IllegalStateException.class, () -> service.handoffPreview(job.id()));
+        due(); java.nio.file.Files.writeString(copy.resolve("a.txt"), "finished"); finish(job, "COMPLETED"); service.tick();
+        var preview = service.handoffPreview(job.id()); assertEquals("baseline", java.nio.file.Files.readString(repo.resolve("a.txt")));
+        var handed = service.handoff(job.id(), preview.revision()); assertNotNull(handed.workspace().handedOffAt());
+        assertEquals("finished", java.nio.file.Files.readString(repo.resolve("a.txt")));
+        assertEquals(copy.toString(), sessions.find(job.sessionId()).orElseThrow().workspace());
+        assertThrows(IllegalStateException.class, () -> service.handoff(job.id(), preview.revision()));
+        var missing = service.create(new ScheduleService.Create("丢失目录", source, "修复", clock.instant().plusSeconds(60), "UTC", null, null, true, true));
+        worktrees.remove(Path.of(missing.workspace().path())); due();
+        assertEquals("NEEDS_ATTENTION", service.get(missing.id()).state()); assertEquals(1, runner.starts);
+    }
+    @Test void oldSchedulePayloadWithoutWorkspaceRemainsReadable() {
+        var mapper = JsonMapper.builder().build(); var job = create();
+        var json = (tools.jackson.databind.node.ObjectNode) mapper.valueToTree(job); json.remove("workspace");
+        assertNull(mapper.treeToValue(json, ScheduledTask.class).workspace());
+    }
+    private static void git(Path directory, String... arguments) throws Exception {
+        var args = new java.util.ArrayList<String>(); args.add("git"); args.addAll(List.of(arguments));
+        var process = new ProcessBuilder(args).directory(directory.toFile()).redirectErrorStream(true).start();
+        assertTrue(process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS));
+        assertEquals(0, process.exitValue(), new String(process.getInputStream().readAllBytes()));
+    }
+    RecurringScheduleService recurring() {
+        return new RecurringScheduleService(new AutomationStore(new SqliteStore(root.resolve("recurring.db"))), JsonMapper.builder().build(), service, sessions, clock);
+    }
+    RecurringScheduleService.Series series(RecurringScheduleService recurring,String misfire) {
+        var task=new ScheduleService.Create("周期检查",source,"复用链路执行",clock.instant().plusSeconds(60),"Asia/Shanghai",null,null,true,false);
+        return recurring.create(new RecurringScheduleService.Create(task,"0 * * * * *",misfire));
+    }
+    @Test void recurringReusesOneShotExecutionAndNeverOverlapsOrReplaysEveryMissedTick() {
+        var recurring=recurring();var series=series(recurring,"ONCE");clock.at=clock.at.plusSeconds(61);recurring.tick();
+        var current=recurring.get(series.id());assertEquals(1,current.occurrences());assertNotNull(current.activeId());
+        clock.at=clock.at.plusSeconds(2);service.tick();assertEquals(1,runner.starts);
+        clock.at=clock.at.plusSeconds(300);recurring.tick();assertEquals(1,recurring.get(series.id()).occurrences());
+        finish(service.get(current.activeId()),"COMPLETED");service.tick();recurring.tick();
+        assertEquals(2,recurring.get(series.id()).occurrences());assertTrue(recurring.get(series.id()).nextAt().isAfter(clock.instant()));
+        var paused=recurring.control(series.id(),recurring.get(series.id()).version(),"pause");
+        clock.at=clock.at.plusSeconds(600);recurring.tick();assertEquals(2,recurring.get(series.id()).occurrences());
+        assertThrows(IllegalStateException.class,()->recurring.control(series.id(),series.version(),"resume"));
+        recurring.control(series.id(),paused.version(),"cancel");assertEquals("CANCELLED",recurring.get(series.id()).state());
+    }
+    @Test void recurringSkipsLateTicksAndRecoversCrashAfterOccurrenceWasPersisted() {
+        var recurring=recurring();var skip=series(recurring,"SKIP");clock.at=clock.at.plusSeconds(180);recurring.tick();
+        assertEquals(0,recurring.get(skip.id()).occurrences());assertTrue(recurring.get(skip.id()).nextAt().isAfter(clock.instant()));
+        var recovery=series(recurring,"SKIP");String key=recovery.id()+"_"+recovery.nextAt().toEpochMilli();
+        var job=service.createOccurrence(recovery.task(),key);int count=sessions.list().size();
+        clock.at=clock.at.plusSeconds(180);var restarted=recurring();restarted.tick();
+        assertEquals(key,restarted.get(recovery.id()).activeId());assertEquals(1,restarted.get(recovery.id()).occurrences());
+        assertEquals(count,sessions.list().size());assertEquals(job,service.get(key));
+    }
+    @Test void cronPreviewUsesNamedTimezoneRejectsDstGapAndTemplatesUseVersionedSnapshots() {
+        var r=recurring();
+        var times=r.times("2026-03-07T09:00","America/New_York","0 0 9 * * *");
+        assertEquals(Instant.parse("2026-03-07T14:00:00Z"),times.runAt());
+        assertEquals(Instant.parse("2026-03-08T13:00:00Z"),times.next().get(1));
+        assertThrows(IllegalArgumentException.class,()->r.times("2026-03-08T02:30","America/New_York","0 30 2 * * *"));
+        assertThrows(IllegalArgumentException.class,()->r.times("2026-03-07T09:00","UTC","* * * * * *"));
+        var task=new ScheduleService.Create("模板目标",source,"原目标",clock.instant().plusSeconds(60),"UTC",null,null,true,false);
+        var template=r.saveTemplate(null,0,"日常检查",task);assertNull(template.task().sourceSessionId());assertNull(template.task().runAt());
+        var changed=r.saveTemplate(template.id(),template.version(),"更新后的检查",task);assertEquals(2,changed.version());
+        assertThrows(IllegalStateException.class,()->r.saveTemplate(template.id(),1,"过期写入",task));
+        assertEquals(2,recurring().templates().getFirst().version());r.deleteTemplate(changed.id(),changed.version());assertTrue(r.templates().isEmpty());
+    }
+    @Test void recurringDoesNotSilentlyFollowSourceWorkspaceChanges() {
+        var r=recurring();var plan=series(r,"ONCE");int count=sessions.list().size();
+        sessions.moveToWorkspace(source,root.resolve("另一个工作区").toString());clock.at=clock.at.plusSeconds(61);r.tick();
+        assertEquals("ERROR",r.get(plan.id()).state());assertTrue(r.get(plan.id()).message().contains("来源工作区已改变"));
+        assertEquals(count,sessions.list().size());assertEquals(0,runner.starts);
     }
     class FakeRunner implements RunStarter {
         final Map<String, String> active = new HashMap<>(); int starts, resumes, pauses, cancels;

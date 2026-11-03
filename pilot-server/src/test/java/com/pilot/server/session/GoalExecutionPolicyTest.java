@@ -76,6 +76,23 @@ class GoalExecutionPolicyTest {
                 Set.of("edit_file", "create_file").contains(tool) ? path : null, check));
     }
 
+    @Test void longResearchRemainsStructuredAndRetainedAfterManyTools() {
+        tasks.configureAutomation("s", new TaskControlService.Automation("scheduled", true, true));
+        var p = policy((messages, tools) -> complete(), 1000); p.beforeRequest(history);
+        ToolCall fetch = new ToolCall("fetch", "web_fetch", Map.of("url", "https://github.com/openclaw/openclaw"));
+        p.beforeTool(fetch); p.observed(fetch, new ToolExecutor.Outcome("web_fetch", "仓库文档", null, null));
+        String decision = "依据已读文档复用现有调度机制。".repeat(300);
+        String report = p.researchTool().execute(Map.of("sources", List.of("https://github.com/openclaw/openclaw"), "decision", decision, "license", "核对许可证"));
+        assertFalse(report.startsWith("ERROR:")); observe(p, "record_research", "", report, null);
+        for (int i = 0; i < 240; i++) observe(p, "edit_file", "file-" + i, "完成", null);
+        var record = tasks.load("s").execution().evidence().stream().filter(e -> e.tool().equals("record_research")).findFirst().orElseThrow();
+        var json = JsonMapper.builder().build().readTree(record.result());
+        assertEquals(decision, json.get("decision").asText()); assertEquals(1, json.get("sourceEvidence").size());
+        assertTrue(p.permits(new ToolCall("write", "edit_file", Map.of("path", "a.java"))));
+        tasks.snapshotResult("s", "finished_run"); tasks.start("s", "新的目标", List.of(), List.of());
+        assertTrue(tasks.result("finished_run").execution().evidence().stream().anyMatch(e -> e.id().equals(record.id())));
+    }
+
     @Test void unattendedResearchIsRequiredAndSurvivesRestart() {
         tasks.configureAutomation("s", new TaskControlService.Automation("scheduled", true, true));
         var p = policy((messages, tools) -> complete(), 20);
