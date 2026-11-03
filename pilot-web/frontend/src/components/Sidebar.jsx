@@ -3,6 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../store.js';
 import { WorkspaceTree } from './WorkspaceTree.jsx';
 import { groupSessionsByProject } from '../lib/projects.js';
+import { sideChatsFor } from '../lib/side-chat.js';
 
 /** 左侧导航：项目分组的会话列表 + 工作区文件树 + 连接状态。 */
 export function Sidebar() {
@@ -12,19 +13,24 @@ export function Sidebar() {
   const workspace = useStore((state) => state.workspace);
   const connection = useStore((state) => state.ui.connection);
   const sideChats = useStore((state) => state.sideChats);
-  const sideItems = sideChats?.items || [];
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState(() => new Set());
 
+  // 侧边对话属于当前任务：换任务后这里只列出那条任务的，跨项目也不会串台
+  const { items: sideItems, activeId: sideActiveId } = sideChatsFor(sideChats, { sessionId, workspace });
+  const sideIds = useMemo(() => new Set((sideChats?.items || []).map((item) => item.id)), [sideChats]);
+
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
+    // 侧边会话即使后端没有过滤掉，也不该在主列表里占一行（旧版本遗留数据）
+    const visible = sessions.filter((session) => !sideIds.has(session.id));
     const filtered = q
-      ? sessions.filter((session) => (session.title || '').toLowerCase().includes(q)
+      ? visible.filter((session) => (session.title || '').toLowerCase().includes(q)
         || (session.workspace || '').toLowerCase().includes(q))
-      : sessions;
+      : visible;
     // 注意参数顺序：projects 在前、sessions 在后
     return groupSessionsByProject(projects, filtered);
-  }, [sessions, projects, query]);
+  }, [sessions, projects, query, sideIds]);
 
   function toggleProject(key) {
     setCollapsed((prev) => {
@@ -117,8 +123,8 @@ export function Sidebar() {
                 <li key={item.id}>
                   <button
                     type="button"
-                    className={`session-item${item.id === sideChats.activeId ? ' is-active' : ''}`}
-                    title={item.title || '侧边对话'}
+                    className={`session-item${item.id === sideActiveId ? ' is-active' : ''}`}
+                    title={`${item.title || '侧边对话'}（当前任务的临时对话）`}
                     onClick={() => useStore.getState().selectSideChat(item.id)}
                   >
                     <span className="session-title">{item.title || '侧边对话'}</span>

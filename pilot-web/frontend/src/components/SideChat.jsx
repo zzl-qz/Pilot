@@ -1,36 +1,77 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
-import { quoteMarkdown } from '../lib/side-chat.js';
 import {
-  lastEventSequence, reduceSideChat, showSidePieceNav, simplifyTranscript
+  lastEventSequence, quoteMarkdown, reduceSideChat, sideChatsFor, simplifyTranscript
 } from '../lib/side-chat.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
 
 /**
- * 侧边对话：一张简易对话框，只有消息和输入。
- * 侧边栏开着时，顶上的标签导航不出现——对话列表已经在侧边栏里。
+ * 侧边对话：从当前任务分叉出来的临时对话（对齐 Codex 的 /side）。
+ *
+ * <p>打开这一页就等于开一条侧边对话，不用先点「新建」；
+ * 切到别的任务时这里只显示属于那条任务的侧边对话，关掉即丢弃。
  */
 export function SideChatPanel() {
   const sideChats = useStore((state) => state.sideChats);
-  const sidebarOpen = useStore((state) => state.ui.sidebarOpen);
+  const sessionId = useStore((state) => state.sessionId);
+  const workspace = useStore((state) => state.workspace);
+  const parentTitle = useStore((state) => state.sessionTitle);
+  const embedded = useStore((state) => state.embeddedSessionId);
   const [creating, setCreating] = useState(false);
-  const items = sideChats?.items || [];
-  const activeId = sideChats?.activeId || null;
-  const showNav = showSidePieceNav(sidebarOpen);
+  const openedFor = useRef('');
 
-  async function create() {
+  const { items, activeId } = sideChatsFor(sideChats, { sessionId, workspace });
+
+  const create = useCallback(async ({ force = false } = {}) => {
     setCreating(true);
     try {
-      await useStore.getState().createSideChat();
+      return await useStore.getState().createSideChat({ force });
     } finally {
       setCreating(false);
     }
-  }
+  }, []);
+
+  /*
+   * 进这一页就现开一条：Codex 的 /side 是「问一句」，不该先让用户点新建。
+   * 只在这一页刚打开时尝试一次——用户手动关掉后留在空态，反复重建会很吵。
+   */
+  useEffect(() => {
+    if (openedFor.current === 'ready') {
+      return;
+    }
+    if (!sessionId || embedded) {
+      return;
+    }
+    openedFor.current = 'ready';
+    if (!items.length) {
+      create();
+    }
+  }, [sessionId, embedded, items.length, create]);
 
   return (
     <div id="panel-side-chat" className="panel side-chat-panel">
-      {showNav && (
+      <div className="side-chat-scope">
+        <span className="side-chat-scope-text" title={workspace || ''}>
+          {sessionId ? `从「${parentTitle || '当前任务'}」分叉` : '还没有可以分叉的任务'}
+        </span>
+        <button
+          type="button"
+          className="side-chat-new"
+          title="在当前任务旁再开一条侧边对话"
+          disabled={creating || !sessionId}
+          onClick={() => create({ force: true })}
+        >＋ 新开</button>
+        <button
+          type="button"
+          className="side-chat-discard"
+          title="关闭并丢弃这条侧边对话（主任务不受影响）"
+          aria-label="关闭并丢弃这条侧边对话"
+          disabled={!activeId}
+          onClick={() => useStore.getState().closeSideChat(activeId)}
+        >×</button>
+      </div>
+      {items.length > 1 && (
         <div className="side-chat-tabs" role="tablist" aria-label="侧边对话">
           {items.map((item) => (
             <div key={item.id} className={`side-chat-tab${item.id === activeId ? ' is-on' : ''}`} role="presentation">
@@ -46,19 +87,11 @@ export function SideChatPanel() {
                 type="button"
                 className="side-chat-close"
                 aria-label={`关闭 ${item.title}`}
-                title="关闭"
+                title="关闭并丢弃这条侧边对话"
                 onClick={() => useStore.getState().closeSideChat(item.id)}
               >×</button>
             </div>
           ))}
-          <button
-            type="button"
-            className="side-chat-add"
-            title="新建侧边对话"
-            aria-label="新建侧边对话"
-            disabled={creating}
-            onClick={create}
-          >＋</button>
         </div>
       )}
       <div className="side-chat-content">
@@ -66,8 +99,16 @@ export function SideChatPanel() {
           ? <SimpleSideChat sessionId={activeId} />
           : (
             <div className="side-chat-empty">
-              <p>问和主线无关的问题。这边不会打断正在跑的任务。</p>
-              <button type="button" className="btn" disabled={creating} onClick={create}>新建对话</button>
+              <p>
+                {sessionId
+                  ? '这条任务还没有侧边对话。在旁边问一句，主线照常跑。'
+                  : '先发一条消息开始任务，再开侧边对话。'}
+              </p>
+              {sessionId && (
+                <button type="button" className="btn" disabled={creating} onClick={() => create()}>
+                  {creating ? '正在打开…' : '开一条侧边对话'}
+                </button>
+              )}
             </div>
           )}
       </div>
@@ -183,7 +224,11 @@ function SimpleSideChat({ sessionId }) {
               </div>
             )
         ))}
-        {!rows.length && <p className="side-chat-hint">直接问。这里不带主线的工具记录。</p>}
+        {!rows.length && (
+          <p className="side-chat-hint">
+            直接问。它继承了当前任务的上下文，这里不显示主线的工具记录，也不会打断主任务。
+          </p>
+        )}
       </div>
       {error && <p className="side-chat-error">{error}</p>}
       <form className="side-chat-compose" onSubmit={send}>

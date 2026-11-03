@@ -49,7 +49,7 @@ export function Inspector() {
   return (
     <aside id="activity" className="activity inspector is-rail is-open" aria-label="工作区面板">
       <div className="inspector-main">
-      <header className="inspector-panel-head"><div><strong>{TABS.find(item => item.id === tab)?.label}</strong><span>{tab === 'preview' ? '只读文件预览' : tab === 'changes' ? '检查工作区的代码改动' : tab === 'commands' ? '命令状态与输出' : tab === 'activity' ? '任务执行记录' : tab === 'capabilities' ? '当前可用的工具与技能' : tab === 'browser' ? '浏览页面与引用内容' : '独立于主任务的对话'}</span></div><button type="button" className="icon-btn" aria-label="关闭工作区面板" onClick={() => useStore.getState().setUi({ inspectorOpen: false, reviewExpanded: false })}><Icon name="close" /></button></header>
+      <header className="inspector-panel-head"><div><strong>{TABS.find(item => item.id === tab)?.label}</strong><span>{tab === 'preview' ? '只读文件预览' : tab === 'changes' ? '检查工作区的代码改动' : tab === 'commands' ? '命令状态与输出' : tab === 'activity' ? '任务执行记录' : tab === 'capabilities' ? '当前可用的工具与技能' : tab === 'browser' ? '浏览页面与引用内容' : '从当前任务分叉的临时对话，关掉即丢弃'}</span></div><button type="button" className="icon-btn" aria-label="关闭工作区面板" onClick={() => useStore.getState().setUi({ inspectorOpen: false, reviewExpanded: false })}><Icon name="close" /></button></header>
       {tab === 'activity' && <div className="inspector-head"><Filters /></div>}
       <div className="inspector-body" id={`inspector-panel-${tab}`} role="tabpanel" aria-labelledby={`inspector-tab-${tab}`}>
         {/* 每个面板单独兜底：某个页签渲染出错时只废掉这一块，别把整页卸载成白屏 */}

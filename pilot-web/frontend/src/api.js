@@ -64,6 +64,8 @@ export const api = {
   sessions: () => apiJson('/api/sessions'),
   session: (id) => apiJson(`/api/sessions/${encodeURIComponent(id)}`),
   createSession: (body) => apiJson('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }),
+  /** 从当前对话分叉一条临时侧边对话（对齐 Codex 的 /side）。 */
+  createSideChat: (id) => apiJson(`/api/sessions/${encodeURIComponent(id)}/side`, { method: 'POST' }),
   renameSession: (id, title) => apiJson(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }),
   archiveSession: (id, archived = true) => apiJson(`/api/sessions/${encodeURIComponent(id)}/archive`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archived }) }),
   switchWorkspace: (id, workspace) => apiJson(`/api/sessions/${encodeURIComponent(id)}/workspace`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspace }) }),

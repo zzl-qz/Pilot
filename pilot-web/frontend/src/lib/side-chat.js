@@ -1,10 +1,16 @@
 /**
  * 侧边对话的纯逻辑：标签页持久化、旧链接的内嵌页判定、选中文本的引用格式。
  * 引用直接交给当前页的侧边对话，不再经过 iframe。
+ *
+ * <p>侧边对话对齐 Codex 的 /side：从某条主对话分叉（parentId），
+ * 切换主任务时只看到属于它的侧边对话，关掉即丢弃。
  */
+
+import { samePath } from './projects.js';
 
 const STORAGE_KEY = 'pilot.side-chats';
 const QUERY_KEY = 'sideChat';
+export const SIDE_CHAT_TITLE = '侧边对话';
 
 /**
  * 默认存储：拿不到 localStorage（隐私模式、Node 测试）时降级成 null，
@@ -26,11 +32,13 @@ export function readSideChats(storage = defaultStorage()) {
   try {
     const saved = JSON.parse(storage.getItem(STORAGE_KEY) || '{}');
     const items = (Array.isArray(saved.items) ? saved.items : [])
-      .filter((item) => item && item.id && item.workspace)
+      .filter((item) => item && item.id && (item.workspace || item.parentId))
       .map((item) => ({
         id: item.id,
-        title: item.title || '侧边对话',
-        workspace: item.workspace,
+        // 旧版标签没有 parentId：保留下来，按工作区兜底展示，不至于升级后凭空消失
+        parentId: item.parentId || null,
+        title: item.title || SIDE_CHAT_TITLE,
+        workspace: item.workspace || null,
         projectId: item.projectId || null
       }));
     const activeId = items.some((item) => item.id === saved.activeId) ? saved.activeId : (items[0]?.id || null);
@@ -47,11 +55,47 @@ export function writeSideChats(state, storage = defaultStorage()) {
   try {
     storage.setItem(STORAGE_KEY, JSON.stringify({
       activeId: state.activeId,
-      items: (state.items || []).map(({ id, title, workspace, projectId }) => ({ id, title, workspace, projectId }))
+      items: (state.items || []).map(({ id, parentId, title, workspace, projectId }) => ({
+        id, parentId: parentId || null, title, workspace, projectId
+      }))
     }));
   } catch {
     // 存不下只影响下次启动
   }
+}
+
+/**
+ * 当前主任务能看到的侧边对话。
+ *
+ * <p>新数据按 parentId 归属；旧标签没有 parentId，只在同一工作区里露出，
+ * 这样切换项目时不会把另一个仓库的侧边对话带过来。
+ */
+export function sideChatsFor(sideChats, { sessionId = null, workspace = '' } = {}) {
+  const items = (sideChats?.items || []).filter((item) => {
+    if (!sessionId) {
+      return false;
+    }
+    return item.parentId ? item.parentId === sessionId : samePath(item.workspace, workspace);
+  });
+  const activeId = items.some((item) => item.id === sideChats?.activeId)
+    ? sideChats.activeId
+    : (items[0]?.id || null);
+  return { items, activeId };
+}
+
+/** 同一主任务下多条侧边对话依次编号，标签才分得清谁是谁。 */
+export function sideChatTitle(items, parentId) {
+  const used = new Set((items || [])
+    .filter((item) => item.parentId === parentId)
+    .map((item) => item.title));
+  if (!used.has(SIDE_CHAT_TITLE)) {
+    return SIDE_CHAT_TITLE;
+  }
+  let index = 2;
+  while (used.has(`${SIDE_CHAT_TITLE} ${index}`)) {
+    index += 1;
+  }
+  return `${SIDE_CHAT_TITLE} ${index}`;
 }
 
 /**

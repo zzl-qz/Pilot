@@ -24,10 +24,14 @@ import { isCommandActive, commandStatusLabel, mergeCommandLog } from './lib/comm
 import { nextMirrorMode } from './lib/browser-mirror.js';
 import { classifyModelError, describeModelSaved } from './lib/model-settings.js';
 import { sameUserInput } from './thread-utils.js';
-import { readSideChats, writeSideChats, readEmbeddedSession } from './lib/side-chat.js';
+import {
+  readSideChats, writeSideChats, readEmbeddedSession, sideChatsFor, sideChatTitle
+} from './lib/side-chat.js';
 import { normalizeQueue } from './lib/queue.js';
 
 let queueLoadSequence = 0;
+/** 侧边对话正在创建：打开面板的同时又点「新开」时共用一个请求，别建出两条。 */
+let sideChatPending = null;
 const RECONNECT_BASE_MS = 800;
 const RECONNECT_MAX_MS = 15000;
 
@@ -383,7 +387,13 @@ export const useStore = create(immer((set, get) => {
     try {
       // 后端 SessionResponse 的字段是 sessionId，而界面（侧栏、启动恢复等）统一按 id 读取，
       // 这里归一化补上 id 别名，避免到处取到 undefined 后把 "undefined" 当会话 ID 发给后端。
-      const sessions = (await api.sessions() || []).map((session) => ({ ...session, id: session.sessionId }));
+      //
+      // 侧边对话由后端过滤，不进主列表；旧版本建的侧边会话没有父会话标记，
+      // 这里按本地标签再兜一道，免得升级后侧栏里多出一条「未分组」的重复项。
+      const sideIds = new Set((get().sideChats?.items || []).map((item) => item.id));
+      const sessions = (await api.sessions() || [])
+        .map((session) => ({ ...session, id: session.sessionId }))
+        .filter((session) => !sideIds.has(session.id));
       set((draft) => { draft.sessions = sessions; });
       return sessions;
     } catch (error) {
@@ -412,6 +422,8 @@ export const useStore = create(immer((set, get) => {
       draft.currentProjectId = projectId;
       draft.sessionTitle = '';
       draft.ui.reviewExpanded = false;
+      // 新任务还没有会话，也就没有可归属的侧边对话；面板留着空态等第一条消息
+      draft.sideChats.activeId = null;
     });
     return null;
   },
@@ -488,6 +500,10 @@ export const useStore = create(immer((set, get) => {
       if (detail?.permissionMode) {
         draft.permissionMode = normalizePermission(detail.permissionMode);
       }
+      // 侧边对话跟着主任务走：切到别的任务后，只选中属于它的那一条
+      draft.sideChats.activeId = sideChatsFor(draft.sideChats, {
+        sessionId, workspace: draft.workspace
+      }).activeId;
     });
     await get().loadHistory();
     // 历史窗口就绪后再按当前游标续订，避免事件落在重建窗口之前被覆盖
@@ -1332,24 +1348,43 @@ export const useStore = create(immer((set, get) => {
     return (state.projects || []).find((project) => project.id === projectId) || null;
   },
 
-  async createSideChat() {
+  /**
+   * 开一条侧边对话：对齐 Codex 的 /side——从**当前任务**分叉，而不是凭空建一条全局会话。
+   *
+   * <p>后端负责继承父会话的工作区与模型记忆；前端只记住「它属于哪条主任务」。
+   * 同一条主任务已经有侧边对话时直接切过去，只有显式 `force` 才再开一条。
+   */
+  async createSideChat({ force = false } = {}) {
     const state = get();
     if (state.embeddedSessionId) {
       return null;
     }
-    const project = state.currentProject() || (state.projects || [])[0] || null;
-    const workspace = state.workspace || project?.folders?.[0];
-    if (!workspace) {
-      state.showNotice('先选择一个已绑定工作区的项目，再开侧边对话');
+    const { sessionId } = state;
+    if (!sessionId) {
+      state.showNotice('先发一条消息开始任务，再开侧边对话');
       return null;
     }
-    try {
-      const session = await api.createSession({ title: '侧边对话', projectId: null, workspace, replaceBlank: false });
+    const existing = (state.sideChats.items || []).find((item) => item.parentId === sessionId);
+    if (existing && !force) {
+      set((draft) => {
+        draft.sideChats.activeId = existing.id;
+        draft.ui.inspectorOpen = true;
+        draft.ui.inspectorTab = 'chat';
+      });
+      persistSideChats();
+      return existing;
+    }
+    if (sideChatPending) {
+      return sideChatPending;
+    }
+    sideChatPending = (async () => {
+      const session = await api.createSideChat(sessionId);
       const item = {
         id: session?.sessionId || session?.id,
-        title: session?.title || '侧边对话',
-        workspace: session?.workspace || workspace,
-        projectId: null
+        parentId: session?.parentSessionId || sessionId,
+        title: sideChatTitle(state.sideChats.items, sessionId),
+        workspace: session?.workspace || state.workspace || null,
+        projectId: session?.projectId || null
       };
       if (!item.id) {
         throw new Error('后端没有返回会话 ID');
@@ -1361,11 +1396,17 @@ export const useStore = create(immer((set, get) => {
         draft.ui.inspectorTab = 'chat';
       });
       persistSideChats();
-      await Promise.all([get().loadSessions(), get().loadProjects()]);
+      // 侧边会话不进主列表；刷新一次把旧版本遗留的重复项也一并清掉
+      get().loadSessions();
       return item;
+    })();
+    try {
+      return await sideChatPending;
     } catch (error) {
       get().showNotice('创建侧边对话失败：' + error.message);
       return null;
+    } finally {
+      sideChatPending = null;
     }
   },
 
@@ -1381,57 +1422,49 @@ export const useStore = create(immer((set, get) => {
     persistSideChats();
   },
 
+  /**
+   * 关闭侧边对话 = 丢弃（Codex 的侧边对话本来就不进历史）。
+   * 后端会话连同事件与记忆一起删掉，主对话不受影响。
+   */
   closeSideChat(id) {
+    const closing = (get().sideChats.items || []).find((item) => item.id === id);
     set((draft) => {
-      const index = draft.sideChats.items.findIndex((item) => item.id === id);
-      if (index >= 0) {
-        draft.sideChats.items.splice(index, 1);
-      }
-      if (draft.sideChats.activeId === id) {
-        draft.sideChats.activeId = draft.sideChats.items[Math.min(index, draft.sideChats.items.length - 1)]?.id || null;
-      }
-      if (!draft.sideChats.activeId && draft.ui.inspectorTab === 'chat') {
-        draft.ui.inspectorTab = 'activity';
-      }
+      draft.sideChats.items = draft.sideChats.items.filter((item) => item.id !== id);
+      draft.sideChats.activeId = sideChatsFor(draft.sideChats, {
+        sessionId: draft.sessionId, workspace: draft.workspace
+      }).activeId;
     });
     persistSideChats();
+    if (closing) {
+      api.deleteSession(id).catch(() => {
+        // 会话可能已经被别处删掉，前端标签移除即可
+      });
+    }
   },
 
-  /** Ctrl+Alt+S：没有标签就先建一个；已经停在对话页就收起，否则切过去（旧版 toggleSideChatPane）。 */
+  /** Ctrl+Alt+S：已经停在对话页就收起，否则开/切到当前任务的侧边对话。 */
   toggleSideChatPane() {
     const state = get();
     if (state.embeddedSessionId) {
-      return;
-    }
-    if (!state.sideChats.items.length) {
-      state.createSideChat();
       return;
     }
     if (state.ui.inspectorOpen && state.ui.inspectorTab === 'chat') {
       state.setUi({ inspectorOpen: false });
       return;
     }
-    state.setUi({ inspectorOpen: true, inspectorTab: 'chat' });
+    state.createSideChat();
   },
 
-  /** 把选中的文本带进当前页的侧边对话。 */
+  /** 把选中的文本带进当前任务的侧边对话（没有就现开一条）。 */
   async askSideChat(text) {
     if (!String(text || '').trim() || get().embeddedSessionId) {
       return;
     }
-    let id = get().sideChats.activeId;
-    if (!id) {
-      const item = await get().createSideChat();
-      if (!item) {
-        return;
-      }
-      id = item.id;
+    const item = await get().createSideChat();
+    if (!item) {
+      return;
     }
-    set((draft) => {
-      draft.ui.inspectorOpen = true;
-      draft.ui.inspectorTab = 'chat';
-    });
-    set((draft) => { draft.sideQuote = { id, text, nonce: Date.now() }; });
+    set((draft) => { draft.sideQuote = { id: item.id, text, nonce: Date.now() }; });
   },
 
   takeSideQuote(id) {
@@ -1785,6 +1818,18 @@ export const useStore = create(immer((set, get) => {
       await api.deleteSession(id);
       // 先本地摘掉这一行：后端的清理是异步的，紧接着的列表可能还带着它
       set((draft) => { draft.sessions = (draft.sessions || []).filter((session) => session.id !== id); });
+      // 主任务没了，挂在它下面的侧边对话也一起清掉（它们不会出现在列表里，留着就成了孤儿）
+      const orphans = (get().sideChats.items || []).filter((item) => item.parentId === id);
+      if (orphans.length) {
+        set((draft) => {
+          draft.sideChats.items = draft.sideChats.items.filter((item) => item.parentId !== id);
+          draft.sideChats.activeId = sideChatsFor(draft.sideChats, {
+            sessionId: draft.sessionId, workspace: draft.workspace
+          }).activeId;
+        });
+        persistSideChats();
+        orphans.forEach((item) => { api.deleteSession(item.id).catch(() => {}); });
+      }
       get().showNotice('已删除对话');
       const list = await get().loadSessions();
       if (!wasActive) {

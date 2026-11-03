@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   readSideChats, writeSideChats, quoteMarkdown, appendQuote,
-  showSidePieceNav, messagePeek, simplifyTranscript, reduceSideChat, lastEventSequence
+  showSidePieceNav, messagePeek, simplifyTranscript, reduceSideChat, lastEventSequence,
+  sideChatsFor, sideChatTitle
 } from '../../../frontend/src/lib/side-chat.js';
 
 /** 最小的 localStorage 桩：侧边对话的标签页持久化只依赖这四个方法。 */
@@ -30,6 +31,47 @@ test('side chat tabs survive a reload and keep the active tab', () => {
   assert.equal(restored.activeId, 'side-2');
   assert.equal(restored.items.length, 2);
   assert.equal(restored.items[1].workspace, 'repo-b');
+});
+
+test('side chat keeps the task it was forked from across a reload', () => {
+  const storage = stubStorage();
+  writeSideChats({
+    activeId: 'side-1',
+    items: [{ id: 'side-1', parentId: 'task-9', title: '侧边对话', workspace: 'repo-a' }]
+  }, storage);
+
+  const restored = readSideChats(storage);
+  assert.equal(restored.items[0].parentId, 'task-9');
+});
+
+test('side chats follow their own task instead of leaking across tasks', () => {
+  const state = {
+    activeId: 'side-b',
+    items: [
+      { id: 'side-a', parentId: 'task-1', title: '侧边对话', workspace: 'repo' },
+      { id: 'side-b', parentId: 'task-2', title: '侧边对话', workspace: 'repo' }
+    ]
+  };
+
+  assert.deepEqual(sideChatsFor(state, { sessionId: 'task-1', workspace: 'repo' }).items.map((item) => item.id),
+    ['side-a']);
+  assert.equal(sideChatsFor(state, { sessionId: 'task-2', workspace: 'repo' }).activeId, 'side-b');
+  // 没有主任务时没有可归属的侧边对话
+  assert.deepEqual(sideChatsFor(state, { sessionId: null, workspace: 'repo' }).items, []);
+});
+
+test('legacy tabs without a parent only show inside their own workspace', () => {
+  const state = { activeId: 'old', items: [{ id: 'old', title: '侧边对话', workspace: 'repo-a' }] };
+
+  assert.equal(sideChatsFor(state, { sessionId: 'task-1', workspace: 'repo-a' }).items.length, 1);
+  assert.equal(sideChatsFor(state, { sessionId: 'task-1', workspace: 'repo-b' }).items.length, 0);
+});
+
+test('extra side chats under the same task are numbered', () => {
+  const items = [{ id: 'a', parentId: 'task-1', title: '侧边对话' }];
+
+  assert.equal(sideChatTitle(items, 'task-1'), '侧边对话 2');
+  assert.equal(sideChatTitle(items, 'task-2'), '侧边对话');
 });
 
 test('a missing active tab falls back to the first one instead of leaving the pane empty', () => {
