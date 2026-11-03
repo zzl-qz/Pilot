@@ -111,6 +111,27 @@ class SandboxStoreTest {
     }
 
     @Test
+    void acceptingOneSandboxInvalidatesVerificationsOfTheOthers() throws IOException {
+        SandboxStore store = store();
+        store.add("ses_partial", proposal());
+        DiffSandbox other = new DiffSandbox("sbx_2", "agent_2", "T2", "");
+        other.add("src/B.java", null, "class B {}\n", false, RiskLevel.MEDIUM);
+        store.add("ses_partial", other);
+        store.recordVerification("ses_partial", "sbx_1",
+                VerificationGate.Report.passed(java.util.List.of("mvn test")));
+        store.recordVerification("ses_partial", "sbx_2",
+                VerificationGate.Report.passed(java.util.List.of("mvn test")));
+
+        assertTrue(store.accept("ses_partial", "sbx_1", workspace).ok());
+        // 接受成功后由 MultiAgentController 递增：只接受一部分改动后，剩下的必须重新校验
+        store.bumpWorkspaceRevision("ses_partial");
+
+        SandboxStore.VerificationState state = store.verificationState("ses_partial", "sbx_2");
+        assertFalse(state.current(), "工作区已被改写，其余沙箱的旧结论不能继续放行");
+        assertTrue(state.reason().contains("重新校验"), state.reason());
+    }
+
+    @Test
     void verificationIsInvalidatedWhenCandidateChanges() throws IOException {
         SandboxStore store = store();
         DiffSandbox sandbox = proposal();

@@ -89,6 +89,8 @@ public class SandboxStore {
     /** 下游沙箱 → 上游沙箱列表，用于依赖变更传播。 */
     private final ConcurrentMap<String, java.util.LinkedHashSet<String>> dependencies =
             new ConcurrentHashMap<>();
+    /** 会话 → 工作区版本；沙箱被接受一次就递增，用来让其余沙箱的旧校验失效。 */
+    private final ConcurrentMap<String, Long> workspaceRevisions = new ConcurrentHashMap<>();
     private final ObjectMapper mapper;
     private final PilotDataDir dataDir;
     private final Set<String> restoredSessions = ConcurrentHashMap.newKeySet();
@@ -101,9 +103,14 @@ public class SandboxStore {
                                String detail, int files) {
     }
 
+    /**
+     * @param workspaceRevision 记录校验时所处的工作区版本；任一沙箱被接受后工作区基线就变了，
+     *                          其余沙箱的旧结论随即失效（「选择一部分改动接受」必须重新校验）
+     */
     private record VerificationPayload(String candidateHash, String dependencyHash,
                                        String environmentFingerprint, String validationHash,
-                                       String status, List<String> checks, String detail) {
+                                       String status, List<String> checks, String detail,
+                                       long workspaceRevision) {
     }
 
     public SandboxStore(ObjectMapper mapper, PilotDataDir dataDir) {
@@ -118,6 +125,7 @@ public class SandboxStore {
         verifications.keySet().removeIf(key -> key.startsWith(sessionId + "/"));
         manifests.keySet().removeIf(key -> key.startsWith(sessionId + "/"));
         dependencies.keySet().removeIf(key -> key.startsWith(sessionId + "/"));
+        workspaceRevisions.remove(sessionId);
         restoredSessions.remove(sessionId);
         Path dir = sessionDir(sessionId);
         if (Files.isDirectory(dir)) {
@@ -180,6 +188,12 @@ public class SandboxStore {
         }
         String environment = payload.environmentFingerprint() == null ? environmentFingerprint()
                 : payload.environmentFingerprint();
+        // 先判工作区：接受过别的改动后，这份结论所对照的工作区已经不是现在的了
+        if (payload.workspaceRevision() != workspaceRevision(sessionId)) {
+            verifications.remove(sessionId + "/" + sandboxId);
+            return new VerificationState(payload.status(), false, "",
+                    "工作区已被其他已接受的变更修改，需要重新校验");
+        }
         com.pilot.core.multi.ArtifactManifest manifest = manifest(sessionId, sandboxId, environment);
         // 先判依赖：候选指纹本身也包含依赖，先判候选会把「上游变了」误报成「自己变了」
         if (!manifest.dependencyHashes().equals(payload.dependencyHash() == null
@@ -333,6 +347,51 @@ public class SandboxStore {
         }
         history.add(manifest);
         persistManifests(sessionId, manifest.sandboxId());
+    }
+
+    /**
+     * 工作区版本：每次有沙箱被接受就递增。
+     *
+     * <p>校验结论是「在某一版工作区上跑出来的」。用户只接受一部分改动时，剩余沙箱面对的
+     * 已经是另一个工作区，旧的通过结论不能继续用来放行。
+     */
+    public long workspaceRevision(String sessionId) {
+        restore(sessionId);
+        return workspaceRevisions.getOrDefault(sessionId, 0L);
+    }
+
+    /** 有变更真正写入工作区后调用；返回递增后的版本。 */
+    public long bumpWorkspaceRevision(String sessionId) {
+        long next = workspaceRevisions.merge(sessionId, 1L, Long::sum);
+        persistWorkspaceRevision(sessionId);
+        return next;
+    }
+
+    private void persistWorkspaceRevision(String sessionId) {
+        Path file = dataDir.file("multi", sanitize(sessionId), "workspace.json");
+        try {
+            Files.createDirectories(file.getParent());
+            atomicWrite(file, mapper.writeValueAsString(
+                    Map.of("workspaceRevision", workspaceRevisions.getOrDefault(sessionId, 0L))));
+        } catch (IOException e) {
+            log.warn("写入工作区版本失败: session={}", sessionId, e);
+        }
+    }
+
+    private void restoreWorkspaceRevision(String sessionId, Path file) {
+        if (!Files.isRegularFile(file)) {
+            return;
+        }
+        try {
+            Map<String, Object> payload = mapper.readValue(Files.readString(file),
+                    new tools.jackson.core.type.TypeReference<Map<String, Object>>() { });
+            Object value = payload == null ? null : payload.get("workspaceRevision");
+            if (value instanceof Number number) {
+                workspaceRevisions.put(sessionId, number.longValue());
+            }
+        } catch (Exception e) {
+            log.warn("忽略损坏的工作区版本文件: {}", file, e);
+        }
     }
 
     public void add(String sessionId, DiffSandbox sandbox) {
@@ -521,7 +580,7 @@ public class SandboxStore {
             atomicWrite(file, mapper.writeValueAsString(new VerificationPayload(manifest.candidateHash(),
                     String.join(",", manifest.dependencyHashes()), manifest.environmentFingerprint(),
                     validationHash(manifest.candidateHash(), manifest.environmentFingerprint(), report.checks()),
-                    report.status(), report.checks(), report.detail())));
+                    report.status(), report.checks(), report.detail(), workspaceRevision(sessionId))));
         } catch (IOException e) {
             log.warn("写入多 Agent 校验状态失败: session={}, sandbox={}", sessionId, sandboxId, e);
         }
@@ -574,6 +633,7 @@ public class SandboxStore {
                     .filter(file -> !file.getFileName().toString().equals("tasks.json"))
                     .filter(file -> !file.getFileName().toString().equals("arbitrations.json"))
                     .filter(file -> !file.getFileName().toString().equals("dependencies.json"))
+                    .filter(file -> !file.getFileName().toString().equals("workspace.json"))
                     .filter(file -> !file.getFileName().toString().startsWith("verification-"))
                     .filter(file -> !file.getFileName().toString().startsWith("manifests-"))
                     .forEach(file -> restoreSandbox(sessionId, file));
@@ -583,6 +643,7 @@ public class SandboxStore {
         restoreTasks(sessionId, dir.resolve("tasks.json"));
         restoreArbitrations(sessionId, dir.resolve("arbitrations.json"));
         restoreDependencies(sessionId, dir.resolve("dependencies.json"));
+        restoreWorkspaceRevision(sessionId, dir.resolve("workspace.json"));
         try (var files = Files.list(dir)) {
             List<Path> entries = files.toList();
             entries.stream().filter(file -> file.getFileName().toString().startsWith("manifests-"))

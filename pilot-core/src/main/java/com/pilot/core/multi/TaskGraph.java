@@ -132,6 +132,97 @@ public final class TaskGraph {
         return result;
     }
 
+    /**
+     * 找出会并行写同一批文件的任务对：两个可写任务之间没有依赖链，文件白名单又可能重叠。
+     *
+     * <p>没有依赖关系的任务会被放进同一批并行执行，而并行写同一批文件必然互相覆盖——
+     * 这不是「合并时才发现冲突」，而是从派发阶段就不成立。返回人类可读的问题列表，空表示无冲突。
+     *
+     * <p>按字面前缀保守判断，不做精确 glob 求值：宁可多报一次，也不能漏掉真正的重叠。
+     */
+    public static List<String> overlappingWriters(Collection<TaskSpec> specs) {
+        if (specs == null || specs.size() < 2) {
+            return List.of();
+        }
+        Map<String, TaskSpec> nodes = new LinkedHashMap<>();
+        for (TaskSpec spec : specs) {
+            nodes.put(spec.id(), spec);
+        }
+        List<TaskSpec> writers = specs.stream()
+                .filter(spec -> spec.scope() != null && spec.scope().writable())
+                .toList();
+        List<String> problems = new ArrayList<>();
+        for (int i = 0; i < writers.size(); i++) {
+            for (int j = i + 1; j < writers.size(); j++) {
+                TaskSpec left = writers.get(i);
+                TaskSpec right = writers.get(j);
+                // 有依赖链的两个任务是串行的，不构成并行写入
+                if (dependsOn(left, right.id(), nodes, new LinkedHashSet<>())
+                        || dependsOn(right, left.id(), nodes, new LinkedHashSet<>())) {
+                    continue;
+                }
+                String shared = sharedPrefix(left.scope().allowFiles(), right.scope().allowFiles());
+                if (shared != null) {
+                    problems.add(left.id() + " 与 " + right.id() + " 都会写 " + shared);
+                }
+            }
+        }
+        return problems;
+    }
+
+    private static boolean dependsOn(TaskSpec spec, String target, Map<String, TaskSpec> nodes,
+                                     Set<String> visited) {
+        for (String dependency : spec.dependsOn()) {
+            if (!visited.add(dependency)) {
+                continue;
+            }
+            if (dependency.equals(target)) {
+                return true;
+            }
+            TaskSpec parent = nodes.get(dependency);
+            if (parent != null && dependsOn(parent, target, nodes, visited)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String sharedPrefix(List<String> left, List<String> right) {
+        if (left == null || left.isEmpty() || right == null || right.isEmpty()) {
+            return "（未限定文件范围）";
+        }
+        for (String first : left) {
+            for (String second : right) {
+                String prefixA = literalPrefix(first);
+                String prefixB = literalPrefix(second);
+                if (!prefixA.startsWith(prefixB) && !prefixB.startsWith(prefixA)) {
+                    continue;
+                }
+                String shorter = prefixA.length() <= prefixB.length() ? prefixA : prefixB;
+                return shorter.isEmpty() ? "（整个工作区）" : shorter;
+            }
+        }
+        return null;
+    }
+
+    /** glob 里第一个通配符之前的字面部分；空串表示匹配整个工作区。 */
+    private static String literalPrefix(String glob) {
+        String text = glob == null ? "" : glob.replace('\\', '/').strip();
+        int cut = text.length();
+        for (int i = 0; i < text.length(); i++) {
+            char current = text.charAt(i);
+            if (current == '*' || current == '?' || current == '{') {
+                cut = i;
+                break;
+            }
+        }
+        String prefix = text.substring(0, cut);
+        while (prefix.endsWith("/")) {
+            prefix = prefix.substring(0, prefix.length() - 1);
+        }
+        return prefix;
+    }
+
     /** 某个任务的最长依赖链深度，用于并行调度时按层推进。 */
     public int depth(String id) {
         TaskSpec spec = require(id);

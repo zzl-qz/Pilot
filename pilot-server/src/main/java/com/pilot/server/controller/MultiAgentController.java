@@ -6,6 +6,7 @@ import com.pilot.core.session.SessionService;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.multi.SandboxStore;
 import com.pilot.server.multi.VerificationGate;
+import com.pilot.server.store.JdbcDispatchStore;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,13 +36,28 @@ public class MultiAgentController {
     private final SandboxStore sandboxes;
     private final AgentProperties properties;
     private final VerificationGate verification;
+    /** 派发记录出口；未配置持久化存储时为空，接口返回空列表。 */
+    private final JdbcDispatchStore dispatchStore;
 
     public MultiAgentController(SessionService sessions, SandboxStore sandboxes, AgentProperties properties,
                                 VerificationGate verification) {
+        this(sessions, sandboxes, properties, verification, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public MultiAgentController(SessionService sessions, SandboxStore sandboxes, AgentProperties properties,
+                                VerificationGate verification, JdbcDispatchStore dispatchStore) {
         this.sessions = sessions;
         this.sandboxes = sandboxes;
         this.properties = properties;
         this.verification = verification;
+        this.dispatchStore = dispatchStore;
+    }
+
+    /** 一次派发的持久化视图：图、节点状态与每次尝试，重启后仍然可查。 */
+    public record DispatchState(String dispatchId, String status, String createdAt,
+                                List<JdbcDispatchStore.NodeRow> nodes,
+                                List<JdbcDispatchStore.AttemptRow> attempts) {
     }
 
     public record MultiState(String sessionId, List<SandboxStore.TaskView> tasks,
@@ -66,6 +82,19 @@ public class MultiAgentController {
         }
         return new MultiState(id, sandboxes.tasks(id), sandboxes.diffs(id), sandboxes.arbitrations(id),
                 manifests, verifications);
+    }
+
+    /** 持久化的派发记录：界面与排查都用同一份状态，不只读内存看板。 */
+    @GetMapping("/dispatches")
+    public List<DispatchState> dispatches(@PathVariable String id) {
+        requireSession(id);
+        if (dispatchStore == null) {
+            return List.of();
+        }
+        return dispatchStore.dispatches(id).stream()
+                .map(row -> new DispatchState(row.dispatchId(), row.status(), row.createdAt(),
+                        dispatchStore.nodes(row.dispatchId()), dispatchStore.attempts(row.dispatchId())))
+                .toList();
     }
 
     /** 某个沙箱的产物清单历史：每一版都绑定当时的候选指纹、依赖与校验结论。 */
@@ -133,6 +162,8 @@ public class MultiAgentController {
         SandboxStore.ApplyReport applied = sandboxes.accept(id, sandboxId, workspaceOf(session));
         if (applied.ok()) {
             sandboxes.markAccepted(id, sandboxId);
+            // 工作区已经被改写：其余沙箱的旧校验结论不再适用，必须重新组装候选后重跑
+            sandboxes.bumpWorkspaceRevision(id);
         }
         return applied;
     }

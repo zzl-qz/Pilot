@@ -38,6 +38,37 @@ class DispatchAgentsToolTest {
         assertFalse(scope.writable());
     }
 
+    /** 单写者原则：互不依赖又写同一批文件的任务会被并行调度，必然互相覆盖。 */
+    @Test
+    void rejectsParallelWritersOnTheSameFiles() {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () ->
+                DispatchAgentsTool.parseTasks(Map.of("tasks", List.of(
+                        Map.of("id", "T1", "goal", "改后端", "files", List.of("src/**"), "writable", true),
+                        Map.of("id", "T2", "goal", "改同一批文件", "files", List.of("src/**"),
+                                "writable", true)))));
+
+        assertTrue(error.getMessage().contains("并行写同一批文件"), error.getMessage());
+    }
+
+    @Test
+    void allowsOverlappingFilesWhenTasksAreSerialized() {
+        List<TaskSpec> specs = DispatchAgentsTool.parseTasks(Map.of("tasks", List.of(
+                Map.of("id", "T1", "goal", "改后端", "files", List.of("src/**"), "writable", true),
+                Map.of("id", "T2", "goal", "接着改", "files", List.of("src/**"), "writable", true,
+                        "depends_on", List.of("T1")))));
+
+        assertEquals(2, specs.size(), "有依赖关系的任务是串行执行，不构成并行写入");
+    }
+
+    @Test
+    void allowsDisjointFileRanges() {
+        List<TaskSpec> specs = DispatchAgentsTool.parseTasks(Map.of("tasks", List.of(
+                Map.of("id", "T1", "goal", "改后端", "files", List.of("server/**"), "writable", true),
+                Map.of("id", "T2", "goal", "改前端", "files", List.of("web/**"), "writable", true))));
+
+        assertEquals(2, specs.size());
+    }
+
     @Test
     void defaultsToReadOnlyWhenWritableIsMissing() {
         List<TaskSpec> specs = DispatchAgentsTool.parseTasks(Map.of("tasks", List.of(Map.of(

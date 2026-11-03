@@ -26,6 +26,41 @@ public interface SandboxSink {
         return null;
     }
 
+    /**
+     * 把上游产物叠加到本任务的沙箱之上：读取时上游产物优先于磁盘内容，写入仍只进本任务沙箱。
+     *
+     * <p>没有这一层时，下游子 Agent 读到的还是旧接口、甚至看不到上游新建的文件，
+     * 依赖顺序就只是「先跑后跑」，没有真正把产物交出去。
+     */
+    default SandboxSink overlay(SandboxSink upstream) {
+        SandboxSink self = this;
+        if (upstream == null) {
+            return self;
+        }
+        return new SandboxSink() {
+            @Override
+            public void record(String path, String oldText, String newText) {
+                self.record(path, oldText, newText);
+            }
+
+            @Override
+            public String currentText(String path, String baselineText) {
+                return self.currentText(path, upstream.currentText(path, baselineText));
+            }
+
+            @Override
+            public boolean proposed(String path) {
+                return self.proposed(path) || upstream.proposed(path);
+            }
+
+            @Override
+            public String proposedText(String path) {
+                String own = self.proposedText(path);
+                return own != null ? own : upstream.proposedText(path);
+            }
+        };
+    }
+
     /** 没有沙箱时的兜底：任何写入都直接报错，避免误落盘。 */
     static SandboxSink rejectAll() {
         return (path, oldText, newText) -> {

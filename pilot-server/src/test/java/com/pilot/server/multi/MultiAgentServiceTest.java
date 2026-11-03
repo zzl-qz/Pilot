@@ -197,6 +197,40 @@ class MultiAgentServiceTest {
     }
 
     @Test
+    void downstreamReadsUpstreamArtifactThroughTools() throws IOException {
+        AtomicInteger requests = new AtomicInteger();
+        CopyOnWriteArrayList<String> seen = new CopyOnWriteArrayList<>();
+        ModelClient client = (messages, tools) -> {
+            int request = requests.getAndIncrement();
+            if (request == 0) {
+                return new ModelResponse("", List.of(new com.pilot.core.tool.ToolCall("create", "create_file",
+                        Map.of("path", "src/Api.java", "content", "interface Api { String token(); }\n"))));
+            }
+            if (request == 1) {
+                return new ModelResponse("【结论】\n接口已定义\n\n【证据清单】\n- src/Api.java:1\n\n【风险评估】\n- 无",
+                        List.of());
+            }
+            if (request == 2) {
+                return new ModelResponse("", List.of(new com.pilot.core.tool.ToolCall("read", "read_file",
+                        Map.of("path", "src/Api.java"))));
+            }
+            messages.forEach(message -> seen.add(message.content()));
+            return new ModelResponse(REPORT, List.of());
+        };
+        MultiAgentService service = service(client);
+        TaskSpec upstream = TaskSpec.editable("T1", "定义接口", "创建 src/Api.java",
+                List.of(), List.of("src/**"), com.pilot.core.multi.RiskLevel.LOW);
+        TaskSpec downstream = TaskSpec.readOnly("T2", "核对接口", "读取上游接口文件并核对",
+                List.of("T1"), List.of("src/**"));
+
+        service.dispatch(dispatch(List.of(upstream, downstream)));
+
+        assertFalse(Files.exists(workspace.resolve("src/Api.java")), "上游产物仍在沙箱，不能落盘");
+        assertTrue(seen.stream().anyMatch(text -> text.contains("interface Api { String token(); }")),
+                "下游通过 read_file 读到的应是上游产物，而不是「文件不存在」：" + seen);
+    }
+
+    @Test
     void downstreamReceivesUpstreamConclusionAndSandboxFiles() throws IOException {
         AtomicInteger requests = new AtomicInteger();
         ModelClient client = (messages, tools) -> {

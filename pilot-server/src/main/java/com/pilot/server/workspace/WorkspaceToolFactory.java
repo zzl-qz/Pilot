@@ -157,7 +157,9 @@ public class WorkspaceToolFactory {
         if (view.allowsTool("web_fetch")) {
             registry.register(new WebFetchTool(webClient));
         }
-        if (view.allowsTool("run_command")) {
+        // 只读任务默认不注册通用命令：命令白名单为空时 run_command 会退回内置可执行白名单，
+        // 那已经超出「只读调研」的范围。需要跑命令的调研任务必须显式声明 commands。
+        if ((view.writable() || !view.allowCommands().isEmpty()) && view.allowsTool("run_command")) {
             registry.register(new RunCommandTool(validator, commandChanges()));
         }
         if (view.writable() && view.allowsTool("edit_file")) {

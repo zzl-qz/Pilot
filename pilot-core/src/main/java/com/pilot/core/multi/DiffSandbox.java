@@ -1,7 +1,9 @@
 package com.pilot.core.multi;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -16,6 +18,14 @@ public final class DiffSandbox {
     private final String taskId;
     private final String baseCommit;
     private final List<SandboxChange> changes = new ArrayList<>();
+    /**
+     * 每个路径首次进入沙箱时的原文（新文件为 {@code null}）。
+     *
+     * <p>同一任务内多次编辑必须有共同的比较基准：否则第二次编辑会把「上一版提案」当成原文，
+     * 既让 diff 只剩最后一处改动，也让 {@code baseHash} 变成提案的哈希，
+     * 接受时与服务端校验的真实文件指纹对不上。
+     */
+    private final Map<String, String> baselines = new HashMap<>();
 
     public DiffSandbox(String id, String agentId, String taskId, String baseCommit) {
         this.id = requireText(id, "sandboxId");
@@ -69,28 +79,47 @@ public final class DiffSandbox {
 
     /**
      * 记一次改动。同一路径被同一子 Agent 再次修改时，用最新内容覆盖旧条目，
-     * 但 diff 始终相对「基线 + 本沙箱此前改动」的最终状态，避免一条路径出现两份互相矛盾的补丁。
+     * 但 diff 始终相对「首次进入沙箱时的原文」计算，{@code baseHash} 也一直是原文的指纹。
+     *
+     * <p>写回真实文件时服务端会重新读取文件并比对该指纹；如果这里用「上一版提案」当基线，
+     * 连续改两处就会因指纹不符被拒绝，表现为第一处改动丢失。
      */
     public synchronized SandboxChange add(String path, String oldText, String newText,
                                           boolean existed, RiskLevel risk) {
-        String diff = UnifiedDiff.create(path, existed ? oldText : null, newText);
-        if (UnifiedDiff.isEmpty(diff)) {
-            return null;
-        }
-        SandboxChange change = new SandboxChange(path, diff, newText, existed,
-                fingerprint(oldText), agentId, taskId, risk, ChangeStatus.PENDING);
+        String key = normalize(path);
         SandboxChange superseded = null;
         for (SandboxChange existing : changes) {
-            if (existing.path().equals(change.path())) {
+            if (samePath(existing.path(), path)) {
                 superseded = existing;
                 break;
             }
         }
+        if (superseded == null) {
+            baselines.put(key, existed ? oldText : null);
+        }
+        boolean baselineExisted = superseded != null ? superseded.existed() : existed;
+        String baseline = baselines.containsKey(key) ? baselines.get(key) : (existed ? oldText : null);
+        String diff = UnifiedDiff.create(path, baselineExisted ? baseline : null, newText);
+        if (UnifiedDiff.isEmpty(diff)) {
+            // 改回原文：不留一条空改动，也不留下过期条目
+            if (superseded != null) {
+                changes.remove(superseded);
+                baselines.remove(key);
+            }
+            return null;
+        }
+        String baseHash = superseded != null ? superseded.baseHash() : fingerprint(baseline);
+        SandboxChange change = new SandboxChange(path, diff, newText, baselineExisted,
+                baseHash, agentId, taskId, risk, ChangeStatus.PENDING);
         if (superseded != null) {
             changes.remove(superseded);
         }
         changes.add(change);
         return change;
+    }
+
+    private static String normalize(String path) {
+        return path == null ? "" : path.replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
     }
 
     public synchronized int fileCount() {

@@ -71,7 +71,25 @@ public final class SandboxEditFileTool implements Tool {
         } catch (RuntimeException e) {
             return "ERROR: " + e.getMessage();
         }
-        if (!Files.isRegularFile(file)) {
+        String shown = paths.display(file);
+        // 沙箱里新建的文件磁盘上还不存在，原文要从中提案取；否则「建完接着改」会被当成文件不存在
+        String diskText = null;
+        if (Files.isRegularFile(file)) {
+            try {
+                if (Files.size(file) > MAX_BYTES) {
+                    return "ERROR: 文件过大（上限 32MB），无法整份替换。";
+                }
+                byte[] bytes = Files.readAllBytes(file);
+                if (ToolSupport.isBinary(bytes)) {
+                    return "ERROR: 二进制文件，无法编辑: " + rawPath;
+                }
+                diskText = new String(bytes, StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                return "ERROR: 读取失败: " + e.getMessage();
+            }
+        }
+        String content = sandbox.currentText(shown, diskText);
+        if (content == null) {
             return "ERROR: 文件不存在: " + rawPath;
         }
         // 先读后改是机制约束：没读过的文件拒绝编辑，不依赖提示词劝导
@@ -80,26 +98,16 @@ public final class SandboxEditFileTool implements Tool {
                     + "，无法确认原文与行号。先 read_file 查看当前内容，再给出 old_string。";
         }
         try {
-            if (Files.size(file) > MAX_BYTES) {
-                return "ERROR: 文件过大（上限 32MB），无法整份替换。";
-            }
-            byte[] bytes = Files.readAllBytes(file);
-            if (ToolSupport.isBinary(bytes)) {
-                return "ERROR: 二进制文件，无法编辑: " + rawPath;
-            }
-            String content = sandbox.currentText(paths.display(file), new String(bytes, StandardCharsets.UTF_8));
             ExactEditBatch.Applied applied;
             try {
                 applied = ExactEditBatch.apply(content, edits);
             } catch (IllegalArgumentException e) {
                 return "ERROR: " + e.getMessage();
             }
-            sandbox.record(paths.display(file), content, applied.content());
+            sandbox.record(shown, content, applied.content());
             reads.observed(file);
-            return "已提交到沙箱 " + paths.display(file) + "：替换 " + applied.count() + " 处（"
+            return "已提交到沙箱 " + shown + "：替换 " + applied.count() + " 处（"
                     + applied.oldLines() + " 行 → " + applied.newLines() + " 行）";
-        } catch (IOException e) {
-            return "ERROR: 读取失败: " + e.getMessage();
         } catch (RuntimeException e) {
             return "ERROR: 提交沙箱失败: " + e.getMessage();
         }

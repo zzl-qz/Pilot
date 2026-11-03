@@ -181,6 +181,12 @@ public final class DispatchAgentsTool implements Tool {
             }
             specs.add(toSpec(map, profiles));
         }
+        // 单写者原则：互不依赖又写同一批文件的任务会被并行调度，必然互相覆盖，派发阶段就拒绝
+        List<String> overlaps = com.pilot.core.multi.TaskGraph.overlappingWriters(specs);
+        if (!overlaps.isEmpty()) {
+            throw new IllegalArgumentException("以下任务会并行写同一批文件：" + String.join("；", overlaps)
+                    + "。请给其中一个加 depends_on 串行执行，或把 files 范围拆开互不重叠。");
+        }
         return List.copyOf(specs);
     }
 
