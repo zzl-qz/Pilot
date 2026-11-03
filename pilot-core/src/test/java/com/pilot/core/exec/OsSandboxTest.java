@@ -26,8 +26,9 @@ class OsSandboxTest {
                 OsSandbox.protectedWrites(root),
                 true);
 
-        int workspaceAllow = profile.indexOf("(allow file-write* (subpath \"" + root + "\"))");
-        int gitDeny = profile.indexOf("(deny file-write* (subpath \"" + root.resolve(".git/config") + "\"))");
+        // SBPL 字符串里反斜杠要转义，Windows 路径带反斜杠，比较时按同样的转义规则拼期望值。
+        int workspaceAllow = profile.indexOf("(allow file-write* (subpath \"" + escaped(root) + "\"))");
+        int gitDeny = profile.indexOf("(deny file-write* (subpath \"" + escaped(root.resolve(".git/config")) + "\"))");
         assertTrue(workspaceAllow >= 0, profile);
         assertTrue(gitDeny > workspaceAllow, "保护规则必须写在工作区允许之后");
         assertTrue(profile.contains("(allow network*)"));
@@ -53,7 +54,7 @@ class OsSandboxTest {
         List<String> argv = OsSandbox.bwrapCommand(bwrap, List.of(root), OsSandbox.protectedWrites(root),
                 false, List.of("mvn", "-v"));
 
-        assertEquals("/usr/bin/bwrap", argv.get(0));
+        assertEquals(bwrap.toString(), argv.get(0));
         assertTrue(argv.contains("--die-with-parent"));
         assertTrue(argv.contains("--unshare-net"));
         assertTrue(argv.contains("--ro-bind"));
@@ -119,6 +120,10 @@ class OsSandboxTest {
 
         assertEquals(0, exit, output);
         assertFalse(output.contains("Operation not permitted"), output);
+    }
+
+    private static String escaped(Path path) {
+        return path.toString().replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private static void git(Path directory, String... args) throws Exception {

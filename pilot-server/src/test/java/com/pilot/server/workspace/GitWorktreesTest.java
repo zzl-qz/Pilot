@@ -33,6 +33,9 @@ class GitWorktreesTest {
         git(repo, "init");
         git(repo, "config", "user.email", "t@example.com");
         git(repo, "config", "user.name", "test");
+        // Windows 的 Git 默认 core.autocrlf=true，检出会把 LF 改成 CRLF；用例比较的是文件内容，
+        // 必须让测试仓库自己决定换行，不跟随本机全局配置。
+        git(repo, "config", "core.autocrlf", "false");
         Files.writeString(repo.resolve("A.txt"), "one\n");
         git(repo, "add", "A.txt");
         git(repo, "commit", "-m", "init");
@@ -62,6 +65,7 @@ class GitWorktreesTest {
     private Path repository() throws Exception {
         Path repo = Files.createDirectories(root.resolve("原项目 with spaces"));
         git(repo, "init"); git(repo, "config", "user.email", "t@example.com"); git(repo, "config", "user.name", "test");
+        git(repo, "config", "core.autocrlf", "false");
         Files.writeString(repo.resolve("A.txt"), "one\n"); Files.writeString(repo.resolve("删除.txt"), "old\n");
         git(repo, "add", "."); git(repo, "commit", "-m", "初始版本"); return repo;
     }

@@ -64,7 +64,11 @@ export function createVoiceInput({ environment = globalThis, transcribe, onState
   let chunks = [], bytes = 0, started = 0;
   const emit = (next, extra = {}) => { phase = next; onState({ phase, ...extra }); };
   const release = () => {
-    clearInterval(timer); clearTimeout(permissionTimer);
+    // 只有真正创建过定时器才清理：Node 20 的 mock timers 对 undefined 句柄会抛错，
+    // 浏览器里 clearTimeout(undefined) 虽是无操作，但显式判断更稳。
+    if (timer !== undefined) clearInterval(timer);
+    if (permissionTimer !== undefined) clearTimeout(permissionTimer);
+    timer = permissionTimer = undefined;
     stream?.getTracks().forEach(track => { track.onended = null; track.stop(); }); stream = null;
   };
   function cancel() {
