@@ -63,6 +63,19 @@ class JdbcSessionRepositoryTest {
         assertEquals(SessionStatus.COMPLETED, session.status());
     }
 
+    /** 侧边对话的父会话要落盘：重启后前端靠它把标签归回原来的任务。 */
+    @Test
+    void persistsTheParentOfASideChat() {
+        Instant now = Instant.parse("2026-01-01T00:00:00Z");
+        repository.create("ses_parent", "主任务", "E:\\work", now);
+        repository.create("ses_side", "侧边对话", "E:\\work", now, null, false, "ses_parent");
+
+        Session side = repository.find("ses_side").orElseThrow();
+        assertTrue(side.isSide());
+        assertEquals("ses_parent", side.parentSessionId());
+        assertFalse(repository.find("ses_parent").orElseThrow().isSide());
+    }
+
     @Test
     void assignsMonotonicSequencePerSession() {
         repository.create("ses_1", "a", null, Instant.now());

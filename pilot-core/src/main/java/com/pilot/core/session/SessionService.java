@@ -72,13 +72,22 @@ public final class SessionService {
      * @param isBlank   还没有发过消息的空白对话；同一项目下最多一条
      */
     public Session createSession(String title, String workspace, String projectId, boolean isBlank) {
+        return createSession(title, workspace, projectId, isBlank, null);
+    }
+
+    /**
+     * @param parentSessionId 侧边对话的父会话；普通对话传 {@code null}
+     */
+    public Session createSession(String title, String workspace, String projectId, boolean isBlank,
+                                 String parentSessionId) {
         if (title == null || title.isBlank()) {
             throw new IllegalArgumentException("title must not be blank");
         }
         String normalizedWorkspace = workspace == null || workspace.isBlank() ? null : workspace.strip();
         String normalizedProject = projectId == null || projectId.isBlank() ? null : projectId.strip();
+        String normalizedParent = parentSessionId == null || parentSessionId.isBlank() ? null : parentSessionId.strip();
         return repository.create("ses_" + UUID.randomUUID(), title.strip(), normalizedWorkspace,
-                clock.instant(), normalizedProject, isBlank);
+                clock.instant(), normalizedProject, isBlank, normalizedParent);
     }
 
     /** 兼容调用：按普通对话创建（非空白）。 */

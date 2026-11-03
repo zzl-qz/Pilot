@@ -204,7 +204,10 @@ public class ProjectController {
     }
 
     private ProjectResponse response(Project project) {
-        List<Session> owned = sessions.listByProject(project.id());
+        // 侧边对话是主对话的临时分叉：不算进项目的对话数量，也不该顶替「最近活跃」
+        List<Session> owned = sessions.listByProject(project.id()).stream()
+                .filter(session -> !session.isSide())
+                .toList();
         Instant lastActive = owned.isEmpty() ? project.updatedAt() : owned.get(0).createdAt();
         // 空白对话单列：它不进历史列表，但界面要靠它决定「新建对话」按钮的行为
         Session blank = owned.stream()

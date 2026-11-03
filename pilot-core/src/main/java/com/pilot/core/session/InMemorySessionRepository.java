@@ -17,8 +17,8 @@ public class InMemorySessionRepository implements SessionRepository {
 
     @Override
     public Session create(String sessionId, String title, String workspace, Instant createdAt, String projectId,
-                          boolean isBlank) {
-        State state = new State(sessionId, title, workspace, createdAt, projectId, isBlank);
+                          boolean isBlank, String parentSessionId) {
+        State state = new State(sessionId, title, workspace, createdAt, projectId, isBlank, parentSessionId);
         sessions.put(sessionId, state);
         return state.snapshot();
     }
@@ -166,6 +166,7 @@ public class InMemorySessionRepository implements SessionRepository {
         private final String id;
         private final Instant createdAt;
         private final String projectId;
+        private final String parentSessionId;
         private final List<EventEnvelope> events = new ArrayList<>();
         private String title;
         private String workspace;
@@ -175,18 +176,20 @@ public class InMemorySessionRepository implements SessionRepository {
         private boolean archived;
 
         private State(String id, String title, String workspace, Instant createdAt, String projectId,
-                      boolean isBlank) {
+                      boolean isBlank, String parentSessionId) {
             this.id = id;
             this.title = title;
             this.workspace = workspace;
             this.createdAt = createdAt;
             this.projectId = projectId;
             this.isBlank = isBlank;
+            this.parentSessionId = parentSessionId;
         }
 
         private Session snapshot() {
             synchronized (this) {
-                return new Session(id, title, createdAt, status, workspace, projectId, isBlank, archived);
+                return new Session(id, title, createdAt, status, workspace, projectId, isBlank, archived,
+                        parentSessionId);
             }
         }
     }

@@ -45,7 +45,8 @@ class SqliteStoreMigrationTest {
                     columns.add(rows.getString("name"));
                 }
             }
-            assertTrue(columns.containsAll(List.of("project_id", "is_blank", "archived")), columns.toString());
+            assertTrue(columns.containsAll(List.of("project_id", "is_blank", "archived", "parent_session_id")),
+                    columns.toString());
 
             boolean indexed = false;
             try (ResultSet rows = statement.executeQuery("PRAGMA index_list(sessions)")) {

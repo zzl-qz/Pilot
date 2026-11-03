@@ -151,6 +151,9 @@ class SessionApiTest {
     @Autowired
     private com.pilot.core.project.ProjectRepository projectRepository;
 
+    @Autowired
+    private com.pilot.core.session.ConversationRepository conversations;
+
     @TempDir
     Path workspace;
 
@@ -184,6 +187,41 @@ class SessionApiTest {
         String body = mvc.perform(get("/api/sessions"))
                 .andReturn().getResponse().getContentAsString();
         assertTrue(body.contains(sessionId), body);
+    }
+
+    /**
+     * 侧边对话：从主对话分叉、继承模型记忆、不进主列表；不能在侧边里再开侧边；删掉即释放。
+     */
+    @Test
+    void sideChatForksParentButStaysOutOfTheMainList() throws Exception {
+        String parentId = createSession();
+        conversations.save(parentId, List.of(
+                com.pilot.core.loop.Message.user("主线的上下文"),
+                new com.pilot.core.loop.Message("assistant", "看过了，没问题")));
+
+        String body = mvc.perform(post("/api/sessions/{id}/side", parentId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.parentSessionId").value(parentId))
+                .andReturn().getResponse().getContentAsString();
+        String sideId = json.readTree(body).get("sessionId").asText();
+        assertFalse(sideId.equals(parentId), "侧边对话应该是独立的会话");
+
+        // 继承模型记忆：侧边问「这里为什么」时能读到主线做过什么
+        assertEquals(List.of("主线的上下文", "看过了，没问题"),
+                conversations.load(sideId).stream().map(com.pilot.core.loop.Message::content).toList());
+
+        // 主列表只留给真正的任务，侧边对话不出现
+        String list = mvc.perform(get("/api/sessions")).andReturn().getResponse().getContentAsString();
+        assertTrue(list.contains(parentId), list);
+        assertFalse(list.contains(sideId), list);
+
+        // 侧边对话里不能再开侧边对话
+        mvc.perform(post("/api/sessions/{id}/side", sideId)).andExpect(status().isConflict());
+
+        // 关掉面板即丢弃：会话与记忆一起清掉
+        mvc.perform(delete("/api/sessions/{id}", sideId)).andExpect(status().isNoContent());
+        mvc.perform(get("/api/sessions/{id}", sideId)).andExpect(status().isNotFound());
+        assertTrue(conversations.load(sideId).isEmpty(), "删除后不应再留下侧边对话的记忆");
     }
 
     @Test

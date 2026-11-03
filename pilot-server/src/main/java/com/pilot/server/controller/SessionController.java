@@ -5,6 +5,7 @@ import com.pilot.core.event.RunStarted;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.project.Project;
 import com.pilot.core.project.ProjectRepository;
+import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.EventSubscription;
 import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.Session;
@@ -72,13 +73,15 @@ public class SessionController {
     private final ProjectRepository projects;
     private final SessionCleanupService cleanup;
     private final SkillService skills;
+    private final ConversationRepository conversations;
 
     public SessionController(SessionService sessions, RunStarter runStarter, ObjectMapper objectMapper,
                              WorkspaceService workspaces, AgentProperties agentProperties,
                              PlanRepository plans, AttachmentService attachments,
                              ProjectRepository projects,
                              SessionCleanupService cleanup,
-                             SkillService skills) {
+                             SkillService skills,
+                             ConversationRepository conversations) {
         this.sessions = sessions;
         this.runStarter = runStarter;
         this.attachments = attachments;
@@ -89,6 +92,7 @@ public class SessionController {
         this.projects = projects;
         this.cleanup = cleanup;
         this.skills = skills;
+        this.conversations = conversations;
     }
 
     /**
@@ -121,6 +125,33 @@ public class SessionController {
         }
         Session session = sessions.createSession(title, workspaceOf(request, project), projectId, true);
         return SessionResponse.of(session, 0);
+    }
+
+    /**
+     * 从当前对话分叉出一条临时侧边对话（对齐 Codex 的 /side）。
+     *
+     * <p>语义：拿到父对话的工作区、项目和模型记忆，但事件记录另起一份——
+     * 面板里只显示侧边问答，主任务的工具流水不会混进来，主任务也不受影响。
+     * 侧边对话不加入会话列表（见 {@link #list(String)}），关掉面板后由前端删除。
+     *
+     * <p>不允许在侧边对话里再开侧边对话：Codex 也是这么限制的，
+     * 否则一个 /side 会无限套娃，用户很难回到主线。
+     */
+    @PostMapping("/{id}/side")
+    public SessionResponse openSide(@PathVariable String id) {
+        Session parent = requireSession(id);
+        if (parent.isSide()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "侧边对话里不能再开侧边对话，请回到主对话");
+        }
+        Session side = sessions.createSession("侧边对话", parent.workspace(), parent.projectId(), false, parent.id());
+        try {
+            // 继承父对话的模型记忆：侧边问「这里为什么这么写」才有上下文可看
+            conversations.save(side.id(), conversations.load(parent.id()));
+        } catch (RuntimeException e) {
+            cleanup.delete(side.id());
+            throw e;
+        }
+        return SessionResponse.of(side, 0);
     }
 
     /** 归档 / 取消归档：归档的对话不进主列表，但历史与事件都保留。 */
@@ -187,6 +218,9 @@ public class SessionController {
     /**
      * 会话列表（按创建时间倒序），供侧栏展示。
      *
+     * <p>侧边对话是主对话的临时分叉，不进主列表：否则关闭面板后它还会以一条「未分组」
+     * 对话的身份留在侧栏里，用户也不知道那是什么。
+     *
      * @param projectId 只看某个项目；传 {@code none} 表示未分组的历史会话；不传表示全部
      */
     @GetMapping
@@ -199,7 +233,10 @@ public class SessionController {
         } else {
             source = sessions.listByProject(projectId);
         }
-        return source.stream().map(session -> SessionResponse.of(session, 0)).toList();
+        return source.stream()
+                .filter(session -> !session.isSide())
+                .map(session -> SessionResponse.of(session, 0))
+                .toList();
     }
 
     /**
@@ -746,12 +783,13 @@ public class SessionController {
 
     public record SessionResponse(String id, String sessionId, String title, Instant createdAt, SessionStatus status,
                                   String workspace, String projectId, boolean isBlank, boolean archived,
-                                  int eventCount) {
+                                  int eventCount, String parentSessionId) {
         static SessionResponse of(Session session, int eventCount) {
             // 同时保留 id 与 sessionId：前端界面（含 React 版）统一按 id 读取会话标识，
             // 旧版 app.js 仍按 sessionId 读取，二者并存避免任一侧取到 undefined。
             return new SessionResponse(session.id(), session.id(), session.title(), session.createdAt(), session.status(),
-                    session.workspace(), session.projectId(), session.isBlank(), session.archived(), eventCount);
+                    session.workspace(), session.projectId(), session.isBlank(), session.archived(), eventCount,
+                    session.parentSessionId());
         }
     }
 }

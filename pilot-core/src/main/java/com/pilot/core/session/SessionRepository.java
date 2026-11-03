@@ -15,8 +15,17 @@ import java.util.Optional;
  */
 public interface SessionRepository {
 
+    /**
+     * @param parentSessionId 侧边对话的父会话；普通对话传 {@code null}
+     */
     Session create(String sessionId, String title, String workspace, Instant createdAt, String projectId,
-                   boolean isBlank);
+                   boolean isBlank, String parentSessionId);
+
+    /** 兼容旧调用：普通对话（没有父会话）。 */
+    default Session create(String sessionId, String title, String workspace, Instant createdAt, String projectId,
+                           boolean isBlank) {
+        return create(sessionId, title, workspace, createdAt, projectId, isBlank, null);
+    }
 
     /** 已经发过消息：清掉空白标记（幂等）。返回是否真的改动过。 */
     boolean markNotBlank(String sessionId);

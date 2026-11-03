@@ -21,7 +21,7 @@ import java.util.Optional;
 public final class JdbcSessionRepository implements SessionRepository {
     private static final int WRITE_ATTEMPTS = 3;
     private static final String COLUMNS =
-            "id, title, workspace, created_at, status, project_id, is_blank, archived";
+            "id, title, workspace, created_at, status, project_id, is_blank, archived, parent_session_id";
 
     private final SqliteStore store;
     private final EventCodec codec;
@@ -33,10 +33,10 @@ public final class JdbcSessionRepository implements SessionRepository {
 
     @Override
     public Session create(String sessionId, String title, String workspace, Instant createdAt, String projectId,
-                          boolean isBlank) {
+                          boolean isBlank, String parentSessionId) {
         JdbcSupport.update(store,
                 "INSERT INTO sessions (id, title, workspace, created_at, status, sequence, project_id, "
-                        + "is_blank, archived) VALUES (?, ?, ?, ?, ?, 0, ?, ?, 0)",
+                        + "is_blank, archived, parent_session_id) VALUES (?, ?, ?, ?, ?, 0, ?, ?, 0, ?)",
                 statement -> {
                     statement.setString(1, sessionId);
                     statement.setString(2, title);
@@ -45,9 +45,11 @@ public final class JdbcSessionRepository implements SessionRepository {
                     statement.setString(5, SessionStatus.CREATED.name());
                     statement.setString(6, projectId);
                     statement.setInt(7, isBlank ? 1 : 0);
+                    statement.setString(8, parentSessionId);
                 },
                 "创建会话失败: " + sessionId);
-        return new Session(sessionId, title, createdAt, SessionStatus.CREATED, workspace, projectId, isBlank, false);
+        return new Session(sessionId, title, createdAt, SessionStatus.CREATED, workspace, projectId, isBlank, false,
+                parentSessionId);
     }
 
     @Override
@@ -361,7 +363,8 @@ public final class JdbcSessionRepository implements SessionRepository {
                 rows.getString("workspace"),
                 rows.getString("project_id"),
                 rows.getInt("is_blank") == 1,
-                rows.getInt("archived") == 1);
+                rows.getInt("archived") == 1,
+                rows.getString("parent_session_id"));
     }
 
     private static boolean isBusy(SQLException e) {
