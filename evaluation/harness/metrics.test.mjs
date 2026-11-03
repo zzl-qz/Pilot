@@ -18,6 +18,7 @@ function record(overrides = {}) {
     costKnown: true,
     inputTokens: 1000,
     outputTokens: 200,
+    cacheReadObserved: true,
     ...overrides
   };
 }
@@ -86,10 +87,10 @@ test("缓存命中率按总输入口径计算", () => {
   assert.equal(group.cacheHitRate, 0.4);
 });
 
-test("没有用量观测时命中率是 0，不是 NaN", () => {
+test("没有用量观测时命中率未知", () => {
   const [group] = aggregate([record({ inputTokens: 0, outputTokens: 0 })]);
-  assert.equal(group.cacheHitRate, 0);
-  assert.equal(summarize([record({ inputTokens: 0, outputTokens: 0 })]).cacheHitRate, 0);
+  assert.equal(group.cacheHitRate, null);
+  assert.equal(summarize([record({ inputTokens: 0, outputTokens: 0 })]).cacheHitRate, null);
 });
 
 function tasks(count, overrides = {}) {

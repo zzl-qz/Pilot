@@ -6,6 +6,11 @@ import java.util.List;
 import java.util.function.Consumer;
 
 public interface ModelClient {
+    /** 一次请求冻结端点、模型及计价配置，热更新从下一请求生效。 */
+    default ModelClient snapshot() { return this; }
+    default ModelProfile profile() { return ModelProfile.generic(); }
+    /** 仅明确的参数拒绝允许去掉优化参数重试一次，网络失败不走此路径。 */
+    default boolean disableRejectedCache(Throwable failure) { return false; }
     ModelResponse chat(List<Message> messages, List<ToolDefinition> tools);
 
     default ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta) {

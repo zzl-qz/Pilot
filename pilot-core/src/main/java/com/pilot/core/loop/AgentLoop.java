@@ -303,7 +303,7 @@ public final class AgentLoop {
         this.client = Objects.requireNonNull(client, "client must not be null");
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.permissionGate = Objects.requireNonNull(permissionGate, "permissionGate must not be null");
-        this.budget = new ContextBudget(new ContextCompactor(client)::compact);
+        this.budget = new ContextBudget(new ContextCompactor(client).withTools(tools::definitions).withContextLimit(this::contextLimit)::compact);
         this.toolExecutor = new ToolExecutor(tools, this.permissionGate,
                 Objects.requireNonNull(approvals, "approvals must not be null"), traceRecorder, hooks);
         this.config = Objects.requireNonNull(config, "config must not be null");
@@ -801,13 +801,35 @@ public final class AgentLoop {
 
     private void refreshTaskContext(List<Message> messages, String runtimeGuidance) {
         String context = taskContext.get();
+        if (client.profile().instructionMessages()) {
+            messages.set(0, Message.system(config.systemPrompt()));
+            String state = "[Runtime task context]\n以下是当前任务状态与约束，更新此前的任务状态。\n" + (context == null ? "" : context);
+            String previous = messages.stream().filter(AgentLoop::runtimeContext).map(Message::content).reduce((a, b) -> b).orElse("");
+            if (!state.equals(previous) && ((context != null && !context.isBlank()) || !previous.isEmpty()))
+                messages.add(Message.system(state));
+            return;
+        }
+        // 切到只支持首条 system 的兼容端点时，把可信任务约束归并回头部，接受明确的前缀失效。
+        messages.removeIf(AgentLoop::runtimeContext);
         StringBuilder system = new StringBuilder(config.systemPrompt());
-        if (context != null && !context.isBlank()) system.append("\n\n").append(context);
+        if (context != null && !context.isBlank()) system.append("\n\n[Runtime task context]\n").append(context);
         if (runtimeGuidance != null && !runtimeGuidance.isBlank()) {
             system.append("\n\n[Runtime guidance; not a new user request]\n")
                     .append(runtimeGuidance.strip());
         }
         messages.set(0, Message.system(system.toString()));
+    }
+
+    private static boolean runtimeContext(Message message) {
+        return "system".equals(message.role()) && message.content().startsWith("[Runtime task context]");
+    }
+
+    private List<Message> requestMessages(List<Message> messages, String guidance) {
+        refreshTaskContext(messages, guidance);
+        if (!client.profile().instructionMessages() || guidance == null || guidance.isBlank()) return List.copyOf(messages);
+        List<Message> request = new ArrayList<>(messages);
+        request.add(Message.system("[Runtime guidance; applies only to this request]\n" + guidance.strip()));
+        return List.copyOf(request);
     }
 
     private static void safeCheckpoint(Consumer<List<Message>> checkpoint, List<Message> messages) {
@@ -884,9 +906,9 @@ public final class AgentLoop {
                         runtimeGuidance.render(policyGuidance));
                 // 阶段性纠偏属于运行时上下文，只进入当前请求的 system 消息；下一次请求会
                 // 重新构造 system，checkpoint/conversation 也从不保存它。
-                refreshTaskContext(messages, retainedGuidance);
-                usage.start(messages, contextLimit());
-                ModelResponse response = client.chat(List.copyOf(messages), tools.definitions(), delta -> {
+                List<Message> request = requestMessages(messages, retainedGuidance);
+                usage.start(request, contextLimit());
+                ModelResponse response = client.chat(request, tools.definitions(), delta -> {
                     if (liveText == null || delta == null || delta.isEmpty()) {
                         return;
                     }

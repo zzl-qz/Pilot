@@ -264,12 +264,16 @@ export async function runTask(args, task) {
     durationSeconds,
     rework: failedCommands.length,
     takeover: diagnostics?.sessionStatus !== "COMPLETED",
-    costUsd: 0,
-    costKnown: false,
+    costUsd: diagnostics?.usageDetails?.costs?.USD ?? 0,
+    costKnown: diagnostics?.usageDetails?.requests > 0
+      && diagnostics.usageDetails.pricedRequests === diagnostics.usageDetails.requests
+      && Object.keys(diagnostics.usageDetails.costs || {}).every(currency => currency === 'USD'),
     inputTokens: diagnostics?.inputTokens ?? 0,
     outputTokens: diagnostics?.outputTokens ?? 0,
     cachedInputTokens: diagnostics?.cachedInputTokens ?? 0,
     usageExact: diagnostics?.usageExact === true,
+    usageDetails: diagnostics?.usageDetails ?? null,
+    cacheReadObserved: Number(diagnostics?.usageDetails?.observedCacheRequests) > 0,
     validationCovered: diagnostics?.validation?.covered ?? false,
     acceptanceDetail: acceptance.detail,
     storageHealth: diagnostics?.storageHealth ?? "",
@@ -296,6 +300,7 @@ export function dryRunRecords(tasks, args) {
     inputTokens: 1200 * (index + 1),
     outputTokens: 400 * (index + 1),
     cachedInputTokens: 300 * (index + 1),
+    cacheReadObserved: true,
     validationCovered: true,
     acceptanceDetail: "dry-run（未执行真实命令）",
     notes: "dry-run 记录不能用于能力结论"

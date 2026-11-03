@@ -140,10 +140,16 @@ public final class PromptLibrary {
      *                       声明了依赖且其中任一工具不在集合里时，整段跳过。
      */
     public String system(Map<String, String> variables, Set<String> availableTools) {
+        return systemParts(variables, availableTools).stream().map(com.pilot.core.model.ContextComposition.Source::text)
+                .collect(java.util.stream.Collectors.joining("\n\n"));
+    }
+
+    /** 同一份实际渲染结果供请求与上下文分项使用，避免 UI 猜测标题或重复计算。 */
+    public List<com.pilot.core.model.ContextComposition.Source> systemParts(Map<String, String> variables, Set<String> availableTools) {
         List<SystemSection> ordered = SYSTEM_SECTIONS.stream()
                 .sorted(Comparator.comparingInt(SystemSection::order))
                 .toList();
-        List<String> sections = new ArrayList<>(ordered.size());
+        List<com.pilot.core.model.ContextComposition.Source> sections = new ArrayList<>(ordered.size());
         for (SystemSection section : ordered) {
             Parsed parsed = parseFrontmatter(section.name(), get(section.name()));
             Set<String> requires = !section.requiresTools().isEmpty()
@@ -154,10 +160,12 @@ public final class PromptLibrary {
             }
             String text = interpolate(section.name(), parsed.body(), variables).strip();
             if (!text.isEmpty()) {
-                sections.add(text);
+                String category = section.name().equals("system/skills") ? "skills"
+                        : Set.of("system/tools-spawn", "system/tools-dispatch", "system/dispatch").contains(section.name()) ? "agents" : "system";
+                sections.add(new com.pilot.core.model.ContextComposition.Source(category, text));
             }
         }
-        return String.join("\n\n", sections);
+        return List.copyOf(sections);
     }
 
     /** 单段渲染，用于 plan / subagent 这类运行时拼接的片段；头部 frontmatter 不进正文。 */

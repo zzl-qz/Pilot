@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { ModelRuntimeSettings } from './ModelRuntimeSettings.jsx';
+import { formatCache, totalCost } from '../lib/request-usage.js';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { Icon, FileIcon } from './Icon.jsx';
@@ -506,6 +508,7 @@ function ModelSettings() {
       </div>
       {hint && <p id="settings-model-hint" className="chip-hint">{hint}</p>}
       <VoiceSettings />
+      <ModelRuntimeSettings model={settings?.model} endpoint={settings?.modelEndpoint} />
     </div>
   );
 }
@@ -799,7 +802,9 @@ function UsageSettings() {
   const cards = [
     ['模型请求', formatCount(usage.totalRequests)],
     ['输入 token', formatCount(usage.totalInputTokens)],
-    ['输出 token', formatCount(usage.totalOutputTokens)]
+    ['输出 token', formatCount(usage.totalOutputTokens)],
+    ['缓存命中', formatCache(usage.details)],
+    ['费用估算', totalCost(usage.details)]
   ];
   const daily = usage.daily || [];
   const maxTokens = Math.max(...daily.map((day) => (day.inputTokens || 0) + (day.outputTokens || 0)), 1);
@@ -820,6 +825,7 @@ function UsageSettings() {
         ))}
       </div>
       <div id="usage-daily" className="usage-daily">
+        {usage.details?.requests > 0 && <p className="request-note">缓存数据覆盖 {usage.details.observedCacheRequests}/{usage.details.requests} 次请求；可计价 {usage.details.pricedRequests}/{usage.details.requests} 次。缺失数据不按零计入，不同币种分别汇总。</p>}
         {daily.length === 0 && <p className="chip-hint">这个窗口内还没有用量记录。</p>}
         {daily.map((day) => {
           const total = (day.inputTokens || 0) + (day.outputTokens || 0);

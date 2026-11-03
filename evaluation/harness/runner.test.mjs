@@ -120,9 +120,11 @@ test('strict 不能没有基线或使用 dry-run，dry-run 不能通过能力门
 });
 
 test('未知用量不会稀释真实缓存命中率，异常缓存数不超过 100%', () => {
-  assert.equal(cacheHitRate([{ inputTokens: 100, cachedInputTokens: 50, usageExact: true },
+  assert.equal(cacheHitRate([{ inputTokens: 100, cachedInputTokens: 50, usageExact: true, cacheReadObserved: true },
     { inputTokens: 900, cachedInputTokens: 0, usageExact: false }]), 0.5);
-  assert.equal(cacheHitRate([{ inputTokens: 100, cachedInputTokens: 200 }]), 1);
+  assert.equal(cacheHitRate([{ inputTokens: 100, cachedInputTokens: 200, cacheReadObserved: true }]), 1);
+  assert.equal(cacheHitRate([{ inputTokens: 100, cachedInputTokens: 0, usageExact: true }]), null);
+  assert.equal(cacheHitRate([{ inputTokens: 1000, cachedInputTokens: 50, usageDetails: {observedCacheRequests: 1, observedCacheInputTokens: 100, cacheReadTokens: 50} }]), 0.5);
 });
 
 test('非 jsonl 输出路径不被 summary 覆盖', async t => {

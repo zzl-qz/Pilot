@@ -579,6 +579,7 @@ public class MultiAgentService {
     /** 只观测不改写：把每次请求的用量记到本次尝试上，per-agent 归集与预算判断都靠它。 */
     private static ModelClient usageMetering(ModelClient delegate, UsageMeter meter) {
         return new ModelClient() {
+            @Override public com.pilot.core.model.ModelProfile profile() { return delegate.profile(); }
             @Override
             public ModelResponse chat(java.util.List<com.pilot.core.loop.Message> messages,
                                       java.util.List<ToolDefinition> tools) {
@@ -589,9 +590,17 @@ public class MultiAgentService {
             public ModelResponse chat(java.util.List<com.pilot.core.loop.Message> messages,
                                       java.util.List<ToolDefinition> tools,
                                       java.util.function.Consumer<String> textDelta) {
+                return chat(messages, tools, textDelta, null);
+            }
+            @Override public ModelResponse chat(java.util.List<com.pilot.core.loop.Message> messages,
+                                                java.util.List<ToolDefinition> tools,
+                                                java.util.function.Consumer<String> textDelta,
+                                                java.util.function.Consumer<String> reasoningDelta) {
                 ModelResponse response = null;
                 try {
-                    response = delegate.chat(messages, tools, textDelta);
+                    response = com.pilot.core.model.ModelRequestScope.within(
+                            com.pilot.core.model.ModelRequestScope.current().purpose().isBlank() ? "subagent" : null, null, false,
+                            () -> delegate.chat(messages, tools, textDelta, reasoningDelta));
                     return response;
                 } finally {
                     ModelUsage usage = response == null ? null : response.usage();
@@ -616,6 +625,7 @@ public class MultiAgentService {
     private static ModelClient usageCounting(ModelClient delegate,
                                              com.pilot.server.session.SpawnAgentTool.UsageSink sink) {
         return new ModelClient() {
+            @Override public com.pilot.core.model.ModelProfile profile() { return delegate.profile(); }
             @Override public ModelResponse chat(java.util.List<com.pilot.core.loop.Message> messages,
                                                 java.util.List<ToolDefinition> tools) {
                 return chat(messages, tools, null);
@@ -624,11 +634,19 @@ public class MultiAgentService {
             @Override public ModelResponse chat(java.util.List<com.pilot.core.loop.Message> messages,
                                                 java.util.List<ToolDefinition> tools,
                                                 java.util.function.Consumer<String> textDelta) {
+                return chat(messages, tools, textDelta, null);
+            }
+            @Override public ModelResponse chat(java.util.List<com.pilot.core.loop.Message> messages,
+                                                java.util.List<ToolDefinition> tools,
+                                                java.util.function.Consumer<String> textDelta,
+                                                java.util.function.Consumer<String> reasoningDelta) {
                 sink.beforeRequest();
                 long started = System.nanoTime();
                 ModelResponse response = null;
                 try {
-                    response = delegate.chat(messages, tools, textDelta);
+                    response = com.pilot.core.model.ModelRequestScope.within(
+                            com.pilot.core.model.ModelRequestScope.current().purpose().isBlank() ? "subagent" : null, null, false,
+                            () -> delegate.chat(messages, tools, textDelta, reasoningDelta));
                     return response;
                 } finally {
                     long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);

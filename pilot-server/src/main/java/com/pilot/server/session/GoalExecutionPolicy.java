@@ -301,17 +301,25 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
 
     ModelClient budgetedClient() {
         return new ModelClient() {
+            @Override public com.pilot.core.model.ModelProfile profile() { return model.profile(); }
             @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
                 return chat(messages, tools, null);
             }
             @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools,
                                                 java.util.function.Consumer<String> delta) {
+                return chat(messages, tools, delta, null);
+            }
+            @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools,
+                                                java.util.function.Consumer<String> delta,
+                                                java.util.function.Consumer<String> reasoning) {
                 chargeRequest();
                 updates.accept(state());
                 long started = System.nanoTime();
                 ModelResponse response = null;
                 try {
-                    response = model.chat(messages, tools, delta);
+                    response = com.pilot.core.model.ModelRequestScope.within(
+                            com.pilot.core.model.ModelRequestScope.current().purpose().isBlank() && finalizing ? "finalization" : null,
+                            null, false, () -> model.chat(messages, tools, delta, reasoning));
                     return response;
                 } finally {
                     long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
@@ -703,8 +711,9 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 reviewing = true;
                 ModelResponse response;
                 try {
-                    response = budgetedClient().chat(messages,
-                            List.of(new ToolDefinition(toolName, "提交结构化核验，不执行其他操作", reviewSchema())));
+                    response = com.pilot.core.model.ModelRequestScope.within("review", null, false,
+                            () -> budgetedClient().chat(messages,
+                                    List.of(new ToolDefinition(toolName, "提交结构化核验，不执行其他操作", reviewSchema()))));
                 } finally {
                     reviewing = false;
                 }

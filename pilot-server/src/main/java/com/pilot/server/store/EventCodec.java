@@ -48,6 +48,7 @@ public class EventCodec {
         Class<? extends SessionEvent> target = switch (type) {
             case "run.started" -> RunStarted.class;
             case "run.usage" -> RunUsageUpdated.class;
+            case "model.request" -> com.pilot.core.event.ModelRequestCompleted.class;
             case "execution.updated" -> com.pilot.core.event.ExecutionUpdated.class;
             case "assistant.delta" -> AssistantDelta.class;
             case "context.compacted" -> ContextCompacted.class;

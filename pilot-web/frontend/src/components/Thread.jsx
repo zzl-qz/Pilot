@@ -1,3 +1,5 @@
+import { RequestList } from './RequestUsage.jsx';
+import { formatCache, totalCost } from '../lib/request-usage.js';
 import ThreadNavigator from './ThreadNavigator.jsx';
 import { modifierKey, duplicateResult } from '../lib/interaction.js';
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
@@ -433,7 +435,7 @@ const Turn = memo(function Turn({ row, isLast }) {
           )}
         </article>
       )}
-      <TurnStats stats={row.stats} />
+      <TurnStats stats={row.stats} reports={row.requests} />
     </div>
   );
 });
@@ -696,7 +698,7 @@ const CopyControl = memo(function CopyControl({ text, label = '复制', tip = '�
   );
 });
 
-const TurnStats = memo(function TurnStats({ stats }) {
+const TurnStats = memo(function TurnStats({ stats, reports }) {
   const running = Boolean(stats?.startedAt) && !stats?.finishedAt;
   useSecondTick(running);
   if (!stats) {
@@ -708,10 +710,8 @@ const TurnStats = memo(function TurnStats({ stats }) {
   const limit = Number(stats.contextLimit) || 0;
   const used = Number(stats.contextTokens) || 0;
   const crowded = limit > 0 && used / limit >= 0.85;
-  const input = Number(stats.inputTokens) || 0;
-  const cached = Number(stats.cachedInputTokens) || 0;
   // 估算路径没有缓存观测：显示「—」，不能把「没观测」读成「没命中」
-  const cacheLabel = stats.exact === false || input <= 0 ? '—' : `${Math.round((cached / input) * 100)}%`;
+  const cacheLabel = formatCache(stats.details);
   return (
     <details className="turn-stats-detail"><summary>{elapsed != null ? `${elapsed}s · ` : ''}用量详情</summary><div className="turn-stats">
       {elapsed != null && <span className="turn-stat"><span>耗时</span><b>{elapsed}s</b></span>}
@@ -724,8 +724,9 @@ const TurnStats = memo(function TurnStats({ stats }) {
       <span className={`turn-stat is-context${crowded ? ' is-hot' : ''}`} title={stats.contextTokens ?? ''}>
         <span>上下文</span><b>{formatCount(stats.contextTokens)}</b>
       </span>
-      <span className="turn-stat-note">{stats.exact === false ? '主任务 · Token 为估算' : '主任务 · 模型实测用量'}</span>
-    </div></details>
+      <span className="turn-stat"><span>费用估算</span><b>{totalCost(stats.details)}</b></span>
+      <span className="turn-stat-note">{stats.details ? `含压缩与子代理 · 可计价 ${stats.details.pricedRequests}/${stats.details.requests} 次` : '旧记录未提供完整缓存与计价数据'}</span>
+    </div>{reports?.length > 0 && <RequestList reports={reports} />}</details>
   );
 });
 

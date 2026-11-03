@@ -311,6 +311,7 @@ export function applyEvent(draft, event, { live }) {
       draft.queueHeld = false;
       draft.running = true;
       draft.runStartedAt = eventTimestamp(event);
+      draft.requestReports = [];
       draft.cancelling = false;
       draft.runId = event.runId || draft.runId;
       draft.turnRuns = event.runId ? [event.runId] : [];
@@ -359,8 +360,29 @@ export function applyEvent(draft, event, { live }) {
       break;
     }
 
+    case 'model.request': {
+      const report = event.payload?.report;
+      if (!report?.id) break;
+      const current = !draft.runId || !event.runId || event.runId === draft.runId;
+      if (current || String(event.runId || '').startsWith('compact_')) {
+        const reports = draft.requestReports || [];
+        if (!reports.some(item => item.id === report.id)) draft.requestReports = [...reports, report].slice(-200);
+        if (report.purpose === 'main' && (!draft.latestContextReport || report.startedAt >= draft.latestContextReport.startedAt))
+          draft.latestContextReport = report;
+      }
+      if (!String(event.runId || '').startsWith('compact_')) {
+        const turn = draft.thread.rows.findLast(row => row.type === 'turn' && row.runIds?.includes(event.runId)) || (current ? ensureTurn(draft) : null);
+        if (turn && !(turn.requests || []).some(item => item.id === report.id)) turn.requests = [...(turn.requests || []), report].slice(-200);
+      }
+      break;
+    }
+
     case 'run.usage': {
       const payload = event.payload || {};
+      if (String(event.runId || '').startsWith('compact_')) {
+        draft.runUsage = { ...payload, runId: event.runId, reported: true };
+        break;
+      }
       if (!draft.runUsage || (event.runId && draft.runUsage.runId && event.runId !== draft.runUsage.runId)) {
         draft.runUsage = { runId: event.runId || draft.runId, startedAt: eventTimestamp(event), finishedAt: null };
       }
@@ -373,15 +395,17 @@ export function applyEvent(draft, event, { live }) {
         contextTokens: Number(payload.contextTokens || 0),
         contextLimit: Math.max(1, Number(payload.contextLimit || 1)),
         exact: Boolean(payload.exact),
+        details: payload.details || null,
         reported: true
       });
       draft.liveOutputTokens = 0;
       const turn = ensureTurn(draft);
-      turn.stats = { ...draft.runUsage };
+      if (!String(event.runId || '').startsWith('compact_')) turn.stats = { ...draft.runUsage };
       draft.contextStatus = {
         ...(draft.contextStatus || {}),
         usedTokens: draft.runUsage.contextTokens,
         limitTokens: draft.runUsage.contextLimit,
+        percent: Math.min(100, Math.round(draft.runUsage.contextTokens / draft.runUsage.contextLimit * 100)),
         estimated: true,
         canCompact: false
       };
@@ -681,6 +705,7 @@ export function applyEvent(draft, event, { live }) {
     }
 
     case 'context.compacted': {
+      draft.latestContextReport = null;
       const payload = event.payload || {};
       pushRow(draft, {
         key: `compaction:${event.sequence}`,
@@ -874,6 +899,8 @@ function applyEventInto(root, event, bucket) {
     runId: replayRunId(bucket, event),
     turnRuns: root.turnRuns,
     runUsage: root.runUsage,
+    requestReports: [...(root.requestReports || [])],
+    latestContextReport: root.latestContextReport,
     liveOutputTokens: root.liveOutputTokens,
     modelRetryUntil: root.modelRetryUntil,
     lastOutcome: root.lastOutcome,

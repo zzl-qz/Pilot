@@ -40,7 +40,7 @@ public class TaskDiagnosticsService {
                               long cachedInputTokens,
                               boolean usageExact, String lastToolSummary, List<CommandView> commands,
                               ValidationView validation, RecoveryView recovery,
-                              String storageHealth) {
+                              String storageHealth, com.pilot.core.model.RequestTotals.Summary usageDetails) {
     }
 
     public record CommandView(String taskId, String command, String status, Integer exitCode,
@@ -118,7 +118,7 @@ public class TaskDiagnosticsService {
                         latestEvidence == null ? "" : latestEvidence.runId()),
                 new RecoveryView(recovered.recoveredAt().toString(), Redaction.text(recovered.note()),
                         recovered.count(), recovered.completed() ? "已执行启动恢复" : "尚未执行启动恢复"),
-                storageHealth());
+                storageHealth(), usage == null ? null : usage.details());
     }
 
     private static String storageHealth() {

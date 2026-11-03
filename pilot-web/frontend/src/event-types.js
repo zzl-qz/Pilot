@@ -2,6 +2,7 @@
 export const EVENT_TYPES = [
   'run.started',
   'run.usage',
+  'model.request',
   'execution.updated',
   'assistant.delta',
   'assistant.preview',

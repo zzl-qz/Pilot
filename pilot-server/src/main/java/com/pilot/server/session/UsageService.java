@@ -42,7 +42,7 @@ public class UsageService {
 
     record UsageReport(int days, List<DayTotal> daily, List<SessionTotal> sessions,
                        long totalRequests, long totalInputTokens, long totalOutputTokens,
-                       long totalCachedInputTokens) {
+                       long totalCachedInputTokens, com.pilot.core.model.RequestTotals.Summary details) {
     }
 
     private static final int MAX_SESSION_ROWS = 10;
@@ -109,7 +109,22 @@ public class UsageService {
             output += totals[2];
             cached += totals[3];
         }
-        return new UsageReport(window, daily, sessionTotals, requests, input, output, cached);
+        int observedRequests = 0, pricedRequests = 0;
+        long observedInput = 0, writes = 0, observedCached = 0;
+        boolean exact = true;
+        Map<String, java.math.BigDecimal> costs = new LinkedHashMap<>();
+        for (EventEnvelope event : lastByRun.values()) {
+            RunUsageUpdated usage = (RunUsageUpdated) event.payload();
+            exact &= usage.exact();
+            var detail = usage.details();
+            if (detail == null) continue;
+            observedRequests += detail.observedCacheRequests(); pricedRequests += detail.pricedRequests();
+            observedInput += detail.observedCacheInputTokens(); writes += detail.cacheWriteTokens(); observedCached += detail.cacheReadTokens();
+            detail.costs().forEach((currency, cost) -> costs.merge(currency, cost, java.math.BigDecimal::add));
+        }
+        var detail = new com.pilot.core.model.RequestTotals.Summary((int) Math.min(Integer.MAX_VALUE, requests),
+                observedRequests, observedInput, observedCached, writes, pricedRequests, Map.copyOf(costs), exact);
+        return new UsageReport(window, daily, sessionTotals, requests, input, output, cached, detail);
     }
 
     private static void accumulate(long[] totals, RunUsageUpdated usage) {

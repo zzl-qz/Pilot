@@ -5,7 +5,7 @@ package com.pilot.core.event;
  * 信封上的 {@code type} 字段由该枚举的线上名称决定。
  */
 public sealed interface SessionEvent
-        permits ExecutionUpdated, RunStarted, RunUsageUpdated, AssistantDelta, AssistantPreview, AssistantReasoning, ContextCompacted, PlanUpdated, RunSteered, RunContinued,
+        permits ExecutionUpdated, RunStarted, RunUsageUpdated, ModelRequestCompleted, AssistantDelta, AssistantPreview, AssistantReasoning, ContextCompacted, PlanUpdated, RunSteered, RunContinued,
                 RunRetrying,
                 SubagentStarted, SubagentFinished, ToolStarted, ApprovalRequired, ApprovalResolved,
                 ToolCompleted, RunFailed, RunCompleted, RunCancelled,

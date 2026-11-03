@@ -250,17 +250,22 @@ public final class SpawnAgentTool implements Tool {
         int maxRequests = MAX_SUBAGENT_STEPS + 1;
         AtomicInteger requests = new AtomicInteger();
         return new ModelClient() {
+            @Override public com.pilot.core.model.ModelProfile profile() { return client.profile(); }
             @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> definitions) {
                 return chat(messages, definitions, null);
             }
 
             @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> definitions,
                                                 Consumer<String> textDelta) {
+                return chat(messages, definitions, textDelta, null);
+            }
+            @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> definitions,
+                                                Consumer<String> textDelta, Consumer<String> reasoningDelta) {
                 claimRequest();
                 long started = System.nanoTime();
                 ModelResponse response = null;
                 try {
-                    response = client.chat(messages, definitions, textDelta);
+                    response = client.chat(messages, definitions, textDelta, reasoningDelta);
                     return response;
                 } finally {
                     long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);

@@ -1,3 +1,5 @@
+import { formatCache } from '../lib/request-usage.js';
+import { ContextUsagePanel } from './RequestUsage.jsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
@@ -16,9 +18,7 @@ import { splitAttachmentMarkers, joinAttachmentMarkers } from '../lib/attachment
 import { queueHeader, resumeBar } from '../lib/queue.js';
 import { PERMISSION_MODES, permissionLabel, permissionHint } from '../lib/permission.js';
 import { buildModelProbe, buildModelUpdate, describeModelsFetched } from '../lib/model-settings.js';
-import {
-  formatTokens, remainingTokens, usageLevel, usageNote, usagePercent, usageSegments
-} from '../lib/context-usage.js';
+import { usageLevel, usagePercent } from '../lib/context-usage.js';
 
 /**
  * 输入区：contenteditable 桥接旧版 composer-input（附件芯片 / @ 引用 / 粘贴纯文本），
@@ -44,6 +44,9 @@ export function Composer() {
   const currentEndpoint = settingsData?.modelEndpoint || '';
   const contextStatus = useStore((state) => state.contextStatus);
   const compacting = useStore((state) => state.compactingContext);
+  const requestReports = useStore((state) => state.requestReports);
+  const latestContextReport = useStore((state) => state.latestContextReport);
+  const runUsage = useStore((state) => state.runUsage);
   const editTarget = useStore((state) => state._editTarget);
 
   const flowRef = useRef(null);
@@ -584,16 +587,21 @@ export function Composer() {
               <span className="perm-picker context-picker">
                 <button
                   type="button"
-                  className={`perm-chip context-chip level-${usageLevel(contextPercent(contextStatus))}`}
+                  className={`perm-chip context-chip level-${usageLevel(usagePercent(contextStatus))}`}
                   id="context-chip"
                   aria-haspopup="dialog"
                   aria-expanded={contextOpen}
                   title={`上下文已用 ${contextPercent(contextStatus)} · 点击查看构成与压缩`}
                   onClick={() => { setContextOpen(!contextOpen); setPermOpen(false); setModelOpen(false); useStore.getState().refreshContext(); }}
                 >
-                  上下文 · {contextPercent(contextStatus)}
+                  <svg className="context-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" opacity=".25" strokeWidth="2" /><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="2" pathLength="100" strokeDasharray={`${usagePercent(contextStatus)} 100`} transform="rotate(-90 10 10)" /></svg>
+                  上下文 · {contextPercent(contextStatus)}{runUsage?.details && <span className="context-cache-label"> · 命中 {formatCache(runUsage.details)}</span>}
                 </button>
-                {contextOpen && <ContextMenu status={contextStatus} compacting={compacting} />}
+                {contextOpen && <ContextUsagePanel status={contextStatus} compacting={compacting}
+                  report={latestContextReport} reports={requestReports} usage={runUsage}
+                  onClose={() => { setContextOpen(false); document.getElementById('context-chip')?.focus(); }}
+                  onCompact={() => useStore.getState().compactContext()}
+                  onSettings={() => { setContextOpen(false); useStore.getState().setUi({ settingsOpen: true, settingsSection: 'model' }); }} /> }
               </span>
             </span>
           </span>
@@ -709,57 +717,6 @@ function ModelMenu({ onClose, models, initialModel = '', initialEndpoint = '' })
   );
 }
 
-/** 上下文占用：用量条 + 记忆构成 + 自动收缩水位，照着 Cursor 的用法说明白。 */
-function ContextMenu({ status, compacting }) {
-  const percent = usagePercent(status);
-  const level = usageLevel(percent);
-  const segments = usageSegments(status);
-  const remaining = remainingTokens(status);
-  return (
-    <div className="chip-menu context-menu" id="context-menu" role="dialog" aria-label="上下文使用详情">
-      <div className="context-head">
-        <p className="menu-head">上下文</p>
-        <span className={`context-percent level-${level}`}>{percent}%</span>
-      </div>
-      <div className={`context-meter level-${level}`}>
-        <span id="context-meter-fill" style={{ width: `${percent}%` }} />
-      </div>
-      <p className="context-line">
-        <span className="mono">{formatTokens(status?.usedTokens)} / {formatTokens(status?.limitTokens)}</span>
-        <span>tokens</span>
-        {status?.estimated && <em title="按字符数保守估算，不是端点返回的精确值">估算</em>}
-      </p>
-      {segments.length > 0 && (
-        <ul className="context-segments">
-          {segments.map((segment) => (
-            <li key={segment.role}>
-              <span className="context-segment-name">{segment.label}</span>
-              <span className="context-segment-bar"><i style={{ width: `${Math.max(2, Math.round(segment.share * 100))}%` }} /></span>
-              <span className="context-segment-value mono">{formatTokens(segment.chars)} 字</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="context-note">{usageNote(status, percent)}</p>
-      <div className="context-foot">
-        <span className="context-remaining">
-          {remaining == null ? `${status?.messages || 0} 条记忆` : `剩余 ${formatTokens(remaining)} tokens`}
-        </span>
-        <button
-          type="button"
-          className="btn"
-          disabled={compacting || status?.canCompact === false}
-          title={status?.canCompact === false ? '当前没有可折叠的历史' : '把手头的历史折叠成交接摘要，聊天记录不删'}
-          onClick={() => useStore.getState().compactContext()}
-        >
-          {compacting ? '压缩中…' : '压缩上下文'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** 输入框上方只留一个继续入口。结果卡上的同名按钮由 has-resume-bar 收起。 */
 function ResumeBar() {
   const running = useStore((state) => state.running);
   const lastOutcome = useStore((state) => state.lastOutcome);

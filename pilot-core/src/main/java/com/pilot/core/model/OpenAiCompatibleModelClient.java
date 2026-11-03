@@ -44,6 +44,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     private final Duration requestTimeout;
     /** 是否给 system 提示词打显式缓存标记；默认关闭，只在端点支持 cache_control 时启用。 */
     private volatile boolean promptCaching;
+    private ModelProfile profile;
+    private volatile boolean cacheParametersDisabled;
+    private volatile boolean streamUsageDisabled;
 
     public OpenAiCompatibleModelClient(HttpClient httpClient, ObjectMapper objectMapper,
                                        URI endpoint, String apiKey, String model) {
@@ -58,6 +61,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         this.apiKey = apiKey;
         this.model = model;
         this.requestTimeout = requestTimeout;
+        this.profile = ModelProfile.resolve(this.endpoint, model, "auto", "auto", "", null, null, "short", null);
     }
 
     /**
@@ -65,8 +69,91 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
      * 只应对支持该字段的端点开启；OpenAI 官方端点自动缓存，保持关闭即可。
      */
     public OpenAiCompatibleModelClient withPromptCaching(boolean enabled) {
-        this.promptCaching = enabled;
+        this.promptCaching = enabled && !profile.provider().equals("openai") && !profile.provider().equals("deepseek");
         return this;
+    }
+
+    public OpenAiCompatibleModelClient withProfile(ModelProfile value) {
+        this.profile = java.util.Objects.requireNonNull(value);
+        return this;
+    }
+
+    @Override public ModelProfile profile() {
+        ModelProfile p = profile;
+        return new ModelProfile(p.provider(), p.model(), cacheParametersDisabled ? "none" : p.cacheMode(),
+                p.cacheTtl(), p.instructionMessages(), p.streamUsage() && !streamUsageDisabled,
+                p.cacheKey() && !cacheParametersDisabled, p.compactionMode(), p.pricing());
+    }
+
+    @Override public synchronized boolean disableRejectedCache(Throwable failure) {
+        if (!(failure instanceof ModelClientException) || failure.getMessage() == null) return false;
+        String message = failure.getMessage().toLowerCase(java.util.Locale.ROOT);
+        if (!message.contains("http 400") || !message.matches("(?s).*(unknown|unsupported|unrecognized|unexpected|not allowed|not permitted|extra inputs|不支持).*")) return false;
+        if (!cacheParametersDisabled && (message.contains("cache_control") || message.contains("prompt_cache_key"))) {
+            cacheParametersDisabled = true;
+            return true;
+        }
+        if (!streamUsageDisabled && message.contains("stream_options")) {
+            streamUsageDisabled = true;
+            return true;
+        }
+        return false;
+    }
+
+    Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions, boolean streaming) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        List<Map<String, Object>> items = new ArrayList<>(messages.stream().map(this::messagePayload).toList());
+        List<Map<String, Object>> tools = definitions == null ? new ArrayList<>()
+                : new ArrayList<>(definitions.stream().map(this::toolPayload).map(LinkedHashMap::new).toList());
+        body.put("model", model);
+        body.put("messages", items);
+        if (streaming) {
+            body.put("stream", true);
+            if (profile().streamUsage()) body.put("stream_options", Map.of("include_usage", true));
+        }
+        if (!tools.isEmpty()) {
+            body.put("tools", tools);
+            if (ModelRequestScope.current().toolsDisabled()) body.put("tool_choice", "none");
+            else if (streaming) body.put("tool_choice", "auto");
+        }
+        if (profile().cacheKey() && !ModelRequestScope.current().cacheGroup().isBlank())
+            body.put("prompt_cache_key", "pilot-" + MeteredModelClient.hash(ModelRequestScope.current().cacheGroup()).substring(0, 32));
+        if (!cacheParametersDisabled && ((promptCaching && !profile.cacheMode().equals("none")) || profile.cacheMode().equals("explicit"))) {
+            Map<String, Object> marker = new LinkedHashMap<>();
+            marker.put("type", "ephemeral");
+            if (!profile.cacheTtl().isBlank()) marker.put("ttl", profile.cacheTtl());
+            // 三个边界：工具、固定 system、最近可缓存消息。不会随着对话积累无限标记。
+            if (!tools.isEmpty()) tools.getLast().put("cache_control", marker);
+            if (!items.isEmpty() && messages.getFirst().role().equals("system")) markMessage(items.getFirst(), marker, true);
+            for (int index = items.size() - 1; index > 0; index--) {
+                if (markMessage(items.get(index), marker, false)) break;
+            }
+        }
+        return body;
+    }
+
+    private static boolean markMessage(Map<String, Object> payload, Map<String, Object> marker, boolean stableSystem) {
+        Object content = payload.get("content");
+        if (content instanceof String text && !text.isBlank()) {
+            int boundary = stableSystem ? text.indexOf("\n\n[Runtime task context]") : -1;
+            if (boundary > 0) {
+                payload.put("content", List.of(Map.of("type", "text", "text", text.substring(0, boundary), "cache_control", marker),
+                        Map.of("type", "text", "text", text.substring(boundary))));
+            } else payload.put("content", List.of(Map.of("type", "text", "text", text, "cache_control", marker)));
+            return true;
+        }
+        if (content instanceof List<?> blocks) {
+            List<Object> changed = new ArrayList<>(blocks);
+            for (int i = changed.size() - 1; i >= 0; i--) {
+                if (changed.get(i) instanceof Map<?, ?> part && "text".equals(part.get("type"))
+                        && part.get("text") instanceof String text && !text.isBlank()) {
+                    Map<String, Object> copy = new LinkedHashMap<>();
+                    part.forEach((key, value) -> copy.put(String.valueOf(key), value));
+                    copy.put("cache_control", marker); changed.set(i, copy); payload.put("content", changed); return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -103,19 +190,14 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
 
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
-        LinkedHashMap<String,Object> body = new LinkedHashMap<String, Object>();
-        body.put("model", model);
-        body.put("messages", messages.stream().map(this::messagePayload).toList());
-        if (tools != null && !tools.isEmpty()) {
-            body.put("tools", tools.stream().map(this::toolPayload).toList());
-        }
+        Map<String, Object> body = requestBody(messages, tools, false);
 
         HttpRequest request = HttpRequest.newBuilder(endpoint)
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
                 .timeout(requestTimeout)
                 .POST(HttpRequest.BodyPublishers.ofString(
-                        objectMapper.writeValueAsString(body), StandardCharsets.UTF_8))
+                        objectMapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
                 .build();
 
         long startedAt = System.nanoTime();
@@ -174,25 +256,13 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools,
                               Consumer<String> textDelta, Consumer<String> reasoningDelta) {
-        LinkedHashMap<String,Object> body = new LinkedHashMap<String, Object>();
-        body.put("model", model);
-        body.put("messages", messages.stream().map(this::messagePayload).toList());
-        body.put("stream", true);
-        // OpenAI 只有显式请求才在流末尾返回 usage。第三方兼容端点不一定接受这个字段，
-        // 因此只对官方域名启用；其他端点若主动返回 usage 仍会被解析。
-        if ("api.openai.com".equalsIgnoreCase(endpoint.getHost())) {
-            body.put("stream_options", Map.of("include_usage", true));
-        }
-        if (tools != null && !tools.isEmpty()) {
-            body.put("tools", tools.stream().map(this::toolPayload).toList());
-            body.put("tool_choice", "auto");
-        }
+        Map<String, Object> body = requestBody(messages, tools, true);
         HttpRequest request = HttpRequest.newBuilder(endpoint)
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
                 .timeout(requestTimeout)
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body), StandardCharsets.UTF_8))
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
                 .build();
         long startedAt = System.nanoTime();
         try {
@@ -285,15 +355,6 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     private Map<String, Object> messagePayload(Message message) {
         LinkedHashMap<String,Object> payload = new LinkedHashMap<String, Object>();
         payload.put("role", message.role());
-        // 显式缓存标记只对支持 cache_control 的端点开启（Anthropic 兼容网关）。
-        // OpenAI 官方端点会自动缓存长前缀，不需要也不能接受这个字段。
-        if (promptCaching && "system".equals(message.role()) && !message.content().isBlank()) {
-            payload.put("content", List.of(Map.of(
-                    "type", "text",
-                    "text", message.content(),
-                    "cache_control", Map.of("type", "ephemeral"))));
-            return payload;
-        }
         if (message.hasToolCalls()) {
             payload.put("content", message.content().isBlank() ? null : message.content());
             payload.put("tool_calls", message.toolCalls().stream().map(call -> Map.of(
@@ -302,7 +363,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     "function", Map.of(
                             "name", call.name(),
                             "arguments", objectMapper.writeValueAsString(
-                                    call.args() == null ? Map.of() : call.args())))).toList());
+                                    CanonicalJson.ordered(call.args() == null ? Map.of() : call.args()))))).toList());
         } else {
             payload.put("content", contentFor(message));
         }
@@ -399,61 +460,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     private static ModelUsage reportedUsage(JsonNode node) {
-        if (node == null || node.isNull() || node.isMissingNode()) {
-            return null;
-        }
-        CacheUsage cache = cacheUsage(node);
-        // 归一化后的总输入：Anthropic 风格要把缓存量加回来，OpenAI 风格本来就已包含
-        long input = longValue(node, "prompt_tokens", "input_tokens") + cache.extraInput();
-        long output = longValue(node, "completion_tokens", "output_tokens");
-        JsonNode details = node.path("completion_tokens_details");
-        if (details.isMissingNode() || details.isNull()) {
-            details = node.path("output_tokens_details");
-        }
-        long reasoning = longValue(details, "reasoning_tokens");
-        if (input <= 0 && output <= 0 && reasoning <= 0) {
-            return null;
-        }
-        return new ModelUsage(input, output, reasoning, cache.hit(), cache.write(), true);
-    }
-
-    /**
-     * 归一化各家端点的缓存字段。两种口径必须分开处理，否则命中率与成本核算会朝相反的方向错：
-     * OpenAI 兼容端点的 {@code prompt_tokens} 已包含缓存部分（缓存是分子）；
-     * Anthropic 兼容端点的 {@code input_tokens} 不含，缓存量单独列出（是加数）。
-     *
-     * @param extraInput 需要补进总输入的缓存量；OpenAI 风格为 0
-     */
-    private static CacheUsage cacheUsage(JsonNode node) {
-        long cacheRead = longValue(node, "cache_read_input_tokens");
-        long cacheWrite = longValue(node, "cache_creation_input_tokens");
-        if (cacheRead > 0 || cacheWrite > 0) {
-            return new CacheUsage(cacheRead, cacheWrite, cacheRead + cacheWrite);
-        }
-        JsonNode promptDetails = node.path("prompt_tokens_details");
-        if (promptDetails.isMissingNode() || promptDetails.isNull()) {
-            promptDetails = node.path("input_tokens_details");
-        }
-        long cached = longValue(promptDetails, "cached_tokens");
-        if (cached <= 0) {
-            // 部分网关把缓存量平铺在 usage 顶层
-            cached = longValue(node, "cached_tokens");
-        }
-        return new CacheUsage(cached, 0L, 0L);
-    }
-
-    private record CacheUsage(long hit, long write, long extraInput) {
-    }
-
-    private static long longValue(JsonNode node, String... names) {
-        if (node == null) return 0L;
-        for (String name : names) {
-            JsonNode value = node.get(name);
-            if (value != null && value.isNumber()) {
-                return Math.max(0L, value.asLong());
-            }
-        }
-        return 0L;
+        return ModelUsageParser.parse(node);
     }
 
     private ModelUsage estimatedUsage(List<Message> messages, String content, List<ToolCall> calls) {
@@ -461,7 +468,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         for (ToolCall call : calls == null ? List.<ToolCall>of() : calls) {
             output += ContextCompactor.estimateTokens(call.name());
             output += ContextCompactor.estimateTokens(objectMapper.writeValueAsString(
-                    call.args() == null ? Map.of() : call.args()));
+                    CanonicalJson.ordered(call.args() == null ? Map.of() : call.args())));
         }
         return new ModelUsage(ContextCompactor.estimateTokens(messages), output, 0, false);
     }

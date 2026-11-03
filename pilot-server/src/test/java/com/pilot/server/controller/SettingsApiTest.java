@@ -38,6 +38,32 @@ class SettingsApiTest {
     private MockMvc mvc;
 
     @Test
+    void runtimePricingAndCapabilitiesRoundTripThroughJsonApi() throws Exception {
+        updateModel("{\"endpoint\":\"https://runtime.test/v1\",\"model\":\"runtime-model\"}");
+        mvc.perform(put("/api/settings/model/runtime").contentType(MediaType.APPLICATION_JSON).content("""
+                {"model":"runtime-model","endpoint":"https://runtime.test/v1","options":{
+                  "provider":"generic","cacheMode":"auto","compactionMode":"short",
+                  "pricing":{"currency":"USD","input":1.5,"cachedInput":0,"cacheWrite":1.5,"output":2,"source":"测试单价"}}}
+                """))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.options.pricing.cachedInput").value(0))
+                .andExpect(jsonPath("$.effective.provider").value("generic"))
+                .andExpect(jsonPath("$.effective.instructionMessages").value(false));
+        mvc.perform(get("/api/settings/model/runtime"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.options.pricing.input").value(1.5));
+        mvc.perform(put("/api/settings/model/runtime").contentType(MediaType.APPLICATION_JSON).content("""
+                {"model":"runtime-model","endpoint":"https://runtime.test/v1","options":{"provider":"generic","cacheMode":"explicit"}}
+                """))
+                .andExpect(status().isBadRequest());
+        updateModel("{\"model\":\"runtime-other\"}");
+        mvc.perform(put("/api/settings/model/runtime").contentType(MediaType.APPLICATION_JSON).content("""
+                {"model":"runtime-model","endpoint":"https://runtime.test/v1","options":{"provider":"auto","cacheMode":"auto"}}
+                """))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/settings/model/runtime")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.options.pricing.input").doesNotExist());
+    }
+
+    @Test
     void blankApiKeyKeepsTheSavedOne() throws Exception {
         updateModel("{\"endpoint\":\"https://gateway.test/v1\",\"model\":\"gpt-a\",\"apiKey\":\"sk-a\"}")
                 .andExpect(jsonPath("$.model").value("gpt-a"))

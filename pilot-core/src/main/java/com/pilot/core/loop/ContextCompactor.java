@@ -84,6 +84,15 @@ public final class ContextCompactor {
 
     private final ModelClient client;
     private final int minKeepGroups;
+    private java.util.function.Supplier<List<com.pilot.core.model.ToolDefinition>> tools = List::of;
+    private java.util.function.IntSupplier contextLimit = () -> 0;
+
+    public ContextCompactor withTools(java.util.function.Supplier<List<com.pilot.core.model.ToolDefinition>> value) {
+        this.tools = value; return this;
+    }
+    public ContextCompactor withContextLimit(java.util.function.IntSupplier value) {
+        this.contextLimit = value; return this;
+    }
 
     public ContextCompactor(ModelClient client) {
         this(client, MIN_KEEP_GROUPS);
@@ -161,7 +170,7 @@ public final class ContextCompactor {
 
         String summary;
         try {
-            summary = summarize(transcript);
+            summary = summarize(messages, transcript);
         } catch (RuntimeException e) {
             // 摘要失败不能拖垮长任务：交给调用方的截断 / 硬裁剪兜底
             return Outcome.none(beforeChars);
@@ -341,9 +350,35 @@ public final class ContextCompactor {
         return "[上下文交接摘要（自动生成，已折叠 " + covered + " 条较早消息）]\n";
     }
 
-    private String summarize(String transcript) {
+    private String summarize(List<Message> history, String transcript) {
+        var profile = client.profile();
+        List<com.pilot.core.model.ToolDefinition> definitions = tools.get();
+        String instruction = "请只生成当前对话的交接摘要，不调用工具。保留目标、约束、已完成工作、验证证据和剩余事项。\n" + SUMMARY_PROMPT;
+        int input = estimateTokens(history) + estimateTokens(String.valueOf(definitions));
+        var price = profile.pricing();
+        // 实验策略仅在有余量且已配置单价显示潜在节省时启用；默认仍走短输入。
+        boolean candidate = "prefix".equals(profile.compactionMode()) && !history.isEmpty()
+                && contextLimit.getAsInt() > 0 && input + estimateTokens(instruction) + 2_000 < contextLimit.getAsInt()
+                && totalChars(history) + instruction.length() + 8_000 < contextLimit.getAsInt()
+                && price.input() != null && price.cachedInput() != null && price.cacheWrite() != null
+                && price.cachedInput().multiply(java.math.BigDecimal.valueOf(input))
+                    .add(price.cacheWrite().multiply(java.math.BigDecimal.valueOf(estimateTokens(instruction))))
+                    .compareTo(price.input().multiply(java.math.BigDecimal.valueOf(estimateTokens(SUMMARY_PROMPT + transcript)))) < 0;
+        if (candidate) {
+            List<Message> request = new ArrayList<>(history);
+            request.add(Message.user(instruction));
+            try {
+                ModelResponse response = com.pilot.core.model.ModelRequestScope.within("compaction", null, true,
+                        () -> client.chat(List.copyOf(request), definitions));
+                if (response.toolCalls().isEmpty() && response.content() != null && !response.content().isBlank()) return response.content().strip();
+            } catch (RuntimeException ignored) {
+                if (Thread.currentThread().isInterrupted()) throw ignored;
+            }
+        }
         List<Message> request = List.of(Message.system(SUMMARY_PROMPT), Message.user(transcript));
-        ModelResponse response = client.chat(request, List.of());
+        ModelResponse response = com.pilot.core.model.ModelRequestScope.within("compaction", null, true,
+                () -> client.chat(request, List.of()));
+        if (!response.toolCalls().isEmpty()) return "";
         return response.content() == null ? "" : response.content().strip();
     }
 

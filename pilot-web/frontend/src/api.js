@@ -136,6 +136,8 @@ export const api = {
   savePermissionMode: (mode) => apiJson('/api/settings/permission-mode', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) }),
   saveModel: (body) => apiJson('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   clearModelKey: () => apiJson('/api/settings/model/api-key', { method: 'DELETE' }),
+  modelRuntime: () => apiJson('/api/settings/model/runtime'),
+  saveModelRuntime: (body) => apiJson('/api/settings/model/runtime', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   probeModels: (body) => apiJson('/api/settings/model/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   skills: (sessionId) => apiJson(`/api/skills${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`),
   skillsPreview: (body) => apiJson('/api/skills/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),

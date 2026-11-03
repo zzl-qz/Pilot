@@ -57,6 +57,7 @@ final class ContextBudget {
     private int lastSuccessfulCompactApply = -1;
     private boolean rapidRefillCounted;
     private boolean compactCircuitOpen;
+    private int nextPruneAt, nextTruncateAt, lastLimit;
 
     ContextBudget(Compactor compactor) {
         this.compactor = compactor;
@@ -73,13 +74,19 @@ final class ContextBudget {
         int charBudget = Math.max(1, limit);
         int tokenBudget = charBudget;
         double usage = usage(messages, charBudget, tokenBudget);
+        if (lastLimit != limit) { nextPruneAt = 0; nextTruncateAt = 0; lastLimit = limit; }
+        int rewriteStep = Math.max(1, (int) (limit * 0.05));
 
         // 第一、二层不花模型调用，只是把「已经读过的内容」压缩成占位符与头尾
-        if (usage >= PRUNE_RATIO) {
+        // 低压区间内批量处理旧输出，避免每新增一个工具结果就改写已缓存的历史前缀。
+        // 达到摘要水位后立即恢复裁剪，不为缓存牺牲上下文预算。
+        if (usage >= PRUNE_RATIO && (usage >= PRE_COMPACT_RATIO || ContextCompactor.totalChars(messages) >= nextPruneAt)) {
             ContextCompactor.pruneToolOutputs(messages, limit);
+            nextPruneAt = ContextCompactor.totalChars(messages) + rewriteStep;
         }
-        if (usage >= TRUNCATE_RATIO) {
+        if (usage >= TRUNCATE_RATIO && (usage >= PRE_COMPACT_RATIO || ContextCompactor.totalChars(messages) >= nextTruncateAt)) {
             ContextCompactor.truncateLongToolOutputs(messages);
+            nextTruncateAt = ContextCompactor.totalChars(messages) + rewriteStep;
         }
 
         usage = usage(messages, charBudget, tokenBudget);

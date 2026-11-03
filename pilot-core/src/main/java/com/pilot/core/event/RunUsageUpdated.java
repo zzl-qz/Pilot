@@ -16,8 +16,13 @@ package com.pilot.core.event;
  * @param exact              所有累计 token 是否都来自端点 usage；false 表示至少含本地估算
  */
 public record RunUsageUpdated(int modelRequests, long inputTokens, long outputTokens,
-                              long cachedInputTokens, int contextTokens, int contextLimit, boolean exact)
+                              long cachedInputTokens, int contextTokens, int contextLimit, boolean exact,
+                              com.pilot.core.model.RequestTotals.Summary details)
         implements SessionEvent {
+
+    public RunUsageUpdated(int requests, long input, long output, long cached, int context, int limit, boolean exact) {
+        this(requests, input, output, cached, context, limit, exact, null);
+    }
 
     /** 兼容没有缓存观测的调用方：缓存命中视为 0。 */
     public RunUsageUpdated(int modelRequests, long inputTokens, long outputTokens,

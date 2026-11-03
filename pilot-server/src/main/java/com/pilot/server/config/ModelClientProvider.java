@@ -18,18 +18,36 @@ import java.util.function.Function;
 public final class ModelClientProvider implements ModelClient {
     private final ModelSettings settings;
     private final Function<ModelSettings.Snapshot, ModelClient> factory;
+    private final java.util.function.Supplier<String> revision;
+    private volatile String appliedRevision;
 
     private volatile ModelClient delegate;
     private volatile ModelSettings.Snapshot applied;
 
     public ModelClientProvider(ModelSettings settings, Function<ModelSettings.Snapshot, ModelClient> factory) {
+        this(settings, factory, () -> "");
+    }
+
+    public ModelClientProvider(ModelSettings settings, Function<ModelSettings.Snapshot, ModelClient> factory,
+                               java.util.function.Supplier<String> revision) {
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         this.factory = Objects.requireNonNull(factory, "factory must not be null");
+        this.revision = revision;
     }
 
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
         return client().chat(messages, tools);
+    }
+
+    @Override public ModelClient snapshot() { return client(); }
+    @Override public com.pilot.core.model.ModelProfile profile() { return client().profile(); }
+    @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, java.util.function.Consumer<String> text) {
+        return client().chat(messages, tools, text);
+    }
+    @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, java.util.function.Consumer<String> text,
+                                         java.util.function.Consumer<String> reasoning) {
+        return client().chat(messages, tools, text, reasoning);
     }
 
     /** 当前配置快照，供健康检查与设置接口展示。 */
@@ -40,14 +58,16 @@ public final class ModelClientProvider implements ModelClient {
     private ModelClient client() {
         ModelSettings.Snapshot current = settings.snapshot();
         ModelClient local = delegate;
-        if (local != null && current.equals(applied)) {
+        if (local != null && current.equals(applied) && Objects.equals(revision.get(), appliedRevision)) {
             return local;
         }
         synchronized (this) {
             ModelSettings.Snapshot now = settings.snapshot();
-            if (delegate == null || !now.equals(applied)) {
+            String version = revision.get();
+            if (delegate == null || !now.equals(applied) || !Objects.equals(version, appliedRevision)) {
                 delegate = factory.apply(now);
                 applied = now;
+                appliedRevision = version;
             }
             return delegate;
         }

@@ -18,6 +18,11 @@ import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.loop.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelUsage;
+import com.pilot.core.model.ContextComposition;
+import com.pilot.core.model.MeteredModelClient;
+import com.pilot.core.model.RequestReport;
+import com.pilot.core.model.RequestTotals;
+import com.pilot.core.event.ModelRequestCompleted;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.plan.PlanSink;
@@ -371,7 +376,7 @@ public class AgentRunService implements RunStarter {
         int used = ContextCompactor.estimateTokens(history);
         int limit = properties.contextMaxChars();
         return new ContextStatus(history.size(), used, limit, true,
-                history.size() > 3 && used >= 1_000, Math.min(100, Math.round(used * 100f / limit)),
+                registry.activeRun(sessionId).isEmpty() && history.size() > 3 && used >= 1_000, Math.min(100, Math.round(used * 100f / limit)),
                 segments(history));
     }
 
@@ -421,7 +426,13 @@ public class AgentRunService implements RunStarter {
                     Math.min(properties.contextMaxChars() / 2, Math.max(1_000, charsBefore * 2 / 3)));
             int targetTokens = Math.max(1_000,
                     Math.min(properties.contextMaxChars() / 2, Math.max(1_000, tokensBefore * 2 / 3)));
-            ContextCompactor.Outcome outcome = new ContextCompactor(modelClient)
+            String compactRun = "compact_" + java.util.UUID.randomUUID();
+            RunUsageAccumulator manualUsage = new RunUsageAccumulator();
+            ModelClient measured = new MeteredModelClient(modelClient, sessionId, "compaction", List.of(), report -> {
+                publish(sessionId, compactRun, new ModelRequestCompleted(report));
+                publish(sessionId, compactRun, manualUsage.request(report));
+            });
+            ContextCompactor.Outcome outcome = new ContextCompactor(measured)
                     .compact(working, targetChars, targetTokens);
             if (!outcome.compacted()) {
                 return new CompactionResult(false, 0, tokensBefore, tokensBefore,
@@ -431,7 +442,6 @@ public class AgentRunService implements RunStarter {
             List<Message> compacted = List.copyOf(working.subList(1, working.size()));
             conversations.save(sessionId, compacted);
             int tokensAfter = ContextCompactor.estimateTokens(compacted);
-            String compactRun = "compact_" + java.util.UUID.randomUUID();
             publish(sessionId, compactRun, new ContextCompacted(outcome.coveredMessages(),
                     outcome.charactersBefore(), outcome.charactersAfter(), outcome.summary()));
             return new CompactionResult(true, outcome.coveredMessages(), tokensBefore, tokensAfter,
@@ -902,29 +912,28 @@ public class AgentRunService implements RunStarter {
      */
     private String systemPrompt(String sessionId, String workspace, Set<String> availableTools,
                                 SkillCatalog catalog, ReviewMode review) {
-        // skills 变量每次都提供（空目录时传空串）：目录段因 requires:[use_skill] 会被过滤，不会走进来
+        return systemPromptParts(sessionId, workspace, availableTools, catalog, review).stream()
+                .map(ContextComposition.Source::text).collect(java.util.stream.Collectors.joining("\n\n"));
+    }
+
+    private List<ContextComposition.Source> systemPromptParts(String sessionId, String workspace,
+                                                             Set<String> availableTools, SkillCatalog catalog, ReviewMode review) {
         Map<String, String> variables = new java.util.LinkedHashMap<>(PromptLibrary.environment(workspace));
         variables.put("skills", skills.catalogText(catalog));
-        String prompt = PROMPTS.system(variables, availableTools);
+        List<ContextComposition.Source> parts = new ArrayList<>(PROMPTS.systemParts(variables, availableTools));
         String rules = projectRules(workspace);
-        if (!rules.isEmpty()) {
-            prompt = prompt + "\n\n" + rules;
-        }
-        // 记忆注入（独立于约定）：MEMORY.md 是人工审阅后的沉淀，remember 只写不注入的候选区
+        if (!rules.isEmpty()) parts.add(new ContextComposition.Source("rules", rules));
         String memory = ProjectRuleLoader.loadMemory(toolFactory.resolve(workspace), PROMPTS);
-        if (!memory.isEmpty()) {
-            prompt = prompt + "\n\n" + memory;
-        }
-        String today = PROMPTS.render("system/today",
-                Map.of("today", java.time.LocalDate.now().toString())).strip();
-        prompt = prompt + "\n\n" + today;
-        // 审查协议追加在段末：工具表已只剩只读，写工具的教学段因 requires 过滤自动消失
-        if (review.active()) {
-            prompt = prompt + "\n\n" + PROMPTS.render("review/protocol",
-                    Map.of("scope", review.scopeText())).strip();
-        }
-        String plan = planBrief(sessionId);
-        return plan.isEmpty() ? prompt : prompt + "\n\n" + plan;
+        if (!memory.isEmpty()) parts.add(new ContextComposition.Source("rules", memory));
+        if (review.active()) parts.add(new ContextComposition.Source("system",
+                PROMPTS.render("review/protocol", Map.of("scope", review.scopeText())).strip()));
+        return List.copyOf(parts);
+    }
+
+    private String currentTaskContext(String sessionId) {
+        return taskControls.prompt(sessionId) + commandContext(sessionId) + "\n\n"
+                + PROMPTS.render("system/today", Map.of("today", java.time.LocalDate.now().toString())).strip()
+                + "\n\n" + planBrief(sessionId);
     }
 
     /**
@@ -1263,9 +1272,18 @@ public class AgentRunService implements RunStarter {
             publish(sessionId, runId, delivered);
         };
         Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
+        List<ContextComposition.Source> promptSources = systemPromptParts(sessionId, workspace, availableTools, catalog, review);
+        Consumer<RequestReport> reports = report -> {
+            synchronized (runUsage) {
+                publish(sessionId, runId, new ModelRequestCompleted(report));
+                publish(sessionId, runId, runUsage.request(report));
+            }
+        };
+        ModelClient measuredMain = new MeteredModelClient(modelClient, sessionId, "main", promptSources, reports);
+        ModelClient measuredChild = new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(), reports);
         AgentLoop.Config config = new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(),
                 properties.repeatAbortAt(),
-                systemPrompt(sessionId, workspace, availableTools, catalog, review),
+                promptSources.stream().map(ContextComposition.Source::text).collect(java.util.stream.Collectors.joining("\n\n")),
                 // 收尾时读一次计划，把「本轮是否真的做完」一并写进 run.completed
                 () -> plans.load(sessionId),
                 // 计划没做完时自动继续，而不是停下来等用户点「继续执行」
@@ -1273,7 +1291,7 @@ public class AgentRunService implements RunStarter {
                 properties.contextMaxChars(),
                 properties.completionChecksEnabled());
         GoalExecutionPolicy goalPolicy = (unattended || (!review.active() && properties.goalModeEnabledValue()))
-                ? new GoalExecutionPolicy(modelClient, objectMapper, taskControls, sessionId,
+                ? new GoalExecutionPolicy(measuredMain, objectMapper, taskControls, sessionId,
                     toolFactory.resolve(workspace), handle.cancelled::get, properties.maxSteps(),
                     properties.directMaxRequests(), properties.directMaxInputTokens(),
                     properties.directMaxOutputTokens(), properties.directMaxActiveMillis(),
@@ -1286,7 +1304,7 @@ public class AgentRunService implements RunStarter {
             tools.register(goalPolicy.promotionTool());
             if (taskControls.load(sessionId).automation() != null) tools.register(goalPolicy.researchTool());
         }
-        ModelClient executionClient = goalPolicy == null ? modelClient : goalPolicy.budgetedClient();
+        ModelClient executionClient = goalPolicy == null ? measuredMain : goalPolicy.budgetedClient();
         // 子代理在构造时冻结并过滤工具快照，使用 run 级共享池；请求/usage 仍计入父任务事故熔断，
         // reviewer/finalization 的额外预留不对工作型子请求开放。
         SpawnAgentTool.UsageSink taskChildUsage = goalPolicy == null
@@ -1316,7 +1334,7 @@ public class AgentRunService implements RunStarter {
                 ? AgentProfileCatalog.EMPTY : agentProfiles.catalogFor(workspace);
         // 审查 run 不派子代理：单一视角审到底，也避免派发工具把只读裁剪绕出去。
         if (!review.active()) {
-            tools.register(new SpawnAgentTool(modelClient, tools, sessionGate, approvals, config,
+            tools.register(new SpawnAgentTool(measuredChild, tools, sessionGate, approvals, config,
                     () -> conversations.load(sessionId), sink, handle.cancelled::get, childUsage, profiles));
             // 多智能体调度：父 Agent 只能派活，子 Agent 的改动一律进沙箱
             if (multiProperties.enabled()) {
@@ -1335,7 +1353,7 @@ public class AgentRunService implements RunStarter {
                 .withPendingMessages(() -> pollSteering(sessionId))
                 .withLiveReasoning(delta -> sessions.preview(sessionId, runId,
                         new com.pilot.core.event.AssistantReasoning(delta)))
-                .withTaskContext(() -> taskControls.prompt(sessionId) + commandContext(sessionId))
+                .withTaskContext(() -> currentTaskContext(sessionId))
                 .withCompletionClaim(() -> claimCompletion(sessionId, handle))
                 // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力
                 .withHooks(com.pilot.core.hook.Hooks.load(toolFactory.resolve(workspace)))
@@ -1435,6 +1453,14 @@ public class AgentRunService implements RunStarter {
         private long childOutputTokens;
         private long childCachedInputTokens;
         private boolean childExact = true;
+        private final RequestTotals observed = new RequestTotals();
+        private int latestContext;
+
+        synchronized RunUsageUpdated request(RequestReport report) {
+            observed.add(report);
+            if ("main".equals(report.purpose())) latestContext = (int) Math.min(Integer.MAX_VALUE, report.context().totalTokens());
+            return combined();
+        }
 
         synchronized RunUsageUpdated main(RunUsageUpdated usage) {
             main = Objects.requireNonNull(usage);
@@ -1452,6 +1478,10 @@ public class AgentRunService implements RunStarter {
         }
 
         private RunUsageUpdated combined() {
+            RequestTotals.Summary summary = observed.summary();
+            if (summary.requests() > 0) return new RunUsageUpdated(summary.requests(), observed.input(), observed.output(),
+                    summary.cacheReadTokens(), latestContext > 0 ? latestContext : main.contextTokens(), main.contextLimit(),
+                    summary.exact(), summary);
             return new RunUsageUpdated(main.modelRequests() + childRequests,
                     main.inputTokens() + childInputTokens,
                     main.outputTokens() + childOutputTokens,

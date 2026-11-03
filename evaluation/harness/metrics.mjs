@@ -63,12 +63,18 @@ export function aggregate(records) {
   }));
 }
 
-/** 缓存命中率（0~1）；没有任何输入或没有缓存观测时为 0。 */
+/** 缓存命中率（0~1）；没有缓存观测时为 null，缺失不能伪装成实测零命中。 */
 export function cacheHitRate(items) {
-  const known = items.filter((item) => item.usageExact !== false && Number(item.inputTokens) > 0);
-  const input = known.reduce((sum, item) => sum + (Number(item.inputTokens) || 0), 0);
-  if (input <= 0) return 0;
-  return known.reduce((sum, item) => sum + Math.min(Number(item.inputTokens), Math.max(0, Number(item.cachedInputTokens) || 0)), 0) / input;
+  let input = 0, cached = 0;
+  for (const item of items) {
+    const details = item.usageDetails;
+    const observed = details ? Number(details.observedCacheRequests) > 0 : item.cacheReadObserved === true;
+    const denominator = Number(details?.observedCacheInputTokens ?? item.inputTokens);
+    const numerator = Number(details?.cacheReadTokens ?? item.cachedInputTokens);
+    if (!observed || !Number.isFinite(denominator) || denominator <= 0 || !Number.isFinite(numerator)) continue;
+    input += denominator; cached += Math.min(denominator, Math.max(0, numerator));
+  }
+  return input > 0 ? cached / input : null;
 }
 
 /**

@@ -160,6 +160,8 @@ function resetSessionState(draft) {
   draft.runId = null;
   draft.lastRunId = null;
   draft.runUsage = null;
+  draft.requestReports = [];
+  draft.latestContextReport = null;
   draft.lastOutcome = '';
   draft.queueHeld = false;
   draft.liveOutputTokens = 0;
@@ -257,6 +259,8 @@ export const useStore = create(immer((set, get) => {
   lastEventAt: 0,
   modelRetryUntil: 0,
   runUsage: null,
+  requestReports: [],
+  latestContextReport: null,
   liveOutputTokens: 0,
   lastOutcome: '',
   queueHeld: false,

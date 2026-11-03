@@ -18,7 +18,7 @@ public class ModelClientConfiguration {
      * 并在模型配置变化时重建，因此改模型 / 端点 / API Key 不需要重启。
      */
     @Bean
-    ModelClient modelClient(ModelSettings settings, ObjectMapper objectMapper,
+    ModelClient modelClient(ModelSettings settings, ObjectMapper objectMapper, ModelRuntimeSettings runtime,
                             @Value("${pilot.model.timeout-seconds:90}") long timeoutSeconds,
                             @Value("${pilot.model.prompt-caching:false}") boolean promptCaching) {
         HttpClient httpClient = HttpClient.newBuilder()
@@ -28,6 +28,6 @@ public class ModelClientConfiguration {
         // 显式缓存标记只给支持 cache_control 的端点；OpenAI 官方端点自动缓存，保持默认关闭
         return new ModelClientProvider(settings, snapshot -> new OpenAiCompatibleModelClient(
                 httpClient, objectMapper, URI.create(snapshot.endpoint()), snapshot.apiKey(),
-                snapshot.model(), timeout).withPromptCaching(promptCaching));
+                snapshot.model(), timeout).withProfile(runtime.profile(snapshot)).withPromptCaching(promptCaching), runtime::revision);
     }
 }
