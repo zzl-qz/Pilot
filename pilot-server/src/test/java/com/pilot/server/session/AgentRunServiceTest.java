@@ -85,6 +85,30 @@ class AgentRunServiceTest {
     }
 
     @Test
+    void accumulatesChildCachedTokensIntoRunSnapshot() {
+        AgentRunService.RunUsageAccumulator usage = new AgentRunService.RunUsageAccumulator();
+
+        RunUsageUpdated main = usage.main(new RunUsageUpdated(2, 1_000, 100, 400, 8_000, 120_000, true));
+        RunUsageUpdated withChild = usage.child(new ModelUsage(300, 30, 0, 250, 0, true));
+
+        assertEquals(400, main.cachedInputTokens());
+        assertEquals(1_300, withChild.inputTokens());
+        assertEquals(650, withChild.cachedInputTokens(), "子代理的缓存命中必须并入 run 级快照");
+        assertEquals(8_000, withChild.contextTokens(), "上下文水位始终来自主请求");
+    }
+
+    @Test
+    void keepsCachedTokensWhenChildUsageIsUnknown() {
+        AgentRunService.RunUsageAccumulator usage = new AgentRunService.RunUsageAccumulator();
+
+        usage.main(new RunUsageUpdated(1, 500, 50, 200, 4_000, 120_000, true));
+        RunUsageUpdated merged = usage.child(ModelUsage.unknown());
+
+        assertEquals(200, merged.cachedInputTokens(), "未知的用量没有缓存观测，不该冲掉已有命中数");
+        assertFalse(merged.exact());
+    }
+
+    @Test
     void waitsForTaskCompletionThenStartsEditedMessagesInOrder() throws Exception {
         CountDownLatch enteredFirst = new CountDownLatch(1);
         CountDownLatch releaseFirst = new CountDownLatch(1);
@@ -220,6 +244,31 @@ class AgentRunServiceTest {
         }
     }
 
+    /**
+     * 普通 run 必须真的把 spawn_agent 声明给模型：工具注册发生在提示词组装之后，
+     * 任何一侧漏改都会让「子代理从没触发」变成默认状态。
+     */
+    @Test
+    void normalRunsExposeSpawnAgentAndItsGuidance() throws Exception {
+        CopyOnWriteArrayList<List<ToolDefinition>> toolSets = new CopyOnWriteArrayList<>();
+        CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<>();
+        ModelClient model = (messages, tools) -> {
+            requests.add(messages);
+            toolSets.add(tools);
+            return done();
+        };
+
+        try (Fixture fixture = new Fixture(model, 8)) {
+            fixture.start();
+            fixture.awaitFinished("COMPLETED");
+
+            List<String> names = toolSets.getFirst().stream().map(ToolDefinition::name).toList();
+            assertTrue(names.contains("spawn_agent"), "普通 run 应向模型暴露 spawn_agent：" + names);
+            String system = requests.getFirst().getFirst().content();
+            assertTrue(system.contains("子代理调研"), "工具可见时系统提示词应带子代理使用场景");
+        }
+    }
+
     @Test
     void reviewRunsUseReadOnlyToolsAndInjectTheProtocol() throws Exception {
         CopyOnWriteArrayList<List<com.pilot.core.model.ToolDefinition>> toolSets = new CopyOnWriteArrayList<>();
@@ -246,6 +295,7 @@ class AgentRunServiceTest {
             String system = requests.getFirst().getFirst().content();
             assertTrue(system.contains("审查协议"), "系统提示词缺审查协议：" + system.substring(0, 120));
             assertTrue(system.contains("重点看登录模块"), "协议范围必须带上用户指定的审查范围");
+            assertFalse(system.contains("子代理调研"), "审查 run 没有派发工具，提示词不应介绍子代理");
             assertTrue(fixture.sessions.events(fixture.sessionId).stream()
                     .anyMatch(event -> event.payload() instanceof RunStarted started
                             && "/review 重点看登录模块".equals(started.input())));

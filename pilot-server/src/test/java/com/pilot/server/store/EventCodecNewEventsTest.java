@@ -44,6 +44,27 @@ class EventCodecNewEventsTest {
     }
 
     @Test
+    void roundTripsRunUsageWithCachedTokens() {
+        RunUsageUpdated event = new RunUsageUpdated(3, 12_400, 860, 9_000, 42_000, 120_000, false);
+
+        RunUsageUpdated decoded = assertInstanceOf(RunUsageUpdated.class, roundTrip("run.usage", event));
+        assertEquals(9_000, decoded.cachedInputTokens(), "缓存命中必须随事件一起落库");
+        assertEquals(event, decoded);
+    }
+
+    /** 老库里的 run.usage 没有 cachedInputTokens，必须按 0 解码，否则整条会话的 SSE 回放会 500。 */
+    @Test
+    void decodesLegacyRunUsageWithoutCachedTokens() {
+        SessionEvent decoded = codec.decode("run.usage",
+                "{\"modelRequests\":3,\"inputTokens\":12400,\"outputTokens\":860,"
+                        + "\"contextTokens\":42000,\"contextLimit\":120000,\"exact\":false}");
+
+        RunUsageUpdated usage = assertInstanceOf(RunUsageUpdated.class, decoded);
+        assertEquals(12_400, usage.inputTokens());
+        assertEquals(0, usage.cachedInputTokens());
+    }
+
+    @Test
     void roundTripsContextCompacted() {
         ContextCompacted event = new ContextCompacted(4, 12_000, 3_000, "## 目标\n完成 P0-1");
 

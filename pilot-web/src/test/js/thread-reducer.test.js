@@ -164,6 +164,26 @@ test('一轮结束后用量计时停住，思考也不再显示思考中', () =>
 });
 
 
+test('run.usage 带上缓存命中，端点不返回时按 0 处理', () => {
+  const state = draft();
+  applyEvent(state, {
+    type: 'run.usage', sequence: 1, runId: 'run_1', timestamp: '2026-11-02T00:00:00Z',
+    payload: { modelRequests: 2, inputTokens: 1000, outputTokens: 20, cachedInputTokens: 800, contextTokens: 80, contextLimit: 1000, exact: true }
+  }, { live: true });
+
+  assert.equal(state.runUsage.cachedInputTokens, 800, '缓存命中必须随用量一起进入 turn.stats');
+  assert.equal(state.runUsage.inputTokens, 1000);
+
+  const legacy = draft();
+  applyEvent(legacy, {
+    type: 'run.usage', sequence: 1, runId: 'run_1', timestamp: '2026-11-02T00:00:00Z',
+    payload: { modelRequests: 2, inputTokens: 1000, outputTokens: 20, contextTokens: 80, contextLimit: 1000, exact: true }
+  }, { live: true });
+
+  assert.equal(legacy.runUsage.cachedInputTokens, 0, '老事件没有该字段时按 0，不能是 NaN');
+});
+
+
 test('引导回放保留正文和图片，后续回复仍属于原运行且显示在引导后', () => {
   const state = draft();
   applyEvent(state, { type: 'run.started', runId: 'r1', sequence: 1, payload: { input: '原任务' } }, { live: true });

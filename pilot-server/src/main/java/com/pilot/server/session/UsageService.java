@@ -31,15 +31,18 @@ public class UsageService {
     record RunTotal(String sessionId, String runId, Instant timestamp, RunUsageUpdated usage) {
     }
 
-    /** 聚合结果：日序列 + 会话 Top + 合计。 */
-    record DayTotal(LocalDate date, int requests, long inputTokens, long outputTokens) {
+    /** 聚合结果：日序列 + 会话 Top + 合计。cachedInputTokens 与 inputTokens 同口径（总输入含缓存）。 */
+    record DayTotal(LocalDate date, int requests, long inputTokens, long outputTokens,
+                    long cachedInputTokens) {
     }
 
-    record SessionTotal(String sessionId, String title, int requests, long inputTokens, long outputTokens) {
+    record SessionTotal(String sessionId, String title, int requests, long inputTokens, long outputTokens,
+                        long cachedInputTokens) {
     }
 
     record UsageReport(int days, List<DayTotal> daily, List<SessionTotal> sessions,
-                       long totalRequests, long totalInputTokens, long totalOutputTokens) {
+                       long totalRequests, long totalInputTokens, long totalOutputTokens,
+                       long totalCachedInputTokens) {
     }
 
     private static final int MAX_SESSION_ROWS = 10;
@@ -74,21 +77,23 @@ public class UsageService {
         for (EventEnvelope event : lastByRun.values()) {
             RunUsageUpdated usage = (RunUsageUpdated) event.payload();
             LocalDate date = LocalDate.ofInstant(event.timestamp(), ZONE);
-            accumulate(byDay.computeIfAbsent(date, ignored -> new long[3]), usage);
-            accumulate(bySession.computeIfAbsent(event.sessionId(), ignored -> new long[3]), usage);
+            accumulate(byDay.computeIfAbsent(date, ignored -> new long[4]), usage);
+            accumulate(bySession.computeIfAbsent(event.sessionId(), ignored -> new long[4]), usage);
         }
 
         List<DayTotal> daily = byDay.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
                 .map(entry -> new DayTotal(entry.getKey(),
-                        (int) entry.getValue()[0], entry.getValue()[1], entry.getValue()[2]))
+                        (int) entry.getValue()[0], entry.getValue()[1], entry.getValue()[2],
+                        entry.getValue()[3]))
                 .toList();
         List<SessionTotal> sessionTotals = bySession.entrySet().stream()
                 .map(entry -> new SessionTotal(entry.getKey(),
                         sessions.find(entry.getKey())
                                 .map(com.pilot.core.session.Session::title)
                                 .orElse("已删除的会话"),
-                        (int) entry.getValue()[0], entry.getValue()[1], entry.getValue()[2]))
+                        (int) entry.getValue()[0], entry.getValue()[1], entry.getValue()[2],
+                        entry.getValue()[3]))
                 .sorted(Comparator.comparingLong((SessionTotal total) ->
                         total.inputTokens() + total.outputTokens()).reversed())
                 .limit(MAX_SESSION_ROWS)
@@ -97,17 +102,20 @@ public class UsageService {
         long requests = 0;
         long input = 0;
         long output = 0;
+        long cached = 0;
         for (long[] totals : byDay.values()) {
             requests += totals[0];
             input += totals[1];
             output += totals[2];
+            cached += totals[3];
         }
-        return new UsageReport(window, daily, sessionTotals, requests, input, output);
+        return new UsageReport(window, daily, sessionTotals, requests, input, output, cached);
     }
 
     private static void accumulate(long[] totals, RunUsageUpdated usage) {
         totals[0] += usage.modelRequests();
         totals[1] += usage.inputTokens();
         totals[2] += usage.outputTokens();
+        totals[3] += usage.cachedInputTokens();
     }
 }

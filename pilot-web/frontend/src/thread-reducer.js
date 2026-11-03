@@ -368,6 +368,8 @@ export function applyEvent(draft, event, { live }) {
         modelRequests: Number(payload.modelRequests || 0),
         inputTokens: Number(payload.inputTokens || 0),
         outputTokens: Number(payload.outputTokens || 0),
+        // 命中缓存的输入 token，与 inputTokens 同口径；端点不返回时为 0
+        cachedInputTokens: Number(payload.cachedInputTokens || 0),
         contextTokens: Number(payload.contextTokens || 0),
         contextLimit: Math.max(1, Number(payload.contextLimit || 1)),
         exact: Boolean(payload.exact),

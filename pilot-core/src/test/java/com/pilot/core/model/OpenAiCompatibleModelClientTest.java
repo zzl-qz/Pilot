@@ -184,6 +184,114 @@ class OpenAiCompatibleModelClientTest {
     }
 
     @Test
+    void readsCachedTokensFromOpenAiStyleUsage() throws IOException {
+        // OpenAI 风格：prompt_tokens 已包含缓存部分，缓存是分子，不能重复加进总输入
+        HttpServer server = startServer(new AtomicReference<>(), 200, """
+                {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+                 "usage":{"prompt_tokens":1000,"completion_tokens":17,
+                   "prompt_tokens_details":{"cached_tokens":800}}}
+                """);
+        server.start();
+        try {
+            ModelResponse response = client(server).chat(List.of(Message.user("开始")), List.of());
+            assertEquals(1000, response.usage().inputTokens(), "总输入已含缓存，再相加会虚增成本");
+            assertEquals(800, response.usage().cachedInputTokens());
+            assertEquals(0, response.usage().cacheWriteTokens(), "OpenAI 端点不返回缓存写入量");
+            assertTrue(response.usage().exact());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void addsAnthropicCacheTokensBackIntoTotalInput() throws IOException {
+        // Anthropic 风格：input_tokens 不含缓存，缓存量是加数
+        HttpServer server = startServer(new AtomicReference<>(), 200, """
+                {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+                 "usage":{"input_tokens":100,"completion_tokens":17,
+                   "cache_read_input_tokens":700,"cache_creation_input_tokens":200}}
+                """);
+        server.start();
+        try {
+            ModelResponse response = client(server).chat(List.of(Message.user("开始")), List.of());
+            assertEquals(1000, response.usage().inputTokens());
+            assertEquals(700, response.usage().cachedInputTokens());
+            assertEquals(200, response.usage().cacheWriteTokens());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void countsAnthropicCacheWriteWithoutRead() throws IOException {
+        // 首次写入缓存：只有 creation 没有 read，仍按 Anthropic 口径处理
+        HttpServer server = startServer(new AtomicReference<>(), 200, """
+                {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+                 "usage":{"input_tokens":50,"completion_tokens":17,
+                   "cache_creation_input_tokens":250}}
+                """);
+        server.start();
+        try {
+            ModelResponse response = client(server).chat(List.of(Message.user("开始")), List.of());
+            assertEquals(300, response.usage().inputTokens());
+            assertEquals(0, response.usage().cachedInputTokens());
+            assertEquals(250, response.usage().cacheWriteTokens());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void fallsBackToFlatCachedTokens() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200, """
+                {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+                 "usage":{"prompt_tokens":600,"completion_tokens":17,"cached_tokens":300}}
+                """);
+        server.start();
+        try {
+            ModelResponse response = client(server).chat(List.of(Message.user("开始")), List.of());
+            assertEquals(600, response.usage().inputTokens());
+            assertEquals(300, response.usage().cachedInputTokens(), "网关把缓存量平铺时也要读到");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void reportsZeroCacheWhenEndpointOmitsIt() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200, """
+                {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+                 "usage":{"prompt_tokens":321,"completion_tokens":17}}
+                """);
+        server.start();
+        try {
+            ModelResponse response = client(server).chat(List.of(Message.user("开始")), List.of());
+            assertEquals(321, response.usage().inputTokens());
+            assertEquals(0, response.usage().cachedInputTokens());
+            assertEquals(0d, response.usage().cacheHitRatio());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void clampsCacheAboveReportedInput() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200, """
+                {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+                 "usage":{"prompt_tokens":100,"completion_tokens":17,
+                   "prompt_tokens_details":{"cached_tokens":400}}}
+                """);
+        server.start();
+        try {
+            ModelResponse response = client(server).chat(List.of(Message.user("开始")), List.of());
+            assertEquals(100, response.usage().inputTokens());
+            assertEquals(100, response.usage().cachedInputTokens(), "命中率不允许超过 100%");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void sendsImageAttachmentAsMultimodalParts() throws IOException {
         Path image = Files.createTempFile("pilot-attach", ".png");
         Files.write(image, new byte[]{(byte) 0x89, 'P', 'N', 'G'});

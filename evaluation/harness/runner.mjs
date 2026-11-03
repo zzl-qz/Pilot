@@ -20,9 +20,9 @@
  * 没有真实端点时可以 `--dry-run`：只验证聚合与产物格式，不产生能力结论。
  */
 import { spawn } from "node:child_process";
-import { cp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { aggregate, compare, summarize } from "./metrics.mjs";
+import { aggregate, compare, gate, summarize } from "./metrics.mjs";
 
 const TERMINAL = new Set(["COMPLETED", "INTERRUPTED", "FAILED", "ARCHIVED"]);
 
@@ -38,7 +38,9 @@ function parseArgs(argv) {
     token: process.env.PILOT_SECURITY_TOKEN ?? "",
     timeoutMinutes: 30,
     dryRun: false,
-    baseline: ""
+    baseline: "",
+    strict: false,
+    verifyFixtures: false
   };
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
@@ -55,6 +57,8 @@ function parseArgs(argv) {
       case "--baseline": args.baseline = value; index++; break;
       case "--timeout-minutes": args.timeoutMinutes = Number(value); index++; break;
       case "--dry-run": args.dryRun = true; break;
+      case "--strict": args.strict = true; break;
+      case "--verify-fixtures": args.verifyFixtures = true; break;
       case "--help":
         console.log(helpText());
         process.exit(0);
@@ -70,7 +74,12 @@ function helpText() {
   return [
     "runner.mjs --base <url> --out <jsonl> [--model M] [--prompt-version P] [--tool-version T]",
     "           [--tasks tasks.json] [--fixtures dir] [--token T] [--timeout-minutes N]",
-    "           [--baseline 上次的 jsonl] [--dry-run]"
+    "           [--baseline 上次的 jsonl] [--dry-run] [--strict]",
+    "",
+    "  --baseline  与上次记录比较，并给出优化门禁结论。",
+    "  --strict    门禁不是 pass 就以非零退出码结束（用于 CI 拦住会造成能力退化的「优化」）。",
+    "  --dry-run   只验证流程与产物格式，不产生能力结论。",
+    "  --verify-fixtures  只检查每个 fixture 在「未修复」状态下验收必须失败（有分辨力）。"
   ].join("\n");
 }
 
@@ -131,10 +140,20 @@ async function acceptanceResult(task, workspace) {
   return { ran: true, ok: details.length > 0, detail: details.join("；") };
 }
 
-async function waitForTerminal(args, sessionId) {
-  const deadline = Date.now() + args.timeoutMinutes * 60 * 1000;
+async function waitForTerminal(args, sessionId, steer) {
+  const started = Date.now();
+  const deadline = started + args.timeoutMinutes * 60 * 1000;
   let last = null;
+  let steered = false;
   while (Date.now() < deadline) {
+    // 中途纠正：跑到指定秒数时追加一条消息，模拟用户中途改主意
+    if (steer && !steered && (Date.now() - started) / 1000 >= steer.afterSeconds) {
+      steered = true;
+      await api(args, `/api/sessions/${sessionId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ content: steer.content })
+      });
+    }
     last = await api(args, `/api/sessions/${sessionId}/diagnostics`);
     if (TERMINAL.has(last.sessionStatus)) return last;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 3000));
@@ -168,7 +187,7 @@ async function runTask(args, task) {
     method: "POST",
     body: JSON.stringify({ content: task.prompt })
   });
-  const diagnostics = await waitForTerminal(args, sessionId);
+  const diagnostics = await waitForTerminal(args, sessionId, task.steer);
   const acceptance = await acceptanceResult(task, workspace);
   const durationSeconds = (Date.now() - started) / 1000;
   const failedCommands = (diagnostics?.commands ?? []).filter((item) => (item.exitCode ?? 0) !== 0);
@@ -189,6 +208,7 @@ async function runTask(args, task) {
     costKnown: false,
     inputTokens: diagnostics?.inputTokens ?? 0,
     outputTokens: diagnostics?.outputTokens ?? 0,
+    cachedInputTokens: diagnostics?.cachedInputTokens ?? 0,
     validationCovered: diagnostics?.validation?.covered ?? false,
     acceptanceDetail: acceptance.detail,
     storageHealth: diagnostics?.storageHealth ?? "",
@@ -213,10 +233,42 @@ function dryRunRecords(tasks, args) {
     costKnown: true,
     inputTokens: 1200 * (index + 1),
     outputTokens: 400 * (index + 1),
+    cachedInputTokens: 300 * (index + 1),
     validationCovered: true,
     acceptanceDetail: "dry-run（未执行真实命令）",
     notes: "dry-run 记录不能用于能力结论"
   }));
+}
+
+/**
+ * fixture 自检：每个 fixture 在「未修复」状态下跑验收必须失败。
+ *
+ * 初始就通过的任务没有分辨力——模型什么都不做也能拿到 PASS，
+ * 于是门禁的回归判定会完全空转（所有任务基线都是成功，永远报不出退化）。
+ */
+async function verifyFixtures(args, tasks) {
+  let broken = 0;
+  for (const task of tasks) {
+    const workspace = await prepareWorkspace(args, task);
+    if (!workspace) {
+      console.log(`✗ ${task.id}：fixture 不存在（${task.fixture ?? task.id}）`);
+      broken += 1;
+      continue;
+    }
+    const result = await acceptanceResult(task, workspace);
+    if (!result.ran) {
+      console.log(`✗ ${task.id}：验收命令没有执行`);
+      broken += 1;
+    } else if (result.ok) {
+      console.log(`✗ ${task.id}：未修复就通过了，没有分辨力`);
+      broken += 1;
+    } else {
+      console.log(`✓ ${task.id}：未修复时验收失败`);
+    }
+    await rm(workspace, { recursive: true, force: true });
+  }
+  console.log(`\n${tasks.length - broken}/${tasks.length} 个 fixture 有分辨力`);
+  if (broken > 0) process.exit(1);
 }
 
 async function main() {
@@ -224,6 +276,11 @@ async function main() {
   const tasksFile = JSON.parse(await readFile(args.tasks, "utf8"));
   const tasks = tasksFile.tasks ?? [];
   if (tasks.length === 0) throw new Error("任务集为空");
+
+  if (args.verifyFixtures) {
+    await verifyFixtures(args, tasks);
+    return;
+  }
 
   let records;
   if (args.dryRun) {
@@ -252,10 +309,14 @@ async function main() {
     ? (await readFile(args.baseline, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line))
     : null;
   const compared = baseline ? compare(baseline, records) : records;
+  const decision = baseline ? gate(baseline, compared) : null;
 
   await mkdir(dirname(args.out), { recursive: true });
   await writeFile(args.out, compared.map((record) => JSON.stringify(record)).join("\n") + "\n", "utf8");
-  const summary = { generatedAt: new Date().toISOString(), dryRun: args.dryRun, groups: aggregate(compared), overall: summarize(compared) };
+  const summary = {
+    generatedAt: new Date().toISOString(), dryRun: args.dryRun,
+    groups: aggregate(compared), overall: summarize(compared), gate: decision
+  };
   await writeFile(args.out.replace(/\.jsonl$/, ".summary.json"), JSON.stringify(summary, null, 2), "utf8");
 
   console.log("\n结果：");
@@ -265,6 +326,25 @@ async function main() {
       `返工 ${group.avgRework.toFixed(1)}  接管 ${(group.takeoverRate * 100).toFixed(1)}%`);
   }
   if (args.dryRun) console.log("  ⚠ dry-run：这些数字只用于验证流程，不能当作模型能力结论。");
+
+  if (decision) {
+    const m = decision.metrics;
+    console.log(`\n门禁：${decision.verdict.toUpperCase()}`);
+    console.log(`  可比任务 ${m.pairedTasks} 个（下限 ${m.minTasks}）  ` +
+      `通过率 ${(m.baselineSuccessRate * 100).toFixed(1)}% → ${(m.currentSuccessRate * 100).toFixed(1)}%  ` +
+      `成本 $${m.baselineCostUsd.toFixed(3)} → $${m.currentCostUsd.toFixed(3)}  ` +
+      `缓存命中 ${(m.baselineCacheHitRate * 100).toFixed(0)}% → ${(m.currentCacheHitRate * 100).toFixed(0)}%`);
+    for (const reason of decision.reasons) {
+      console.log(`  - ${reason}`);
+    }
+    if (decision.verdict === "pass") {
+      console.log("  可以合入：能力没有下降，成本也没有上升。");
+    }
+    if (args.strict && decision.verdict !== "pass") {
+      console.error("  --strict：门禁未通过，按失败退出。");
+      process.exit(1);
+    }
+  }
 }
 
 main().catch((error) => {

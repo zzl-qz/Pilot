@@ -700,12 +700,19 @@ const TurnStats = memo(function TurnStats({ stats }) {
   const limit = Number(stats.contextLimit) || 0;
   const used = Number(stats.contextTokens) || 0;
   const crowded = limit > 0 && used / limit >= 0.85;
+  const input = Number(stats.inputTokens) || 0;
+  const cached = Number(stats.cachedInputTokens) || 0;
+  // 估算路径没有缓存观测：显示「—」，不能把「没观测」读成「没命中」
+  const cacheLabel = stats.exact === false || input <= 0 ? '—' : `${Math.round((cached / input) * 100)}%`;
   return (
     <details className="turn-stats-detail"><summary>{elapsed != null ? `${elapsed}s · ` : ''}用量详情</summary><div className="turn-stats">
       {elapsed != null && <span className="turn-stat"><span>耗时</span><b>{elapsed}s</b></span>}
       <span className="turn-stat"><span>请求</span><b>{stats.modelRequests ?? '—'}</b></span>
       <span className="turn-stat" title={stats.inputTokens ?? ''}><span>输入</span><b>{mark}{formatCount(stats.inputTokens)}</b></span>
       <span className="turn-stat" title={stats.outputTokens ?? ''}><span>输出</span><b>{mark}{formatCount(stats.outputTokens)}</b></span>
+      <span className="turn-stat" title={`命中缓存 ${formatCount(stats.cachedInputTokens)} / 总输入 ${formatCount(stats.inputTokens)}`}>
+        <span>缓存命中</span><b>{cacheLabel}</b>
+      </span>
       <span className={`turn-stat is-context${crowded ? ' is-hot' : ''}`} title={stats.contextTokens ?? ''}>
         <span>上下文</span><b>{formatCount(stats.contextTokens)}</b>
       </span>

@@ -1118,6 +1118,7 @@ public final class AgentLoop {
         private int requests;
         private long inputTokens;
         private long outputTokens;
+        private long cachedInputTokens;
         private long pendingInput;
         private int contextTokens;
         private int contextLimit = 1;
@@ -1140,6 +1141,11 @@ public final class AgentLoop {
             if (reported != null && reported.present()) {
                 inputTokens += reported.inputTokens() > 0 ? reported.inputTokens() : pendingInput;
                 outputTokens += reported.outputTokens();
+                // 缓存命中只有在端点真的给出了输入用量时才可信；回落到本地估算的那一步
+                // 没有缓存观测，计入会让命中率虚高。
+                if (reported.exact() && reported.inputTokens() > 0) {
+                    cachedInputTokens += reported.cachedInputTokens();
+                }
                 allExact = allExact && reported.exact() && reported.inputTokens() > 0;
             } else {
                 inputTokens += pendingInput;
@@ -1172,7 +1178,7 @@ public final class AgentLoop {
 
         private void publish(boolean exact) {
             long visibleInput = inputTokens + pendingInput;
-            events.accept(new RunUsageUpdated(requests, visibleInput, outputTokens,
+            events.accept(new RunUsageUpdated(requests, visibleInput, outputTokens, cachedInputTokens,
                     contextTokens, contextLimit, exact && pendingInput == 0));
         }
     }

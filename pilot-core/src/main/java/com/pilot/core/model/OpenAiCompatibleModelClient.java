@@ -402,7 +402,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (node == null || node.isNull() || node.isMissingNode()) {
             return null;
         }
-        long input = longValue(node, "prompt_tokens", "input_tokens");
+        CacheUsage cache = cacheUsage(node);
+        // 归一化后的总输入：Anthropic 风格要把缓存量加回来，OpenAI 风格本来就已包含
+        long input = longValue(node, "prompt_tokens", "input_tokens") + cache.extraInput();
         long output = longValue(node, "completion_tokens", "output_tokens");
         JsonNode details = node.path("completion_tokens_details");
         if (details.isMissingNode() || details.isNull()) {
@@ -412,7 +414,35 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (input <= 0 && output <= 0 && reasoning <= 0) {
             return null;
         }
-        return new ModelUsage(input, output, reasoning, true);
+        return new ModelUsage(input, output, reasoning, cache.hit(), cache.write(), true);
+    }
+
+    /**
+     * 归一化各家端点的缓存字段。两种口径必须分开处理，否则命中率与成本核算会朝相反的方向错：
+     * OpenAI 兼容端点的 {@code prompt_tokens} 已包含缓存部分（缓存是分子）；
+     * Anthropic 兼容端点的 {@code input_tokens} 不含，缓存量单独列出（是加数）。
+     *
+     * @param extraInput 需要补进总输入的缓存量；OpenAI 风格为 0
+     */
+    private static CacheUsage cacheUsage(JsonNode node) {
+        long cacheRead = longValue(node, "cache_read_input_tokens");
+        long cacheWrite = longValue(node, "cache_creation_input_tokens");
+        if (cacheRead > 0 || cacheWrite > 0) {
+            return new CacheUsage(cacheRead, cacheWrite, cacheRead + cacheWrite);
+        }
+        JsonNode promptDetails = node.path("prompt_tokens_details");
+        if (promptDetails.isMissingNode() || promptDetails.isNull()) {
+            promptDetails = node.path("input_tokens_details");
+        }
+        long cached = longValue(promptDetails, "cached_tokens");
+        if (cached <= 0) {
+            // 部分网关把缓存量平铺在 usage 顶层
+            cached = longValue(node, "cached_tokens");
+        }
+        return new CacheUsage(cached, 0L, 0L);
+    }
+
+    private record CacheUsage(long hit, long write, long extraInput) {
     }
 
     private static long longValue(JsonNode node, String... names) {

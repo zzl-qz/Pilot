@@ -1188,7 +1188,9 @@ public class AgentRunService implements RunStarter {
         }
         // 条件注册的 spawn_agent / dispatch_agents 位于 config 构造之后，先算出最终工具名，
         // 让 system prompt 只注入本轮真实可用的工具说明。
-        Set<String> availableTools = sessionTools(tools);
+        // 审查 run 用 reviewTools 的最终名单：它既不注册也不允许派发工具，
+        // 不能再补 spawn_agent / dispatch_agents，否则提示词会介绍本轮根本调不到的工具。
+        Set<String> availableTools = review.active() ? tools.names() : sessionTools(tools);
         RunUsageAccumulator runUsage = new RunUsageAccumulator();
         // 收尾事件里的检查摘要要用于校验证据，sink 里先留一份
         java.util.concurrent.atomic.AtomicReference<RunCompleted> lastCompleted =
@@ -1415,6 +1417,7 @@ public class AgentRunService implements RunStarter {
         private int childRequests;
         private long childInputTokens;
         private long childOutputTokens;
+        private long childCachedInputTokens;
         private boolean childExact = true;
 
         synchronized RunUsageUpdated main(RunUsageUpdated usage) {
@@ -1427,6 +1430,7 @@ public class AgentRunService implements RunStarter {
             childRequests++;
             childInputTokens += value.inputTokens();
             childOutputTokens += value.outputTokens();
+            childCachedInputTokens += value.cachedInputTokens();
             childExact &= value.exact();
             return combined();
         }
@@ -1435,6 +1439,7 @@ public class AgentRunService implements RunStarter {
             return new RunUsageUpdated(main.modelRequests() + childRequests,
                     main.inputTokens() + childInputTokens,
                     main.outputTokens() + childOutputTokens,
+                    main.cachedInputTokens() + childCachedInputTokens,
                     main.contextTokens(), main.contextLimit(), main.exact() && childExact);
         }
     }

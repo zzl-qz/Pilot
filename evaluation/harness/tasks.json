@@ -1,54 +1,206 @@
 {
-  "version": 1,
-  "note": "固定任务集。每个任务给一份可复制的初始工作区和一个外部验收命令，验收不依赖模型自述。",
+  "version": 2,
+  "note": "固定任务集。每个任务给一份可复制的初始工作区和一个外部验收命令，验收不依赖模型自述。fixture 统一是零依赖的 Node 工程：跨平台、不需要联网、验收秒级完成，便于在同一台机器上反复跑基线。每个 fixture 的验收在「未修复」状态下必须失败（用 --verify-fixtures 检查），否则任务没有分辨力。",
   "tasks": [
     {
       "id": "fix-failing-unit-test",
       "title": "修复一个失败的单元测试",
       "fixture": "fixtures/fix-failing-unit-test",
-      "prompt": "这个仓库里有一个单元测试是失败的。找到根因并修复实现（不要删测试），最后跑一遍测试确认全绿。",
-      "acceptance": ["mvn -q -o test"],
-      "maxMinutes": 15
+      "prompt": "这里有一个单元测试是失败的。找到根因并修复实现（不要删测试、不要改断言），最后跑一遍测试确认全绿。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 8
+    },
+    {
+      "id": "off-by-one-pagination",
+      "title": "修复分页的 off-by-one",
+      "fixture": "fixtures/off-by-one-pagination",
+      "prompt": "分页结果不对：页码和下标算错了。修好 paginate，让每一页都按预期返回，越界时返回空数组而不是抛异常。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 8
+    },
+    {
+      "id": "null-guard-crash",
+      "title": "补上缺失字段的空值防护",
+      "fixture": "fixtures/null-guard-crash",
+      "prompt": "buildProfile 在入参缺字段时会直接崩溃。补上防护：缺地址时城市记「未填写」，缺订单时返回空数组，缺积分时为 0。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 8
+    },
+    {
+      "id": "async-race-condition",
+      "title": "修掉并发结果的顺序问题",
+      "fixture": "fixtures/async-race-condition",
+      "prompt": "fetchAll 并发拉取时结果顺序不对，而且失败时看不出是哪个 url。修好：结果按传入顺序返回，失败时错误信息里带上失败的 url。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 10
+    },
+    {
+      "id": "unstable-sort",
+      "title": "让排序结果稳定可预期",
+      "fixture": "fixtures/unstable-sort",
+      "prompt": "rank 同分时顺序不确定，而且会改坏传入的数组。修好：分数高的在前、同分按名字升序，并且不修改入参数组。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 8
     },
     {
       "id": "add-validation",
       "title": "补一个输入校验与错误消息",
       "fixture": "fixtures/add-validation",
-      "prompt": "给注册接口补上邮箱格式与重复邮箱校验，返回统一错误结构，并补两条单元测试。",
-      "acceptance": ["mvn -q -o test"],
-      "maxMinutes": 20
+      "prompt": "给注册接口补上校验：邮箱格式、名字不得为空、邮箱不得重复。失败时返回统一结构 { ok:false, errors:[{field, code}] }，并且一个用户都不写入。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 10
+    },
+    {
+      "id": "add-retry-backoff",
+      "title": "实现指数退避重试",
+      "fixture": "fixtures/add-retry-backoff",
+      "prompt": "withRetry 现在只是傻等，没有退避。改成指数退避（10ms、20ms、40ms…），最多尝试 maxAttempts 次，最后一次失败时把错误抛出去。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 10
+    },
+    {
+      "id": "add-cursor-pagination",
+      "title": "改成能抵抗列表变化的游标分页",
+      "fixture": "fixtures/add-cursor-pagination",
+      "prompt": "现在用下标当游标，翻页期间列表一变就会重复或漏数据。改成基于 id 的游标：续接时不重复、不遗漏，最后一页的 nextCursor 为 null。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 12
+    },
+    {
+      "id": "add-idempotency",
+      "title": "给扣款加上幂等键",
+      "fixture": "fixtures/add-idempotency",
+      "prompt": "charge 重复提交会重复扣款。加上幂等：同一个 key 只真正扣一次，重复调用返回第一次的结果，账本里也只有一条记录。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 10
     },
     {
       "id": "refactor-without-behavior-change",
       "title": "重构但保持行为不变",
       "fixture": "fixtures/refactor-no-behavior-change",
-      "prompt": "把 OrderService 里的价格计算抽成独立策略类，保持所有测试通过，不要改公开 API。",
-      "acceptance": ["mvn -q -o test"],
-      "maxMinutes": 25
+      "prompt": "把 orderService 里的价格计算抽成独立的策略模块，保持所有行为不变，并留出注册新策略的入口——以后加一种会员不该再改 orderService。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 12
     },
     {
-      "id": "frontend-form-a11y",
-      "title": "修复表单可访问性与窄屏布局",
-      "fixture": "fixtures/frontend-form-a11y",
-      "prompt": "修复设置页表单：label 与输入框关联、错误提示可被读屏软件读到、窄屏不出现横向滚动。",
-      "acceptance": ["npm test -- --run", "npm run build"],
-      "maxMinutes": 20
+      "id": "extract-shared-module",
+      "title": "抽出重复且不一致的共享逻辑",
+      "fixture": "fixtures/extract-shared-module",
+      "prompt": "invoice 和 receipt 各有一份金额格式化，而且规则不一致。抽到 src/money.js，让两边共用同一份实现，改一处两边同时生效。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 12
     },
     {
-      "id": "flaky-test-diagnosis",
-      "title": "定位并消除一个不稳定测试",
-      "fixture": "fixtures/flaky-test",
-      "prompt": "有一个测试偶发失败。找出不稳定的根因（时间/顺序/共享状态），修掉而不是加重试循环。",
-      "acceptance": ["mvn -q -o test"],
-      "maxMinutes": 25
+      "id": "split-large-module",
+      "title": "拆开塞了两套逻辑的大模块",
+      "fixture": "fixtures/split-large-module",
+      "prompt": "store.js 里塞了用户和订单两套逻辑。拆成 src/users.js 和 src/orders.js，store.js 保留成门面，外部调用方式不变。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 15
+    },
+    {
+      "id": "rename-across-files",
+      "title": "跨文件重命名一个函数",
+      "fixture": "fixtures/rename-across-files",
+      "prompt": "把 getUserName 改名为 displayNameOf，所有引用它的文件都要同步更新，源码里不允许残留旧名字，行为保持不变。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 10
+    },
+    {
+      "id": "move-file-update-imports",
+      "title": "移动文件并更新所有引用",
+      "fixture": "fixtures/move-file-update-imports",
+      "prompt": "把 src/utils/helpers.js 挪到 src/shared/helpers.js，更新所有引用方，旧路径不能留下。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 10
     },
     {
       "id": "path-safety-regression",
       "title": "修复路径越界回归",
       "fixture": "fixtures/path-safety",
-      "prompt": "文件工具允许通过 .. 逃出工作区。修掉这个漏洞并补上回归测试，保持正常路径不受影响。",
-      "acceptance": ["mvn -q -o test"],
-      "maxMinutes": 20
+      "prompt": "resolveInside 允许用 .. 逃出工作区。修掉这个漏洞：越界一律返回 null（不要抛异常），正常子路径不受影响，恰好等于根目录时放行。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 12
+    },
+    {
+      "id": "path-separator",
+      "title": "修掉硬编码的路径分隔符",
+      "fixture": "fixtures/path-separator",
+      "prompt": "joinPath 写死了斜杠，Windows 风格输入会拼出混合分隔符。改成按输入风格正确拼接，且输出里不能同时出现正反斜杠。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 10
+    },
+    {
+      "id": "case-insensitive-path",
+      "title": "按平台判断路径是否同一文件",
+      "fixture": "fixtures/case-insensitive-path",
+      "prompt": "isSamePath 现在只做字符串相等。改成按平台判断：win32 和 darwin 大小写不敏感，linux 敏感；尾部斜杠不影响判断。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 10
+    },
+    {
+      "id": "flaky-test-diagnosis",
+      "title": "定位并消除一个不稳定测试",
+      "fixture": "fixtures/flaky-test",
+      "prompt": "会话过期判断直接读全局时钟，所以测试偶发失败。把时间改成显式传入的参数，让同样的入参永远得到同样的结果——不要靠加重试或放宽断言来掩盖。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 10
+    },
+    {
+      "id": "shared-state-pollution",
+      "title": "消除测试之间的共享状态污染",
+      "fixture": "fixtures/shared-state-pollution",
+      "prompt": "counter 是模块级单例，一个测试改了它下一个测试就受影响。改成可以创建独立实例的工厂，实例之间互不影响。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 10
+    },
+    {
+      "id": "long-file-targeted-edit",
+      "title": "在长文件里只改错的那一段",
+      "fixture": "fixtures/long-file-targeted-edit",
+      "prompt": "src/ledger.js 很长，但只有「合计」那一段算错了（折扣的符号反了）。只修那一处，其余所有格式化函数的行为都不许变。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 12
+    },
+    {
+      "id": "frontend-form-a11y",
+      "title": "修复表单可访问性与窄屏布局",
+      "fixture": "fixtures/frontend-form-a11y",
+      "prompt": "修复表单渲染：label 与输入框用 for/id 关联、错误提示能被读屏软件读到并挂到 aria-describedby、窄屏不出现横向滚动（不要写死宽像素）。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 12
+    },
+    {
+      "id": "tool-failure-recovery",
+      "title": "从一个跑不起来的工程里恢复",
+      "fixture": "fixtures/tool-failure-recovery",
+      "prompt": "跑测试会直接报模块找不到：pricing.js 被误删了。重建它，让 app.js 能正常加载，账单渲染结果正确（含数量为 0 的情况）。",
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 10
+    },
+    {
+      "id": "steer-mid-run",
+      "title": "中途改变要求后仍能按新要求交付",
+      "fixture": "fixtures/steer-mid-run",
+      "prompt": "提取 Markdown 标题大纲，先按你现在的理解实现，跑一遍测试看看。",
+      "steer": {
+        "afterSeconds": 90,
+        "content": "补充要求：outline 改成返回对象数组，每一项带 level（# 的个数）和 line（从 1 开始的行号），导出名保持不变，代码块里的 # 不算标题。"
+      },
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 15
+    },
+    {
+      "id": "steer-constraint-hold",
+      "title": "中途追加的约束要一直遵守到结束",
+      "fixture": "fixtures/steer-constraint-hold",
+      "prompt": "实现 CSV 解析，支持引号内的逗号与换行，先按你现在的理解实现。",
+      "steer": {
+        "afterSeconds": 90,
+        "content": "补充约束：不要引入任何第三方依赖，也不要在 src 和 test 之外新建目录或文件。"
+      },
+      "acceptance": ["node --test test/"],
+      "maxMinutes": 15
     }
   ]
 }

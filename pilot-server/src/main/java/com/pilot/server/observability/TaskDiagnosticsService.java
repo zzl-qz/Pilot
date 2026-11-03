@@ -37,6 +37,7 @@ public class TaskDiagnosticsService {
                               String phase, int step, String lastSuccessfulStep, String nextAction,
                               String leaseState, Long retryAttempt, Long retryDelayMs, String retryReason,
                               Long elapsedSeconds, int modelRequests, long inputTokens, long outputTokens,
+                              long cachedInputTokens,
                               boolean usageExact, String lastToolSummary, List<CommandView> commands,
                               ValidationView validation, RecoveryView recovery,
                               String storageHealth) {
@@ -106,6 +107,7 @@ public class TaskDiagnosticsService {
                 usage == null ? 0 : usage.modelRequests(),
                 usage == null ? 0 : usage.inputTokens(),
                 usage == null ? 0 : usage.outputTokens(),
+                usage == null ? 0 : usage.cachedInputTokens(),
                 usage != null && usage.exact(),
                 lastTool == null ? "" : Redaction.text(lastTool.resultSummary()),
                 commands,
