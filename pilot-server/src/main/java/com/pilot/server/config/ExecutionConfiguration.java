@@ -17,7 +17,7 @@ import org.springframework.context.annotation.Configuration;
 public class ExecutionConfiguration {
 
     @Bean
-    ExecutionSettings executionSettings(@Value("${pilot.execution.isolation:local}") String isolation,
+    ExecutionSettings executionSettings(PilotDataDir dataDir, @Value("${pilot.execution.isolation:local}") String isolation,
                                         @Value("${pilot.execution.image:}") String image,
                                         @Value("${pilot.execution.runtime:}") String runtime,
                                         @Value("${pilot.execution.network:false}") boolean network,
@@ -32,7 +32,7 @@ public class ExecutionConfiguration {
         ExecutionLimits limits = new ExecutionLimits(timeoutSeconds, 200_000,
                 Math.max(64, memoryMb), Math.max(0.1, cpus), Math.max(8, pidsLimit));
         return new ExecutionSettings(com.pilot.core.exec.ExecutionIsolation.parse(isolation),
-                image, runtime, network, limits);
+                image, runtime, network, limits, dataDir.file("build-cache"));
     }
 
     @Bean

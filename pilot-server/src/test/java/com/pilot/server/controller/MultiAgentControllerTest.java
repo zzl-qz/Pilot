@@ -34,6 +34,7 @@ class MultiAgentControllerTest {
     private SandboxStore store;
     private MultiAgentController controller;
     private VerificationGate.Report nextReport;
+    private Runnable duringVerification = () -> {};
 
     @BeforeEach
     void setUp() {
@@ -48,7 +49,7 @@ class MultiAgentControllerTest {
         when(sessions.find("s1")).thenReturn(Optional.of(session));
         AgentProperties properties = new AgentProperties(workspace.toString(), PermissionMode.AUTO,
                 8, 3, 5, 300, 2, 1, 60_000, true);
-        VerificationGate gate = (root, base, changes) -> nextReport;
+        VerificationGate gate = (root, base, changes) -> { duringVerification.run(); return nextReport; };
         controller = new MultiAgentController(sessions, store, properties, gate);
     }
 
@@ -109,6 +110,31 @@ class MultiAgentControllerTest {
         assertEquals(409, conflict.getStatusCode().value());
         var missing = assertThrows(ResponseStatusException.class, () -> controller.resolve("s1", "missing", request));
         assertEquals(404, missing.getStatusCode().value());
+    }
+
+    @Test void staleReviewAndMutationDuringVerificationCannotApplyOrRecordPassingResult() {
+        nextReport = VerificationGate.Report.passed(List.of("ok"));
+        String reviewed = controller.manifest("s1", "sbx_1").reviewHash();
+        duringVerification = () -> store.find("s1", "sbx_1").orElseThrow()
+                .add("a.txt", null, "changed candidate", false, RiskLevel.LOW);
+        var error = assertThrows(ResponseStatusException.class, () -> controller.accept("s1", "sbx_1",
+                new MultiAgentController.AcceptRequest(false, reviewed)));
+        assertEquals(409, error.getStatusCode().value());
+        assertFalse(Files.exists(workspace.resolve("a.txt")), "版本变化不能写入");
+        org.junit.jupiter.api.Assertions.assertNull(store.verification("s1", "sbx_1"));
+        duringVerification = () -> { throw new AssertionError("旧版本应在运行校验前拒绝"); };
+        assertEquals(409, assertThrows(ResponseStatusException.class, () -> controller.accept("s1", "sbx_1",
+                new MultiAgentController.AcceptRequest(true, reviewed))).getStatusCode().value());
+    }
+
+    @Test void duplicateAcceptAndRecoveryAreIdempotent() {
+        nextReport = VerificationGate.Report.passed(List.of("ok"));
+        assertTrue(controller.accept("s1", "sbx_1", null).ok());
+        duringVerification = () -> { throw new AssertionError("不能重复校验已接受的内容"); };
+        assertTrue(controller.accept("s1", "sbx_1", null).written().isEmpty());
+        assertEquals(204, controller.recover("s1", "sbx_1").getStatusCode().value());
+        assertEquals(1, store.workspaceRevision("s1"));
+        assertEquals("accepted", controller.manifest("s1", "sbx_1").disposition());
     }
 
     private static void assertFalse(boolean condition, String message) {

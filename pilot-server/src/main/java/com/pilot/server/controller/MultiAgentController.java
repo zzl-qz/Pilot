@@ -110,19 +110,29 @@ public class MultiAgentController {
     /** 最近两版的差异，以及当前校验状态为什么有效/失效。 */
     @GetMapping("/sandboxes/{sandboxId}/manifest")
     public SandboxManifestReport manifest(@PathVariable String id, @PathVariable String sandboxId) {
-        requireSession(id);
+        Session session = requireSession(id);
         if (sandboxes.find(id, sandboxId).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有这个沙箱: " + sandboxId);
         }
-        var current = sandboxes.manifest(id, sandboxId, SandboxStore.environmentFingerprint());
-        return new SandboxManifestReport(current, sandboxes.manifestDiff(id, sandboxId),
-                sandboxes.verificationState(id, sandboxId), sandboxes.dependenciesOf(id, sandboxId));
+        var recovery = sandboxes.applyState(workspaceOf(session));
+        return sandboxes.withCandidate(id, sandboxId, () -> {
+            var current = sandboxes.manifest(id, sandboxId, SandboxStore.environmentFingerprint());
+            var candidate = sandboxes.candidate(id, sandboxId);
+            String disposition = candidate.changes().isEmpty() ? "empty"
+                    : candidate.changes().stream().anyMatch(change -> change.status() == com.pilot.core.multi.ChangeStatus.PENDING) ? "pending"
+                    : candidate.changes().stream().allMatch(change -> change.status() == com.pilot.core.multi.ChangeStatus.ACCEPTED) ? "accepted"
+                    : candidate.changes().stream().allMatch(change -> change.status() == com.pilot.core.multi.ChangeStatus.REJECTED) ? "rejected" : "closed";
+            return new SandboxManifestReport(current, sandboxes.manifestDiff(id, sandboxId),
+                    sandboxes.verificationState(id, sandboxId), sandboxes.dependenciesOf(id, sandboxId),
+                    candidate.reviewHash(), disposition, recovery);
+        });
     }
 
     public record SandboxManifestReport(com.pilot.core.multi.ArtifactManifest manifest,
                                         com.pilot.core.multi.ArtifactDiff diff,
                                         SandboxStore.VerificationState verification,
-                                        List<String> dependencies) {
+                                        List<String> dependencies, String reviewHash, String disposition,
+                                        com.pilot.server.multi.WorkspaceApplyJournal.State recovery) {
     }
 
     /**
@@ -135,44 +145,61 @@ public class MultiAgentController {
     public SandboxStore.ApplyReport accept(@PathVariable String id, @PathVariable String sandboxId,
                                            @RequestBody(required = false) AcceptRequest request) {
         Session session = requireSession(id);
-        boolean acknowledgeUnverified = request != null && Boolean.TRUE.equals(request.acknowledgeUnverified());
-        com.pilot.core.multi.DiffSandbox sandbox = sandboxes.find(id, sandboxId).orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "没有这个沙箱: " + sandboxId));
-
-        List<SandboxStore.Arbitration> pending = sandboxes.arbitrations(id);
-        if (!pending.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "还有 " + pending.size() + " 项未解决的人工仲裁，先完成仲裁再接受变更："
-                            + pending.stream().map(SandboxStore.Arbitration::id).collect(Collectors.joining("、")));
+        try {
+            return sandboxes.withWorkspaceLock(workspaceOf(session), () -> {
+                sandboxes.recoverApply(id, sandboxId, workspaceOf(session));
+                if (sandboxes.find(id, sandboxId).isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有这个沙箱");
+                var candidate = sandboxes.candidate(id, sandboxId);
+                if (request != null && request.candidateHash() != null) sandboxes.assertCandidate(id, sandboxId, request.candidateHash());
+                requireNoArbitration(id);
+                var changes = candidate.changes().stream().filter(change -> change.status() == com.pilot.core.multi.ChangeStatus.PENDING).toList();
+                if (!changes.isEmpty()) {
+                    VerificationGate.Report report = verification.verify(workspaceOf(session), candidate.baseCommit(), changes);
+                    sandboxes.recordCandidateVerification(id, sandboxId, candidate.reviewHash(), report);
+                    if (!report.ok() && (request == null || !Boolean.TRUE.equals(request.acknowledgeUnverified())))
+                        throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED,
+                                (VerificationGate.Report.FAILED.equals(report.status()) ? "硬校验未通过，改动未写入：" : "变更未经校验，改动未写入：")
+                                        + report.detail() + "。显式确认后可接受此候选版本。");
+                }
+                requireNoArbitration(id);
+                return sandboxes.accept(id, sandboxId, workspaceOf(session), candidate.reviewHash());
+            });
+        } catch (IllegalStateException | java.io.UncheckedIOException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage(), e);
         }
+    }
 
-        List<com.pilot.core.multi.SandboxChange> changes = sandbox.changes().stream()
-                .filter(change -> change.status() == com.pilot.core.multi.ChangeStatus.PENDING).toList();
-        if (!changes.isEmpty()) {
-            VerificationGate.Report report = verification.verify(workspaceOf(session), sandbox.baseCommit(), changes);
-            sandboxes.recordVerification(id, sandboxId, SandboxStore.environmentFingerprint(), report);
-            if (!report.ok() && !acknowledgeUnverified) {
-                throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED,
-                        (VerificationGate.Report.FAILED.equals(report.status()) ? "硬校验未通过，改动未写入：" : "变更未经校验，改动未写入：")
-                                + report.detail()
-                                + (report.checks().isEmpty() ? "" : "（已执行：" + String.join("；", report.checks()) + "）")
-                                + "。确认要接受时请带 acknowledgeUnverified=true。");
-            }
-        }
-        return sandboxes.accept(id, sandboxId, workspaceOf(session));
+    private void requireNoArbitration(String id) {
+        var pending = sandboxes.arbitrations(id);
+        if (!pending.isEmpty()) throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "先处理待决仲裁：" + pending.stream().map(SandboxStore.Arbitration::id).collect(Collectors.joining("、")));
+    }
+
+    @PostMapping("/sandboxes/{sandboxId}/recover")
+    public ResponseEntity<Void> recover(@PathVariable String id, @PathVariable String sandboxId) {
+        Session session = requireSession(id);
+        try { sandboxes.recoverApply(id, sandboxId, workspaceOf(session)); }
+        catch (IllegalStateException | java.io.UncheckedIOException e) { throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage(), e); }
+        return ResponseEntity.noContent().build();
     }
 
     /** @param acknowledgeUnverified 用户明确接受未通过或未执行校验的改动 */
-    public record AcceptRequest(Boolean acknowledgeUnverified) {
+    public record AcceptRequest(Boolean acknowledgeUnverified, String candidateHash) {
+        public AcceptRequest(Boolean acknowledgeUnverified) { this(acknowledgeUnverified, null); }
     }
 
     @PostMapping("/sandboxes/{sandboxId}/reject")
     public ResponseEntity<Void> reject(@PathVariable String id, @PathVariable String sandboxId) {
-        requireSession(id);
-        if (!sandboxes.reject(id, sandboxId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有这个沙箱: " + sandboxId);
+        Session session = requireSession(id);
+        try {
+            return sandboxes.withWorkspaceLock(workspaceOf(session), () -> {
+                sandboxes.recoverApply(id, sandboxId, workspaceOf(session));
+                if (!sandboxes.reject(id, sandboxId)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有这个沙箱: " + sandboxId);
+                return ResponseEntity.noContent().build();
+            });
+        } catch (IllegalStateException | java.io.UncheckedIOException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage(), e);
         }
-        return ResponseEntity.noContent().build();
     }
 
     /** 记录人工仲裁结果；父 Agent 在下一轮会看到这条事件，不会自行猜测结论。 */

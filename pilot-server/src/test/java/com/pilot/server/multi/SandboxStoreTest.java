@@ -240,18 +240,14 @@ class SandboxStoreTest {
         }
     }
 
-    @Test void partialAcceptancePersistsOnlyWrittenFilesAndInvalidatesOldChecks() throws Exception {
+    @Test void conflictsPreventTheEntireBatchFromBeingApplied() throws Exception {
         var first = store(); var box = proposal();
         box.add("conflict", null, "proposed", false, RiskLevel.LOW);
         Files.writeString(workspace.resolve("conflict"), "user content"); first.add("ses", box);
         var report = first.accept("ses", "sbx_1", workspace);
-        assertFalse(report.ok()); assertEquals(java.util.List.of("src/A.java"), report.written());
-        var restored = store();
-        assertEquals(1, restored.workspaceRevision("ses"));
-        assertEquals("accepted", restored.diffs("ses").getFirst().status());
-        assertEquals("pending", restored.diffs("ses").get(1).status());
-        var retry = restored.accept("ses", "sbx_1", workspace);
-        assertTrue(retry.written().isEmpty()); assertEquals(1, retry.skipped().size());
-        assertEquals("user content", Files.readString(workspace.resolve("conflict")));
+        assertFalse(report.ok()); assertTrue(report.written().isEmpty());
+        assertEquals(ORIGINAL, Files.readString(workspace.resolve("src/A.java")));
+        assertEquals(0, store().workspaceRevision("ses"));
+        assertTrue(store().diffs("ses").stream().allMatch(diff -> diff.status().equals("pending")));
     }
 }

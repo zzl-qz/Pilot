@@ -15,7 +15,7 @@ import java.util.Set;
  * 丢弃 capabilities、禁止提权。挂载目录仍然可写，调用方必须传入临时副本；容器本身不隔离 bind mount 的写入。
  *
  * <p>可用性必须实测：没有 Docker/Podman、守护进程没启动、镜像不存在时明确报告原因，
- * 而不是悄悄退化成普通子进程。{@link #available()} 只探测运行时，镜像是否就绪在第一次执行时才暴露。
+ * 而不是悄悄退化成普通子进程。{@link #available()} 只探测运行时，每次执行前检查本地镜像，不自动拉取或打开网络。
  */
 public final class ContainerExecutionBackend implements ExecutionBackend {
     private static final Set<String> CLI_ENV = Set.of(
@@ -84,15 +84,27 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         probed = true;
     }
 
+    @Override public String cacheIdentity() {
+        if (!available()) throw new IllegalStateException("容器隔离不可用：" + unavailableReason());
+        ExecutionResult inspect = cli.run(new ExecutionRequest(List.of(runtime, "image", "inspect", "--format", "{{.Id}}", "--", image), "",
+                Path.of("."), Path.of("."), Map.of(), false, new ExecutionLimits(10, 1024, 256, 0.5, 64)));
+        if (!inspect.ok() || inspect.output().isBlank()) throw new IllegalStateException(
+                "构建镜像未就绪：" + image + "。请先通过容器运行时拉取或构建此镜像；不会自动下载或在宿主机执行。");
+        return image + "@" + inspect.output().strip();
+    }
+
     @Override
     public ExecutionResult run(ExecutionRequest request) {
         if (!available()) {
             return ExecutionResult.failure(id(), isolation(), "容器隔离不可用：" + unavailableReason);
         }
+        try { cacheIdentity(); }
+        catch (IllegalStateException e) { return ExecutionResult.failure(id(), isolation(), e.getMessage()); }
         Path workdir, root;
         try {
             workdir = request.workdir().toRealPath();
             root = request.workspaceRoot().toRealPath();
+            if (request.dependencyCache() != null) DependencyCache.validateMount(request.dependencyCache(), root);
         } catch (java.io.IOException e) {
             return ExecutionResult.failure(id(), isolation(), "无法解析容器工作区：" + e.getMessage());
         }
@@ -160,6 +172,17 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         argv.add("--mount");
         argv.add("type=bind,\"source=" + root.toString().replace("\"", "\"\"") + "\",\"target="
                 + containerWorkspace.replace("\"", "\"\"") + "\"");
+        if (request.dependencyCache() != null) {
+            argv.add("--mount");
+            argv.add("type=bind,\"source=" + request.dependencyCache().toAbsolutePath().normalize().toString().replace("\"", "\"\"")
+                    + "\",target=/pilot-cache");
+            // 只注入固定的容器路径，不继承宿主包管理器配置或凭据。
+            for (String value : List.of("NPM_CONFIG_CACHE=/pilot-cache/npm", "GRADLE_USER_HOME=/pilot-cache/gradle",
+                    "MAVEN_OPTS=-Dmaven.repo.local=/pilot-cache/maven -Duser.home=/tmp/pilot-home",
+                    "MAVEN_USER_HOME=/pilot-cache/maven-wrapper")) {
+                argv.add("-e"); argv.add(value);
+            }
+        }
         argv.add("-w");
         argv.add(workingDir);
         for (Map.Entry<String, String> entry : sanitizedEnv(request.env()).entrySet()) {
@@ -183,6 +206,7 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         lines.add("资源上限：" + request.limits().memoryMb() + "MB / " + request.limits().cpus() + " CPU / "
                 + request.limits().pidsLimit() + " 进程");
         lines.add("挂载：" + request.workspaceRoot().toAbsolutePath().normalize() + " → " + containerWorkspace);
+        lines.add("依赖缓存：" + (request.dependencyCache() == null ? "未启用" : "项目专用 /pilot-cache（不共享宿主缓存）"));
         lines.add("传入环境变量：" + (env.isEmpty() ? "(无)" : String.join(",", env.keySet())));
         return lines;
     }

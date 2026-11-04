@@ -62,7 +62,8 @@ public final class SandboxCommandTool implements Tool, ProducesCheck {
                 timeout = n.longValue();
             }
             var base = execution.settings().limits();
-            try (var copy = IsolatedWorkspace.create(paths, proposals.proposedFiles())) {
+            try (var copy = IsolatedWorkspace.createForBuild(paths, proposals.proposedFiles());
+                 var cache = DependencyCache.acquire(execution.settings().cacheRoot(), paths.root(), execution.backend().cacheIdentity(), copy.root())) {
                 Path workdir = new PathValidator(copy.root()).resolve(relative.toString().isEmpty() ? "." : relative.toString());
                 if (!Files.isDirectory(workdir)) return "ERROR: workdir 不在可见的隔离副本中";
                 List<String> pieces = new ArrayList<>();
@@ -73,10 +74,11 @@ public final class SandboxCommandTool implements Tool, ProducesCheck {
                             + (chain.segments().get(i).mergeStderr() ? " 2>&1" : ""));
                 }
                 var result = execution.backend().run(ExecutionRequest.shell(String.join(" ", pieces), workdir, copy.root(), Map.of("CI", "true"),
-                        execution.settings().network(), new ExecutionLimits(timeout, base.maxOutputBytes(), base.memoryMb(), base.cpus(), base.pidsLimit())));
+                        execution.settings().network(), new ExecutionLimits(timeout, base.maxOutputBytes(), base.memoryMb(), base.cpus(), base.pidsLimit())).withDependencyCache(cache.path()));
                 copy.verifySourceUnchanged();
                 if (!result.error().isEmpty() || result.timedOut()) return "ERROR: 隔离校验未完成：" + (result.timedOut() ? "命令超时" : result.error()) + "\n" + result.output();
                 return "退出码: " + result.exitCode() + "\n隔离校验（临时产物不合入提案）\n" + result.output()
+                        + (copy.excludedDirectories().isEmpty() ? "" : "\n副本排除生成目录：" + String.join("、", copy.excludedDirectories()))
                         + (result.truncated() ? "\n（输出已截断）" : "");
             }
         } catch (Exception e) { return "ERROR: 隔离校验失败：" + e.getMessage(); }

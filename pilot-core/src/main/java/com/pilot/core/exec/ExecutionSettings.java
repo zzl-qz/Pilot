@@ -9,12 +9,17 @@ package com.pilot.core.exec;
  * @param network          容器内是否允许访问网络；默认关闭
  */
 public record ExecutionSettings(ExecutionIsolation isolation, String image, String containerRuntime,
-                                boolean network, ExecutionLimits limits) {
+                                boolean network, ExecutionLimits limits, java.nio.file.Path cacheRoot) {
     public ExecutionSettings {
         isolation = isolation == null ? ExecutionIsolation.LOCAL : isolation;
         image = image == null ? "" : image.strip();
         containerRuntime = containerRuntime == null ? "" : containerRuntime.strip();
         limits = limits == null ? ExecutionLimits.defaults() : limits;
+    }
+
+    public ExecutionSettings(ExecutionIsolation isolation, String image, String containerRuntime,
+                             boolean network, ExecutionLimits limits) {
+        this(isolation, image, containerRuntime, network, limits, null);
     }
 
     public static ExecutionSettings local() {
@@ -33,10 +38,10 @@ public record ExecutionSettings(ExecutionIsolation isolation, String image, Stri
     }
 
     public ExecutionSettings withNetwork(boolean allowed) {
-        return new ExecutionSettings(isolation, image, containerRuntime, allowed, limits);
+        return new ExecutionSettings(isolation, image, containerRuntime, allowed, limits, cacheRoot);
     }
 
     public ExecutionSettings withLimits(ExecutionLimits newLimits) {
-        return new ExecutionSettings(isolation, image, containerRuntime, network, newLimits);
+        return new ExecutionSettings(isolation, image, containerRuntime, network, newLimits, cacheRoot);
     }
 }

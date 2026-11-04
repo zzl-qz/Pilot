@@ -72,4 +72,18 @@ class IsolatedWorkspaceTest {
             assertThrows(java.io.IOException.class, copy::verifySourceUnchanged);
         }
     }
+    @Test void buildCopyExcludesOnlyKnownGeneratedDirectoriesAndRejectsProposalsInsideThem() throws Exception {
+        Files.writeString(root.resolve("pom.xml"), "pom");
+        for (String directory : List.of("target", "node_modules", "build", "dist")) {
+            Files.createDirectory(root.resolve(directory)); Files.writeString(root.resolve(directory + "/a"), "content");
+        }
+        try (var copy = IsolatedWorkspace.createForBuild(new PathValidator(root), Map.of())) {
+            assertFalse(Files.exists(copy.root().resolve("target"))); assertFalse(Files.exists(copy.root().resolve("node_modules")));
+            assertTrue(Files.exists(copy.root().resolve("build/a")), "没有 Gradle 配置时 build 可能是源码");
+            assertTrue(Files.exists(copy.root().resolve("dist/a")), "不能猜测自定义输出目录");
+            assertEquals(Set.of("target", "node_modules"), new HashSet<>(copy.excludedDirectories()));
+        }
+        assertThrows(java.io.IOException.class, () -> IsolatedWorkspace.createForBuild(new PathValidator(root), Map.of("target/a", "proposal")));
+    }
+
 }

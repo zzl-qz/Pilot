@@ -94,6 +94,7 @@ public class SandboxStore {
     private final ConcurrentMap<String, Map<String, String>> decisions = new ConcurrentHashMap<>();
     private final ObjectMapper mapper;
     private final PilotDataDir dataDir;
+    private final WorkspaceApplyJournal applyJournal;
     private final Set<String> restoredSessions = ConcurrentHashMap.newKeySet();
 
     private record SandboxPayload(String sandboxId, String agentId, String taskId, String baseCommit,
@@ -114,12 +115,17 @@ public class SandboxStore {
                                        long workspaceRevision) {
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
     public SandboxStore(ObjectMapper mapper, PilotDataDir dataDir) {
-        this.mapper = mapper;
-        this.dataDir = dataDir;
+        this(mapper, dataDir, new WorkspaceApplyJournal(dataDir.file("apply-journal"), mapper));
+    }
+
+    SandboxStore(ObjectMapper mapper, PilotDataDir dataDir, WorkspaceApplyJournal applyJournal) {
+        this.mapper = mapper; this.dataDir = dataDir; this.applyJournal = applyJournal;
     }
 
     public synchronized void reset(String sessionId) {
+        applyJournal.assertSessionIdle(sessionId);
         sandboxes.remove(sessionId);
         tasks.remove(sessionId);
         arbitrations.remove(sessionId);
@@ -168,6 +174,16 @@ public class SandboxStore {
         recordManifest(sessionId, manifest);
         // 上游产物迭代后，依赖它的下游校验结果随即失效
         invalidateDownstream(sessionId, sandboxId);
+    }
+
+    /** 校验结果只能绑定实际校验过的候选，不能在版本变化后写给新提案。 */
+    public synchronized void recordCandidateVerification(String sessionId, String sandboxId, String expected,
+                                                          VerificationGate.Report report) {
+        DiffSandbox box = find(sessionId, sandboxId).orElseThrow();
+        synchronized (box) {
+            assertCandidate(sessionId, sandboxId, expected);
+            recordVerification(sessionId, sandboxId, report);
+        }
     }
 
     /** 没有跑过校验、或校验针对的已经不是当前产物时返回 null。 */
@@ -511,72 +527,98 @@ public class SandboxStore {
         return true;
     }
 
-    /**
-     * 接受某个沙箱的改动：逐文件写回工作区。
-     *
-     * <p>写入前重新校验路径与内容指纹：如果文件在子 Agent 读取之后被用户或其他改动修改过，
-     * 直接拒绝而不是静默覆盖。
-     */
-    public synchronized ApplyReport accept(String sessionId, String sandboxId, Path workspace) {
-        DiffSandbox sandbox = find(sessionId, sandboxId).orElse(null);
-        if (sandbox == null) {
-            return new ApplyReport(false, List.of(), List.of(), List.of(), "没有这个沙箱: " + sandboxId);
-        }
-        PathValidator paths;
-        try {
-            paths = new PathValidator(workspace);
-        } catch (RuntimeException e) {
-            return new ApplyReport(false, List.of(), List.of(), List.of(), "工作区不可用: " + e.getMessage());
-        }
+    public record Candidate(String baseCommit, String reviewHash, List<SandboxChange> changes) { }
 
-        List<String> written = new ArrayList<>();
-        List<String> skipped = new ArrayList<>();
-        List<String> failed = new ArrayList<>();
-        for (SandboxChange change : sandbox.changes()) {
-            if (change.status() != ChangeStatus.PENDING) {
-                skipped.add(change.path() + "（" + change.status().wireName() + "）");
-                continue;
+    public synchronized Candidate candidate(String sessionId, String sandboxId) {
+        DiffSandbox box = find(sessionId, sandboxId).orElseThrow(() -> new IllegalArgumentException("没有这个沙箱"));
+        synchronized (box) { return new Candidate(box.baseCommit(), box.candidateHash(), box.changes()); }
+    }
+
+    public synchronized <T> T withCandidate(String sessionId, String sandboxId, java.util.function.Supplier<T> action) {
+        DiffSandbox box = find(sessionId, sandboxId).orElseThrow();
+        synchronized (box) { return action.get(); }
+    }
+
+    public synchronized void assertCandidate(String sessionId, String sandboxId, String expected) {
+        if (!candidate(sessionId, sandboxId).reviewHash().equals(expected))
+            throw new IllegalStateException("候选版本已变化，请刷新改动并重新审阅");
+    }
+
+    public <T> T withWorkspaceLock(Path workspace, java.util.function.Supplier<T> action) {
+        return applyJournal.locked(workspace, action);
+    }
+
+    public WorkspaceApplyJournal.State applyState(Path workspace) { return applyJournal.state(workspace); }
+
+    /** 仅在用户重新操作时恢复文件应用，不重放任何模型或命令。 */
+    public void recoverApply(String sessionId, String sandboxId, Path workspace) {
+        withWorkspaceLock(workspace, () -> {
+            synchronized (this) {
+                WorkspaceApplyJournal.Journal journal = applyJournal.read(workspace);
+                if (journal == null) return null;
+                if (!journal.sessionId().equals(sessionId) || !journal.sandboxId().equals(sandboxId))
+                    throw new IllegalStateException("工作区有其他任务未完成的应用，请先处理：" + journal.sandboxId());
+                try {
+                    if (journal.phase().equals("applied")) finishApply(sessionId, sandboxId, workspace, journal);
+                    else applyJournal.rollback(workspace, journal);
+                } catch (IOException e) { throw new java.io.UncheckedIOException("恢复失败，备份已保留：" + e.getMessage(), e); }
+                return null;
             }
-            try {
-                Path file = paths.resolve(change.path());
-                // 上次写入后、状态落盘前退出时允许安全重试：内容相同不重复改文件。
-                if (Files.isRegularFile(file) && Files.readString(file, StandardCharsets.UTF_8).equals(change.newContent())) {
-                    replace(sandbox, change.withStatus(ChangeStatus.ACCEPTED));
-                    written.add(change.path());
-                    continue;
-                }
-                if (change.existed()) {
-                    String current = Files.isRegularFile(file)
-                            ? Files.readString(file, StandardCharsets.UTF_8)
-                            : null;
-                    if (current == null || !DiffSandbox.fingerprint(current).equals(change.baseHash())) {
-                        failed.add(change.path() + "（文件已被修改，拒绝覆盖）");
-                        continue;
+        });
+    }
+
+    public ApplyReport accept(String sessionId, String sandboxId, Path workspace) {
+        return accept(sessionId, sandboxId, workspace, null);
+    }
+
+    public ApplyReport accept(String sessionId, String sandboxId, Path workspace, String expectedHash) {
+        return withWorkspaceLock(workspace, () -> {
+            synchronized (this) {
+                recoverApply(sessionId, sandboxId, workspace);
+                DiffSandbox box = find(sessionId, sandboxId).orElse(null);
+                if (box == null) return new ApplyReport(false, List.of(), List.of(), List.of(), "没有这个沙箱");
+                synchronized (box) {
+                    if (expectedHash != null) assertCandidate(sessionId, sandboxId, expectedHash);
+                    List<SandboxChange> pending = box.changes().stream().filter(change -> change.status() == ChangeStatus.PENDING).toList();
+                    List<String> skipped = box.changes().stream().filter(change -> change.status() != ChangeStatus.PENDING)
+                            .map(SandboxChange::path).toList();
+                    if (pending.isEmpty()) return new ApplyReport(true, List.of(), skipped, List.of(), "没有待接受的改动");
+                    try {
+                        var journal = applyJournal.apply(workspace, sessionId, sandboxId, pending, workspaceRevision(sessionId) + 1);
+                        finishApply(sessionId, sandboxId, workspace, journal);
+                        return new ApplyReport(true, pending.stream().map(SandboxChange::path).toList(), skipped, List.of(), "整批变更已接受");
+                    } catch (IOException | RuntimeException e) {
+                        return new ApplyReport(false, List.of(), skipped, List.of(e.getMessage()), "应用未完成：" + e.getMessage());
                     }
-                } else if (Files.exists(file)) {
-                    failed.add(change.path() + "（文件已存在，拒绝覆盖）");
-                    continue;
                 }
-                if (file.getParent() != null) {
-                    Files.createDirectories(file.getParent());
-                }
-                Files.writeString(file, change.newContent(), StandardCharsets.UTF_8);
-                written.add(change.path());
-                replace(sandbox, change.withStatus(ChangeStatus.ACCEPTED));
-            } catch (IOException | RuntimeException e) {
-                failed.add(change.path() + "（" + e.getMessage() + "）");
             }
+        });
+    }
+
+    private void finishApply(String sessionId, String sandboxId, Path workspace, WorkspaceApplyJournal.Journal journal) throws IOException {
+        DiffSandbox box = find(sessionId, sandboxId).orElseThrow(() -> new IllegalStateException("恢复的沙箱不存在，保留日志等待处理"));
+        synchronized (box) {
+            Path root = new PathValidator(workspace).root();
+            List<SandboxChange> current = box.changes();
+            for (var entry : journal.entries()) {
+                if (current.stream().noneMatch(change -> change.path().equals(entry.path()) && change.newContent().equals(entry.after())
+                        && (change.status() == ChangeStatus.PENDING || change.status() == ChangeStatus.ACCEPTED)))
+                    throw new IOException("候选内容与已写日志不一致：" + entry.path());
+                if (!java.util.Objects.equals(WorkspaceApplyJournal.content(WorkspaceApplyJournal.target(root, entry.path())), entry.after()))
+                    throw new IOException("已应用文件包含后续修改，保留现场：" + entry.path());
+            }
+            Set<String> applied = journal.entries().stream().map(WorkspaceApplyJournal.Entry::path).collect(java.util.stream.Collectors.toSet());
+            // 版本号记录在写前日志中；崩溃在两次元数据落盘之间时重试也只递增一次。
+            workspaceRevisions.put(sessionId, Math.max(workspaceRevision(sessionId), journal.targetRevision()));
+            persistWorkspaceRevision(sessionId);
+            applyJournal.checkpoint("after-revision");
+            if (current.stream().anyMatch(change -> applied.contains(change.path()) && change.status() == ChangeStatus.PENDING)) {
+                box.replaceAll(current.stream().map(change -> applied.contains(change.path()) ? change.withStatus(ChangeStatus.ACCEPTED) : change).toList());
+                persist(sessionId, box);
+            }
+            applyJournal.checkpoint("after-metadata");
+            applyJournal.clear(workspace);
         }
-        if (!written.isEmpty()) {
-            // 部分文件成功也会改变工作区，不能保留其他候选的旧校验或把已写文件再次提交。
-            bumpWorkspaceRevision(sessionId);
-            persist(sessionId, sandbox);
-        }
-        boolean ok = failed.isEmpty();
-        String message = ok ? "已接受 " + written.size() + " 个文件改动" : "部分文件未写入，请检查后重试";
-        log.info("Accept sandbox {} for session {}: written={}, failed={}", sandboxId, sessionId,
-                written.size(), failed.size());
-        return new ApplyReport(ok, List.copyOf(written), List.copyOf(skipped), List.copyOf(failed), message);
     }
 
     /** 拒绝某个沙箱：只改状态，不碰工作区。 */

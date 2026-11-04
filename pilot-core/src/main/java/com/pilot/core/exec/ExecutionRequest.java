@@ -11,12 +11,12 @@ import java.util.Objects;
  * @param argv          宿主侧命令与参数；LOCAL 后端直接使用
  * @param script        POSIX shell 脚本；容器后端用它执行，为空时由 argv 拼接
  * @param workdir       工作目录；容器后端要求它位于 workspaceRoot 内
- * @param workspaceRoot 允许被容器挂载的唯一目录
+ * @param workspaceRoot 容器可见的临时工作区；可另挂专用依赖缓存
  * @param env           追加环境变量；会先经过 {@link EnvironmentSanitizer}
  * @param network       是否允许容器访问网络
  */
 public record ExecutionRequest(List<String> argv, String script, Path workdir, Path workspaceRoot,
-                               Map<String, String> env, boolean network, ExecutionLimits limits) {
+                               Map<String, String> env, boolean network, ExecutionLimits limits, Path dependencyCache) {
     public ExecutionRequest {
         // argv 是已分词参数，空参数和首尾空格都有语义，不能像命令文本一样裁剪。
         argv = argv == null ? List.of() : List.copyOf(argv);
@@ -29,6 +29,16 @@ public record ExecutionRequest(List<String> argv, String script, Path workdir, P
         workspaceRoot = workspaceRoot == null ? workdir : workspaceRoot;
         env = env == null ? Map.of() : Map.copyOf(env);
         limits = limits == null ? ExecutionLimits.defaults() : limits;
+    }
+
+    public ExecutionRequest(List<String> argv, String script, Path workdir, Path workspaceRoot,
+                            Map<String, String> env, boolean network, ExecutionLimits limits) {
+        this(argv, script, workdir, workspaceRoot, env, network, limits, null);
+    }
+
+    /** 专用项目依赖缓存，不能指向宿主用户的 .m2、.npm 或真实工作区。 */
+    public ExecutionRequest withDependencyCache(Path cache) {
+        return new ExecutionRequest(argv, script, workdir, workspaceRoot, env, network, limits, cache);
     }
 
     /** 以宿主平台 shell 执行一条命令行（LOCAL 后端的常见入口）。 */

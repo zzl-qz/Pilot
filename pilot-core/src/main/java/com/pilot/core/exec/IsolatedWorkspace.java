@@ -12,24 +12,36 @@ import java.util.*;
 public final class IsolatedWorkspace implements AutoCloseable {
     private static final long MAX_FILE = 32L * 1024 * 1024, MAX_TOTAL = 256L * 1024 * 1024;
     private final Path root;
+    private final List<String> excluded = new ArrayList<>();
+    public List<String> excludedDirectories() { return List.copyOf(excluded); }
     private final Map<String, byte[]> baseline = new LinkedHashMap<>();
 
     private IsolatedWorkspace(Path root) { this.root = root; }
     public Path root() { return root; }
 
     public static IsolatedWorkspace create(PathValidator source, Map<String, String> proposals) throws IOException {
+        return create(source, proposals, false);
+    }
+
+    public static IsolatedWorkspace createForBuild(PathValidator source, Map<String, String> proposals) throws IOException {
+        return create(source, proposals, true);
+    }
+
+    private static IsolatedWorkspace create(PathValidator source, Map<String, String> proposals, boolean build) throws IOException {
         IsolatedWorkspace copy = new IsolatedWorkspace(Files.createTempDirectory("pilot-isolated-").toRealPath());
         long[] total = {0};
         try {
             Files.walkFileTree(source.root(), new SimpleFileVisitor<>() {
                 @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                     if (dir.equals(source.root())) return FileVisitResult.CONTINUE;
+                    if (build && generated(dir)) { copy.excluded.add(source.display(dir)); return FileVisitResult.SKIP_SUBTREE; }
                     if (reserved(source.display(dir)) || !source.allowsDirectory(dir)) return FileVisitResult.SKIP_SUBTREE;
                     Files.createDirectories(copy.root.resolve(source.display(dir)));
                     return FileVisitResult.CONTINUE;
                 }
                 @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                     String name = source.display(file);
+                    if (build && generated(file)) { copy.excluded.add(name); return FileVisitResult.CONTINUE; }
                     if (reserved(name) || !source.allows(file)) return FileVisitResult.CONTINUE;
                     if (!attrs.isRegularFile() || attrs.isSymbolicLink()) throw new IOException("隔离副本不支持链接或特殊文件：" + name);
                     if (attrs.size() > MAX_FILE || (total[0] += attrs.size()) > MAX_TOTAL || copy.baseline.size() >= 50000)
@@ -48,6 +60,9 @@ public final class IsolatedWorkspace implements AutoCloseable {
             for (var entry : proposals.entrySet()) {
                 if (reserved(entry.getKey())) throw new IOException("提案包含受保护路径：" + entry.getKey());
                 Path target = targetPaths.resolve(entry.getKey());
+                String normalized = targetPaths.display(target);
+                if (copy.excluded.stream().anyMatch(dir -> normalized.equals(dir) || normalized.startsWith(dir + "/")))
+                    throw new IOException("提案修改了被排除的构建产物，不能校验：" + normalized);
                 byte[] content = entry.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8);
                 if (content.length > MAX_FILE || (total[0] += content.length) > MAX_TOTAL)
                     throw new IOException("提案超过隔离副本大小上限");
@@ -62,6 +77,14 @@ public final class IsolatedWorkspace implements AutoCloseable {
             try { copy.close(); } catch (IOException cleanup) { e.addSuppressed(cleanup); }
             throw e;
         }
+    }
+
+    private static boolean generated(Path path) {
+        String name = path.getFileName().toString();
+        Path parent = path.getParent();
+        return name.equals("node_modules") || name.equals(".gradle")
+                || name.equals("target") && Files.isRegularFile(parent.resolve("pom.xml"))
+                || name.equals("build") && (Files.isRegularFile(parent.resolve("build.gradle")) || Files.isRegularFile(parent.resolve("build.gradle.kts")));
     }
 
     private static boolean reserved(String path) {

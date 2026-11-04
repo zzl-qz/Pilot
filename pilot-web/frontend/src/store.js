@@ -1572,9 +1572,9 @@ export const useStore = create(immer((set, get) => {
 
   /* ---------- 多沙箱 ---------- */
   /** 单独接受 / 拒绝某个沙箱的改动；服务端拦下未校验的改动时让用户显式确认后重试。 */
-  async decideSandbox(sandboxId, action) {
+  async decideSandbox(sandboxId, action, candidateHash) {
     const { sessionId } = get();
-    if (!sessionId || !sandboxId) {
+    if (!sessionId || !sandboxId || !['accept', 'reject', 'recover'].includes(action)) {
       return false;
     }
     const post = (acknowledge) => apiFetch(
@@ -1582,13 +1582,16 @@ export const useStore = create(immer((set, get) => {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(acknowledge ? { acknowledgeUnverified: true } : {})
-      }
+        body: JSON.stringify({ candidateHash, ...(acknowledge ? { acknowledgeUnverified: true } : {}) })
+      },
+      action === 'accept' ? 60 * 60 * 1000 : 20000
     );
     try {
       let response = await post(false);
-      if (action === 'reject') {
-        get().showNotice(`已拒绝 ${sandboxId} 的改动`);
+      if (get().sessionId !== sessionId) return false;
+      if (action !== 'accept') {
+        if (!response.ok) throw new Error(await describeError(response));
+        get().showNotice(action === 'recover' ? '恢复已完成，请重新审阅变更' : `已拒绝 ${sandboxId} 的改动`);
         return true;
       }
       if (response.status === 409 || response.status === 412) {
@@ -1598,6 +1601,7 @@ export const useStore = create(immer((set, get) => {
           return false;
         }
         response = await post(true);
+        if (get().sessionId !== sessionId) return false;
       }
       const data = await response.json().catch(() => ({}));
       if (response.ok && data?.ok !== false) {
@@ -1608,7 +1612,8 @@ export const useStore = create(immer((set, get) => {
       get().showNotice(`未能写入：${reason}`);
       return false;
     } catch (error) {
-      get().showNotice('操作失败：' + error.message);
+      if (get().sessionId !== sessionId) return false;
+      get().showNotice('操作失败：' + error.message + (error.message?.includes('超时') ? '；服务端可能仍在处理，请刷新核对写入状态后再操作。' : ''));
       return false;
     }
   },
