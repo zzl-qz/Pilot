@@ -84,3 +84,10 @@ pilot-desktop/dist/
 pilot-desktop/out/
 coverage/
 .cache/
+
+### Android 与移动连接桥 ###
+.gradle/
+local.properties
+*.jks
+*.keystore
+pilot-mobile/.kotlin/

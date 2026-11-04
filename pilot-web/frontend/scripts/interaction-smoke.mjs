@@ -19,6 +19,7 @@ import App from '/src/components/App.jsx'; import {useStore} from '/src/store.js
 import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
 document.documentElement.dataset.theme='dark'; window.store=useStore; window.api=api; window.realTranscribe=api.transcribeVoice; window.calls=[];
 for(const name of Object.keys(api)) if(typeof api[name]==='function') api[name]=async (...args)=>{calls.push({name,args});return {};};
+api.workProducts=api.skillDrafts=async()=>[];
 api.worktreeInfo=async()=>({branch:'feature/ui',worktree:false});
 api.filesFlat=api.workspaceFiles=async()=>({files:['src/组件.jsx','src/App.jsx','src/space file.js']});
 api.context=async()=>({usedTokens:10,limitTokens:100}); api.queue=async()=>({items:[]});

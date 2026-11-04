@@ -24,6 +24,7 @@ import { dragWidth, readLayout, writeLayout } from '../lib/layout.js';
 export default function App() {
   const init = useStore((state) => state.init);
   const notice = useStore((state) => state.ui.notice);
+  useEffect(() => window.pilotDesktop?.onMobileConnection?.(() => useStore.getState().setUi({ mobileConnectionOpen: true })), []);
   const sidebarOpen = useStore((state) => state.ui.sidebarOpen);
   const agentsDockOpen = useStore((state) => state.ui.agentsDockOpen);
   const running = useStore((state) => state.running);
@@ -171,7 +172,7 @@ export default function App() {
       const state = useStore.getState();
       const overlayOpen = Boolean(state.ui.picker || state.ui.projectEditor || state.ui.settingsOpen
         || state.ui.searchOpen || state.ui.resultsOpen || state.ui.schedulesOpen || state.ui.recurringOpen
-        || state.ui.paletteOpen || state.ui.checkpointDialog || state.ui.skillsInstall || state.ui.confirm);
+        || state.ui.paletteOpen || state.ui.checkpointDialog || state.ui.skillsInstall || state.ui.confirm || state.ui.mobileConnectionOpen);
       if (overlayOpen) {
         return;
       }
@@ -342,10 +343,6 @@ export default function App() {
               {running && runStartedAt ? ` · ${Math.round((Date.now() - runStartedAt) / 1000)}s` : ''}
               {stalled ? ` · ${idleSeconds}s 无新事件` : ''}
             </span>
-            {!embedded && sessionId && <button type="button" className="icon-btn product-toggle" aria-label="查看任务成果" title="交付文件与技能审核"
-              onClick={() => useStore.getState().setUi({ inspectorOpen: true, inspectorTab: 'products', reviewExpanded: false })}>
-              <Icon name="file" /><span>成果</span>
-            </button>}
             {/* 内嵌页再展开审阅面板会把窄 iframe 挤成两栏，这里不给入口 */}
             {!embedded && (
               <button

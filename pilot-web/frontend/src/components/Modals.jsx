@@ -11,6 +11,7 @@ import { filterPaletteActions } from '../lib/commands.js';
 import { PERMISSION_MODES } from '../lib/permission.js';
 import { emptySkillsHint, parseInstallSource, summarizeInstallResults } from '../lib/skills.js';
 import { buildModelProbe, buildModelUpdate, describeModelsFetched } from '../lib/model-settings.js';
+import { MobileConnectionContent } from './MobileConnection.jsx';
 import { verificationLabel, verificationHint } from '../lib/verification.js';
 
 /** 任务契约状态 → 中文（与旧版 renderTaskContract 的映射一致）。 */
@@ -153,6 +154,7 @@ export function Modals() {
   const paletteOpen = useStore((state) => state.ui.paletteOpen);
   const checkpoint = useStore((state) => state.ui.checkpointDialog);
   const confirm = useStore((state) => state.ui.confirm);
+  const mobileConnectionOpen = useStore((state) => state.ui.mobileConnectionOpen);
   return (
     <>
       {picker && <WorkspacePicker />}
@@ -161,6 +163,9 @@ export function Modals() {
       {paletteOpen && <Palette />}
       {checkpoint && <CheckpointDialog />}
       {confirm && <ConfirmDialog />}
+      {mobileConnectionOpen && <Modal id="mobile-connection" title="连接手机" onClose={() => useStore.getState().setUi({ mobileConnectionOpen: false })}>
+        <MobileConnectionContent onDone={() => useStore.getState().setUi({ mobileConnectionOpen: false })} />
+      </Modal>}
     </>
   );
 }

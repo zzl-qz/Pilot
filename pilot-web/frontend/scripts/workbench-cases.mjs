@@ -104,8 +104,9 @@ export async function checkWorkbench(page, name, output) {
   assert.equal(await page.evaluate(() => document.activeElement.id), 'sidebar-toggle', '窄屏收起全局入口后返回可见的导航开关');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole('tab', { name: '预览', exact: true }).press('Home');
-  assert.equal(await page.getByRole('tab', { name: '对话', exact: true }).getAttribute('aria-selected'), 'true');
-  await page.getByRole('tab', { name: '对话', exact: true }).press('End');
+  const firstTab = page.locator('#panel-tabs [role="tab"]').first();
+  assert.equal(await firstTab.getAttribute('aria-selected'), 'true');
+  await firstTab.press('End');
   assert.equal(await page.getByRole('tab', { name: '活动', exact: true }).getAttribute('aria-selected'), 'true');
   await page.getByLabel('关闭工作区面板', { exact: true }).click();
   console.log(`${name}: PASS file tree, picker contract/errors, modal focus, settings/theme and panel keyboard navigation`);

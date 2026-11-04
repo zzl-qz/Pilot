@@ -1,5 +1,5 @@
 import { installMicrophonePermissions } from './media-permission.mjs';
-import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, nativeImage, systemPreferences } from 'electron';
+import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, nativeImage, systemPreferences, dialog, clipboard } from 'electron';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
@@ -685,6 +685,38 @@ function appIcon() {
   return image.isEmpty() ? undefined : image;
 }
 
+async function openMobileConnection() {
+  if (!shell || shell.isDestroyed()) throw new Error('请先打开 Pilot 工作台');
+  shell.show(); shell.focus();
+  shell.webContents.send('pilot-mobile-open');
+}
+
+function trustedWorkbench(event) {
+  try {
+    return shell && !shell.isDestroyed() && event.sender === shell.webContents
+      && event.senderFrame === shell.webContents.mainFrame
+      && new URL(event.senderFrame.url).origin === new URL(shellUrl()).origin;
+  } catch { return false; }
+}
+
+ipcMain.handle('pilot-mobile-open', async event => {
+  if (!trustedWorkbench(event)) return { ok: false, error: '请从 Pilot 工作台打开手机连接。' };
+  await openMobileConnection();
+  return { ok: true };
+});
+
+ipcMain.handle('pilot-mobile-copy', async (event, code) => {
+  if (!trustedWorkbench(event) || typeof code !== 'string' || !/^pilot:\/\/pair\/[A-Za-z0-9_-]{20,8192}$/.test(code)) {
+    return { ok: false };
+  }
+  try {
+    // 只写入用户选择的配对码，不向页面开放系统剪贴板读取能力。
+    if (typeof clipboard.writeText === 'function') clipboard.writeText(code);
+    else await clipboard.write([{ 'text/plain': new Blob([code], { type: 'text/plain' }) }]);
+    return { ok: true };
+  } catch { return { ok: false }; }
+});
+
 function installMenu() {
   if (smoke) return;
   const template = [
@@ -724,6 +756,13 @@ function installMenu() {
         { type: 'separator' },
         { role: 'togglefullscreen', label: '进入全屏' }
       ]
+    },
+    {
+      label: '设备',
+      submenu: [{ label: '连接手机…', click: async () => {
+        try { await openMobileConnection(); }
+        catch (error) { dialog.showErrorBox('无法连接手机', error.message); }
+      } }],
     },
     {
       label: '窗口',

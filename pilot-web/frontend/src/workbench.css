@@ -474,3 +474,40 @@ html[data-theme] .app.side-chat-embedded-app > .main { grid-column: 1; }
   html[data-theme] .topbar .review-toggle span { display: none; }
   html[data-theme] .composer { border-radius: 14px; }
 }
+
+/* 手机连接：全局设备管理，扫码和主要操作始终在同一视野。 */
+#mobile-connect { min-height: 44px; }
+#mobile-connection .modal-box { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; }
+.mobile-connection-content { display: grid; gap: 16px; line-height: 1.6; }
+.mobile-connection-content p { margin: 0; }
+.mobile-scope { color: var(--muted); }
+.mobile-tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--line, #333); }
+.mobile-tabs button { min-height: 44px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.mobile-tabs button[aria-selected=true] { color: var(--ink); border-bottom-color: currentColor; }
+.mobile-pair-layout { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.mobile-qr-area { display: grid; gap: 12px; text-align: center; }
+.mobile-qr-area img { width: 100%; aspect-ratio: 1; display: block; border-radius: 8px; background: white; }
+.mobile-qr-area p { font-size: 12px; color: var(--muted); }
+.mobile-qr-placeholder { display: grid; place-content: center; aspect-ratio: 1; background: var(--surface, #252525); border-radius: 8px; }
+.mobile-pair-actions { display: grid; gap: 12px; align-content: start; }
+.mobile-pair-actions h3 { margin: 0; font-size: 16px; }
+.mobile-pair-actions .btn { min-height: 40px; justify-self: start; }
+.mobile-pair-actions .link-btn { justify-self: start; background: none; border: 0; padding: 4px 0; color: var(--ink); text-decoration: underline; cursor: pointer; }
+.mobile-pair-actions textarea { width: 100%; min-height: 68px; resize: vertical; overflow-wrap: anywhere; }
+.mobile-device-list { max-height: 400px; overflow: auto; }
+.mobile-device-row { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--line, #333); }
+.mobile-device-row p { color: var(--muted); font-size: 12px; }
+.mobile-device-row strong { overflow-wrap: anywhere; }
+.mobile-connection-error, .mobile-revoke { padding: 12px; border: 1px solid var(--line, #555); border-radius: 6px; }
+.mobile-connection-error { color: var(--danger, #e48686); }
+.mobile-revoke .btn { margin: 12px 8px 0 0; }
+@media (max-width: 620px) { .mobile-pair-layout { grid-template-columns: 1fr; gap: 16px; } .mobile-qr-area { width: min(280px, 100%); justify-self: center; } }
+
+.mobile-pair-success { display: grid; justify-items: center; gap: 12px; padding: 28px 16px 20px; text-align: center; }
+.mobile-pair-success-icon { width: 32px; height: 32px; color: var(--ink); }
+.mobile-pair-success h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.mobile-pair-success p { max-width: 520px; overflow-wrap: anywhere; }
+.mobile-completion-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
+.mobile-completion-actions .btn, .mobile-device-footer .btn { min-height: 44px; }
+.mobile-device-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.mobile-device-footer p { flex: 1 1 220px; }

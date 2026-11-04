@@ -1,6 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('pilotDesktop', {
+  copyPairingCode: code => ipcRenderer.invoke('pilot-mobile-copy', code),
+  onMobileConnection: callback => {
+    const listener = () => callback();
+    ipcRenderer.on('pilot-mobile-open', listener);
+    return () => ipcRenderer.removeListener('pilot-mobile-open', listener);
+  },
+  openMobileConnection: () => ipcRenderer.invoke('pilot-mobile-open'),
   ensureTab: (sessionId) => ipcRenderer.invoke('pilot-browser-ensure', sessionId),
   navigate: (url) => ipcRenderer.invoke('pilot-browser-navigate', url),
   back: () => ipcRenderer.invoke('pilot-browser-go', 'back'),

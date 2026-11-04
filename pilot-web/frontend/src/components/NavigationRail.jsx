@@ -20,6 +20,8 @@ export function NavigationRail() {
         onClick={() => open({ schedulesOpen: true, scheduleDraft: null })} />
     </div>
     <div className="navigation-rail-group navigation-rail-bottom">
+      <RailButton id="mobile-connect" icon="phone" label="连接手机" active={ui.mobileConnectionOpen}
+        onClick={() => open({ mobileConnectionOpen: true })} />
       <RailButton icon="more" label="命令面板" hint={shortcut('K')} active={ui.paletteOpen}
         onClick={() => open({ paletteOpen: true })} />
       <RailButton id="theme-toggle" icon={ui.themeMode === 'light' ? 'moon' : 'sun'} label="切换明暗主题"
