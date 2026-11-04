@@ -25,6 +25,7 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -127,9 +128,13 @@ public class SkillInstallService {
             } else {
                 copyTree(Path.of(src.value()), repo, "来源", stageMaxFiles, stageMaxBytes);
             }
-            // 布局判定：根有 SKILL.md → 整个仓库是单个技能（扫描根 = stageRoot，repo 目录即技能名）；
-            // 否则按一级子目录解析（扫描根 = repo）。两种布局不混判，根优先。
-            Path scanRoot = Files.isRegularFile(repo.resolve("SKILL.md")) ? stageRoot : repo;
+            // 布局判定（依次尝试，先命中先赢）：
+            // 1. repo/SKILL.md → 单技能仓：扫描根 = stageRoot（repo 目录名即技能名）；
+            // 2. 一级子目录有 SKILL.md → 一级集合仓：扫描根 = repo；
+            // 3. skills/ 包裹目录（如 anthropics/skills 的 sources 布局）：扫描根 = repo/skills；
+            // 4. 唯一包裹回退：恰好一个无 SKILL.md 的一级子目录，其子目录含 SKILL.md → 扫描根 = 它。
+            // 全不命中按 repo 扫（空候选走引导文案），不报错。
+            Path scanRoot = resolveScanRoot(stageRoot, repo);
             SkillCatalog catalog = SkillCatalog.scan(List.of(new SkillCatalog.Root(scanRoot, SkillSource.PROJECT)));
             List<Candidate> candidates = new ArrayList<>();
             for (SkillManifest manifest : catalog.list()) {
@@ -140,7 +145,8 @@ public class SkillInstallService {
                 candidates.add(new Candidate(problem.name(), null, null, false, problem.reason()));
             }
             String message = candidates.isEmpty()
-                    ? "来源里没有找到技能：单技能仓库在根目录放 SKILL.md，集合仓库的每个一级子目录各放一个"
+                    ? "来源里没有找到技能：支持三种布局——根目录直接放 SKILL.md（单技能）、"
+                            + "每个一级子目录各一个（集合仓）、或 skills/<名字>/SKILL.md 包裹布局（如 anthropics/skills）"
                     : null;
             staged.put(token, new Staged(stageRoot, scanRoot, System.currentTimeMillis()));
             return new Preview(token, src.git() ? "git" : "local", List.copyOf(candidates), message);
@@ -234,6 +240,59 @@ public class SkillInstallService {
         }
     }
 
+    /**
+     * 布局判定：确定把哪个目录当「技能目录的父级」交给 {@link SkillCatalog} 扫描。
+     *
+     * <p>真实世界的三种仓库形态都见过：根目录放 SKILL.md（单技能仓）、一级子目录各一个
+     * （集合仓）、以及 {@code skills/<名>/SKILL.md} 的包裹布局（anthropics/skills 等社区
+     * 仓库）。包裹布局优先认 {@code skills/} 这个既成惯例，其次接受「恰好一个包裹目录」
+     * 的仓库；多个候选包裹时报错而不是猜——猜测装错内容比报错更糟。
+     */
+    private static Path resolveScanRoot(Path stageRoot, Path repo) {
+        if (Files.isRegularFile(repo.resolve("SKILL.md"))) {
+            return stageRoot;
+        }
+        if (hasDirectSkillChildren(repo)) {
+            return repo;
+        }
+        Path skillsDir = repo.resolve("skills");
+        if (Files.isDirectory(skillsDir) && hasDirectSkillChildren(skillsDir)) {
+            return skillsDir;
+        }
+        List<Path> wrappers = new ArrayList<>();
+        try (var entries = Files.list(repo)) {
+            for (Path entry : entries.filter(Files::isDirectory).toList()) {
+                if (".git".equals(entry.getFileName().toString())) {
+                    continue;
+                }
+                if (hasDirectSkillChildren(entry)) {
+                    wrappers.add(entry);
+                }
+            }
+        } catch (IOException e) {
+            return repo;
+        }
+        if (wrappers.size() == 1) {
+            return wrappers.get(0);
+        }
+        if (wrappers.size() > 1) {
+            throw new InstallException("仓库里有多层嵌套的技能目录（"
+                    + wrappers.stream().map(path -> path.getFileName().toString()).collect(Collectors.joining("、"))
+                    + "），自动判定不可靠；请把要装的技能目录复制到本机后用「本机目录」导入");
+        }
+        return repo;
+    }
+
+    /** 目录的直接子目录里是否至少有一个含 SKILL.md。 */
+    private static boolean hasDirectSkillChildren(Path dir) {
+        try (var entries = Files.list(dir)) {
+            return entries.filter(Files::isDirectory)
+                    .anyMatch(child -> Files.isRegularFile(child.resolve("SKILL.md")));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     /** 来源解析：http(s) → git；绝对路径 → 本机目录；其余（裸域名、相对路径、~）判非法。 */
     private static Source parseSource(String source) {
         String text = source == null ? "" : source.strip();
@@ -249,6 +308,7 @@ public class SkillInstallService {
             } catch (Exception e) {
                 throw new InstallException("git 地址不合法：" + text);
             }
+            diagnoseGitUrl(text);
             return new Source(true, text);
         }
         Path path;
@@ -261,6 +321,32 @@ public class SkillInstallService {
             throw new InstallException("本机目录要用绝对路径；git 地址必须以 http:// 或 https:// 开头");
         }
         return new Source(false, text);
+    }
+
+    /**
+     * git 地址形状诊断：把浏览器里复制来的网页地址拦在 clone 之前，给出正确写法。
+     *
+     * <p>最高频的坑：用户在 GitHub 网页里对着某个文件点「复制链接」，拿到
+     * {@code /blob/main/…/SKILL.md} 这种浏览地址——git clone 会报 repository not found，
+     * 但仅凭那行 git 错误很难联想到是地址形式错了。含 {@code /blob/}、{@code /tree/}、
+     * {@code /raw/} 或末段是 .md 文件时，直接告诉用户该用仓库根地址。
+     */
+    private static void diagnoseGitUrl(String url) {
+        String lower = url.toLowerCase(Locale.ROOT);
+        for (String marker : List.of("/blob/", "/tree/", "/raw/")) {
+            if (lower.contains(marker)) {
+                throw new InstallException("这是浏览器里看文件的网页地址（含 " + marker + "），不是 git 仓库地址。"
+                        + "请改用仓库根地址：把 " + url + " 中的 " + marker + "… 部分去掉，"
+                        + "例如 https://github.com/anthropics/skills");
+            }
+        }
+        String trimmed = lower.endsWith("/") ? lower.substring(0, lower.length() - 1) : lower;
+        int slash = trimmed.lastIndexOf('/');
+        String last = slash >= 0 ? trimmed.substring(slash + 1) : trimmed;
+        if (last.endsWith(".md") || last.endsWith(".markdown")) {
+            throw new InstallException("地址末段看起来是文件（" + last + "）而不是仓库。"
+                    + "git 地址应指向仓库根，例如 https://github.com/用户名/仓库名");
+        }
     }
 
     /** 来源名：URL 末段（去 .git 后缀）或来源目录名；只需是安全段，不要求满足技能名规则。 */

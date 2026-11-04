@@ -100,6 +100,97 @@ class SkillInstallServiceTest {
 
         assertTrue(preview.candidates().isEmpty());
         assertTrue(preview.message().contains("没有找到技能"));
+        assertTrue(preview.message().contains("skills/<名字>/SKILL.md"), "引导文案要提到包裹布局");
+    }
+
+    @Test
+    void rejectsGithubWebPageUrlsWithGuidance() {
+        var service = installer(skillService(true));
+        // GitHub 网页里对着文件点「复制链接」拿到的是 blob 地址，git clone 只会报 repository
+        // not found；诊断要把「这是网页地址、该用仓库根」说清楚
+        var blob = assertThrows(SkillInstallService.InstallException.class,
+                () -> service.preview("https://github.com/anthropics/skills/blob/main/skills/doc-coauthoring/SKILL.md", null));
+        assertTrue(blob.getMessage().contains("网页地址"));
+        assertTrue(blob.getMessage().contains("仓库根"));
+
+        var tree = assertThrows(SkillInstallService.InstallException.class,
+                () -> service.preview("https://github.com/u/repo/tree/main", null));
+        assertTrue(tree.getMessage().contains("网页地址"));
+
+        var raw = assertThrows(SkillInstallService.InstallException.class,
+                () -> service.preview("https://raw.githubusercontent.com/u/repo/main/skills/x/SKILL.md", null));
+        assertTrue(raw.getMessage().contains("文件"));
+    }
+
+    @Test
+    void previewsSourcesLayoutRepositories() throws IOException {
+        // anthropics/skills 形态：根无 SKILL.md，技能在 skills/<名>/ 下（sources 包裹布局）
+        Path repo = Files.createDirectories(source.resolve("repo"));
+        Files.createDirectories(repo.resolve("spec"));
+        Files.writeString(repo.resolve("README.md"), "说明");
+        skillDir(repo.resolve("skills"), "doc-coauthoring", "正文");
+        skillDir(repo.resolve("skills"), "canvas-design", "正文");
+
+        var preview = installer(skillService(true)).preview(repo.toString(), null);
+
+        assertEquals(2, preview.candidates().size());
+        assertTrue(preview.candidates().stream()
+                .anyMatch(candidate -> candidate.name().equals("doc-coauthoring") && candidate.valid()));
+        assertTrue(preview.candidates().stream()
+                .anyMatch(candidate -> candidate.name().equals("canvas-design") && candidate.valid()));
+    }
+
+    @Test
+    void singleAnonymousWrapperDirectoryIsAccepted() throws IOException {
+        // 不是 skills/ 名字的唯一包裹目录也可以：只要恰好一个，就下钻它
+        Path repo = Files.createDirectories(source.resolve("packed"));
+        skillDir(repo.resolve("bundles"), "alpha", "正文");
+
+        var preview = installer(skillService(true)).preview(repo.toString(), null);
+
+        assertEquals(1, preview.candidates().size());
+        assertEquals("alpha", preview.candidates().get(0).name());
+    }
+
+    @Test
+    void ambiguousNestedLayoutsAreRejectedInsteadOfGuessed() throws IOException {
+        // 没有名为 skills 的包裹目录时，多个匿名包裹意味着结构不明确，猜错会装进非预期的
+        // 内容——报错引导改用本机目录导入
+        Path repo = Files.createDirectories(source.resolve("nested"));
+        skillDir(repo.resolve("bundles"), "alpha", "正文");
+        skillDir(repo.resolve("more"), "beta", "正文");
+
+        var thrown = assertThrows(SkillInstallService.InstallException.class,
+                () -> installer(skillService(true)).preview(repo.toString(), null));
+        assertTrue(thrown.getMessage().contains("多层嵌套"));
+    }
+
+    @Test
+    void skillsConventionWinsOverSiblingWrappers() throws IOException {
+        // skills/ 是既成惯例（anthropics/skills），同名兄弟包裹存在时按 skills/ 扫，
+        // 不报歧义也不扫兄弟包裹
+        Path repo = Files.createDirectories(source.resolve("mixed"));
+        skillDir(repo.resolve("skills"), "alpha", "正文");
+        skillDir(repo.resolve("more"), "beta", "正文");
+
+        var preview = installer(skillService(true)).preview(repo.toString(), null);
+
+        assertEquals(1, preview.candidates().size());
+        assertEquals("alpha", preview.candidates().get(0).name());
+    }
+
+    @Test
+    void installsSkillFromSourcesLayout() throws IOException {
+        Path repo = Files.createDirectories(source.resolve("repo"));
+        skillDir(repo.resolve("skills"), "doc-coauthoring", "正文");
+
+        var service = installer(skillService(true));
+        var preview = service.preview(repo.toString(), workspace.toString());
+        var result = service.install(preview.token(), List.of("doc-coauthoring"), true,
+                workspace.toString(), false);
+
+        assertEquals("installed", result.results().get(0).status());
+        assertTrue(Files.isRegularFile(workspace.resolve(".pilot/skills/doc-coauthoring/SKILL.md")));
     }
 
     @Test
