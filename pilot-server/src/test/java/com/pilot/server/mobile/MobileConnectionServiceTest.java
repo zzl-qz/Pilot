@@ -3,6 +3,7 @@ package com.pilot.server.mobile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.io.File;
 import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,13 @@ class MobileConnectionServiceTest {
         assertThrows(IllegalStateException.class, () -> MobileConnectionService.requirePlatform("Mac OS X", "x86_64"));
         assertThrows(IllegalStateException.class,
             () -> MobileConnectionService.requirePlatform("Windows 11", "aarch64"));
+    }
+
+    @Test
+    void classpathWildcardIsJoinedAsTextBecauseWindowsRejectsStarInPaths() {
+        // Path.resolve("*") 在 Windows 里是非法路径（InvalidPathException），通配符只能拼字符串。
+        String classpath = MobileConnectionService.classpath(directory);
+        assertEquals(directory + File.separator + "*", classpath);
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.pilot.server.mobile;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -126,8 +127,11 @@ public class MobileConnectionService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("连接请求已中断", e);
-        } catch (IllegalArgumentException | IllegalStateException e) {
+        } catch (IllegalStateException e) {
             throw e;
+        } catch (RuntimeException e) {
+            // 路径非法这类非受检异常也转成可读的 503，界面不该只看到 Internal Server Error。
+            throw new IllegalStateException("手机连接服务暂不可用，请重试", e);
         } catch (Exception e) {
             throw new IllegalStateException("手机连接服务暂不可用，请重试", e);
         }
@@ -150,7 +154,7 @@ public class MobileConnectionService {
             System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java";
         List<String> args =
             new ArrayList<>(List.of(Path.of(System.getProperty("java.home"), "bin", executable).toString(),
-                "--enable-native-access=ALL-UNNAMED", "-cp", libraries.resolve("*").toString(),
+                "--enable-native-access=ALL-UNNAMED", "-cp", classpath(libraries),
                 "com.pilot.mobile.bridge.MainKt", "--pilot-port", Integer.toString(port), "--data-dir", data.toString(),
                 "--no-open", "--parent-pid", Long.toString(ProcessHandle.current().pid()), "--name", computerName()));
         if (!relay.isBlank()) {
@@ -196,6 +200,15 @@ public class MobileConnectionService {
             throw new IllegalArgumentException("无效的连接组件地址");
         }
         return uri;
+    }
+
+    /**
+     * classpath 通配符只能用字符串拼。{@code Path.resolve("*")} 在 Windows 上会抛
+     * {@link java.nio.file.InvalidPathException}（{@code *} 是非法路径字符），
+     * 导致「连接手机」在 Windows 上直接 500。
+     */
+    static String classpath(Path libraries) {
+        return libraries + File.separator + "*";
     }
 
     static void requirePlatform(String os, String arch) {
