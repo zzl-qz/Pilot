@@ -45,9 +45,15 @@ export function buildModelProbe({ endpoint, apiKey } = {}) {
   };
 }
 
+/** 模型 ID 区分大小写；忽略空值与重复值，保证数量和可选行一致。 */
+export function normalizeModelNames(models) {
+  return [...new Set((Array.isArray(models) ? models : [])
+    .filter(model => typeof model === 'string').map(model => model.trim()).filter(Boolean))];
+}
+
 /** 「获取可用模型」成功后的状态行文案：有结果引导点击选择，无结果提示手填。 */
 export function describeModelsFetched(data, { endpoint = '' } = {}) {
-  const models = Array.isArray(data && data.models) ? data.models : [];
+  const models = normalizeModelNames(data?.models);
   const from = endpoint ? `，来自 ${endpoint}` : '';
   if (!models.length) {
     return `端点已连通，但没有返回任何模型${from}：请手动填写模型名。`;

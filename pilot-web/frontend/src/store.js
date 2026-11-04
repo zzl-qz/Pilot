@@ -34,6 +34,7 @@ let queueLoadSequence = 0;
 let activationSequence = 0;
 let projectLoadSequence = 0;
 let sessionLoadSequence = 0;
+let settingsLoadSequence = 0;
 /** 侧边对话正在创建：打开面板的同时又点「新开」时共用一个请求，别建出两条。 */
 const sideChatPending = new Map();
 const sideChatClosing = new Map();
@@ -139,6 +140,12 @@ function resetFilePreview(draft) {
   draft._previewData = null;
   draft._previewLoading = false;
   draft.ui.previewPath = '';
+}
+
+function applySettings(draft, data) {
+  draft.settingsData = data;
+  if (data?.permissionMode) draft.permissionMode = normalizePermission(data.permissionMode);
+  draft.modelOptions = Array.isArray(data?.modelOptions) ? data.modelOptions : [];
 }
 
 function resetSessionState(draft) {
@@ -321,6 +328,7 @@ export const useStore = create(immer((set, get) => {
   modelOptions: [],
   remoteModels: [],
   settingsData: null,
+  modelSave: { busy: false, message: '', error: false },
   /** 桌面通知开关（默认关，用户主动开才打扰）。 */
   notifyEnabled: readNotifyEnabled(),
   permissionMode: 'default',
@@ -1964,15 +1972,12 @@ export const useStore = create(immer((set, get) => {
 
   /* ---------- 设置 ---------- */
   async loadSettings() {
+    const sequence = ++settingsLoadSequence;
     try {
       const data = await api.settings();
+      if (sequence !== settingsLoadSequence || get().modelSave.busy) return;
       set((draft) => {
-        draft.settingsData = data;
-        if (data?.permissionMode) {
-          draft.permissionMode = normalizePermission(data.permissionMode);
-        }
-        // 后端字段叫 modelOptions（不是 models）：读错等于模型下拉永远是空的
-        draft.modelOptions = Array.isArray(data?.modelOptions) ? data.modelOptions : [];
+        applySettings(draft, data);
       });
     } catch { /* 设置读取失败不阻塞 */ }
   },
@@ -1998,30 +2003,38 @@ export const useStore = create(immer((set, get) => {
   },
   /** 清除已保存的 API Key（后端独立接口，和「留空表示不改」区分开）。 */
   async clearModelKey() {
-    try {
-      await api.clearModelKey();
-      await get().loadSettings();
-      get().showNotice('已清除保存的 API Key');
-    } catch (error) {
-      get().showNotice('清除失败：' + error.message);
-    }
+    return get().saveModel({}, { clearKey: true });
   },
-  async saveModel(body) {
+  resetModelFeedback() {
+    if (!get().modelSave.busy) set((draft) => { draft.modelSave = { busy: false, message: '', error: false }; });
+  },
+  async saveModel(body, { clearKey = false } = {}) {
+    // 两个入口共用写入锁：慢请求期间关闭、重开表单也不能重复提交。
+    if (get().modelSave.busy) return false;
+    settingsLoadSequence++;
+    set((draft) => { draft.modelSave = { busy: true, message: clearKey ? '正在清除 API Key…' : '正在保存模型配置…', error: false }; });
     try {
-      const result = await api.saveModel(body);
-      get().showNotice(describeModelSaved(result, {
-        clearKey: Boolean(body?.clearApiKey),
-        keyChanged: Boolean(String(body?.apiKey || '').trim())
-      }));
-      await get().loadSettings();
-      // 换了模型，能力页签里的「模型」也要跟着刷新
-      if (get().capabilities) {
-        await get().loadCapabilities();
+      const result = clearKey ? await api.clearModelKey() : await api.saveModel(body);
+      if (typeof result?.model !== 'string' || typeof result?.modelEndpoint !== 'string') {
+        throw new Error('无法确认保存结果，请重新加载工作台核对配置');
       }
+      const message = describeModelSaved(result, {
+        clearKey: clearKey || Boolean(body?.clearApiKey),
+        keyChanged: Boolean(String(body?.apiKey || '').trim())
+      });
+      // PUT / DELETE 已返回完整设置，无需等额外 GET 才显示新配置。
+      settingsLoadSequence++;
+      set((draft) => {
+        applySettings(draft, result);
+        if (draft.capabilities) draft.capabilities.model = result.model;
+        draft.modelSave = { busy: false, message, error: false };
+      });
+      get().showNotice(message);
       return true;
     } catch (error) {
-      const problem = classifyModelError(error?.message || error);
-      get().showNotice(problem.hint || '保存模型失败：' + error.message);
+      const message = (clearKey ? '清除失败：' : '保存失败：') + (error?.message || '无法连接服务，请检查网络后重试');
+      set((draft) => { draft.modelSave = { busy: false, message, error: true }; });
+      get().showNotice(message);
       return false;
     }
   },

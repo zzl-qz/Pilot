@@ -10,7 +10,8 @@ import { writeClipboard } from '../lib/clipboard.js';
 import { filterPaletteActions } from '../lib/commands.js';
 import { PERMISSION_MODES } from '../lib/permission.js';
 import { emptySkillsHint, parseInstallSource, summarizeInstallResults } from '../lib/skills.js';
-import { buildModelProbe, buildModelUpdate, describeModelsFetched } from '../lib/model-settings.js';
+import { ModelOptions, useModelDiscovery } from './ModelDiscovery.jsx';
+import { ModelSaveFeedback, useModelForm } from './ModelForm.jsx';
 import { MobileConnectionContent } from './MobileConnection.jsx';
 import { verificationLabel, verificationHint } from '../lib/verification.js';
 
@@ -200,7 +201,8 @@ export function Modal({ id, title, onClose, children, wide }) {
   useEffect(() => {
     const previous = document.activeElement;
     const node = container.current;
-    const focusable = () => [...node.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"]')].filter(el => el.getClientRects().length);
+    const focusable = () => [...node.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, a[href], [tabindex="0"]')]
+      .filter(el => el.tabIndex >= 0 && el.getClientRects().length);
     const topmost = () => [...document.querySelectorAll('.modal')].at(-1) === node;
     const frame = requestAnimationFrame(() => (node.querySelector('input:not([disabled]), textarea, [aria-current="page"]') || focusable()[0] || node).focus());
     const onKey = event => {
@@ -467,50 +469,45 @@ function AppearanceSettings() {
 function ModelSettings() {
   const settings = useStore((state) => state.settingsData);
   // 后端字段：model（字符串）/ modelEndpoint / modelApiKeySet；旧代码读的是 model.name，永远是空
-  const [name, setName] = useState(settings?.model || '');
-  const [endpoint, setEndpoint] = useState(settings?.modelEndpoint || '');
-  const [key, setKey] = useState('');
-  const [hint, setHint] = useState('');
+  const { name, endpoint, key, setName, setEndpoint, setKey, saving, feedback, save, clearKey } = useModelForm({ model: settings?.model, endpoint: settings?.modelEndpoint });
+  const discovery = useModelDiscovery({ endpoint, apiKey: key });
   return (
     <div>
 
-      <label className="task-field">模型名称<input id="settings-model-name" value={name} onChange={(event) => setName(event.target.value)} /></label>
-      <label className="task-field">API 端点<input id="settings-model-endpoint" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
+      <label className="task-field">模型名称<input id="settings-model-name" disabled={saving} value={name} onChange={(event) => setName(event.target.value)} /></label>
+      <label className="task-field">API 端点<input id="settings-model-endpoint" disabled={saving} value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
       <label className="task-field">
         API Key
         <input
           id="settings-model-key"
           type="password"
+          disabled={saving}
           value={key}
           onChange={(event) => setKey(event.target.value)}
           placeholder={settings?.modelApiKeySet ? `已保存 ${settings?.modelApiKeyMasked || ''}（不填沿用）` : '尚未保存密钥'}
         />
       </label>
       <div className="chip-menu-actions">
-        <button type="button" className="btn" id="settings-model-fetch" onClick={async () => {
-          try {
-            const list = await useStore.getState().probeModels(buildModelProbe({ endpoint, apiKey: key }));
-            setHint(describeModelsFetched(list, { endpoint }));
-          } catch (error) {
-            setHint('探测失败：' + error.message);
-          }
-        }}>探测可用模型</button>
-        <button type="button" className="btn btn-primary" id="settings-model-save" onClick={() => useStore.getState().saveModel(buildModelUpdate({ model: name, endpoint, apiKey: key }))}>保存</button>
+        <button type="button" className="btn" id="settings-model-fetch" disabled={saving || discovery.probing} aria-busy={discovery.probing} onClick={discovery.probe}>{discovery.probing ? '探测中…' : '探测可用模型'}</button>
+        <button type="button" className="btn btn-primary" id="settings-model-save" disabled={saving || !name.trim()} aria-busy={saving} onClick={save}>{saving ? '保存中…' : '保存'}</button>
         <button
           type="button"
           className="btn btn-danger"
           id="settings-model-clear-key"
+          disabled={saving || !settings?.modelApiKeySet}
           title="删除已保存在本机的 API Key"
           onClick={() => useStore.getState().askConfirm({
             title: '清除 API Key',
             message: '清除后模型请求会失败，直到重新填写。确定清除吗？',
             confirmText: '清除',
             danger: true,
-            onConfirm: () => useStore.getState().clearModelKey()
+            onConfirm: clearKey
           })}
         >清除 Key</button>
       </div>
-      {hint && <p id="settings-model-hint" className="chip-hint">{hint}</p>}
+      <ModelSaveFeedback id="settings-model-save-feedback" feedback={feedback} />
+      {discovery.hint && <p id="settings-model-hint" className="chip-hint" role={discovery.error ? 'alert' : 'status'}>{discovery.hint}</p>}
+      <ModelOptions models={discovery.models} value={name} onSelect={setName} disabled={saving} discovered={discovery.discovered} />
       <VoiceSettings />
       <ModelRuntimeSettings model={settings?.model} endpoint={settings?.modelEndpoint} />
     </div>

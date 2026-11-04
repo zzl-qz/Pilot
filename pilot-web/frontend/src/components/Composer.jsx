@@ -17,7 +17,8 @@ import { writeDraft, readDraft, dropDraft } from '../lib/drafts.js';
 import { splitAttachmentMarkers, joinAttachmentMarkers } from '../lib/attachments.js';
 import { queueHeader, resumeBar } from '../lib/queue.js';
 import { PERMISSION_MODES, permissionLabel, permissionHint } from '../lib/permission.js';
-import { buildModelProbe, buildModelUpdate, describeModelsFetched } from '../lib/model-settings.js';
+import { ModelOptions, useModelDiscovery } from './ModelDiscovery.jsx';
+import { ModelSaveFeedback, useModelForm } from './ModelForm.jsx';
 import { usageLevel, usagePercent } from '../lib/context-usage.js';
 import { agentStatusLabel, summarizeAgents } from '../lib/agents.js';
 
@@ -682,56 +683,21 @@ function CheckIcon() {
 
 function ModelMenu({ onClose, models, initialModel = '', initialEndpoint = '' }) {
   // 打开菜单时预填当前配置：之前是空白表单，用户会以为模型没配
-  const [name, setName] = useState(initialModel);
-  const [endpoint, setEndpoint] = useState(initialEndpoint);
-  const [key, setKey] = useState('');
-  const [hint, setHint] = useState('');
-  const [probing, setProbing] = useState(false);
-  const [savingModel, setSavingModel] = useState(false);
+  const { name, endpoint, key, setName, setEndpoint, setKey, saving, feedback, save } = useModelForm({ model: initialModel, endpoint: initialEndpoint });
+  const discovery = useModelDiscovery({ endpoint, apiKey: key, initialModels: models, initialEndpoint });
   return (
     <div className="chip-menu model-menu" id="model-menu" role="dialog" aria-label="模型设置">
       <p className="menu-head">模型</p>
-      <label>模型名称<input value={name} onChange={(event) => setName(event.target.value)} placeholder="如 deepseek-chat" /></label>
-      <label>端点<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="模型服务地址，以 /v1 结尾" /></label>
-      <label>API Key<input type="password" value={key} onChange={(event) => setKey(event.target.value)} placeholder="不填则沿用已保存的" /></label>
+      <label>模型名称<input disabled={saving} value={name} onChange={(event) => setName(event.target.value)} placeholder="如 deepseek-chat" /></label>
+      <label>端点<input disabled={saving} value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="模型服务地址，以 /v1 结尾" /></label>
+      <label>API Key<input disabled={saving} type="password" value={key} onChange={(event) => setKey(event.target.value)} placeholder="不填则沿用已保存的" /></label>
       <div className="chip-menu-actions">
-        <button type="button" className="btn" disabled={probing} onClick={async () => {
-          setProbing(true);
-          try {
-            const list = await useStore.getState().probeModels(buildModelProbe({ endpoint, apiKey: key }));
-            setHint(describeModelsFetched(list, { endpoint }));
-          } catch (error) {
-            setHint('探测失败：' + error.message);
-          } finally {
-            setProbing(false);
-          }
-        }}>{probing ? '探测中…' : '探测模型'}</button>
-        <button type="button" className="btn btn-primary" disabled={savingModel || !name.trim()} onClick={async () => {
-          setSavingModel(true);
-          try {
-            if (await useStore.getState().saveModel(buildModelUpdate({ model: name, endpoint, apiKey: key }))) onClose();
-          } finally { setSavingModel(false); }
-        }}>保存</button>
+        <button type="button" className="btn" disabled={saving || discovery.probing} aria-busy={discovery.probing} onClick={discovery.probe}>{discovery.probing ? '探测中…' : '探测模型'}</button>
+        <button type="button" className="btn btn-primary" disabled={saving || !name.trim()} aria-busy={saving} onClick={async () => { if (await save()) onClose(); }}>{saving ? '保存中…' : '保存'}</button>
       </div>
-      {models?.length > 0 && (
-        <div className="model-options" role="listbox" aria-label="探测到的模型">
-          <p className="model-options-head">端点可用模型<span>{models.length}</span></p>
-          {models.slice(0, 12).map((model) => (
-            <button
-              key={model}
-              type="button"
-              role="option"
-              aria-selected={model === name}
-              className={`model-option${model === name ? ' is-on' : ''}`}
-              onClick={() => setName(model)}
-            >
-              <span className="model-option-name">{model}</span>
-              {model === name && <CheckIcon />}
-            </button>
-          ))}
-        </div>
-      )}
-      {hint && <p className="chip-hint">{hint}</p>}
+      <ModelSaveFeedback feedback={feedback} />
+      {discovery.hint && <p className="chip-hint" role={discovery.error ? 'alert' : 'status'}>{discovery.hint}</p>}
+      <ModelOptions models={discovery.models} value={name} onSelect={setName} disabled={saving} discovered={discovery.discovered} />
     </div>
   );
 }

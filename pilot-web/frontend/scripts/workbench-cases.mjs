@@ -71,6 +71,12 @@ export async function checkWorkbench(page, name, output) {
     await page.locator('.settings-nav').getByRole('button', { name: section, exact: true }).click();
     assert.equal(await page.locator('.settings-body').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true, section + ' 无横向溢出');
   }
+  // 数量提示不等于可选择：必须验证实际列表与表单值，防止模型探测只返回一行提示。
+  await page.locator('.settings-nav').getByRole('button', { name: '模型', exact: true }).click();
+  await page.evaluate(() => { api.probeModels = async () => ({ models: ['probe-first', 'probe-second'] }); });
+  await page.locator('#settings-model-fetch').click();
+  await page.getByRole('option', { name: 'probe-second', exact: true }).click();
+  assert.equal(await page.locator('#settings-model-name').inputValue(), 'probe-second');
   await page.locator('.settings-nav').getByRole('button', { name: '诊断', exact: true }).click();
   const validation = page.getByText('校验证据：', { exact: false });
   await validation.waitFor();

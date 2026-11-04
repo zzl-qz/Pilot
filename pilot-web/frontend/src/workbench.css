@@ -65,6 +65,7 @@ html[data-theme] .session-action.is-danger { right: 0; }
 html[data-theme] .session-row:is(:hover, :focus-within) .session-item { padding-right: 48px; }
 html[data-theme] .session-row:hover .session-action, html[data-theme] .session-row:focus-within .session-action { visibility: visible; opacity: 1; }
 html[data-theme] .rail-foot { padding: 10px 14px; gap: 7px; }
+
 html[data-theme] .workspace-chip { border: 0; text-align: left; padding: 4px 6px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; background: transparent; border-radius: 4px; color: var(--muted); }
 html[data-theme] .workspace-chip:hover { background: var(--ui-hover); color: var(--ink); }
 .workspace-files { display: flex; flex-direction: column; flex: 0 0 auto; min-height: 0; border-top: 1px solid var(--line-soft); margin: 0 10px; }
@@ -122,6 +123,21 @@ html[data-theme] #send:not(:disabled) { background: var(--ink); color: var(--bg)
 html[data-theme] .chip-menu { padding: 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
 html[data-theme] .chip-menu input { min-height: 34px; width: 100%; border: 1px solid var(--line); background: var(--ui-field); color: var(--ink); border-radius: 6px; padding: 6px 9px; font: 13px var(--sans); }
 html[data-theme] .chip-menu-actions { flex-wrap: wrap; gap: 8px; }
+
+/* 模型探测结果紧邻操作反馈；Web / Electron 共用，不截断可选模型数量。 */
+.model-discovery { min-width: 0; display: grid; gap: 8px; margin: 12px 0; }
+.model-discovery .model-options-head { margin: 0; padding: 0; font-size: 12px; color: var(--muted); }
+.model-discovery > input { width: 100%; min-width: 0; min-height: 34px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--ui-field); color: var(--ink); font: 13px var(--sans); }
+.model-discovery .model-options { flex-wrap: nowrap; max-height: min(240px, 35vh); overflow: auto; overscroll-behavior: contain; }
+.model-discovery .model-option { flex-shrink: 0; min-height: 36px; padding: 8px 10px; }
+.model-discovery .model-option.is-on { background: var(--ui-selected); color: var(--ink); }
+.model-discovery .model-option-name { min-width: 0; white-space: normal; overflow-wrap: anywhere; font-size: 12px; }
+.model-option-check { flex: none; }
+.model-options-help { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.model-save-feedback { display: flex; align-items: baseline; gap: 8px; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--ui-field); color: var(--ink); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.model-save-feedback > span:first-child { flex: none; color: var(--ok); }
+.model-save-feedback.is-error, .model-save-feedback.is-error > span:first-child { color: var(--err); }
+@media (pointer: coarse) { .model-discovery .model-option, .model-discovery > input { min-height: 44px; } }
 html[data-theme] .queue-entry { min-height: 36px; }
 html[data-theme] .queue-actions button { min-height: 28px; }
 html[data-theme] .approval-card { border-radius: 8px; border-color: color-mix(in srgb, var(--warn) 40%, var(--line-soft)); }
