@@ -1,14 +1,14 @@
 package com.pilot.core.workspace;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class PathValidatorTest {
     @TempDir
@@ -63,8 +63,7 @@ class PathValidatorTest {
         }
 
         PathValidator validator = new PathValidator(workspace);
-        assertThrows(WorkspaceViolationException.class,
-                () -> validator.resolve("external-link/new-file.txt"));
+        assertThrows(WorkspaceViolationException.class, () -> validator.resolve("external-link/new-file.txt"));
     }
 
     @Test

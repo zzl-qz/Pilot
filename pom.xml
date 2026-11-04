@@ -15,6 +15,8 @@
     <name>Pilot</name>
     <properties>
         <java.version>25</java.version>
+        <!-- 5.24.0 修复 inline / subclass 混用时随机触发的 MockUtil 断言失败（Mockito #3795）。 -->
+        <mockito.version>5.24.0</mockito.version>
     </properties>
     <modules>
         <module>pilot-core</module>
@@ -30,6 +32,64 @@
                     <!-- sqlite-jdbc 通过 System.load 加载本地库，JDK 25 需要显式授权 -->
                     <argLine>--enable-native-access=ALL-UNNAMED</argLine>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <lineEndings>UNIX</lineEndings>
+                    <java>
+                        <includes>
+                            <include>src/main/java/**/*.java</include>
+                            <include>src/test/java/**/*.java</include>
+                            <include>src/test/resources/**/*.java</include>
+                        </includes>
+                        <shortenFullyQualifiedTypes/>
+                        <removeUnusedImports/>
+                        <importOrder><order>java,javax,jakarta,org,com,tools,</order></importOrder>
+                        <eclipse>
+                            <version>4.38</version>
+                            <file>${maven.multiModuleProjectDirectory}/config/java/alibaba-eclipse.xml</file>
+                        </eclipse>
+                        <trimTrailingWhitespace/>
+                        <endWithNewline/>
+                    </java>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>java-format-check</id>
+                        <phase>verify</phase>
+                        <goals><goal>check</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>3.5.0</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>com.puppycrawl.tools</groupId>
+                        <artifactId>checkstyle</artifactId>
+                        <version>14.4.0</version>
+                    </dependency>
+                </dependencies>
+                <configuration>
+                    <configLocation>${maven.multiModuleProjectDirectory}/config/java/checkstyle.xml</configLocation>
+                    <includeTestSourceDirectory>true</includeTestSourceDirectory>
+                    <includeResources>false</includeResources>
+                    <includeTestResources>false</includeTestResources>
+                    <consoleOutput>true</consoleOutput>
+                    <linkXRef>false</linkXRef>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>java-readability-check</id>
+                        <phase>verify</phase>
+                        <goals><goal>check</goal></goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

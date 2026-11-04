@@ -1,7 +1,10 @@
 package com.pilot.server.desktop;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -13,11 +16,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class DesktopShellInstallerTest {
 
@@ -25,13 +25,13 @@ class DesktopShellInstallerTest {
     void installedShellIsUsedWithoutInstalling(@TempDir Path root) throws Exception {
         electron(root);
         AtomicBoolean ran = new AtomicBoolean();
-        DesktopShellInstaller installer = installer(true, null,
-                (dir, command, env, log, timeout) -> {
-                    ran.set(true);
-                    return 0;
-                });
+        DesktopShellInstaller installer = installer(true, null, (dir, command, env, log, timeout) -> {
+            ran.set(true);
+            return 0;
+        });
 
-        assertNull(installer.ensureInstalled(root, () -> {}));
+        assertNull(installer.ensureInstalled(root, () -> {
+        }));
         assertFalse(ran.get());
     }
 
@@ -40,15 +40,14 @@ class DesktopShellInstallerTest {
         desktopPackage(root);
         CountDownLatch opened = new CountDownLatch(1);
         AtomicInteger attempts = new AtomicInteger();
-        DesktopShellInstaller installer = installer(true, fakeNpm(root),
-                (dir, command, env, log, timeout) -> {
-                    attempts.incrementAndGet();
-                    assertEquals(root.resolve("pilot-desktop"), dir);
-                    assertTrue(String.join(" ", command).contains("install --no-audit --no-fund"),
-                            "安装命令应执行 npm install：" + command);
-                    electron(root);
-                    return 0;
-                });
+        DesktopShellInstaller installer = installer(true, fakeNpm(root), (dir, command, env, log, timeout) -> {
+            attempts.incrementAndGet();
+            assertEquals(root.resolve("pilot-desktop"), dir);
+            assertTrue(String.join(" ", command).contains("install --no-audit --no-fund"),
+                "安装命令应执行 npm install：" + command);
+            electron(root);
+            return 0;
+        });
 
         String pending = installer.ensureInstalled(root, opened::countDown);
         assertTrue(pending.contains("正在后台安装"), pending);
@@ -61,18 +60,17 @@ class DesktopShellInstallerTest {
         desktopPackage(root);
         AtomicInteger attempts = new AtomicInteger();
         CountDownLatch opened = new CountDownLatch(1);
-        DesktopShellInstaller installer = installer(true, fakeNpm(root),
-                (dir, command, env, log, timeout) -> {
-                    int attempt = attempts.incrementAndGet();
-                    if (attempt == 1) {
-                        assertFalse(command.toString().contains("npmmirror"));
-                        assertFalse(env.containsKey("ELECTRON_MIRROR"));
-                    } else {
-                        assertTrue(command.toString().contains("npmmirror"));
-                        assertEquals(DesktopShellInstaller.ELECTRON_MIRROR, env.get("ELECTRON_MIRROR"));
-                    }
-                    return 1;
-                });
+        DesktopShellInstaller installer = installer(true, fakeNpm(root), (dir, command, env, log, timeout) -> {
+            int attempt = attempts.incrementAndGet();
+            if (attempt == 1) {
+                assertFalse(command.toString().contains("npmmirror"));
+                assertFalse(env.containsKey("ELECTRON_MIRROR"));
+            } else {
+                assertTrue(command.toString().contains("npmmirror"));
+                assertEquals(DesktopShellInstaller.ELECTRON_MIRROR, env.get("ELECTRON_MIRROR"));
+            }
+            return 1;
+        });
 
         assertNotNull(installer.ensureInstalled(root, opened::countDown));
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
@@ -88,13 +86,13 @@ class DesktopShellInstallerTest {
     void provisionDisabledKeepsTheManualCommand(@TempDir Path root) throws Exception {
         desktopPackage(root);
         AtomicBoolean ran = new AtomicBoolean();
-        DesktopShellInstaller installer = installer(false, fakeNpm(root),
-                (dir, command, env, log, timeout) -> {
-                    ran.set(true);
-                    return 0;
-                });
+        DesktopShellInstaller installer = installer(false, fakeNpm(root), (dir, command, env, log, timeout) -> {
+            ran.set(true);
+            return 0;
+        });
 
-        String pending = installer.ensureInstalled(root, () -> {});
+        String pending = installer.ensureInstalled(root, () -> {
+        });
         assertTrue(pending.contains(DesktopShellInstaller.MANUAL), pending);
         assertTrue(pending.contains("provision=false"), pending);
         assertFalse(ran.get());
@@ -106,7 +104,8 @@ class DesktopShellInstallerTest {
         DesktopShellInstaller installer = installer(true, null, (dir, command, env, log, timeout) -> 0);
 
         assertNull(DesktopShellInstaller.npm(root, "", ""));
-        String pending = installer.ensureInstalled(root, () -> {});
+        String pending = installer.ensureInstalled(root, () -> {
+        });
         assertTrue(pending.contains(DesktopShellInstaller.MANUAL), pending);
         assertFalse(installer.installing());
     }
@@ -116,16 +115,15 @@ class DesktopShellInstallerTest {
         desktopPackage(root);
         CountDownLatch release = new CountDownLatch(1);
         CountDownLatch opened = new CountDownLatch(1);
-        DesktopShellInstaller installer = installer(true, fakeNpm(root),
-                (dir, command, env, log, timeout) -> {
-                    electron(root);
-                    try {
-                        release.await(10, TimeUnit.SECONDS);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                    return 0;
-                });
+        DesktopShellInstaller installer = installer(true, fakeNpm(root), (dir, command, env, log, timeout) -> {
+            electron(root);
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return 0;
+        });
 
         String first = installer.ensureInstalled(root, opened::countDown);
         assertTrue(first.contains("正在后台安装"), first);
@@ -181,8 +179,7 @@ class DesktopShellInstallerTest {
     }
 
     /** 固定住 npm 的位置：不依赖测试机器上装没装 Node。 */
-    private static DesktopShellInstaller installer(boolean provision, Path npm,
-                                                   DesktopShellInstaller.Runner runner) {
+    private static DesktopShellInstaller installer(boolean provision, Path npm, DesktopShellInstaller.Runner runner) {
         return new DesktopShellInstaller(provision, runner) {
             @Override
             Path npm(Path root) {

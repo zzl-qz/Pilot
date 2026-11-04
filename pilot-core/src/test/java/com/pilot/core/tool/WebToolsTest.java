@@ -1,16 +1,20 @@
 package com.pilot.core.tool;
 
-import com.sun.net.httpserver.HttpServer;
-import org.junit.jupiter.api.Test;
-import tools.jackson.databind.ObjectMapper;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
+
+import com.sun.net.httpserver.HttpServer;
+
+import tools.jackson.databind.ObjectMapper;
 
 class WebToolsTest {
     private final ObjectMapper mapper = new ObjectMapper();
@@ -22,7 +26,8 @@ class WebToolsTest {
             String query = exchange.getRequestURI().getRawQuery();
             assertNotNull(query);
             assertTrue(query.contains("format=json"));
-            byte[] body = "{\"results\":[{\"title\":\"Example\",\"url\":\"https://example.com\",\"content\":\"A result\"}]}"
+            byte[] body =
+                "{\"results\":[{\"title\":\"Example\",\"url\":\"https://example.com\",\"content\":\"A result\"}]}"
                     .getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, body.length);
@@ -32,7 +37,7 @@ class WebToolsTest {
         server.start();
         try {
             WebSearchTool tool = new WebSearchTool(HttpClient.newHttpClient(), mapper,
-                    java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
             String result = tool.execute(Map.of("query", "example"));
             assertTrue(result.contains("https://example.com"));
             assertTrue(result.contains("A result"));
@@ -44,8 +49,8 @@ class WebToolsTest {
 
     @Test
     void searchSaysWhenLocalEngineIsDown() {
-        WebSearchTool tool = new WebSearchTool(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(), mapper,
-                java.net.URI.create("http://127.0.0.1:1"));
+        WebSearchTool tool = new WebSearchTool(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(),
+            mapper, URI.create("http://127.0.0.1:1"));
         assertTrue(tool.execute(Map.of("query", "pilot")).contains("本地搜索未启动"));
     }
 
@@ -67,8 +72,8 @@ class WebToolsTest {
         server.start();
         try {
             // 本机地址在发出请求前就拒绝，不会顺着 Location 再访问一次
-            String result = new WebFetchTool(HttpClient.newHttpClient()).execute(
-                    Map.of("url", "http://127.0.0.1:" + server.getAddress().getPort() + "/"));
+            String result = new WebFetchTool(HttpClient.newHttpClient())
+                .execute(Map.of("url", "http://127.0.0.1:" + server.getAddress().getPort() + "/"));
             assertTrue(result.startsWith("ERROR:"), result);
         } finally {
             server.stop(0);

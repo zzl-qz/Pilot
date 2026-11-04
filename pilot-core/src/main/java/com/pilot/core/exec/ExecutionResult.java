@@ -11,8 +11,8 @@ package com.pilot.core.exec;
  * @param isolation  实际使用的隔离级别
  * @param error      启动失败等原因；正常执行时为空串
  */
-public record ExecutionResult(int exitCode, String output, boolean timedOut, boolean truncated,
-                              String backend, ExecutionIsolation isolation, String error) {
+public record ExecutionResult(int exitCode, String output, boolean timedOut, boolean truncated, String backend,
+    ExecutionIsolation isolation, String error) {
 
     public ExecutionResult {
         output = output == null ? "" : output;

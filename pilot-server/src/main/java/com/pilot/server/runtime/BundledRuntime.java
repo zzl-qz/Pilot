@@ -1,11 +1,5 @@
 package com.pilot.server.runtime;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.SmartLifecycle;
-import org.springframework.stereotype.Component;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,6 +10,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.SmartLifecycle;
+import org.springframework.stereotype.Component;
 
 /**
  * 给技能脚本准备 Python 3.12 和 Node 22。
@@ -78,8 +78,8 @@ public class BundledRuntime implements SmartLifecycle {
         Path tar = parent.resolve(dest.getFileName() + ".download");
         boolean fetched = false;
         for (String url : archive.urls()) {
-            if (run(parent, Duration.ofMinutes(5), "curl", "-fL", "--retry", "2", "--max-time", "180",
-                    "-o", tar.toString(), url) == 0 && Files.isRegularFile(tar)) {
+            if (run(parent, Duration.ofMinutes(5), "curl", "-fL", "--retry", "2", "--max-time", "180", "-o",
+                tar.toString(), url) == 0 && Files.isRegularFile(tar)) {
                 fetched = true;
                 break;
             }
@@ -193,7 +193,7 @@ public class BundledRuntime implements SmartLifecycle {
         Path dir = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath();
         for (int i = 0; i < 6 && dir != null; i++) {
             if (Files.isRegularFile(dir.resolve("pom.xml"))
-                    && Files.isRegularFile(dir.resolve("pilot-server").resolve("pom.xml"))) {
+                && Files.isRegularFile(dir.resolve("pilot-server").resolve("pom.xml"))) {
                 return dir.resolve(".pilot").resolve("runtime");
             }
             dir = dir.getParent();
@@ -205,10 +205,10 @@ public class BundledRuntime implements SmartLifecycle {
         String triple = pythonTriple();
         String file = "cpython-" + PYTHON_VERSION + "+" + PYTHON_RELEASE + "-" + triple + "-install_only.tar.gz";
         String encoded = file.replace("+", "%2B");
-        String origin = "https://github.com/astral-sh/python-build-standalone/releases/download/"
-                + PYTHON_RELEASE + "/" + file;
-        return new Archive("Python " + PYTHON_VERSION, List.of(
-                "https://registry.npmmirror.com/-/binary/python-build-standalone/" + PYTHON_RELEASE + "/" + encoded,
+        String origin =
+            "https://github.com/astral-sh/python-build-standalone/releases/download/" + PYTHON_RELEASE + "/" + file;
+        return new Archive("Python " + PYTHON_VERSION,
+            List.of("https://registry.npmmirror.com/-/binary/python-build-standalone/" + PYTHON_RELEASE + "/" + encoded,
                 origin));
     }
 
@@ -216,9 +216,8 @@ public class BundledRuntime implements SmartLifecycle {
         String tag = nodeTag();
         String file = "node-v" + NODE_VERSION + "-" + tag + (tag.startsWith("win-") ? ".zip" : ".tar.gz");
         String origin = "https://nodejs.org/dist/v" + NODE_VERSION + "/" + file;
-        return new Archive("Node.js " + NODE_VERSION, List.of(
-                origin,
-                "https://npmmirror.com/mirrors/node/v" + NODE_VERSION + "/" + file));
+        return new Archive("Node.js " + NODE_VERSION,
+            List.of(origin, "https://npmmirror.com/mirrors/node/v" + NODE_VERSION + "/" + file));
     }
 
     private static String pythonTriple() {

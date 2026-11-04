@@ -1,5 +1,7 @@
 package com.pilot.core.exec;
 
+import java.nio.file.Path;
+
 /**
  * 执行隔离配置。
  *
@@ -8,13 +10,18 @@ package com.pilot.core.exec;
  * @param containerRuntime docker / podman；为空时自动探测
  * @param network          容器内是否允许访问网络；默认关闭
  */
-public record ExecutionSettings(ExecutionIsolation isolation, String image, String containerRuntime,
-                                boolean network, ExecutionLimits limits) {
+public record ExecutionSettings(ExecutionIsolation isolation, String image, String containerRuntime, boolean network,
+    ExecutionLimits limits, Path cacheRoot) {
     public ExecutionSettings {
         isolation = isolation == null ? ExecutionIsolation.LOCAL : isolation;
         image = image == null ? "" : image.strip();
         containerRuntime = containerRuntime == null ? "" : containerRuntime.strip();
         limits = limits == null ? ExecutionLimits.defaults() : limits;
+    }
+
+    public ExecutionSettings(ExecutionIsolation isolation, String image, String containerRuntime, boolean network,
+        ExecutionLimits limits) {
+        this(isolation, image, containerRuntime, network, limits, null);
     }
 
     public static ExecutionSettings local() {
@@ -24,19 +31,16 @@ public record ExecutionSettings(ExecutionIsolation isolation, String image, Stri
     /** 读取系统属性（{@code pilot.execution.*}）覆盖，便于本机与 CI 切换。 */
     public static ExecutionSettings fromSystemProperties() {
         String isolation = System.getProperty("pilot.execution.isolation", "local");
-        return new ExecutionSettings(
-                ExecutionIsolation.parse(isolation),
-                System.getProperty("pilot.execution.image", ""),
-                System.getProperty("pilot.execution.runtime", ""),
-                Boolean.parseBoolean(System.getProperty("pilot.execution.network", "false")),
-                ExecutionLimits.defaults());
+        return new ExecutionSettings(ExecutionIsolation.parse(isolation),
+            System.getProperty("pilot.execution.image", ""), System.getProperty("pilot.execution.runtime", ""),
+            Boolean.parseBoolean(System.getProperty("pilot.execution.network", "false")), ExecutionLimits.defaults());
     }
 
     public ExecutionSettings withNetwork(boolean allowed) {
-        return new ExecutionSettings(isolation, image, containerRuntime, allowed, limits);
+        return new ExecutionSettings(isolation, image, containerRuntime, allowed, limits, cacheRoot);
     }
 
     public ExecutionSettings withLimits(ExecutionLimits newLimits) {
-        return new ExecutionSettings(isolation, image, containerRuntime, network, newLimits);
+        return new ExecutionSettings(isolation, image, containerRuntime, network, newLimits, cacheRoot);
     }
 }

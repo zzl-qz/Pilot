@@ -1,14 +1,14 @@
 package com.pilot.server.config;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Map;
+
 import org.springframework.boot.EnvironmentPostProcessor;
 import org.springframework.boot.SpringApplication;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Map;
 
 /**
  * 开发时直接读 pilot-web 源码里的页面，改 HTML/JS/CSS 保存后刷新浏览器即可。
@@ -28,10 +28,10 @@ public class LiveStaticEnvironment implements EnvironmentPostProcessor, Ordered 
             location = location + "/";
         }
         // 源码目录放最前，classpath 留着兜底，接口路径不受影响
-        String locations = location
-                + ",classpath:/META-INF/resources/,classpath:/resources/,classpath:/static/,classpath:/public/";
-        environment.getPropertySources().addFirst(new MapPropertySource(
-                "pilotLiveStatic", Map.of(LOCATIONS_KEY, locations)));
+        String locations =
+            location + ",classpath:/META-INF/resources/,classpath:/resources/,classpath:/static/,classpath:/public/";
+        environment.getPropertySources()
+            .addFirst(new MapPropertySource("pilotLiveStatic", Map.of(LOCATIONS_KEY, locations)));
     }
 
     /** 从工作目录往上找几层。IDEA 的工作目录有时是仓库根，有时是 pilot-server。 */

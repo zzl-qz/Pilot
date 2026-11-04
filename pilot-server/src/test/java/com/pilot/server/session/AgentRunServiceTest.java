@@ -1,5 +1,31 @@
 package com.pilot.server.session;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.MockMakers.SUBCLASS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
@@ -10,6 +36,7 @@ import com.pilot.core.loop.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
+import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.plan.PlanItem;
@@ -18,7 +45,6 @@ import com.pilot.core.session.InMemoryConversationRepository;
 import com.pilot.core.session.InMemoryPlanRepository;
 import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.SessionService;
-import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.tool.ReadFileTool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolRegistry;
@@ -34,28 +60,8 @@ import com.pilot.server.store.InMemorySettingsStore;
 import com.pilot.server.store.QueuedMessageRepository;
 import com.pilot.server.workspace.RunSnapshotService;
 import com.pilot.server.workspace.WorkspaceToolFactory;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+
 import tools.jackson.databind.json.JsonMapper;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.MockMakers.SUBCLASS;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.withSettings;
 
 class AgentRunServiceTest {
     @TempDir
@@ -67,11 +73,9 @@ class AgentRunServiceTest {
     void aggregatesChildUsageWithoutReplacingMainRunSnapshot() {
         AgentRunService.RunUsageAccumulator usage = new AgentRunService.RunUsageAccumulator();
 
-        RunUsageUpdated main = usage.main(new RunUsageUpdated(2, 1_000, 100,
-                700, 8_000, true));
+        RunUsageUpdated main = usage.main(new RunUsageUpdated(2, 1_000, 100, 700, 8_000, true));
         RunUsageUpdated child = usage.child(new ModelUsage(300, 30, 0, true));
-        RunUsageUpdated nextMain = usage.main(new RunUsageUpdated(3, 1_500, 150,
-                900, 8_000, true));
+        RunUsageUpdated nextMain = usage.main(new RunUsageUpdated(3, 1_500, 150, 900, 8_000, true));
         RunUsageUpdated unknownChild = usage.child(ModelUsage.unknown());
 
         assertEquals(2, main.modelRequests());
@@ -158,10 +162,11 @@ class AgentRunServiceTest {
             assertEquals(List.of("原任务", "修改后的下一条", "再下一条"), userInputs(requests.get(3)));
             List<EventEnvelope> events = fixture.sessions.events(fixture.sessionId);
             assertFalse(events.stream().anyMatch(event -> event.type().equals("run.steered")));
-            EventEnvelope firstCompleted = events.stream().filter(event -> event.payload() instanceof RunCompleted)
-                    .findFirst().orElseThrow();
-            EventEnvelope nextStarted = events.stream().filter(event -> event.payload() instanceof RunStarted started
-                    && started.input().equals("修改后的下一条")).findFirst().orElseThrow();
+            EventEnvelope firstCompleted =
+                events.stream().filter(event -> event.payload() instanceof RunCompleted).findFirst().orElseThrow();
+            EventEnvelope nextStarted = events.stream()
+                .filter(event -> event.payload() instanceof RunStarted started && started.input().equals("修改后的下一条"))
+                .findFirst().orElseThrow();
             assertTrue(firstCompleted.sequence() < nextStarted.sequence());
             assertNotEquals(firstCompleted.runId(), nextStarted.runId());
         } finally {
@@ -228,15 +233,13 @@ class AgentRunServiceTest {
             fixture.awaitFinished("COMPLETED", "COMPLETED", "COMPLETED");
 
             Message delivered = requests.get(1).stream()
-                    .filter(message -> "user".equals(message.role()) && "改成这样看图".equals(message.content()))
-                    .findFirst().orElseThrow();
+                .filter(message -> "user".equals(message.role()) && "改成这样看图".equals(message.content())).findFirst()
+                .orElseThrow();
             assertEquals(List.of(image), delivered.attachments());
             assertEquals(List.of(2), delivered.imagePositions());
-            RunStarted started = fixture.sessions.events(fixture.sessionId).stream()
-                    .map(event -> event.payload())
-                    .filter(payload -> payload instanceof RunStarted run && "改成这样看图".equals(run.input()))
-                    .map(payload -> (RunStarted) payload)
-                    .findFirst().orElseThrow();
+            RunStarted started = fixture.sessions.events(fixture.sessionId).stream().map(event -> event.payload())
+                .filter(payload -> payload instanceof RunStarted run && "改成这样看图".equals(run.input()))
+                .map(payload -> (RunStarted)payload).findFirst().orElseThrow();
             assertEquals(List.of(image), started.attachments());
             assertEquals(List.of(), fixture.queue());
         } finally {
@@ -271,7 +274,7 @@ class AgentRunServiceTest {
 
     @Test
     void reviewRunsUseReadOnlyToolsAndInjectTheProtocol() throws Exception {
-        CopyOnWriteArrayList<List<com.pilot.core.model.ToolDefinition>> toolSets = new CopyOnWriteArrayList<>();
+        CopyOnWriteArrayList<List<ToolDefinition>> toolSets = new CopyOnWriteArrayList<>();
         CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<>();
         ModelClient model = (messages, tools) -> {
             requests.add(messages);
@@ -286,8 +289,7 @@ class AgentRunServiceTest {
             fixture.awaitFinished("COMPLETED");
 
             // 审查 run 的工具表：读工具在，写工具与派发工具不存在（goals fixture 里 edit_file 也只给普通 run）
-            List<String> names = toolSets.getFirst().stream()
-                    .map(com.pilot.core.model.ToolDefinition::name).toList();
+            List<String> names = toolSets.getFirst().stream().map(ToolDefinition::name).toList();
             assertTrue(names.contains("read_file"), "审查需要读取工具：" + names);
             assertFalse(names.contains("edit_file"), "审查 run 不提供写工具：" + names);
             assertFalse(names.contains("spawn_agent"), "审查 run 不派子代理：" + names);
@@ -296,9 +298,8 @@ class AgentRunServiceTest {
             assertTrue(system.contains("审查协议"), "系统提示词缺审查协议：" + system.substring(0, 120));
             assertTrue(system.contains("重点看登录模块"), "协议范围必须带上用户指定的审查范围");
             assertFalse(system.contains("子代理调研"), "审查 run 没有派发工具，提示词不应介绍子代理");
-            assertTrue(fixture.sessions.events(fixture.sessionId).stream()
-                    .anyMatch(event -> event.payload() instanceof RunStarted started
-                            && "/review 重点看登录模块".equals(started.input())));
+            assertTrue(fixture.sessions.events(fixture.sessionId).stream().anyMatch(
+                event -> event.payload() instanceof RunStarted started && "/review 重点看登录模块".equals(started.input())));
         }
     }
 
@@ -339,7 +340,9 @@ class AgentRunServiceTest {
 
     @Test
     void keepsQueueWhenModelFails() throws Exception {
-        assertKeepsQueue(8, List.of(), () -> { throw new IllegalArgumentException("invalid model request"); }, "FAILED");
+        assertKeepsQueue(8, List.of(), () -> {
+            throw new IllegalArgumentException("invalid model request");
+        }, "FAILED");
     }
 
     @Test
@@ -381,26 +384,21 @@ class AgentRunServiceTest {
 
             List<Message> second = requests.get(1);
             assertEquals(1, snapshotCount(second), "第二轮 run 不应重复注入快照");
-            assertTrue(second.stream().anyMatch(message -> "user".equals(message.role())
-                    && "第二个任务".equals(message.content())));
+            assertTrue(second.stream()
+                .anyMatch(message -> "user".equals(message.role()) && "第二个任务".equals(message.content())));
         }
     }
 
     /** 请求里「## 仓库现状」开头的 user 消息数。 */
     private static long snapshotCount(List<Message> messages) {
-        return messages.stream()
-                .filter(message -> "user".equals(message.role()))
-                .filter(message -> message.content().startsWith("## 仓库现状"))
-                .count();
+        return messages.stream().filter(message -> "user".equals(message.role()))
+            .filter(message -> message.content().startsWith("## 仓库现状")).count();
     }
 
     /** 请求里的 system 提示词（第一条 system 消息）。 */
     private static String systemOf(List<Message> messages) {
-        return messages.stream()
-                .filter(message -> "system".equals(message.role()))
-                .map(Message::content)
-                .findFirst()
-                .orElse("");
+        return messages.stream().filter(message -> "system".equals(message.role())).map(Message::content).findFirst()
+            .orElse("");
     }
 
     /** 往工作区写一个项目级技能。 */
@@ -423,9 +421,8 @@ class AgentRunServiceTest {
             fixture.awaitFinished("COMPLETED");
 
             assertTrue(toolSets.get(0).stream().noneMatch(tool -> "use_skill".equals(tool.name())),
-                    "无技能时不注册 use_skill");
-            assertFalse(systemOf(requests.get(0)).contains("## 技能"),
-                    "无技能时目录段整体消失，零 token 成本");
+                "无技能时不注册 use_skill");
+            assertFalse(systemOf(requests.get(0)).contains("## 技能"), "无技能时目录段整体消失，零 token 成本");
         }
     }
 
@@ -444,7 +441,8 @@ class AgentRunServiceTest {
             fixture.awaitFinished("COMPLETED");
 
             assertTrue(toolSets.get(0).stream().anyMatch(tool -> "use_skill".equals(tool.name())));
-            var useSkill = toolSets.get(0).stream().filter(tool -> "use_skill".equals(tool.name())).findFirst().orElseThrow();
+            var useSkill =
+                toolSets.get(0).stream().filter(tool -> "use_skill".equals(tool.name())).findFirst().orElseThrow();
             assertFalse(useSkill.description().isBlank(), "描述来自 prompts/tools/use_skill.md");
             String system = systemOf(requests.get(0));
             assertTrue(system.contains("## 技能"), "目录段随 use_skill 注册而注入");
@@ -482,8 +480,7 @@ class AgentRunServiceTest {
             assertTrue(activation >= 0, "激活指引应作为独立 user 消息注入");
             assertTrue(activation < input, "激活消息应位于用户输入之前");
             assertTrue(fixture.conversations.load(fixture.sessionId).stream()
-                    .anyMatch(message -> message.content().startsWith("（用户为本任务指定了技能 demo")),
-                    "激活消息随对话记忆落盘，续跑/压缩不丢");
+                .anyMatch(message -> message.content().startsWith("（用户为本任务指定了技能 demo")), "激活消息随对话记忆落盘，续跑/压缩不丢");
         }
     }
 
@@ -495,8 +492,8 @@ class AgentRunServiceTest {
     /** 计划未完成不再把正常收尾改判成中断，队列仍按原顺序继续。 */
     @Test
     void keepsQueueWhenModelStopsWithAnOpenPlan() throws Exception {
-        assertKeepsQueue(8, List.of(new PlanItem("还没做完的原任务", PlanItem.PENDING)),
-                AgentRunServiceTest::done, "COMPLETED");
+        assertKeepsQueue(8, List.of(new PlanItem("还没做完的原任务", PlanItem.PENDING)), AgentRunServiceTest::done,
+            "COMPLETED");
     }
 
     @Test
@@ -554,16 +551,18 @@ class AgentRunServiceTest {
                 return new ModelResponse("进度已保存", List.of());
             }
             int call = executionCalls.getAndIncrement();
-            if (call < 4) return new ModelResponse("", List.of(new ToolCall("read" + call, "read_file",
-                    Map.of("path", "A" + call + ".java"))));
+            if (call < 4) {
+                return new ModelResponse("",
+                    List.of(new ToolCall("read" + call, "read_file", Map.of("path", "A" + call + ".java"))));
+            }
             return done();
         };
         try (Fixture fixture = new Fixture(model, 4, true)) {
             fixture.start();
             fixture.awaitFinished("MAX_STEPS");
             assertEquals(4, executionCalls.get());
-            TaskControlService tasks = new TaskControlService(JsonMapper.builder().build(),
-                    new PilotDataDir(dataRoot.toString()));
+            TaskControlService tasks =
+                new TaskControlService(JsonMapper.builder().build(), new PilotDataDir(dataRoot.toString()));
             assertEquals("BUDGET_LIMITED", tasks.load(fixture.sessionId).status());
 
             String resumeRun = fixture.service.claimRun(fixture.sessionId).orElseThrow();
@@ -583,9 +582,10 @@ class AgentRunServiceTest {
             if (tools.isEmpty() && messages.getLast().content().startsWith("[系统收尾要求]")) {
                 return new ModelResponse("进度已保存", List.of());
             }
-            if (calls.getAndIncrement() == 0) return readFile();
-            current[0].plans.save(current[0].sessionId,
-                    List.of(new PlanItem("原任务计划", PlanItem.COMPLETED)));
+            if (calls.getAndIncrement() == 0) {
+                return readFile();
+            }
+            current[0].plans.save(current[0].sessionId, List.of(new PlanItem("原任务计划", PlanItem.COMPLETED)));
             return done();
         };
         try (Fixture fixture = new Fixture(model, 1, true)) {
@@ -594,8 +594,8 @@ class AgentRunServiceTest {
             fixture.start();
             fixture.awaitFinished("MAX_STEPS", "COMPLETED");
             assertEquals(2, calls.get());
-            TaskControlService tasks = new TaskControlService(JsonMapper.builder().build(),
-                    new PilotDataDir(dataRoot.toString()));
+            TaskControlService tasks =
+                new TaskControlService(JsonMapper.builder().build(), new PilotDataDir(dataRoot.toString()));
             assertEquals(1, tasks.load(fixture.sessionId).execution().budgetSegments());
         }
     }
@@ -617,7 +617,7 @@ class AgentRunServiceTest {
             fixture.awaitFinished("CANCELLED");
             assertEquals(List.of("下一条"), fixture.queue());
             assertEquals(1, fixture.sessions.events(fixture.sessionId).stream()
-                    .filter(event -> event.payload() instanceof RunStarted).count());
+                .filter(event -> event.payload() instanceof RunStarted).count());
         } finally {
             release.countDown();
         }
@@ -647,8 +647,8 @@ class AgentRunServiceTest {
         }
     }
 
-    private void assertKeepsQueue(int maxSteps, List<PlanItem> plan,
-                                 java.util.function.Supplier<ModelResponse> response, String status) throws Exception {
+    private void assertKeepsQueue(int maxSteps, List<PlanItem> plan, Supplier<ModelResponse> response, String status)
+        throws Exception {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         AtomicInteger calls = new AtomicInteger();
@@ -668,8 +668,7 @@ class AgentRunServiceTest {
             release.countDown();
             fixture.awaitFinished(status);
             assertEquals(List.of("下一条"), fixture.queue());
-            assertEquals("COMPLETED".equals(status) ? 1 : 2, calls.get(),
-                    "正常完成不追加收尾请求；真正停止时才额外执行一次禁用工具的收尾请求");
+            assertEquals("COMPLETED".equals(status) ? 1 : 2, calls.get(), "正常完成不追加收尾请求；真正停止时才额外执行一次禁用工具的收尾请求");
             assertTrue(fixture.service.activeRun(fixture.sessionId).isEmpty());
         } finally {
             release.countDown();
@@ -692,34 +691,57 @@ class AgentRunServiceTest {
         }
 
         Fixture(ModelClient model, int maxSteps, boolean goals) {
-            AgentProperties properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY,
-                    maxSteps, 3, 5, 300, 1, 0, 60_000, false, goals,
-                    null, null, null, null, null, null, null, null);
+            AgentProperties properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY, maxSteps,
+                3, 5, 300, 1, 0, 60_000, false, goals, null, null, null, null, null, null, null, null);
             JsonMapper mapper = JsonMapper.builder().build();
             PilotDataDir dataDir = new PilotDataDir(dataRoot.toString());
             commandTasks = new com.pilot.core.tool.CommandTaskManager(dataDir.file("commands"), mapper);
             WorkspaceToolFactory factory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
             when(factory.resolve(anyString())).thenReturn(workspace);
             when(factory.registryForScope(anyString(), any(com.pilot.core.multi.AgentScope.class),
-                    any(com.pilot.core.tool.SandboxSink.class))).thenAnswer(invocation -> {
-                // /review 独立模式的只读工具表（真实实现里由 AgentScope 裁剪）：测试里至少提供读工具
-                ToolRegistry tools = new ToolRegistry();
-                tools.register(new ReadFileTool(new PathValidator(workspace)));
-                return tools;
-            });
+                any(com.pilot.core.tool.SandboxSink.class))).thenAnswer(invocation -> {
+                    // /review 独立模式的只读工具表（真实实现里由 AgentScope 裁剪）：测试里至少提供读工具
+                    ToolRegistry tools = new ToolRegistry();
+                    tools.register(new ReadFileTool(new PathValidator(workspace)));
+                    return tools;
+                });
             when(factory.registryFor(anyString(), any(PlanSink.class))).thenAnswer(invocation -> {
                 ToolRegistry tools = new ToolRegistry();
                 tools.register(new ReadFileTool(new PathValidator(workspace)));
-                if (goals) tools.register(new com.pilot.core.tool.Tool() {
-                    @Override public String name() { return "edit_file"; }
-                    @Override public String description() { return "test edit"; }
-                    @Override public Map<String, Object> parameters() { return Map.of("type", "object"); }
-                    @Override public boolean readOnly() { return true; }
-                    @Override public String execute(Map<String, Object> args) { return "updated"; }
-                    @Override public com.pilot.core.tool.ToolResult executeResult(Map<String, Object> args) {
-                        return new com.pilot.core.tool.ToolResult("updated", List.of(String.valueOf(args.get("path"))), List.of());
-                    }
-                });
+                if (goals) {
+                    tools.register(new com.pilot.core.tool.Tool() {
+                        @Override
+                        public String name() {
+                            return "edit_file";
+                        }
+
+                        @Override
+                        public String description() {
+                            return "test edit";
+                        }
+
+                        @Override
+                        public Map<String, Object> parameters() {
+                            return Map.of("type", "object");
+                        }
+
+                        @Override
+                        public boolean readOnly() {
+                            return true;
+                        }
+
+                        @Override
+                        public String execute(Map<String, Object> args) {
+                            return "updated";
+                        }
+
+                        @Override
+                        public com.pilot.core.tool.ToolResult executeResult(Map<String, Object> args) {
+                            return new com.pilot.core.tool.ToolResult("updated",
+                                List.of(String.valueOf(args.get("path"))), List.of());
+                        }
+                    });
+                }
                 return tools;
             });
             metrics = new RunMetrics() {
@@ -729,14 +751,15 @@ class AgentRunServiceTest {
                     finished.add(status);
                 }
             };
-            service = new AgentRunService(sessions, model, factory,
-                    new PolicyPermissionGate(PermissionMode.READ_ONLY), ApprovalBroker.denyAll(),
-                    properties, new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
-                            new InMemorySettingsStore()), new RunSnapshotService(mapper, dataDir),
-                    new RunRegistry(), RunRepository.noop(), conversations,
-                    plans, mapper, dataDir, new QueuedMessageRepository(), null,
-                    new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics, new TaskControlService(mapper, dataDir),
-                    commandTasks, new SkillService(new SkillProperties(true, null), properties, dataDir));
+            service = new AgentRunService(sessions, model, factory, new PolicyPermissionGate(PermissionMode.READ_ONLY),
+                ApprovalBroker.denyAll(), properties,
+                new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
+                    new InMemorySettingsStore()),
+                new RunSnapshotService(mapper, dataDir), new RunRegistry(), RunRepository.noop(), conversations, plans,
+                mapper, dataDir, new QueuedMessageRepository(), null,
+                new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics,
+                new TaskControlService(mapper, dataDir), commandTasks,
+                new SkillService(new SkillProperties(true, null), properties, dataDir));
         }
 
         void start() {
@@ -778,10 +801,8 @@ class AgentRunServiceTest {
 
     /** 用户输入序列：过滤会话首条自动注入的仓库快照（以「## 仓库现状」开头的 user 消息）。 */
     private static List<String> userInputs(List<Message> messages) {
-        return messages.stream().filter(message -> "user".equals(message.role()))
-                .map(Message::content)
-                .filter(content -> !content.startsWith("## 仓库现状"))
-                .toList();
+        return messages.stream().filter(message -> "user".equals(message.role())).map(Message::content)
+            .filter(content -> !content.startsWith("## 仓库现状")).toList();
     }
 
     private static ModelResponse readFile() {

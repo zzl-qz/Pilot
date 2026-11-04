@@ -1,18 +1,20 @@
 package com.pilot.server.multi;
 
-import com.pilot.core.multi.DiffSandbox;
-import com.pilot.core.multi.RiskLevel;
-import com.pilot.server.config.PilotDataDir;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import tools.jackson.databind.json.JsonMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.multi.DiffSandbox;
+import com.pilot.core.multi.RiskLevel;
+import com.pilot.server.config.PilotDataDir;
+
+import tools.jackson.databind.json.JsonMapper;
 
 class SandboxArtifactTest {
     private static final String ORIGINAL = "a\nb\n";

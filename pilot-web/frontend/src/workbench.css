@@ -65,6 +65,7 @@ html[data-theme] .session-action.is-danger { right: 0; }
 html[data-theme] .session-row:is(:hover, :focus-within) .session-item { padding-right: 48px; }
 html[data-theme] .session-row:hover .session-action, html[data-theme] .session-row:focus-within .session-action { visibility: visible; opacity: 1; }
 html[data-theme] .rail-foot { padding: 10px 14px; gap: 7px; }
+
 html[data-theme] .workspace-chip { border: 0; text-align: left; padding: 4px 6px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; background: transparent; border-radius: 4px; color: var(--muted); }
 html[data-theme] .workspace-chip:hover { background: var(--ui-hover); color: var(--ink); }
 .workspace-files { display: flex; flex-direction: column; flex: 0 0 auto; min-height: 0; border-top: 1px solid var(--line-soft); margin: 0 10px; }
@@ -122,6 +123,21 @@ html[data-theme] #send:not(:disabled) { background: var(--ink); color: var(--bg)
 html[data-theme] .chip-menu { padding: 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
 html[data-theme] .chip-menu input { min-height: 34px; width: 100%; border: 1px solid var(--line); background: var(--ui-field); color: var(--ink); border-radius: 6px; padding: 6px 9px; font: 13px var(--sans); }
 html[data-theme] .chip-menu-actions { flex-wrap: wrap; gap: 8px; }
+
+/* 模型探测结果紧邻操作反馈；Web / Electron 共用，不截断可选模型数量。 */
+.model-discovery { min-width: 0; display: grid; gap: 8px; margin: 12px 0; }
+.model-discovery .model-options-head { margin: 0; padding: 0; font-size: 12px; color: var(--muted); }
+.model-discovery > input { width: 100%; min-width: 0; min-height: 34px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--ui-field); color: var(--ink); font: 13px var(--sans); }
+.model-discovery .model-options { flex-wrap: nowrap; max-height: min(240px, 35vh); overflow: auto; overscroll-behavior: contain; }
+.model-discovery .model-option { flex-shrink: 0; min-height: 36px; padding: 8px 10px; }
+.model-discovery .model-option.is-on { background: var(--ui-selected); color: var(--ink); }
+.model-discovery .model-option-name { min-width: 0; white-space: normal; overflow-wrap: anywhere; font-size: 12px; }
+.model-option-check { flex: none; }
+.model-options-help { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.model-save-feedback { display: flex; align-items: baseline; gap: 8px; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--ui-field); color: var(--ink); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.model-save-feedback > span:first-child { flex: none; color: var(--ok); }
+.model-save-feedback.is-error, .model-save-feedback.is-error > span:first-child { color: var(--err); }
+@media (pointer: coarse) { .model-discovery .model-option, .model-discovery > input { min-height: 44px; } }
 html[data-theme] .queue-entry { min-height: 36px; }
 html[data-theme] .queue-actions button { min-height: 28px; }
 html[data-theme] .approval-card { border-radius: 8px; border-color: color-mix(in srgb, var(--warn) 40%, var(--line-soft)); }
@@ -474,3 +490,40 @@ html[data-theme] .app.side-chat-embedded-app > .main { grid-column: 1; }
   html[data-theme] .topbar .review-toggle span { display: none; }
   html[data-theme] .composer { border-radius: 14px; }
 }
+
+/* 手机连接：全局设备管理，扫码和主要操作始终在同一视野。 */
+#mobile-connect { min-height: 44px; }
+#mobile-connection .modal-box { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; }
+.mobile-connection-content { display: grid; gap: 16px; line-height: 1.6; }
+.mobile-connection-content p { margin: 0; }
+.mobile-scope { color: var(--muted); }
+.mobile-tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--line, #333); }
+.mobile-tabs button { min-height: 44px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.mobile-tabs button[aria-selected=true] { color: var(--ink); border-bottom-color: currentColor; }
+.mobile-pair-layout { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.mobile-qr-area { display: grid; gap: 12px; text-align: center; }
+.mobile-qr-area img { width: 100%; aspect-ratio: 1; display: block; border-radius: 8px; background: white; }
+.mobile-qr-area p { font-size: 12px; color: var(--muted); }
+.mobile-qr-placeholder { display: grid; place-content: center; aspect-ratio: 1; background: var(--surface, #252525); border-radius: 8px; }
+.mobile-pair-actions { display: grid; gap: 12px; align-content: start; }
+.mobile-pair-actions h3 { margin: 0; font-size: 16px; }
+.mobile-pair-actions .btn { min-height: 40px; justify-self: start; }
+.mobile-pair-actions .link-btn { justify-self: start; background: none; border: 0; padding: 4px 0; color: var(--ink); text-decoration: underline; cursor: pointer; }
+.mobile-pair-actions textarea { width: 100%; min-height: 68px; resize: vertical; overflow-wrap: anywhere; }
+.mobile-device-list { max-height: 400px; overflow: auto; }
+.mobile-device-row { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--line, #333); }
+.mobile-device-row p { color: var(--muted); font-size: 12px; }
+.mobile-device-row strong { overflow-wrap: anywhere; }
+.mobile-connection-error, .mobile-revoke { padding: 12px; border: 1px solid var(--line, #555); border-radius: 6px; }
+.mobile-connection-error { color: var(--danger, #e48686); }
+.mobile-revoke .btn { margin: 12px 8px 0 0; }
+@media (max-width: 620px) { .mobile-pair-layout { grid-template-columns: 1fr; gap: 16px; } .mobile-qr-area { width: min(280px, 100%); justify-self: center; } }
+
+.mobile-pair-success { display: grid; justify-items: center; gap: 12px; padding: 28px 16px 20px; text-align: center; }
+.mobile-pair-success-icon { width: 32px; height: 32px; color: var(--ink); }
+.mobile-pair-success h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.mobile-pair-success p { max-width: 520px; overflow-wrap: anywhere; }
+.mobile-completion-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
+.mobile-completion-actions .btn, .mobile-device-footer .btn { min-height: 44px; }
+.mobile-device-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.mobile-device-footer p { flex: 1 1 220px; }

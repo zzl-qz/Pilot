@@ -1,0 +1,24 @@
+{
+  "sources": [
+    {
+      "id": "official-a",
+      "date": "2026-10-01",
+      "product": "A",
+      "offline": true,
+      "export": [
+        "csv",
+        "md"
+      ]
+    },
+    {
+      "id": "official-b",
+      "date": "2026-10-02",
+      "product": "B",
+      "offline": false,
+      "export": [
+        "csv",
+        "pdf"
+      ]
+    }
+  ]
+}

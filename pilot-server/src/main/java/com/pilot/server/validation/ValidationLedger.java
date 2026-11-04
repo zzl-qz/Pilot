@@ -1,11 +1,5 @@
 package com.pilot.server.validation;
 
-import com.pilot.server.config.PilotDataDir;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
-import tools.jackson.databind.ObjectMapper;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -17,6 +11,14 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+import com.pilot.server.config.PilotDataDir;
+
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 会话级校验证据账本。
@@ -36,8 +38,8 @@ public class ValidationLedger {
      * @param current 最近一条证据是否覆盖当前产物
      * @param reason  不可用的原因；可用时为空串
      */
-    public record Report(boolean current, String reason, String currentCandidateHash,
-                         ValidationEvidence latest, List<ValidationEvidence> recent) {
+    public record Report(boolean current, String reason, String currentCandidateHash, ValidationEvidence latest,
+        List<ValidationEvidence> recent) {
         public Report {
             reason = reason == null ? "" : reason;
             recent = recent == null ? List.of() : List.copyOf(recent);
@@ -89,12 +91,10 @@ public class ValidationLedger {
             return new Report(false, "本轮没有产物变化，无需校验", "", latest, entries);
         }
         if (!currentCandidateHash.equals(latest.candidateHash())) {
-            return new Report(false, "最近一次校验针对的是旧产物，代码已变化", currentCandidateHash,
-                    latest, entries);
+            return new Report(false, "最近一次校验针对的是旧产物，代码已变化", currentCandidateHash, latest, entries);
         }
         if (!latest.passed()) {
-            return new Report(false, "最近一次校验没有通过（" + latest.status() + "）", currentCandidateHash,
-                    latest, entries);
+            return new Report(false, "最近一次校验没有通过（" + latest.status() + "）", currentCandidateHash, latest, entries);
         }
         return new Report(true, "", currentCandidateHash, latest, entries);
     }

@@ -1,8 +1,10 @@
 package com.pilot.server.config;
 
-import com.pilot.core.tool.ToolArtifacts;
 import jakarta.annotation.PostConstruct;
+
 import org.springframework.stereotype.Component;
+
+import com.pilot.core.tool.ToolArtifacts;
 
 /**
  * 把工具产物（浏览器截图、PDF 渲染页、MCP 图片）的落盘目录指到数据目录下的 {@code artifacts/}，

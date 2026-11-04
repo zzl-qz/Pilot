@@ -1,11 +1,11 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.workspace.PathValidator;
-
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+
+import com.pilot.core.workspace.PathValidator;
 
 /**
  * 沙箱版 {@code create_file}：新文件同样只进沙箱，等用户接受变更后才真正创建。
@@ -39,14 +39,10 @@ public final class SandboxCreateFileTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "path", Map.of("type", "string", "description",
-                                "工作区内的相对文件路径；文件不能已存在，改已有文件请用 edit_file"),
-                        "content", Map.of("type", "string", "description", "文件的完整内容")),
-                "required", List.of("path", "content"),
-                "additionalProperties", false);
+        return Map.of("type", "object", "properties",
+            Map.of("path", Map.of("type", "string", "description", "工作区内的相对文件路径；文件不能已存在，改已有文件请用 edit_file"), "content",
+                Map.of("type", "string", "description", "文件的完整内容")),
+            "required", List.of("path", "content"), "additionalProperties", false);
     }
 
     @Override
@@ -79,8 +75,7 @@ public final class SandboxCreateFileTool implements Tool {
             sandbox.record(paths.display(file), null, content);
             // 刚创建的文件视为已读：后续 edit_file 不会被「先读后改」拦截
             reads.observed(file);
-            return "已提交到沙箱 " + paths.display(file) + "（新文件，"
-                    + (int) content.lines().count() + " 行）";
+            return "已提交到沙箱 " + paths.display(file) + "（新文件，" + (int)content.lines().count() + " 行）";
         } catch (RuntimeException e) {
             return "ERROR: 提交沙箱失败: " + e.getMessage();
         }

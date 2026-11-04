@@ -1,7 +1,5 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.workspace.PathValidator;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -14,6 +12,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.UnaryOperator;
+
+import com.pilot.core.workspace.PathValidator;
 
 /**
  * 跨文件补丁：一次提交多个文件的新增、修改、删除与重命名。
@@ -61,12 +61,9 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of("patch", Map.of("type", "string", "description",
-                        "完整补丁文本，以 *** Begin Patch 开头、*** End Patch 结尾")),
-                "required", List.of("patch"),
-                "additionalProperties", false);
+        return Map.of("type", "object", "properties",
+            Map.of("patch", Map.of("type", "string", "description", "完整补丁文本，以 *** Begin Patch 开头、*** End Patch 结尾")),
+            "required", List.of("patch"), "additionalProperties", false);
     }
 
     @Override
@@ -112,11 +109,11 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
             }
         } catch (IOException | RuntimeException e) {
             String done = applied.isEmpty() ? "没有文件被修改" : "已写入：" + String.join("；", applied);
-            return new ToolResult("ERROR: 写入失败: " + e.getMessage() + "。" + done
-                    + "。请 read_file 核对当前状态后再继续。", List.copyOf(changed), List.of());
-        }
-        return new ToolResult("已应用补丁（" + plan.size() + " 个文件）：\n" + String.join("\n", applied),
+            return new ToolResult("ERROR: 写入失败: " + e.getMessage() + "。" + done + "。请 read_file 核对当前状态后再继续。",
                 List.copyOf(changed), List.of());
+        }
+        return new ToolResult("已应用补丁（" + plan.size() + " 个文件）：\n" + String.join("\n", applied), List.copyOf(changed),
+            List.of());
     }
 
     @Override
@@ -126,22 +123,31 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
 
     // ---- 解析 ----
 
-    private enum Kind { ADD, DELETE, UPDATE }
+    private enum Kind {
+        ADD, DELETE, UPDATE
+    }
 
-    private record Line(char mark, String text) { }
+    private record Line(char mark, String text) {
+    }
 
     /** ordered 保留 hunk 内的原始顺序：上下文行落盘时沿用文件里的原文，不被补丁里的版本改写。 */
     private record Hunk(String header, List<String> oldLines, List<String> newLines, List<Line> ordered,
-                        boolean endOfFile) { }
+        boolean endOfFile) {
+    }
 
-    private record Operation(Kind kind, String path, String moveTo, List<String> addLines, List<Hunk> hunks) { }
+    private record Operation(Kind kind, String path, String moveTo, List<String> addLines, List<Hunk> hunks) {
+    }
 
     static List<Operation> parse(String patch) {
         List<String> lines = patch.replace("\r\n", "\n").replace('\r', '\n').lines().toList();
         int begin = 0;
-        while (begin < lines.size() && lines.get(begin).isBlank()) begin++;
+        while (begin < lines.size() && lines.get(begin).isBlank()) {
+            begin++;
+        }
         int end = lines.size() - 1;
-        while (end >= 0 && lines.get(end).isBlank()) end--;
+        while (end >= 0 && lines.get(end).isBlank()) {
+            end--;
+        }
         if (begin >= lines.size() || !lines.get(begin).strip().equals("*** Begin Patch")) {
             throw new IllegalArgumentException("第一行必须是 *** Begin Patch");
         }
@@ -161,16 +167,15 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
                 while (index < end && !lines.get(index).startsWith("*** ")) {
                     String added = lines.get(index);
                     if (!added.startsWith("+")) {
-                        throw new IllegalArgumentException("新增文件 " + path + " 的内容行必须以 + 开头（第 "
-                                + (index + 1) + " 行）");
+                        throw new IllegalArgumentException("新增文件 " + path + " 的内容行必须以 + 开头（第 " + (index + 1) + " 行）");
                     }
                     content.add(added.substring(1));
                     index++;
                 }
                 operations.add(new Operation(Kind.ADD, path, null, content, List.of()));
             } else if (line.startsWith("*** Delete File: ")) {
-                operations.add(new Operation(Kind.DELETE, line.substring("*** Delete File: ".length()).strip(),
-                        null, List.of(), List.of()));
+                operations.add(new Operation(Kind.DELETE, line.substring("*** Delete File: ".length()).strip(), null,
+                    List.of(), List.of()));
                 index++;
             } else if (line.startsWith("*** Update File: ")) {
                 String path = line.substring("*** Update File: ".length()).strip();
@@ -190,7 +195,9 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
                 while (index < end && !isOperationStart(lines.get(index))) {
                     String hunkLine = lines.get(index);
                     if (hunkLine.startsWith("@@")) {
-                        if (open) hunks.add(new Hunk(header, oldLines, newLines, ordered, eof));
+                        if (open) {
+                            hunks.add(new Hunk(header, oldLines, newLines, ordered, eof));
+                        }
                         header = hunkLine.substring(2).strip();
                         oldLines = new ArrayList<>();
                         newLines = new ArrayList<>();
@@ -203,17 +210,29 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
                         char mark = hunkLine.isEmpty() ? ' ' : hunkLine.charAt(0);
                         String text = hunkLine.isEmpty() ? "" : hunkLine.substring(1);
                         switch (mark) {
-                            case ' ' -> { oldLines.add(text); newLines.add(text); ordered.add(new Line(' ', text)); }
-                            case '-' -> { oldLines.add(text); ordered.add(new Line('-', text)); }
-                            case '+' -> { newLines.add(text); ordered.add(new Line('+', text)); }
-                            default -> throw new IllegalArgumentException("修改 " + path
-                                    + " 的第 " + (index + 1) + " 行必须以空格、+、- 或 @@ 开头");
+                            case ' ' -> {
+                                oldLines.add(text);
+                                newLines.add(text);
+                                ordered.add(new Line(' ', text));
+                            }
+                            case '-' -> {
+                                oldLines.add(text);
+                                ordered.add(new Line('-', text));
+                            }
+                            case '+' -> {
+                                newLines.add(text);
+                                ordered.add(new Line('+', text));
+                            }
+                            default -> throw new IllegalArgumentException(
+                                "修改 " + path + " 的第 " + (index + 1) + " 行必须以空格、+、- 或 @@ 开头");
                         }
                         open = true;
                     }
                     index++;
                 }
-                if (open) hunks.add(new Hunk(header, oldLines, newLines, ordered, eof));
+                if (open) {
+                    hunks.add(new Hunk(header, oldLines, newLines, ordered, eof));
+                }
                 if (hunks.isEmpty() && moveTo == null) {
                     throw new IllegalArgumentException("修改 " + path + " 没有任何 hunk");
                 }
@@ -222,7 +241,9 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
                 throw new IllegalArgumentException("无法识别的行（第 " + (index + 1) + " 行）：" + ToolSupport.oneLine(line, 80));
             }
         }
-        if (operations.isEmpty()) throw new IllegalArgumentException("补丁没有任何文件操作");
+        if (operations.isEmpty()) {
+            throw new IllegalArgumentException("补丁没有任何文件操作");
+        }
         if (operations.size() > MAX_OPERATIONS) {
             throw new IllegalArgumentException("单个补丁最多 " + MAX_OPERATIONS + " 个文件操作");
         }
@@ -231,7 +252,7 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
 
     private static boolean isOperationStart(String line) {
         return line.startsWith("*** Add File: ") || line.startsWith("*** Delete File: ")
-                || line.startsWith("*** Update File: ");
+            || line.startsWith("*** Update File: ");
     }
 
     // ---- 校验与生成新内容（内存中，不落盘） ----
@@ -243,7 +264,8 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
     }
 
     private record Planned(Kind kind, Path file, Path target, String content, String shown, String summary,
-                           List<String> changed) { }
+        List<String> changed) {
+    }
 
     private List<Planned> plan(List<Operation> operations) throws IOException {
         Map<String, Operation> seen = new LinkedHashMap<>();
@@ -251,13 +273,17 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
         for (Operation op : operations) {
             Path file = paths.resolve(op.path());
             String shown = paths.display(file);
-            if (seen.put(shown, op) != null) throw new PatchException("同一文件在补丁中出现多次：" + shown);
+            if (seen.put(shown, op) != null) {
+                throw new PatchException("同一文件在补丁中出现多次：" + shown);
+            }
             switch (op.kind()) {
                 case ADD -> {
-                    if (Files.exists(file)) throw new PatchException("文件已存在: " + shown + "，修改请用 Update File");
+                    if (Files.exists(file)) {
+                        throw new PatchException("文件已存在: " + shown + "，修改请用 Update File");
+                    }
                     String content = String.join("\n", op.addLines()) + (op.addLines().isEmpty() ? "" : "\n");
                     plan.add(new Planned(Kind.ADD, file, null, content, shown,
-                            "新增 " + shown + "（" + op.addLines().size() + " 行）", List.of(shown)));
+                        "新增 " + shown + "（" + op.addLines().size() + " 行）", List.of(shown)));
                 }
                 case DELETE -> {
                     requireExistingFile(file, shown);
@@ -273,9 +299,13 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
     private Planned planUpdate(Operation op, Path file, String shown) throws IOException {
         requireExistingFile(file, shown);
         requireObserved(file, shown);
-        if (Files.size(file) > MAX_BYTES) throw new PatchException("文件过大（上限 32MB）: " + shown);
+        if (Files.size(file) > MAX_BYTES) {
+            throw new PatchException("文件过大（上限 32MB）: " + shown);
+        }
         byte[] bytes = Files.readAllBytes(file);
-        if (ToolSupport.isBinary(bytes)) throw new PatchException("二进制文件，无法修改: " + shown);
+        if (ToolSupport.isBinary(bytes)) {
+            throw new PatchException("二进制文件，无法修改: " + shown);
+        }
         String original = new String(bytes, StandardCharsets.UTF_8);
         String bom = original.startsWith("\uFEFF") ? "\uFEFF" : "";
         String body = bom.isEmpty() ? original : original.substring(1);
@@ -283,7 +313,9 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
         String normalized = body.replace("\r\n", "\n").replace('\r', '\n');
         boolean trailingNewline = normalized.endsWith("\n");
         List<String> lines = new ArrayList<>(normalized.isEmpty() ? List.of() : List.of(normalized.split("\n", -1)));
-        if (trailingNewline) lines.remove(lines.size() - 1);
+        if (trailingNewline) {
+            lines.remove(lines.size() - 1);
+        }
 
         int cursor = 0;
         int added = 0;
@@ -314,7 +346,9 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
                     default -> replacement.add(line.text());
                 }
             }
-            for (int r = 0; r < hunk.oldLines().size(); r++) lines.remove(position);
+            for (int r = 0; r < hunk.oldLines().size(); r++) {
+                lines.remove(position);
+            }
             lines.addAll(position, replacement);
             cursor = position + replacement.size();
             removed += hunk.oldLines().size();
@@ -334,8 +368,8 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
         }
         boolean moved = !target.equals(file);
         List<String> changed = moved ? List.of(shown, targetShown) : List.of(shown);
-        String summary = (moved ? "重命名 " + shown + " → " + targetShown : "修改 " + shown)
-                + "（+" + added + " -" + removed + "）";
+        String summary =
+            (moved ? "重命名 " + shown + " → " + targetShown : "修改 " + shown) + "（+" + added + " -" + removed + "）";
         return new Planned(Kind.UPDATE, file, moved ? target : null, text, shown, summary, changed);
     }
 
@@ -346,46 +380,61 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
         for (UnaryOperator<String> mode : modes) {
             if (hunk.endOfFile()) {
                 int at = lines.size() - wanted.size();
-                if (at >= from && matches(lines, wanted, at, mode)) return at;
+                if (at >= from && matches(lines, wanted, at, mode)) {
+                    return at;
+                }
                 continue;
             }
             int first = -1;
             for (int at = from; at + wanted.size() <= lines.size(); at++) {
-                if (!matches(lines, wanted, at, mode)) continue;
+                if (!matches(lines, wanted, at, mode)) {
+                    continue;
+                }
                 if (first >= 0) {
-                    throw new PatchException(shown + " 的 hunk " + number
-                            + " 匹配到多处，无法唯一定位。请增加上下文行，或用 @@ 指定所在的函数/类");
+                    throw new PatchException(shown + " 的 hunk " + number + " 匹配到多处，无法唯一定位。请增加上下文行，或用 @@ 指定所在的函数/类");
                 }
                 first = at;
             }
-            if (first >= 0) return first;
+            if (first >= 0) {
+                return first;
+            }
         }
         String firstLine = wanted.getFirst();
         throw new PatchException(shown + " 的 hunk " + number + " 没有找到对应原文。最接近的文件片段：\n"
-                + ExactEditBatch.closestExcerpt(String.join("\n", lines), String.join("\n", wanted))
-                + "\n请基于该片段重写 hunk（首行：" + ToolSupport.oneLine(firstLine, 80) + "）");
+            + ExactEditBatch.closestExcerpt(String.join("\n", lines), String.join("\n", wanted)) + "\n请基于该片段重写 hunk（首行："
+            + ToolSupport.oneLine(firstLine, 80) + "）");
     }
 
     private static boolean matches(List<String> lines, List<String> wanted, int at, UnaryOperator<String> mode) {
         for (int i = 0; i < wanted.size(); i++) {
-            if (!mode.apply(lines.get(at + i)).equals(mode.apply(wanted.get(i)))) return false;
+            if (!mode.apply(lines.get(at + i)).equals(mode.apply(wanted.get(i)))) {
+                return false;
+            }
         }
         return true;
     }
 
     private static int indexOfLine(List<String> lines, String header, int from) {
         for (int i = from; i < lines.size(); i++) {
-            if (lines.get(i).strip().equals(header.strip())) return i;
+            if (lines.get(i).strip().equals(header.strip())) {
+                return i;
+            }
         }
         for (int i = from; i < lines.size(); i++) {
-            if (lines.get(i).strip().startsWith(header.strip())) return i;
+            if (lines.get(i).strip().startsWith(header.strip())) {
+                return i;
+            }
         }
         return -1;
     }
 
     private void requireExistingFile(Path file, String shown) {
-        if (!Files.exists(file)) throw new PatchException("文件不存在: " + shown);
-        if (!Files.isRegularFile(file)) throw new PatchException("不是普通文件: " + shown);
+        if (!Files.exists(file)) {
+            throw new PatchException("文件不存在: " + shown);
+        }
+        if (!Files.isRegularFile(file)) {
+            throw new PatchException("不是普通文件: " + shown);
+        }
     }
 
     private void requireObserved(Path file, String shown) {

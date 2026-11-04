@@ -1,13 +1,14 @@
 package com.pilot.server.config;
 
-import com.pilot.server.store.SettingsStore;
+import java.net.URI;
+import java.util.List;
+import java.util.Map;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.net.URI;
-import java.util.List;
-import java.util.Map;
+import com.pilot.server.store.SettingsStore;
 
 /**
  * 当前生效的模型配置（端点 / 模型名 / API Key）。
@@ -36,9 +37,8 @@ public class ModelSettings {
                 return "";
             }
             String key = apiKey.strip();
-            return key.length() <= 8
-                    ? "••••"
-                    : key.substring(0, Math.min(6, key.length())) + "…" + key.substring(key.length() - 4);
+            return key.length() <= 8 ? "••••"
+                : key.substring(0, Math.min(6, key.length())) + "…" + key.substring(key.length() - 4);
         }
     }
 
@@ -98,13 +98,10 @@ public class ModelSettings {
         requireHttpEndpoint(nextEndpoint);
 
         Snapshot next = new Snapshot(nextEndpoint, nextModel, nextKey);
-        store.saveAll(Map.of(
-                KEY_ENDPOINT, next.endpoint(),
-                KEY_MODEL, next.model(),
-                KEY_API_KEY, next.apiKey()));
+        store.saveAll(Map.of(KEY_ENDPOINT, next.endpoint(), KEY_MODEL, next.model(), KEY_API_KEY, next.apiKey()));
         current = next;
-        log.info("模型配置已更新：model={} endpoint={} apiKey={}",
-                next.model(), next.endpoint(), next.hasApiKey() ? "已配置" : "未配置");
+        log.info("模型配置已更新：model={} endpoint={} apiKey={}", next.model(), next.endpoint(),
+            next.hasApiKey() ? "已配置" : "未配置");
         return next;
     }
 
@@ -114,7 +111,7 @@ public class ModelSettings {
         String apiKey = store.find(KEY_API_KEY).orElse(defaults.apiKey());
         Snapshot restored = new Snapshot(endpoint, model, apiKey == null ? "" : apiKey);
         log.info("模型配置：model={} endpoint={} apiKey={}", restored.model(), restored.endpoint(),
-                restored.hasApiKey() ? "已配置" : "未配置（可在界面设置）");
+            restored.hasApiKey() ? "已配置" : "未配置（可在界面设置）");
         return restored;
     }
 

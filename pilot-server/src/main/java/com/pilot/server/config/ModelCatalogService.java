@@ -1,13 +1,15 @@
 package com.pilot.server.config;
 
-import com.pilot.core.model.ModelCatalog;
-import org.springframework.stereotype.Component;
-import tools.jackson.databind.ObjectMapper;
-
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
+
+import org.springframework.stereotype.Component;
+
+import com.pilot.core.model.ModelCatalog;
+
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 「获取可用模型」的代理执行：由服务端代发 {@code GET {base}/models}。
@@ -22,9 +24,7 @@ import java.util.List;
 public class ModelCatalogService {
     private final ModelSettings settings;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
+    private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
     public ModelCatalogService(ModelSettings settings, ObjectMapper objectMapper) {
         this.settings = settings;

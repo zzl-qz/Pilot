@@ -1,12 +1,5 @@
 package com.pilot.server.desktop;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
-import org.springframework.core.env.Environment;
-import org.springframework.stereotype.Component;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -15,6 +8,13 @@ import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.core.env.Environment;
+import org.springframework.stereotype.Component;
 
 /**
  * 服务起来后打开桌面窗口。浏览器访问同一个端口仍然可用。
@@ -121,8 +121,7 @@ public class DesktopWindowLauncher {
     }
 
     private String port() {
-        return environment.getProperty("local.server.port",
-                environment.getProperty("server.port", "9999"));
+        return environment.getProperty("local.server.port", environment.getProperty("server.port", "9999"));
     }
 
     /** 开发态才打开：从 classes 目录启动，并且能找到源码仓库。 */
@@ -143,8 +142,8 @@ public class DesktopWindowLauncher {
         Path dir = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath();
         for (int i = 0; i < 6 && dir != null; i++) {
             if (Files.isRegularFile(dir.resolve("pom.xml"))
-                    && Files.isRegularFile(dir.resolve("pilot-server").resolve("pom.xml"))
-                    && Files.isDirectory(dir.resolve("pilot-desktop"))) {
+                && Files.isRegularFile(dir.resolve("pilot-server").resolve("pom.xml"))
+                && Files.isDirectory(dir.resolve("pilot-desktop"))) {
                 return dir;
             }
             dir = dir.getParent();
@@ -169,8 +168,8 @@ public class DesktopWindowLauncher {
         if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac")) {
             return electron;
         }
-        ProcessBuilder prepare = new ProcessBuilder(electron.toString(),
-                root.resolve("pilot-desktop").resolve("brand-host.mjs").toString());
+        ProcessBuilder prepare =
+            new ProcessBuilder(electron.toString(), root.resolve("pilot-desktop").resolve("brand-host.mjs").toString());
         prepare.directory(root.resolve("pilot-desktop").toFile());
         prepare.environment().put("ELECTRON_RUN_AS_NODE", "1");
         prepare.redirectError(ProcessBuilder.Redirect.appendTo(logFile.toFile()));

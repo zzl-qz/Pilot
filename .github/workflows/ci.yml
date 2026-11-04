@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -60,4 +61,75 @@ jobs:
           path: |
             pilot-core/target/surefire-reports/**
             pilot-server/target/surefire-reports/**
+            pilot-core/target/checkstyle-result.xml
+            pilot-server/target/checkstyle-result.xml
           if-no-files-found: ignore
+
+  isolated-builds:
+    name: isolated builds and recovery UI (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Prepare explicit test images
+        run: |
+          docker pull alpine:3.20
+          docker pull node:22-alpine
+          docker pull maven:3.9-eclipse-temurin-25
+      - name: Install UI and desktop test dependencies
+        run: |
+          npm --prefix pilot-web/frontend ci
+          npm --prefix pilot-desktop ci
+      - name: Portable reliability suite (no model API)
+        run: node scripts/verify-reliability.mjs --containers --ui --web-only
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-build-reports
+          path: |
+            pilot-core/target/surefire-reports/**
+            pilot-server/target/surefire-reports/**
+            pilot-core/target/checkstyle-result.xml
+            pilot-server/target/checkstyle-result.xml
+          if-no-files-found: ignore
+
+  mobile:
+    name: mobile (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: android-actions/setup-android@v3
+      - name: Native transport, bridge, and Android compatibility checks
+        run: node scripts/mobile.mjs test
+      - name: Build Android preview and bundled bridge
+        run: node scripts/mobile.mjs build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-${{ matrix.os }}
+          path: |
+            pilot-mobile/bridge/build/reports/**
+            pilot-mobile/transport/build/reports/**
+            pilot-mobile/app/build/reports/**
+            pilot-mobile/app/build/outputs/apk/debug/*.apk

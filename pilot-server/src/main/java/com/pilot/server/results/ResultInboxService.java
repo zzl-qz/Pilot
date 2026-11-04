@@ -1,14 +1,30 @@
 package com.pilot.server.results;
 
-import com.pilot.core.event.*;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Stream;
+
+import org.springframework.stereotype.Service;
+
+import com.pilot.core.event.EventEnvelope;
+import com.pilot.core.event.RunCancelled;
+import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.RunFailed;
+import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.schedule.*;
+import com.pilot.server.schedule.ScheduleService;
+import com.pilot.server.schedule.ScheduledTask;
 import com.pilot.server.session.TaskControlService;
 import com.pilot.server.store.ResultInboxRepository;
-import org.springframework.stereotype.Service;
+
 import tools.jackson.databind.ObjectMapper;
-import java.time.Instant;
-import java.util.*;
 
 @Service
 public class ResultInboxService {
@@ -17,120 +33,198 @@ public class ResultInboxService {
     private final ScheduleService schedules;
     private final TaskControlService tasks;
     private final ObjectMapper mapper;
-    public ResultInboxService(ResultInboxRepository repository, SessionService sessions, ScheduleService schedules,
-                              TaskControlService tasks, ObjectMapper mapper) {
-        this.repository = repository; this.sessions = sessions; this.schedules = schedules; this.tasks = tasks; this.mapper = mapper;
-    }
-    public record Item(String id, String revision, String sessionId, String title, String source, String state,
-                       String summary, Instant at, String runId, String scheduleId, boolean read, boolean handled,
-                       List<String> changedFiles, List<String> checks, List<String> openSteps, ScheduledTask.Workspace workspace) { }
-    public record Page(List<Item> items, boolean truncated) { }
-    public record Research(String id, List<String> sources, String decision, String license, List<String> sourceEvidence,
-                           long observedAt, boolean structured, String raw) { }
-    public record Detail(Item item, List<Research> research, String verification, List<TaskControlService.Acceptance> acceptance,
-                         String verificationDetail) { }
 
-    public Page list() { return page(500, Instant.EPOCH); }
+    public ResultInboxService(ResultInboxRepository repository, SessionService sessions, ScheduleService schedules,
+        TaskControlService tasks, ObjectMapper mapper) {
+        this.repository = repository;
+        this.sessions = sessions;
+        this.schedules = schedules;
+        this.tasks = tasks;
+        this.mapper = mapper;
+    }
+
+    public record Item(String id, String revision, String sessionId, String title, String source, String state,
+        String summary, Instant at, String runId, String scheduleId, boolean read, boolean handled,
+        List<String> changedFiles, List<String> checks, List<String> openSteps, ScheduledTask.Workspace workspace) {
+    }
+
+    public record Page(List<Item> items, boolean truncated) {
+    }
+
+    public record Research(String id, List<String> sources, String decision, String license,
+        List<String> sourceEvidence, long observedAt, boolean structured, String raw) {
+    }
+
+    public record Detail(Item item, List<Research> research, String verification,
+        List<TaskControlService.Acceptance> acceptance, String verificationDetail) {
+    }
+
+    public Page list() {
+        return page(500, Instant.EPOCH);
+    }
+
     /** 通知不能因 UI 的最近 500 条窗口而漏掉离线结果。 */
-    public List<Item> deliveryItems(Instant since) { return page(Integer.MAX_VALUE, since).items(); }
+    public List<Item> deliveryItems(Instant since) {
+        return page(Integer.MAX_VALUE, since).items();
+    }
+
     private Page page(int limit, Instant since) {
         List<EventEnvelope> endings = repository.endings(limit == Integer.MAX_VALUE ? limit : limit + 1, since);
-        Map<String, EventEnvelope> byRun = new HashMap<>(); endings.forEach(e -> byRun.put(e.runId(), e));
-        var jobs = schedules.list(); Set<String> scheduledSessions = new HashSet<>();
+        Map<String, EventEnvelope> byRun = new HashMap<>();
+        endings.forEach(e -> byRun.put(e.runId(), e));
+        var jobs = schedules.list();
+        Set<String> scheduledSessions = new HashSet<>();
         List<Item> items = new ArrayList<>();
-        Map<String, com.pilot.core.session.Session> sessionIndex = new HashMap<>();
+        Map<String, Session> sessionIndex = new HashMap<>();
         sessions.list().forEach(session -> sessionIndex.put(session.id(), session));
-        List<String> receiptIds = new ArrayList<>(byRun.keySet()); jobs.forEach(job -> receiptIds.add(job.id()));
-        var receipts = limit == Integer.MAX_VALUE ? Map.<String, ResultInboxRepository.Receipt>of() : repository.receipts(receiptIds);
+        List<String> receiptIds = new ArrayList<>(byRun.keySet());
+        jobs.forEach(job -> receiptIds.add(job.id()));
+        var receipts = limit == Integer.MAX_VALUE ? Map.<String, ResultInboxRepository.Receipt>of()
+            : repository.receipts(receiptIds);
         for (var job : jobs) {
             scheduledSessions.add(job.sessionId());
-            if (!Set.of("COMPLETED", "NEEDS_ATTENTION").contains(job.state()) || !sessionIndex.containsKey(job.sessionId())) continue;
+            if (!Set.of("COMPLETED", "NEEDS_ATTENTION").contains(job.state())
+                || !sessionIndex.containsKey(job.sessionId())) {
+                continue;
+            }
             EventEnvelope end = byRun.get(job.runId());
             var completed = end != null && end.payload() instanceof RunCompleted c ? c : null;
-            String revision = job.state() + ":" + job.runId() + ":" + job.attempts() + ":" + (end == null ? 0 : end.sequence());
+            String revision =
+                job.state() + ":" + job.runId() + ":" + job.attempts() + ":" + (end == null ? 0 : end.sequence());
             var receipt = receipt(receipts, job.id(), revision);
             items.add(new Item(job.id(), revision, job.sessionId(), job.name(), "SCHEDULE", job.state(),
-                    scheduleSummary(job, end), job.endedAt() != null ? job.endedAt() : end == null ? job.runAt() : end.timestamp(),
-                    job.runId(), job.id(), receipt.seen(), receipt.handled(), completed == null ? List.of() : completed.changedFiles(),
-                    completed == null ? List.of() : completed.checks(), completed == null ? List.of() : completed.openSteps(), job.workspace()));
+                scheduleSummary(job, end),
+                job.endedAt() != null ? job.endedAt() : end == null ? job.runAt() : end.timestamp(), job.runId(),
+                job.id(), receipt.seen(), receipt.handled(), completed == null ? List.of() : completed.changedFiles(),
+                completed == null ? List.of() : completed.checks(),
+                completed == null ? List.of() : completed.openSteps(), job.workspace()));
         }
         for (var end : endings) {
-            if (scheduledSessions.contains(end.sessionId())) continue;
-            if (end.payload() instanceof RunFailed failed && Set.of("WAITING", "PAUSED").contains(failed.code())) continue;
-            if (end.payload() instanceof RunCancelled) continue;
-            var session = sessionIndex.get(end.sessionId()); if (session == null) continue;
+            if (scheduledSessions.contains(end.sessionId())) {
+                continue;
+            }
+            if (end.payload() instanceof RunFailed failed && Set.of("WAITING", "PAUSED").contains(failed.code())) {
+                continue;
+            }
+            if (end.payload() instanceof RunCancelled) {
+                continue;
+            }
+            var session = sessionIndex.get(end.sessionId());
+            if (session == null) {
+                continue;
+            }
             var completed = end.payload() instanceof RunCompleted c ? c : null;
             var resultTask = tasks.result(end.runId());
             String state = completed == null || verificationNeedsAttention(resultTask, completed) ? "NEEDS_ATTENTION"
-                    : completed.openSteps().isEmpty() ? "COMPLETED" : "AWAITING_REVIEW";
-            String summary = completed == null ? ((RunFailed) end.payload()).message() : completed.summary();
+                : completed.openSteps().isEmpty() ? "COMPLETED" : "AWAITING_REVIEW";
+            String summary = completed == null ? ((RunFailed)end.payload()).message() : completed.summary();
             String revision = end.sessionId() + ":" + end.sequence();
             var receipt = receipt(receipts, end.runId(), revision);
-            items.add(new Item(end.runId(), revision, session.id(), session.title(), "CHAT", state, summary, end.timestamp(),
-                    end.runId(), null, receipt.seen(), receipt.handled(), completed == null ? List.of() : completed.changedFiles(),
-                    completed == null ? List.of() : completed.checks(), completed == null ? List.of() : completed.openSteps(), null));
+            items.add(new Item(end.runId(), revision, session.id(), session.title(), "CHAT", state, summary,
+                end.timestamp(), end.runId(), null, receipt.seen(), receipt.handled(),
+                completed == null ? List.of() : completed.changedFiles(),
+                completed == null ? List.of() : completed.checks(),
+                completed == null ? List.of() : completed.openSteps(), null));
         }
         items.sort(Comparator.comparing(Item::at).reversed().thenComparing(Item::id));
-        return new Page(items.stream().filter(item -> !item.at().isBefore(since)).limit(limit).toList(), endings.size() > limit || items.size() > limit);
+        return new Page(items.stream().filter(item -> !item.at().isBefore(since)).limit(limit).toList(),
+            endings.size() > limit || items.size() > limit);
     }
+
     private static boolean verificationNeedsAttention(TaskControlService.TaskContract task, RunCompleted completed) {
-        if (task == null || task.execution() == null) return false;
+        if (task == null || task.execution() == null) {
+            return false;
+        }
         var execution = task.execution();
-        if (Set.of("CHECKS_FAILED", "CHECKS_STALE").contains(execution.phase())) return true;
-        if (!"UNVERIFIED".equals(execution.phase())) return false;
+        if (Set.of("CHECKS_FAILED", "CHECKS_STALE").contains(execution.phase())) {
+            return true;
+        }
+        if (!"UNVERIFIED".equals(execution.phase())) {
+            return false;
+        }
         // 问答与文档修改可以正常交付；代码改动缺证据则需要关注，不能冒充验证完成。
-        return java.util.stream.Stream.concat(execution.changedPaths().stream(), completed.changedFiles().stream())
-                .anyMatch(path -> path != null && !path.isBlank() && !path.matches("(?i).*\\.(md|txt|rst|adoc)$"))
-                || execution.evidence().stream().anyMatch(e -> "RUNNING".equals(e.status()) && e.check() != null);
+        return Stream.concat(execution.changedPaths().stream(), completed.changedFiles().stream())
+            .anyMatch(path -> path != null && !path.isBlank() && !path.matches("(?i).*\\.(md|txt|rst|adoc)$"))
+            || execution.evidence().stream().anyMatch(e -> "RUNNING".equals(e.status()) && e.check() != null);
     }
+
     private static String scheduleSummary(ScheduledTask job, EventEnvelope end) {
         String result = end == null ? "" : end.payload() instanceof RunCompleted c ? c.summary()
-                : end.payload() instanceof RunFailed f ? f.message() : "";
-        if (result == null || result.isBlank()) return job.message();
+            : end.payload() instanceof RunFailed f ? f.message() : "";
+        if (result == null || result.isBlank()) {
+            return job.message();
+        }
         return "NEEDS_ATTENTION".equals(job.state()) ? job.message() + "\n\n最近运行：" + result : result;
     }
-    private static ResultInboxRepository.Receipt receipt(Map<String, ResultInboxRepository.Receipt> receipts, String id, String revision) {
+
+    private static ResultInboxRepository.Receipt receipt(Map<String, ResultInboxRepository.Receipt> receipts, String id,
+        String revision) {
         var saved = receipts.get(id);
-        return saved != null && saved.revision().equals(revision) ? saved : new ResultInboxRepository.Receipt(revision, false, false);
+        return saved != null && saved.revision().equals(revision) ? saved
+            : new ResultInboxRepository.Receipt(revision, false, false);
     }
+
     public Item get(String id) {
         return list().items.stream().filter(item -> item.id.equals(id)).findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("结果不存在或不在最近结果窗口，请打开原对话查看"));
+            .orElseThrow(() -> new IllegalArgumentException("结果不存在或不在最近结果窗口，请打开原对话查看"));
     }
+
     public Item mark(String id, String revision, String action) {
         Item item = get(id);
-        if (!item.revision.equals(revision)) throw new IllegalStateException("结果已更新，请刷新后操作");
+        if (!item.revision.equals(revision)) {
+            throw new IllegalStateException("结果已更新，请刷新后操作");
+        }
         repository.mark(id, revision, action);
         return get(id);
     }
+
     public Detail detail(String id) {
         var item = get(id);
         TaskControlService.TaskContract task = item.runId == null ? null : tasks.result(item.runId);
         if (task == null && item.scheduleId != null) {
-            var job = schedules.get(item.scheduleId); var current = tasks.load(item.sessionId);
-            if (current != null && Objects.equals(current.taskId(), job.taskId())) task = current;
+            var job = schedules.get(item.scheduleId);
+            var current = tasks.load(item.sessionId);
+            if (current != null && Objects.equals(current.taskId(), job.taskId())) {
+                task = current;
+            }
         }
-        return new Detail(item, research(task), task == null || task.execution() == null ? "UNKNOWN" : task.execution().phase(),
-                task == null ? List.of() : task.acceptance(), task == null || task.execution() == null ? "" : task.execution().gap());
+        return new Detail(item, research(task),
+            task == null || task.execution() == null ? "UNKNOWN" : task.execution().phase(),
+            task == null ? List.of() : task.acceptance(),
+            task == null || task.execution() == null ? "" : task.execution().gap());
     }
+
     public List<Research> sessionResearch(String sessionId) {
-        if (sessions.find(sessionId).isEmpty()) throw new IllegalArgumentException("会话不存在");
+        if (sessions.find(sessionId).isEmpty()) {
+            throw new IllegalArgumentException("会话不存在");
+        }
         return research(tasks.load(sessionId));
     }
+
     private List<Research> research(TaskControlService.TaskContract task) {
-        if (task == null || task.execution() == null) return List.of();
+        if (task == null || task.execution() == null) {
+            return List.of();
+        }
         List<Research> result = new ArrayList<>();
         for (var e : task.execution().evidence()) {
-            if (!"record_research".equals(e.tool()) || !"SUCCESS".equals(e.status())) continue;
+            if (!"record_research".equals(e.tool()) || !"SUCCESS".equals(e.status())) {
+                continue;
+            }
             try {
                 var json = mapper.readTree(e.result());
-                List<String> sources = new ArrayList<>(), evidence = new ArrayList<>();
-                if (json.has("sources")) json.get("sources").forEach(value -> sources.add(value.asText()));
-                if (json.has("sourceEvidence")) json.get("sourceEvidence").forEach(value -> evidence.add(value.asText()));
-                result.add(new Research(e.id(), sources, json.path("decision").asText(""), json.path("license").asText(""),
-                        evidence, e.observedAtEpochMillis(), true, ""));
+                List<String> sources = new ArrayList<>();
+                List<String> evidence = new ArrayList<>();
+                if (json.has("sources")) {
+                    json.get("sources").forEach(value -> sources.add(value.asText()));
+                }
+                if (json.has("sourceEvidence")) {
+                    json.get("sourceEvidence").forEach(value -> evidence.add(value.asText()));
+                }
+                result.add(new Research(e.id(), sources, json.path("decision").asText(""),
+                    json.path("license").asText(""), evidence, e.observedAtEpochMillis(), true, ""));
             } catch (RuntimeException ex) {
-                result.add(new Research(e.id(), List.of(), "", "", List.of(), e.observedAtEpochMillis(), false, e.result()));
+                result.add(
+                    new Research(e.id(), List.of(), "", "", List.of(), e.observedAtEpochMillis(), false, e.result()));
             }
         }
         return List.copyOf(result);

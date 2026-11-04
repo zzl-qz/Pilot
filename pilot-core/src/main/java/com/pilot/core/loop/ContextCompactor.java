@@ -1,10 +1,6 @@
 package com.pilot.core.loop;
 
-import com.pilot.core.model.ModelClient;
-import com.pilot.core.model.ModelResponse;
-import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.tool.ToolCall;
-
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -12,6 +8,16 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.IntSupplier;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
+import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ModelRequestScope;
+import com.pilot.core.model.ModelResponse;
+import com.pilot.core.model.ToolDefinition;
+import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.core.tool.ToolCall;
 
 /**
  * 上下文压缩，分四层，先做不花钱的，再动模型：
@@ -84,14 +90,17 @@ public final class ContextCompactor {
 
     private final ModelClient client;
     private final int minKeepGroups;
-    private java.util.function.Supplier<List<com.pilot.core.model.ToolDefinition>> tools = List::of;
-    private java.util.function.IntSupplier contextLimit = () -> 0;
+    private Supplier<List<ToolDefinition>> tools = List::of;
+    private IntSupplier contextLimit = () -> 0;
 
-    public ContextCompactor withTools(java.util.function.Supplier<List<com.pilot.core.model.ToolDefinition>> value) {
-        this.tools = value; return this;
+    public ContextCompactor withTools(Supplier<List<ToolDefinition>> value) {
+        this.tools = value;
+        return this;
     }
-    public ContextCompactor withContextLimit(java.util.function.IntSupplier value) {
-        this.contextLimit = value; return this;
+
+    public ContextCompactor withContextLimit(IntSupplier value) {
+        this.contextLimit = value;
+        return this;
     }
 
     public ContextCompactor(ModelClient client) {
@@ -138,8 +147,8 @@ public final class ContextCompactor {
             return Outcome.none(beforeChars);
         }
 
-        int reserveChars = Math.max(1, (int) (targetChars * KEEP_RATIO));
-        int reserveTokens = Math.max(1, (int) (targetTokens * KEEP_RATIO));
+        int reserveChars = Math.max(1, (int)(targetChars * KEEP_RATIO));
+        int reserveTokens = Math.max(1, (int)(targetTokens * KEEP_RATIO));
         int start = groups.size();
         int keptGroups = 0;
         int keptChars = 0;
@@ -149,8 +158,8 @@ public final class ContextCompactor {
             int sizeChars = chars(messages, group);
             int sizeTokens = tokens(messages, group);
             // 最近 minKeepGroups 组无论多大都保留；之后任一预算超了就停。
-            if (keptGroups >= minKeepGroups && (keptChars + sizeChars > reserveChars
-                    || keptTokens + sizeTokens > reserveTokens)) {
+            if (keptGroups >= minKeepGroups
+                && (keptChars + sizeChars > reserveChars || keptTokens + sizeTokens > reserveTokens)) {
                 break;
             }
             keptChars += sizeChars;
@@ -188,8 +197,8 @@ public final class ContextCompactor {
         String replacement = head + summary;
         int foldedChars = chars(messages, 1, end);
         int foldedTokens = tokens(messages, 1, end);
-        double charGain = (foldedChars - replacement.length()) / (double) Math.max(1, targetChars);
-        double tokenGain = (foldedTokens - estimateTokens(replacement)) / (double) Math.max(1, targetTokens);
+        double charGain = (foldedChars - replacement.length()) / (double)Math.max(1, targetChars);
+        double tokenGain = (foldedTokens - estimateTokens(replacement)) / (double)Math.max(1, targetTokens);
         if (Math.max(charGain, tokenGain) < MIN_GAIN_RATIO) {
             return Outcome.none(beforeChars);
         }
@@ -208,7 +217,7 @@ public final class ContextCompactor {
      * @return 被替换的条数
      */
     public static int pruneToolOutputs(List<Message> messages, int limit) {
-        int keep = Math.max(1, (int) (limit * PRUNE_KEEP_RATIO));
+        int keep = Math.max(1, (int)(limit * PRUNE_KEEP_RATIO));
         Map<String, String> calls = callIndex(messages);
         int seen = 0;
         int pruned = 0;
@@ -223,8 +232,8 @@ public final class ContextCompactor {
                 continue;
             }
             String target = calls.getOrDefault(message.toolCallId(), "工具");
-            messages.set(i, Message.tool(message.toolCallId(),
-                    PRUNED_PREFIX + "：" + target + "，约 " + length + " 字符，需要时重新读取]"));
+            messages.set(i,
+                Message.tool(message.toolCallId(), PRUNED_PREFIX + "：" + target + "，约 " + length + " 字符，需要时重新读取]"));
             pruned++;
         }
         return pruned;
@@ -241,12 +250,15 @@ public final class ContextCompactor {
         int dropped = 0;
         for (int i = messages.size() - 1; i >= 0; i--) {
             Message message = messages.get(i);
-            if (!message.isToolImages() || message.attachments().isEmpty()) continue;
-            if (++kept <= Math.max(0, keep)) continue;
-            String names = message.attachments().stream().map(Attachment::name)
-                    .collect(java.util.stream.Collectors.joining(", "));
-            messages.set(i, new Message("user", Message.TOOL_IMAGE_MARKER + " 较早的图片已省略（" + names
-                    + "）；需要当前状态请重新截图或读取。"));
+            if (!message.isToolImages() || message.attachments().isEmpty()) {
+                continue;
+            }
+            if (++kept <= Math.max(0, keep)) {
+                continue;
+            }
+            String names = message.attachments().stream().map(Attachment::name).collect(Collectors.joining(", "));
+            messages.set(i,
+                new Message("user", Message.TOOL_IMAGE_MARKER + " 较早的图片已省略（" + names + "）；需要当前状态请重新截图或读取。"));
             dropped++;
         }
         return dropped;
@@ -268,9 +280,8 @@ public final class ContextCompactor {
             if (content.length() <= TRUNCATE_TRIGGER_CHARS || content.startsWith(PRUNED_PREFIX)) {
                 continue;
             }
-            String trimmed = content.substring(0, TRUNCATE_HEAD_CHARS)
-                    + "\n" + TRUNCATE_MARK + "\n"
-                    + content.substring(content.length() - TRUNCATE_TAIL_CHARS);
+            String trimmed = content.substring(0, TRUNCATE_HEAD_CHARS) + "\n" + TRUNCATE_MARK + "\n"
+                + content.substring(content.length() - TRUNCATE_TAIL_CHARS);
             messages.set(i, Message.tool(message.toolCallId(), trimmed));
             changed++;
         }
@@ -301,8 +312,8 @@ public final class ContextCompactor {
             messages.subList(1, end).clear();
         }
         if (dropped > 0) {
-            messages.add(1, Message.user("[更早的 " + dropped + " 条消息已因上下文超限丢弃]",
-                    List.copyOf(pinnedAttachments.values())));
+            messages.add(1,
+                Message.user("[更早的 " + dropped + " 条消息已因上下文超限丢弃]", List.copyOf(pinnedAttachments.values())));
         }
         return dropped;
     }
@@ -352,33 +363,39 @@ public final class ContextCompactor {
 
     private String summarize(List<Message> history, String transcript) {
         var profile = client.profile();
-        List<com.pilot.core.model.ToolDefinition> definitions = tools.get();
+        List<ToolDefinition> definitions = tools.get();
         String instruction = "请只生成当前对话的交接摘要，不调用工具。保留目标、约束、已完成工作、验证证据和剩余事项。\n" + SUMMARY_PROMPT;
         int input = estimateTokens(history) + estimateTokens(String.valueOf(definitions));
         var price = profile.pricing();
         // 实验策略仅在有余量且已配置单价显示潜在节省时启用；默认仍走短输入。
         boolean candidate = "prefix".equals(profile.compactionMode()) && !history.isEmpty()
-                && contextLimit.getAsInt() > 0 && input + estimateTokens(instruction) + 2_000 < contextLimit.getAsInt()
-                && totalChars(history) + instruction.length() + 8_000 < contextLimit.getAsInt()
-                && price.input() != null && price.cachedInput() != null && price.cacheWrite() != null
-                && price.cachedInput().multiply(java.math.BigDecimal.valueOf(input))
-                    .add(price.cacheWrite().multiply(java.math.BigDecimal.valueOf(estimateTokens(instruction))))
-                    .compareTo(price.input().multiply(java.math.BigDecimal.valueOf(estimateTokens(SUMMARY_PROMPT + transcript)))) < 0;
+            && contextLimit.getAsInt() > 0 && input + estimateTokens(instruction) + 2_000 < contextLimit.getAsInt()
+            && totalChars(history) + instruction.length() + 8_000 < contextLimit.getAsInt() && price.input() != null
+            && price.cachedInput() != null && price.cacheWrite() != null
+            && price.cachedInput().multiply(BigDecimal.valueOf(input))
+                .add(price.cacheWrite().multiply(BigDecimal.valueOf(estimateTokens(instruction))))
+                .compareTo(price.input().multiply(BigDecimal.valueOf(estimateTokens(SUMMARY_PROMPT + transcript)))) < 0;
         if (candidate) {
             List<Message> request = new ArrayList<>(history);
             request.add(Message.user(instruction));
             try {
-                ModelResponse response = com.pilot.core.model.ModelRequestScope.within("compaction", null, true,
-                        () -> client.chat(List.copyOf(request), definitions));
-                if (response.toolCalls().isEmpty() && response.content() != null && !response.content().isBlank()) return response.content().strip();
+                ModelResponse response = ModelRequestScope.within("compaction", null, true,
+                    () -> client.chat(List.copyOf(request), definitions));
+                if (response.toolCalls().isEmpty() && response.content() != null && !response.content().isBlank()) {
+                    return response.content().strip();
+                }
             } catch (RuntimeException ignored) {
-                if (Thread.currentThread().isInterrupted()) throw ignored;
+                if (Thread.currentThread().isInterrupted()) {
+                    throw ignored;
+                }
             }
         }
         List<Message> request = List.of(Message.system(SUMMARY_PROMPT), Message.user(transcript));
-        ModelResponse response = com.pilot.core.model.ModelRequestScope.within("compaction", null, true,
-                () -> client.chat(request, List.of()));
-        if (!response.toolCalls().isEmpty()) return "";
+        ModelResponse response =
+            ModelRequestScope.within("compaction", null, true, () -> client.chat(request, List.of()));
+        if (!response.toolCalls().isEmpty()) {
+            return "";
+        }
         return response.content() == null ? "" : response.content().strip();
     }
 
@@ -446,7 +463,7 @@ public final class ContextCompactor {
             } else {
                 i++;
             }
-            result.add(new int[]{start, i});
+            result.add(new int[] {start, i});
         }
         return result;
     }
@@ -493,7 +510,9 @@ public final class ContextCompactor {
         Map<String, String> results = new HashMap<>();
         for (int index = from; index < to; index++) {
             Message message = messages.get(index);
-            if ("tool".equals(message.role())) results.put(message.toolCallId(), message.content());
+            if ("tool".equals(message.role())) {
+                results.put(message.toolCallId(), message.content());
+            }
         }
         for (int index = from; index < to; index++) {
             Message message = messages.get(index);
@@ -502,19 +521,25 @@ public final class ContextCompactor {
             }
             for (ToolCall call : message.toolCalls()) {
                 Object value = call.args() == null ? null : call.args().get("path");
-                if (!(value instanceof String path) || !validTrackedPath(path)) continue;
+                if (!(value instanceof String path) || !validTrackedPath(path)) {
+                    continue;
+                }
                 String result = results.get(call.callId());
-                if (result == null || result.isBlank() || result.startsWith("ERROR")
-                        || result.startsWith("SKIPPED:")) continue;
+                if (result == null || result.isBlank() || result.startsWith("ERROR") || result.startsWith("SKIPPED:")) {
+                    continue;
+                }
                 switch (call.name()) {
                     case "read_file" -> read.add(path);
                     case "edit_file", "create_file" -> modified.add(path);
-                    default -> { }
+                    default -> {
+                    }
                 }
             }
         }
         read.removeAll(modified);
-        if (read.isEmpty() && modified.isEmpty()) return "";
+        if (read.isEmpty() && modified.isEmpty()) {
+            return "";
+        }
         StringBuilder output = new StringBuilder("\n\n");
         appendPaths(output, READ_FILES_START, READ_FILES_END, read);
         appendPaths(output, MODIFIED_FILES_START, MODIFIED_FILES_END, modified);
@@ -525,21 +550,27 @@ public final class ContextCompactor {
         Set<String> active = null;
         for (String line : summary.lines().toList()) {
             String value = line.strip();
-            if (READ_FILES_START.equals(value)) active = read;
-            else if (MODIFIED_FILES_START.equals(value)) active = modified;
-            else if (READ_FILES_END.equals(value) || MODIFIED_FILES_END.equals(value)) active = null;
-            else if (active != null && validTrackedPath(value)) active.add(value);
+            if (READ_FILES_START.equals(value)) {
+                active = read;
+            } else if (MODIFIED_FILES_START.equals(value)) {
+                active = modified;
+            } else if (READ_FILES_END.equals(value) || MODIFIED_FILES_END.equals(value)) {
+                active = null;
+            } else if (active != null && validTrackedPath(value)) {
+                active.add(value);
+            }
         }
     }
 
     private static boolean validTrackedPath(String path) {
-        return path != null && !path.isBlank() && path.length() <= 300
-                && path.indexOf('\n') < 0 && path.indexOf('\r') < 0
-                && path.indexOf('<') < 0 && path.indexOf('>') < 0;
+        return path != null && !path.isBlank() && path.length() <= 300 && path.indexOf('\n') < 0
+            && path.indexOf('\r') < 0 && path.indexOf('<') < 0 && path.indexOf('>') < 0;
     }
 
     private static void appendPaths(StringBuilder output, String start, String end, Set<String> paths) {
-        if (paths.isEmpty()) return;
+        if (paths.isEmpty()) {
+            return;
+        }
         output.append(start).append('\n');
         int omitted = 0;
         for (String path : paths) {
@@ -550,7 +581,9 @@ public final class ContextCompactor {
             output.append(path).append('\n');
         }
         output.append(end);
-        if (omitted > 0) output.append("\n[还有 ").append(omitted).append(" 条文件路径因长度限制省略]");
+        if (omitted > 0) {
+            output.append("\n[还有 ").append(omitted).append(" 条文件路径因长度限制省略]");
+        }
         output.append('\n');
     }
 
@@ -559,7 +592,9 @@ public final class ContextCompactor {
         LinkedHashMap<String, Attachment> unique = new LinkedHashMap<>();
         for (int index = from; index < to; index++) {
             // 工具截图是一次性观察，折叠后由摘要里的文字证据代替，不跟着交接摘要无限累积
-            if (messages.get(index).isToolImages()) continue;
+            if (messages.get(index).isToolImages()) {
+                continue;
+            }
             for (Attachment attachment : messages.get(index).attachments()) {
                 unique.putIfAbsent(attachment.path(), attachment);
             }

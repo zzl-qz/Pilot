@@ -1,5 +1,13 @@
 package com.pilot.server.multi;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.multi.AgentProfile;
 import com.pilot.core.multi.AgentProfileCatalog;
@@ -8,14 +16,6 @@ import com.pilot.core.multi.RiskLevel;
 import com.pilot.core.multi.TaskSpec;
 import com.pilot.core.tool.Tool;
 import com.pilot.server.session.SpawnAgentTool;
-
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
 
 /**
  * {@code dispatch_agents}：父 Agent 把任务 DAG 交给调度器，由内核拉子 Agent 执行。
@@ -28,6 +28,7 @@ public final class DispatchAgentsTool implements Tool {
 
     private final com.pilot.core.model.ModelClient executionClient;
     private com.pilot.core.permission.PermissionMode parentPermission;
+
     public DispatchAgentsTool withParentPermission(com.pilot.core.permission.PermissionMode permission) {
         this.parentPermission = permission;
         return this;
@@ -45,26 +46,24 @@ public final class DispatchAgentsTool implements Tool {
     private final SpawnAgentTool.UsageSink usageSink;
 
     public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
-                              Consumer<SessionEvent> events, BooleanSupplier cancelled) {
+        Consumer<SessionEvent> events, BooleanSupplier cancelled) {
         this(service, sessionId, runId, workspace, events, cancelled, null, AgentProfileCatalog.EMPTY, null);
     }
 
     public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
-                              Consumer<SessionEvent> events, BooleanSupplier cancelled,
-                              com.pilot.core.model.ModelClient executionClient) {
+        Consumer<SessionEvent> events, BooleanSupplier cancelled, com.pilot.core.model.ModelClient executionClient) {
         this(service, sessionId, runId, workspace, events, cancelled, executionClient, AgentProfileCatalog.EMPTY, null);
     }
 
     public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
-                              Consumer<SessionEvent> events, BooleanSupplier cancelled,
-                              com.pilot.core.model.ModelClient executionClient, AgentProfileCatalog profiles) {
+        Consumer<SessionEvent> events, BooleanSupplier cancelled, com.pilot.core.model.ModelClient executionClient,
+        AgentProfileCatalog profiles) {
         this(service, sessionId, runId, workspace, events, cancelled, executionClient, profiles, null);
     }
 
     public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
-                              Consumer<SessionEvent> events, BooleanSupplier cancelled,
-                              com.pilot.core.model.ModelClient executionClient, AgentProfileCatalog profiles,
-                              SpawnAgentTool.UsageSink usageSink) {
+        Consumer<SessionEvent> events, BooleanSupplier cancelled, com.pilot.core.model.ModelClient executionClient,
+        AgentProfileCatalog profiles, SpawnAgentTool.UsageSink usageSink) {
         this.executionClient = executionClient;
         this.service = Objects.requireNonNull(service, "service must not be null");
         this.sessionId = Objects.requireNonNull(sessionId, "sessionId must not be null");
@@ -88,50 +87,47 @@ public final class DispatchAgentsTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        Map<String, Object> fields = Map.ofEntries(
-                Map.entry("id", Map.of("type", "string", "description", "任务编号，会话内唯一，例如 T1")),
+        Map<String,
+            Object> fields = Map.ofEntries(Map.entry("id", Map.of("type", "string", "description", "任务编号，会话内唯一，例如 T1")),
                 Map.entry("title", Map.of("type", "string", "description", "任务标题，界面展示用")),
                 Map.entry("goal", Map.of("type", "string", "description", "完整目标：做什么、做到什么算完成")),
-                Map.entry("agent", Map.of("type", "string",
-                        "description", agentFieldDescription())),
-                Map.entry("depends_on", Map.of("type", "array", "items", Map.of("type", "string"),
-                        "description", "前置任务编号；为空表示可立即并行")),
-                Map.entry("files", Map.of("type", "array", "items", Map.of("type", "string"),
-                        "description", "文件白名单 glob，例如 pilot-core/src/**/*.java")),
-                Map.entry("deny_files", Map.of("type", "array", "items", Map.of("type", "string"),
-                        "description", "禁止访问的 glob")),
-                Map.entry("writable", Map.of("type", "boolean",
-                        "description", "是否允许提交沙箱改动；只读调研填 false")),
-                Map.entry("tools", Map.of("type", "array", "items", Map.of("type", "string"),
-                        "description", "可用工具白名单，支持 * 通配符，例如 read_*/search_text/run_command")),
-                Map.entry("commands", Map.of("type", "array", "items", Map.of("type", "string"),
-                        "description", "命令白名单，按参数前缀匹配，例如 mvn test / git status；留空沿用内置可执行白名单")),
-                Map.entry("deny_commands", Map.of("type", "array", "items", Map.of("type", "string"),
-                        "description", "禁止执行的命令前缀，优先级高于 commands")),
-                Map.entry("risk", Map.of("type", "string", "enum", List.of("low", "medium", "high"),
-                        "description", "风险等级，高风险必须人工审批")),
-                Map.entry("reviewers", Map.of("type", "integer",
-                        "description", "同一任务并行出方案的子 Agent 数量（1-3），结论不一致会触发仲裁")));
-        Map<String, Object> task = Map.of(
-                "type", "object",
-                "properties", fields,
-                "required", List.of("id", "goal"),
-                "additionalProperties", false);
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "tasks", Map.of("type", "array", "items", task,
-                                "description", "任务列表，按依赖关系组成 DAG；建议 2-6 个"),
-                        "reason", Map.of("type", "string", "description", "一句话说明为什么这样拆分")),
-                "required", List.of("tasks"),
-                "additionalProperties", false);
+                Map.entry("agent", Map.of("type", "string", "description", agentFieldDescription())),
+                Map.entry("depends_on",
+                    Map.of("type", "array", "items", Map.of("type", "string"), "description", "前置任务编号；为空表示可立即并行")),
+                Map.entry("files",
+                    Map.of("type", "array", "items", Map.of("type", "string"), "description",
+                        "文件白名单 glob，例如 pilot-core/src/**/*.java")),
+                Map.entry("deny_files",
+                    Map.of("type", "array", "items", Map.of("type", "string"), "description", "禁止访问的 glob")),
+                Map.entry("writable", Map.of("type", "boolean", "description", "是否允许提交沙箱改动；只读调研填 false")),
+                Map.entry("tools",
+                    Map.of("type", "array", "items", Map.of("type", "string"), "description",
+                        "可用工具白名单，支持 * 通配符，例如 read_*/search_text/run_command")),
+                Map.entry("commands",
+                    Map.of("type", "array", "items", Map.of("type", "string"), "description",
+                        "命令白名单，按参数前缀匹配，例如 mvn test / git status；留空沿用内置可执行白名单")),
+                Map.entry(
+                    "deny_commands",
+                    Map.of("type", "array", "items", Map.of("type", "string"), "description",
+                        "禁止执行的命令前缀，优先级高于 commands")),
+                Map.entry(
+                    "risk",
+                    Map.of("type", "string", "enum", List.of("low", "medium", "high"), "description",
+                        "风险等级，高风险必须人工审批")),
+                Map.entry("reviewers",
+                    Map.of("type", "integer", "description", "同一任务并行出方案的子 Agent 数量（1-3），结论不一致会触发仲裁")));
+        Map<String, Object> task = Map.of("type", "object", "properties", fields, "required", List.of("id", "goal"),
+            "additionalProperties", false);
+        return Map.of("type", "object", "properties",
+            Map.of("tasks", Map.of("type", "array", "items", task, "description", "任务列表，按依赖关系组成 DAG；建议 2-6 个"),
+                "reason", Map.of("type", "string", "description", "一句话说明为什么这样拆分")),
+            "required", List.of("tasks"), "additionalProperties", false);
     }
 
     /** agent 字段的动态说明：有可用代理时点名角色与职责，模型不必猜名字。 */
     private String agentFieldDescription() {
-        StringBuilder text = new StringBuilder(
-                "引用自定义子代理（.pilot/agents/<name>.md）的名字：工具/文件/命令白名单与角色提示词从定义装配，"
-                        + "本任务里显式声明的字段优先、缺省用定义补");
+        StringBuilder text =
+            new StringBuilder("引用自定义子代理（.pilot/agents/<name>.md）的名字：工具/文件/命令白名单与角色提示词从定义装配，" + "本任务里显式声明的字段优先、缺省用定义补");
         String names = profiles.nameListText();
         if (!names.isEmpty()) {
             text.append("。可用代理：").append(names);
@@ -154,16 +150,14 @@ public final class DispatchAgentsTool implements Tool {
             return "ERROR: 任务计划不合法：" + e.getMessage();
         }
         try {
-            MultiAgentService.Result result = service.dispatch(
-                    new MultiAgentService.Dispatch(sessionId, runId, workspace, specs, events, cancelled,
-                            executionClient, usageSink).withParentPermission(parentPermission));
+            MultiAgentService.Result result =
+                service.dispatch(new MultiAgentService.Dispatch(sessionId, runId, workspace, specs, events, cancelled,
+                    executionClient, usageSink).withParentPermission(parentPermission));
             return result.report();
         } catch (IllegalArgumentException e) {
             return "ERROR: 任务计划不合法：" + e.getMessage();
         } catch (RuntimeException e) {
-            return "ERROR: 多智能体调度失败：" + (e.getMessage() == null
-                    ? e.getClass().getSimpleName()
-                    : e.getMessage());
+            return "ERROR: 多智能体调度失败：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
         }
     }
 
@@ -190,8 +184,8 @@ public final class DispatchAgentsTool implements Tool {
         // 单写者原则：互不依赖又写同一批文件的任务会被并行调度，必然互相覆盖，派发阶段就拒绝
         List<String> overlaps = com.pilot.core.multi.TaskGraph.overlappingWriters(specs);
         if (!overlaps.isEmpty()) {
-            throw new IllegalArgumentException("以下任务会并行写同一批文件：" + String.join("；", overlaps)
-                    + "。请给其中一个加 depends_on 串行执行，或把 files 范围拆开互不重叠。");
+            throw new IllegalArgumentException(
+                "以下任务会并行写同一批文件：" + String.join("；", overlaps) + "。请给其中一个加 depends_on 串行执行，或把 files 范围拆开互不重叠。");
         }
         return List.copyOf(specs);
     }
@@ -212,15 +206,13 @@ public final class DispatchAgentsTool implements Tool {
         String agentName = text(map.get("agent"));
         AgentProfile profile = null;
         if (!agentName.isEmpty()) {
-            profile = profiles.find(agentName)
-                    .orElseThrow(() -> new IllegalArgumentException("引用的代理 " + agentName
-                            + " 不存在（可用：" + (profiles.nameListText().isEmpty() ? "无" : profiles.nameListText()) + "）"));
+            profile = profiles.find(agentName).orElseThrow(() -> new IllegalArgumentException("引用的代理 " + agentName
+                + " 不存在（可用：" + (profiles.nameListText().isEmpty() ? "无" : profiles.nameListText()) + "）"));
         }
         AgentScope scope = profile == null
-                ? (writable ? AgentScope.readWrite(files, denyFiles) : AgentScope.readOnly(files, denyFiles))
-                    .withTools(tools, List.of())
-                    .withCommands(commands, denyCommands)
-                : profile.mergeScope(writable, files, denyFiles, tools, commands, denyCommands);
+            ? (writable ? AgentScope.readWrite(files, denyFiles) : AgentScope.readOnly(files, denyFiles))
+                .withTools(tools, List.of()).withCommands(commands, denyCommands)
+            : profile.mergeScope(writable, files, denyFiles, tools, commands, denyCommands);
         String effectiveGoal = profile == null ? goal : profile.prefixGoal(goal);
         return new TaskSpec(id, title, effectiveGoal, dependsOn, scope, risk, reviewers);
     }

@@ -1,7 +1,6 @@
 package com.pilot.server.store;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -11,7 +10,8 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class SqliteStoreMigrationTest {
     @TempDir
@@ -22,18 +22,17 @@ class SqliteStoreMigrationTest {
     void addsProjectColumnsBeforeCreatingTheirIndex() throws Exception {
         Path db = dir.resolve("pilot.db");
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + db);
-             Statement statement = connection.createStatement()) {
+            Statement statement = connection.createStatement()) {
             statement.execute("""
-                    CREATE TABLE sessions (
-                        id TEXT PRIMARY KEY,
-                        title TEXT NOT NULL,
-                        workspace TEXT,
-                        created_at TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        sequence INTEGER NOT NULL DEFAULT 0
-                    )""");
-            statement.execute("INSERT INTO sessions VALUES "
-                    + "('s1','旧会话',NULL,'2026-01-01T00:00:00Z','DONE',0)");
+                CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    workspace TEXT,
+                    created_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    sequence INTEGER NOT NULL DEFAULT 0
+                )""");
+            statement.execute("INSERT INTO sessions VALUES " + "('s1','旧会话',NULL,'2026-01-01T00:00:00Z','DONE',0)");
         }
 
         SqliteStore store = new SqliteStore(db);
@@ -46,7 +45,7 @@ class SqliteStoreMigrationTest {
                 }
             }
             assertTrue(columns.containsAll(List.of("project_id", "is_blank", "archived", "parent_session_id")),
-                    columns.toString());
+                columns.toString());
 
             boolean indexed = false;
             try (ResultSet rows = statement.executeQuery("PRAGMA index_list(sessions)")) {
@@ -64,20 +63,20 @@ class SqliteStoreMigrationTest {
     void addsAttachmentColumnToLegacyConversationTable() throws Exception {
         Path db = dir.resolve("legacy-conversation.db");
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + db);
-             Statement statement = connection.createStatement()) {
+            Statement statement = connection.createStatement()) {
             statement.execute("""
-                    CREATE TABLE conversation_messages (
-                        session_id TEXT NOT NULL,
-                        seq INTEGER NOT NULL,
-                        role TEXT NOT NULL,
-                        content TEXT NOT NULL,
-                        tool_calls TEXT,
-                        tool_call_id TEXT,
-                        created_at TEXT NOT NULL,
-                        PRIMARY KEY (session_id, seq)
-                    )""");
-            statement.execute("INSERT INTO conversation_messages VALUES "
-                    + "('s1',1,'user','看图',NULL,NULL,'2026-01-01T00:00:00Z')");
+                CREATE TABLE conversation_messages (
+                    session_id TEXT NOT NULL,
+                    seq INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    tool_calls TEXT,
+                    tool_call_id TEXT,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (session_id, seq)
+                )""");
+            statement.execute(
+                "INSERT INTO conversation_messages VALUES " + "('s1',1,'user','看图',NULL,NULL,'2026-01-01T00:00:00Z')");
         }
 
         SqliteStore store = new SqliteStore(db);
@@ -85,11 +84,13 @@ class SqliteStoreMigrationTest {
         try (Connection connection = store.open(); Statement statement = connection.createStatement()) {
             List<String> columns = new ArrayList<>();
             try (ResultSet rows = statement.executeQuery("PRAGMA table_info(conversation_messages)")) {
-                while (rows.next()) columns.add(rows.getString("name"));
+                while (rows.next()) {
+                    columns.add(rows.getString("name"));
+                }
             }
             assertTrue(columns.contains("attachments"), columns.toString());
-            try (ResultSet rows = statement.executeQuery(
-                    "SELECT content, attachments FROM conversation_messages WHERE session_id='s1'")) {
+            try (ResultSet rows = statement
+                .executeQuery("SELECT content, attachments FROM conversation_messages WHERE session_id='s1'")) {
                 assertTrue(rows.next());
                 assertTrue("看图".equals(rows.getString(1)));
                 assertTrue(rows.getString(2) == null, "旧消息附件列应保持 NULL");

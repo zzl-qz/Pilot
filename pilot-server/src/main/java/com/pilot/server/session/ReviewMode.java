@@ -31,8 +31,6 @@ public record ReviewMode(boolean active, String scope) {
 
     /** 审查范围说明：未显式给范围时默认审未提交改动，注入协议模板的 {@code {{scope}}}。 */
     public String scopeText() {
-        return scope.isEmpty()
-                ? "当前工作区的未提交改动（以 git status 与 git diff 实查为准）"
-                : scope;
+        return scope.isEmpty() ? "当前工作区的未提交改动（以 git status 与 git diff 实查为准）" : scope;
     }
 }

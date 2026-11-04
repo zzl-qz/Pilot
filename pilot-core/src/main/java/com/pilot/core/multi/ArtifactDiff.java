@@ -7,8 +7,8 @@ import java.util.List;
  *
  * @param previousCandidate 上一版的清单指纹；没有上一版时为 {@code null}
  */
-public record ArtifactDiff(String previousCandidate, String currentCandidate, List<String> added,
-                           List<String> removed, List<String> modified, List<String> unchanged) {
+public record ArtifactDiff(String previousCandidate, String currentCandidate, List<String> added, List<String> removed,
+    List<String> modified, List<String> unchanged) {
     public ArtifactDiff {
         added = added == null ? List.of() : List.copyOf(added);
         removed = removed == null ? List.of() : List.copyOf(removed);

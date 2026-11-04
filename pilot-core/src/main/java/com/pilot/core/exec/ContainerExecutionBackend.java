@@ -15,12 +15,11 @@ import java.util.Set;
  * 丢弃 capabilities、禁止提权。挂载目录仍然可写，调用方必须传入临时副本；容器本身不隔离 bind mount 的写入。
  *
  * <p>可用性必须实测：没有 Docker/Podman、守护进程没启动、镜像不存在时明确报告原因，
- * 而不是悄悄退化成普通子进程。{@link #available()} 只探测运行时，镜像是否就绪在第一次执行时才暴露。
+ * 而不是悄悄退化成普通子进程。{@link #available()} 只探测运行时，每次执行前检查本地镜像，不自动拉取或打开网络。
  */
 public final class ContainerExecutionBackend implements ExecutionBackend {
-    private static final Set<String> CLI_ENV = Set.of(
-            "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY",
-            "XDG_RUNTIME_DIR", "CONTAINER_HOST");
+    private static final Set<String> CLI_ENV = Set.of("DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CERT_PATH",
+        "DOCKER_TLS_VERIFY", "XDG_RUNTIME_DIR", "CONTAINER_HOST");
 
     private final String runtime;
     private final String image;
@@ -33,8 +32,8 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
     public ContainerExecutionBackend(String runtime, String image, String containerWorkspace, String containerUser) {
         this.runtime = runtime == null || runtime.isBlank() ? detectRuntime() : runtime.strip();
         this.image = image == null || image.isBlank() ? "eclipse-temurin:25-jdk" : image.strip();
-        this.containerWorkspace = containerWorkspace == null || containerWorkspace.isBlank()
-                ? "/workspace" : containerWorkspace.strip();
+        this.containerWorkspace =
+            containerWorkspace == null || containerWorkspace.isBlank() ? "/workspace" : containerWorkspace.strip();
         this.containerUser = containerUser == null ? "" : containerUser.strip();
         this.cli = new LocalExecutionBackend(new EnvironmentSanitizer(CLI_ENV));
     }
@@ -74,14 +73,28 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
             probed = true;
             return;
         }
-        ExecutionResult version = cli.run(new ExecutionRequest(
-                List.of(runtime, "info", "--format", "{{.ServerVersion}}"), "", Path.of("."), Path.of("."),
-                Map.of(), false, new ExecutionLimits(5, 10_000, 256, 0.5, 64)));
+        ExecutionResult version =
+            cli.run(new ExecutionRequest(List.of(runtime, "info", "--format", "{{.ServerVersion}}"), "", Path.of("."),
+                Path.of("."), Map.of(), false, new ExecutionLimits(5, 10_000, 256, 0.5, 64)));
         if (!version.ok()) {
             unavailableReason = "容器运行时不可用（" + runtime + " info 失败）："
-                    + firstLine(version.error().isEmpty() ? version.output() : version.error());
+                + firstLine(version.error().isEmpty() ? version.output() : version.error());
         }
         probed = true;
+    }
+
+    @Override
+    public String cacheIdentity() {
+        if (!available()) {
+            throw new IllegalStateException("容器隔离不可用：" + unavailableReason());
+        }
+        ExecutionResult inspect =
+            cli.run(new ExecutionRequest(List.of(runtime, "image", "inspect", "--format", "{{.Id}}", "--", image), "",
+                Path.of("."), Path.of("."), Map.of(), false, new ExecutionLimits(10, 1024, 256, 0.5, 64)));
+        if (!inspect.ok() || inspect.output().isBlank()) {
+            throw new IllegalStateException("构建镜像未就绪：" + image + "。请先通过容器运行时拉取或构建此镜像；不会自动下载或在宿主机执行。");
+        }
+        return image + "@" + inspect.output().strip();
     }
 
     @Override
@@ -89,16 +102,24 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         if (!available()) {
             return ExecutionResult.failure(id(), isolation(), "容器隔离不可用：" + unavailableReason);
         }
-        Path workdir, root;
+        try {
+            cacheIdentity();
+        } catch (IllegalStateException e) {
+            return ExecutionResult.failure(id(), isolation(), e.getMessage());
+        }
+        Path workdir;
+        Path root;
         try {
             workdir = request.workdir().toRealPath();
             root = request.workspaceRoot().toRealPath();
+            if (request.dependencyCache() != null) {
+                DependencyCache.validateMount(request.dependencyCache(), root);
+            }
         } catch (java.io.IOException e) {
             return ExecutionResult.failure(id(), isolation(), "无法解析容器工作区：" + e.getMessage());
         }
         if (!workdir.startsWith(root)) {
-            return ExecutionResult.failure(id(), isolation(),
-                    "工作目录不在允许挂载的工作区内：" + workdir + "（工作区 " + root + "）");
+            return ExecutionResult.failure(id(), isolation(), "工作目录不在允许挂载的工作区内：" + workdir + "（工作区 " + root + "）");
         }
         if (!java.nio.file.Files.isDirectory(workdir)) {
             return ExecutionResult.failure(id(), isolation(), "工作目录不存在：" + workdir);
@@ -113,20 +134,25 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         ExecutionResult cliResult;
         try {
             cliResult = cli.run(new ExecutionRequest(argv, "", root, root, Map.of(), false,
-                    new ExecutionLimits(Math.max(1, limits.timeoutSeconds()), limits.maxOutputBytes(),
-                            limits.memoryMb(), limits.cpus(), limits.pidsLimit())));
+                new ExecutionLimits(Math.max(1, limits.timeoutSeconds()), limits.maxOutputBytes(), limits.memoryMb(),
+                    limits.cpus(), limits.pidsLimit())));
         } finally {
             // 杀掉 docker 客户端不等于终止容器。只清理本次生成的名字，不接触用户容器。
             boolean interrupted = Thread.interrupted();
-            try { cli.run(new ExecutionRequest(List.of(runtime, "rm", "-f", name), "", root, root, Map.of(), false,
-                    new ExecutionLimits(10, 10000, 256, 0.5, 64))); }
-            finally { if (interrupted) Thread.currentThread().interrupt(); }
+            try {
+                cli.run(new ExecutionRequest(List.of(runtime, "rm", "-f", name), "", root, root, Map.of(), false,
+                    new ExecutionLimits(10, 10000, 256, 0.5, 64)));
+            } finally {
+                if (interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
         }
         if (!cliResult.error().isEmpty()) {
             return ExecutionResult.failure(id(), isolation(), "容器启动失败：" + cliResult.error());
         }
         return new ExecutionResult(cliResult.exitCode(), cliResult.output(), cliResult.timedOut(),
-                cliResult.truncated(), id(), isolation(), "");
+            cliResult.truncated(), id(), isolation(), "");
     }
 
     /**
@@ -159,7 +185,20 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         argv.add(containerUser.isEmpty() ? workspaceOwner(root) : containerUser);
         argv.add("--mount");
         argv.add("type=bind,\"source=" + root.toString().replace("\"", "\"\"") + "\",\"target="
-                + containerWorkspace.replace("\"", "\"\"") + "\"");
+            + containerWorkspace.replace("\"", "\"\"") + "\"");
+        if (request.dependencyCache() != null) {
+            argv.add("--mount");
+            argv.add("type=bind,\"source="
+                + request.dependencyCache().toAbsolutePath().normalize().toString().replace("\"", "\"\"")
+                + "\",target=/pilot-cache");
+            // 只注入固定的容器路径，不继承宿主包管理器配置或凭据。
+            for (String value : List.of("NPM_CONFIG_CACHE=/pilot-cache/npm", "GRADLE_USER_HOME=/pilot-cache/gradle",
+                "MAVEN_OPTS=-Dmaven.repo.local=/pilot-cache/maven -Duser.home=/tmp/pilot-home",
+                "MAVEN_USER_HOME=/pilot-cache/maven-wrapper")) {
+                argv.add("-e");
+                argv.add(value);
+            }
+        }
         argv.add("-w");
         argv.add(workingDir);
         for (Map.Entry<String, String> entry : sanitizedEnv(request.env()).entrySet()) {
@@ -181,8 +220,9 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         lines.add("网络：" + (request.network() ? "bridge" : "none"));
         lines.add("根文件系统：只读；/tmp 为受限 tmpfs");
         lines.add("资源上限：" + request.limits().memoryMb() + "MB / " + request.limits().cpus() + " CPU / "
-                + request.limits().pidsLimit() + " 进程");
+            + request.limits().pidsLimit() + " 进程");
         lines.add("挂载：" + request.workspaceRoot().toAbsolutePath().normalize() + " → " + containerWorkspace);
+        lines.add("依赖缓存：" + (request.dependencyCache() == null ? "未启用" : "项目专用 /pilot-cache（不共享宿主缓存）"));
         lines.add("传入环境变量：" + (env.isEmpty() ? "(无)" : String.join(",", env.keySet())));
         return lines;
     }
@@ -236,9 +276,8 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
             return false;
         }
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        List<String> names = os.contains("win")
-                ? List.of(executable + ".exe", executable + ".cmd", executable)
-                : List.of(executable);
+        List<String> names =
+            os.contains("win") ? List.of(executable + ".exe", executable + ".cmd", executable) : List.of(executable);
         for (String directory : path.split(java.io.File.pathSeparator)) {
             for (String name : names) {
                 try {

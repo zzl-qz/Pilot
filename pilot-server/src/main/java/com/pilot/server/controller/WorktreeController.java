@@ -1,9 +1,7 @@
 package com.pilot.server.controller;
 
-import com.pilot.core.session.Session;
-import com.pilot.core.session.SessionService;
-import com.pilot.server.workspace.GitWorktrees;
-import com.pilot.server.workspace.WorkspaceService;
+import java.nio.file.Path;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,7 +12,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.nio.file.Path;
+import com.pilot.core.session.Session;
+import com.pilot.core.session.SessionService;
+import com.pilot.server.workspace.GitWorktrees;
+import com.pilot.server.workspace.WorkspaceService;
 
 /**
  * 平行检出：人选定分支后另开一个 worktree 对话，做完再把未提交改动交回原来的目录。
@@ -49,24 +50,25 @@ public class WorktreeController {
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
-        String title = request.title() == null || request.title().isBlank()
-                ? "worktree " + created.branch() : request.title().strip();
+        String title = request.title() == null || request.title().isBlank() ? "worktree " + created.branch()
+            : request.title().strip();
         String projectId = request.projectId() == null || request.projectId().isBlank() ? null : request.projectId();
         Session session = sessions.createSession(title, created.path(), projectId, false);
-        return new Opened(session.id(), session.title(), created.path(), created.base(), created.branch(), created.commit());
+        return new Opened(session.id(), session.title(), created.path(), created.base(), created.branch(),
+            created.commit());
     }
 
     @GetMapping
     public Info info(@RequestParam("path") String path) {
-        return worktrees.findByPath(Path.of(path)).map(meta -> new Info(true, meta.id(), meta.path(),
-                meta.base(), meta.branch(), meta.commit())).orElseGet(() -> new Info(false, "", path, "",
-                        worktrees.currentBranch(Path.of(path)), ""));
+        return worktrees.findByPath(Path.of(path))
+            .map(meta -> new Info(true, meta.id(), meta.path(), meta.base(), meta.branch(), meta.commit()))
+            .orElseGet(() -> new Info(false, "", path, "", worktrees.currentBranch(Path.of(path)), ""));
     }
 
     @PostMapping("/handoff")
     public Handed handoff(@RequestParam("sessionId") String sessionId) {
-        Session session = sessions.find(sessionId).orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "会话不存在"));
+        Session session =
+            sessions.find(sessionId).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "会话不存在"));
         GitWorktrees.Handoff handed;
         try {
             handed = worktrees.handoff(Path.of(session.workspace()));

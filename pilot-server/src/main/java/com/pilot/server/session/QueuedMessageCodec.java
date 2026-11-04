@@ -1,10 +1,11 @@
 package com.pilot.server.session;
 
+import java.util.List;
+
 import com.pilot.core.loop.Attachment;
+
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
-
-import java.util.List;
 
 /**
  * 排队消息在 {@code queued_messages.content} 里的存储格式。

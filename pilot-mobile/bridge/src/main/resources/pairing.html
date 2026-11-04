@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pilot · 连接手机</title><link rel="stylesheet" href="/pairing.css"></head>
+<body><main><header><span>Pilot</span><span>移动连接 · 预览版</span></header><h1>连接你的手机</h1><p>在 Pilot Android 中扫描配对码，即可查看任务和发送指令。电脑需要保持运行。</p>
+<button id="create">生成配对码</button><p id="status" role="status" aria-live="polite"></p>
+<section id="invite" hidden><img id="qr" alt="Pilot 手机配对二维码"><p id="expiry"></p><button id="copy">复制配对码</button></section>
+<section><h2>已配对设备</h2><div id="devices">正在读取设备…</div></section>
+<p class="note">配对将允许手机操作此电脑上的 Pilot 任务。配对码 5 分钟有效，只能使用一次；请勿分享给他人。</p></main><script src="/pairing.js"></script></body></html>

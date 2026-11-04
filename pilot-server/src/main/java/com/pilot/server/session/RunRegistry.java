@@ -1,11 +1,14 @@
 package com.pilot.server.session;
 
-import org.springframework.stereotype.Component;
-
+import java.io.IOException;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+
+import org.springframework.stereotype.Component;
 
 /**
  * 进程内活跃运行索引：用于断线重连后校准界面状态。
@@ -18,8 +21,8 @@ public class RunRegistry {
     private final ConcurrentMap<String, String> sessionToRun = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> runToSession = new ConcurrentHashMap<>();
 
-    private final java.util.Map<String, String> runWorkspaces = new java.util.HashMap<>();
-    private final java.util.Map<String, String> workspaceOperations = new java.util.HashMap<>();
+    private final Map<String, String> runWorkspaces = new HashMap<>();
+    private final Map<String, String> workspaceOperations = new HashMap<>();
 
     /**
      * 抢占会话的运行槽位。
@@ -30,16 +33,20 @@ public class RunRegistry {
         return claim(runId, sessionId, null);
     }
 
-    public synchronized boolean claim(String runId, String sessionId, java.nio.file.Path workspace) {
+    public synchronized boolean claim(String runId, String sessionId, Path workspace) {
         String key = workspace == null ? null : workspaceKey(workspace);
-        if (key != null && workspaceOperations.entrySet().stream().anyMatch(entry -> overlaps(key, entry.getKey())
-                && !runId.equals(entry.getValue()))) return false;
+        if (key != null && workspaceOperations.entrySet().stream()
+            .anyMatch(entry -> overlaps(key, entry.getKey()) && !runId.equals(entry.getValue()))) {
+            return false;
+        }
         String existing = sessionToRun.putIfAbsent(sessionId, runId);
         if (existing != null && !existing.equals(runId)) {
             return false;
         }
         runToSession.put(runId, sessionId);
-        if (key != null) runWorkspaces.put(runId, key);
+        if (key != null) {
+            runWorkspaces.put(runId, key);
+        }
         return true;
     }
 
@@ -48,13 +55,15 @@ public class RunRegistry {
         register(runId, sessionId, null);
     }
 
-    public synchronized void register(String runId, String sessionId, java.nio.file.Path workspace) {
+    public synchronized void register(String runId, String sessionId, Path workspace) {
         String key = workspace == null ? null : workspaceKey(workspace);
-        if (key != null && workspaceOperations.entrySet().stream().anyMatch(entry -> overlaps(key, entry.getKey())
-                && !runId.equals(entry.getValue()))) {
+        if (key != null && workspaceOperations.entrySet().stream()
+            .anyMatch(entry -> overlaps(key, entry.getKey()) && !runId.equals(entry.getValue()))) {
             throw new IllegalStateException("工作区正在回退或切换分支");
         }
-        if (key != null) runWorkspaces.put(runId, key);
+        if (key != null) {
+            runWorkspaces.put(runId, key);
+        }
         runToSession.put(runId, sessionId);
         sessionToRun.put(sessionId, runId);
     }
@@ -76,25 +85,32 @@ public class RunRegistry {
         }
     }
 
-    public synchronized boolean lockWorkspace(String operationId, java.nio.file.Path workspace) {
+    public synchronized boolean lockWorkspace(String operationId, Path workspace) {
         String key = workspaceKey(workspace);
-        if (workspaceOperations.entrySet().stream().anyMatch(entry -> overlaps(key, entry.getKey())
-                && !operationId.equals(entry.getValue()))) return false;
-        if (runWorkspaces.entrySet().stream().anyMatch(entry -> overlaps(key, entry.getValue())
-                && !operationId.equals(entry.getKey()))) return false;
+        if (workspaceOperations.entrySet().stream()
+            .anyMatch(entry -> overlaps(key, entry.getKey()) && !operationId.equals(entry.getValue()))) {
+            return false;
+        }
+        if (runWorkspaces.entrySet().stream()
+            .anyMatch(entry -> overlaps(key, entry.getValue()) && !operationId.equals(entry.getKey()))) {
+            return false;
+        }
         workspaceOperations.put(key, operationId);
         return true;
     }
 
-    private static String workspaceKey(java.nio.file.Path workspace) {
-        try { return workspace.toRealPath().toString(); }
-        catch (java.io.IOException e) { return workspace.toAbsolutePath().normalize().toString(); }
+    private static String workspaceKey(Path workspace) {
+        try {
+            return workspace.toRealPath().toString();
+        } catch (IOException e) {
+            return workspace.toAbsolutePath().normalize().toString();
+        }
     }
 
     /** 父目录与子目录共享文件，恢复期间必须使用同一套互斥边界。 */
     private static boolean overlaps(String first, String second) {
-        Path left = java.nio.file.Path.of(first);
-        Path right = java.nio.file.Path.of(second);
+        Path left = Path.of(first);
+        Path right = Path.of(second);
         return left.startsWith(right) || right.startsWith(left);
     }
 

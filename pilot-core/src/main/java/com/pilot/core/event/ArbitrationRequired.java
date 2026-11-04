@@ -11,8 +11,8 @@ import java.util.List;
  * @param options       可选操作
  * @param report        结构化报告正文（Markdown）
  */
-public record ArbitrationRequired(String arbitrationId, String kind, String taskId,
-                                  List<String> options, String report) implements SessionEvent {
+public record ArbitrationRequired(String arbitrationId, String kind, String taskId, List<String> options,
+    String report) implements SessionEvent {
     public ArbitrationRequired {
         arbitrationId = arbitrationId == null ? "" : arbitrationId;
         kind = kind == null ? "" : kind;

@@ -1,24 +1,26 @@
 package com.pilot.server.workspace;
 
-import com.pilot.core.loop.Message;
-import com.pilot.core.tool.CommandChangeTracker;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.io.TempDir;
-import tools.jackson.databind.json.JsonMapper;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.loop.Message;
+import com.pilot.core.tool.CommandChangeTracker;
+
+import tools.jackson.databind.json.JsonMapper;
 
 class RunSnapshotServiceTest {
     @TempDir
@@ -120,8 +122,8 @@ class RunSnapshotServiceTest {
 
         assertNotNull(meta);
         assertEquals("run_meta", meta.runId());
-        assertEquals(List.of("a.txt", "dir/new.txt"), meta.files().stream()
-                .map(RunSnapshotService.SnapshotEntry::path).toList());
+        assertEquals(List.of("a.txt", "dir/new.txt"),
+            meta.files().stream().map(RunSnapshotService.SnapshotEntry::path).toList());
         assertTrue(meta.files().get(0).originalHash() != null);
         assertNull(meta.files().get(1).originalHash());
         assertNull(snapshots.meta("run_absent"), "没写过文件时没有元数据，交给上层按「无改动」处理");
@@ -138,6 +140,7 @@ class RunSnapshotServiceTest {
             snapshots.clear();
         }
     }
+
     @Test
     void restoresAllLaterRunsToEarliestStateAndPreflightsEveryFile() throws IOException {
         Path file = workspace.resolve("a.txt");
@@ -206,8 +209,7 @@ class RunSnapshotServiceTest {
         } catch (IOException | UnsupportedOperationException e) {
             // Windows 创建符号链接需要 SeCreateSymbolicLinkPrivilege（管理员或开发者模式）。
             // 无特权时跳过而非报错：被测行为依赖符号链接真实存在，环境给不了就换机器再验。
-            org.junit.jupiter.api.Assumptions.assumeTrue(false,
-                    "本机无法创建符号链接（需要管理员或开发者模式），跳过符号链接拒绝断言");
+            Assumptions.assumeTrue(false, "本机无法创建符号链接（需要管理员或开发者模式），跳过符号链接拒绝断言");
             return;
         }
         assertEquals(List.of("dir/a.txt"), snapshots.rollback("linked_parent").conflicts());
@@ -225,9 +227,7 @@ class RunSnapshotServiceTest {
 
     @Test
     void conversationCheckpointSurvivesServiceRestartWithExactMessages() {
-        List<Message> messages = List.of(com.pilot.core.loop.Message.user("重复"),
-                com.pilot.core.loop.Message.assistant("之前的回复", List.of()),
-                com.pilot.core.loop.Message.user("重复"));
+        List<Message> messages = List.of(Message.user("重复"), Message.assistant("之前的回复", List.of()), Message.user("重复"));
         snapshots.saveConversation("conversation", messages, List.of());
         RunSnapshotService reopened = new RunSnapshotService(JsonMapper.builder().build(), storage);
         assertEquals(messages, reopened.conversation("conversation").messages());
@@ -257,8 +257,7 @@ class RunSnapshotServiceTest {
     void legacyMetadataIsUnavailableInsteadOfOverwritingUnverifiedFiles() throws IOException {
         Path directory = storage.resolve("legacy");
         Files.createDirectories(directory);
-        Files.writeString(directory.resolve("meta.json"),
-                "{\"runId\":\"legacy\",\"workspace\":\"/tmp\",\"files\":[]}");
+        Files.writeString(directory.resolve("meta.json"), "{\"runId\":\"legacy\",\"workspace\":\"/tmp\",\"files\":[]}");
         assertFalse(snapshots.preview(List.of("legacy")).ready());
     }
 

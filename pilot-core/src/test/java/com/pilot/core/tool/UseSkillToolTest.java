@@ -1,9 +1,8 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.skill.SkillCatalog;
-import com.pilot.core.skill.SkillSource;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -11,26 +10,29 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.skill.SkillCatalog;
+import com.pilot.core.skill.SkillSource;
 
 class UseSkillToolTest {
-    @TempDir Path dir;
+    @TempDir
+    Path dir;
 
     private SkillCatalog oneSkill() throws IOException {
         Path root = Files.createDirectories(dir.resolve("skills"));
         Path skill = Files.createDirectories(root.resolve("commit-review"));
         Files.writeString(skill.resolve("SKILL.md"), """
-                ---
-                name: commit-review
-                description: 审阅未提交改动并按风险输出问题清单。
-                command: /review
-                ---
-                ## 流程
-                1. 先看 git status
-                2. 按 references/risk-checklist.md 检查
-                """);
+            ---
+            name: commit-review
+            description: 审阅未提交改动并按风险输出问题清单。
+            command: /review
+            ---
+            ## 流程
+            1. 先看 git status
+            2. 按 references/risk-checklist.md 检查
+            """);
         Files.createDirectories(skill.resolve("references"));
         Files.writeString(skill.resolve("references/risk-checklist.md"), "- 高风险：改动公共接口");
         return SkillCatalog.scan(List.of(new SkillCatalog.Root(root, SkillSource.USER)));
@@ -81,10 +83,8 @@ class UseSkillToolTest {
     @Test
     void traversalOutsideSkillDirectoryIsRejected() throws IOException {
         var tool = new UseSkillTool(oneSkill());
-        assertTrue(tool.execute(Map.of("name", "commit-review", "file", "../outside.md"))
-                .startsWith("ERROR:"));
-        assertTrue(tool.execute(Map.of("name", "commit-review", "file", "/etc/passwd"))
-                .startsWith("ERROR:"));
+        assertTrue(tool.execute(Map.of("name", "commit-review", "file", "../outside.md")).startsWith("ERROR:"));
+        assertTrue(tool.execute(Map.of("name", "commit-review", "file", "/etc/passwd")).startsWith("ERROR:"));
     }
 
     @Test

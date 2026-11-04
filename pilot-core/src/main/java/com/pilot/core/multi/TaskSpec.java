@@ -14,8 +14,8 @@ import java.util.Objects;
  * @param risk      风险等级，决定是否需要强制人工审批
  * @param reviewers 同一任务并行出方案的子 Agent 数量；&gt;1 时结论不一致会触发分歧仲裁
  */
-public record TaskSpec(String id, String title, String goal, List<String> dependsOn,
-                       AgentScope scope, RiskLevel risk, int reviewers) {
+public record TaskSpec(String id, String title, String goal, List<String> dependsOn, AgentScope scope, RiskLevel risk,
+    int reviewers) {
     public TaskSpec {
         if (id == null || id.isBlank()) {
             throw new IllegalArgumentException("任务编号不能为空");
@@ -26,12 +26,8 @@ public record TaskSpec(String id, String title, String goal, List<String> depend
             throw new IllegalArgumentException("任务 " + id + " 缺少目标描述");
         }
         goal = goal.strip();
-        dependsOn = dependsOn == null ? List.of() : dependsOn.stream()
-                .filter(Objects::nonNull)
-                .map(String::strip)
-                .filter(dep -> !dep.isEmpty())
-                .distinct()
-                .toList();
+        dependsOn = dependsOn == null ? List.of() : dependsOn.stream().filter(Objects::nonNull).map(String::strip)
+            .filter(dep -> !dep.isEmpty()).distinct().toList();
         if (dependsOn.contains(id)) {
             throw new IllegalArgumentException("任务 " + id + " 不能依赖自己");
         }
@@ -41,17 +37,14 @@ public record TaskSpec(String id, String title, String goal, List<String> depend
     }
 
     /** 便捷构造：只读调研任务，文件范围用通配符描述。 */
-    public static TaskSpec readOnly(String id, String title, String goal, List<String> dependsOn,
-                                    List<String> files) {
-        return new TaskSpec(id, title, goal, dependsOn,
-                AgentScope.readOnly(files, List.of()), RiskLevel.LOW, 1);
+    public static TaskSpec readOnly(String id, String title, String goal, List<String> dependsOn, List<String> files) {
+        return new TaskSpec(id, title, goal, dependsOn, AgentScope.readOnly(files, List.of()), RiskLevel.LOW, 1);
     }
 
     /** 便捷构造：可提交沙箱改动的任务。 */
-    public static TaskSpec editable(String id, String title, String goal, List<String> dependsOn,
-                                    List<String> files, RiskLevel risk) {
-        return new TaskSpec(id, title, goal, dependsOn,
-                AgentScope.readWrite(files, List.of()), risk, 1);
+    public static TaskSpec editable(String id, String title, String goal, List<String> dependsOn, List<String> files,
+        RiskLevel risk) {
+        return new TaskSpec(id, title, goal, dependsOn, AgentScope.readWrite(files, List.of()), risk, 1);
     }
 
     public TaskSpec withReviewers(int count) {

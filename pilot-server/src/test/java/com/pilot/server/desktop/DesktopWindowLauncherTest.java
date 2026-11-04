@@ -1,18 +1,19 @@
 package com.pilot.server.desktop;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class DesktopWindowLauncherTest {
 
@@ -58,8 +59,7 @@ class DesktopWindowLauncherTest {
         Files.writeString(command, "#!/bin/sh\necho '故意失败' >&2\nexit 1\n");
         assertTrue(command.toFile().setExecutable(true));
         Path log = root.resolve("prepare.log");
-        assertThrows(java.io.IOException.class,
-                () -> DesktopWindowLauncher.prepareDesktopBinary(root, command, log));
+        assertThrows(IOException.class, () -> DesktopWindowLauncher.prepareDesktopBinary(root, command, log));
         assertTrue(Files.readString(log).contains("故意失败"));
     }
 

@@ -1,8 +1,8 @@
 package com.pilot.core.loop;
 
-import com.pilot.core.tool.ToolCall;
-
 import java.util.List;
+
+import com.pilot.core.tool.ToolCall;
 
 /**
  * 模型对话消息，对应 OpenAI 兼容协议的 messages 元素。
@@ -14,7 +14,7 @@ import java.util.List;
  * @param attachments 需要模型侧二次处理的附件（图片等）；文本附件已内联进 content
  */
 public record Message(String role, String content, List<ToolCall> toolCalls, String toolCallId,
-                      List<Attachment> attachments, List<Integer> imagePositions) {
+    List<Attachment> attachments, List<Integer> imagePositions) {
     public Message {
         if (role == null || role.isBlank()) {
             throw new IllegalArgumentException("role must not be blank");
@@ -33,7 +33,7 @@ public record Message(String role, String content, List<ToolCall> toolCalls, Str
     }
 
     public Message(String role, String content, List<ToolCall> toolCalls, String toolCallId,
-                   List<Attachment> attachments) {
+        List<Attachment> attachments) {
         this(role, content, toolCalls, toolCallId, attachments, List.of());
     }
 

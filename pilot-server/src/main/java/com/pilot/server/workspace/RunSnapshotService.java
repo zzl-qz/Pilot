@@ -1,20 +1,10 @@
 package com.pilot.server.workspace;
 
-import com.pilot.core.loop.Message;
-import com.pilot.core.plan.PlanItem;
-import com.pilot.core.tool.CommandChangeTracker;
-import com.pilot.core.tool.SnapshotSink;
-import com.pilot.server.config.PilotDataDir;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
-import tools.jackson.databind.ObjectMapper;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.nio.file.Files;
 import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
@@ -32,6 +22,18 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+import com.pilot.core.loop.Message;
+import com.pilot.core.plan.PlanItem;
+import com.pilot.core.tool.CommandChangeTracker;
+import com.pilot.core.tool.SnapshotSink;
+import com.pilot.server.config.PilotDataDir;
+
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 运行级文件快照：写工具落盘前备份原文件，支持按 runId 回滚。
@@ -52,10 +54,9 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     private static final int MAX_COMMAND_FILES = 100_000;
     private static final long MAX_COMMAND_HASH_BYTES = 64L * 1024 * 1024;
     private static final long MAX_COMMAND_BACKUP_BYTES = 128L * 1024 * 1024;
-    private static final Set<String> COMMAND_IGNORED_DIRECTORIES = Set.of(
-            ".git", ".pilot", ".gradle", ".idea", ".vscode", ".next", ".nuxt",
-            "node_modules", "target", "build", "dist", "out", "coverage",
-            "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv");
+    private static final Set<String> COMMAND_IGNORED_DIRECTORIES =
+        Set.of(".git", ".pilot", ".gradle", ".idea", ".vscode", ".next", ".nuxt", "node_modules", "target", "build",
+            "dist", "out", "coverage", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv");
 
     private final ObjectMapper mapper;
     private final Path root;
@@ -81,7 +82,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         }
     }
 
-    public record SnapshotMeta(String runId, String workspace, List<SnapshotEntry> files, Boolean completed, List<String> conflicts) {
+    public record SnapshotMeta(String runId, String workspace, List<SnapshotEntry> files, Boolean completed,
+        List<String> conflicts) {
         public SnapshotMeta {
             completed = Boolean.TRUE.equals(completed);
             conflicts = conflicts == null ? List.of() : List.copyOf(conflicts);
@@ -89,14 +91,15 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     }
 
     /** 独立保存每轮开始时的模型记忆，压缩、重复输入和进程重启都不影响定位。 */
-    public record ConversationCheckpoint(List<Message> messages, List<PlanItem> plan) { }
+    public record ConversationCheckpoint(List<Message> messages, List<PlanItem> plan) {
+    }
 
     public void saveConversation(String runId, List<Message> messages, List<PlanItem> plan) {
         Path directory = root.resolve(sanitize(runId));
         try {
             Files.createDirectories(directory);
-            Files.writeString(directory.resolve("conversation.json"), mapper.writeValueAsString(
-                    new ConversationCheckpoint(List.copyOf(messages), List.copyOf(plan))));
+            Files.writeString(directory.resolve("conversation.json"),
+                mapper.writeValueAsString(new ConversationCheckpoint(List.copyOf(messages), List.copyOf(plan))));
         } catch (IOException e) {
             throw new UncheckedIOException("保存消息检查点失败", e);
         }
@@ -104,7 +107,9 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
 
     public ConversationCheckpoint conversation(String runId) {
         Path file = root.resolve(sanitize(runId)).resolve("conversation.json");
-        if (!Files.isRegularFile(file)) return null;
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
         try {
             return mapper.readValue(Files.readString(file), ConversationCheckpoint.class);
         } catch (IOException e) {
@@ -112,8 +117,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         }
     }
 
-    public record RollbackReport(String runId, String workspace, List<String> restored,
-                                 List<String> deleted, List<String> failed, List<String> conflicts) {
+    public record RollbackReport(String runId, String workspace, List<String> restored, List<String> deleted,
+        List<String> failed, List<String> conflicts) {
     }
 
     public void bind(String runId, Path workspace) {
@@ -131,9 +136,11 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             SnapshotEntry entry = context.entries.get(i);
             try {
                 Path file = context.workspace.resolve(entry.path()).normalize();
-                String completedHash = context.writtenHashes.containsKey(entry.path()) ? context.writtenHashes.get(entry.path())
+                String completedHash =
+                    context.writtenHashes.containsKey(entry.path()) ? context.writtenHashes.get(entry.path())
                         : file.startsWith(context.workspace) ? hashIfRegularFile(file) : null;
-                context.entries.set(i, new SnapshotEntry(entry.path(), entry.existed(), entry.originalHash(), completedHash));
+                context.entries.set(i,
+                    new SnapshotEntry(entry.path(), entry.existed(), entry.originalHash(), completedHash));
             } catch (IOException e) {
                 completed = false;
                 log.warn("读取 {} 的完成态指纹失败", entry.path(), e);
@@ -150,7 +157,9 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     @Override
     public synchronized CommandChangeTracker.Handle begin(Path workspace) {
         Context context = current.get();
-        if (context == null) return CommandChangeTracker.Handle.none();
+        if (context == null) {
+            return CommandChangeTracker.Handle.none();
+        }
         Path requested = workspace.toAbsolutePath().normalize();
         if (!sameWorkspace(requested, context.workspace)) {
             throw new IllegalStateException("命令工作区与当前运行快照不一致");
@@ -166,15 +175,22 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             Files.writeString(directory.resolve("baseline.json"), mapper.writeValueAsString(baseline));
             return new CommandChangeTracker.Handle(context.runId, id);
         } catch (IOException | RuntimeException e) {
-            try { deleteRecursively(directory); } catch (IOException ignored) { }
-            if (e instanceof RuntimeException runtime) throw runtime;
-            throw new UncheckedIOException("建立命令前文件基线失败", (IOException) e);
+            try {
+                deleteRecursively(directory);
+            } catch (IOException ignored) {
+            }
+            if (e instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw new UncheckedIOException("建立命令前文件基线失败", (IOException)e);
         }
     }
 
     /** Recognize platform path aliases without rewriting the snapshot's lexical workspace root. */
     private static boolean sameWorkspace(Path left, Path right) {
-        if (left.equals(right)) return true;
+        if (left.equals(right)) {
+            return true;
+        }
         try {
             return Files.isSameFile(left, right);
         } catch (IOException e) {
@@ -184,12 +200,17 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
 
     @Override
     public synchronized CommandChangeTracker.Result finish(CommandChangeTracker.Handle handle) {
-        if (handle == null || !handle.active()) return CommandChangeTracker.Result.empty();
+        if (handle == null || !handle.active()) {
+            return CommandChangeTracker.Result.empty();
+        }
         Path directory = commandTrackingDirectory(handle.runId(), handle.id());
         Path resultFile = directory.resolve("result.json");
         if (Files.isRegularFile(resultFile)) {
-            try { return mapper.readValue(Files.readString(resultFile), CommandChangeTracker.Result.class); }
-            catch (IOException e) { return new CommandChangeTracker.Result(List.of(), false, "命令变更结果损坏"); }
+            try {
+                return mapper.readValue(Files.readString(resultFile), CommandChangeTracker.Result.class);
+            } catch (IOException e) {
+                return new CommandChangeTracker.Result(List.of(), false, "命令变更结果损坏");
+            }
         }
         Path baselineFile = directory.resolve("baseline.json");
         if (!Files.isRegularFile(baselineFile)) {
@@ -202,10 +223,10 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             Set<String> names = new LinkedHashSet<>(baseline.files().keySet());
             names.addAll(after.files().keySet());
             List<String> changed = names.stream()
-                    .filter(name -> !Objects.equals(
-                            baseline.files().get(name) == null ? null : baseline.files().get(name).hash(),
-                            after.files().get(name) == null ? null : after.files().get(name).hash()))
-                    .sorted().toList();
+                .filter(name -> !Objects.equals(
+                    baseline.files().get(name) == null ? null : baseline.files().get(name).hash(),
+                    after.files().get(name) == null ? null : after.files().get(name).hash()))
+                .sorted().toList();
             for (String name : changed) {
                 CommandFile before = baseline.files().get(name);
                 byte[] content = null;
@@ -216,17 +237,19 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                     }
                     content = Files.readAllBytes(backup);
                 }
-                externalChange(workspace.resolve(name), new SnapshotSink.FileSnapshot(
-                        before != null, content, before == null ? "" : before.hash()));
+                externalChange(workspace.resolve(name),
+                    new SnapshotSink.FileSnapshot(before != null, content, before == null ? "" : before.hash()));
             }
             CommandChangeTracker.Result result = new CommandChangeTracker.Result(changed, true, "");
             Files.writeString(resultFile, mapper.writeValueAsString(result));
             return result;
         } catch (IOException | RuntimeException e) {
             CommandChangeTracker.Result result = new CommandChangeTracker.Result(List.of(), false,
-                    e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
-            try { Files.writeString(resultFile, mapper.writeValueAsString(result)); }
-            catch (IOException ignored) { }
+                e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            try {
+                Files.writeString(resultFile, mapper.writeValueAsString(result));
+            } catch (IOException ignored) {
+            }
             return result;
         }
     }
@@ -236,30 +259,34 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         int[] count = {0};
         long[] backedUpBytes = {0L};
         Files.walkFileTree(workspace, new SimpleFileVisitor<>() {
-            @Override public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
+            @Override
+            public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
                 if (!directory.equals(workspace)
-                        && (directory.toAbsolutePath().normalize().startsWith(RunSnapshotService.this.root)
+                    && (directory.toAbsolutePath().normalize().startsWith(RunSnapshotService.this.root)
                         || COMMAND_IGNORED_DIRECTORIES.contains(directory.getFileName().toString()))) {
                     return FileVisitResult.SKIP_SUBTREE;
                 }
                 return FileVisitResult.CONTINUE;
             }
 
-            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
-                if (!attributes.isRegularFile() || Files.isSymbolicLink(file)) return FileVisitResult.CONTINUE;
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
+                if (!attributes.isRegularFile() || Files.isSymbolicLink(file)) {
+                    return FileVisitResult.CONTINUE;
+                }
                 if (++count[0] > MAX_COMMAND_FILES) {
                     throw new IOException("工作区可跟踪文件超过上限 " + MAX_COMMAND_FILES);
                 }
                 String relative = workspace.relativize(file).toString().replace('\\', '/');
                 long size = attributes.size();
-                String hash = size <= MAX_COMMAND_HASH_BYTES
-                        ? hashIfRegularFile(file)
-                        : "large:" + size + ":" + attributes.lastModifiedTime().toMillis();
+                String hash = size <= MAX_COMMAND_HASH_BYTES ? hashIfRegularFile(file)
+                    : "large:" + size + ":" + attributes.lastModifiedTime().toMillis();
                 boolean copied = false;
-                if (backup && size <= MAX_SNAPSHOT_BYTES
-                        && backedUpBytes[0] + size <= MAX_COMMAND_BACKUP_BYTES) {
+                if (backup && size <= MAX_SNAPSHOT_BYTES && backedUpBytes[0] + size <= MAX_COMMAND_BACKUP_BYTES) {
                     Path target = backupRoot.resolve(relative).normalize();
-                    if (!target.startsWith(backupRoot.normalize())) throw new IOException("非法命令基线路径");
+                    if (!target.startsWith(backupRoot.normalize())) {
+                        throw new IOException("非法命令基线路径");
+                    }
                     Files.createDirectories(target.getParent());
                     Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
                     backedUpBytes[0] += size;
@@ -285,7 +312,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         }
     }
 
-    private record CommandFile(String hash, boolean backedUp) { }
+    private record CommandFile(String hash, boolean backedUp) {
+    }
 
     @Override
     public void beforeWrite(Path file) {
@@ -302,7 +330,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         if (!context.recorded.add(key)) {
             try {
                 if (context.writtenHashes.containsKey(key)
-                        && !Objects.equals(context.writtenHashes.get(key), hashIfRegularFile(absolute))) {
+                    && !Objects.equals(context.writtenHashes.get(key), hashIfRegularFile(absolute))) {
                     context.conflicts.add(key);
                 }
             } catch (IOException e) {
@@ -337,9 +365,13 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     @Override
     public void afterWrite(Path file) {
         Context context = current.get();
-        if (context == null) return;
+        if (context == null) {
+            return;
+        }
         String key = context.workspace.relativize(file.toAbsolutePath().normalize()).toString().replace('\\', '/');
-        if (!context.recorded.contains(key)) return;
+        if (!context.recorded.contains(key)) {
+            return;
+        }
         try {
             context.writtenHashes.put(key, hashIfRegularFile(file));
         } catch (IOException e) {
@@ -352,7 +384,9 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     @Override
     public synchronized void externalChange(Path file, SnapshotSink.FileSnapshot original) {
         Context context = current.get();
-        if (context == null) return;
+        if (context == null) {
+            return;
+        }
         Path absolute = file.toAbsolutePath().normalize();
         if (!absolute.startsWith(context.workspace) || absolute.equals(context.workspace)) {
             throw new IllegalStateException("拒绝记录工作区之外的命令变更: " + absolute);
@@ -363,8 +397,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             String currentHash = hashIfRegularFile(absolute);
             if (!context.recorded.add(key)) {
                 String expected = context.writtenHashes.get(key);
-                if (expected != null && original != null && original.hash() != null
-                        && !original.hash().isBlank() && !Objects.equals(expected, original.hash())) {
+                if (expected != null && original != null && original.hash() != null && !original.hash().isBlank()
+                    && !Objects.equals(expected, original.hash())) {
                     context.conflicts.add(key);
                 }
                 context.writtenHashes.put(key, currentHash);
@@ -382,7 +416,9 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                 }
                 Files.createDirectories(target.getParent());
                 Files.write(target, content);
-                if (originalHash == null || originalHash.isBlank()) originalHash = hash(content);
+                if (originalHash == null || originalHash.isBlank()) {
+                    originalHash = hash(content);
+                }
             }
             context.entries.add(new SnapshotEntry(key, existed, originalHash, currentHash));
             context.writtenHashes.put(key, currentHash);
@@ -415,11 +451,13 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     public synchronized RestorePreview preview(List<String> runIds) {
         RestorePlan plan = prepare(runIds);
         return new RestorePreview(List.copyOf(plan.actions.keySet()), List.copyOf(plan.conflicts),
-                List.copyOf(plan.unavailable));
+            List.copyOf(plan.unavailable));
     }
 
     public synchronized RollbackReport rollback(String runId) {
-        if (meta(runId) == null) throw new IllegalArgumentException("没有该运行的回滚快照: " + runId);
+        if (meta(runId) == null) {
+            throw new IllegalArgumentException("没有该运行的回滚快照: " + runId);
+        }
         return rollback(List.of(runId));
     }
 
@@ -437,7 +475,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             try {
                 // 预览后仍重新校验；每次实际写入前再检查，避免覆盖预览期间的手工修改。
                 if (!safePath(action.workspace, action.target)
-                        || !Objects.equals(hashIfRegularFile(action.target), action.currentHash)) {
+                    || !Objects.equals(hashIfRegularFile(action.target), action.currentHash)) {
                     plan.conflicts.add(action.path);
                     break;
                 }
@@ -455,7 +493,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             for (RestoreAction action : applied.reversed()) {
                 try {
                     if (safePath(action.workspace, action.target)
-                            && Objects.equals(hashIfRegularFile(action.target), hash(action.content))) {
+                        && Objects.equals(hashIfRegularFile(action.target), hash(action.content))) {
                         writeContent(action.target, action.previous);
                     } else {
                         failed.add(action.path);
@@ -497,15 +535,17 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                         continue;
                     }
                     if (lastHash.containsKey(entry.path())
-                            && !Objects.equals(lastHash.get(entry.path()), entry.originalHash())) {
+                        && !Objects.equals(lastHash.get(entry.path()), entry.originalHash())) {
                         // 两轮之间有人改过同一个文件，恢复首轮快照会丢掉这些修改。
                         plan.conflicts.add(entry.path());
                     }
                     lastHash.put(entry.path(), entry.completedHash());
                     if (!plan.actions.containsKey(entry.path())) {
                         Path backup = root.resolve(sanitize(runId)).resolve("files").resolve(entry.path()).normalize();
-                        byte[] content = entry.existed() && Files.isRegularFile(backup) ? Files.readAllBytes(backup) : null;
-                        if (entry.existed() && (content == null || !Objects.equals(hash(content), entry.originalHash()))) {
+                        byte[] content =
+                            entry.existed() && Files.isRegularFile(backup) ? Files.readAllBytes(backup) : null;
+                        if (entry.existed()
+                            && (content == null || !Objects.equals(hash(content), entry.originalHash()))) {
                             plan.unavailable.add(entry.path());
                             continue;
                         }
@@ -515,8 +555,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                         }
                         String currentHash = hashIfRegularFile(target);
                         byte[] previous = currentHash == null ? null : Files.readAllBytes(target);
-                        plan.actions.put(entry.path(), new RestoreAction(entry.path(), workspace, target,
-                                content, currentHash, previous));
+                        plan.actions.put(entry.path(),
+                            new RestoreAction(entry.path(), workspace, target, content, currentHash, previous));
                     }
                 } catch (IOException e) {
                     plan.unavailable.add(entry.path());
@@ -532,17 +572,29 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     }
 
     private static boolean safePath(Path workspace, Path target) throws IOException {
-        if (!target.startsWith(workspace) || target.equals(workspace)) return false;
+        if (!target.startsWith(workspace) || target.equals(workspace)) {
+            return false;
+        }
         Path part = workspace;
-        if (Files.isSymbolicLink(part)) return false;
+        if (Files.isSymbolicLink(part)) {
+            return false;
+        }
         for (Path segment : workspace.relativize(target)) {
             part = part.resolve(segment);
-            if (Files.isSymbolicLink(part)) return false;
+            if (Files.isSymbolicLink(part)) {
+                return false;
+            }
         }
-        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) return true;
-        if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) return false;
+        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+            return true;
+        }
+        if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
         try {
-            if (((Number) Files.getAttribute(target, "unix:nlink", LinkOption.NOFOLLOW_LINKS)).intValue() > 1) return false;
+            if (((Number)Files.getAttribute(target, "unix:nlink", LinkOption.NOFOLLOW_LINKS)).intValue() > 1) {
+                return false;
+            }
         } catch (UnsupportedOperationException | IllegalArgumentException ignored) {
             // Windows 文件系统没有 unix:nlink 属性。
         }
@@ -559,8 +611,10 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         try {
             Files.write(temporary, content);
             if (Files.exists(target)) {
-                try { Files.setPosixFilePermissions(temporary, Files.getPosixFilePermissions(target)); }
-                catch (UnsupportedOperationException ignored) { }
+                try {
+                    Files.setPosixFilePermissions(temporary, Files.getPosixFilePermissions(target));
+                } catch (UnsupportedOperationException ignored) {
+                }
             }
             Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
         } finally {
@@ -568,8 +622,9 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         }
     }
 
-    private record RestoreAction(String path, Path workspace, Path target, byte[] content,
-                                 String currentHash, byte[] previous) { }
+    private record RestoreAction(String path, Path workspace, Path target, byte[] content, String currentHash,
+        byte[] previous) {
+    }
 
     private static final class RestorePlan {
         String workspace;
@@ -587,7 +642,9 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             try (InputStream input = Files.newInputStream(file)) {
                 byte[] buffer = new byte[8192];
                 int count;
-                while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count);
+                while ((count = input.read(buffer)) != -1) {
+                    digest.update(buffer, 0, count);
+                }
             }
             return java.util.HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException e) {
@@ -596,7 +653,9 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     }
 
     private static String hash(byte[] content) {
-        if (content == null) return null;
+        if (content == null) {
+            return null;
+        }
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(content);
             return java.util.HexFormat.of().formatHex(digest);
@@ -640,7 +699,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         Path directory = context.directory();
         try {
             Files.createDirectories(directory);
-            SnapshotMeta meta = new SnapshotMeta(context.runId, context.workspace.toString(), List.copyOf(context.entries), context.completed, List.copyOf(context.conflicts));
+            SnapshotMeta meta = new SnapshotMeta(context.runId, context.workspace.toString(),
+                List.copyOf(context.entries), context.completed, List.copyOf(context.conflicts));
             Files.writeString(directory.resolve(META_FILE), mapper.writeValueAsString(meta));
         } catch (IOException e) {
             throw new UncheckedIOException("写入快照元数据失败", e);

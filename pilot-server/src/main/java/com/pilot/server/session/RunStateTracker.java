@@ -1,5 +1,20 @@
 package com.pilot.server.session;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
 import com.pilot.core.event.ApprovalRequired;
 import com.pilot.core.event.ApprovalResolved;
 import com.pilot.core.event.RunCancelled;
@@ -12,20 +27,6 @@ import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.event.ToolStarted;
 import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunCheckpointRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
-
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 /**
  * 把运行推进过程写成可恢复的调度状态，并用租约防止重复接管。
@@ -45,7 +46,7 @@ public class RunStateTracker {
 
     /** 启动恢复时展示给用户的一条接管信息。 */
     public record RecoveryEntry(String runId, String sessionId, String step, String lastSuccessfulStep,
-                                String nextAction, String workspace, String leaseState, Instant updatedAt) {
+        String nextAction, String workspace, String leaseState, Instant updatedAt) {
     }
 
     private final RunCheckpointRepository repository;
@@ -54,11 +55,10 @@ public class RunStateTracker {
     private final ConcurrentMap<String, String> lostLeases = new ConcurrentHashMap<>();
 
     public RunStateTracker(RunCheckpointRepository repository,
-                           @Value("${pilot.instance.id:}") String configuredInstanceId) {
+        @Value("${pilot.instance.id:}") String configuredInstanceId) {
         this.repository = repository;
         this.instanceId = configuredInstanceId == null || configuredInstanceId.isBlank()
-                ? "pilot-" + UUID.randomUUID().toString().substring(0, 8)
-                : configuredInstanceId.strip();
+            ? "pilot-" + UUID.randomUUID().toString().substring(0, 8) : configuredInstanceId.strip();
     }
 
     public String instanceId() {
@@ -88,46 +88,32 @@ public class RunStateTracker {
         }
         try {
             RunCheckpoint current = repository.find(runId)
-                    .orElseGet(() -> RunCheckpoint.start(runId, sessionId, null, instanceId,
-                            Instant.now(), LEASE));
+                .orElseGet(() -> RunCheckpoint.start(runId, sessionId, null, instanceId, Instant.now(), LEASE));
             Instant now = Instant.now();
             RunCheckpoint updated = switch (event) {
-                case RunStarted ignored -> current
-                        .advance(current.step(), current.lastToolCallId(), "收到任务输入",
-                                "请求模型决定下一步", RunCheckpoint.PHASE_MODEL, now);
-                case ToolStarted started -> current
-                        .advance(current.step(), started.callId(), current.lastSuccessfulStep(),
-                                "等待工具 " + started.name() + " 返回", RunCheckpoint.PHASE_TOOL, now);
-                case ToolCompleted completed -> current
-                        .advance(current.step() + 1, completed.callId(),
-                                "工具调用成功：" + clip(completed.resultSummary(), 120),
-                                "根据工具结果决定下一步", RunCheckpoint.PHASE_MODEL, now);
-                case ApprovalRequired approval -> current
-                        .advance(current.step(), current.lastToolCallId(), current.lastSuccessfulStep(),
-                                "等待用户批准 " + approval.name(), RunCheckpoint.PHASE_WAITING_APPROVAL, now);
-                case ApprovalResolved ignored -> current
-                        .advance(current.step(), current.lastToolCallId(), current.lastSuccessfulStep(),
-                                "继续执行已批准的工具", RunCheckpoint.PHASE_TOOL, now);
-                case RunRetrying retrying -> current
-                        .advance(current.step(), current.lastToolCallId(), current.lastSuccessfulStep(),
-                                "等待模型恢复后重试（第 " + retrying.attempt() + " 次）",
-                                RunCheckpoint.PHASE_MODEL, now);
-                case RunCompleted ignored -> current
-                        .advance(current.step(), current.lastToolCallId(), "本轮已完成",
-                                "等待用户验收或下一轮输入", RunCheckpoint.PHASE_FINISHED, now)
-                        .status(RunCheckpoint.STATUS_COMPLETED, now);
-                case RunCancelled ignored -> current
-                        .advance(current.step(), current.lastToolCallId(), "运行已被取消，进度与对话已保存",
-                                "确认后可继续执行", RunCheckpoint.PHASE_FINISHED, now)
-                        .status(RunCheckpoint.STATUS_INTERRUPTED, now);
-                case RunFailed failed -> current
-                        .advance(current.step(), current.lastToolCallId(),
-                                current.lastSuccessfulStep() == null ? "本轮未成功完成任何步骤"
-                                        : current.lastSuccessfulStep(),
-                                failed.retryable() ? "确认原因后可继续执行" : "按失败原因处理后重新开始",
-                                RunCheckpoint.PHASE_FINISHED, now)
-                        .status(failed.retryable() ? RunCheckpoint.STATUS_INTERRUPTED
-                                : RunCheckpoint.STATUS_FAILED, now);
+                case RunStarted ignored -> current.advance(current.step(), current.lastToolCallId(), "收到任务输入",
+                    "请求模型决定下一步", RunCheckpoint.PHASE_MODEL, now);
+                case ToolStarted started -> current.advance(current.step(), started.callId(),
+                    current.lastSuccessfulStep(), "等待工具 " + started.name() + " 返回", RunCheckpoint.PHASE_TOOL, now);
+                case ToolCompleted completed -> current.advance(current.step() + 1, completed.callId(),
+                    "工具调用成功：" + clip(completed.resultSummary(), 120), "根据工具结果决定下一步", RunCheckpoint.PHASE_MODEL, now);
+                case ApprovalRequired approval ->
+                    current.advance(current.step(), current.lastToolCallId(), current.lastSuccessfulStep(),
+                        "等待用户批准 " + approval.name(), RunCheckpoint.PHASE_WAITING_APPROVAL, now);
+                case ApprovalResolved ignored -> current.advance(current.step(), current.lastToolCallId(),
+                    current.lastSuccessfulStep(), "继续执行已批准的工具", RunCheckpoint.PHASE_TOOL, now);
+                case RunRetrying retrying ->
+                    current.advance(current.step(), current.lastToolCallId(), current.lastSuccessfulStep(),
+                        "等待模型恢复后重试（第 " + retrying.attempt() + " 次）", RunCheckpoint.PHASE_MODEL, now);
+                case RunCompleted ignored -> current.advance(current.step(), current.lastToolCallId(), "本轮已完成",
+                    "等待用户验收或下一轮输入", RunCheckpoint.PHASE_FINISHED, now).status(RunCheckpoint.STATUS_COMPLETED, now);
+                case RunCancelled ignored ->
+                    current.advance(current.step(), current.lastToolCallId(), "运行已被取消，进度与对话已保存", "确认后可继续执行",
+                        RunCheckpoint.PHASE_FINISHED, now).status(RunCheckpoint.STATUS_INTERRUPTED, now);
+                case RunFailed failed -> current.advance(current.step(), current.lastToolCallId(),
+                    current.lastSuccessfulStep() == null ? "本轮未成功完成任何步骤" : current.lastSuccessfulStep(),
+                    failed.retryable() ? "确认原因后可继续执行" : "按失败原因处理后重新开始", RunCheckpoint.PHASE_FINISHED, now)
+                    .status(failed.retryable() ? RunCheckpoint.STATUS_INTERRUPTED : RunCheckpoint.STATUS_FAILED, now);
                 // 文本增量等事件不影响调度状态：不写库，否则每个 token 都会产生一次落盘
                 default -> null;
             };
@@ -206,20 +192,18 @@ public class RunStateTracker {
             try {
                 boolean leasedByOther = checkpoint.leasedByOther(instanceId, now);
                 repository.releaseLease(checkpoint.runId(), RunCheckpoint.STATUS_INTERRUPTED, now);
-                leaseState = leasedByOther
-                        ? "上一个租约属于其他实例（" + checkpoint.owner() + "），已收敛为中断"
-                        : "已释放本机遗留租约";
+                leaseState = leasedByOther ? "上一个租约属于其他实例（" + checkpoint.owner() + "），已收敛为中断" : "已释放本机遗留租约";
             } catch (RuntimeException e) {
                 leaseState = "租约收敛失败：" + e.getMessage();
             }
             if (alreadyConverged) {
                 continue;
             }
-            entries.add(new RecoveryEntry(checkpoint.runId(), checkpoint.sessionId(),
-                    "第 " + checkpoint.step() + " 步", checkpoint.lastSuccessfulStep(),
-                    checkpoint.nextAction(), checkpoint.workspace(), leaseState, checkpoint.updatedAt()));
-            log.warn("运行 {}（会话 {}）上次未正常结束：{}，下一步：{}", checkpoint.runId(),
-                    checkpoint.sessionId(), checkpoint.lastSuccessfulStep(), checkpoint.nextAction());
+            entries.add(new RecoveryEntry(checkpoint.runId(), checkpoint.sessionId(), "第 " + checkpoint.step() + " 步",
+                checkpoint.lastSuccessfulStep(), checkpoint.nextAction(), checkpoint.workspace(), leaseState,
+                checkpoint.updatedAt()));
+            log.warn("运行 {}（会话 {}）上次未正常结束：{}，下一步：{}", checkpoint.runId(), checkpoint.sessionId(),
+                checkpoint.lastSuccessfulStep(), checkpoint.nextAction());
         }
         return List.copyOf(entries);
     }
@@ -246,11 +230,9 @@ public class RunStateTracker {
     }
 
     private static boolean affectsCheckpoint(SessionEvent event) {
-        return event instanceof RunStarted || event instanceof ToolStarted
-                || event instanceof ToolCompleted || event instanceof ApprovalRequired
-                || event instanceof ApprovalResolved || event instanceof RunRetrying
-                || event instanceof RunCompleted || event instanceof RunCancelled
-                || event instanceof RunFailed;
+        return event instanceof RunStarted || event instanceof ToolStarted || event instanceof ToolCompleted
+            || event instanceof ApprovalRequired || event instanceof ApprovalResolved || event instanceof RunRetrying
+            || event instanceof RunCompleted || event instanceof RunCancelled || event instanceof RunFailed;
     }
 
     private static String terminalStatus(String status) {

@@ -1,5 +1,5 @@
 import { installMicrophonePermissions } from './media-permission.mjs';
-import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, nativeImage, systemPreferences } from 'electron';
+import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, nativeImage, systemPreferences, dialog, clipboard } from 'electron';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { hostname } from 'node:os';
 import { formatPageLogs, markerPath, partitionName, snapBounds, userPageUrl } from './protocol.mjs';
 import { offlinePage } from './offline-page.mjs';
-import { windowSizeMenuItem } from './platform-menu.mjs';
+import { windowSizeMenuItem, workbenchMenuItems, workbenchShortcut } from './platform-menu.mjs';
 
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -285,6 +285,7 @@ function wire(tab) {
     if (next) createTab({ url: next, sessionId: null });
     return { action: 'deny' };
   });
+  installWorkbenchKeys(contents);
   contents.on('before-input-event', (event, input) => {
     const key = String(input.key || '').toLowerCase();
     const mod = input.meta || input.control;
@@ -685,6 +686,63 @@ function appIcon() {
   return image.isEmpty() ? undefined : image;
 }
 
+let workbenchReady = false;
+function dispatchWorkbenchCommand(command) {
+  if (!shell || shell.isDestroyed()) return;
+  if (workbenchReady) shell.webContents.send('pilot-workbench-command', command);
+  else if (shell.webContents.getURL().startsWith('data:')) shell.loadURL(shellUrl()).catch(() => {});
+  else shell.webContents.reloadIgnoringCache();
+}
+function installWorkbenchKeys(contents) {
+  contents.on('before-input-event', (event, input) => {
+    // 合成输入与长按也拦住默认菜单动作，避免绕过草稿保护反复重载。
+    const command = workbenchShortcut({ ...input, isComposing: false, isAutoRepeat: false });
+    if (command) {
+      event.preventDefault();
+      if (!input.isComposing && !input.isAutoRepeat) dispatchWorkbenchCommand(command);
+    }
+  });
+}
+
+async function openMobileConnection() {
+  if (!shell || shell.isDestroyed()) throw new Error('请先打开 Pilot 工作台');
+  shell.show(); shell.focus();
+  shell.webContents.send('pilot-mobile-open');
+}
+
+function trustedWorkbench(event) {
+  try {
+    return shell && !shell.isDestroyed() && event.sender === shell.webContents
+      && event.senderFrame === shell.webContents.mainFrame
+      && new URL(event.senderFrame.url).origin === new URL(shellUrl()).origin;
+  } catch { return false; }
+}
+
+ipcMain.on('pilot-workbench-ready', event => { if (trustedWorkbench(event)) workbenchReady = true; });
+ipcMain.handle('pilot-workbench-reload', event => {
+  if (!trustedWorkbench(event)) return { ok: false, error: '请从 Pilot 工作台重新载入界面' };
+  shell.webContents.reloadIgnoringCache();
+  return { ok: true };
+});
+
+ipcMain.handle('pilot-mobile-open', async event => {
+  if (!trustedWorkbench(event)) return { ok: false, error: '请从 Pilot 工作台打开手机连接。' };
+  await openMobileConnection();
+  return { ok: true };
+});
+
+ipcMain.handle('pilot-mobile-copy', async (event, code) => {
+  if (!trustedWorkbench(event) || typeof code !== 'string' || !/^pilot:\/\/pair\/[A-Za-z0-9_-]{20,8192}$/.test(code)) {
+    return { ok: false };
+  }
+  try {
+    // 只写入用户选择的配对码，不向页面开放系统剪贴板读取能力。
+    if (typeof clipboard.writeText === 'function') clipboard.writeText(code);
+    else await clipboard.write([{ 'text/plain': new Blob([code], { type: 'text/plain' }) }]);
+    return { ok: true };
+  } catch { return { ok: false }; }
+});
+
 function installMenu() {
   if (smoke) return;
   const template = [
@@ -716,7 +774,7 @@ function installMenu() {
     {
       label: '视图',
       submenu: [
-        { role: 'reload', label: '重新载入' },
+        ...workbenchMenuItems(dispatchWorkbenchCommand),
         { type: 'separator' },
         { role: 'zoomIn', label: '放大界面' },
         { role: 'zoomOut', label: '缩小界面' },
@@ -724,6 +782,13 @@ function installMenu() {
         { type: 'separator' },
         { role: 'togglefullscreen', label: '进入全屏' }
       ]
+    },
+    {
+      label: '设备',
+      submenu: [{ label: '连接手机…', click: async () => {
+        try { await openMobileConnection(); }
+        catch (error) { dialog.showErrorBox('无法连接手机', error.message); }
+      } }],
     },
     {
       label: '窗口',
@@ -758,6 +823,8 @@ app.whenReady().then(async () => {
       sandbox: true
     }
   });
+  installWorkbenchKeys(shell.webContents);
+  shell.webContents.on('did-start-navigation', (_event, _url, _inPlace, mainFrame) => { if (mainFrame) workbenchReady = false; });
   installMicrophonePermissions(shell.webContents, shellUrl(), systemPreferences);
   shell.webContents.on('did-fail-load', (_event, code, _desc, _url, isMainFrame) => {
     if (!isMainFrame || code === -3 || smoke || _url?.startsWith('data:')) return;

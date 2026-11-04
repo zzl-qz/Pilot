@@ -1,8 +1,5 @@
 package com.pilot.server.store;
 
-import com.pilot.core.session.InterruptedRun;
-import com.pilot.core.session.RunRepository;
-
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -10,6 +7,9 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+
+import com.pilot.core.session.InterruptedRun;
+import com.pilot.core.session.RunRepository;
 
 /** 运行记录落库，供状态校准与后续断点续跑使用。 */
 public final class JdbcRunRepository implements RunRepository {
@@ -21,32 +21,27 @@ public final class JdbcRunRepository implements RunRepository {
 
     @Override
     public void started(String runId, String sessionId, Instant at) {
-        JdbcSupport.update(store,
-                "INSERT OR REPLACE INTO runs (id, session_id, status, started_at, finished_at) "
-                        + "VALUES (?, ?, 'RUNNING', ?, NULL)",
-                statement -> {
-                    statement.setString(1, runId);
-                    statement.setString(2, sessionId);
-                    statement.setString(3, at.toString());
-                },
-                "记录运行开始失败: " + runId);
+        JdbcSupport.update(store, "INSERT OR REPLACE INTO runs (id, session_id, status, started_at, finished_at) "
+            + "VALUES (?, ?, 'RUNNING', ?, NULL)", statement -> {
+                statement.setString(1, runId);
+                statement.setString(2, sessionId);
+                statement.setString(3, at.toString());
+            }, "记录运行开始失败: " + runId);
     }
 
     @Override
     public void finished(String runId, String status, Instant at) {
-        JdbcSupport.update(store, "UPDATE runs SET status = ?, finished_at = ? WHERE id = ?",
-                statement -> {
-                    statement.setString(1, status);
-                    statement.setString(2, at.toString());
-                    statement.setString(3, runId);
-                },
-                "记录运行结束失败: " + runId);
+        JdbcSupport.update(store, "UPDATE runs SET status = ?, finished_at = ? WHERE id = ?", statement -> {
+            statement.setString(1, status);
+            statement.setString(2, at.toString());
+            statement.setString(3, runId);
+        }, "记录运行结束失败: " + runId);
     }
 
     @Override
     public int deleteBySession(String sessionId) {
         return JdbcSupport.update(store, "DELETE FROM runs WHERE session_id = ?",
-                statement -> statement.setString(1, sessionId), "删除运行记录失败: " + sessionId);
+            statement -> statement.setString(1, sessionId), "删除运行记录失败: " + sessionId);
     }
 
     @Override
@@ -57,7 +52,7 @@ public final class JdbcRunRepository implements RunRepository {
         try (Connection connection = store.open()) {
             List<InterruptedRun> interrupted = new ArrayList<>();
             try (PreparedStatement statement = connection.prepareStatement(select);
-                 ResultSet rows = statement.executeQuery()) {
+                ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
                     interrupted.add(new InterruptedRun(rows.getString("id"), rows.getString("session_id")));
                 }

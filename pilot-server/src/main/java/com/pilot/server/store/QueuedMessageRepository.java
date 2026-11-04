@@ -2,6 +2,7 @@ package com.pilot.server.store;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -22,19 +23,16 @@ public final class QueuedMessageRepository {
         if (store == null) {
             return memory.getOrDefault(sessionId, List.of());
         }
-        return JdbcSupport.query(store,
-                "SELECT content FROM queued_messages WHERE session_id = ? ORDER BY position",
-                statement -> statement.setString(1, sessionId),
-                rows -> rows.getString(1),
-                "读取排队消息失败");
+        return JdbcSupport.query(store, "SELECT content FROM queued_messages WHERE session_id = ? ORDER BY position",
+            statement -> statement.setString(1, sessionId), rows -> rows.getString(1), "读取排队消息失败");
     }
 
     public void save(String sessionId, List<String> messages) {
-        saveAll(java.util.Map.of(sessionId, messages));
+        saveAll(Map.of(sessionId, messages));
     }
 
     /** 一次事务移动普通队列与引导队列，失败时两个队列一起回滚。 */
-    public synchronized void saveAll(java.util.Map<String, List<String>> queues) {
+    public synchronized void saveAll(Map<String, List<String>> queues) {
         if (store == null) {
             queues.forEach((id, values) -> memory.put(id, List.copyOf(values)));
             return;
@@ -54,9 +52,9 @@ public final class QueuedMessageRepository {
                     });
                 }
                 JdbcSupport.exec(connection, "DELETE FROM queued_messages WHERE session_id = ?",
-                        statement -> statement.setString(1, sessionId));
+                    statement -> statement.setString(1, sessionId));
                 JdbcSupport.batch(connection,
-                        "INSERT INTO queued_messages(session_id, position, content) VALUES (?, ?, ?)", rows);
+                    "INSERT INTO queued_messages(session_id, position, content) VALUES (?, ?, ?)", rows);
             }
         }, "保存排队消息失败");
     }

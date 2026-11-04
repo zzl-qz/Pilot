@@ -1,18 +1,21 @@
 package com.pilot.server.config;
 
-import com.pilot.core.tool.ToolRegistry;
-import com.pilot.core.tool.CommandTaskManager;
-import com.pilot.server.workspace.WorkspaceToolFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import com.pilot.core.tool.CommandTaskManager;
+import com.pilot.core.tool.ToolRegistry;
+import com.pilot.server.workspace.WorkspaceToolFactory;
+
+import tools.jackson.databind.ObjectMapper;
 
 /** 工具装配。工具集按会话工作区由 {@link WorkspaceToolFactory} 构建。 */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(WebSearchProperties.class)
 public class AgentConfiguration {
     @Bean(destroyMethod = "close")
-    CommandTaskManager commandTaskManager(PilotDataDir data, tools.jackson.databind.ObjectMapper mapper) {
+    CommandTaskManager commandTaskManager(PilotDataDir data, ObjectMapper mapper) {
         return new CommandTaskManager(data.file("commands"), mapper);
     }
 

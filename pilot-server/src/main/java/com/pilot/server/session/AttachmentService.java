@@ -1,11 +1,5 @@
 package com.pilot.server.session;
 
-import com.pilot.core.loop.Attachment;
-import com.pilot.server.config.PilotDataDir;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -20,6 +14,13 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import com.pilot.core.loop.Attachment;
+import com.pilot.server.config.PilotDataDir;
 
 /**
  * 把用户随消息粘贴的文件变成模型能看懂的上下文。
@@ -40,29 +41,27 @@ public class AttachmentService {
     static final int MAX_INLINE_CHARS = 200_000;
 
     private static final Set<String> IMAGE_TYPES = Set.of("image/png", "image/jpeg", "image/webp", "image/gif");
-    private static final Set<String> TEXT_TYPES = Set.of(
-            "application/json", "application/xml", "application/yaml", "application/x-yaml",
+    private static final Set<String> TEXT_TYPES =
+        Set.of("application/json", "application/xml", "application/yaml", "application/x-yaml",
             "application/javascript", "application/typescript", "application/sql", "application/x-sh");
-    private static final Set<String> CODE_SUFFIXES = Set.of(
-            ".java", ".kt", ".kts", ".md", ".txt", ".json", ".xml", ".yml", ".yaml", ".properties",
-            ".gradle", ".sql", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".css", ".html", ".vue", ".svelte",
-            ".py", ".go", ".rs", ".c", ".h", ".cpp", ".hpp", ".cs", ".rb", ".php", ".sh", ".bat",
-            ".ps1", ".toml", ".ini", ".cfg", ".conf", ".log", ".diff", ".patch", ".pom");
+    private static final Set<String> CODE_SUFFIXES = Set.of(".java", ".kt", ".kts", ".md", ".txt", ".json", ".xml",
+        ".yml", ".yaml", ".properties", ".gradle", ".sql", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".css", ".html",
+        ".vue", ".svelte", ".py", ".go", ".rs", ".c", ".h", ".cpp", ".hpp", ".cs", ".rb", ".php", ".sh", ".bat", ".ps1",
+        ".toml", ".ini", ".cfg", ".conf", ".log", ".diff", ".patch", ".pom");
 
     private final Path root;
 
     @Autowired
     public AttachmentService(@Value("${pilot.attachments.dir:}") String configured, PilotDataDir dataDir) {
-        this(configured == null || configured.isBlank()
-                ? dataDir.file("attachments")
-                : Path.of(configured));
+        this(configured == null || configured.isBlank() ? dataDir.file("attachments") : Path.of(configured));
     }
 
     AttachmentService(Path root) {
         this.root = root;
     }
 
-    private record PendingAttachment(String name, String mime, byte[] bytes) { }
+    private record PendingAttachment(String name, String mime, byte[] bytes) {
+    }
 
     /** 客户端提交的原始附件：文件名、MIME 与 base64 内容（可带 data URL 前缀）。 */
     public record Inbound(String name, String mimeType, String dataBase64) {
@@ -89,8 +88,7 @@ public class AttachmentService {
         }
         List<Integer> imagePositions = positions == null ? List.of() : List.copyOf(positions);
         long imageCount = inbound.stream()
-                .filter(item -> item != null && IMAGE_TYPES.contains(resolveMime(item.mimeType(), item.name())))
-                .count();
+            .filter(item -> item != null && IMAGE_TYPES.contains(resolveMime(item.mimeType(), item.name()))).count();
         if (!imagePositions.isEmpty() && imagePositions.size() != imageCount) {
             throw new IllegalArgumentException("图片位置数量必须与图片附件数量一致");
         }
@@ -121,9 +119,8 @@ public class AttachmentService {
                 if (IMAGE_TYPES.contains(item.mime())) {
                     attachments.add(saved);
                 } else {
-                    text.append("\n\n[附件 ").append(item.name()).append(" (").append(item.mime())
-                            .append(") 已保存到 ").append(saved.path())
-                            .append("，需要时用工具读取]");
+                    text.append("\n\n[附件 ").append(item.name()).append(" (").append(item.mime()).append(") 已保存到 ")
+                        .append(saved.path()).append("，需要时用工具读取]");
                 }
             }
         } catch (RuntimeException e) {
@@ -138,7 +135,7 @@ public class AttachmentService {
         }
         if (text.toString().isBlank() && imagePositions.isEmpty()) {
             text.append("请看随消息附上的文件：")
-                    .append(attachments.stream().map(Attachment::name).collect(Collectors.joining("、")));
+                .append(attachments.stream().map(Attachment::name).collect(Collectors.joining("、")));
         }
         return new Prepared(text.toString(), List.copyOf(attachments), imagePositions);
     }
@@ -164,17 +161,17 @@ public class AttachmentService {
         return bytes;
     }
 
-    public record DisplayAttachment(String name, String mimeType, String url) { }
+    public record DisplayAttachment(String name, String mimeType, String url) {
+    }
 
     public List<DisplayAttachment> displayAttachments(String sessionId, List<Attachment> attachments) {
         if (attachments == null) {
             return List.of();
         }
         return attachments.stream().filter(Attachment::image)
-                .map(item -> new DisplayAttachment(item.name(), item.mimeType(),
-                        "/api/sessions/" + safeName(sessionId, 80) + "/attachments/"
-                                + Path.of(item.path()).getFileName()))
-                .toList();
+            .map(item -> new DisplayAttachment(item.name(), item.mimeType(),
+                "/api/sessions/" + safeName(sessionId, 80) + "/attachments/" + Path.of(item.path()).getFileName()))
+            .toList();
     }
 
     public Path resolveImage(String sessionId, String fileName) {
@@ -205,10 +202,8 @@ public class AttachmentService {
         String text = new String(bytes, StandardCharsets.UTF_8);
         boolean truncated = text.length() > MAX_INLINE_CHARS;
         String body = truncated ? text.substring(0, MAX_INLINE_CHARS) : text;
-        return "[附件 " + name + " (" + mime + ")]\n"
-                + body
-                + (truncated ? "\n…（附件过长已截断，原文件 " + text.length() + " 字符）" : "")
-                + "\n[附件结束 " + name + "]";
+        return "[附件 " + name + " (" + mime + ")]\n" + body
+            + (truncated ? "\n…（附件过长已截断，原文件 " + text.length() + " 字符）" : "") + "\n[附件结束 " + name + "]";
     }
 
     private static String resolveMime(String mime, String name) {
@@ -266,11 +261,8 @@ public class AttachmentService {
             }
         }
         try {
-            String text = StandardCharsets.UTF_8.newDecoder()
-                    .onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(bytes))
-                    .toString();
+            String text = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();
             long control = text.chars().filter(ch -> ch < 0x09 || (ch > 0x0D && ch < 0x20)).count();
             return control * 10 <= Math.max(1, text.length());
         } catch (CharacterCodingException e) {

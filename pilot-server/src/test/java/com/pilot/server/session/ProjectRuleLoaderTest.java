@@ -1,18 +1,20 @@
 package com.pilot.server.session;
 
-import com.pilot.core.prompt.PromptLibrary;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.prompt.PromptLibrary;
 
 class ProjectRuleLoaderTest {
-    @TempDir Path root;
+    @TempDir
+    Path root;
 
     @Test
     void loadsAncestorAndWorkspaceRulesWithSourcesAndOneFilePerDirectory() throws IOException {
@@ -65,8 +67,7 @@ class ProjectRuleLoaderTest {
     void draftFileIsDeliberatelyNotInjected() throws IOException {
         Path workspace = Files.createDirectories(root.resolve("repo"));
         Files.createDirectories(workspace.resolve(".pilot"));
-        Files.writeString(workspace.resolve(".pilot").resolve("memory-draft.md"),
-                "- [2026-10-31] 候选条目");
+        Files.writeString(workspace.resolve(".pilot").resolve("memory-draft.md"), "- [2026-10-31] 候选条目");
 
         String memory = ProjectRuleLoader.loadMemory(workspace, PromptLibrary.classpathOnly());
 

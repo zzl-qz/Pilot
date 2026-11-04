@@ -1,28 +1,32 @@
 package com.pilot.server.session;
 
-import com.pilot.core.permission.PermissionMode;
-import com.pilot.server.config.AgentProperties;
-import com.pilot.server.config.PilotDataDir;
-import com.pilot.server.config.SkillProperties;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.permission.PermissionMode;
+import com.pilot.server.config.AgentProperties;
+import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.config.SkillProperties;
 
 /** 安装器单测：全部走本机目录来源或假 Cloner，永不依赖网络与真实 git。 */
 class SkillInstallServiceTest {
-    @TempDir Path workspace;
-    @TempDir Path dataRoot;
-    @TempDir Path source;
+    @TempDir
+    Path workspace;
+    @TempDir
+    Path dataRoot;
+    @TempDir
+    Path source;
 
     private PilotDataDir dataDir;
 
@@ -32,8 +36,8 @@ class SkillInstallServiceTest {
     }
 
     private SkillService skillService(boolean enabled) {
-        var properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY,
-                8, 3, 5, 300, 1, 0, 60_000, false);
+        var properties =
+            new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY, 8, 3, 5, 300, 1, 0, 60_000, false);
         return new SkillService(new SkillProperties(enabled, null), properties, dataDir);
     }
 
@@ -74,8 +78,9 @@ class SkillInstallServiceTest {
         var preview = installer(skillService(true)).preview(source.toString(), null);
 
         assertEquals(3, preview.candidates().size());
-        assertTrue(preview.candidates().stream().filter(candidate -> candidate.name().equals("alpha") || candidate.name().equals("beta"))
-                .allMatch(SkillInstallService.Candidate::valid));
+        assertTrue(preview.candidates().stream()
+            .filter(candidate -> candidate.name().equals("alpha") || candidate.name().equals("beta"))
+            .allMatch(SkillInstallService.Candidate::valid));
         var invalid = preview.candidates().stream().filter(candidate -> !candidate.valid()).findFirst().orElseThrow();
         assertEquals("broken", invalid.name());
         assertTrue(invalid.reason().contains("description"));
@@ -108,17 +113,17 @@ class SkillInstallServiceTest {
         var service = installer(skillService(true));
         // GitHub 网页里对着文件点「复制链接」拿到的是 blob 地址，git clone 只会报 repository
         // not found；诊断要把「这是网页地址、该用仓库根」说清楚
-        var blob = assertThrows(SkillInstallService.InstallException.class,
-                () -> service.preview("https://github.com/anthropics/skills/blob/main/skills/doc-coauthoring/SKILL.md", null));
+        var blob = assertThrows(SkillInstallService.InstallException.class, () -> service
+            .preview("https://github.com/anthropics/skills/blob/main/skills/doc-coauthoring/SKILL.md", null));
         assertTrue(blob.getMessage().contains("网页地址"));
         assertTrue(blob.getMessage().contains("仓库根"));
 
         var tree = assertThrows(SkillInstallService.InstallException.class,
-                () -> service.preview("https://github.com/u/repo/tree/main", null));
+            () -> service.preview("https://github.com/u/repo/tree/main", null));
         assertTrue(tree.getMessage().contains("网页地址"));
 
         var raw = assertThrows(SkillInstallService.InstallException.class,
-                () -> service.preview("https://raw.githubusercontent.com/u/repo/main/skills/x/SKILL.md", null));
+            () -> service.preview("https://raw.githubusercontent.com/u/repo/main/skills/x/SKILL.md", null));
         assertTrue(raw.getMessage().contains("文件"));
     }
 
@@ -135,9 +140,9 @@ class SkillInstallServiceTest {
 
         assertEquals(2, preview.candidates().size());
         assertTrue(preview.candidates().stream()
-                .anyMatch(candidate -> candidate.name().equals("doc-coauthoring") && candidate.valid()));
+            .anyMatch(candidate -> candidate.name().equals("doc-coauthoring") && candidate.valid()));
         assertTrue(preview.candidates().stream()
-                .anyMatch(candidate -> candidate.name().equals("canvas-design") && candidate.valid()));
+            .anyMatch(candidate -> candidate.name().equals("canvas-design") && candidate.valid()));
     }
 
     @Test
@@ -161,7 +166,7 @@ class SkillInstallServiceTest {
         skillDir(repo.resolve("more"), "beta", "正文");
 
         var thrown = assertThrows(SkillInstallService.InstallException.class,
-                () -> installer(skillService(true)).preview(repo.toString(), null));
+            () -> installer(skillService(true)).preview(repo.toString(), null));
         assertTrue(thrown.getMessage().contains("多层嵌套"));
     }
 
@@ -186,8 +191,7 @@ class SkillInstallServiceTest {
 
         var service = installer(skillService(true));
         var preview = service.preview(repo.toString(), workspace.toString());
-        var result = service.install(preview.token(), List.of("doc-coauthoring"), true,
-                workspace.toString(), false);
+        var result = service.install(preview.token(), List.of("doc-coauthoring"), true, workspace.toString(), false);
 
         assertEquals("installed", result.results().get(0).status());
         assertTrue(Files.isRegularFile(workspace.resolve(".pilot/skills/doc-coauthoring/SKILL.md")));
@@ -197,10 +201,12 @@ class SkillInstallServiceTest {
     void rejectsMissingAndMalformedSources() {
         var service = installer(skillService(true));
         assertTrue(assertThrows(SkillInstallService.InstallException.class, () -> service.preview(null, null))
-                .getMessage().contains("来源不能为空"));
-        assertTrue(assertThrows(SkillInstallService.InstallException.class, () -> service.preview("github.com/u/repo", null))
+            .getMessage().contains("来源不能为空"));
+        assertTrue(
+            assertThrows(SkillInstallService.InstallException.class, () -> service.preview("github.com/u/repo", null))
                 .getMessage().contains("http"));
-        assertTrue(assertThrows(SkillInstallService.InstallException.class, () -> service.preview("skills/review", null))
+        assertTrue(
+            assertThrows(SkillInstallService.InstallException.class, () -> service.preview("skills/review", null))
                 .getMessage().contains("绝对路径"));
     }
 
@@ -208,14 +214,13 @@ class SkillInstallServiceTest {
     void rejectsInvalidRepoName() throws IOException {
         Path chinese = skillDir(source, "我的技能", "正文");
         assertTrue(assertThrows(SkillInstallService.InstallException.class,
-                        () -> installer(skillService(true)).preview(chinese.toString(), null))
-                .getMessage().contains("来源名不合法"));
+            () -> installer(skillService(true)).preview(chinese.toString(), null)).getMessage().contains("来源名不合法"));
     }
 
     @Test
     void rejectsWhenSkillsDisabled() {
         var thrown = assertThrows(SkillInstallService.InstallException.class,
-                () -> installer(skillService(false)).preview("https://example.com/x/review.git", null));
+            () -> installer(skillService(false)).preview("https://example.com/x/review.git", null));
         assertTrue(thrown.getMessage().contains("技能功能已关闭"));
     }
 
@@ -228,15 +233,15 @@ class SkillInstallServiceTest {
             Files.writeString(target.resolve("SKILL.md"), "---\ndescription: git 技能。\n---\n正文");
             Files.writeString(target.resolve("scripts/run.py"), "print(1)");
         };
-        var service = new SkillInstallService(skillService(true), dataDir, fake,
-                10 * 60 * 1000L, 2000, 64L * 1024 * 1024, 500, 20L * 1024 * 1024);
+        var service = new SkillInstallService(skillService(true), dataDir, fake, 10 * 60 * 1000L, 2000,
+            64L * 1024 * 1024, 500, 20L * 1024 * 1024);
 
         var preview = service.preview("https://github.com/user/pilot-skill-review.git", null);
 
         assertEquals("git", preview.kind());
         assertEquals("pilot-skill-review", preview.candidates().get(0).name());
-        assertTrue(Files.isRegularFile(dataDir.file("tmp", "skill-install", preview.token(),
-                "pilot-skill-review", "SKILL.md")));
+        assertTrue(Files
+            .isRegularFile(dataDir.file("tmp", "skill-install", preview.token(), "pilot-skill-review", "SKILL.md")));
     }
 
     @Test
@@ -244,11 +249,11 @@ class SkillInstallServiceTest {
         SkillInstallService.Cloner failing = (url, target) -> {
             throw new SkillInstallService.InstallException("未找到 git，请安装它或改用本机目录导入");
         };
-        var service = new SkillInstallService(skillService(true), dataDir, failing,
-                10 * 60 * 1000L, 2000, 64L * 1024 * 1024, 500, 20L * 1024 * 1024);
+        var service = new SkillInstallService(skillService(true), dataDir, failing, 10 * 60 * 1000L, 2000,
+            64L * 1024 * 1024, 500, 20L * 1024 * 1024);
 
         var thrown = assertThrows(SkillInstallService.InstallException.class,
-                () -> service.preview("https://example.com/x/any.git", null));
+            () -> service.preview("https://example.com/x/any.git", null));
         assertTrue(thrown.getMessage().contains("未找到 git"));
         try (var entries = Files.list(dataDir.file("tmp", "skill-install"))) {
             assertEquals(0, entries.count(), "失败的预览不应留下暂存目录");
@@ -308,8 +313,7 @@ class SkillInstallServiceTest {
         var overwrite = service.install(preview.token(), List.of("alpha"), true, workspace.toString(), true);
         assertEquals("installed", overwrite.results().get(0).status());
         assertTrue(Files.readString(existing.resolve("SKILL.md")).contains("新正文")
-                && Files.readString(existing.resolve("SKILL.md")).contains("description"),
-                "覆盖后是新技能文件（含 frontmatter）");
+            && Files.readString(existing.resolve("SKILL.md")).contains("description"), "覆盖后是新技能文件（含 frontmatter）");
         assertFalse(Files.exists(existing.resolve("legacy.txt")), "覆盖 = 删旧装新，附属残留一并清除");
     }
 
@@ -353,10 +357,10 @@ class SkillInstallServiceTest {
         var service = installer(skillService(true));
         var preview = service.preview(source.toString(), workspace.toString());
 
-        assertEquals("installed", service.install(preview.token(), List.of("alpha"), true,
-                workspace.toString(), false).results().get(0).status());
-        assertEquals("installed", service.install(preview.token(), List.of("beta"), false,
-                null, false).results().get(0).status());
+        assertEquals("installed", service.install(preview.token(), List.of("alpha"), true, workspace.toString(), false)
+            .results().get(0).status());
+        assertEquals("installed",
+            service.install(preview.token(), List.of("beta"), false, null, false).results().get(0).status());
 
         assertTrue(Files.isRegularFile(workspace.resolve(".pilot/skills/alpha/SKILL.md")));
         assertTrue(Files.isRegularFile(dataDir.file("skills", "beta", "SKILL.md")));
@@ -371,10 +375,9 @@ class SkillInstallServiceTest {
 
         var preview = service.preview(source.toString(), workspace.toString());
         var thrown = assertThrows(SkillInstallService.InstallException.class,
-                () -> service.install(preview.token(), List.of("alpha"), true, workspace.toString(), false));
+            () -> service.install(preview.token(), List.of("alpha"), true, workspace.toString(), false));
         assertTrue(thrown.getMessage().contains("过期"));
-        assertFalse(Files.exists(dataDir.file("tmp", "skill-install", preview.token())),
-                "过期清扫应删除暂存目录");
+        assertFalse(Files.exists(dataDir.file("tmp", "skill-install", preview.token())), "过期清扫应删除暂存目录");
     }
 
     @Test
@@ -384,10 +387,10 @@ class SkillInstallServiceTest {
         var preview = service.preview(source.toString(), workspace.toString());
 
         assertTrue(assertThrows(SkillInstallService.InstallException.class,
-                        () -> service.install(preview.token(), List.of(), true, workspace.toString(), false))
-                .getMessage().contains("请选择要安装的技能"));
+            () -> service.install(preview.token(), List.of(), true, workspace.toString(), false)).getMessage()
+            .contains("请选择要安装的技能"));
         assertTrue(assertThrows(SkillInstallService.InstallException.class,
-                        () -> service.install("bogus-token", List.of("alpha"), true, workspace.toString(), false))
-                .getMessage().contains("过期"));
+            () -> service.install("bogus-token", List.of("alpha"), true, workspace.toString(), false)).getMessage()
+            .contains("过期"));
     }
 }

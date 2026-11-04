@@ -1,13 +1,13 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.workspace.PathValidator;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+
+import com.pilot.core.workspace.PathValidator;
 
 /** 在工作区内创建新文件，父目录自动创建；已存在的文件不覆盖，要求模型改用 edit_file。 */
 public final class CreateFileTool implements Tool, WritesFiles {
@@ -41,14 +41,10 @@ public final class CreateFileTool implements Tool, WritesFiles {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "path", Map.of("type", "string", "description",
-                                "工作区内的相对文件路径；文件不能已存在，改已有文件请用 edit_file"),
-                        "content", Map.of("type", "string", "description", "文件的完整内容")),
-                "required", List.of("path", "content"),
-                "additionalProperties", false);
+        return Map.of("type", "object", "properties",
+            Map.of("path", Map.of("type", "string", "description", "工作区内的相对文件路径；文件不能已存在，改已有文件请用 edit_file"), "content",
+                Map.of("type", "string", "description", "文件的完整内容")),
+            "required", List.of("path", "content"), "additionalProperties", false);
     }
 
     @Override
@@ -89,8 +85,7 @@ public final class CreateFileTool implements Tool, WritesFiles {
             // 刚创建的文件视为已读：后续 edit_file 不会被「先读后改」拦截
             reads.observed(file);
             int bytes = content.getBytes(StandardCharsets.UTF_8).length;
-            return "已创建 " + paths.display(file) + "（" + bytes + " 字节，"
-                    + (int) content.lines().count() + " 行）";
+            return "已创建 " + paths.display(file) + "（" + bytes + " 字节，" + (int)content.lines().count() + " 行）";
         } catch (IOException e) {
             return "ERROR: 创建失败: " + e.getMessage();
         }

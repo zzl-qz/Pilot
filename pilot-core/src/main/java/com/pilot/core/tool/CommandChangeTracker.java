@@ -30,7 +30,7 @@ public interface CommandChangeTracker {
     record Result(List<String> changedPaths, boolean complete, String warning) {
         public Result {
             changedPaths = changedPaths == null ? List.of() : changedPaths.stream()
-                    .filter(path -> path != null && !path.isBlank()).map(String::strip).distinct().sorted().toList();
+                .filter(path -> path != null && !path.isBlank()).map(String::strip).distinct().sorted().toList();
             warning = warning == null ? "" : warning.strip();
         }
 
@@ -41,8 +41,15 @@ public interface CommandChangeTracker {
 
     static CommandChangeTracker none() {
         return new CommandChangeTracker() {
-            @Override public Handle begin(Path workspace) { return Handle.none(); }
-            @Override public Result finish(Handle handle) { return Result.empty(); }
+            @Override
+            public Handle begin(Path workspace) {
+                return Handle.none();
+            }
+
+            @Override
+            public Result finish(Handle handle) {
+                return Result.empty();
+            }
         };
     }
 }

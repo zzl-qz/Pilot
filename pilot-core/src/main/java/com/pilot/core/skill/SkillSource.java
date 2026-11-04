@@ -10,6 +10,5 @@ package com.pilot.core.skill;
  * </ul>
  */
 public enum SkillSource {
-    PROJECT,
-    USER
+    PROJECT, USER
 }

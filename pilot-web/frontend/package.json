@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:models": "node scripts/model-discovery-smoke.mjs",
+    "test:refresh": "node scripts/workbench-refresh-smoke.mjs",
+    "test:mobile": "node scripts/mobile-connection-smoke.mjs",
     "test:usage": "node --test scripts/request-usage.test.mjs && node scripts/request-usage-smoke.mjs",
     "test:agents": "node --test scripts/agent-events.test.mjs && node scripts/agent-usage-smoke.mjs",
     "test:automation": "node scripts/p1-smoke.mjs",
@@ -13,7 +16,9 @@
     "build": "node scripts/build.mjs",
     "check": "node scripts/check.mjs",
     "test:interaction": "node scripts/interaction-smoke.mjs",
-    "test:navigation": "node scripts/navigation-smoke.mjs"
+    "test:navigation": "node scripts/navigation-smoke.mjs",
+    "test:products": "node scripts/work-products-smoke.mjs",
+    "test:recovery": "node scripts/sandbox-recovery-smoke.mjs"
   },
   "dependencies": {
     "immer": "^10.1.1",

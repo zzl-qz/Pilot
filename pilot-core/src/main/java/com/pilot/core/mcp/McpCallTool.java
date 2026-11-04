@@ -1,13 +1,5 @@
 package com.pilot.core.mcp;
 
-import com.pilot.core.loop.Attachment;
-import com.pilot.core.tool.Availability;
-import com.pilot.core.tool.Tool;
-import com.pilot.core.tool.ToolArtifacts;
-import com.pilot.core.tool.ToolResult;
-import com.pilot.core.tool.ToolSupport;
-import tools.jackson.databind.JsonNode;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,6 +9,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
+
+import com.pilot.core.loop.Attachment;
+import com.pilot.core.tool.Availability;
+import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolArtifacts;
+import com.pilot.core.tool.ToolResult;
+import com.pilot.core.tool.ToolSupport;
+
+import tools.jackson.databind.JsonNode;
 
 /**
  * 调用某个 MCP 服务器的工具。文本内容原样返回；图片内容落盘后作为图片交给模型；
@@ -50,14 +51,11 @@ public final class McpCallTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "server", Map.of("type", "string", "description", "MCP 服务器名"),
-                        "tool", Map.of("type", "string", "description", "工具名（来自 mcp_tools）"),
-                        "arguments", Map.of("type", "object", "description", "工具参数，结构以 mcp_tools 返回的 schema 为准")),
-                "required", List.of("server", "tool"),
-                "additionalProperties", false);
+        return Map.of("type", "object", "properties",
+            Map.of("server", Map.of("type", "string", "description", "MCP 服务器名"), "tool",
+                Map.of("type", "string", "description", "工具名（来自 mcp_tools）"), "arguments",
+                Map.of("type", "object", "description", "工具参数，结构以 mcp_tools 返回的 schema 为准")),
+            "required", List.of("server", "tool"), "additionalProperties", false);
     }
 
     @Override
@@ -69,16 +67,17 @@ public final class McpCallTool implements Tool {
     public boolean readOnly(Map<String, Object> args) {
         String server = ToolSupport.stringArg(args, "server");
         String tool = ToolSupport.stringArg(args, "tool");
-        if (server == null || tool == null) return true; // 参数不全只会返回错误
+        if (server == null || tool == null) {
+            return true;
+        } // 参数不全只会返回错误
         return manager.knownTools(workspace, server).stream()
-                .anyMatch(info -> info.name().equals(tool) && info.readOnlyHint());
+            .anyMatch(info -> info.name().equals(tool) && info.readOnlyHint());
     }
 
     @Override
     public Availability availability() {
-        return manager.hasServers(workspace)
-                ? Availability.ready()
-                : Availability.unavailable("当前工作区没有配置 MCP 服务器（.mcp.json）");
+        return manager.hasServers(workspace) ? Availability.ready()
+            : Availability.unavailable("当前工作区没有配置 MCP 服务器（.mcp.json）");
     }
 
     @Override
@@ -91,11 +90,17 @@ public final class McpCallTool implements Tool {
     public ToolResult executeResult(Map<String, Object> args) {
         String server = ToolSupport.stringArg(args, "server");
         String tool = ToolSupport.stringArg(args, "tool");
-        if (server == null) return ToolResult.text("ERROR: 缺少参数 server");
-        if (tool == null) return ToolResult.text("ERROR: 缺少参数 tool");
+        if (server == null) {
+            return ToolResult.text("ERROR: 缺少参数 server");
+        }
+        if (tool == null) {
+            return ToolResult.text("ERROR: 缺少参数 tool");
+        }
         Object raw = args.get("arguments");
-        if (raw != null && !(raw instanceof Map<?, ?>)) return ToolResult.text("ERROR: arguments 必须是对象");
-        Map<String, Object> arguments = raw == null ? Map.of() : (Map<String, Object>) raw;
+        if (raw != null && !(raw instanceof Map<?, ?>)) {
+            return ToolResult.text("ERROR: arguments 必须是对象");
+        }
+        Map<String, Object> arguments = raw == null ? Map.of() : (Map<String, Object>)raw;
         JsonNode result;
         try {
             result = manager.call(workspace, server, tool, arguments);
@@ -113,12 +118,14 @@ public final class McpCallTool implements Tool {
                 case "text" -> append(text, block.path("text").asString(""));
                 case "image" -> {
                     String note = saveImage(server, block, attachments);
-                    if (note != null) append(text, note);
+                    if (note != null) {
+                        append(text, note);
+                    }
                 }
                 case "resource" -> {
                     JsonNode resource = block.path("resource");
                     append(text, resource.has("text") ? resource.path("text").asString("")
-                            : "[资源 " + resource.path("uri").asString("") + "]");
+                        : "[资源 " + resource.path("uri").asString("") + "]");
                 }
                 case "resource_link" -> append(text, "[资源链接 " + block.path("uri").asString("") + "]");
                 default -> append(text, "[不支持的内容类型 " + block.path("type").asString("?") + "]");
@@ -127,11 +134,14 @@ public final class McpCallTool implements Tool {
         if (text.isEmpty() && attachments.isEmpty() && result.has("structuredContent")) {
             text.append(result.path("structuredContent"));
         }
-        if (text.isEmpty() && attachments.isEmpty()) text.append("（工具没有返回内容）");
+        if (text.isEmpty() && attachments.isEmpty()) {
+            text.append("（工具没有返回内容）");
+        }
         String body = text.length() > MAX_TEXT_CHARS
-                ? text.substring(0, MAX_TEXT_CHARS) + "\n…（已截断，原文 " + text.length() + " 字符）"
-                : text.toString();
-        if (result.path("isError").asBoolean(false)) body = "ERROR: " + body;
+            ? text.substring(0, MAX_TEXT_CHARS) + "\n…（已截断，原文 " + text.length() + " 字符）" : text.toString();
+        if (result.path("isError").asBoolean(false)) {
+            body = "ERROR: " + body;
+        }
         return attachments.isEmpty() ? ToolResult.text(body) : ToolResult.withImages(body, attachments);
     }
 
@@ -144,15 +154,20 @@ public final class McpCallTool implements Tool {
             case "image/webp" -> "webp";
             default -> null;
         };
-        if (extension == null) return "[不支持的图片类型 " + mime + "]";
+        if (extension == null) {
+            return "[不支持的图片类型 " + mime + "]";
+        }
         try {
             byte[] bytes = Base64.getDecoder().decode(block.path("data").asString(""));
-            if (bytes.length == 0 || bytes.length > MAX_IMAGE_BYTES) return "[图片大小异常，已忽略]";
+            if (bytes.length == 0 || bytes.length > MAX_IMAGE_BYTES) {
+                return "[图片大小异常，已忽略]";
+            }
             Path dir = ToolArtifacts.directory("mcp/" + server.replaceAll("[^A-Za-z0-9._-]", "_"));
-            Path file = dir.resolve("image-" + System.currentTimeMillis() + "-" + images.incrementAndGet() + "." + extension);
+            Path file =
+                dir.resolve("image-" + System.currentTimeMillis() + "-" + images.incrementAndGet() + "." + extension);
             Files.write(file, bytes);
-            attachments.add(new Attachment(file.getFileName().toString(), mime.equals("image/jpg") ? "image/jpeg" : mime,
-                    file.toString()));
+            attachments.add(new Attachment(file.getFileName().toString(),
+                mime.equals("image/jpg") ? "image/jpeg" : mime, file.toString()));
             return "[图片 " + file.getFileName() + "]";
         } catch (IllegalArgumentException | IOException e) {
             return "[图片无法保存：" + e.getMessage() + "]";
@@ -160,8 +175,12 @@ public final class McpCallTool implements Tool {
     }
 
     private static void append(StringBuilder out, String piece) {
-        if (piece == null || piece.isEmpty()) return;
-        if (!out.isEmpty()) out.append('\n');
+        if (piece == null || piece.isEmpty()) {
+            return;
+        }
+        if (!out.isEmpty()) {
+            out.append('\n');
+        }
         out.append(piece);
     }
 }

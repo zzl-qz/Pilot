@@ -1,12 +1,5 @@
 package com.pilot.core.session;
 
-import com.pilot.core.event.EventEnvelope;
-import com.pilot.core.event.RunFailed;
-import com.pilot.core.event.RunStarted;
-import com.pilot.core.event.SessionEvent;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -22,6 +15,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.pilot.core.event.EventEnvelope;
+import com.pilot.core.event.EventType;
+import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunStarted;
+import com.pilot.core.event.SessionEvent;
 
 /**
  * 会话服务：负责 id 生成、状态推进与事件订阅，数据读写委托给 {@link SessionRepository}。
@@ -39,8 +41,7 @@ public final class SessionService {
 
     private final Clock clock;
     private final SessionRepository repository;
-    private final ConcurrentMap<String, CopyOnWriteArrayList<EventDelivery>> subscribers =
-            new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, CopyOnWriteArrayList<EventDelivery>> subscribers = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Object> locks = new ConcurrentHashMap<>();
 
     public SessionService() {
@@ -79,15 +80,15 @@ public final class SessionService {
      * @param parentSessionId 侧边对话的父会话；普通对话传 {@code null}
      */
     public Session createSession(String title, String workspace, String projectId, boolean isBlank,
-                                 String parentSessionId) {
+        String parentSessionId) {
         if (title == null || title.isBlank()) {
             throw new IllegalArgumentException("title must not be blank");
         }
         String normalizedWorkspace = workspace == null || workspace.isBlank() ? null : workspace.strip();
         String normalizedProject = projectId == null || projectId.isBlank() ? null : projectId.strip();
         String normalizedParent = parentSessionId == null || parentSessionId.isBlank() ? null : parentSessionId.strip();
-        return repository.create("ses_" + UUID.randomUUID(), title.strip(), normalizedWorkspace,
-                clock.instant(), normalizedProject, isBlank, normalizedParent);
+        return repository.create("ses_" + UUID.randomUUID(), title.strip(), normalizedWorkspace, clock.instant(),
+            normalizedProject, isBlank, normalizedParent);
     }
 
     /** 兼容调用：按普通对话创建（非空白）。 */
@@ -191,7 +192,7 @@ public final class SessionService {
             });
             SessionStatus status = nextStatus(current.status(), event);
             // 发过第一条消息就不再是空白对话。放在 publish 里，发送、重新生成、改历史重跑都覆盖
-            if (event.type() == com.pilot.core.event.EventType.RUN_STARTED) {
+            if (event.type() == EventType.RUN_STARTED) {
                 repository.markNotBlank(sessionId);
             }
             EventEnvelope envelope = repository.append(sessionId, runId, clock.instant(), event, status);
@@ -270,16 +271,17 @@ public final class SessionService {
      * @throws NoSuchSessionException 会话不存在
      */
     public EventSubscription subscribe(String sessionId, long afterSequence, Consumer<EventEnvelope> listener) {
-        return subscribe(sessionId, afterSequence, listener, () -> { });
+        return subscribe(sessionId, afterSequence, listener, () -> {
+        });
     }
 
     /**
      * @param onClosed 订阅被动结束（客户端断开、队列积压溢出）时的回调，用于关闭底层连接
      */
     public EventSubscription subscribe(String sessionId, long afterSequence, Consumer<EventEnvelope> listener,
-                                       Runnable onClosed) {
+        Runnable onClosed) {
         Objects.requireNonNull(listener, "listener must not be null");
-        AtomicReference<EventDelivery> self = new java.util.concurrent.atomic.AtomicReference<EventDelivery>();
+        AtomicReference<EventDelivery> self = new AtomicReference<EventDelivery>();
         EventDelivery delivery = new EventDelivery(envelope -> listener.accept(envelope), () -> {
             EventDelivery current = self.get();
             if (current != null) {
@@ -342,8 +344,12 @@ public final class SessionService {
 
     private static SessionStatus failedStatus(SessionEvent event) {
         if (event instanceof RunFailed failed) {
-            if ("PAUSED".equals(failed.code())) return SessionStatus.PAUSED;
-            if ("INTERRUPTED".equals(failed.code())) return SessionStatus.INTERRUPTED;
+            if ("PAUSED".equals(failed.code())) {
+                return SessionStatus.PAUSED;
+            }
+            if ("INTERRUPTED".equals(failed.code())) {
+                return SessionStatus.INTERRUPTED;
+            }
         }
         return SessionStatus.FAILED;
     }

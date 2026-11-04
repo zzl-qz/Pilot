@@ -1,28 +1,5 @@
 package com.pilot.server.session;
 
-import com.pilot.core.approval.ApprovalBroker;
-import com.pilot.core.event.RunCompleted;
-import com.pilot.core.event.SessionEvent;
-import com.pilot.core.event.SubagentFinished;
-import com.pilot.core.event.SubagentStarted;
-import com.pilot.core.event.ToolStarted;
-import com.pilot.core.loop.AgentLoop;
-import com.pilot.core.loop.ExecutionPolicy;
-import com.pilot.core.loop.Message;
-import com.pilot.core.model.ModelClient;
-import com.pilot.core.model.ModelResponse;
-import com.pilot.core.model.ModelUsage;
-import com.pilot.core.model.ToolDefinition;
-import com.pilot.core.permission.PermissionGate;
-import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.multi.AgentProfile;
-import com.pilot.core.multi.AgentProfileCatalog;
-import com.pilot.core.tool.Tool;
-import com.pilot.core.tool.ToolCall;
-import com.pilot.core.tool.ToolExecutor;
-import com.pilot.core.tool.ToolRegistry;
-import com.pilot.core.tool.ToolResult;
-
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -36,6 +13,29 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+
+import com.pilot.core.approval.ApprovalBroker;
+import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.SessionEvent;
+import com.pilot.core.event.SubagentFinished;
+import com.pilot.core.event.SubagentStarted;
+import com.pilot.core.event.ToolStarted;
+import com.pilot.core.loop.AgentLoop;
+import com.pilot.core.loop.ExecutionPolicy;
+import com.pilot.core.loop.Message;
+import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ModelResponse;
+import com.pilot.core.model.ModelUsage;
+import com.pilot.core.model.ToolDefinition;
+import com.pilot.core.multi.AgentProfile;
+import com.pilot.core.multi.AgentProfileCatalog;
+import com.pilot.core.permission.PermissionGate;
+import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolCall;
+import com.pilot.core.tool.ToolExecutor;
+import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.ToolResult;
 
 /**
  * {@code spawn_agent}：把一段「读得多、结论短」的探索派给子代理。
@@ -52,9 +52,8 @@ public final class SpawnAgentTool implements Tool {
     private static final int MAX_SPAWNS_PER_RUN = 4;
     /** 所有子任务共享的模型请求池，不能靠不断更换 task 文案绕过单子任务上限。 */
     private static final int MAX_SUBAGENT_REQUESTS_PER_RUN = 24;
-    private static final Set<String> FORBIDDEN_TOOLS = Set.of(
-            "spawn_agent", "dispatch_agents", "promote_goal", "create_goal", "update_goal",
-            "update_plan", "stop_command", "wait_until", "record_research");
+    private static final Set<String> FORBIDDEN_TOOLS = Set.of("spawn_agent", "dispatch_agents", "promote_goal",
+        "create_goal", "update_goal", "update_plan", "stop_command", "wait_until", "record_research");
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
 
     private final ModelClient client;
@@ -79,31 +78,33 @@ public final class SpawnAgentTool implements Tool {
 
         static UsageSink none() {
             return new UsageSink() {
-                @Override public void beforeRequest() { }
-                @Override public void afterRequest(long activeMillis, ModelUsage usage) { }
+                @Override
+                public void beforeRequest() {
+                }
+
+                @Override
+                public void afterRequest(long activeMillis, ModelUsage usage) {
+                }
             };
         }
     }
 
     public SpawnAgentTool(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
-                          ApprovalBroker approvals, AgentLoop.Config config,
-                          Supplier<List<Message>> history, Consumer<SessionEvent> events,
-                          BooleanSupplier cancelled) {
+        ApprovalBroker approvals, AgentLoop.Config config, Supplier<List<Message>> history,
+        Consumer<SessionEvent> events, BooleanSupplier cancelled) {
         this(client, tools, permissionGate, approvals, config, history, events, cancelled, UsageSink.none());
     }
 
-    SpawnAgentTool(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
-                   ApprovalBroker approvals, AgentLoop.Config config,
-                   Supplier<List<Message>> history, Consumer<SessionEvent> events,
-                   BooleanSupplier cancelled, UsageSink usageSink) {
+    SpawnAgentTool(ModelClient client, ToolRegistry tools, PermissionGate permissionGate, ApprovalBroker approvals,
+        AgentLoop.Config config, Supplier<List<Message>> history, Consumer<SessionEvent> events,
+        BooleanSupplier cancelled, UsageSink usageSink) {
         this(client, tools, permissionGate, approvals, config, history, events, cancelled, usageSink,
-                AgentProfileCatalog.EMPTY);
+            AgentProfileCatalog.EMPTY);
     }
 
-    SpawnAgentTool(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
-                   ApprovalBroker approvals, AgentLoop.Config config,
-                   Supplier<List<Message>> history, Consumer<SessionEvent> events,
-                   BooleanSupplier cancelled, UsageSink usageSink, AgentProfileCatalog profiles) {
+    SpawnAgentTool(ModelClient client, ToolRegistry tools, PermissionGate permissionGate, ApprovalBroker approvals,
+        AgentLoop.Config config, Supplier<List<Message>> history, Consumer<SessionEvent> events,
+        BooleanSupplier cancelled, UsageSink usageSink, AgentProfileCatalog profiles) {
         this.client = Objects.requireNonNull(client, "client must not be null");
         this.tools = isolatedTools(Objects.requireNonNull(tools, "tools must not be null"));
         this.permissionGate = Objects.requireNonNull(permissionGate, "permissionGate must not be null");
@@ -129,30 +130,19 @@ public final class SpawnAgentTool implements Tool {
     @Override
     public Map<String, Object> parameters() {
         return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "task", Map.of(
-                                "type", "string",
-                                "description", "子任务的完整描述，包含目标、范围与期望产出"),
-                        "agent", Map.of(
-                                "type", "string",
-                                "description", agentFieldDescription()),
-                        "name", Map.of(
-                                "type", "string",
-                                "description", "子任务的简短名字（10 字以内，如「统计 Java 文件」），用于界面展示，可省略"),
-                        "fork_turns", Map.of(
-                                "type", "string",
-                                "enum", List.of("none", "all"),
-                                "description", "none = 不带父对话（默认，推荐）；all = 带上当前对话记忆")),
-                "required", List.of("task"),
-                "additionalProperties", false);
+            "type", "object", "properties", Map
+                .of("task", Map.of("type", "string", "description", "子任务的完整描述，包含目标、范围与期望产出"), "agent",
+                    Map.of("type", "string", "description", agentFieldDescription()), "name",
+                    Map.of("type", "string", "description", "子任务的简短名字（10 字以内，如「统计 Java 文件」），用于界面展示，可省略"), "fork_turns",
+                    Map.of("type", "string", "enum", List.of("none", "all"), "description",
+                        "none = 不带父对话（默认，推荐）；all = 带上当前对话记忆")),
+            "required", List.of("task"), "additionalProperties", false);
     }
 
     /** agent 字段的动态说明：有可用代理时点名角色，模型不必猜名字。 */
     private String agentFieldDescription() {
         StringBuilder text = new StringBuilder(
-                "引用自定义子代理（.pilot/agents/<name>.md）：工具名单按定义裁剪，角色提示词注入子代理。"
-                        + "子代理仍保持只读探索语义，可写代理请用 dispatch_agents");
+            "引用自定义子代理（.pilot/agents/<name>.md）：工具名单按定义裁剪，角色提示词注入子代理。" + "子代理仍保持只读探索语义，可写代理请用 dispatch_agents");
         String names = profiles.nameListText();
         if (!names.isEmpty()) {
             text.append("。可用代理：").append(names);
@@ -190,16 +180,15 @@ public final class SpawnAgentTool implements Tool {
             profile = profiles.find(agentName).orElse(null);
             if (profile == null) {
                 String available = profiles.nameListText();
-                return ToolResult.text("ERROR: 引用的代理 " + agentName + " 不存在（可用："
-                        + (available.isEmpty() ? "无" : available) + "）");
+                return ToolResult
+                    .text("ERROR: 引用的代理 " + agentName + " 不存在（可用：" + (available.isEmpty() ? "无" : available) + "）");
             }
         }
         String displayName = args == null || text(args.get("name")).isEmpty() ? agentName : text(args.get("name"));
 
         int spawn = runSpawns.incrementAndGet();
         if (spawn > MAX_SPAWNS_PER_RUN) {
-            return ToolResult.text("ERROR: 本轮子代理派生次数已达到 " + MAX_SPAWNS_PER_RUN
-                    + " 次；请先合并已有结果，由父代理继续执行或阶段交付。");
+            return ToolResult.text("ERROR: 本轮子代理派生次数已达到 " + MAX_SPAWNS_PER_RUN + " 次；请先合并已有结果，由父代理继续执行或阶段交付。");
         }
 
         String agentId = "agent_" + UUID.randomUUID().toString().substring(0, 8);
@@ -211,14 +200,12 @@ public final class SpawnAgentTool implements Tool {
             ToolRegistry effectiveTools = profile == null ? this.tools : filterTools(this.tools, profile);
             AgentLoop.Config effectiveConfig = profile == null ? this.config : roleConfig(this.config, profile);
             AgentLoop loop = new AgentLoop(boundedClient(), effectiveTools, permissionGate, approvals, effectiveConfig,
-                    cancelled::getAsBoolean)
-                    .withExecutionPolicy(artifacts);
+                cancelled::getAsBoolean).withExecutionPolicy(artifacts);
             List<Message> context = inherit ? history.get() : List.of();
-            String prompt = PROMPTS.render("subagent/task",
-                    Map.of("task", profile == null ? task : profile.prefixGoal(task))).strip();
+            String prompt = PROMPTS
+                .render("subagent/task", Map.of("task", profile == null ? task : profile.prefixGoal(task))).strip();
             // 子代理有独立累计器；子 run 的终止事件绝不能流入父 sink，否则会提前完成/中断父任务。
-            AgentLoop.Result result = loop.run(prompt, context,
-                    event -> forwardChildEvent(event, completion, agentId));
+            AgentLoop.Result result = loop.run(prompt, context, event -> forwardChildEvent(event, completion, agentId));
             if (result.failed()) {
                 String reason = "子代理未完成：" + result.failureCode();
                 String report = "ERROR: " + reason + resultManifest(artifacts, completion.get());
@@ -250,17 +237,25 @@ public final class SpawnAgentTool implements Tool {
         int maxRequests = MAX_SUBAGENT_STEPS + 1;
         AtomicInteger requests = new AtomicInteger();
         return new ModelClient() {
-            @Override public com.pilot.core.model.ModelProfile profile() { return client.profile(); }
-            @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> definitions) {
+            @Override
+            public com.pilot.core.model.ModelProfile profile() {
+                return client.profile();
+            }
+
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> definitions) {
                 return chat(messages, definitions, null);
             }
 
-            @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> definitions,
-                                                Consumer<String> textDelta) {
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> definitions,
+                Consumer<String> textDelta) {
                 return chat(messages, definitions, textDelta, null);
             }
-            @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> definitions,
-                                                Consumer<String> textDelta, Consumer<String> reasoningDelta) {
+
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> definitions,
+                Consumer<String> textDelta, Consumer<String> reasoningDelta) {
                 claimRequest();
                 long started = System.nanoTime();
                 ModelResponse response = null;
@@ -269,21 +264,18 @@ public final class SpawnAgentTool implements Tool {
                     return response;
                 } finally {
                     long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
-                    usageSink.afterRequest(elapsed,
-                            response == null ? ModelUsage.unknown() : response.usage());
+                    usageSink.afterRequest(elapsed, response == null ? ModelUsage.unknown() : response.usage());
                 }
             }
 
             private void claimRequest() {
                 if (requests.incrementAndGet() > maxRequests) {
-                    throw new ExecutionPolicy.Stop("MAX_STEPS",
-                            "子代理已达到独立模型请求上限 " + maxRequests + "，返回已有证据给父代理收尾。");
+                    throw new ExecutionPolicy.Stop("MAX_STEPS", "子代理已达到独立模型请求上限 " + maxRequests + "，返回已有证据给父代理收尾。");
                 }
                 int total = runRequests.incrementAndGet();
                 if (total > MAX_SUBAGENT_REQUESTS_PER_RUN) {
                     throw new ExecutionPolicy.Stop("MAX_STEPS",
-                            "本轮所有子代理累计模型请求已达到 " + MAX_SUBAGENT_REQUESTS_PER_RUN
-                                    + "，请由父代理合并已有证据并收尾。");
+                        "本轮所有子代理累计模型请求已达到 " + MAX_SUBAGENT_REQUESTS_PER_RUN + "，请由父代理合并已有证据并收尾。");
                 }
                 usageSink.beforeRequest();
             }
@@ -293,35 +285,31 @@ public final class SpawnAgentTool implements Tool {
     /** 在父工具注册表继续变化前就冻结一份能力快照，并移除所有派生/目标控制工具。 */
     private static ToolRegistry isolatedTools(ToolRegistry source) {
         ToolRegistry isolated = new ToolRegistry();
-        source.tools().stream()
-                .filter(tool -> tool.readOnly() && !FORBIDDEN_TOOLS.contains(tool.name()))
-                .forEach(isolated::register);
+        source.tools().stream().filter(tool -> tool.readOnly() && !FORBIDDEN_TOOLS.contains(tool.name()))
+            .forEach(isolated::register);
         return isolated;
     }
 
     /** 自定义代理的工具裁剪：在已隔离的只读表上按 profile 名单再过滤，名单外的工具不存在。 */
     static ToolRegistry filterTools(ToolRegistry source, AgentProfile profile) {
         ToolRegistry filtered = new ToolRegistry();
-        source.tools().stream()
-                .filter(tool -> profile.scope().allowsTool(tool.name()))
-                .forEach(filtered::register);
+        source.tools().stream().filter(tool -> profile.scope().allowsTool(tool.name())).forEach(filtered::register);
         return filtered;
     }
 
     /** 角色提示词注入子代理系统提示词（隔离段保留，只加身份设定）。 */
     static AgentLoop.Config roleConfig(AgentLoop.Config config, AgentProfile profile) {
         return new AgentLoop.Config(config.maxSteps(), config.repeatRemindAt(), config.repeatAbortAt(),
-                config.systemPrompt() + "\n\n[角色设定]\n" + profile.prompt(),
-                config.plan(), config.maxPlanContinues(), config.contextLimit(), config.completionChecks());
+            config.systemPrompt() + "\n\n[角色设定]\n" + profile.prompt(), config.plan(), config.maxPlanContinues(),
+            config.contextLimit(), config.completionChecks());
     }
 
     /** 子代理不继承父计划，也不共享父步数上限；最多八次工作请求，AgentLoop 仍保留一次收尾。 */
     private static AgentLoop.Config subagentConfig(AgentLoop.Config parent) {
         int steps = Math.min(parent.maxSteps(), MAX_SUBAGENT_STEPS);
         return new AgentLoop.Config(steps, parent.repeatRemindAt(), parent.repeatAbortAt(),
-                parent.systemPrompt() + "\n\n[子代理隔离] 你是只读探索。只完成派发的子任务，把结论交回父代理。"
-                        + "不能改文件，不能跑命令，不能创建 Goal，不能再派生子代理。",
-                List::of, 0, parent.contextLimit(), parent.completionChecks());
+            parent.systemPrompt() + "\n\n[子代理隔离] 你是只读探索。只完成派发的子任务，把结论交回父代理。" + "不能改文件，不能跑命令，不能创建 Goal，不能再派生子代理。",
+            List::of, 0, parent.contextLimit(), parent.completionChecks());
     }
 
     private void forwardChildEvent(SessionEvent event, AtomicReference<RunCompleted> completion, String agentId) {
@@ -338,18 +326,16 @@ public final class SpawnAgentTool implements Tool {
         // 工具与审批事件仍需透传，否则用户看不到执行进度，也无法批准子代理操作。
         switch (event.type()) {
             case TOOL_STARTED, TOOL_COMPLETED, APPROVAL_REQUIRED, APPROVAL_RESOLVED -> events.accept(event);
-            default -> { }
+            default -> {
+            }
         }
     }
 
     /** 让父模型拿到可合并的结果清单；生命周期状态仍由父 run 自己决定。 */
     private static String resultManifest(ArtifactCollector artifacts, RunCompleted completed) {
         List<String> openSteps = completed == null ? List.of() : completed.openSteps();
-        return "\n\n<subagent_result>\n"
-                + "changed_files: " + artifacts.changedPaths() + "\n"
-                + "checks: " + artifacts.checks() + "\n"
-                + "open_steps: " + openSteps + "\n"
-                + "</subagent_result>";
+        return "\n\n<subagent_result>\n" + "changed_files: " + artifacts.changedPaths() + "\n" + "checks: "
+            + artifacts.checks() + "\n" + "open_steps: " + openSteps + "\n" + "</subagent_result>";
     }
 
     /**
@@ -360,17 +346,25 @@ public final class SpawnAgentTool implements Tool {
         private final LinkedHashSet<String> changedPaths = new LinkedHashSet<>();
         private final ArrayList<String> checks = new ArrayList<>();
 
-        @Override public void beforeRequest(List<Message> history) { }
+        @Override
+        public void beforeRequest(List<Message> history) {
+        }
 
-        @Override public void observed(ToolCall call, ToolExecutor.Outcome outcome) {
-            if (outcome == null) return;
+        @Override
+        public void observed(ToolCall call, ToolExecutor.Outcome outcome) {
+            if (outcome == null) {
+                return;
+            }
             changedPaths.addAll(outcome.changedPaths());
             for (String check : outcome.checks()) {
-                if (!checks.contains(check)) checks.add(check);
+                if (!checks.contains(check)) {
+                    checks.add(check);
+                }
             }
         }
 
-        @Override public String review(List<Message> history, Set<String> changedFiles, List<String> checks) {
+        @Override
+        public String review(List<Message> history, Set<String> changedFiles, List<String> checks) {
             return null;
         }
 

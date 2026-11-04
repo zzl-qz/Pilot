@@ -15,17 +15,16 @@ import java.util.List;
  */
 final class AgentFrontmatter {
 
-    private static final List<String> KEYS = List.of(
-            "name", "description", "tools", "files", "deny-files", "commands", "deny-commands", "writable");
+    private static final List<String> KEYS =
+        List.of("name", "description", "tools", "files", "deny-files", "commands", "deny-commands", "writable");
     private static final int MAX_DESCRIPTION_CHARS = 500;
 
     private AgentFrontmatter() {
     }
 
     /** 解析结果：frontmatter 各键与剥离声明头之后的正文（角色提示词）。 */
-    record Parsed(String name, String description, List<String> tools, List<String> files,
-                  List<String> denyFiles, List<String> commands, List<String> denyCommands,
-                  boolean writable, String body) {
+    record Parsed(String name, String description, List<String> tools, List<String> files, List<String> denyFiles,
+        List<String> commands, List<String> denyCommands, boolean writable, String body) {
     }
 
     /**
@@ -68,48 +67,65 @@ final class AgentFrontmatter {
             String key = line.substring(0, colon).strip();
             String value = line.substring(colon + 1).strip();
             if (!KEYS.contains(key)) {
-                throw new IllegalArgumentException("不支持的键：" + key
-                        + "（只支持 " + String.join(" / ", KEYS) + "）");
+                throw new IllegalArgumentException("不支持的键：" + key + "（只支持 " + String.join(" / ", KEYS) + "）");
             }
             switch (key) {
                 case "name" -> {
-                    if (value.isEmpty()) throw new IllegalArgumentException("name 为空（以文件名为准，可不写）");
-                    if (name != null) throw new IllegalArgumentException("重复的键：name");
+                    if (value.isEmpty()) {
+                        throw new IllegalArgumentException("name 为空（以文件名为准，可不写）");
+                    }
+                    if (name != null) {
+                        throw new IllegalArgumentException("重复的键：name");
+                    }
                     name = value;
                 }
                 case "description" -> {
-                    if (description != null) throw new IllegalArgumentException("重复的键：description");
+                    if (description != null) {
+                        throw new IllegalArgumentException("重复的键：description");
+                    }
                     if (value.isEmpty()) {
                         throw new IllegalArgumentException("description 必填：模型靠它判断何时引用该代理");
                     }
                     if (value.length() > MAX_DESCRIPTION_CHARS) {
-                        throw new IllegalArgumentException("description 超过 "
-                                + MAX_DESCRIPTION_CHARS + " 字符上限（当前 " + value.length() + "）");
+                        throw new IllegalArgumentException(
+                            "description 超过 " + MAX_DESCRIPTION_CHARS + " 字符上限（当前 " + value.length() + "）");
                     }
                     description = value;
                 }
                 case "tools" -> {
-                    if (tools != null) throw new IllegalArgumentException("重复的键：tools");
+                    if (tools != null) {
+                        throw new IllegalArgumentException("重复的键：tools");
+                    }
                     tools = list(value, key);
                 }
                 case "files" -> {
-                    if (files != null) throw new IllegalArgumentException("重复的键：files");
+                    if (files != null) {
+                        throw new IllegalArgumentException("重复的键：files");
+                    }
                     files = list(value, key);
                 }
                 case "deny-files" -> {
-                    if (denyFiles != null) throw new IllegalArgumentException("重复的键：deny-files");
+                    if (denyFiles != null) {
+                        throw new IllegalArgumentException("重复的键：deny-files");
+                    }
                     denyFiles = list(value, key);
                 }
                 case "commands" -> {
-                    if (commands != null) throw new IllegalArgumentException("重复的键：commands");
+                    if (commands != null) {
+                        throw new IllegalArgumentException("重复的键：commands");
+                    }
                     commands = list(value, key);
                 }
                 case "deny-commands" -> {
-                    if (denyCommands != null) throw new IllegalArgumentException("重复的键：deny-commands");
+                    if (denyCommands != null) {
+                        throw new IllegalArgumentException("重复的键：deny-commands");
+                    }
                     denyCommands = list(value, key);
                 }
                 case "writable" -> {
-                    if (writable != null) throw new IllegalArgumentException("重复的键：writable");
+                    if (writable != null) {
+                        throw new IllegalArgumentException("重复的键：writable");
+                    }
                     writable = switch (value.toLowerCase()) {
                         case "true", "yes", "1" -> true;
                         case "false", "no", "0", "" -> false;
@@ -123,14 +139,9 @@ final class AgentFrontmatter {
             throw new IllegalArgumentException("缺少 description（必填）");
         }
         String body = String.join("\n", lines.subList(end + 1, lines.size())).strip();
-        return new Parsed(name, description,
-                tools == null ? List.of() : tools,
-                files == null ? List.of() : files,
-                denyFiles == null ? List.of() : denyFiles,
-                commands == null ? List.of() : commands,
-                denyCommands == null ? List.of() : denyCommands,
-                writable != null && writable,
-                body);
+        return new Parsed(name, description, tools == null ? List.of() : tools, files == null ? List.of() : files,
+            denyFiles == null ? List.of() : denyFiles, commands == null ? List.of() : commands,
+            denyCommands == null ? List.of() : denyCommands, writable != null && writable, body);
     }
 
     /** {@code [a, b]} / {@code a, b} / {@code a} 三种写法统一成列表（语法对齐技能解析器）。 */
@@ -141,10 +152,8 @@ final class AgentFrontmatter {
         } else if (list.startsWith("[") != list.endsWith("]")) {
             throw new IllegalArgumentException(key + " 列表括号不成对：" + value);
         }
-        List<String> items = new ArrayList<>(Arrays.stream(list.split("[,，]"))
-                .map(String::strip)
-                .filter(item -> !item.isEmpty())
-                .toList());
+        List<String> items = new ArrayList<>(
+            Arrays.stream(list.split("[,，]")).map(String::strip).filter(item -> !item.isEmpty()).toList());
         if (items.stream().distinct().count() != items.size()) {
             throw new IllegalArgumentException(key + " 存在重复项：" + value);
         }

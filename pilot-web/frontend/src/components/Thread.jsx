@@ -189,8 +189,8 @@ function EmptyState() {
   }, [workspace]);
   const prompts = [
     { title: '了解项目', sub: '识别技术栈、入口与运行方式', prompt: '分析当前工作区的结构、技术栈和启动方式，先读取项目实际配置和说明。' },
-    { title: '检查改动', sub: '检查工作区改动中的潜在问题', prompt: '审阅当前工作区的未提交改动，重点检查逻辑错误、边界情况和缺失测试。' },
-    { title: '完善测试', sub: '找到测试入口和未覆盖的边界', prompt: '查看项目现有测试，找到关键流程缺少的边界用例，补充测试并实际运行。' }
+    { title: '调研问题', sub: '核对来源，交付可下载的报告', prompt: '请帮我调研以下问题，优先查阅原始来源，说明时间与不确定性，整理为报告并保存到成果面板。调研问题：' },
+    { title: '整理资料', sub: '提取要点、核对数据与缺失项', prompt: '请根据我提供的文件整理要点或表格，核对数字和来源，缺失数据不要猜测，并将结果保存到成果面板。具体要求：' }
   ];
   return (
     <div className="thread-scroll-region">
@@ -203,7 +203,7 @@ function EmptyState() {
             <div className="task-scope">
               <strong>{project?.name || '当前工作区'}</strong>
               <span title={workspace}>{workspace || '尚未选择工作区'}</span>
-              <span>{scope?.branch ? `${scope.worktree ? '源分支' : 'Git 分支'} · ${scope.branch}` : 'Git 分支 · 未获取'} · {scope?.worktree ? '独立 worktree' : '在所选目录执行'}</span>
+              <span>{scope?.branch ? `${scope.worktree ? '源分支' : 'Git 分支'} · ${scope.branch} · ` : ''}{scope?.worktree ? '独立 worktree' : '在所选目录执行'}</span>
               <button type="button" className="btn" onClick={() => useStore.getState().setUi({ picker: { title: '选择任务工作区' } })}>选择工作区</button>
             </div>
             <div className="prompts">
@@ -842,33 +842,36 @@ function SandboxCard({ row }) {
   const [busy, setBusy] = useState(false);
   /** 产物清单与校验结论：让「接受」不是盲批。 */
   const [report, setReport] = useState(null);
+  const [refresh, setRefresh] = useState(0);
+  const [loadError, setLoadError] = useState('');
+  const sessionId = useStore((state) => state.sessionId);
 
   useEffect(() => {
-    const sessionId = useStore.getState().sessionId;
+    setReport(null);
+    setLoadError('');
+    setDecision('');
     if (!row.sandboxId || !sessionId) {
       return undefined;
     }
     let alive = true;
     api.sandboxManifest(sessionId, row.sandboxId)
-      .then((data) => { if (alive) setReport(data); })
-      .catch(() => { if (alive) setReport(null); });
+      .then((data) => { if (alive) { setReport(data); setDecision(({accepted:'已接受',rejected:'已拒绝',closed:'已处理',empty:'没有待处理变更'})[data.disposition] || ''); } })
+      .catch((error) => { if (alive) setLoadError(error.message || '读取候选版本失败'); });
     return () => { alive = false; };
-  }, [row.sandboxId]);
+  }, [row.sandboxId, sessionId, refresh]);
 
   const decide = async (action) => {
-    setBusy(true);
-    const ok = await useStore.getState().decideSandbox(row.sandboxId, action);
-    setBusy(false);
-    // 接受失败（未通过校验且没有确认）时不写状态，用户还能重试
-    if (ok) {
-      setDecision(action === 'accept' ? '已接受' : '已拒绝');
-    } else if (action === 'reject') {
-      setDecision('已拒绝');
-    }
+    setBusy(action);
+    try {
+      const ok = await useStore.getState().decideSandbox(row.sandboxId, action, report?.reviewHash);
+      if (useStore.getState().sessionId !== sessionId) return;
+      if (ok && action !== 'recover') setDecision(action === 'accept' ? '已接受' : '已拒绝');
+      else setRefresh((value) => value + 1);
+    } finally { setBusy(false); }
   };
 
   const verification = report?.verification || null;
-  const verified = Boolean(verification?.current) && verification?.status === 'PASSED';
+  const verified = Boolean(verification?.current) && String(verification?.status).toLowerCase() === 'passed';
   const files = report?.manifest?.files?.length ?? 0;
 
   return (
@@ -877,16 +880,23 @@ function SandboxCard({ row }) {
       <pre className="sandbox-body">{row.detail}</pre>
       {report && (
         <p className={`sandbox-verify${verified ? ' is-ok' : ' is-warn'}`}>
-          {verified ? '校验通过' : (verification ? `校验：${verification.status}${verification.reason ? ` · ${verification.reason}` : ''}` : '尚未校验')}
+          {verified ? '校验通过' : (verification ? `校验：${({passed:'通过',failed:'失败',skipped:'未执行',missing:'尚未校验'})[String(verification.status).toLowerCase()] || '状态未知'}${verification.reason ? ` · ${verification.reason}` : ''}` : '尚未校验')}
           {` · 产物 ${files} 个文件`}
           {(report.dependencies || []).length > 0 && ` · 依赖 ${report.dependencies.length} 个`}
         </p>
       )}
+      {loadError && <p role="alert">{loadError} <button type="button" className="btn btn-sm" onClick={() => setRefresh((value) => value + 1)}>重新加载</button></p>}
+      {report?.recovery && <p role="status" className="sandbox-verify is-warn">
+        上次变更写入中断，需先恢复。恢复遇到外部修改时会停止并保留备份。
+        {report.recovery.sessionId === sessionId && report.recovery.sandboxId === row.sandboxId
+          ? <button type="button" className="btn btn-sm" disabled={busy} onClick={() => decide('recover')}>恢复写入状态</button>
+          : `请先处理 ${report.recovery.sandboxId} 的恢复。`}
+      </p>}
       {row.sandboxId && (
         <div className="sandbox-actions">
           <span className="sandbox-label mono">{row.sandboxId}</span>
-          <button type="button" className="btn btn-primary btn-sm" disabled={busy || Boolean(decision)} onClick={() => decide('accept')}>接受变更</button>
-          <button type="button" className="btn btn-sm" disabled={busy || Boolean(decision)} onClick={() => decide('reject')}>拒绝</button>
+          <button type="button" className="btn btn-primary btn-sm" disabled={busy || Boolean(decision) || !report?.reviewHash || Boolean(report?.recovery)} onClick={() => decide('accept')}>{busy === 'accept' ? '校验并写入中…' : '接受变更'}</button>
+          <button type="button" className="btn btn-sm" disabled={busy || Boolean(decision) || !report?.reviewHash || Boolean(report?.recovery)} onClick={() => decide('reject')}>拒绝</button>
           {decision && <span className="sandbox-decision">{decision}</span>}
         </div>
       )}

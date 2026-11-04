@@ -1,18 +1,19 @@
 package com.pilot.server.store;
 
-import com.pilot.core.session.RunCheckpoint;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.session.RunCheckpoint;
 
 /**
  * 租约语义必须由真实 SQL 验证：条件更新写错一个字，就会出现两个实例同时推进。
@@ -26,8 +27,7 @@ class JdbcRunCheckpointRepositoryTest {
         return new JdbcRunCheckpointRepository(new SqliteStore(dir.resolve("pilot.db")));
     }
 
-    private static RunCheckpoint checkpoint(String runId, String sessionId, String owner, Instant now,
-                                            Duration lease) {
+    private static RunCheckpoint checkpoint(String runId, String sessionId, String owner, Instant now, Duration lease) {
         return RunCheckpoint.start(runId, sessionId, "/work", owner, now, lease);
     }
 
@@ -35,8 +35,8 @@ class JdbcRunCheckpointRepositoryTest {
     void savesAndReadsBackEveryField() {
         JdbcRunCheckpointRepository repository = repository();
         Instant now = Instant.now();
-        repository.save(checkpoint("run_1", "ses_1", "a", now, Duration.ofSeconds(30))
-                .advance(3, "call_9", "mvn test → exit 0", "查看报告", RunCheckpoint.PHASE_MODEL, now));
+        repository.save(checkpoint("run_1", "ses_1", "a", now, Duration.ofSeconds(30)).advance(3, "call_9",
+            "mvn test → exit 0", "查看报告", RunCheckpoint.PHASE_MODEL, now));
 
         RunCheckpoint loaded = repository.find("run_1").orElseThrow();
         assertEquals("ses_1", loaded.sessionId());
@@ -54,12 +54,9 @@ class JdbcRunCheckpointRepositoryTest {
         Instant now = Instant.now();
         repository.save(checkpoint("run_1", "ses_1", "a", now, Duration.ofSeconds(30)));
 
-        assertFalse(repository.claimLease("run_1", "b", now, Duration.ofSeconds(30)),
-                "未过期的租约不能被第二个实例抢走");
-        assertTrue(repository.claimLease("run_1", "a", now, Duration.ofSeconds(30)),
-                "持有者自己续租应当成功");
-        assertTrue(repository.claimLease("run_1", "b", now.plusSeconds(31), Duration.ofSeconds(30)),
-                "过期后允许接管");
+        assertFalse(repository.claimLease("run_1", "b", now, Duration.ofSeconds(30)), "未过期的租约不能被第二个实例抢走");
+        assertTrue(repository.claimLease("run_1", "a", now, Duration.ofSeconds(30)), "持有者自己续租应当成功");
+        assertTrue(repository.claimLease("run_1", "b", now.plusSeconds(31), Duration.ofSeconds(30)), "过期后允许接管");
     }
 
     @Test

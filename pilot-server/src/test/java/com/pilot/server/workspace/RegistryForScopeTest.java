@@ -1,18 +1,19 @@
 package com.pilot.server.workspace;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.nio.file.Path;
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
 import com.pilot.core.multi.AgentScope;
 import com.pilot.core.tool.SandboxSink;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.config.WebSearchProperties;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.nio.file.Path;
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 子 Agent 工具表的权限边界：只读不拿通用命令，任何任务都拿不到派发入口。 */
 class RegistryForScopeTest {
@@ -35,30 +36,27 @@ class RegistryForScopeTest {
 
     @Test
     void readOnlyTaskDoesNotGetGeneralCommandRunner() {
-        AgentScope scope = AgentScope.readOnly(List.of("**"), List.of())
-                .withTools(List.of("read_file", "run_command"), List.of());
+        AgentScope scope =
+            AgentScope.readOnly(List.of("**"), List.of()).withTools(List.of("read_file", "run_command"), List.of());
 
         List<String> names = names(registry(scope));
 
         assertTrue(names.contains("read_file"), names.toString());
-        assertFalse(names.contains("run_command"),
-                "只读任务不能拿到退回内置白名单的通用命令：" + names);
+        assertFalse(names.contains("run_command"), "只读任务不能拿到退回内置白名单的通用命令：" + names);
     }
 
     @Test
     void readOnlyTaskGetsCommandRunnerOnlyWithExplicitWhitelist() {
         AgentScope scope = AgentScope.readOnly(List.of("**"), List.of())
-                .withTools(List.of("read_file", "run_command"), List.of())
-                .withCommands(List.of("mvn test"), List.of());
+            .withTools(List.of("read_file", "run_command"), List.of()).withCommands(List.of("mvn test"), List.of());
 
-        assertTrue(names(registry(scope)).contains("run_command"),
-                "显式声明命令白名单的调研任务仍可执行受限命令");
+        assertTrue(names(registry(scope)).contains("run_command"), "显式声明命令白名单的调研任务仍可执行受限命令");
     }
 
     @Test
     void writableTaskKeepsCommandRunner() {
-        AgentScope scope = AgentScope.readWrite(List.of("**"), List.of())
-                .withTools(List.of("read_file", "run_command"), List.of());
+        AgentScope scope =
+            AgentScope.readWrite(List.of("**"), List.of()).withTools(List.of("read_file", "run_command"), List.of());
 
         assertTrue(names(registry(scope)).contains("run_command"));
     }

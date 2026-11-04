@@ -28,7 +28,7 @@ public final class RetryBudget {
      * @param breakerAfterFailures 连续失败达到该次数直接熔断；0 表示不启用
      */
     public record Settings(int maxAttempts, long maxElapsedMs, long baseDelayMs, long maxDelayMs,
-                           int breakerAfterFailures) {
+        int breakerAfterFailures) {
         public Settings {
             if (maxAttempts < 0) {
                 throw new IllegalArgumentException("maxAttempts must be >= 0");
@@ -51,12 +51,11 @@ public final class RetryBudget {
         /** 读取系统属性覆盖，便于本机调参而不改代码。 */
         public static Settings fromSystemProperties() {
             Settings defaults = defaults();
-            return new Settings(
-                    integer("pilot.retry.max-attempts", defaults.maxAttempts()),
-                    integer("pilot.retry.max-elapsed-seconds", (int) (defaults.maxElapsedMs() / 1000)) * 1000L,
-                    integer("pilot.retry.base-delay-ms", (int) defaults.baseDelayMs()),
-                    integer("pilot.retry.max-delay-ms", (int) defaults.maxDelayMs()),
-                    integer("pilot.retry.breaker-after-failures", defaults.breakerAfterFailures()));
+            return new Settings(integer("pilot.retry.max-attempts", defaults.maxAttempts()),
+                integer("pilot.retry.max-elapsed-seconds", (int)(defaults.maxElapsedMs() / 1000)) * 1000L,
+                integer("pilot.retry.base-delay-ms", (int)defaults.baseDelayMs()),
+                integer("pilot.retry.max-delay-ms", (int)defaults.maxDelayMs()),
+                integer("pilot.retry.breaker-after-failures", defaults.breakerAfterFailures()));
         }
 
         private static int integer(String key, int fallback) {
@@ -78,7 +77,7 @@ public final class RetryBudget {
      * @param remainingMs  预算剩余毫秒，{@code -1} 表示预算不设上限
      */
     public record Decision(boolean retry, int attempt, long delayMs, long elapsedMs, long remainingMs,
-                           boolean circuitOpen, String reason) {
+        boolean circuitOpen, String reason) {
         public Decision {
             reason = reason == null ? "" : reason;
         }
@@ -142,15 +141,15 @@ public final class RetryBudget {
 
         if (settings.breakerAfterFailures() > 0 && consecutiveFailures >= settings.breakerAfterFailures()) {
             return new Decision(false, attempts, 0, elapsed, remaining, true,
-                    clip(reason) + "（连续失败 " + consecutiveFailures + " 次，已熔断）");
+                clip(reason) + "（连续失败 " + consecutiveFailures + " 次，已熔断）");
         }
         if (attempts > settings.maxAttempts()) {
             return new Decision(false, attempts, 0, elapsed, remaining, false,
-                    clip(reason) + "（重试次数已达上限 " + settings.maxAttempts() + "）");
+                clip(reason) + "（重试次数已达上限 " + settings.maxAttempts() + "）");
         }
         if (remaining == 0) {
             return new Decision(false, attempts, 0, elapsed, 0, false,
-                    clip(reason) + "（重试总时长已达上限 " + (settings.maxElapsedMs() / 1000) + " 秒）");
+                clip(reason) + "（重试总时长已达上限 " + (settings.maxElapsedMs() / 1000) + " 秒）");
         }
         // 最后一次可用预算不足以覆盖完整等待时，缩短等待，避免「等完就超预算」
         long bounded = remaining > 0 ? Math.min(delay, remaining) : delay;
@@ -164,7 +163,7 @@ public final class RetryBudget {
         long capped = Math.min(settings.maxDelayMs(), Math.max(settings.baseDelayMs(), exponential));
         double jitter = Math.max(0.0, Math.min(1.0, random.getAsDouble()));
         // 等量抖动：实际等待落在 [capped/2, capped]，既能退避又不会同步重连
-        return Math.max(1L, (long) (capped * (0.5 + 0.5 * jitter)));
+        return Math.max(1L, (long)(capped * (0.5 + 0.5 * jitter)));
     }
 
     private static String clip(String reason) {

@@ -1,8 +1,9 @@
 package com.pilot.server.controller;
 
-import com.pilot.server.session.RunStarter;
-import com.pilot.server.workspace.ChangeService;
-import com.pilot.server.workspace.RunSnapshotService;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.UUID;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -11,8 +12,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.nio.file.Path;
-import java.util.List;
+import com.pilot.server.session.RunStarter;
+import com.pilot.server.workspace.ChangeService;
+import com.pilot.server.workspace.RunSnapshotService;
 
 /** 运行控制：取消执行、回滚改动与查看本轮改动。 */
 @RestController
@@ -58,7 +60,7 @@ public class RunController {
         }
         try {
             return changes.inspectRun(runId, Path.of(meta.workspace()),
-                    meta.files().stream().map(RunSnapshotService.SnapshotEntry::path).toList());
+                meta.files().stream().map(RunSnapshotService.SnapshotEntry::path).toList());
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
         }
@@ -68,8 +70,10 @@ public class RunController {
     @PostMapping("/{runId}/rollback")
     public RunSnapshotService.RollbackReport rollback(@PathVariable String runId) {
         RunSnapshotService.SnapshotMeta meta = snapshots.meta(runId);
-        if (meta == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有该运行的回滚快照: " + runId);
-        String operationId = "restore_" + java.util.UUID.randomUUID();
+        if (meta == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有该运行的回滚快照: " + runId);
+        }
+        String operationId = "restore_" + UUID.randomUUID();
         if (!runStarter.lockWorkspace(operationId, Path.of(meta.workspace()))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "工作区仍有任务在运行，请结束后再回滚");
         }

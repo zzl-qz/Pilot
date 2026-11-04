@@ -1,10 +1,17 @@
 package com.pilot.core.multi;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * 单个子 Agent 的变更沙箱。
@@ -63,18 +70,17 @@ public final class DiffSandbox {
     }
 
     public synchronized String currentText(String path, String baselineText) {
-        return changes.stream().filter(change -> samePath(change.path(), path))
-                .findFirst().map(SandboxChange::newContent).orElse(baselineText);
+        return changes.stream().filter(change -> samePath(change.path(), path)).findFirst()
+            .map(SandboxChange::newContent).orElse(baselineText);
     }
 
     public synchronized String proposedText(String path) {
-        return changes.stream().filter(change -> samePath(change.path(), path))
-                .findFirst().map(SandboxChange::newContent).orElse(null);
+        return changes.stream().filter(change -> samePath(change.path(), path)).findFirst()
+            .map(SandboxChange::newContent).orElse(null);
     }
 
     private static boolean samePath(String left, String right) {
-        return left != null && right != null
-                && left.replace('\\', '/').equalsIgnoreCase(right.replace('\\', '/'));
+        return left != null && right != null && left.replace('\\', '/').equalsIgnoreCase(right.replace('\\', '/'));
     }
 
     /**
@@ -84,8 +90,8 @@ public final class DiffSandbox {
      * <p>写回真实文件时服务端会重新读取文件并比对该指纹；如果这里用「上一版提案」当基线，
      * 连续改两处就会因指纹不符被拒绝，表现为第一处改动丢失。
      */
-    public synchronized SandboxChange add(String path, String oldText, String newText,
-                                          boolean existed, RiskLevel risk) {
+    public synchronized SandboxChange add(String path, String oldText, String newText, boolean existed,
+        RiskLevel risk) {
         String key = normalize(path);
         SandboxChange superseded = null;
         for (SandboxChange existing : changes) {
@@ -109,8 +115,8 @@ public final class DiffSandbox {
             return null;
         }
         String baseHash = superseded != null ? superseded.baseHash() : fingerprint(baseline);
-        SandboxChange change = new SandboxChange(path, diff, newText, baselineExisted,
-                baseHash, agentId, taskId, risk, ChangeStatus.PENDING);
+        SandboxChange change = new SandboxChange(path, diff, newText, baselineExisted, baseHash, agentId, taskId, risk,
+            ChangeStatus.PENDING);
         if (superseded != null) {
             changes.remove(superseded);
         }
@@ -119,7 +125,7 @@ public final class DiffSandbox {
     }
 
     private static String normalize(String path) {
-        return path == null ? "" : path.replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
+        return path == null ? "" : path.replace('\\', '/').toLowerCase(Locale.ROOT);
     }
 
     public synchronized int fileCount() {
@@ -127,15 +133,15 @@ public final class DiffSandbox {
     }
 
     public synchronized String candidateHash() {
-        String canonical = changes.stream().sorted(java.util.Comparator.comparing(SandboxChange::path))
-                .map(change -> change.path() + "\0" + change.baseHash() + "\0" + change.newContent()
-                        + "\0" + change.status().wireName())
-                .collect(java.util.stream.Collectors.joining("\n"));
+        String canonical = changes
+            .stream().sorted(Comparator.comparing(SandboxChange::path)).map(change -> change.path() + "\0"
+                + change.baseHash() + "\0" + change.newContent() + "\0" + change.status().wireName())
+            .collect(Collectors.joining("\n"));
         return fingerprint(canonical);
     }
 
     /** 审阅后回写状态用；保持顺序不变。 */
-    public synchronized void replaceAll(java.util.Collection<SandboxChange> updated) {
+    public synchronized void replaceAll(Collection<SandboxChange> updated) {
         changes.clear();
         if (updated != null) {
             changes.addAll(updated);
@@ -148,14 +154,13 @@ public final class DiffSandbox {
             return "";
         }
         try {
-            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));
             StringBuilder hex = new StringBuilder(digest.length * 2);
             for (byte value : digest) {
                 hex.append(String.format("%02x", value));
             }
             return hex.toString();
-        } catch (java.security.NoSuchAlgorithmException e) {
+        } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 不可用", e);
         }
     }
@@ -169,8 +174,7 @@ public final class DiffSandbox {
 
     @Override
     public String toString() {
-        return "DiffSandbox{" + id + ", agent=" + agentId + ", task=" + taskId
-                + ", files=" + fileCount() + '}';
+        return "DiffSandbox{" + id + ", agent=" + agentId + ", task=" + taskId + ", files=" + fileCount() + '}';
     }
 
     @Override

@@ -9,8 +9,8 @@ package com.pilot.core.event;
  * @param status  {@link com.pilot.core.multi.TaskStatus#wireName()}
  * @param detail  一句话说明（失败原因、仲裁摘要等）
  */
-public record TaskUpdated(String taskId, String agentId, String title, String status, String detail)
-        implements SessionEvent {
+public record TaskUpdated(String taskId, String agentId, String title, String status,
+    String detail) implements SessionEvent {
     public TaskUpdated {
         if (taskId == null || taskId.isBlank()) {
             throw new IllegalArgumentException("taskId must not be blank");

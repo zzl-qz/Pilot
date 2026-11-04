@@ -17,7 +17,8 @@ import { writeDraft, readDraft, dropDraft } from '../lib/drafts.js';
 import { splitAttachmentMarkers, joinAttachmentMarkers } from '../lib/attachments.js';
 import { queueHeader, resumeBar } from '../lib/queue.js';
 import { PERMISSION_MODES, permissionLabel, permissionHint } from '../lib/permission.js';
-import { buildModelProbe, buildModelUpdate, describeModelsFetched } from '../lib/model-settings.js';
+import { ModelOptions, useModelDiscovery } from './ModelDiscovery.jsx';
+import { ModelSaveFeedback, useModelForm } from './ModelForm.jsx';
 import { usageLevel, usagePercent } from '../lib/context-usage.js';
 import { agentStatusLabel, summarizeAgents } from '../lib/agents.js';
 
@@ -70,6 +71,7 @@ export function Composer() {
   const [pendingFiles, setPendingFiles] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState(false);
+  const voiceBusyRef = useRef(false);
   const [dragging, setDragging] = useState(false);
   const dragDepthRef = useRef(0);
   const sessionDraftsRef = useRef(new Map());
@@ -92,8 +94,23 @@ export function Composer() {
       }
     });
     inputRef.current = input;
+    let composing = false;
+    const startComposition = () => { composing = true; };
+    const endComposition = () => { composing = false; };
+    input.root.addEventListener('compositionstart', startComposition);
+    input.root.addEventListener('compositionend', endComposition);
     // state 被 immer 冻结，必须走 setState，不能直接赋值
     useStore.setState({ composerApi: {
+      prepareReload: () => {
+        if (composing) return { ok: false, reason: '请先完成输入法中的文字，再重新载入。' };
+        if (voiceBusyRef.current) return { ok: false, reason: '请先结束语音输入，再重新载入。' };
+        if (submittingRef.current || pendingFilesRef.current) return { ok: false, reason: '正在发送或读取附件，请完成后重新载入。' };
+        if (input.attachmentIds().length) return { ok: false, reason: '有未发送的附件，请先发送或移除，再重新载入。' };
+        const text = input.getText();
+        writeDraft(localStorage, useStore.getState().sessionId, text);
+        if (text.trim() && readDraft(localStorage, useStore.getState().sessionId) !== text) return { ok: false, reason: '当前草稿未能完整保存，已保留页面，请先复制或发送草稿。' };
+        return { ok: true };
+      },
       getText: () => input.getText(),
       getDraft: () => input.getDraft(),
       attachmentIds: () => input.attachmentIds(),
@@ -104,6 +121,8 @@ export function Composer() {
       focus: () => input.focus()
     } });
     return () => {
+      input.root.removeEventListener('compositionstart', startComposition);
+      input.root.removeEventListener('compositionend', endComposition);
       input.destroy();
       inputRef.current = null;
       useStore.setState({ composerApi: null });
@@ -616,7 +635,7 @@ export function Composer() {
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.5V8l2.5 1.5"/></svg>
             </button>
             <VoiceInput ownerKey={`${sessionEpoch}:${sessionId || ''}:${workspace}`} disabled={submitting}
-              onBusy={setVoiceBusy} onText={(text) => { const input = inputRef.current; input?.appendText((input.getText().trim() ? '\n' : '') + text); input?.focus(); }} />
+              onBusy={value => { voiceBusyRef.current = value; setVoiceBusy(value); }} onText={(text) => { const input = inputRef.current; input?.appendText((input.getText().trim() ? '\n' : '') + text); input?.focus(); }} />
 
             <button
               type={sendAction.stop ? "button" : "submit"}
@@ -664,56 +683,21 @@ function CheckIcon() {
 
 function ModelMenu({ onClose, models, initialModel = '', initialEndpoint = '' }) {
   // 打开菜单时预填当前配置：之前是空白表单，用户会以为模型没配
-  const [name, setName] = useState(initialModel);
-  const [endpoint, setEndpoint] = useState(initialEndpoint);
-  const [key, setKey] = useState('');
-  const [hint, setHint] = useState('');
-  const [probing, setProbing] = useState(false);
-  const [savingModel, setSavingModel] = useState(false);
+  const { name, endpoint, key, setName, setEndpoint, setKey, saving, feedback, save } = useModelForm({ model: initialModel, endpoint: initialEndpoint });
+  const discovery = useModelDiscovery({ endpoint, apiKey: key, initialModels: models, initialEndpoint });
   return (
     <div className="chip-menu model-menu" id="model-menu" role="dialog" aria-label="模型设置">
       <p className="menu-head">模型</p>
-      <label>模型名称<input value={name} onChange={(event) => setName(event.target.value)} placeholder="如 deepseek-chat" /></label>
-      <label>端点<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="模型服务地址，以 /v1 结尾" /></label>
-      <label>API Key<input type="password" value={key} onChange={(event) => setKey(event.target.value)} placeholder="不填则沿用已保存的" /></label>
+      <label>模型名称<input disabled={saving} value={name} onChange={(event) => setName(event.target.value)} placeholder="如 deepseek-chat" /></label>
+      <label>端点<input disabled={saving} value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="模型服务地址，以 /v1 结尾" /></label>
+      <label>API Key<input disabled={saving} type="password" value={key} onChange={(event) => setKey(event.target.value)} placeholder="不填则沿用已保存的" /></label>
       <div className="chip-menu-actions">
-        <button type="button" className="btn" disabled={probing} onClick={async () => {
-          setProbing(true);
-          try {
-            const list = await useStore.getState().probeModels(buildModelProbe({ endpoint, apiKey: key }));
-            setHint(describeModelsFetched(list, { endpoint }));
-          } catch (error) {
-            setHint('探测失败：' + error.message);
-          } finally {
-            setProbing(false);
-          }
-        }}>{probing ? '探测中…' : '探测模型'}</button>
-        <button type="button" className="btn btn-primary" disabled={savingModel || !name.trim()} onClick={async () => {
-          setSavingModel(true);
-          try {
-            if (await useStore.getState().saveModel(buildModelUpdate({ model: name, endpoint, apiKey: key }))) onClose();
-          } finally { setSavingModel(false); }
-        }}>保存</button>
+        <button type="button" className="btn" disabled={saving || discovery.probing} aria-busy={discovery.probing} onClick={discovery.probe}>{discovery.probing ? '探测中…' : '探测模型'}</button>
+        <button type="button" className="btn btn-primary" disabled={saving || !name.trim()} aria-busy={saving} onClick={async () => { if (await save()) onClose(); }}>{saving ? '保存中…' : '保存'}</button>
       </div>
-      {models?.length > 0 && (
-        <div className="model-options" role="listbox" aria-label="探测到的模型">
-          <p className="model-options-head">端点可用模型<span>{models.length}</span></p>
-          {models.slice(0, 12).map((model) => (
-            <button
-              key={model}
-              type="button"
-              role="option"
-              aria-selected={model === name}
-              className={`model-option${model === name ? ' is-on' : ''}`}
-              onClick={() => setName(model)}
-            >
-              <span className="model-option-name">{model}</span>
-              {model === name && <CheckIcon />}
-            </button>
-          ))}
-        </div>
-      )}
-      {hint && <p className="chip-hint">{hint}</p>}
+      <ModelSaveFeedback feedback={feedback} />
+      {discovery.hint && <p className="chip-hint" role={discovery.error ? 'alert' : 'status'}>{discovery.hint}</p>}
+      <ModelOptions models={discovery.models} value={name} onSelect={setName} disabled={saving} discovered={discovery.discovered} />
     </div>
   );
 }

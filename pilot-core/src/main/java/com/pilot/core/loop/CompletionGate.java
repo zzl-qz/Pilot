@@ -1,11 +1,5 @@
 package com.pilot.core.loop;
 
-import com.pilot.core.plan.PlanItem;
-import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.tool.ToolCall;
-import com.pilot.core.tool.ToolSupport;
-import com.pilot.core.tool.VerificationCheck;
-
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -14,6 +8,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import com.pilot.core.plan.PlanItem;
+import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.core.tool.ToolCall;
+import com.pilot.core.tool.ToolSupport;
+import com.pilot.core.tool.VerificationCheck;
 
 /**
  * 收尾门：模型说「做完了」时，先检查它是不是真的做完了。
@@ -35,18 +35,18 @@ final class CompletionGate {
     /** 实现类目标却没有任何改动就想收尾时，只推一次让它直接动手。 */
     private static final int MAX_ACTION_PROMPTS = 1;
     /** 目标像「修复 / 实现 / 修改」时，没有任何改动就收尾通常是半途停手，而不是完成。 */
-    private static final List<String> ACTION_HINTS = List.of(
-            "修复", "修改", "实现", "添加", "增加", "新增", "重构", "优化", "改成", "改为", "开发", "落地");
-    private static final List<String> ACTION_HINTS_EN = List.of(
-            "fix", "implement", "add ", "change", "refactor", "update", "build");
+    private static final List<String> ACTION_HINTS =
+        List.of("修复", "修改", "实现", "添加", "增加", "新增", "重构", "优化", "改成", "改为", "开发", "落地");
+    private static final List<String> ACTION_HINTS_EN =
+        List.of("fix", "implement", "add ", "change", "refactor", "update", "build");
     /** 只改这些后缀的文档不算「改了代码」，不强制跑构建。 */
     private static final Set<String> DOC_SUFFIXES = Set.of(".md", ".txt", ".rst", ".adoc");
     /** 目标像「调研 / 解释 / 定位」时，只读任务也要核对覆盖范围，不能读两个文件就下结论。 */
-    private static final List<String> RESEARCH_HINTS = List.of(
-            "分析", "梳理", "说明", "解释", "为什么", "怎么实现", "如何实现", "调用链", "流程",
-            "审查", "评估", "调研", "看一下", "读一下", "哪些", "对比", "定位");
-    private static final List<String> RESEARCH_HINTS_EN = List.of(
-            "explain", "analyze", "analyse", "review", "how does", "why", "walk through");
+    private static final List<String> RESEARCH_HINTS = List.of("分析", "梳理", "说明", "解释", "为什么", "怎么实现", "如何实现", "调用链",
+        "流程", "审查", "评估", "调研", "看一下", "读一下", "哪些", "对比", "定位");
+    private static final List<String> RESEARCH_HINTS_EN =
+        List.of("explain", "analyze", "analyse", "review", "how does", "why", "walk through");
+
     /** @param attempt 第几次提醒；{@code max} 是这类提醒的上限 */
     record Nudge(String prompt, String reason, int attempt, int max) {
     }
@@ -129,7 +129,7 @@ final class CompletionGate {
     }
 
     Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps,
-                   boolean independentReview) {
+        boolean independentReview) {
         if (!enabled) {
             return null;
         }
@@ -138,21 +138,18 @@ final class CompletionGate {
         boolean researching = !changed && toolCalls >= 2 && looksLikeResearch(goal);
         // 实现类目标却一个文件都没改就想收尾，多半是只给了方案或反问了一句，而不是真的做完
         if (!changed && !researching && actionPrompts < MAX_ACTION_PROMPTS && looksLikeAction(goal)
-                && !looksLikeResearch(goal)) {
+            && !looksLikeResearch(goal)) {
             actionPrompts++;
-            String prompt = prompts.render("completion/act",
-                    Map.of("goal", ToolSupport.oneLine(goal, 500))).strip();
+            String prompt = prompts.render("completion/act", Map.of("goal", ToolSupport.oneLine(goal, 500))).strip();
             return new Nudge(prompt, "实现类目标尚无任何改动，已要求直接动手", actionPrompts, MAX_ACTION_PROMPTS);
         }
         if (!changed && !researching) {
             return null;
         }
-        if (changed && touchesCode(changedFiles) && !hasPassingCheck(checks)
-                && verifyPrompts < MAX_VERIFY_PROMPTS) {
+        if (changed && touchesCode(changedFiles) && !hasPassingCheck(checks) && verifyPrompts < MAX_VERIFY_PROMPTS) {
             verifyPrompts++;
-            String prompt = prompts.render("completion/verify", Map.of(
-                    "changedFiles", bullets(changedFiles),
-                    "checks", checks.isEmpty() ? "（本轮没有跑过构建或测试）" : bullets(checks))).strip();
+            String prompt = prompts.render("completion/verify", Map.of("changedFiles", bullets(changedFiles), "checks",
+                checks.isEmpty() ? "（本轮没有跑过构建或测试）" : bullets(checks))).strip();
             return new Nudge(prompt, "改动未验证，已要求先跑构建或测试", verifyPrompts, MAX_VERIFY_PROMPTS);
         }
         if (!independentReview && reviewPrompts < MAX_REVIEW_PROMPTS) {
@@ -160,24 +157,18 @@ final class CompletionGate {
             String goalText = goal == null ? "（续跑，无原始输入）" : ToolSupport.oneLine(goal, 500);
             String prompt;
             if (changed) {
-                int done = (int) plan.stream().filter(PlanItem::done).count();
-                prompt = prompts.render("completion/review", Map.of(
-                        "goal", goalText,
-                        "toolCalls", String.valueOf(toolCalls),
-                        "changedFiles", bullets(changedFiles),
-                        "planProgress", plan.isEmpty()
-                                ? "（本轮没有维护计划）"
-                                : done + "/" + plan.size() + " 已完成",
-                        "openSteps", openSteps.isEmpty() ? "（无）" : bullets(openSteps),
-                        "checks", checks.isEmpty() ? "（未执行验证）" : bullets(checks)));
+                int done = (int)plan.stream().filter(PlanItem::done).count();
+                prompt = prompts.render("completion/review",
+                    Map.of("goal", goalText, "toolCalls", String.valueOf(toolCalls), "changedFiles",
+                        bullets(changedFiles), "planProgress",
+                        plan.isEmpty() ? "（本轮没有维护计划）" : done + "/" + plan.size() + " 已完成", "openSteps",
+                        openSteps.isEmpty() ? "（无）" : bullets(openSteps), "checks",
+                        checks.isEmpty() ? "（未执行验证）" : bullets(checks)));
             } else {
-                prompt = prompts.render("completion/review-readonly", Map.of(
-                        "goal", goalText,
-                        "toolCalls", String.valueOf(toolCalls),
-                        "inspected", inspected.isEmpty() ? "（未记录具体路径）" : bullets(inspected)));
+                prompt = prompts.render("completion/review-readonly", Map.of("goal", goalText, "toolCalls",
+                    String.valueOf(toolCalls), "inspected", inspected.isEmpty() ? "（未记录具体路径）" : bullets(inspected)));
             }
-            return new Nudge(prompt.strip(), "收尾前自审：核对目标与结论是否真的覆盖完整",
-                    reviewPrompts, MAX_REVIEW_PROMPTS);
+            return new Nudge(prompt.strip(), "收尾前自审：核对目标与结论是否真的覆盖完整", reviewPrompts, MAX_REVIEW_PROMPTS);
         }
         return null;
     }
@@ -187,8 +178,7 @@ final class CompletionGate {
             return false;
         }
         String lower = goal.toLowerCase(Locale.ROOT);
-        return ACTION_HINTS.stream().anyMatch(goal::contains)
-                || ACTION_HINTS_EN.stream().anyMatch(lower::contains);
+        return ACTION_HINTS.stream().anyMatch(goal::contains) || ACTION_HINTS_EN.stream().anyMatch(lower::contains);
     }
 
     private static boolean looksLikeResearch(String goal) {
@@ -196,8 +186,7 @@ final class CompletionGate {
             return false;
         }
         String lower = goal.toLowerCase(Locale.ROOT);
-        return RESEARCH_HINTS.stream().anyMatch(goal::contains)
-                || RESEARCH_HINTS_EN.stream().anyMatch(lower::contains);
+        return RESEARCH_HINTS.stream().anyMatch(goal::contains) || RESEARCH_HINTS_EN.stream().anyMatch(lower::contains);
     }
 
     private static String bullets(Collection<String> values) {
@@ -213,7 +202,6 @@ final class CompletionGate {
     }
 
     private static boolean hasPassingCheck(List<String> checks) {
-        return checks.stream().map(VerificationCheck::passingKind)
-                .anyMatch(VerificationCheck.Kind::qualifies);
+        return checks.stream().map(VerificationCheck::passingKind).anyMatch(VerificationCheck.Kind::qualifies);
     }
 }

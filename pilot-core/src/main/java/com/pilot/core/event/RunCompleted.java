@@ -18,8 +18,8 @@ import java.util.List;
  * @param planTotal  计划总项数；0 表示本次运行没有维护计划
  * @param openSteps  仍未完成的步骤（按原顺序）
  */
-public record RunCompleted(String summary, List<String> changedFiles, List<String> checks,
-                           Integer planDone, Integer planTotal, List<String> openSteps) implements SessionEvent {
+public record RunCompleted(String summary, List<String> changedFiles, List<String> checks, Integer planDone,
+    Integer planTotal, List<String> openSteps) implements SessionEvent {
     public RunCompleted {
         changedFiles = List.copyOf(changedFiles == null ? List.of() : changedFiles);
         checks = List.copyOf(checks == null ? List.of() : checks);

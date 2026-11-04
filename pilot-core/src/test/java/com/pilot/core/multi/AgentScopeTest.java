@@ -1,11 +1,11 @@
 package com.pilot.core.multi;
 
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 
 class AgentScopeTest {
 
@@ -45,8 +45,8 @@ class AgentScopeTest {
 
     @Test
     void toolAllowListRestrictsTools() {
-        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
-                .withTools(List.of("read_file", "search_text"), List.of());
+        AgentScope scope =
+            AgentScope.readOnly(List.of(), List.of()).withTools(List.of("read_file", "search_text"), List.of());
 
         assertTrue(scope.allowsTool("read_file"));
         assertFalse(scope.allowsTool("run_command"));
@@ -55,8 +55,8 @@ class AgentScopeTest {
 
     @Test
     void toolAllowListSupportsWildcards() {
-        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
-                .withTools(List.of("read_*", "search_text"), List.of());
+        AgentScope scope =
+            AgentScope.readOnly(List.of(), List.of()).withTools(List.of("read_*", "search_text"), List.of());
 
         assertTrue(scope.allowsTool("read_file"));
         assertTrue(scope.allowsTool("search_text"));
@@ -66,8 +66,8 @@ class AgentScopeTest {
 
     @Test
     void commandAllowListMatchesArgumentPrefix() {
-        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
-                .withCommands(List.of("mvn test", "git status"), List.of());
+        AgentScope scope =
+            AgentScope.readOnly(List.of(), List.of()).withCommands(List.of("mvn test", "git status"), List.of());
 
         assertTrue(scope.allowsCommand("mvn test"));
         assertTrue(scope.allowsCommand("mvn test -q -DskipITs"));
@@ -79,8 +79,8 @@ class AgentScopeTest {
 
     @Test
     void commandDenyListWinsOverAllowList() {
-        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
-                .withCommands(List.of("mvn"), List.of("mvn deploy"));
+        AgentScope scope =
+            AgentScope.readOnly(List.of(), List.of()).withCommands(List.of("mvn"), List.of("mvn deploy"));
 
         assertTrue(scope.allowsCommand("mvn test"));
         assertFalse(scope.allowsCommand("mvn deploy -q"));
@@ -88,8 +88,8 @@ class AgentScopeTest {
 
     @Test
     void commandWildcardsMatchSingleOrRestArguments() {
-        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
-                .withCommands(List.of("git *", "npm run **"), List.of());
+        AgentScope scope =
+            AgentScope.readOnly(List.of(), List.of()).withCommands(List.of("git *", "npm run **"), List.of());
 
         assertTrue(scope.allowsCommand("git status --porcelain"));
         assertFalse(scope.allowsCommand("git"));

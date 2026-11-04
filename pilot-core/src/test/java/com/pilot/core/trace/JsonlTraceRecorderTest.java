@@ -1,9 +1,7 @@
 package com.pilot.core.trace;
 
-import com.pilot.core.tool.ToolCall;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import tools.jackson.databind.json.JsonMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -12,8 +10,12 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.tool.ToolCall;
+
+import tools.jackson.databind.json.JsonMapper;
 
 class JsonlTraceRecorderTest {
     @TempDir
@@ -25,8 +27,7 @@ class JsonlTraceRecorderTest {
         JsonlTraceRecorder recorder = new JsonlTraceRecorder(file, JsonMapper.builder().build());
 
         recorder.record(new ToolCall("c1", "read_file", Map.of("path", "a.txt")), "读到 12 行", 5L);
-        recorder.record(new ToolCall("c2", "run_command", Map.of("command", "mvnw test")),
-                "ERROR: 权限拒绝：READ_ONLY", 9L);
+        recorder.record(new ToolCall("c2", "run_command", Map.of("command", "mvnw test")), "ERROR: 权限拒绝：READ_ONLY", 9L);
 
         List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
         assertEquals(2, lines.size());

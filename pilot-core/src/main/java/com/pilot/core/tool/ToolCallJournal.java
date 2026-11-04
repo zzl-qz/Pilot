@@ -26,8 +26,8 @@ public interface ToolCallJournal {
      * @param postHash    写完之后的文件内容指纹；无法计算时为空串
      * @param replayable  是否允许复用（只有写文件成功的结果为 true）
      */
-    record Recorded(String result, List<String> changedPaths, List<String> checks,
-                    String fingerprint, String postHash, boolean replayable) {
+    record Recorded(String result, List<String> changedPaths, List<String> checks, String fingerprint, String postHash,
+        boolean replayable) {
         public Recorded {
             changedPaths = changedPaths == null ? List.of() : List.copyOf(changedPaths);
             checks = checks == null ? List.of() : List.copyOf(checks);
@@ -40,8 +40,8 @@ public interface ToolCallJournal {
     Optional<Recorded> replay(String runId, ToolCall call);
 
     /** 实现方按自己的方式计算写出内容的现状指纹（服务端知道工作区路径）。 */
-    void record(String runId, ToolCall call, String result, List<String> changedPaths,
-                List<String> checks, boolean replayable);
+    void record(String runId, ToolCall call, String result, List<String> changedPaths, List<String> checks,
+        boolean replayable);
 
     int deleteBySession(String sessionId);
 
@@ -54,7 +54,7 @@ public interface ToolCallJournal {
 
             @Override
             public void record(String runId, ToolCall call, String result, List<String> changedPaths,
-                               List<String> checks, boolean replayable) {
+                List<String> checks, boolean replayable) {
             }
 
             @Override
@@ -68,8 +68,7 @@ public interface ToolCallJournal {
     static String fingerprint(ToolCall call) {
         String canonical = call.name() + "\0" + canonical(call.args());
         try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(canonical.getBytes(StandardCharsets.UTF_8));
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8));
             StringBuilder hex = new StringBuilder(digest.length * 2);
             for (byte value : digest) {
                 hex.append(String.format("%02x", value));
@@ -82,10 +81,9 @@ public interface ToolCallJournal {
 
     private static String canonical(Object value) {
         if (value instanceof Map<?, ?> map) {
-            return map.entrySet().stream()
-                    .sorted(Comparator.comparing(entry -> String.valueOf(entry.getKey())))
-                    .map(entry -> entry.getKey() + "=" + canonical(entry.getValue()))
-                    .collect(Collectors.joining(",", "{", "}"));
+            return map.entrySet().stream().sorted(Comparator.comparing(entry -> String.valueOf(entry.getKey())))
+                .map(entry -> entry.getKey() + "=" + canonical(entry.getValue()))
+                .collect(Collectors.joining(",", "{", "}"));
         }
         if (value instanceof List<?> list) {
             return list.stream().map(ToolCallJournal::canonical).collect(Collectors.joining(",", "[", "]"));

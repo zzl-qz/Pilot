@@ -1,5 +1,18 @@
 package com.pilot.server.store;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.List;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunStarted;
@@ -7,19 +20,8 @@ import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.session.NoSuchSessionException;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionStatus;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+
 import tools.jackson.databind.json.JsonMapper;
-
-import java.nio.file.Path;
-import java.time.Instant;
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JdbcSessionRepositoryTest {
     @TempDir
@@ -31,8 +33,7 @@ class JdbcSessionRepositoryTest {
     @BeforeEach
     void setUp() {
         database = tempDir.resolve("pilot.db");
-        repository = new JdbcSessionRepository(new SqliteStore(database),
-                new EventCodec(JsonMapper.builder().build()));
+        repository = new JdbcSessionRepository(new SqliteStore(database), new EventCodec(JsonMapper.builder().build()));
     }
 
     @Test
@@ -42,20 +43,21 @@ class JdbcSessionRepositoryTest {
 
         repository.append("ses_1", "run_1", now, new RunStarted("你好"), SessionStatus.RUNNING);
         repository.append("ses_1", "run_1", now.plusSeconds(1), new ToolCompleted("call_1", "读取 12 行", 42L),
-                SessionStatus.RUNNING);
+            SessionStatus.RUNNING);
         repository.append("ses_1", "run_1", now.plusSeconds(2),
-                new RunCompleted("完成", List.of("a.txt"), List.of("mvn -q test → exit 0")), SessionStatus.COMPLETED);
+            new RunCompleted("完成", List.of("a.txt"), List.of("mvn -q test → exit 0")), SessionStatus.COMPLETED);
 
         // 重新打开同一个库，验证真的落盘而不是内存
-        JdbcSessionRepository reopened = new JdbcSessionRepository(new SqliteStore(database),
-                new EventCodec(JsonMapper.builder().build()));
+        JdbcSessionRepository reopened =
+            new JdbcSessionRepository(new SqliteStore(database), new EventCodec(JsonMapper.builder().build()));
         List<EventEnvelope> events = reopened.events("ses_1");
 
         assertEquals(3, events.size());
         assertEquals(1, events.get(0).sequence());
         assertTrue(events.get(0).payload() instanceof RunStarted started && "你好".equals(started.input()));
         assertTrue(events.get(1).payload() instanceof ToolCompleted completed && completed.latencyMs() == 42L);
-        assertTrue(events.get(2).payload() instanceof RunCompleted done && done.changedFiles().equals(List.of("a.txt")));
+        assertTrue(
+            events.get(2).payload() instanceof RunCompleted done && done.changedFiles().equals(List.of("a.txt")));
 
         Session session = reopened.find("ses_1").orElseThrow();
         assertEquals("第一个会话", session.title());
@@ -113,7 +115,7 @@ class JdbcSessionRepositoryTest {
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
         for (int i = 1; i <= 10; i++) {
             repository.append("ses_1", "run_1", now.plusSeconds(i), new RunStarted("第 " + i + " 条"),
-                    SessionStatus.RUNNING);
+                SessionStatus.RUNNING);
         }
 
         assertEquals(10, repository.eventCount("ses_1"));
@@ -142,7 +144,7 @@ class JdbcSessionRepositoryTest {
         JdbcSessionRepository repo = new JdbcSessionRepository(store, new EventCodec(JsonMapper.builder().build()));
         repo.create("ses_1", "保留策略", null, Instant.parse("2020-01-01T00:00:00Z"));
         repo.append("ses_1", "run_1", Instant.parse("2020-01-02T00:00:00Z"), new RunStarted("旧"),
-                SessionStatus.RUNNING);
+            SessionStatus.RUNNING);
 
         assertEquals(1, store.deleteEventsBefore(Instant.parse("2021-01-01T00:00:00Z")));
         assertEquals(0, repo.eventCount("ses_1"));
@@ -152,7 +154,7 @@ class JdbcSessionRepositoryTest {
 
     @Test
     void appendingToUnknownSessionFails() {
-        assertThrows(NoSuchSessionException.class, () -> repository.append("ses_missing", "run_1", Instant.now(),
-                new RunStarted("x"), SessionStatus.RUNNING));
+        assertThrows(NoSuchSessionException.class,
+            () -> repository.append("ses_missing", "run_1", Instant.now(), new RunStarted("x"), SessionStatus.RUNNING));
     }
 }

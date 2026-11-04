@@ -1,18 +1,19 @@
 package com.pilot.core.loop;
 
-import com.pilot.core.plan.PlanItem;
-import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.tool.ToolCall;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
+import com.pilot.core.plan.PlanItem;
+import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.core.tool.ToolCall;
 
 class CompletionGateTest {
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
@@ -70,7 +71,8 @@ class CompletionGateTest {
     void passingCheckSkipsVerificationPrompt() {
         CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
 
-        CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"), List.of(), List.of());
+        CompletionGate.Nudge nudge =
+            gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"), List.of(), List.of());
 
         assertNotNull(nudge);
         assertTrue(nudge.reason().contains("自审"), nudge.reason());
@@ -80,33 +82,25 @@ class CompletionGateTest {
     void independentReviewerAvoidsDuplicateSelfReview() {
         CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
 
-        assertNull(gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"),
-                List.of(), List.of(), true));
+        assertNull(gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"), List.of(), List.of(), true));
     }
 
     @Test
     void independentReviewerStillRequiresCodeVerification() {
         CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
 
-        CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(),
-                List.of(), List.of(), true);
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(), List.of(), List.of(), true);
         assertNotNull(nudge);
         assertTrue(nudge.reason().contains("未验证"), nudge.reason());
     }
 
     @Test
     void unrelatedSuccessfulCommandsDoNotVerifyCodeChanges() {
-        for (String check : List.of(
-                "git status --short → exit 0",
-                "git diff → exit 0",
-                "node --version → exit 0",
-                "java -version → exit 0",
-                "npm --version → exit 0",
-                "cargo metadata → exit 0")) {
+        for (String check : List.of("git status --short → exit 0", "git diff → exit 0", "node --version → exit 0",
+            "java -version → exit 0", "npm --version → exit 0", "cargo metadata → exit 0")) {
             CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
 
-            CompletionGate.Nudge nudge = gate.evaluate(
-                    Set.of("src/A.java"), List.of(check), List.of(), List.of());
+            CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(check), List.of(), List.of());
 
             assertNotNull(nudge, check);
             assertTrue(nudge.reason().contains("未验证"), check + ": " + nudge.reason());
@@ -115,19 +109,12 @@ class CompletionGateTest {
 
     @Test
     void successfulBuildTestLintAndFormatChecksVerifyCodeChanges() {
-        for (String check : List.of(
-                "mvnw -q test → exit 0",
-                "gradlew :app:build → exit 0",
-                "npm run lint → exit 0",
-                "node --test → exit 0",
-                "python3 -m pytest -q → exit 0",
-                "cargo check → exit 0",
-                "go vet ./... → exit 0",
-                "git diff --check → exit 0")) {
+        for (String check : List.of("mvnw -q test → exit 0", "gradlew :app:build → exit 0", "npm run lint → exit 0",
+            "node --test → exit 0", "python3 -m pytest -q → exit 0", "cargo check → exit 0", "go vet ./... → exit 0",
+            "git diff --check → exit 0")) {
             CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
 
-            CompletionGate.Nudge nudge = gate.evaluate(
-                    Set.of("src/A.java"), List.of(check), List.of(), List.of());
+            CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(check), List.of(), List.of());
 
             assertNotNull(nudge, check);
             assertTrue(nudge.reason().contains("自审"), check + ": " + nudge.reason());
@@ -136,18 +123,16 @@ class CompletionGateTest {
 
     @Test
     void exitZeroInsideCommandCannotHideItsRealFailureOrUnfinishedState() {
-        for (String check : List.of(
-                "node -e process.exit(1) exit 0 → exit 1",
-                "node -e process.exit(1) exit 0 → RUNNING",
-                "node -e process.exit(1) exit 0 → TIMED_OUT（进程退出码 0）")) {
+        for (String check : List.of("node -e process.exit(1) exit 0 → exit 1",
+            "node -e process.exit(1) exit 0 → RUNNING", "node -e process.exit(1) exit 0 → TIMED_OUT（进程退出码 0）")) {
             CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
             CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(check), List.of(), List.of());
             assertNotNull(nudge, check);
             assertTrue(nudge.reason().contains("未验证"), check + ": " + nudge.reason());
         }
         CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
-        CompletionGate.Nudge passed = gate.evaluate(Set.of("src/A.java"),
-                List.of("mvn -Dlabel=exit_1 test → exit 0"), List.of(), List.of());
+        CompletionGate.Nudge passed =
+            gate.evaluate(Set.of("src/A.java"), List.of("mvn -Dlabel=exit_1 test → exit 0"), List.of(), List.of());
         assertNotNull(passed);
         assertTrue(passed.reason().contains("自审"), passed.reason());
     }
@@ -207,14 +192,13 @@ class CompletionGateTest {
     @Test
     void restoresInspectedPathsAndToolCountFromPersistedHistory() {
         CompletionGate gate = new CompletionGate(PROMPTS, true, "分析这个模块的调用链");
-        List<Message> history = List.of(
-                Message.user("分析这个模块的调用链"),
-                Message.assistant("", List.of(new ToolCall("call_1", "read_file", Map.of("path", "src/A.java")))),
-                Message.tool("call_1", "class A {}"),
-                Message.assistant("", List.of(new ToolCall("call_2", "read_file", Map.of("path", "src/B.java")))),
-                Message.tool("call_2", "class B {}"),
-                Message.assistant("", List.of(new ToolCall("call_3", "read_file", Map.of("path", "src/Skipped.java")))),
-                Message.tool("call_3", "SKIPPED: 用户已纠正当前任务"));
+        List<Message> history = List.of(Message.user("分析这个模块的调用链"),
+            Message.assistant("", List.of(new ToolCall("call_1", "read_file", Map.of("path", "src/A.java")))),
+            Message.tool("call_1", "class A {}"),
+            Message.assistant("", List.of(new ToolCall("call_2", "read_file", Map.of("path", "src/B.java")))),
+            Message.tool("call_2", "class B {}"),
+            Message.assistant("", List.of(new ToolCall("call_3", "read_file", Map.of("path", "src/Skipped.java")))),
+            Message.tool("call_3", "SKIPPED: 用户已纠正当前任务"));
 
         gate.restoreFrom(history);
         CompletionGate.Nudge nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
@@ -239,7 +223,8 @@ class CompletionGateTest {
         CompletionGate gate = new CompletionGate(PROMPTS, true, "做三件事");
         List<PlanItem> plan = List.of(new PlanItem("第一步", PlanItem.COMPLETED), new PlanItem("第二步", PlanItem.PENDING));
 
-        CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"), plan, List.of("第二步"));
+        CompletionGate.Nudge nudge =
+            gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"), plan, List.of("第二步"));
 
         assertNotNull(nudge);
         assertTrue(nudge.prompt().contains("1/2"), nudge.prompt());

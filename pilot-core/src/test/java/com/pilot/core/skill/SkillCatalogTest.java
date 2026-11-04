@@ -1,7 +1,9 @@
 package com.pilot.core.skill;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -11,13 +13,13 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class SkillCatalogTest {
-    @TempDir Path dir;
+    @TempDir
+    Path dir;
 
     private Path write(Path root, String name, String frontmatter, String body) throws IOException {
         Path skill = Files.createDirectories(root.resolve(name));
@@ -27,7 +29,7 @@ class SkillCatalogTest {
 
     private static List<SkillCatalog.Root> roots(Path project, Path user) {
         return List.of(new SkillCatalog.Root(project, SkillSource.PROJECT),
-                new SkillCatalog.Root(user, SkillSource.USER));
+            new SkillCatalog.Root(user, SkillSource.USER));
     }
 
     /** 项目级根不存在时的扫描入参。 */
@@ -46,8 +48,7 @@ class SkillCatalogTest {
         var catalog = SkillCatalog.scan(roots(project, user));
 
         assertEquals(2, catalog.list().size());
-        assertTrue(catalog.find("shared").orElseThrow().body().contains("项目正文"),
-                "项目级应遮蔽用户级同名技能");
+        assertTrue(catalog.find("shared").orElseThrow().body().contains("项目正文"), "项目级应遮蔽用户级同名技能");
         assertEquals(SkillSource.PROJECT, catalog.find("shared").orElseThrow().manifest().source());
         assertEquals(SkillSource.USER, catalog.find("personal").orElseThrow().manifest().source());
     }
@@ -78,9 +79,9 @@ class SkillCatalogTest {
     void bodyLimitsAreEnforced() throws IOException {
         Path root = Files.createDirectories(dir.resolve("skills"));
         write(root, "too-many-lines", "---\ndescription: x\n",
-                String.join("\n", IntStream.range(0, 501).mapToObj(i -> "行" + i).toList()));
+            String.join("\n", IntStream.range(0, 501).mapToObj(i -> "行" + i).toList()));
         write(root, "within-limits", "---\ndescription: x\n",
-                String.join("\n", IntStream.range(0, 500).mapToObj(i -> "行" + i).toList()));
+            String.join("\n", IntStream.range(0, 500).mapToObj(i -> "行" + i).toList()));
 
         var catalog = SkillCatalog.scan(roots(noProject(), root));
 
@@ -162,13 +163,12 @@ class SkillCatalogTest {
         assertThrows(IllegalArgumentException.class, () -> catalog.readFile(skill, "/etc/passwd"));
 
         Path longFile = root.resolve("demo/long.md");
-        Files.write(longFile, IntStream.range(0, SkillCatalog.MAX_FILE_LINES + 10)
-                .mapToObj(i -> "行" + i).toList());
+        Files.write(longFile, IntStream.range(0, SkillCatalog.MAX_FILE_LINES + 10).mapToObj(i -> "行" + i).toList());
         String truncated = catalog.readFile(skill, "long.md");
         assertTrue(truncated.contains("已截断"));
         assertTrue(truncated.lines().count() <= SkillCatalog.MAX_FILE_LINES + 1);
 
-        Files.write(root.resolve("demo/blob.bin"), new byte[]{1, 2, 0, 4});
+        Files.write(root.resolve("demo/blob.bin"), new byte[] {1, 2, 0, 4});
         assertThrows(IllegalArgumentException.class, () -> catalog.readFile(skill, "blob.bin"));
     }
 
@@ -183,7 +183,7 @@ class SkillCatalogTest {
             Files.createSymbolicLink(link, outside.resolve("secret.md"));
         } catch (IOException | UnsupportedOperationException e) {
             // Windows 创建符号链接需要特权；跳过而非失败
-            org.junit.jupiter.api.Assumptions.assumeTrue(false, "本机不支持创建符号链接");
+            Assumptions.assumeTrue(false, "本机不支持创建符号链接");
             return;
         }
         var catalog = SkillCatalog.scan(roots(noProject(), root));
@@ -194,8 +194,8 @@ class SkillCatalogTest {
     @Test
     void emptyAndMissingRootsYieldEmptyCatalog() {
         assertTrue(SkillCatalog.scan(List.of()).list().isEmpty());
-        assertTrue(SkillCatalog.scan(roots(dir.resolve("missing-project"), dir.resolve("missing-user")))
-                .list().isEmpty());
+        assertTrue(
+            SkillCatalog.scan(roots(dir.resolve("missing-project"), dir.resolve("missing-user"))).list().isEmpty());
         assertTrue(SkillCatalog.EMPTY.list().isEmpty());
         assertTrue(SkillCatalog.EMPTY.find("any").isEmpty());
     }

@@ -7,6 +7,7 @@ import {
   classifyModelError,
   describeModelSaved,
   describeModelsFetched,
+  normalizeModelNames,
   errorText
 } from '../../../frontend/src/lib/model-settings.js';
 
@@ -15,6 +16,12 @@ test('默认不清除密钥，字段两端空格被去掉', () => {
     buildModelUpdate({ model: ' gpt-4o ', endpoint: ' https://api.example/v1 ', apiKey: ' sk-1 ' }),
     { model: 'gpt-4o', endpoint: 'https://api.example/v1', apiKey: 'sk-1', clearApiKey: false }
   );
+});
+
+test('可选模型数量与有效 ID 对齐，去重、忽略无效值并保留大小写', () => {
+  assert.deepEqual(normalizeModelNames([' gpt-a ', 'gpt-a', '', null, 42, {}, 'GPT-A']), ['gpt-a', 'GPT-A']);
+  assert.deepEqual(normalizeModelNames(null), []);
+  assert.match(describeModelsFetched({ models: ['gpt-a', ' gpt-a ', '', null] }), /已获取 1 个可用模型/);
 });
 
 test('勾选清除时 apiKey 一律置空，避免「填了又清」的歧义', () => {

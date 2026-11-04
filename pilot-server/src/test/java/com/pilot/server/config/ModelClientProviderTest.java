@@ -1,14 +1,15 @@
 package com.pilot.server.config;
 
-import com.pilot.core.model.ModelClient;
-import com.pilot.core.model.ModelResponse;
-import com.pilot.server.store.InMemorySettingsStore;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.Test;
+
+import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ModelResponse;
+import com.pilot.server.store.InMemorySettingsStore;
 
 class ModelClientProviderTest {
 
@@ -16,8 +17,7 @@ class ModelClientProviderTest {
     void rebuildsDelegateOnlyWhenSettingsChange() {
         InMemorySettingsStore store = new InMemorySettingsStore();
         ModelSettings settings = new ModelSettings(
-                new ModelProperties("sk-1", "https://api.example.com/v1", "model-a",
-                        List.of("model-a", "model-b")), store);
+            new ModelProperties("sk-1", "https://api.example.com/v1", "model-a", List.of("model-a", "model-b")), store);
         ArrayList<ModelSettings.Snapshot> built = new ArrayList<ModelSettings.Snapshot>();
         ModelClient client = new ModelClientProvider(settings, snapshot -> {
             built.add(snapshot);

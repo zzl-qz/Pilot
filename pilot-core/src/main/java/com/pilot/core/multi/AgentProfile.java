@@ -13,10 +13,8 @@ import java.util.List;
  * <p>与技能（Skill）刻意分层：技能是「怎么做某类事」的指引，代理是「以什么身份与边界做事」
  * 的角色；两者都由目录即协议加载，但解析器与语义互不依赖。
  */
-public record AgentProfile(String name, String description, List<String> tools,
-                           List<String> files, List<String> denyFiles,
-                           List<String> commands, List<String> denyCommands,
-                           boolean writable, String prompt) {
+public record AgentProfile(String name, String description, List<String> tools, List<String> files,
+    List<String> denyFiles, List<String> commands, List<String> denyCommands, boolean writable, String prompt) {
 
     public AgentProfile {
         name = name == null ? "" : name.strip();
@@ -32,8 +30,7 @@ public record AgentProfile(String name, String description, List<String> tools,
     /** 该 profile 的权限视图底座：任务里的显式字段应在 server 层覆盖后重建。 */
     public AgentScope scope() {
         return (writable ? AgentScope.readWrite(files, denyFiles) : AgentScope.readOnly(files, denyFiles))
-                .withTools(tools, List.of())
-                .withCommands(commands, denyCommands);
+            .withTools(tools, List.of()).withCommands(commands, denyCommands);
     }
 
     /**
@@ -49,8 +46,7 @@ public record AgentProfile(String name, String description, List<String> tools,
      * @param taskCommands  任务声明的命令白名单；空表示未声明
      */
     public AgentScope mergeScope(boolean taskWritable, List<String> taskFiles, List<String> taskDenyFiles,
-                                 List<String> taskTools, List<String> taskCommands,
-                                 List<String> taskDenyCommands) {
+        List<String> taskTools, List<String> taskCommands, List<String> taskDenyCommands) {
         boolean writable = taskWritable;
         List<String> files = taskFiles.isEmpty() ? this.files : taskFiles;
         List<String> denyFiles = taskDenyFiles.isEmpty() ? this.denyFiles : taskDenyFiles;
@@ -58,8 +54,7 @@ public record AgentProfile(String name, String description, List<String> tools,
         List<String> commands = taskCommands.isEmpty() ? this.commands : taskCommands;
         List<String> denyCommands = taskDenyCommands.isEmpty() ? this.denyCommands : taskDenyCommands;
         return (writable ? AgentScope.readWrite(files, denyFiles) : AgentScope.readOnly(files, denyFiles))
-                .withTools(tools, List.of())
-                .withCommands(commands, denyCommands);
+            .withTools(tools, List.of()).withCommands(commands, denyCommands);
     }
 
     /** 子任务目标前拼角色设定段：子代理拿到的是「身份 + 目标」，不是裸任务。 */

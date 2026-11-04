@@ -1,28 +1,28 @@
 package com.pilot.core.multi;
 
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
 
 class AgentReportTest {
 
     @Test
     void parsesThreeSections() {
         String text = """
-                【结论】
-                应该在 PathValidator 里加白名单校验，而不是只在提示词里约束。
+            【结论】
+            应该在 PathValidator 里加白名单校验，而不是只在提示词里约束。
 
-                【证据清单】
-                - pilot-core/src/main/java/com/pilot/core/workspace/PathValidator.java:42 负责所有路径解析
-                - pilot-core/src/main/java/com/pilot/core/tool/ListDirTool.java:60 直接列举目录
+            【证据清单】
+            - pilot-core/src/main/java/com/pilot/core/workspace/PathValidator.java:42 负责所有路径解析
+            - pilot-core/src/main/java/com/pilot/core/tool/ListDirTool.java:60 直接列举目录
 
-                【风险评估】
-                - 白名单写法过宽会误放行
-                """;
+            【风险评估】
+            - 白名单写法过宽会误放行
+            """;
 
         AgentReport report = AgentReport.parse("agent_1", "T1", text);
 
@@ -44,15 +44,15 @@ class AgentReportTest {
     @Test
     void explicitNoEvidenceIsFlagged() {
         String text = """
-                【结论】
-                可能是缓存问题。
+            【结论】
+            可能是缓存问题。
 
-                【证据清单】
-                - 无证据支撑，推测
+            【证据清单】
+            - 无证据支撑，推测
 
-                【风险评估】
-                - 未验证
-                """;
+            【风险评估】
+            - 未验证
+            """;
 
         assertTrue(AgentReport.parse("agent_3", "T3", text).evidenceMissing());
     }

@@ -1,16 +1,17 @@
 package com.pilot.server.security;
 
-import com.pilot.server.config.PilotDataDir;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+import com.pilot.server.config.PilotDataDir;
 
 /**
  * 访问审计：只记录拒绝、限流和令牌缺失，成功请求不逐条落盘。
@@ -33,14 +34,14 @@ public class AccessAudit {
         if (!enabled) {
             return;
         }
-        String line = String.format("{\"at\":\"%s\",\"remote\":\"%s\",\"method\":\"%s\",\"path\":\"%s\","
-                        + "\"status\":%d,\"reason\":\"%s\",\"token\":%s}%n",
-                Instant.now(), escape(remote), escape(method), escape(path), status, escape(reason),
-                tokenPresent ? "true" : "false");
+        String line = String.format(
+            "{\"at\":\"%s\",\"remote\":\"%s\",\"method\":\"%s\",\"path\":\"%s\","
+                + "\"status\":%d,\"reason\":\"%s\",\"token\":%s}%n",
+            Instant.now(), escape(remote), escape(method), escape(path), status, escape(reason),
+            tokenPresent ? "true" : "false");
         try {
             Files.createDirectories(file.getParent());
-            Files.writeString(file, line, StandardCharsets.UTF_8, StandardOpenOption.CREATE,
-                    StandardOpenOption.APPEND);
+            Files.writeString(file, line, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
             log.debug("写入访问审计失败（不影响请求处理）", e);
         }

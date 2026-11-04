@@ -1,10 +1,5 @@
 package com.pilot.server.store;
 
-import com.pilot.core.multi.DiffSandbox;
-import com.pilot.core.tool.ToolCall;
-import com.pilot.core.tool.ToolCallJournal;
-import tools.jackson.databind.ObjectMapper;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -14,6 +9,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+
+import com.pilot.core.multi.DiffSandbox;
+import com.pilot.core.tool.ToolCall;
+import com.pilot.core.tool.ToolCallJournal;
+
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 基于 SQLite 的幂等账本，按工作区核对文件现状后才重放。
@@ -40,35 +41,34 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
     public Optional<Recorded> replay(String runId, ToolCall call) {
         String fingerprint = ToolCallJournal.fingerprint(call);
         Optional<Row> row = JdbcSupport.queryOne(store,
-                "SELECT * FROM tool_call_journal WHERE run_id = ? AND fingerprint = ?",
-                statement -> {
-                    statement.setString(1, runId);
-                    statement.setString(2, fingerprint);
-                }, rows -> new Row(rows.getString("result"), rows.getString("changed_paths"),
-                        rows.getString("checks"), rows.getString("post_hash")),
-                "读取工具调用账本失败");
+            "SELECT * FROM tool_call_journal WHERE run_id = ? AND fingerprint = ?", statement -> {
+                statement.setString(1, runId);
+                statement.setString(2, fingerprint);
+            }, rows -> new Row(rows.getString("result"), rows.getString("changed_paths"), rows.getString("checks"),
+                rows.getString("post_hash")),
+            "读取工具调用账本失败");
         if (row.isEmpty() || !row.get().postHash().equals(postHash(paths(row.get())))) {
             return Optional.empty();
         }
-        return Optional.of(new Recorded(row.get().result(), paths(row.get()), checks(row.get()),
-                fingerprint, row.get().postHash(), true));
+        return Optional.of(new Recorded(row.get().result(), paths(row.get()), checks(row.get()), fingerprint,
+            row.get().postHash(), true));
     }
 
     @Override
-    public void record(String runId, ToolCall call, String result, List<String> changedPaths,
-                       List<String> checks, boolean replayable) {
+    public void record(String runId, ToolCall call, String result, List<String> changedPaths, List<String> checks,
+        boolean replayable) {
         if (!replayable || changedPaths == null || changedPaths.isEmpty()) {
             return;
         }
         String fingerprint = ToolCallJournal.fingerprint(call);
         JdbcSupport.update(store, """
-                INSERT INTO tool_call_journal
-                    (run_id, session_id, fingerprint, tool, result, changed_paths, checks, post_hash, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(run_id, fingerprint) DO UPDATE SET
-                    result = excluded.result, changed_paths = excluded.changed_paths,
-                    checks = excluded.checks, post_hash = excluded.post_hash
-                """, statement -> {
+            INSERT INTO tool_call_journal
+                (run_id, session_id, fingerprint, tool, result, changed_paths, checks, post_hash, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id, fingerprint) DO UPDATE SET
+                result = excluded.result, changed_paths = excluded.changed_paths,
+                checks = excluded.checks, post_hash = excluded.post_hash
+            """, statement -> {
             statement.setString(1, runId);
             statement.setString(2, sessionId);
             statement.setString(3, fingerprint);
@@ -84,7 +84,7 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
     @Override
     public int deleteBySession(String sessionId) {
         return JdbcSupport.update(store, "DELETE FROM tool_call_journal WHERE session_id = ?",
-                statement -> statement.setString(1, sessionId), "删除工具调用账本失败: " + sessionId);
+            statement -> statement.setString(1, sessionId), "删除工具调用账本失败: " + sessionId);
     }
 
     /** 现状指纹：{@code path + 内容哈希}，文件消失记为 DELETED。 */
@@ -142,8 +142,8 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
         }
         try {
             String[] values = mapper.readValue(json, String[].class);
-            return values == null ? List.of() : Arrays.stream(values)
-                    .filter(value -> value != null && !value.isBlank()).toList();
+            return values == null ? List.of()
+                : Arrays.stream(values).filter(value -> value != null && !value.isBlank()).toList();
         } catch (RuntimeException e) {
             return List.of();
         }

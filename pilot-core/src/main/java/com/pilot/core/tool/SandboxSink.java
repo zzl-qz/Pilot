@@ -1,5 +1,8 @@
 package com.pilot.core.tool;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * 子 Agent 的改动出口：写工具不落盘，只把「改前 / 改后」交给沙箱。
  *
@@ -27,7 +30,9 @@ public interface SandboxSink {
     }
 
     /** 物化校验副本时必须能枚举新建提案，不能只覆盖磁盘上已有的文件。 */
-    default java.util.Map<String, String> proposedFiles() { return java.util.Map.of(); }
+    default Map<String, String> proposedFiles() {
+        return Map.of();
+    }
 
     /**
      * 把上游产物叠加到本任务的沙箱之上：读取时上游产物优先于磁盘内容，写入仍只进本任务沙箱。
@@ -41,10 +46,13 @@ public interface SandboxSink {
             return self;
         }
         return new SandboxSink() {
-            @Override public java.util.Map<String, String> proposedFiles() {
-                var files = new java.util.LinkedHashMap<>(upstream.proposedFiles());
-                files.putAll(self.proposedFiles()); return java.util.Map.copyOf(files);
+            @Override
+            public Map<String, String> proposedFiles() {
+                var files = new LinkedHashMap<>(upstream.proposedFiles());
+                files.putAll(self.proposedFiles());
+                return Map.copyOf(files);
             }
+
             @Override
             public void record(String path, String oldText, String newText) {
                 self.record(path, oldText, newText);

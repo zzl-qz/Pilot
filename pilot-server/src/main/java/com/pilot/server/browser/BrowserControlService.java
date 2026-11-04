@@ -1,18 +1,5 @@
 package com.pilot.server.browser;
 
-import com.pilot.core.browser.BrowserBackend;
-import com.pilot.core.browser.BrowserEventListener;
-import com.pilot.core.tool.Availability;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-
-import jakarta.annotation.PreDestroy;
-
 import java.io.IOException;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -23,6 +10,21 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import jakarta.annotation.PreDestroy;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import com.pilot.core.browser.BrowserBackend;
+import com.pilot.core.browser.BrowserEventListener;
+import com.pilot.core.tool.Availability;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 浏览器镜像的订阅分发与上行动作入口（瞬态通道，与持久化事件流完全分开）。
@@ -57,9 +59,9 @@ public class BrowserControlService implements BrowserEventListener {
     });
 
     public BrowserControlService(BrowserRuntime runtime, ObjectMapper mapper,
-                                 @Value("${pilot.browser.mirror.enabled:true}") boolean enabled,
-                                 @Value("${pilot.browser.mirror.max-width:1280}") int maxWidth,
-                                 @Value("${pilot.browser.mirror.quality:55}") int quality) {
+        @Value("${pilot.browser.mirror.enabled:true}") boolean enabled,
+        @Value("${pilot.browser.mirror.max-width:1280}") int maxWidth,
+        @Value("${pilot.browser.mirror.quality:55}") int quality) {
         this.runtime = runtime;
         this.mapper = mapper;
         this.enabled = enabled;
@@ -82,13 +84,9 @@ public class BrowserControlService implements BrowserEventListener {
     /** 镜像面板的轻量状态：前端据此决定是否显示浏览器 tab、能否连 SSE。 */
     public Map<String, Object> status(String sessionId) {
         Availability availability = runtime.availability();
-        return Map.of(
-                "enabled", enabled,
-                "capable", runtime.mirrorCapable(),
-                "available", availability.available(),
-                "reason", availability.reason(),
-                "paused", runtime.interactionsPaused(sessionId),
-                "headless", runtime.headless());
+        return Map.of("enabled", enabled, "capable", runtime.mirrorCapable(), "available", availability.available(),
+            "reason", availability.reason(), "paused", runtime.interactionsPaused(sessionId), "headless",
+            runtime.headless());
     }
 
     /** 订阅某个会话的镜像帧；连接建立即补发当前状态与最新一帧。 */
@@ -119,7 +117,9 @@ public class BrowserControlService implements BrowserEventListener {
     /** 订阅者断开（页面关闭/折叠/出错）；最后一个断开时停止该会话的 screencast。幂等。 */
     public void unsubscribe(String sessionId, SseEmitter emitter) {
         State state = states.get(sessionId);
-        if (state == null) return;
+        if (state == null) {
+            return;
+        }
         synchronized (state) {
             drop(state, emitter);
         }
@@ -185,7 +185,9 @@ public class BrowserControlService implements BrowserEventListener {
         switch (kind) {
             case "mirror-frame" -> {
                 State state = states.get(sessionId);
-                if (state == null) return;
+                if (state == null) {
+                    return;
+                }
                 state.frame = payload; // latest-wins：新帧直接覆盖，旧帧即弃
                 broadcast(state, "frame", payload.toString());
             }
@@ -214,7 +216,9 @@ public class BrowserControlService implements BrowserEventListener {
 
     private void broadcastTo(String sessionId, String name, JsonNode payload) {
         State state = states.get(sessionId);
-        if (state == null) return;
+        if (state == null) {
+            return;
+        }
         broadcast(state, name, payload.toString());
     }
 
@@ -241,7 +245,9 @@ public class BrowserControlService implements BrowserEventListener {
         if (!state.subscribers.remove(emitter) && state.subscribers.contains(emitter)) {
             // CopyOnWriteArrayList 语义下 remove 已足够；此分支只为可读性
         }
-        if (!state.subscribers.isEmpty()) return;
+        if (!state.subscribers.isEmpty()) {
+            return;
+        }
         // 订阅清空：停帧、清缓存帧，接管开关一并复位（没人看着页面就不算接管中）
         runtime.setInteractionsPaused(state.id, false);
         state.frame = null;
@@ -250,11 +256,8 @@ public class BrowserControlService implements BrowserEventListener {
     }
 
     private String statePayload(String sessionId) {
-        return mapper.writeValueAsString(Map.of(
-                "sessionId", sessionId,
-                "paused", runtime.interactionsPaused(sessionId),
-                "available", runtime.availability().available(),
-                "headless", runtime.headless()));
+        return mapper.writeValueAsString(Map.of("sessionId", sessionId, "paused", runtime.interactionsPaused(sessionId),
+            "available", runtime.availability().available(), "headless", runtime.headless()));
     }
 
     private static int clamp(int value, int min, int max) {

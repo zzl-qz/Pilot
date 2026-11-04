@@ -20,5 +20,6 @@ public record PlanUpdated(List<PlanItemPayload> plan, String explanation) implem
     }
 
     /** 事件里的计划项，与 core.plan.PlanItem 字段一致，单独定义避免把内部模型暴露给协议层。 */
-    public record PlanItemPayload(String step, String status) { }
+    public record PlanItemPayload(String step, String status) {
+    }
 }

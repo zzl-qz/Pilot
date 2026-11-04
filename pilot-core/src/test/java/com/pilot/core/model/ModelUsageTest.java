@@ -1,10 +1,10 @@
 package com.pilot.core.model;
 
-import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
 
 /**
  * 用量归一化与缓存口径。这两件事错了不会有异常，只会让成本面板显示一个看着合理、
@@ -37,8 +37,7 @@ class ModelUsageTest {
 
     @Test
     void treatsMissingCacheObservationAsZeroHit() {
-        assertEquals(0, new ModelUsage(1_000, 40, 0, true).cachedInputTokens(),
-                "四参构造器用于没有缓存观测的路径");
+        assertEquals(0, new ModelUsage(1_000, 40, 0, true).cachedInputTokens(), "四参构造器用于没有缓存观测的路径");
         assertEquals(0, new ModelUsage(1_000, 40, 0, true).cacheWriteTokens());
         assertEquals(0d, new ModelUsage(1_000, 40, 0, true).cacheHitRatio());
     }
@@ -57,8 +56,7 @@ class ModelUsageTest {
         // 端点字段偶尔自相矛盾：缓存量大于总输入。命中率不能因此超过 100%
         ModelUsage usage = new ModelUsage(100, 10, 0, 400, 300, true);
 
-        assertEquals(100, usage.cachedInputTokens() + usage.cacheWriteTokens(),
-                "缓存之和必须钳到总输入内");
+        assertEquals(100, usage.cachedInputTokens() + usage.cacheWriteTokens(), "缓存之和必须钳到总输入内");
         assertEquals(100, usage.cachedInputTokens(), "先保命中，余量才算写入");
         assertEquals(0, usage.cacheWriteTokens());
         assertTrue(usage.cacheHitRatio() <= 1.0);

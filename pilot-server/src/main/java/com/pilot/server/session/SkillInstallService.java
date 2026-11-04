@@ -1,15 +1,5 @@
 package com.pilot.server.session;
 
-import com.pilot.core.skill.SkillCatalog;
-import com.pilot.core.skill.SkillManifest;
-import com.pilot.core.skill.SkillProblem;
-import com.pilot.core.skill.SkillSource;
-import com.pilot.server.config.PilotDataDir;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -17,6 +7,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
@@ -33,6 +24,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import com.pilot.core.skill.SkillCatalog;
+import com.pilot.core.skill.SkillManifest;
+import com.pilot.core.skill.SkillProblem;
+import com.pilot.core.skill.SkillSource;
+import com.pilot.server.config.PilotDataDir;
 
 /**
  * 技能安装器：把 git 仓库或本机目录里的技能装进项目级/用户级技能目录。
@@ -68,17 +70,23 @@ public class SkillInstallService {
         void clone(String url, Path targetDir) throws Exception;
     }
 
-    public record Candidate(String name, String description, String command, boolean valid, String reason) { }
+    public record Candidate(String name, String description, String command, boolean valid, String reason) {
+    }
 
-    public record Preview(String token, String kind, List<Candidate> candidates, String message) { }
+    public record Preview(String token, String kind, List<Candidate> candidates, String message) {
+    }
 
-    public record Outcome(String name, String status, String reason) { }
+    public record Outcome(String name, String status, String reason) {
+    }
 
-    public record InstallResult(List<Outcome> results) { }
+    public record InstallResult(List<Outcome> results) {
+    }
 
-    private record Source(boolean git, String value) { }
+    private record Source(boolean git, String value) {
+    }
 
-    private record Staged(Path root, Path scanRoot, long createdAt) { }
+    private record Staged(Path root, Path scanRoot, long createdAt) {
+    }
 
     private final SkillService skills;
     private final PilotDataDir dataDir;
@@ -92,14 +100,12 @@ public class SkillInstallService {
 
     @Autowired
     public SkillInstallService(SkillService skills, PilotDataDir dataDir) {
-        this(skills, dataDir, new GitCloner(),
-                10L * 60 * 1000, 2000, 64L * 1024 * 1024, 500, 20L * 1024 * 1024);
+        this(skills, dataDir, new GitCloner(), 10L * 60 * 1000, 2000, 64L * 1024 * 1024, 500, 20L * 1024 * 1024);
     }
 
     /** 测试构造：可缩小 TTL 与各上限（与 CommandTaskManager 注入 limits 的做法一致）。 */
-    SkillInstallService(SkillService skills, PilotDataDir dataDir, Cloner cloner,
-                        long tokenTtlMs, int stageMaxFiles, long stageMaxBytes,
-                        int skillMaxFiles, long skillMaxBytes) {
+    SkillInstallService(SkillService skills, PilotDataDir dataDir, Cloner cloner, long tokenTtlMs, int stageMaxFiles,
+        long stageMaxBytes, int skillMaxFiles, long skillMaxBytes) {
         this.skills = skills;
         this.dataDir = dataDir;
         this.cloner = cloner;
@@ -138,16 +144,13 @@ public class SkillInstallService {
             SkillCatalog catalog = SkillCatalog.scan(List.of(new SkillCatalog.Root(scanRoot, SkillSource.PROJECT)));
             List<Candidate> candidates = new ArrayList<>();
             for (SkillManifest manifest : catalog.list()) {
-                candidates.add(new Candidate(manifest.name(), manifest.description(),
-                        manifest.command(), true, null));
+                candidates.add(new Candidate(manifest.name(), manifest.description(), manifest.command(), true, null));
             }
             for (SkillProblem problem : catalog.invalid()) {
                 candidates.add(new Candidate(problem.name(), null, null, false, problem.reason()));
             }
-            String message = candidates.isEmpty()
-                    ? "来源里没有找到技能：支持三种布局——根目录直接放 SKILL.md（单技能）、"
-                            + "每个一级子目录各一个（集合仓）、或 skills/<名字>/SKILL.md 包裹布局（如 anthropics/skills）"
-                    : null;
+            String message = candidates.isEmpty() ? "来源里没有找到技能：支持三种布局——根目录直接放 SKILL.md（单技能）、"
+                + "每个一级子目录各一个（集合仓）、或 skills/<名字>/SKILL.md 包裹布局（如 anthropics/skills）" : null;
             staged.put(token, new Staged(stageRoot, scanRoot, System.currentTimeMillis()));
             return new Preview(token, src.git() ? "git" : "local", List.copyOf(candidates), message);
         } catch (InstallException e) {
@@ -163,8 +166,8 @@ public class SkillInstallService {
      * 从暂存区把选中技能复制到目标根。逐技能出结果：installed / conflict / invalid / error，
      * 部分成功是常态（A 装上、B 冲突），conflict 是业务状态不是协议错误。
      */
-    public InstallResult install(String token, List<String> names, boolean project,
-                                 String workspace, boolean overwrite) {
+    public InstallResult install(String token, List<String> names, boolean project, String workspace,
+        boolean overwrite) {
         requireEnabled();
         sweep();
         Staged entry = token == null ? null : staged.get(token);
@@ -187,8 +190,7 @@ public class SkillInstallService {
         for (String requested : names) {
             String name = requested == null ? "" : requested.strip();
             if (!valid.contains(name)) {
-                results.add(new Outcome(name.isEmpty() ? "（空）" : name, "invalid",
-                        "该技能在来源中无效或不存在，无法安装"));
+                results.add(new Outcome(name.isEmpty() ? "（空）" : name, "invalid", "该技能在来源中无效或不存在，无法安装"));
                 continue;
             }
             // 技能名已被目录校验规则封死穿越；这里再套一层 normalize + startsWith 兜底
@@ -214,7 +216,7 @@ public class SkillInstallService {
                 copyTree(from, to, "技能", skillMaxFiles, skillMaxBytes);
                 results.add(new Outcome(name, "installed", null));
             } catch (IOException e) {
-                deleteTreeQuietly(to);   // 装一半的目录不留残骸
+                deleteTreeQuietly(to); // 装一半的目录不留残骸
                 results.add(new Outcome(name, "error", e.getMessage()));
             }
         }
@@ -277,8 +279,8 @@ public class SkillInstallService {
         }
         if (wrappers.size() > 1) {
             throw new InstallException("仓库里有多层嵌套的技能目录（"
-                    + wrappers.stream().map(path -> path.getFileName().toString()).collect(Collectors.joining("、"))
-                    + "），自动判定不可靠；请把要装的技能目录复制到本机后用「本机目录」导入");
+                + wrappers.stream().map(path -> path.getFileName().toString()).collect(Collectors.joining("、"))
+                + "），自动判定不可靠；请把要装的技能目录复制到本机后用「本机目录」导入");
         }
         return repo;
     }
@@ -286,8 +288,7 @@ public class SkillInstallService {
     /** 目录的直接子目录里是否至少有一个含 SKILL.md。 */
     private static boolean hasDirectSkillChildren(Path dir) {
         try (var entries = Files.list(dir)) {
-            return entries.filter(Files::isDirectory)
-                    .anyMatch(child -> Files.isRegularFile(child.resolve("SKILL.md")));
+            return entries.filter(Files::isDirectory).anyMatch(child -> Files.isRegularFile(child.resolve("SKILL.md")));
         } catch (IOException e) {
             return false;
         }
@@ -314,7 +315,7 @@ public class SkillInstallService {
         Path path;
         try {
             path = Path.of(text);
-        } catch (java.nio.file.InvalidPathException e) {
+        } catch (InvalidPathException e) {
             throw new InstallException("来源既不是 http(s) 开头的 git 地址，也不是合法路径：" + text);
         }
         if (!path.isAbsolute()) {
@@ -335,17 +336,15 @@ public class SkillInstallService {
         String lower = url.toLowerCase(Locale.ROOT);
         for (String marker : List.of("/blob/", "/tree/", "/raw/")) {
             if (lower.contains(marker)) {
-                throw new InstallException("这是浏览器里看文件的网页地址（含 " + marker + "），不是 git 仓库地址。"
-                        + "请改用仓库根地址：把 " + url + " 中的 " + marker + "… 部分去掉，"
-                        + "例如 https://github.com/anthropics/skills");
+                throw new InstallException("这是浏览器里看文件的网页地址（含 " + marker + "），不是 git 仓库地址。" + "请改用仓库根地址：把 " + url
+                    + " 中的 " + marker + "… 部分去掉，" + "例如 https://github.com/anthropics/skills");
             }
         }
         String trimmed = lower.endsWith("/") ? lower.substring(0, lower.length() - 1) : lower;
         int slash = trimmed.lastIndexOf('/');
         String last = slash >= 0 ? trimmed.substring(slash + 1) : trimmed;
         if (last.endsWith(".md") || last.endsWith(".markdown")) {
-            throw new InstallException("地址末段看起来是文件（" + last + "）而不是仓库。"
-                    + "git 地址应指向仓库根，例如 https://github.com/用户名/仓库名");
+            throw new InstallException("地址末段看起来是文件（" + last + "）而不是仓库。" + "git 地址应指向仓库根，例如 https://github.com/用户名/仓库名");
         }
     }
 
@@ -367,8 +366,8 @@ public class SkillInstallService {
             raw = path.getFileName() == null ? "" : path.getFileName().toString();
         }
         if (raw.isEmpty() || !REPO_NAME.matcher(raw).matches()) {
-            throw new InstallException("来源名不合法（只能是字母数字开头的字母/数字/点/横线/下划线，且不超过 64 字符）："
-                    + (raw.isEmpty() ? src.value() : raw));
+            throw new InstallException(
+                "来源名不合法（只能是字母数字开头的字母/数字/点/横线/下划线，且不超过 64 字符）：" + (raw.isEmpty() ? src.value() : raw));
         }
         return raw;
     }
@@ -455,17 +454,16 @@ public class SkillInstallService {
 
         @Override
         public void clone(String url, Path targetDir) throws Exception {
-            ProcessBuilder builder = new ProcessBuilder("git", "clone", "--depth", "1",
-                    "--single-branch", "--no-tags", url, targetDir.toString());
+            ProcessBuilder builder = new ProcessBuilder("git", "clone", "--depth", "1", "--single-branch", "--no-tags",
+                url, targetDir.toString());
             builder.redirectErrorStream(true);
             Process process;
             try {
                 process = builder.start();
             } catch (IOException e) {
                 throw new SkillInstallService.InstallException(
-                        e.getMessage() != null && e.getMessage().contains("Cannot run program")
-                                ? "未找到 git，请安装它或改用本机目录导入"
-                                : "git clone 启动失败：" + e.getMessage());
+                    e.getMessage() != null && e.getMessage().contains("Cannot run program") ? "未找到 git，请安装它或改用本机目录导入"
+                        : "git clone 启动失败：" + e.getMessage());
             }
             process.getOutputStream().close();
             var timedOut = new AtomicBoolean(false);
@@ -497,8 +495,8 @@ public class SkillInstallService {
             int exit = process.exitValue();
             if (exit != 0) {
                 String detail = collected.toString(StandardCharsets.UTF_8).strip();
-                throw new SkillInstallService.InstallException("git clone 失败（退出码 " + exit + "）："
-                        + (detail.isEmpty() ? url : detail));
+                throw new SkillInstallService.InstallException(
+                    "git clone 失败（退出码 " + exit + "）：" + (detail.isEmpty() ? url : detail));
             }
         }
     }

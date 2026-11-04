@@ -1,5 +1,6 @@
 package com.pilot.core.exec;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -58,8 +59,7 @@ public final class OsSandbox {
         return switch (family) {
             case MAC -> mac(command, root, writable, locked, network);
             case LINUX -> linux(command, root, writable, locked, network);
-            case WINDOWS -> new Launch(List.copyOf(command),
-                    "隔离：未启用（Windows 需要 MXC 或受限令牌，当前进程无法创建，命令在本机执行）", false);
+            case WINDOWS -> new Launch(List.copyOf(command), "隔离：未启用（Windows 需要 MXC 或受限令牌，当前进程无法创建，命令在本机执行）", false);
         };
     }
 
@@ -80,19 +80,17 @@ public final class OsSandbox {
     }
 
     private static Launch mac(List<String> command, Path workspace, List<Path> writable, List<Path> locked,
-                              boolean network) {
+        boolean network) {
         Path sandboxExec = Path.of("/usr/bin/sandbox-exec");
         if (!Files.isExecutable(sandboxExec)) {
-            return new Launch(List.copyOf(command),
-                    "隔离：未启用（找不到 /usr/bin/sandbox-exec，命令在本机执行）", false);
+            return new Launch(List.copyOf(command), "隔离：未启用（找不到 /usr/bin/sandbox-exec，命令在本机执行）", false);
         }
         String profile = seatbeltProfile(writable, locked, network);
         Path file;
         try {
             file = profileFile(profile);
         } catch (IOException e) {
-            return new Launch(List.copyOf(command),
-                    "隔离：未启用（Seatbelt 配置写不出去：" + e.getMessage() + "，命令在本机执行）", false);
+            return new Launch(List.copyOf(command), "隔离：未启用（Seatbelt 配置写不出去：" + e.getMessage() + "，命令在本机执行）", false);
         }
         List<String> argv = new ArrayList<>();
         argv.add(sandboxExec.toString());
@@ -104,14 +102,13 @@ public final class OsSandbox {
     }
 
     private static Launch linux(List<String> command, Path workspace, List<Path> writable, List<Path> locked,
-                                boolean network) {
+        boolean network) {
         Path bwrap = findBwrap(workspace);
         if (bwrap == null) {
-            return new Launch(List.copyOf(command),
-                    "隔离：未启用（找不到 bwrap，命令在本机执行。安装 bubblewrap 后才会限制文件系统）", false);
+            return new Launch(List.copyOf(command), "隔离：未启用（找不到 bwrap，命令在本机执行。安装 bubblewrap 后才会限制文件系统）", false);
         }
-        return new Launch(bwrapCommand(bwrap, writable, locked, network, command),
-                label("Linux bubblewrap", network), true);
+        return new Launch(bwrapCommand(bwrap, writable, locked, network, command), label("Linux bubblewrap", network),
+            true);
     }
 
     static String seatbeltProfile(List<Path> writable, List<Path> locked, boolean network) {
@@ -128,8 +125,8 @@ public final class OsSandbox {
         profile.append("(allow process*)\n(allow signal)\n(allow sysctl-read)\n");
         profile.append("(allow mach-lookup)\n(allow ipc-posix*)\n");
         // git、编译器会用读写方式打开这些设备。不放行时 git status 会报 Operation not permitted。
-        for (String device : List.of("/dev/null", "/dev/zero", "/dev/urandom", "/dev/random",
-                "/dev/tty", "/dev/dtracehelper")) {
+        for (String device : List.of("/dev/null", "/dev/zero", "/dev/urandom", "/dev/random", "/dev/tty",
+            "/dev/dtracehelper")) {
             profile.append("(allow file-read* (literal \"").append(device).append("\"))\n");
             profile.append("(allow file-write* (literal \"").append(device).append("\"))\n");
         }
@@ -138,7 +135,7 @@ public final class OsSandbox {
     }
 
     static List<String> bwrapCommand(Path bwrap, List<Path> writable, List<Path> locked, boolean network,
-                                     List<String> command) {
+        List<String> command) {
         List<String> argv = new ArrayList<>();
         argv.add(bwrap.toString());
         argv.add("--die-with-parent");
@@ -198,8 +195,7 @@ public final class OsSandbox {
     }
 
     private static String label(String backend, boolean network) {
-        return "隔离：" + backend + "（工作区可写，构建缓存可写，.git 配置只读，网络"
-                + (network ? "允许" : "关闭") + "）";
+        return "隔离：" + backend + "（工作区可写，构建缓存可写，.git 配置只读，网络" + (network ? "允许" : "关闭") + "）";
     }
 
     private static Path findBwrap(Path workspace) {
@@ -208,7 +204,7 @@ public final class OsSandbox {
             return null;
         }
         Path root = workspace.toAbsolutePath().normalize();
-        for (String dir : path.split(java.io.File.pathSeparator)) {
+        for (String dir : path.split(File.pathSeparator)) {
             if (dir.isBlank()) {
                 continue;
             }

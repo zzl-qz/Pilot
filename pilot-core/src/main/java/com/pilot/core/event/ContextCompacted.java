@@ -8,8 +8,8 @@ package com.pilot.core.event;
  * @param charactersAfter  压缩后的字符数
  * @param summary          摘要正文（前端默认折叠展示）
  */
-public record ContextCompacted(int coveredMessages, int charactersBefore, int charactersAfter, String summary)
-        implements SessionEvent {
+public record ContextCompacted(int coveredMessages, int charactersBefore, int charactersAfter,
+    String summary) implements SessionEvent {
     public ContextCompacted {
         if (coveredMessages < 0) {
             throw new IllegalArgumentException("coveredMessages must be >= 0");

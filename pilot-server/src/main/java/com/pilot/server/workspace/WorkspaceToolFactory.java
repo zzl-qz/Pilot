@@ -1,15 +1,28 @@
 package com.pilot.server.workspace;
 
+import java.net.http.HttpClient;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
 import com.pilot.core.browser.BrowserBackend;
 import com.pilot.core.browser.BrowserTool;
+import com.pilot.core.exec.ExecutionBackends.Selection;
 import com.pilot.core.mcp.McpCallTool;
 import com.pilot.core.mcp.McpManager;
 import com.pilot.core.mcp.McpToolsTool;
 import com.pilot.core.multi.AgentScope;
 import com.pilot.core.plan.PlanSink;
 import com.pilot.core.tool.ApplyPatchTool;
-import com.pilot.core.tool.CreateFileTool;
 import com.pilot.core.tool.CommandChangeTracker;
+import com.pilot.core.tool.CreateFileTool;
 import com.pilot.core.tool.EditFileTool;
 import com.pilot.core.tool.GlobFilesTool;
 import com.pilot.core.tool.ListDirTool;
@@ -17,6 +30,7 @@ import com.pilot.core.tool.ReadFileTool;
 import com.pilot.core.tool.ReadTracker;
 import com.pilot.core.tool.RememberTool;
 import com.pilot.core.tool.RunCommandTool;
+import com.pilot.core.tool.SandboxCommandTool;
 import com.pilot.core.tool.SandboxCreateFileTool;
 import com.pilot.core.tool.SandboxEditFileTool;
 import com.pilot.core.tool.SandboxSink;
@@ -30,17 +44,8 @@ import com.pilot.core.tool.WebSearchTool;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.WebSearchProperties;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-import tools.jackson.databind.ObjectMapper;
 
-import java.net.http.HttpClient;
-import java.nio.file.Path;
-import java.time.Duration;
-import java.util.List;
-import java.util.Locale;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 按工作区构建工具集。
@@ -54,21 +59,21 @@ public class WorkspaceToolFactory {
     private final WebSearchProperties webSearchProperties;
     private final SnapshotSink snapshots;
     private final ObjectMapper mapper;
-    private final HttpClient webClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(5))
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build();
+    private final HttpClient webClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5))
+        .followRedirects(HttpClient.Redirect.NEVER).build();
     private final ConcurrentMap<String, ToolRegistry> cache = new ConcurrentHashMap<>();
     /** 可选能力：测试里手工构造本工厂时不注入，对应工具就不存在。 */
     private BrowserBackend browser;
     private McpManager mcp;
-    private com.pilot.core.exec.ExecutionBackends.Selection execution;
+    private Selection execution;
 
     @Autowired(required = false)
-    public void setExecution(com.pilot.core.exec.ExecutionBackends.Selection execution) { this.execution = execution; }
+    public void setExecution(Selection execution) {
+        this.execution = execution;
+    }
 
     public WorkspaceToolFactory(AgentProperties properties, WebSearchProperties webSearchProperties,
-                                SnapshotSink snapshots, ObjectMapper mapper) {
+        SnapshotSink snapshots, ObjectMapper mapper) {
         this.properties = properties;
         this.webSearchProperties = webSearchProperties;
         this.snapshots = snapshots;
@@ -91,7 +96,7 @@ public class WorkspaceToolFactory {
      * 浏览器没装好、没有配置 MCP 服务器时，模型看不到它们。
      */
     public List<Tool> sessionExtras(String sessionId, String workspace) {
-        List<Tool> extras = new java.util.ArrayList<>();
+        List<Tool> extras = new ArrayList<>();
         Path root = resolve(workspace);
         if (browser != null) {
             extras.add(new BrowserTool(browser, sessionId, new PathValidator(root)));
@@ -138,7 +143,7 @@ public class WorkspaceToolFactory {
      * @param sandbox 改动出口；只读任务传 {@link SandboxSink#rejectAll()} 也不会被触发
      */
     public ToolRegistry registryForScope(String workspace, AgentScope scope, SandboxSink sandbox) {
-        AgentScope view = scope == null ? AgentScope.readOnly(java.util.List.of(), java.util.List.of()) : scope;
+        AgentScope view = scope == null ? AgentScope.readOnly(List.of(), List.of()) : scope;
         PathValidator validator = new PathValidator(resolve(workspace), view);
         ToolRegistry registry = new ToolRegistry();
         // 每个子 Agent 一份「先读后改」记录，与父级互不共享
@@ -164,7 +169,7 @@ public class WorkspaceToolFactory {
         // 只读任务默认不注册通用命令：命令白名单为空时 run_command 会退回内置可执行白名单，
         // 那已经超出「只读调研」的范围。需要跑命令的调研任务必须显式声明 commands。
         if ((view.writable() || !view.allowCommands().isEmpty()) && view.allowsTool("run_command")) {
-            registry.register(new com.pilot.core.tool.SandboxCommandTool(validator, sandbox, execution));
+            registry.register(new SandboxCommandTool(validator, sandbox, execution));
         }
         if (view.writable() && view.allowsTool("edit_file")) {
             registry.register(new SandboxEditFileTool(validator, sandbox, reads));

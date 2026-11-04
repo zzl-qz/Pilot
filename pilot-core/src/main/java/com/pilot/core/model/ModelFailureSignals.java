@@ -12,19 +12,9 @@ import java.util.Locale;
  */
 public final class ModelFailureSignals {
     /** 明确的「没钱/额度耗尽/欠费」信号；命中就不要重试了。 */
-    private static final List<String> BILLING_MARKERS = List.of(
-            "insufficient_quota",
-            "exceeded your current quota",
-            "billing_not_active",
-            "billing hard limit",
-            "payment required",
-            "insufficient balance",
-            "credit balance is too low",
-            "quota has been exhausted",
-            "余额不足",
-            "额度已用尽",
-            "额度已耗尽",
-            "欠费");
+    private static final List<String> BILLING_MARKERS = List.of("insufficient_quota", "exceeded your current quota",
+        "billing_not_active", "billing hard limit", "payment required", "insufficient balance",
+        "credit balance is too low", "quota has been exhausted", "余额不足", "额度已用尽", "额度已耗尽", "欠费");
 
     private ModelFailureSignals() {
     }
@@ -53,8 +43,7 @@ public final class ModelFailureSignals {
         if (statusCode == 402 || billingOrQuota(body)) {
             return ModelFailureKind.PERMANENT;
         }
-        return statusCode == 408 || statusCode == 429 || statusCode >= 500
-                ? ModelFailureKind.TRANSIENT
-                : ModelFailureKind.PERMANENT;
+        return statusCode == 408 || statusCode == 429 || statusCode >= 500 ? ModelFailureKind.TRANSIENT
+            : ModelFailureKind.PERMANENT;
     }
 }

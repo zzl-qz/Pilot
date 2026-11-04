@@ -1,8 +1,8 @@
 package com.pilot.server.config;
 
-import org.springframework.boot.context.properties.ConfigurationProperties;
-
 import java.net.URI;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** 本机 SearXNG。local 为 true 时，Pilot 启动会把它拉起来。 */
 @ConfigurationProperties(prefix = "pilot.web-search")
@@ -26,10 +26,7 @@ public record WebSearchProperties(boolean local, String endpoint, String python,
     /** 只在访问本机时才由 Pilot 负责拉起进程。 */
     public boolean loopback() {
         String host = endpointUri().getHost();
-        return host == null
-                || "127.0.0.1".equals(host)
-                || "localhost".equalsIgnoreCase(host)
-                || "::1".equals(host);
+        return host == null || "127.0.0.1".equals(host) || "localhost".equalsIgnoreCase(host) || "::1".equals(host);
     }
 
     public int port() {

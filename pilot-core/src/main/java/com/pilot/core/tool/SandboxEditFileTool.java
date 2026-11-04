@@ -1,13 +1,13 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.workspace.PathValidator;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+
+import com.pilot.core.workspace.PathValidator;
 
 /**
  * 沙箱版 {@code edit_file}：语义与真实写工具完全一致（old_string 必须唯一命中），
@@ -94,8 +94,7 @@ public final class SandboxEditFileTool implements Tool {
         }
         // 先读后改是机制约束：没读过的文件拒绝编辑，不依赖提示词劝导
         if (!reads.isObserved(file)) {
-            return "ERROR: 本次运行尚未读取过 " + rawPath
-                    + "，无法确认原文与行号。先 read_file 查看当前内容，再给出 old_string。";
+            return "ERROR: 本次运行尚未读取过 " + rawPath + "，无法确认原文与行号。先 read_file 查看当前内容，再给出 old_string。";
         }
         try {
             ExactEditBatch.Applied applied;
@@ -106,8 +105,8 @@ public final class SandboxEditFileTool implements Tool {
             }
             sandbox.record(shown, content, applied.content());
             reads.observed(file);
-            return "已提交到沙箱 " + shown + "：替换 " + applied.count() + " 处（"
-                    + applied.oldLines() + " 行 → " + applied.newLines() + " 行）";
+            return "已提交到沙箱 " + shown + "：替换 " + applied.count() + " 处（" + applied.oldLines() + " 行 → "
+                + applied.newLines() + " 行）";
         } catch (RuntimeException e) {
             return "ERROR: 提交沙箱失败: " + e.getMessage();
         }

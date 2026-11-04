@@ -1,13 +1,14 @@
 package com.pilot.server.controller;
 
-import com.pilot.core.exec.ExecutionBackends;
-import com.pilot.server.maintenance.BackupService;
-import com.pilot.server.maintenance.RetentionService;
-import com.pilot.server.maintenance.StorageHealth;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import com.pilot.core.exec.ExecutionBackends;
+import com.pilot.server.maintenance.BackupService;
+import com.pilot.server.maintenance.RetentionService;
+import com.pilot.server.maintenance.StorageHealth;
 
 /**
  * 运维接口：备份、保留策略、存储与隔离状态。
@@ -22,7 +23,7 @@ public class MaintenanceController {
     private final ExecutionBackends.Selection execution;
 
     public MaintenanceController(BackupService backups, RetentionService retention,
-                                 ExecutionBackends.Selection execution) {
+        ExecutionBackends.Selection execution) {
         this.backups = backups;
         this.retention = retention;
         this.execution = execution;
@@ -31,9 +32,8 @@ public class MaintenanceController {
     @GetMapping("/status")
     public Status status() {
         BackupService.Status status = backups.status();
-        return new Status(status, retention.retentionDays(), StorageHealth.snapshot(),
-                execution.describe(), execution.isolated(), execution.degraded(),
-                execution.reason());
+        return new Status(status, retention.retentionDays(), StorageHealth.snapshot(), execution.describe(),
+            execution.isolated(), execution.degraded(), execution.reason());
     }
 
     @PostMapping("/backup")
@@ -46,8 +46,7 @@ public class MaintenanceController {
         return retention.purgeNow();
     }
 
-    public record Status(BackupService.Status backup, int retentionDays,
-                         StorageHealth.Snapshot storage, String executionIsolation,
-                         boolean isolated, boolean degraded, String degradedReason) {
+    public record Status(BackupService.Status backup, int retentionDays, StorageHealth.Snapshot storage,
+        String executionIsolation, boolean isolated, boolean degraded, String degradedReason) {
     }
 }

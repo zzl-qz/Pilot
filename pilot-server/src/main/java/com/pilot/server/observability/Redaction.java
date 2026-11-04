@@ -13,9 +13,9 @@ import java.util.regex.Pattern;
 public final class Redaction {
     private static final String MASK = "***";
     private static final Pattern BEARER = Pattern.compile("(?i)(bearer\\s+)[A-Za-z0-9._~+/=-]{6,}");
-    private static final Pattern KEY_VALUE = Pattern.compile(
-            "(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|passwd|authorization)"
-                    + "\\s*[=:]\\s*)(\"?)([^\\s\"',;]{4,})");
+    private static final Pattern KEY_VALUE = Pattern
+        .compile("(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|passwd|authorization)"
+            + "\\s*[=:]\\s*)(\"?)([^\\s\"',;]{4,})");
     private static final Pattern KNOWN_PREFIX = Pattern.compile("\\b(sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{8,})");
     private static final int MAX_LENGTH = 2_000;
 

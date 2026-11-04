@@ -1,6 +1,17 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.workspace.PathValidator;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Map;
+
+import javax.imageio.ImageIO;
+
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -11,16 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import com.pilot.core.workspace.PathValidator;
 
 class ReadFileMediaTest {
     @TempDir
@@ -40,8 +42,11 @@ class ReadFileMediaTest {
 
     @AfterEach
     void tearDown() {
-        if (previousArtifacts == null) System.clearProperty(ToolArtifacts.PROPERTY);
-        else System.setProperty(ToolArtifacts.PROPERTY, previousArtifacts);
+        if (previousArtifacts == null) {
+            System.clearProperty(ToolArtifacts.PROPERTY);
+        } else {
+            System.setProperty(ToolArtifacts.PROPERTY, previousArtifacts);
+        }
     }
 
     private Path png(String name, int size) throws IOException {
@@ -60,8 +65,7 @@ class ReadFileMediaTest {
         assertTrue(result.text().contains("图片 shots/home.png（image/png"), result.text());
         assertEquals(1, result.images().size());
         assertEquals("image/png", result.images().getFirst().mimeType());
-        assertEquals(file.toRealPath().toString(),
-                Path.of(result.images().getFirst().path()).toRealPath().toString());
+        assertEquals(file.toRealPath().toString(), Path.of(result.images().getFirst().path()).toRealPath().toString());
         assertTrue(result.images().getFirst().image());
     }
 
@@ -77,7 +81,7 @@ class ReadFileMediaTest {
     @Test
     void oversizedImagesAreRejectedWithAnActionableMessage() throws IOException {
         Path big = workspace.resolve("big.png");
-        Files.write(big, new byte[(int) MediaFileReader.MAX_IMAGE_BYTES + 1]);
+        Files.write(big, new byte[(int)MediaFileReader.MAX_IMAGE_BYTES + 1]);
 
         ToolResult result = tool.executeResult(Map.of("path", "big.png"));
 
@@ -89,7 +93,7 @@ class ReadFileMediaTest {
     void pdfTextIsExtractedByPageRange() throws IOException {
         Path pdf = workspace.resolve("spec.pdf");
         try (PDDocument document = new PDDocument()) {
-            for (String text : new String[]{"Alpha page", "Bravo page", "Charlie page"}) {
+            for (String text : new String[] {"Alpha page", "Bravo page", "Charlie page"}) {
                 PDPage page = new PDPage();
                 document.addPage(page);
                 try (PDPageContentStream content = new PDPageContentStream(document, page)) {
@@ -104,8 +108,9 @@ class ReadFileMediaTest {
         }
 
         ToolResult all = tool.executeResult(Map.of("path", "spec.pdf"));
-        assertTrue(all.text().contains("共 3 页") && all.text().contains("Alpha page")
-                && all.text().contains("Charlie page"), all.text());
+        assertTrue(
+            all.text().contains("共 3 页") && all.text().contains("Alpha page") && all.text().contains("Charlie page"),
+            all.text());
         assertTrue(all.images().isEmpty());
 
         ToolResult second = tool.executeResult(Map.of("path", "spec.pdf", "pages", "2"));

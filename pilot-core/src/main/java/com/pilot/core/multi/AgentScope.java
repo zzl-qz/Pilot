@@ -36,9 +36,9 @@ public final class AgentScope {
     private final List<String> denyCommands;
     private final boolean writable;
 
-    private AgentScope(Collection<String> allowFiles, Collection<String> denyFiles,
-                       Collection<String> allowTools, Collection<String> denyTools,
-                       Collection<String> allowCommands, Collection<String> denyCommands, boolean writable) {
+    private AgentScope(Collection<String> allowFiles, Collection<String> denyFiles, Collection<String> allowTools,
+        Collection<String> denyTools, Collection<String> allowCommands, Collection<String> denyCommands,
+        boolean writable) {
         this.allowFiles = clean(allowFiles);
         this.denyFiles = clean(denyFiles);
         this.allowTools = cleanTools(allowTools);
@@ -59,19 +59,16 @@ public final class AgentScope {
     }
 
     public AgentScope withTools(Collection<String> allowTools, Collection<String> denyTools) {
-        return new AgentScope(allowFiles, denyFiles, allowTools, denyTools,
-                allowCommands, denyCommands, writable);
+        return new AgentScope(allowFiles, denyFiles, allowTools, denyTools, allowCommands, denyCommands, writable);
     }
 
     /** 命令白名单：空允许清单表示沿用 {@code run_command} 的内置可执行白名单。 */
     public AgentScope withCommands(Collection<String> allowCommands, Collection<String> denyCommands) {
-        return new AgentScope(allowFiles, denyFiles, allowTools, denyTools,
-                allowCommands, denyCommands, writable);
+        return new AgentScope(allowFiles, denyFiles, allowTools, denyTools, allowCommands, denyCommands, writable);
     }
 
     public AgentScope withWritable(boolean writable) {
-        return new AgentScope(allowFiles, denyFiles, allowTools, denyTools,
-                allowCommands, denyCommands, writable);
+        return new AgentScope(allowFiles, denyFiles, allowTools, denyTools, allowCommands, denyCommands, writable);
     }
 
     public List<String> allowFiles() {
@@ -225,9 +222,7 @@ public final class AgentScope {
         if (!denyCommands.isEmpty()) {
             out.append("\n- 禁用命令：").append(String.join(" / ", denyCommands));
         }
-        out.append(writable
-                ? "\n- 改动权限：可以在白名单内提交改动，改动只进沙箱，不会直接写入真实工作区"
-                : "\n- 改动权限：只读，不提交任何文件改动");
+        out.append(writable ? "\n- 改动权限：可以在白名单内提交改动，改动只进沙箱，不会直接写入真实工作区" : "\n- 改动权限：只读，不提交任何文件改动");
         return out.toString();
     }
 
@@ -408,9 +403,8 @@ public final class AgentScope {
 
     @Override
     public String toString() {
-        return "AgentScope{allow=" + allowFiles + ", deny=" + denyFiles
-                + ", tools=" + allowTools + ", commands=" + allowCommands
-                + ", writable=" + writable + '}';
+        return "AgentScope{allow=" + allowFiles + ", deny=" + denyFiles + ", tools=" + allowTools + ", commands="
+            + allowCommands + ", writable=" + writable + '}';
     }
 
     @Override
@@ -421,19 +415,14 @@ public final class AgentScope {
         if (!(other instanceof AgentScope scope)) {
             return false;
         }
-        return writable == scope.writable
-                && allowFiles.equals(scope.allowFiles)
-                && denyFiles.equals(scope.denyFiles)
-                && allowTools.equals(scope.allowTools)
-                && denyTools.equals(scope.denyTools)
-                && allowCommands.equals(scope.allowCommands)
-                && denyCommands.equals(scope.denyCommands);
+        return writable == scope.writable && allowFiles.equals(scope.allowFiles) && denyFiles.equals(scope.denyFiles)
+            && allowTools.equals(scope.allowTools) && denyTools.equals(scope.denyTools)
+            && allowCommands.equals(scope.allowCommands) && denyCommands.equals(scope.denyCommands);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(allowFiles, denyFiles, allowTools, denyTools,
-                allowCommands, denyCommands, writable);
+        return Objects.hash(allowFiles, denyFiles, allowTools, denyTools, allowCommands, denyCommands, writable);
     }
 
     /** 用于拼错误信息：把白名单说清楚，模型才知道下一步怎么绕。 */

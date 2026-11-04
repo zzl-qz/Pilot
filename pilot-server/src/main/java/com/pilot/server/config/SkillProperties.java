@@ -1,8 +1,8 @@
 package com.pilot.server.config;
 
-import org.springframework.boot.context.properties.ConfigurationProperties;
-
 import java.nio.file.Path;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
  * 技能体系配置。
@@ -17,8 +17,7 @@ public record SkillProperties(Boolean enabled, String userDir) {
 
     public SkillProperties {
         enabled = enabled == null || enabled;
-        userDir = userDir == null || userDir.isBlank()
-                ? null
-                : Path.of(userDir.strip()).toAbsolutePath().normalize().toString();
+        userDir = userDir == null || userDir.isBlank() ? null
+            : Path.of(userDir.strip()).toAbsolutePath().normalize().toString();
     }
 }

@@ -1,9 +1,11 @@
 package com.pilot.server.mcp;
 
-import com.pilot.core.mcp.McpManager;
-import com.pilot.server.config.PilotDataDir;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import com.pilot.core.mcp.McpManager;
+import com.pilot.server.config.PilotDataDir;
+
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -16,6 +18,6 @@ public class McpConfiguration {
     @Bean(destroyMethod = "close")
     public McpManager mcpManager(ObjectMapper mapper, PilotDataDir dataDir) {
         return new McpManager(mapper, dataDir.file("mcp.json"), dataDir.file("mcp-logs"),
-                () -> System.getProperty("pilot.runtime.bin", ""));
+            () -> System.getProperty("pilot.runtime.bin", ""));
     }
 }

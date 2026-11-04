@@ -1,7 +1,6 @@
 package com.pilot.core.skill;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -72,13 +71,11 @@ public final class SkillCatalog {
             }
             List<Path> dirs;
             try (Stream<Path> entries = Files.list(root.directory())) {
-                dirs = entries.filter(Files::isDirectory)
-                        .filter(path -> !Files.isSymbolicLink(path))
-                        .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                        .toList();
+                dirs = entries.filter(Files::isDirectory).filter(path -> !Files.isSymbolicLink(path))
+                    .sorted(Comparator.comparing(path -> path.getFileName().toString())).toList();
             } catch (IOException e) {
-                problems.add(new SkillProblem("（目录）", root.directory().toString(),
-                        "扫描失败：" + e.getClass().getSimpleName()));
+                problems
+                    .add(new SkillProblem("（目录）", root.directory().toString(), "扫描失败：" + e.getClass().getSimpleName()));
                 continue;
             }
             for (Path dir : dirs) {
@@ -91,39 +88,35 @@ public final class SkillCatalog {
     /** 按加载序固化：项目级遮蔽用户级的语义依赖插入顺序，Map.copyOf 不保序，先按名重排。 */
     private static Map<String, Skill> ordered(Map<String, Skill> byName) {
         Map<String, Skill> sorted = new LinkedHashMap<>();
-        byName.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .forEach(entry -> sorted.put(entry.getKey(), entry.getValue()));
+        byName.entrySet().stream().sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> sorted.put(entry.getKey(), entry.getValue()));
         return sorted;
     }
 
-    private static void load(Path dir, SkillSource source, Map<String, Skill> byName,
-                             Set<String> commands, List<SkillProblem> problems) {
+    private static void load(Path dir, SkillSource source, Map<String, Skill> byName, Set<String> commands,
+        List<SkillProblem> problems) {
         String dirName = dir.getFileName().toString();
         Path skillMd = dir.resolve("SKILL.md");
         if (!Files.isRegularFile(skillMd)) {
-            return;   // 没有 SKILL.md 的目录不是技能（可能是任何无关目录），静默跳过
+            return; // 没有 SKILL.md 的目录不是技能（可能是任何无关目录），静默跳过
         }
         // 同名技能已被更高优先级来源加载：遮蔽是设计行为，不亮牌
         if (byName.containsKey(dirName)) {
             return;
         }
         if (byName.size() >= MAX_SKILLS) {
-            problems.add(new SkillProblem(dirName, dir.toString(),
-                    "有效技能数已达上限 " + MAX_SKILLS + "，本技能被跳过"));
+            problems.add(new SkillProblem(dirName, dir.toString(), "有效技能数已达上限 " + MAX_SKILLS + "，本技能被跳过"));
             return;
         }
         if (!VALID_NAME.matcher(dirName).matches()) {
-            problems.add(new SkillProblem(dirName, dir.toString(),
-                    "目录名必须匹配 ^[a-z][a-z0-9-]{0,63}$"));
+            problems.add(new SkillProblem(dirName, dir.toString(), "目录名必须匹配 ^[a-z][a-z0-9-]{0,63}$"));
             return;
         }
         String text;
         try {
             text = Files.readString(skillMd, StandardCharsets.UTF_8);
         } catch (IOException e) {
-            problems.add(new SkillProblem(dirName, dir.toString(),
-                    "读取 SKILL.md 失败：" + e.getClass().getSimpleName()));
+            problems.add(new SkillProblem(dirName, dir.toString(), "读取 SKILL.md 失败：" + e.getClass().getSimpleName()));
             return;
         }
         SkillFrontmatter.Parsed parsed;
@@ -134,30 +127,26 @@ public final class SkillCatalog {
             return;
         }
         if (parsed.name() != null && !parsed.name().equals(dirName)) {
-            problems.add(new SkillProblem(dirName, dir.toString(),
-                    "name 声明（" + parsed.name() + "）与目录名不一致；目录名是真源名"));
+            problems.add(new SkillProblem(dirName, dir.toString(), "name 声明（" + parsed.name() + "）与目录名不一致；目录名是真源名"));
             return;
         }
         if (parsed.body().isEmpty()) {
-            problems.add(new SkillProblem(dirName, dir.toString(),
-                    "正文为空：SKILL.md 只有 frontmatter，没有可执行的指引"));
+            problems.add(new SkillProblem(dirName, dir.toString(), "正文为空：SKILL.md 只有 frontmatter，没有可执行的指引"));
             return;
         }
         if (parsed.body().lines().count() > MAX_BODY_LINES
-                || parsed.body().getBytes(StandardCharsets.UTF_8).length > MAX_BODY_BYTES) {
+            || parsed.body().getBytes(StandardCharsets.UTF_8).length > MAX_BODY_BYTES) {
             problems.add(new SkillProblem(dirName, dir.toString(),
-                    "正文超过上限（" + MAX_BODY_LINES + " 行 / " + (MAX_BODY_BYTES / 1024) + "KB）"));
+                "正文超过上限（" + MAX_BODY_LINES + " 行 / " + (MAX_BODY_BYTES / 1024) + "KB）"));
             return;
         }
         if (parsed.command() != null && !commands.add(parsed.command())) {
-            problems.add(new SkillProblem(dirName, dir.toString(),
-                    "快捷指令 " + parsed.command() + " 与已有技能冲突，本技能不可用"));
+            problems.add(new SkillProblem(dirName, dir.toString(), "快捷指令 " + parsed.command() + " 与已有技能冲突，本技能不可用"));
             return;
         }
         List<String> files = listFiles(dir);
-        byName.put(dirName, new Skill(new SkillManifest(dirName, parsed.description(),
-                parsed.command(), parsed.argumentHint(), parsed.allowedTools(), dir, source),
-                parsed.body(), files));
+        byName.put(dirName, new Skill(new SkillManifest(dirName, parsed.description(), parsed.command(),
+            parsed.argumentHint(), parsed.allowedTools(), dir, source), parsed.body(), files));
     }
 
     /**
@@ -171,12 +160,9 @@ public final class SkillCatalog {
     private static List<String> listFiles(Path dir) {
         List<String> files = new ArrayList<>();
         try (Stream<Path> walk = Files.walk(dir, 6)) {
-            walk.filter(Files::isRegularFile)
-                    .filter(path -> !path.getFileName().toString().equals("SKILL.md"))
-                    .filter(path -> !insideGit(dir, path))
-                    .limit(MAX_FILES)
-                    .forEach(path -> files.add(dir.relativize(path).toString()
-                            .replace('\\', '/')));
+            walk.filter(Files::isRegularFile).filter(path -> !path.getFileName().toString().equals("SKILL.md"))
+                .filter(path -> !insideGit(dir, path)).limit(MAX_FILES)
+                .forEach(path -> files.add(dir.relativize(path).toString().replace('\\', '/')));
         } catch (IOException e) {
             return List.of();
         }
@@ -204,10 +190,7 @@ public final class SkillCatalog {
 
     /** 有效技能清单，按名排序。 */
     public List<SkillManifest> list() {
-        return skills.values().stream()
-                .map(Skill::manifest)
-                .sorted(Comparator.comparing(SkillManifest::name))
-                .toList();
+        return skills.values().stream().map(Skill::manifest).sorted(Comparator.comparing(SkillManifest::name)).toList();
     }
 
     /** 校验失败清单：名称、路径、原因，供 API 展示与日志。 */
@@ -251,8 +234,8 @@ public final class SkillCatalog {
         String text = new String(raw, StandardCharsets.UTF_8);
         List<String> lines = text.lines().toList();
         if (lines.size() > MAX_FILE_LINES || raw.length > MAX_FILE_BYTES) {
-            return String.join("\n", lines.subList(0, Math.min(lines.size(), MAX_FILE_LINES)))
-                    + "\n…（超出 " + MAX_FILE_LINES + " 行上限，已截断）";
+            return String.join("\n", lines.subList(0, Math.min(lines.size(), MAX_FILE_LINES))) + "\n…（超出 "
+                + MAX_FILE_LINES + " 行上限，已截断）";
         }
         return text;
     }

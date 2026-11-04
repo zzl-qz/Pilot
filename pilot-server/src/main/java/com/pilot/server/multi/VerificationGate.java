@@ -1,9 +1,9 @@
 package com.pilot.server.multi;
 
-import com.pilot.core.multi.SandboxChange;
-
 import java.nio.file.Path;
 import java.util.List;
+
+import com.pilot.core.multi.SandboxChange;
 
 /**
  * 非 LLM 硬校验层：编译器与测试结果优先于任何 Agent（包括父 Agent）的主观判断。

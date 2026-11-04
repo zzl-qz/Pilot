@@ -1,10 +1,10 @@
 package com.pilot.server.session;
 
-import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
 
 /** /review 独立审查模式的识别边界：服务端识别不依赖前端命令面板，直接输入也一样生效。 */
 class ReviewModeTest {

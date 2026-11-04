@@ -1,15 +1,17 @@
 package com.pilot.server.config;
 
-import com.pilot.core.permission.PermissionMode;
-import com.pilot.server.store.InMemorySettingsStore;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import com.pilot.core.permission.PermissionMode;
+import com.pilot.server.store.InMemorySettingsStore;
 
 class PermissionSettingsTest {
     @Test
     void fallsBackToConfiguredModeWhenNothingSaved() {
-        PermissionSettings settings = new PermissionSettings(properties(PermissionMode.READ_ONLY), new InMemorySettingsStore());
+        PermissionSettings settings =
+            new PermissionSettings(properties(PermissionMode.READ_ONLY), new InMemorySettingsStore());
 
         assertEquals(PermissionMode.READ_ONLY, settings.mode());
     }

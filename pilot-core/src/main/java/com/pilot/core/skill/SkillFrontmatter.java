@@ -22,14 +22,14 @@ final class SkillFrontmatter {
     /** description 是目录段里唯一的判断依据，上限 500 字符。 */
     private static final int MAX_DESCRIPTION_CHARS = 500;
     private static final List<String> KEYS =
-            List.of("name", "description", "command", "argument-hint", "allowed-tools");
+        List.of("name", "description", "command", "argument-hint", "allowed-tools");
 
     private SkillFrontmatter() {
     }
 
     /** 解析结果：frontmatter 各键与剥离声明头之后的正文。 */
-    record Parsed(String name, String description, String command, String argumentHint,
-                  List<String> allowedTools, String body) {
+    record Parsed(String name, String description, String command, String argumentHint, List<String> allowedTools,
+        String body) {
     }
 
     /**
@@ -70,41 +70,50 @@ final class SkillFrontmatter {
             String key = line.substring(0, colon).strip();
             String value = line.substring(colon + 1).strip();
             if (!KEYS.contains(key)) {
-                throw new IllegalArgumentException("不支持的键：" + key
-                        + "（只支持 " + String.join(" / ", KEYS) + "）");
+                throw new IllegalArgumentException("不支持的键：" + key + "（只支持 " + String.join(" / ", KEYS) + "）");
             }
             switch (key) {
                 case "name" -> {
                     if (value.isEmpty()) {
                         throw new IllegalArgumentException("name 为空（缺省时以目录名为准，可不写）");
                     }
-                    if (name != null) throw new IllegalArgumentException("重复的键：name");
+                    if (name != null) {
+                        throw new IllegalArgumentException("重复的键：name");
+                    }
                     name = value;
                 }
                 case "description" -> {
-                    if (description != null) throw new IllegalArgumentException("重复的键：description");
+                    if (description != null) {
+                        throw new IllegalArgumentException("重复的键：description");
+                    }
                     if (value.isEmpty()) {
                         throw new IllegalArgumentException("description 必填：模型靠它判断何时使用技能");
                     }
                     if (value.length() > MAX_DESCRIPTION_CHARS) {
-                        throw new IllegalArgumentException("description 超过 "
-                                + MAX_DESCRIPTION_CHARS + " 字符上限（当前 " + value.length() + "）");
+                        throw new IllegalArgumentException(
+                            "description 超过 " + MAX_DESCRIPTION_CHARS + " 字符上限（当前 " + value.length() + "）");
                     }
                     description = value;
                 }
                 case "command" -> {
-                    if (command != null) throw new IllegalArgumentException("重复的键：command");
+                    if (command != null) {
+                        throw new IllegalArgumentException("重复的键：command");
+                    }
                     if (!value.isEmpty() && !COMMAND.matcher(value).matches()) {
                         throw new IllegalArgumentException("command 必须是 / 加小写连字符词（如 /review）：" + value);
                     }
                     command = value.isEmpty() ? null : value;
                 }
                 case "argument-hint" -> {
-                    if (argumentHint != null) throw new IllegalArgumentException("重复的键：argument-hint");
+                    if (argumentHint != null) {
+                        throw new IllegalArgumentException("重复的键：argument-hint");
+                    }
                     argumentHint = value.isEmpty() ? null : value;
                 }
                 case "allowed-tools" -> {
-                    if (allowedTools != null) throw new IllegalArgumentException("重复的键：allowed-tools");
+                    if (allowedTools != null) {
+                        throw new IllegalArgumentException("重复的键：allowed-tools");
+                    }
                     allowedTools = toolList(value);
                 }
                 default -> throw new IllegalArgumentException("不支持的键：" + key);
@@ -115,7 +124,7 @@ final class SkillFrontmatter {
         }
         String body = String.join("\n", lines.subList(end + 1, lines.size())).strip();
         return new Parsed(name, description, command, argumentHint,
-                allowedTools == null ? List.of() : List.copyOf(allowedTools), body);
+            allowedTools == null ? List.of() : List.copyOf(allowedTools), body);
     }
 
     /** {@code [a, b]} / {@code a, b} / {@code a} 三种写法统一成工具名列表（语法对齐 PromptLibrary）。 */
@@ -126,10 +135,8 @@ final class SkillFrontmatter {
         } else if (list.startsWith("[") != list.endsWith("]")) {
             throw new IllegalArgumentException("allowed-tools 列表括号不成对：" + value);
         }
-        List<String> names = new ArrayList<>(Arrays.stream(list.split("[,，]"))
-                .map(String::strip)
-                .filter(item -> !item.isEmpty())
-                .toList());
+        List<String> names = new ArrayList<>(
+            Arrays.stream(list.split("[,，]")).map(String::strip).filter(item -> !item.isEmpty()).toList());
         if (names.stream().distinct().count() != names.size()) {
             throw new IllegalArgumentException("allowed-tools 存在重复项：" + value);
         }

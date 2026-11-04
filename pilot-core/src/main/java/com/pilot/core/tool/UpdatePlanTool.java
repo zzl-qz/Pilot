@@ -1,12 +1,12 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.plan.PlanItem;
-import com.pilot.core.plan.PlanSink;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+
+import com.pilot.core.plan.PlanItem;
+import com.pilot.core.plan.PlanSink;
 
 /**
  * {@code update_plan}：让模型把多步任务外化成可读的 checklist。
@@ -35,28 +35,14 @@ public final class UpdatePlanTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "explanation", Map.of(
-                                "type", "string",
-                                "description", "本次更新的原因（可选）"),
-                        "plan", Map.of(
-                                "type", "array",
-                                "description", "完整步骤列表，整体替换上一次的计划",
-                                "items", Map.of(
-                                        "type", "object",
-                                        "properties", Map.of(
-                                                "step", Map.of("type", "string", "description", "步骤描述"),
-                                                "status", Map.of(
-                                                        "type", "string",
-                                                        "enum", List.of(PlanItem.PENDING, PlanItem.IN_PROGRESS,
-                                                                PlanItem.COMPLETED),
-                                                        "description", "步骤状态")),
-                                        "required", List.of("step", "status"),
-                                        "additionalProperties", false))),
-                "required", List.of("plan"),
-                "additionalProperties", false);
+        return Map.of("type", "object", "properties", Map.of("explanation",
+            Map.of("type", "string", "description", "本次更新的原因（可选）"), "plan",
+            Map.of("type", "array", "description", "完整步骤列表，整体替换上一次的计划", "items", Map.of("type", "object", "properties",
+                Map.of("step", Map.of("type", "string", "description", "步骤描述"), "status",
+                    Map.of("type", "string", "enum",
+                        List.of(PlanItem.PENDING, PlanItem.IN_PROGRESS, PlanItem.COMPLETED), "description", "步骤状态")),
+                "required", List.of("step", "status"), "additionalProperties", false))),
+            "required", List.of("plan"), "additionalProperties", false);
     }
 
     @Override

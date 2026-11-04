@@ -56,6 +56,18 @@ export async function apiJson(url, init, timeoutMs) {
 
 const jsonBody = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 export const api = {
+  workProducts: (session, signal) => apiJson(`/api/sessions/${encodeURIComponent(session)}/products`, { signal }),
+  productPreview: (session, id, signal) => apiJson(`/api/sessions/${encodeURIComponent(session)}/products/${encodeURIComponent(id)}/preview`, { signal }),
+  skillDrafts: (session, signal) => apiJson(`/api/sessions/${encodeURIComponent(session)}/skill-drafts`, { signal }),
+  decideSkill: (session, id, action, version) => apiJson(`/api/sessions/${encodeURIComponent(session)}/skill-drafts/${encodeURIComponent(id)}/${action}`, jsonBody('POST', { version })),
+  downloadProduct: async (session, id, signal) => {
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(session)}/products/${encodeURIComponent(id)}/download`, { signal });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.message || body.error || `下载失败（${response.status}）`);
+    }
+    return response.blob();
+  },
   recurring: () => apiJson('/api/automation/series'),
   createRecurring: body => apiJson('/api/automation/series', jsonBody('POST', body)),
   controlRecurring: (id, body) => apiJson(`/api/automation/series/${encodeURIComponent(id)}`, jsonBody('POST', body)),

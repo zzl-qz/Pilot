@@ -14,19 +14,33 @@ public final class StopCommandTool implements Tool {
         this.sessionId = Objects.requireNonNull(sessionId);
     }
 
-    public String name() { return "stop_command"; }
-    public String description() { return promptDescription(); }
-    public boolean readOnly() { return false; }
+    public String name() {
+        return "stop_command";
+    }
+
+    public String description() {
+        return promptDescription();
+    }
+
+    public boolean readOnly() {
+        return false;
+    }
+
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties", Map.of(
-                "taskId", Map.of("type", "string", "description", "当前会话需要停止的命令任务 ID")),
-                "required", List.of("taskId"), "additionalProperties", false);
+        return Map.of("type", "object", "properties",
+            Map.of("taskId", Map.of("type", "string", "description", "当前会话需要停止的命令任务 ID")), "required",
+            List.of("taskId"), "additionalProperties", false);
     }
 
     public String execute(Map<String, Object> args) {
         String id = ToolSupport.stringArg(args, "taskId");
-        if (id == null) return "ERROR: 缺少参数 taskId";
-        try { return CommandToolSupport.render(tasks.stop(sessionId, id), false); }
-        catch (IllegalArgumentException e) { return "ERROR: " + e.getMessage(); }
+        if (id == null) {
+            return "ERROR: 缺少参数 taskId";
+        }
+        try {
+            return CommandToolSupport.render(tasks.stop(sessionId, id), false);
+        } catch (IllegalArgumentException e) {
+            return "ERROR: " + e.getMessage();
+        }
     }
 }

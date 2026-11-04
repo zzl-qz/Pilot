@@ -1,15 +1,15 @@
 package com.pilot.core.hook;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class HooksTest {
     @TempDir
@@ -24,22 +24,21 @@ class HooksTest {
     @Test
     void postToolUseOutputIsReturnedForMatchingTool() throws IOException {
         settings("""
-                {"hooks":{"PostToolUse":[
-                  {"matcher":"edit_file|create_file","command":"echo formatted"}
-                ]}}
-                """);
+            {"hooks":{"PostToolUse":[
+              {"matcher":"edit_file|create_file","command":"echo formatted"}
+            ]}}
+            """);
         Hooks hooks = Hooks.load(workspace);
 
         assertEquals("formatted", hooks.run(Hooks.Event.POST_TOOL_USE, "edit_file").output());
-        assertTrue(hooks.run(Hooks.Event.POST_TOOL_USE, "read_file").output().isEmpty(),
-                "未匹配的工具不应执行钩子");
+        assertTrue(hooks.run(Hooks.Event.POST_TOOL_USE, "read_file").output().isEmpty(), "未匹配的工具不应执行钩子");
     }
 
     @Test
     void wildcardMatcherRunsForEveryTool() throws IOException {
         settings("""
-                {"hooks":{"PostToolUse":[{"matcher":"*","command":"echo any"}]}}
-                """);
+            {"hooks":{"PostToolUse":[{"matcher":"*","command":"echo any"}]}}
+            """);
         Hooks hooks = Hooks.load(workspace);
 
         assertEquals("any", hooks.run(Hooks.Event.POST_TOOL_USE, "run_command").output());
@@ -48,10 +47,10 @@ class HooksTest {
     @Test
     void preToolUseBlocksOnlyWhenConfigured() throws IOException {
         settings("""
-                {"hooks":{"PreToolUse":[
-                  {"matcher":"run_command","command":"exit 1","blockOnFailure":true}
-                ]}}
-                """);
+            {"hooks":{"PreToolUse":[
+              {"matcher":"run_command","command":"exit 1","blockOnFailure":true}
+            ]}}
+            """);
         Hooks hooks = Hooks.load(workspace);
 
         Hooks.Result blocked = hooks.run(Hooks.Event.PRE_TOOL_USE, "run_command");
@@ -62,8 +61,8 @@ class HooksTest {
     @Test
     void failingHookWithoutBlockFlagNeverBlocks() throws IOException {
         settings("""
-                {"hooks":{"PreToolUse":[{"matcher":"run_command","command":"exit 1"}]}}
-                """);
+            {"hooks":{"PreToolUse":[{"matcher":"run_command","command":"exit 1"}]}}
+            """);
         Hooks hooks = Hooks.load(workspace);
 
         assertFalse(hooks.run(Hooks.Event.PRE_TOOL_USE, "run_command").blocked());
@@ -81,10 +80,10 @@ class HooksTest {
     @Test
     void nestedClaudeCodeFormatIsSupported() throws IOException {
         settings("""
-                {"hooks":{"PostToolUse":[
-                  {"matcher":"edit_file","hooks":[{"type":"command","command":"echo nested"}]}
-                ]}}
-                """);
+            {"hooks":{"PostToolUse":[
+              {"matcher":"edit_file","hooks":[{"type":"command","command":"echo nested"}]}
+            ]}}
+            """);
         Hooks hooks = Hooks.load(workspace);
 
         assertEquals("nested", hooks.run(Hooks.Event.POST_TOOL_USE, "edit_file").output());

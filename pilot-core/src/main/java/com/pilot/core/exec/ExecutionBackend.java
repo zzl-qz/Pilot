@@ -20,6 +20,11 @@ public interface ExecutionBackend {
     /** 不可用的原因，直接展示给用户和模型，避免「以为隔离了其实没有」。 */
     String unavailableReason();
 
+    /** 用于构建缓存分区；容器实现返回实际镜像 ID，镜像未就绪时拒绝。 */
+    default String cacheIdentity() {
+        return id();
+    }
+
     ExecutionResult run(ExecutionRequest request);
 
     /** 诊断用：这次会以什么方式执行（不包含凭据值）。 */

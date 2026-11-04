@@ -1,13 +1,10 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.multi.AgentScope;
-import com.pilot.core.multi.DiffSandbox;
-import com.pilot.core.multi.RiskLevel;
-import com.pilot.core.multi.SandboxChange;
-import com.pilot.core.workspace.PathValidator;
-import com.pilot.core.workspace.WorkspaceViolationException;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -16,11 +13,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.multi.AgentScope;
+import com.pilot.core.multi.DiffSandbox;
+import com.pilot.core.multi.RiskLevel;
+import com.pilot.core.multi.SandboxChange;
+import com.pilot.core.workspace.PathValidator;
+import com.pilot.core.workspace.WorkspaceViolationException;
 
 class SandboxToolsTest {
 
@@ -41,17 +42,14 @@ class SandboxToolsTest {
         SandboxSink sink = (path, oldText, newText) -> proposals.add(new Proposal(path, oldText, newText));
         SandboxEditFileTool tool = new SandboxEditFileTool(new PathValidator(root), sink);
 
-        String result = tool.execute(Map.of(
-                "path", "src/A.java",
-                "old_string", "int x = 1;",
-                "new_string", "int x = 2;"));
+        String result =
+            tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 1;", "new_string", "int x = 2;"));
 
         assertFalse(result.startsWith("ERROR"), result);
         assertEquals(1, proposals.size());
         assertEquals("src/A.java", proposals.get(0).path());
         assertTrue(proposals.get(0).newText().contains("int x = 2;"));
-        assertTrue(Files.readString(root.resolve("src/A.java")).contains("int x = 1;"),
-                "真实文件必须保持不变");
+        assertTrue(Files.readString(root.resolve("src/A.java")).contains("int x = 1;"), "真实文件必须保持不变");
     }
 
     @Test
@@ -59,10 +57,10 @@ class SandboxToolsTest {
         Path root = workspace(dir);
         ArrayList<Proposal> proposals = new ArrayList<>();
         SandboxEditFileTool tool = new SandboxEditFileTool(new PathValidator(root),
-                (path, oldText, newText) -> proposals.add(new Proposal(path, oldText, newText)));
+            (path, oldText, newText) -> proposals.add(new Proposal(path, oldText, newText)));
 
-        String result = tool.execute(Map.of("path", "src/A.java", "edits", List.of(
-                Map.of("old_string", "class A", "new_string", "class B"),
+        String result = tool.execute(
+            Map.of("path", "src/A.java", "edits", List.of(Map.of("old_string", "class A", "new_string", "class B"),
                 Map.of("old_string", "int x = 1;", "new_string", "int x = 2;"))));
 
         assertTrue(result.contains("替换 2 处"), result);
@@ -103,7 +101,8 @@ class SandboxToolsTest {
         reader.execute(Map.of("path", "src/A.java"));
 
         tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 1;", "new_string", "int x = 2;"));
-        String result = tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 2;", "new_string", "int x = 3;"));
+        String result =
+            tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 2;", "new_string", "int x = 3;"));
 
         assertFalse(result.startsWith("ERROR"), result);
         assertTrue(sandbox.currentText("src/A.java", "").contains("int x = 3;"));
@@ -123,17 +122,16 @@ class SandboxToolsTest {
         observe(root, reads, "src/A.java");
 
         tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 1;", "new_string", "int x = 2;"));
-        String result = tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 2;", "new_string", "int x = 3;"));
+        String result =
+            tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 2;", "new_string", "int x = 3;"));
 
         assertFalse(result.startsWith("ERROR"), result);
         assertEquals(1, sandbox.fileCount(), "同一路径只能留一条改动");
         SandboxChange change = sandbox.changes().get(0);
-        assertEquals(DiffSandbox.fingerprint(original), change.baseHash(),
-                "接受时会与真实文件比对指纹，baseHash 必须一直是原文的");
+        assertEquals(DiffSandbox.fingerprint(original), change.baseHash(), "接受时会与真实文件比对指纹，baseHash 必须一直是原文的");
         assertTrue(change.diff().contains("int x = 1;"), change.diff());
         assertTrue(change.diff().contains("int x = 3;"), change.diff());
-        assertFalse(change.diff().contains("int x = 2;"),
-                "diff 应相对真实原文，而不是相对上一版提案：" + change.diff());
+        assertFalse(change.diff().contains("int x = 2;"), "diff 应相对真实原文，而不是相对上一版提案：" + change.diff());
     }
 
     @Test
@@ -147,7 +145,8 @@ class SandboxToolsTest {
 
         String created = create.execute(Map.of("path", "src/New.java", "content", "class New {\n    int v = 1;\n}\n"));
         assertFalse(created.startsWith("ERROR"), created);
-        String result = edit.execute(Map.of("path", "src/New.java", "old_string", "int v = 1;", "new_string", "int v = 2;"));
+        String result =
+            edit.execute(Map.of("path", "src/New.java", "old_string", "int v = 1;", "new_string", "int v = 2;"));
 
         assertFalse(result.startsWith("ERROR"), result);
         assertTrue(sandbox.currentText("src/New.java", "").contains("int v = 2;"));
@@ -166,7 +165,8 @@ class SandboxToolsTest {
         observe(root, reads, "src/A.java");
 
         tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 1;", "new_string", "int x = 2;"));
-        String result = tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 2;", "new_string", "int x = 1;"));
+        String result =
+            tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 2;", "new_string", "int x = 1;"));
 
         assertFalse(result.startsWith("ERROR"), result);
         assertTrue(sandbox.isEmpty(), "改回原文后不应留下空改动");
@@ -209,8 +209,7 @@ class SandboxToolsTest {
         DiffSandbox own = new DiffSandbox("sbx_own", "agent_own", "T2", "");
         SandboxSink combined = sandboxSink(own).overlay(upstreamSink);
 
-        assertEquals("interface Api {}\n", combined.proposedText("src/Api.java"),
-                "下游必须能看到上游新建的文件");
+        assertEquals("interface Api {}\n", combined.proposedText("src/Api.java"), "下游必须能看到上游新建的文件");
         assertTrue(combined.proposed("src/Api.java"));
         assertEquals("磁盘内容", combined.currentText("src/Other.java", "磁盘内容"));
 
@@ -249,7 +248,7 @@ class SandboxToolsTest {
         Path root = workspace(dir);
         ArrayList<Proposal> proposals = new ArrayList<Proposal>();
         SandboxCreateFileTool tool = new SandboxCreateFileTool(new PathValidator(root),
-                (path, oldText, newText) -> proposals.add(new Proposal(path, oldText, newText)));
+            (path, oldText, newText) -> proposals.add(new Proposal(path, oldText, newText)));
 
         tool.execute(Map.of("path", "src/B.java", "content", "class B {}\n"));
 
@@ -265,10 +264,7 @@ class SandboxToolsTest {
         PathValidator validator = new PathValidator(root, scope);
         SandboxEditFileTool tool = new SandboxEditFileTool(validator, SandboxSink.rejectAll());
 
-        String result = tool.execute(Map.of(
-                "path", "secret.txt",
-                "old_string", "top secret",
-                "new_string", "leaked"));
+        String result = tool.execute(Map.of("path", "secret.txt", "old_string", "top secret", "new_string", "leaked"));
 
         assertTrue(result.startsWith("ERROR"), result);
         assertTrue(result.contains("白名单"), result);

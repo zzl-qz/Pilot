@@ -1,19 +1,22 @@
 package com.pilot.server.session;
 
-import com.pilot.core.event.EventEnvelope;
-import com.pilot.core.event.RunUsageUpdated;
-import com.pilot.core.session.SessionRepository;
-import com.pilot.core.session.SessionService;
-import org.springframework.stereotype.Service;
-
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import org.springframework.stereotype.Service;
+
+import com.pilot.core.event.EventEnvelope;
+import com.pilot.core.event.RunUsageUpdated;
+import com.pilot.core.model.RequestTotals.Summary;
+import com.pilot.core.session.Session;
+import com.pilot.core.session.SessionRepository;
+import com.pilot.core.session.SessionService;
 
 /**
  * 用量聚合：把落库的 {@code run.usage} 累计快照聚成日/会话两个视角，供设置页成本面板展示。
@@ -32,17 +35,15 @@ public class UsageService {
     }
 
     /** 聚合结果：日序列 + 会话 Top + 合计。cachedInputTokens 与 inputTokens 同口径（总输入含缓存）。 */
-    record DayTotal(LocalDate date, int requests, long inputTokens, long outputTokens,
-                    long cachedInputTokens) {
+    record DayTotal(LocalDate date, int requests, long inputTokens, long outputTokens, long cachedInputTokens) {
     }
 
     record SessionTotal(String sessionId, String title, int requests, long inputTokens, long outputTokens,
-                        long cachedInputTokens) {
+        long cachedInputTokens) {
     }
 
-    record UsageReport(int days, List<DayTotal> daily, List<SessionTotal> sessions,
-                       long totalRequests, long totalInputTokens, long totalOutputTokens,
-                       long totalCachedInputTokens, com.pilot.core.model.RequestTotals.Summary details) {
+    record UsageReport(int days, List<DayTotal> daily, List<SessionTotal> sessions, long totalRequests,
+        long totalInputTokens, long totalOutputTokens, long totalCachedInputTokens, Summary details) {
     }
 
     private static final int MAX_SESSION_ROWS = 10;
@@ -61,7 +62,7 @@ public class UsageService {
      */
     public UsageReport report(int days) {
         int window = Math.max(1, Math.min(90, days));
-        Instant since = Instant.now().minusSeconds((long) window * 24 * 3600);
+        Instant since = Instant.now().minusSeconds((long)window * 24 * 3600);
         List<EventEnvelope> events = repository.eventsOfType("run.usage", since);
 
         // 每 run 取最后一条快照（事件升序读入，覆盖即末值）
@@ -75,29 +76,25 @@ public class UsageService {
         Map<LocalDate, long[]> byDay = new LinkedHashMap<>();
         Map<String, long[]> bySession = new LinkedHashMap<>();
         for (EventEnvelope event : lastByRun.values()) {
-            RunUsageUpdated usage = (RunUsageUpdated) event.payload();
+            RunUsageUpdated usage = (RunUsageUpdated)event.payload();
             LocalDate date = LocalDate.ofInstant(event.timestamp(), ZONE);
             accumulate(byDay.computeIfAbsent(date, ignored -> new long[4]), usage);
             accumulate(bySession.computeIfAbsent(event.sessionId(), ignored -> new long[4]), usage);
         }
 
-        List<DayTotal> daily = byDay.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .map(entry -> new DayTotal(entry.getKey(),
-                        (int) entry.getValue()[0], entry.getValue()[1], entry.getValue()[2],
-                        entry.getValue()[3]))
-                .toList();
+        List<
+            DayTotal> daily =
+                byDay
+                    .entrySet().stream().sorted(Map.Entry.comparingByKey()).map(entry -> new DayTotal(entry.getKey(),
+                        (int)entry.getValue()[0], entry.getValue()[1], entry.getValue()[2], entry.getValue()[3]))
+                    .toList();
         List<SessionTotal> sessionTotals = bySession.entrySet().stream()
-                .map(entry -> new SessionTotal(entry.getKey(),
-                        sessions.find(entry.getKey())
-                                .map(com.pilot.core.session.Session::title)
-                                .orElse("已删除的会话"),
-                        (int) entry.getValue()[0], entry.getValue()[1], entry.getValue()[2],
-                        entry.getValue()[3]))
-                .sorted(Comparator.comparingLong((SessionTotal total) ->
-                        total.inputTokens() + total.outputTokens()).reversed())
-                .limit(MAX_SESSION_ROWS)
-                .toList();
+            .map(entry -> new SessionTotal(entry.getKey(),
+                sessions.find(entry.getKey()).map(Session::title).orElse("已删除的会话"), (int)entry.getValue()[0],
+                entry.getValue()[1], entry.getValue()[2], entry.getValue()[3]))
+            .sorted(
+                Comparator.comparingLong((SessionTotal total) -> total.inputTokens() + total.outputTokens()).reversed())
+            .limit(MAX_SESSION_ROWS).toList();
 
         long requests = 0;
         long input = 0;
@@ -109,21 +106,29 @@ public class UsageService {
             output += totals[2];
             cached += totals[3];
         }
-        int observedRequests = 0, pricedRequests = 0;
-        long observedInput = 0, writes = 0, observedCached = 0;
+        int observedRequests = 0;
+        int pricedRequests = 0;
+        long observedInput = 0;
+        long writes = 0;
+        long observedCached = 0;
         boolean exact = true;
-        Map<String, java.math.BigDecimal> costs = new LinkedHashMap<>();
+        Map<String, BigDecimal> costs = new LinkedHashMap<>();
         for (EventEnvelope event : lastByRun.values()) {
-            RunUsageUpdated usage = (RunUsageUpdated) event.payload();
+            RunUsageUpdated usage = (RunUsageUpdated)event.payload();
             exact &= usage.exact();
             var detail = usage.details();
-            if (detail == null) continue;
-            observedRequests += detail.observedCacheRequests(); pricedRequests += detail.pricedRequests();
-            observedInput += detail.observedCacheInputTokens(); writes += detail.cacheWriteTokens(); observedCached += detail.cacheReadTokens();
-            detail.costs().forEach((currency, cost) -> costs.merge(currency, cost, java.math.BigDecimal::add));
+            if (detail == null) {
+                continue;
+            }
+            observedRequests += detail.observedCacheRequests();
+            pricedRequests += detail.pricedRequests();
+            observedInput += detail.observedCacheInputTokens();
+            writes += detail.cacheWriteTokens();
+            observedCached += detail.cacheReadTokens();
+            detail.costs().forEach((currency, cost) -> costs.merge(currency, cost, BigDecimal::add));
         }
-        var detail = new com.pilot.core.model.RequestTotals.Summary((int) Math.min(Integer.MAX_VALUE, requests),
-                observedRequests, observedInput, observedCached, writes, pricedRequests, Map.copyOf(costs), exact);
+        var detail = new Summary((int)Math.min(Integer.MAX_VALUE, requests), observedRequests, observedInput,
+            observedCached, writes, pricedRequests, Map.copyOf(costs), exact);
         return new UsageReport(window, daily, sessionTotals, requests, input, output, cached, detail);
     }
 

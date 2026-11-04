@@ -1,11 +1,12 @@
 package com.pilot.core.session;
 
-import com.pilot.core.event.EventEnvelope;
-import com.pilot.core.event.SessionEvent;
-
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+
+import com.pilot.core.event.EventEnvelope;
+import com.pilot.core.event.SessionEvent;
 
 /**
  * 会话存储端口。只负责数据读写，不处理订阅推送（那属于 {@link SessionService}）。
@@ -19,11 +20,11 @@ public interface SessionRepository {
      * @param parentSessionId 侧边对话的父会话；普通对话传 {@code null}
      */
     Session create(String sessionId, String title, String workspace, Instant createdAt, String projectId,
-                   boolean isBlank, String parentSessionId);
+        boolean isBlank, String parentSessionId);
 
     /** 兼容旧调用：普通对话（没有父会话）。 */
     default Session create(String sessionId, String title, String workspace, Instant createdAt, String projectId,
-                           boolean isBlank) {
+        boolean isBlank) {
         return create(sessionId, title, workspace, createdAt, projectId, isBlank, null);
     }
 
@@ -50,16 +51,13 @@ public interface SessionRepository {
 
     /** 某个项目下的会话，按创建时间倒序。 */
     default List<Session> listByProject(String projectId) {
-        return list().stream()
-                .filter(session -> java.util.Objects.equals(session.projectId(), projectId))
-                .toList();
+        return list().stream().filter(session -> Objects.equals(session.projectId(), projectId)).toList();
     }
 
     /** 项目下唯一的那条「未归档空白对话」，没有则返回空。 */
     default Optional<Session> findBlank(String projectId) {
-        return listByProject(projectId).stream()
-                .filter(session -> session.isBlank() && !session.archived())
-                .findFirst();
+        return listByProject(projectId).stream().filter(session -> session.isBlank() && !session.archived())
+            .findFirst();
     }
 
     /** 切换会话当前使用的文件夹（同一项目绑定的其它目录）。 */
@@ -114,7 +112,7 @@ public interface SessionRepository {
      * @param type 事件的 wireName，例如 {@code run.usage}
      * @param since 只取这个时刻之后的事件
      */
-    default List<EventEnvelope> eventsOfType(String type, java.time.Instant since) {
+    default List<EventEnvelope> eventsOfType(String type, Instant since) {
         return List.of();
     }
 

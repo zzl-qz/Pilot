@@ -1,12 +1,12 @@
 package com.pilot.server.security;
 
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
 
 class AccessControlTest {
 
@@ -19,8 +19,7 @@ class AccessControlTest {
     }
 
     private static AccessControl.Request request(String remote) {
-        return new AccessControl.Request("GET", "/api/sessions", remote, null, null, null, null,
-                "127.0.0.1:8080");
+        return new AccessControl.Request("GET", "/api/sessions", remote, null, null, null, null, "127.0.0.1:8080");
     }
 
     @Test
@@ -51,28 +50,28 @@ class AccessControlTest {
 
         assertEquals(401, control.check(request("192.168.1.20")).status());
         assertEquals(401, control.check(new AccessControl.Request("GET", "/api/sessions", "192.168.1.20",
-                "Bearer wrong", null, null, null, "192.168.1.20:8080")).status());
+            "Bearer wrong", null, null, null, "192.168.1.20:8080")).status());
         assertTrue(control.check(new AccessControl.Request("GET", "/api/sessions", "192.168.1.20",
-                "Bearer s3cret-token", null, null, null, "192.168.1.20:8080")).allow());
+            "Bearer s3cret-token", null, null, null, "192.168.1.20:8080")).allow());
     }
 
     @Test
     void sseMayPassTokenInQueryString() {
         AccessControl control = new AccessControl(token("s3cret-token"));
-        assertTrue(control.check(new AccessControl.Request("GET", "/api/sessions/s1/events", "192.168.1.20",
-                null, null, "s3cret-token", null, "192.168.1.20:8080")).allow());
+        assertTrue(control.check(new AccessControl.Request("GET", "/api/sessions/s1/events", "192.168.1.20", null, null,
+            "s3cret-token", null, "192.168.1.20:8080")).allow());
     }
 
     @Test
     void sseMayPassTokenInQueryStringAndCookieAfterwards() {
         AccessControl control = new AccessControl(token("s3cret-token"));
-        AccessControl.Request pageLoad = new AccessControl.Request("GET", "/", "192.168.1.20",
-                null, null, "s3cret-token", null, "http://192.168.1.20:8080", "192.168.1.20:8080");
+        AccessControl.Request pageLoad = new AccessControl.Request("GET", "/", "192.168.1.20", null, null,
+            "s3cret-token", null, "http://192.168.1.20:8080", "192.168.1.20:8080");
         assertTrue(control.check(pageLoad).allow());
 
         // 首次带 ?token= 之后，浏览器用 HttpOnly Cookie 继续访问页面内的 fetch/EventSource
-        AccessControl.Request withCookie = new AccessControl.Request("GET", "/api/sessions/s1/events",
-                "192.168.1.20", null, null, null, "s3cret-token", null, "192.168.1.20:8080");
+        AccessControl.Request withCookie = new AccessControl.Request("GET", "/api/sessions/s1/events", "192.168.1.20",
+            null, null, null, "s3cret-token", null, "192.168.1.20:8080");
         assertTrue(control.check(withCookie).allow());
     }
 
@@ -80,7 +79,7 @@ class AccessControlTest {
     void foreignBrowserOriginIsRejected() {
         AccessControl control = new AccessControl(token("s3cret-token"));
         AccessControl.Decision decision = control.check(new AccessControl.Request("POST", "/api/messages",
-                "192.168.1.20", "Bearer s3cret-token", null, null, "http://evil.example", "192.168.1.20:8080"));
+            "192.168.1.20", "Bearer s3cret-token", null, null, "http://evil.example", "192.168.1.20:8080"));
 
         assertEquals(403, decision.status());
         assertTrue(decision.reason().contains("来源"), decision.reason());
@@ -90,8 +89,7 @@ class AccessControlTest {
     void configuredOriginIsAllowed() {
         AccessControl control = new AccessControl(token("s3cret-token"));
         assertTrue(control.check(new AccessControl.Request("POST", "/api/messages", "192.168.1.20",
-                "Bearer s3cret-token", null, null, "https://pilot.example.com",
-                "192.168.1.20:8080")).allow());
+            "Bearer s3cret-token", null, null, "https://pilot.example.com", "192.168.1.20:8080")).allow());
     }
 
     @Test

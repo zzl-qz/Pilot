@@ -1,10 +1,9 @@
 package com.pilot.server.workspace;
 
-import org.springframework.stereotype.Component;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,6 +16,8 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
+
+import org.springframework.stereotype.Component;
 
 /**
  * 变更审阅：读取工作区的 git 状态与 diff，供界面展示「这次到底改了什么」。
@@ -45,8 +46,8 @@ public class ChangeService {
     /**
      * @param diff 未暂存改动的 unified diff；仓库不是 git 仓库时为空字符串
      */
-    public record ChangeReport(String workspace, boolean gitRepository, List<FileChange> files,
-                               String diff, boolean truncated, String error) {
+    public record ChangeReport(String workspace, boolean gitRepository, List<FileChange> files, String diff,
+        boolean truncated, String error) {
     }
 
     /**
@@ -60,9 +61,8 @@ public class ChangeService {
     }
 
     /** 按运行汇总的改动清单，供对话区像 Codex 那样列出「本轮改了哪些文件」。 */
-    public record RunChangeReport(String runId, String workspace, boolean gitRepository,
-                                  List<RunFileChange> files, int added, int removed,
-                                  boolean truncated, String error) {
+    public record RunChangeReport(String runId, String workspace, boolean gitRepository, List<RunFileChange> files,
+        int added, int removed, boolean truncated, String error) {
     }
 
     /**
@@ -81,8 +81,8 @@ public class ChangeService {
      * @param failed   没能撤销的文件与原因
      * @param error    整体失败（例如不是 git 仓库）时非空，此时三个列表都是空的
      */
-    public record RestoreReport(List<String> restored, List<String> deleted,
-                                List<RestoreFailure> failed, String error) {
+    public record RestoreReport(List<String> restored, List<String> deleted, List<RestoreFailure> failed,
+        String error) {
     }
 
     public ChangeReport inspect(Path workspace) {
@@ -94,8 +94,8 @@ public class ChangeService {
         String status = exec(workspace, List.of("git", "status", "--porcelain=v1", "-uall"));
         // 与运行级保持一致：相对 HEAD 取补丁，已暂存的改动才不会在审阅面板里消失
         boolean head = hasHead(workspace);
-        ArrayList<String> diffCommand = new ArrayList<>(List.of("git", "-c", "core.quotePath=false", "diff",
-                "--no-color", "--no-ext-diff"));
+        ArrayList<String> diffCommand =
+            new ArrayList<>(List.of("git", "-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff"));
         if (head) {
             diffCommand.add("HEAD");
         }
@@ -126,10 +126,10 @@ public class ChangeService {
             }
             int[] stat = stats.get(path);
             if (stat == null && countsAsWholeFile(code)) {
-                stat = new int[]{countTextLines(workspace.resolve(path)), 0};
+                stat = new int[] {countTextLines(workspace.resolve(path)), 0};
             }
             if (stat == null) {
-                stat = new int[]{0, 0};
+                stat = new int[] {0, 0};
             }
             files.add(new FileChange(code, path, stat[0], stat[1]));
         }
@@ -201,7 +201,7 @@ public class ChangeService {
                 // 新增文件不在 git diff 里（或仓库还没有 HEAD 可比），按当前内容合成一份「全新增」的 diff
                 SyntheticDiff synthetic = untrackedDiff(root.resolve(path), path);
                 chunk = synthetic.text();
-                stat = new int[]{synthetic.added(), 0};
+                stat = new int[] {synthetic.added(), 0};
                 truncated = truncated || synthetic.truncated();
             } else if (status == null) {
                 // 写过但内容又回到 HEAD 一致，或文件已被删除，不算本轮可见改动
@@ -209,7 +209,7 @@ public class ChangeService {
             } else {
                 // 纯重命名、二进制等没有文本补丁的场景：文件仍要列出来
                 chunk = "";
-                stat = new int[]{0, 0};
+                stat = new int[] {0, 0};
             }
             String text = chunk;
             addedTotal += stat[0];
@@ -230,8 +230,8 @@ public class ChangeService {
             files.add(new RunFileChange(path, status == null ? "M" : status, stat[0], stat[1], diff));
         }
 
-        return new RunChangeReport(runId, root.toString(), true, List.copyOf(files),
-                addedTotal, removedTotal, truncated, null);
+        return new RunChangeReport(runId, root.toString(), true, List.copyOf(files), addedTotal, removedTotal,
+            truncated, null);
     }
 
     /**
@@ -273,10 +273,10 @@ public class ChangeService {
             // 未跟踪/新增文件不在 git diff 里，按当前内容合成一份全新增补丁
             SyntheticDiff synthetic = untrackedDiff(root.resolve(relative), relative);
             chunk = synthetic.text();
-            stat = new int[]{synthetic.added(), 0};
+            stat = new int[] {synthetic.added(), 0};
         } else {
             chunk = "";
-            stat = new int[]{0, 0};
+            stat = new int[] {0, 0};
         }
 
         boolean truncated = chunk.length() > MAX_FILE_DIFF_CHARS;
@@ -359,8 +359,8 @@ public class ChangeService {
                 failed.add(new RestoreFailure(path, "仓库还没有提交，没有可回退的版本"));
                 continue;
             }
-            CommandResult result = run(root, List.of("git", "restore", "--source=HEAD",
-                    "--staged", "--worktree", "--", ":(literal)" + path));
+            CommandResult result = run(root,
+                List.of("git", "restore", "--source=HEAD", "--staged", "--worktree", "--", ":(literal)" + path));
             if (result.exitCode() != 0) {
                 // git 2.23 之前没有 restore；路径不在 HEAD 里时也会失败，退回 checkout 再试一次
                 result = run(root, List.of("git", "checkout", "HEAD", "--", ":(literal)" + path));
@@ -371,8 +371,7 @@ public class ChangeService {
                 failed.add(new RestoreFailure(path, firstLine(result.output())));
             }
         }
-        return new RestoreReport(List.copyOf(restored), List.copyOf(deleted),
-                List.copyOf(failed), null);
+        return new RestoreReport(List.copyOf(restored), List.copyOf(deleted), List.copyOf(failed), null);
     }
 
     /** git 输出可能有很多行，界面上的失败原因只留第一行有用信息。 */
@@ -465,8 +464,8 @@ public class ChangeService {
 
     /** 一次 git diff 取全部文件的补丁，再按文件头切开；路径用字面量 pathspec，避免被当成通配符。 */
     private static Map<String, String> diffChunks(Path root, List<String> paths, boolean head) {
-        ArrayList<String> command = new ArrayList<>(List.of("git", "-c", "core.quotePath=false", "diff",
-                "--no-color", "--no-ext-diff", "--unified=3"));
+        ArrayList<String> command = new ArrayList<>(
+            List.of("git", "-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--unified=3"));
         // 相对 HEAD 比较：已暂存（git add）的改动也要算进来；仓库还没有提交时退回工作区 diff
         if (head) {
             command.add("HEAD");
@@ -524,8 +523,8 @@ public class ChangeService {
      * 还没有提交时只看暂存区。未跟踪文件不在这份输出里，调用方另行数行。
      */
     private static Map<String, int[]> numstat(Path root, boolean head) {
-        ArrayList<String> command = new ArrayList<>(List.of("git", "-c", "core.quotePath=false", "diff",
-                "--numstat", "--no-color", "--no-ext-diff"));
+        ArrayList<String> command = new ArrayList<>(
+            List.of("git", "-c", "core.quotePath=false", "diff", "--numstat", "--no-color", "--no-ext-diff"));
         if (head) {
             command.add("HEAD");
         } else {
@@ -546,7 +545,7 @@ public class ChangeService {
             if (parts.length < 3 || parts[2].isBlank()) {
                 continue;
             }
-            result.put(renameDestination(parts[2].strip()), new int[]{parseStat(parts[0]), parseStat(parts[1])});
+            result.put(renameDestination(parts[2].strip()), new int[] {parseStat(parts[0]), parseStat(parts[1])});
         }
         return result;
     }
@@ -595,9 +594,9 @@ public class ChangeService {
                 return 0;
             }
             try (Stream<String> stream = Files.lines(absolute, StandardCharsets.UTF_8)) {
-                return (int) Math.min(Integer.MAX_VALUE, stream.count());
+                return (int)Math.min(Integer.MAX_VALUE, stream.count());
             }
-        } catch (IOException | java.io.UncheckedIOException e) {
+        } catch (IOException | UncheckedIOException e) {
             return 0;
         }
     }
@@ -680,7 +679,7 @@ public class ChangeService {
         int added = 0;
         int removed = 0;
         if (diff == null || diff.isEmpty()) {
-            return new int[]{0, 0};
+            return new int[] {0, 0};
         }
         boolean inHunk = false;
         for (String line : diff.split("\n", -1)) {
@@ -701,7 +700,7 @@ public class ChangeService {
                 removed++;
             }
         }
-        return new int[]{added, removed};
+        return new int[] {added, removed};
     }
 
     /** 去掉 git 输出里与 diff 无关的告警行（例如 Windows 的 LF/CRLF 提示）。 */
@@ -746,7 +745,7 @@ public class ChangeService {
         try {
             Process process = builder.start();
             process.getOutputStream().close();
-            AtomicBoolean timedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
+            AtomicBoolean timedOut = new AtomicBoolean(false);
             Thread watchdog = Thread.ofVirtual().name("pilot-git-watchdog").start(() -> {
                 try {
                     if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
@@ -758,7 +757,7 @@ public class ChangeService {
                 }
             });
 
-            ByteArrayOutputStream collected = new java.io.ByteArrayOutputStream();
+            ByteArrayOutputStream collected = new ByteArrayOutputStream();
             byte[] buffer = new byte[8192];
             try (InputStream stream = process.getInputStream()) {
                 int read;

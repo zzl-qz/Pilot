@@ -1,8 +1,12 @@
 package com.pilot.server.maintenance;
 
-import com.pilot.server.config.PilotDataDir;
-import com.pilot.server.store.SqliteStore;
-import com.pilot.server.workspace.RunSnapshotService;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.stream.Stream;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -10,12 +14,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.stream.Stream;
+import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.store.SqliteStore;
+import com.pilot.server.workspace.RunSnapshotService;
 
 /**
  * 运行期数据的保留策略：事件、快照和 trace 都是只增不减的，跑久了会持续占盘。
@@ -36,12 +37,9 @@ public class RetentionService {
     private final PilotDataDir dataDir;
 
     public RetentionService(@Value("${pilot.retention.days:0}") int retentionDays,
-                            @Value("${pilot.retention.backups-days:0}") int backupDays,
-                            @Value("${pilot.retention.validation-days:0}") int validationDays,
-                            ObjectProvider<SqliteStore> store,
-                            RunSnapshotService snapshots,
-                            BackupService backups,
-                            PilotDataDir dataDir) {
+        @Value("${pilot.retention.backups-days:0}") int backupDays,
+        @Value("${pilot.retention.validation-days:0}") int validationDays, ObjectProvider<SqliteStore> store,
+        RunSnapshotService snapshots, BackupService backups, PilotDataDir dataDir) {
         this.retentionDays = retentionDays;
         this.backupDays = backupDays;
         this.validationDays = validationDays;
@@ -80,12 +78,11 @@ public class RetentionService {
                 sqlite.checkpoint();
             }
         }
-        int backupCount = backupDays > 0
-                ? backups.purgeOlderThan(now.minus(backupDays, ChronoUnit.DAYS)) : 0;
+        int backupCount = backupDays > 0 ? backups.purgeOlderThan(now.minus(backupDays, ChronoUnit.DAYS)) : 0;
         int validationFiles = validationDays > 0
-                ? deleteFilesBefore(dataDir.file("validation"), now.minus(validationDays, ChronoUnit.DAYS)) : 0;
-        return new PurgeReport(events, snapshotRuns, traces, retentionDays, backupCount, validationFiles,
-                backupDays, validationDays);
+            ? deleteFilesBefore(dataDir.file("validation"), now.minus(validationDays, ChronoUnit.DAYS)) : 0;
+        return new PurgeReport(events, snapshotRuns, traces, retentionDays, backupCount, validationFiles, backupDays,
+            validationDays);
     }
 
     /** 删除某个数据目录下早于 cutoff 的普通文件；目录不存在时返回 0。 */
@@ -134,6 +131,6 @@ public class RetentionService {
      * @param validationDays 校验证据保留天数
      */
     public record PurgeReport(int events, int snapshotRuns, int traces, int retentionDays, int backups,
-                              int validationFiles, int backupDays, int validationDays) {
+        int validationFiles, int backupDays, int validationDays) {
     }
 }

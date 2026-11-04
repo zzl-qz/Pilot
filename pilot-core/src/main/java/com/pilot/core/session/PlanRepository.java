@@ -1,8 +1,8 @@
 package com.pilot.core.session;
 
-import com.pilot.core.plan.PlanItem;
-
 import java.util.List;
+
+import com.pilot.core.plan.PlanItem;
 
 /** 计划清单存储：按会话保存，用于跨轮次与跨进程恢复进度。 */
 public interface PlanRepository {

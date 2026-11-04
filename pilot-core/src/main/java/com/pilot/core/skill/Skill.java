@@ -12,4 +12,5 @@ import java.util.List;
  * @param body    SKILL.md 去掉 frontmatter 的正文
  * @param files   目录内除 SKILL.md 外的文件清单（{@code /} 分隔的相对路径）
  */
-public record Skill(SkillManifest manifest, String body, List<String> files) { }
+public record Skill(SkillManifest manifest, String body, List<String> files) {
+}

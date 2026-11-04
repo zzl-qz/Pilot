@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark light"><title>连接 Pilot</title>
+<style nonce="__NONCE__">
+  :root { color-scheme: dark; font-family: system-ui, sans-serif; color: #ededed; background: #181818; }
+  * { box-sizing: border-box; } body { margin: 0; padding: 24px; min-height: 100dvh; display: grid; align-items: center; }
+  main { width: 100%; max-width: 400px; margin: auto; } .brand { font-size: 14px; color: #aaa; margin-bottom: 32px; }
+  h1 { font-size: 26px; font-weight: 600; margin: 0 0 12px; } p { line-height: 1.7; font-size: 14px; color: #b5b5b5; }
+  label { display: block; margin: 28px 0 8px; font-size: 14px; } input, button { font: inherit; min-height: 48px; width: 100%; border-radius: 8px; }
+  input { padding: 12px; border: 1px solid #555; background: #222; color: #eee; } button { margin-top: 16px; border: 0; background: #ededed; color: #181818; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; } input:focus-visible, button:focus-visible { outline: 2px solid #89b4fa; outline-offset: 3px; }
+  #status { min-height: 24px; color: #efaaaa; } .note { border-top: 1px solid #363636; margin-top: 24px; padding-top: 16px; font-size: 13px; }
+</style></head><body><main><div class="brand">Pilot · 远程工作台</div><h1>连接你的工作区</h1><p>发送任务、查看执行进度，或审核已经完成的成果。</p>
+<form id="connect"><label for="token">访问令牌</label><input id="token" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false" required maxlength="4096" aria-describedby="status"><button id="submit" type="submit">连接</button></form>
+<p id="status" role="alert" aria-live="polite"></p><p class="note">使用运行 Pilot 的电脑上配置的访问令牌。电脑需保持运行，设备之间需能通过局域网或已配置的 VPN 访问。此页面不会自动开启远程访问。</p>
+</main><script nonce="__NONCE__">
+const form = document.getElementById('connect'), button = document.getElementById('submit'), status = document.getElementById('status'), token = document.getElementById('token');
+form.addEventListener('submit', async event => {
+  event.preventDefault(); if (!token.value.trim() || button.disabled) return;
+  button.disabled = true; status.textContent = ''; const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch('/api/access/login', { method: 'POST', headers: { 'X-Pilot-Token': token.value.trim() }, signal: controller.signal });
+    if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || '连接失败，请稍后重试'); }
+    token.value = ''; location.replace('/');
+  } catch (error) { status.textContent = error.name === 'AbortError' ? '连接超时，请检查网络后重试。' : error.message || '无法连接，请检查网络。'; }
+  finally { clearTimeout(timer); button.disabled = false; }
+});
+</script></body></html>

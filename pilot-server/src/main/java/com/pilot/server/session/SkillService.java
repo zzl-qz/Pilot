@@ -1,5 +1,13 @@
 package com.pilot.server.session;
 
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.springframework.stereotype.Component;
+
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.skill.Skill;
 import com.pilot.core.skill.SkillCatalog;
@@ -7,13 +15,6 @@ import com.pilot.core.skill.SkillSource;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.config.SkillProperties;
-import org.springframework.stereotype.Component;
-
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * 会话与技能目录的装配点。
@@ -48,9 +49,7 @@ public class SkillService {
     }
 
     private Path resolve(String workspace) {
-        String target = workspace == null || workspace.isBlank()
-                ? agentProperties.workspace()
-                : workspace;
+        String target = workspace == null || workspace.isBlank() ? agentProperties.workspace() : workspace;
         return Path.of(target).toAbsolutePath().normalize();
     }
 
@@ -83,9 +82,9 @@ public class SkillService {
      */
     public String catalogText(SkillCatalog catalog) {
         return catalog.list().stream()
-                .map(manifest -> "- " + manifest.name() + "：" + manifest.description()
-                        + (manifest.command() == null ? "" : "（快捷命令 " + manifest.command() + "）"))
-                .collect(Collectors.joining("\n"));
+            .map(manifest -> "- " + manifest.name() + "：" + manifest.description()
+                + (manifest.command() == null ? "" : "（快捷命令 " + manifest.command() + "）"))
+            .collect(Collectors.joining("\n"));
     }
 
     /**

@@ -1,15 +1,5 @@
 package com.pilot.server.browser;
 
-import com.pilot.core.tool.Availability;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-
-import java.io.IOException;
-
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -21,6 +11,19 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import java.io.IOException;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import com.pilot.core.tool.Availability;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 镜像分发的瞬态行为：latest-wins、订阅联动（首连开帧/断连停帧）、异常订阅者被静默摘除。
@@ -40,6 +43,11 @@ class BrowserControlServiceTest {
         when(runtime.availability()).thenReturn(Availability.ready());
         when(runtime.interactionsPaused(any())).thenReturn(false);
         service = new BrowserControlService(runtime, MAPPER, true, 960, 55);
+    }
+
+    @AfterEach
+    void tearDown() {
+        service.shutdown();
     }
 
     private static JsonNode event(String kind) {
@@ -80,7 +88,8 @@ class BrowserControlServiceTest {
 
         // 断线重连/多端订阅：补发缓存的最新帧；不再重复开 screencast
         verify(late, timeout(2000).times(2)).send(any(SseEmitter.SseEventBuilder.class));
-        verify(runtime).mirrorControl("s1", true, 960, 55);
+        // 帧补发是同步的，控制命令是异步的；收到帧不代表控制线程已经执行。
+        verify(runtime, timeout(2000)).mirrorControl("s1", true, 960, 55);
     }
 
     @Test
@@ -135,12 +144,12 @@ class BrowserControlServiceTest {
 
         var status = service.status("s1");
 
-        org.junit.jupiter.api.Assertions.assertEquals(true, status.get("enabled"));
-        org.junit.jupiter.api.Assertions.assertEquals(true, status.get("capable"));
-        org.junit.jupiter.api.Assertions.assertEquals(true, status.get("available"));
-        org.junit.jupiter.api.Assertions.assertEquals(true, status.get("paused"));
+        Assertions.assertEquals(true, status.get("enabled"));
+        Assertions.assertEquals(true, status.get("capable"));
+        Assertions.assertEquals(true, status.get("available"));
+        Assertions.assertEquals(true, status.get("paused"));
         // 后台模式标记：前端据此隐藏「置前窗口」（没有窗口可置前）
-        org.junit.jupiter.api.Assertions.assertEquals(true, status.get("headless"));
+        Assertions.assertEquals(true, status.get("headless"));
     }
 
     @Test

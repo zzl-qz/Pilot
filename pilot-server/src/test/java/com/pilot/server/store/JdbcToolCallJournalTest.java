@@ -1,10 +1,7 @@
 package com.pilot.server.store;
 
-import com.pilot.core.tool.ToolCall;
-import com.pilot.core.tool.ToolCallJournal;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import tools.jackson.databind.json.JsonMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -12,8 +9,13 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.tool.ToolCall;
+import com.pilot.core.tool.ToolCallJournal;
+
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * 幂等重放的安全性：只有文件现状仍与写入后一致时才复用结果。
@@ -25,8 +27,8 @@ class JdbcToolCallJournalTest {
     Path dir;
 
     private JdbcToolCallJournal journal(Path workspace) {
-        return new JdbcToolCallJournal(new SqliteStore(dir.resolve("pilot.db")),
-                JsonMapper.builder().build(), "ses_1", workspace);
+        return new JdbcToolCallJournal(new SqliteStore(dir.resolve("pilot.db")), JsonMapper.builder().build(), "ses_1",
+            workspace);
     }
 
     private static ToolCall call(String content) {

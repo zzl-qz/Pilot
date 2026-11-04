@@ -122,8 +122,8 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- 根 pom 的 argLine 会盖掉默认值。JDK 25 上 Mockito 若中途自己挂 agent，
-                         全量测试里两个 mock maker 会冲突，桩 default 方法时直接断言失败。 -->
+                    <!-- JDK 25 显式预加载 Mockito agent，避免依赖运行中的动态挂载。
+                         混用 mock maker 的断言缺陷由父 pom 中的 Mockito 修复版本处理。 -->
                     <argLine>-javaagent:${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar --enable-native-access=ALL-UNNAMED</argLine>
                 </configuration>
             </plugin>

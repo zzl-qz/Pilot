@@ -1,7 +1,5 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.model.ToolDefinition;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -13,6 +11,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
+
+import com.pilot.core.model.ToolDefinition;
 
 /**
  * 工具注册表：按名称查找工具，并生成模型请求所需的工具定义。
@@ -53,7 +53,9 @@ public final class ToolRegistry {
         Map<String, String> result = new LinkedHashMap<>();
         for (Tool tool : tools()) {
             Availability availability = available(tool);
-            if (!availability.available()) result.put(tool.name(), availability.reason());
+            if (!availability.available()) {
+                result.put(tool.name(), availability.reason());
+            }
         }
         return Map.copyOf(result);
     }
@@ -61,8 +63,7 @@ public final class ToolRegistry {
     /** 名称与定义按名称排序，保证相同工具集的请求体稳定（便于缓存与测试）。 */
     public List<ToolDefinition> definitions() {
         return availableTools().stream()
-                .map(tool -> new ToolDefinition(tool.name(), tool.description(), tool.parameters()))
-                .toList();
+            .map(tool -> new ToolDefinition(tool.name(), tool.description(), tool.parameters())).toList();
     }
 
     /** 当前可用的工具名，供系统提示词按工具过滤依赖段落。 */

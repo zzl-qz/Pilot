@@ -1,11 +1,5 @@
 package com.pilot.core.browser;
 
-import com.pilot.core.tool.Availability;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -27,6 +21,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.pilot.core.tool.Availability;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 用 Node 子进程驱动 Playwright Chromium 的 {@link BrowserBackend}。
@@ -96,7 +98,7 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
 
     /** @param environment 合并到 sidecar 进程的额外环境变量；内部会拷贝一份 */
     public PlaywrightBackend(Path node, Path script, Path home, ObjectMapper mapper, long idleShutdownMs,
-                            Map<String, String> environment) {
+        Map<String, String> environment) {
         this.node = node;
         this.script = script;
         this.home = home;
@@ -109,7 +111,7 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     public Availability availability() {
         Availability current = state;
         if (!current.available() && !closed && System.currentTimeMillis() - lastProbeAt > REPROBE_INTERVAL_MS
-                && lastProbeAt != 0 && probing.compareAndSet(false, true)) {
+            && lastProbeAt != 0 && probing.compareAndSet(false, true)) {
             Thread thread = new Thread(() -> {
                 try {
                     probe();
@@ -141,9 +143,13 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     }
 
     private static boolean declaresMirror(JsonNode capabilities) {
-        if (!capabilities.isArray()) return false;
+        if (!capabilities.isArray()) {
+            return false;
+        }
         for (JsonNode item : capabilities) {
-            if ("mirror".equals(item.asString())) return true;
+            if ("mirror".equals(item.asString())) {
+                return true;
+            }
         }
         return false;
     }
@@ -176,7 +182,9 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
         sessionGeneration.remove(sessionId);
         mirroredSessions.remove(sessionId);
         synchronized (lifecycle) {
-            if (process == null || !process.isAlive()) return;
+            if (process == null || !process.isAlive()) {
+                return;
+            }
         }
         try {
             request(sessionId, "close", Map.of(), Duration.ofSeconds(5));
@@ -243,7 +251,9 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     /** sidecar 的主动事件：从协议读取线程转交到单线程事件流，不阻塞 req/resp。 */
     private void dispatchEvent(JsonNode node) {
         BrowserEventListener current = listener;
-        if (current == null) return;
+        if (current == null) {
+            return;
+        }
         String sessionId = node.path("session").asString("");
         String kind = node.path("event").asString("");
         try {
@@ -266,9 +276,7 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
             current = generation;
         }
         Long previous = sessionGeneration.put(sessionId, current);
-        return previous != null && previous != current
-                ? "（浏览器进程自上次使用后重启过，此前打开的页面和登录状态已丢失，请重新 navigate。）\n"
-                : "";
+        return previous != null && previous != current ? "（浏览器进程自上次使用后重启过，此前打开的页面和登录状态已丢失，请重新 navigate。）\n" : "";
     }
 
     private JsonNode request(String sessionId, String op, Map<String, Object> arguments, Duration timeout) {
@@ -279,7 +287,9 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
             Map<String, Object> message = new HashMap<>(arguments);
             message.put("id", id);
             message.put("op", op);
-            if (sessionId != null) message.put("session", sessionId);
+            if (sessionId != null) {
+                message.put("session", sessionId);
+            }
             String line = mapper.writeValueAsString(message);
             synchronized (lifecycle) {
                 ensureStarted();
@@ -312,8 +322,12 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
 
     /** 调用方必须持有 {@code lifecycle}。 */
     private void ensureStarted() throws IOException {
-        if (closed) throw new BrowserException("浏览器运行时已关闭");
-        if (process != null && process.isAlive()) return;
+        if (closed) {
+            throw new BrowserException("浏览器运行时已关闭");
+        }
+        if (process != null && process.isAlive()) {
+            return;
+        }
         if (!Files.isRegularFile(node)) {
             throw new BrowserException("找不到 Node.js（" + node + "），无法启动浏览器 sidecar。");
         }
@@ -347,11 +361,13 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     }
 
     private void read(Process owner, CompletableFuture<JsonNode> handshake) {
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(owner.getInputStream(), StandardCharsets.UTF_8))) {
+        try (BufferedReader reader =
+            new BufferedReader(new InputStreamReader(owner.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                if (line.isBlank()) continue;
+                if (line.isBlank()) {
+                    continue;
+                }
                 JsonNode node;
                 try {
                     node = mapper.readTree(line);
@@ -369,7 +385,9 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
                     continue;
                 }
                 CompletableFuture<JsonNode> future = pending.get(id);
-                if (future != null) future.complete(node);
+                if (future != null) {
+                    future.complete(node);
+                }
             }
         } catch (IOException ignored) {
             // 进程退出会关闭管道
@@ -386,7 +404,9 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     }
 
     private void startReaper() {
-        if (reaper != null || idleShutdownMs <= 0) return;
+        if (reaper != null || idleShutdownMs <= 0) {
+            return;
+        }
         Thread thread = new Thread(() -> {
             long interval = Math.max(50, Math.min(30_000, idleShutdownMs / 2));
             while (!closed) {
@@ -425,7 +445,9 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     private void destroyLocked() {
         Process current = process;
         process = null;
-        if (current == null) return;
+        if (current == null) {
+            return;
+        }
         BrowserException gone = new BrowserException("浏览器已关闭");
         pending.values().forEach(future -> future.completeExceptionally(gone));
         try {

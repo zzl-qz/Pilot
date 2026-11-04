@@ -1,12 +1,14 @@
 package com.pilot.server.controller;
 
-import com.pilot.core.project.Project;
-import com.pilot.core.project.ProjectRepository;
-import com.pilot.core.session.Session;
-import com.pilot.core.session.SessionService;
-import com.pilot.server.config.AgentProperties;
-import com.pilot.server.session.SessionCleanupService;
-import com.pilot.server.workspace.WorkspaceService;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -21,12 +23,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.nio.file.Path;
-import java.time.Clock;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
+import com.pilot.core.project.Project;
+import com.pilot.core.project.ProjectRepository;
+import com.pilot.core.session.Session;
+import com.pilot.core.session.SessionService;
+import com.pilot.server.config.AgentProperties;
+import com.pilot.server.session.SessionCleanupService;
+import com.pilot.server.workspace.WorkspaceService;
 
 /**
  * 项目：对话的上级容器，绑定一个或多个本地文件夹。
@@ -47,14 +50,13 @@ public class ProjectController {
     private final Clock clock;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public ProjectController(ProjectRepository projects, SessionService sessions,
-                             SessionCleanupService cleanup, WorkspaceService workspaces,
-                             AgentProperties agentProperties) {
+    public ProjectController(ProjectRepository projects, SessionService sessions, SessionCleanupService cleanup,
+        WorkspaceService workspaces, AgentProperties agentProperties) {
         this(projects, sessions, cleanup, workspaces, agentProperties, Clock.systemUTC());
     }
 
     ProjectController(ProjectRepository projects, SessionService sessions, SessionCleanupService cleanup,
-                      WorkspaceService workspaces, AgentProperties agentProperties, Clock clock) {
+        WorkspaceService workspaces, AgentProperties agentProperties, Clock clock) {
         this.projects = projects;
         this.sessions = sessions;
         this.cleanup = cleanup;
@@ -84,12 +86,13 @@ public class ProjectController {
             folders = List.of(agentProperties.workspace());
         }
         Project project = projects.create("prj_" + UUID.randomUUID(), name(request.name()), folders,
-                gitHead(folders.get(0)), clock.instant());
+            gitHead(folders.get(0)), clock.instant());
         return response(project);
     }
 
     @PatchMapping("/{id}")
-    public ProjectResponse rename(@PathVariable String id, @RequestBody(required = false) RenameProjectRequest request) {
+    public ProjectResponse rename(@PathVariable String id,
+        @RequestBody(required = false) RenameProjectRequest request) {
         require(id);
         if (request == null || request.name() == null || request.name().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "name must not be blank");
@@ -101,7 +104,7 @@ public class ProjectController {
     /** 整体替换绑定的文件夹；已存在的对话不会被迁移，保持各自的当前工作区。 */
     @PutMapping("/{id}/folders")
     public ProjectResponse updateFolders(@PathVariable String id,
-                                         @RequestBody(required = false) FoldersRequest request) {
+        @RequestBody(required = false) FoldersRequest request) {
         require(id);
         List<String> folders = folders(request == null ? null : request.folders());
         if (folders.isEmpty()) {
@@ -120,8 +123,7 @@ public class ProjectController {
      */
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable String id,
-                                       @RequestParam(name = "deleteSessions", defaultValue = "true")
-                                       boolean deleteSessions) {
+        @RequestParam(name = "deleteSessions", defaultValue = "true") boolean deleteSessions) {
         if (projects.find(id).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "project not found: " + id);
         }
@@ -174,49 +176,44 @@ public class ProjectController {
             Path root = Path.of(folder);
             Path dotGit = root.resolve(".git");
             // 工作区可能在子目录里：向上找到仓库根
-            for (int depth = 0; depth < 6 && !java.nio.file.Files.isDirectory(dotGit); depth++) {
+            for (int depth = 0; depth < 6 && !Files.isDirectory(dotGit); depth++) {
                 root = root.getParent();
                 if (root == null) {
                     return null;
                 }
                 dotGit = root.resolve(".git");
             }
-            if (!java.nio.file.Files.isDirectory(dotGit)) {
+            if (!Files.isDirectory(dotGit)) {
                 return null;
             }
-            String head = java.nio.file.Files.readString(dotGit.resolve("HEAD")).strip();
+            String head = Files.readString(dotGit.resolve("HEAD")).strip();
             String prefix = "ref: ";
             if (!head.startsWith(prefix)) {
                 return head.isEmpty() ? null : head;
             }
             Path ref = dotGit.resolve(head.substring(prefix.length()));
-            return java.nio.file.Files.isRegularFile(ref)
-                    ? java.nio.file.Files.readString(ref).strip()
-                    : null;
-        } catch (java.io.IOException | RuntimeException e) {
+            return Files.isRegularFile(ref) ? Files.readString(ref).strip() : null;
+        } catch (IOException | RuntimeException e) {
             return null;
         }
     }
 
     private Project require(String id) {
         return projects.find(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project not found: " + id));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project not found: " + id));
     }
 
     private ProjectResponse response(Project project) {
         // 侧边对话是主对话的临时分叉：不算进项目的对话数量，也不该顶替「最近活跃」
-        List<Session> owned = sessions.listByProject(project.id()).stream()
-                .filter(session -> !session.isSide())
-                .toList();
+        List<Session> owned =
+            sessions.listByProject(project.id()).stream().filter(session -> !session.isSide()).toList();
         Instant lastActive = owned.isEmpty() ? project.updatedAt() : owned.get(0).createdAt();
         // 空白对话单列：它不进历史列表，但界面要靠它决定「新建对话」按钮的行为
-        Session blank = owned.stream()
-                .filter(session -> session.isBlank() && !session.archived())
-                .findFirst()
-                .orElse(null);
-        return new ProjectResponse(project.id(), project.name(), project.folders(), project.baseCommit(),
-                owned.size(), blank == null ? null : blank.id(), blank == null ? 0 : 1,
-                project.createdAt(), project.updatedAt(), lastActive);
+        Session blank =
+            owned.stream().filter(session -> session.isBlank() && !session.archived()).findFirst().orElse(null);
+        return new ProjectResponse(project.id(), project.name(), project.folders(), project.baseCommit(), owned.size(),
+            blank == null ? null : blank.id(), blank == null ? 0 : 1, project.createdAt(), project.updatedAt(),
+            lastActive);
     }
 
     public record CreateProjectRequest(String name, List<String> folders) {
@@ -234,8 +231,7 @@ public class ProjectController {
      * @param sessionCount 项目下的对话数（含空白对话）
      * @param blankSessionId 项目当前那条空白对话；没有则为空
      */
-    public record ProjectResponse(String id, String name, List<String> folders, String baseCommit,
-                                  int sessionCount, String blankSessionId, int blankCount,
-                                  Instant createdAt, Instant updatedAt, Instant lastActiveAt) {
+    public record ProjectResponse(String id, String name, List<String> folders, String baseCommit, int sessionCount,
+        String blankSessionId, int blankCount, Instant createdAt, Instant updatedAt, Instant lastActiveAt) {
     }
 }

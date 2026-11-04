@@ -1,8 +1,9 @@
 package com.pilot.server.security;
 
-import org.springframework.boot.context.properties.ConfigurationProperties;
-
 import java.util.List;
+import java.util.Locale;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
  * 远程访问安全配置。
@@ -14,15 +15,13 @@ import java.util.List;
  * @param audit               是否把访问拒绝与限流事件写入审计日志
  */
 @ConfigurationProperties(prefix = "pilot.security")
-public record SecurityProperties(String mode, String token, List<String> allowedOrigins,
-                                 Integer rateLimitPerMinute, Boolean audit) {
+public record SecurityProperties(String mode, String token, List<String> allowedOrigins, Integer rateLimitPerMinute,
+    Boolean audit) {
     public SecurityProperties {
-        mode = mode == null || mode.isBlank() ? "local" : mode.strip().toLowerCase(java.util.Locale.ROOT);
+        mode = mode == null || mode.isBlank() ? "local" : mode.strip().toLowerCase(Locale.ROOT);
         token = token == null ? "" : token.strip();
         allowedOrigins = allowedOrigins == null ? List.of() : allowedOrigins.stream()
-                .filter(origin -> origin != null && !origin.isBlank())
-                .map(origin -> origin.strip())
-                .toList();
+            .filter(origin -> origin != null && !origin.isBlank()).map(origin -> origin.strip()).toList();
         rateLimitPerMinute = rateLimitPerMinute == null || rateLimitPerMinute < 0 ? 0 : rateLimitPerMinute;
         audit = audit == null || audit;
     }

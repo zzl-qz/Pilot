@@ -21,24 +21,36 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
         this.changes = changes == null ? CommandChangeTracker.none() : changes;
     }
 
-    public String name() { return "command_status"; }
-    public String description() { return promptDescription(); }
-    public boolean readOnly() { return true; }
+    public String name() {
+        return "command_status";
+    }
+
+    public String description() {
+        return promptDescription();
+    }
+
+    public boolean readOnly() {
+        return true;
+    }
+
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties", Map.of(
-                "taskId", Map.of("type", "string", "description", "run_command 返回的任务 ID"),
-                "waitSeconds", Map.of("type", "integer", "minimum", 0, "maximum", 5,
-                        "description", "最多等待多少秒再返回，默认 0，最大 5；运行中可用 5 避免频繁轮询")),
-                "required", List.of("taskId"), "additionalProperties", false);
+        return Map.of("type", "object", "properties",
+            Map.of("taskId", Map.of("type", "string", "description", "run_command 返回的任务 ID"), "waitSeconds",
+                Map.of("type", "integer", "minimum", 0, "maximum", 5, "description",
+                    "最多等待多少秒再返回，默认 0，最大 5；运行中可用 5 避免频繁轮询")),
+            "required", List.of("taskId"), "additionalProperties", false);
     }
 
     public String execute(Map<String, Object> args) {
         return executeResult(args).text();
     }
 
-    @Override public ToolResult executeResult(Map<String, Object> args) {
+    @Override
+    public ToolResult executeResult(Map<String, Object> args) {
         String id = ToolSupport.stringArg(args, "taskId");
-        if (id == null) return ToolResult.text("ERROR: 缺少参数 taskId");
+        if (id == null) {
+            return ToolResult.text("ERROR: 缺少参数 taskId");
+        }
         try {
             long wait = CommandToolSupport.integerArg(args, "waitSeconds", 0, 0, 5);
             CommandTaskManager.Task task = tasks.get(sessionId, id);
@@ -49,7 +61,9 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
             }
             String rendered = CommandToolSupport.render(task);
             if (task == null || CommandToolSupport.running(task) || task.changeTracking() == null
-                    || !task.changeTracking().active()) return ToolResult.text(rendered);
+                || !task.changeTracking().active()) {
+                return ToolResult.text(rendered);
+            }
             CommandChangeTracker.Result result;
             try {
                 result = changes.finish(task.changeTracking());
@@ -57,14 +71,15 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
                 result = new CommandChangeTracker.Result(List.of(), false, String.valueOf(e.getMessage()));
             }
             if (!result.complete()) {
-                rendered = "ERROR: 命令已结束，但无法完整确认其工作区变更；不得据此宣称验证通过："
-                        + result.warning() + "\n" + rendered;
+                rendered = "ERROR: 命令已结束，但无法完整确认其工作区变更；不得据此宣称验证通过：" + result.warning() + "\n" + rendered;
             }
             return new ToolResult(rendered, result.changedPaths(), List.of());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return ToolResult.text("ERROR: 状态等待被中断；命令仍可用原 taskId 查询");
-        } catch (IllegalArgumentException e) { return ToolResult.text("ERROR: " + e.getMessage()); }
+        } catch (IllegalArgumentException e) {
+            return ToolResult.text("ERROR: " + e.getMessage());
+        }
     }
 
     public String checkSummary(ToolCall call, String result) {

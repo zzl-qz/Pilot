@@ -1,13 +1,5 @@
 package com.pilot.server.search;
 
-import com.pilot.server.config.PilotDataDir;
-import com.pilot.server.config.WebSearchProperties;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.context.SmartLifecycle;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.stereotype.Component;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
@@ -21,6 +13,15 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.SmartLifecycle;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.stereotype.Component;
+
+import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.config.WebSearchProperties;
+
 /**
  * Pilot 启动时在本机拉起 SearXNG。
  * 不使用 Docker。源码和虚拟环境放在数据目录，打包时也可以改指到安装目录里的副本。
@@ -33,13 +34,9 @@ public class LocalSearchRuntime implements SmartLifecycle {
     private static final String ARCHIVE_NAME = "searxng.tar.gz";
     /** 小于这个大小的压缩包基本是下载中断留下的残骸。 */
     private static final long MIN_ARCHIVE_BYTES = 1_000_000L;
-    private static final List<String> PYTHON_CANDIDATES = List.of(
-            "/opt/homebrew/opt/python@3.13/bin/python3.13",
-            "/opt/homebrew/opt/python@3.12/bin/python3.12",
-            "/usr/local/opt/python@3.12/bin/python3.12",
-            "python3.13",
-            "python3.12",
-            "python3.11");
+    private static final List<String> PYTHON_CANDIDATES =
+        List.of("/opt/homebrew/opt/python@3.13/bin/python3.13", "/opt/homebrew/opt/python@3.12/bin/python3.12",
+            "/usr/local/opt/python@3.12/bin/python3.12", "python3.13", "python3.12", "python3.11");
     /** macOS/Linux 上 python3 常见是指向 3.x 的软链，Windows 的同名命令会拉起商店，所以不放进去。 */
     private static final List<String> POSIX_PYTHON_CANDIDATES = List.of("python3", "python");
 
@@ -150,7 +147,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
         Path dir = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath();
         for (int i = 0; i < 6 && dir != null; i++) {
             if (Files.isRegularFile(dir.resolve("pom.xml"))
-                    && Files.isRegularFile(dir.resolve("pilot-server").resolve("pom.xml"))) {
+                && Files.isRegularFile(dir.resolve("pilot-server").resolve("pom.xml"))) {
                 return dir;
             }
             dir = dir.getParent();
@@ -182,9 +179,8 @@ public class LocalSearchRuntime implements SmartLifecycle {
             return true;
         }
         deleteTree(source);
-        for (String url : List.of(
-                "https://github.com/searxng/searxng/archive/refs/heads/master.tar.gz",
-                "https://ghfast.top/https://github.com/searxng/searxng/archive/refs/heads/master.tar.gz")) {
+        for (String url : List.of("https://github.com/searxng/searxng/archive/refs/heads/master.tar.gz",
+            "https://ghfast.top/https://github.com/searxng/searxng/archive/refs/heads/master.tar.gz")) {
             log.info("改从压缩包下载：{}", url);
             if (downloadArchive(url, source)) {
                 return true;
@@ -202,9 +198,9 @@ public class LocalSearchRuntime implements SmartLifecycle {
     private boolean gitClone(Path source) {
         Path temp = source.getParent().resolve("clone");
         deleteTree(temp);
-        int code = run(Path.of(System.getProperty("user.dir", ".")), Duration.ofMinutes(10),
-                "git", "-c", "http.version=HTTP/1.1", "clone", "--depth", "1",
-                "https://github.com/searxng/searxng.git", temp.toString());
+        int code = run(Path.of(System.getProperty("user.dir", ".")), Duration.ofMinutes(10), "git", "-c",
+            "http.version=HTTP/1.1", "clone", "--depth", "1", "https://github.com/searxng/searxng.git",
+            temp.toString());
         boolean ok = code == 0 && Files.isRegularFile(temp.resolve("searx").resolve("webapp.py"));
         if (ok) {
             ok = moveInto(temp, source);
@@ -234,9 +230,8 @@ public class LocalSearchRuntime implements SmartLifecycle {
         if (usableArchive(tar)) {
             log.info("复用已下载的压缩包 {}", tar);
         } else {
-            int code = run(parent, Duration.ofMinutes(10),
-                    "curl", "-fL", "--retry", "2", "--connect-timeout", "20", "--max-time", "300",
-                    "-o", tar.toString(), url);
+            int code = run(parent, Duration.ofMinutes(10), "curl", "-fL", "--retry", "2", "--connect-timeout", "20",
+                "--max-time", "300", "-o", tar.toString(), url);
             if (code != 0 || !usableArchive(tar)) {
                 // 半截文件留着只会让下一次误以为是下载好了
                 try {
@@ -256,7 +251,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
         // 仓库里 utils/templates 下的 httpd/nginx 站点模板含 "xxx:socket"，NTFS 建不出来，
         // 而且这些模板跟运行无关，直接跳过
         int code = run(parent, Duration.ofMinutes(2), "tar", "-xzf", tar.toString(), "-C", unpack.toString(),
-                "--exclude=*sites-available*", "--exclude=*sites-enabled*");
+            "--exclude=*sites-available*", "--exclude=*sites-enabled*");
         // 少数文件解不出来不影响运行，只要 webapp.py 在就继续
         if (!Files.isRegularFile(extracted.resolve("searx").resolve("webapp.py"))) {
             log.warn("解压 SearXNG 源码失败（tar 退出码 {}）", code);
@@ -389,9 +384,10 @@ public class LocalSearchRuntime implements SmartLifecycle {
             log.warn("安装 SearXNG 依赖失败");
             return false;
         }
-        if (run(source, Duration.ofMinutes(10), pip, "-m", "pip", "install", "--use-pep517", "--no-build-isolation", "-e", ".") != 0
-                // 构建隔离模式下 pip 会自己拉构建依赖，再给一次机会
-                && run(source, Duration.ofMinutes(10), pip, "-m", "pip", "install", "-e", ".") != 0) {
+        if (run(source, Duration.ofMinutes(10), pip, "-m", "pip", "install", "--use-pep517", "--no-build-isolation",
+            "-e", ".") != 0
+            // 构建隔离模式下 pip 会自己拉构建依赖，再给一次机会
+            && run(source, Duration.ofMinutes(10), pip, "-m", "pip", "install", "-e", ".") != 0) {
             log.warn("安装 SearXNG 失败");
             return false;
         }
@@ -414,7 +410,8 @@ public class LocalSearchRuntime implements SmartLifecycle {
         }
         Path staticRoot = source.resolve("searx").resolve("static");
         Path theme = staticRoot.resolve("themes").resolve("simple");
-        if (!Files.isDirectory(theme) || sameContent(theme.resolve("manifest.json"), staticRoot.resolve("manifest.json"))) {
+        if (!Files.isDirectory(theme)
+            || sameContent(theme.resolve("manifest.json"), staticRoot.resolve("manifest.json"))) {
             return;
         }
         try (Stream<Path> children = Files.list(theme)) {
@@ -435,9 +432,8 @@ public class LocalSearchRuntime implements SmartLifecycle {
 
     private static boolean sameContent(Path a, Path b) {
         try {
-            return Files.isRegularFile(a) && Files.isRegularFile(b)
-                    && Files.size(a) == Files.size(b)
-                    && java.util.Arrays.equals(Files.readAllBytes(a), Files.readAllBytes(b));
+            return Files.isRegularFile(a) && Files.isRegularFile(b) && Files.size(a) == Files.size(b)
+                && java.util.Arrays.equals(Files.readAllBytes(a), Files.readAllBytes(b));
         } catch (IOException e) {
             return false;
         }
@@ -529,8 +525,8 @@ public class LocalSearchRuntime implements SmartLifecycle {
     }
 
     private static boolean supported(String python) {
-        return run(Path.of(System.getProperty("user.dir", ".")), Duration.ofSeconds(15),
-                python, "-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)") == 0;
+        return run(Path.of(System.getProperty("user.dir", ".")), Duration.ofSeconds(15), python, "-c",
+            "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)") == 0;
     }
 
     private static int run(Path directory, Duration timeout, String... command) {

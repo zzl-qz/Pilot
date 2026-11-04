@@ -9,7 +9,7 @@ import java.util.Map;
  * @param unsupported 非空表示配置存在但当前无法使用（例如只给了 HTTP url），原因会原样展示给模型
  */
 public record McpServerConfig(String name, String command, List<String> args, Map<String, String> env,
-                              String unsupported) {
+    String unsupported) {
     public McpServerConfig {
         args = args == null ? List.of() : List.copyOf(args);
         env = env == null ? Map.of() : Map.copyOf(env);

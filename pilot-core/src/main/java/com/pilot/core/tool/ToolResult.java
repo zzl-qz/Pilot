@@ -1,8 +1,8 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.loop.Attachment;
-
 import java.util.List;
+
+import com.pilot.core.loop.Attachment;
 
 /**
  * 工具的结构化执行结果。
@@ -17,10 +17,8 @@ public record ToolResult(String text, List<String> changedPaths, List<String> ch
         text = text == null ? "" : text;
         changedPaths = normalized(changedPaths);
         checks = normalized(checks);
-        images = images == null ? List.of() : images.stream()
-                .filter(image -> image != null && image.image())
-                .distinct()
-                .toList();
+        images = images == null ? List.of()
+            : images.stream().filter(image -> image != null && image.image()).distinct().toList();
     }
 
     public ToolResult(String text, List<String> changedPaths, List<String> checks) {
@@ -37,10 +35,7 @@ public record ToolResult(String text, List<String> changedPaths, List<String> ch
     }
 
     private static List<String> normalized(List<String> values) {
-        return values == null ? List.of() : values.stream()
-                .filter(value -> value != null && !value.isBlank())
-                .map(String::strip)
-                .distinct()
-                .toList();
+        return values == null ? List.of()
+            : values.stream().filter(value -> value != null && !value.isBlank()).map(String::strip).distinct().toList();
     }
 }

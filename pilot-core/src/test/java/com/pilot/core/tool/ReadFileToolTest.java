@@ -1,9 +1,8 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.workspace.PathValidator;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -12,9 +11,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.workspace.PathValidator;
 
 class ReadFileToolTest {
     @TempDir
@@ -49,10 +50,8 @@ class ReadFileToolTest {
     void rejectsInvalidLineRange() throws IOException {
         Files.writeString(workspace.resolve("App.java"), "one");
 
-        assertTrue(tool.execute(Map.of("path", "App.java", "start_line", 0))
-                .startsWith("ERROR: 参数 start_line"));
-        assertTrue(tool.execute(Map.of("path", "App.java", "line_count", 1.5))
-                .startsWith("ERROR: 参数 line_count"));
+        assertTrue(tool.execute(Map.of("path", "App.java", "start_line", 0)).startsWith("ERROR: 参数 start_line"));
+        assertTrue(tool.execute(Map.of("path", "App.java", "line_count", 1.5)).startsWith("ERROR: 参数 line_count"));
     }
 
     @Test
@@ -80,7 +79,7 @@ class ReadFileToolTest {
 
     @Test
     void reportsBinaryFile() throws IOException {
-        Files.write(workspace.resolve("logo.bin"), new byte[]{1, 0, 2, 0});
+        Files.write(workspace.resolve("logo.bin"), new byte[] {1, 0, 2, 0});
 
         String result = tool.execute(Map.of("path", "logo.bin"));
 
@@ -99,8 +98,7 @@ class ReadFileToolTest {
         String result = tool.execute(Map.of("path", "App.java", "start_line", "3", "line_count", "2"));
 
         assertEquals("3 | three\n4 | four\n… 显示第 3 到第 4 行，文件共 5 行，后续内容未显示，从第 5 行继续 …", result);
-        assertEquals("请求范围从第 9 行开始，但文件共 5 行（无内容返回）",
-                tool.execute(Map.of("path", "App.java", "start_line", 9)));
+        assertEquals("请求范围从第 9 行开始，但文件共 5 行（无内容返回）", tool.execute(Map.of("path", "App.java", "start_line", 9)));
     }
 
     @Test
@@ -177,11 +175,11 @@ class ReadFileToolTest {
         Files.writeString(workspace.resolve("App.java"), "one\ntwo\nthree\nfour\nfive");
 
         assertEquals("5 | five\n… 显示第 5 到第 5 行，文件共 5 行 …",
-                tool.execute(Map.of("path", "App.java", "start_line", -1, "line_count", 1)));
+            tool.execute(Map.of("path", "App.java", "start_line", -1, "line_count", 1)));
         assertEquals("3 | three\n4 | four\n… 显示第 3 到第 4 行，文件共 5 行，后续内容未显示，从第 5 行继续 …",
-                tool.execute(Map.of("path", "App.java", "start_line", "-3", "line_count", "2")));
+            tool.execute(Map.of("path", "App.java", "start_line", "-3", "line_count", "2")));
         assertEquals("1 | one\n2 | two\n… 显示第 1 到第 2 行，文件共 5 行（负向起点超出文件开头，已从第 1 行读起），后续内容未显示，从第 3 行继续 …",
-                tool.execute(Map.of("path", "App.java", "start_line", -100, "line_count", 2)));
+            tool.execute(Map.of("path", "App.java", "start_line", -100, "line_count", 2)));
     }
 
     @Test

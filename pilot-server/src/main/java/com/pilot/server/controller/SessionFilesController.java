@@ -1,19 +1,5 @@
 package com.pilot.server.controller;
 
-import com.pilot.core.session.Session;
-import com.pilot.core.session.SessionService;
-import com.pilot.core.workspace.PathValidator;
-import com.pilot.core.workspace.WorkspaceViolationException;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitOption;
@@ -31,6 +17,21 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+import com.pilot.core.session.Session;
+import com.pilot.core.session.SessionService;
+import com.pilot.core.workspace.PathValidator;
+import com.pilot.core.workspace.WorkspaceViolationException;
+
 /**
  * 工作区文件浏览：给左侧文件树和右侧只读预览用。
  *
@@ -40,12 +41,11 @@ import java.util.stream.Stream;
 @RequestMapping("/api/sessions")
 public class SessionFilesController {
     /** 构建产物与运行期噪音目录，不进文件树。 */
-    private static final Set<String> NOISY = Set.copyOf(List.of(
-            ".git", ".gradle", ".idea", ".vscode", "node_modules", "target", "build", "dist", "out", ".next",
-            ".playwright-cli", ".pilot", "logs"));
+    private static final Set<String> NOISY = Set.copyOf(List.of(".git", ".gradle", ".idea", ".vscode", "node_modules",
+        "target", "build", "dist", "out", ".next", ".playwright-cli", ".pilot", "logs"));
     private static final int MAX_ENTRIES = 400;
     private static final int MAX_PREVIEW_BYTES = 512 * 1024;
-    /** @ 补全用的递归清单：默认 5000 个文件、12 层目录，超出就截断。 */
+    /** {@code @} 补全用的递归清单：默认 5000 个文件、12 层目录，超出就截断。 */
     private static final int MAX_FLAT_ENTRIES = 5_000;
     private static final int MAX_FLAT_LIMIT = 20_000;
     private static final int MAX_FLAT_DEPTH = 12;
@@ -73,23 +73,18 @@ public class SessionFilesController {
         List<Entry> entries = new ArrayList<>();
         boolean truncated = false;
         try (Stream<Path> stream = Files.list(directory)) {
-            List<Path> children = stream
-                    .filter(child -> !NOISY.contains(name(child).toLowerCase(Locale.ROOT)))
-                    .sorted(Comparator
-                            .comparing((Path child) -> !Files.isDirectory(child))
-                            .thenComparing(child -> name(child).toLowerCase(Locale.ROOT)))
-                    .toList();
+            List<Path> children = stream.filter(child -> !NOISY.contains(name(child).toLowerCase(Locale.ROOT)))
+                .sorted(Comparator.comparing((Path child) -> !Files.isDirectory(child))
+                    .thenComparing(child -> name(child).toLowerCase(Locale.ROOT)))
+                .toList();
             for (Path child : children) {
                 if (entries.size() >= MAX_ENTRIES) {
                     truncated = true;
                     break;
                 }
                 boolean directoryEntry = Files.isDirectory(child);
-                entries.add(new Entry(
-                        name(child),
-                        relative(root, child),
-                        directoryEntry,
-                        directoryEntry ? null : sizeOrNull(child)));
+                entries.add(new Entry(name(child), relative(root, child), directoryEntry,
+                    directoryEntry ? null : sizeOrNull(child)));
             }
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "无法读取目录: " + path, e);
@@ -106,8 +101,7 @@ public class SessionFilesController {
      * {@code .git}、{@code node_modules} 这类目录整枝跳过（不进去枚举），避免大仓库扫一遍很慢。
      */
     @GetMapping("/{id}/files/flat")
-    public FlatResponse flat(@PathVariable String id,
-                             @RequestParam(name = "limit", required = false) Integer limit) {
+    public FlatResponse flat(@PathVariable String id, @RequestParam(name = "limit", required = false) Integer limit) {
         return flatWorkspace(paths(id).root(), limit);
     }
 
@@ -117,35 +111,34 @@ public class SessionFilesController {
         List<String> files = new ArrayList<>();
         boolean[] truncated = {false};
         try {
-            Files.walkFileTree(root, EnumSet.noneOf(FileVisitOption.class), MAX_FLAT_DEPTH,
-                    new SimpleFileVisitor<>() {
-                        @Override
-                        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                            if (!dir.equals(root) && NOISY.contains(fileName(dir))) {
-                                return FileVisitResult.SKIP_SUBTREE;
-                            }
-                            return FileVisitResult.CONTINUE;
-                        }
+            Files.walkFileTree(root, EnumSet.noneOf(FileVisitOption.class), MAX_FLAT_DEPTH, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    if (!dir.equals(root) && NOISY.contains(fileName(dir))) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
 
-                        @Override
-                        public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                            if (!attrs.isRegularFile()) {
-                                return FileVisitResult.CONTINUE;
-                            }
-                            if (files.size() >= max) {
-                                truncated[0] = true;
-                                return FileVisitResult.TERMINATE;
-                            }
-                            files.add(relative(root, file));
-                            return FileVisitResult.CONTINUE;
-                        }
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    if (!attrs.isRegularFile()) {
+                        return FileVisitResult.CONTINUE;
+                    }
+                    if (files.size() >= max) {
+                        truncated[0] = true;
+                        return FileVisitResult.TERMINATE;
+                    }
+                    files.add(relative(root, file));
+                    return FileVisitResult.CONTINUE;
+                }
 
-                        @Override
-                        public FileVisitResult visitFileFailed(Path file, IOException e) {
-                            // 个别目录不可读不影响其余文件
-                            return FileVisitResult.CONTINUE;
-                        }
-                    });
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException e) {
+                    // 个别目录不可读不影响其余文件
+                    return FileVisitResult.CONTINUE;
+                }
+            });
         } catch (IOException e) {
             if (files.isEmpty()) {
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "无法读取工作区文件", e);
@@ -191,7 +184,7 @@ public class SessionFilesController {
 
     private PathValidator paths(String sessionId) {
         Session session = sessions.find(sessionId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "会话不存在: " + sessionId));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "会话不存在: " + sessionId));
         if (session.workspace() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "该会话没有绑定工作区");
         }
@@ -232,11 +225,14 @@ public class SessionFilesController {
     }
 
     /** @param path 相对工作区的路径，根目录为空字符串 */
-    public record TreeResponse(String path, String parent, List<Entry> entries, boolean truncated) { }
+    public record TreeResponse(String path, String parent, List<Entry> entries, boolean truncated) {
+    }
 
-    public record Entry(String name, String path, boolean directory, Long size) { }
+    public record Entry(String name, String path, boolean directory, Long size) {
+    }
 
-    public record FlatResponse(List<String> files, boolean truncated) { }
+    public record FlatResponse(List<String> files, boolean truncated) {
+    }
 
     public record FileResponse(String path, long size, boolean binary, boolean truncated, String content) {
         public FileResponse(String path, long size, boolean binary, boolean truncated) {

@@ -10,3 +10,19 @@ export function windowSizeMenuItem(platform = process.platform) {
     }
   };
 }
+
+/** 主工作台快捷键明确指定目标，避免焦点在内置浏览器时刷新错页面。 */
+export function workbenchShortcut(input, platform = process.platform) {
+  if (input?.type !== 'keyDown' || input.isComposing || input.alt || input.isAutoRepeat) return null;
+  const key = String(input.key || '').toLowerCase();
+  if (key === 'f5' && !input.meta && !input.control) return input.shift ? 'reload' : 'refresh';
+  const modifier = platform === 'darwin' ? input.meta : input.control;
+  return modifier && key === 'r' ? 'reload' : null;
+}
+
+export function workbenchMenuItems(dispatch) {
+  return [
+    { id: 'workbench-refresh', label: '刷新工作台数据', accelerator: 'F5', click: () => dispatch('refresh') },
+    { id: 'workbench-reload', label: '重新载入工作台界面', accelerator: 'CommandOrControl+R', click: () => dispatch('reload') },
+  ];
+}

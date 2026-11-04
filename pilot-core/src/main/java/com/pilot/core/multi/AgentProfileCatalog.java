@@ -9,6 +9,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -57,14 +58,11 @@ public final class AgentProfileCatalog {
             }
             List<Path> files;
             try (Stream<Path> entries = Files.list(root)) {
-                files = entries.filter(Files::isRegularFile)
-                        .filter(path -> !Files.isSymbolicLink(path))
-                        .filter(path -> path.getFileName().toString().endsWith(".md"))
-                        .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                        .toList();
+                files = entries.filter(Files::isRegularFile).filter(path -> !Files.isSymbolicLink(path))
+                    .filter(path -> path.getFileName().toString().endsWith(".md"))
+                    .sorted(Comparator.comparing(path -> path.getFileName().toString())).toList();
             } catch (IOException e) {
-                problems.add(new AgentProblem("（目录）", root.toString(),
-                        "扫描失败：" + e.getClass().getSimpleName()));
+                problems.add(new AgentProblem("（目录）", root.toString(), "扫描失败：" + e.getClass().getSimpleName()));
                 continue;
             }
             for (Path file : files) {
@@ -82,21 +80,18 @@ public final class AgentProfileCatalog {
             return;
         }
         if (byName.size() >= MAX_PROFILES) {
-            problems.add(new AgentProblem(name, file.toString(),
-                    "有效代理数已达上限 " + MAX_PROFILES + "，本代理被跳过"));
+            problems.add(new AgentProblem(name, file.toString(), "有效代理数已达上限 " + MAX_PROFILES + "，本代理被跳过"));
             return;
         }
         if (!VALID_NAME.matcher(name).matches()) {
-            problems.add(new AgentProblem(name, file.toString(),
-                    "文件名必须匹配 ^[a-z][a-z0-9-]{0,63}$"));
+            problems.add(new AgentProblem(name, file.toString(), "文件名必须匹配 ^[a-z][a-z0-9-]{0,63}$"));
             return;
         }
         String text;
         try {
             text = Files.readString(file, StandardCharsets.UTF_8);
         } catch (IOException e) {
-            problems.add(new AgentProblem(name, file.toString(),
-                    "读取失败：" + e.getClass().getSimpleName()));
+            problems.add(new AgentProblem(name, file.toString(), "读取失败：" + e.getClass().getSimpleName()));
             return;
         }
         AgentFrontmatter.Parsed parsed;
@@ -107,31 +102,27 @@ public final class AgentProfileCatalog {
             return;
         }
         if (parsed.name() != null && !parsed.name().equals(name)) {
-            problems.add(new AgentProblem(name, file.toString(),
-                    "name 声明（" + parsed.name() + "）与文件名不一致；文件名是真源名"));
+            problems.add(new AgentProblem(name, file.toString(), "name 声明（" + parsed.name() + "）与文件名不一致；文件名是真源名"));
             return;
         }
         if (parsed.body().isEmpty()) {
-            problems.add(new AgentProblem(name, file.toString(),
-                    "正文为空：代理定义只有 frontmatter，没有角色提示词"));
+            problems.add(new AgentProblem(name, file.toString(), "正文为空：代理定义只有 frontmatter，没有角色提示词"));
             return;
         }
         if (parsed.body().lines().count() > MAX_PROMPT_LINES) {
-            problems.add(new AgentProblem(name, file.toString(),
-                    "角色提示词超过 " + MAX_PROMPT_LINES + " 行上限"));
+            problems.add(new AgentProblem(name, file.toString(), "角色提示词超过 " + MAX_PROMPT_LINES + " 行上限"));
             return;
         }
-        byName.put(name, new AgentProfile(name, parsed.description(), parsed.tools(),
-                parsed.files(), parsed.denyFiles(), parsed.commands(), parsed.denyCommands(),
-                parsed.writable(), parsed.body()));
+        byName.put(name, new AgentProfile(name, parsed.description(), parsed.tools(), parsed.files(),
+            parsed.denyFiles(), parsed.commands(), parsed.denyCommands(), parsed.writable(), parsed.body()));
     }
 
     /** @return 按名查找；不存在返回空。 */
-    public java.util.Optional<AgentProfile> find(String name) {
+    public Optional<AgentProfile> find(String name) {
         if (name == null || name.isBlank()) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
-        return java.util.Optional.ofNullable(profiles.get(name.strip()));
+        return Optional.ofNullable(profiles.get(name.strip()));
     }
 
     public Map<String, AgentProfile> profiles() {

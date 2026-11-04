@@ -1,13 +1,13 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.skill.Skill;
-import com.pilot.core.skill.SkillCatalog;
-import com.pilot.core.skill.SkillManifest;
-
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import com.pilot.core.skill.Skill;
+import com.pilot.core.skill.SkillCatalog;
+import com.pilot.core.skill.SkillManifest;
 
 /**
  * 加载技能指引（SKILL.md 正文）或技能目录内的参考文件——渐进式披露的第二、三层入口。
@@ -40,12 +40,11 @@ public final class UseSkillTool implements Tool {
     @Override
     public Map<String, Object> parameters() {
         Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("name", Map.of("type", "string",
-                "description", "系统提示词「技能」一节列出的技能名，必须完全一致"));
-        properties.put("file", Map.of("type", "string",
-                "description", "可选；技能目录内相对路径（如 references/api.md）。缺省返回 SKILL.md 正文"));
-        return Map.of("type", "object", "properties", properties,
-                "required", List.of("name"), "additionalProperties", false);
+        properties.put("name", Map.of("type", "string", "description", "系统提示词「技能」一节列出的技能名，必须完全一致"));
+        properties.put("file",
+            Map.of("type", "string", "description", "可选；技能目录内相对路径（如 references/api.md）。缺省返回 SKILL.md 正文"));
+        return Map.of("type", "object", "properties", properties, "required", List.of("name"), "additionalProperties",
+            false);
     }
 
     @Override
@@ -72,7 +71,7 @@ public final class UseSkillTool implements Tool {
             return catalog.readFile(skill, file);
         } catch (IllegalArgumentException e) {
             return "ERROR: " + e.getMessage()
-                    + (skill.files().isEmpty() ? "" : "；本技能目录内文件：" + String.join(", ", skill.files()));
+                + (skill.files().isEmpty() ? "" : "；本技能目录内文件：" + String.join(", ", skill.files()));
         }
     }
 
@@ -87,6 +86,6 @@ public final class UseSkillTool implements Tool {
             return "";
         }
         return "\n\n本技能目录内文件（用 file 参数读取）：\n"
-                + skill.files().stream().map(file -> "- " + file).collect(Collectors.joining("\n"));
+            + skill.files().stream().map(file -> "- " + file).collect(Collectors.joining("\n"));
     }
 }

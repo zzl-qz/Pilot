@@ -1,5 +1,15 @@
 package com.pilot.server.controller;
 
+import java.nio.file.Path;
+import java.util.List;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.observability.TaskDiagnosticsService;
@@ -8,15 +18,6 @@ import com.pilot.server.session.RunStateTracker;
 import com.pilot.server.validation.ValidationEvidence;
 import com.pilot.server.validation.ValidationLedger;
 import com.pilot.server.validation.WorkspaceFingerprint;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
-
-import java.nio.file.Path;
-import java.util.List;
 
 /**
  * 任务诊断与校验证据接口。
@@ -34,8 +35,7 @@ public class DiagnosticsController {
     private final RunStateTracker runStates;
 
     public DiagnosticsController(SessionService sessions, TaskDiagnosticsService diagnostics,
-                                 ValidationLedger validations, RecoveryReportService recovery,
-                                 RunStateTracker runStates) {
+        ValidationLedger validations, RecoveryReportService recovery, RunStateTracker runStates) {
         this.sessions = sessions;
         this.diagnostics = diagnostics;
         this.validations = validations;
@@ -63,22 +63,21 @@ public class DiagnosticsController {
     @GetMapping("/recovery")
     public RecoveryReportService.Snapshot recovery() {
         RecoveryReportService.Snapshot snapshot = recovery.latest();
-        return new RecoveryReportService.Snapshot(snapshot.recoveredAt(), runStates.instanceId(),
-                snapshot.entries(), snapshot.note(), snapshot.completed());
+        return new RecoveryReportService.Snapshot(snapshot.recoveredAt(), runStates.instanceId(), snapshot.entries(),
+            snapshot.note(), snapshot.completed());
     }
 
     public record ValidationView(ValidationLedger.Report report, List<ValidationEvidence> recent) {
     }
 
     private Session requireSession(String id) {
-        return sessions.find(id).orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
+        return sessions.find(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
     }
 
     private static Path workspaceOf(Session session) {
         String configured = session.workspace();
-        return configured == null || configured.isBlank()
-                ? Path.of(System.getProperty("user.dir", "."))
-                : Path.of(configured).toAbsolutePath().normalize();
+        return configured == null || configured.isBlank() ? Path.of(System.getProperty("user.dir", "."))
+            : Path.of(configured).toAbsolutePath().normalize();
     }
 }

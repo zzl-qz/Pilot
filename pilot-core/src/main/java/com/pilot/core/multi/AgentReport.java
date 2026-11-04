@@ -10,13 +10,12 @@ import java.util.List;
  *
  * @param evidenceMissing 是否明确缺少源码或工具证据
  */
-public record AgentReport(String agentId, String taskId, String conclusion,
-                          List<String> evidence, List<String> risks, boolean evidenceMissing) {
+public record AgentReport(String agentId, String taskId, String conclusion, List<String> evidence, List<String> risks,
+    boolean evidenceMissing) {
     private static final String CONCLUSION = "【结论】";
     private static final String EVIDENCE = "【证据清单】";
     private static final String RISK = "【风险评估】";
-    private static final List<String> NO_EVIDENCE_MARKS =
-            List.of("无证据支撑", "无证据", "推测", "猜测", "未验证");
+    private static final List<String> NO_EVIDENCE_MARKS = List.of("无证据支撑", "无证据", "推测", "猜测", "未验证");
 
     public AgentReport {
         agentId = agentId == null ? "" : agentId;
@@ -44,8 +43,8 @@ public record AgentReport(String agentId, String taskId, String conclusion,
         if (conclusion.isEmpty()) {
             conclusion = preface.isEmpty() ? body : preface;
         }
-        boolean weak = evidence.isEmpty() || evidence.stream()
-                .anyMatch(line -> NO_EVIDENCE_MARKS.stream().anyMatch(line::contains));
+        boolean weak = evidence.isEmpty()
+            || evidence.stream().anyMatch(line -> NO_EVIDENCE_MARKS.stream().anyMatch(line::contains));
         return new AgentReport(agentId, taskId, conclusion, evidence, risks, weak);
     }
 
@@ -90,8 +89,8 @@ public record AgentReport(String agentId, String taskId, String conclusion,
         if (marker < 0) {
             return "";
         }
-        String name = body.startsWith(CONCLUSION, marker) ? CONCLUSION
-                : body.startsWith(EVIDENCE, marker) ? EVIDENCE : RISK;
+        String name =
+            body.startsWith(CONCLUSION, marker) ? CONCLUSION : body.startsWith(EVIDENCE, marker) ? EVIDENCE : RISK;
         int start = marker + name.length();
         int end = body.length();
         for (int other : others) {

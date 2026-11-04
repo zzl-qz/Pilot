@@ -1,9 +1,10 @@
 package com.pilot.core.model;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
-import org.junit.jupiter.api.Test;
-import tools.jackson.databind.json.JsonMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -14,11 +15,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+
+import tools.jackson.databind.json.JsonMapper;
 
 /** 模型清单探测：端点写法换算、鉴权头有无、错误 fail-visible。 */
 class ModelCatalogTest {
@@ -28,45 +30,45 @@ class ModelCatalogTest {
     @Test
     void resolvesModelsUriFromEveryCommonEndpointStyle() {
         assertEquals(URI.create("https://gateway.test/v1/models"),
-                ModelCatalog.resolveModelsUri(URI.create("https://gateway.test")));
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test")));
         assertEquals(URI.create("https://gateway.test/v1/models"),
-                ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/")));
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/")));
         assertEquals(URI.create("https://gateway.test/v1/models"),
-                ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/v1")));
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/v1")));
         assertEquals(URI.create("https://gateway.test/v1/models"),
-                ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/v1/")));
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/v1/")));
         // 项目默认端点就是完整的 chat/completions 地址，必须能换算回 /models
         assertEquals(URI.create("https://gateway.test/v1/models"),
-                ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/v1/chat/completions")));
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/v1/chat/completions")));
         // 自定义路径：原样追加，猜错会 fail-visible
         assertEquals(URI.create("https://gateway.test/custom/models"),
-                ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/custom")));
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/custom")));
         // query 保留
         assertEquals(URI.create("https://gateway.test/v1/models?api-version=2024"),
-                ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/v1/chat/completions?api-version=2024")));
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/v1/chat/completions?api-version=2024")));
     }
 
     /** 与 chat 客户端同一套约定：带前缀的 /v1 基址也要补 /models。 */
     @Test
     void resolvesModelsUriForPrefixedV1Endpoints() {
         assertEquals(URI.create("https://gateway.test/api/llm/v1/models"),
-                ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/api/llm/v1")));
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/api/llm/v1")));
         assertEquals(URI.create("https://gateway.test/api/llm/v1/models"),
-                ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/api/llm/v1/")));
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/api/llm/v1/")));
         assertEquals(URI.create("https://gateway.test/v11/models"),
-                ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/v11")));
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/v11")));
     }
 
     @Test
     void fetchesSortedAndDeduplicatedModelIds() throws IOException {
         var server = stubServer(200, """
-                {"object":"list","data":[
-                  {"id":"zeta-2"},
-                  {"id":"Alpha-1"},
-                  {"id":"alpha-1"},
-                  {"id":"beta"},
-                  {"object":"model","owned_by":"system"}]}
-                """);
+            {"object":"list","data":[
+              {"id":"zeta-2"},
+              {"id":"Alpha-1"},
+              {"id":"alpha-1"},
+              {"id":"beta"},
+              {"object":"model","owned_by":"system"}]}
+            """);
         server.start();
         try {
             List<String> models = ModelCatalog.fetch(httpClient, json, base(server), "sk-test");
@@ -99,8 +101,7 @@ class ModelCatalogTest {
         var server = stubServer(200, "{\"models\":[{\"id\":\"qwen-max\"}]}");
         server.start();
         try {
-            assertEquals(List.of("qwen-max"),
-                    ModelCatalog.fetch(httpClient, json, base(server), "k"));
+            assertEquals(List.of("qwen-max"), ModelCatalog.fetch(httpClient, json, base(server), "k"));
         } finally {
             server.stop(0);
         }
@@ -122,8 +123,8 @@ class ModelCatalogTest {
         var server = stubServer(404, "{\"error\":\"no such route\"}");
         server.start();
         try {
-            var exception = assertThrows(ModelClientException.class,
-                    () -> ModelCatalog.fetch(httpClient, json, base(server), "k"));
+            var exception =
+                assertThrows(ModelClientException.class, () -> ModelCatalog.fetch(httpClient, json, base(server), "k"));
             assertTrue(exception.getMessage().contains("404"), exception.getMessage());
             assertTrue(exception.getMessage().contains("/v1/models"), exception.getMessage());
             assertTrue(exception.getMessage().contains("no such route"), exception.getMessage());
@@ -137,8 +138,8 @@ class ModelCatalogTest {
         var server = stubServer(200, "{\"error\":{\"message\":\"bad key\"}}");
         server.start();
         try {
-            var exception = assertThrows(ModelClientException.class,
-                    () -> ModelCatalog.fetch(httpClient, json, base(server), "k"));
+            var exception =
+                assertThrows(ModelClientException.class, () -> ModelCatalog.fetch(httpClient, json, base(server), "k"));
             assertTrue(exception.getMessage().contains("缺少 data 数组"), exception.getMessage());
         } finally {
             server.stop(0);
@@ -150,8 +151,8 @@ class ModelCatalogTest {
         var server = stubServer(200, "<html>login page</html>");
         server.start();
         try {
-            var exception = assertThrows(ModelClientException.class,
-                    () -> ModelCatalog.fetch(httpClient, json, base(server), "k"));
+            var exception =
+                assertThrows(ModelClientException.class, () -> ModelCatalog.fetch(httpClient, json, base(server), "k"));
             assertTrue(exception.getMessage().contains("不是合法 JSON"), exception.getMessage());
         } finally {
             server.stop(0);
@@ -161,7 +162,7 @@ class ModelCatalogTest {
     @Test
     void reportsUnreachableEndpoints() {
         var exception = assertThrows(ModelClientException.class,
-                () -> ModelCatalog.fetch(httpClient, json, URI.create("http://127.0.0.1:1/v1"), "sk-never-leak-123"));
+            () -> ModelCatalog.fetch(httpClient, json, URI.create("http://127.0.0.1:1/v1"), "sk-never-leak-123"));
         assertTrue(exception.getMessage().contains("模型列表请求失败"), exception.getMessage());
         assertFalse(exception.getMessage().contains("sk-never-leak-123"), "报错里不能带密钥");
     }
@@ -183,7 +184,7 @@ class ModelCatalogTest {
 
     /** 记录请求头后再回固定响应，用于核对鉴权头的有无。 */
     private static HttpServer headerCaptureServer(Map<String, String> captured, String responseBody)
-            throws IOException {
+        throws IOException {
         return respond(exchange -> {
             String authorization = exchange.getRequestHeaders().getFirst("Authorization");
             if (authorization != null) {

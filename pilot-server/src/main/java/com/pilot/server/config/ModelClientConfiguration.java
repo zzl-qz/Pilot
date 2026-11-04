@@ -1,15 +1,17 @@
 package com.pilot.server.config;
 
-import com.pilot.core.model.ModelClient;
-import com.pilot.core.model.OpenAiCompatibleModelClient;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import tools.jackson.databind.ObjectMapper;
-
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.OpenAiCompatibleModelClient;
+
+import tools.jackson.databind.ObjectMapper;
 
 @Configuration(proxyBeanMethods = false)
 public class ModelClientConfiguration {
@@ -19,15 +21,15 @@ public class ModelClientConfiguration {
      */
     @Bean
     ModelClient modelClient(ModelSettings settings, ObjectMapper objectMapper, ModelRuntimeSettings runtime,
-                            @Value("${pilot.model.timeout-seconds:90}") long timeoutSeconds,
-                            @Value("${pilot.model.prompt-caching:false}") boolean promptCaching) {
-        HttpClient httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
+        @Value("${pilot.model.timeout-seconds:90}") long timeoutSeconds,
+        @Value("${pilot.model.prompt-caching:false}") boolean promptCaching) {
+        HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         Duration timeout = Duration.ofSeconds(Math.max(5, timeoutSeconds));
         // 显式缓存标记只给支持 cache_control 的端点；OpenAI 官方端点自动缓存，保持默认关闭
-        return new ModelClientProvider(settings, snapshot -> new OpenAiCompatibleModelClient(
-                httpClient, objectMapper, URI.create(snapshot.endpoint()), snapshot.apiKey(),
-                snapshot.model(), timeout).withProfile(runtime.profile(snapshot)).withPromptCaching(promptCaching), runtime::revision);
+        return new ModelClientProvider(settings,
+            snapshot -> new OpenAiCompatibleModelClient(httpClient, objectMapper, URI.create(snapshot.endpoint()),
+                snapshot.apiKey(), snapshot.model(), timeout).withProfile(runtime.profile(snapshot))
+                .withPromptCaching(promptCaching),
+            runtime::revision);
     }
 }

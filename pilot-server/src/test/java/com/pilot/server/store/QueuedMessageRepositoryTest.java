@@ -1,12 +1,16 @@
 package com.pilot.server.store;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class QueuedMessageRepositoryTest {
     @TempDir
@@ -16,12 +20,13 @@ class QueuedMessageRepositoryTest {
     void movingQueueAndSteeringPersistsTogetherAndRollsBackOnFailure() {
         var repository = new QueuedMessageRepository(new SqliteStore(tempDir.resolve("atomic.db")));
         repository.save("s", List.of("guide", "next"));
-        repository.saveAll(java.util.Map.of("s", List.of("next"), "steer:s", List.of("guide")));
+        repository.saveAll(Map.of("s", List.of("next"), "steer:s", List.of("guide")));
         assertEquals(List.of("next"), repository.load("s"));
         assertEquals(List.of("guide"), repository.load("steer:s"));
-        var invalid = new java.util.LinkedHashMap<String, List<String>>();
-        invalid.put("s", List.of()); invalid.put("steer:s", java.util.Arrays.asList((String) null));
-        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, () -> repository.saveAll(invalid));
+        var invalid = new LinkedHashMap<String, List<String>>();
+        invalid.put("s", List.of());
+        invalid.put("steer:s", Arrays.asList((String)null));
+        Assertions.assertThrows(RuntimeException.class, () -> repository.saveAll(invalid));
         assertEquals(List.of("next"), repository.load("s"));
         assertEquals(List.of("guide"), repository.load("steer:s"));
     }
