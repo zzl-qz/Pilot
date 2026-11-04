@@ -95,6 +95,32 @@ export function parseInstallSource(text) {
   return null;
 }
 
+/**
+ * git 地址形状预检：把浏览器复制来的 GitHub 网页地址（blob/tree/raw/文件路径）拦在
+ * 请求之前，返回可展示的中文错误；形状没问题返回 null。
+ *
+ * <p>与后端 SkillInstallService.diagnoseGitUrl 同口径——前端拦一次省一个网络往返，
+ * 后端仍是权威（API 是公共面，不能只靠前端）。
+ */
+export function gitUrlProblem(url) {
+  const value = String(url || '').trim();
+  if (!/^https?:\/\//i.test(value)) {
+    return null;
+  }
+  const lower = value.toLowerCase();
+  for (const marker of ['/blob/', '/tree/', '/raw/']) {
+    if (lower.includes(marker)) {
+      return `这是浏览器里看文件的网页地址（含 ${marker}…），不是 git 仓库地址。请改用仓库根地址，例如 https://github.com/anthropics/skills`;
+    }
+  }
+  const trimmed = lower.endsWith('/') ? lower.slice(0, -1) : lower;
+  const last = trimmed.split('/').pop() || '';
+  if (last.endsWith('.md') || last.endsWith('.markdown')) {
+    return `地址末段看起来是文件（${last}）而不是仓库。git 地址应指向仓库根，例如 https://github.com/用户名/仓库名`;
+  }
+  return null;
+}
+
 /** 安装结果三组化：成功的 / 冲突的 / 失败的，供弹窗结果行渲染。 */
 export function summarizeInstallResults(results) {
   const installed = [];

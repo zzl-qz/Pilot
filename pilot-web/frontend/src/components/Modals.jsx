@@ -9,7 +9,7 @@ import { shortcut } from '../lib/interaction.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { filterPaletteActions } from '../lib/commands.js';
 import { PERMISSION_MODES } from '../lib/permission.js';
-import { emptySkillsHint, parseInstallSource, summarizeInstallResults } from '../lib/skills.js';
+import { emptySkillsHint, parseInstallSource, summarizeInstallResults, gitUrlProblem } from '../lib/skills.js';
 import { buildModelProbe, buildModelUpdate, describeModelsFetched } from '../lib/model-settings.js';
 import { verificationLabel, verificationHint } from '../lib/verification.js';
 
@@ -628,6 +628,12 @@ function SkillsInstall({ onDone }) {
     const parsed = parseInstallSource(source);
     if (!parsed) {
       setHint('来源要填 http(s):// 开头的 git 地址，或本机技能目录的绝对路径（如 D:\\skills\\review）。');
+      return;
+    }
+    // GitHub 网页地址（blob/tree/文件路径）本地直接拦下，省一个网络往返；后端仍有同款权威校验
+    const urlProblem = parsed.type === 'git' ? gitUrlProblem(parsed.value) : null;
+    if (urlProblem) {
+      setHint(urlProblem);
       return;
     }
     setBusy('preview');
