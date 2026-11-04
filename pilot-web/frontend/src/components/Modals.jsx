@@ -1138,6 +1138,13 @@ function paletteItems(query, sessions) {
 function runPaletteAction(action) {
   const state = useStore.getState();
   switch (action) {
+    case 'refresh-workbench':
+      state.refreshWorkbench();
+      break;
+    case 'reload-workbench':
+      state.setUi({ paletteOpen: false });
+      state.reloadWorkbench();
+      break;
     case 'new-session':
       state.startNewSession();
       break;

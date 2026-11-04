@@ -28,9 +28,12 @@ import {
   readSideChats, writeSideChats, readEmbeddedSession, sideChatsFor, sideChatTitle
 } from './lib/side-chat.js';
 import { normalizeQueue } from './lib/queue.js';
+import { createWorkbenchRefresher, saveWorkbenchView, takeWorkbenchView } from './lib/workbench-sync.js';
 
 let queueLoadSequence = 0;
 let activationSequence = 0;
+let projectLoadSequence = 0;
+let sessionLoadSequence = 0;
 /** 侧边对话正在创建：打开面板的同时又点「新开」时共用一个请求，别建出两条。 */
 const sideChatPending = new Map();
 const sideChatClosing = new Map();
@@ -192,6 +195,10 @@ function resetSessionState(draft) {
 export const initialUi = () => ({
   notice: null,
   noticeTimer: null,
+  refreshing: false,
+  syncError: '',
+  lastSyncedAt: 0,
+  filesRevision: 0,
   themeMode: localStorage.getItem('pilot.theme') || 'dark',
   accent: localStorage.getItem('pilot.accent') || 'sky',
   sidebarOpen: typeof window.matchMedia === 'function' ? !window.matchMedia('(max-width: 960px)').matches : true,
@@ -231,6 +238,33 @@ export const useStore = create(immer((set, get) => {
   /* ---------- 会话 / 项目 ---------- */
   sessionId: null,
   sessionEpoch: 0,
+  ready: false,
+  refreshWorkbench: createWorkbenchRefresher({ get, set, api }),
+  async reloadWorkbench() {
+    const state = get();
+    const prepared = state.composerApi?.prepareReload?.() || { ok: true };
+    const reason = !prepared.ok ? prepared.reason : state.taskDirty || state.taskBusy
+      ? '请先保存正在编辑的任务内容，再重新载入界面。'
+      : state.ui.settingsOpen || state.ui.projectEditor ? '请先保存或关闭设置、项目编辑窗口，再重新载入界面。' : '';
+    if (reason) {
+      if (document.querySelector('.modal')) state.askConfirm({ title: '暂时不能重新载入', message: reason + '刷新数据仍可保留当前内容。', confirmText: '返回编辑' });
+      else state.showNotice(reason + '可先使用“刷新工作台数据”。');
+      return false;
+    }
+    let saved = false;
+    try { saved = saveWorkbenchView(sessionStorage, state); } catch { /* 浏览器禁止访问存储 */ }
+    if (!saved) {
+      state.showNotice('无法保存当前工作区状态，已保留页面。请先使用“刷新工作台数据”。');
+      return false;
+    }
+    try {
+      if (window.pilotDesktop?.reloadWorkbench) {
+        const result = await window.pilotDesktop.reloadWorkbench();
+        if (!result?.ok) throw new Error(result?.error || '重新载入失败，请重试');
+      } else window.location.reload();
+    } catch (error) { state.showNotice('重新载入失败：' + error.message); return false; }
+    return true;
+  },
   /** 草稿态的新对话：{ projectId, workspace }，还没有对应会话记录。 */
   draftSession: null,
   /** 非空表示自己是 Side chat 内嵌页：只显示这一个会话，也不许再开嵌套面板。 */
@@ -356,6 +390,8 @@ export const useStore = create(immer((set, get) => {
 
   /* ---------- 启动 ---------- */
   async init(embeddedSessionId = null) {
+    let restore = null;
+    try { if (!embeddedSessionId) restore = takeWorkbenchView(sessionStorage); } catch { /* 隐私模式下继续正常启动 */ }
     applyTheme(get().ui.themeMode, get().ui.accent);
     get().loadSkills();
     try {
@@ -369,6 +405,17 @@ export const useStore = create(immer((set, get) => {
     // Side chat 内嵌页：只认 URL 里指定的那个会话，不按「第一个历史对话」恢复
     if (embeddedSessionId) {
       await get().activate(embeddedSessionId);
+      set(state => { state.ready = true; });
+      return;
+    }
+    if (restore?.sessionId) {
+      await get().activate(restore.sessionId);
+      set(state => { state.ready = true; });
+      return;
+    }
+    if (restore?.draftSession) {
+      get().startNewSession({ projectId: restore.draftSession.projectId, workspace: restore.workspace });
+      set(state => { state.ready = true; });
       return;
     }
     // 空白对话是旧版「先建后聊」留下的空壳，启动时不该停在它上面
@@ -380,18 +427,23 @@ export const useStore = create(immer((set, get) => {
     } else {
       get().startNewSession();
     }
+    set(state => { state.ready = true; });
   },
 
-  async loadProjects() {
+  async loadProjects({ strict = false } = {}) {
+    const request = ++projectLoadSequence;
     try {
       const projects = await api.projects();
-      set((draft) => { draft.projects = projects || []; });
+      if (!Array.isArray(projects)) throw new Error('项目数据格式无效');
+      if (request === projectLoadSequence) set((draft) => { draft.projects = projects; });
     } catch (error) {
+      if (strict) throw error;
       console.warn('[projects]', error);
     }
   },
 
-  async loadSessions() {
+  async loadSessions({ strict = false } = {}) {
+    const request = ++sessionLoadSequence;
     try {
       // 后端 SessionResponse 的字段是 sessionId，而界面（侧栏、启动恢复等）统一按 id 读取，
       // 这里归一化补上 id 别名，避免到处取到 undefined 后把 "undefined" 当会话 ID 发给后端。
@@ -399,12 +451,15 @@ export const useStore = create(immer((set, get) => {
       // 侧边对话由后端过滤，不进主列表；旧版本建的侧边会话没有父会话标记，
       // 这里按本地标签再兜一道，免得升级后侧栏里多出一条「未分组」的重复项。
       const sideIds = new Set((get().sideChats?.items || []).map((item) => item.id));
-      const sessions = (await api.sessions() || [])
-        .map((session) => ({ ...session, id: session.sessionId }))
+      const raw = await api.sessions();
+      if (!Array.isArray(raw)) throw new Error('任务数据格式无效');
+      const sessions = raw
+        .map((session) => ({ ...session, id: session.sessionId || session.id }))
         .filter((session) => !sideIds.has(session.id));
-      set((draft) => { draft.sessions = sessions; });
+      if (request === sessionLoadSequence) set((draft) => { draft.sessions = sessions; });
       return sessions;
     } catch (error) {
+      if (strict) throw error;
       console.warn('[sessions]', error);
       return [];
     }
@@ -789,6 +844,7 @@ export const useStore = create(immer((set, get) => {
     const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/events?after=${cursor}`);
     eventSource = source;
     const handle = (message) => {
+      if (eventSource !== source || get().sessionId !== sessionId) return;
       try {
         get().handleEvent(JSON.parse(message.data));
       } catch (error) {
@@ -800,11 +856,14 @@ export const useStore = create(immer((set, get) => {
     }
     source.addEventListener('user.message', handle);
     source.onopen = () => {
+      if (eventSource !== source || get().sessionId !== sessionId) return;
       set((draft) => {
         draft.ui.connection = { status: 'ok', text: '已连接' };
+        draft._reconnectAttempt = 0;
       });
     };
     source.onerror = () => {
+      if (eventSource !== source || get().sessionId !== sessionId) return;
       source.close();
       if (eventSource === source) {
         eventSource = null;
@@ -1108,13 +1167,14 @@ export const useStore = create(immer((set, get) => {
   },
 
   /* ---------- 计划 / 队列 / 契约 / 上下文 ---------- */
-  async loadPlan() {
-    const { sessionId } = get();
+  async loadPlan({ strict = false } = {}) {
+    const { sessionId, sessionEpoch } = get();
     if (!sessionId) {
       return;
     }
     try {
       const data = await api.plan(sessionId);
+      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
       if (Array.isArray(data?.plan) && data.plan.length) {
         set((draft) => {
           let existing = null;
@@ -1142,10 +1202,10 @@ export const useStore = create(immer((set, get) => {
           draft.planItems = data.plan;
         });
       }
-    } catch { /* 计划恢复失败不影响对话 */ }
+    } catch (error) { if (strict) throw error; /* 计划恢复失败不影响对话 */ }
   },
 
-  async loadQueue() {
+  async loadQueue({ strict = false } = {}) {
     const { sessionId, sessionEpoch } = get();
     if (!sessionId) {
       return;
@@ -1160,7 +1220,7 @@ export const useStore = create(immer((set, get) => {
         draft.queueEntries = normalized.rows;
         draft.queueRevision = data.revision || null;
       });
-    } catch { /* 队列读取失败不阻塞 */ }
+    } catch (error) { if (strict) throw error; /* 队列读取失败不阻塞 */ }
   },
 
   async mutateQueue(operation, failure) {
@@ -1199,20 +1259,22 @@ export const useStore = create(immer((set, get) => {
     return get().mutateQueue((id, revision) => api.moveQueueItem(id, from, to, revision), '调整顺序失败：');
   },
 
-  async loadTask() {
-    const { sessionId } = get();
+  async loadTask({ strict = false } = {}) {
+    const { sessionId, sessionEpoch } = get();
     if (!sessionId) {
       return;
     }
     try {
       const task = await api.task(sessionId);
+      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
+      if (get().taskDirty || get().taskBusy) return;
       set((draft) => {
         if (JSON.stringify(draft.task) !== JSON.stringify(task)) {
           draft.task = task;
           draft.taskDirty = false;
         }
       });
-    } catch { /* 契约读取失败不阻塞 */ }
+    } catch (error) { if (strict) throw error; /* 契约读取失败不阻塞 */ }
   },
 
   async saveTask(constraints, acceptance) {
@@ -1232,15 +1294,16 @@ export const useStore = create(immer((set, get) => {
     }
   },
 
-  async refreshContext() {
-    const { sessionId } = get();
+  async refreshContext({ strict = false } = {}) {
+    const { sessionId, sessionEpoch } = get();
     if (!sessionId) {
       return;
     }
     try {
       const contextStatus = await api.context(sessionId);
+      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
       set((draft) => { draft.contextStatus = contextStatus; });
-    } catch { /* 上下文读取失败不阻塞 */ }
+    } catch (error) { if (strict) throw error; /* 上下文读取失败不阻塞 */ }
   },
 
   /**
@@ -1619,7 +1682,7 @@ export const useStore = create(immer((set, get) => {
   },
 
   /* ---------- 变更 / 预览 ---------- */
-  async loadChanges() {
+  async loadChanges({ strict = false } = {}) {
     const { sessionId, sessionEpoch, workspace } = get();
     if (!sessionId || get().changesState === 'restoring') {
       return;
@@ -1638,6 +1701,7 @@ export const useStore = create(immer((set, get) => {
     } catch (error) {
       if (!current()) return;
       set((draft) => { draft.changesState = 'error'; });
+      if (strict) throw error;
       get().showNotice('读取变更失败：' + error.message);
     }
   },
@@ -2034,12 +2098,13 @@ export const useStore = create(immer((set, get) => {
   },
 
   async refreshActiveRun() {
-    const { sessionId } = get();
+    const { sessionId, sessionEpoch } = get();
     if (!sessionId) {
       return;
     }
     try {
       const active = await api.activeRun(sessionId);
+      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
       if (active?.runId) {
         set((draft) => {
           draft.running = true;

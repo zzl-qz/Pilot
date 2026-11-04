@@ -29,7 +29,9 @@ export function WorkspaceTree() {
 
 function WorkspaceFiles({ sessionId, workspace }) {
   const [open, setOpen] = useState(true);
-  const [revision, setRevision] = useState(0);
+  const [localRevision, setRevision] = useState(0);
+  const syncRevision = useStore(state => state.ui.filesRevision || 0);
+  const revision = localRevision + syncRevision;
   const focused = useRef(null);
   const previewPath = useStore(state => state.ui.previewPath);
   const root = useRef(null);

@@ -42,6 +42,8 @@ export const QUICK_COMMANDS = [
 ];
 
 const COMMAND_PALETTE_ACTIONS = [
+  { label: '刷新工作台数据（保留草稿）', hint: 'F5', keywords: ['刷新', '同步', 'refresh', 'sync'], action: 'refresh-workbench' },
+  { label: '重新载入工作台界面', hint: shortcut('R'), keywords: ['刷新', '重新载入', '界面', 'reload'], action: 'reload-workbench' },
   { label: '新任务（当前工作区）', hint: shortcut('N'), keywords: ['任务', '工作区', 'workspace', 'new'], action: 'new-session' },
   { label: '查看上下文与压缩', hint: '', keywords: ['上下文', '压缩', 'context', 'compact', 'token'], action: 'open-context' },
   { label: '切换活动/变更面板', hint: shortcut('J'), keywords: ['活动', '变更', '面板', 'activity', 'changes'], action: 'toggle-activity' },

@@ -17,6 +17,7 @@ import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { resolveFolders, samePath } from '../lib/projects.js';
 import { shortcut, runPhase, isShortcutModifier } from '../lib/interaction.js';
 import { api } from '../api.js';
+import { watchWorkbench } from '../lib/workbench-sync.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { dragWidth, readLayout, writeLayout } from '../lib/layout.js';
 
@@ -25,6 +26,15 @@ export default function App() {
   const init = useStore((state) => state.init);
   const notice = useStore((state) => state.ui.notice);
   useEffect(() => window.pilotDesktop?.onMobileConnection?.(() => useStore.getState().setUi({ mobileConnectionOpen: true })), []);
+  const ready = useStore(state => state.ready);
+  const refreshing = useStore(state => state.ui.refreshing);
+  const syncError = useStore(state => state.ui.syncError);
+  useEffect(() => window.pilotDesktop?.onWorkbenchCommand?.(command => {
+    const state = useStore.getState();
+    if (command === 'refresh') state.refreshWorkbench();
+    if (command === 'reload') state.reloadWorkbench();
+  }), []);
+  useEffect(() => ready ? watchWorkbench({ refresh: options => useStore.getState().refreshWorkbench(options) }) : undefined, [ready]);
   const sidebarOpen = useStore((state) => state.ui.sidebarOpen);
   const agentsDockOpen = useStore((state) => state.ui.agentsDockOpen);
   const running = useStore((state) => state.running);
@@ -129,6 +139,16 @@ export default function App() {
         return;
       }
       const mod = isShortcutModifier(event);
+      const refreshKey = event.key === 'F5' || (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r';
+      if (!event.altKey && !event.getModifierState?.('AltGraph') && refreshKey) {
+        event.preventDefault();
+        if (event.isComposing || event.keyCode === 229) return;
+        if (!event.repeat) {
+          if (event.key === 'F5' && !event.shiftKey) useStore.getState().refreshWorkbench();
+          else useStore.getState().reloadWorkbench();
+        }
+        return;
+      }
       if (mod && event.altKey && event.key.toLowerCase() === 's') {
         event.preventDefault();
         useStore.getState().toggleSideChatPane();
@@ -317,6 +337,10 @@ export default function App() {
                 子智能体 · {Object.keys(agents).length}
               </button>
             )}
+            {!embedded && <button type="button" id="refresh-workbench" className="icon-btn"
+              aria-label="刷新工作台数据" aria-busy={Boolean(refreshing)} disabled={refreshing}
+              title={syncError ? `同步失败：${syncError}，点击重试` : '刷新工作台数据，保留草稿与附件 (F5)'}
+              onClick={() => useStore.getState().refreshWorkbench()}><Icon name="refresh" /></button>}
             {sessionId && (
               <button
                 type="button"

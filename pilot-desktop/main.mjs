@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { hostname } from 'node:os';
 import { formatPageLogs, markerPath, partitionName, snapBounds, userPageUrl } from './protocol.mjs';
 import { offlinePage } from './offline-page.mjs';
-import { windowSizeMenuItem } from './platform-menu.mjs';
+import { windowSizeMenuItem, workbenchMenuItems, workbenchShortcut } from './platform-menu.mjs';
 
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -285,6 +285,7 @@ function wire(tab) {
     if (next) createTab({ url: next, sessionId: null });
     return { action: 'deny' };
   });
+  installWorkbenchKeys(contents);
   contents.on('before-input-event', (event, input) => {
     const key = String(input.key || '').toLowerCase();
     const mod = input.meta || input.control;
@@ -685,6 +686,24 @@ function appIcon() {
   return image.isEmpty() ? undefined : image;
 }
 
+let workbenchReady = false;
+function dispatchWorkbenchCommand(command) {
+  if (!shell || shell.isDestroyed()) return;
+  if (workbenchReady) shell.webContents.send('pilot-workbench-command', command);
+  else if (shell.webContents.getURL().startsWith('data:')) shell.loadURL(shellUrl()).catch(() => {});
+  else shell.webContents.reloadIgnoringCache();
+}
+function installWorkbenchKeys(contents) {
+  contents.on('before-input-event', (event, input) => {
+    // 合成输入与长按也拦住默认菜单动作，避免绕过草稿保护反复重载。
+    const command = workbenchShortcut({ ...input, isComposing: false, isAutoRepeat: false });
+    if (command) {
+      event.preventDefault();
+      if (!input.isComposing && !input.isAutoRepeat) dispatchWorkbenchCommand(command);
+    }
+  });
+}
+
 async function openMobileConnection() {
   if (!shell || shell.isDestroyed()) throw new Error('请先打开 Pilot 工作台');
   shell.show(); shell.focus();
@@ -698,6 +717,13 @@ function trustedWorkbench(event) {
       && new URL(event.senderFrame.url).origin === new URL(shellUrl()).origin;
   } catch { return false; }
 }
+
+ipcMain.on('pilot-workbench-ready', event => { if (trustedWorkbench(event)) workbenchReady = true; });
+ipcMain.handle('pilot-workbench-reload', event => {
+  if (!trustedWorkbench(event)) return { ok: false, error: '请从 Pilot 工作台重新载入界面' };
+  shell.webContents.reloadIgnoringCache();
+  return { ok: true };
+});
 
 ipcMain.handle('pilot-mobile-open', async event => {
   if (!trustedWorkbench(event)) return { ok: false, error: '请从 Pilot 工作台打开手机连接。' };
@@ -748,7 +774,7 @@ function installMenu() {
     {
       label: '视图',
       submenu: [
-        { role: 'reload', label: '重新载入' },
+        ...workbenchMenuItems(dispatchWorkbenchCommand),
         { type: 'separator' },
         { role: 'zoomIn', label: '放大界面' },
         { role: 'zoomOut', label: '缩小界面' },
@@ -797,6 +823,8 @@ app.whenReady().then(async () => {
       sandbox: true
     }
   });
+  installWorkbenchKeys(shell.webContents);
+  shell.webContents.on('did-start-navigation', (_event, _url, _inPlace, mainFrame) => { if (mainFrame) workbenchReady = false; });
   installMicrophonePermissions(shell.webContents, shellUrl(), systemPreferences);
   shell.webContents.on('did-fail-load', (_event, code, _desc, _url, isMainFrame) => {
     if (!isMainFrame || code === -3 || smoke || _url?.startsWith('data:')) return;

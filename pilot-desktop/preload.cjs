@@ -1,6 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('pilotDesktop', {
+  reloadWorkbench: () => ipcRenderer.invoke('pilot-workbench-reload'),
+  onWorkbenchCommand: callback => {
+    const listener = (_event, command) => callback(command);
+    ipcRenderer.on('pilot-workbench-command', listener);
+    ipcRenderer.send('pilot-workbench-ready');
+    return () => ipcRenderer.removeListener('pilot-workbench-command', listener);
+  },
   copyPairingCode: code => ipcRenderer.invoke('pilot-mobile-copy', code),
   onMobileConnection: callback => {
     const listener = () => callback();

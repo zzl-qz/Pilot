@@ -70,6 +70,7 @@ export function Composer() {
   const [pendingFiles, setPendingFiles] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState(false);
+  const voiceBusyRef = useRef(false);
   const [dragging, setDragging] = useState(false);
   const dragDepthRef = useRef(0);
   const sessionDraftsRef = useRef(new Map());
@@ -92,8 +93,23 @@ export function Composer() {
       }
     });
     inputRef.current = input;
+    let composing = false;
+    const startComposition = () => { composing = true; };
+    const endComposition = () => { composing = false; };
+    input.root.addEventListener('compositionstart', startComposition);
+    input.root.addEventListener('compositionend', endComposition);
     // state 被 immer 冻结，必须走 setState，不能直接赋值
     useStore.setState({ composerApi: {
+      prepareReload: () => {
+        if (composing) return { ok: false, reason: '请先完成输入法中的文字，再重新载入。' };
+        if (voiceBusyRef.current) return { ok: false, reason: '请先结束语音输入，再重新载入。' };
+        if (submittingRef.current || pendingFilesRef.current) return { ok: false, reason: '正在发送或读取附件，请完成后重新载入。' };
+        if (input.attachmentIds().length) return { ok: false, reason: '有未发送的附件，请先发送或移除，再重新载入。' };
+        const text = input.getText();
+        writeDraft(localStorage, useStore.getState().sessionId, text);
+        if (text.trim() && readDraft(localStorage, useStore.getState().sessionId) !== text) return { ok: false, reason: '当前草稿未能完整保存，已保留页面，请先复制或发送草稿。' };
+        return { ok: true };
+      },
       getText: () => input.getText(),
       getDraft: () => input.getDraft(),
       attachmentIds: () => input.attachmentIds(),
@@ -104,6 +120,8 @@ export function Composer() {
       focus: () => input.focus()
     } });
     return () => {
+      input.root.removeEventListener('compositionstart', startComposition);
+      input.root.removeEventListener('compositionend', endComposition);
       input.destroy();
       inputRef.current = null;
       useStore.setState({ composerApi: null });
@@ -616,7 +634,7 @@ export function Composer() {
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.5V8l2.5 1.5"/></svg>
             </button>
             <VoiceInput ownerKey={`${sessionEpoch}:${sessionId || ''}:${workspace}`} disabled={submitting}
-              onBusy={setVoiceBusy} onText={(text) => { const input = inputRef.current; input?.appendText((input.getText().trim() ? '\n' : '') + text); input?.focus(); }} />
+              onBusy={value => { voiceBusyRef.current = value; setVoiceBusy(value); }} onText={(text) => { const input = inputRef.current; input?.appendText((input.getText().trim() ? '\n' : '') + text); input?.focus(); }} />
 
             <button
               type={sendAction.stop ? "button" : "submit"}
