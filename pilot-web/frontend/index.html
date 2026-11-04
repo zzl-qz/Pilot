@@ -8,13 +8,102 @@
     <link id="favicon" rel="icon" href="/favicon.svg" />
     <script>
       /*
-       * 白屏兜底：构建会换掉入口的 hash 文件名。浏览器里如果还留着上一版 index.html，
-       * 它引用的 /assets/index-<旧hash>.js 已经不在了，模块脚本 404 → 页面上什么都没有。
-       * 这里只做一件事：load 之后 1.5s 根节点仍是空的，就重载一次拿新的 index.html；
-       * 用 sessionStorage 记一次，避免服务端真坏了的时候无限刷新。
+       * 启动兜底：vite 每次构建都会换掉入口的 hash 文件名，而 index.html 和 assets 是分开产出的。
+       * 拉取代码、合并分支，或者只换了 index.html 的时候，入口脚本会 404，React 不会挂载，
+       * 页面只剩 body 的背景色，看起来就是一片全黑，浏览器自己不给任何提示。
+       * 这里做两件事：
+       * 1) 第一次失败先重载一次，换掉浏览器里缓存的旧 index.html；
+       * 2) 仍然起不来就把原因和修复命令直接画在页面上，不再静默黑屏。
        */
       (function () {
         var KEY = 'pilot.boot-retry';
+        var missing = '';
+        var shown = false;
+
+        function noteMissing(url) {
+          if (!url || missing) return;
+          var parts = String(url).split('/');
+          missing = parts[parts.length - 1] || String(url);
+        }
+
+        function storageWorks() {
+          try {
+            sessionStorage.setItem(KEY + '-probe', '1');
+            sessionStorage.removeItem(KEY + '-probe');
+            return true;
+          } catch (e) {
+            return false;
+          }
+        }
+
+        function render() {
+          if (shown) return;
+          var root = document.getElementById('root');
+          if (!root) {
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', render);
+            return;
+          }
+          // 已经渲染出内容就别动它；只有空了才接管。
+          if (root.childElementCount > 0) return;
+          shown = true;
+          if (!document.getElementById('pilot-boot-hint-style')) {
+            var style = document.createElement('style');
+            style.id = 'pilot-boot-hint-style';
+            style.textContent = [
+              '#pilot-boot-hint{max-width:520px;margin:12vh auto 0;padding:24px;border-radius:12px;',
+              'border:1px solid #3a3a3a;background:#1c1c1c;color:#e8e8e8;',
+              'font:14px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left}',
+              '#pilot-boot-hint h1{margin:0 0 10px;font-size:17px;font-weight:600}',
+              '#pilot-boot-hint p{margin:0 0 12px;color:#b4b4b4}',
+              '#pilot-boot-hint code{padding:2px 6px;border-radius:4px;background:#2a2a2a;color:#f2f2f2;',
+              'font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}',
+              '@media (prefers-color-scheme: light){#pilot-boot-hint{background:#fafafa;border-color:#dcdcdc;color:#252525}',
+              '#pilot-boot-hint p{color:#5a5a5a}#pilot-boot-hint code{background:#ececec;color:#252525}}'
+            ].join('');
+            document.head.appendChild(style);
+          }
+          var box = document.createElement('div');
+          box.id = 'pilot-boot-hint';
+          box.setAttribute('role', 'alert');
+          var title = document.createElement('h1');
+          title.textContent = '界面没有加载出来';
+          var reason = document.createElement('p');
+          reason.textContent = missing
+            ? '缺少前端文件 ' + missing + '，页面脚本没有执行。通常是更新代码后没有重新构建前端。'
+            : '前端脚本没有启动。通常是更新代码后没有重新构建前端。';
+          var steps = document.createElement('p');
+          steps.textContent = '在电脑上执行下面的命令，然后刷新这个页面：';
+          var command = document.createElement('p');
+          var code = document.createElement('code');
+          code.textContent = 'cd pilot-web/frontend && npm run build';
+          command.appendChild(code);
+          var action = document.createElement('p');
+          action.textContent = '也可以直接重新启动 Pilot：start.cmd / start.sh 会自动构建前端。';
+          box.appendChild(title);
+          box.appendChild(reason);
+          box.appendChild(steps);
+          box.appendChild(command);
+          box.appendChild(action);
+          root.textContent = '';
+          root.appendChild(box);
+        }
+
+        function fail(url) {
+          noteMissing(url);
+          if (storageWorks() && !sessionStorage.getItem(KEY)) {
+            sessionStorage.setItem(KEY, '1');
+            location.reload();
+            return;
+          }
+          render();
+        }
+
+        // 资源 404 的 error 事件不冒泡，必须在捕获阶段才能拿到 script 加载失败。
+        window.addEventListener('error', function (event) {
+          var target = event.target;
+          if (target && target.tagName === 'SCRIPT') fail(target.src);
+        }, true);
+
         window.addEventListener('load', function () {
           setTimeout(function () {
             var root = document.getElementById('root');
@@ -22,13 +111,7 @@
               try { sessionStorage.removeItem(KEY); } catch (e) { /* 隐私模式忽略 */ }
               return;
             }
-            try {
-              if (sessionStorage.getItem(KEY)) {
-                return;
-              }
-              sessionStorage.setItem(KEY, '1');
-            } catch (e) { /* 存不下就只重试这一轮 */ }
-            location.reload();
+            fail('');
           }, 1500);
         });
       })();

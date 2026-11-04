@@ -88,6 +88,8 @@ bash mvnw -pl pilot-server spring-boot:run
 
 只构建 `pilot-server` 时，同一次编译会带上 `pilot-core` 的源码，不依赖本机仓库里可能过期的 JAR，也不另起一次 Maven。IDEA 里运行 `PilotServerApplication` 即可。项目不使用 Spring Boot DevTools，改了 Java 后由你再点一次运行。若 9999 仍被旧进程占用，先停掉那个进程。
 
+前端产物 `pilot-web/src/main/resources/static/index.html` 与 `static/assets/` 是 vite 构建结果，不入库：每次构建的 hash 文件名都会变，入库后拉代码不重新构建就会引用不存在的资源。Maven 的 `generate-resources` 会自动构建，`start.cmd` / `start.sh` 走的就是这条路径。**在 IDEA 里直接运行前**，先执行一次 `npm --prefix pilot-web/frontend run build`（或 `.\mvnw.cmd -pl pilot-server -am install`）。漏构建时：缺 `index.html` 首页会返回 404；缺 `assets` 里的入口脚本，页面会直接说明缺哪个文件并给出构建命令，不再是无声黑屏。
+
 Java 代码采用基于阿里巴巴开发手册的[格式与可读性规范](config/java/README.md)。提交前运行 `./mvnw spotless:apply` 整理格式，再运行 `./mvnw spotless:check checkstyle:check`；`verify` 和可靠性脚本也会执行这两个检查。Windows 使用 `.\mvnw.cmd`。
 
 ## 权限说明
