@@ -189,8 +189,8 @@ function EmptyState() {
   }, [workspace]);
   const prompts = [
     { title: '了解项目', sub: '识别技术栈、入口与运行方式', prompt: '分析当前工作区的结构、技术栈和启动方式，先读取项目实际配置和说明。' },
-    { title: '检查改动', sub: '检查工作区改动中的潜在问题', prompt: '审阅当前工作区的未提交改动，重点检查逻辑错误、边界情况和缺失测试。' },
-    { title: '完善测试', sub: '找到测试入口和未覆盖的边界', prompt: '查看项目现有测试，找到关键流程缺少的边界用例，补充测试并实际运行。' }
+    { title: '调研问题', sub: '核对来源，交付可下载的报告', prompt: '请帮我调研以下问题，优先查阅原始来源，说明时间与不确定性，整理为报告并保存到成果面板。调研问题：' },
+    { title: '整理资料', sub: '提取要点、核对数据与缺失项', prompt: '请根据我提供的文件整理要点或表格，核对数字和来源，缺失数据不要猜测，并将结果保存到成果面板。具体要求：' }
   ];
   return (
     <div className="thread-scroll-region">
@@ -203,7 +203,7 @@ function EmptyState() {
             <div className="task-scope">
               <strong>{project?.name || '当前工作区'}</strong>
               <span title={workspace}>{workspace || '尚未选择工作区'}</span>
-              <span>{scope?.branch ? `${scope.worktree ? '源分支' : 'Git 分支'} · ${scope.branch}` : 'Git 分支 · 未获取'} · {scope?.worktree ? '独立 worktree' : '在所选目录执行'}</span>
+              <span>{scope?.branch ? `${scope.worktree ? '源分支' : 'Git 分支'} · ${scope.branch} · ` : ''}{scope?.worktree ? '独立 worktree' : '在所选目录执行'}</span>
               <button type="button" className="btn" onClick={() => useStore.getState().setUi({ picker: { title: '选择任务工作区' } })}>选择工作区</button>
             </div>
             <div className="prompts">

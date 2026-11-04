@@ -33,5 +33,9 @@ await tests('pilot-desktop');
 await tests('evaluation/harness');
 await run(process.execPath, ['--test', 'evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-final.test.mjs']);
 await run(process.execPath, ['pilot-web/frontend/scripts/check.mjs']);
-if (flags.has('--ui')) await run(process.execPath, ['pilot-web/frontend/scripts/sandbox-recovery-smoke.mjs', ...(flags.has('--web-only') ? ['--web-only'] : [])]);
+if (flags.has('--ui')) {
+  for (const script of ['sandbox-recovery-smoke.mjs', 'work-products-smoke.mjs']) {
+    await run(process.execPath, [`pilot-web/frontend/scripts/${script}`, ...(flags.has('--web-only') ? ['--web-only'] : [])]);
+  }
+}
 console.log('\n可靠性验证通过。未启用的容器/UI 实测，以及本机之外的操作系统验证，均不计为通过。');

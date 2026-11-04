@@ -14,6 +14,8 @@ import com.pilot.core.tool.CommandTaskManager;
 import com.pilot.server.multi.SandboxStore;
 import com.pilot.server.store.ToolCallJournalFactory;
 import com.pilot.server.validation.ValidationLedger;
+import com.pilot.server.work.SkillDraftService;
+import com.pilot.server.work.WorkProductService;
 
 /**
  * 会话的级联删除：删一个会话要同时清掉它的事件、对话记忆、计划、运行记录、沙箱和内存队列。
@@ -35,11 +37,16 @@ public class SessionCleanupService {
     private final ValidationLedger validations;
     private final ToolCallJournalFactory journals;
     private final RunCheckpointRepository checkpoints;
+    private final WorkProductService products;
+    private final SkillDraftService skillDrafts;
 
     public SessionCleanupService(SessionService sessions, ConversationRepository conversations, PlanRepository plans,
         RunRepository runs, SandboxStore sandboxes, RunStarter runStarter, TaskControlService taskControls,
         CommandTaskManager commandTasks, ObjectProvider<BrowserBackend> browser, ValidationLedger validations,
-        ToolCallJournalFactory journals, RunCheckpointRepository checkpoints) {
+        ToolCallJournalFactory journals, RunCheckpointRepository checkpoints, WorkProductService products,
+        SkillDraftService skillDrafts) {
+        this.products = products;
+        this.skillDrafts = skillDrafts;
         this.validations = validations;
         this.journals = journals;
         this.checkpoints = checkpoints;
@@ -71,6 +78,8 @@ public class SessionCleanupService {
         }
         runStarter.activeRun(sessionId).ifPresent(runStarter::cancel);
         boolean removed = sessions.delete(sessionId);
+        products.deleteBySession(sessionId);
+        skillDrafts.deleteBySession(sessionId);
         conversations.delete(sessionId);
         plans.delete(sessionId);
         runs.deleteBySession(sessionId);

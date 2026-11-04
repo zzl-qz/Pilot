@@ -141,6 +141,15 @@ public class AgentRunService implements RunStarter {
     @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.beans.factory.ObjectProvider<com.pilot.server.schedule.ScheduleService> scheduleService;
     private volatile com.pilot.server.desktop.DesktopViewportReset viewportReset;
+    private com.pilot.server.work.WorkProductService workProducts;
+    private com.pilot.server.work.SkillDraftService skillDrafts;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setWorkProducts(com.pilot.server.work.WorkProductService workProducts,
+        com.pilot.server.work.SkillDraftService skillDrafts) {
+        this.workProducts = workProducts;
+        this.skillDrafts = skillDrafts;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setAgentProfiles(AgentProfileService agentProfiles) {
@@ -1233,7 +1242,8 @@ public class AgentRunService implements RunStarter {
                     items.stream().map(item -> new PlanUpdated.PlanItemPayload(item.step(), item.status())).toList(),
                     explanation));
         };
-        ToolRegistry tools = review.active() ? reviewTools(workspace) : sessionTools(sessionId, workspace, planSink);
+        ToolRegistry tools =
+            review.active() ? reviewTools(workspace) : sessionTools(sessionId, runId, workspace, planSink);
         // 技能目录：本 run 内工具注册与目录段共用同一份快照，避免两次扫描之间目录变化造成不一致
         SkillCatalog catalog = skills.catalogFor(workspace);
         if (!review.active() && !catalog.list().isEmpty()) {
@@ -1582,7 +1592,7 @@ public class AgentRunService implements RunStarter {
     }
 
     /** 会话命令有独立的任务归属；默认和受限子代理工具集不共享这个入口。 */
-    private ToolRegistry sessionTools(String sessionId, String workspace, PlanSink planSink) {
+    private ToolRegistry sessionTools(String sessionId, String runId, String workspace, PlanSink planSink) {
         ToolRegistry tools = new ToolRegistry();
         toolFactory.registryFor(workspace, planSink).tools().stream().filter(tool -> !"run_command".equals(tool.name()))
             .forEach(tools::register);
@@ -1591,6 +1601,12 @@ public class AgentRunService implements RunStarter {
         tools.register(new CommandStatusTool(commandTasks, sessionId, snapshots));
         tools.register(new CommandLogsTool(commandTasks, sessionId));
         tools.register(new StopCommandTool(commandTasks, sessionId));
+        if (workProducts != null) {
+            tools.register(new com.pilot.server.work.PublishArtifactTool(workProducts, objectMapper, sessionId, runId));
+        }
+        if (skillDrafts != null && skills != null && skills.enabled()) {
+            tools.register(new com.pilot.server.work.ProposeSkillTool(skillDrafts, objectMapper, sessionId, runId));
+        }
         // 浏览器与 MCP：始终注册，是否可见由工具自己的 availability 在运行时决定。
         toolFactory.sessionExtras(sessionId, workspace).forEach(tools::register);
         return tools;

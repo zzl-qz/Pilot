@@ -342,6 +342,10 @@ export default function App() {
               {running && runStartedAt ? ` · ${Math.round((Date.now() - runStartedAt) / 1000)}s` : ''}
               {stalled ? ` · ${idleSeconds}s 无新事件` : ''}
             </span>
+            {!embedded && sessionId && <button type="button" className="icon-btn product-toggle" aria-label="查看任务成果" title="交付文件与技能审核"
+              onClick={() => useStore.getState().setUi({ inspectorOpen: true, inspectorTab: 'products', reviewExpanded: false })}>
+              <Icon name="file" /><span>成果</span>
+            </button>}
             {/* 内嵌页再展开审阅面板会把窄 iframe 挤成两栏，这里不给入口 */}
             {!embedded && (
               <button

@@ -1,0 +1,29 @@
+{
+  "orders": [
+    {
+      "id": "a",
+      "status": "paid",
+      "cents": 1299
+    },
+    {
+      "id": "b",
+      "status": "paid",
+      "cents": 2500
+    },
+    {
+      "id": "c",
+      "status": "cancelled",
+      "cents": 9000
+    },
+    {
+      "id": "d",
+      "status": "refunded",
+      "cents": -500
+    },
+    {
+      "id": "e",
+      "status": "paid",
+      "cents": null
+    }
+  ]
+}

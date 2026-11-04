@@ -79,8 +79,9 @@ public final class PromptLibrary {
      * （代码声明优先于 md 头部 frontmatter）。新增段落取区间空隙值。
      */
     private static final List<SystemSection> SYSTEM_SECTIONS = List.of(new SystemSection("system/base", 0),
-        new SystemSection("system/workflow", 100), new SystemSection("system/tools", 200),
-        new SystemSection("system/skills", 250, Set.of("use_skill")),
+        new SystemSection("system/workflow", 100),
+        new SystemSection("system/deliverables", 150, Set.of("publish_artifact")),
+        new SystemSection("system/tools", 200), new SystemSection("system/skills", 250, Set.of("use_skill")),
         new SystemSection("system/tools-spawn", 300, Set.of("spawn_agent")),
         new SystemSection("system/tools-dispatch", 310, Set.of("dispatch_agents")),
         new SystemSection("system/browser", 350, Set.of("browser")), new SystemSection("system/orchestration", 400),
