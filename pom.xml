@@ -15,6 +15,8 @@
     <name>Pilot</name>
     <properties>
         <java.version>25</java.version>
+        <!-- 5.24.0 修复 inline / subclass 混用时随机触发的 MockUtil 断言失败（Mockito #3795）。 -->
+        <mockito.version>5.24.0</mockito.version>
     </properties>
     <modules>
         <module>pilot-core</module>

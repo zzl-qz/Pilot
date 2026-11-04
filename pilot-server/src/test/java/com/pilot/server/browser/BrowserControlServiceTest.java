@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,6 +43,11 @@ class BrowserControlServiceTest {
         when(runtime.availability()).thenReturn(Availability.ready());
         when(runtime.interactionsPaused(any())).thenReturn(false);
         service = new BrowserControlService(runtime, MAPPER, true, 960, 55);
+    }
+
+    @AfterEach
+    void tearDown() {
+        service.shutdown();
     }
 
     private static JsonNode event(String kind) {
@@ -82,7 +88,8 @@ class BrowserControlServiceTest {
 
         // 断线重连/多端订阅：补发缓存的最新帧；不再重复开 screencast
         verify(late, timeout(2000).times(2)).send(any(SseEmitter.SseEventBuilder.class));
-        verify(runtime).mirrorControl("s1", true, 960, 55);
+        // 帧补发是同步的，控制命令是异步的；收到帧不代表控制线程已经执行。
+        verify(runtime, timeout(2000)).mirrorControl("s1", true, 960, 55);
     }
 
     @Test
