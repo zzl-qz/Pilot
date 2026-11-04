@@ -18,10 +18,10 @@ import java.util.Locale;
 public final class ProcessSupport {
     /** Windows 中文环境的默认编码，作为非 UTF-8 输出的回退。 */
     private static final Charset GBK = Charset.forName("GBK");
-    private static final boolean WINDOWS =
-            System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
 
-    private ProcessSupport() { }
+    private ProcessSupport() {
+    }
 
     /** 用平台 shell 执行一条命令行：Windows 走 {@code cmd.exe /c}，其余走 {@code /bin/sh -c}。 */
     public static List<String> shell(String command) {
@@ -30,7 +30,9 @@ public final class ProcessSupport {
 
     /** 优先按 UTF-8 严格解码；出现非法字节时回退 GBK。 */
     public static String decode(byte[] bytes) {
-        if (bytes == null || bytes.length == 0) return "";
+        if (bytes == null || bytes.length == 0) {
+            return "";
+        }
         try {
             return StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString();
         } catch (CharacterCodingException e) {

@@ -1,20 +1,9 @@
 package com.pilot.core.browser;
 
-import com.pilot.core.permission.PermissionDecision;
-import com.pilot.core.permission.PermissionMode;
-import com.pilot.core.permission.PolicyPermissionGate;
-import com.pilot.core.tool.ToolCall;
-import com.pilot.core.tool.ToolResult;
-import com.pilot.core.workspace.PathValidator;
-import com.sun.net.httpserver.HttpServer;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import tools.jackson.databind.ObjectMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -25,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -34,13 +24,24 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import tools.jackson.databind.JsonNode;
+import javax.imageio.ImageIO;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.permission.PermissionDecision;
+import com.pilot.core.permission.PermissionMode;
+import com.pilot.core.permission.PolicyPermissionGate;
+import com.pilot.core.tool.ToolCall;
+import com.pilot.core.tool.ToolResult;
+import com.pilot.core.workspace.PathValidator;
+import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.JsonNode;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 真实浏览器验收：Pilot 的 browser 工具打开一个本机页面，输入文字、上传两张图片、提交，
@@ -52,28 +53,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class BrowserIntegrationTest {
     private static final String PAGE = """
-            <!doctype html><html><head><meta charset="utf-8"><title>Pilot Demo</title></head><body>
-            <h1>消息队列</h1>
-            <input id="title" placeholder="消息内容">
-            <input id="files" type="file" multiple accept="image/*">
-            <button id="send">发送到队列</button>
-            <ul id="queue"></ul>
-            <script>
-              console.error('boot-warning');
-              const queue = document.getElementById('queue');
-              function show(text) { const li = document.createElement('li'); li.textContent = text; queue.appendChild(li); }
-              const saved = localStorage.getItem('queue');
-              if (saved) show('已恢复: ' + saved);
-              document.getElementById('send').onclick = async () => {
-                const text = document.getElementById('title').value;
-                const count = document.getElementById('files').files.length;
-                const entry = text + ' / 图片 ' + count;
-                show('已入队: ' + entry);
-                localStorage.setItem('queue', entry);
-                await fetch('/api/queue', { method: 'POST' });
-              };
-            </script></body></html>
-            """;
+        <!doctype html><html><head><meta charset="utf-8"><title>Pilot Demo</title></head><body>
+        <h1>消息队列</h1>
+        <input id="title" placeholder="消息内容">
+        <input id="files" type="file" multiple accept="image/*">
+        <button id="send">发送到队列</button>
+        <ul id="queue"></ul>
+        <script>
+          console.error('boot-warning');
+          const queue = document.getElementById('queue');
+          function show(text) { const li = document.createElement('li'); li.textContent = text; queue.appendChild(li); }
+          const saved = localStorage.getItem('queue');
+          if (saved) show('已恢复: ' + saved);
+          document.getElementById('send').onclick = async () => {
+            const text = document.getElementById('title').value;
+            const count = document.getElementById('files').files.length;
+            const entry = text + ' / 图片 ' + count;
+            show('已入队: ' + entry);
+            localStorage.setItem('queue', entry);
+            await fetch('/api/queue', { method: 'POST' });
+          };
+        </script></body></html>
+        """;
 
     @TempDir
     Path workspace;
@@ -89,8 +90,9 @@ class BrowserIntegrationTest {
     @BeforeEach
     void setUp() throws Exception {
         Path home = home();
-        Assumptions.assumeTrue(home != null && Files.isDirectory(home.resolve("node_modules").resolve("playwright-core")),
-                "没有安装 playwright-core（.pilot/browser）");
+        Assumptions.assumeTrue(
+            home != null && Files.isDirectory(home.resolve("node_modules").resolve("playwright-core")),
+            "没有安装 playwright-core（.pilot/browser）");
         Path node = findNode();
         Assumptions.assumeTrue(node != null, "没有找到 Node.js");
         Path script = home.resolve("browser-sidecar.mjs");
@@ -99,9 +101,8 @@ class BrowserIntegrationTest {
         }
         // 测试只操作独立浏览器，不能捡到真实桌面壳遗留的 CDP 连接信息。
         backend = new PlaywrightBackend(node, script, artifacts, new ObjectMapper(), 120_000,
-                Map.of("PILOT_DESKTOP_ENDPOINT", artifacts.resolve("no-desktop.json").toString(),
-                        "PILOT_BROWSER_PREFER_BUNDLED", "false",
-                        "PILOT_BROWSER_HEADLESS", "true"));
+            Map.of("PILOT_DESKTOP_ENDPOINT", artifacts.resolve("no-desktop.json").toString(),
+                "PILOT_BROWSER_PREFER_BUNDLED", "false", "PILOT_BROWSER_HEADLESS", "true"));
         Assumptions.assumeTrue(backend.probe().available(), "本机没有可用的 Chrome：" + backend.availability().reason());
 
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
@@ -129,16 +130,24 @@ class BrowserIntegrationTest {
 
     @AfterEach
     void tearDown() {
-        if (server != null) server.stop(0);
-        if (backend != null) backend.close();
-        if (previousArtifacts == null) System.clearProperty("pilot.artifacts.dir");
-        else System.setProperty("pilot.artifacts.dir", previousArtifacts);
+        if (server != null) {
+            server.stop(0);
+        }
+        if (backend != null) {
+            backend.close();
+        }
+        if (previousArtifacts == null) {
+            System.clearProperty("pilot.artifacts.dir");
+        } else {
+            System.setProperty("pilot.artifacts.dir", previousArtifacts);
+        }
     }
 
     @Test
     void verifiesAPageEndToEndWithEvidence() throws IOException {
         for (String name : List.of("one.png", "two.png")) {
-            ImageIO.write(new BufferedImage(40, 40, BufferedImage.TYPE_INT_RGB), "png", workspace.resolve(name).toFile());
+            ImageIO.write(new BufferedImage(40, 40, BufferedImage.TYPE_INT_RGB), "png",
+                workspace.resolve(name).toFile());
         }
 
         String navigation = run("navigate", "url", base);
@@ -179,7 +188,8 @@ class BrowserIntegrationTest {
         run("evaluate", "expression", "localStorage.setItem('secret','a')");
         BrowserTool other = new BrowserTool(backend, "other-session", new PathValidator(workspace));
         assertTrue(other.execute(Map.of("action", "navigate", "url", base)).startsWith("已打开"));
-        assertEquals("null", other.execute(Map.of("action", "evaluate", "expression", "localStorage.getItem('secret')")).strip());
+        assertEquals("null",
+            other.execute(Map.of("action", "evaluate", "expression", "localStorage.getItem('secret')")).strip());
 
         String refused = run("navigate", "url", "https://example.com/");
         assertTrue(refused.startsWith("ERROR: browser 只能打开本机地址"), refused);
@@ -192,15 +202,20 @@ class BrowserIntegrationTest {
         for (PermissionMode mode : PermissionMode.values()) {
             PolicyPermissionGate gate = new PolicyPermissionGate(mode);
             assertEquals(PermissionDecision.ALLOW,
-                    gate.check(new ToolCall("1", "browser", Map.of("action", "snapshot")), probe).decision());
+                gate.check(new ToolCall("1", "browser", Map.of("action", "snapshot")), probe).decision());
         }
         ToolCall click = new ToolCall("2", "browser", Map.of("action", "click", "ref", "e1"));
-        assertEquals(PermissionDecision.DENY, new PolicyPermissionGate(PermissionMode.READ_ONLY).check(click, probe).decision());
-        assertEquals(PermissionDecision.ASK, new PolicyPermissionGate(PermissionMode.ASK).check(click, probe).decision());
-        assertEquals(PermissionDecision.ALLOW, new PolicyPermissionGate(PermissionMode.AUTO_EDIT).check(click, probe).decision());
+        assertEquals(PermissionDecision.DENY,
+            new PolicyPermissionGate(PermissionMode.READ_ONLY).check(click, probe).decision());
+        assertEquals(PermissionDecision.ASK,
+            new PolicyPermissionGate(PermissionMode.ASK).check(click, probe).decision());
+        assertEquals(PermissionDecision.ALLOW,
+            new PolicyPermissionGate(PermissionMode.AUTO_EDIT).check(click, probe).decision());
         ToolCall evaluate = new ToolCall("3", "browser", Map.of("action", "evaluate", "expression", "1"));
-        assertEquals(PermissionDecision.ASK, new PolicyPermissionGate(PermissionMode.AUTO_EDIT).check(evaluate, probe).decision());
-        assertEquals(PermissionDecision.ALLOW, new PolicyPermissionGate(PermissionMode.AUTO).check(evaluate, probe).decision());
+        assertEquals(PermissionDecision.ASK,
+            new PolicyPermissionGate(PermissionMode.AUTO_EDIT).check(evaluate, probe).decision());
+        assertEquals(PermissionDecision.ALLOW,
+            new PolicyPermissionGate(PermissionMode.AUTO).check(evaluate, probe).decision());
     }
 
     /** 镜像链路全流程：握手声明能力 → 首帧到达 → 交互坐标上报 → 停帧后不再产帧。 */
@@ -241,17 +256,18 @@ class BrowserIntegrationTest {
         int seen = kinds.size();
         run("fill", "ref", ref(snapshot, "textbox|input", "消息内容"), "text", "停帧后还能操作");
         Thread.sleep(1500);
-        assertTrue(kinds.stream().skip(seen).noneMatch("mirror-frame"::equals),
-                "mirror-stop 之后不应再有帧：" + kinds);
+        assertTrue(kinds.stream().skip(seen).noneMatch("mirror-frame"::equals), "mirror-stop 之后不应再有帧：" + kinds);
 
         // 置前不抛异常（无头环境下静默成功）
         backend.focusPage("it-session");
     }
 
     private String run(String action, Object... pairs) {
-        Map<String, Object> args = new java.util.LinkedHashMap<>();
+        Map<String, Object> args = new LinkedHashMap<>();
         args.put("action", action);
-        for (int i = 0; i + 1 < pairs.length; i += 2) args.put(String.valueOf(pairs[i]), pairs[i + 1]);
+        for (int i = 0; i + 1 < pairs.length; i += 2) {
+            args.put(String.valueOf(pairs[i]), pairs[i + 1]);
+        }
         return tool.execute(args);
     }
 
@@ -260,18 +276,24 @@ class BrowserIntegrationTest {
         Pattern pattern = Pattern.compile("^\\s*- (?:" + kindPattern + ")\\b.*\\[ref=(e\\d+)].*$", Pattern.MULTILINE);
         Matcher matcher = pattern.matcher(snapshot);
         while (matcher.find()) {
-            if (matcher.group().contains(needle)) return matcher.group(1);
+            if (matcher.group().contains(needle)) {
+                return matcher.group(1);
+            }
         }
         throw new AssertionError("快照里找不到 " + kindPattern + " / " + needle + "：\n" + snapshot);
     }
 
     private static Path home() {
         String configured = System.getProperty("pilot.browser.home");
-        if (configured != null && !configured.isBlank()) return Path.of(configured);
+        if (configured != null && !configured.isBlank()) {
+            return Path.of(configured);
+        }
         Path dir = Path.of(System.getProperty("user.dir")).toAbsolutePath();
         for (int i = 0; i < 5 && dir != null; i++) {
             Path candidate = dir.resolve(".pilot").resolve("browser");
-            if (Files.isDirectory(candidate)) return candidate;
+            if (Files.isDirectory(candidate)) {
+                return candidate;
+            }
             dir = dir.getParent();
         }
         return null;
@@ -281,10 +303,14 @@ class BrowserIntegrationTest {
         String runtime = System.getProperty("pilot.runtime.bin", "");
         String path = System.getenv("PATH") == null ? "" : System.getenv("PATH");
         for (String dir : (runtime + File.pathSeparator + path).split(File.pathSeparator)) {
-            if (dir.isBlank()) continue;
+            if (dir.isBlank()) {
+                continue;
+            }
             for (String name : List.of("node", "node.exe")) {
                 Path candidate = Path.of(dir, name);
-                if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) return candidate;
+                if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
+                    return candidate;
+                }
             }
         }
         return null;

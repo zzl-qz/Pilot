@@ -1,12 +1,12 @@
 package com.pilot.core.loop;
 
-import com.pilot.core.model.ModelClientException;
-import com.pilot.core.model.ModelFailureKind;
-import com.pilot.core.model.ModelFailureSignals;
-
 import java.io.IOException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import com.pilot.core.model.ModelClientException;
+import com.pilot.core.model.ModelFailureKind;
+import com.pilot.core.model.ModelFailureSignals;
 
 /**
  * 模型请求失败时的重试判定。

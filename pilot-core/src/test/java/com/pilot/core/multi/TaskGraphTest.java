@@ -1,13 +1,13 @@
 package com.pilot.core.multi;
 
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 
 class TaskGraphTest {
 
@@ -17,8 +17,8 @@ class TaskGraphTest {
 
     @Test
     void rejectsUnknownDependency() {
-        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-                () -> new TaskGraph(List.of(task("T1", "T9"))));
+        IllegalArgumentException error =
+            assertThrows(IllegalArgumentException.class, () -> new TaskGraph(List.of(task("T1", "T9"))));
 
         assertTrue(error.getMessage().contains("T9"));
     }
@@ -26,7 +26,7 @@ class TaskGraphTest {
     @Test
     void rejectsCycles() {
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-                () -> new TaskGraph(List.of(task("T1", "T2"), task("T2", "T1"))));
+            () -> new TaskGraph(List.of(task("T1", "T2"), task("T2", "T1"))));
 
         assertTrue(error.getMessage().contains("环"));
     }

@@ -1,10 +1,10 @@
 package com.pilot.core.loop;
 
-import com.pilot.core.event.ContextCompacted;
-import com.pilot.core.event.SessionEvent;
-
 import java.util.List;
 import java.util.function.Consumer;
+
+import com.pilot.core.event.ContextCompacted;
+import com.pilot.core.event.SessionEvent;
 
 /**
  * 上下文预算：每次采样前按代价从低到高分四层收缩历史。
@@ -57,7 +57,9 @@ final class ContextBudget {
     private int lastSuccessfulCompactApply = -1;
     private boolean rapidRefillCounted;
     private boolean compactCircuitOpen;
-    private int nextPruneAt, nextTruncateAt, lastLimit;
+    private int nextPruneAt;
+    private int nextTruncateAt;
+    private int lastLimit;
 
     ContextBudget(Compactor compactor) {
         this.compactor = compactor;
@@ -74,17 +76,23 @@ final class ContextBudget {
         int charBudget = Math.max(1, limit);
         int tokenBudget = charBudget;
         double usage = usage(messages, charBudget, tokenBudget);
-        if (lastLimit != limit) { nextPruneAt = 0; nextTruncateAt = 0; lastLimit = limit; }
-        int rewriteStep = Math.max(1, (int) (limit * 0.05));
+        if (lastLimit != limit) {
+            nextPruneAt = 0;
+            nextTruncateAt = 0;
+            lastLimit = limit;
+        }
+        int rewriteStep = Math.max(1, (int)(limit * 0.05));
 
         // 第一、二层不花模型调用，只是把「已经读过的内容」压缩成占位符与头尾
         // 低压区间内批量处理旧输出，避免每新增一个工具结果就改写已缓存的历史前缀。
         // 达到摘要水位后立即恢复裁剪，不为缓存牺牲上下文预算。
-        if (usage >= PRUNE_RATIO && (usage >= PRE_COMPACT_RATIO || ContextCompactor.totalChars(messages) >= nextPruneAt)) {
+        if (usage >= PRUNE_RATIO
+            && (usage >= PRE_COMPACT_RATIO || ContextCompactor.totalChars(messages) >= nextPruneAt)) {
             ContextCompactor.pruneToolOutputs(messages, limit);
             nextPruneAt = ContextCompactor.totalChars(messages) + rewriteStep;
         }
-        if (usage >= TRUNCATE_RATIO && (usage >= PRE_COMPACT_RATIO || ContextCompactor.totalChars(messages) >= nextTruncateAt)) {
+        if (usage >= TRUNCATE_RATIO
+            && (usage >= PRE_COMPACT_RATIO || ContextCompactor.totalChars(messages) >= nextTruncateAt)) {
             ContextCompactor.truncateLongToolOutputs(messages);
             nextTruncateAt = ContextCompactor.totalChars(messages) + rewriteStep;
         }
@@ -99,7 +107,7 @@ final class ContextBudget {
                 lastSuccessfulCompactApply = -1;
                 rapidRefillCounted = false;
             } else if (lastSuccessfulCompactApply > 0
-                    && applyIndex - lastSuccessfulCompactApply > RAPID_REFILL_WINDOW_APPLIES) {
+                && applyIndex - lastSuccessfulCompactApply > RAPID_REFILL_WINDOW_APPLIES) {
                 rapidRefillStreak = 0;
                 lastSuccessfulCompactApply = -1;
                 rapidRefillCounted = false;
@@ -122,8 +130,8 @@ final class ContextBudget {
         }
 
         int rounds = usage >= FORCE_COMPACT_RATIO ? MAX_COMPACT_ROUNDS : 1;
-        int targetChars = (int) (charBudget * TARGET_RATIO);
-        int targetTokens = (int) (tokenBudget * TARGET_RATIO);
+        int targetChars = (int)(charBudget * TARGET_RATIO);
+        int targetTokens = (int)(tokenBudget * TARGET_RATIO);
         boolean reduced = false;
         for (int round = 0; round < rounds; round++) {
             ContextCompactor.Outcome outcome = compactor.compact(messages, targetChars, targetTokens);
@@ -132,7 +140,7 @@ final class ContextBudget {
             }
             reduced = true;
             events.accept(new ContextCompacted(outcome.coveredMessages(), outcome.charactersBefore(),
-                    outcome.charactersAfter(), outcome.summary()));
+                outcome.charactersAfter(), outcome.summary()));
             if (usage(messages, charBudget, tokenBudget) < PRE_COMPACT_RATIO) {
                 break;
             }
@@ -145,7 +153,7 @@ final class ContextBudget {
             lastSuccessfulCompactApply = applyIndex;
             rapidRefillCounted = false;
         } else {
-            backoffUntil = (int) (total * 1.05) + 1;
+            backoffUntil = (int)(total * 1.05) + 1;
             consecutiveCompactFailures++;
             if (consecutiveCompactFailures >= MAX_CONSECUTIVE_COMPACT_FAILURES) {
                 compactCircuitOpen = true;
@@ -174,8 +182,8 @@ final class ContextBudget {
 
     /** 当前占用 / 预算，取字符与 token 两个口径里更满的那个。 */
     static double usage(List<Message> messages, int charBudget, int tokenBudget) {
-        double byChars = ContextCompactor.totalChars(messages) / (double) charBudget;
-        double byTokens = ContextCompactor.estimateTokens(messages) / (double) tokenBudget;
+        double byChars = ContextCompactor.totalChars(messages) / (double)charBudget;
+        double byTokens = ContextCompactor.estimateTokens(messages) / (double)tokenBudget;
         return Math.max(byChars, byTokens);
     }
 

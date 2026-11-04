@@ -13,7 +13,7 @@ import java.util.Objects;
  * @param parentSessionId 侧边对话（对齐 Codex 的 /side）：从哪条主对话分叉出来；普通对话为 {@code null}
  */
 public record Session(String id, String title, Instant createdAt, SessionStatus status, String workspace,
-                      String projectId, boolean isBlank, boolean archived, String parentSessionId) {
+    String projectId, boolean isBlank, boolean archived, String parentSessionId) {
     /** 兼容旧调用：不归属项目，也不是空白对话。 */
     public Session(String id, String title, Instant createdAt, SessionStatus status, String workspace) {
         this(id, title, createdAt, status, workspace, null, false, false, null);
@@ -21,13 +21,13 @@ public record Session(String id, String title, Instant createdAt, SessionStatus 
 
     /** 兼容旧调用：不归属项目的普通对话。 */
     public Session(String id, String title, Instant createdAt, SessionStatus status, String workspace,
-                   String projectId) {
+        String projectId) {
         this(id, title, createdAt, status, workspace, projectId, false, false, null);
     }
 
     /** 兼容旧调用：没有父会话（不是侧边对话）。 */
-    public Session(String id, String title, Instant createdAt, SessionStatus status, String workspace,
-                   String projectId, boolean isBlank, boolean archived) {
+    public Session(String id, String title, Instant createdAt, SessionStatus status, String workspace, String projectId,
+        boolean isBlank, boolean archived) {
         this(id, title, createdAt, status, workspace, projectId, isBlank, archived, null);
     }
 

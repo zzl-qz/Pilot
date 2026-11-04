@@ -44,7 +44,7 @@ public record DissentReport(String taskId, String title, List<AgentReport> sides
             options.add(switch (i) {
                 case 0 -> OPTION_ACCEPT_A;
                 case 1 -> OPTION_ACCEPT_B;
-                default -> "选用方案 " + (char) ('A' + i);
+                default -> "选用方案 " + (char)('A' + i);
             });
         }
         options.add(OPTION_DEBATE);
@@ -76,7 +76,6 @@ public record DissentReport(String taskId, String title, List<AgentReport> sides
         if (text == null) {
             return "";
         }
-        return text.toLowerCase(Locale.ROOT)
-                .replaceAll("[\\s\\p{Punct}，。；：！？、（）【】《》]", "");
+        return text.toLowerCase(Locale.ROOT).replaceAll("[\\s\\p{Punct}，。；：！？、（）【】《》]", "");
     }
 }

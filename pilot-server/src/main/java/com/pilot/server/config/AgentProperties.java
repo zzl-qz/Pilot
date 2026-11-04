@@ -1,9 +1,10 @@
 package com.pilot.server.config;
 
-import com.pilot.core.permission.PermissionMode;
+import java.nio.file.Path;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-import java.nio.file.Path;
+import com.pilot.core.permission.PermissionMode;
 
 /**
  * Agent 运行配置。
@@ -25,32 +26,31 @@ import java.nio.file.Path;
  * @param directMaxInvestigationTools 兼容旧配置的高位调查诊断值；运行时不据此拒绝读取/搜索
  */
 @ConfigurationProperties(prefix = "pilot.agent")
-public record AgentProperties(String workspace, PermissionMode permissionMode,
-                              int maxSteps, Integer repeatRemindAt, Integer repeatAbortAt,
-                              int approvalTimeoutSeconds,
-                              int runThreads, Integer maxPlanContinues, Integer contextMaxChars,
-                              Boolean completionChecks, Boolean goalModeEnabled,
-                              Integer directMaxRequests, Long directMaxInputTokens, Long directMaxOutputTokens,
-                              Long directMaxActiveMillis, Integer directMaxInvestigationTools,
-                              Long goalMaxInputTokens, Long goalMaxOutputTokens, Long goalMaxActiveMillis) {
-    public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort,
-                           int timeout, int threads, Integer continues, Integer chars, Boolean checks) {
-        this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, false,
-                null, null, null, null, null, null, null, null);
-    }
-    public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort,
-                           int timeout, int threads, Integer continues, Integer chars, Boolean checks,
-                           Boolean goals) {
-        this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, goals,
-                null, null, null, null, null, null, null, null);
+public record AgentProperties(String workspace, PermissionMode permissionMode, int maxSteps, Integer repeatRemindAt,
+    Integer repeatAbortAt, int approvalTimeoutSeconds, int runThreads, Integer maxPlanContinues,
+    Integer contextMaxChars, Boolean completionChecks, Boolean goalModeEnabled, Integer directMaxRequests,
+    Long directMaxInputTokens, Long directMaxOutputTokens, Long directMaxActiveMillis,
+    Integer directMaxInvestigationTools, Long goalMaxInputTokens, Long goalMaxOutputTokens, Long goalMaxActiveMillis) {
+    public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort, int timeout,
+        int threads, Integer continues, Integer chars, Boolean checks) {
+        this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, false, null, null, null,
+            null, null, null, null, null);
     }
 
-    public boolean goalModeEnabledValue() { return !Boolean.FALSE.equals(goalModeEnabled); }
+    public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort, int timeout,
+        int threads, Integer continues, Integer chars, Boolean checks, Boolean goals) {
+        this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, goals, null, null, null,
+            null, null, null, null, null);
+    }
+
+    public boolean goalModeEnabledValue() {
+        return !Boolean.FALSE.equals(goalModeEnabled);
+    }
+
     @org.springframework.boot.context.properties.bind.ConstructorBinding
     public AgentProperties {
-        workspace = workspace == null || workspace.isBlank()
-                ? Path.of("").toAbsolutePath().normalize().toString()
-                : Path.of(workspace).toAbsolutePath().normalize().toString();
+        workspace = workspace == null || workspace.isBlank() ? Path.of("").toAbsolutePath().normalize().toString()
+            : Path.of(workspace).toAbsolutePath().normalize().toString();
         // Pilot 默认 AUTO；READ_ONLY、ASK、AUTO_EDIT 可按任务需要配置，工作区边界仍生效。
         permissionMode = permissionMode == null ? PermissionMode.AUTO : permissionMode;
         maxSteps = maxSteps < 1 ? 1_000 : maxSteps;
@@ -59,7 +59,7 @@ public record AgentProperties(String workspace, PermissionMode permissionMode,
         int remind = repeatRemindAt == null ? 3 : repeatRemindAt;
         if (remind < 0 || (remind > 0 && remind >= abort)) {
             throw new IllegalArgumentException(
-                    "pilot.agent.repeat-remind-at 必须为 0（关闭提醒）或小于 repeat-abort-at（当前 " + abort + "）");
+                "pilot.agent.repeat-remind-at 必须为 0（关闭提醒）或小于 repeat-abort-at（当前 " + abort + "）");
         }
         repeatRemindAt = remind;
         repeatAbortAt = abort;
@@ -68,9 +68,8 @@ public record AgentProperties(String workspace, PermissionMode permissionMode,
         // 计划不再拦住收尾：默认不自动继续，只把未完成项如实报给用户。
         int continues = maxPlanContinues == null ? 0 : maxPlanContinues;
         maxPlanContinues = continues < 0 ? 0 : Math.min(continues, 10);
-        contextMaxChars = contextMaxChars == null || contextMaxChars < 20_000
-                ? 400_000
-                : Math.min(contextMaxChars, 2_000_000);
+        contextMaxChars =
+            contextMaxChars == null || contextMaxChars < 20_000 ? 400_000 : Math.min(contextMaxChars, 2_000_000);
         // 通用收尾提醒门默认关闭；Direct 收尾仍按实际证据区分检查通过、失败、陈旧或未验证。
         // Goal 的独立核验不受此开关影响；执行结束本身不代表已核验。
         // 可配置 pilot.agent.completion-checks；仅未显式配置时才回退读取 -Dpilot.completion.checks。
@@ -78,22 +77,22 @@ public record AgentProperties(String workspace, PermissionMode permissionMode,
         if (completionChecks == null) {
             completionChecks = flag != null && !flag.isBlank() && "true".equalsIgnoreCase(flag.strip());
         }
-        directMaxRequests = directMaxRequests == null || directMaxRequests < 4
-                ? maxSteps : Math.min(directMaxRequests, maxSteps);
-        directMaxInputTokens = directMaxInputTokens == null || directMaxInputTokens < 50_000
-                ? 50_000_000L : directMaxInputTokens;
-        directMaxOutputTokens = directMaxOutputTokens == null || directMaxOutputTokens < 5_000
-                ? 2_000_000L : directMaxOutputTokens;
-        directMaxActiveMillis = directMaxActiveMillis == null || directMaxActiveMillis < 60_000
-                ? 8 * 60 * 60_000L : directMaxActiveMillis;
-        directMaxInvestigationTools = directMaxInvestigationTools == null || directMaxInvestigationTools < 8
-                ? 512 : directMaxInvestigationTools;
-        goalMaxInputTokens = goalMaxInputTokens == null || goalMaxInputTokens < 10_000
-                ? 50_000_000L : goalMaxInputTokens;
-        goalMaxOutputTokens = goalMaxOutputTokens == null || goalMaxOutputTokens < 1_000
-                ? 2_000_000L : goalMaxOutputTokens;
-        goalMaxActiveMillis = goalMaxActiveMillis == null || goalMaxActiveMillis < 60_000
-                ? 8 * 60 * 60_000L : goalMaxActiveMillis;
+        directMaxRequests =
+            directMaxRequests == null || directMaxRequests < 4 ? maxSteps : Math.min(directMaxRequests, maxSteps);
+        directMaxInputTokens =
+            directMaxInputTokens == null || directMaxInputTokens < 50_000 ? 50_000_000L : directMaxInputTokens;
+        directMaxOutputTokens =
+            directMaxOutputTokens == null || directMaxOutputTokens < 5_000 ? 2_000_000L : directMaxOutputTokens;
+        directMaxActiveMillis =
+            directMaxActiveMillis == null || directMaxActiveMillis < 60_000 ? 8 * 60 * 60_000L : directMaxActiveMillis;
+        directMaxInvestigationTools =
+            directMaxInvestigationTools == null || directMaxInvestigationTools < 8 ? 512 : directMaxInvestigationTools;
+        goalMaxInputTokens =
+            goalMaxInputTokens == null || goalMaxInputTokens < 10_000 ? 50_000_000L : goalMaxInputTokens;
+        goalMaxOutputTokens =
+            goalMaxOutputTokens == null || goalMaxOutputTokens < 1_000 ? 2_000_000L : goalMaxOutputTokens;
+        goalMaxActiveMillis =
+            goalMaxActiveMillis == null || goalMaxActiveMillis < 60_000 ? 8 * 60 * 60_000L : goalMaxActiveMillis;
     }
 
     /** 通用收尾提醒门是否启用（默认关闭）；与实际验证状态、Goal 独立核验分别处理。 */

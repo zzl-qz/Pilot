@@ -1,19 +1,23 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.multi.AgentScope;
-import com.pilot.core.workspace.PathValidator;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.nio.file.Path;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.multi.AgentScope;
+import com.pilot.core.workspace.PathValidator;
 
 class RunCommandToolTest {
     @TempDir
@@ -69,8 +73,8 @@ class RunCommandToolTest {
     void rejectsUnquotedShellSyntax() {
         RunCommandTool tool = tool();
 
-        for (String command : List.of("git status > out.txt", "git status `whoami`", "echo $(whoami)",
-                "git status &", "(git status)", "git log < /etc/passwd", "git status ||", "&& git status")) {
+        for (String command : List.of("git status > out.txt", "git status `whoami`", "echo $(whoami)", "git status &",
+            "(git status)", "git log < /etc/passwd", "git status ||", "&& git status")) {
             String result = tool.execute(Map.of("command", command));
             assertTrue(result.startsWith("ERROR: "), command + " -> " + result);
             assertFalse(result.contains("退出码"), command + " -> " + result);
@@ -109,13 +113,12 @@ class RunCommandToolTest {
     @Test
     void prefersBundledRuntimeOnPath() throws Exception {
         Path bin = workspace.resolve("runtime-bin");
-        java.nio.file.Files.createDirectories(bin);
+        Files.createDirectories(bin);
         // resolveOnPath 在 Windows 只认 .exe/.cmd/.bat（直接执行 Unix 脚本会报 Win32 错误），
         // 测试按平台创建对应的文件名。
-        boolean windows = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
         Path python = bin.resolve(windows ? "python3.cmd" : "python3");
-        java.nio.file.Files.writeString(python,
-                windows ? "@echo bundled-python\r\n" : "#!/bin/sh\necho bundled-python\n");
+        Files.writeString(python, windows ? "@echo bundled-python\r\n" : "#!/bin/sh\necho bundled-python\n");
         String previous = System.getProperty("pilot.runtime.bin");
         System.setProperty("pilot.runtime.bin", bin.toString());
         try {
@@ -132,9 +135,8 @@ class RunCommandToolTest {
     /** mvnw 本身也要映射到工作区 wrapper，而不是去 PATH 里找一个不存在的 mvnw。 */
     @Test
     void mapsMvnwToWorkspaceWrapper() throws Exception {
-        org.junit.jupiter.api.Assumptions.assumeTrue(
-                System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win"));
-        java.nio.file.Files.writeString(workspace.resolve("mvnw.cmd"), "@echo wrapper-ok %1\r\n");
+        Assumptions.assumeTrue(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
+        Files.writeString(workspace.resolve("mvnw.cmd"), "@echo wrapper-ok %1\r\n");
         RunCommandTool tool = tool();
 
         String result = tool.execute(Map.of("command", "mvnw -v", "timeoutSeconds", 60));
@@ -145,11 +147,10 @@ class RunCommandToolTest {
 
     @Test
     void runsUnixWrapperWithoutExecutablePermission() throws Exception {
-        org.junit.jupiter.api.Assumptions.assumeFalse(
-                System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win"));
+        Assumptions.assumeFalse(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
         Path wrapper = workspace.resolve("mvnw");
-        java.nio.file.Files.writeString(wrapper, "#!/bin/sh\nprintf 'wrapper-ok:%s\\n' \"$1\"\n");
-        assertFalse(java.nio.file.Files.isExecutable(wrapper));
+        Files.writeString(wrapper, "#!/bin/sh\nprintf 'wrapper-ok:%s\\n' \"$1\"\n");
+        assertFalse(Files.isExecutable(wrapper));
         String result = tool().execute(Map.of("command", "mvn -v", "timeoutSeconds", 10));
         assertTrue(result.contains("退出码: 0"), result);
         assertTrue(result.contains("wrapper-ok:-v"), result);
@@ -171,19 +172,19 @@ class RunCommandToolTest {
 
     @Test
     void runsInRequestedChildDirectoryAndRejectsEscapes() throws Exception {
-        Path child = java.nio.file.Files.createDirectory(workspace.resolve("pilot-web"));
+        Path child = Files.createDirectory(workspace.resolve("pilot-web"));
         String result = tool().execute(Map.of("command", "node -p process.cwd()", "workdir", "pilot-web"));
         assertTrue(result.contains("退出码: 0"), result);
         // Windows 上临时目录可能以 8.3 短名出现，比较真实路径而不是字符串
         String printed = result.lines().filter(line -> line.contains("工作目录")).findFirst().orElse("")
-                .replaceFirst("^.*工作目录[:：]\\s*", "").strip();
+            .replaceFirst("^.*工作目录[:：]\\s*", "").strip();
         assertEquals(child.toRealPath(), Path.of(printed).toRealPath(), result);
-        assertTrue(tool().execute(Map.of("command", "node -v", "workdir", "../outside"))
-                .startsWith("ERROR: workdir 无效"));
-        assertTrue(tool().execute(Map.of("command", "node -v", "workdir", "missing"))
-                .startsWith("ERROR: workdir 不是现有目录"));
+        assertTrue(
+            tool().execute(Map.of("command", "node -v", "workdir", "../outside")).startsWith("ERROR: workdir 无效"));
+        assertTrue(
+            tool().execute(Map.of("command", "node -v", "workdir", "missing")).startsWith("ERROR: workdir 不是现有目录"));
         assertTrue(tool().execute(Map.of("command", "npm --prefix ../outside test"))
-                .startsWith("ERROR: --prefix 必须指向工作区内的目录"));
+            .startsWith("ERROR: --prefix 必须指向工作区内的目录"));
     }
 
     @Test
@@ -192,7 +193,7 @@ class RunCommandToolTest {
 
         assertNull(RunCommandTool.resolveOnPath("definitely-not-a-real-binary-xyz"));
         assertTrue(resolved != null && resolved.getFileName().toString().toLowerCase().contains("mvn"),
-                String.valueOf(resolved));
+            String.valueOf(resolved));
     }
 
     @Test
@@ -209,7 +210,8 @@ class RunCommandToolTest {
     void childProcessUsesTheSameJdkAsPilot() {
         RunCommandTool tool = tool();
 
-        String result = tool.execute(Map.of("command", "java -XshowSettings:properties -version", "timeoutSeconds", 60));
+        String result =
+            tool.execute(Map.of("command", "java -XshowSettings:properties -version", "timeoutSeconds", 60));
 
         assertTrue(result.contains("java.home = " + System.getProperty("java.home")), result);
     }
@@ -229,9 +231,8 @@ class RunCommandToolTest {
 
     @Test
     void rejectsCommandOutsideScope() {
-        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
-                .withTools(List.of("run_command"), List.of())
-                .withCommands(List.of("git status"), List.of());
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of()).withTools(List.of("run_command"), List.of())
+            .withCommands(List.of("git status"), List.of());
         RunCommandTool tool = new RunCommandTool(new PathValidator(workspace, scope));
 
         String result = tool.execute(Map.of("command", "mvn -v"));
@@ -242,8 +243,7 @@ class RunCommandToolTest {
 
     @Test
     void readOnlyScopeRejectsGitWrite() {
-        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
-                .withCommands(List.of("git"), List.of());
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of()).withCommands(List.of("git"), List.of());
         RunCommandTool tool = new RunCommandTool(new PathValidator(workspace, scope));
 
         String result = tool.execute(Map.of("command", "git commit -m \"test\""));
@@ -253,8 +253,7 @@ class RunCommandToolTest {
 
     @Test
     void writableScopeStillAllowsGitWriteChecks() {
-        AgentScope scope = AgentScope.readWrite(List.of(), List.of())
-                .withCommands(List.of("git commit"), List.of());
+        AgentScope scope = AgentScope.readWrite(List.of(), List.of()).withCommands(List.of("git commit"), List.of());
         RunCommandTool tool = new RunCommandTool(new PathValidator(workspace, scope));
 
         String result = tool.execute(Map.of("command", "git commit"));
@@ -264,8 +263,7 @@ class RunCommandToolTest {
 
     @Test
     void tokenizerKeepsQuotedArguments() {
-        assertEquals(List.of("git", "commit", "-m", "带 空格 的说明"),
-                RunCommandTool.tokenize("git commit -m \"带 空格 的说明\""));
+        assertEquals(List.of("git", "commit", "-m", "带 空格 的说明"), RunCommandTool.tokenize("git commit -m \"带 空格 的说明\""));
         assertEquals(List.of("mvn", "-q", "test"), RunCommandTool.tokenize("  mvn   -q  test  "));
     }
 

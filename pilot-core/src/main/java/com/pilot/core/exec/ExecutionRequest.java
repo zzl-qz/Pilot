@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import com.pilot.core.tool.ProcessSupport;
+
 /**
  * 一次受控命令执行。
  *
@@ -16,7 +18,7 @@ import java.util.Objects;
  * @param network       是否允许容器访问网络
  */
 public record ExecutionRequest(List<String> argv, String script, Path workdir, Path workspaceRoot,
-                               Map<String, String> env, boolean network, ExecutionLimits limits, Path dependencyCache) {
+    Map<String, String> env, boolean network, ExecutionLimits limits, Path dependencyCache) {
     public ExecutionRequest {
         // argv 是已分词参数，空参数和首尾空格都有语义，不能像命令文本一样裁剪。
         argv = argv == null ? List.of() : List.copyOf(argv);
@@ -24,15 +26,17 @@ public record ExecutionRequest(List<String> argv, String script, Path workdir, P
         if (argv.isEmpty() && script.isEmpty()) {
             throw new IllegalArgumentException("argv or script must not be empty");
         }
-        if (!argv.isEmpty() && argv.getFirst().isBlank()) throw new IllegalArgumentException("executable must not be blank");
+        if (!argv.isEmpty() && argv.getFirst().isBlank()) {
+            throw new IllegalArgumentException("executable must not be blank");
+        }
         Objects.requireNonNull(workdir, "workdir must not be null");
         workspaceRoot = workspaceRoot == null ? workdir : workspaceRoot;
         env = env == null ? Map.of() : Map.copyOf(env);
         limits = limits == null ? ExecutionLimits.defaults() : limits;
     }
 
-    public ExecutionRequest(List<String> argv, String script, Path workdir, Path workspaceRoot,
-                            Map<String, String> env, boolean network, ExecutionLimits limits) {
+    public ExecutionRequest(List<String> argv, String script, Path workdir, Path workspaceRoot, Map<String, String> env,
+        boolean network, ExecutionLimits limits) {
         this(argv, script, workdir, workspaceRoot, env, network, limits, null);
     }
 
@@ -42,10 +46,10 @@ public record ExecutionRequest(List<String> argv, String script, Path workdir, P
     }
 
     /** 以宿主平台 shell 执行一条命令行（LOCAL 后端的常见入口）。 */
-    public static ExecutionRequest shell(String command, Path workdir, Path workspaceRoot,
-                                         Map<String, String> env, boolean network, ExecutionLimits limits) {
-        return new ExecutionRequest(com.pilot.core.tool.ProcessSupport.shell(command), command,
-                workdir, workspaceRoot, env, network, limits);
+    public static ExecutionRequest shell(String command, Path workdir, Path workspaceRoot, Map<String, String> env,
+        boolean network, ExecutionLimits limits) {
+        return new ExecutionRequest(ProcessSupport.shell(command), command, workdir, workspaceRoot, env, network,
+            limits);
     }
 
     public String commandLine() {

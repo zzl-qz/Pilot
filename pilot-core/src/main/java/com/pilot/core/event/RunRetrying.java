@@ -11,7 +11,7 @@ package com.pilot.core.event;
  * @param maxAttempts 重试预算的最大次数；未知为 {@code null}
  */
 public record RunRetrying(int attempt, long delayMs, String reason, Long elapsedMs, Long remainingMs,
-                          Integer maxAttempts) implements SessionEvent {
+    Integer maxAttempts) implements SessionEvent {
     public RunRetrying {
         if (attempt < 1) {
             throw new IllegalArgumentException("attempt must be >= 1");

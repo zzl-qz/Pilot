@@ -1,13 +1,13 @@
 package com.pilot.server.config;
 
+import java.util.List;
+import java.util.Objects;
+import java.util.function.Function;
+
 import com.pilot.core.loop.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ToolDefinition;
-
-import java.util.List;
-import java.util.Objects;
-import java.util.function.Function;
 
 /**
  * 模型客户端代理：每次调用前比对当前配置，变了就用新配置重建底层客户端。
@@ -29,7 +29,7 @@ public final class ModelClientProvider implements ModelClient {
     }
 
     public ModelClientProvider(ModelSettings settings, Function<ModelSettings.Snapshot, ModelClient> factory,
-                               java.util.function.Supplier<String> revision) {
+        java.util.function.Supplier<String> revision) {
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         this.factory = Objects.requireNonNull(factory, "factory must not be null");
         this.revision = revision;
@@ -40,13 +40,25 @@ public final class ModelClientProvider implements ModelClient {
         return client().chat(messages, tools);
     }
 
-    @Override public ModelClient snapshot() { return client(); }
-    @Override public com.pilot.core.model.ModelProfile profile() { return client().profile(); }
-    @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, java.util.function.Consumer<String> text) {
+    @Override
+    public ModelClient snapshot() {
+        return client();
+    }
+
+    @Override
+    public com.pilot.core.model.ModelProfile profile() {
+        return client().profile();
+    }
+
+    @Override
+    public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools,
+        java.util.function.Consumer<String> text) {
         return client().chat(messages, tools, text);
     }
-    @Override public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, java.util.function.Consumer<String> text,
-                                         java.util.function.Consumer<String> reasoning) {
+
+    @Override
+    public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools,
+        java.util.function.Consumer<String> text, java.util.function.Consumer<String> reasoning) {
         return client().chat(messages, tools, text, reasoning);
     }
 

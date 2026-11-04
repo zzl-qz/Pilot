@@ -1,9 +1,8 @@
 package com.pilot.server.controller;
 
-import com.pilot.core.session.Session;
-import com.pilot.core.session.SessionService;
-import com.pilot.server.config.AgentProperties;
-import com.pilot.server.workspace.ChangeService;
+import java.nio.file.Path;
+import java.util.List;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,8 +13,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.nio.file.Path;
-import java.util.List;
+import com.pilot.core.session.Session;
+import com.pilot.core.session.SessionService;
+import com.pilot.server.config.AgentProperties;
+import com.pilot.server.workspace.ChangeService;
 
 /** 会话改动审阅：读取该会话工作区的 git 状态与 diff，并按文件撤销改动。 */
 @RestController
@@ -60,18 +61,16 @@ public class ChangeController {
      */
     @PostMapping("/diff/restore")
     public ChangeService.RestoreReport restore(@PathVariable String id,
-                                               @RequestBody(required = false) RestoreRequest request) {
-        return changes.restore(workspace(id),
-                request == null ? List.of() : request.paths(),
-                request != null && Boolean.TRUE.equals(request.all()));
+        @RequestBody(required = false) RestoreRequest request) {
+        return changes.restore(workspace(id), request == null ? List.of() : request.paths(),
+            request != null && Boolean.TRUE.equals(request.all()));
     }
 
     private Path workspace(String id) {
-        Session session = sessions.find(id).orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
-        String workspace = session.workspace() == null || session.workspace().isBlank()
-                ? properties.workspace()
-                : session.workspace();
+        Session session = sessions.find(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
+        String workspace =
+            session.workspace() == null || session.workspace().isBlank() ? properties.workspace() : session.workspace();
         return Path.of(workspace);
     }
 

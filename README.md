@@ -85,6 +85,8 @@ bash mvnw -pl pilot-server spring-boot:run
 
 只构建 `pilot-server` 时，同一次编译会带上 `pilot-core` 的源码，不依赖本机仓库里可能过期的 JAR，也不另起一次 Maven。IDEA 里运行 `PilotServerApplication` 即可。项目不使用 Spring Boot DevTools，改了 Java 后由你再点一次运行。若 9999 仍被旧进程占用，先停掉那个进程。
 
+Java 代码采用基于阿里巴巴开发手册的[格式与可读性规范](config/java/README.md)。提交前运行 `./mvnw spotless:apply` 整理格式，再运行 `./mvnw spotless:check checkstyle:check`；`verify` 和可靠性脚本也会执行这两个检查。Windows 使用 `.\mvnw.cmd`。
+
 ## 权限说明
 
 - `AUTO`：注册工具直接执行（默认，与 Codex / OpenCode 一致）。

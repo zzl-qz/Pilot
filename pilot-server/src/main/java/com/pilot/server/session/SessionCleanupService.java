@@ -1,11 +1,19 @@
 package com.pilot.server.session;
 
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.stereotype.Component;
+
+import com.pilot.core.browser.BrowserBackend;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.PlanRepository;
+import com.pilot.core.session.RunCheckpointRepository;
 import com.pilot.core.session.RunRepository;
+import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.tool.CommandTaskManager;
 import com.pilot.server.multi.SandboxStore;
-import org.springframework.stereotype.Component;
+import com.pilot.server.store.ToolCallJournalFactory;
+import com.pilot.server.validation.ValidationLedger;
 
 /**
  * 会话的级联删除：删一个会话要同时清掉它的事件、对话记忆、计划、运行记录、沙箱和内存队列。
@@ -22,20 +30,16 @@ public class SessionCleanupService {
     private final SandboxStore sandboxes;
     private final RunStarter runStarter;
     private final TaskControlService taskControls;
-    private final com.pilot.core.tool.CommandTaskManager commandTasks;
-    private final org.springframework.beans.factory.ObjectProvider<com.pilot.core.browser.BrowserBackend> browser;
-    private final com.pilot.server.validation.ValidationLedger validations;
-    private final com.pilot.server.store.ToolCallJournalFactory journals;
-    private final com.pilot.core.session.RunCheckpointRepository checkpoints;
+    private final CommandTaskManager commandTasks;
+    private final ObjectProvider<BrowserBackend> browser;
+    private final ValidationLedger validations;
+    private final ToolCallJournalFactory journals;
+    private final RunCheckpointRepository checkpoints;
 
-    public SessionCleanupService(SessionService sessions, ConversationRepository conversations,
-                                 PlanRepository plans, RunRepository runs, SandboxStore sandboxes,
-                                 RunStarter runStarter, TaskControlService taskControls,
-                                 com.pilot.core.tool.CommandTaskManager commandTasks,
-                                 org.springframework.beans.factory.ObjectProvider<com.pilot.core.browser.BrowserBackend> browser,
-                                 com.pilot.server.validation.ValidationLedger validations,
-                                 com.pilot.server.store.ToolCallJournalFactory journals,
-                                 com.pilot.core.session.RunCheckpointRepository checkpoints) {
+    public SessionCleanupService(SessionService sessions, ConversationRepository conversations, PlanRepository plans,
+        RunRepository runs, SandboxStore sandboxes, RunStarter runStarter, TaskControlService taskControls,
+        CommandTaskManager commandTasks, ObjectProvider<BrowserBackend> browser, ValidationLedger validations,
+        ToolCallJournalFactory journals, RunCheckpointRepository checkpoints) {
         this.validations = validations;
         this.journals = journals;
         this.checkpoints = checkpoints;
@@ -55,12 +59,16 @@ public class SessionCleanupService {
      */
     public boolean delete(String sessionId) {
         // 子会话不在主列表里，不能依赖某个浏览器的本地标签替服务器做清理。
-        for (com.pilot.core.session.Session child : sessions.list()) {
-            if (sessionId.equals(child.parentSessionId())) delete(child.id());
+        for (Session child : sessions.list()) {
+            if (sessionId.equals(child.parentSessionId())) {
+                delete(child.id());
+            }
         }
         commandTasks.stopSession(sessionId);
-        com.pilot.core.browser.BrowserBackend backend = browser.getIfAvailable();
-        if (backend != null) backend.closeSession(sessionId);
+        BrowserBackend backend = browser.getIfAvailable();
+        if (backend != null) {
+            backend.closeSession(sessionId);
+        }
         runStarter.activeRun(sessionId).ifPresent(runStarter::cancel);
         boolean removed = sessions.delete(sessionId);
         conversations.delete(sessionId);

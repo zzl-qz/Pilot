@@ -7,14 +7,22 @@ import java.util.Map;
 
 /** 一次验证并应用同一文件里的多个精确替换；任何一处失败都不产生部分修改。 */
 final class ExactEditBatch {
-    record Edit(String oldText, String newText) {}
-    record Applied(String content, int count, int oldLines, int newLines) {}
-    private record Match(int start, int end, String replacement) {}
+    record Edit(String oldText, String newText) {
+    }
 
-    private ExactEditBatch() {}
+    record Applied(String content, int count, int oldLines, int newLines) {
+    }
+
+    private record Match(int start, int end, String replacement) {
+    }
+
+    private ExactEditBatch() {
+    }
 
     static List<Edit> parse(Map<String, Object> args) {
-        if (args == null) throw new IllegalArgumentException("缺少编辑参数");
+        if (args == null) {
+            throw new IllegalArgumentException("缺少编辑参数");
+        }
         boolean legacy = args.containsKey("old_string") || args.containsKey("new_string");
         Object batch = args.get("edits");
         if (batch != null && legacy) {
@@ -36,9 +44,8 @@ final class ExactEditBatch {
         }
         List<Edit> edits = new ArrayList<>(entries.size());
         for (int i = 0; i < entries.size(); i++) {
-            if (!(entries.get(i) instanceof Map<?, ?> item)
-                    || !(item.get("old_string") instanceof String old) || old.isEmpty()
-                    || !(item.get("new_string") instanceof String replacement)) {
+            if (!(entries.get(i) instanceof Map<?, ?> item) || !(item.get("old_string") instanceof String old)
+                || old.isEmpty() || !(item.get("new_string") instanceof String replacement)) {
                 throw new IllegalArgumentException("edits[" + i + "] 需要非空 old_string 和字符串 new_string");
             }
             edits.add(new Edit(old, replacement));
@@ -57,19 +64,21 @@ final class ExactEditBatch {
         for (int i = 0; i < edits.size(); i++) {
             Edit edit = edits.get(i);
             String search = normalize(edit.oldText());
-            if (search.isEmpty()) throw new IllegalArgumentException("edits[" + i + "] 的 old_string 不能为空");
+            if (search.isEmpty()) {
+                throw new IllegalArgumentException("edits[" + i + "] 的 old_string 不能为空");
+            }
             int start = normalized.indexOf(search);
             if (start < 0) {
                 throw new IllegalArgumentException("edits[" + i + "] 未找到 old_string。最接近的文件片段：\n"
-                        + closestExcerpt(normalized, search) + "\n请基于该片段提供更精确的旧内容。");
+                    + closestExcerpt(normalized, search) + "\n请基于该片段提供更精确的旧内容。");
             }
             if (normalized.indexOf(search, start + search.length()) >= 0) {
                 throw new IllegalArgumentException("edits[" + i + "] 的 old_string 匹配到多处，无法唯一定位。请扩大上下文。");
             }
             String replacement = normalize(edit.newText());
             matches.add(new Match(start, start + search.length(), replacement));
-            oldLines += (int) search.lines().count();
-            newLines += (int) replacement.lines().count();
+            oldLines += (int)search.lines().count();
+            newLines += (int)replacement.lines().count();
         }
         matches.sort(Comparator.comparingInt(Match::start));
         for (int i = 1; i < matches.size(); i++) {
@@ -101,7 +110,9 @@ final class ExactEditBatch {
         for (int i = 0; i < sourceLines.length; i++) {
             String candidate = sourceLines[i].strip();
             int score = commonPrefix(candidate, needle);
-            if (!needle.isEmpty() && candidate.contains(needle)) score += needle.length();
+            if (!needle.isEmpty() && candidate.contains(needle)) {
+                score += needle.length();
+            }
             if (score > bestScore) {
                 bestScore = score;
                 bestLine = i;
@@ -111,7 +122,9 @@ final class ExactEditBatch {
         int to = Math.min(sourceLines.length, bestLine + 3);
         StringBuilder excerpt = new StringBuilder();
         for (int i = from; i < to; i++) {
-            if (excerpt.length() > 0) excerpt.append('\n');
+            if (excerpt.length() > 0) {
+                excerpt.append('\n');
+            }
             excerpt.append(i + 1).append(": ").append(sourceLines[i]);
         }
         return excerpt.toString();
@@ -120,7 +133,9 @@ final class ExactEditBatch {
     private static int commonPrefix(String left, String right) {
         int length = Math.min(left.length(), right.length());
         int index = 0;
-        while (index < length && left.charAt(index) == right.charAt(index)) index++;
+        while (index < length && left.charAt(index) == right.charAt(index)) {
+            index++;
+        }
         return index;
     }
 }

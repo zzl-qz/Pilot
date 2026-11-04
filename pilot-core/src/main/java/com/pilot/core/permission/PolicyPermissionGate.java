@@ -1,12 +1,12 @@
 package com.pilot.core.permission;
 
+import java.util.Objects;
+import java.util.function.Supplier;
+
 import com.pilot.core.tool.LocalInteraction;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.WritesFiles;
-
-import java.util.Objects;
-import java.util.function.Supplier;
 
 /**
  * 权限策略：默认全放行，与 Codex / OpenCode 的默认行为对齐——写入和命令不再逐个打断，
@@ -37,9 +37,8 @@ public final class PolicyPermissionGate implements PermissionGate {
     public PermissionResult check(ToolCall call, Tool tool) {
         var args = call == null ? null : call.args();
         if (tool.confirm(args)) {
-            return mode() == PermissionMode.READ_ONLY
-                    ? PermissionResult.deny("READ_ONLY 模式禁止执行 " + tool.name())
-                    : PermissionResult.ask("这项操作有破坏性，需要你确认后才执行");
+            return mode() == PermissionMode.READ_ONLY ? PermissionResult.deny("READ_ONLY 模式禁止执行 " + tool.name())
+                : PermissionResult.ask("这项操作有破坏性，需要你确认后才执行");
         }
         if (tool.readOnly(args)) {
             return PermissionResult.allow();
@@ -49,9 +48,8 @@ public final class PolicyPermissionGate implements PermissionGate {
             case ASK -> PermissionResult.ask("需要用户批准 " + tool.name());
             // 文件写入像 Codex 那样直接改，命令仍逐次确认：命令的副作用不能被快照回滚
             case AUTO_EDIT -> tool instanceof WritesFiles
-                    || tool instanceof LocalInteraction local && local.localInteraction(call == null ? null : call.args())
-                    ? PermissionResult.allow()
-                    : PermissionResult.ask("需要用户批准 " + tool.name());
+                || tool instanceof LocalInteraction local && local.localInteraction(call == null ? null : call.args())
+                    ? PermissionResult.allow() : PermissionResult.ask("需要用户批准 " + tool.name());
             case AUTO -> PermissionResult.allow();
         };
     }

@@ -1,15 +1,17 @@
 package com.pilot.server.config;
 
-import com.pilot.core.permission.PermissionMode;
-import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import org.junit.jupiter.api.Test;
+
+import com.pilot.core.permission.PermissionMode;
+
 class AgentPropertiesTest {
-    @Test void directAndGoalDefaultsAreHighAccidentFusesRatherThanShortBusinessBudgets() {
-        AgentProperties properties = new AgentProperties(".", PermissionMode.READ_ONLY,
-                120, 3, 5, 300, 4, 8, 120_000, true);
+    @Test
+    void directAndGoalDefaultsAreHighAccidentFusesRatherThanShortBusinessBudgets() {
+        AgentProperties properties =
+            new AgentProperties(".", PermissionMode.READ_ONLY, 120, 3, 5, 300, 4, 8, 120_000, true);
 
         assertEquals(120, properties.directMaxRequests());
         assertEquals(50_000_000L, properties.directMaxInputTokens());
@@ -21,7 +23,8 @@ class AgentPropertiesTest {
         assertEquals(28_800_000L, properties.goalMaxActiveMillis());
     }
 
-    @Test void defaultsFollowCodexAndOpenCodeFullyPermissiveAndNoCompletionGates() {
+    @Test
+    void defaultsFollowCodexAndOpenCodeFullyPermissiveAndNoCompletionGates() {
         AgentProperties properties = new AgentProperties(".", null, 0, null, null, 0, 0, null, null, null);
 
         assertEquals(PermissionMode.AUTO, properties.permissionMode(), "默认完全放行");

@@ -14,17 +14,11 @@ import java.util.Objects;
  * @param payload   事件负载
  * @param version   事件信封协议版本，当前为 1
  */
-public record EventEnvelope(
-        long sequence,
-        Instant timestamp,
-        String type,
-        String sessionId,
-        String runId,
-        SessionEvent payload,
-        int version) {
+public record EventEnvelope(long sequence, Instant timestamp, String type, String sessionId, String runId,
+    SessionEvent payload, int version) {
 
     public EventEnvelope(long sequence, Instant timestamp, String type, String sessionId, String runId,
-                         SessionEvent payload) {
+        SessionEvent payload) {
         this(sequence, timestamp, type, sessionId, runId, payload, 1);
     }
 
@@ -51,7 +45,8 @@ public record EventEnvelope(
         }
     }
 
-    public static EventEnvelope of(long sequence, Instant timestamp, String sessionId, String runId, SessionEvent payload) {
+    public static EventEnvelope of(long sequence, Instant timestamp, String sessionId, String runId,
+        SessionEvent payload) {
         Objects.requireNonNull(payload, "payload must not be null");
         return new EventEnvelope(sequence, timestamp, payload.type().wireName(), sessionId, runId, payload, 1);
     }

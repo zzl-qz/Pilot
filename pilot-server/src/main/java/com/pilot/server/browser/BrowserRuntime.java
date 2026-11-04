@@ -1,18 +1,5 @@
 package com.pilot.server.browser;
 
-import com.pilot.core.browser.BrowserBackend;
-import com.pilot.core.browser.BrowserEventListener;
-import com.pilot.core.browser.PlaywrightBackend;
-import com.pilot.core.tool.Availability;
-import com.pilot.server.config.PilotDataDir;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.SmartLifecycle;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.stereotype.Component;
-import tools.jackson.databind.ObjectMapper;
-
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,6 +16,21 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.SmartLifecycle;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.stereotype.Component;
+
+import com.pilot.core.browser.BrowserBackend;
+import com.pilot.core.browser.BrowserEventListener;
+import com.pilot.core.browser.PlaywrightBackend;
+import com.pilot.core.tool.Availability;
+import com.pilot.server.config.PilotDataDir;
+
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 浏览器运行时的装配与生命周期。
@@ -84,13 +86,13 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     private final ConcurrentMap<String, Boolean> interactionsPaused = new ConcurrentHashMap<>();
 
     public BrowserRuntime(PilotDataDir dataDir, ObjectMapper mapper,
-                          @Value("${pilot.browser.enabled:true}") boolean enabled,
-                          @Value("${pilot.browser.provision:true}") boolean provision,
-                          @Value("${pilot.browser.download-chromium:true}") boolean downloadChromium,
-                          @Value("${pilot.browser.headless:true}") boolean headless,
-                          @Value("${pilot.browser.prefer-bundled:true}") boolean preferBundled,
-                          @Value("${pilot.browser.browsers-dir:}") String browsersDir,
-                          @Value("${pilot.browser.idle-shutdown-seconds:-1}") long idleShutdownSeconds) {
+        @Value("${pilot.browser.enabled:true}") boolean enabled,
+        @Value("${pilot.browser.provision:true}") boolean provision,
+        @Value("${pilot.browser.download-chromium:true}") boolean downloadChromium,
+        @Value("${pilot.browser.headless:true}") boolean headless,
+        @Value("${pilot.browser.prefer-bundled:true}") boolean preferBundled,
+        @Value("${pilot.browser.browsers-dir:}") String browsersDir,
+        @Value("${pilot.browser.idle-shutdown-seconds:-1}") long idleShutdownSeconds) {
         this.dataDir = dataDir;
         this.mapper = mapper;
         this.enabled = enabled;
@@ -124,7 +126,9 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     public void closeSession(String sessionId) {
         interactionsPaused.remove(sessionId); // 会话关闭即复位接管开关
         PlaywrightBackend current = backend;
-        if (current != null) current.closeSession(sessionId);
+        if (current != null) {
+            current.closeSession(sessionId);
+        }
     }
 
     /** 用户接管：暂停/恢复智能体的页面交互动作（观察类不受影响）；内存态，重启即清零。 */
@@ -145,25 +149,33 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     public void setEventListener(BrowserEventListener listener) {
         this.eventListener = listener;
         PlaywrightBackend current = backend;
-        if (current != null) current.setEventListener(listener);
+        if (current != null) {
+            current.setEventListener(listener);
+        }
     }
 
     @Override
     public void mirrorControl(String sessionId, boolean start, int maxWidth, int quality) {
         PlaywrightBackend current = backend;
-        if (current != null) current.mirrorControl(sessionId, start, maxWidth, quality);
+        if (current != null) {
+            current.mirrorControl(sessionId, start, maxWidth, quality);
+        }
     }
 
     /** 开/关截图推帧，但不把会话从「有人在看」里摘掉。 */
     public void mirrorCapture(String sessionId, boolean capture, int maxWidth, int quality) {
         PlaywrightBackend current = backend;
-        if (current != null) current.mirrorControl(sessionId, true, maxWidth, quality, capture);
+        if (current != null) {
+            current.mirrorControl(sessionId, true, maxWidth, quality, capture);
+        }
     }
 
     @Override
     public void focusPage(String sessionId) {
         PlaywrightBackend current = backend;
-        if (current != null) current.focusPage(sessionId);
+        if (current != null) {
+            current.focusPage(sessionId);
+        }
     }
 
     /** 最近一次装配实际生效的 headless（含无桌面降级）：前端据此判断有没有窗口可置前。 */
@@ -180,7 +192,9 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     @Override
     public void start() {
         running = true;
-        if (!enabled) return;
+        if (!enabled) {
+            return;
+        }
         pendingReason = "浏览器运行时正在准备（首次使用需要安装依赖，请稍后再试）";
         Thread thread = new Thread(this::prepare, "pilot-browser-provision");
         thread.setDaemon(true);
@@ -193,7 +207,9 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         running = false;
         PlaywrightBackend current = backend;
         backend = null;
-        if (current != null) current.close();
+        if (current != null) {
+            current.close();
+        }
     }
 
     @Override
@@ -227,13 +243,12 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
             }
             boolean headless = resolveHeadless();
             lastHeadless = headless;
-            PlaywrightBackend candidate = new PlaywrightBackend(node, script, home, mapper,
-                    idleMillis(headless), sidecarEnvironment(home, headless));
+            PlaywrightBackend candidate = new PlaywrightBackend(node, script, home, mapper, idleMillis(headless),
+                sidecarEnvironment(home, headless));
             candidate.setEventListener(eventListener);
             Availability result = candidate.probe();
-            if (!result.available() && provision && downloadChromium
-                    && result.reason().contains("没有找到可用的")
-                    && installChromium(home, node)) {
+            if (!result.available() && provision && downloadChromium && result.reason().contains("没有找到可用的")
+                && installChromium(home, node)) {
                 result = candidate.probe();
             }
             // 即使探测失败也保留 backend：之后用户装好浏览器，availability() 会自动重测。
@@ -255,13 +270,12 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
             return false;
         }
         log.info("第一次使用浏览器验证，正在安装 playwright-core@{}", PLAYWRIGHT_VERSION);
-        List<List<String>> attempts = List.of(
-                List.of(npm.toString(), "install", "--no-audit", "--no-fund", "--omit=dev"),
-                List.of(npm.toString(), "install", "--no-audit", "--no-fund", "--omit=dev",
-                        "--registry=https://registry.npmmirror.com"));
+        List<List<String>> attempts =
+            List.of(List.of(npm.toString(), "install", "--no-audit", "--no-fund", "--omit=dev"), List.of(npm.toString(),
+                "install", "--no-audit", "--no-fund", "--omit=dev", "--registry=https://registry.npmmirror.com"));
         for (List<String> command : attempts) {
             if (run(home, node, Duration.ofMinutes(5), command, Map.of()) == 0
-                    && Files.isDirectory(home.resolve("node_modules").resolve("playwright-core"))) {
+                && Files.isDirectory(home.resolve("node_modules").resolve("playwright-core"))) {
                 return true;
             }
             log.info("安装未成功，换下一个 npm 源重试");
@@ -271,7 +285,9 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
 
     private boolean installChromium(Path home, Path node) {
         Path cli = home.resolve("node_modules").resolve("playwright-core").resolve("cli.js");
-        if (!Files.isRegularFile(cli)) return false;
+        if (!Files.isRegularFile(cli)) {
+            return false;
+        }
         Path browsers = browsersPath(home);
         log.info("本机没有可用的浏览器，正在下载内置 Chromium（完整版约 400MB，仅此一次，落盘 {}）", browsers);
         // 只装完整版：sidecar 一律显式传 executablePath（无头降级也是完整版跑无头模式），
@@ -297,10 +313,12 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
 
     /** @return PLAYWRIGHT_BROWSERS_PATH 下是否已有 chromium-* 目录（安装成功的粗校验） */
     private static boolean hasChromium(Path browsers) {
-        if (!Files.isDirectory(browsers)) return false;
+        if (!Files.isDirectory(browsers)) {
+            return false;
+        }
         try (java.util.stream.Stream<Path> entries = Files.list(browsers)) {
-            return entries.anyMatch(path -> Files.isDirectory(path)
-                    && path.getFileName().toString().startsWith("chromium-"));
+            return entries
+                .anyMatch(path -> Files.isDirectory(path) && path.getFileName().toString().startsWith("chromium-"));
         } catch (IOException e) {
             return false;
         }
@@ -316,8 +334,8 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     }
 
     private static boolean desktopAvailable() {
-        return desktopAvailable(System.getProperty("os.name"),
-                System.getenv("SESSIONNAME"), System.getenv("DISPLAY"), System.getenv("WAYLAND_DISPLAY"));
+        return desktopAvailable(System.getProperty("os.name"), System.getenv("SESSIONNAME"), System.getenv("DISPLAY"),
+            System.getenv("WAYLAND_DISPLAY"));
     }
 
     /**
@@ -346,7 +364,9 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
 
     /** 空闲回收策略：显式秒数优先；自动模式下无头 10 分钟，有头不回收（用户可能正看着窗口）。 */
     private long idleMillis(boolean headless) {
-        if (idleShutdownSeconds >= 0) return idleShutdownSeconds * 1000L;
+        if (idleShutdownSeconds >= 0) {
+            return idleShutdownSeconds * 1000L;
+        }
         return headless ? 10 * 60_000L : 0L;
     }
 
@@ -355,13 +375,17 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         Map<String, String> env = new LinkedHashMap<>();
         env.put("PLAYWRIGHT_BROWSERS_PATH", browsersPath(home).toString());
         env.put("PILOT_BROWSER_HEADLESS", headless ? "true" : "false");
-        if (!preferBundled) env.put("PILOT_BROWSER_PREFER_BUNDLED", "false");
+        if (!preferBundled) {
+            env.put("PILOT_BROWSER_PREFER_BUNDLED", "false");
+        }
         return env;
     }
 
     /** 内置 Chromium 落盘目录：默认在运行时目录下的 browsers/，可用配置改到别处。 */
     private Path browsersPath(Path home) {
-        if (browsersDir.isEmpty()) return home.resolve("browsers");
+        if (browsersDir.isEmpty()) {
+            return home.resolve("browsers");
+        }
         Path configured = Path.of(browsersDir);
         return configured.isAbsolute() ? configured : Path.of(".").toAbsolutePath().resolve(configured);
     }
@@ -398,23 +422,27 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         try (InputStream in = new ClassPathResource(SCRIPT_RESOURCE).getInputStream()) {
             bundled = in.readAllBytes();
         }
-        if (Files.isRegularFile(script) && java.util.Arrays.equals(Files.readAllBytes(script), bundled)) return;
+        if (Files.isRegularFile(script) && java.util.Arrays.equals(Files.readAllBytes(script), bundled)) {
+            return;
+        }
         Files.copy(new java.io.ByteArrayInputStream(bundled), script, StandardCopyOption.REPLACE_EXISTING);
     }
 
     private void writePackageJson(Path home) throws IOException {
         String json = """
-                {
-                  "name": "pilot-browser-sidecar",
-                  "private": true,
-                  "type": "module",
-                  "dependencies": {
-                    "playwright-core": "%s"
-                  }
-                }
-                """.formatted(PLAYWRIGHT_VERSION);
+            {
+              "name": "pilot-browser-sidecar",
+              "private": true,
+              "type": "module",
+              "dependencies": {
+                "playwright-core": "%s"
+              }
+            }
+            """.formatted(PLAYWRIGHT_VERSION);
         Path file = home.resolve("package.json");
-        if (Files.isRegularFile(file) && Files.readString(file).equals(json)) return;
+        if (Files.isRegularFile(file) && Files.readString(file).equals(json)) {
+            return;
+        }
         Files.writeString(file, json, StandardCharsets.UTF_8);
     }
 
@@ -422,7 +450,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         Path dir = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath();
         for (int i = 0; i < 6 && dir != null; i++) {
             if (Files.isRegularFile(dir.resolve("pom.xml"))
-                    && Files.isRegularFile(dir.resolve("pilot-server").resolve("pom.xml"))) {
+                && Files.isRegularFile(dir.resolve("pilot-server").resolve("pom.xml"))) {
                 return dir.resolve(".pilot").resolve("browser");
             }
             dir = dir.getParent();
@@ -436,25 +464,39 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         String bundled = System.getProperty("pilot.runtime.bin", "");
         dirs.addAll(List.of(bundled.split(File.pathSeparator)));
         String path = System.getenv("PATH");
-        if (path != null) dirs.addAll(List.of(path.split(File.pathSeparator)));
+        if (path != null) {
+            dirs.addAll(List.of(path.split(File.pathSeparator)));
+        }
         dirs.addAll(List.of("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"));
         for (String dir : dirs) {
-            if (dir.isBlank()) continue;
+            if (dir.isBlank()) {
+                continue;
+            }
             Path found = executable(Path.of(dir), "node");
-            if (found != null) return found;
+            if (found != null) {
+                return found;
+            }
         }
         return null;
     }
 
     private static Path sibling(Path node, String name) {
         Path found = executable(node.getParent(), name);
-        if (found != null) return found;
+        if (found != null) {
+            return found;
+        }
         String path = System.getenv("PATH");
-        if (path == null) return null;
+        if (path == null) {
+            return null;
+        }
         for (String dir : path.split(File.pathSeparator)) {
-            if (dir.isBlank()) continue;
+            if (dir.isBlank()) {
+                continue;
+            }
             found = executable(Path.of(dir), name);
-            if (found != null) return found;
+            if (found != null) {
+                return found;
+            }
         }
         return null;
     }
@@ -463,7 +505,9 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
         for (String file : windows ? List.of(name + ".exe", name + ".cmd") : List.of(name)) {
             Path candidate = dir.resolve(file);
-            if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) return candidate;
+            if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
+                return candidate;
+            }
         }
         return null;
     }

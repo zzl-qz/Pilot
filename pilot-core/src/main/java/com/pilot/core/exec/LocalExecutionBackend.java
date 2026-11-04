@@ -66,8 +66,8 @@ public final class LocalExecutionBackend implements ExecutionBackend {
             // stdin 关闭失败不影响执行
         }
 
-        CompletableFuture<Captured> output = CompletableFuture.supplyAsync(
-                () -> read(process.getInputStream(), request.limits().maxOutputBytes()));
+        CompletableFuture<Captured> output =
+            CompletableFuture.supplyAsync(() -> read(process.getInputStream(), request.limits().maxOutputBytes()));
         boolean finished;
         try {
             long timeout = request.limits().timeoutSeconds();
@@ -83,8 +83,8 @@ public final class LocalExecutionBackend implements ExecutionBackend {
             return new ExecutionResult(-1, captured.text(), true, captured.truncated(), id(), isolation(), "");
         }
         Captured captured = await(output);
-        return new ExecutionResult(process.exitValue(), captured.text(), false, captured.truncated(),
-                id(), isolation(), "");
+        return new ExecutionResult(process.exitValue(), captured.text(), false, captured.truncated(), id(), isolation(),
+            "");
     }
 
     @Override

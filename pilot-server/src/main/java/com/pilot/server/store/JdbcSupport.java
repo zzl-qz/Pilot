@@ -37,8 +37,7 @@ final class JdbcSupport {
 
     /** 查询多行；返回不可变列表。 */
     static <T> List<T> query(SqliteStore store, String sql, Binder binder, RowMapper<T> mapper, String failure) {
-        try (Connection connection = store.open();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = store.open(); PreparedStatement statement = connection.prepareStatement(sql)) {
             binder.bind(statement);
             try (ResultSet rows = statement.executeQuery()) {
                 ArrayList<T> result = new ArrayList<T>();
@@ -53,8 +52,7 @@ final class JdbcSupport {
     }
 
     /** 查询单行；没有结果返回空。 */
-    static <T> Optional<T> queryOne(SqliteStore store, String sql, Binder binder, RowMapper<T> mapper,
-                                    String failure) {
+    static <T> Optional<T> queryOne(SqliteStore store, String sql, Binder binder, RowMapper<T> mapper, String failure) {
         List<T> rows = query(store, sql, binder, mapper, failure);
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }

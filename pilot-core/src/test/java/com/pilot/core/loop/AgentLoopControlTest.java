@@ -1,5 +1,27 @@
 package com.pilot.core.loop;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+
+import org.junit.jupiter.api.Test;
+
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.ApprovalDecision;
 import com.pilot.core.event.ApprovalResolved;
@@ -19,24 +41,6 @@ import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.WritesFiles;
-import org.junit.jupiter.api.Test;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Supplier;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 class AgentLoopControlTest {
     @Test
@@ -52,8 +56,11 @@ class AgentLoopControlTest {
             requests.add(messages);
             if (turns.getAndIncrement() == 0) {
                 called.countDown();
-                try { assertTrue(release.await(5, TimeUnit.SECONDS)); }
-                catch (InterruptedException e) { throw new IllegalStateException(e); }
+                try {
+                    assertTrue(release.await(5, TimeUnit.SECONDS));
+                } catch (InterruptedException e) {
+                    throw new IllegalStateException(e);
+                }
                 return new ModelResponse("旧方案", List.of(call("a"), call("b")));
             }
             return new ModelResponse("按纠正后的范围完成", List.of());
@@ -68,8 +75,8 @@ class AgentLoopControlTest {
             assertNull(result.failureCode());
             assertEquals(0, executions.get());
             assertEquals(2, turns.get());
-            assertEquals(List.of("a", "b"), requests.get(1).stream().filter(m -> m.role().equals("tool"))
-                    .map(Message::toolCallId).toList());
+            assertEquals(List.of("a", "b"),
+                requests.get(1).stream().filter(m -> m.role().equals("tool")).map(Message::toolCallId).toList());
             assertEquals("只处理测试，不修改实现", requests.get(1).getLast().content());
             assertFalse(events.stream().anyMatch(e -> e instanceof AssistantDelta delta && delta.text().equals("旧方案")));
             assertEquals(1, events.stream().filter(RunCompleted.class::isInstance).count());
@@ -84,9 +91,8 @@ class AgentLoopControlTest {
         ArrayList<List<Message>> requests = new ArrayList<List<Message>>();
         ModelClient model = (messages, definitions) -> {
             requests.add(messages);
-            return turns.getAndIncrement() == 0
-                    ? new ModelResponse("", List.of(call("a"), call("b"), call("c")))
-                    : new ModelResponse("已重新规划", List.of());
+            return turns.getAndIncrement() == 0 ? new ModelResponse("", List.of(call("a"), call("b"), call("c")))
+                : new ModelResponse("已重新规划", List.of());
         };
         AgentLoop loop = loop(model, registry(() -> {
             executions.incrementAndGet();
@@ -111,8 +117,7 @@ class AgentLoopControlTest {
         ArrayList<SessionEvent> events = new ArrayList<SessionEvent>();
         ModelClient model = (messages, definitions) -> new ModelResponse("", List.of(call("a"), call("b")));
         AgentLoop loop = new AgentLoop(model, registry(executions::incrementAndGet),
-                (call, tool) -> PermissionResult.ask("需要确认"), approved(),
-                config(), cancelled::get);
+            (call, tool) -> PermissionResult.ask("需要确认"), approved(), config(), cancelled::get);
         AgentLoop.Result result = loop.run("完成目标", List.of(), event -> {
             events.add(event);
             if (event instanceof ApprovalResolved approval) {
@@ -127,7 +132,7 @@ class AgentLoopControlTest {
         assertEquals(List.of("a", "b"), outputs.stream().map(Message::toolCallId).toList());
         assertTrue(outputs.stream().allMatch(message -> message.content().startsWith("SKIPPED:")));
         assertTrue(events.stream().filter(ToolCompleted.class::isInstance).map(ToolCompleted.class::cast)
-                .allMatch(event -> event.resultSummary().startsWith("SKIPPED:")));
+            .allMatch(event -> event.resultSummary().startsWith("SKIPPED:")));
         assertTrue(events.stream().noneMatch(RunCompleted.class::isInstance));
     }
 
@@ -140,29 +145,29 @@ class AgentLoopControlTest {
         ArrayList<SessionEvent> events = new ArrayList<SessionEvent>();
         ModelClient model = (messages, definitions) -> {
             requests.add(messages);
-            return turns.getAndIncrement() == 0
-                    ? new ModelResponse("", List.of(call("a"), call("b")))
-                    : new ModelResponse("已采用纠正后的方向", List.of());
+            return turns.getAndIncrement() == 0 ? new ModelResponse("", List.of(call("a"), call("b")))
+                : new ModelResponse("已采用纠正后的方向", List.of());
         };
         AgentLoop loop = new AgentLoop(model, registry(executions::incrementAndGet),
-                (call, tool) -> PermissionResult.ask("需要确认"), approved(),
-                config(), () -> false, pending::poll);
+            (call, tool) -> PermissionResult.ask("需要确认"), approved(), config(), () -> false, pending::poll);
         AgentLoop.Result result = loop.run("原始目标", List.of(), event -> {
             events.add(event);
-            if (event instanceof ApprovalResolved) pending.add("不要修改文件，只解释方案");
+            if (event instanceof ApprovalResolved) {
+                pending.add("不要修改文件，只解释方案");
+            }
         });
         assertNull(result.failureCode());
         assertEquals(0, executions.get());
         assertEquals(2, requests.size());
         List<Message> revised = requests.get(1);
         assertEquals(List.of("system", "user", "assistant", "tool", "tool", "user"),
-                revised.stream().map(Message::role).toList());
+            revised.stream().map(Message::role).toList());
         assertEquals("不要修改文件，只解释方案", revised.getLast().content());
         assertTrue(revised.stream().filter(message -> message.role().equals("tool"))
-                .allMatch(message -> message.content().startsWith("SKIPPED:")));
+            .allMatch(message -> message.content().startsWith("SKIPPED:")));
         assertEquals(1, events.stream().filter(RunSteered.class::isInstance).count());
         RunCompleted completed = events.stream().filter(RunCompleted.class::isInstance).map(RunCompleted.class::cast)
-                .findFirst().orElseThrow();
+            .findFirst().orElseThrow();
         assertEquals(List.of(), completed.changedFiles());
         assertEquals(List.of(), completed.checks());
     }
@@ -173,19 +178,20 @@ class AgentLoopControlTest {
         AtomicInteger executions = new AtomicInteger();
         AtomicInteger turns = new AtomicInteger();
         ModelClient model = (messages, definitions) -> turns.getAndIncrement() == 0
-                ? new ModelResponse("", List.of(call("a"), call("b")))
-                : new ModelResponse("按新方向完成", List.of());
+            ? new ModelResponse("", List.of(call("a"), call("b"))) : new ModelResponse("按新方向完成", List.of());
         AgentLoop.Result result = loop(model, registry(executions::incrementAndGet), () -> false, pending::poll)
-                .run("原始目标", List.of(), event -> {
-                    if (event instanceof ToolStarted) pending.add("保留现有文件");
-                });
+            .run("原始目标", List.of(), event -> {
+                if (event instanceof ToolStarted) {
+                    pending.add("保留现有文件");
+                }
+            });
         assertNull(result.failureCode());
         assertEquals(0, executions.get());
         assertEquals(2, turns.get());
         assertEquals(List.of("原始目标", "保留现有文件"), result.conversation().stream()
-                .filter(message -> message.role().equals("user")).map(Message::content).toList());
-        assertEquals(List.of("a", "b"), result.conversation().stream()
-                .filter(message -> message.role().equals("tool")).map(Message::toolCallId).toList());
+            .filter(message -> message.role().equals("user")).map(Message::content).toList());
+        assertEquals(List.of("a", "b"), result.conversation().stream().filter(message -> message.role().equals("tool"))
+            .map(Message::toolCallId).toList());
     }
 
     @Test
@@ -198,18 +204,21 @@ class AgentLoopControlTest {
         });
         ModelClient model = (messages, definitions) -> new ModelResponse("", List.of(call("a"), call("b")));
         AgentLoop loop = loop(model, tool, cancelled::get, () -> null);
-        AgentLoop.Result paused = loop.run("完成原目标", List.of(), event -> { });
+        AgentLoop.Result paused = loop.run("完成原目标", List.of(), event -> {
+        });
         assertEquals("CANCELLED", paused.failureCode());
         assertEquals(1, executions.get());
-        assertEquals(List.of("a", "b"), paused.conversation().stream().filter(m -> m.role().equals("tool"))
-                .map(Message::toolCallId).toList());
+        assertEquals(List.of("a", "b"),
+            paused.conversation().stream().filter(m -> m.role().equals("tool")).map(Message::toolCallId).toList());
         assertTrue(paused.conversation().getLast().content().startsWith("SKIPPED:"));
         ModelClient resumedModel = (messages, definitions) -> {
             assertEquals(paused.conversation(), messages.subList(1, messages.size()));
             return new ModelResponse("继续后完成", List.of());
         };
-        AgentLoop.Result resumed = loop(resumedModel, tool, () -> false, () -> null)
-                .resume(paused.conversation(), event -> { }, messages -> { });
+        AgentLoop.Result resumed =
+            loop(resumedModel, tool, () -> false, () -> null).resume(paused.conversation(), event -> {
+            }, messages -> {
+            });
         assertNull(resumed.failureCode());
         assertEquals("继续后完成", resumed.finalText());
     }
@@ -219,9 +228,10 @@ class AgentLoopControlTest {
         AtomicBoolean cancelled = new AtomicBoolean();
         ModelClient model = (messages, definitions) -> new ModelResponse("", List.of(call("a")));
         AgentLoop loop = new AgentLoop(model, registry(() -> cancelled.set(true)),
-                new PolicyPermissionGate(PermissionMode.AUTO), ApprovalBroker.denyAll(),
-                new AgentLoop.Config(1, 3, "system", List::of, 0, 120_000, false), cancelled::get);
-        assertEquals("CANCELLED", loop.run("目标", List.of(), event -> { }).failureCode());
+            new PolicyPermissionGate(PermissionMode.AUTO), ApprovalBroker.denyAll(),
+            new AgentLoop.Config(1, 3, "system", List::of, 0, 120_000, false), cancelled::get);
+        assertEquals("CANCELLED", loop.run("目标", List.of(), event -> {
+        }).failureCode());
     }
 
     @Test
@@ -232,8 +242,8 @@ class AgentLoopControlTest {
             return new ModelResponse("已经完成", List.of());
         };
         ArrayList<SessionEvent> events = new ArrayList<SessionEvent>();
-        AgentLoop.Result result = loop(model, registry(() -> { }), cancelled::get, () -> null)
-                .run("原目标", List.of(), events::add);
+        AgentLoop.Result result = loop(model, registry(() -> {
+        }), cancelled::get, () -> null).run("原目标", List.of(), events::add);
         assertEquals("CANCELLED", result.failureCode());
         assertTrue(events.stream().noneMatch(RunCompleted.class::isInstance));
     }
@@ -245,17 +255,19 @@ class AgentLoopControlTest {
         AtomicInteger calls = new AtomicInteger();
         ArrayList<SessionEvent> events = new ArrayList<SessionEvent>();
         ModelClient model = (messages, definitions) -> {
-            if (calls.getAndIncrement() > 0) assertEquals("补充验收条件", messages.getLast().content());
+            if (calls.getAndIncrement() > 0) {
+                assertEquals("补充验收条件", messages.getLast().content());
+            }
             return new ModelResponse("本轮结果", List.of());
         };
-        AgentLoop loop = loop(model, registry(() -> { }), () -> false, pending::poll)
-                .withCompletionClaim(() -> {
-                    if (claims.getAndIncrement() == 0) {
-                        pending.add("补充验收条件");
-                        return false;
-                    }
-                    return true;
-                });
+        AgentLoop loop = loop(model, registry(() -> {
+        }), () -> false, pending::poll).withCompletionClaim(() -> {
+            if (claims.getAndIncrement() == 0) {
+                pending.add("补充验收条件");
+                return false;
+            }
+            return true;
+        });
         AgentLoop.Result result = loop.run("原目标", List.of(), events::add);
         assertNull(result.failureCode());
         assertEquals(2, calls.get());
@@ -270,26 +282,32 @@ class AgentLoopControlTest {
         AtomicInteger calls = new AtomicInteger();
         ModelClient model = (messages, definitions) -> {
             requests.add(messages);
-            return calls.getAndIncrement() == 0
-                    ? new ModelResponse("", List.of(call("a"))) : new ModelResponse("完成", List.of());
+            return calls.getAndIncrement() == 0 ? new ModelResponse("", List.of(call("a")))
+                : new ModelResponse("完成", List.of());
         };
         ToolRegistry tool = registry(() -> context.set("原始目标：修复登录；约束：不改数据库；验收：重连测试通过"));
         AgentLoop loop = loop(model, tool, () -> false, () -> null).withTaskContext(context::get);
-        AgentLoop.Result result = loop.run("继续", List.of(), event -> { });
+        AgentLoop.Result result = loop.run("继续", List.of(), event -> {
+        });
         assertTrue(requests.get(0).getFirst().content().contains("不改数据库"));
         assertTrue(requests.get(1).getFirst().content().contains("验收：重连测试通过"));
         assertFalse(result.conversation().stream().anyMatch(m -> m.role().equals("system")));
-        loop(model, tool, () -> false, () -> null).withTaskContext(context::get)
-                .resume(result.conversation(), event -> { }, messages -> { });
+        loop(model, tool, () -> false, () -> null).withTaskContext(context::get).resume(result.conversation(),
+            event -> {
+            }, messages -> {
+            });
         assertTrue(requests.getLast().getFirst().content().contains("原始目标：修复登录"));
         assertTrue(requests.getLast().getFirst().content().contains("验收：重连测试通过"));
     }
 
-    private static ToolCall call(String id) { return new ToolCall(id, "write", Map.of("path", id)); }
+    private static ToolCall call(String id) {
+        return new ToolCall(id, "write", Map.of("path", id));
+    }
 
-    private static AgentLoop loop(ModelClient model, ToolRegistry tools, Cancellation cancelled, Supplier<String> pending) {
+    private static AgentLoop loop(ModelClient model, ToolRegistry tools, Cancellation cancelled,
+        Supplier<String> pending) {
         return new AgentLoop(model, tools, new PolicyPermissionGate(PermissionMode.AUTO), ApprovalBroker.denyAll(),
-                config(), cancelled, pending);
+            config(), cancelled, pending);
     }
 
     private static AgentLoop.Config config() {
@@ -303,13 +321,34 @@ class AgentLoopControlTest {
     private static ToolRegistry registry(Runnable action) {
         ToolRegistry registry = new ToolRegistry();
         class ControlledTool implements Tool, WritesFiles, ProducesCheck {
-            public String name() { return "write"; }
-            public String description() { return "test"; }
-            public Map<String, Object> parameters() { return Map.of("type", "object"); }
-            public boolean readOnly() { return false; }
-            public String execute(Map<String, Object> args) { action.run(); return "executed"; }
-            public String changedPath(ToolCall call) { return String.valueOf(call.args().get("path")); }
-            public String checkSummary(ToolCall call, String result) { return "mvn test → exit 0"; }
+            public String name() {
+                return "write";
+            }
+
+            public String description() {
+                return "test";
+            }
+
+            public Map<String, Object> parameters() {
+                return Map.of("type", "object");
+            }
+
+            public boolean readOnly() {
+                return false;
+            }
+
+            public String execute(Map<String, Object> args) {
+                action.run();
+                return "executed";
+            }
+
+            public String changedPath(ToolCall call) {
+                return String.valueOf(call.args().get("path"));
+            }
+
+            public String checkSummary(ToolCall call, String result) {
+                return "mvn test → exit 0";
+            }
         }
         registry.register(new ControlledTool());
         return registry;

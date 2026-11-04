@@ -1,14 +1,14 @@
 package com.pilot.core.mcp;
 
-import com.pilot.core.tool.Availability;
-import com.pilot.core.tool.Tool;
-import com.pilot.core.tool.ToolSupport;
-
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+
+import com.pilot.core.tool.Availability;
+import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolSupport;
 
 /**
  * 按需发现 MCP 工具：模型每次请求只携带 {@code mcp_tools} 与 {@code mcp_call} 两个定义，
@@ -41,13 +41,11 @@ public final class McpToolsTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "server", Map.of("type", "string", "description", "MCP 服务器名；省略则列出所有已配置的服务器"),
-                        "query", Map.of("type", "string", "description", "按名称或描述过滤工具（不区分大小写）"),
-                        "tool", Map.of("type", "string", "description", "给出后返回该工具的完整说明与参数 schema")),
-                "additionalProperties", false);
+        return Map.of("type", "object", "properties",
+            Map.of("server", Map.of("type", "string", "description", "MCP 服务器名；省略则列出所有已配置的服务器"), "query",
+                Map.of("type", "string", "description", "按名称或描述过滤工具（不区分大小写）"), "tool",
+                Map.of("type", "string", "description", "给出后返回该工具的完整说明与参数 schema")),
+            "additionalProperties", false);
     }
 
     @Override
@@ -69,9 +67,8 @@ public final class McpToolsTool implements Tool {
 
     @Override
     public Availability availability() {
-        return manager.hasServers(workspace)
-                ? Availability.ready()
-                : Availability.unavailable("当前工作区没有配置 MCP 服务器（.mcp.json）");
+        return manager.hasServers(workspace) ? Availability.ready()
+            : Availability.unavailable("当前工作区没有配置 MCP 服务器（.mcp.json）");
     }
 
     @Override
@@ -80,7 +77,9 @@ public final class McpToolsTool implements Tool {
         String tool = ToolSupport.stringArg(args, "tool");
         String query = ToolSupport.stringArg(args, "query");
         if (server == null) {
-            if (tool != null || query != null) return "ERROR: 查询工具需要同时给出 server；先不带参数列出服务器";
+            if (tool != null || query != null) {
+                return "ERROR: 查询工具需要同时给出 server；先不带参数列出服务器";
+            }
             return listServers();
         }
         List<McpToolInfo> tools;
@@ -91,25 +90,29 @@ public final class McpToolsTool implements Tool {
         }
         if (tool != null) {
             return tools.stream().filter(info -> info.name().equals(tool)).findFirst()
-                    .map(info -> describe(server, info))
-                    .orElse("ERROR: 服务器 " + server + " 没有工具 " + tool + "；可用：" + names(tools));
+                .map(info -> describe(server, info))
+                .orElse("ERROR: 服务器 " + server + " 没有工具 " + tool + "；可用：" + names(tools));
         }
         List<McpToolInfo> matched = tools;
         if (query != null) {
             String needle = query.toLowerCase(Locale.ROOT);
             matched = tools.stream().filter(info -> info.name().toLowerCase(Locale.ROOT).contains(needle)
-                    || info.description().toLowerCase(Locale.ROOT).contains(needle)).toList();
+                || info.description().toLowerCase(Locale.ROOT).contains(needle)).toList();
         }
         if (matched.isEmpty()) {
             return "服务器 " + server + " 没有匹配的工具" + (query == null ? "。" : "（共 " + tools.size() + " 个，换个关键词）。");
         }
-        StringBuilder out = new StringBuilder("服务器 ").append(server).append(" 的工具（")
-                .append(matched.size()).append(" 个");
-        if (matched.size() > MAX_LISTED) out.append("，仅显示前 ").append(MAX_LISTED).append(" 个，请用 query 缩小");
+        StringBuilder out =
+            new StringBuilder("服务器 ").append(server).append(" 的工具（").append(matched.size()).append(" 个");
+        if (matched.size() > MAX_LISTED) {
+            out.append("，仅显示前 ").append(MAX_LISTED).append(" 个，请用 query 缩小");
+        }
         out.append("）：\n");
         for (McpToolInfo info : matched.stream().limit(MAX_LISTED).toList()) {
             out.append("- ").append(info.name()).append(info.readOnlyHint() ? " [只读]" : "");
-            if (!info.description().isBlank()) out.append("：").append(ToolSupport.oneLine(info.description(), 140));
+            if (!info.description().isBlank()) {
+                out.append("：").append(ToolSupport.oneLine(info.description(), 140));
+            }
             out.append('\n');
         }
         out.append("用 mcp_tools(server=\"").append(server).append("\", tool=\"名字\") 查看参数，再用 mcp_call 调用。");
@@ -118,7 +121,9 @@ public final class McpToolsTool implements Tool {
 
     private String listServers() {
         Map<String, McpServerConfig> servers = manager.servers(workspace);
-        if (servers.isEmpty()) return "当前工作区没有配置 MCP 服务器（.mcp.json）。";
+        if (servers.isEmpty()) {
+            return "当前工作区没有配置 MCP 服务器（.mcp.json）。";
+        }
         List<String> lines = new ArrayList<>();
         for (McpServerConfig config : servers.values()) {
             String status;
@@ -138,8 +143,7 @@ public final class McpToolsTool implements Tool {
 
     private static String describe(String server, McpToolInfo info) {
         return "工具 " + server + "." + info.name() + (info.readOnlyHint() ? "（声明为只读）" : "") + "\n"
-                + (info.description().isBlank() ? "" : info.description() + "\n")
-                + "参数 schema：\n" + info.inputSchema();
+            + (info.description().isBlank() ? "" : info.description() + "\n") + "参数 schema：\n" + info.inputSchema();
     }
 
     private static String names(List<McpToolInfo> tools) {

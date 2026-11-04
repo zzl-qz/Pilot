@@ -1,10 +1,10 @@
 package com.pilot.server.store;
 
-import com.pilot.core.plan.PlanItem;
-import com.pilot.core.session.PlanRepository;
-
 import java.util.ArrayList;
 import java.util.List;
+
+import com.pilot.core.plan.PlanItem;
+import com.pilot.core.session.PlanRepository;
 
 /** SQLite 版计划存储：每次 update_plan 整体替换该会话的清单。 */
 public final class JdbcPlanRepository implements PlanRepository {
@@ -19,11 +19,9 @@ public final class JdbcPlanRepository implements PlanRepository {
 
     @Override
     public List<PlanItem> load(String sessionId) {
-        return JdbcSupport.query(store,
-                "SELECT step, status FROM plan_items WHERE session_id = ? ORDER BY ord",
-                statement -> statement.setString(1, sessionId),
-                rows -> new PlanItem(rows.getString(1), rows.getString(2)),
-                "读取计划失败: " + sessionId);
+        return JdbcSupport.query(store, "SELECT step, status FROM plan_items WHERE session_id = ? ORDER BY ord",
+            statement -> statement.setString(1, sessionId), rows -> new PlanItem(rows.getString(1), rows.getString(2)),
+            "读取计划失败: " + sessionId);
     }
 
     @Override
@@ -47,7 +45,6 @@ public final class JdbcPlanRepository implements PlanRepository {
 
     @Override
     public void delete(String sessionId) {
-        JdbcSupport.update(store, DELETE, statement -> statement.setString(1, sessionId),
-                "删除计划失败: " + sessionId);
+        JdbcSupport.update(store, DELETE, statement -> statement.setString(1, sessionId), "删除计划失败: " + sessionId);
     }
 }

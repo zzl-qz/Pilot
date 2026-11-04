@@ -16,8 +16,8 @@ import java.util.Objects;
  * @param folders 绑定的绝对路径，按用户给的顺序；第一个是默认工作区
  * @param baseCommit 建项目时记录的仓库基线；沙箱与变更审阅都应以它为起点
  */
-public record Project(String id, String name, List<String> folders, String baseCommit,
-                      Instant createdAt, Instant updatedAt) {
+public record Project(String id, String name, List<String> folders, String baseCommit, Instant createdAt,
+    Instant updatedAt) {
     /** 兼容调用：不记录基线。 */
     public Project(String id, String name, List<String> folders, Instant createdAt, Instant updatedAt) {
         this(id, name, folders, null, createdAt, updatedAt);

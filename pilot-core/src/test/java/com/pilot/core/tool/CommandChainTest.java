@@ -1,14 +1,15 @@
 package com.pilot.core.tool;
 
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.Collections;
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
 
 class CommandChainTest {
     @Test
@@ -45,7 +46,7 @@ class CommandChainTest {
     @Test
     void rejectsShellSyntaxThatWouldBeReinterpreted() {
         for (String command : List.of("a `b`", "a $(b)", "a &", "a\nb", "a ||", "&& a", "a && && b",
-                "echo 'unterminated", "")) {
+            "echo 'unterminated", "")) {
             assertNotNull(CommandChain.parse(command).error(), command);
         }
         assertNull(CommandChain.parse("ls ;").error());
@@ -53,7 +54,7 @@ class CommandChainTest {
 
     @Test
     void limitsChainLength() {
-        String command = String.join(" && ", java.util.Collections.nCopies(CommandChain.MAX_SEGMENTS + 1, "ls"));
+        String command = String.join(" && ", Collections.nCopies(CommandChain.MAX_SEGMENTS + 1, "ls"));
 
         assertNotNull(CommandChain.parse(command).error());
     }

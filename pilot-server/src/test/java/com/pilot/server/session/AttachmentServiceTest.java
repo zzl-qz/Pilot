@@ -1,8 +1,9 @@
 package com.pilot.server.session;
 
-import com.pilot.core.loop.Attachment;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -12,10 +13,10 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.loop.Attachment;
 
 class AttachmentServiceTest {
     @TempDir
@@ -26,7 +27,7 @@ class AttachmentServiceTest {
         AttachmentService service = new AttachmentService(root);
 
         AttachmentService.Prepared prepared = service.prepare("ses_1", "看看这个类",
-                List.of(new AttachmentService.Inbound("A.java", "text/plain", base64("class A {}"))));
+            List.of(new AttachmentService.Inbound("A.java", "text/plain", base64("class A {}"))));
 
         assertTrue(prepared.content().contains("看看这个类"));
         assertTrue(prepared.content().contains("[附件 A.java"));
@@ -37,10 +38,10 @@ class AttachmentServiceTest {
     @Test
     void storesImageAttachmentOnDisk() throws IOException {
         AttachmentService service = new AttachmentService(root);
-        byte[] png = {(byte) 0x89, 'P', 'N', 'G'};
+        byte[] png = {(byte)0x89, 'P', 'N', 'G'};
 
-        AttachmentService.Prepared prepared = service.prepare("ses_1", "看图", List.of(
-                new AttachmentService.Inbound("shot.png", "image/png", Base64.getEncoder().encodeToString(png))));
+        AttachmentService.Prepared prepared = service.prepare("ses_1", "看图",
+            List.of(new AttachmentService.Inbound("shot.png", "image/png", Base64.getEncoder().encodeToString(png))));
 
         assertEquals(1, prepared.attachments().size());
         Attachment attachment = prepared.attachments().get(0);
@@ -52,9 +53,10 @@ class AttachmentServiceTest {
     @Test
     void imagePositionsCountOnlyImageAttachments() {
         AttachmentService service = new AttachmentService(root);
-        AttachmentService.Prepared prepared = service.prepare("ses_1", "beforeafter", List.of(
-                new AttachmentService.Inbound("shot.png", "image/png", base64("png")),
-                new AttachmentService.Inbound("notes.txt", "text/plain", base64("note"))), List.of(6));
+        AttachmentService.Prepared prepared = service.prepare("ses_1", "beforeafter",
+            List.of(new AttachmentService.Inbound("shot.png", "image/png", base64("png")),
+                new AttachmentService.Inbound("notes.txt", "text/plain", base64("note"))),
+            List.of(6));
 
         assertEquals(1, prepared.attachments().size());
         assertEquals(List.of(6), prepared.imagePositions());
@@ -65,9 +67,8 @@ class AttachmentServiceTest {
     void acceptsDataUrlPrefixedPayload() {
         AttachmentService service = new AttachmentService(root);
 
-        AttachmentService.Prepared prepared = service.prepare("ses_1", "",
-                List.of(new AttachmentService.Inbound("A.java", "text/plain",
-                        "data:text/plain;base64," + base64("int a = 1;"))));
+        AttachmentService.Prepared prepared = service.prepare("ses_1", "", List.of(
+            new AttachmentService.Inbound("A.java", "text/plain", "data:text/plain;base64," + base64("int a = 1;"))));
 
         assertTrue(prepared.content().contains("int a = 1;"));
     }
@@ -76,8 +77,8 @@ class AttachmentServiceTest {
     void inventsPromptWhenOnlyImageHasNoText() {
         AttachmentService service = new AttachmentService(root);
 
-        AttachmentService.Prepared prepared = service.prepare("ses_1", "  ", List.of(
-                new AttachmentService.Inbound("shot.png", "image/png", base64("png"))));
+        AttachmentService.Prepared prepared = service.prepare("ses_1", "  ",
+            List.of(new AttachmentService.Inbound("shot.png", "image/png", base64("png"))));
 
         assertTrue(prepared.content().contains("请看随消息附上的文件"));
         assertTrue(prepared.content().contains("shot.png"));
@@ -91,7 +92,8 @@ class AttachmentServiceTest {
             many.add(new AttachmentService.Inbound("f" + i + ".png", "image/png", base64("png")));
         }
 
-        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> service.prepare("ses_1", "hi", many));
+        IllegalArgumentException error =
+            assertThrows(IllegalArgumentException.class, () -> service.prepare("ses_1", "hi", many));
         assertTrue(error.getMessage().contains("最多"), error.getMessage());
     }
 
@@ -113,9 +115,9 @@ class AttachmentServiceTest {
         AttachmentService service = new AttachmentService(root);
         byte[] big = new byte[AttachmentService.MAX_BYTES + 1];
 
-        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> service.prepare("ses_1", "hi",
-                List.of(new AttachmentService.Inbound("big.bin", "image/png",
-                        Base64.getEncoder().encodeToString(big)))));
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> service.prepare("ses_1",
+            "hi",
+            List.of(new AttachmentService.Inbound("big.bin", "image/png", Base64.getEncoder().encodeToString(big)))));
         assertTrue(error.getMessage().contains("MB"), error.getMessage());
     }
 
@@ -124,9 +126,8 @@ class AttachmentServiceTest {
         AttachmentService service = new AttachmentService(root);
         byte[] pdf = {'%', 'P', 'D', 'F', '-', '1', '.', '7', 0, 1, 2};
 
-        AttachmentService.Prepared prepared = service.prepare("ses_1", "帮我看看这份文档", List.of(
-                new AttachmentService.Inbound("doc.pdf", "application/pdf",
-                        Base64.getEncoder().encodeToString(pdf))));
+        AttachmentService.Prepared prepared = service.prepare("ses_1", "帮我看看这份文档", List
+            .of(new AttachmentService.Inbound("doc.pdf", "application/pdf", Base64.getEncoder().encodeToString(pdf))));
 
         assertTrue(prepared.content().contains("doc.pdf"));
         assertTrue(prepared.content().contains("已保存到"));
@@ -140,9 +141,9 @@ class AttachmentServiceTest {
         AttachmentService service = new AttachmentService(root);
         byte[] csv = "a,b\n1,2\n".getBytes(StandardCharsets.UTF_8);
 
-        AttachmentService.Prepared prepared = service.prepare("ses_1", "看数据", List.of(
-                new AttachmentService.Inbound("data.unknownext", "application/octet-stream",
-                        Base64.getEncoder().encodeToString(csv))));
+        AttachmentService.Prepared prepared =
+            service.prepare("ses_1", "看数据", List.of(new AttachmentService.Inbound("data.unknownext",
+                "application/octet-stream", Base64.getEncoder().encodeToString(csv))));
 
         assertTrue(prepared.content().contains("a,b"), "可解码文本应内联");
     }
@@ -152,16 +153,17 @@ class AttachmentServiceTest {
         AttachmentService service = new AttachmentService(root);
 
         assertThrows(IllegalArgumentException.class, () -> service.prepare("ses_1", "hi",
-                List.of(new AttachmentService.Inbound("a.txt", "text/plain", "!!!not-base64!!!"))));
+            List.of(new AttachmentService.Inbound("a.txt", "text/plain", "!!!not-base64!!!"))));
     }
 
     @Test
     void invalidLaterAttachmentDoesNotLeaveEarlierFiles() throws IOException {
         AttachmentService service = new AttachmentService(root);
 
-        assertThrows(IllegalArgumentException.class, () -> service.prepare("ses_1", "hi", List.of(
-                new AttachmentService.Inbound("image.png", "image/png", base64("png")),
-                new AttachmentService.Inbound("broken.png", "image/png", "!!!not-base64!!!"))));
+        assertThrows(IllegalArgumentException.class,
+            () -> service.prepare("ses_1", "hi",
+                List.of(new AttachmentService.Inbound("image.png", "image/png", base64("png")),
+                    new AttachmentService.Inbound("broken.png", "image/png", "!!!not-base64!!!"))));
 
         Path sessionDir = root.resolve("ses_1");
         assertFalse(Files.exists(sessionDir), "验证失败时不应写入任何附件");

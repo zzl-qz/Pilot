@@ -1,15 +1,15 @@
 package com.pilot.core.multi;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * 跨平台行为回归。
@@ -28,8 +28,7 @@ class CrossPlatformPathTest {
         DiffSandbox sandbox = new DiffSandbox("sbx_1", "agent_1", "T1", "");
         sandbox.add("src\\Feature\\A.java", "", "class A {}", false, RiskLevel.LOW);
 
-        assertTrue(sandbox.hasChange("src/feature/a.java"),
-                "Windows 与 POSIX 的路径分隔符、大小写差异不应产生两份改动");
+        assertTrue(sandbox.hasChange("src/feature/a.java"), "Windows 与 POSIX 的路径分隔符、大小写差异不应产生两份改动");
         assertEquals(1, sandbox.fileCount());
     }
 

@@ -1,9 +1,9 @@
 package com.pilot.server.config;
 
+import java.nio.file.Path;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-
-import java.nio.file.Path;
 
 /**
  * 运行期数据的根目录：会话库、快照、trace、附件都放在这里。
@@ -19,9 +19,8 @@ public class PilotDataDir {
     private final Path root;
 
     public PilotDataDir(@Value("${pilot.data.dir:}") String configured) {
-        Path base = configured == null || configured.isBlank()
-                ? Path.of(System.getProperty("user.dir", "."), ".pilot")
-                : Path.of(configured);
+        Path base = configured == null || configured.isBlank() ? Path.of(System.getProperty("user.dir", "."), ".pilot")
+            : Path.of(configured);
         this.root = base.toAbsolutePath().normalize();
     }
 

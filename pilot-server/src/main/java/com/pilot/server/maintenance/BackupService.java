@@ -1,17 +1,10 @@
 package com.pilot.server.maintenance;
 
-import com.pilot.server.config.PilotDataDir;
-import com.pilot.server.store.SqliteStore;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.stereotype.Component;
-import tools.jackson.databind.ObjectMapper;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.sql.Connection;
 import java.sql.Statement;
 import java.time.Instant;
@@ -23,6 +16,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.stereotype.Component;
+
+import com.pilot.core.multi.DiffSandbox;
+import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.store.SqliteStore;
+
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 数据备份与恢复演练支持。
@@ -39,12 +43,11 @@ public class BackupService {
     private static final Logger log = LoggerFactory.getLogger(BackupService.class);
     private static final List<String> DIRECTORIES = List.of("multi", "validation", "commands", "traces");
 
-    public record BackupReport(boolean ok, String directory, int files, long bytes, String message,
-                               Instant createdAt) {
+    public record BackupReport(boolean ok, String directory, int files, long bytes, String message, Instant createdAt) {
     }
 
     public record Status(String dataDir, long databaseBytes, int backups, String lastBackupAt,
-                         StorageHealth.Snapshot storage, List<String> includedDirectories) {
+        StorageHealth.Snapshot storage, List<String> includedDirectories) {
         public Status {
             includedDirectories = includedDirectories == null ? List.of() : List.copyOf(includedDirectories);
         }
@@ -61,8 +64,7 @@ public class BackupService {
     }
 
     public synchronized BackupReport backup() {
-        String stamp = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC)
-                .format(Instant.now());
+        String stamp = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC).format(Instant.now());
         Path target = dataDir.file("backups", stamp);
         try {
             Files.createDirectories(target);
@@ -83,9 +85,8 @@ public class BackupService {
                         Path relative = source.relativize(file);
                         Path destination = target.resolve(directory).resolve(relative);
                         Files.createDirectories(destination.getParent());
-                        Files.copy(file, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                        manifest.add(entry(directory + "/" + relative.toString().replace('\\', '/'),
-                                destination));
+                        Files.copy(file, destination, StandardCopyOption.REPLACE_EXISTING);
+                        manifest.add(entry(directory + "/" + relative.toString().replace('\\', '/'), destination));
                     }
                 }
             }
@@ -95,9 +96,8 @@ public class BackupService {
             root.put("schemaVersion", "2");
             root.put("files", manifest);
             root.put("restoreHint", "停止服务后，把本目录内容覆盖回数据目录，再启动；不要在服务运行时恢复。");
-            Files.writeString(target.resolve("manifest.json"), mapper.writeValueAsString(root),
-                    StandardCharsets.UTF_8);
-            long bytes = manifest.stream().mapToLong(item -> ((Number) item.get("bytes")).longValue()).sum();
+            Files.writeString(target.resolve("manifest.json"), mapper.writeValueAsString(root), StandardCharsets.UTF_8);
+            long bytes = manifest.stream().mapToLong(item -> ((Number)item.get("bytes")).longValue()).sum();
             StorageHealth.recovered("backup");
             log.info("备份完成: {}（{} 个文件，{} 字节）", target, manifest.size(), bytes);
             return new BackupReport(true, target.toString(), manifest.size(), bytes, "备份完成", Instant.now());
@@ -129,8 +129,8 @@ public class BackupService {
         }
         directories.sort(Comparator.comparing(path -> path.getFileName().toString()));
         String last = directories.isEmpty() ? "" : directories.getLast().getFileName().toString();
-        return new Status(dataDir.root().toString(), databaseBytes, directories.size(), last,
-                StorageHealth.snapshot(), DIRECTORIES);
+        return new Status(dataDir.root().toString(), databaseBytes, directories.size(), last, StorageHealth.snapshot(),
+            DIRECTORIES);
     }
 
     /** 删除早于 cutoff 的备份目录，避免备份把磁盘吃满。 */
@@ -170,8 +170,7 @@ public class BackupService {
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("path", name);
         item.put("bytes", Files.size(file));
-        item.put("sha256", com.pilot.core.multi.DiffSandbox.fingerprint(Files.readString(file,
-                StandardCharsets.ISO_8859_1)));
+        item.put("sha256", DiffSandbox.fingerprint(Files.readString(file, StandardCharsets.ISO_8859_1)));
         return item;
     }
 

@@ -44,7 +44,7 @@ public final class InMemoryApprovalBroker implements ApprovalBroker {
             throw new IllegalStateException("approval already pending: " + callId);
         }
         future.completeOnTimeout(false, timeout.toMillis(), TimeUnit.MILLISECONDS)
-                .whenComplete((approved, error) -> pending.remove(callId, entry));
+            .whenComplete((approved, error) -> pending.remove(callId, entry));
         return future;
     }
 
@@ -59,10 +59,8 @@ public final class InMemoryApprovalBroker implements ApprovalBroker {
 
     @Override
     public List<PendingApproval> pending() {
-        return pending.values().stream()
-                .map(Entry::approval)
-                .sorted(Comparator.comparing(PendingApproval::requestedAt))
-                .toList();
+        return pending.values().stream().map(Entry::approval).sorted(Comparator.comparing(PendingApproval::requestedAt))
+            .toList();
     }
 
     public Duration timeout() {

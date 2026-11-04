@@ -1,11 +1,11 @@
 package com.pilot.core.session;
 
-import com.pilot.core.loop.Message;
-
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+
+import com.pilot.core.loop.Message;
 
 /** 进程内实现：给 memory 模式和测试用，重启即丢失。 */
 public final class InMemoryConversationRepository implements ConversationRepository {

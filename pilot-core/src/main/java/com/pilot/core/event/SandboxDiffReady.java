@@ -10,8 +10,8 @@ package com.pilot.core.event;
  * @param added     新增行数
  * @param removed   删除行数
  */
-public record SandboxDiffReady(String sandboxId, String agentId, String taskId, String path,
-                               int added, int removed) implements SessionEvent {
+public record SandboxDiffReady(String sandboxId, String agentId, String taskId, String path, int added,
+    int removed) implements SessionEvent {
     public SandboxDiffReady {
         sandboxId = sandboxId == null ? "" : sandboxId;
         agentId = agentId == null ? "" : agentId;

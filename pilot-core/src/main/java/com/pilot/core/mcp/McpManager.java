@@ -1,8 +1,5 @@
 package com.pilot.core.mcp;
 
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,6 +10,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * MCP 服务器的配置与生命周期。
@@ -51,7 +51,9 @@ public final class McpManager implements AutoCloseable {
     /** 某个工作区当前配置的全部服务器（按名字排序）。配置文件每次现读，改完立即生效。 */
     public Map<String, McpServerConfig> servers(Path workspace) {
         Map<String, McpServerConfig> merged = new java.util.TreeMap<>();
-        if (userConfig != null) merged.putAll(load(userConfig));
+        if (userConfig != null) {
+            merged.putAll(load(userConfig));
+        }
         merged.putAll(load(workspace.resolve(".mcp.json")));
         return merged;
     }
@@ -74,17 +76,22 @@ public final class McpManager implements AutoCloseable {
     McpClient client(Path workspace, String server) {
         McpServerConfig config = servers(workspace).get(server);
         if (config == null) {
-            throw new McpException("没有名为 " + server + " 的 MCP 服务器；已配置：" + String.join(", ", servers(workspace).keySet()));
+            throw new McpException(
+                "没有名为 " + server + " 的 MCP 服务器；已配置：" + String.join(", ", servers(workspace).keySet()));
         }
         if (!config.usable()) {
-            throw new McpException("MCP 服务器 " + server + " 无法使用：" + (config.unsupported() == null
-                    ? "缺少 command" : config.unsupported()));
+            throw new McpException(
+                "MCP 服务器 " + server + " 无法使用：" + (config.unsupported() == null ? "缺少 command" : config.unsupported()));
         }
         String key = key(workspace, server);
         synchronized (this) {
             McpClient existing = clients.get(key);
-            if (existing != null && existing.running()) return existing;
-            if (existing != null) existing.close();
+            if (existing != null && existing.running()) {
+                return existing;
+            }
+            if (existing != null) {
+                existing.close();
+            }
             Path log = logDir == null ? null : logDir.resolve(safe(server) + ".log");
             McpClient fresh = new McpClient(server, config, workspace, log, mapper, extraPath.get());
             try {
@@ -105,7 +112,9 @@ public final class McpManager implements AutoCloseable {
     /** 已运行服务器声明的工具；没运行时返回空，不会为了列举而启动进程。 */
     public List<McpToolInfo> knownTools(Path workspace, String server) {
         McpClient client = clients.get(key(workspace, server));
-        if (client == null || !client.running()) return List.of();
+        if (client == null || !client.running()) {
+            return List.of();
+        }
         try {
             return client.tools(LIST_TIMEOUT);
         } catch (McpException e) {
@@ -129,32 +138,39 @@ public final class McpManager implements AutoCloseable {
 
     private Map<String, McpServerConfig> load(Path file) {
         Map<String, McpServerConfig> result = new LinkedHashMap<>();
-        if (!Files.isRegularFile(file)) return result;
+        if (!Files.isRegularFile(file)) {
+            return result;
+        }
         JsonNode root;
         try {
             root = mapper.readTree(Files.readString(file));
         } catch (IOException | RuntimeException e) {
             result.put("(" + file.getFileName() + ")", new McpServerConfig("(" + file.getFileName() + ")", null,
-                    List.of(), Map.of(), "配置文件无法解析：" + e.getMessage()));
+                List.of(), Map.of(), "配置文件无法解析：" + e.getMessage()));
             return result;
         }
         JsonNode servers = root.path("mcpServers");
         for (String name : servers.propertyNames()) {
             JsonNode node = servers.path(name);
-            if (node.path("disabled").asBoolean(false)) continue;
+            if (node.path("disabled").asBoolean(false)) {
+                continue;
+            }
             String command = node.path("command").asString("");
             if (command.isBlank()) {
-                String reason = node.has("url")
-                        ? "只配置了 url（HTTP / SSE 传输），Pilot 目前仅支持 stdio（command + args）"
-                        : "缺少 command";
+                String reason =
+                    node.has("url") ? "只配置了 url（HTTP / SSE 传输），Pilot 目前仅支持 stdio（command + args）" : "缺少 command";
                 result.put(name, new McpServerConfig(name, null, List.of(), Map.of(), reason));
                 continue;
             }
             List<String> args = new ArrayList<>();
-            for (JsonNode arg : node.path("args")) args.add(arg.asString(""));
+            for (JsonNode arg : node.path("args")) {
+                args.add(arg.asString(""));
+            }
             Map<String, String> env = new LinkedHashMap<>();
             JsonNode envNode = node.path("env");
-            for (String key : envNode.propertyNames()) env.put(key, envNode.path(key).asString(""));
+            for (String key : envNode.propertyNames()) {
+                env.put(key, envNode.path(key).asString(""));
+            }
             result.put(name, new McpServerConfig(name, command, args, env, null));
         }
         return result;

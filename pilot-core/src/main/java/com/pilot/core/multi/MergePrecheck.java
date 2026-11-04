@@ -41,9 +41,8 @@ public final class MergePrecheck {
             }
             StringBuilder out = new StringBuilder("合并预检发现 ").append(conflicts.size()).append(" 处冲突：");
             for (Conflict conflict : conflicts) {
-                out.append("\n- ").append(conflict.path())
-                        .append("（").append(String.join(" / ", conflict.owners())).append("）：")
-                        .append(conflict.detail());
+                out.append("\n- ").append(conflict.path()).append("（").append(String.join(" / ", conflict.owners()))
+                    .append("）：").append(conflict.detail());
             }
             return out.toString();
         }
@@ -58,8 +57,7 @@ public final class MergePrecheck {
             for (DiffSandbox sandbox : sandboxes) {
                 for (SandboxChange change : sandbox.changes()) {
                     byPath.computeIfAbsent(change.path(), key -> new LinkedHashMap<>())
-                            .computeIfAbsent(owner(change), key -> new ArrayList<>())
-                            .add(change);
+                        .computeIfAbsent(owner(change), key -> new ArrayList<>()).add(change);
                 }
             }
         }
@@ -113,8 +111,7 @@ public final class MergePrecheck {
                 for (int[] a : UnifiedDiff.oldRanges(one.diff())) {
                     for (int[] b : UnifiedDiff.oldRanges(other.diff())) {
                         if (a[0] <= b[1] && b[0] <= a[1]) {
-                            return "改动行区间重叠 " + a[0] + "-" + bounded(a[1]) + " 与 "
-                                    + b[0] + "-" + bounded(b[1]);
+                            return "改动行区间重叠 " + a[0] + "-" + bounded(a[1]) + " 与 " + b[0] + "-" + bounded(b[1]);
                         }
                     }
                 }

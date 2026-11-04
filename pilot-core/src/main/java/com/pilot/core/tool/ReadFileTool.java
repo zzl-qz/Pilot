@@ -1,7 +1,5 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.workspace.PathValidator;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,6 +10,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+
+import com.pilot.core.workspace.PathValidator;
 
 /** 按行读取工作区文本。结果里只有请求的窗口，行号用文件里的绝对行号。 */
 public final class ReadFileTool implements Tool {
@@ -50,18 +50,12 @@ public final class ReadFileTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "path", Map.of("type", "string", "description", "工作区内的相对文件路径"),
-                        "start_line", Map.of("type", "integer",
-                                "description", "起始行号。正数从 1 开始，负数从末尾数，-1 是最后一行。默认 1"),
-                        "line_count", Map.of("type", "integer",
-                                "description", "最多读取行数，默认 200，最大 2000"),
-                        "pages", Map.of("type", "string",
-                                "description", "仅 PDF：页码或范围，例如 \"3\" 或 \"2-5\"，默认前 10 页，单次最多 30 页")),
-                "required", List.of("path"),
-                "additionalProperties", false);
+        return Map.of("type", "object", "properties",
+            Map.of("path", Map.of("type", "string", "description", "工作区内的相对文件路径"), "start_line",
+                Map.of("type", "integer", "description", "起始行号。正数从 1 开始，负数从末尾数，-1 是最后一行。默认 1"), "line_count",
+                Map.of("type", "integer", "description", "最多读取行数，默认 200，最大 2000"), "pages",
+                Map.of("type", "string", "description", "仅 PDF：页码或范围，例如 \"3\" 或 \"2-5\"，默认前 10 页，单次最多 30 页")),
+            "required", List.of("path"), "additionalProperties", false);
     }
 
     @Override
@@ -82,7 +76,9 @@ public final class ReadFileTool implements Tool {
             try {
                 Path file = paths.resolve(rawPath);
                 if (Files.isRegularFile(file)) {
-                    if (MediaFileReader.isImage(file)) return MediaFileReader.readImage(file, rawPath);
+                    if (MediaFileReader.isImage(file)) {
+                        return MediaFileReader.readImage(file, rawPath);
+                    }
                     if (MediaFileReader.isPdf(file)) {
                         return MediaFileReader.readPdf(file, rawPath, args.get("pages"));
                     }
@@ -129,8 +125,8 @@ public final class ReadFileTool implements Tool {
             if (proposal == null && looksBinary(file)) {
                 return "ERROR: 二进制文件，无法读取: " + rawPath;
             }
-            ReadResult slice = proposal == null ? readSlice(file, startLine, lineCount)
-                    : readText(proposal, startLine, lineCount);
+            ReadResult slice =
+                proposal == null ? readSlice(file, startLine, lineCount) : readText(proposal, startLine, lineCount);
             // 只有实际返回文件行才解锁编辑，越界读取和空文件提示不算观察过内容。
             if (slice.hasLines()) {
                 reads.observed(file);
@@ -142,12 +138,15 @@ public final class ReadFileTool implements Tool {
     }
 
     private static ReadResult readText(String text, int startLine, int lineCount) {
-        List<String> all = text.lines().map(line -> line.length() > MAX_LINE_CHARS
-                ? line.substring(0, MAX_LINE_CHARS) + "…（超长行已截断）" : line).toList();
+        List<String> all = text.lines()
+            .map(line -> line.length() > MAX_LINE_CHARS ? line.substring(0, MAX_LINE_CHARS) + "…（超长行已截断）" : line)
+            .toList();
         int total = all.size();
-        if (total == 0) return new ReadResult("(空文件，共 0 行)", false);
-        long requested = startLine < 0 ? (long) total + startLine + 1 : startLine;
-        int start = (int) Math.max(1, Math.min(total, requested));
+        if (total == 0) {
+            return new ReadResult("(空文件，共 0 行)", false);
+        }
+        long requested = startLine < 0 ? (long)total + startLine + 1 : startLine;
+        int start = (int)Math.max(1, Math.min(total, requested));
         int end = Math.min(total, start + lineCount - 1);
         List<String> selected = all.subList(start - 1, end);
         String note = startLine < 0 && requested < 1 ? "（负向起点超出文件开头，已从第 1 行读起）" : "";
@@ -166,9 +165,9 @@ public final class ReadFileTool implements Tool {
             if (total == 0) {
                 return new ReadResult("(空文件，共 0 行)", false);
             }
-            long resolved = (long) total + startLine + 1;
+            long resolved = (long)total + startLine + 1;
             boolean clamped = resolved < 1;
-            int start = clamped ? 1 : (int) resolved;
+            int start = clamped ? 1 : (int)resolved;
             List<String> lines = collect(file, start, lineCount);
             String clampNote = clamped ? "（负向起点超出文件开头，已从第 1 行读起）" : "";
             return new ReadResult(render(start, lines, total, "", clampNote), !lines.isEmpty());
@@ -178,8 +177,7 @@ public final class ReadFileTool implements Tool {
             return new ReadResult("(空文件，共 0 行)", false);
         }
         if (slice.lines.isEmpty()) {
-            return new ReadResult("请求范围从第 " + startLine + " 行开始，但文件共 "
-                    + slice.total + " 行（无内容返回）", false);
+            return new ReadResult("请求范围从第 " + startLine + " 行开始，但文件共 " + slice.total + " 行（无内容返回）", false);
         }
         return new ReadResult(render(startLine, slice.lines, slice.total, "", ""), true);
     }
@@ -265,7 +263,7 @@ public final class ReadFileTool implements Tool {
         if (value instanceof Number number) {
             double numeric = number.doubleValue();
             if (numeric == Math.rint(numeric) && numeric >= Integer.MIN_VALUE && numeric <= Integer.MAX_VALUE) {
-                return (int) numeric;
+                return (int)numeric;
             }
             return null;
         }
@@ -273,7 +271,7 @@ public final class ReadFileTool implements Tool {
             try {
                 long parsed = Long.parseLong(text.strip());
                 if (parsed >= Integer.MIN_VALUE && parsed <= Integer.MAX_VALUE) {
-                    return (int) parsed;
+                    return (int)parsed;
                 }
             } catch (NumberFormatException ignored) {
                 return null;
@@ -327,7 +325,7 @@ public final class ReadFileTool implements Tool {
                     return new LineChunk(text.toString(), truncated);
                 }
                 if (text.length() < MAX_LINE_CHARS) {
-                    text.append((char) ch);
+                    text.append((char)ch);
                 } else {
                     truncated = true;
                 }

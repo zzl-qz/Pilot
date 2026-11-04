@@ -1,13 +1,13 @@
 package com.pilot.server.validation;
 
-import com.pilot.core.multi.DiffSandbox;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+
+import com.pilot.core.multi.DiffSandbox;
 
 /**
  * 工作区产物的稳定指纹。
@@ -45,8 +45,7 @@ public final class WorkspaceFingerprint {
                 continue;
             }
             try {
-                entries.add(relative + "\0" + DiffSandbox.fingerprint(
-                        Files.readString(file, StandardCharsets.UTF_8)));
+                entries.add(relative + "\0" + DiffSandbox.fingerprint(Files.readString(file, StandardCharsets.UTF_8)));
             } catch (IOException | RuntimeException e) {
                 entries.add(relative + "\0UNREADABLE");
             }

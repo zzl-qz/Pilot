@@ -1,12 +1,12 @@
 package com.pilot.server.observability;
 
-import org.springframework.stereotype.Component;
-
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.LongAdder;
+
+import org.springframework.stereotype.Component;
 
 /**
  * 运行指标：只做进程内累计，重启归零。

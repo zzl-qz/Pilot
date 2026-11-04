@@ -37,8 +37,7 @@ public enum RiskLevel {
             return MEDIUM;
         }
         for (RiskLevel level : values()) {
-            if (level.wireName.equalsIgnoreCase(wireName.strip())
-                    || level.name().equalsIgnoreCase(wireName.strip())) {
+            if (level.wireName.equalsIgnoreCase(wireName.strip()) || level.name().equalsIgnoreCase(wireName.strip())) {
                 return level;
             }
         }

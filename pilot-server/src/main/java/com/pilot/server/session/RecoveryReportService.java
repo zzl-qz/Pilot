@@ -1,9 +1,9 @@
 package com.pilot.server.session;
 
-import org.springframework.stereotype.Component;
-
 import java.time.Instant;
 import java.util.List;
+
+import org.springframework.stereotype.Component;
 
 /**
  * 最近一次启动恢复的结果。
@@ -20,7 +20,7 @@ public class RecoveryReportService {
      * @param degradedReason 恢复过程中不致命的问题（例如检查点写不进去）
      */
     public record Snapshot(Instant recoveredAt, String instanceId, List<RunStateTracker.RecoveryEntry> entries,
-                           String note, boolean completed) {
+        String note, boolean completed) {
         public Snapshot {
             entries = entries == null ? List.of() : List.copyOf(entries);
             note = note == null ? "" : note;

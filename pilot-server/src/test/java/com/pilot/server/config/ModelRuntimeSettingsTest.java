@@ -1,23 +1,41 @@
 package com.pilot.server.config;
 
-import com.pilot.core.loop.Message;
-import com.pilot.core.model.*;
-import com.pilot.server.store.InMemorySettingsStore;
-import org.junit.jupiter.api.Test;
-import tools.jackson.databind.json.JsonMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.fail;
+
 import java.math.BigDecimal;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
-import static org.junit.jupiter.api.Assertions.*;
+
+import org.junit.jupiter.api.Test;
+
+import com.pilot.core.loop.Message;
+import com.pilot.core.model.MeteredModelClient;
+import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ModelPricing;
+import com.pilot.core.model.ModelProfile;
+import com.pilot.core.model.ModelResponse;
+import com.pilot.core.model.ModelUsage;
+import com.pilot.core.model.RequestReport;
+import com.pilot.core.model.ToolDefinition;
+import com.pilot.server.store.InMemorySettingsStore;
+
+import tools.jackson.databind.json.JsonMapper;
 
 class ModelRuntimeSettingsTest {
-    @Test void persistsPerEndpointAndModelAndRejectsStaleOrInvalidUpdates() {
+    @Test
+    void persistsPerEndpointAndModelAndRejectsStaleOrInvalidUpdates() {
         var store = new InMemorySettingsStore();
-        var models = new ModelSettings(new ModelProperties("test", "https://one.test/v1", "model-a", List.of("model-a", "model-b")), store);
+        var models = new ModelSettings(
+            new ModelProperties("test", "https://one.test/v1", "model-a", List.of("model-a", "model-b")), store);
         var runtime = new ModelRuntimeSettings(store, models, new JsonMapper());
         var options = new ModelRuntimeSettings.Options("generic", "auto", "", false, true, "short",
-                new ModelPricing("CNY", BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.TEN, "测试报价"));
+            new ModelPricing("CNY", BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.TEN, "测试报价"));
         runtime.update("model-a", "https://one.test/v1", options);
         assertEquals(options, new ModelRuntimeSettings(store, models, new JsonMapper()).current().options());
         models.update(null, "model-b", null);
@@ -28,30 +46,49 @@ class ModelRuntimeSettingsTest {
         models.update("https://one.test/v1", "model-a", null);
         assertEquals(options, runtime.current().options());
         assertThrows(IllegalArgumentException.class, () -> runtime.update("model-a", "https://one.test/v1",
-                new ModelRuntimeSettings.Options("generic", "explicit", "", null, null, "short", null)));
+            new ModelRuntimeSettings.Options("generic", "explicit", "", null, null, "short", null)));
         assertEquals(options, runtime.current().options());
     }
-    @Test void hotReloadForwardsStreamingAndPinsPricingToActualRequest() {
+
+    @Test
+    void hotReloadForwardsStreamingAndPinsPricingToActualRequest() {
         var store = new InMemorySettingsStore();
         var models = new ModelSettings(new ModelProperties("test", "https://one.test/v1", "model-a", null), store);
-        var runtime = new ModelRuntimeSettings(store, models, new JsonMapper()); var built = new AtomicInteger();
+        var runtime = new ModelRuntimeSettings(store, models, new JsonMapper());
+        var built = new AtomicInteger();
         var provider = new ModelClientProvider(models, snapshot -> {
-            built.incrementAndGet(); var profile = runtime.profile(snapshot);
+            built.incrementAndGet();
+            var profile = runtime.profile(snapshot);
             return new ModelClient() {
-                public ModelProfile profile() { return profile; }
-                public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) { fail("streaming overload lost"); return null; }
-                public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> text, Consumer<String> reasoning) {
-                    text.accept("text"); reasoning.accept("reasoning"); return new ModelResponse("text", List.of(), new ModelUsage(1000, 10, 0, 0, 0, true));
+                public ModelProfile profile() {
+                    return profile;
+                }
+
+                public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                    fail("streaming overload lost");
+                    return null;
+                }
+
+                public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> text,
+                    Consumer<String> reasoning) {
+                    text.accept("text");
+                    reasoning.accept("reasoning");
+                    return new ModelResponse("text", List.of(), new ModelUsage(1000, 10, 0, 0, 0, true));
                 }
             };
         }, runtime::revision);
         var before = provider.snapshot();
-        runtime.update("model-a", "https://one.test/v1", new ModelRuntimeSettings.Options("generic", "auto", "", null, null, "short",
+        runtime.update("model-a", "https://one.test/v1",
+            new ModelRuntimeSettings.Options("generic", "auto", "", null, null, "short",
                 new ModelPricing("USD", BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.TEN, "test")));
-        var reports = new ArrayList<RequestReport>(); var output = new ArrayList<String>();
-        new MeteredModelClient(provider, "session", "main", List.of(), reports::add).chat(List.of(Message.user("hi")), List.of(), output::add, output::add);
-        assertEquals(List.of("text", "reasoning"), output); assertEquals(2, built.get());
-        assertNull(before.profile().pricing().input()); assertNotNull(reports.getFirst().cost().total());
+        var reports = new ArrayList<RequestReport>();
+        var output = new ArrayList<String>();
+        new MeteredModelClient(provider, "session", "main", List.of(), reports::add).chat(List.of(Message.user("hi")),
+            List.of(), output::add, output::add);
+        assertEquals(List.of("text", "reasoning"), output);
+        assertEquals(2, built.get());
+        assertNull(before.profile().pricing().input());
+        assertNotNull(reports.getFirst().cost().total());
         assertNotNull(reports.getFirst().firstTokenMs());
     }
 }

@@ -1,8 +1,8 @@
 package com.pilot.core.session;
 
-import com.pilot.core.loop.Message;
-
 import java.util.List;
+
+import com.pilot.core.loop.Message;
 
 /**
  * 对话记忆存储：保存「真正发给模型的消息」，与会话事件（给人看的审计日志）分开。

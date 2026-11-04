@@ -103,7 +103,7 @@ public final class UnifiedDiff {
         }
         flush(ranges, first, last);
         if (ranges.isEmpty()) {
-            ranges.add(new int[]{1, Integer.MAX_VALUE});
+            ranges.add(new int[] {1, Integer.MAX_VALUE});
         }
         return ranges;
     }
@@ -113,7 +113,7 @@ public final class UnifiedDiff {
         int added = 0;
         int removed = 0;
         if (diff == null || diff.isBlank()) {
-            return new int[]{0, 0};
+            return new int[] {0, 0};
         }
         boolean inHunk = false;
         for (String line : diff.split("\n", -1)) {
@@ -134,12 +134,12 @@ public final class UnifiedDiff {
                 removed++;
             }
         }
-        return new int[]{added, removed};
+        return new int[] {added, removed};
     }
 
     private static void flush(List<int[]> ranges, int first, int last) {
         if (first > 0 && last >= first) {
-            ranges.add(new int[]{first, last});
+            ranges.add(new int[] {first, last});
         }
     }
 
@@ -227,7 +227,7 @@ public final class UnifiedDiff {
         int suffix = 0;
         int maxSuffix = Math.min(before.size(), after.size()) - prefix;
         while (suffix < maxSuffix
-                && before.get(before.size() - 1 - suffix).equals(after.get(after.size() - 1 - suffix))) {
+            && before.get(before.size() - 1 - suffix).equals(after.get(after.size() - 1 - suffix))) {
             suffix++;
         }
         for (int i = 0; i < prefix; i++) {
@@ -235,7 +235,7 @@ public final class UnifiedDiff {
         }
         List<String> left = before.subList(prefix, before.size() - suffix);
         List<String> right = after.subList(prefix, after.size() - suffix);
-        if ((long) left.size() * right.size() > MAX_CELLS) {
+        if ((long)left.size() * right.size() > MAX_CELLS) {
             left.forEach(line -> ops.add(new Op('-', line)));
             right.forEach(line -> ops.add(new Op('+', line)));
         } else {
@@ -253,9 +253,8 @@ public final class UnifiedDiff {
         int[][] table = new int[n + 1][m + 1];
         for (int i = n - 1; i >= 0; i--) {
             for (int j = m - 1; j >= 0; j--) {
-                table[i][j] = left.get(i).equals(right.get(j))
-                        ? table[i + 1][j + 1] + 1
-                        : Math.max(table[i + 1][j], table[i][j + 1]);
+                table[i][j] = left.get(i).equals(right.get(j)) ? table[i + 1][j + 1] + 1
+                    : Math.max(table[i + 1][j], table[i][j + 1]);
             }
         }
         List<Op> ops = new ArrayList<>(n + m);

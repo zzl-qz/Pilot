@@ -1,6 +1,15 @@
 package com.pilot.server.browser;
 
-import com.pilot.core.session.SessionService;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -13,15 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.util.LinkedHashMap;
-import java.util.Locale;
-import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
+import com.pilot.core.session.SessionService;
 
 /**
  * 浏览器镜像面板的 HTTP 入口：瞬态 SSE 帧流 + 置前等上行动作。
@@ -69,9 +70,13 @@ public class BrowserControlController {
 
         // 页面刷新、折叠侧栏或关页都会让连接失效；属于正常生命周期，静默收尾。
         Runnable close = () -> {
-            if (!closed.compareAndSet(false, true)) return;
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
             ScheduledFuture<?> beat = heartbeat.get();
-            if (beat != null) beat.cancel(false);
+            if (beat != null) {
+                beat.cancel(false);
+            }
             browser.unsubscribe(id, emitter);
             try {
                 emitter.complete();
@@ -83,17 +88,16 @@ public class BrowserControlController {
         emitter.onTimeout(close);
         emitter.onError(error -> close.run());
         heartbeat.set(HEARTBEAT.scheduleAtFixedRate(() -> {
-            if (closed.get()) return;
+            if (closed.get()) {
+                return;
+            }
             try {
                 emitter.send(SseEmitter.event().comment("ping"));
             } catch (Exception error) {
                 close.run();
             }
         }, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS));
-        return ResponseEntity.ok()
-                .header("Cache-Control", "no-cache")
-                .header("X-Accel-Buffering", "no")
-                .body(emitter);
+        return ResponseEntity.ok().header("Cache-Control", "no-cache").header("X-Accel-Buffering", "no").body(emitter);
     }
 
     /** 把该会话的浏览器窗口置前；用户不点不抢焦点。 */
@@ -116,7 +120,8 @@ public class BrowserControlController {
 
     /** 直接嵌页面时关掉截图流；页面禁止被嵌入时再打开。 */
     @PostMapping("/{id}/browser/capture")
-    public ResponseEntity<Void> capture(@PathVariable String id, @RequestBody(required = false) Map<String, Object> body) {
+    public ResponseEntity<Void> capture(@PathVariable String id,
+        @RequestBody(required = false) Map<String, Object> body) {
         requireSession(id);
         boolean on = body != null && Boolean.TRUE.equals(body.get("capture"));
         browser.setCapture(id, on);
@@ -133,7 +138,8 @@ public class BrowserControlController {
 
     /** 地址栏：用户直接输入地址打开页面（简写 localhost:5173 会自动补 http://）。 */
     @PostMapping("/{id}/browser/navigate")
-    public Map<String, Object> navigate(@PathVariable String id, @RequestBody(required = false) Map<String, Object> body) {
+    public Map<String, Object> navigate(@PathVariable String id,
+        @RequestBody(required = false) Map<String, Object> body) {
         requireSession(id);
         String raw = body == null ? null : String.valueOf(body.getOrDefault("url", "")).strip();
         if (raw.isEmpty()) {
@@ -165,7 +171,8 @@ public class BrowserControlController {
      * 由前端按镜像帧尺寸换算，服务端只做范围裁剪。
      */
     @PostMapping("/{id}/browser/pointer")
-    public Map<String, Object> pointer(@PathVariable String id, @RequestBody(required = false) Map<String, Object> body) {
+    public Map<String, Object> pointer(@PathVariable String id,
+        @RequestBody(required = false) Map<String, Object> body) {
         requireSession(id);
         if (body == null) {
             return Map.of("ok", false, "error", "缺少指针参数");
@@ -194,7 +201,8 @@ public class BrowserControlController {
 
     /** 面板尺寸变化：把页面视口设成面板大小，画面才能铺满且点击坐标 1:1。 */
     @PostMapping("/{id}/browser/resize")
-    public Map<String, Object> resize(@PathVariable String id, @RequestBody(required = false) Map<String, Object> body) {
+    public Map<String, Object> resize(@PathVariable String id,
+        @RequestBody(required = false) Map<String, Object> body) {
         requireSession(id);
         if (body == null) {
             return Map.of("ok", false, "error", "缺少尺寸");

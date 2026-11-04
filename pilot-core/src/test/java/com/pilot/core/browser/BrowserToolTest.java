@@ -1,12 +1,9 @@
 package com.pilot.core.browser;
 
-import com.pilot.core.tool.Availability;
-import com.pilot.core.tool.ToolRegistry;
-import com.pilot.core.tool.ToolResult;
-import com.pilot.core.workspace.PathValidator;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import tools.jackson.databind.ObjectMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -15,11 +12,17 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.tool.Availability;
+import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.ToolResult;
+import com.pilot.core.workspace.PathValidator;
+
+import tools.jackson.databind.ObjectMapper;
 
 class BrowserToolTest {
     @TempDir
@@ -43,7 +46,7 @@ class BrowserToolTest {
         assertEquals("未检测到 Chrome", registry.unavailable().get("browser"));
 
         backend.availability = Availability.ready();
-        assertEquals(java.util.Set.of("browser"), registry.names());
+        assertEquals(Set.of("browser"), registry.names());
     }
 
     @Test
@@ -85,12 +88,12 @@ class BrowserToolTest {
         BrowserTool tool = tool();
 
         for (String url : List.of("https://example.com/", "http://192.168.1.5:8080/", "file:///etc/passwd",
-                "javascript:alert(1)", "http://localhost.evil.com/", "ftp://localhost/x")) {
+            "javascript:alert(1)", "http://localhost.evil.com/", "ftp://localhost/x")) {
             String result = tool.execute(Map.of("action", "navigate", "url", url));
             assertTrue(result.startsWith("ERROR: "), url + " -> " + result);
         }
         for (String url : List.of("http://localhost:8080/", "https://127.0.0.1/", "http://[::1]:3000/x",
-                "http://app.localhost:5173/", "http://127.0.0.2/")) {
+            "http://app.localhost:5173/", "http://127.0.0.2/")) {
             assertFalse(tool.execute(Map.of("action", "navigate", "url", url)).startsWith("ERROR: "), url);
         }
     }
@@ -102,14 +105,15 @@ class BrowserToolTest {
 
         String ok = tool.execute(Map.of("action", "upload", "ref", "e2", "files", List.of("a.png")));
         assertFalse(ok.startsWith("ERROR"), ok);
-        assertEquals(List.of(workspace.toRealPath().resolve("a.png").toString()), backend.commands.getLast().get("files"));
+        assertEquals(List.of(workspace.toRealPath().resolve("a.png").toString()),
+            backend.commands.getLast().get("files"));
 
         assertTrue(tool.execute(Map.of("action", "upload", "ref", "e2", "files", List.of("/etc/passwd")))
-                .startsWith("ERROR: 文件不在工作区内"));
+            .startsWith("ERROR: 文件不在工作区内"));
         assertTrue(tool.execute(Map.of("action", "upload", "ref", "e2", "files", List.of("../x.png")))
-                .startsWith("ERROR: 文件不在工作区内"));
+            .startsWith("ERROR: 文件不在工作区内"));
         assertTrue(tool.execute(Map.of("action", "upload", "ref", "e2", "files", List.of("missing.png")))
-                .startsWith("ERROR: 文件不存在"));
+            .startsWith("ERROR: 文件不存在"));
         assertEquals(1, backend.commands.size());
     }
 
@@ -130,8 +134,11 @@ class BrowserToolTest {
             assertEquals(true, backend.commands.getFirst().get("fullPage"));
             assertEquals(file.toString(), backend.commands.getFirst().get("path"));
         } finally {
-            if (previous == null) System.clearProperty("pilot.artifacts.dir");
-            else System.setProperty("pilot.artifacts.dir", previous);
+            if (previous == null) {
+                System.clearProperty("pilot.artifacts.dir");
+            } else {
+                System.setProperty("pilot.artifacts.dir", previous);
+            }
         }
     }
 
@@ -148,12 +155,12 @@ class BrowserToolTest {
     void classifiesActionsForPermissions() {
         BrowserTool tool = tool();
         for (String action : List.of("navigate", "snapshot", "screenshot", "console", "network", "wait", "reload",
-                "back", "forward", "close", "text", "links", "tabs")) {
+            "back", "forward", "close", "text", "links", "tabs")) {
             assertTrue(tool.readOnly(Map.of("action", action)), action);
             assertFalse(tool.localInteraction(Map.of("action", action)), action);
         }
-        for (String action : List.of("click", "dblclick", "right_click", "hover", "fill", "type", "press",
-                "select", "upload", "download", "switch_tab", "close_tab")) {
+        for (String action : List.of("click", "dblclick", "right_click", "hover", "fill", "type", "press", "select",
+            "upload", "download", "switch_tab", "close_tab")) {
             assertFalse(tool.readOnly(Map.of("action", action)), action);
             assertTrue(tool.localInteraction(Map.of("action", action)), action);
         }
@@ -170,12 +177,11 @@ class BrowserToolTest {
         backend.paused = true;
         BrowserTool tool = tool();
 
-        for (String action : List.of("click", "dblclick", "right_click", "hover", "fill", "type", "press",
-                "select", "upload", "download", "switch_tab", "close_tab",
-                "navigate", "reload", "back", "forward", "close", "evaluate")) {
-            String result = tool.execute(Map.of("action", action, "url", "http://localhost:1",
-                    "ref", "e1", "text", "x", "key", "Enter", "values", List.of("a"), "files", List.of("a.txt"),
-                    "expression", "1"));
+        for (String action : List.of("click", "dblclick", "right_click", "hover", "fill", "type", "press", "select",
+            "upload", "download", "switch_tab", "close_tab", "navigate", "reload", "back", "forward", "close",
+            "evaluate")) {
+            String result = tool.execute(Map.of("action", action, "url", "http://localhost:1", "ref", "e1", "text", "x",
+                "key", "Enter", "values", List.of("a"), "files", List.of("a.txt"), "expression", "1"));
             assertTrue(result.startsWith("用户已接管浏览器"), action + " 应被拦截：" + result);
             assertFalse(result.startsWith("ERROR"), "拦截提示不应是 ERROR，避免模型当成故障重试：" + result);
         }
@@ -196,7 +202,7 @@ class BrowserToolTest {
     @Test
     void realBackendReportsAReasonInsteadOfThrowingWhenTheRuntimeIsMissing() {
         PlaywrightBackend real = new PlaywrightBackend(workspace.resolve("no-node"), workspace.resolve("sidecar.mjs"),
-                workspace.resolve("home"), new ObjectMapper());
+            workspace.resolve("home"), new ObjectMapper());
         try {
             assertFalse(real.availability().available());
 
@@ -205,7 +211,7 @@ class BrowserToolTest {
             assertFalse(probed.available());
             assertTrue(probed.reason().contains("找不到 Node.js"), probed.reason());
             BrowserBackend.BrowserException error = assertThrows(BrowserBackend.BrowserException.class,
-                    () -> real.execute("s", Map.of("op", "snapshot"), Duration.ofSeconds(1)));
+                () -> real.execute("s", Map.of("op", "snapshot"), Duration.ofSeconds(1)));
             assertTrue(error.getMessage().startsWith("浏览器当前不可用："), error.getMessage());
         } finally {
             real.close();
@@ -232,14 +238,16 @@ class BrowserToolTest {
 
         @Override
         public Reply execute(String sessionId, Map<String, Object> command, Duration timeout) {
-            if (failure != null) throw new BrowserException(failure);
+            if (failure != null) {
+                throw new BrowserException(failure);
+            }
             commands.add(new java.util.LinkedHashMap<>(command));
             sessions.add(sessionId);
             if (screenshot) {
                 try {
                     Path path = Path.of(String.valueOf(command.get("path")));
                     Files.createDirectories(path.getParent());
-                    Files.write(path, new byte[]{1, 2, 3});
+                    Files.write(path, new byte[] {1, 2, 3});
                     return new Reply("已截图", path.toString());
                 } catch (IOException e) {
                     throw new BrowserException(e.getMessage());

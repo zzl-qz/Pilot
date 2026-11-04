@@ -1,17 +1,8 @@
 package com.pilot.core.mcp;
 
-import com.pilot.core.permission.PermissionDecision;
-import com.pilot.core.permission.PermissionMode;
-import com.pilot.core.permission.PolicyPermissionGate;
-import com.pilot.core.tool.ToolCall;
-import com.pilot.core.tool.ToolRegistry;
-import com.pilot.core.tool.ToolResult;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import tools.jackson.databind.ObjectMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
@@ -21,10 +12,22 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.permission.PermissionDecision;
+import com.pilot.core.permission.PermissionMode;
+import com.pilot.core.permission.PolicyPermissionGate;
+import com.pilot.core.tool.ToolCall;
+import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.ToolResult;
+
+import tools.jackson.databind.ObjectMapper;
 
 class McpToolsTest {
     private final ObjectMapper mapper = new ObjectMapper();
@@ -47,8 +50,8 @@ class McpToolsTest {
         try (InputStream in = getClass().getResourceAsStream("/mcp/fake-mcp-server.mjs")) {
             Files.copy(in, script, StandardCopyOption.REPLACE_EXISTING);
         }
-        String config = mapper.writeValueAsString(Map.of("mcpServers", Map.of(
-                "fake", Map.of("command", node.toString(), "args", List.of(script.toString())),
+        String config = mapper.writeValueAsString(
+            Map.of("mcpServers", Map.of("fake", Map.of("command", node.toString(), "args", List.of(script.toString())),
                 "remote", Map.of("url", "https://example.com/mcp"))));
         Files.writeString(workspace.resolve(".mcp.json"), config);
         manager = new McpManager(mapper, null, null, () -> "");
@@ -60,9 +63,14 @@ class McpToolsTest {
 
     @AfterEach
     void tearDown() {
-        if (manager != null) manager.close();
-        if (previousArtifacts == null) System.clearProperty("pilot.artifacts.dir");
-        else System.setProperty("pilot.artifacts.dir", previousArtifacts);
+        if (manager != null) {
+            manager.close();
+        }
+        if (previousArtifacts == null) {
+            System.clearProperty("pilot.artifacts.dir");
+        } else {
+            System.setProperty("pilot.artifacts.dir", previousArtifacts);
+        }
     }
 
     @Test
@@ -90,7 +98,8 @@ class McpToolsTest {
 
     @Test
     void callsToolsAndConvertsContent() throws IOException {
-        assertEquals("echo:hi", calling.execute(Map.of("server", "fake", "tool", "echo", "arguments", Map.of("text", "hi"))));
+        assertEquals("echo:hi",
+            calling.execute(Map.of("server", "fake", "tool", "echo", "arguments", Map.of("text", "hi"))));
 
         ToolResult image = calling.executeResult(Map.of("server", "fake", "tool", "shot"));
         assertTrue(image.text().startsWith("here\n[图片 image-"), image.text());
@@ -99,9 +108,11 @@ class McpToolsTest {
         assertTrue(Path.of(image.images().getFirst().path()).startsWith(artifacts));
 
         assertEquals("ERROR: it broke", calling.execute(Map.of("server", "fake", "tool", "boom")));
-        assertTrue(calling.execute(Map.of("server", "fake", "tool", "missing")).startsWith("ERROR: unknown tool missing"));
+        assertTrue(
+            calling.execute(Map.of("server", "fake", "tool", "missing")).startsWith("ERROR: unknown tool missing"));
         assertTrue(calling.execute(Map.of("server", "fake")).startsWith("ERROR: 缺少参数 tool"));
-        assertTrue(calling.execute(Map.of("server", "fake", "tool", "echo", "arguments", "x")).startsWith("ERROR: arguments 必须是对象"));
+        assertTrue(calling.execute(Map.of("server", "fake", "tool", "echo", "arguments", "x"))
+            .startsWith("ERROR: arguments 必须是对象"));
     }
 
     @Test
@@ -132,7 +143,7 @@ class McpToolsTest {
         ToolRegistry registry = new ToolRegistry();
         registry.register(listing);
         registry.register(calling);
-        assertEquals(java.util.Set.of("mcp_tools", "mcp_call"), registry.names());
+        assertEquals(Set.of("mcp_tools", "mcp_call"), registry.names());
 
         Files.delete(workspace.resolve(".mcp.json"));
 
@@ -143,7 +154,7 @@ class McpToolsTest {
     @Test
     void startupFailureIsReportedAndRemembered() throws IOException {
         Files.writeString(workspace.resolve(".mcp.json"),
-                "{\"mcpServers\":{\"bad\":{\"command\":\"/definitely/not/here\"}}}");
+            "{\"mcpServers\":{\"bad\":{\"command\":\"/definitely/not/here\"}}}");
 
         String result = listing.execute(Map.of("server", "bad"));
 
@@ -163,10 +174,14 @@ class McpToolsTest {
     private static Path findNode() {
         String path = System.getenv("PATH") == null ? "" : System.getenv("PATH");
         for (String dir : path.split(File.pathSeparator)) {
-            if (dir.isBlank()) continue;
+            if (dir.isBlank()) {
+                continue;
+            }
             for (String name : List.of("node", "node.exe")) {
                 Path candidate = Path.of(dir, name);
-                if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) return candidate;
+                if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
+                    return candidate;
+                }
             }
         }
         return null;

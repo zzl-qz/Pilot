@@ -1,39 +1,5 @@
 package com.pilot.server.controller;
 
-import com.pilot.core.event.EventEnvelope;
-import com.pilot.core.event.RunStarted;
-import com.pilot.core.plan.PlanItem;
-import com.pilot.core.project.Project;
-import com.pilot.core.project.ProjectRepository;
-import com.pilot.core.session.ConversationRepository;
-import com.pilot.core.session.EventSubscription;
-import com.pilot.core.session.PlanRepository;
-import com.pilot.core.session.Session;
-import com.pilot.core.session.SessionService;
-import com.pilot.core.session.SessionStatus;
-import com.pilot.server.config.AgentProperties;
-import com.pilot.server.session.*;
-import com.pilot.server.workspace.WorkspaceService;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.core.io.FileSystemResource;
-import org.springframework.core.io.Resource;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import tools.jackson.databind.ObjectMapper;
-
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -47,6 +13,47 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import com.pilot.core.event.EventEnvelope;
+import com.pilot.core.event.RunStarted;
+import com.pilot.core.plan.PlanItem;
+import com.pilot.core.project.Project;
+import com.pilot.core.project.ProjectRepository;
+import com.pilot.core.session.ConversationRepository;
+import com.pilot.core.session.EventSubscription;
+import com.pilot.core.session.PlanRepository;
+import com.pilot.core.session.Session;
+import com.pilot.core.session.SessionService;
+import com.pilot.core.session.SessionStatus;
+import com.pilot.server.config.AgentProperties;
+import com.pilot.server.session.AttachmentService;
+import com.pilot.server.session.RunStarter;
+import com.pilot.server.session.RunSubmissionService;
+import com.pilot.server.session.SessionCleanupService;
+import com.pilot.server.session.SkillService;
+import com.pilot.server.session.TaskControlService;
+import com.pilot.server.workspace.WorkspaceService;
+
+import tools.jackson.databind.ObjectMapper;
 
 @RestController
 @RequestMapping("/api/sessions")
@@ -76,12 +83,9 @@ public class SessionController {
     private final ConversationRepository conversations;
 
     public SessionController(SessionService sessions, RunStarter runStarter, ObjectMapper objectMapper,
-                             WorkspaceService workspaces, AgentProperties agentProperties,
-                             PlanRepository plans, AttachmentService attachments,
-                             ProjectRepository projects,
-                             SessionCleanupService cleanup,
-                             SkillService skills,
-                             ConversationRepository conversations) {
+        WorkspaceService workspaces, AgentProperties agentProperties, PlanRepository plans,
+        AttachmentService attachments, ProjectRepository projects, SessionCleanupService cleanup, SkillService skills,
+        ConversationRepository conversations) {
         this.sessions = sessions;
         this.runStarter = runStarter;
         this.attachments = attachments;
@@ -106,9 +110,8 @@ public class SessionController {
      */
     @PostMapping
     public SessionResponse create(@RequestBody(required = false) CreateSessionRequest request) {
-        String title = request == null || request.title() == null || request.title().isBlank()
-                ? DEFAULT_TITLE
-                : request.title();
+        String title =
+            request == null || request.title() == null || request.title().isBlank() ? DEFAULT_TITLE : request.title();
         String projectId = request == null ? null : blankToNull(request.projectId());
         Project project = projectId == null ? null : requireProject(projectId);
 
@@ -117,8 +120,7 @@ public class SessionController {
             if (existingBlank.isPresent()) {
                 if (request == null || request.replaceBlank() == null || !request.replaceBlank()) {
                     throw new ResponseStatusException(HttpStatus.CONFLICT,
-                            "该项目已有未使用的空白对话（" + existingBlank.get().id() + "），"
-                                    + "请先归档它再新建，或者直接回到那条对话。");
+                        "该项目已有未使用的空白对话（" + existingBlank.get().id() + "），" + "请先归档它再新建，或者直接回到那条对话。");
                 }
                 sessions.setArchived(existingBlank.get().id(), true);
             }
@@ -163,7 +165,8 @@ public class SessionController {
         return SessionResponse.of(requireSession(id), countOf(id));
     }
 
-    public record ArchiveRequest(Boolean archived) { }
+    public record ArchiveRequest(Boolean archived) {
+    }
 
     /**
      * 决定新对话的工作区。
@@ -208,7 +211,7 @@ public class SessionController {
 
     private Project requireProject(String projectId) {
         return projects.find(projectId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project not found: " + projectId));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project not found: " + projectId));
     }
 
     private static String blankToNull(String value) {
@@ -233,10 +236,8 @@ public class SessionController {
         } else {
             source = sessions.listByProject(projectId);
         }
-        return source.stream()
-                .filter(session -> !session.isSide())
-                .map(session -> SessionResponse.of(session, 0))
-                .toList();
+        return source.stream().filter(session -> !session.isSide()).map(session -> SessionResponse.of(session, 0))
+            .toList();
     }
 
     /**
@@ -245,7 +246,7 @@ public class SessionController {
      */
     @PatchMapping("/{id}/workspace")
     public SessionResponse switchWorkspace(@PathVariable String id,
-                                           @RequestBody(required = false) WorkspaceRequest request) {
+        @RequestBody(required = false) WorkspaceRequest request) {
         Session session = requireSession(id);
         if (request == null || request.workspace() == null || request.workspace().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "workspace must not be blank");
@@ -264,7 +265,8 @@ public class SessionController {
         return SessionResponse.of(requireSession(id), countOf(id));
     }
 
-    public record WorkspaceRequest(String workspace) { }
+    public record WorkspaceRequest(String workspace) {
+    }
 
     @GetMapping("/{id}")
     public SessionResponse get(@PathVariable String id) {
@@ -285,7 +287,7 @@ public class SessionController {
     /** 事件总数走存储层计数，不把整表事件读进内存再 size()。 */
     private int countOf(String sessionId) {
         long total = sessions.eventCount(sessionId);
-        return total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+        return total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int)total;
     }
 
     @DeleteMapping("/{id}")
@@ -360,8 +362,8 @@ public class SessionController {
      * 并发请求只有一个能拿到槽位，其余返回 409。
      */
     private String claimRun(String sessionId) {
-        return runStarter.claimRun(sessionId).orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行"));
+        return runStarter.claimRun(sessionId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行"));
     }
 
     /** 启动失败（发布事件或注册运行抛异常）时把槽位还回去，避免会话被永久占住。 */
@@ -383,13 +385,12 @@ public class SessionController {
 
     private QueueResponse queueResponse(String id) {
         List<RunStarter.QueuedMessage> messages = runStarter.queuedMessages(id);
-        return new QueueResponse(
-                messages.stream().map(RunStarter.QueuedMessage::content).toList(),
-                messages.stream()
-                        .map(message -> new QueueEntry(message.content(),
-                                attachments.displayAttachments(id, message.attachments()),
-                                message.imagePositions()))
-                        .toList(), RunStarter.queueRevision(messages));
+        return new QueueResponse(messages.stream().map(RunStarter.QueuedMessage::content).toList(),
+            messages.stream()
+                .map(message -> new QueueEntry(message.content(),
+                    attachments.displayAttachments(id, message.attachments()), message.imagePositions()))
+                .toList(),
+            RunStarter.queueRevision(messages));
     }
 
     /**
@@ -407,24 +408,19 @@ public class SessionController {
         }
         String lower = file.toLowerCase(Locale.ROOT);
         MediaType type = lower.endsWith(".png") ? MediaType.IMAGE_PNG
-                : lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? MediaType.IMAGE_JPEG
-                : lower.endsWith(".gif") ? MediaType.IMAGE_GIF
-                : lower.endsWith(".webp") ? MediaType.parseMediaType("image/webp")
-                : null;
+            : lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? MediaType.IMAGE_JPEG : lower.endsWith(".gif")
+                ? MediaType.IMAGE_GIF : lower.endsWith(".webp") ? MediaType.parseMediaType("image/webp") : null;
         if (type == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "附件不是图片");
         }
-        return ResponseEntity.ok()
-                .contentType(type)
-                .header("X-Content-Type-Options", "nosniff")
-                .header("Cache-Control", "private, max-age=86400")
-                .body(new FileSystemResource(path));
+        return ResponseEntity.ok().contentType(type).header("X-Content-Type-Options", "nosniff")
+            .header("Cache-Control", "private, max-age=86400").body(new FileSystemResource(path));
     }
 
     /** 改队列里的某一句，下标从 0 开始。还没轮到的才能改。 */
     @PutMapping("/{id}/queue/{index}")
     public QueueResponse editQueued(@PathVariable String id, @PathVariable int index,
-                                    @RequestBody(required = false) QueueEditRequest request) {
+        @RequestBody(required = false) QueueEditRequest request) {
         requireSession(id);
         if (request == null || request.content() == null || request.content().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
@@ -447,7 +443,8 @@ public class SessionController {
 
     /** 拖拽排序：把 index 这一句挪到 to 的位置，整条消息（含图片）一起移动。 */
     @PostMapping("/{id}/queue/{index}/move")
-    public QueueResponse moveQueued(@PathVariable String id, @PathVariable int index, @RequestParam int to, @RequestParam(required = false) String revision) {
+    public QueueResponse moveQueued(@PathVariable String id, @PathVariable int index, @RequestParam int to,
+        @RequestParam(required = false) String revision) {
         requireSession(id);
         if (!runStarter.moveQueued(id, index, to, revision)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "位置无效，或这一句已经不在队列里");
@@ -456,7 +453,8 @@ public class SessionController {
     }
 
     @DeleteMapping("/{id}/queue/{index}")
-    public QueueResponse removeQueued(@PathVariable String id, @PathVariable int index, @RequestParam(required = false) String revision) {
+    public QueueResponse removeQueued(@PathVariable String id, @PathVariable int index,
+        @RequestParam(required = false) String revision) {
         requireSession(id);
         if (!runStarter.removeQueued(id, index, revision)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列已变化或消息不存在，请刷新后重试");
@@ -466,7 +464,7 @@ public class SessionController {
 
     @PostMapping("/{id}/queue/{index}/steer")
     public QueueResponse steerQueued(@PathVariable String id, @PathVariable int index,
-                                     @RequestBody QueueSteerRequest request) {
+        @RequestBody QueueSteerRequest request) {
         requireSession(id);
         if (request == null || request.runId() == null || request.revision() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少运行或队列版本，请刷新后重试");
@@ -477,7 +475,8 @@ public class SessionController {
         return queueResponse(id);
     }
 
-    public record QueueSteerRequest(String runId, String revision) { }
+    public record QueueSteerRequest(String runId, String revision) {
+    }
 
     /**
      * 改已经发出去的一句并重跑。这句以及它后面的回复都会拿掉，再用新内容开一轮。
@@ -538,8 +537,7 @@ public class SessionController {
     private String lastUserInput(String sessionId) {
         List<EventEnvelope> events = sessions.events(sessionId);
         for (int i = events.size() - 1; i >= 0; i--) {
-            if (events.get(i).payload() instanceof RunStarted started
-                    && !"（继续上一次未完成的任务）".equals(started.input())) {
+            if (events.get(i).payload() instanceof RunStarted started && !"（继续上一次未完成的任务）".equals(started.input())) {
                 return started.input();
             }
         }
@@ -559,7 +557,8 @@ public class SessionController {
         return ResponseEntity.accepted().body(new MessageResponse(id, runId));
     }
 
-    public record SteerRequest(String content, String runId) { }
+    public record SteerRequest(String content, String runId) {
+    }
 
     @PostMapping("/{id}/messages")
     public ResponseEntity<MessageResponse> sendMessage(@PathVariable String id, @RequestBody MessageRequest request) {
@@ -568,18 +567,14 @@ public class SessionController {
         if (request == null || ((request.content() == null || request.content().isBlank()) && !hasAttachments)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
         }
-        String skill = request.skill() == null || request.skill().isBlank()
-                ? null : request.skill().strip();
+        String skill = request.skill() == null || request.skill().isBlank() ? null : request.skill().strip();
         if (skill != null) {
             // 激活是启动期行为，排队消息无法携带；错误信息直接给出可行动的原因
             var catalog = skills.catalogFor(workspaceOf(id));
             if (catalog.find(skill).isEmpty()) {
-                String reason = catalog.invalid().stream()
-                        .filter(problem -> problem.name().equals(skill))
-                        .map(problem -> problem.reason())
-                        .findFirst().orElse("未找到");
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "技能 " + skill + " 不可用：" + reason);
+                String reason = catalog.invalid().stream().filter(problem -> problem.name().equals(skill))
+                    .map(problem -> problem.reason()).findFirst().orElse("未找到");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "技能 " + skill + " 不可用：" + reason);
             }
         }
         // 运行中的消息进队列，附件随消息保存；独立验收条件只属于一次新任务的启动，技能是启动期行为，都不能排队。
@@ -606,13 +601,12 @@ public class SessionController {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "运行状态已变化，请结束当前任务后重试");
             }
             if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions())) {
-                return ResponseEntity.accepted()
-                        .body(new MessageResponse(id, runStarter.activeRun(id).orElse(null)));
+                return ResponseEntity.accepted().body(new MessageResponse(id, runStarter.activeRun(id).orElse(null)));
             }
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行");
         }
-        RunSubmissionService.start(sessions, runStarter, id, runId, prepared.content(),
-                prepared.attachments(), prepared.imagePositions(), request.task(), skill);
+        RunSubmissionService.start(sessions, runStarter, id, runId, prepared.content(), prepared.attachments(),
+            prepared.imagePositions(), request.task(), skill);
         return ResponseEntity.ok().body(new MessageResponse(id, runId));
     }
 
@@ -632,19 +626,18 @@ public class SessionController {
      */
     @GetMapping("/{id}/history")
     public HistoryResponse history(@PathVariable String id,
-                                   @RequestParam(name = "limit", defaultValue = "60") int limit,
-                                   @RequestParam(name = "before", required = false) Long before,
-                                   @RequestParam(name = "after", required = false) Long after) {
+        @RequestParam(name = "limit", defaultValue = "60") int limit,
+        @RequestParam(name = "before", required = false) Long before,
+        @RequestParam(name = "after", required = false) Long after) {
         requireSession(id);
         if (before != null && after != null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "before 和 after 不能同时使用");
         }
         int capped = Math.max(1, Math.min(limit, 500));
-        List<EventEnvelope> page = after != null
-                ? sessions.eventsPageAfter(id, after, capped)
-                : sessions.eventsPage(id, before, capped);
-        boolean hasMore = after != null
-                ? !page.isEmpty() && page.get(page.size() - 1).sequence() < sessions.latestSequence(id)
+        List<EventEnvelope> page =
+            after != null ? sessions.eventsPageAfter(id, after, capped) : sessions.eventsPage(id, before, capped);
+        boolean hasMore =
+            after != null ? !page.isEmpty() && page.get(page.size() - 1).sequence() < sessions.latestSequence(id)
                 : !page.isEmpty() && page.get(0).sequence() > 1;
         return new HistoryResponse(page, hasMore, countOf(id));
     }
@@ -653,12 +646,13 @@ public class SessionController {
      * @param hasMore 是否还有更早的事件
      * @param total   该会话的事件总数
      */
-    public record HistoryResponse(List<EventEnvelope> events, boolean hasMore, int total) { }
+    public record HistoryResponse(List<EventEnvelope> events, boolean hasMore, int total) {
+    }
 
     @GetMapping(value = "/{id}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<SseEmitter> events(@PathVariable String id,
-                                             @RequestParam(name = "after", required = false) Long after,
-                                             @RequestHeader(name = "Last-Event-ID", required = false) Long lastEventId) {
+        @RequestParam(name = "after", required = false) Long after,
+        @RequestHeader(name = "Last-Event-ID", required = false) Long lastEventId) {
         requireSession(id);
         long cursor = after != null ? after : lastEventId != null ? lastEventId : 0L;
         SseEmitter emitter = new SseEmitter(0L);
@@ -680,8 +674,8 @@ public class SessionController {
         try {
             emitter.send(SseEmitter.event().comment("stream open: session=" + id + ", after=" + cursor));
             // 第四个参数：订阅被服务端摘掉（客户端积压太多）时，把底层连接一起关掉
-            subscription.set(sessions.subscribe(id, cursor, listener,
-                    () -> closeQuietly(closed, subscription, heartbeat, emitter)));
+            subscription.set(
+                sessions.subscribe(id, cursor, listener, () -> closeQuietly(closed, subscription, heartbeat, emitter)));
             if (closed.get()) {
                 subscription.get().close();
             }
@@ -702,19 +696,14 @@ public class SessionController {
         } catch (IOException | RuntimeException e) {
             emitter.completeWithError(e);
         }
-        return ResponseEntity.ok()
-                .header("Cache-Control", "no-cache")
-                .header("X-Accel-Buffering", "no")
-                .body(emitter);
+        return ResponseEntity.ok().header("Cache-Control", "no-cache").header("X-Accel-Buffering", "no").body(emitter);
     }
 
     /** @return {@code false} 表示客户端已经断开，调用方应停止推送并注销订阅 */
     private boolean send(SseEmitter emitter, EventEnvelope envelope) {
         try {
-            emitter.send(SseEmitter.event()
-                    .id(Long.toString(envelope.sequence()))
-                    .name(envelope.type())
-                    .data(objectMapper.writeValueAsString(envelope)));
+            emitter.send(SseEmitter.event().id(Long.toString(envelope.sequence())).name(envelope.type())
+                .data(objectMapper.writeValueAsString(envelope)));
             return true;
         } catch (IOException | IllegalStateException e) {
             // ClientAbortException / AsyncRequestNotUsableException：对端已关闭，静默收尾
@@ -723,7 +712,7 @@ public class SessionController {
     }
 
     private static void closeQuietly(AtomicBoolean closed, AtomicReference<EventSubscription> subscription,
-                                     AtomicReference<ScheduledFuture<?>> heartbeat, SseEmitter emitter) {
+        AtomicReference<ScheduledFuture<?>> heartbeat, SseEmitter emitter) {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
@@ -745,49 +734,55 @@ public class SessionController {
     }
 
     private Session requireSession(String id) {
-        return sessions.find(id).orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
+        return sessions.find(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
     }
 
-    public record CreateSessionRequest(String title, String workspace, String projectId, Boolean replaceBlank) { }
+    public record CreateSessionRequest(String title, String workspace, String projectId, Boolean replaceBlank) {
+    }
 
-    public record RenameRequest(String title) { }
+    public record RenameRequest(String title) {
+    }
 
     public record MessageRequest(String content, List<AttachmentService.Inbound> attachments,
-                                 TaskControlService.Requirements task,
-                                 String skill, List<Integer> imagePositions) {
+        TaskControlService.Requirements task, String skill, List<Integer> imagePositions) {
         public MessageRequest(String content, List<AttachmentService.Inbound> attachments,
-                              TaskControlService.Requirements task) {
+            TaskControlService.Requirements task) {
             this(content, attachments, task, null, List.of());
         }
     }
 
-    public record ResendRequest(Long sequence, String content) { }
+    public record ResendRequest(Long sequence, String content) {
+    }
 
-    public record QueueEditRequest(String content, String revision) { }
+    public record QueueEditRequest(String content, String revision) {
+    }
 
     /**
      * @param items   排队消息正文，顺序即执行顺序（保持旧契约）
      * @param entries 同一批消息的结构化版本，额外带上图片附件和它们在正文里的位置
      */
-    public record QueueResponse(List<String> items, List<QueueEntry> entries, String revision) { }
+    public record QueueResponse(List<String> items, List<QueueEntry> entries, String revision) {
+    }
 
     public record QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments,
-                              List<Integer> imagePositions) { }
+        List<Integer> imagePositions) {
+    }
 
-    public record MessageResponse(String sessionId, String runId) { }
+    public record MessageResponse(String sessionId, String runId) {
+    }
 
-    public record ActiveRunResponse(String sessionId, String runId) { }
+    public record ActiveRunResponse(String sessionId, String runId) {
+    }
 
     public record SessionResponse(String id, String sessionId, String title, Instant createdAt, SessionStatus status,
-                                  String workspace, String projectId, boolean isBlank, boolean archived,
-                                  int eventCount, String parentSessionId) {
+        String workspace, String projectId, boolean isBlank, boolean archived, int eventCount, String parentSessionId) {
         static SessionResponse of(Session session, int eventCount) {
             // 同时保留 id 与 sessionId：前端界面（含 React 版）统一按 id 读取会话标识，
             // 旧版 app.js 仍按 sessionId 读取，二者并存避免任一侧取到 undefined。
-            return new SessionResponse(session.id(), session.id(), session.title(), session.createdAt(), session.status(),
-                    session.workspace(), session.projectId(), session.isBlank(), session.archived(), eventCount,
-                    session.parentSessionId());
+            return new SessionResponse(session.id(), session.id(), session.title(), session.createdAt(),
+                session.status(), session.workspace(), session.projectId(), session.isBlank(), session.archived(),
+                eventCount, session.parentSessionId());
         }
     }
 }

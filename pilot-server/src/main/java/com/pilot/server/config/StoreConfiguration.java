@@ -1,12 +1,21 @@
 package com.pilot.server.config;
 
+import java.nio.file.Path;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
 import com.pilot.core.project.InMemoryProjectRepository;
 import com.pilot.core.project.ProjectRepository;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.InMemoryConversationRepository;
 import com.pilot.core.session.InMemoryPlanRepository;
+import com.pilot.core.session.InMemoryRunCheckpointRepository;
 import com.pilot.core.session.InMemorySessionRepository;
 import com.pilot.core.session.PlanRepository;
+import com.pilot.core.session.RunCheckpointRepository;
 import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.SessionRepository;
 import com.pilot.server.store.EventCodec;
@@ -14,18 +23,15 @@ import com.pilot.server.store.InMemorySettingsStore;
 import com.pilot.server.store.JdbcConversationRepository;
 import com.pilot.server.store.JdbcPlanRepository;
 import com.pilot.server.store.JdbcProjectRepository;
+import com.pilot.server.store.JdbcRunCheckpointRepository;
 import com.pilot.server.store.JdbcRunRepository;
 import com.pilot.server.store.JdbcSessionRepository;
 import com.pilot.server.store.JdbcSettingsStore;
+import com.pilot.server.store.QueuedMessageRepository;
 import com.pilot.server.store.SettingsStore;
 import com.pilot.server.store.SqliteStore;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import tools.jackson.databind.ObjectMapper;
 
-import java.nio.file.Path;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 存储装配：{@code pilot.store=sqlite}（默认，落盘到项目下的 {@code .pilot/pilot.db}）或 {@code memory}（进程内）。
@@ -37,9 +43,7 @@ public class StoreConfiguration {
     @Bean
     @ConditionalOnProperty(name = "pilot.store", havingValue = "sqlite", matchIfMissing = true)
     SqliteStore sqliteStore(PilotDataDir data, @Value("${pilot.store.path:}") String configured) {
-        Path path = configured == null || configured.isBlank()
-                ? data.file("pilot.db")
-                : Path.of(configured);
+        Path path = configured == null || configured.isBlank() ? data.file("pilot.db") : Path.of(configured);
         return new SqliteStore(path);
     }
 
@@ -107,26 +111,26 @@ public class StoreConfiguration {
     /** 可恢复调度状态与幂等账本的存储端口；内存模式退化为不持久化。 */
     @Bean
     @ConditionalOnProperty(name = "pilot.store", havingValue = "sqlite", matchIfMissing = true)
-    com.pilot.core.session.RunCheckpointRepository jdbcRunCheckpointRepository(SqliteStore store) {
-        return new com.pilot.server.store.JdbcRunCheckpointRepository(store);
+    RunCheckpointRepository jdbcRunCheckpointRepository(SqliteStore store) {
+        return new JdbcRunCheckpointRepository(store);
     }
 
     @Bean
     @ConditionalOnProperty(name = "pilot.store", havingValue = "memory")
-    com.pilot.core.session.RunCheckpointRepository inMemoryRunCheckpointRepository() {
-        return new com.pilot.core.session.InMemoryRunCheckpointRepository();
+    RunCheckpointRepository inMemoryRunCheckpointRepository() {
+        return new InMemoryRunCheckpointRepository();
     }
 
     @Bean
     @ConditionalOnProperty(name = "pilot.store", havingValue = "sqlite", matchIfMissing = true)
-    com.pilot.server.store.QueuedMessageRepository queuedMessageRepository(SqliteStore store) {
-        return new com.pilot.server.store.QueuedMessageRepository(store);
+    QueuedMessageRepository queuedMessageRepository(SqliteStore store) {
+        return new QueuedMessageRepository(store);
     }
 
     @Bean
     @ConditionalOnProperty(name = "pilot.store", havingValue = "memory")
-    com.pilot.server.store.QueuedMessageRepository inMemoryQueuedMessageRepository() {
-        return new com.pilot.server.store.QueuedMessageRepository();
+    QueuedMessageRepository inMemoryQueuedMessageRepository() {
+        return new QueuedMessageRepository();
     }
 
     @Bean

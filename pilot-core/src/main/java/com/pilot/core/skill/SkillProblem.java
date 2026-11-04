@@ -7,4 +7,5 @@ package com.pilot.core.skill;
  * 对用户 fail-visible（经 {@code GET /api/skills} 的 {@code invalid} 列表与启动日志亮牌）。
  * 一个坏技能只影响自己，绝不中断会话。
  */
-public record SkillProblem(String name, String path, String reason) { }
+public record SkillProblem(String name, String path, String reason) {
+}

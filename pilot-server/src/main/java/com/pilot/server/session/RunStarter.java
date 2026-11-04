@@ -1,9 +1,15 @@
 package com.pilot.server.session;
 
-import com.pilot.core.loop.Attachment;
-
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+
+import com.pilot.core.loop.Attachment;
 
 /**
  * 一次运行的启动器。控制器只依赖这个接口，真正跑模型的是 {@code AgentRunService}。
@@ -20,7 +26,7 @@ public interface RunStarter {
     }
 
     default void start(String sessionId, String runId, String input, List<Attachment> attachments,
-                       TaskControlService.Requirements task) {
+        TaskControlService.Requirements task) {
         start(sessionId, runId, input, attachments);
     }
 
@@ -29,12 +35,12 @@ public interface RunStarter {
      * 默认转发到无技能版本，测试里的空实现不用改。
      */
     default void start(String sessionId, String runId, String input, List<Attachment> attachments,
-                       TaskControlService.Requirements task, String skill) {
+        TaskControlService.Requirements task, String skill) {
         start(sessionId, runId, input, attachments, task);
     }
 
     default void start(String sessionId, String runId, String input, List<Attachment> attachments,
-                       List<Integer> imagePositions, TaskControlService.Requirements task) {
+        List<Integer> imagePositions, TaskControlService.Requirements task) {
         start(sessionId, runId, input, attachments, task);
     }
 
@@ -43,7 +49,7 @@ public interface RunStarter {
      * 默认忽略技能，测试里的空实现不用改。
      */
     default void start(String sessionId, String runId, String input, List<Attachment> attachments,
-                       List<Integer> imagePositions, TaskControlService.Requirements task, String skill) {
+        List<Integer> imagePositions, TaskControlService.Requirements task, String skill) {
         start(sessionId, runId, input, attachments, imagePositions, task);
     }
 
@@ -62,20 +68,24 @@ public interface RunStarter {
     }
 
     /** 普通追加仅排队；保留默认转发以兼容已有启动器。 */
-    default boolean followup(String sessionId, String text) { return steer(sessionId, text); }
+    default boolean followup(String sessionId, String text) {
+        return steer(sessionId, text);
+    }
 
     /**
      * 带图片附件的追加。默认实现只认纯文本，带附件时返回 false，
      * 这样不支持附件的启动器不会悄悄丢掉用户的图片。
      */
     default boolean followup(String sessionId, String text, List<Attachment> attachments,
-                             List<Integer> imagePositions) {
+        List<Integer> imagePositions) {
         boolean plain = attachments == null || attachments.isEmpty();
         return plain && followup(sessionId, text);
     }
 
     /** 暂停在当前安全步骤结束后生效，保留任务及排队消息。 */
-    default boolean pause(String runId) { return false; }
+    default boolean pause(String runId) {
+        return false;
+    }
 
     /**
      * 请求取消一次运行。
@@ -106,7 +116,7 @@ public interface RunStarter {
         if (activeRun(sessionId).isPresent()) {
             return Optional.empty();
         }
-        return Optional.of("run_" + java.util.UUID.randomUUID());
+        return Optional.of("run_" + UUID.randomUUID());
     }
 
     /** 释放 {@link #claimRun(String)} 占到但没能启动的槽位。 */
@@ -114,7 +124,7 @@ public interface RunStarter {
     }
 
     /** 独占文件恢复/切分支期间的工作区，abandon 时释放；其他会话不能趁此启动。 */
-    default boolean lockWorkspace(String operationId, java.nio.file.Path workspace) {
+    default boolean lockWorkspace(String operationId, Path workspace) {
         return true;
     }
 
@@ -153,21 +163,17 @@ public interface RunStarter {
         return new CompactionResult(false, 0, 0, 0, "当前运行器不支持主动压缩");
     }
 
-    record ContextStatus(int messages, int usedTokens, int limitTokens,
-                         boolean estimated, boolean canCompact, int percent,
-                         java.util.List<Segment> segments) {
-        public ContextStatus(int messages, int usedTokens, int limitTokens,
-                             boolean estimated, boolean canCompact) {
+    record ContextStatus(int messages, int usedTokens, int limitTokens, boolean estimated, boolean canCompact,
+        int percent, List<Segment> segments) {
+        public ContextStatus(int messages, int usedTokens, int limitTokens, boolean estimated, boolean canCompact) {
             this(messages, usedTokens, limitTokens, estimated, canCompact,
-                    Math.min(100, (int) Math.round(Math.max(0, usedTokens) * 100.0
-                            / Math.max(1, limitTokens))),
-                    java.util.List.of());
+                Math.min(100, (int)Math.round(Math.max(0, usedTokens) * 100.0 / Math.max(1, limitTokens))), List.of());
         }
 
         /** 兼容旧调用：构成未提供时视为空（前端隐藏构成区）。 */
-        public ContextStatus(int messages, int usedTokens, int limitTokens,
-                             boolean estimated, boolean canCompact, int percent) {
-            this(messages, usedTokens, limitTokens, estimated, canCompact, percent, java.util.List.of());
+        public ContextStatus(int messages, int usedTokens, int limitTokens, boolean estimated, boolean canCompact,
+            int percent) {
+            this(messages, usedTokens, limitTokens, estimated, canCompact, percent, List.of());
         }
 
         /** 模型记忆按角色的构成（条数与字符数），前端叠加成占比条：看得出记忆里什么在占地方。 */
@@ -184,12 +190,11 @@ public interface RunStarter {
             usedTokens = Math.max(0, usedTokens);
             limitTokens = Math.max(1, limitTokens);
             percent = Math.max(0, Math.min(100, percent));
-            segments = segments == null ? java.util.List.of() : java.util.List.copyOf(segments);
+            segments = segments == null ? List.of() : List.copyOf(segments);
         }
     }
 
-    record CompactionResult(boolean compacted, int coveredMessages,
-                            int tokensBefore, int tokensAfter, String message) {
+    record CompactionResult(boolean compacted, int coveredMessages, int tokensBefore, int tokensAfter, String message) {
         public CompactionResult {
             coveredMessages = Math.max(0, coveredMessages);
             tokensBefore = Math.max(0, tokensBefore);
@@ -213,24 +218,30 @@ public interface RunStarter {
     }
 
     /** 从用户所见队列原子转入当前运行；版本或运行变化时保留原消息。 */
-    default boolean steerQueued(String sessionId, String runId, int index, String revision) { return false; }
+    default boolean steerQueued(String sessionId, String runId, int index, String revision) {
+        return false;
+    }
 
     static String queueRevision(List<QueuedMessage> messages) {
         try {
-            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(messages.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+            return HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(messages.toString().getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
     }
 
     /** 最后一项验收完成并释放编辑槽位后，尝试启动等待中的下一件事。 */
-    default void requirementsUpdated(String sessionId) { }
+    default void requirementsUpdated(String sessionId) {
+    }
 
     /** 等待当前任务结束后执行的用户消息，按入队顺序。 */
     default List<String> queued(String sessionId) {
         return List.of();
     }
 
-    default void discardSteering(String sessionId) { }
+    default void discardSteering(String sessionId) {
+    }
 
     /** 改队列里的某一句。下标从 0 开始。 */
     default boolean editQueued(String sessionId, int index, String text) {
@@ -238,13 +249,18 @@ public interface RunStarter {
     }
 
     default boolean editQueued(String sessionId, int index, String text, String revision) {
-        return (revision == null || queueRevision(queuedMessages(sessionId)).equals(revision)) && editQueued(sessionId, index, text);
+        return (revision == null || queueRevision(queuedMessages(sessionId)).equals(revision))
+            && editQueued(sessionId, index, text);
     }
+
     default boolean moveQueued(String sessionId, int from, int to, String revision) {
-        return (revision == null || queueRevision(queuedMessages(sessionId)).equals(revision)) && moveQueued(sessionId, from, to);
+        return (revision == null || queueRevision(queuedMessages(sessionId)).equals(revision))
+            && moveQueued(sessionId, from, to);
     }
+
     default boolean removeQueued(String sessionId, int index, String revision) {
-        return (revision == null || queueRevision(queuedMessages(sessionId)).equals(revision)) && removeQueued(sessionId, index);
+        return (revision == null || queueRevision(queuedMessages(sessionId)).equals(revision))
+            && removeQueued(sessionId, index);
     }
 
     /** 把某一句往前挪一位（和前一句交换）。文字和图片作为一个整体移动。 */

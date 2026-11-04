@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+
 import org.junit.jupiter.api.Test;
 
 class FrontendDepsPromptTest {
@@ -45,7 +46,6 @@ class FrontendDepsPromptTest {
     }
 
     private static int read(String text) {
-        return FrontendDepsPrompt.readChoice(
-                new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8)), false, 1);
+        return FrontendDepsPrompt.readChoice(new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8)), false, 1);
     }
 }

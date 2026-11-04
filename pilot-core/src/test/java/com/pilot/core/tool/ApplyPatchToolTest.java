@@ -1,9 +1,8 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.workspace.PathValidator;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -14,9 +13,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.workspace.PathValidator;
 
 class ApplyPatchToolTest {
     @TempDir
@@ -31,14 +32,21 @@ class ApplyPatchToolTest {
     void setUp() throws IOException {
         realWorkspace = workspace.toRealPath();
         ReadGuard guard = new ReadGuard() {
-            @Override public void observed(Path file) { observed.add(file.toAbsolutePath().normalize()); }
-            @Override public boolean isObserved(Path file) {
+            @Override
+            public void observed(Path file) {
+                observed.add(file.toAbsolutePath().normalize());
+            }
+
+            @Override
+            public boolean isObserved(Path file) {
                 return observed.contains(file.toAbsolutePath().normalize());
             }
         };
-        tool = new ApplyPatchTool(new PathValidator(workspace),
-                file -> snapshots.add(realWorkspace.relativize(file.toAbsolutePath().normalize())
-                        .toString().replace('\\', '/')), guard);
+        tool =
+            new ApplyPatchTool(new PathValidator(workspace),
+                file -> snapshots
+                    .add(realWorkspace.relativize(file.toAbsolutePath().normalize()).toString().replace('\\', '/')),
+                guard);
     }
 
     private Path write(String name, String content) throws IOException {
@@ -59,22 +67,22 @@ class ApplyPatchToolTest {
         write("old/Legacy.java", "legacy\n");
 
         ToolResult result = apply("""
-                *** Begin Patch
-                *** Update File: src/A.java
-                @@ class A
-                   int x = 1;
-                -  int y = 2;
-                +  int y = 3;
-                +  int z = 4;
-                *** Add File: src/B.java
-                +class B {}
-                *** Delete File: old/Legacy.java
-                *** End Patch
-                """);
+            *** Begin Patch
+            *** Update File: src/A.java
+            @@ class A
+               int x = 1;
+            -  int y = 2;
+            +  int y = 3;
+            +  int z = 4;
+            *** Add File: src/B.java
+            +class B {}
+            *** Delete File: old/Legacy.java
+            *** End Patch
+            """);
 
         assertTrue(result.text().startsWith("已应用补丁（3 个文件）"), result.text());
         assertEquals("class A {\n  int x = 1;\n  int y = 3;\n  int z = 4;\n}\n",
-                Files.readString(workspace.resolve("src/A.java")));
+            Files.readString(workspace.resolve("src/A.java")));
         assertEquals("class B {}\n", Files.readString(workspace.resolve("src/B.java")));
         assertFalse(Files.exists(workspace.resolve("old/Legacy.java")));
         assertEquals(List.of("src/A.java", "src/B.java", "old/Legacy.java"), result.changedPaths());
@@ -87,15 +95,15 @@ class ApplyPatchToolTest {
         write("b.txt", "alpha\nbeta\n");
 
         ToolResult result = apply("""
-                *** Begin Patch
-                *** Update File: a.txt
-                -one
-                +ONE
-                *** Update File: b.txt
-                -does not exist
-                +whatever
-                *** End Patch
-                """);
+            *** Begin Patch
+            *** Update File: a.txt
+            -one
+            +ONE
+            *** Update File: b.txt
+            -does not exist
+            +whatever
+            *** End Patch
+            """);
 
         assertTrue(result.text().startsWith("ERROR: "), result.text());
         assertTrue(result.text().contains("补丁未应用"), result.text());
@@ -109,12 +117,12 @@ class ApplyPatchToolTest {
         write("a.txt", "x = 1\nfoo\nx = 1\nbar\n");
 
         ToolResult result = apply("""
-                *** Begin Patch
-                *** Update File: a.txt
-                -x = 1
-                +x = 2
-                *** End Patch
-                """);
+            *** Begin Patch
+            *** Update File: a.txt
+            -x = 1
+            +x = 2
+            *** End Patch
+            """);
 
         assertTrue(result.text().contains("匹配到多处"), result.text());
         assertEquals("x = 1\nfoo\nx = 1\nbar\n", Files.readString(workspace.resolve("a.txt")));
@@ -125,16 +133,17 @@ class ApplyPatchToolTest {
         write("a.txt", "void one() {\n  x = 1\n}\nvoid two() {\n  x = 1\n}\n");
 
         ToolResult result = apply("""
-                *** Begin Patch
-                *** Update File: a.txt
-                @@ void two()
-                -  x = 1
-                +  x = 2
-                *** End Patch
-                """);
+            *** Begin Patch
+            *** Update File: a.txt
+            @@ void two()
+            -  x = 1
+            +  x = 2
+            *** End Patch
+            """);
 
         assertTrue(result.text().startsWith("已应用补丁"), result.text());
-        assertEquals("void one() {\n  x = 1\n}\nvoid two() {\n  x = 2\n}\n", Files.readString(workspace.resolve("a.txt")));
+        assertEquals("void one() {\n  x = 1\n}\nvoid two() {\n  x = 2\n}\n",
+            Files.readString(workspace.resolve("a.txt")));
     }
 
     @Test
@@ -142,12 +151,12 @@ class ApplyPatchToolTest {
         Files.writeString(workspace.resolve("unread.txt"), "a\n");
 
         ToolResult result = apply("""
-                *** Begin Patch
-                *** Update File: unread.txt
-                -a
-                +b
-                *** End Patch
-                """);
+            *** Begin Patch
+            *** Update File: unread.txt
+            -a
+            +b
+            *** End Patch
+            """);
 
         assertTrue(result.text().contains("尚未读取过"), result.text());
         assertEquals("a\n", Files.readString(workspace.resolve("unread.txt")));
@@ -158,14 +167,14 @@ class ApplyPatchToolTest {
         write("a/Old.java", "class Old {}\n");
 
         ToolResult result = apply("""
-                *** Begin Patch
-                *** Update File: a/Old.java
-                *** Move to: b/New.java
-                @@
-                -class Old {}
-                +class New {}
-                *** End Patch
-                """);
+            *** Begin Patch
+            *** Update File: a/Old.java
+            *** Move to: b/New.java
+            @@
+            -class Old {}
+            +class New {}
+            *** End Patch
+            """);
 
         assertTrue(result.text().contains("重命名 a/Old.java → b/New.java"), result.text());
         assertFalse(Files.exists(workspace.resolve("a/Old.java")));
@@ -178,14 +187,14 @@ class ApplyPatchToolTest {
         write("win.txt", "a\r\nb\r\nc");
 
         apply("""
-                *** Begin Patch
-                *** Update File: win.txt
-                 a
-                -b
-                +B
-                 c
-                *** End Patch
-                """);
+            *** Begin Patch
+            *** Update File: win.txt
+             a
+            -b
+            +B
+             c
+            *** End Patch
+            """);
 
         assertEquals("a\r\nB\r\nc", Files.readString(workspace.resolve("win.txt")));
     }
@@ -195,13 +204,13 @@ class ApplyPatchToolTest {
         write("a.txt", "keep   \nold\n");
 
         ToolResult result = apply("""
-                *** Begin Patch
-                *** Update File: a.txt
-                 keep
-                -old
-                +new
-                *** End Patch
-                """);
+            *** Begin Patch
+            *** Update File: a.txt
+             keep
+            -old
+            +new
+            *** End Patch
+            """);
 
         assertTrue(result.text().startsWith("已应用补丁"), result.text());
         assertEquals("keep   \nnew\n", Files.readString(workspace.resolve("a.txt")));
@@ -211,14 +220,13 @@ class ApplyPatchToolTest {
     void rejectsEscapesExistingTargetsAndMalformedPatches() throws IOException {
         write("exists.txt", "x\n");
 
-        assertTrue(apply("*** Begin Patch\n*** Add File: ../outside.txt\n+x\n*** End Patch")
-                .text().contains("超出工作区"));
-        assertTrue(apply("*** Begin Patch\n*** Add File: exists.txt\n+x\n*** End Patch")
-                .text().contains("文件已存在"));
+        assertTrue(apply("*** Begin Patch\n*** Add File: ../outside.txt\n+x\n*** End Patch").text().contains("超出工作区"));
+        assertTrue(apply("*** Begin Patch\n*** Add File: exists.txt\n+x\n*** End Patch").text().contains("文件已存在"));
         assertTrue(apply("not a patch").text().startsWith("ERROR: 补丁格式错误"));
         assertTrue(apply("*** Begin Patch\n*** Frobnicate: x\n*** End Patch").text().contains("无法识别"));
-        assertTrue(apply("*** Begin Patch\n*** Update File: exists.txt\n-x\n+y\n*** Update File: exists.txt\n-x\n+z\n*** End Patch")
-                .text().contains("出现多次"));
+        assertTrue(apply(
+            "*** Begin Patch\n*** Update File: exists.txt\n-x\n+y\n*** Update File: exists.txt\n-x\n+z\n*** End Patch")
+            .text().contains("出现多次"));
     }
 
     @Test

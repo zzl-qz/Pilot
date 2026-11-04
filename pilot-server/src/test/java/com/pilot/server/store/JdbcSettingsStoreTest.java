@@ -1,7 +1,8 @@
 package com.pilot.server.store;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -9,9 +10,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.LinkedHashMap;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class JdbcSettingsStoreTest {
     @TempDir
@@ -47,19 +47,18 @@ class JdbcSettingsStoreTest {
 
         try (Connection connection = sqlite.open(); Statement statement = connection.createStatement()) {
             statement.execute("""
-                    CREATE TRIGGER fail_on_boom BEFORE INSERT ON settings
-                    WHEN NEW.key = 'model.boom'
-                    BEGIN SELECT RAISE(ABORT, 'boom'); END""");
+                CREATE TRIGGER fail_on_boom BEFORE INSERT ON settings
+                WHEN NEW.key = 'model.boom'
+                BEGIN SELECT RAISE(ABORT, 'boom'); END""");
         }
 
-        LinkedHashMap<String,String> batch = new LinkedHashMap<String, String>();
+        LinkedHashMap<String, String> batch = new LinkedHashMap<String, String>();
         batch.put("model.endpoint", "https://new.example/v1");
         batch.put("model.boom", "x");
 
         assertThrows(RuntimeException.class, () -> store.saveAll(batch));
 
-        assertEquals("https://old.example/v1", store.find("model.endpoint").orElseThrow(),
-                "同一批次里先写的键也必须回滚");
+        assertEquals("https://old.example/v1", store.find("model.endpoint").orElseThrow(), "同一批次里先写的键也必须回滚");
         assertTrue(store.find("model.boom").isEmpty());
     }
 }

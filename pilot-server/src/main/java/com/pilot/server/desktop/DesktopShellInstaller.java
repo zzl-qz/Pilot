@@ -1,11 +1,5 @@
 package com.pilot.server.desktop;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -19,6 +13,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 /**
  * 桌面壳（{@code pilot-desktop} 的 Electron）没装时自动安装，装好再打开窗口。
@@ -65,8 +65,7 @@ public class DesktopShellInstaller {
     /** 命令执行器：返回退出码。测试里换成不真装的实现。 */
     @FunctionalInterface
     interface Runner {
-        int run(Path directory, List<String> command, Map<String, String> environment,
-                Path logFile, Duration timeout);
+        int run(Path directory, List<String> command, Map<String, String> environment, Path logFile, Duration timeout);
     }
 
     /**
@@ -96,8 +95,7 @@ public class DesktopShellInstaller {
         Thread thread = new Thread(() -> install(root, desktop, npm, logFile, onReady), "pilot-desktop-install");
         thread.setDaemon(true);
         thread.start();
-        return "桌面壳（Electron）尚未安装，正在后台安装（首次约几分钟，日志 " + logFile
-                + "），装好会自动打开窗口。" + MANUAL;
+        return "桌面壳（Electron）尚未安装，正在后台安装（首次约几分钟，日志 " + logFile + "），装好会自动打开窗口。" + MANUAL;
     }
 
     /** 正在安装？给测试与日志用。 */
@@ -110,7 +108,7 @@ public class DesktopShellInstaller {
             for (int attempt = 0; attempt < ATTEMPTS.size(); attempt++) {
                 Attempt current = ATTEMPTS.get(attempt);
                 int code = runner.run(desktop, installCommand(npm, current.arguments()),
-                        environment(npm, current.environment()), logFile, INSTALL_TIMEOUT);
+                    environment(npm, current.environment()), logFile, INSTALL_TIMEOUT);
                 if (ready(root, onReady)) {
                     log.info("桌面壳安装完成（第 {} 次尝试），正在打开窗口", attempt + 1);
                     return;
@@ -135,13 +133,13 @@ public class DesktopShellInstaller {
     private boolean downloadBinaryOnly(Path root, Path desktop, Path npm, Path logFile, Runnable onReady) {
         Path script = desktop.resolve("node_modules").resolve("electron").resolve("install.js");
         Path node = sibling(npm, "node");
-        if (Files.isExecutable(DesktopWindowLauncher.electronBinary(root))
-                || !Files.isRegularFile(script) || node == null) {
+        if (Files.isExecutable(DesktopWindowLauncher.electronBinary(root)) || !Files.isRegularFile(script)
+            || node == null) {
             return false;
         }
         log.info("Electron 包已装好但二进制缺失，直接用镜像补下载");
         runner.run(desktop, List.of(node.toString(), script.toString()),
-                environment(npm, Map.of("ELECTRON_MIRROR", ELECTRON_MIRROR)), logFile, INSTALL_TIMEOUT);
+            environment(npm, Map.of("ELECTRON_MIRROR", ELECTRON_MIRROR)), logFile, INSTALL_TIMEOUT);
         return ready(root, onReady);
     }
 
@@ -158,9 +156,8 @@ public class DesktopShellInstaller {
     }
 
     /** 官方源优先，失败换 npmmirror（npm 包与 Electron 二进制都换）。 */
-    private static final List<Attempt> ATTEMPTS = List.of(
-            new Attempt(List.of(), Map.of()),
-            new Attempt(List.of("--registry=" + MIRROR_REGISTRY), Map.of("ELECTRON_MIRROR", ELECTRON_MIRROR)));
+    private static final List<Attempt> ATTEMPTS = List.of(new Attempt(List.of(), Map.of()),
+        new Attempt(List.of("--registry=" + MIRROR_REGISTRY), Map.of("ELECTRON_MIRROR", ELECTRON_MIRROR)));
 
     /**
      * 安装命令。Windows 上 npm 是 {@code npm.cmd}，{@code CreateProcess} 执行不了批处理，
@@ -170,8 +167,7 @@ public class DesktopShellInstaller {
         List<String> arguments = new ArrayList<>(List.of("install", "--no-audit", "--no-fund"));
         arguments.addAll(extra);
         if (isWindows()) {
-            return List.of("cmd.exe", "/d", "/c",
-                    "\"" + npm + "\" " + String.join(" ", arguments));
+            return List.of("cmd.exe", "/d", "/c", "\"" + npm + "\" " + String.join(" ", arguments));
         }
         List<String> command = new ArrayList<>();
         command.add(npm.toString());
@@ -182,8 +178,7 @@ public class DesktopShellInstaller {
     /** npm 所在目录进 PATH（npm 要能找到同目录的 node），再叠加本次尝试的镜像变量。 */
     private static Map<String, String> environment(Path npm, Map<String, String> extra) {
         Map<String, String> environment = new LinkedHashMap<>(extra);
-        environment.put("PATH", npm.getParent() + File.pathSeparator
-                + System.getenv().getOrDefault("PATH", ""));
+        environment.put("PATH", npm.getParent() + File.pathSeparator + System.getenv().getOrDefault("PATH", ""));
         return environment;
     }
 
@@ -248,8 +243,8 @@ public class DesktopShellInstaller {
         return file;
     }
 
-    private static int run(Path directory, List<String> command, Map<String, String> environment,
-                           Path logFile, Duration timeout) {
+    private static int run(Path directory, List<String> command, Map<String, String> environment, Path logFile,
+        Duration timeout) {
         try {
             ProcessBuilder builder = new ProcessBuilder(command);
             builder.directory(directory.toFile());

@@ -1,8 +1,11 @@
 package com.pilot.core.tool;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import tools.jackson.databind.json.JsonMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -14,18 +17,24 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import tools.jackson.databind.json.JsonMapper;
 
 class CommandTaskManagerTest {
-    @TempDir Path storage;
-    @TempDir Path workspace;
+    @TempDir
+    Path storage;
+    @TempDir
+    Path workspace;
 
     @Test
     void logsArriveBeforeExitWithoutNewlinesAndUnicodePaginationPreservesTrailingOutput() throws Exception {
         Path release = workspace.resolve("release");
         String id;
         try (CommandTaskManager manager = manager()) {
-            CommandTaskManager.Task task = manager.start("session_a", "live unicode", process("live", release.toString()), true, 10_000);
+            CommandTaskManager.Task task =
+                manager.start("session_a", "live unicode", process("live", release.toString()), true, 10_000);
             id = task.taskId();
             waitUntil(() -> manager.logs("session_a", id, 0, 100).text().contains("你好🧪live"));
             assertEquals("RUNNING", manager.get("session_a", id).status());
@@ -59,8 +68,9 @@ class CommandTaskManagerTest {
             assertEquals("FAILED", result.status());
             assertEquals(7, result.exitCode());
             assertEquals("failed-tail", manager.logs("session_a", task.taskId(), 0, 100).text());
-            CommandTaskManager.Task missing = manager.start("session_a", "missing", new ProcessBuilder(workspace.resolve("missing-program").toString())
-                    .directory(workspace.toFile()), false, 1_000);
+            CommandTaskManager.Task missing = manager.start("session_a", "missing",
+                new ProcessBuilder(workspace.resolve("missing-program").toString()).directory(workspace.toFile()),
+                false, 1_000);
             assertEquals("FAILED", missing.status());
             assertNull(missing.pid());
             assertNotNull(missing.finishedAt());
@@ -71,11 +81,11 @@ class CommandTaskManagerTest {
     void gbkConsoleOutputIsDecodedWithFallbackInsteadOfMojibake() throws Exception {
         // 中文 Windows 子进程默认按控制台编码（GBK）输出；管理器严格 UTF-8 解码失败后必须回退 GBK，
         // 中文不能全部变成替换符。这是老 RunCommandTool 已解决、CommandTaskManager 曾经缺失的一处回归。
-        var command = new java.util.ArrayList<>(List.of(javaBinary(), "-Dstdout.encoding=GBK",
-                "-cp", System.getProperty("java.class.path"), Child.class.getName(), "gbk"));
+        var command = new ArrayList<>(List.of(javaBinary(), "-Dstdout.encoding=GBK", "-cp",
+            System.getProperty("java.class.path"), Child.class.getName(), "gbk"));
         try (var manager = manager()) {
-            var task = manager.start("session_a", "gbk console", new ProcessBuilder(command)
-                    .directory(workspace.toFile()), false, 10_000);
+            var task = manager.start("session_a", "gbk console",
+                new ProcessBuilder(command).directory(workspace.toFile()), false, 10_000);
             assertEquals("COMPLETED", awaitDone(manager, "session_a", task.taskId()).status());
             String text = manager.logs("session_a", task.taskId(), 0, 100).text();
             assertTrue(text.contains("你好GBK输出"), text);
@@ -89,7 +99,8 @@ class CommandTaskManagerTest {
             assertEquals("TIMED_OUT", awaitDone(manager, "session_a", timed.taskId()).status());
             assertFalse(ProcessHandle.of(timed.pid()).map(ProcessHandle::isAlive).orElse(false));
             Path childPidFile = workspace.resolve("child.pid");
-            CommandTaskManager.Task tree = manager.start("session_a", "tree", process("tree", childPidFile.toString()), true, 10_000);
+            CommandTaskManager.Task tree =
+                manager.start("session_a", "tree", process("tree", childPidFile.toString()), true, 10_000);
             waitUntil(() -> hasContent(childPidFile));
             long childPid = Long.parseLong(Files.readString(childPidFile).strip());
             assertTrue(ProcessHandle.of(childPid).orElseThrow().isAlive());
@@ -110,7 +121,8 @@ class CommandTaskManagerTest {
     void trackedDescendantRemainsOwnedAfterParentExits() throws Exception {
         try (CommandTaskManager manager = manager()) {
             Path childPidFile = workspace.resolve("orphan.pid");
-            CommandTaskManager.Task task = manager.start("session_a", "parent exits", process("orphan", childPidFile.toString()), true, 10_000);
+            CommandTaskManager.Task task =
+                manager.start("session_a", "parent exits", process("orphan", childPidFile.toString()), true, 10_000);
             waitUntil(() -> hasContent(childPidFile));
             long childPid = Long.parseLong(Files.readString(childPidFile).strip());
             waitUntil(() -> !ProcessHandle.of(task.pid()).map(ProcessHandle::isAlive).orElse(false));
@@ -163,8 +175,8 @@ class CommandTaskManagerTest {
     void restartMarksUnownedPidInterruptedWithoutSignallingIt() throws Exception {
         JsonMapper mapper = JsonMapper.builder().build();
         Path session = Files.createDirectories(storage.resolve("session_a"));
-        CommandTaskManager.Task stale = new CommandTaskManager.Task("cmd_stale", "session_a", "previous command", workspace.toString(),
-                "RUNNING", ProcessHandle.current().pid(), null, Instant.now(), null, true, 60, "");
+        CommandTaskManager.Task stale = new CommandTaskManager.Task("cmd_stale", "session_a", "previous command",
+            workspace.toString(), "RUNNING", ProcessHandle.current().pid(), null, Instant.now(), null, true, 60, "");
         Files.writeString(session.resolve("cmd_stale.json"), mapper.writeValueAsString(stale));
         Files.writeString(session.resolve("cmd_stale.log"), "saved🧪");
         try (CommandTaskManager manager = manager()) {
@@ -181,8 +193,8 @@ class CommandTaskManagerTest {
         Path session = Files.createDirectories(storage.resolve("session_a"));
         Files.writeString(session.resolve("cmd_broken.json"), "{\"taskId\":");
         Files.writeString(session.resolve("cmd_incomplete.json"), "{\"taskId\":\"cmd_incomplete\"}");
-        CommandTaskManager.Task valid = new CommandTaskManager.Task("cmd_good", "session_a", "prior command", workspace.toString(),
-                "COMPLETED", 123L, 0, Instant.now(), Instant.now(), true, 60, "");
+        CommandTaskManager.Task valid = new CommandTaskManager.Task("cmd_good", "session_a", "prior command",
+            workspace.toString(), "COMPLETED", 123L, 0, Instant.now(), Instant.now(), true, 60, "");
         Files.writeString(session.resolve("cmd_good.json"), JsonMapper.builder().build().writeValueAsString(valid));
         try (CommandTaskManager manager = manager()) {
             assertEquals(List.of(valid), manager.list("session_a"));
@@ -199,7 +211,7 @@ class CommandTaskManagerTest {
             pid = task.pid();
             manager.stopSession("session_a");
             assertThrows(IllegalStateException.class,
-                    () -> manager.start("session_a", "late", process("hold"), true, 10_000));
+                () -> manager.start("session_a", "late", process("hold"), true, 10_000));
             assertEquals("CANCELLED", awaitDone(manager, "session_a", task.taskId()).status());
             pid = manager.start("session_b", "hold", process("hold"), true, 10_000).pid();
         }
@@ -207,7 +219,7 @@ class CommandTaskManagerTest {
         waitUntil(() -> !ProcessHandle.of(stopped).map(ProcessHandle::isAlive).orElse(false));
         try (CommandTaskManager manager = manager()) {
             assertThrows(IllegalStateException.class,
-                    () -> manager.start("session_a", "late", process("hold"), true, 10_000));
+                () -> manager.start("session_a", "late", process("hold"), true, 10_000));
             assertEquals("INTERRUPTED", manager.list("session_b").getFirst().status());
         }
     }
@@ -229,7 +241,7 @@ class CommandTaskManagerTest {
         try (CommandTaskManager manager = new CommandTaskManager(storage, JsonMapper.builder().build(), 1024, 1, 2)) {
             CommandTaskManager.Task first = manager.start("session_a", "hold", process("hold"), true, 10_000);
             assertThrows(IllegalStateException.class,
-                    () -> manager.start("session_a", "another", process("hold"), true, 10_000));
+                () -> manager.start("session_a", "another", process("hold"), true, 10_000));
             manager.stop("session_a", first.taskId());
             awaitDone(manager, "session_a", first.taskId());
             for (int count = 0; count < 3; count++) {
@@ -241,29 +253,39 @@ class CommandTaskManagerTest {
         }
     }
 
-    private CommandTaskManager manager() { return new CommandTaskManager(storage, JsonMapper.builder().build()); }
+    private CommandTaskManager manager() {
+        return new CommandTaskManager(storage, JsonMapper.builder().build());
+    }
+
     private ProcessBuilder process(String... args) {
         // Windows 上子进程的 stdout/stderr 默认按本地编码输出，这里显式要求 UTF-8，
         // 否则同一条命令会混成两种编码，emoji 与分页边界都无法验证
-        ArrayList<String> command = new java.util.ArrayList<>(List.of(javaBinary(),
-                "-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8",
-                "-cp", System.getProperty("java.class.path"), Child.class.getName()));
+        ArrayList<String> command =
+            new ArrayList<>(List.of(javaBinary(), "-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8",
+                "-Dstderr.encoding=UTF-8", "-cp", System.getProperty("java.class.path"), Child.class.getName()));
         command.addAll(List.of(args));
         return new ProcessBuilder(command).directory(workspace.toFile());
     }
+
     private static String javaBinary() {
         String executable = System.getProperty("os.name").toLowerCase().contains("win") ? "java.exe" : "java";
         return Path.of(System.getProperty("java.home"), "bin", executable).toString();
     }
-    private static CommandTaskManager.Task awaitDone(CommandTaskManager manager, String session, String id) throws Exception {
+
+    private static CommandTaskManager.Task awaitDone(CommandTaskManager manager, String session, String id)
+        throws Exception {
         waitUntil(() -> !List.of("RUNNING", "STOPPING").contains(manager.get(session, id).status()));
         return manager.get(session, id);
     }
+
     private static void waitUntil(BooleanSupplier ready) throws Exception {
         long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(8);
-        while (!ready.getAsBoolean() && System.nanoTime() < until) Thread.sleep(10);
+        while (!ready.getAsBoolean() && System.nanoTime() < until) {
+            Thread.sleep(10);
+        }
         assertTrue(ready.getAsBoolean(), "expected command lifecycle boundary was not reached");
     }
+
     private static boolean hasContent(Path file) {
         try {
             return Files.isRegularFile(file) && Files.size(file) > 0;
@@ -277,27 +299,41 @@ class CommandTaskManagerTest {
         public static void main(String[] args) throws Exception {
             switch (args[0]) {
                 case "live" -> {
-                    System.out.print("你好🧪live"); System.out.flush();
+                    System.out.print("你好🧪live");
+                    System.out.flush();
                     untilFile(args[1]);
-                    System.err.print("尾部完成"); System.err.flush();
+                    System.err.print("尾部完成");
+                    System.err.flush();
                 }
-                case "failure" -> { System.out.print("failed-tail"); System.exit(7); }
+                case "failure" -> {
+                    System.out.print("failed-tail");
+                    System.exit(7);
+                }
                 case "secret" -> {
                     String secret = System.getenv("TASK_TEST_SECRET");
-                    System.out.print("prefix:" + secret.substring(0, 14)); System.out.flush();
+                    System.out.print("prefix:" + secret.substring(0, 14));
+                    System.out.flush();
                     untilFile(args[1]);
-                    System.out.print(secret.substring(14) + ":suffix"); System.out.flush();
+                    System.out.print(secret.substring(14) + ":suffix");
+                    System.out.flush();
                 }
                 case "tree", "orphan" -> {
                     Process child = new ProcessBuilder(javaBinary(), "-cp", System.getProperty("java.class.path"),
-                            Child.class.getName(), "hold").inheritIO().start();
+                        Child.class.getName(), "hold").inheritIO().start();
                     Files.writeString(Path.of(args[1]), String.valueOf(child.pid()));
-                    if (args[0].equals("orphan")) Thread.sleep(300);
-                    else child.waitFor();
+                    if (args[0].equals("orphan")) {
+                        Thread.sleep(300);
+                    } else {
+                        child.waitFor();
+                    }
                 }
                 case "noisy" -> {
                     String output = "x".repeat(256);
-                    while (true) { System.out.print(output); System.out.flush(); Thread.sleep(1); }
+                    while (true) {
+                        System.out.print(output);
+                        System.out.flush();
+                        Thread.sleep(1);
+                    }
                 }
                 case "hold" -> Thread.sleep(30_000);
                 case "done" -> System.out.print("done");
@@ -305,8 +341,11 @@ class CommandTaskManagerTest {
                 default -> throw new IllegalArgumentException(args[0]);
             }
         }
+
         private static void untilFile(String path) throws Exception {
-            while (!Files.exists(Path.of(path))) Thread.sleep(10);
+            while (!Files.exists(Path.of(path))) {
+                Thread.sleep(10);
+            }
         }
     }
 }

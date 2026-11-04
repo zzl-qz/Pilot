@@ -1,9 +1,9 @@
 package com.pilot.core.browser;
 
-import com.pilot.core.tool.Availability;
-
 import java.time.Duration;
 import java.util.Map;
+
+import com.pilot.core.tool.Availability;
 
 /**
  * 浏览器运行时的抽象：{@code browser} 工具只依赖它，真实实现是 Playwright sidecar，

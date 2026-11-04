@@ -1,11 +1,10 @@
 package com.pilot.server.controller;
 
-import com.pilot.core.session.SessionService;
-import com.pilot.core.skill.SkillManifest;
-import com.pilot.core.skill.SkillProblem;
-import com.pilot.server.session.SkillInstallService;
-import com.pilot.server.session.SkillService;
-import com.pilot.server.workspace.WorkspaceService;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -17,10 +16,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
+import com.pilot.core.session.SessionService;
+import com.pilot.core.skill.SkillManifest;
+import com.pilot.core.skill.SkillProblem;
+import com.pilot.server.session.SkillInstallService;
+import com.pilot.server.session.SkillService;
 
 /**
  * 技能目录查询：前端 `/` 快捷命令菜单与设置页从这里拉取清单。
@@ -52,29 +52,27 @@ public class SkillsController {
         String workspace = null;
         if (sessionId != null && !sessionId.isBlank()) {
             workspace = sessions.find(sessionId)
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                            "session not found: " + sessionId))
-                    .workspace();
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + sessionId))
+                .workspace();
         }
         var catalog = skills.catalogFor(workspace);
         List<SkillPayload> available = catalog.list().stream().map(SkillPayload::of).toList();
-        return new SkillsResponse(available, catalog.invalid(),
-                skills.projectRootFor(workspace).toString(),
-                skills.userRootOf().toString());
+        return new SkillsResponse(available, catalog.invalid(), skills.projectRootFor(workspace).toString(),
+            skills.userRootOf().toString());
     }
 
     public record SkillPayload(String name, String description, String command, String argumentHint,
-                               List<String> allowedTools, String source, String directory) {
+        List<String> allowedTools, String source, String directory) {
         static SkillPayload of(SkillManifest manifest) {
             return new SkillPayload(manifest.name(), manifest.description(), manifest.command(),
-                    manifest.argumentHint(), manifest.allowedTools(),
-                    manifest.source().name().toLowerCase(Locale.ROOT),
-                    manifest.directory().toString());
+                manifest.argumentHint(), manifest.allowedTools(), manifest.source().name().toLowerCase(Locale.ROOT),
+                manifest.directory().toString());
         }
     }
 
-    public record SkillsResponse(List<SkillPayload> available, List<SkillProblem> invalid,
-                                 String projectRoot, String userRoot) { }
+    public record SkillsResponse(List<SkillPayload> available, List<SkillProblem> invalid, String projectRoot,
+        String userRoot) {
+    }
 
     /**
      * 预览安装来源：git 仓库或本机目录取到暂存区并解析候选（不安装）。
@@ -83,12 +81,13 @@ public class SkillsController {
     @PostMapping("/preview")
     public ResponseEntity<PreviewResponse> preview(@RequestBody(required = false) PreviewRequest request) {
         var preview = installer.preview(request == null ? null : request.source(),
-                resolveWorkspace(request == null ? null : request.sessionId()));
-        return ResponseEntity.ok(new PreviewResponse(preview.token(), preview.kind(), preview.message(),
-                preview.candidates().stream()
-                        .map(candidate -> new CandidatePayload(candidate.name(), candidate.description(),
-                                candidate.command(), candidate.valid(), candidate.reason()))
-                        .toList()));
+            resolveWorkspace(request == null ? null : request.sessionId()));
+        return ResponseEntity
+            .ok(new PreviewResponse(preview.token(), preview.kind(), preview.message(),
+                preview
+                    .candidates().stream().map(candidate -> new CandidatePayload(candidate.name(),
+                        candidate.description(), candidate.command(), candidate.valid(), candidate.reason()))
+                    .toList()));
     }
 
     /**
@@ -109,17 +108,15 @@ public class SkillsController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "target 只能是 project 或 user");
         }
         var result = installer.install(request.token(), request.skills(), project,
-                resolveWorkspace(request.sessionId()), Boolean.TRUE.equals(request.overwrite()));
+            resolveWorkspace(request.sessionId()), Boolean.TRUE.equals(request.overwrite()));
         return ResponseEntity.ok(new InstallResponse(result.results().stream()
-                .map(outcome -> new OutcomePayload(outcome.name(), outcome.status(), outcome.reason()))
-                .toList()));
+            .map(outcome -> new OutcomePayload(outcome.name(), outcome.status(), outcome.reason())).toList()));
     }
 
     /** 安装器失败统一 400 带中文原因（include-message: always，前端直接展示）。 */
     @ExceptionHandler(SkillInstallService.InstallException.class)
     public ResponseEntity<Map<String, String>> onInstallFailure(SkillInstallService.InstallException e) {
-        return ResponseEntity.badRequest().body(Map.of("message", Objects.requireNonNullElse(
-                e.getMessage(), "安装失败")));
+        return ResponseEntity.badRequest().body(Map.of("message", Objects.requireNonNullElse(e.getMessage(), "安装失败")));
     }
 
     /** sessionId 非空时必须存在（与 GET 同口径）；缺省按默认工作区解析。 */
@@ -128,23 +125,26 @@ public class SkillsController {
             return null;
         }
         return sessions.find(sessionId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "session not found: " + sessionId))
-                .workspace();
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + sessionId))
+            .workspace();
     }
 
-    public record PreviewRequest(String source, String sessionId) { }
+    public record PreviewRequest(String source, String sessionId) {
+    }
 
-    public record PreviewResponse(String token, String kind, String message,
-                                  List<CandidatePayload> candidates) { }
+    public record PreviewResponse(String token, String kind, String message, List<CandidatePayload> candidates) {
+    }
 
-    public record CandidatePayload(String name, String description, String command,
-                                   boolean valid, String reason) { }
+    public record CandidatePayload(String name, String description, String command, boolean valid, String reason) {
+    }
 
-    public record InstallRequest(String token, List<String> skills, String target,
-                                 String sessionId, Boolean overwrite) { }
+    public record InstallRequest(String token, List<String> skills, String target, String sessionId,
+        Boolean overwrite) {
+    }
 
-    public record OutcomePayload(String name, String status, String reason) { }
+    public record OutcomePayload(String name, String status, String reason) {
+    }
 
-    public record InstallResponse(List<OutcomePayload> results) { }
+    public record InstallResponse(List<OutcomePayload> results) {
+    }
 }

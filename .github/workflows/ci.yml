@@ -61,6 +61,8 @@ jobs:
           path: |
             pilot-core/target/surefire-reports/**
             pilot-server/target/surefire-reports/**
+            pilot-core/target/checkstyle-result.xml
+            pilot-server/target/checkstyle-result.xml
           if-no-files-found: ignore
 
   isolated-builds:
@@ -96,4 +98,6 @@ jobs:
           path: |
             pilot-core/target/surefire-reports/**
             pilot-server/target/surefire-reports/**
+            pilot-core/target/checkstyle-result.xml
+            pilot-server/target/checkstyle-result.xml
           if-no-files-found: ignore

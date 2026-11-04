@@ -1,16 +1,13 @@
 package com.pilot.server.controller;
 
-import com.pilot.core.session.SessionService;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.http.MediaType;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.web.servlet.MockMvc;
-import tools.jackson.databind.ObjectMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -21,14 +18,20 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import org.hamcrest.Matchers;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
+
+import com.pilot.core.session.SessionService;
+
+import tools.jackson.databind.ObjectMapper;
 
 /** 审阅面板的两个新接口：撤销改动、能力清单。 */
 @SpringBootTest(properties = "pilot.store=memory")
@@ -64,13 +67,10 @@ class ReviewApiTest {
         Files.writeString(workspace.resolve("new.txt"), "hello\n");
         String id = sessions.createSession("审阅撤销", workspace.toString()).id();
 
-        mvc.perform(post("/api/sessions/{id}/diff/restore", id)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(Map.of("paths", List.of("a.txt", "new.txt")))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.restored[0]").value("a.txt"))
-                .andExpect(jsonPath("$.deleted[0]").value("new.txt"))
-                .andExpect(jsonPath("$.failed").isEmpty());
+        mvc.perform(post("/api/sessions/{id}/diff/restore", id).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("paths", List.of("a.txt", "new.txt")))))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.restored[0]").value("a.txt"))
+            .andExpect(jsonPath("$.deleted[0]").value("new.txt")).andExpect(jsonPath("$.failed").isEmpty());
 
         assertEquals("old\n", Files.readString(tracked));
         assertFalse(Files.exists(workspace.resolve("new.txt")));
@@ -83,13 +83,10 @@ class ReviewApiTest {
         git("init", "-q");
         String id = sessions.createSession("越界撤销", workspace.toString()).id();
 
-        mvc.perform(post("/api/sessions/{id}/diff/restore", id)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(Map.of("paths", List.of("../escape.txt")))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.restored").isEmpty())
-                .andExpect(jsonPath("$.failed[0].path").value("../escape.txt"))
-                .andExpect(jsonPath("$.failed[0].reason").isNotEmpty());
+        mvc.perform(post("/api/sessions/{id}/diff/restore", id).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("paths", List.of("../escape.txt"))))).andExpect(status().isOk())
+            .andExpect(jsonPath("$.restored").isEmpty()).andExpect(jsonPath("$.failed[0].path").value("../escape.txt"))
+            .andExpect(jsonPath("$.failed[0].reason").isNotEmpty());
     }
 
     /**
@@ -109,21 +106,16 @@ class ReviewApiTest {
         Files.writeString(workspace.resolve("new.txt"), "hello\n");
         String id = sessions.createSession("单文件补丁", workspace.toString()).id();
 
-        mvc.perform(get("/api/sessions/{id}/diff/file", id).param("path", "a.txt"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.path").value("a.txt"))
-                .andExpect(jsonPath("$.added").value(1))
-                .andExpect(jsonPath("$.removed").value(1))
-                .andExpect(jsonPath("$.truncated").value(false))
-                .andExpect(jsonPath("$.diff").value(org.hamcrest.Matchers.containsString("diff --git a/a.txt b/a.txt")))
-                .andExpect(jsonPath("$.diff").value(org.hamcrest.Matchers.containsString("+TWO")));
+        mvc.perform(get("/api/sessions/{id}/diff/file", id).param("path", "a.txt")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.path").value("a.txt")).andExpect(jsonPath("$.added").value(1))
+            .andExpect(jsonPath("$.removed").value(1)).andExpect(jsonPath("$.truncated").value(false))
+            .andExpect(jsonPath("$.diff").value(Matchers.containsString("diff --git a/a.txt b/a.txt")))
+            .andExpect(jsonPath("$.diff").value(Matchers.containsString("+TWO")));
 
         // 未跟踪文件按当前内容合成全新增补丁，不能返回空
-        mvc.perform(get("/api/sessions/{id}/diff/file", id).param("path", "new.txt"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("??"))
-                .andExpect(jsonPath("$.added").value(1))
-                .andExpect(jsonPath("$.diff").value(org.hamcrest.Matchers.containsString("+hello")));
+        mvc.perform(get("/api/sessions/{id}/diff/file", id).param("path", "new.txt")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("??")).andExpect(jsonPath("$.added").value(1))
+            .andExpect(jsonPath("$.diff").value(Matchers.containsString("+hello")));
     }
 
     @Test
@@ -133,9 +125,8 @@ class ReviewApiTest {
         String id = sessions.createSession("越界补丁", workspace.toString()).id();
 
         mvc.perform(get("/api/sessions/{id}/diff/file", id).param("path", "../escape.txt"))
-                .andExpect(status().isBadRequest());
-        mvc.perform(get("/api/sessions/{id}/diff/file", id).param("path", " "))
-                .andExpect(status().isBadRequest());
+            .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/sessions/{id}/diff/file", id).param("path", " ")).andExpect(status().isBadRequest());
     }
 
     /** 能力页签读的就是注册表：工具必须有名字和可用性，不再是写死的说明。 */
@@ -143,13 +134,10 @@ class ReviewApiTest {
     void capabilitiesEndpointListsToolsAndEnvironment() throws Exception {
         String id = sessions.createSession("能力清单", workspace.toString()).id();
 
-        mvc.perform(get("/api/sessions/{id}/capabilities", id))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.workspace").value(workspace.toAbsolutePath().normalize().toString()))
-                .andExpect(jsonPath("$.permissionMode").isNotEmpty())
-                .andExpect(jsonPath("$.tools").isArray())
-                .andExpect(jsonPath("$.tools[0].name").isNotEmpty())
-                .andExpect(jsonPath("$.mcpServers").isArray());
+        mvc.perform(get("/api/sessions/{id}/capabilities", id)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.workspace").value(workspace.toAbsolutePath().normalize().toString()))
+            .andExpect(jsonPath("$.permissionMode").isNotEmpty()).andExpect(jsonPath("$.tools").isArray())
+            .andExpect(jsonPath("$.tools[0].name").isNotEmpty()).andExpect(jsonPath("$.mcpServers").isArray());
     }
 
     /**
@@ -160,9 +148,8 @@ class ReviewApiTest {
     void capabilitiesIncludeSessionScopedBrowserTool() throws Exception {
         String id = sessions.createSession("浏览器能力", workspace.toString()).id();
 
-        mvc.perform(get("/api/sessions/{id}/capabilities", id))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.tools[?(@.name=='browser')]").isNotEmpty());
+        mvc.perform(get("/api/sessions/{id}/capabilities", id)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.tools[?(@.name=='browser')]").isNotEmpty());
     }
 
     private void commit() {

@@ -1,5 +1,16 @@
 package com.pilot.server.session;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
+
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.ToolCompleted;
@@ -7,16 +18,6 @@ import com.pilot.core.event.ToolStarted;
 import com.pilot.core.session.InMemoryRunCheckpointRepository;
 import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunCheckpointRepository;
-import org.junit.jupiter.api.Test;
-
-import java.time.Duration;
-import java.time.Instant;
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RunStateTrackerTest {
 
@@ -47,8 +48,8 @@ class RunStateTrackerTest {
         RunStateTracker tracker = new RunStateTracker(repository, "instance-a");
         tracker.begin("ses_1", "run_1", "/work");
 
-        tracker.onEvent("ses_1", "run_1", new RunCompleted("done", List.of("src/A.java"),
-                List.of("mvn test → exit 0"), 1, 1, List.of()));
+        tracker.onEvent("ses_1", "run_1",
+            new RunCompleted("done", List.of("src/A.java"), List.of("mvn test → exit 0"), 1, 1, List.of()));
         tracker.finish("ses_1", "run_1", "COMPLETED");
 
         RunCheckpoint checkpoint = tracker.checkpoint("run_1").orElseThrow();
@@ -74,9 +75,10 @@ class RunStateTrackerTest {
     @Test
     void recoveryReportsWhereEachRunStoppedAndReleasesItsLease() {
         RunCheckpointRepository repository = new InMemoryRunCheckpointRepository();
-        repository.save(RunCheckpoint.start("run_old", "ses_old", "/work/old", "instance-old",
-                Instant.now().minusSeconds(5), Duration.ofSeconds(30)).advance(4, "call_7",
-                "工具调用成功：mvn test → exit 0", "修复失败用例", RunCheckpoint.PHASE_MODEL, Instant.now()));
+        repository.save(RunCheckpoint
+            .start("run_old", "ses_old", "/work/old", "instance-old", Instant.now().minusSeconds(5),
+                Duration.ofSeconds(30))
+            .advance(4, "call_7", "工具调用成功：mvn test → exit 0", "修复失败用例", RunCheckpoint.PHASE_MODEL, Instant.now()));
 
         RunStateTracker tracker = new RunStateTracker(repository, "instance-new");
         List<RunStateTracker.RecoveryEntry> entries = tracker.recoverAfterRestart();
@@ -103,7 +105,7 @@ class RunStateTrackerTest {
     void recoveryDoesNotReportAlreadyConvergedRunsAgain() {
         RunCheckpointRepository repository = new InMemoryRunCheckpointRepository();
         repository.save(RunCheckpoint.start("run_old", "ses_old", "/work/old", "instance-old",
-                Instant.now().minusSeconds(5), Duration.ofSeconds(30)));
+            Instant.now().minusSeconds(5), Duration.ofSeconds(30)));
         RunStateTracker tracker = new RunStateTracker(repository, "instance-new");
 
         assertEquals(1, tracker.recoverAfterRestart().size(), "第一次恢复要上报遗留运行");

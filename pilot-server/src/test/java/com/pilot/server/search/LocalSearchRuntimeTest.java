@@ -1,13 +1,14 @@
 package com.pilot.server.search;
 
-import com.pilot.server.config.PilotDataDir;
-import com.pilot.server.config.WebSearchProperties;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.config.WebSearchProperties;
 
 class LocalSearchRuntimeTest {
     @TempDir
@@ -16,8 +17,7 @@ class LocalSearchRuntimeTest {
     @Test
     void staysDownWhenDisabled() {
         LocalSearchRuntime runtime = new LocalSearchRuntime(
-                new WebSearchProperties(false, "http://127.0.0.1:9", "", ""),
-                new PilotDataDir(dataDir.toString()));
+            new WebSearchProperties(false, "http://127.0.0.1:9", "", ""), new PilotDataDir(dataDir.toString()));
 
         runtime.start();
 

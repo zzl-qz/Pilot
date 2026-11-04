@@ -32,8 +32,7 @@ public final class SlidingWindowRateLimiter {
     /** @return true 表示放行；false 表示超过窗口上限 */
     public boolean allow(String key) {
         long now = clock.getAsLong();
-        Deque<Long> window = hits.computeIfAbsent(key == null ? "unknown" : key,
-                ignored -> new ArrayDeque<>());
+        Deque<Long> window = hits.computeIfAbsent(key == null ? "unknown" : key, ignored -> new ArrayDeque<>());
         synchronized (window) {
             while (!window.isEmpty() && now - window.peekFirst() >= windowMillis) {
                 window.pollFirst();

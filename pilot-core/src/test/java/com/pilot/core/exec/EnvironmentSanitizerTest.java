@@ -1,13 +1,15 @@
 package com.pilot.core.exec;
 
-import org.junit.jupiter.api.Test;
-
-import java.util.LinkedHashMap;
-import java.util.Map;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import org.junit.jupiter.api.Test;
 
 class EnvironmentSanitizerTest {
 
@@ -38,8 +40,8 @@ class EnvironmentSanitizerTest {
 
     @Test
     void explicitValuesStillGoThroughTheFilter() {
-        Map<String, String> merged = EnvironmentSanitizer.defaults().merge(env(),
-                Map.of("MY_SECRET", "x", "PILOT_SAFE_ENV", "ok"));
+        Map<String, String> merged =
+            EnvironmentSanitizer.defaults().merge(env(), Map.of("MY_SECRET", "x", "PILOT_SAFE_ENV", "ok"));
 
         assertEquals("ok", merged.get("PILOT_SAFE_ENV"));
         assertFalse(merged.containsKey("MY_SECRET"), "显式传入不能绕过凭据过滤");
@@ -47,14 +49,14 @@ class EnvironmentSanitizerTest {
 
     @Test
     void canExplicitlyAllowExtraNames() {
-        EnvironmentSanitizer sanitizer = new EnvironmentSanitizer(java.util.Set.of("CUSTOM_FLAG"));
+        EnvironmentSanitizer sanitizer = new EnvironmentSanitizer(Set.of("CUSTOM_FLAG"));
         assertTrue(sanitizer.allowed("CUSTOM_FLAG"));
         assertFalse(sanitizer.allowed("CUSTOM_TOKEN"));
     }
 
     @Test
     void reportsRejectedNamesWithoutValues() {
-        assertEquals(java.util.List.of("AWS_SECRET_ACCESS_KEY", "DB_PASSWORD", "GITHUB_TOKEN", "OPENAI_API_KEY"),
-                EnvironmentSanitizer.defaults().rejectedNames(env()).stream().sorted().toList());
+        assertEquals(List.of("AWS_SECRET_ACCESS_KEY", "DB_PASSWORD", "GITHUB_TOKEN", "OPENAI_API_KEY"),
+            EnvironmentSanitizer.defaults().rejectedNames(env()).stream().sorted().toList());
     }
 }

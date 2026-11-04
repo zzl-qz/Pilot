@@ -1,5 +1,20 @@
 package com.pilot.server.controller;
 
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.session.ConversationRepository;
@@ -8,14 +23,8 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.RunStarter;
+import com.pilot.server.session.TaskControlService;
 import com.pilot.server.workspace.RunSnapshotService;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.server.ResponseStatusException;
-
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
 
 /** 按用户消息回到发送前；分支保留原对话，使用当前工作区文件。 */
 @RestController
@@ -27,10 +36,11 @@ public class CheckpointController {
     private final ConversationRepository conversations;
     private final PlanRepository plans;
     private final AgentProperties properties;
-    private final com.pilot.server.session.TaskControlService tasks;
+    private final TaskControlService tasks;
 
     public CheckpointController(SessionService sessions, RunStarter runs, RunSnapshotService snapshots,
-                                ConversationRepository conversations, PlanRepository plans, AgentProperties properties, com.pilot.server.session.TaskControlService tasks) {
+        ConversationRepository conversations, PlanRepository plans, AgentProperties properties,
+        TaskControlService tasks) {
         this.sessions = sessions;
         this.runs = runs;
         this.snapshots = snapshots;
@@ -43,13 +53,15 @@ public class CheckpointController {
     @GetMapping
     public Preview preview(@PathVariable String id, @RequestParam long sequence) {
         Selection selection = select(id, sequence);
-        return new Preview(sequence, selection.events().getLast().sequence(), selection.input(), selection.runIds().size(),
-                snapshots.conversation(selection.event().runId()) != null, codePreview(selection));
+        return new Preview(sequence, selection.events().getLast().sequence(), selection.input(),
+            selection.runIds().size(), snapshots.conversation(selection.event().runId()) != null,
+            codePreview(selection));
     }
 
     @PostMapping("/restore")
     public RestoreResponse restore(@PathVariable String id, @RequestBody Request request) {
-        if (request == null || request.sequence() == null || request.mode() == null || !List.of("code", "conversation", "both").contains(request.mode())) {
+        if (request == null || request.sequence() == null || request.mode() == null
+            || !List.of("code", "conversation", "both").contains(request.mode())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择只撤代码、只撤对话或一起撤");
         }
         String slot = claim(id);
@@ -57,7 +69,8 @@ public class CheckpointController {
             Selection selection = select(id, request.sequence());
             checkRevision(selection, request.revision());
             boolean withConversation = !"code".equals(request.mode());
-            RunSnapshotService.ConversationCheckpoint checkpoint = withConversation ? snapshots.conversation(selection.event().runId()) : null;
+            RunSnapshotService.ConversationCheckpoint checkpoint =
+                withConversation ? snapshots.conversation(selection.event().runId()) : null;
             if (withConversation && checkpoint == null) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "对话检查点不存在或已过期，无法恢复模型记忆");
             }
@@ -72,9 +85,9 @@ public class CheckpointController {
                 }
                 RunSnapshotService.RestorePreview preview = codePreview(selection);
                 if (!preview.ready()) {
-                    return new RestoreResponse(false, selection.input(), new RunSnapshotService.RollbackReport(
-                            selection.event().runId(), workspace(selection.session()), List.of(), List.of(),
-                            preview.unavailable(), preview.conflicts()));
+                    return new RestoreResponse(false, selection.input(),
+                        new RunSnapshotService.RollbackReport(selection.event().runId(), workspace(selection.session()),
+                            List.of(), List.of(), preview.unavailable(), preview.conflicts()));
                 }
                 report = snapshots.rollback(selection.runIds());
                 if (!report.conflicts().isEmpty() || !report.failed().isEmpty()) {
@@ -108,10 +121,13 @@ public class CheckpointController {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "对话检查点不存在或已过期，无法创建分支");
             }
             Session source = selection.session();
-            Session fork = sessions.createSession(source.title() + " · 分支", source.workspace(), source.projectId(), false);
+            Session fork =
+                sessions.createSession(source.title() + " · 分支", source.workspace(), source.projectId(), false);
             try {
                 for (EventEnvelope event : selection.events()) {
-                    if (event.sequence() >= request.sequence()) break;
+                    if (event.sequence() >= request.sequence()) {
+                        break;
+                    }
                     sessions.publish(fork.id(), event.runId(), event.payload());
                 }
                 tasks.restoreTo(fork.id(), selection.event().runId());
@@ -138,14 +154,14 @@ public class CheckpointController {
 
     private String claim(String id) {
         requireSession(id);
-        return runs.claimRun(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                "该会话仍在运行，请等任务结束或停止后再操作"));
+        return runs.claimRun(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍在运行，请等任务结束或停止后再操作"));
     }
 
     private void requireIdleWorkspace(Session source, String slot) {
         for (Session session : sessions.list()) {
             if (sameWorkspace(workspace(source), workspace(session))
-                    && runs.activeRun(session.id()).filter(runId -> !runId.equals(slot)).isPresent()) {
+                && runs.activeRun(session.id()).filter(runId -> !runId.equals(slot)).isPresent()) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "同一工作区有其他对话正在运行，请等它结束再回退代码");
             }
         }
@@ -156,7 +172,7 @@ public class CheckpointController {
         for (String runId : selection.runIds()) {
             RunSnapshotService.SnapshotMeta meta = snapshots.meta(runId);
             if (meta != null && !sameWorkspace(workspace(selection.session()), meta.workspace())) {
-                ArrayList<String> unavailable = new java.util.ArrayList<>(preview.unavailable());
+                ArrayList<String> unavailable = new ArrayList<>(preview.unavailable());
                 unavailable.add("当前工作区与检查点不同，请切回原工作区后回退代码");
                 return new RunSnapshotService.RestorePreview(preview.files(), preview.conflicts(), unavailable);
             }
@@ -165,34 +181,47 @@ public class CheckpointController {
     }
 
     private String workspace(Session session) {
-        return session.workspace() == null || session.workspace().isBlank() ? properties.workspace() : session.workspace();
+        return session.workspace() == null || session.workspace().isBlank() ? properties.workspace()
+            : session.workspace();
     }
 
     private static boolean sameWorkspace(String first, String second) {
-        if (first == null || second == null) return java.util.Objects.equals(first, second);
+        if (first == null || second == null) {
+            return Objects.equals(first, second);
+        }
         return Path.of(first).toAbsolutePath().normalize().equals(Path.of(second).toAbsolutePath().normalize());
     }
 
     private Selection select(String id, long sequence) {
         Session session = requireSession(id);
         List<EventEnvelope> events = sessions.events(id);
-        EventEnvelope selected = events.stream().filter(event -> event.sequence() == sequence
-                        && event.payload() instanceof RunStarted).findFirst()
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "该消息已变化，请刷新后重新选择用户消息"));
-        List<String> runIds = events.stream().filter(event -> event.sequence() >= sequence)
-                .map(EventEnvelope::runId).distinct().toList();
-        return new Selection(session, selected, events, runIds, ((RunStarted) selected.payload()).input());
+        EventEnvelope selected =
+            events.stream().filter(event -> event.sequence() == sequence && event.payload() instanceof RunStarted)
+                .findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "该消息已变化，请刷新后重新选择用户消息"));
+        List<String> runIds =
+            events.stream().filter(event -> event.sequence() >= sequence).map(EventEnvelope::runId).distinct().toList();
+        return new Selection(session, selected, events, runIds, ((RunStarted)selected.payload()).input());
     }
 
     private Session requireSession(String id) {
-        return sessions.find(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
+        return sessions.find(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
     }
 
-    private record Selection(Session session, EventEnvelope event, List<EventEnvelope> events,
-                             List<String> runIds, String input) { }
-    public record Request(Long sequence, String mode, Long revision) { }
+    private record Selection(Session session, EventEnvelope event, List<EventEnvelope> events, List<String> runIds,
+        String input) {
+    }
+
+    public record Request(Long sequence, String mode, Long revision) {
+    }
+
     public record Preview(long sequence, long revision, String input, int runs, boolean conversationAvailable,
-                          RunSnapshotService.RestorePreview code) { }
-    public record RestoreResponse(boolean applied, String input, RunSnapshotService.RollbackReport code) { }
-    public record ForkResponse(String sessionId, String title, String workspace, String input) { }
+        RunSnapshotService.RestorePreview code) {
+    }
+
+    public record RestoreResponse(boolean applied, String input, RunSnapshotService.RollbackReport code) {
+    }
+
+    public record ForkResponse(String sessionId, String title, String workspace, String input) {
+    }
 }

@@ -1,13 +1,14 @@
 package com.pilot.server.session;
 
-import com.pilot.core.multi.AgentProfileCatalog;
-import com.pilot.server.config.AgentProperties;
-import com.pilot.server.config.PilotDataDir;
-import org.springframework.stereotype.Component;
-
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+
+import org.springframework.stereotype.Component;
+
+import com.pilot.core.multi.AgentProfileCatalog;
+import com.pilot.server.config.AgentProperties;
+import com.pilot.server.config.PilotDataDir;
 
 /**
  * 自定义子代理目录的装配点（两级目录，语义与 {@link SkillService} 同构）。
@@ -51,9 +52,7 @@ public class AgentProfileService {
     }
 
     private Path resolve(String workspace) {
-        String target = workspace == null || workspace.isBlank()
-                ? agentProperties.workspace()
-                : workspace;
+        String target = workspace == null || workspace.isBlank() ? agentProperties.workspace() : workspace;
         return Path.of(target).toAbsolutePath().normalize();
     }
 }

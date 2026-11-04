@@ -1,13 +1,14 @@
 package com.pilot.core.permission;
 
-import com.pilot.core.tool.Tool;
-import com.pilot.core.tool.ToolCall;
-import com.pilot.core.tool.WritesFiles;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.Test;
+
+import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolCall;
+import com.pilot.core.tool.WritesFiles;
 
 class PolicyPermissionGateTest {
     private static final ToolCall CALL = new ToolCall("call_1", "tool", Map.of());
@@ -48,12 +49,35 @@ class PolicyPermissionGateTest {
     void autoStillAsksBeforeDangerousCommands() {
         PolicyPermissionGate gate = new PolicyPermissionGate(PermissionMode.AUTO);
         Tool dangerous = new Tool() {
-            @Override public String name() { return "run_command"; }
-            @Override public String description() { return "run_command"; }
-            @Override public Map<String, Object> parameters() { return Map.of("type", "object"); }
-            @Override public boolean readOnly() { return false; }
-            @Override public boolean confirm(Map<String, Object> args) { return true; }
-            @Override public String execute(Map<String, Object> args) { return ""; }
+            @Override
+            public String name() {
+                return "run_command";
+            }
+
+            @Override
+            public String description() {
+                return "run_command";
+            }
+
+            @Override
+            public Map<String, Object> parameters() {
+                return Map.of("type", "object");
+            }
+
+            @Override
+            public boolean readOnly() {
+                return false;
+            }
+
+            @Override
+            public boolean confirm(Map<String, Object> args) {
+                return true;
+            }
+
+            @Override
+            public String execute(Map<String, Object> args) {
+                return "";
+            }
         };
 
         assertEquals(PermissionDecision.ASK, gate.check(CALL, dangerous).decision());

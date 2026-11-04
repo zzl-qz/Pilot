@@ -25,9 +25,7 @@ public final class InMemoryProjectRepository implements ProjectRepository {
 
     @Override
     public List<Project> list() {
-        return projects.values().stream()
-                .sorted(Comparator.comparing(Project::updatedAt).reversed())
-                .toList();
+        return projects.values().stream().sorted(Comparator.comparing(Project::updatedAt).reversed()).toList();
     }
 
     @Override

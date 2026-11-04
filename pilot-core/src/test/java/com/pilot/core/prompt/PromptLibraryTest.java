@@ -1,26 +1,25 @@
 package com.pilot.core.prompt;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Map;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
 class PromptLibraryTest {
 
-    private static final Map<String, String> VARS = Map.of(
-            "platform", "Windows 11",
-            "today", "2026-10-27",
-            "workspace", "pilot",
-            "skills", "- commit-review：审阅未提交改动");
+    private static final Map<String, String> VARS = Map.of("platform", "Windows 11", "today", "2026-10-27", "workspace",
+        "pilot", "skills", "- commit-review：审阅未提交改动");
 
     @Test
     void assemblesSystemPromptWithEnvironment() {
@@ -38,13 +37,12 @@ class PromptLibraryTest {
         var prompts = PromptLibrary.classpathOnly();
 
         // use_skill 注册：目录段注入且带出目录数据
-        String withSkills = prompts.system(VARS, java.util.Set.of(
-                "read_file", "run_command", "use_skill"));
+        String withSkills = prompts.system(VARS, Set.of("read_file", "run_command", "use_skill"));
         assertTrue(withSkills.contains("## 技能"));
         assertTrue(withSkills.contains("- commit-review：审阅未提交改动"));
 
         // use_skill 未注册：目录段整体消失，连策略文本都不出现（零 token 成本）
-        String withoutSkills = prompts.system(VARS, java.util.Set.of("read_file", "run_command"));
+        String withoutSkills = prompts.system(VARS, Set.of("read_file", "run_command"));
         assertFalse(withoutSkills.contains("## 技能"));
         assertFalse(withoutSkills.contains("commit-review"));
     }
@@ -54,30 +52,27 @@ class PromptLibraryTest {
         PromptLibrary prompts = PromptLibrary.classpathOnly();
 
         // spawn_agent 与 dispatch_agents 都在：子代理选择行与调度段都注入
-        String full = prompts.system(VARS, java.util.Set.of(
-                "read_file", "list_dir", "search_text", "edit_file", "create_file",
-                "run_command", "update_plan", "spawn_agent", "dispatch_agents"));
+        String full = prompts.system(VARS, Set.of("read_file", "list_dir", "search_text", "edit_file", "create_file",
+            "run_command", "update_plan", "spawn_agent", "dispatch_agents"));
         assertTrue(full.contains("spawn_agent"));
         assertTrue(full.contains("dispatch_agents"));
         assertTrue(full.contains("## 多智能体调度"));
 
         // 只有 spawn_agent：dispatch_agents 相关段整体消失
-        String withoutDispatch = prompts.system(VARS, java.util.Set.of(
-                "read_file", "list_dir", "search_text", "edit_file", "create_file",
-                "run_command", "update_plan", "spawn_agent"));
+        String withoutDispatch = prompts.system(VARS, Set.of("read_file", "list_dir", "search_text", "edit_file",
+            "create_file", "run_command", "update_plan", "spawn_agent"));
         assertTrue(withoutDispatch.contains("spawn_agent"), "已注册的子代理工具应保留使用指导");
         assertFalse(withoutDispatch.contains("dispatch_agents"), "工具未注册时提示词不应出现它的用法教学");
         assertFalse(withoutDispatch.contains("多智能体调度"));
 
         // 只有 dispatch_agents：并行派发指导仍保留，不应被 spawn_agent 的缺失连带过滤。
-        String withoutSpawn = prompts.system(VARS, java.util.Set.of(
-                "read_file", "run_command", "dispatch_agents"));
+        String withoutSpawn = prompts.system(VARS, Set.of("read_file", "run_command", "dispatch_agents"));
         assertTrue(withoutSpawn.contains("dispatch_agents"));
         assertTrue(withoutSpawn.contains("## 多智能体调度"));
         assertFalse(withoutSpawn.contains("spawn_agent"), "只注册派发工具时不应介绍探索工具");
 
         // 两个都没有：连子代理选择表也不出现
-        String bare = prompts.system(VARS, java.util.Set.of("read_file", "run_command"));
+        String bare = prompts.system(VARS, Set.of("read_file", "run_command"));
         assertFalse(bare.contains("spawn_agent"));
         assertFalse(bare.contains("dispatch_agents"));
         assertTrue(bare.contains("## 工具选择"), "主选择表与工具无关，不应被过滤");
@@ -86,8 +81,7 @@ class PromptLibraryTest {
     @Test
     void renderStripsFrontmatterFromSectionBody(@TempDir Path dir) throws IOException {
         Files.createDirectories(dir.resolve("plan"));
-        Files.writeString(dir.resolve("plan/front.md"),
-                "---\nrequires: [read_file]\n---\n正文内容 {{openSteps}}");
+        Files.writeString(dir.resolve("plan/front.md"), "---\nrequires: [read_file]\n---\n正文内容 {{openSteps}}");
 
         PromptLibrary prompts = new PromptLibrary(dir);
         String rendered = prompts.render("plan/front", Map.of("openSteps", "第一步"));
@@ -100,23 +94,18 @@ class PromptLibraryTest {
     @Test
     void rejectsMalformedFrontmatter(@TempDir Path dir) throws IOException {
         Files.createDirectories(dir.resolve("system"));
-        Files.writeString(dir.resolve("system/unknown-key.md"),
-                "---\nunknown_key: value\n---\n正文");
-        Files.writeString(dir.resolve("system/unclosed-list.md"),
-                "---\nrequires: [a\n---\n正文");
-        Files.writeString(dir.resolve("system/no-end-delim.md"),
-                "---\nrequires: [a]\n正文缺结束分隔符");
+        Files.writeString(dir.resolve("system/unknown-key.md"), "---\nunknown_key: value\n---\n正文");
+        Files.writeString(dir.resolve("system/unclosed-list.md"), "---\nrequires: [a\n---\n正文");
+        Files.writeString(dir.resolve("system/no-end-delim.md"), "---\nrequires: [a]\n正文缺结束分隔符");
 
         PromptLibrary prompts = new PromptLibrary(dir);
 
-        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-                () -> prompts.render("system/unknown-key", Map.of()));
+        IllegalArgumentException error =
+            assertThrows(IllegalArgumentException.class, () -> prompts.render("system/unknown-key", Map.of()));
         assertTrue(error.getMessage().contains("只支持 requires"));
 
-        assertThrows(IllegalArgumentException.class,
-                () -> prompts.render("system/unclosed-list", Map.of()));
-        assertThrows(IllegalArgumentException.class,
-                () -> prompts.render("system/no-end-delim", Map.of()));
+        assertThrows(IllegalArgumentException.class, () -> prompts.render("system/unclosed-list", Map.of()));
+        assertThrows(IllegalArgumentException.class, () -> prompts.render("system/no-end-delim", Map.of()));
     }
 
     @Test
@@ -130,26 +119,18 @@ class PromptLibraryTest {
         String brief = prompts.render("system/plan-context", Map.of("planItems", "- [in_progress] 改代码"));
         assertTrue(brief.contains("- [in_progress] 改代码"));
 
-        String goal = prompts.render("goal/continue", Map.of(
-                "contractJson", "{\"untrusted_user_objective\":\"让测试通过\","
-                        + "\"next_action\":\"修复失败断言\",\"expected_observation\":\"测试退出 0\"}"));
+        String goal = prompts.render("goal/continue", Map.of("contractJson", "{\"untrusted_user_objective\":\"让测试通过\","
+            + "\"next_action\":\"修复失败断言\",\"expected_observation\":\"测试退出 0\"}"));
         assertTrue(goal.contains("\"next_action\":\"修复失败断言\""));
         assertFalse(goal.contains("{{"));
 
-        String stuck = prompts.render("loop/stuck-nudge", Map.of(
-                "pattern", "same-action-same-result",
-                "repeatCount", "3",
-                "unchangedState", "源码版本未变化",
-                "blockedActions", "- 重读同一文件"));
+        String stuck = prompts.render("loop/stuck-nudge", Map.of("pattern", "same-action-same-result", "repeatCount",
+            "3", "unchangedState", "源码版本未变化", "blockedActions", "- 重读同一文件"));
         assertTrue(stuck.contains("不是新的用户要求"));
 
-        String windDown = prompts.render("loop/budget-wind-down", Map.of(
-                "objective", "完成修复",
-                "completedConditions", "- c1/e17",
-                "changedFiles", "A.java",
-                "verification", "单测未运行",
-                "remaining", "缺少验证",
-                "nextAction", "运行目标单测"));
+        String windDown =
+            prompts.render("loop/budget-wind-down", Map.of("objective", "完成修复", "completedConditions", "- c1/e17",
+                "changedFiles", "A.java", "verification", "单测未运行", "remaining", "缺少验证", "nextAction", "运行目标单测"));
         assertTrue(windDown.contains("不代表任务已经完成"));
     }
 
@@ -167,8 +148,8 @@ class PromptLibraryTest {
     void failsLoudlyOnMissingVariable() {
         PromptLibrary prompts = PromptLibrary.classpathOnly();
 
-        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-                () -> prompts.render("plan/continue", Map.of()));
+        IllegalArgumentException error =
+            assertThrows(IllegalArgumentException.class, () -> prompts.render("plan/continue", Map.of()));
 
         assertTrue(error.getMessage().contains("openSteps"));
     }
@@ -196,18 +177,12 @@ class PromptLibraryTest {
     @Test
     void loadsEveryToolDescription() {
         PromptLibrary prompts = PromptLibrary.classpathOnly();
-        Map<String,String> variables = Map.of(
-                "inspection", "ls/cat",
-                "development", "mvn/mvnw",
-                "mutators", "mkdir/touch",
-                "gitReadonly", "status/diff",
-                "gitWrite", "add/commit",
-                "backgroundHelp", "后台返回任务 ID");
+        Map<String, String> variables = Map.of("inspection", "ls/cat", "development", "mvn/mvnw", "mutators",
+            "mkdir/touch", "gitReadonly", "status/diff", "gitWrite", "add/commit", "backgroundHelp", "后台返回任务 ID");
 
-        for (String tool : List.of("read_file", "list_dir", "search_text", "edit_file",
-                "create_file", "run_command", "command_status", "command_logs", "stop_command",
-                "update_plan", "spawn_agent", "dispatch_agents", "use_skill", "glob_files", "apply_patch", "browser",
-                "mcp_tools", "mcp_call")) {
+        for (String tool : List.of("read_file", "list_dir", "search_text", "edit_file", "create_file", "run_command",
+            "command_status", "command_logs", "stop_command", "update_plan", "spawn_agent", "dispatch_agents",
+            "use_skill", "glob_files", "apply_patch", "browser", "mcp_tools", "mcp_call")) {
             String text = prompts.render("tools/" + tool, variables);
             assertFalse(text.isBlank(), tool);
             assertFalse(text.contains("{{"), tool + " 仍有未替换的变量");
@@ -219,8 +194,8 @@ class PromptLibraryTest {
     void browserGuidanceFollowsCapability() {
         PromptLibrary prompts = PromptLibrary.classpathOnly();
 
-        String with = prompts.system(VARS, java.util.Set.of("read_file", "run_command", "browser"));
-        String without = prompts.system(VARS, java.util.Set.of("read_file", "run_command"));
+        String with = prompts.system(VARS, Set.of("read_file", "run_command", "browser"));
+        String without = prompts.system(VARS, Set.of("read_file", "run_command"));
 
         assertTrue(with.contains("## 页面验证"));
         assertFalse(without.contains("## 页面验证"));
@@ -229,18 +204,18 @@ class PromptLibraryTest {
     @Test
     void stableSystemPrefixDoesNotDependOnDateOrTaskState() {
         PromptLibrary prompts = PromptLibrary.classpathOnly();
-        var tools = java.util.Set.of("read_file", "run_command");
-        var first = new java.util.HashMap<>(VARS);
+        var tools = Set.of("read_file", "run_command");
+        var first = new HashMap<>(VARS);
         first.put("planItems", "第一轮计划");
         first.put("contractJson", "第一轮状态");
-        var next = new java.util.HashMap<>(first);
+        var next = new HashMap<>(first);
         next.put("today", "2026-11-04");
         next.put("planItems", "用户纠正后的计划");
         next.put("contractJson", "新的验证证据");
         next.remove("skills");
 
         assertEquals(prompts.system(first, tools), prompts.system(next, tools),
-                "日期、计划与任务状态应单独注入，不能污染稳定系统前缀；不可用技能也不应要求目录变量");
+            "日期、计划与任务状态应单独注入，不能污染稳定系统前缀；不可用技能也不应要求目录变量");
     }
 
     @Test
@@ -249,7 +224,7 @@ class PromptLibraryTest {
         Path workflow = dir.resolve("system/workflow.md");
         Files.writeString(workflow, "候选流程 A");
         PromptLibrary prompts = new PromptLibrary(dir);
-        var tools = java.util.Set.of("read_file", "run_command");
+        var tools = Set.of("read_file", "run_command");
         var before = prompts.systemParts(VARS, tools);
 
         Files.writeString(workflow, "候选流程 B");
@@ -259,7 +234,6 @@ class PromptLibraryTest {
         assertEquals(before.getFirst(), after.getFirst(), "行为实验不应重写身份与环境");
         assertEquals("候选流程 A", before.get(1).text());
         assertEquals("候选流程 B", after.get(1).text());
-        assertEquals(before.subList(2, before.size()), after.subList(2, after.size()),
-                "单段覆盖应保留其余工具能力与规则，便于独立对照");
+        assertEquals(before.subList(2, before.size()), after.subList(2, after.size()), "单段覆盖应保留其余工具能力与规则，便于独立对照");
     }
 }

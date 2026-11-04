@@ -1,11 +1,11 @@
 package com.pilot.core.session;
 
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.Instant;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import org.junit.jupiter.api.Test;
 
 class SessionAndRunTest {
     private static final Instant NOW = Instant.parse("2026-10-25T10:00:00Z");
@@ -19,10 +19,8 @@ class SessionAndRunTest {
 
     @Test
     void sessionRejectsMissingRequiredFields() {
-        assertThrows(IllegalArgumentException.class,
-                () -> new Session(" ", "Task", NOW, SessionStatus.CREATED, null));
-        assertThrows(IllegalArgumentException.class,
-                () -> new Session("ses_1", " ", NOW, SessionStatus.CREATED, null));
+        assertThrows(IllegalArgumentException.class, () -> new Session(" ", "Task", NOW, SessionStatus.CREATED, null));
+        assertThrows(IllegalArgumentException.class, () -> new Session("ses_1", " ", NOW, SessionStatus.CREATED, null));
     }
 
     @Test

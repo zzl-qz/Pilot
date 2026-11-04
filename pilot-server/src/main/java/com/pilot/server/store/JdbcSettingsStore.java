@@ -45,11 +45,11 @@ public final class JdbcSettingsStore implements SettingsStore {
             return;
         }
         String sql = "INSERT INTO settings (key, value) VALUES (?, ?) "
-                + "ON CONFLICT(key) DO UPDATE SET value = excluded.value";
+            + "ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         try (Connection connection = store.open()) {
             connection.setAutoCommit(false);
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
-                for (Map.Entry<String,String> entry : values.entrySet()) {
+                for (Map.Entry<String, String> entry : values.entrySet()) {
                     statement.setString(1, entry.getKey());
                     statement.setString(2, entry.getValue());
                     statement.addBatch();

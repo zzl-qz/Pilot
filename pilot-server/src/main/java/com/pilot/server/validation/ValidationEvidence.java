@@ -13,9 +13,8 @@ import java.util.List;
  * @param checks        实际执行过的校验命令与结果摘要
  * @param status        passed / failed / skipped
  */
-public record ValidationEvidence(String id, String sessionId, String runId, String candidateHash,
-                                 List<String> files, List<String> checks, String status,
-                                 String environmentFingerprint, String source, Instant recordedAt) {
+public record ValidationEvidence(String id, String sessionId, String runId, String candidateHash, List<String> files,
+    List<String> checks, String status, String environmentFingerprint, String source, Instant recordedAt) {
     public ValidationEvidence {
         files = files == null ? List.of() : List.copyOf(files);
         checks = checks == null ? List.of() : List.copyOf(checks);

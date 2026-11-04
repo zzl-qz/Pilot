@@ -1,31 +1,33 @@
 package com.pilot.server.session;
 
-import org.junit.jupiter.api.Test;
-
-import java.nio.file.Path;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
 class RunRegistryTest {
-    @org.junit.jupiter.api.io.TempDir java.nio.file.Path root;
+    @org.junit.jupiter.api.io.TempDir
+    Path root;
 
     @Test
     void restoreAndRunsAreMutuallyExclusiveAcrossNestedWorkspaces() throws Exception {
         RunRegistry registry = new RunRegistry();
-        Path parent = java.nio.file.Files.createDirectories(root.resolve("repo"));
-        Path child = java.nio.file.Files.createDirectories(parent.resolve("child"));
-        Path sibling = java.nio.file.Files.createDirectories(root.resolve("repo-other"));
-        org.junit.jupiter.api.Assertions.assertTrue(registry.claim("child-run", "one", child));
-        org.junit.jupiter.api.Assertions.assertFalse(registry.lockWorkspace("restore", parent));
+        Path parent = Files.createDirectories(root.resolve("repo"));
+        Path child = Files.createDirectories(parent.resolve("child"));
+        Path sibling = Files.createDirectories(root.resolve("repo-other"));
+        Assertions.assertTrue(registry.claim("child-run", "one", child));
+        Assertions.assertFalse(registry.lockWorkspace("restore", parent));
         registry.unregister("child-run");
-        org.junit.jupiter.api.Assertions.assertTrue(registry.lockWorkspace("restore", parent));
-        org.junit.jupiter.api.Assertions.assertFalse(registry.claim("next", "two", child));
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
-                () -> registry.register("direct", "three", child));
-        org.junit.jupiter.api.Assertions.assertFalse(registry.lockWorkspace("child-restore", child));
-        org.junit.jupiter.api.Assertions.assertTrue(registry.claim("sibling-run", "four", sibling));
+        Assertions.assertTrue(registry.lockWorkspace("restore", parent));
+        Assertions.assertFalse(registry.claim("next", "two", child));
+        Assertions.assertThrows(IllegalStateException.class, () -> registry.register("direct", "three", child));
+        Assertions.assertFalse(registry.lockWorkspace("child-restore", child));
+        Assertions.assertTrue(registry.claim("sibling-run", "four", sibling));
         registry.unregister("restore");
-        org.junit.jupiter.api.Assertions.assertTrue(registry.claim("next", "two", child));
+        Assertions.assertTrue(registry.claim("next", "two", child));
     }
 
     @Test
@@ -38,17 +40,18 @@ class RunRegistryTest {
 
         assertEquals("run-next", registry.activeRun("session").orElseThrow());
     }
+
     @Test
     void workspaceRestoreBlocksNewRunsAndReleasesLeaseOnAbandon() {
         RunRegistry registry = new RunRegistry();
-        Path workspace = java.nio.file.Path.of(".").toAbsolutePath();
-        org.junit.jupiter.api.Assertions.assertTrue(registry.claim("run", "one", workspace));
-        org.junit.jupiter.api.Assertions.assertFalse(registry.lockWorkspace("restore", workspace));
+        Path workspace = Path.of(".").toAbsolutePath();
+        Assertions.assertTrue(registry.claim("run", "one", workspace));
+        Assertions.assertFalse(registry.lockWorkspace("restore", workspace));
         registry.unregister("run");
-        org.junit.jupiter.api.Assertions.assertTrue(registry.lockWorkspace("restore", workspace));
-        org.junit.jupiter.api.Assertions.assertFalse(registry.claim("next", "two", workspace));
+        Assertions.assertTrue(registry.lockWorkspace("restore", workspace));
+        Assertions.assertFalse(registry.claim("next", "two", workspace));
         registry.unregister("restore");
-        org.junit.jupiter.api.Assertions.assertTrue(registry.claim("next", "two", workspace));
+        Assertions.assertTrue(registry.claim("next", "two", workspace));
     }
 
 }

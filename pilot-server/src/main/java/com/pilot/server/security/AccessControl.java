@@ -21,11 +21,10 @@ public final class AccessControl {
      *                    页面内的 fetch 与 EventSource 会自动带上它
      */
     public record Request(String method, String path, String remoteAddress, String authorizationHeader,
-                          String tokenHeader, String queryToken, String cookieToken, String origin,
-                          String host) {
+        String tokenHeader, String queryToken, String cookieToken, String origin, String host) {
         /** 兼容没有 Cookie 的调用方。 */
-        public Request(String method, String path, String remoteAddress, String authorizationHeader,
-                       String tokenHeader, String queryToken, String origin, String host) {
+        public Request(String method, String path, String remoteAddress, String authorizationHeader, String tokenHeader,
+            String queryToken, String origin, String host) {
             this(method, path, remoteAddress, authorizationHeader, tokenHeader, queryToken, null, origin, host);
         }
     }
@@ -56,7 +55,7 @@ public final class AccessControl {
         boolean loopback = isLoopback(request.remoteAddress());
         if (properties.localOnly()) {
             return loopback ? Decision.permit()
-                    : Decision.reject(403, "当前只允许本机访问；如需远程访问请启用 pilot.security.mode=token 并配置令牌");
+                : Decision.reject(403, "当前只允许本机访问；如需远程访问请启用 pilot.security.mode=token 并配置令牌");
         }
         if (properties.token().isEmpty()) {
             // 配置了令牌模式却没有令牌，比放行更危险：直接拒绝并说明原因
@@ -72,13 +71,13 @@ public final class AccessControl {
     }
 
     private boolean matchesToken(Request request) {
-        String presented = firstNonBlank(request.authorizationHeader(), request.tokenHeader(),
-                request.queryToken(), request.cookieToken());
+        String presented = firstNonBlank(request.authorizationHeader(), request.tokenHeader(), request.queryToken(),
+            request.cookieToken());
         if (presented == null) {
             return false;
         }
-        String value = presented.regionMatches(true, 0, "Bearer ", 0, 7)
-                ? presented.substring(7).strip() : presented.strip();
+        String value =
+            presented.regionMatches(true, 0, "Bearer ", 0, 7) ? presented.substring(7).strip() : presented.strip();
         byte[] expected = properties.token().getBytes(StandardCharsets.UTF_8);
         byte[] actual = value.getBytes(StandardCharsets.UTF_8);
         return MessageDigest.isEqual(expected, actual);
@@ -97,9 +96,8 @@ public final class AccessControl {
         if (loopback && isSameHost(normalized, request.host())) {
             return true;
         }
-        if (properties.allowedOrigins().stream()
-                .map(allowed -> allowed.toLowerCase(Locale.ROOT))
-                .anyMatch(normalized::equals)) {
+        if (properties.allowedOrigins().stream().map(allowed -> allowed.toLowerCase(Locale.ROOT))
+            .anyMatch(normalized::equals)) {
             return true;
         }
         return isSameHost(normalized, request.host());
@@ -127,7 +125,7 @@ public final class AccessControl {
             value = value.substring(0, zone);
         }
         return value.equals("127.0.0.1") || value.startsWith("127.") || value.equals("::1")
-                || value.equals("0:0:0:0:0:0:0:1") || value.equalsIgnoreCase("localhost");
+            || value.equals("0:0:0:0:0:0:0:1") || value.equalsIgnoreCase("localhost");
     }
 
     private static String firstNonBlank(String... values) {

@@ -16,7 +16,7 @@ async function run(command, args, cwd = root) {
   });
   if (code !== 0) throw new Error(`检查失败：${command}（${code}）`);
 }
-const javaArgs = ['-B', '-ntp', '-pl', 'pilot-server', '-am', '-DskipFrontend=true', 'test'];
+const javaArgs = ['-B', '-ntp', '-pl', 'pilot-server', '-am', '-DskipFrontend=true', 'test', 'spotless:check', 'checkstyle:check'];
 if (flags.has('--containers')) {
   for (const image of ['alpine:3.20', 'node:22-alpine', 'maven:3.9-eclipse-temurin-25']) await run('docker', ['image', 'inspect', '--format', '{{.Id}}', image]);
   javaArgs.push('-Dpilot.test.container.image=alpine:3.20', '-Dpilot.test.project-builds=true');

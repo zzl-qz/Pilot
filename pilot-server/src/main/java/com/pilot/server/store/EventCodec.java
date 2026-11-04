@@ -1,28 +1,32 @@
 package com.pilot.server.store;
 
+import org.springframework.stereotype.Component;
+
 import com.pilot.core.event.ApprovalRequired;
 import com.pilot.core.event.ApprovalResolved;
 import com.pilot.core.event.ArbitrationRequired;
 import com.pilot.core.event.ArbitrationResolved;
 import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.ContextCompacted;
+import com.pilot.core.event.ExecutionUpdated;
+import com.pilot.core.event.ModelRequestCompleted;
 import com.pilot.core.event.PlanUpdated;
-import com.pilot.core.event.SandboxDiffReady;
-import com.pilot.core.event.TaskUpdated;
-import com.pilot.core.event.RunSteered;
 import com.pilot.core.event.RunCancelled;
-import com.pilot.core.event.RunContinued;
-import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.RunContinued;
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.RunStarted;
+import com.pilot.core.event.RunSteered;
 import com.pilot.core.event.RunUsageUpdated;
+import com.pilot.core.event.SandboxDiffReady;
+import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.SubagentFinished;
 import com.pilot.core.event.SubagentStarted;
-import com.pilot.core.event.SessionEvent;
+import com.pilot.core.event.TaskUpdated;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.event.ToolStarted;
-import org.springframework.stereotype.Component;
+
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 
@@ -48,8 +52,8 @@ public class EventCodec {
         Class<? extends SessionEvent> target = switch (type) {
             case "run.started" -> RunStarted.class;
             case "run.usage" -> RunUsageUpdated.class;
-            case "model.request" -> com.pilot.core.event.ModelRequestCompleted.class;
-            case "execution.updated" -> com.pilot.core.event.ExecutionUpdated.class;
+            case "model.request" -> ModelRequestCompleted.class;
+            case "execution.updated" -> ExecutionUpdated.class;
             case "assistant.delta" -> AssistantDelta.class;
             case "context.compacted" -> ContextCompacted.class;
             case "plan.updated" -> PlanUpdated.class;
@@ -73,8 +77,6 @@ public class EventCodec {
         };
         // 历史事件不会带上后来新增的字段：Jackson 3 默认对原生类型字段缺省即报错，
         // 这里按 reader 放宽，让老事件继续能读，而不是整条会话的 SSE 回放直接 500
-        return mapper.readerFor(target)
-                .without(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
-                .readValue(payload);
+        return mapper.readerFor(target).without(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES).readValue(payload);
     }
 }

@@ -1,8 +1,5 @@
 package com.pilot.core.session;
 
-import com.pilot.core.event.EventEnvelope;
-import com.pilot.core.event.SessionEvent;
-
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -11,13 +8,16 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import com.pilot.core.event.EventEnvelope;
+import com.pilot.core.event.SessionEvent;
+
 /** 进程内存储：默认实现，也是测试用的轻量实现。重启后数据丢失。 */
 public class InMemorySessionRepository implements SessionRepository {
     private final ConcurrentMap<String, State> sessions = new ConcurrentHashMap<>();
 
     @Override
     public Session create(String sessionId, String title, String workspace, Instant createdAt, String projectId,
-                          boolean isBlank, String parentSessionId) {
+        boolean isBlank, String parentSessionId) {
         State state = new State(sessionId, title, workspace, createdAt, projectId, isBlank, parentSessionId);
         sessions.put(sessionId, state);
         return state.snapshot();
@@ -63,8 +63,12 @@ public class InMemorySessionRepository implements SessionRepository {
     @Override
     public boolean updateStatus(String sessionId, SessionStatus status) {
         State state = sessions.get(sessionId);
-        if (state == null) return false;
-        synchronized (state) { state.status = status; }
+        if (state == null) {
+            return false;
+        }
+        synchronized (state) {
+            state.status = status;
+        }
         return true;
     }
 
@@ -76,10 +80,8 @@ public class InMemorySessionRepository implements SessionRepository {
 
     @Override
     public List<Session> list() {
-        return sessions.values().stream()
-                .map(State::snapshot)
-                .sorted(Comparator.comparing(Session::createdAt).reversed())
-                .toList();
+        return sessions.values().stream().map(State::snapshot)
+            .sorted(Comparator.comparing(Session::createdAt).reversed()).toList();
     }
 
     @Override
@@ -144,7 +146,7 @@ public class InMemorySessionRepository implements SessionRepository {
 
     @Override
     public EventEnvelope append(String sessionId, String runId, Instant timestamp, SessionEvent event,
-                                SessionStatus status) {
+        SessionStatus status) {
         State state = require(sessionId);
         synchronized (state) {
             EventEnvelope envelope = EventEnvelope.of(++state.sequence, timestamp, sessionId, runId, event);
@@ -175,8 +177,8 @@ public class InMemorySessionRepository implements SessionRepository {
         private boolean isBlank;
         private boolean archived;
 
-        private State(String id, String title, String workspace, Instant createdAt, String projectId,
-                      boolean isBlank, String parentSessionId) {
+        private State(String id, String title, String workspace, Instant createdAt, String projectId, boolean isBlank,
+            String parentSessionId) {
             this.id = id;
             this.title = title;
             this.workspace = workspace;
@@ -189,7 +191,7 @@ public class InMemorySessionRepository implements SessionRepository {
         private Session snapshot() {
             synchronized (this) {
                 return new Session(id, title, createdAt, status, workspace, projectId, isBlank, archived,
-                        parentSessionId);
+                    parentSessionId);
             }
         }
     }

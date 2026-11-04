@@ -12,8 +12,7 @@ package com.pilot.core.exec;
  * @param cpus           容器 CPU 配额
  * @param pidsLimit      容器进程数上限
  */
-public record ExecutionLimits(long timeoutSeconds, int maxOutputBytes, int memoryMb, double cpus,
-                              int pidsLimit) {
+public record ExecutionLimits(long timeoutSeconds, int maxOutputBytes, int memoryMb, double cpus, int pidsLimit) {
     public ExecutionLimits {
         if (maxOutputBytes < 1_024) {
             throw new IllegalArgumentException("maxOutputBytes must be >= 1024");

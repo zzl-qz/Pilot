@@ -1,13 +1,13 @@
 package com.pilot.core.workspace;
 
-import com.pilot.core.multi.AgentScope;
-
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.Objects;
+
+import com.pilot.core.multi.AgentScope;
 
 /**
  * 工作区路径校验：把模型给出的路径规范化为工作区内的绝对路径。

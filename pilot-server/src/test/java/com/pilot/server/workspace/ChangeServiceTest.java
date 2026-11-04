@@ -1,7 +1,11 @@
 package com.pilot.server.workspace;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -10,12 +14,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ChangeServiceTest {
     @TempDir
@@ -27,13 +27,12 @@ class ChangeServiceTest {
     void listsTouchedFilesEvenWithoutGit() throws IOException {
         Files.writeString(workspace.resolve("a.txt"), "hello");
 
-        ChangeService.RunChangeReport report = changes.inspectRun("run_1", workspace,
-                List.of("a.txt", "missing.txt", "../escape.txt", "./a.txt"));
+        ChangeService.RunChangeReport report =
+            changes.inspectRun("run_1", workspace, List.of("a.txt", "missing.txt", "../escape.txt", "./a.txt"));
 
         assertFalse(report.gitRepository());
         assertEquals(List.of("a.txt", "missing.txt"),
-                report.files().stream().map(ChangeService.RunFileChange::path).toList(),
-                "越界路径必须被剔除，重复路径只保留一次");
+            report.files().stream().map(ChangeService.RunFileChange::path).toList(), "越界路径必须被剔除，重复路径只保留一次");
         assertEquals("M", report.files().get(0).status());
         assertEquals("D", report.files().get(1).status());
         assertEquals(0, report.added());
@@ -53,8 +52,7 @@ class ChangeServiceTest {
         Files.writeString(file, "one\nTWO\nthree\n");
         Files.writeString(workspace.resolve("new.txt"), "hello\nworld\n");
 
-        ChangeService.RunChangeReport report = changes.inspectRun("run_1", workspace,
-                List.of("a.txt", "new.txt"));
+        ChangeService.RunChangeReport report = changes.inspectRun("run_1", workspace, List.of("a.txt", "new.txt"));
 
         assertTrue(report.gitRepository());
         ChangeService.RunFileChange modified = file(report, "a.txt");
@@ -95,17 +93,17 @@ class ChangeServiceTest {
         git("config", "core.autocrlf", "false");
         Files.writeString(workspace.resolve("old name.txt"), "old\n");
         Files.writeString(workspace.resolve("删除.txt"), "before\n");
-        Files.write(workspace.resolve("image.bin"), new byte[]{0, 1, 2, 3});
+        Files.write(workspace.resolve("image.bin"), new byte[] {0, 1, 2, 3});
         git("add", ".");
         commit();
 
         Files.delete(workspace.resolve("old name.txt"));
         Files.writeString(workspace.resolve("new name.txt"), "old\n");
         Files.writeString(workspace.resolve("删除.txt"), "after\n");
-        Files.write(workspace.resolve("image.bin"), new byte[]{0, 1, 2, 4});
+        Files.write(workspace.resolve("image.bin"), new byte[] {0, 1, 2, 4});
 
-        ChangeService.RunChangeReport report = changes.inspectRun("run_1", workspace,
-                List.of("old name.txt", "new name.txt", "删除.txt", "image.bin"));
+        ChangeService.RunChangeReport report =
+            changes.inspectRun("run_1", workspace, List.of("old name.txt", "new name.txt", "删除.txt", "image.bin"));
 
         assertEquals("D", file(report, "old name.txt").status());
         assertEquals("??", file(report, "new name.txt").status());
@@ -117,7 +115,7 @@ class ChangeServiceTest {
     void capsNumberOfReportedFiles() throws IOException {
         assumeTrue(git("--version"), "需要本机可用的 git");
         git("init", "-q");
-        ArrayList<String> paths = new java.util.ArrayList<String>();
+        ArrayList<String> paths = new ArrayList<String>();
         for (int i = 0; i < 510; i++) {
             String path = "f" + i + ".txt";
             paths.add(path);
@@ -143,8 +141,8 @@ class ChangeServiceTest {
 
         Files.writeString(file, "a\n++ plus\nb\n");
 
-        ChangeService.RunFileChange change = file(changes.inspectRun("run_1", workspace,
-                List.of("notes.txt")), "notes.txt");
+        ChangeService.RunFileChange change =
+            file(changes.inspectRun("run_1", workspace, List.of("notes.txt")), "notes.txt");
 
         assertEquals(1, change.added(), change.diff());
         assertEquals(1, change.removed(), change.diff());
@@ -164,8 +162,8 @@ class ChangeServiceTest {
         Files.writeString(workspace.resolve("existing.txt"), "old\nnew\n");
         git("add", ".");
 
-        ChangeService.RunChangeReport report = changes.inspectRun("run_1", workspace,
-                List.of("staged.txt", "existing.txt"));
+        ChangeService.RunChangeReport report =
+            changes.inspectRun("run_1", workspace, List.of("staged.txt", "existing.txt"));
 
         ChangeService.RunFileChange added = file(report, "staged.txt");
         assertEquals("A", added.status());
@@ -182,12 +180,12 @@ class ChangeServiceTest {
         git("add", "committed-later.txt");
         Files.writeString(workspace.resolve("untracked.txt"), "x\n");
 
-        ChangeService.RunChangeReport report = changes.inspectRun("run_1", workspace,
-                List.of("committed-later.txt", "untracked.txt"));
+        ChangeService.RunChangeReport report =
+            changes.inspectRun("run_1", workspace, List.of("committed-later.txt", "untracked.txt"));
 
         assertTrue(report.gitRepository());
         assertEquals(List.of("committed-later.txt", "untracked.txt"),
-                report.files().stream().map(ChangeService.RunFileChange::path).toList());
+            report.files().stream().map(ChangeService.RunFileChange::path).toList());
         assertEquals(1, file(report, "committed-later.txt").added(), "暂存的新文件按当前内容合成 diff");
         assertEquals(1, file(report, "untracked.txt").added());
     }
@@ -205,8 +203,7 @@ class ChangeServiceTest {
         git("mv", "a.txt", "b.txt");
         Files.writeString(workspace.resolve("b.txt"), "one\nTWO\nthree\n");
 
-        ChangeService.RunFileChange change = file(changes.inspectRun("run_1", workspace,
-                List.of("b.txt")), "b.txt");
+        ChangeService.RunFileChange change = file(changes.inspectRun("run_1", workspace, List.of("b.txt")), "b.txt");
 
         assertEquals("R", change.status());
         assertTrue(change.diff().contains("rename from a.txt"), change.diff());
@@ -227,8 +224,8 @@ class ChangeServiceTest {
 
         Files.writeString(file, "one\ntwo\n");
 
-        ChangeService.RunFileChange change = file(changes.inspectRun("run_1", workspace,
-                List.of("a b.txt")), "a b.txt");
+        ChangeService.RunFileChange change =
+            file(changes.inspectRun("run_1", workspace, List.of("a b.txt")), "a b.txt");
 
         assertEquals("M", change.status());
         assertEquals(1, change.added(), change.diff());
@@ -367,8 +364,8 @@ class ChangeServiceTest {
         Path created = workspace.resolve("new.txt");
         Files.writeString(created, "hello\n");
 
-        ChangeService.RestoreReport report = changes.restore(workspace,
-                List.of("a.txt", "new.txt", "../escape.txt"), false);
+        ChangeService.RestoreReport report =
+            changes.restore(workspace, List.of("a.txt", "new.txt", "../escape.txt"), false);
 
         assertEquals(List.of("a.txt"), report.restored());
         assertEquals(List.of("new.txt"), report.deleted());
@@ -397,8 +394,7 @@ class ChangeServiceTest {
 
         assertEquals(List.of("Added.java"), report.deleted());
         assertFalse(Files.exists(added));
-        assertFalse(changes.inspect(workspace).files().stream()
-                .anyMatch(file -> file.path().equals("Added.java")));
+        assertFalse(changes.inspect(workspace).files().stream().anyMatch(file -> file.path().equals("Added.java")));
     }
 
     /** 「撤销全部」覆盖同一份 git status 里的所有条目，撤销完面板应该变空。 */
@@ -436,17 +432,13 @@ class ChangeServiceTest {
     }
 
     private static ChangeService.FileChange sessionFile(ChangeService.ChangeReport report, String path) {
-        return report.files().stream()
-                .filter(file -> file.path().equals(path))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("缺少文件: " + path));
+        return report.files().stream().filter(file -> file.path().equals(path)).findFirst()
+            .orElseThrow(() -> new AssertionError("缺少文件: " + path));
     }
 
     private static ChangeService.RunFileChange file(ChangeService.RunChangeReport report, String path) {
-        return report.files().stream()
-                .filter(file -> file.path().equals(path))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("缺少文件: " + path));
+        return report.files().stream().filter(file -> file.path().equals(path)).findFirst()
+            .orElseThrow(() -> new AssertionError("缺少文件: " + path));
     }
 
     private void commit() {
@@ -454,7 +446,7 @@ class ChangeServiceTest {
     }
 
     private boolean git(String... args) {
-        ArrayList<String> command = new java.util.ArrayList<String>();
+        ArrayList<String> command = new ArrayList<String>();
         command.add("git");
         command.addAll(List.of(args));
         ProcessBuilder builder = new ProcessBuilder(command);

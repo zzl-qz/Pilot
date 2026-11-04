@@ -15,9 +15,8 @@ package com.pilot.core.multi;
  * @param taskId     归属任务
  * @param risk       该任务的风险等级，决定是否强制人工确认
  */
-public record SandboxChange(String path, String diff, String newContent, boolean existed,
-                            String baseHash, String agentId, String taskId, RiskLevel risk,
-                            ChangeStatus status) {
+public record SandboxChange(String path, String diff, String newContent, boolean existed, String baseHash,
+    String agentId, String taskId, RiskLevel risk, ChangeStatus status) {
     public SandboxChange {
         if (path == null || path.isBlank()) {
             throw new IllegalArgumentException("改动路径不能为空");

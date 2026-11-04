@@ -1,10 +1,11 @@
 package com.pilot.server;
 
-import com.pilot.server.frontend.FrontendDepsPrompt;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.scheduling.annotation.EnableScheduling;
+
+import com.pilot.server.frontend.FrontendDepsPrompt;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan

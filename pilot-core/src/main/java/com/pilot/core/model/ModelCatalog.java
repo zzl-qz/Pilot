@@ -1,8 +1,5 @@
 package com.pilot.core.model;
 
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -13,6 +10,9 @@ import java.time.Duration;
 import java.util.List;
 import java.util.SortedSet;
 import java.util.TreeSet;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * OpenAI 兼容端点的模型清单：{@code GET {base}/models}。
@@ -65,13 +65,10 @@ public final class ModelCatalog {
      * @return 去重（忽略大小写）并按字母序排序的模型 id 列表；端点没返回任何模型时为空列表
      * @throws ModelClientException 网络失败、非 2xx 响应或响应结构不合法
      */
-    public static List<String> fetch(HttpClient httpClient, ObjectMapper objectMapper,
-                                      URI endpoint, String apiKey) {
+    public static List<String> fetch(HttpClient httpClient, ObjectMapper objectMapper, URI endpoint, String apiKey) {
         URI modelsUri = resolveModelsUri(endpoint);
-        HttpRequest.Builder request = HttpRequest.newBuilder(modelsUri)
-                .timeout(REQUEST_TIMEOUT)
-                .header("Accept", "application/json")
-                .GET();
+        HttpRequest.Builder request =
+            HttpRequest.newBuilder(modelsUri).timeout(REQUEST_TIMEOUT).header("Accept", "application/json").GET();
         if (apiKey != null && !apiKey.isBlank()) {
             request.header("Authorization", "Bearer " + apiKey.strip());
         }
@@ -88,8 +85,8 @@ public final class ModelCatalog {
 
         String body = response.body();
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new ModelClientException("模型列表接口返回 HTTP " + response.statusCode()
-                    + "（" + modelsUri + "）：" + snippet(body));
+            throw new ModelClientException(
+                "模型列表接口返回 HTTP " + response.statusCode() + "（" + modelsUri + "）：" + snippet(body));
         }
 
         JsonNode root;

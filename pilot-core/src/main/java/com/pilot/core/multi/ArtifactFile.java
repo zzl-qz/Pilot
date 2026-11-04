@@ -26,7 +26,7 @@ public record ArtifactFile(String path, String baselineHash, String contentHash,
     public static ArtifactFile of(String path, String baselineText, String content) {
         String text = content == null ? "" : content;
         return new ArtifactFile(path, DiffSandbox.fingerprint(baselineText), DiffSandbox.fingerprint(text),
-                text.getBytes(StandardCharsets.UTF_8).length);
+            text.getBytes(StandardCharsets.UTF_8).length);
     }
 
     public boolean created() {

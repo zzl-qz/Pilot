@@ -1,7 +1,5 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.workspace.PathValidator;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -18,6 +16,8 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Stream;
 
+import com.pilot.core.workspace.PathValidator;
+
 /**
  * 在工作区内按正则搜索文本，返回 {@code 路径:行号: 内容}。
  * 跳过构建产物、依赖目录与二进制文件，结果数量有上限。
@@ -29,7 +29,7 @@ public final class SearchTool implements Tool {
     /** 兜底扫描的时间预算：到点就交出手上已有的匹配，别把整轮对话吊死。 */
     private static final int FALLBACK_BUDGET_SECONDS = 8;
     private static final Set<String> SKIPPED_DIRECTORIES =
-            Set.of(".git", ".idea", ".gradle", "target", "build", "node_modules", "out", "dist");
+        Set.of(".git", ".idea", ".gradle", "target", "build", "node_modules", "out", "dist");
 
     private final PathValidator paths;
 
@@ -49,15 +49,11 @@ public final class SearchTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "pattern", Map.of("type", "string", "description",
-                                "正则表达式；先精确定位符号再用宽松模式，避免一次命中过多"),
-                        "path", Map.of("type", "string", "description", "工作区内的相对路径，省略表示根目录"),
-                        "glob", Map.of("type", "string", "description", "文件 glob，例如 *.java")),
-                "required", List.of("pattern"),
-                "additionalProperties", false);
+        return Map.of("type", "object", "properties",
+            Map.of("pattern", Map.of("type", "string", "description", "正则表达式；先精确定位符号再用宽松模式，避免一次命中过多"), "path",
+                Map.of("type", "string", "description", "工作区内的相对路径，省略表示根目录"), "glob",
+                Map.of("type", "string", "description", "文件 glob，例如 *.java")),
+            "required", List.of("pattern"), "additionalProperties", false);
     }
 
     @Override
@@ -110,8 +106,8 @@ public final class SearchTool implements Tool {
     }
 
     private List<String> runRipgrep(Path base, String regex, String glob) {
-        ArrayList<String> command = new ArrayList<>(List.of(
-                "rg", "--line-number", "--no-heading", "--color", "never", "--no-messages", "--with-filename"));
+        ArrayList<String> command = new ArrayList<>(
+            List.of("rg", "--line-number", "--no-heading", "--color", "never", "--no-messages", "--with-filename"));
         for (String skipped : SKIPPED_DIRECTORIES) {
             command.add("--glob");
             command.add("!" + skipped + "/**");
@@ -127,12 +123,11 @@ public final class SearchTool implements Tool {
         Process process = null;
         try {
             Path directory = Files.isDirectory(base) ? base : base.getParent();
-            process = new ProcessBuilder(command)
-                    .directory(directory.toFile())
-                    .redirectError(ProcessBuilder.Redirect.DISCARD)
-                    .start();
+            process = new ProcessBuilder(command).directory(directory.toFile())
+                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
             Process running = process;
-            CompletableFuture<byte[]> output = CompletableFuture.supplyAsync(() -> readLimited(running.getInputStream()));
+            CompletableFuture<byte[]> output =
+                CompletableFuture.supplyAsync(() -> readLimited(running.getInputStream()));
             if (!process.waitFor(10, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
                 output.cancel(true);
@@ -140,13 +135,17 @@ public final class SearchTool implements Tool {
             }
             byte[] bytes = output.get(2, TimeUnit.SECONDS);
             int status = process.exitValue();
-            if (status > 1) return null;
+            if (status > 1) {
+                return null;
+            }
             ArrayList<String> matches = new ArrayList<String>();
             String text = new String(bytes, StandardCharsets.UTF_8);
             for (String line : text.lines().toList()) {
                 int first = line.indexOf(':');
                 int second = first < 0 ? -1 : line.indexOf(':', first + 1);
-                if (second < 0) continue;
+                if (second < 0) {
+                    continue;
+                }
                 String file = line.substring(0, first);
                 String lineNumber = line.substring(first + 1, second);
                 Path matched = Files.isDirectory(base) ? base.resolve(file) : base;
@@ -155,18 +154,26 @@ public final class SearchTool implements Tool {
                     continue;
                 }
                 matches.add(formatMatch(paths.display(matched), lineNumber, line.substring(second + 1)));
-                if (matches.size() > MAX_MATCHES) break;
+                if (matches.size() > MAX_MATCHES) {
+                    break;
+                }
             }
             return matches;
         } catch (IOException e) {
-            if (process != null) process.destroyForcibly();
+            if (process != null) {
+                process.destroyForcibly();
+            }
             return null;
         } catch (InterruptedException e) {
-            if (process != null) process.destroyForcibly();
+            if (process != null) {
+                process.destroyForcibly();
+            }
             Thread.currentThread().interrupt();
             return null;
         } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
-            if (process != null) process.destroyForcibly();
+            if (process != null) {
+                process.destroyForcibly();
+            }
             return null;
         }
     }
@@ -230,12 +237,18 @@ public final class SearchTool implements Tool {
         StringBuilder regex = new StringBuilder("^");
         for (int i = 0; i < normalized.length(); i++) {
             char ch = normalized.charAt(i);
-            if (ch == '*') regex.append("[^/]*");
-            else if (ch == '?') regex.append("[^/]");
-            else regex.append(Pattern.quote(String.valueOf(ch)));
+            if (ch == '*') {
+                regex.append("[^/]*");
+            } else if (ch == '?') {
+                regex.append("[^/]");
+            } else {
+                regex.append(Pattern.quote(String.valueOf(ch)));
+            }
         }
         regex.append('$');
-        if (!normalized.contains("/")) path = Path.of(path).getFileName().toString();
+        if (!normalized.contains("/")) {
+            path = Path.of(path).getFileName().toString();
+        }
         return path.matches(regex.toString());
     }
 
@@ -256,13 +269,17 @@ public final class SearchTool implements Tool {
                 return false;
             }
             byte[] bytes = Files.readAllBytes(file);
-            if (ToolSupport.isBinary(bytes)) return false;
+            if (ToolSupport.isBinary(bytes)) {
+                return false;
+            }
             String[] lines = new String(bytes, StandardCharsets.UTF_8).split("\\R", -1);
             String display = paths.display(file);
             for (int i = 0; i < lines.length; i++) {
                 if (pattern.matcher(lines[i]).find()) {
                     matches.add(formatMatch(display, Integer.toString(i + 1), lines[i]));
-                    if (matches.size() > MAX_MATCHES) return true;
+                    if (matches.size() > MAX_MATCHES) {
+                        return true;
+                    }
                 }
             }
         } catch (IOException ignored) {
@@ -273,7 +290,9 @@ public final class SearchTool implements Tool {
 
     private static String formatMatch(String file, String line, String text) {
         String compact = text.strip();
-        if (compact.length() > MAX_LINE_CHARS) compact = compact.substring(0, MAX_LINE_CHARS) + "…";
+        if (compact.length() > MAX_LINE_CHARS) {
+            compact = compact.substring(0, MAX_LINE_CHARS) + "…";
+        }
         return file + ":" + line + ": " + compact;
     }
 }

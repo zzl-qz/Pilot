@@ -17,8 +17,8 @@ public final class ExecutionBackends {
      * @param degraded  请求的隔离没有落实
      * @param reason    降级原因；未降级时为空串
      */
-    public record Selection(ExecutionBackend backend, ExecutionIsolation requested, boolean degraded,
-                            String reason, ExecutionSettings settings) {
+    public record Selection(ExecutionBackend backend, ExecutionIsolation requested, boolean degraded, String reason,
+        ExecutionSettings settings) {
         public Selection {
             settings = settings == null ? ExecutionSettings.local() : settings;
         }
@@ -28,24 +28,22 @@ public final class ExecutionBackends {
         }
 
         public String describe() {
-            return isolated()
-                    ? "已启用容器隔离（" + backend.id() + "）"
-                    : "未启用系统级隔离：" + (degraded ? reason : "当前配置为本地执行");
+            return isolated() ? "已启用容器隔离（" + backend.id() + "）" : "未启用系统级隔离：" + (degraded ? reason : "当前配置为本地执行");
         }
     }
 
     public static Selection select(ExecutionSettings settings) {
         ExecutionSettings effective = settings == null ? ExecutionSettings.local() : settings;
         if (effective.isolation() != ExecutionIsolation.CONTAINER) {
-            return new Selection(new LocalExecutionBackend(EnvironmentSanitizer.defaults()),
-                    ExecutionIsolation.LOCAL, false, "", effective);
+            return new Selection(new LocalExecutionBackend(EnvironmentSanitizer.defaults()), ExecutionIsolation.LOCAL,
+                false, "", effective);
         }
-        ContainerExecutionBackend container = new ContainerExecutionBackend(
-                effective.containerRuntime(), effective.image(), "/workspace", "");
+        ContainerExecutionBackend container =
+            new ContainerExecutionBackend(effective.containerRuntime(), effective.image(), "/workspace", "");
         if (container.available()) {
             return new Selection(container, ExecutionIsolation.CONTAINER, false, "", effective);
         }
-        return new Selection(new LocalExecutionBackend(EnvironmentSanitizer.defaults()),
-                ExecutionIsolation.CONTAINER, true, container.unavailableReason(), effective);
+        return new Selection(new LocalExecutionBackend(EnvironmentSanitizer.defaults()), ExecutionIsolation.CONTAINER,
+            true, container.unavailableReason(), effective);
     }
 }

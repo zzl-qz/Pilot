@@ -21,8 +21,7 @@ public final class ToolArtifacts {
     public static Path directory(String bucket) {
         String configured = System.getProperty(PROPERTY);
         Path root = configured == null || configured.isBlank()
-                ? Path.of(System.getProperty("java.io.tmpdir"), "pilot-artifacts")
-                : Path.of(configured);
+            ? Path.of(System.getProperty("java.io.tmpdir"), "pilot-artifacts") : Path.of(configured);
         Path dir = root.resolve(bucket).toAbsolutePath().normalize();
         if (!dir.startsWith(root.toAbsolutePath().normalize())) {
             throw new IllegalArgumentException("产物目录越界: " + bucket);

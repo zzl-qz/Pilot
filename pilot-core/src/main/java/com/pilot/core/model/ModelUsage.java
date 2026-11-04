@@ -5,9 +5,8 @@ package com.pilot.core.model;
  * cacheReadObserved / cacheWriteObserved 分别表示已取得相应字段，实测零值与字段缺失不混淆。
  * 兼容旧 JSON 的反序列化由 EventCodec 按缺省 false 处理。
  */
-public record ModelUsage(long inputTokens, long outputTokens, long reasoningTokens,
-                         long cachedInputTokens, long cacheWriteTokens, boolean exact,
-                         boolean cacheReadObserved, boolean cacheWriteObserved) {
+public record ModelUsage(long inputTokens, long outputTokens, long reasoningTokens, long cachedInputTokens,
+    long cacheWriteTokens, boolean exact, boolean cacheReadObserved, boolean cacheWriteObserved) {
 
     public ModelUsage(long input, long output, long reasoning, long cached, long written, boolean exact) {
         this(input, output, reasoning, cached, written, exact, exact, exact);
@@ -45,7 +44,7 @@ public record ModelUsage(long inputTokens, long outputTokens, long reasoningToke
         if (!cacheReadObserved || inputTokens <= 0) {
             return 0d;
         }
-        return cachedInputTokens / (double) inputTokens;
+        return cachedInputTokens / (double)inputTokens;
     }
 
     /** 按全价计费的输入部分：总输入减去命中缓存与写入缓存的部分。 */

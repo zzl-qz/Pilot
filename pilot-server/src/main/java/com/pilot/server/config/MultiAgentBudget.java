@@ -18,9 +18,8 @@ public record MultiAgentBudget(Integer maxDispatchSeconds, Integer maxTotalToken
     public static final MultiAgentBudget DEFAULT = new MultiAgentBudget(null, null);
 
     public MultiAgentBudget {
-        maxDispatchSeconds = maxDispatchSeconds == null || maxDispatchSeconds < 30
-                ? 1_800
-                : Math.min(maxDispatchSeconds, 21_600);
+        maxDispatchSeconds =
+            maxDispatchSeconds == null || maxDispatchSeconds < 30 ? 1_800 : Math.min(maxDispatchSeconds, 21_600);
         maxTotalTokens = maxTotalTokens == null || maxTotalTokens < 0 ? 0 : maxTotalTokens;
     }
 }

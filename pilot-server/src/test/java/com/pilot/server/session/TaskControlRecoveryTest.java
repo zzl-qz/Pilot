@@ -1,20 +1,24 @@
 package com.pilot.server.session;
 
-import com.pilot.core.session.SessionService;
-import com.pilot.server.config.PilotDataDir;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import tools.jackson.databind.json.JsonMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.core.session.SessionService;
+import com.pilot.server.config.PilotDataDir;
+
+import tools.jackson.databind.json.JsonMapper;
 
 class TaskControlRecoveryTest {
-    @TempDir Path directory;
+    @TempDir
+    Path directory;
 
     @Test
     void restartOnlyInterruptsActiveTasksAndPreservesPausedRequirements() {
@@ -27,7 +31,7 @@ class TaskControlRecoveryTest {
             String id = sessions.createSession(status).id();
             ids.put(status, id);
             original.start(id, "恢复后仍需满足的原目标", List.of("不能改数据库"),
-                    List.of(new TaskControlService.Acceptance("重连测试通过", false, "已有观察记录")));
+                List.of(new TaskControlService.Acceptance("重连测试通过", false, "已有观察记录")));
             original.correct(id, "优先覆盖断线再连接");
             original.status(id, status);
         }
@@ -35,7 +39,7 @@ class TaskControlRecoveryTest {
         TaskControlService restarted = new TaskControlService(mapper, data);
         TaskControlRecovery recovery = new TaskControlRecovery(sessions, restarted);
         recovery.run(null);
-        for (Map.Entry<String,String> entry : ids.entrySet()) {
+        for (Map.Entry<String, String> entry : ids.entrySet()) {
             TaskControlService.TaskContract task = restarted.load(entry.getValue());
             assertEquals(entry.getKey().equals("ACTIVE") ? "INTERRUPTED" : entry.getKey(), task.status());
             assertEquals("恢复后仍需满足的原目标", task.originalGoal());

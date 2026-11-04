@@ -27,18 +27,14 @@ public final class InMemoryRunCheckpointRepository implements RunCheckpointRepos
 
     @Override
     public synchronized Optional<RunCheckpoint> activeForSession(String sessionId) {
-        return checkpoints.values().stream()
-                .filter(checkpoint -> checkpoint.sessionId().equals(sessionId))
-                .filter(RunCheckpoint::resumable)
-                .max(java.util.Comparator.comparing(RunCheckpoint::updatedAt));
+        return checkpoints.values().stream().filter(checkpoint -> checkpoint.sessionId().equals(sessionId))
+            .filter(RunCheckpoint::resumable).max(java.util.Comparator.comparing(RunCheckpoint::updatedAt));
     }
 
     @Override
     public synchronized List<RunCheckpoint> resumable() {
-        return checkpoints.values().stream()
-                .filter(RunCheckpoint::resumable)
-                .sorted(java.util.Comparator.comparing(RunCheckpoint::updatedAt))
-                .toList();
+        return checkpoints.values().stream().filter(RunCheckpoint::resumable)
+            .sorted(java.util.Comparator.comparing(RunCheckpoint::updatedAt)).toList();
     }
 
     @Override
@@ -52,10 +48,10 @@ public final class InMemoryRunCheckpointRepository implements RunCheckpointRepos
             return false;
         }
         Duration span = lease == null ? Duration.ofSeconds(30) : lease;
-        checkpoints.put(runId, new RunCheckpoint(checkpoint.runId(), checkpoint.sessionId(), checkpoint.phase(),
-                checkpoint.step(), checkpoint.lastToolCallId(), checkpoint.lastSuccessfulStep(),
-                checkpoint.nextAction(), checkpoint.workspace(), checkpoint.status(), owner,
-                at.plus(span), checkpoint.heartbeatAt(), at));
+        checkpoints.put(runId,
+            new RunCheckpoint(checkpoint.runId(), checkpoint.sessionId(), checkpoint.phase(), checkpoint.step(),
+                checkpoint.lastToolCallId(), checkpoint.lastSuccessfulStep(), checkpoint.nextAction(),
+                checkpoint.workspace(), checkpoint.status(), owner, at.plus(span), checkpoint.heartbeatAt(), at));
         return true;
     }
 
@@ -77,10 +73,10 @@ public final class InMemoryRunCheckpointRepository implements RunCheckpointRepos
         if (checkpoint == null) {
             return;
         }
-        checkpoints.put(runId, new RunCheckpoint(checkpoint.runId(), checkpoint.sessionId(),
-                checkpoint.phase(), checkpoint.step(), checkpoint.lastToolCallId(),
-                checkpoint.lastSuccessfulStep(), checkpoint.nextAction(), checkpoint.workspace(),
-                status == null ? RunCheckpoint.STATUS_COMPLETED : status, null, null,
+        checkpoints.put(runId,
+            new RunCheckpoint(checkpoint.runId(), checkpoint.sessionId(), checkpoint.phase(), checkpoint.step(),
+                checkpoint.lastToolCallId(), checkpoint.lastSuccessfulStep(), checkpoint.nextAction(),
+                checkpoint.workspace(), status == null ? RunCheckpoint.STATUS_COMPLETED : status, null, null,
                 checkpoint.heartbeatAt(), now == null ? Instant.now() : now));
     }
 

@@ -12,13 +12,8 @@ package com.pilot.core.multi;
  * </pre>
  */
 public enum TaskStatus {
-    PENDING("pending", "⏳等待"),
-    RUNNING("running", "🔄运行中"),
-    DONE("done", "✅完成"),
-    DISSENT("dissent", "⚠️分歧待仲裁"),
-    CONFLICT("conflict", "🔴变更冲突"),
-    FAILED("failed", "❌失败"),
-    BLOCKED("blocked", "⛔已阻断"),
+    PENDING("pending", "⏳等待"), RUNNING("running", "🔄运行中"), DONE("done", "✅完成"), DISSENT("dissent", "⚠️分歧待仲裁"),
+    CONFLICT("conflict", "🔴变更冲突"), FAILED("failed", "❌失败"), BLOCKED("blocked", "⛔已阻断"),
     CANCELLED("cancelled", "🚫已取消");
 
     private final String wireName;

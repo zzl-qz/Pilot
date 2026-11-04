@@ -1,6 +1,14 @@
 package com.pilot.server.controller;
 
-import com.pilot.server.workspace.RunSnapshotService;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,13 +18,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import com.pilot.server.workspace.RunSnapshotService;
 
 /** 对话区的「本轮改动」卡依赖这个接口：run 粒度、逐文件状态与 diff。 */
 @SpringBootTest(properties = "pilot.store=memory")
@@ -46,12 +48,10 @@ class RunChangesApiTest {
         snapshots.beforeWrite(file);
         snapshots.clear();
 
-        mvc.perform(get("/api/runs/{runId}/changes", "run_changes_1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.runId").value("run_changes_1"))
-                .andExpect(jsonPath("$.workspace").value(workspace.toAbsolutePath().normalize().toString()))
-                .andExpect(jsonPath("$.files[0].path").value("a.txt"))
-                .andExpect(jsonPath("$.files[0].status").value("M"));
+        mvc.perform(get("/api/runs/{runId}/changes", "run_changes_1")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.runId").value("run_changes_1"))
+            .andExpect(jsonPath("$.workspace").value(workspace.toAbsolutePath().normalize().toString()))
+            .andExpect(jsonPath("$.files[0].path").value("a.txt")).andExpect(jsonPath("$.files[0].status").value("M"));
     }
 
     @Test
@@ -65,20 +65,16 @@ class RunChangesApiTest {
         snapshots.clear();
         Files.writeString(file, "manual edit");
 
-        mvc.perform(post("/api/runs/{runId}/rollback", "run_rollback_conflict"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.conflicts[0]").value("a.txt"))
-                .andExpect(jsonPath("$.restored").isEmpty())
-                .andExpect(jsonPath("$.deleted").isEmpty());
+        mvc.perform(post("/api/runs/{runId}/rollback", "run_rollback_conflict")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.conflicts[0]").value("a.txt")).andExpect(jsonPath("$.restored").isEmpty())
+            .andExpect(jsonPath("$.deleted").isEmpty());
 
-        org.junit.jupiter.api.Assertions.assertEquals("manual edit", Files.readString(file));
+        Assertions.assertEquals("manual edit", Files.readString(file));
     }
 
     @Test
     void returnsEmptyReportWhenRunHasNoSnapshot() throws Exception {
-        mvc.perform(get("/api/runs/{runId}/changes", "run_without_snapshot"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.files").isEmpty())
-                .andExpect(jsonPath("$.added").value(0));
+        mvc.perform(get("/api/runs/{runId}/changes", "run_without_snapshot")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.files").isEmpty()).andExpect(jsonPath("$.added").value(0));
     }
 }

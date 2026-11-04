@@ -1,17 +1,20 @@
 package com.pilot.core.hook;
 
-import tools.jackson.databind.ObjectMapper;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+
+import com.pilot.core.tool.ProcessSupport;
+
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 确定性钩子：与 Claude Code / Codex 一致，把「编辑后自动格式化」「写文件前跑检查」这类
@@ -39,8 +42,7 @@ import java.util.concurrent.TimeUnit;
 public final class Hooks {
 
     public enum Event {
-        PRE_TOOL_USE("PreToolUse"),
-        POST_TOOL_USE("PostToolUse");
+        PRE_TOOL_USE("PreToolUse"), POST_TOOL_USE("PostToolUse");
 
         private final String wireName;
 
@@ -53,10 +55,14 @@ public final class Hooks {
         }
 
         public static Event parse(String value) {
-            if (value == null) return null;
+            if (value == null) {
+                return null;
+            }
             String normalized = value.strip().toLowerCase(Locale.ROOT).replace("_", "");
             for (Event event : values()) {
-                if (event.wireName().toLowerCase(Locale.ROOT).equals(normalized)) return event;
+                if (event.wireName().toLowerCase(Locale.ROOT).equals(normalized)) {
+                    return event;
+                }
             }
             return null;
         }
@@ -72,13 +78,9 @@ public final class Hooks {
 
         /** {@code *} 全部命中，{@code a|b} 任一命中，末尾 {@code *} 做前缀匹配。 */
         public boolean matches(String toolName) {
-            return Arrays.stream(matcher.split("\\|"))
-                    .map(String::strip)
-                    .filter(part -> !part.isBlank())
-                    .anyMatch(part -> part.equals("*")
-                            || part.equalsIgnoreCase(toolName)
-                            || part.endsWith("*")
-                            && toolName.regionMatches(true, 0, part, 0, part.length() - 1));
+            return Arrays.stream(matcher.split("\\|")).map(String::strip).filter(part -> !part.isBlank())
+                .anyMatch(part -> part.equals("*") || part.equalsIgnoreCase(toolName)
+                    || part.endsWith("*") && toolName.regionMatches(true, 0, part, 0, part.length() - 1));
         }
     }
 
@@ -105,15 +107,19 @@ public final class Hooks {
 
     /** 读取用户级与工作区级配置并合并；任何读取或格式问题都退化为「没有钩子」，不阻断运行。 */
     public static Hooks load(Path workspace) {
-        Map<Event, List<Spec>> merged = new java.util.LinkedHashMap<>();
+        Map<Event, List<Spec>> merged = new LinkedHashMap<>();
         Path userHome = Path.of(System.getProperty("user.home", "."));
         merge(merged, userHome.resolve(".pilot").resolve("settings.json"));
-        if (workspace != null) merge(merged, workspace.resolve(".pilot").resolve("settings.json"));
+        if (workspace != null) {
+            merge(merged, workspace.resolve(".pilot").resolve("settings.json"));
+        }
         return merged.isEmpty() ? none() : new Hooks(merged, workspace);
     }
 
     private static void merge(Map<Event, List<Spec>> target, Path file) {
-        if (!Files.isRegularFile(file)) return;
+        if (!Files.isRegularFile(file)) {
+            return;
+        }
         Map<?, ?> root;
         try {
             root = MAPPER.readValue(Files.readAllBytes(file), Map.class);
@@ -121,21 +127,31 @@ public final class Hooks {
             return;
         }
         Object hooks = root == null ? null : root.get("hooks");
-        if (!(hooks instanceof Map<?, ?> groups)) return;
+        if (!(hooks instanceof Map<?, ?> groups)) {
+            return;
+        }
         for (Map.Entry<?, ?> entry : groups.entrySet()) {
             Event event = Event.parse(String.valueOf(entry.getKey()));
-            if (event == null) continue;
+            if (event == null) {
+                continue;
+            }
             List<Spec> parsed = parseSpecs(entry.getValue());
-            if (parsed.isEmpty()) continue;
+            if (parsed.isEmpty()) {
+                continue;
+            }
             target.computeIfAbsent(event, key -> new ArrayList<>()).addAll(parsed);
         }
     }
 
     private static List<Spec> parseSpecs(Object value) {
         List<Spec> specs = new ArrayList<>();
-        if (!(value instanceof List<?> items)) return specs;
+        if (!(value instanceof List<?> items)) {
+            return specs;
+        }
         for (Object item : items) {
-            if (!(item instanceof Map<?, ?> group)) continue;
+            if (!(item instanceof Map<?, ?> group)) {
+                continue;
+            }
             String matcher = text(group.get("matcher"));
             long timeout = number(group.get("timeoutSeconds"));
             boolean block = Boolean.parseBoolean(text(group.get("blockOnFailure")));
@@ -144,12 +160,16 @@ public final class Hooks {
                 for (Object hook : nested) {
                     if (hook instanceof Map<?, ?> entry) {
                         String command = text(entry.get("command"));
-                        if (!command.isBlank()) specs.add(new Spec(matcher, command, timeout, block));
+                        if (!command.isBlank()) {
+                            specs.add(new Spec(matcher, command, timeout, block));
+                        }
                     }
                 }
             }
             String direct = text(group.get("command"));
-            if (!direct.isBlank()) specs.add(new Spec(matcher, direct, timeout, block));
+            if (!direct.isBlank()) {
+                specs.add(new Spec(matcher, direct, timeout, block));
+            }
         }
         return specs;
     }
@@ -159,9 +179,13 @@ public final class Hooks {
     }
 
     private static long number(Object value) {
-        if (value instanceof Number number) return number.longValue();
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
         String raw = text(value);
-        if (raw.isBlank()) return 0;
+        if (raw.isBlank()) {
+            return 0;
+        }
         try {
             return Long.parseLong(raw);
         } catch (NumberFormatException e) {
@@ -175,9 +199,11 @@ public final class Hooks {
      * @return 合并后的输出；{@link Result#blocked()} 为 true 时调用方应跳过工具执行
      */
     public Result run(Event event, String toolName) {
-        List<Spec> matched = specs.getOrDefault(event, List.of()).stream()
-                .filter(spec -> spec.matches(toolName)).toList();
-        if (matched.isEmpty()) return Result.NONE;
+        List<Spec> matched =
+            specs.getOrDefault(event, List.of()).stream().filter(spec -> spec.matches(toolName)).toList();
+        if (matched.isEmpty()) {
+            return Result.NONE;
+        }
 
         StringBuilder out = new StringBuilder();
         for (Spec spec : matched) {
@@ -190,25 +216,31 @@ public final class Hooks {
                 }
                 continue;
             }
-            if (out.length() > 0) out.append('\n');
+            if (out.length() > 0) {
+                out.append('\n');
+            }
             out.append(executed.output());
-            if (blocking) return new Result(clip(out.toString()), true);
+            if (blocking) {
+                return new Result(clip(out.toString()), true);
+            }
         }
         return new Result(clip(out.toString()), false);
     }
 
     /** 在工作区里跑一条钩子命令；超时、无法执行、被中断都记成失败，不抛给调用方。 */
     private static Exec exec(Spec spec, Path workspace) {
-        ProcessBuilder builder = new ProcessBuilder(com.pilot.core.tool.ProcessSupport.shell(spec.command()));
-        if (workspace != null) builder.directory(workspace.toFile());
+        ProcessBuilder builder = new ProcessBuilder(ProcessSupport.shell(spec.command()));
+        if (workspace != null) {
+            builder.directory(workspace.toFile());
+        }
         builder.redirectErrorStream(true);
         Process process = null;
         try {
             process = builder.start();
             process.getOutputStream().close();
             Process running = process;
-            CompletableFuture<String> output = CompletableFuture.supplyAsync(
-                    () -> com.pilot.core.tool.ProcessSupport.read(running.getInputStream()));
+            CompletableFuture<String> output =
+                CompletableFuture.supplyAsync(() -> ProcessSupport.read(running.getInputStream()));
             if (!process.waitFor(spec.timeoutSeconds(), TimeUnit.SECONDS)) {
                 process.destroyForcibly();
                 output.cancel(true);
@@ -219,7 +251,9 @@ public final class Hooks {
             return new Exec(-1, "钩子无法执行 " + spec.command() + "：" + e.getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            if (process != null) process.destroyForcibly();
+            if (process != null) {
+                process.destroyForcibly();
+            }
             return new Exec(-1, "钩子被中断：" + spec.command());
         }
     }

@@ -1,12 +1,11 @@
 package com.pilot.server.session;
 
-import com.pilot.core.event.RunFailed;
-import com.pilot.core.session.InterruptedRun;
-import com.pilot.core.session.RunCheckpoint;
-import com.pilot.core.session.RunRepository;
-import com.pilot.core.session.Session;
-import com.pilot.core.session.SessionService;
-import com.pilot.core.session.SessionStatus;
+import java.time.Instant;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,11 +13,13 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 
-import java.time.Instant;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import com.pilot.core.event.RunFailed;
+import com.pilot.core.session.InterruptedRun;
+import com.pilot.core.session.RunCheckpoint;
+import com.pilot.core.session.RunRepository;
+import com.pilot.core.session.Session;
+import com.pilot.core.session.SessionService;
+import com.pilot.core.session.SessionStatus;
 
 /**
  * 启动时的状态收敛：进程重启后，上一次运行不可能继续，必须把「运行」和「会话」一起收敛。
@@ -48,7 +49,7 @@ public class InterruptedRunRecovery implements ApplicationRunner {
 
     @Autowired
     public InterruptedRunRecovery(RunRepository runs, SessionService sessions, RunStateTracker tracker,
-                                  RecoveryReportService report) {
+        RecoveryReportService report) {
         this.runs = runs;
         this.sessions = sessions;
         this.tracker = tracker;
@@ -75,8 +76,8 @@ public class InterruptedRunRecovery implements ApplicationRunner {
                 continue;
             }
             // 有检查点时用检查点里的 runId，界面才能把「继续」关联到同一次运行
-            String runId = tracker == null ? null : tracker.current(session.id())
-                    .map(RunCheckpoint::runId).orElse(null);
+            String runId =
+                tracker == null ? null : tracker.current(session.id()).map(RunCheckpoint::runId).orElse(null);
             closeSession(session.id(), runId == null ? "run_recovered-" + UUID.randomUUID() : runId);
         }
         if (tracker == null || report == null) {

@@ -1,7 +1,5 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.workspace.PathValidator;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -9,6 +7,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
+
+import com.pilot.core.workspace.PathValidator;
 
 /** 列出工作区内的一个目录，标记子目录与文件大小。 */
 public final class ListDirTool implements Tool {
@@ -32,12 +32,9 @@ public final class ListDirTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "path", Map.of("type", "string", "description", "工作区内的相对目录路径，省略表示根目录")),
-                "required", List.of(),
-                "additionalProperties", false);
+        return Map.of("type", "object", "properties",
+            Map.of("path", Map.of("type", "string", "description", "工作区内的相对目录路径，省略表示根目录")), "required", List.of(),
+            "additionalProperties", false);
     }
 
     @Override
@@ -65,14 +62,12 @@ public final class ListDirTool implements Tool {
         }
         try (Stream<Path> stream = Files.list(dir)) {
             List<Path> entries = stream
-                    // 白名单之外的文件在子 Agent 眼里直接不存在，而不是「列出来但读不了」
-                    .filter(entry -> Files.isDirectory(entry) ? paths.allowsDirectory(entry) : paths.allows(entry))
-                    .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                    .toList();
+                // 白名单之外的文件在子 Agent 眼里直接不存在，而不是「列出来但读不了」
+                .filter(entry -> Files.isDirectory(entry) ? paths.allowsDirectory(entry) : paths.allows(entry))
+                .sorted(Comparator.comparing(path -> path.getFileName().toString())).toList();
             int limit = Math.min(entries.size(), MAX_ENTRIES);
-            StringBuilder out = new StringBuilder()
-                    .append("目录: ").append(paths.display(dir))
-                    .append("（").append(entries.size()).append(" 项）");
+            StringBuilder out = new StringBuilder().append("目录: ").append(paths.display(dir)).append("（")
+                .append(entries.size()).append(" 项）");
             for (int i = 0; i < limit; i++) {
                 Path entry = entries.get(i);
                 out.append('\n');

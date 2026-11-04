@@ -1,13 +1,14 @@
 package com.pilot.server.config;
 
-import com.pilot.core.permission.PermissionMode;
-import com.pilot.server.store.SettingsStore;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.util.Objects;
-import java.util.concurrent.atomic.AtomicReference;
+import com.pilot.core.permission.PermissionMode;
+import com.pilot.server.store.SettingsStore;
 
 /**
  * 当前生效的权限档位。默认与 Codex / OpenCode 一致：完全放行（{@code AUTO}）。
@@ -51,12 +52,10 @@ public class PermissionSettings {
     }
 
     private PermissionMode restore(PermissionMode fallback) {
-        return store.find(KEY)
-                .map(saved -> parse(saved, fallback))
-                .orElseGet(() -> {
-                    log.info("权限档位使用配置文件默认值: {}", fallback);
-                    return fallback;
-                });
+        return store.find(KEY).map(saved -> parse(saved, fallback)).orElseGet(() -> {
+            log.info("权限档位使用配置文件默认值: {}", fallback);
+            return fallback;
+        });
     }
 
     private static PermissionMode parse(String saved, PermissionMode fallback) {

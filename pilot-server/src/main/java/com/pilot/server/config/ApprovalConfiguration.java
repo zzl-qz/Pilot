@@ -1,11 +1,12 @@
 package com.pilot.server.config;
 
-import com.pilot.core.approval.ApprovalBroker;
-import com.pilot.core.approval.InMemoryApprovalBroker;
+import java.time.Duration;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.time.Duration;
+import com.pilot.core.approval.ApprovalBroker;
+import com.pilot.core.approval.InMemoryApprovalBroker;
 
 /** 审批注册表。等待超时按拒绝处理。 */
 @Configuration(proxyBeanMethods = false)

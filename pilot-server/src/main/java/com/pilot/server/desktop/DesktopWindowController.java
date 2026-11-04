@@ -1,12 +1,13 @@
 package com.pilot.server.desktop;
 
-import com.pilot.server.browser.BrowserRuntime;
+import java.time.Duration;
+import java.util.Map;
+
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.Duration;
-import java.util.Map;
+import com.pilot.server.browser.BrowserRuntime;
 
 /** 网页版点按钮时，拉起内置 Chromium 窗口。桌面壳不走这里。 */
 @RestController

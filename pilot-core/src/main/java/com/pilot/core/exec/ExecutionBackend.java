@@ -21,7 +21,9 @@ public interface ExecutionBackend {
     String unavailableReason();
 
     /** 用于构建缓存分区；容器实现返回实际镜像 ID，镜像未就绪时拒绝。 */
-    default String cacheIdentity() { return id(); }
+    default String cacheIdentity() {
+        return id();
+    }
 
     ExecutionResult run(ExecutionRequest request);
 

@@ -1,13 +1,13 @@
 package com.pilot.server.workspace;
 
-import org.springframework.stereotype.Component;
-
+import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,6 +15,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
+
+import org.springframework.stereotype.Component;
 
 /**
  * 本地目录浏览与工作区校验。
@@ -25,7 +27,8 @@ import java.util.stream.Stream;
 @Component
 public class WorkspaceService {
     private static final int MAX_DIRECTORIES = 300;
-    private static final Set<String> NOISY_DIRECTORIES = Set.of("node_modules", ".git", ".gradle", "target", "dist", "out");
+    private static final Set<String> NOISY_DIRECTORIES =
+        Set.of("node_modules", ".git", ".gradle", "target", "dist", "out");
 
     public record RootEntry(String path, String label) {
     }
@@ -38,14 +41,14 @@ public class WorkspaceService {
      * @param directories 子目录（仅目录，按名称排序，最多 300 项）
      */
     public record BrowseResult(String path, String name, String parent, boolean gitRepository,
-                               List<DirectoryEntry> directories, boolean truncated) {
+        List<DirectoryEntry> directories, boolean truncated) {
     }
 
     /** 快捷入口：盘符或根、用户主目录。 */
     public List<RootEntry> roots() {
         Path home = Path.of(System.getProperty("user.home", ".")).toAbsolutePath().normalize();
         Path startup = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
-        List<Path> roots = java.util.Arrays.stream(java.io.File.listRoots()).map(java.io.File::toPath).toList();
+        List<Path> roots = Arrays.stream(File.listRoots()).map(File::toPath).toList();
         return roots(home, startup, roots);
     }
 
@@ -66,11 +69,8 @@ public class WorkspaceService {
         List<DirectoryEntry> children = new ArrayList<>();
         boolean truncated = false;
         try (Stream<Path> stream = Files.list(directory)) {
-            List<Path> dirs = stream
-                    .filter(Files::isDirectory)
-                    .filter(path -> !isNoisy(path))
-                    .sorted(Comparator.comparing(path -> path.getFileName().toString().toLowerCase(Locale.ROOT)))
-                    .toList();
+            List<Path> dirs = stream.filter(Files::isDirectory).filter(path -> !isNoisy(path))
+                .sorted(Comparator.comparing(path -> path.getFileName().toString().toLowerCase(Locale.ROOT))).toList();
             for (Path child : dirs) {
                 if (children.size() >= MAX_DIRECTORIES) {
                     truncated = true;
@@ -83,13 +83,9 @@ public class WorkspaceService {
         }
 
         Path parent = directory.getParent();
-        return new BrowseResult(
-                directory.toString(),
-                displayName(directory),
-                parent == null ? null : parent.toAbsolutePath().toString(),
-                Files.isDirectory(directory.resolve(".git")),
-                List.copyOf(children),
-                truncated);
+        return new BrowseResult(directory.toString(), displayName(directory),
+            parent == null ? null : parent.toAbsolutePath().toString(), Files.isDirectory(directory.resolve(".git")),
+            List.copyOf(children), truncated);
     }
 
     /**

@@ -1,12 +1,5 @@
 package com.pilot.core.model;
 
-import com.pilot.core.loop.Attachment;
-import com.pilot.core.loop.ContextCompactor;
-import com.pilot.core.loop.Message;
-import com.pilot.core.tool.ToolCall;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,6 +17,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+
+import com.pilot.core.loop.Attachment;
+import com.pilot.core.loop.ContextCompactor;
+import com.pilot.core.loop.Message;
+import com.pilot.core.tool.ToolCall;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * OpenAI 兼容的 chat completions 客户端。
@@ -48,13 +49,13 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     private volatile boolean cacheParametersDisabled;
     private volatile boolean streamUsageDisabled;
 
-    public OpenAiCompatibleModelClient(HttpClient httpClient, ObjectMapper objectMapper,
-                                       URI endpoint, String apiKey, String model) {
+    public OpenAiCompatibleModelClient(HttpClient httpClient, ObjectMapper objectMapper, URI endpoint, String apiKey,
+        String model) {
         this(httpClient, objectMapper, endpoint, apiKey, model, Duration.ofSeconds(90));
     }
 
-    public OpenAiCompatibleModelClient(HttpClient httpClient, ObjectMapper objectMapper,
-                                       URI endpoint, String apiKey, String model, Duration requestTimeout) {
+    public OpenAiCompatibleModelClient(HttpClient httpClient, ObjectMapper objectMapper, URI endpoint, String apiKey,
+        String model, Duration requestTimeout) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.endpoint = resolveEndpoint(endpoint);
@@ -78,17 +79,24 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         return this;
     }
 
-    @Override public ModelProfile profile() {
+    @Override
+    public ModelProfile profile() {
         ModelProfile p = profile;
-        return new ModelProfile(p.provider(), p.model(), cacheParametersDisabled ? "none" : p.cacheMode(),
-                p.cacheTtl(), p.instructionMessages(), p.streamUsage() && !streamUsageDisabled,
-                p.cacheKey() && !cacheParametersDisabled, p.compactionMode(), p.pricing());
+        return new ModelProfile(p.provider(), p.model(), cacheParametersDisabled ? "none" : p.cacheMode(), p.cacheTtl(),
+            p.instructionMessages(), p.streamUsage() && !streamUsageDisabled, p.cacheKey() && !cacheParametersDisabled,
+            p.compactionMode(), p.pricing());
     }
 
-    @Override public synchronized boolean disableRejectedCache(Throwable failure) {
-        if (!(failure instanceof ModelClientException) || failure.getMessage() == null) return false;
+    @Override
+    public synchronized boolean disableRejectedCache(Throwable failure) {
+        if (!(failure instanceof ModelClientException) || failure.getMessage() == null) {
+            return false;
+        }
         String message = failure.getMessage().toLowerCase(java.util.Locale.ROOT);
-        if (!message.contains("http 400") || !message.matches("(?s).*(unknown|unsupported|unrecognized|unexpected|not allowed|not permitted|extra inputs|不支持).*")) return false;
+        if (!message.contains("http 400") || !message.matches(
+            "(?s).*(unknown|unsupported|unrecognized|unexpected|not allowed|not permitted|extra inputs|不支持).*")) {
+            return false;
+        }
         if (!cacheParametersDisabled && (message.contains("cache_control") || message.contains("prompt_cache_key"))) {
             cacheParametersDisabled = true;
             return true;
@@ -104,29 +112,45 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         Map<String, Object> body = new LinkedHashMap<>();
         List<Map<String, Object>> items = new ArrayList<>(messages.stream().map(this::messagePayload).toList());
         List<Map<String, Object>> tools = definitions == null ? new ArrayList<>()
-                : new ArrayList<>(definitions.stream().map(this::toolPayload).map(LinkedHashMap::new).toList());
+            : new ArrayList<>(definitions.stream().map(this::toolPayload).map(LinkedHashMap::new).toList());
         body.put("model", model);
         body.put("messages", items);
         if (streaming) {
             body.put("stream", true);
-            if (profile().streamUsage()) body.put("stream_options", Map.of("include_usage", true));
+            if (profile().streamUsage()) {
+                body.put("stream_options", Map.of("include_usage", true));
+            }
         }
         if (!tools.isEmpty()) {
             body.put("tools", tools);
-            if (ModelRequestScope.current().toolsDisabled()) body.put("tool_choice", "none");
-            else if (streaming) body.put("tool_choice", "auto");
+            if (ModelRequestScope.current().toolsDisabled()) {
+                body.put("tool_choice", "none");
+            } else if (streaming) {
+                body.put("tool_choice", "auto");
+            }
         }
-        if (profile().cacheKey() && !ModelRequestScope.current().cacheGroup().isBlank())
-            body.put("prompt_cache_key", "pilot-" + MeteredModelClient.hash(ModelRequestScope.current().cacheGroup()).substring(0, 32));
-        if (!cacheParametersDisabled && ((promptCaching && !profile.cacheMode().equals("none")) || profile.cacheMode().equals("explicit"))) {
+        if (profile().cacheKey() && !ModelRequestScope.current().cacheGroup().isBlank()) {
+            body.put("prompt_cache_key",
+                "pilot-" + MeteredModelClient.hash(ModelRequestScope.current().cacheGroup()).substring(0, 32));
+        }
+        if (!cacheParametersDisabled
+            && ((promptCaching && !profile.cacheMode().equals("none")) || profile.cacheMode().equals("explicit"))) {
             Map<String, Object> marker = new LinkedHashMap<>();
             marker.put("type", "ephemeral");
-            if (!profile.cacheTtl().isBlank()) marker.put("ttl", profile.cacheTtl());
+            if (!profile.cacheTtl().isBlank()) {
+                marker.put("ttl", profile.cacheTtl());
+            }
             // 三个边界：工具、固定 system、最近可缓存消息。不会随着对话积累无限标记。
-            if (!tools.isEmpty()) tools.getLast().put("cache_control", marker);
-            if (!items.isEmpty() && messages.getFirst().role().equals("system")) markMessage(items.getFirst(), marker, true);
+            if (!tools.isEmpty()) {
+                tools.getLast().put("cache_control", marker);
+            }
+            if (!items.isEmpty() && messages.getFirst().role().equals("system")) {
+                markMessage(items.getFirst(), marker, true);
+            }
             for (int index = items.size() - 1; index > 0; index--) {
-                if (markMessage(items.get(index), marker, false)) break;
+                if (markMessage(items.get(index), marker, false)) {
+                    break;
+                }
             }
         }
         return body;
@@ -137,19 +161,25 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (content instanceof String text && !text.isBlank()) {
             int boundary = stableSystem ? text.indexOf("\n\n[Runtime task context]") : -1;
             if (boundary > 0) {
-                payload.put("content", List.of(Map.of("type", "text", "text", text.substring(0, boundary), "cache_control", marker),
+                payload.put("content",
+                    List.of(Map.of("type", "text", "text", text.substring(0, boundary), "cache_control", marker),
                         Map.of("type", "text", "text", text.substring(boundary))));
-            } else payload.put("content", List.of(Map.of("type", "text", "text", text, "cache_control", marker)));
+            } else {
+                payload.put("content", List.of(Map.of("type", "text", "text", text, "cache_control", marker)));
+            }
             return true;
         }
         if (content instanceof List<?> blocks) {
             List<Object> changed = new ArrayList<>(blocks);
             for (int i = changed.size() - 1; i >= 0; i--) {
                 if (changed.get(i) instanceof Map<?, ?> part && "text".equals(part.get("type"))
-                        && part.get("text") instanceof String text && !text.isBlank()) {
+                    && part.get("text") instanceof String text && !text.isBlank()) {
                     Map<String, Object> copy = new LinkedHashMap<>();
                     part.forEach((key, value) -> copy.put(String.valueOf(key), value));
-                    copy.put("cache_control", marker); changed.set(i, copy); payload.put("content", changed); return true;
+                    copy.put("cache_control", marker);
+                    changed.set(i, copy);
+                    payload.put("content", changed);
+                    return true;
                 }
             }
         }
@@ -192,13 +222,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
         Map<String, Object> body = requestBody(messages, tools, false);
 
-        HttpRequest request = HttpRequest.newBuilder(endpoint)
-                .header("Authorization", "Bearer " + apiKey)
-                .header("Content-Type", "application/json")
-                .timeout(requestTimeout)
-                .POST(HttpRequest.BodyPublishers.ofString(
-                        objectMapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
-                .build();
+        HttpRequest request = HttpRequest.newBuilder(endpoint).header("Authorization", "Bearer " + apiKey)
+            .header("Content-Type", "application/json").timeout(requestTimeout).POST(HttpRequest.BodyPublishers
+                .ofString(objectMapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
+            .build();
 
         long startedAt = System.nanoTime();
         HttpResponse<String> response;
@@ -209,39 +236,35 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             throw new ModelClientException(ModelFailureKind.INTERRUPTED, "模型请求被中断", e);
         } catch (IOException e) {
             throw new ModelClientException(ModelFailureKind.NETWORK,
-                    "模型请求失败（" + elapsedMs(startedAt) + " ms, model=" + model + "）："
-                            + e.getMessage(), e);
+                "模型请求失败（" + elapsedMs(startedAt) + " ms, model=" + model + "）：" + e.getMessage(), e);
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             String errorBody = snippet(response.body());
             throw new ModelClientException(ModelFailureSignals.statusKind(response.statusCode(), errorBody),
-                    "模型接口返回 HTTP " + response.statusCode()
-                            + "（" + elapsedMs(startedAt) + " ms, model=" + model + "）：" + errorBody);
+                "模型接口返回 HTTP " + response.statusCode() + "（" + elapsedMs(startedAt) + " ms, model=" + model + "）："
+                    + errorBody);
         }
 
         JsonNode root;
         try {
             root = objectMapper.readTree(response.body());
         } catch (RuntimeException e) {
-            throw new ModelClientException(ModelFailureKind.PERMANENT,
-                    "模型响应不是合法 JSON：" + snippet(response.body()), e);
+            throw new ModelClientException(ModelFailureKind.PERMANENT, "模型响应不是合法 JSON：" + snippet(response.body()), e);
         }
 
         JsonNode choices = root.path("choices");
         if (!choices.isArray() || choices.isEmpty()) {
-            throw new ModelClientException(ModelFailureKind.PERMANENT,
-                    "模型响应缺少 choices：" + snippet(response.body()));
+            throw new ModelClientException(ModelFailureKind.PERMANENT, "模型响应缺少 choices：" + snippet(response.body()));
         }
         JsonNode message = choices.get(0).path("message");
         if (message.isMissingNode()) {
-            throw new ModelClientException(ModelFailureKind.PERMANENT,
-                    "模型响应缺少 message：" + snippet(response.body()));
+            throw new ModelClientException(ModelFailureKind.PERMANENT, "模型响应缺少 message：" + snippet(response.body()));
         }
         String content = text(message.get("content"));
         List<ToolCall> calls = toolCalls(message.get("tool_calls"));
-        ModelResponse.FinishReason finishReason = ModelResponse.FinishReason.fromWire(
-                text(choices.get(0).get("finish_reason")));
+        ModelResponse.FinishReason finishReason =
+            ModelResponse.FinishReason.fromWire(text(choices.get(0).get("finish_reason")));
         if (finishReason == ModelResponse.FinishReason.UNKNOWN) {
             finishReason = calls.isEmpty() ? ModelResponse.FinishReason.STOP : ModelResponse.FinishReason.TOOL_CALLS;
         }
@@ -254,46 +277,54 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     @Override
-    public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools,
-                              Consumer<String> textDelta, Consumer<String> reasoningDelta) {
+    public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
+        Consumer<String> reasoningDelta) {
         Map<String, Object> body = requestBody(messages, tools, true);
-        HttpRequest request = HttpRequest.newBuilder(endpoint)
-                .header("Authorization", "Bearer " + apiKey)
-                .header("Content-Type", "application/json")
-                .header("Accept", "text/event-stream")
-                .timeout(requestTimeout)
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
-                .build();
+        HttpRequest request = HttpRequest
+            .newBuilder(endpoint).header("Authorization", "Bearer " + apiKey).header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream").timeout(requestTimeout).POST(HttpRequest.BodyPublishers
+                .ofString(objectMapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
+            .build();
         long startedAt = System.nanoTime();
         try {
-            HttpResponse<java.io.InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            HttpResponse<java.io.InputStream> response =
+                httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 try (InputStream stream = response.body()) {
                     String errorBody = snippet(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
                     throw new ModelClientException(ModelFailureSignals.statusKind(response.statusCode(), errorBody),
-                            "模型接口返回 HTTP " + response.statusCode() + "：" + errorBody);
+                        "模型接口返回 HTTP " + response.statusCode() + "：" + errorBody);
                 }
             }
             StringBuilder content = new StringBuilder();
             ThinkSplit thoughts = new ThinkSplit();
-            LinkedHashMap<Integer,Map<String,Object>> toolParts = new LinkedHashMap<Integer, Map<String, Object>>();
+            LinkedHashMap<Integer, Map<String, Object>> toolParts = new LinkedHashMap<Integer, Map<String, Object>>();
             ModelUsage reportedUsage = null;
             ModelResponse.FinishReason finishReason = ModelResponse.FinishReason.UNKNOWN;
-            try (BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+            try (BufferedReader reader =
+                new java.io.BufferedReader(new java.io.InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    if (!line.startsWith("data:")) continue;
+                    if (!line.startsWith("data:")) {
+                        continue;
+                    }
                     String data = line.substring(5).strip();
-                    if (data.equals("[DONE]")) break;
+                    if (data.equals("[DONE]")) {
+                        break;
+                    }
                     JsonNode root = objectMapper.readTree(data);
                     ModelUsage chunkUsage = reportedUsage(root.get("usage"));
                     if (chunkUsage != null) {
                         reportedUsage = chunkUsage;
                     }
                     JsonNode choices = root.path("choices");
-                    if (!choices.isArray() || choices.isEmpty()) continue;
+                    if (!choices.isArray() || choices.isEmpty()) {
+                        continue;
+                    }
                     String finish = text(choices.get(0).get("finish_reason"));
-                    if (!finish.isBlank()) finishReason = ModelResponse.FinishReason.fromWire(finish);
+                    if (!finish.isBlank()) {
+                        finishReason = ModelResponse.FinishReason.fromWire(finish);
+                    }
                     JsonNode delta = choices.get(0).path("delta");
                     String reasoning = reasoningText(delta);
                     if (!reasoning.isEmpty()) {
@@ -311,12 +342,20 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                         for (JsonNode call : calls) {
                             int index = call.path("index").asInt();
                             @SuppressWarnings("unchecked")
-                            Map<String, Object> part = toolParts.computeIfAbsent(index, ignored -> new LinkedHashMap<>());
+                            Map<String, Object> part =
+                                toolParts.computeIfAbsent(index, ignored -> new LinkedHashMap<>());
                             JsonNode id = call.get("id");
-                            if (id != null) part.put("id", part.getOrDefault("id", "") + id.asString());
+                            if (id != null) {
+                                part.put("id", part.getOrDefault("id", "") + id.asString());
+                            }
                             JsonNode function = call.path("function");
-                            if (function.has("name")) part.put("name", part.getOrDefault("name", "") + function.path("name").asString());
-                            if (function.has("arguments")) part.put("arguments", part.getOrDefault("arguments", "") + function.path("arguments").asString());
+                            if (function.has("name")) {
+                                part.put("name", part.getOrDefault("name", "") + function.path("name").asString());
+                            }
+                            if (function.has("arguments")) {
+                                part.put("arguments",
+                                    part.getOrDefault("arguments", "") + function.path("arguments").asString());
+                            }
                         }
                     }
                 }
@@ -327,18 +366,19 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             }, piece -> emit(reasoningDelta, piece));
             List<ToolCall> calls = toolParts.values().stream().map(part -> {
                 try {
-                    String args = (String) part.getOrDefault("arguments", "{}");
+                    String args = (String)part.getOrDefault("arguments", "{}");
                     JsonNode parsed = objectMapper.readTree(args);
-                    return new ToolCall((String) part.get("id"), (String) part.get("name"), objectMapper.convertValue(parsed, Map.class));
+                    return new ToolCall((String)part.get("id"), (String)part.get("name"),
+                        objectMapper.convertValue(parsed, Map.class));
                 } catch (Exception e) {
                     throw new ModelClientException(ModelFailureKind.PERMANENT, "流式工具参数不是合法 JSON", e);
                 }
             }).toList();
-            ModelUsage finalUsage = reportedUsage != null
-                    ? reportedUsage
-                    : estimatedUsage(messages, content.toString(), calls);
+            ModelUsage finalUsage =
+                reportedUsage != null ? reportedUsage : estimatedUsage(messages, content.toString(), calls);
             if (finishReason == ModelResponse.FinishReason.UNKNOWN) {
-                finishReason = calls.isEmpty() ? ModelResponse.FinishReason.STOP : ModelResponse.FinishReason.TOOL_CALLS;
+                finishReason =
+                    calls.isEmpty() ? ModelResponse.FinishReason.STOP : ModelResponse.FinishReason.TOOL_CALLS;
             }
             return new ModelResponse(content.toString(), calls, finalUsage, finishReason);
         } catch (InterruptedException e) {
@@ -348,22 +388,21 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             // 流式响应读到一半断开（服务端重启、代理断连、本地网络抖动）也归网络类：
             // 上层会退避重连，而不是把这个任务判死。
             throw new ModelClientException(ModelFailureKind.NETWORK,
-                    "流式模型请求失败（" + elapsedMs(startedAt) + " ms）：" + e.getMessage(), e);
+                "流式模型请求失败（" + elapsedMs(startedAt) + " ms）：" + e.getMessage(), e);
         }
     }
 
     private Map<String, Object> messagePayload(Message message) {
-        LinkedHashMap<String,Object> payload = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<String, Object>();
         payload.put("role", message.role());
         if (message.hasToolCalls()) {
             payload.put("content", message.content().isBlank() ? null : message.content());
-            payload.put("tool_calls", message.toolCalls().stream().map(call -> Map.of(
-                    "id", call.callId(),
-                    "type", "function",
-                    "function", Map.of(
-                            "name", call.name(),
-                            "arguments", objectMapper.writeValueAsString(
-                                    CanonicalJson.ordered(call.args() == null ? Map.of() : call.args()))))).toList());
+            payload.put("tool_calls",
+                message.toolCalls().stream()
+                    .map(call -> Map.of("id", call.callId(), "type", "function", "function",
+                        Map.of("name", call.name(), "arguments", objectMapper
+                            .writeValueAsString(CanonicalJson.ordered(call.args() == null ? Map.of() : call.args())))))
+                    .toList());
         } else {
             payload.put("content", contentFor(message));
         }
@@ -382,7 +421,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (images.isEmpty()) {
             return message.content();
         }
-        ArrayList<Map<String,Object>> parts = new ArrayList<Map<String, Object>>();
+        ArrayList<Map<String, Object>> parts = new ArrayList<Map<String, Object>>();
         List<Integer> positions = message.imagePositions();
         if (positions.isEmpty()) {
             if (!message.content().isBlank()) {
@@ -429,12 +468,8 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     private Map<String, Object> toolPayload(ToolDefinition tool) {
-        return Map.of(
-                "type", "function",
-                "function", Map.of(
-                        "name", tool.name(),
-                        "description", tool.description(),
-                        "parameters", tool.parameters()));
+        return Map.of("type", "function", "function",
+            Map.of("name", tool.name(), "description", tool.description(), "parameters", tool.parameters()));
     }
 
     private List<ToolCall> toolCalls(JsonNode node) {
@@ -467,8 +502,8 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         long output = ContextCompactor.estimateTokens(content);
         for (ToolCall call : calls == null ? List.<ToolCall>of() : calls) {
             output += ContextCompactor.estimateTokens(call.name());
-            output += ContextCompactor.estimateTokens(objectMapper.writeValueAsString(
-                    CanonicalJson.ordered(call.args() == null ? Map.of() : call.args())));
+            output += ContextCompactor.estimateTokens(
+                objectMapper.writeValueAsString(CanonicalJson.ordered(call.args() == null ? Map.of() : call.args())));
         }
         return new ModelUsage(ContextCompactor.estimateTokens(messages), output, 0, false);
     }
@@ -482,11 +517,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             return Map.of();
         }
         try {
-            return objectMapper.readValue(raw, objectMapper.getTypeFactory()
-                    .constructMapType(LinkedHashMap.class, String.class, Object.class));
+            return objectMapper.readValue(raw,
+                objectMapper.getTypeFactory().constructMapType(LinkedHashMap.class, String.class, Object.class));
         } catch (RuntimeException e) {
-            throw new ModelClientException(ModelFailureKind.PERMANENT,
-                    "工具调用参数不是合法 JSON：" + snippet(raw), e);
+            throw new ModelClientException(ModelFailureKind.PERMANENT, "工具调用参数不是合法 JSON：" + snippet(raw), e);
         }
     }
 

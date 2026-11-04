@@ -1,10 +1,5 @@
 package com.pilot.core.mcp;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -24,6 +19,12 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 最小的 MCP stdio 客户端：JSON-RPC 2.0，一行一条消息。
@@ -73,8 +74,8 @@ final class McpClient implements AutoCloseable {
             builder.environment().put("PATH", extraPath + File.pathSeparator + path);
         }
         builder.environment().putAll(config.env());
-        builder.redirectError(logFile == null ? ProcessBuilder.Redirect.DISCARD
-                : ProcessBuilder.Redirect.appendTo(logFile.toFile()));
+        builder.redirectError(
+            logFile == null ? ProcessBuilder.Redirect.DISCARD : ProcessBuilder.Redirect.appendTo(logFile.toFile()));
         try {
             if (logFile != null && logFile.getParent() != null) {
                 java.nio.file.Files.createDirectories(logFile.getParent());
@@ -104,22 +105,30 @@ final class McpClient implements AutoCloseable {
     /** 服务器声明的全部工具；首次调用时拉取并缓存。 */
     List<McpToolInfo> tools(Duration timeout) {
         List<McpToolInfo> cached = tools;
-        if (cached != null) return cached;
+        if (cached != null) {
+            return cached;
+        }
         List<McpToolInfo> all = new ArrayList<>();
         String cursor = null;
         for (int page = 0; page < MAX_PAGES; page++) {
             Map<String, Object> params = new LinkedHashMap<>();
-            if (cursor != null) params.put("cursor", cursor);
+            if (cursor != null) {
+                params.put("cursor", cursor);
+            }
             JsonNode result = request("tools/list", params, timeout);
             for (JsonNode item : result.path("tools")) {
                 String toolName = item.path("name").asString("");
-                if (toolName.isBlank()) continue;
+                if (toolName.isBlank()) {
+                    continue;
+                }
                 boolean readOnly = item.path("annotations").path("readOnlyHint").asBoolean(false);
-                all.add(new McpToolInfo(toolName, item.path("description").asString(""),
-                        item.path("inputSchema"), readOnly));
+                all.add(new McpToolInfo(toolName, item.path("description").asString(""), item.path("inputSchema"),
+                    readOnly));
             }
             cursor = result.path("nextCursor").asString("");
-            if (cursor.isBlank()) break;
+            if (cursor.isBlank()) {
+                break;
+            }
         }
         tools = List.copyOf(all);
         return tools;
@@ -147,7 +156,7 @@ final class McpClient implements AutoCloseable {
             JsonNode error = reply.path("error");
             if (!error.isMissingNode() && !error.isNull()) {
                 throw new McpException(error.path("message").asString("MCP 服务器返回错误")
-                        + (error.has("code") ? "（code " + error.path("code").asInt() + "）" : ""));
+                    + (error.has("code") ? "（code " + error.path("code").asInt() + "）" : ""));
             }
             return reply.path("result");
         } catch (TimeoutException e) {
@@ -169,7 +178,9 @@ final class McpClient implements AutoCloseable {
 
     private void write(Map<String, Object> message) {
         OutputStream out = stdin;
-        if (out == null) throw new McpException("MCP 服务器 " + name + " 未运行");
+        if (out == null) {
+            throw new McpException("MCP 服务器 " + name + " 未运行");
+        }
         try {
             String line = mapper.writeValueAsString(message);
             synchronized (writeLock) {
@@ -182,11 +193,13 @@ final class McpClient implements AutoCloseable {
     }
 
     private void read(Process owner) {
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(owner.getInputStream(), StandardCharsets.UTF_8))) {
+        try (BufferedReader reader =
+            new BufferedReader(new InputStreamReader(owner.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                if (line.isBlank()) continue;
+                if (line.isBlank()) {
+                    continue;
+                }
                 JsonNode node;
                 try {
                     node = mapper.readTree(line);
@@ -199,7 +212,9 @@ final class McpClient implements AutoCloseable {
                     answerServerRequest(node);
                 } else if (!hasMethod && node.has("id")) {
                     CompletableFuture<JsonNode> future = pending.get(node.path("id").asLong(-1));
-                    if (future != null) future.complete(node);
+                    if (future != null) {
+                        future.complete(node);
+                    }
                 }
             }
         } catch (IOException ignored) {
@@ -207,7 +222,9 @@ final class McpClient implements AutoCloseable {
         } finally {
             McpException gone = new McpException("MCP 服务器 " + name + " 已退出");
             pending.values().forEach(future -> future.completeExceptionally(gone));
-            if (process == owner) process = null;
+            if (process == owner) {
+                process = null;
+            }
         }
     }
 
@@ -232,12 +249,16 @@ final class McpClient implements AutoCloseable {
         Process current = process;
         process = null;
         tools = null;
-        if (current == null) return;
+        if (current == null) {
+            return;
+        }
         McpException gone = new McpException("MCP 服务器 " + name + " 已关闭");
         pending.values().forEach(future -> future.completeExceptionally(gone));
         try {
             OutputStream out = stdin;
-            if (out != null) out.close();
+            if (out != null) {
+                out.close();
+            }
         } catch (IOException ignored) {
             // 已关闭
         }
@@ -254,10 +275,12 @@ final class McpClient implements AutoCloseable {
 
     /** Windows 上 npx、npm 等是 .cmd 脚本，ProcessBuilder 不会自动补扩展名。 */
     private static String resolveCommand(String command) {
-        if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) return command;
+        if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+            return command;
+        }
         String lower = command.toLowerCase(Locale.ROOT);
         if (lower.endsWith(".exe") || lower.endsWith(".cmd") || lower.endsWith(".bat") || command.contains("/")
-                || command.contains("\\")) {
+            || command.contains("\\")) {
             return command;
         }
         return List.of("npx", "npm", "pnpm", "yarn", "uvx").contains(lower) ? command + ".cmd" : command;

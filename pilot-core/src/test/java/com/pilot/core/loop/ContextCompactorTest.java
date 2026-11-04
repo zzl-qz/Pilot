@@ -1,18 +1,19 @@
 package com.pilot.core.loop;
 
-import com.pilot.core.model.ModelClient;
-import com.pilot.core.model.ModelClientException;
-import com.pilot.core.model.ModelResponse;
-import com.pilot.core.tool.ToolCall;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
+import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ModelClientException;
+import com.pilot.core.model.ModelResponse;
+import com.pilot.core.tool.ToolCall;
 
 class ContextCompactorTest {
 
@@ -26,8 +27,7 @@ class ContextCompactorTest {
 
         assertTrue(outcome.compacted());
         assertEquals(before, outcome.charactersBefore());
-        assertTrue(outcome.charactersAfter() < 12_000,
-                "压缩后应落回预算内，实际 " + outcome.charactersAfter());
+        assertTrue(outcome.charactersAfter() < 12_000, "压缩后应落回预算内，实际 " + outcome.charactersAfter());
         assertTrue(outcome.coveredMessages() >= 14, "应折叠掉大部分旧消息，实际 " + outcome.coveredMessages());
 
         // system 之后紧接交接摘要，且以 user 角色插回，兼容 OpenAI 协议
@@ -42,8 +42,7 @@ class ContextCompactorTest {
     void compactionKeepsFileHistoryAcrossMultipleSummaries() {
         List<Message> messages = history(10, 3_000);
         ModelClient summarizer = (request, tools) -> {
-            assertTrue(request.get(1).content().contains("read_file f0"),
-                    "摘要输入要包含实际工具目标，不能只有工具名");
+            assertTrue(request.get(1).content().contains("read_file f0"), "摘要输入要包含实际工具目标，不能只有工具名");
             return new ModelResponse("已完成先前工作", List.of());
         };
         ContextCompactor first = new ContextCompactor(summarizer, 2);
@@ -52,8 +51,8 @@ class ContextCompactorTest {
         assertTrue(messages.get(1).content().contains("<read_files>\nf0\n"));
 
         for (int i = 100; i < 110; i++) {
-            messages.add(Message.assistant("step " + i,
-                    List.of(new ToolCall("c" + i, "read_file", Map.of("path", "f" + i)))));
+            messages.add(
+                Message.assistant("step " + i, List.of(new ToolCall("c" + i, "read_file", Map.of("path", "f" + i)))));
             messages.add(Message.tool("c" + i, "x".repeat(3_000)));
         }
         ContextCompactor second = new ContextCompactor(summarizing("继续完成"), 2);
@@ -67,10 +66,10 @@ class ContextCompactorTest {
     void compactionTracksModifiedFilesSeparatelyFromReads() {
         List<Message> messages = history(10, 3_000);
         messages.add(1, Message.assistant("edit", List.of(new ToolCall("edit", "edit_file",
-                Map.of("path", "src/A.java", "old_string", "old", "new_string", "new")))));
+            Map.of("path", "src/A.java", "old_string", "old", "new_string", "new")))));
         messages.add(2, Message.tool("edit", "已修改 src/A.java"));
-        messages.add(3, Message.assistant("read", List.of(new ToolCall("read", "read_file",
-                Map.of("path", "src/A.java")))));
+        messages.add(3,
+            Message.assistant("read", List.of(new ToolCall("read", "read_file", Map.of("path", "src/A.java")))));
         messages.add(4, Message.tool("read", "content"));
 
         assertTrue(new ContextCompactor(summarizing("摘要"), 2).compact(messages, 12_000).compacted());
@@ -82,11 +81,11 @@ class ContextCompactorTest {
     @Test
     void failedOrSkippedToolCallsDoNotBecomeFileHistory() {
         List<Message> messages = history(10, 3_000);
-        messages.add(1, Message.assistant("edit", List.of(new ToolCall("failed-edit", "edit_file",
-                Map.of("path", "src/Untouched.java")))));
+        messages.add(1, Message.assistant("edit",
+            List.of(new ToolCall("failed-edit", "edit_file", Map.of("path", "src/Untouched.java")))));
         messages.add(2, Message.tool("failed-edit", "ERROR: 原文没有匹配"));
-        messages.add(3, Message.assistant("read", List.of(new ToolCall("skipped-read", "read_file",
-                Map.of("path", "src/Unread.java")))));
+        messages.add(3, Message.assistant("read",
+            List.of(new ToolCall("skipped-read", "read_file", Map.of("path", "src/Unread.java")))));
         messages.add(4, Message.tool("skipped-read", "SKIPPED: 用户已纠正任务"));
 
         assertTrue(new ContextCompactor(summarizing("摘要"), 2).compact(messages, 12_000).compacted());
@@ -181,7 +180,7 @@ class ContextCompactorTest {
             }
             Message previous = messages.get(i - 1);
             assertTrue(previous.hasToolCalls() || "tool".equals(previous.role()),
-                    "tool 消息前面必须是 assistant(tool_calls) 或另一条 tool 消息");
+                "tool 消息前面必须是 assistant(tool_calls) 或另一条 tool 消息");
         }
     }
 
@@ -208,7 +207,7 @@ class ContextCompactorTest {
 
         assertTrue(outcome.compacted());
         assertTrue(ContextCompactor.totalChars(messages) <= 11_000,
-                "压缩后应降到目标的一半附近，实际 " + ContextCompactor.totalChars(messages));
+            "压缩后应降到目标的一半附近，实际 " + ContextCompactor.totalChars(messages));
     }
 
     @Test
@@ -236,8 +235,7 @@ class ContextCompactorTest {
         ContextCompactor.Outcome outcome = compactor.compact(messages, 12_000);
 
         assertTrue(outcome.compacted());
-        assertEquals(List.of(image), messages.get(1).attachments(),
-                "折叠旧文字时必须把原图引用固定在交接摘要上");
+        assertEquals(List.of(image), messages.get(1).attachments(), "折叠旧文字时必须把原图引用固定在交接摘要上");
     }
 
     @Test
@@ -251,8 +249,7 @@ class ContextCompactorTest {
         int dropped = ContextCompactor.dropOldestGroups(messages, 7_000);
 
         assertTrue(dropped > 0);
-        assertEquals(List.of(image), messages.get(1).attachments(),
-                "硬裁剪也只能丢文字，不能丢失任务所依赖的原图");
+        assertEquals(List.of(image), messages.get(1).attachments(), "硬裁剪也只能丢文字，不能丢失任务所依赖的原图");
     }
 
     /** 中文按 1 字符 1 token 估算，不能沿用「4 字符 1 token」把中文上下文算少。 */
@@ -269,8 +266,8 @@ class ContextCompactorTest {
         ArrayList<Message> messages = new ArrayList<Message>();
         messages.add(Message.system("sys"));
         for (int i = 0; i < groups; i++) {
-            messages.add(Message.assistant("step " + i,
-                    List.of(new ToolCall("c" + i, "read_file", Map.of("path", "f" + i)))));
+            messages.add(
+                Message.assistant("step " + i, List.of(new ToolCall("c" + i, "read_file", Map.of("path", "f" + i)))));
             messages.add(Message.tool("c" + i, "x".repeat(charsPerTool)));
         }
         return messages;

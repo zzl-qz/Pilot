@@ -18,6 +18,9 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+import com.pilot.core.model.ContextComposition.Source;
 
 /**
  * 提示词仓库：喂给模型的指令性文本放在 {@code prompts/} 目录里维护，Java 代码只引用名字。
@@ -75,17 +78,13 @@ public final class PromptLibrary {
      * 系统提示词注册表：按 order 稀疏分配拼接顺序，requiresTools 声明依赖
      * （代码声明优先于 md 头部 frontmatter）。新增段落取区间空隙值。
      */
-    private static final List<SystemSection> SYSTEM_SECTIONS = List.of(
-            new SystemSection("system/base", 0),
-            new SystemSection("system/workflow", 100),
-            new SystemSection("system/tools", 200),
-            new SystemSection("system/skills", 250, Set.of("use_skill")),
-            new SystemSection("system/tools-spawn", 300, Set.of("spawn_agent")),
-            new SystemSection("system/tools-dispatch", 310, Set.of("dispatch_agents")),
-            new SystemSection("system/browser", 350, Set.of("browser")),
-            new SystemSection("system/orchestration", 400),
-            new SystemSection("system/dispatch", 500, Set.of("dispatch_agents")),
-            new SystemSection("system/output", 9000));
+    private static final List<SystemSection> SYSTEM_SECTIONS = List.of(new SystemSection("system/base", 0),
+        new SystemSection("system/workflow", 100), new SystemSection("system/tools", 200),
+        new SystemSection("system/skills", 250, Set.of("use_skill")),
+        new SystemSection("system/tools-spawn", 300, Set.of("spawn_agent")),
+        new SystemSection("system/tools-dispatch", 310, Set.of("dispatch_agents")),
+        new SystemSection("system/browser", 350, Set.of("browser")), new SystemSection("system/orchestration", 400),
+        new SystemSection("system/dispatch", 500, Set.of("dispatch_agents")), new SystemSection("system/output", 9000));
 
     /** frontmatter 解析结果：声明的依赖工具 + 去掉声明头之后的正文。 */
     private record Parsed(Set<String> requires, String body) {
@@ -140,29 +139,26 @@ public final class PromptLibrary {
      *                       声明了依赖且其中任一工具不在集合里时，整段跳过。
      */
     public String system(Map<String, String> variables, Set<String> availableTools) {
-        return systemParts(variables, availableTools).stream().map(com.pilot.core.model.ContextComposition.Source::text)
-                .collect(java.util.stream.Collectors.joining("\n\n"));
+        return systemParts(variables, availableTools).stream().map(Source::text).collect(Collectors.joining("\n\n"));
     }
 
     /** 同一份实际渲染结果供请求与上下文分项使用，避免 UI 猜测标题或重复计算。 */
-    public List<com.pilot.core.model.ContextComposition.Source> systemParts(Map<String, String> variables, Set<String> availableTools) {
-        List<SystemSection> ordered = SYSTEM_SECTIONS.stream()
-                .sorted(Comparator.comparingInt(SystemSection::order))
-                .toList();
-        List<com.pilot.core.model.ContextComposition.Source> sections = new ArrayList<>(ordered.size());
+    public List<Source> systemParts(Map<String, String> variables, Set<String> availableTools) {
+        List<SystemSection> ordered =
+            SYSTEM_SECTIONS.stream().sorted(Comparator.comparingInt(SystemSection::order)).toList();
+        List<Source> sections = new ArrayList<>(ordered.size());
         for (SystemSection section : ordered) {
             Parsed parsed = parseFrontmatter(section.name(), get(section.name()));
-            Set<String> requires = !section.requiresTools().isEmpty()
-                    ? section.requiresTools()
-                    : parsed.requires();
+            Set<String> requires = !section.requiresTools().isEmpty() ? section.requiresTools() : parsed.requires();
             if (availableTools != null && !requires.isEmpty() && !availableTools.containsAll(requires)) {
                 continue;
             }
             String text = interpolate(section.name(), parsed.body(), variables).strip();
             if (!text.isEmpty()) {
                 String category = section.name().equals("system/skills") ? "skills"
-                        : Set.of("system/tools-spawn", "system/tools-dispatch", "system/dispatch").contains(section.name()) ? "agents" : "system";
-                sections.add(new com.pilot.core.model.ContextComposition.Source(category, text));
+                    : Set.of("system/tools-spawn", "system/tools-dispatch", "system/dispatch").contains(section.name())
+                        ? "agents" : "system";
+                sections.add(new Source(category, text));
             }
         }
         return List.copyOf(sections);
@@ -181,8 +177,7 @@ public final class PromptLibrary {
             String key = matcher.group(1);
             String value = variables == null ? null : variables.get(key);
             if (value == null) {
-                throw new IllegalArgumentException(
-                        "提示词 " + name + " 引用了未提供的变量 {{" + key + "}}；已提供：" + keys(variables));
+                throw new IllegalArgumentException("提示词 " + name + " 引用了未提供的变量 {{" + key + "}}；已提供：" + keys(variables));
             }
             matcher.appendReplacement(out, Matcher.quoteReplacement(value));
         }
@@ -225,8 +220,7 @@ public final class PromptLibrary {
             String key = line.substring(0, colon).strip();
             String value = line.substring(colon + 1).strip();
             if (!"requires".equals(key)) {
-                throw new IllegalArgumentException("提示词 " + name
-                        + " 的 frontmatter 不支持的键：" + key + "（只支持 requires）");
+                throw new IllegalArgumentException("提示词 " + name + " 的 frontmatter 不支持的键：" + key + "（只支持 requires）");
             }
             requires.addAll(toolList(value));
         }
@@ -242,10 +236,7 @@ public final class PromptLibrary {
         } else if (list.startsWith("[") != list.endsWith("]")) {
             throw new IllegalArgumentException("frontmatter requires 列表括号不成对：" + value);
         }
-        return Arrays.stream(list.split("[,，]"))
-                .map(String::strip)
-                .filter(item -> !item.isEmpty())
-                .toList();
+        return Arrays.stream(list.split("[,，]")).map(String::strip).filter(item -> !item.isEmpty()).toList();
     }
 
     /** 读取模板原文，不做变量替换。 */
@@ -304,8 +295,8 @@ public final class PromptLibrary {
         String resource = CLASSPATH_ROOT + name + SUFFIX;
         try (InputStream in = PromptLibrary.class.getClassLoader().getResourceAsStream(resource)) {
             if (in == null) {
-                throw new IllegalStateException("找不到提示词资源 " + resource
-                        + "；确认它位于 pilot-core/src/main/resources/prompts 并且已打包");
+                throw new IllegalStateException(
+                    "找不到提示词资源 " + resource + "；确认它位于 pilot-core/src/main/resources/prompts 并且已打包");
             }
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {
@@ -331,8 +322,7 @@ public final class PromptLibrary {
         }
         Path dir = Path.of(configured.strip()).toAbsolutePath().normalize();
         if (!Files.isDirectory(dir)) {
-            throw new IllegalStateException("提示词目录不存在：" + dir
-                    + "（来自系统属性 " + DIR_PROPERTY + " 或环境变量 " + DIR_ENV + "）");
+            throw new IllegalStateException("提示词目录不存在：" + dir + "（来自系统属性 " + DIR_PROPERTY + " 或环境变量 " + DIR_ENV + "）");
         }
         return dir;
     }

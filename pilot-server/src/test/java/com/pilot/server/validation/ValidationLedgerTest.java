@@ -1,17 +1,19 @@
 package com.pilot.server.validation;
 
-import com.pilot.server.config.PilotDataDir;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import tools.jackson.databind.json.JsonMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.server.config.PilotDataDir;
+
+import tools.jackson.databind.json.JsonMapper;
 
 class ValidationLedgerTest {
 
@@ -24,7 +26,7 @@ class ValidationLedgerTest {
 
     private static ValidationEvidence evidence(String hash, String status) {
         return new ValidationEvidence("val_1", "ses_1", "run_1", hash, List.of("src/A.java"),
-                List.of("mvn -q test → exit 0"), status, "linux|amd64|java25", "run", Instant.now());
+            List.of("mvn -q test → exit 0"), status, "linux|amd64|java25", "run", Instant.now());
     }
 
     @Test

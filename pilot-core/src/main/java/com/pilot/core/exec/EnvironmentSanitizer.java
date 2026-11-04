@@ -17,15 +17,13 @@ import java.util.regex.Pattern;
 public final class EnvironmentSanitizer {
     /** 名字命中这些片段的变量一律不传给子进程。 */
     private static final Pattern SECRET_NAME = Pattern.compile(
-            "(?i).*(key|token|secret|password|passwd|credential|session|cookie|auth|private|"
-                    + "connection_string|dsn).*");
+        "(?i).*(key|token|secret|password|passwd|credential|session|cookie|auth|private|" + "connection_string|dsn).*");
     /** 无凭据也必需的基础变量。 */
-    private static final Set<String> BASE_ALLOWED = Set.of(
-            "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "USERPROFILE", "TEMP", "TMP", "TMPDIR", "SYSTEMROOT", "WINDIR",
-            "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ", "JAVA_HOME", "MAVEN_HOME", "GRADLE_HOME",
-            "CI", "GITHUB_ACTIONS", "GITHUB_WORKSPACE", "BUILD_NUMBER", "NODE_ENV",
-            "NODE_HOME", "NPM_CONFIG_CACHE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
-            "http_proxy", "https_proxy", "no_proxy", "PYTHONIOENCODING", "PILOT_SAFE_ENV");
+    private static final Set<String> BASE_ALLOWED = Set.of("PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM",
+        "USERPROFILE", "TEMP", "TMP", "TMPDIR", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ",
+        "JAVA_HOME", "MAVEN_HOME", "GRADLE_HOME", "CI", "GITHUB_ACTIONS", "GITHUB_WORKSPACE", "BUILD_NUMBER",
+        "NODE_ENV", "NODE_HOME", "NPM_CONFIG_CACHE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy",
+        "https_proxy", "no_proxy", "PYTHONIOENCODING", "PILOT_SAFE_ENV");
 
     private final Set<String> extraAllowed;
 

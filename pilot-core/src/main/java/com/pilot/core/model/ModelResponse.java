@@ -1,17 +1,19 @@
 package com.pilot.core.model;
 
+import java.util.List;
+import java.util.Locale;
+
 import com.pilot.core.tool.ToolCall;
 
-import java.util.List;
-
-public record ModelResponse(String content, List<ToolCall> toolCalls, ModelUsage usage,
-                            FinishReason finishReason) {
+public record ModelResponse(String content, List<ToolCall> toolCalls, ModelUsage usage, FinishReason finishReason) {
     public enum FinishReason {
         STOP, TOOL_CALLS, LENGTH, CONTENT_FILTER, ERROR, UNKNOWN;
 
         public static FinishReason fromWire(String value) {
-            if (value == null || value.isBlank()) return UNKNOWN;
-            return switch (value.strip().toLowerCase(java.util.Locale.ROOT)) {
+            if (value == null || value.isBlank()) {
+                return UNKNOWN;
+            }
+            return switch (value.strip().toLowerCase(Locale.ROOT)) {
                 case "stop" -> STOP;
                 case "tool_calls", "function_call" -> TOOL_CALLS;
                 case "length", "max_tokens" -> LENGTH;

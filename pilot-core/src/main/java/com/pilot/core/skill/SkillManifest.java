@@ -19,6 +19,6 @@ import java.util.List;
  * @param directory    技能目录的绝对路径
  * @param source       来源层级
  */
-public record SkillManifest(String name, String description, String command,
-                            String argumentHint, List<String> allowedTools,
-                            Path directory, SkillSource source) { }
+public record SkillManifest(String name, String description, String command, String argumentHint,
+    List<String> allowedTools, Path directory, SkillSource source) {
+}

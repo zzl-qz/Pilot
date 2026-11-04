@@ -1,12 +1,13 @@
 package com.pilot.server.session;
 
-import com.pilot.core.loop.Attachment;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
+import com.pilot.core.loop.Attachment;
 
 class QueuedMessageCodecTest {
     @Test

@@ -37,8 +37,7 @@ public final class TaskGraph {
         for (TaskSpec spec : nodes.values()) {
             for (String dependency : spec.dependsOn()) {
                 if (!nodes.containsKey(dependency)) {
-                    throw new IllegalArgumentException(
-                            "任务 " + spec.id() + " 依赖了不存在的任务 " + dependency);
+                    throw new IllegalArgumentException("任务 " + spec.id() + " 依赖了不存在的任务 " + dependency);
                 }
             }
         }
@@ -148,9 +147,8 @@ public final class TaskGraph {
         for (TaskSpec spec : specs) {
             nodes.put(spec.id(), spec);
         }
-        List<TaskSpec> writers = specs.stream()
-                .filter(spec -> spec.scope() != null && spec.scope().writable())
-                .toList();
+        List<TaskSpec> writers =
+            specs.stream().filter(spec -> spec.scope() != null && spec.scope().writable()).toList();
         List<String> problems = new ArrayList<>();
         for (int i = 0; i < writers.size(); i++) {
             for (int j = i + 1; j < writers.size(); j++) {
@@ -158,7 +156,7 @@ public final class TaskGraph {
                 TaskSpec right = writers.get(j);
                 // 有依赖链的两个任务是串行的，不构成并行写入
                 if (dependsOn(left, right.id(), nodes, new LinkedHashSet<>())
-                        || dependsOn(right, left.id(), nodes, new LinkedHashSet<>())) {
+                    || dependsOn(right, left.id(), nodes, new LinkedHashSet<>())) {
                     continue;
                 }
                 String shared = sharedPrefix(left.scope().allowFiles(), right.scope().allowFiles());
@@ -170,8 +168,7 @@ public final class TaskGraph {
         return problems;
     }
 
-    private static boolean dependsOn(TaskSpec spec, String target, Map<String, TaskSpec> nodes,
-                                     Set<String> visited) {
+    private static boolean dependsOn(TaskSpec spec, String target, Map<String, TaskSpec> nodes, Set<String> visited) {
         for (String dependency : spec.dependsOn()) {
             if (!visited.add(dependency)) {
                 continue;

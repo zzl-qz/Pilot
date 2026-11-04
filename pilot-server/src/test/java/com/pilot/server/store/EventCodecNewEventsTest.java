@@ -1,5 +1,14 @@
 package com.pilot.server.store;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
+
 import com.pilot.core.event.ArbitrationRequired;
 import com.pilot.core.event.ArbitrationResolved;
 import com.pilot.core.event.ContextCompacted;
@@ -16,15 +25,8 @@ import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.SubagentFinished;
 import com.pilot.core.event.SubagentStarted;
 import com.pilot.core.event.TaskUpdated;
-import org.junit.jupiter.api.Test;
+
 import tools.jackson.databind.json.JsonMapper;
-
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 新增事件必须能完整往返，否则历史回放会 500。 */
 class EventCodecNewEventsTest {
@@ -32,14 +34,13 @@ class EventCodecNewEventsTest {
 
     @Test
     void roundTripsExecutionProgress() {
-        ExecutionUpdated event = new com.pilot.core.event.ExecutionUpdated("GOAL", "VERIFYING", 4, "需要复现", "缺少回归");
+        ExecutionUpdated event = new ExecutionUpdated("GOAL", "VERIFYING", 4, "需要复现", "缺少回归");
         assertEquals(event, roundTrip("execution.updated", event));
     }
 
     @Test
     void roundTripsRunUsage() {
-        RunUsageUpdated event = new com.pilot.core.event.RunUsageUpdated(3, 12_400, 860,
-                42_000, 120_000, false);
+        RunUsageUpdated event = new RunUsageUpdated(3, 12_400, 860, 42_000, 120_000, false);
         assertEquals(event, roundTrip("run.usage", event));
     }
 
@@ -55,9 +56,9 @@ class EventCodecNewEventsTest {
     /** 老库里的 run.usage 没有 cachedInputTokens，必须按 0 解码，否则整条会话的 SSE 回放会 500。 */
     @Test
     void decodesLegacyRunUsageWithoutCachedTokens() {
-        SessionEvent decoded = codec.decode("run.usage",
-                "{\"modelRequests\":3,\"inputTokens\":12400,\"outputTokens\":860,"
-                        + "\"contextTokens\":42000,\"contextLimit\":120000,\"exact\":false}");
+        SessionEvent decoded =
+            codec.decode("run.usage", "{\"modelRequests\":3,\"inputTokens\":12400,\"outputTokens\":860,"
+                + "\"contextTokens\":42000,\"contextLimit\":120000,\"exact\":false}");
 
         RunUsageUpdated usage = assertInstanceOf(RunUsageUpdated.class, decoded);
         assertEquals(12_400, usage.inputTokens());
@@ -75,10 +76,8 @@ class EventCodecNewEventsTest {
 
     @Test
     void roundTripsPlanUpdated() {
-        PlanUpdated event = new PlanUpdated(
-                List.of(new PlanUpdated.PlanItemPayload("读代码", "completed"),
-                        new PlanUpdated.PlanItemPayload("写实现", "in_progress")),
-                "开始第二步");
+        PlanUpdated event = new PlanUpdated(List.of(new PlanUpdated.PlanItemPayload("读代码", "completed"),
+            new PlanUpdated.PlanItemPayload("写实现", "in_progress")), "开始第二步");
 
         SessionEvent decoded = roundTrip("plan.updated", event);
 
@@ -87,7 +86,7 @@ class EventCodecNewEventsTest {
 
     @Test
     void roundTripsRunSteered() {
-        RunSteered event = new com.pilot.core.event.RunSteered("只改 A 模块");
+        RunSteered event = new RunSteered("只改 A 模块");
 
         SessionEvent decoded = roundTrip("run.steered", event);
 
@@ -96,7 +95,7 @@ class EventCodecNewEventsTest {
 
     @Test
     void roundTripsRunContinued() {
-        RunContinued event = new com.pilot.core.event.RunContinued(2, 3, "步数触顶");
+        RunContinued event = new RunContinued(2, 3, "步数触顶");
 
         SessionEvent decoded = roundTrip("run.continued", event);
 
@@ -105,8 +104,8 @@ class EventCodecNewEventsTest {
 
     @Test
     void roundTripsSubagentEvents() {
-        SubagentStarted started = new com.pilot.core.event.SubagentStarted("agent_1", "盘点入口类");
-        SubagentFinished finished = new com.pilot.core.event.SubagentFinished("agent_1", "有 3 个入口", true);
+        SubagentStarted started = new SubagentStarted("agent_1", "盘点入口类");
+        SubagentFinished finished = new SubagentFinished("agent_1", "有 3 个入口", true);
 
         assertEquals(started, roundTrip("subagent.started", started));
         assertEquals(finished, roundTrip("subagent.finished", finished));
@@ -114,8 +113,7 @@ class EventCodecNewEventsTest {
 
     @Test
     void roundTripsRunCompletedPlanProgress() {
-        RunCompleted event = new com.pilot.core.event.RunCompleted("做到一半", List.of("A.java"), List.of("mvn test"),
-                2, 5, List.of("跑回归测试"));
+        RunCompleted event = new RunCompleted("做到一半", List.of("A.java"), List.of("mvn test"), 2, 5, List.of("跑回归测试"));
 
         assertEquals(event, roundTrip("run.completed", event));
     }
@@ -123,10 +121,10 @@ class EventCodecNewEventsTest {
     /** 老库里没有 planDone / planTotal / openSteps，必须按 0 / 空解码，否则整条会话的 SSE 回放会 500。 */
     @Test
     void decodesLegacyRunCompletedWithoutPlanFields() {
-        SessionEvent decoded = codec.decode("run.completed",
-                "{\"summary\":\"完成\",\"changedFiles\":[\"A.java\"],\"checks\":[]}");
+        SessionEvent decoded =
+            codec.decode("run.completed", "{\"summary\":\"完成\",\"changedFiles\":[\"A.java\"],\"checks\":[]}");
 
-        RunCompleted completed = assertInstanceOf(com.pilot.core.event.RunCompleted.class, decoded);
+        RunCompleted completed = assertInstanceOf(RunCompleted.class, decoded);
         assertEquals(0, completed.planDone().intValue());
         assertEquals(0, completed.planTotal().intValue());
         assertTrue(completed.openSteps().isEmpty());
@@ -144,13 +142,11 @@ class EventCodecNewEventsTest {
 
     @Test
     void roundTripsMultiAgentEvents() {
-        TaskUpdated task = new com.pilot.core.event.TaskUpdated("T1", "agent_1", "改路径校验",
-                "done", "已完成");
-        SandboxDiffReady diff = new com.pilot.core.event.SandboxDiffReady("sbx_1", "agent_1", "T1",
-                "pilot-core/src/A.java", 3, 1);
-        ArbitrationRequired required = new com.pilot.core.event.ArbitrationRequired("arb_1", "dissent", "T1",
-                List.of("选用方案 A", "选用方案 B"), "报告正文");
-        ArbitrationResolved resolved = new com.pilot.core.event.ArbitrationResolved("arb_1", "选用方案 A");
+        TaskUpdated task = new TaskUpdated("T1", "agent_1", "改路径校验", "done", "已完成");
+        SandboxDiffReady diff = new SandboxDiffReady("sbx_1", "agent_1", "T1", "pilot-core/src/A.java", 3, 1);
+        ArbitrationRequired required =
+            new ArbitrationRequired("arb_1", "dissent", "T1", List.of("选用方案 A", "选用方案 B"), "报告正文");
+        ArbitrationResolved resolved = new ArbitrationResolved("arb_1", "选用方案 A");
 
         assertEquals(task, roundTrip("task.updated", task));
         assertEquals(diff, roundTrip("sandbox.diff", diff));

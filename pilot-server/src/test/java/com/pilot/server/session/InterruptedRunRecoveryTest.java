@@ -1,5 +1,16 @@
 package com.pilot.server.session;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.DefaultApplicationArguments;
+
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
@@ -9,16 +20,6 @@ import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
-import org.junit.jupiter.api.Test;
-import org.springframework.boot.DefaultApplicationArguments;
-
-import java.time.Clock;
-import java.time.Instant;
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class InterruptedRunRecoveryTest {
 
@@ -30,7 +31,7 @@ class InterruptedRunRecoveryTest {
         assertEquals(SessionStatus.RUNNING, sessions.find(session.id()).orElseThrow().status());
 
         recovery(sessions, List.of(new InterruptedRun(run.runId(), session.id())))
-                .run(new DefaultApplicationArguments());
+            .run(new DefaultApplicationArguments());
 
         // 会话不能停在 RUNNING，否则界面永远显示「正在处理」
         assertEquals(SessionStatus.INTERRUPTED, sessions.find(session.id()).orElseThrow().status());
@@ -74,7 +75,7 @@ class InterruptedRunRecoveryTest {
         Session session = sessions.createSession("还没开始", null, null, true);
 
         recovery(sessions, List.of(new InterruptedRun("run_blank", session.id())))
-                .run(new DefaultApplicationArguments());
+            .run(new DefaultApplicationArguments());
 
         assertEquals(SessionStatus.CREATED, sessions.find(session.id()).orElseThrow().status());
         assertEquals(0, sessions.events(session.id()).size(), "空白对话不应被补中断事件");
@@ -90,7 +91,7 @@ class InterruptedRunRecoveryTest {
 
         // runs 表里残留一条 RUNNING（历史脏数据）也不该给已结束的会话再造中断卡片
         recovery(sessions, List.of(new InterruptedRun("run_stale", session.id())))
-                .run(new DefaultApplicationArguments());
+            .run(new DefaultApplicationArguments());
 
         assertEquals(SessionStatus.COMPLETED, sessions.find(session.id()).orElseThrow().status());
         assertEquals(before, sessions.events(session.id()).size());

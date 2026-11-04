@@ -1,13 +1,13 @@
 package com.pilot.core.tool;
 
-import com.pilot.core.workspace.PathValidator;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+
+import com.pilot.core.workspace.PathValidator;
 
 /**
  * 精确文本替换。old_string 必须唯一命中，否则返回结构化错误让模型补充上下文后重试。
@@ -50,20 +50,16 @@ public final class EditFileTool implements Tool, WritesFiles {
     }
 
     static Map<String, Object> schema() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "path", Map.of("type", "string", "description", "工作区内的相对文件路径"),
-                        "old_string", Map.of("type", "string", "description",
-                                "单处替换的原文，必须唯一匹配；与 edits 二选一"),
-                        "new_string", Map.of("type", "string", "description", "单处替换的新内容，可为空；与 edits 二选一"),
-                        "edits", Map.of("type", "array", "description", "同一文件内多处互不重叠的替换；均匹配原文件，整体成功或整体失败",
-                                "items", Map.of("type", "object", "properties", Map.of(
-                                        "old_string", Map.of("type", "string", "description", "唯一匹配的原文"),
-                                        "new_string", Map.of("type", "string", "description", "替换后的内容，可为空")),
-                                        "required", List.of("old_string", "new_string"), "additionalProperties", false))),
-                "required", List.of("path"),
-                "additionalProperties", false);
+        return Map.of("type", "object", "properties",
+            Map.of("path", Map.of("type", "string", "description", "工作区内的相对文件路径"), "old_string",
+                Map.of("type", "string", "description", "单处替换的原文，必须唯一匹配；与 edits 二选一"), "new_string",
+                Map.of("type", "string", "description", "单处替换的新内容，可为空；与 edits 二选一"), "edits",
+                Map.of("type", "array", "description", "同一文件内多处互不重叠的替换；均匹配原文件，整体成功或整体失败", "items",
+                    Map.of("type", "object", "properties",
+                        Map.of("old_string", Map.of("type", "string", "description", "唯一匹配的原文"), "new_string",
+                            Map.of("type", "string", "description", "替换后的内容，可为空")),
+                        "required", List.of("old_string", "new_string"), "additionalProperties", false))),
+            "required", List.of("path"), "additionalProperties", false);
     }
 
     @Override
@@ -99,8 +95,7 @@ public final class EditFileTool implements Tool, WritesFiles {
         // 先读后改是机制约束：本次运行没读过的文件拒绝编辑，不依赖提示词劝导。
         // 刚创建或刚编辑过的文件已在 ReadGuard 登记过，连续编辑不受影响。
         if (!reads.isObserved(file)) {
-            return "ERROR: 本次运行尚未读取过 " + rawPath
-                    + "，无法确认原文与行号。先 read_file 查看当前内容，再给出 old_string。";
+            return "ERROR: 本次运行尚未读取过 " + rawPath + "，无法确认原文与行号。先 read_file 查看当前内容，再给出 old_string。";
         }
 
         try {
@@ -121,8 +116,8 @@ public final class EditFileTool implements Tool, WritesFiles {
             Files.writeString(file, applied.content(), StandardCharsets.UTF_8);
             snapshots.afterWrite(file);
             reads.observed(file);
-            return "已修改 " + paths.display(file) + "：替换 " + applied.count() + " 处（"
-                    + applied.oldLines() + " 行 → " + applied.newLines() + " 行）";
+            return "已修改 " + paths.display(file) + "：替换 " + applied.count() + " 处（" + applied.oldLines() + " 行 → "
+                + applied.newLines() + " 行）";
         } catch (IOException e) {
             return "ERROR: 写入失败: " + e.getMessage();
         }

@@ -1,17 +1,19 @@
 package com.pilot.core.exec;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OsSandboxTest {
 
@@ -21,10 +23,8 @@ class OsSandboxTest {
     @Test
     void seatbeltAllowsWorkspaceThenLocksGitMetadata() throws Exception {
         Path root = workspace.toRealPath();
-        String profile = OsSandbox.seatbeltProfile(
-                List.of(root, Path.of("/private/tmp")),
-                OsSandbox.protectedWrites(root),
-                true);
+        String profile =
+            OsSandbox.seatbeltProfile(List.of(root, Path.of("/private/tmp")), OsSandbox.protectedWrites(root), true);
 
         // SBPL 字符串里反斜杠要转义，Windows 路径带反斜杠，比较时按同样的转义规则拼期望值。
         int workspaceAllow = profile.indexOf("(allow file-write* (subpath \"" + escaped(root) + "\"))");
@@ -51,8 +51,8 @@ class OsSandboxTest {
         Files.writeString(root.resolve(".git/config"), "seed\n");
         Path bwrap = Path.of("/usr/bin/bwrap");
 
-        List<String> argv = OsSandbox.bwrapCommand(bwrap, List.of(root), OsSandbox.protectedWrites(root),
-                false, List.of("mvn", "-v"));
+        List<String> argv =
+            OsSandbox.bwrapCommand(bwrap, List.of(root), OsSandbox.protectedWrites(root), false, List.of("mvn", "-v"));
 
         assertEquals(bwrap.toString(), argv.get(0));
         assertTrue(argv.contains("--die-with-parent"));
@@ -68,8 +68,7 @@ class OsSandboxTest {
 
     @Test
     void windowsStaysOnTheHostAndSaysSo() {
-        OsSandbox.Launch launch = OsSandbox.wrap(List.of("mvn", "-v"), workspace,
-                OsSandbox.Family.WINDOWS, true);
+        OsSandbox.Launch launch = OsSandbox.wrap(List.of("mvn", "-v"), workspace, OsSandbox.Family.WINDOWS, true);
 
         assertEquals(List.of("mvn", "-v"), launch.command());
         assertFalse(launch.enforced());
@@ -85,12 +84,13 @@ class OsSandboxTest {
         Files.deleteIfExists(escape);
         Files.createDirectories(root.resolve(".git"));
         Files.writeString(root.resolve(".git/config"), "seed\n");
-        OsSandbox.Launch launch = OsSandbox.wrap(List.of("/bin/sh", "-c",
-                "echo ok > inside.txt; echo hacked > .git/config; echo no > '" + escape + "'"), root);
+        OsSandbox.Launch launch = OsSandbox.wrap(
+            List.of("/bin/sh", "-c", "echo ok > inside.txt; echo hacked > .git/config; echo no > '" + escape + "'"),
+            root);
         assertTrue(launch.enforced(), launch.label());
 
-        Process process = new ProcessBuilder(launch.command()).directory(root.toFile())
-                .redirectErrorStream(true).start();
+        Process process =
+            new ProcessBuilder(launch.command()).directory(root.toFile()).redirectErrorStream(true).start();
         String output = new String(process.getInputStream().readAllBytes());
         int exit = process.waitFor();
 
@@ -113,8 +113,8 @@ class OsSandboxTest {
         git(root, "commit", "-m", "init");
 
         OsSandbox.Launch launch = OsSandbox.wrap(List.of("git", "status", "--porcelain"), root);
-        Process process = new ProcessBuilder(launch.command()).directory(root.toFile())
-                .redirectErrorStream(true).start();
+        Process process =
+            new ProcessBuilder(launch.command()).directory(root.toFile()).redirectErrorStream(true).start();
         String output = new String(process.getInputStream().readAllBytes());
         int exit = process.waitFor();
 
@@ -127,12 +127,11 @@ class OsSandboxTest {
     }
 
     private static void git(Path directory, String... args) throws Exception {
-        java.util.List<String> command = new java.util.ArrayList<>();
+        List<String> command = new ArrayList<>();
         command.add("git");
-        command.addAll(java.util.List.of(args));
-        Process process = new ProcessBuilder(command).directory(directory.toFile())
-                .redirectErrorStream(true).start();
-        assertTrue(process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS));
+        command.addAll(List.of(args));
+        Process process = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true).start();
+        assertTrue(process.waitFor(30, TimeUnit.SECONDS));
         assertEquals(0, process.exitValue(), new String(process.getInputStream().readAllBytes()));
     }
 }

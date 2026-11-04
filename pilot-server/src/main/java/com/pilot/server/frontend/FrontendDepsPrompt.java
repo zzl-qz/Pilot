@@ -73,8 +73,7 @@ public final class FrontendDepsPrompt {
             return;
         }
         if (askedRecently(root)) {
-            System.out.println("  Pilot 启动检查：刚刚已确认过前端依赖，跳过询问"
-                    + "（删掉 .pilot/" + STAMP_NAME + " 可强制再问）");
+            System.out.println("  Pilot 启动检查：刚刚已确认过前端依赖，跳过询问" + "（删掉 .pilot/" + STAMP_NAME + " 可强制再问）");
             return;
         }
         // 依赖缺失没得选：不装的话后面的前端构建必然失败。
@@ -104,9 +103,8 @@ public final class FrontendDepsPrompt {
         System.out.println("  [1] 否，直接启动");
         System.out.println("  [2] 是，拉取最新依赖（npm install）");
         System.out.println();
-        System.out.println(interactive
-                ? "  输入 1 / 2 后回车，直接回车默认「否」"
-                : "  输入 2 后回车即更新，" + timeoutSeconds() + " 秒内无输入则直接启动");
+        System.out
+            .println(interactive ? "  输入 1 / 2 后回车，直接回车默认「否」" : "  输入 2 后回车即更新，" + timeoutSeconds() + " 秒内无输入则直接启动");
         System.out.print("  > ");
         System.out.flush();
     }
@@ -157,12 +155,9 @@ public final class FrontendDepsPrompt {
     }
 
     private static boolean install(Path root, Path frontend) {
-        List<String> command = isWindows()
-                ? List.of("cmd.exe", "/d", "/c", "npm install")
-                : List.of("/bin/sh", "-c", "npm install");
-        ProcessBuilder builder = new ProcessBuilder(command)
-                .directory(frontend.toFile())
-                .inheritIO();
+        List<String> command =
+            isWindows() ? List.of("cmd.exe", "/d", "/c", "npm install") : List.of("/bin/sh", "-c", "npm install");
+        ProcessBuilder builder = new ProcessBuilder(command).directory(frontend.toFile()).inheritIO();
         Path npmHome = npmHome(root);
         if (npmHome != null) {
             String path = builder.environment().getOrDefault("PATH", "");
@@ -223,7 +218,7 @@ public final class FrontendDepsPrompt {
         Path dir = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath();
         for (int i = 0; i < 6 && dir != null; i++) {
             if (Files.isRegularFile(dir.resolve("pom.xml"))
-                    && Files.isRegularFile(dir.resolve("pilot-web").resolve("frontend").resolve("package.json"))) {
+                && Files.isRegularFile(dir.resolve("pilot-web").resolve("frontend").resolve("package.json"))) {
                 return dir;
             }
             dir = dir.getParent();
@@ -278,8 +273,8 @@ public final class FrontendDepsPrompt {
         Path file = stampFile(root);
         try {
             Files.createDirectories(file.getParent());
-            Files.writeString(file, Instant.now().toString(),
-                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            Files.writeString(file, Instant.now().toString(), StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING);
         } catch (IOException e) {
             // 只是去重标记，写不下去不影响启动
         }

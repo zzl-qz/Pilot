@@ -1,10 +1,6 @@
 package com.pilot.server.session;
 
-import com.pilot.core.event.EventEnvelope;
-import com.pilot.core.event.RunUsageUpdated;
-import com.pilot.core.session.InMemorySessionRepository;
-import com.pilot.core.session.SessionService;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -12,7 +8,12 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.Test;
+
+import com.pilot.core.event.EventEnvelope;
+import com.pilot.core.event.RunUsageUpdated;
+import com.pilot.core.session.InMemorySessionRepository;
+import com.pilot.core.session.SessionService;
 
 /** 用量聚合的关键语义：run.usage 是累计快照，每 run 只取末值，跨 run / 跨会话求和。 */
 class UsageServiceTest {
@@ -20,8 +21,8 @@ class UsageServiceTest {
     @Test
     void takesLastSnapshotPerRunAndSumsAcrossRuns() {
         Instant day = LocalDate.parse("2026-10-31").atStartOfDay(ZoneId.systemDefault()).toInstant();
-        UsageRepository repository = new UsageRepository(List.of(
-                envelope("s1", "run_a", day.plusSeconds(10), 1, 100, 10),
+        UsageRepository repository =
+            new UsageRepository(List.of(envelope("s1", "run_a", day.plusSeconds(10), 1, 100, 10),
                 envelope("s1", "run_a", day.plusSeconds(20), 2, 200, 20),
                 envelope("s1", "run_a", day.plusSeconds(30), 3, 300, 30),
                 envelope("s1", "run_b", day.plusSeconds(40), 5, 500, 50),
@@ -48,8 +49,8 @@ class UsageServiceTest {
     @Test
     void sumsCachedInputTokensAcrossRuns() {
         Instant day = LocalDate.parse("2026-10-31").atStartOfDay(ZoneId.systemDefault()).toInstant();
-        UsageRepository repository = new UsageRepository(List.of(
-                envelopeCached("s1", "run_a", day.plusSeconds(10), 1, 1_000, 100, 800),
+        UsageRepository repository =
+            new UsageRepository(List.of(envelopeCached("s1", "run_a", day.plusSeconds(10), 1, 1_000, 100, 800),
                 envelopeCached("s1", "run_b", day.plusSeconds(20), 2, 500, 50, 100)));
         repository.create("s1", "登录修复", "/ws", Instant.now(), null, false);
 
@@ -63,8 +64,7 @@ class UsageServiceTest {
 
     @Test
     void missingSessionsFallBackToPlaceholderTitle() {
-        UsageRepository repository = new UsageRepository(List.of(
-                envelope("gone", "run_x", Instant.now(), 1, 10, 1)));
+        UsageRepository repository = new UsageRepository(List.of(envelope("gone", "run_x", Instant.now(), 1, 10, 1)));
 
         UsageService.UsageReport report = new UsageService(repository, sessions(repository)).report(30);
 
@@ -75,16 +75,16 @@ class UsageServiceTest {
         return new SessionService(Clock.systemUTC(), repository);
     }
 
-    private static EventEnvelope envelope(String sessionId, String runId, Instant timestamp,
-                                          int requests, long input, long output) {
+    private static EventEnvelope envelope(String sessionId, String runId, Instant timestamp, int requests, long input,
+        long output) {
         return new EventEnvelope(1, timestamp, "run.usage", sessionId, runId,
-                new RunUsageUpdated(requests, input, output, 100, 120_000, true));
+            new RunUsageUpdated(requests, input, output, 100, 120_000, true));
     }
 
-    private static EventEnvelope envelopeCached(String sessionId, String runId, Instant timestamp,
-                                                int requests, long input, long output, long cached) {
+    private static EventEnvelope envelopeCached(String sessionId, String runId, Instant timestamp, int requests,
+        long input, long output, long cached) {
         return new EventEnvelope(1, timestamp, "run.usage", sessionId, runId,
-                new RunUsageUpdated(requests, input, output, cached, 100, 120_000, true));
+            new RunUsageUpdated(requests, input, output, cached, 100, 120_000, true));
     }
 
     /** 测试只关心用量事件，不把 Mockito 桩到接口默认方法上。 */

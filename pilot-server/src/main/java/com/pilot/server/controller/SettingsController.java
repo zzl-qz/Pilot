@@ -1,10 +1,8 @@
 package com.pilot.server.controller;
 
-import com.pilot.core.model.ModelClientException;
-import com.pilot.core.permission.PermissionMode;
-import com.pilot.server.config.ModelCatalogService;
-import com.pilot.server.config.ModelSettings;
-import com.pilot.server.config.PermissionSettings;
+import java.util.Arrays;
+import java.util.List;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,8 +13,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.Arrays;
-import java.util.List;
+import com.pilot.core.model.ModelClientException;
+import com.pilot.core.permission.PermissionMode;
+import com.pilot.server.config.ModelCatalogService;
+import com.pilot.server.config.ModelSettings;
+import com.pilot.server.config.PermissionSettings;
 
 /**
  * 运行时设置：权限档位与模型配置。
@@ -31,8 +32,7 @@ public class SettingsController {
     private final ModelSettings models;
     private final ModelCatalogService catalog;
 
-    public SettingsController(PermissionSettings permissions, ModelSettings models,
-                              ModelCatalogService catalog) {
+    public SettingsController(PermissionSettings permissions, ModelSettings models, ModelCatalogService catalog) {
         this.permissions = permissions;
         this.models = models;
         this.catalog = catalog;
@@ -53,7 +53,7 @@ public class SettingsController {
             permissions.update(PermissionMode.valueOf(raw.strip().toUpperCase()));
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "未知权限档位: " + raw + "，可选: " + Arrays.toString(PermissionMode.values()));
+                "未知权限档位: " + raw + "，可选: " + Arrays.toString(PermissionMode.values()));
         }
         return current();
     }
@@ -69,7 +69,7 @@ public class SettingsController {
         }
         try {
             models.update(request.endpoint(), request.model(), request.apiKey(),
-                    Boolean.TRUE.equals(request.clearApiKey()));
+                Boolean.TRUE.equals(request.clearApiKey()));
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
@@ -110,34 +110,32 @@ public class SettingsController {
 
     private SettingsResponse current() {
         ModelSettings.Snapshot snapshot = models.snapshot();
-        return new SettingsResponse(
-                permissions.mode().name(),
-                Arrays.stream(PermissionMode.values()).map(Enum::name).toList(),
-                snapshot.model(),
-                snapshot.endpoint(),
-                snapshot.hasApiKey(),
-                snapshot.maskedApiKey(),
-                models.options());
+        return new SettingsResponse(permissions.mode().name(),
+            Arrays.stream(PermissionMode.values()).map(Enum::name).toList(), snapshot.model(), snapshot.endpoint(),
+            snapshot.hasApiKey(), snapshot.maskedApiKey(), models.options());
     }
 
-    public record SettingsResponse(String permissionMode, List<String> permissionModes,
-                                   String model, String modelEndpoint,
-                                   boolean modelApiKeySet, String modelApiKeyMasked,
-                                   List<String> modelOptions) { }
+    public record SettingsResponse(String permissionMode, List<String> permissionModes, String model,
+        String modelEndpoint, boolean modelApiKeySet, String modelApiKeyMasked, List<String> modelOptions) {
+    }
 
-    public record PermissionRequest(String mode) { }
+    public record PermissionRequest(String mode) {
+    }
 
     /**
      * Jackson 3 对「缺失字段 + 基本类型」会按 null 处理并报错，
      * 所以 {@code clearApiKey} 用包装类型，缺省视为不清理。
      */
-    public record ModelRequest(String endpoint, String model, String apiKey, Boolean clearApiKey) { }
+    public record ModelRequest(String endpoint, String model, String apiKey, Boolean clearApiKey) {
+    }
 
     /**
      * 探测入参：两个字段都留空表示用已保存的端点与密钥。
      * 密钥只在这次请求里用一下，不落盘、不回传。
      */
-    public record ModelsRequest(String endpoint, String apiKey) { }
+    public record ModelsRequest(String endpoint, String apiKey) {
+    }
 
-    public record ModelsResponse(List<String> models) { }
+    public record ModelsResponse(List<String> models) {
+    }
 }

@@ -15,7 +15,8 @@ final class CommandChain {
     static final int MAX_SEGMENTS = 8;
 
     /** @param mergeStderr 该段带 {@code 2>&1}；受管命令本来就合并输出，多段脚本里需要原样保留 */
-    record Segment(List<String> tokens, boolean mergeStderr) { }
+    record Segment(List<String> tokens, boolean mergeStderr) {
+    }
 
     record Parsed(List<Segment> segments, List<String> operators, String error) {
         static Parsed error(String message) {
@@ -42,8 +43,11 @@ final class CommandChain {
         for (int i = 0; i < length; i++) {
             char ch = raw.charAt(i);
             if (quote != 0) {
-                if (ch == quote) quote = 0;
-                else current.append(ch);
+                if (ch == quote) {
+                    quote = 0;
+                } else {
+                    current.append(ch);
+                }
                 continue;
             }
             switch (ch) {
@@ -79,12 +83,11 @@ final class CommandChain {
                 }
                 case '>' -> {
                     // 只放行 2>&1：受管命令本来就合并 stderr，其余重定向会绕开文件变更追踪
-                    boolean merge = hasToken && current.toString().equals("2") && raw.startsWith(">&1", i)
-                            && (i + 3 >= length || Character.isWhitespace(raw.charAt(i + 3))
-                            || "&|;".indexOf(raw.charAt(i + 3)) >= 0);
+                    boolean merge =
+                        hasToken && current.toString().equals("2") && raw.startsWith(">&1", i) && (i + 3 >= length
+                            || Character.isWhitespace(raw.charAt(i + 3)) || "&|;".indexOf(raw.charAt(i + 3)) >= 0);
                     if (!merge) {
-                        return Parsed.error("不支持输出重定向 >；需要写文件请用 create_file / edit_file / apply_patch，"
-                                + "只放行 2>&1");
+                        return Parsed.error("不支持输出重定向 >；需要写文件请用 create_file / edit_file / apply_patch，" + "只放行 2>&1");
                     }
                     current.setLength(0);
                     hasToken = false;
@@ -108,7 +111,9 @@ final class CommandChain {
                         current.setLength(0);
                         hasToken = false;
                     }
-                    if (tokens.isEmpty()) return Parsed.error("连接符 " + operator + " 前缺少命令");
+                    if (tokens.isEmpty()) {
+                        return Parsed.error("连接符 " + operator + " 前缺少命令");
+                    }
                     segments.add(new Segment(List.copyOf(tokens), mergeStderr));
                     operators.add(operator);
                     tokens = new ArrayList<>();
@@ -120,11 +125,17 @@ final class CommandChain {
                 }
             }
         }
-        if (quote != 0) return Parsed.error("引号没有闭合");
-        if (hasToken) tokens.add(current.toString());
+        if (quote != 0) {
+            return Parsed.error("引号没有闭合");
+        }
+        if (hasToken) {
+            tokens.add(current.toString());
+        }
         if (tokens.isEmpty()) {
             // 末尾的 ; 允许（"cmd ;"），其余连接符后必须还有命令
-            if (segments.isEmpty()) return Parsed.error("命令为空");
+            if (segments.isEmpty()) {
+                return Parsed.error("命令为空");
+            }
             if (!operators.getLast().equals(";")) {
                 return Parsed.error("连接符 " + operators.getLast() + " 后缺少命令");
             }

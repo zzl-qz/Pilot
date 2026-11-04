@@ -22,10 +22,9 @@ import java.util.Objects;
  * @param nextAction        下一动作描述，接管后据此继续
  * @param status            RUNNING / INTERRUPTED / PAUSED / COMPLETED / FAILED
  */
-public record RunCheckpoint(String runId, String sessionId, String phase, int step,
-                            String lastToolCallId, String lastSuccessfulStep, String nextAction,
-                            String workspace, String status, String owner,
-                            Instant leaseExpiresAt, Instant heartbeatAt, Instant updatedAt) {
+public record RunCheckpoint(String runId, String sessionId, String phase, int step, String lastToolCallId,
+    String lastSuccessfulStep, String nextAction, String workspace, String status, String owner, Instant leaseExpiresAt,
+    Instant heartbeatAt, Instant updatedAt) {
     public static final String PHASE_STARTING = "STARTING";
     public static final String PHASE_MODEL = "MODEL";
     public static final String PHASE_TOOL = "TOOL";
@@ -57,12 +56,11 @@ public record RunCheckpoint(String runId, String sessionId, String phase, int st
     }
 
     /** 新运行的初始检查点，租约归当前实例所有。 */
-    public static RunCheckpoint start(String runId, String sessionId, String workspace, String owner,
-                                      Instant now, Duration lease) {
+    public static RunCheckpoint start(String runId, String sessionId, String workspace, String owner, Instant now,
+        Duration lease) {
         Instant at = now == null ? Instant.now() : now;
-        return new RunCheckpoint(runId, sessionId, PHASE_STARTING, 0, null, null,
-                "读取任务要求并开始下一步", workspace, STATUS_RUNNING, owner,
-                at.plus(lease == null ? Duration.ofSeconds(30) : lease), at, at);
+        return new RunCheckpoint(runId, sessionId, PHASE_STARTING, 0, null, null, "读取任务要求并开始下一步", workspace,
+            STATUS_RUNNING, owner, at.plus(lease == null ? Duration.ofSeconds(30) : lease), at, at);
     }
 
     /** 租约有效 = 有人持有 + 尚未过期。释放后 owner 为空，即使时间未到也不算活跃。 */
@@ -82,29 +80,29 @@ public record RunCheckpoint(String runId, String sessionId, String phase, int st
     public RunCheckpoint heartbeat(String newOwner, Instant now, Duration lease) {
         Instant at = now == null ? Instant.now() : now;
         Duration span = lease == null ? Duration.ofSeconds(30) : lease;
-        return new RunCheckpoint(runId, sessionId, phase, step, lastToolCallId, lastSuccessfulStep,
-                nextAction, workspace, status, newOwner == null ? owner : newOwner, at.plus(span), at, at);
+        return new RunCheckpoint(runId, sessionId, phase, step, lastToolCallId, lastSuccessfulStep, nextAction,
+            workspace, status, newOwner == null ? owner : newOwner, at.plus(span), at, at);
     }
 
     public RunCheckpoint status(String newStatus, Instant now) {
         Instant at = now == null ? Instant.now() : now;
-        return new RunCheckpoint(runId, sessionId, phase, step, lastToolCallId, lastSuccessfulStep,
-                nextAction, workspace, newStatus, owner, leaseExpiresAt, heartbeatAt, at);
+        return new RunCheckpoint(runId, sessionId, phase, step, lastToolCallId, lastSuccessfulStep, nextAction,
+            workspace, newStatus, owner, leaseExpiresAt, heartbeatAt, at);
     }
 
     public RunCheckpoint phase(String newPhase, Instant now) {
         Instant at = now == null ? Instant.now() : now;
-        return new RunCheckpoint(runId, sessionId, newPhase, step, lastToolCallId, lastSuccessfulStep,
-                nextAction, workspace, status, owner, leaseExpiresAt, heartbeatAt, at);
+        return new RunCheckpoint(runId, sessionId, newPhase, step, lastToolCallId, lastSuccessfulStep, nextAction,
+            workspace, status, owner, leaseExpiresAt, heartbeatAt, at);
     }
 
     /** 记录一次已完成的动作，并给出下一动作；{@code step} 只增不减。 */
-    public RunCheckpoint advance(int newStep, String toolCallId, String successfulStep, String next,
-                                 String newPhase, Instant now) {
+    public RunCheckpoint advance(int newStep, String toolCallId, String successfulStep, String next, String newPhase,
+        Instant now) {
         Instant at = now == null ? Instant.now() : now;
-        return new RunCheckpoint(runId, sessionId, newPhase == null ? phase : newPhase,
-                Math.max(step, newStep), toolCallId, successfulStep == null ? lastSuccessfulStep : successfulStep,
-                next == null ? nextAction : next, workspace, status, owner, leaseExpiresAt, heartbeatAt, at);
+        return new RunCheckpoint(runId, sessionId, newPhase == null ? phase : newPhase, Math.max(step, newStep),
+            toolCallId, successfulStep == null ? lastSuccessfulStep : successfulStep, next == null ? nextAction : next,
+            workspace, status, owner, leaseExpiresAt, heartbeatAt, at);
     }
 
     private static String requireText(String value, String field) {
