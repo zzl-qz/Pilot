@@ -1,6 +1,7 @@
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -27,6 +28,8 @@ let posted = 0;
 const receipts = new Map();
 let approved = 0, steered = 0, paused = 0, continued = 0, cancelled = 0;
 let activeRun = 'run_test', queue = [], revision = '1';
+let fullSnapshots = 0, unchangedSnapshots = 0, parallelTaskReads = false, firstHistoryLimit;
+const taskReads = new Set();
 let approvals = [{ callId: 'call_test', toolName: 'run_command', argsSummary: '只运行本地验收夹具', sessionId:'ses_test', title:'移动连接验收' }];
 function emit(type, payload, runId = activeRun || 'run_test') {
   const event = { sequence: events.length + 1, type, runId, payload };
@@ -40,17 +43,30 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   res.setHeader('Content-Type', 'application/json');
   const json = value => res.end(JSON.stringify(value));
+  // 每个任务读取人为增加 500ms，确认历史、运行状态、队列真实重叠，串行实现无法通过。
+  const taskRead = url.pathname.match(/\/(history|runs\/active|queue)$/)?.[1];
+  if (req.method === 'GET' && taskRead) {
+    taskReads.add(taskRead);
+    if (['history', 'runs/active', 'queue'].every(key => taskReads.has(key))) parallelTaskReads = true;
+    await new Promise(resolve => setTimeout(resolve, 500));
+    taskReads.delete(taskRead);
+  }
   if (url.pathname.endsWith('/events')) {
     res.setHeader('Content-Type', 'text/event-stream'); res.write(': connected\n\n');
     for (const event of events.filter(e => e.sequence > Number(url.searchParams.get('after') || 0))) res.write(`data: ${JSON.stringify(event)}\n\n`);
     subscribers.add(res);
     const timer = setInterval(() => res.write(': ping\n\n'), 1000);
     res.on('close', () => { clearInterval(timer); subscribers.delete(res); });
-  } else if (url.pathname === '/api/mobile/workbench') json({version:1,sessions:[session,other],projects,approvals:[...approvals,otherApproval],results:{items:[]},capabilities:{idempotency:true}});
+  } else if (url.pathname === '/api/mobile/workbench') {
+    const snapshot = {version:1,sessions:[session,other],projects,approvals:[...approvals,otherApproval],results:{items:[]},capabilities:{idempotency:true,conditionalSnapshot:true}};
+    const revision = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+    if (url.searchParams.get('revision') === revision) { unchangedSnapshots++; json({version:1,revision,unchanged:true}); }
+    else { fullSnapshots++; json({...snapshot,revision}); }
+  }
   else if (url.pathname === '/api/sessions') json([session,other]);
   else if (url.pathname === '/api/projects') json(projects);
   else if (url.pathname === '/api/sessions/ses_test' && req.method === 'GET') json(session);
-  else if (url.pathname.endsWith('/history')) json({ events, hasMore: false, total: events.length });
+  else if (url.pathname.endsWith('/history')) { firstHistoryLimit ??= Number(url.searchParams.get('limit')); json({ events, hasMore: false, total: events.length }); }
   else if (url.pathname.endsWith('/runs/active')) json({ runId: activeRun });
   else if (url.pathname.endsWith('/queue')) json({ items: queue, entries: [], revision });
   else if (url.pathname.endsWith('/context')) json({usedTokens:1200,limitTokens:16000,percent:7.5,estimated:true,segments:[{role:'system',messages:1,chars:900},{role:'user',messages:2,chars:1600}],usage:{inputTokens:1200,outputTokens:80}});
@@ -126,6 +142,8 @@ try {
   if (!design.stdout.includes('OK (4 tests)')) throw new Error('小屏、大字体、主题与消息排版验收失败');
   const counts = { posted, approved, steered, paused, continued, cancelled };
   if (!output.stdout.includes('OK (1 test)') || posted !== 2 || [approved,steered,paused,continued,cancelled].some(count => count !== 1)) throw new Error(`Android 验收失败：${JSON.stringify(counts)}`);
+  if (!parallelTaskReads || firstHistoryLimit !== 60 || unchangedSnapshots === 0) throw new Error(`性能回归：${JSON.stringify({parallelTaskReads,firstHistoryLimit,fullSnapshots,unchangedSnapshots})}`);
+  console.log('性能验收：' + JSON.stringify({parallelTaskReads,firstHistoryLimit,fullSnapshots,unchangedSnapshots,perReadDelayMs:500}));
   const artifacts = path.join(root, 'build/mobile-qa'); await mkdir(artifacts, { recursive: true });
   for (const name of ['pairing', 'tasks', 'conversation', 'inbox', 'devices', 'usage']) {
     await runAdb('pull', `/sdcard/Android/data/com.pilot.mobile.qa/files/${name}.png`, path.join(artifacts, `${name}.png`));

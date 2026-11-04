@@ -4,6 +4,20 @@ import com.pilot.mobile.transport.Request
 import kotlin.test.*
 
 class RoutePolicyTest {
+    @Test fun `条件快照只允许精确只读路由与固定格式版本`() {
+        val revision = "a".repeat(64)
+        assertTrue(RoutePolicy.allowed(Request(path = "/api/mobile/workbench", snapshotRevision = revision)))
+        assertTrue(RoutePolicy.allowed(Request(path = "/api/mobile/workbench?revision=$revision")))
+        assertFalse(RoutePolicy.allowed(Request(path = "/api/sessions", snapshotRevision = revision)))
+        assertFalse(RoutePolicy.allowed(Request("POST", "/api/mobile/workbench", snapshotRevision = revision)))
+        for (invalid in listOf("", "a".repeat(63), "A".repeat(64), "$revision&redirect=http://evil.test")) {
+            assertFalse(RoutePolicy.allowed(Request(path = "/api/mobile/workbench", snapshotRevision = invalid)))
+            assertFalse(RoutePolicy.allowed(Request(path = "/api/mobile/workbench?revision=$invalid")))
+        }
+        assertFalse(RoutePolicy.allowed(Request(path = "/api/mobile/workbench?revision=$revision&revision=$revision")))
+        assertFalse(RoutePolicy.allowed(Request(path = "/api/mobile/workbench?revision=$revision", snapshotRevision = revision)))
+    }
+
     @Test fun `移动工作流可用且禁止任意代理和敏感设置`() {
         for (path in listOf("/api/sessions", "/api/sessions/ses_1/events?after=2", "/api/sessions/ses_1/history?limit=300&before=400")) {
             assertTrue(RoutePolicy.allowed(Request(path = path)), path)

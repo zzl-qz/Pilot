@@ -36,10 +36,12 @@ data class Request(
     val pairingSecret: String? = null,
     val deviceName: String? = null,
     val requestId: String? = null,
+    val acceptGzipFrames: Boolean = false,
+    val snapshotRevision: String? = null,
 )
 
 @Serializable
-data class ResponseHead(val status: Int, val contentType: String = "application/json")
+data class ResponseHead(val status: Int, val contentType: String = "application/json", val frameEncoding: String = "")
 
 @Serializable
 data class PairingInvite(

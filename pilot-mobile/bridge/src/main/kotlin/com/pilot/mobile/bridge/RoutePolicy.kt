@@ -24,11 +24,14 @@ object RoutePolicy {
     fun allowed(request: Request): Boolean {
         if (request.path.length > 8192 || request.body.toByteArray().size > 12 * 1024 * 1024) return false
         if (request.requestId?.matches(Regex("[a-f0-9-]{36}")) == false) return false
+        val snapshotRevision = request.snapshotRevision
+        if (snapshotRevision != null && (request.method != "GET" || request.path != "/api/mobile/workbench" || !snapshotRevision.matches(Regex("[a-f0-9]{64}")))) return false
         val uri = runCatching { URI(request.path) }.getOrNull() ?: return false
         if (uri.isAbsolute || uri.rawAuthority != null || uri.rawFragment != null || uri.rawPath != uri.path) return false
         if (routes[request.method]?.none { it.matches(uri.path) } != false) return false
         val query = uri.rawQuery ?: return true
         val allowedKeys = when {
+            uri.path == "/api/mobile/workbench" -> setOf("revision")
             uri.path.endsWith("/history") -> setOf("after", "before", "limit")
             uri.path.endsWith("/events") -> setOf("after")
             uri.path.endsWith("/diff/file") || uri.path == "/api/workspaces/browse" -> setOf("path")
@@ -40,6 +43,7 @@ object RoutePolicy {
             val pair = part.split('=', limit = 2)
             if (pair.size != 2 || pair[0] !in allowedKeys || !keys.add(pair[0])) false
             else if (pair[0] in setOf("after", "before", "limit", "to")) pair[1].matches(Regex("[0-9]{1,18}"))
+            else if (uri.path == "/api/mobile/workbench") pair[1].matches(Regex("[a-f0-9]{64}"))
             else runCatching { URLDecoder.decode(pair[1], StandardCharsets.UTF_8).none { it.isISOControl() } }.getOrDefault(false)
         }
     }

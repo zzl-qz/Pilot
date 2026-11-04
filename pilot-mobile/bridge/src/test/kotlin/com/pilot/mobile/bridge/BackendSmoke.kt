@@ -44,8 +44,17 @@ fun main() = runBlocking {
         val creation = Request("POST", "/api/sessions", buildJsonObject { put("projectId", id); put("title", "移动契约验收"); put("replaceBlank", false) }.toString(), requestId = System.getenv("PILOT_TEST_REQUEST_ID") ?: java.util.UUID.randomUUID().toString())
         val session = json(creation).jsonObject.text("id")
         check(json(creation).jsonObject.text("id") == session) { "重复提交必须返回相同任务" }
-        check(json(Request(path = "/api/mobile/workbench")).jsonObject.text("version") == "1")
+        val snapshot = json(Request(path = "/api/mobile/workbench")).jsonObject
+        check(snapshot.text("version") == "1")
+        val snapshotRevision = snapshot.text("revision")
+        check(snapshotRevision.matches(Regex("[a-f0-9]{64}")))
+        val unchanged = json(Request(path = "/api/mobile/workbench", snapshotRevision = snapshotRevision)).jsonObject
+        check(unchanged["unchanged"]!!.jsonPrimitive.boolean && unchanged.text("revision") == snapshotRevision)
+        check("sessions" !in unchanged && unchanged.toString().toByteArray().size < 160)
         check(json(Request("PATCH", "/api/sessions/$session", "{\"title\":\"手机重命名任务\"}", requestId = java.util.UUID.randomUUID().toString())).jsonObject.text("title") == "手机重命名任务")
+        val changed = json(Request(path = "/api/mobile/workbench", snapshotRevision = snapshotRevision)).jsonObject
+        check(changed.text("revision") != snapshotRevision && changed["sessions"]!!.jsonArray.single().jsonObject.text("title") == "手机重命名任务")
+        println("条件快照：全量 ${snapshot.toString().toByteArray().size} bytes，未变化 ${unchanged.toString().toByteArray().size} bytes，修改后返回新状态")
         check(json(Request("PATCH", "/api/sessions/$session/archive", "{\"archived\":true}")).jsonObject["archived"]!!.jsonPrimitive.boolean)
         check(!json(Request("PATCH", "/api/sessions/$session/archive", "{\"archived\":false}")).jsonObject["archived"]!!.jsonPrimitive.boolean)
         check(client.request(Request(path = "/api/mobile/connection")).first.status == 403)

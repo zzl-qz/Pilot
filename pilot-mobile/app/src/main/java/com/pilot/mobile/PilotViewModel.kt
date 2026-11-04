@@ -3,6 +3,7 @@ package com.pilot.mobile
 import android.app.Application
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pilot.mobile.transport.*
@@ -11,6 +12,8 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.*
 import java.net.URLEncoder
@@ -29,6 +32,8 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
     private val historyEvents = sortedMapOf<Long, JsonObject>()
     private var foreground = false
     private var historyChars = 0
+    private val syncMutex = Mutex()
+    private var workbench = WorkbenchSnapshot()
 
     init {
         viewModelScope.launch {
@@ -40,14 +45,17 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun connect(computer: PairedComputer) {
+    private fun remote(endpoint: Endpoint, ticket: String) = RemoteClient(endpoint, ticket, diagnostic = { Log.d("PilotConnection", it) })
+
+    private suspend fun connect(computer: PairedComputer, readyEndpoint: Endpoint? = null, readyClient: RemoteClient? = null) {
         saveDraft(); monitor?.cancelAndJoin(); client?.disconnect(); endpoint?.shutdown()
+        workbench = WorkbenchSnapshot()
         store.select(computer.id)
         mutable.value = MobileState(computer = computer.name, computerId = computer.id, computers = store.computers(), status = "正在连接", busy = state.value.busy,
             pins = store.value(computer.id, "pins")?.split('\n')?.filter { it.isNotBlank() }?.toSet().orEmpty(),
             pending = store.value(computer.id, "pending")?.let { Protocol.json.decodeFromString(Request.serializer(), it) })
-        endpoint = createEndpoint(store.identity(), computer.relays, computer.development)
-        client = RemoteClient(endpoint!!, computer.ticket)
+        endpoint = readyEndpoint ?: createEndpoint(store.identity(), computer.relays, computer.development)
+        client = readyClient ?: remote(endpoint!!, computer.ticket)
         restartMonitor()
     }
 
@@ -58,16 +66,20 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         val computer = PairedComputer(invite.ticket, invite.name, invite.relays, invite.developmentRelays)
         require(store.computers().size < 16 || store.computers().any { it.id == computer.id }) { "最多保存 16 台电脑" }
         val candidateEndpoint = createEndpoint(store.identity(), computer.relays, computer.development)
-        val candidate = RemoteClient(candidateEndpoint, computer.ticket)
+        val candidate = remote(candidateEndpoint, computer.ticket)
+        var adopted = false
         try {
             val response = candidate.request(Request("POST", "/pair", pairingSecret = invite.secret, deviceName = android.os.Build.MODEL))
             require(response.first.status == 200) { "配对码失效或已使用，请在电脑上重新生成" }
             store.save(computer)
-        } finally { candidate.disconnect(); candidateEndpoint.shutdown() }
-        connect(computer)
+            // 已完成握手的链路直接交给工作台，避免移动网络下重新冷启动。
+            connect(computer, candidateEndpoint, candidate)
+            adopted = true
+        } finally { if (!adopted) { candidate.disconnect(); candidateEndpoint.shutdown() } }
     }
 
     fun setForeground(active: Boolean) {
+        if (foreground == active) return
         foreground = active
         if (active) restartMonitor() else { monitor?.cancel(); monitor = null; persistDraftSoon(0) }
     }
@@ -83,7 +95,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                     if (id == null || state.value.viewingHistory) { refresh(); delay(5000) }
                     else coroutineScope {
                         conversation.reconnect()
-                        val metadata = launch { while (isActive) { refresh(); refreshRun(id); delay(5000) } }
+                        val metadata = launch { while (isActive) { refreshTask(id); delay(5000) } }
                         try {
                             val decoder = SseDecoder { event ->
                                 if (event.text("type") !in setOf("assistant.preview", "assistant.reasoning")) recordEvent(event, false)
@@ -105,25 +117,39 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun refresh() {
-        val snapshot = api(Request(path = "/api/mobile/workbench")).jsonObject
-        require(snapshot.text("version") == "1" && (snapshot["capabilities"] as? JsonObject)?.bool("idempotency") == true) { "电脑端协议版本不兼容，请更新 Pilot" }
-        val sessions = snapshot.objects("sessions")
-        mutable.update { it.copy(sessions = sessions, projects = snapshot.objects("projects"), approvals = snapshot.objects("approvals"),
-            results = (snapshot["results"] as? JsonObject)?.objects("items").orEmpty(), capabilities = snapshot["capabilities"] as? JsonObject,
-            selected = it.selected?.let { old -> sessions.firstOrNull { s -> s.text("id") == old.text("id") } ?: old },
-            status = client?.pathLabel() ?: "未连接", networkError = "") }
+    private suspend fun refresh() = syncMutex.withLock {
+        val owner = client
+        val host = state.value.computerId
+        mutable.update { it.copy(syncing = true) }
+        try {
+            val incoming = api(workbench.request()).jsonObject
+            if (client !== owner || state.value.computerId != host) return@withLock
+            val snapshot = workbench.accept(incoming)
+            val sessions = snapshot.objects("sessions")
+            mutable.update { it.copy(sessions = sessions, projects = snapshot.objects("projects"), approvals = snapshot.objects("approvals"),
+                results = (snapshot["results"] as? JsonObject)?.objects("items").orEmpty(), capabilities = snapshot["capabilities"] as? JsonObject,
+                selected = it.selected?.let { old -> sessions.firstOrNull { s -> s.text("id") == old.text("id") } ?: old },
+                status = client?.pathLabel() ?: "未连接", networkError = "", hasSnapshot = true) }
+        } finally {
+            if (client === owner && state.value.computerId == host) mutable.update { it.copy(syncing = false) }
+        }
     }
 
     fun select(session: JsonObject) = action { openSession(session) }
-    fun openTask(id: String) = action { openSession(api(Request(path = "/api/sessions/$id")).jsonObject) }
+    fun openTask(id: String) = action { openSession(state.value.sessions.firstOrNull { it.text("id") == id } ?: api(Request(path = "/api/sessions/$id")).jsonObject) }
     private suspend fun openSession(session: JsonObject) {
         saveDraft(); monitor?.cancelAndJoin()
         conversation = Conversation(6000); historyEvents.clear(); historyChars = 0
         val draft = loadDraft(session.text("id"))
         mutable.update { it.copy(selected = session, rows = emptyList(), runId = "", phase = "读取历史…", queued = emptyList(), viewingHistory = false, limitedHistory = false,
             draft = draft.text, attachments = draft.attachments, detail = null) }
-        try { loadHistory(false); refreshRun(session.text("id")) } finally { restartMonitor() }
+        try {
+            coroutineScope {
+                val run = async { readRunState(session.text("id")) }
+                loadHistory(false)
+                applyRunState(session.text("id"), run.await())
+            }
+        } finally { restartMonitor() }
     }
 
     fun older() = action { mutable.update { it.copy(viewingHistory = true) }; monitor?.cancelAndJoin(); try { loadHistory(true) } finally { restartMonitor() } }
@@ -131,7 +157,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun loadHistory(older: Boolean) {
         val id = state.value.selected!!.text("id")
         val before = if (older && historyEvents.isNotEmpty()) "&before=${historyEvents.firstKey()}" else ""
-        val page = api(Request(path = "/api/sessions/$id/history?limit=300$before")).jsonObject
+        val page = api(Request(path = "/api/sessions/$id/history?limit=${if (older) 100 else 60}$before")).jsonObject
         val events = page.objects("events")
         events.forEach { recordEvent(it, older) }
         conversation = Conversation(6000)
@@ -150,12 +176,25 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun refreshRun(id: String) {
-        val active = api(Request(path = "/api/sessions/$id/runs/active")).jsonObject.text("runId")
-        val queue = api(Request(path = "/api/sessions/$id/queue")).jsonObject
+    private suspend fun readRunState(id: String): Pair<String, JsonObject> = coroutineScope {
+        val active = async { api(Request(path = "/api/sessions/$id/runs/active")).jsonObject.text("runId") }
+        val queue = async { api(Request(path = "/api/sessions/$id/queue")).jsonObject }
+        active.await() to queue.await()
+    }
+
+    private fun applyRunState(id: String, run: Pair<String, JsonObject>) {
+        val (active, queue) = run
         mutable.update { if (it.selected?.text("id") != id) it else it.copy(runId = active,
             phase = if (active.isBlank()) statusLabel(it.selected.text("status")) else it.phase.ifBlank { "正在执行" },
             queued = queue["items"]?.jsonArray?.map { value -> value.jsonPrimitive.content }.orEmpty(), queueRevision = queue.text("revision")) }
+    }
+
+    private suspend fun refreshRun(id: String) = applyRunState(id, readRunState(id))
+
+    private suspend fun refreshTask(id: String) = coroutineScope {
+        val run = async { readRunState(id) }
+        refresh()
+        applyRunState(id, run.await())
     }
 
     fun back() = action { saveDraft(); mutable.update { it.copy(selected = null, draft = "", attachments = emptyList(), detail = null) }; restartMonitor() }
@@ -246,7 +285,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         val current = state.value
         require(operation in setOf("pause", "cancel", "continue"))
         val path = if (operation == "continue") "/api/sessions/${current.selected!!.text("id")}/continue" else "/api/runs/${current.runId}/$operation"
-        api(Request("POST", path, "{}")); refresh(); refreshRun(current.selected!!.text("id"))
+        api(Request("POST", path, "{}")); refreshTask(current.selected!!.text("id"))
     }
     fun queue(index: Int, operation: String, content: String = "", expectedRevision: String? = null) = action {
         val current = state.value
@@ -331,7 +370,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         if (pending.path == "/api/sessions" && response is JsonObject) openSession(response)
     }
     fun dismissPending() = action { store.value(state.value.computerId, "pending", null); mutable.update { it.copy(pending = null) } }
-    fun retry() { clearError(); restartMonitor() }
+    fun retry() { clearError(); if (!syncMutex.isLocked) restartMonitor() }
     fun forget(id: String) = action {
         if (id == state.value.computerId) { saveDraft(); monitor?.cancelAndJoin(); client?.disconnect(); client = null; endpoint?.shutdown(); endpoint = null }
         store.forget(id)
@@ -348,7 +387,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
             mutable.update { it.copy(pending = request) }
         }
         val result = client?.request(request) ?: error("请先连接电脑")
-        val parsed = runCatching { Protocol.json.parseToJsonElement(result.second) }.getOrNull()
+        val parsed = withContext(Dispatchers.Default) { runCatching { Protocol.json.parseToJsonElement(result.second) }.getOrNull() }
         val uncertain = result.first.status >= 500 || (parsed as? JsonObject)?.bool("uncertain") == true
         if (mutation && !uncertain) {
             withContext(Dispatchers.IO) { store.value(state.value.computerId, "pending", null) }
@@ -369,7 +408,12 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     private fun fail(error: Exception) { mutable.update { it.copy(error = error.message ?: "操作失败，请重试") } }
-    override fun onCleared() { monitor?.cancel(); client?.disconnect(); endpoint?.let { ep -> CoroutineScope(Dispatchers.IO).launch { ep.shutdown() } } }
+    override fun onCleared() {
+        monitor?.cancel()
+        val previousClient = client
+        val previousEndpoint = endpoint
+        CoroutineScope(Dispatchers.IO).launch { previousClient?.disconnect(); previousEndpoint?.shutdown() }
+    }
 }
 
 fun JsonObject.bool(key: String): Boolean = (this[key] as? JsonPrimitive)?.booleanOrNull == true

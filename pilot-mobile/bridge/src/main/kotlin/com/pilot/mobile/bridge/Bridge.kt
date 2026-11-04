@@ -86,7 +86,8 @@ class Bridge(
     }
 
     private suspend fun proxy(peer: String, request: Request, send: SendStream) {
-        val builder = HttpRequest.newBuilder(URI("http://127.0.0.1:$port${request.path}"))
+        val path = request.snapshotRevision?.let { "${request.path}?revision=$it" } ?: request.path
+        val builder = HttpRequest.newBuilder(URI("http://127.0.0.1:$port$path"))
             .timeout(Duration.ofSeconds(30)).header("Accept", if (request.path.substringBefore('?').endsWith("/events")) "text/event-stream" else "application/json")
         if (token.isNotBlank()) builder.header("X-Pilot-Token", token)
         if (request.method != "GET") {
@@ -98,16 +99,20 @@ class Bridge(
         val response = try { runInterruptible(Dispatchers.IO) { http.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream()) } }
         catch (_: java.net.ConnectException) { reply(send, 503, "{\"error\":\"电脑上的 Pilot 未启动，请先启动 Pilot\"}"); return }
         val type = response.headers().firstValue("Content-Type").orElse("application/json")
+        val encoding = if (request.acceptGzipFrames && (type.startsWith("application/json") || type.substringBefore(';').endsWith("+json"))) "gzip" else ""
         response.body().use { input ->
-            Protocol.write(send, Protocol.json.encodeToString(ResponseHead.serializer(), ResponseHead(response.statusCode(), type)).toByteArray())
+            Protocol.write(send, Protocol.json.encodeToString(ResponseHead.serializer(), ResponseHead(response.statusCode(), type, encoding)).toByteArray())
             var count = 0L
-            val buffer = ByteArray(8192)
+            val buffer = ByteArray(32 * 1024)
             while (currentCoroutineContext().isActive) {
                 val size = withTimeout(35_000) { runInterruptible(Dispatchers.IO) { input.read(buffer) } }
                 if (size < 0) break
+                if (size == 0) continue
                 count += size
                 require(type.startsWith("text/event-stream") || count <= Protocol.MAX_RESPONSE) { "响应过大" }
-                withTimeout(15_000) { Protocol.write(send, buffer.copyOf(size)) }
+                val chunk = buffer.copyOf(size)
+                val encoded = if (encoding.isEmpty()) chunk else FrameCodec.encode(chunk)
+                withTimeout(15_000) { Protocol.write(send, encoded) }
             }
             Protocol.write(send, byteArrayOf()); send.finish()
         }

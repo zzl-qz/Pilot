@@ -63,7 +63,7 @@ class MobileSmokeTest {
         compose.onNodeWithText("引导", useUnmergedTree = true).performScrollTo().performClick()
         compose.waitUntil(10000) { compose.onAllNodesWithText("引导", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
         compose.onNodeWithText("暂停").performClick()
-        compose.waitUntil(10000) { compose.onAllNodesWithText("继续").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(10000) { compose.onAllNodes(hasText("继续") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("继续").performClick()
         compose.waitUntil(10000) { compose.onAllNodes(hasText("停止") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("停止", useUnmergedTree = true).performClick()

@@ -13,6 +13,7 @@ data class TaskDraft(val text: String = "", val attachments: List<MobileAttachme
 data class MobileState(
     val computer: String = "", val computerId: String = "", val computers: List<PairedComputer> = emptyList(),
     val status: String = "未连接", val networkError: String = "", val error: String = "", val busy: Boolean = false, val tab: String = "任务",
+    val syncing: Boolean = false, val hasSnapshot: Boolean = false,
     val sessions: List<JsonObject> = emptyList(), val projects: List<JsonObject> = emptyList(),
     val results: List<JsonObject> = emptyList(), val capabilities: JsonObject? = null,
     val selected: JsonObject? = null, val rows: List<TranscriptRow> = emptyList(),

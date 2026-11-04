@@ -4,8 +4,22 @@ import kotlin.test.*
 import kotlinx.serialization.json.jsonObject
 
 class ProtocolTest {
+    @Test fun `旧请求默认明文且新增元数据不改变协议版本`() {
+        val legacy = Protocol.json.decodeFromString(Request.serializer(), """{"method":"GET","path":"/api/mobile/workbench"}""")
+        assertFalse(legacy.acceptGzipFrames)
+        assertNull(legacy.snapshotRevision)
+        assertEquals("", Protocol.json.decodeFromString(ResponseHead.serializer(), """{"status":200,"contentType":"application/json"}""").frameEncoding)
+        assertEquals(2, Protocol.VERSION)
+    }
+
     private val now = 1_800_000_000_000L
     private fun invite() = PairingInvite(ticket = "a".repeat(100), secret = "a".repeat(43), expiresAt = now + 300_000, name = "工作电脑")
+
+    @Test fun `只读超时与写入结果未确认使用不同提示`() {
+        assertContains(requestTimeoutMessage("GET"), "读取数据超时")
+        assertFalse(requestTimeoutMessage("GET").contains("指令"))
+        for (method in listOf("POST", "PUT", "PATCH", "DELETE")) assertContains(requestTimeoutMessage(method), "核对")
+    }
 
     @Test fun `配对码保留中文名称且有版本与过期检查`() {
         assertEquals(invite(), PairingInvite.decode(invite().encode(), now))

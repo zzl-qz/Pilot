@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -101,11 +102,14 @@ fun PilotApp(model: PilotViewModel = viewModel()) {
                         IconButton(onClick = { taskMenu = true }, enabled = !state.busy) { Icon(Icons.Outlined.MoreHoriz, "任务选项") }
                         DropdownMenu(taskMenu, onDismissRequest = { taskMenu = false }) {
                             DropdownMenuItem(text = { Text("重命名任务") }, onClick = { taskMenu = false; rename = state.selected; renameText = state.selected!!.text("title") })
-                            DropdownMenuItem(text = { Text("刷新连接") }, onClick = { taskMenu = false; model.retry() })
+                            DropdownMenuItem(text = { Text(if (state.syncing) "正在同步…" else "刷新连接") }, enabled = !state.syncing, onClick = { taskMenu = false; model.retry() })
                         }
                     } else if (state.computer.isNotBlank()) {
-                        IconButton(onClick = model::retry, enabled = !state.busy) { Icon(Icons.Outlined.Refresh, "刷新数据", Modifier.size(20.dp)) }
-                        if (state.tab == "任务") Button(onClick = { showProjects = true }, enabled = !state.busy, contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.heightIn(min = 48.dp)) {
+                        IconButton(onClick = model::retry, enabled = !state.busy && !state.syncing) {
+                            if (state.syncing) CircularProgressIndicator(Modifier.size(20.dp).semantics { contentDescription = "正在同步" }, strokeWidth = 2.dp)
+                            else Icon(Icons.Outlined.Refresh, "刷新数据", Modifier.size(20.dp))
+                        }
+                        if (state.tab == "任务") Button(onClick = { showProjects = true }, enabled = !state.busy && !(state.syncing && !state.hasSnapshot), contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.heightIn(min = 48.dp)) {
                             Icon(Icons.Outlined.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("新任务")
                         }
                     }
@@ -150,6 +154,7 @@ fun PilotApp(model: PilotViewModel = viewModel()) {
             when {
                 state.computer.isBlank() -> ConnectScreen(state.busy, scan, { showCode = true })
                 state.selected != null -> TaskDetail(state, model)
+                state.syncing && !state.hasSnapshot && state.tab != "设备" -> EmptyState("正在同步工作台", "首次连接需要读取电脑上的项目和任务，请稍候。")
                 else -> screenState.SaveableStateProvider("${state.computerId}:${state.tab}") {
                     when (state.tab) {
                         "任务" -> TasksScreen(state, model, { showProjects = true }, { rename = it; renameText = it.text("title") })
