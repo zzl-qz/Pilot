@@ -42,7 +42,7 @@
 
 ## 安装与开发
 
-普通源码使用直接运行仓库 `start.sh` / `start.cmd`，会自动检查并补齐 Java、Node、Maven 与连接桥；缺少 Java 21 时也无需手动配置。IDE 直接运行后台时，手机连接依赖在后台准备，窗口显示当前进度，失败后可主动“检查并修复环境”。下列手动命令用于独立开发和验收，不再是普通用户连接手机的必经步骤。说明见 [源码环境自动准备](../SOURCE_ENVIRONMENT.md)。
+普通 PC 源码运行直接使用仓库 `start.sh` / `start.cmd`，只准备电脑端的 Java 25、Node、Maven 与 Electron。不会因此下载 Gradle、Android SDK 或 Java 21，也不会自动构建 APK / 连接桥。手机功能需要开发者先按下列命令另外打包；打开手机连接窗口才验证已打包的桥及电脑原生运行库。说明见 [源码环境自动准备](../SOURCE_ENVIRONMENT.md)。
 
 普通预览包包含 Android APK、后台 Jar、连接桥和当前系统的 Java 运行时。启动 `start.sh` 或 `start.cmd`，浏览器打开 `http://localhost:9999`；Pilot 桌面也可连接这个后台。手机安装 APK 后扫描电脑的配对码。电脑需保持在线且不休眠。
 
@@ -96,3 +96,13 @@ node scripts/package-mobile-host.mjs <新的输出目录>
 真机蜂窝网络排查、已观察到的中继往返与尚未完成的最终包回归见 [跨网连接记录](../evaluation/MOBILE_CROSS_NETWORK_2026-11-04.md)。
 
 0.2.2 的数据量对照、兼容策略与弱网模拟验收见 [延迟优化记录](../evaluation/MOBILE_LATENCY_2026-11-04.md)。
+
+## 扫码与电脑身份
+
+手机扫码使用 Pilot 自有竖屏页，可直接返回或切换到粘贴配对码。相机拒权时提供授权 / 设置入口；无相机或相机暂不可用时仍能手动连接。扫到其他产品的二维码会留在扫码页提示，不会提交连接请求。
+
+同一个 APK 使用相同协议扫描任意受支持电脑生成的配对码，不依赖某台开发用 Mac 的地址。每张二维码包含生成电脑的动态连接票据和五分钟单次凭证，因此只授权连接那台电脑；其他电脑必须生成自己的码。二维码不是跨电脑共用的万能口令。手机可以保存多台电脑并切换，电脑可以分别授权多台手机。
+
+设备身份运行时保存在 `.pilot/mobile`（或显式数据目录），不会随 Git 源码发布。分发源码或便携包时不要把某台电脑的 `.pilot/mobile` 运行数据复制给其他电脑，否则会把身份和已有授权一起复制。
+
+专用模拟器验收：先执行 `node scripts/mobile.mjs qa`，然后运行 `ANDROID_HOME=... node pilot-mobile/scripts/scanner-smoke.mjs emulator-xxxx`。该脚本只接受名为 Pilot 的模拟器，重置独立 `.qa` 包，不操作真机。Windows 请用对应 PowerShell 环境变量语法。

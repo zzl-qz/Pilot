@@ -4,6 +4,30 @@ import java.nio.file.Files
 import kotlin.test.*
 
 class PairingStoreTest {
+    @Test fun `不同电脑独立生成身份且配对凭证不能串用`() {
+        val firstDirectory = Files.createTempDirectory("pilot-computer-a")
+        val secondDirectory = Files.createTempDirectory("pilot-computer-b")
+        try {
+            val first = PairingStore(firstDirectory)
+            val second = PairingStore(secondDirectory)
+            assertFalse(first.key.contentEquals(second.key))
+            val a = first.issue("ticket-a", "macOS 电脑", emptyList(), false)
+            val b = second.issue("ticket-b", "Windows 电脑", emptyList(), false)
+            assertNotEquals(a.secret, b.secret)
+            assertFalse(first.pair("phone", b.secret, "手机"))
+            assertFalse(second.pair("phone", a.secret, "手机"))
+            assertTrue(first.pair("phone", a.secret, "手机"))
+            assertTrue(second.pair("phone", b.secret, "手机"))
+            assertContentEquals(first.key, PairingStore(firstDirectory).key)
+            assertContentEquals(second.key, PairingStore(secondDirectory).key)
+            first.revoke("phone")
+            assertTrue(second.isTrusted("phone"))
+        } finally {
+            firstDirectory.toFile().deleteRecursively()
+            secondDirectory.toFile().deleteRecursively()
+        }
+    }
+
     @Test fun `配对单次消费重启恢复且撤销后拒绝`() {
         val directory = Files.createTempDirectory("pilot-pairing")
         try {

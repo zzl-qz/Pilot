@@ -33,8 +33,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 import com.pilot.mobile.transport.text
 
 class MainActivity : ComponentActivity() {
@@ -68,9 +66,12 @@ fun PilotApp(model: PilotViewModel = viewModel()) {
     var renameText by rememberSaveable { mutableStateOf("") }
     var taskMenu by remember { mutableStateOf(false) }
     val screenState = rememberSaveableStateHolder()
-    val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        if (result.contents != null) model.pair(result.contents)
-        else model.report("扫码已取消或相机未授权，也可以粘贴配对码。")
+    val scanner = rememberLauncherForActivityResult(PairingScanContract()) { result ->
+        when (result) {
+            is PairingScanResult.Code -> model.pair(result.value)
+            PairingScanResult.Paste -> showCode = true
+            PairingScanResult.Cancelled -> Unit
+        }
     }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) model.attach(uris) }
     val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -79,7 +80,7 @@ fun PilotApp(model: PilotViewModel = viewModel()) {
         else model.report("未录入文字。可以重新录音，或使用键盘输入。")
     }
     val scan: () -> Unit = {
-        try { scanner.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setPrompt("扫描电脑上的 Pilot 配对码").setBeepEnabled(false).setOrientationLocked(false)) }
+        try { model.clearError(); scanner.launch(Unit) }
         catch (_: Exception) { model.report("此设备无法打开相机，请粘贴配对码。") }
     }
     BackHandler(state.detail != null || state.selected != null) { if (state.detail != null) model.closeDetail() else model.back() }

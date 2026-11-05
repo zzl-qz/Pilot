@@ -151,6 +151,11 @@ try {
   for (const name of ['small-search-empty', 'pairing-large-text', 'approval-large-text', 'conversation-small', 'devices-light', 'devices-dark', 'projects-small']) {
     await runAdb('pull', `/sdcard/Android/data/com.pilot.mobile.qa/files/design-${name}.png`, path.join(artifacts, `design-${name}.png`));
   }
+  await runAdb('shell', 'pm', 'clear', 'com.pilot.mobile.qa');
+  const scanning = await runAdb('shell', 'am', 'instrument', '-w', '-r', '-e', 'class', 'com.pilot.mobile.PairingScannerTest', 'com.pilot.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner');
+  console.log(scanning.stdout);
+  if (!scanning.stdout.includes('OK (2 tests)')) throw new Error('竖屏扫码、取消与粘贴切换验收失败');
+  await runAdb('pull', '/sdcard/Android/data/com.pilot.mobile.qa/files/scanner-portrait.png', path.join(artifacts, 'scanner-portrait.png'));
   console.log('通过：应用级多任务、审批归属、原生配对、QUIC/SSE、指令与控制、断线回执去重、独立进程恢复草稿、设备移除。');
 } finally {
   bridge.kill(); for (const res of subscribers) res.end(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
