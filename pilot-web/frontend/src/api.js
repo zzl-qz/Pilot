@@ -100,6 +100,7 @@ export const api = {
   /** 从当前对话分叉一条临时侧边对话（对齐 Codex 的 /side）。 */
   createSideChat: (id) => apiJson(`/api/sessions/${encodeURIComponent(id)}/side`, { method: 'POST' }),
   renameSession: (id, title) => apiJson(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }),
+  sessionPreferences: (id, body) => apiJson(`/api/sessions/${encodeURIComponent(id)}/preferences`, jsonBody('PATCH', body)),
   archiveSession: (id, archived = true) => apiJson(`/api/sessions/${encodeURIComponent(id)}/archive`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archived }) }),
   switchWorkspace: (id, workspace) => apiJson(`/api/sessions/${encodeURIComponent(id)}/workspace`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspace }) }),
   sendMessage: (id, body) => apiFetch(`/api/sessions/${encodeURIComponent(id)}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 120000).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),

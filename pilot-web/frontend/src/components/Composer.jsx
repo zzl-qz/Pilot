@@ -17,8 +17,7 @@ import { writeDraft, readDraft, dropDraft } from '../lib/drafts.js';
 import { splitAttachmentMarkers, joinAttachmentMarkers } from '../lib/attachments.js';
 import { queueHeader, resumeBar } from '../lib/queue.js';
 import { PERMISSION_MODES, permissionLabel, permissionHint } from '../lib/permission.js';
-import { ModelOptions, useModelDiscovery } from './ModelDiscovery.jsx';
-import { ModelSaveFeedback, useModelForm } from './ModelForm.jsx';
+import { ModelPicker } from './ModelPicker.jsx';
 import { usageLevel, usagePercent } from '../lib/context-usage.js';
 import { agentStatusLabel, summarizeAgents } from '../lib/agents.js';
 
@@ -40,6 +39,7 @@ export function Composer() {
   const cancelling = useStore((state) => state.cancelling);
   const permissionMode = useStore((state) => state.permissionMode);
   const modelOptions = useStore((state) => state.modelOptions);
+  const modelSaving = useStore((state) => state.modelSave.busy);
   const settingsData = useStore((state) => state.settingsData);
   // /api/settings 的字段是 model（字符串）+ modelEndpoint，不是嵌套对象
   const currentModel = typeof settingsData?.model === 'string' ? settingsData.model : '';
@@ -167,13 +167,14 @@ export function Composer() {
       steering: state.steering,
       pausing: state.pausing,
       cancelling: state.cancelling,
+      modelSaving: state.modelSave.busy,
       queuePaused: state.queueHeld
     });
   }
 
   useEffect(() => {
     setSendAction(sendState());
-  }, [running, queueHeld, lastOutcome, pendingInputs.length, steering, pausing, cancelling, editTarget]);
+  }, [running, queueHeld, lastOutcome, pendingInputs.length, steering, pausing, cancelling, editTarget, modelSaving]);
 
   /* 附件上传：选择 / 拖放 / 粘贴共用 */
   function addFiles(fileList) {
@@ -590,14 +591,18 @@ export function Composer() {
                   id="model-chip"
                   aria-haspopup="dialog"
                   aria-expanded={modelOpen}
+                  aria-controls={modelOpen ? 'model-menu' : undefined}
+                  aria-label={currentModel ? `切换模型，当前 ${currentModel}` : '选择模型'}
                   title={currentModel ? `当前模型：${currentModel} · 点击切换` : '选择模型'}
                   onClick={() => { setModelOpen(!modelOpen); setPermOpen(false); setContextOpen(false); }}
                 >
-                  {currentModel || '模型'}
+                  <span className="model-chip-name">{currentModel || '选择模型'}</span>
+                  <svg className="model-chip-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </button>
                 {modelOpen && (
-                  <ModelMenu
-                    onClose={() => setModelOpen(false)}
+                  <ModelPicker
+                    key={currentEndpoint}
+                    onClose={() => { setModelOpen(false); document.getElementById('model-chip')?.focus(); }}
                     models={modelOptions}
                     initialModel={currentModel}
                     initialEndpoint={currentEndpoint}
@@ -679,27 +684,6 @@ function PermissionIcon({ mode }) {
 
 function CheckIcon() {
   return <svg className="menu-check" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.4 3 3 6-6.4" stroke="currentColor" strokeWidth="1.7" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-}
-
-function ModelMenu({ onClose, models, initialModel = '', initialEndpoint = '' }) {
-  // 打开菜单时预填当前配置：之前是空白表单，用户会以为模型没配
-  const { name, endpoint, key, setName, setEndpoint, setKey, saving, feedback, save } = useModelForm({ model: initialModel, endpoint: initialEndpoint });
-  const discovery = useModelDiscovery({ endpoint, apiKey: key, initialModels: models, initialEndpoint });
-  return (
-    <div className="chip-menu model-menu" id="model-menu" role="dialog" aria-label="模型设置">
-      <p className="menu-head">模型</p>
-      <label>模型名称<input disabled={saving} value={name} onChange={(event) => setName(event.target.value)} placeholder="如 deepseek-chat" /></label>
-      <label>端点<input disabled={saving} value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="模型服务地址，以 /v1 结尾" /></label>
-      <label>API Key<input disabled={saving} type="password" value={key} onChange={(event) => setKey(event.target.value)} placeholder="不填则沿用已保存的" /></label>
-      <div className="chip-menu-actions">
-        <button type="button" className="btn" disabled={saving || discovery.probing} aria-busy={discovery.probing} onClick={discovery.probe}>{discovery.probing ? '探测中…' : '探测模型'}</button>
-        <button type="button" className="btn btn-primary" disabled={saving || !name.trim()} aria-busy={saving} onClick={async () => { if (await save()) onClose(); }}>{saving ? '保存中…' : '保存'}</button>
-      </div>
-      <ModelSaveFeedback feedback={feedback} />
-      {discovery.hint && <p className="chip-hint" role={discovery.error ? 'alert' : 'status'}>{discovery.hint}</p>}
-      <ModelOptions models={discovery.models} value={name} onSelect={setName} disabled={saving} discovered={discovery.discovered} />
-    </div>
-  );
 }
 
 function ResumeBar() {

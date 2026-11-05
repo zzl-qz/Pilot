@@ -17,6 +17,8 @@
     "check": "node scripts/check.mjs",
     "test:interaction": "node scripts/interaction-smoke.mjs",
     "test:navigation": "node scripts/navigation-smoke.mjs",
+    "test:sessions": "node scripts/session-management-smoke.mjs",
+    "test:style": "node scripts/workbench-style-smoke.mjs",
     "test:products": "node scripts/work-products-smoke.mjs",
     "test:recovery": "node scripts/sandbox-recovery-smoke.mjs"
   },

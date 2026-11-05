@@ -55,8 +55,9 @@ export function TaskContract() {
   return (
     <details id="task-contract" className="task-contract" open={open} onToggle={(event) => setOpen(event.target.open)}>
       <summary id="task-contract-summary">
-        任务契约 · {goal ? String(goal).slice(0, 40) : '未设定目标'} · {lifecycle}
-        {items.length ? ` · 验收 ${checked}/${items.length}` : ''}
+        <span className="task-contract-label">任务契约</span>
+        <span className="task-contract-goal" title={goal}>{goal || '未设定目标'}</span>
+        <span className="task-contract-status">{lifecycle}{items.length ? ` · 验收 ${checked}/${items.length}` : ''}</span>
       </summary>
       <div className="task-contract-body">
         <p id="task-original-goal"><b>目标：</b>{goal || '（未设定）'}</p>

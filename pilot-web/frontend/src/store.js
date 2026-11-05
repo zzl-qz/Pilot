@@ -18,7 +18,7 @@ import { faviconHref, shouldNotify, tabTitle } from './lib/attention.js';
 import { mergeCommands, resolveSkillCommand, toSkillCommands } from './lib/skills.js';
 import { normalizePermission, permissionLabel } from './lib/permission.js';
 import { QUICK_COMMANDS, filterQuickCommands, expandQuickCommand } from './lib/commands.js';
-import { groupSessionsByProject, samePath } from './lib/projects.js';
+import { groupSessionsByProject, samePath, sortSessions } from './lib/projects.js';
 import { mergeRunReports, sortChangeFiles } from './lib/changes.js';
 import { isCommandActive, commandStatusLabel, mergeCommandLog } from './lib/command-tasks.js';
 import { nextMirrorMode } from './lib/browser-mirror.js';
@@ -461,10 +461,14 @@ export const useStore = create(immer((set, get) => {
       const sideIds = new Set((get().sideChats?.items || []).map((item) => item.id));
       const raw = await api.sessions();
       if (!Array.isArray(raw)) throw new Error('任务数据格式无效');
-      const sessions = raw
+      const sessions = sortSessions(raw
         .map((session) => ({ ...session, id: session.sessionId || session.id }))
-        .filter((session) => !sideIds.has(session.id));
-      if (request === sessionLoadSequence) set((draft) => { draft.sessions = sessions; });
+        .filter((session) => !sideIds.has(session.id)));
+      if (request === sessionLoadSequence) set((draft) => {
+        draft.sessions = sessions;
+        const current = sessions.find(session => session.id === draft.sessionId);
+        if (current) draft.sessionTitle = current.title;
+      });
       return sessions;
     } catch (error) {
       if (strict) throw error;
@@ -502,10 +506,9 @@ export const useStore = create(immer((set, get) => {
   /**
    * 确保当前有真实会话：草稿态下按需创建，创建后立刻接上事件流与各面板连接。
    *
-   * @param {{title?: string}} options 第一条消息的前缀会顺手当成标题，省掉一次改名请求
    * @returns {Promise<string|null>} 会话 ID；拿不到时返回 null（调用方负责提示）
    */
-  async ensureSession({ title = '' } = {}) {
+  async ensureSession() {
     const { sessionId, draftSession, sessionEpoch } = get();
     if (sessionId) {
       return sessionId;
@@ -520,10 +523,7 @@ export const useStore = create(immer((set, get) => {
     if (draftSession.workspace) {
       body.workspace = draftSession.workspace;
     }
-    const trimmed = String(title || '').trim();
-    if (trimmed) {
-      body.title = trimmed.slice(0, 22);
-    }
+    // 首条消息由服务端统一命名，Web、桌面及 API 调用保持一致。
     const created = await api.createSession(body);
     const id = created?.sessionId || created?.id;
     if (get().sessionEpoch !== sessionEpoch) throw new Error('会话已切换，原草稿已保留，请回到原会话重试');
@@ -567,6 +567,8 @@ export const useStore = create(immer((set, get) => {
       if (current()) get().showNotice('读取会话失败：' + error.message);
       return false;
     }
+    if (!current()) return false;
+    if (detail?.unread) await get().updateSessionPreferences(sessionId, {unread:false});
     if (!current()) return false;
     set((draft) => {
       draft.workspace = detail?.workspace || '';
@@ -950,23 +952,9 @@ export const useStore = create(immer((set, get) => {
   /** 单条事件落地后的联动（标题转正、任务契约、上下文、变更报告）。 */
   settleEvent(event, after) {
     const sessionId = get().sessionId;
-    if (event.type === 'run.started' && after.promoteBlank) {
-      set((draft) => {
-        const found = draft.sessions.find((session) => session.id === draft.sessionId);
-        if (found?.isBlank) {
-          found.isBlank = false;
-          const title = (after.promoteBlank.input || '').slice(0, 22) || found.title;
-          found.title = title;
-          draft.sessionTitle = title;
-        }
-        draft.promoteBlank = null;
-      });
-      const found = get().sessions.find((session) => session.id === sessionId);
-      if (found && !found.isBlank) {
-        apiJson(`/api/sessions/${encodeURIComponent(sessionId)}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: found.title })
-        }).then(() => get().loadProjects()).catch(() => {});
-      }
+    if (['run.started', 'run.steered', 'run.completed', 'run.failed', 'run.cancelled'].includes(event.type)) {
+      set(draft => { draft.promoteBlank = null; });
+      get().loadSessions();
     }
     // 任务契约面板刷新
     if (['run.started', 'run.steered', 'run.continued', 'run.completed', 'run.failed', 'run.cancelled', 'tool.completed', 'execution.updated'].includes(event.type)) {
@@ -1014,16 +1002,23 @@ export const useStore = create(immer((set, get) => {
   },
   composerApi: null,
 
+  modelReady() {
+    if (!get().modelSave.busy) return true;
+    get().showNotice('模型配置保存中，请稍候再发送；当前草稿已保留。');
+    return false;
+  },
+
   async submitInput(text, attachments, imagePositions) {
     if (!text?.trim() && !attachments?.length) {
       return false;
     }
-    // 草稿态：第一条消息就是创建会话的时机，标题直接用这句话开头
+    if (!get().modelReady()) return false;
+    // 草稿态：第一条消息触发创建会话，标题由服务端统一生成。
     const ownerEpoch = get().sessionEpoch;
     let sessionId = get().sessionId;
     if (!sessionId) {
       try {
-        sessionId = await get().ensureSession({ title: text });
+        sessionId = await get().ensureSession();
       } catch (error) {
         get().showNotice('创建对话失败：' + error.message);
         return false;
@@ -1032,6 +1027,8 @@ export const useStore = create(immer((set, get) => {
         return false;
       }
     }
+    // 创建会话是异步的，期间可能开始切换模型；发送前再次确认配置已保存。
+    if (!get().modelReady()) return false;
     // /技能名 参数 → 服务端期望 content=参数 + skill=技能名（旧版 resolveSkillCommand 同语义）
     const skillCall = resolveSkillCommand(text, toSkillCommands(get().skills || []));
     const payloadContent = skillCall
@@ -1063,6 +1060,7 @@ export const useStore = create(immer((set, get) => {
     }
     try {
       await api.sendMessage(sessionId, body);
+      get().loadSessions();
       if (queueInstead && get().sessionId === sessionId) {
         await get().loadQueue();
       }
@@ -1131,6 +1129,7 @@ export const useStore = create(immer((set, get) => {
   },
 
   async continueRun() {
+    if (!get().modelReady()) return false;
     const { sessionId } = get();
     try {
       await api.continueRun(sessionId);
@@ -1140,6 +1139,7 @@ export const useStore = create(immer((set, get) => {
   },
 
   async resendMessage(sequence, text, attachments) {
+    if (!get().modelReady()) return false;
     if (attachments?.length) {
       get().showNotice('编辑历史消息暂不支持新增附件。附件已保留，可取消编辑后作为新消息发送。');
       return false;
@@ -1883,19 +1883,39 @@ export const useStore = create(immer((set, get) => {
   },
 
   /* ---------- 会话操作 ---------- */
-  async renameSession(title) {
-    const { sessionId } = get();
+  async renameSession(title, id = get().sessionId) {
+    const normalized = String(title || '').trim();
+    if (!normalized || [...normalized].length > 120) {
+      get().showNotice('标题不能为空，且不能超过 120 个字符');
+      return false;
+    }
     try {
-      await api.renameSession(sessionId, title);
-      set((draft) => {
-        draft.sessionTitle = title;
-        const found = draft.sessions.find((session) => session.id === sessionId);
-        if (found) {
-          found.title = title;
-        }
+      const response = await api.renameSession(id, normalized);
+      sessionLoadSequence++;
+      set(draft => {
+        const row = draft.sessions.find(session => session.id === id);
+        if (row) Object.assign(row, response, {id, title: response?.title || normalized});
+        if (draft.sessionId === id) draft.sessionTitle = response?.title || normalized;
       });
+      return true;
     } catch (error) {
       get().showNotice('重命名失败：' + error.message);
+      return false;
+    }
+  },
+  async updateSessionPreferences(id, values) {
+    try {
+      const response = await api.sessionPreferences(id, values);
+      sessionLoadSequence++;
+      set(draft => {
+        const row = draft.sessions.find(session => session.id === id);
+        if (row) Object.assign(row, values, response, {id});
+        draft.sessions = sortSessions(draft.sessions);
+      });
+      return true;
+    } catch (error) {
+      get().showNotice('会话设置保存失败：' + error.message);
+      return false;
     }
   },
   async archiveSession(id, archived = true) {
@@ -1904,12 +1924,13 @@ export const useStore = create(immer((set, get) => {
       await get().loadSessions();
       if (archived && get().sessionId === id) {
         const next = get().sessions.find((session) => !session.archived);
-        if (next) {
-          await get().activate(next.id);
-        }
+        if (next) await get().activate(next.id);
+        else get().startNewSession();
       }
+      return true;
     } catch (error) {
       get().showNotice('归档失败：' + error.message);
+      return false;
     }
   },
   /** 彻底删除会话（事件、检查点、计划一起清）；归档只是藏起来，列表会越积越多。 */

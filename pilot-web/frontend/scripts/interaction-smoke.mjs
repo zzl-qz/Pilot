@@ -96,9 +96,11 @@ async function run(page,name,url) {
   await page.locator('#perm-chip').click();await page.keyboard.press('ArrowDown');assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('role')),'menuitemradio');await page.locator('#model-chip').click();
   assert.equal(await page.locator('#perm-menu').count(),0);await page.keyboard.press('Escape');
   // Failed settings save preserves the form; this fixture never changes real credentials.
-  await page.locator('#model-chip').click();await page.getByLabel('模型名称',{exact:true}).fill('test-model');
+  await page.locator('#model-chip').click();
+  await page.locator('#model-menu').getByRole('button',{name:'模型设置'}).click();
+  await page.getByLabel('模型名称',{exact:true}).fill('test-model');
   await page.evaluate(()=>api.saveModel=async()=>{throw Error('offline');});
-  await page.locator('#model-menu').getByText('保存',{exact:true}).click();
+  await page.locator('#settings-model-save').click();
   assert.equal(await page.getByLabel('模型名称',{exact:true}).inputValue(),'test-model');
   await page.keyboard.press('Escape');
   await input.fill('暂停请求中不能发'); await page.evaluate(()=>store.setState({pausing:true}));

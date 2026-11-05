@@ -101,3 +101,16 @@ test('groupSessionsByProject 空输入返回空数组', () => {
   assert.deepEqual(groupSessionsByProject([], []), []);
   assert.deepEqual(groupSessionsByProject(undefined, undefined), []);
 });
+
+
+test('会话按置顶与最近活动排序，旧会话新消息前移且不修改原数组', () => {
+  const sessions = [
+    {id:'old',createdAt:'2026-01-01',updatedAt:'2026-11-05'},
+    {id:'new',createdAt:'2026-11-01'},
+    {id:'pin',createdAt:'2025-01-01',pinned:true},
+    {id:'archived',createdAt:'2026-11-06',archived:true}
+  ];
+  assert.deepEqual(partitionSessions(sessions).active.map(item=>item.id), ['pin','old','new']);
+  assert.deepEqual(sessions.map(item=>item.id), ['old','new','pin','archived']);
+  assert.deepEqual(partitionSessions(sessions).archived.map(item=>item.id), ['archived']);
+});

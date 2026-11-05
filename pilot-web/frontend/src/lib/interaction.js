@@ -1,3 +1,5 @@
+import { classifyRunFailure } from './events.js';
+
 /** 平台快捷键文案与界面派生状态，保持事件数据本身不变。 */
 export function platformModifier(nav = globalThis.navigator) {
   return /Mac|iPhone|iPad/i.test(nav?.userAgentData?.platform || nav?.platform || '') ? '⌘' : 'Ctrl';
@@ -23,7 +25,19 @@ export function runPhase({running, cancelling, pausing, queueHeld, pendingApprov
   if (cancelling) return '正在停止';
   if (Object.keys(pendingApprovals).length) return '等待批准';
   if (pausing) return '正在暂停';
-  if (!running) return lastOutcome === 'NEED_INPUT' ? '等待补充' : queueHeld ? '已暂停' : '就绪';
+  if (!running) {
+    if (lastOutcome === 'NEED_INPUT') return '等待补充';
+    if (queueHeld) return '已暂停';
+    if (!lastOutcome || lastOutcome === 'completed') return '就绪';
+    const failure = classifyRunFailure(lastOutcome);
+    if (failure.cancelled) return '已取消';
+    if (failure.paused) return '已暂停';
+    if (failure.interrupted) return '已中断';
+    if (failure.blocked) return '遇到阻塞';
+    if (failure.budgetLimited) return '已达预算';
+    return { WAITING: '等待外部事件', UNVERIFIED: '结果待核验', NO_PROGRESS: '暂无有效进展',
+      REVIEW_UNAVAILABLE: '核验暂不可用' }[failure.outcome] || '运行失败';
+  }
   const turn = [...(thread?.rows || [])].reverse().find(row => row.type === 'turn');
   const tool = [...(turn?.tools || [])].reverse().find(tool => tool.status === 'run');
   if (tool) {
@@ -34,6 +48,15 @@ export function runPhase({running, cancelling, pausing, queueHeld, pendingApprov
     return '正在执行';
   }
   return turn?.reply?.live ? '正在回复' : '正在思考';
+}
+
+/** 颜色与文字共同表达状态；暂停和需要人工处理不能伪装成「正在运行」。 */
+export function runTone(phase, stalled = false) {
+  if (phase === '就绪') return 'ready';
+  if (phase === '运行失败') return 'error';
+  if (['已暂停', '已取消', '正在停止', '正在暂停'].includes(phase)) return 'paused';
+  if (phase.startsWith('正在')) return stalled ? 'attention' : 'running';
+  return 'attention';
 }
 
 export function duplicateResult(rows, index) {

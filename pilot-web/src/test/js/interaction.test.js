@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { duplicateResult, reviewQuote, runPhase } from '../../../frontend/src/lib/interaction.js';
+import { duplicateResult, reviewQuote, runPhase, runTone } from '../../../frontend/src/lib/interaction.js';
 
 test('仅消除同一用户回合中完全重复的结论，保留不同和跨轮结论', () => {
   const turn = {type:'turn', reply:{text:'完成'}};
@@ -22,4 +22,22 @@ test('运行状态优先显示停止与审批，再显示实际工具阶段', ()
     assert.equal(runPhase({running:true,thread:{rows:[{type:'turn',tools:[{name,args,status:'run'}]}]}}),label);
   }
   assert.equal(runPhase({lastOutcome:'NEED_INPUT'}),'等待补充');
+});
+
+test('失败、暂停和等待状态不能显示为就绪或沿用运行颜色', () => {
+  for (const [state, label, tone] of [
+    [{lastOutcome:'completed'}, '就绪', 'ready'],
+    [{lastOutcome:'HTTP_502'}, '运行失败', 'error'],
+    [{lastOutcome:'MAX_STEPS'}, '已暂停', 'paused'],
+    [{lastOutcome:'CANCELLED'}, '已取消', 'paused'],
+    [{lastOutcome:'BLOCKED'}, '遇到阻塞', 'attention'],
+    [{lastOutcome:'UNVERIFIED'}, '结果待核验', 'attention'],
+    [{running:true,pendingApprovals:{a:{}}}, '等待批准', 'attention'],
+    [{running:true,cancelling:true}, '正在停止', 'paused']
+  ]) {
+    assert.equal(runPhase(state), label);
+    assert.equal(runTone(runPhase(state)), tone);
+  }
+  assert.equal(runTone('正在思考', true), 'attention');
+  assert.equal(runTone('正在测试'), 'running');
 });

@@ -32,6 +32,7 @@ const real={settings:api.settings,saveModel:api.saveModel,clearModelKey:api.clea
 for(const name of Object.keys(api))if(typeof api[name]==='function')api[name]=async()=>({});Object.assign(api,real);
 for(const name of ['bookmarks','workProducts','skillDrafts','schedules'])api[name]=async()=>[];
 api.files=async()=>({entries:[]});api.filesFlat=async()=>({files:[]});
+window.submissions=[];api.sendMessage=async(id,body)=>{window.submissions.push({id,body,model:useStore.getState().settingsData.model});return {};};
 const settings=await api.settings();useStore.setState({init:async()=>{},sessionId:'model-test',sessionTitle:'模型列表选择验收',settingsData:settings,modelOptions:settings.modelOptions,capabilities:{model:settings.model},projects:[],sessions:[]});
 window.store=useStore;createRoot(document.getElementById('root')).render(React.createElement(App));
 </script></body></html>`;
@@ -51,7 +52,7 @@ const server = await createServer({ root, publicDir: join(root, '../src/main/res
       if (req.url === '/model/models') {
         probes.push(body);
         const requestedMode = mode;
-        if (body.endpoint.includes('slow')) await new Promise(resolve => held.push(resolve));
+        if (body.endpoint.includes('slow') || requestedMode === 'slow') await new Promise(resolve => held.push(resolve));
         else await new Promise(resolve => setTimeout(resolve, 80));
         if (requestedMode === 'error') { res.statusCode = 503; res.end(JSON.stringify({ message: '测试端点暂不可用' })); return; }
         const list = requestedMode === 'many' ? Array.from({ length: 30 }, (_, i) => `model-${String(i).padStart(2, '0')}`) : body.endpoint.includes('new') ? ['new-model-a', 'new-model-b'] : models;
@@ -231,35 +232,131 @@ async function run(page, name) {
   assert.equal((await settings.innerText()).includes('fixture-key'), false);
   await page.keyboard.press('Escape');
 
-  // 输入区入口也应使用本次 HTTP 返回的列表，而非全局旧候选或前 12 个。
-  await page.locator('#model-chip').click();
-  const menu = page.locator('#model-menu');
-  await menu.getByLabel('端点', { exact: true }).fill('https://new.example/v1');
-  assert.equal(await menu.getByRole('option').count(), 0);
-  mode = 'many'; await menu.getByRole('button', { name: '探测模型', exact: true }).click();
-  await menu.getByRole('searchbox', { name: '筛选模型' }).waitFor();
-  assert.equal(await menu.getByRole('option').count(), 30);
-  await menu.getByRole('searchbox', { name: '筛选模型' }).fill('model-29');
-  await menu.getByRole('option', { name: 'model-29', exact: true }).click();
-  assert.equal(await menu.getByLabel('模型名称', { exact: true }).inputValue(), 'model-29');
-  saveMode = 'error'; await menu.getByRole('button', { name: '保存', exact: true }).click();
+  // 输入区直接获取、搜索并切换；配置操作集中在完整设置中。
+  mode = 'many'; await page.locator('#model-chip').click();
+  const menu = page.locator('#model-menu'), search = menu.getByRole('combobox', { name: '搜索模型' });
+  await menu.getByRole('option', { name: 'model-29', exact: true }).waitFor();
+  assert.equal(await menu.getByRole('option').count(), 31, '完整列表加当前配置，不截断远端结果');
+  assert.equal(await search.evaluate(el => el === document.activeElement), true);
+  assert.equal(await menu.locator('input[type=password]').count(), 0);
+  assert.equal(probes.at(-1).endpoint, saved.modelEndpoint);
+  const beforeNavigation = saves.length;
+  await search.press('ArrowDown');
+  assert.equal(saves.length, beforeNavigation, '方向键只导航，不提交切换');
+  await search.fill('MODEL 29');
+  assert.equal(await menu.getByRole('option').count(), 1, '搜索忽略大小写且支持多个关键词');
+  await search.evaluate(el => el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true })));
+  assert.equal(saves.length, beforeNavigation, '中文候选确认不能误切换模型');
+  saveMode = 'error'; await search.press('Enter');
   await menu.getByRole('alert').getByText(/保存失败：测试保存暂不可用/).waitFor();
-  assert.equal(await menu.isVisible(), true, '输入区保存失败保留菜单');
-  saveMode = 'success';
-  const savedBefore = saves.length; await menu.getByRole('button', { name: '保存', exact: true }).click();
-  await page.waitForFunction(() => !document.querySelector('#model-menu'));
-  assert.equal(saves.length, savedBefore + 1); assert.equal(saved.model, 'model-29'); assert.equal(saved.modelEndpoint, 'https://new.example/v1');
+  assert.equal(await menu.isVisible(), true, '失败保留菜单和搜索');
+  assert.equal(await search.inputValue(), 'MODEL 29');
+  assert.equal(saved.model, 'reopened-model');
+  saveMode = 'slow'; await menu.getByRole('option', { name: 'model-29', exact: true }).click();
+  await until(() => heldSaves.length === 1);
+  assert.equal(await menu.getByRole('option').first().isDisabled(), true);
+  const inFlightCount = saves.length;
+  await search.press('Enter'); assert.equal(saves.length, inFlightCount, '保存中不重复提交');
+  await page.keyboard.press('Escape');
+  await page.locator('#input-flow').fill('使用刚选择的模型发送');
+  assert.equal(await page.locator('#send').isDisabled(), true, '切换未确认前不能发送');
+  await page.locator('#input-flow').press('Enter');
+  assert.deepEqual(await page.evaluate(async () => [
+    await store.getState().submitInput('旁路发送', []),
+    await store.getState().resendMessage(1, '旁路重发', []),
+    await store.getState().continueRun()
+  ]), [false, false, false], '发送入口自身也检查模型保存锁');
+  assert.equal(await page.evaluate(() => submissions.length), 0);
+  assert.equal(await page.locator('#input-flow').innerText(), '使用刚选择的模型发送', '保存中保留草稿');
+  heldSaves.splice(0).forEach(resolve => resolve()); saveMode = 'success';
+  await page.waitForFunction(() => store.getState().settingsData.model === 'model-29');
+  assert.equal(saved.model, 'model-29');
+  assert.equal(saved.modelEndpoint, 'https://saved.example/v1', '快速切换不修改连接配置');
+  assert.deepEqual(saves.at(-1), {model:'model-29',endpoint:'',apiKey:'',clearApiKey:false});
+  await page.waitForFunction(() => !document.querySelector('#send').disabled);
+  await page.evaluate(() => window.threadBeforeSend = store.getState().thread);
+  await page.locator('#send').click();
+  await page.waitForFunction(() => submissions.length === 1);
+  assert.equal(await page.evaluate(() => submissions[0].model), 'model-29', '确认保存后发送使用新模型配置');
+  await page.evaluate(() => store.setState({thread:window.threadBeforeSend,pendingInputs:[]}));
 
-  // 关闭表单后完成的请求不能复活旧列表。
-  mode = 'success'; await page.locator('#model-chip').click();
-  await menu.getByLabel('端点', { exact: true }).fill('https://slow.example/v1');
-  await menu.getByRole('button', { name: '探测模型', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('#model-menu button[aria-busy="true"]'));
-  await page.keyboard.press('Escape'); held.splice(0).forEach(resolve => resolve());
+  // 选择当前项不写入；Escape 关闭并还原焦点。
   await page.locator('#model-chip').click();
-  assert.equal(await menu.getByRole('listbox', { name: '探测到的模型' }).count(), 0);
+  const beforeCurrent = saves.length;
+  await menu.getByRole('option', { name: 'model-29', exact: true }).click();
+  assert.equal(saves.length, beforeCurrent);
+  await page.locator('#model-chip').click(); await page.keyboard.press('Escape');
+  assert.equal(await menu.count(), 0);
+  assert.equal(await page.locator('#model-chip').evaluate(el => el === document.activeElement), true);
+
+  // 旧菜单异步完成不能关闭重开的菜单，重开期间也保留全局保存锁。
+  await page.locator('#model-chip').click();
+  await menu.getByRole('option', { name: 'model-28', exact: true }).waitFor();
+  saveMode = 'slow'; await search.fill('model-28'); await search.press('Enter');
+  await until(() => heldSaves.length === 1);
+  await page.keyboard.press('Escape'); await page.locator('#model-chip').click();
+  assert.equal(await menu.getByRole('option').first().isDisabled(), true);
+  heldSaves.splice(0).forEach(resolve => resolve()); saveMode = 'success';
+  await page.waitForFunction(() => store.getState().settingsData.model === 'model-28');
+  assert.equal(await menu.isVisible(), true);
+  await menu.getByRole('option', {name:'model-28', exact:true}).waitFor();
+  assert.equal(await menu.getByRole('option', {name:'model-28', exact:true}).getAttribute('aria-selected'), 'true');
+  await search.fill('missing-model'); await menu.getByText(/没有匹配的模型/).waitFor();
+  assert.equal(await menu.getByRole('option').count(), 0);
+  const beforeEmpty = saves.length; await search.press('Enter'); assert.equal(saves.length, beforeEmpty);
+  await page.keyboard.press('Escape');
+
+  mode = 'slow'; await page.locator('#model-chip').click();
+  await until(() => held.length === 1);
+  await search.fill('gpt'); await page.keyboard.press('Escape');
+  mode = 'many'; await page.locator('#model-chip').click();
+  await menu.getByRole('option', {name:'model-29',exact:true}).waitFor();
+  held.splice(0).forEach(resolve => resolve()); await page.waitForTimeout(100);
+  assert.equal(await menu.getByRole('option', {name:'gpt-test-a',exact:true}).count(), 0, '已关闭菜单的晚响应不能覆盖新列表');
+  await page.keyboard.press('Escape');
+
+  // 获取失败保留当前配置；刷新可重试；空返回与首次无配置都有可操作的反馈。
+  mode = 'error'; await page.locator('#model-chip').click();
+  await menu.getByRole('alert').filter({hasText:'测试端点暂不可用'}).waitFor();
+  await menu.getByRole('option', {name:'model-28', exact:true}).waitFor();
+  mode = 'empty'; await menu.getByRole('button', {name:'刷新模型列表'}).click();
+  await menu.getByText(/服务未返回模型列表/).waitFor();
+  assert.equal(await menu.getByRole('option').count(), 1);
+  await menu.getByRole('button', {name:'模型设置'}).click();
+  await settings.locator('#settings-model-name').waitFor();
+  assert.equal(await settings.locator('#settings-model-name').inputValue(), 'model-28');
+  assert.equal(await menu.count(), 0);
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => store.setState({settingsData:{...store.getState().settingsData,model:''},modelOptions:[]}));
+  await page.locator('#model-chip').click(); await menu.getByText(/暂无可选模型/).waitFor();
+  await page.keyboard.press('Escape');
+  await page.evaluate(model => store.setState({settingsData:{...store.getState().settingsData,model}}), saved.model);
+
+  // 三种宽度、长模型名和短窗口：搜索、列表、底部设置都在视口内。
+  mode = 'success';
+  const longModel = 'provider/' + 'very-long-model-name-'.repeat(5);
+  models.push(longModel);
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
+    for (const [width,height] of [[1440,900],[768,900],[390,844],[768,480]]) {
+      await page.setViewportSize({width,height}); await page.locator('#model-chip').click();
+      await menu.getByRole('option', {name:longModel,exact:true}).waitFor();
+      await page.waitForFunction(() => document.querySelector('#model-menu [role=listbox]')?.getAttribute('aria-busy') === 'false');
+      const box = await menu.boundingBox();
+      assert.ok(box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height, '菜单不越出视口');
+      assert.ok(await menu.evaluate(el => el.scrollWidth <= el.clientWidth + 1), '长名称不导致横向溢出');
+      await page.screenshot({path:join(output,`${name}-picker-${theme}-${width}x${height}.png`),animations:'disabled'});
+      await search.fill(longModel); await search.press('Enter');
+      await page.waitForFunction(() => !document.querySelector('#model-menu'));
+      assert.ok(await page.locator('#model-chip').evaluate(el => el.getBoundingClientRect().width <= 240), '长名称入口保持紧凑');
+    }
+  }
+  models.pop();
+  await page.setViewportSize({width:1440,height:900});
+  await page.locator('#model-chip').click(); await page.locator('.empty-title').click();
+  assert.equal(await menu.count(), 0, '点击外部关闭菜单');
   assert.deepEqual(errors, []);
-  console.log(`${name}: PASS 模型探测/选择、保存中/弹窗内反馈/全局防重复/密钥清空/错误重试/断网/畸形响应/清 Key/重开竞态、三个宽度`);
+  console.log(`${name}: PASS 模型设置、快速搜索切换、键盘/IME/焦点、失败重试/写入锁/重开竞态、深浅主题/三个宽度/短窗口/长模型名`);
 }
 try {
   browser = await chromium.launch({ channel: 'chrome', headless: true });

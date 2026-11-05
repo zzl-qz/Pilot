@@ -1,6 +1,8 @@
 import React from 'react';
 
 const paths = {
+  pin: 'm6 2 6 3-2 3v3l-3-1-3 2-1-3 3-2Z M5 11l-3 3',
+  unread: 'M13 7a5 5 0 1 1-4-4 M14 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0',
   home: 'M2 7 8 2l6 5v7H9v-4H7v4H2Z',
   phone: 'M5 1h6a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1Z M7 12h2',
   sidebar: 'M2 3h12v10H2Z M6 3v10',

@@ -38,8 +38,14 @@ export function resolveFolders(project, workspace) {
  * 永远置顶、浅色、发送第一条消息后自动变成普通历史。
  * 归档的不删，收进折叠区，随时可以恢复。
  */
+export function sortSessions(sessions) {
+  const time = session => Date.parse(session.updatedAt || session.createdAt || '') || 0;
+  return [...(Array.isArray(sessions) ? sessions : [])].sort((a, b) =>
+    Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || time(b) - time(a));
+}
+
 export function partitionSessions(sessions) {
-  const list = Array.isArray(sessions) ? sessions : [];
+  const list = sortSessions(sessions);
   const blank = list.find((session) => session.isBlank && !session.archived) || null;
   const active = list.filter((session) => !session.isBlank && !session.archived);
   const archived = list.filter((session) => session.archived);
@@ -51,7 +57,7 @@ export function partitionSessions(sessions) {
  *
  * @param {Array<{id: string, name: string, folders?: string[]}>} projects
  * @param {Array<{id: string, projectId?: string|null, isBlank?: boolean, archived?: boolean}>} sessions
- *        已按创建时间倒序
+ *        按置顶和最近活动时间排序
  * @returns {Array<{project: object, blank: object|null, active: Array, archived: Array}>}
  */
 export function groupSessionsByProject(projects, sessions) {

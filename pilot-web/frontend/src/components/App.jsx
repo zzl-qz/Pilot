@@ -15,7 +15,7 @@ import { TaskContract, Modals } from './Modals.jsx';
 import { SelectionQuote } from './SideChat.jsx';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { resolveFolders, samePath } from '../lib/projects.js';
-import { shortcut, runPhase, isShortcutModifier } from '../lib/interaction.js';
+import { shortcut, runPhase, runTone, isShortcutModifier } from '../lib/interaction.js';
 import { api } from '../api.js';
 import { watchWorkbench } from '../lib/workbench-sync.js';
 import { writeClipboard } from '../lib/clipboard.js';
@@ -59,6 +59,10 @@ export default function App() {
   // 75 秒没有任何事件就提示可能卡住（与旧版 STALL_SECONDS 一致）
   const idleSeconds = running && lastEventAt ? Math.round((Date.now() - lastEventAt) / 1000) : 0;
   const stalled = idleSeconds >= 75;
+  const statusTone = runTone(phase, running && stalled);
+  const statusLabel = running && stalled && runTone(phase) === 'running' ? '暂无新进展' : phase;
+  const statusDetail = running && stalled ? `${statusLabel} · 已经 ${idleSeconds} 秒没有新事件，请检查执行情况`
+    : phase === '就绪' ? '就绪，可以发送新消息' : phase;
 
   useEffect(() => {
     if (!running) {
@@ -360,12 +364,12 @@ export default function App() {
             )}
             <span
               id="run-state"
-              className={`run-state state-${running ? 'running' : 'idle'}${running && stalled ? ' is-stalled' : ''}`}
-              title={stalled ? `已经 ${idleSeconds} 秒没有新事件，可能卡住了` : undefined}
+              className={`run-state state-${statusTone}`}
+              data-tone={statusTone}
+              title={statusDetail}
             >
-              {phase}
-              {running && runStartedAt ? ` · ${Math.round((Date.now() - runStartedAt) / 1000)}s` : ''}
-              {stalled ? ` · ${idleSeconds}s 无新事件` : ''}
+              <span className="run-state-label" role="status">{statusLabel}</span>
+              {running && runStartedAt ? <span className="run-state-time" aria-hidden="true">{Math.round((Date.now() - runStartedAt) / 1000)}s</span> : null}
             </span>
             {/* 内嵌页再展开审阅面板会把窄 iframe 挤成两栏，这里不给入口 */}
             {!embedded && (

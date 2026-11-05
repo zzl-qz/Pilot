@@ -1,9 +1,10 @@
 import { shortcut } from '../lib/interaction.js';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store.js';
 import { WorkspaceTree } from './WorkspaceTree.jsx';
 import { groupSessionsByProject } from '../lib/projects.js';
 import { Icon } from './Icon.jsx';
+import { SessionMenu } from './SessionMenu.jsx';
 import { sideChatsFor } from '../lib/side-chat.js';
 
 /** 左侧导航：项目分组的会话列表 + 工作区文件树 + 连接状态。 */
@@ -13,9 +14,13 @@ export function Sidebar() {
   const sessionId = useStore((state) => state.sessionId);
   const workspace = useStore((state) => state.workspace);
   const connection = useStore((state) => state.ui.connection);
+  const sidebarOpen = useStore((state) => state.ui.sidebarOpen);
   const sideChats = useStore((state) => state.sideChats);
   const [query, setQuery] = useState('');
+  const [menu, setMenu] = useState(null);
+  const menuSession = menu && sessions.find(session => session.id === menu.id);
   const [collapsed, setCollapsed] = useState(() => new Set());
+  useEffect(() => { if (!sidebarOpen) setMenu(null); }, [sidebarOpen]);
 
   // 侧边对话属于当前任务：换任务后这里只列出那条任务的，跨项目也不会串台
   const { items: sideItems, activeId: sideActiveId } = sideChatsFor(sideChats, { sessionId, workspace });
@@ -87,6 +92,8 @@ export function Sidebar() {
                 key={group.project.id || 'ungrouped'}
                 group={group}
                 activeId={sessionId}
+                menuId={menu?.id}
+                onMenu={(session, anchor) => setMenu({id:session.id, ...anchor})}
                 collapsed={collapsed.has(group.project.id || 'ungrouped')}
                 onToggle={() => toggleProject(group.project.id || 'ungrouped')}
               />
@@ -135,11 +142,12 @@ export function Sidebar() {
           {workspace ? workspace.split(/[\\/]/).filter(Boolean).pop() : ''}
         </button>
       </div>
+      {menuSession && <SessionMenu key={menu.id} session={menuSession} anchor={menu} onClose={() => setMenu(null)} />}
     </aside>
   );
 }
 
-function ProjectGroup({ group, activeId, collapsed, onToggle }) {
+function ProjectGroup({ group, activeId, collapsed, onToggle, onMenu, menuId }) {
   // 空白对话（isBlank）是旧版「先建后聊」的遗留：新对话不再落库，这里也不再给它留位置
   const { project, active, archived } = group;
   const count = active.length;
@@ -198,7 +206,7 @@ function ProjectGroup({ group, activeId, collapsed, onToggle }) {
       </div>
 
       <ul className="project-sessions" hidden={collapsed}>
-        {active.map((session) => <SessionRow key={session.id} session={session} activeId={activeId} />)}
+        {active.map((session) => <SessionRow key={session.id} session={session} activeId={activeId} onMenu={onMenu} menuId={menuId} />)}
         {!active.length && (
           <li className="project-empty">{project.id ? '还没有对话' : '没有未分组的对话'}</li>
         )}
@@ -208,7 +216,7 @@ function ProjectGroup({ group, activeId, collapsed, onToggle }) {
         <details className="project-archived" hidden={collapsed}>
           <summary>{`已归档 ${archived.length}`}</summary>
           <ul className="project-sessions">
-            {archived.map((session) => <SessionRow key={session.id} session={session} activeId={activeId} />)}
+            {archived.map((session) => <SessionRow key={session.id} session={session} activeId={activeId} onMenu={onMenu} menuId={menuId} />)}
           </ul>
         </details>
       )}
@@ -216,17 +224,21 @@ function ProjectGroup({ group, activeId, collapsed, onToggle }) {
   );
 }
 
-function SessionRow({ session, activeId }) {
+function SessionRow({ session, activeId, onMenu, menuId }) {
   const blank = session.isBlank === true;
   const status = String(session.status || '').trim().toLowerCase();
   return (
-    <li className="session-row">
+    <li className={`session-row${session.unread ? ' is-unread' : ''}`} data-session-id={session.id}
+      onContextMenu={event => { event.preventDefault(); onMenu(session, {x:event.clientX,y:event.clientY,trigger:event.currentTarget.querySelector('.session-more')}); }}>
       <button
         type="button"
         className={`session-item${session.id === activeId ? ' is-active' : ''}${blank ? ' is-blank' : ''}${session.archived ? ' is-archived' : ''}`}
         aria-current={session.id === activeId ? 'page' : undefined}
         title={blank ? '新对话：还没有消息，发送第一条后自动变成历史对话' : (session.workspace ? `${session.title}\n${session.workspace}` : session.title)}
         onClick={() => useStore.getState().activate(session.id)}
+        onKeyDown={event => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+          event.preventDefault(); const box=event.currentTarget.getBoundingClientRect(); onMenu(session,{x:box.right,y:box.top,trigger:event.currentTarget});
+        } }}
       >
         {blank ? (
           <span className="session-new-icon" aria-hidden="true">
@@ -236,35 +248,14 @@ function SessionRow({ session, activeId }) {
           <span className={`dot is-${status || 'idle'}`} aria-hidden="true" />
         )}
         <span className="session-title">{blank ? '新对话' : session.title}</span>
+        {session.pinned && <span className="session-pin" aria-label="已置顶"><Icon name="pin" /></span>}
+        {session.unread && <span className="session-unread" aria-label="未读" />}
       </button>
-      <button
-        type="button"
-        className="session-action"
-        title={session.archived ? '恢复到列表' : '归档（保留历史，从列表里收起）'}
-        aria-label={session.archived ? '恢复到列表' : '归档'}
-        onClick={(event) => {
-          event.stopPropagation();
-          useStore.getState().archiveSession(session.id, !session.archived);
-        }}
-      >
-        {session.archived ? '↩' : '↓'}
-      </button>
-      <button
-        type="button"
-        className="session-action is-danger"
-        title="彻底删除（事件与检查点一起清掉，不可恢复）"
-        aria-label="删除对话"
-        onClick={(event) => {
-          event.stopPropagation();
-          useStore.getState().askConfirm({
-            title: '删除对话',
-            message: `「${session.title || '新对话'}」及其历史、检查点会被永久删除，无法恢复。确定删除吗？`,
-            confirmText: '删除',
-            danger: true,
-            onConfirm: () => useStore.getState().deleteSession(session.id)
-          });
-        }}
-      >×</button>
+      <button type="button" className="session-more icon-btn" title="更多操作" aria-label={`对话操作：${session.title}`}
+        aria-haspopup="menu" aria-expanded={menuId === session.id} onClick={event => {
+          const box = event.currentTarget.getBoundingClientRect();
+          onMenu(session, {x:box.right + 4, y:box.top, trigger:event.currentTarget});
+        }}><Icon name="more" /></button>
     </li>
   );
 }

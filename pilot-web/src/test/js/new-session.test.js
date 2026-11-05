@@ -83,7 +83,7 @@ test('项目里新建对话会把 projectId 带上，不再掉进未分组', () 
   assert.deepEqual(useStore.getState().draftSession, { projectId: 'prj_1', workspace: 'E:\\Pilot' });
 });
 
-test('第一条消息触发创建，标题取输入开头，随后才发消息', async () => {
+test('第一条消息触发创建，标题由服务端生成，随后才发消息', async () => {
   reset();
   useStore.getState().startNewSession();
   await useStore.getState().submitInput('帮我看看 pom 里有哪些模块');
@@ -92,7 +92,7 @@ test('第一条消息触发创建，标题取输入开头，随后才发消息',
   assert.equal(created.length, 1);
   assert.equal(created[0].body.projectId, undefined);
   assert.equal(created[0].body.replaceBlank, true, '旧版遗留的空白对话要顺手归档');
-  assert.equal(created[0].body.title, '帮我看看 pom 里有哪些模块');
+  assert.equal(created[0].body.title, undefined, '客户端不能把自动名称写成手动名称');
 
   const sent = calls.filter((call) => call.url.includes('/messages'));
   assert.equal(sent.length, 1);
