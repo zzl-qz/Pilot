@@ -5,12 +5,15 @@ import computer.iroh.*
 import kotlinx.coroutines.*
 
 /** 显式执行的外网探针：仅固定文本。两端分处网络命名空间且只绑定回环，避免走直连。 */
-private suspend fun probeEndpoint(): Endpoint = Endpoint.bind(EndpointOptions(
-    preset = presetMinimal(), bindAddr = "127.0.0.1:0", alpns = listOf(Protocol.alpn), relayMode = RelayMode.defaultMode(),
-))
+private suspend fun probeEndpoint(relays: List<String>): Endpoint {
+    require(relays.isNotEmpty()) { "中继探针需要显式提供已配置的中继地址，不会自动使用公共服务" }
+    return Endpoint.bind(EndpointOptions(
+    preset = presetMinimal(), bindAddr = "127.0.0.1:0", alpns = listOf(Protocol.alpn), relayMode = RelayMode.customFromUrls(relays),
+    ))
+}
 
-suspend fun relayProbeServer() {
-    val endpoint = probeEndpoint()
+suspend fun relayProbeServer(relays: List<String>) {
+    val endpoint = probeEndpoint(relays)
     try {
         withTimeout(60_000) {
             endpoint.online()
@@ -28,8 +31,8 @@ suspend fun relayProbeServer() {
     } finally { endpoint.shutdown() }
 }
 
-suspend fun relayProbeClient(ticket: String) {
-    val endpoint = probeEndpoint()
+suspend fun relayProbeClient(ticket: String, relays: List<String>) {
+    val endpoint = probeEndpoint(relays)
     try {
         withTimeout(45_000) {
             endpoint.online()

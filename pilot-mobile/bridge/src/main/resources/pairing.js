@@ -4,7 +4,10 @@ const $ = id => document.getElementById(id);
 let code = '', deadline = 0;
 async function api(path, method = 'GET', body) {
   const response = await fetch(path, { method, headers: { 'X-Pilot-Pairing': token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(25000) });
-  if (!response.ok) throw new Error(response.status === 403 ? '页面授权已失效，请从电脑重新打开连接页面。' : '连接服务暂不可用，请检查网络后重试。');
+  if (!response.ok) {
+    const details = await response.json().catch(() => ({}));
+    throw new Error(response.status === 403 ? '页面授权已失效，请从电脑重新打开连接页面。' : details.error || '无法生成本机配对码，请重试。');
+  }
   return response.json();
 }
 async function devices() {
@@ -23,10 +26,13 @@ async function devices() {
   }
 }
 $('create').onclick = async () => {
-  $('create').disabled = true; $('status').textContent = '正在准备连接…'; $('invite').hidden = true;
+  $('create').disabled = true; $('status').textContent = '正在生成这台电脑的配对码…'; $('invite').hidden = true;
   try {
     const result = await api('/api/pair', 'POST'); code = result.code; deadline = Date.now() + result.expiresIn * 1000;
-    $('qr').src = result.image; $('invite').hidden = false; $('status').textContent = '打开 Pilot App，选择“扫码连接电脑”。'; $('create').textContent = '重新生成';
+    $('qr').src = result.image; $('invite').hidden = false; $('status').textContent = '配对码已在本机生成，等待手机扫码。'; $('create').textContent = '重新生成';
+    $('mode').textContent = result.connectionMode === 'relay-enabled'
+      ? '后端已配置中继，必要时使用已配置的中继。'
+      : '未配置中继，仅尝试 P2P 直连；两端需有可互达的网络地址。';
   } catch (error) { $('status').textContent = error.message; }
   finally { $('create').disabled = false; }
 };

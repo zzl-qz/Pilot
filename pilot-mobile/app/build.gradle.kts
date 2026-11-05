@@ -11,8 +11,8 @@ android {
         applicationId = "com.pilot.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.2.3-preview"
+        versionCode = 6
+        versionName = "0.2.4-preview"
         resValue("string", "app_name", "Pilot")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }

@@ -28,6 +28,11 @@ spring:
           no-cache: true
 
 pilot:
+  mobile:
+    # 留空时只尝试 P2P 直连，不启用公共中继、发现服务或等待中继上线。
+    # 只有明确配置后才使用，例如 https://relay.example.com:443；多个地址以逗号分隔。
+    # 这里必须是可供双方访问的 iroh 中继服务，不是 HTTP 代理或普通路由器端口。
+    relay: ${PILOT_MOBILE_RELAY:}
   desktop:
     # 服务起来后打开桌面窗口。浏览器访问同一端口仍然可用。测试里关掉。
     launch: ${PILOT_DESKTOP_LAUNCH:true}

@@ -51,7 +51,7 @@ data class PairingInvite(
     val expiresAt: Long,
     val name: String,
     val relays: List<String> = emptyList(),
-    val developmentRelays: Boolean = true,
+    val developmentRelays: Boolean = false,
 ) {
     fun encode(): String = PREFIX + Base64.getUrlEncoder().withoutPadding()
         .encodeToString(Protocol.json.encodeToString(serializer(), this).toByteArray())

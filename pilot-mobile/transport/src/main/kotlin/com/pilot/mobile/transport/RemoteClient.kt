@@ -13,6 +13,7 @@ class RemoteClient(
     private val ticket: String,
     private val requestTimeoutMillis: Long = 45_000,
     private val diagnostic: (String) -> Unit = {},
+    private val relays: List<String> = emptyList(),
 ) {
     private val mutex = Mutex()
     private var connection: Connection? = null
@@ -22,7 +23,7 @@ class RemoteClient(
     private suspend fun connect(): Connection = mutex.withLock {
         connection?.takeIf { it.closeReason() == null } ?: withTimeout(20_000) {
             trace("connect.start")
-            val address = EndpointTicket.fromString(ticket).use { it.endpointAddr() }
+            val address = dialAddress(ticket, relays)
             try { endpoint.connect(address, Protocol.alpn).also { connection = it; trace("connect.ready ${pathLabel()}") } }
             finally { address.close() }
         }
@@ -134,18 +135,25 @@ class RemoteClient(
     }
 }
 
+/** 旧版保存的票据可能含公共中继；未配置中继时也必须剥离该路由。 */
+internal fun dialAddress(ticket: String, relays: List<String>): EndpointAddr =
+    EndpointTicket.fromString(ticket).use { parsed ->
+        parsed.endpointAddr().use { address ->
+            address.id().use { id ->
+                EndpointAddr(id, if (relays.isEmpty()) null else address.relayUrl(), address.directAddresses())
+            }
+        }
+    }
+
 internal fun requestTimeoutMessage(method: String): String = if (method == "GET")
     "读取数据超时，正在尝试重新连接电脑" else "请求超时，请先核对电脑端是否已收到指令"
 
-/** 同一配置用于 Android 和桌面；测试可关闭外部发现与中继。 */
-suspend fun createEndpoint(key: ByteArray, relays: List<String> = emptyList(), development: Boolean = true): Endpoint {
-    val mode = when {
-        relays.isNotEmpty() -> RelayMode.customFromUrls(relays)
-        development -> RelayMode.defaultMode()
-        else -> RelayMode.disabled()
-    }
+/** 未显式配置就只走直连；兼容旧数据中的 development 字段，但不据此启用公共服务。 */
+@Suppress("UNUSED_PARAMETER")
+suspend fun createEndpoint(key: ByteArray, relays: List<String> = emptyList(), development: Boolean = false): Endpoint {
+    val mode = if (relays.isEmpty()) RelayMode.disabled() else RelayMode.customFromUrls(relays)
     return Endpoint.bind(EndpointOptions(
-        preset = if (development) presetN0() else presetMinimal(),
+        preset = presetMinimal(),
         secretKey = key, alpns = listOf(Protocol.alpn), relayMode = mode,
     ))
 }

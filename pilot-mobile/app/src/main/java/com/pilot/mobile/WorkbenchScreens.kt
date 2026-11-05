@@ -63,7 +63,7 @@ fun ConnectScreen(busy: Boolean, scan: () -> Unit, paste: () -> Unit) {
             SectionTitle("配对只需一步")
             Text("在电脑 Pilot 的左侧打开“连接手机”，扫描弹出的二维码。配对后，可以管理这台电脑上的全部项目与任务。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        item { InfoNote("电脑需要保持在线。手机和电脑可以使用不同网络，连接可能经由中继。") }
+        item { InfoNote("电脑需保持在线。默认使用 P2P 直连；仅在电脑后端明确配置后才使用中继。不同网络能否直连取决于网络条件。") }
     }
 }
 
@@ -230,7 +230,12 @@ fun DevicesScreen(state: MobileState, model: PilotViewModel, scan: () -> Unit, p
         item { AppearanceSettings() }
         item { SectionTitle("连接说明"); Text("每台电脑的项目、草稿与待核对指令分别保存。断开连接不会停止电脑上的任务。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { Text("授权范围：这台电脑上的 Pilot 项目和任务。要撤销手机权限，请在电脑左侧“连接手机 → 已配对设备”中移除。", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        if (state.computers.firstOrNull { it.id == state.computerId }?.development == true) item { Text("已自动配置公共连接服务，无需自建服务器。连接速度与可用性受网络及公共服务影响。", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item {
+            val configured = state.computers.firstOrNull { it.id == state.computerId }?.relays?.isNotEmpty() == true
+            Text(if (configured) "电脑端已配置中继；连接优先尝试直连，必要时使用已配置的中继。"
+                else "未配置中继，仅尝试 P2P 直连。两端需有可互达的网络地址。",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
     forget?.let { computer -> AlertDialog(onDismissRequest = { forget = null }, title = { Text("移除 ${computer.name}？") }, text = { Text("将删除这台电脑在手机上的连接、草稿和待核对记录。电脑上的任务继续运行。") },
         confirmButton = { TextButton(onClick = { model.forget(computer.id); forget = null }) { Text("断开并忘记") } }, dismissButton = { TextButton(onClick = { forget = null }) { Text("取消") } }) }

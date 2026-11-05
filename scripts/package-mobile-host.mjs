@@ -33,7 +33,7 @@ await new Promise((resolve,reject) => {
 const sh = '#!/bin/sh\nset -eu\nPILOT_BUNDLE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\ncd "$PILOT_BUNDLE_DIR"\nexec "$PILOT_BUNDLE_DIR/runtime/bin/java" --enable-native-access=ALL-UNNAMED -jar "$PILOT_BUNDLE_DIR/pilot-server.jar" "--pilot.mobile.libraries=$PILOT_BUNDLE_DIR/mobile-bridge/lib" --server.address=127.0.0.1 "$@"\n';
 await writeFile(path.join(output,'start.sh'), sh); await chmod(path.join(output,'start.sh'),0o755);
 await writeFile(path.join(output,'start.cmd'), '@echo off\r\nsetlocal\r\ncd /d "%~dp0"\r\n"%~dp0runtime\\bin\\java.exe" --enable-native-access=ALL-UNNAMED -jar "%~dp0pilot-server.jar" "--pilot.mobile.libraries=%~dp0mobile-bridge\\lib" --server.address=127.0.0.1 %*\r\n');
-await writeFile(path.join(output,'README.txt'), 'Pilot 移动连接预览包\n运行当前系统的 start.sh 或 start.cmd，然后在浏览器打开 http://localhost:9999。已有 Pilot 桌面可以连接此后台。\n手机安装 pilot-android-preview.apk，在电脑左侧“连接手机”中扫码。电脑需保持运行。\n已默认配置公共连接服务，自用无需先租服务器；公共服务可能限速或不可用。此 APK 已由本机开发密钥签名，可直接安装；以后更新应使用相同的签名密钥。后台通知尚未启用。\n运行数据保存在此目录下 .pilot，请备份后再替换安装包。\n');
+await writeFile(path.join(output,'README.txt'), 'Pilot 移动连接预览包\n运行当前系统的 start.sh 或 start.cmd，然后在浏览器打开 http://localhost:9999。已有 Pilot 桌面可以连接此后台。\n手机安装 pilot-android-preview.apk，在电脑左侧“连接手机”中扫码。电脑需保持运行。\n默认不使用中继，仅尝试 P2P 直连；两端需有可互达地址。需要中继时必须在后端明确配置服务地址。此 APK 已由本机开发密钥签名，可直接安装；以后更新应使用相同的签名密钥。后台通知尚未启用。\n运行数据保存在此目录下 .pilot，请备份后再替换安装包。\n');
 await rename(output, finalOutput);
 console.log(`已生成便携后台：${finalOutput}`);
 } catch (error) { await rm(output, {recursive:true,force:true}); throw error; }

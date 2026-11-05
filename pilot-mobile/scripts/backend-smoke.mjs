@@ -23,8 +23,8 @@ const requestId = randomUUID();
 let server;
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
-async function start(mobileLibraries = libraries) {
-  server = spawn(java, ['--enable-native-access=ALL-UNNAMED', '-jar', serverJar, '--server.address=127.0.0.1', '--server.port=0', `--pilot.data.dir=${data}`, `--pilot.agent.workspace=${workspace}`, `--pilot.mobile.libraries=${mobileLibraries}`, '--pilot.runtime.provision=false', '--pilot.web-search.local=false', '--pilot.model.api-key=', '--pilot.model.endpoint=http://127.0.0.1:9/v1/chat/completions', '--pilot.security.mode=token', `--pilot.security.token=${token}`], { cwd: directory, stdio: ['ignore', 'pipe', 'pipe'] });
+async function start(mobileLibraries = libraries, relay = '') {
+  server = spawn(java, ['--enable-native-access=ALL-UNNAMED', '-jar', serverJar, '--server.address=127.0.0.1', '--server.port=0', `--pilot.data.dir=${data}`, `--pilot.agent.workspace=${workspace}`, `--pilot.mobile.libraries=${mobileLibraries}`, `--pilot.mobile.relay=${relay}`, '--pilot.runtime.provision=false', '--pilot.web-search.local=false', '--pilot.model.api-key=', '--pilot.model.endpoint=http://127.0.0.1:9/v1/chat/completions', '--pilot.security.mode=token', `--pilot.security.token=${token}`], { cwd: directory, stdio: ['ignore', 'pipe', 'pipe'] });
   return new Promise((resolve, reject) => {
     let output = '';
     const timer = setTimeout(() => reject(new Error('真实服务启动超时，请先构建服务端 Jar 并使用 Java 25')), 30000);
@@ -87,7 +87,9 @@ try {
   if (!before.ok || !(await before.json()).running) throw new Error('后台托管连接桥启动失败');
   const response = await fetch(`${base}/api/mobile/connection/pair`, {method:'POST',headers:{'X-Pilot-Token':token,'Content-Type':'application/json'},body:'{"reuse":true}'});
   if (!response.ok) throw new Error('工作台配对码生成失败');
-  const {code} = await response.json();
+  const invite = await response.json();
+  assert.equal(invite.connectionMode, 'direct-only', '未配置后端中继必须是直连模式');
+  const {code} = invite;
   await checkPhone(code);
   if (recovery) {
     const oldPid = (await bridgeProcesses('stop')).at(0);
@@ -109,5 +111,15 @@ try {
     await waitBridge();
     await checkPhone(code, true);
     console.log('PASS: 连接桥异常退出自动恢复、后台重启自动恢复、原配对和任务及幂等回执保留；模型调用为 0');
+  }
+  if (!recovery) {
+    await stop();
+    base = await start(libraries, 'https://127.0.0.1:9');
+    const status = await (await fetch(base+'/api/mobile/connection', {headers:{'X-Pilot-Token':token}})).json();
+    assert.equal(status.connectionMode,'relay-enabled','只有明确配置后端中继才进入中继模式');
+    const unavailable = await fetch(base+'/api/mobile/connection/pair',{method:'POST',headers:{'X-Pilot-Token':token,'Content-Type':'application/json'},body:'{}'});
+    assert.equal(unavailable.status,503);
+    assert.match((await unavailable.json()).message,/后端已配置的中继/);
+    console.log('PASS: 显式配置的不可达中继返回对应错误，没有回退到默认公共中继');
   }
 } finally { await stop(); await rm(directory,{recursive:true,force:true}); }

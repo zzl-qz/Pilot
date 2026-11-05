@@ -22,6 +22,7 @@ import java.util.concurrent.Executors
 class PairingAdmin(
     private val store: PairingStore,
     private val bridge: Bridge,
+    private val relayConfigured: Boolean = false,
     private val issue: suspend () -> PairingInvite,
 ) : AutoCloseable {
     @Volatile private var cachedInvite: JsonObject? = null
@@ -36,8 +37,8 @@ class PairingAdmin(
             try { handle(exchange) }
             catch (error: Exception) {
                 val message = if (error is TimeoutCancellationException)
-                    "手机连接组件已启动，但连接中继超时，请检查这台电脑的网络、代理或防火墙后重试"
-                    else "连接服务暂不可用，请检查网络后重试"
+                    "无法连接后端已配置的中继，请检查中继地址、端口和网络后重新生成配对码"
+                    else "无法生成这台电脑的配对码，请重试"
                 runCatching { respond(exchange, 503, "application/json", buildJsonObject { put("error", message) }.toString().toByteArray()) }
             }
             finally { exchange.close() }
@@ -62,6 +63,7 @@ class PairingAdmin(
                 path == "/api/status" && e.requestMethod == "GET" -> buildJsonObject {
                     put("version", Protocol.VERSION)
                     put("running", true)
+                    put("connectionMode", if (relayConfigured) "relay-enabled" else "direct-only")
                     put("maxDevices", PairingStore.MAX_DEVICES)
                     put("pairedDevice", store.pairedDevice()?.let { device -> devicePayload(device) } ?: JsonNull)
                     put("pairingState", store.pairingState())
@@ -87,6 +89,7 @@ class PairingAdmin(
                             put("code", invite.encode()); put("image", "data:image/png;base64," + Base64.getEncoder().encodeToString(png.toByteArray()))
                             put("expiresIn", 300); put("expiresAt", invite.expiresAt); put("name", invite.name)
                             put("development", invite.developmentRelays)
+                            put("connectionMode", if (relayConfigured) "relay-enabled" else "direct-only")
                         }.also { cachedInvite = it }
                     }).toString()
                 }

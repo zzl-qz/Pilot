@@ -24,7 +24,7 @@ class PairingAdminTest {
         val store = PairingStore(directory)
         val endpoint = createEndpoint(store.key, development = false)
         var simulateRelayTimeout = false
-        val admin = PairingAdmin(store, Bridge(endpoint, store, 9999)) {
+        val admin = PairingAdmin(store, Bridge(endpoint, store, 9999), relayConfigured = true) {
             if (simulateRelayTimeout) withTimeout(1) { delay(100) }
             store.issue(EndpointTicket.fromAddr(endpoint.addr()).toString(), "测试电脑", emptyList(), false)
         }
@@ -45,6 +45,7 @@ class PairingAdminTest {
             assertEquals(200, response.statusCode())
             assertTrue(response.headers().firstValue("Content-Security-Policy").get().contains("frame-ancestors 'none'"))
             val payload = Protocol.json.parseToJsonElement(response.body()).jsonObject
+            assertEquals("relay-enabled", payload.text("connectionMode"))
             val bytes = Base64.getDecoder().decode(payload.text("image").substringAfter(','))
             val bitmap = BinaryBitmap(HybridBinarizer(BufferedImageLuminanceSource(ImageIO.read(bytes.inputStream()))))
             val decoded = MultiFormatReader().decode(bitmap).text
@@ -62,7 +63,7 @@ class PairingAdminTest {
             simulateRelayTimeout = true
             val failed = request("/api/pair", "POST", origin = root)
             assertEquals(503, failed.statusCode())
-            assertTrue(Protocol.json.parseToJsonElement(failed.body()).jsonObject.text("error").contains("连接中继超时"))
+            assertTrue(Protocol.json.parseToJsonElement(failed.body()).jsonObject.text("error").contains("后端已配置的中继"))
             assertFalse(failed.body().contains(invite.secret))
             assertEquals(200, request("/api/status").statusCode(), "配对超时不能误报为连接进程已退出")
         } finally { admin.close(); endpoint.shutdown(); directory.toFile().deleteRecursively() }

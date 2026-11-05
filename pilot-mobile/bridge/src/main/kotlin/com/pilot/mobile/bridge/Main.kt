@@ -8,6 +8,10 @@ import java.net.URI
 import java.nio.file.Path
 
 fun main(args: Array<String>) = runBlocking {
+    fun option(name: String): String? = args.indexOf(name).takeIf { it >= 0 }?.let {
+        require(it + 1 < args.size) { "$name 缺少参数" }; args[it + 1]
+    }
+    fun configuredRelays() = option("--relay")?.split(',')?.map(String::trim)?.filter(String::isNotEmpty) ?: emptyList()
     if ("--check-runtime" in args) {
         // 无设备身份、管理口或外网连接的启动探针，退出码用于判断是否需要修复。
         val status = try {
@@ -28,27 +32,33 @@ fun main(args: Array<String>) = runBlocking {
         println(if (status == 0) "PILOT_MOBILE_RUNTIME_READY" else "PILOT_MOBILE_RUNTIME_UNAVAILABLE")
         kotlin.system.exitProcess(status)
     }
-    if ("--probe-relay-server" in args) { relayProbeServer(); return@runBlocking }
-    if (args.firstOrNull() == "--probe-relay-client") { relayProbeClient(args[1]); return@runBlocking }
-    fun option(name: String): String? = args.indexOf(name).takeIf { it >= 0 }?.let {
-        require(it + 1 < args.size) { "$name 缺少参数" }; args[it + 1]
-    }
+    if ("--probe-relay-server" in args) { relayProbeServer(configuredRelays()); return@runBlocking }
+    if (args.firstOrNull() == "--probe-relay-client") { relayProbeClient(args[1], configuredRelays()); return@runBlocking }
     val port = (option("--pilot-port") ?: "9999").toInt()
     require(port in 1..65535) { "Pilot 端口无效" }
     val parent = option("--parent-pid")?.let { ProcessHandle.of(it.toLong()).orElseThrow { IllegalArgumentException("Pilot 后台已经退出") } }
     val store = PairingStore(Path.of(option("--data-dir") ?: ".pilot/mobile"))
-    val relays = option("--relay")?.split(',') ?: emptyList()
-    relays.forEach { require(URI(it).scheme == "https" && URI(it).host != null) { "中继必须使用 HTTPS" } }
-    val development = "--no-relay" !in args && relays.isEmpty()
-    val endpoint = createEndpoint(store.key, relays, development)
+    val relays = configuredRelays()
+    require(relays.size <= 4) { "最多配置 4 个中继地址" }
+    relays.forEach {
+        val uri = runCatching { URI(it) }.getOrNull()
+        require(uri?.scheme == "https" && uri.host != null && uri.userInfo == null && uri.fragment == null) { "中继必须使用不含认证信息的 HTTPS 地址" }
+    }
+    require("--no-relay" !in args || relays.isEmpty()) { "不能同时配置中继与 --no-relay" }
+    val endpoint = createEndpoint(store.key, relays)
     val bridge = Bridge(endpoint, store, port, System.getenv("PILOT_SECURITY_TOKEN") ?: "")
-    val admin = PairingAdmin(store, bridge) {
-        if (development || relays.isNotEmpty()) withTimeout(20_000) { endpoint.online() }
-        store.issue(EndpointTicket.fromAddr(endpoint.addr()).toString(), option("--name") ?: "我的电脑", relays, development)
+    val admin = PairingAdmin(store, bridge, relayConfigured = relays.isNotEmpty()) {
+        // 只有管理员明确配置了中继，才等待中继可用；默认出码完全在本机完成。
+        if (relays.isNotEmpty()) withTimeout(20_000) { endpoint.online() }
+        endpoint.addr().use { address ->
+            EndpointTicket.fromAddr(address).use { ticket ->
+                store.issue(ticket.toString(), option("--name") ?: "我的电脑", relays, false)
+            }
+        }
     }
     val adminUrl = admin.start()
     println("PILOT_MOBILE_ADMIN $adminUrl")
-    if (development) println("当前使用开发中继；正式发布需配置托管或自建中继。")
+    println(if (relays.isEmpty()) "连接模式：P2P 直连，未启用中继。" else "连接模式：P2P 与已配置的中继。")
     if ("--no-open" !in args && Desktop.isDesktopSupported()) runCatching { Desktop.getDesktop().browse(URI(adminUrl)) }
     Runtime.getRuntime().addShutdownHook(Thread {
         admin.close()

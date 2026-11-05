@@ -45,7 +45,8 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun remote(endpoint: Endpoint, ticket: String) = RemoteClient(endpoint, ticket, diagnostic = { Log.d("PilotConnection", it) })
+    private fun remote(endpoint: Endpoint, ticket: String, relays: List<String>) =
+        RemoteClient(endpoint, ticket, diagnostic = { Log.d("PilotConnection", it) }, relays = relays)
 
     private suspend fun connect(computer: PairedComputer, readyEndpoint: Endpoint? = null, readyClient: RemoteClient? = null) {
         saveDraft(); monitor?.cancelAndJoin(); client?.disconnect(); endpoint?.shutdown()
@@ -55,7 +56,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
             pins = store.value(computer.id, "pins")?.split('\n')?.filter { it.isNotBlank() }?.toSet().orEmpty(),
             pending = store.value(computer.id, "pending")?.let { Protocol.json.decodeFromString(Request.serializer(), it) })
         endpoint = readyEndpoint ?: createEndpoint(store.identity(), computer.relays, computer.development)
-        client = readyClient ?: remote(endpoint!!, computer.ticket)
+        client = readyClient ?: remote(endpoint!!, computer.ticket, computer.relays)
         restartMonitor()
     }
 
@@ -63,10 +64,10 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
 
     fun pair(code: String) = action {
         val invite = PairingInvite.decode(code)
-        val computer = PairedComputer(invite.ticket, invite.name, invite.relays, invite.developmentRelays)
+        val computer = PairedComputer(invite.ticket, invite.name, invite.relays, false)
         require(store.computers().size < 16 || store.computers().any { it.id == computer.id }) { "最多保存 16 台电脑" }
         val candidateEndpoint = createEndpoint(store.identity(), computer.relays, computer.development)
-        val candidate = remote(candidateEndpoint, computer.ticket)
+        val candidate = remote(candidateEndpoint, computer.ticket, computer.relays)
         var adopted = false
         try {
             val response = candidate.request(Request("POST", "/pair", pairingSecret = invite.secret, deviceName = android.os.Build.MODEL))

@@ -30,7 +30,7 @@
 
 后端 `MobileConnectionService` 统一管理连接桥的生命周期。Web 和桌面共用 `<pilot.data.dir>/mobile` 中的电脑密钥与设备授权；关闭配对弹窗不关闭连接。首次启用后，后端重启会自动启动连接桥；连接桥异常退出也会自动恢复，失败时逐步退避至每分钟重试。后台正常或强制退出后，连接桥随之结束。Java 子进程使用与后端一致的运行时和解析后的访问令牌；令牌不下发手机。
 
-传输采用 iroh 1.2.0 的加密 QUIC：能直连则直连，需要时经中继；二维码固定电脑公钥。配对码 5 分钟、一次有效，重新生成立即使旧码失效。管理入口只接受本机同源请求，手机路由白名单不开放设置、配对管理或任意代理。
+传输采用 iroh 1.2.0 的加密 QUIC：默认关闭中继及公共发现，仅尝试 P2P 直连；只有后端明确配置了中继，才启用对应中继。二维码固定电脑公钥。配对码 5 分钟、一次有效，重新生成立即使旧码失效。管理入口只接受本机同源请求，手机路由白名单不开放设置、配对管理或任意代理。
 
 协议升级为 `pilot/remote/2`，手机和连接组件需一起更新。旧 0.1 预览版的独立桌面桥使用过另一份身份目录，升级后需要重新扫码一次；任务和项目数据不迁移也不删除。新的协议版本避免旧桥忽略请求标识后静默重复执行。
 
@@ -71,7 +71,7 @@ node scripts/package-mobile-host.mjs <新的输出目录>
 
 发布签名：设置 `PILOT_ANDROID_KEYSTORE`、`PILOT_ANDROID_STORE_PASSWORD`、`PILOT_ANDROID_KEY_ALIAS`、`PILOT_ANDROID_KEY_PASSWORD` 后运行 `node scripts/mobile.mjs release`。缺少配置会直接失败，避免把未签名包误当正式发行包。普通 `build` 只生成开发签名的预览 APK；正式密钥不进入 Git。
 
-可用 `pilot.mobile.libraries` 指定连接桥 `lib` 目录；默认识别源码构建目录和便携包目录。可用 `PILOT_MOBILE_RELAY=https://…` 配置运营方中继，手机用户无需填写。独立诊断入口仍为 `node scripts/mobile.mjs bridge`，其数据目录需显式指定，不能把它与应用后台同时当作同一电脑身份运行。
+可用 `pilot.mobile.libraries` 指定连接桥 `lib` 目录；默认识别源码构建目录和便携包目录。只有后端的 `pilot.mobile.relay`（或对应 `PILOT_MOBILE_RELAY` 环境变量）明确配置了 HTTPS 地址与端口时才启用中继，手机用户无需填写。留空不会自动启用公共服务。独立诊断入口仍为 `node scripts/mobile.mjs bridge`，其数据目录需显式指定，不能把它与应用后台同时当作同一电脑身份运行。
 
 ## 平台与当前限制
 
@@ -86,7 +86,7 @@ node scripts/package-mobile-host.mjs <新的输出目录>
 - 单附件不超过 2 MB，单次总量 6 MB、最多 16 个；手机成果下载上限 16 MB。
 - 正文支持可选择的段落、标题、加粗、行内代码和可横向滚动、复制的代码块；未结束的流式代码块继续展示。复杂 Markdown 表格与内嵌 HTML 保留文本显示，复杂文件可保存到手机后由对应应用打开。iOS 不在此 APK 交付范围。
 - **尚未上线后台系统推送**。App 退后台可能被系统暂停；重新打开同步状态。界面与 capabilities 明确标为不支持，不能把常驻 SSE 当作锁屏推送。
-- 默认公共中继可供当前自用验证，受限速和可用性影响，无需把租服务器作为开始使用的前置条件。若以后需要稳定对外发行，再选择运营方中继与监控；共享付费中继的认证适配未实现。
+- 默认不启用公共中继，也不会因为未配置而自动补一个。两个独立私网能否直连取决于地址可达性、NAT 和防火墙；二维码本身不保证打洞成功。需要中继时，后端必须明确配置双方可访问的 iroh 服务。共享付费中继的认证适配未实现。
 - 正式 APK / 桌面安装包签名、分发、更新回滚和全平台真机属于发布验收，不能用本机成功替代。
 
 测试明细见 [验收记录](../evaluation/MOBILE_2026-11-04.md)。所有本轮测试使用临时数据或专用 QA 包，模型 API 调用为 0。
@@ -106,3 +106,19 @@ node scripts/package-mobile-host.mjs <新的输出目录>
 设备身份运行时保存在 `.pilot/mobile`（或显式数据目录），不会随 Git 源码发布。分发源码或便携包时不要把某台电脑的 `.pilot/mobile` 运行数据复制给其他电脑，否则会把身份和已有授权一起复制。
 
 专用模拟器验收：先执行 `node scripts/mobile.mjs qa`，然后运行 `ANDROID_HOME=... node pilot-mobile/scripts/scanner-smoke.mjs emulator-xxxx`。该脚本只接受名为 Pilot 的模拟器，重置独立 `.qa` 包，不操作真机。Windows 请用对应 PowerShell 环境变量语法。
+
+## 0.2.4 的默认直连规则
+
+未配置中继时，连接桥在本机生成二维码，不等待中继上线。明确配置后才准备对应中继，不会回退到公共服务。后端可在本机 application-local.yaml 配置（保留原有其他配置）：
+
+```yaml
+pilot:
+  mobile:
+    relay: "" # 默认直连；启用时填写实际的 https://relay.example.com:443
+```
+
+这里必须是真正的 iroh 中继服务，不能随意填写 HTTP 代理、STUN 服务或路由器端口；HTTPS 证书需正常可信。修改后端配置后需重启后端并重新生成配对码。
+
+手机需更新至 0.2.4-preview，才能同时忽略旧保存数据的公共服务标记，并在未配置时剥离旧票据里的中继路由；原有电脑公钥与直连地址保留。更改后端中继配置后应重新扫码刷新保存的信息。
+
+断网出码验收：构建连接桥后运行 node pilot-mobile/scripts/direct-qr-smoke.mjs --container，容器使用已缓存 Java 镜像和 --network none。中继探针 relay-smoke.mjs 现在要求显式地址，未配置时直接停止，不再测试默认公共服务。

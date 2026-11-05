@@ -46,7 +46,7 @@ export function MobileConnectionContent({ onDone }) {
     pending.current = true; operationError.current = false; setBusy(true); setError(''); setCopyStatus(''); setManual(false);
     try {
       const result = await post('pair', { reuse });
-      if (alive.current) { setInvite(result); activeCode.current = result.code; setPaired(false); }
+      if (alive.current) { setInvite(result); activeCode.current = result.code; setPaired(false); setStatus(current => ({...current, connectionMode: result.connectionMode || current?.connectionMode})); }
     } catch (e) { if (alive.current) { operationError.current = true; setError(e.message); } }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
@@ -81,6 +81,7 @@ export function MobileConnectionContent({ onDone }) {
 
   const maxDevices = status?.maxDevices || 16;
   const preparing = status?.environment?.state === 'preparing';
+  const relayConfigured = status?.connectionMode === 'relay-enabled';
   const full = (status?.devices?.length || 0) >= maxDevices;
   function showAdd() {
     setTab('add');
@@ -112,7 +113,7 @@ export function MobileConnectionContent({ onDone }) {
       <button role="tab" aria-selected={tab === 'add'} onClick={showAdd}>添加设备</button>
       <button role="tab" aria-selected={tab === 'devices'} onClick={() => setTab('devices')}>已配对设备{Array.isArray(status?.devices) ? ` · ${status.devices.length}` : ''}</button>
     </div>
-    {error && <div className="mobile-connection-error" role="alert"><p>{error}</p><button className="btn" onClick={() => generate(true)} disabled={busy || preparing}>重试连接</button><button className="btn" disabled={busy || preparing} onClick={async () => {
+    {error && <div className="mobile-connection-error" role="alert"><p>{error}</p><button className="btn" onClick={() => generate(true)} disabled={busy || preparing}>重新生成配对码</button><button className="btn" disabled={busy || preparing} onClick={async () => {
       if (pending.current) return;
       pending.current = true; operationError.current = false; setBusy(true); setError('');
       try { apply(await post('repair', {})); needsInitialPair.current = true; }
@@ -137,19 +138,21 @@ export function MobileConnectionContent({ onDone }) {
     </div> : tab === 'add' ? <div role="tabpanel" aria-label="添加设备" className="mobile-pair-layout">
       <div className="mobile-qr-area">
         {invite && seconds > 0 ? <img src={invite.image} alt="用 Pilot 手机 App 扫描此配对二维码" />
-          : <div className="mobile-qr-placeholder" role="status">{busy || preparing ? '正在准备连接…' : error ? '连接暂不可用' : !status ? '正在准备连接…' : invite ? '配对码已过期' : '还未生成配对码'}</div>}
+          : <div className="mobile-qr-placeholder" role="status">{preparing ? '正在检查电脑端组件…' : busy ? relayConfigured ? '正在准备已配置的中继…' : '正在生成本机配对码…' : error ? '配对码暂不可用' : !status ? '正在读取配对信息…' : invite ? '配对码已过期' : '还未生成配对码'}</div>}
         <p role="status">{seconds > 0 ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} 后过期 · 仅限一次配对` : ''}</p>
       </div>
       <div className="mobile-pair-actions">
         <h3>用 Pilot App 扫码</h3>
         <p>打开手机上的 Pilot，选择“扫码连接电脑”。手机与电脑无需处于同一个网络。</p>
         <p className="chip-hint">请保持电脑在线。配对后，无需为每个任务重新扫码。</p>
-        <button className="btn btn-primary" disabled={!seconds || busy || preparing} onClick={copy}>复制配对码</button>
+        {invite && seconds > 0 && <button className="btn btn-primary" disabled={busy || preparing} onClick={copy}>复制配对码</button>}
         <button className="btn" disabled={busy || preparing} onClick={() => generate(false)}>{preparing ? '正在准备环境…' : busy ? '正在生成…' : invite ? '重新生成' : '生成配对码'}</button>
-        <button className="link-btn" onClick={() => setManual(!manual)} disabled={!seconds}>手动复制配对码</button>
+        {invite && seconds > 0 && <button className="link-btn" onClick={() => setManual(!manual)} disabled={busy}>手动复制配对码</button>}
         <p className="chip-hint" role="status">{copyStatus}</p>
         {manual && seconds > 0 && <><label htmlFor="mobile-pair-code">完整配对码</label><textarea id="mobile-pair-code" ref={codeArea} readOnly rows={3} value={invite.code} onFocus={e => e.target.select()} /><button className="btn" onClick={() => { codeArea.current?.focus(); codeArea.current?.select(); }}>全选配对码</button></>}
-        {invite?.development && <p className="chip-hint">已自动配置公共连接服务，无需自建服务器；连接速度与可用性受网络及公共服务影响。</p>}
+        {status?.connectionMode && <p className="chip-hint" role="status">{relayConfigured
+          ? '后端已配置中继。连接将尝试直连，必要时使用已配置的中继。'
+          : '未配置中继，仅尝试 P2P 直连。二维码在本机生成，等待手机扫码；两端需有可互达的网络地址。'}</p>}
       </div>
     </div> : <div role="tabpanel" aria-label="已配对设备" className="mobile-device-list">
       {!status || preparing ? <p>正在读取设备，环境准备完成后会自动更新…</p> : !status.devices?.length ? <p>还没有配对设备。添加手机后会显示在这里。</p> : status.devices.map(device => <div className="mobile-device-row" key={device.id}>

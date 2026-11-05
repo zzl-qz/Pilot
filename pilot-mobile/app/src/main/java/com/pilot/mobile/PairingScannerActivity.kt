@@ -171,7 +171,7 @@ private fun PairingScanner(cancel: () -> Unit, paste: () -> Unit, scanned: (Stri
                     Text(if (torch) "关闭手电筒" else "打开手电筒")
                 }
                 TextButton(onClick = paste, modifier = Modifier.heightIn(min = 48.dp)) { Text("改用配对码连接") }
-                Text("手机与电脑可以使用不同网络。每张配对码仅连接生成它的电脑。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("默认 P2P 直连，中继由电脑端显式配置。配对码仅连接生成它的电脑。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
