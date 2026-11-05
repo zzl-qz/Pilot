@@ -33,9 +33,9 @@ let code = 'pilot://pair/' + 'A'.repeat(80); // 无效测试凭证，不代表�
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="768" height="768"><rect width="768" height="768" fill="white"/><path d="M80 80h180v180H80zm428 0h180v180H508zM80 508h180v180H80zM310 310h150v150H310zM500 500h80v80H500z" fill="black"/></svg>`;
 let invite, pairedDevice = null, generation = 0, pairingState = 'none', fail = false;
 let environmentState = null, repairs = 0, failPair = false;
-let connectionMode = 'direct-only', pairDelay = 150, networkState = 'local', networkMessage = '';
+let connectionMode = 'direct-only', pairDelay = 150, networkState = 'local', networkMessage = '', networkEnvironment = null;
 const devices = [];
-const create = () => ({ code, image:'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64'), expiresAt: Date.now() + 300000, development:connectionMode==='automatic', connectionMode, networkState, networkMessage });
+const create = () => ({ code, image:'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64'), expiresAt: Date.now() + 300000, development:connectionMode==='automatic', connectionMode, networkState, networkMessage, networkEnvironment });
 async function routes(page) {
   await page.route('**/api/mobile/connection**', async route => {
     const request = route.request();
@@ -45,7 +45,7 @@ async function routes(page) {
     if (request.url().endsWith('/pair') && failPair) return route.fulfill({status:503,json:{message:'测试中继连接超时，请重试'}});
     if (request.url().endsWith('/pair')) { generation++; await new Promise(resolve => setTimeout(resolve, pairDelay)); invite = create(); pairingState = 'ready'; pairedDevice = null; return route.fulfill({json:invite}); }
     if (request.url().endsWith('/revoke')) { devices.length = 0; return route.fulfill({json:{}}); }
-    return route.fulfill({json:{running:true, connectionMode, networkState, networkMessage, pairingState, pairedDevice, maxDevices:16, invite, devices}});
+    return route.fulfill({json:{running:true, connectionMode, networkState, networkMessage, networkEnvironment, pairingState, pairedDevice, maxDevices:16, invite, devices}});
   });
 }
 try {
@@ -108,6 +108,12 @@ try {
   await page.getByRole('button',{name:'连接手机',exact:true}).click();
   await page.getByAltText('用 Pilot 手机 App 扫描此配对二维码').waitFor();
   await page.getByText('正在后台准备跨网服务',{exact:true}).waitFor();
+  networkEnvironment = {availability:'available',proxyTypes:['http'],explicitProxySupported:false,message:'已检测代理配置，仅代理出网的网络当前不支持'};
+  await page.getByText('网络与代理说明',{exact:true}).click();
+  await page.getByText(networkEnvironment.message,{exact:true}).waitFor();
+  await page.setViewportSize({width:390,height:900});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'代理说明不能撑宽窄屏');
+  await page.setViewportSize({width:1440,height:900});
   const expiry = invite.expiresAt, issued = generation;
   networkState = 'unavailable'; networkMessage = '跨网服务暂未就绪，检查 TUN';
   await page.getByText(networkMessage,{exact:true}).waitFor();
@@ -118,7 +124,7 @@ try {
   assert.equal(generation,issued,'网络恢复通过状态轮询更新路由，不能重新申请授权');
   assert.equal(invite.expiresAt,expiry);
   await page.keyboard.press('Escape');
-  networkState = 'local'; networkMessage = '';
+  networkState = 'local'; networkMessage = ''; networkEnvironment = null;
   connectionMode = 'direct-only'; pairDelay = 150; invite = null; generation = 0;
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({width, height:900});

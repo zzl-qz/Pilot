@@ -69,7 +69,10 @@ class PairingNetworkTest {
             assertEquals(invite.expiresAt, routed.expiresAt)
             val bytes = Base64.getDecoder().decode(updated.text("image").substringAfter(','))
             val bitmap = BinaryBitmap(HybridBinarizer(BufferedImageLuminanceSource(ImageIO.read(bytes.inputStream()))))
-            assertEquals(updated.text("code"), MultiFormatReader().decode(bitmap).text)
+            assertEquals(updated.text("code"), MultiFormatReader().decode(bitmap, mapOf(
+                com.google.zxing.DecodeHintType.POSSIBLE_FORMATS to listOf(com.google.zxing.BarcodeFormat.QR_CODE),
+                com.google.zxing.DecodeHintType.TRY_HARDER to true,
+            )).text)
             assertTrue(store.pair("phone", invite.secret, "手机"), "网络地址变化不能使已扫描的授权失效")
             assertEquals(JsonNull, request("/api/status")["invite"])
             assertEquals("paired", store.pairingState())
@@ -114,5 +117,47 @@ class PairingNetworkTest {
         assertTrue(dnsHint(listOf(byteArrayOf(198.toByte(), 18, 0, 1))).contains("虚拟 DNS"))
         assertTrue(dnsHint(listOf(byteArrayOf(198.toByte(), 19, 127, 1))).contains("虚拟 DNS"))
         assertFalse(dnsHint(listOf(byteArrayOf(198.toByte(), 20, 0, 1), ByteArray(16))).contains("虚拟 DNS"))
+    }
+
+    @Test fun `当前中继丢失不沿用历史就绪断网换网恢复会更新状态与次数`() = runBlocking {
+        val directory = Files.createTempDirectory("pilot-live-network")
+        val store = PairingStore(directory)
+        val proxy = observeProxies(emptyMap(), emptyMap(), emptyList())
+        val environment = java.util.concurrent.atomic.AtomicReference(environmentSnapshot(listOf(InterfaceObservation("Ethernet", listOf(byteArrayOf(10, 0, 0, 1)))), proxy))
+        val connected = java.util.concurrent.atomic.AtomicBoolean(true)
+        val network = PairingNetwork(store, "automatic", { "test-ticket" },
+            online = {},
+            observe = { environment.get() }, relayAvailable = { connected.get() }, pollMillis = 10)
+        suspend fun waitFor(state: String) = withTimeout(2_000) {
+            while (network.snapshot().text("networkState") != state) delay(5)
+        }
+        try {
+            waitFor("ready")
+            val invite = network.issue("电脑", emptyList(), true)
+            connected.set(false); waitFor("unavailable")
+            environment.set(environmentSnapshot(emptyList(), proxy)); waitFor("offline")
+            environment.set(environmentSnapshot(listOf(InterfaceObservation("Wi-Fi", listOf(byteArrayOf(10, 0, 1, 1)))), proxy))
+            connected.set(true); waitFor("ready")
+            assertTrue(network.snapshot()["networkChangeCount"]!!.jsonPrimitive.long >= 2)
+            assertEquals(invite.secret, store.currentInvite()!!.secret)
+            assertEquals(invite.expiresAt, store.currentInvite()!!.expiresAt)
+        } finally { network.close(); directory.toFile().deleteRecursively() }
+    }
+
+    @Test fun `代理或网卡查询阻塞和异常不阻塞本地出码及实际连接检查`() = runBlocking {
+        val directory = Files.createTempDirectory("pilot-slow-environment")
+        val store = PairingStore(directory)
+        val gate = CompletableDeferred<Unit>()
+        val network = PairingNetwork(store, "automatic", { "test-ticket" }, online = null,
+            observe = { gate.await(); error("权限不足") },
+            relayAvailable = { true }, pollMillis = 10)
+        try {
+            withTimeout(1_000) { while (network.snapshot().text("networkState") != "ready") delay(5) }
+            assertNotNull(network.issue("电脑", emptyList(), true))
+            gate.complete(Unit)
+            withTimeout(1_000) { while (network.snapshot()["networkEnvironment"]?.jsonObject?.text("availability") != "unknown") delay(5) }
+            // 采样未完成仍能查询；不会在 HTTP 处理线程等待代理检测。
+            assertEquals("ready", network.snapshot().text("networkState"))
+        } finally { network.close(); directory.toFile().deleteRecursively() }
     }
 }

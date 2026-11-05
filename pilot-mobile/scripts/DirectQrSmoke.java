@@ -48,7 +48,7 @@ class DirectQrSmoke {
                 }
                 throw new IllegalStateException("默认连接桥未启动");
             }).get(20, TimeUnit.SECONDS);
-            HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
+            HttpClient http = HttpClient.newBuilder().proxy(java.net.ProxySelector.of(null)).connectTimeout(Duration.ofSeconds(2)).build();
             long started = System.nanoTime();
             URI pair = URI.create("http://127.0.0.1:" + admin.getPort() + "/api/pair");
             var request = HttpRequest.newBuilder(pair).timeout(Duration.ofSeconds(3))
@@ -66,7 +66,9 @@ class DirectQrSmoke {
             }
             byte[] png = Base64.getDecoder().decode(value(json, "image").substring("data:image/png;base64,".length()));
             var bitmap = new BinaryBitmap(new HybridBinarizer(new BufferedImageLuminanceSource(ImageIO.read(new ByteArrayInputStream(png)))));
-            check(new MultiFormatReader().decode(bitmap).getText().equals(code), "实际 PNG 二维码无法解码");
+            check(new MultiFormatReader().decode(bitmap, java.util.Map.of(
+                com.google.zxing.DecodeHintType.POSSIBLE_FORMATS, List.of(com.google.zxing.BarcodeFormat.QR_CODE),
+                com.google.zxing.DecodeHintType.TRY_HARDER, true)).getText().equals(code), "实际 PNG 二维码无法解码");
             System.out.println("PASS: " + (direct ? "显式直连" : "默认自动") + "模式无手机、无自建中继配置生成可解码二维码，耗时 " + millis + " ms；不输出配对凭证");
         } finally {
             child.destroy();

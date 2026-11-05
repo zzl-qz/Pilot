@@ -117,6 +117,31 @@ class MobileSmokeTest {
         lateinit var model: PilotViewModel
         compose.activityRule.scenario.onActivity { model = androidx.lifecycle.ViewModelProvider(it)[PilotViewModel::class.java] }
         compose.waitUntil(10000) { !model.state.value.busy }
+        if (InstrumentationRegistry.getArguments().getString("networkSwitch") == "true") {
+            org.junit.Assert.assertTrue(android.os.Build.HARDWARE in listOf("ranchu", "goldfish"))
+            val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+            fun shell(command: String): String = android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                automation.executeShellCommand(command)).bufferedReader().use { it.readText().trim() }
+            val wifi = shell("settings get global wifi_on")
+            val data = shell("settings get global mobile_data")
+            org.junit.Assert.assertTrue(wifi in listOf("0", "1", "2", "3", "null"))
+            org.junit.Assert.assertTrue(data in listOf("0", "1", "null"))
+            compose.runOnIdle { model.draft("网络切换后保留的草稿") }
+            try {
+                shell("svc wifi disable"); shell("svc data disable")
+                compose.waitUntil(15000) { model.state.value.networkError.contains("网络不可用") }
+            } finally {
+                shell(if (data == "1") "svc data enable" else "svc data disable")
+                shell(if (wifi == "1") "svc wifi enable" else "svc wifi disable")
+                shell(if (wifi == "null") "settings delete global wifi_on" else "settings put global wifi_on $wifi")
+                shell(if (data == "null") "settings delete global mobile_data" else "settings put global mobile_data $data")
+            }
+            compose.waitUntil(30000) { !model.state.value.busy && model.state.value.networkError.isEmpty() &&
+                (model.state.value.status.startsWith("直连") || model.state.value.status.startsWith("中继")) }
+            org.junit.Assert.assertEquals("网络切换后保留的草稿", model.state.value.draft)
+            org.junit.Assert.assertNull(model.state.value.pending)
+            compose.runOnIdle { model.draft("") }
+        }
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val good = File(context.cacheDir, "边界附件.txt").apply { writeText("附件内容") }
         val large = File(context.cacheDir, "超限附件.bin").apply { outputStream().use { it.write(ByteArray(2 * 1024 * 1024 + 1)) } }

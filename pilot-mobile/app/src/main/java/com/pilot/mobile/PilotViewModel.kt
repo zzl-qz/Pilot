@@ -34,6 +34,29 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
     private var historyChars = 0
     private val syncMutex = Mutex()
     private var workbench = WorkbenchSnapshot()
+    private var networkAvailable = true
+    private val networkRecovery = NetworkRecovery(viewModelScope,
+        busy = { state.value.busy && client != null },
+        offline = { mutable.update { it.copy(networkError = "手机网络不可用，恢复后将自动连接；已写入的指令会保留待核对。") } },
+        recover = {
+            val previous = client
+            if (previous == null) true
+            else if (state.value.busy) false
+            else {
+                mutable.update { it.copy(busy = true, status = "网络已切换 · 正在恢复连接") }
+                try {
+                    monitor?.cancelAndJoin()
+                    previous?.disconnect()
+                    restartMonitor()
+                } finally { mutable.update { it.copy(busy = false) } }
+                true
+            }
+        },
+        failure = { mutable.update { it.copy(networkError = "恢复连接暂未完成，正在重试；待核对指令不会自动重发。") } })
+    private val networkMonitor = MobileNetworkMonitor(application) { fingerprint, available ->
+        networkAvailable = available
+        networkRecovery.changed(fingerprint, available)
+    }
 
     init {
         viewModelScope.launch {
@@ -50,7 +73,10 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
             relays = computer.relays, allowPublicRelays = computer.development)
 
     private suspend fun connect(computer: PairedComputer, readyEndpoint: Endpoint? = null, readyClient: RemoteClient? = null) {
-        saveDraft(); monitor?.cancelAndJoin(); client?.disconnect(); endpoint?.shutdown()
+        saveDraft(); monitor?.cancelAndJoin()
+        val previousClient = client; val previousEndpoint = endpoint
+        client = null; endpoint = null
+        releaseTransport(previousClient?.takeUnless { it === readyClient }, previousEndpoint?.takeUnless { it === readyEndpoint })
         workbench = WorkbenchSnapshot()
         store.select(computer.id)
         mutable.value = MobileState(computer = computer.name, computerId = computer.id, computers = store.computers(), status = "正在连接", busy = state.value.busy,
@@ -112,7 +138,8 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                     backoff = 1000
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) {
-                    mutable.update { it.copy(status = "连接中断 · 正在重试", networkError = e.message ?: "连接失败") }
+                    mutable.update { it.copy(status = "连接中断 · 正在重试",
+                        networkError = if (!networkAvailable) "手机网络不可用，恢复后将自动连接。" else e.message ?: "连接失败") }
                     delay(backoff); backoff = (backoff * 2).coerceAtMost(15_000)
                 }
             }
@@ -131,7 +158,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
             mutable.update { it.copy(sessions = sessions, projects = snapshot.objects("projects"), approvals = snapshot.objects("approvals"),
                 results = (snapshot["results"] as? JsonObject)?.objects("items").orEmpty(), capabilities = snapshot["capabilities"] as? JsonObject,
                 selected = it.selected?.let { old -> sessions.firstOrNull { s -> s.text("id") == old.text("id") } ?: old },
-                status = client?.pathLabel() ?: "未连接", networkError = "", hasSnapshot = true) }
+                status = client?.pathLabel() ?: "未连接", networkError = if (networkAvailable) "" else it.networkError, hasSnapshot = true) }
         } finally {
             if (client === owner && state.value.computerId == host) mutable.update { it.copy(syncing = false) }
         }
@@ -374,9 +401,15 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
     fun dismissPending() = action { store.value(state.value.computerId, "pending", null); mutable.update { it.copy(pending = null) } }
     fun retry() { clearError(); if (!syncMutex.isLocked) restartMonitor() }
     fun forget(id: String) = action {
-        if (id == state.value.computerId) { saveDraft(); monitor?.cancelAndJoin(); client?.disconnect(); client = null; endpoint?.shutdown(); endpoint = null }
+        val active = id == state.value.computerId
+        if (active) {
+            saveDraft(); monitor?.cancelAndJoin(); monitor = null
+            val previousClient = client; val previousEndpoint = endpoint
+            client = null; endpoint = null
+            releaseTransport(previousClient, previousEndpoint)
+        }
         store.forget(id)
-        if (id == state.value.computerId) { mutable.value = MobileState(computers = store.computers()); store.computer()?.let { connect(it) } }
+        if (active) { mutable.value = MobileState(computers = store.computers()); store.computer()?.let { connect(it) } }
         else mutable.update { it.copy(computers = store.computers()) }
     }
 
@@ -410,11 +443,20 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     private fun fail(error: Exception) { mutable.update { it.copy(error = error.message ?: "操作失败，请重试") } }
+    private fun releaseTransport(previousClient: RemoteClient?, previousEndpoint: Endpoint?) {
+        if (previousClient == null && previousEndpoint == null) return
+        // 原生 shutdown 可能等待网络回调；先撤销本地引用与 UI，再在 IO 上释放。
+        CoroutineScope(Dispatchers.IO).launch {
+            try { withTimeoutOrNull(5_000) { previousClient?.disconnect(); previousEndpoint?.shutdown() } }
+            finally { runCatching { previousEndpoint?.close() } }
+        }
+    }
     override fun onCleared() {
+        networkMonitor.close(); networkRecovery.close()
         monitor?.cancel()
         val previousClient = client
         val previousEndpoint = endpoint
-        CoroutineScope(Dispatchers.IO).launch { previousClient?.disconnect(); previousEndpoint?.shutdown() }
+        releaseTransport(previousClient, previousEndpoint)
     }
 }
 

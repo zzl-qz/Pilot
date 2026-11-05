@@ -46,7 +46,7 @@ export function MobileConnectionContent({ onDone }) {
     pending.current = true; operationError.current = false; setBusy(true); setError(''); setCopyStatus(''); setManual(false);
     try {
       const result = await post('pair', { reuse });
-      if (alive.current) { setInvite(result); activeCode.current = result.code; setPaired(false); setStatus(current => ({...current, connectionMode: result.connectionMode || current?.connectionMode, networkState:result.networkState, networkMessage:result.networkMessage})); }
+      if (alive.current) { setInvite(result); activeCode.current = result.code; setPaired(false); setStatus(current => ({...current, connectionMode: result.connectionMode || current?.connectionMode, networkState:result.networkState, networkMessage:result.networkMessage, networkEnvironment:result.networkEnvironment || current?.networkEnvironment})); }
     } catch (e) { if (alive.current) { operationError.current = true; setError(e.message); } }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
@@ -156,6 +156,10 @@ export function MobileConnectionContent({ onDone }) {
           ? '后端已配置中继。连接将尝试直连，必要时使用已配置的中继。'
           : '未配置中继，仅尝试 P2P 直连。二维码在本机生成，等待手机扫码；两端需有可互达的网络地址。'}</p>}
         {status?.networkMessage && <p className="chip-hint" role="status" data-network-state={status.networkState}>{status.networkMessage}</p>}
+        {status?.networkEnvironment && <details><summary>网络与代理说明</summary>
+          <p className="chip-hint">{status.networkEnvironment.message}</p>
+          <p className="chip-hint">网线与 Wi-Fi 无需分别配置。HTTP/SOCKS 代理和 TUN 属于不同路径；不会更改电脑的系统代理、路由或防火墙。</p>
+        </details>}
       </div>
     </div> : <div role="tabpanel" aria-label="已配对设备" className="mobile-device-list">
       {!status || preparing ? <p>正在读取设备，环境准备完成后会自动更新…</p> : !status.devices?.length ? <p>还没有配对设备。添加手机后会显示在这里。</p> : status.devices.map(device => <div className="mobile-device-row" key={device.id}>

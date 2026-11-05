@@ -48,7 +48,8 @@ class PairingAdminTest {
             assertEquals("relay-enabled", payload.text("connectionMode"))
             val bytes = Base64.getDecoder().decode(payload.text("image").substringAfter(','))
             val bitmap = BinaryBitmap(HybridBinarizer(BufferedImageLuminanceSource(ImageIO.read(bytes.inputStream()))))
-            val decoded = MultiFormatReader().decode(bitmap).text
+            val hints = mapOf(DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE), DecodeHintType.TRY_HARDER to true)
+            val decoded = MultiFormatReader().decode(bitmap, hints).text
             assertEquals(payload.text("code"), decoded)
             assertEquals("测试电脑", PairingInvite.decode(decoded).name)
             assertEquals("[]", request("/api/devices").body())
@@ -60,6 +61,12 @@ class PairingAdminTest {
             assertEquals("我的手机", status["pairedDevice"]!!.jsonObject.text("name"))
             assertEquals(JsonNull, status["invite"])
             assertFalse(status.toString().contains(invite.secret))
+            repeat(24) {
+                val rotated = Protocol.json.parseToJsonElement(request("/api/pair", "POST", origin = root).body()).jsonObject
+                val image = Base64.getDecoder().decode(rotated.text("image").substringAfter(','))
+                val pixels = BinaryBitmap(HybridBinarizer(BufferedImageLuminanceSource(ImageIO.read(image.inputStream()))))
+                assertEquals(rotated.text("code"), MultiFormatReader().decode(pixels, hints).text)
+            }
             simulateRelayTimeout = true
             val failed = request("/api/pair", "POST", origin = root)
             assertEquals(503, failed.statusCode())

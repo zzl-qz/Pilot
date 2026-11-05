@@ -8,6 +8,8 @@ import java.net.URI
 import java.nio.file.Path
 
 fun main(args: Array<String>) = runBlocking {
+    // 仅作用于这个连接桥 JVM，用于读取系统代理线索；不改变系统代理，也不代表原生库支持 HTTP 代理。
+    if (System.getProperty("java.net.useSystemProxies") == null) System.setProperty("java.net.useSystemProxies", "true")
     fun option(name: String): String? = args.indexOf(name).takeIf { it >= 0 }?.let {
         require(it + 1 < args.size) { "$name 缺少参数" }; args[it + 1]
     }
@@ -56,7 +58,10 @@ fun main(args: Array<String>) = runBlocking {
             }
         }
     }, online = if (publicServices || relays.isNotEmpty()) ({ endpoint.online() }) else null,
-        diagnose = { diagnoseNetwork(URI(relays.firstOrNull() ?: "https://aps1-1.relay.n0.iroh.link").host) })
+        diagnose = { diagnoseNetwork(URI(relays.firstOrNull() ?: "https://aps1-1.relay.n0.iroh.link").host) },
+        observe = { observeEnvironment(URI(relays.firstOrNull() ?: "https://aps1-1.relay.n0.iroh.link"),
+            inspectSystemProxy = mode != "direct-only" && System.getProperty("java.net.useSystemProxies") == "true") },
+        relayAvailable = { endpoint.addr().use { it.relayUrl() != null } })
     val admin = PairingAdmin(store, bridge, relayConfigured = relays.isNotEmpty(), network = network::snapshot) {
         network.issue(option("--name") ?: "我的电脑", relays, publicServices)
     }

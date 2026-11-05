@@ -12,6 +12,15 @@ import kotlin.test.*
 
 class BridgeIntegrationTest {
     @Test fun `真实加密直连配对访问事件转发与设备撤销`() = runBlocking {
+        val previousProxy = java.net.ProxySelector.getDefault()
+        val proxyCalls = AtomicInteger()
+        java.net.ProxySelector.setDefault(object : java.net.ProxySelector() {
+            override fun select(uri: java.net.URI): List<java.net.Proxy> {
+                proxyCalls.incrementAndGet()
+                return listOf(java.net.Proxy(java.net.Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 9)))
+            }
+            override fun connectFailed(uri: java.net.URI, sa: java.net.SocketAddress, error: java.io.IOException) {}
+        })
         val directory = Files.createTempDirectory("pilot-bridge")
         val upstream = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         val upstreamExecutor = java.util.concurrent.Executors.newFixedThreadPool(4)
@@ -128,10 +137,12 @@ class BridgeIntegrationTest {
                 client.disconnect()
                 assertEquals(401, client.request(Request()).first.status)
                 assertEquals(200, secondClient.request(Request()).first.status, "撤销一台手机不能影响另一台")
+                assertEquals(0, proxyCalls.get(), "本机令牌和后台流量不能经过系统代理")
             }
         } finally {
             client.disconnect(); secondClient.disconnect(); serving.cancelAndJoin(); desktop.shutdown(); phone.shutdown(); secondPhone.shutdown(); upstream.stop(0); upstreamExecutor.shutdownNow()
             directory.toFile().deleteRecursively()
+            java.net.ProxySelector.setDefault(previousProxy)
         }
     }
 }

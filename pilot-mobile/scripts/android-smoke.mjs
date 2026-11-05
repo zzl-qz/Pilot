@@ -13,6 +13,7 @@ if (!sdk) throw new Error('请设置 ANDROID_HOME');
 const adb = path.join(sdk, 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb');
 const serial = process.argv[2];
 const automatic = process.argv.includes('--automatic');
+const networkSwitch = process.argv.includes('--network-switch');
 if (!serial) throw new Error('传入专用测试设备编号：node scripts/android-smoke.mjs emulator-5580');
 const runAdb = async (...args) => {
   try { return await exec(adb, ['-s', serial, ...args], { timeout: 120000, maxBuffer: 1024 * 1024 }); }
@@ -22,6 +23,10 @@ const runAdb = async (...args) => {
     throw new Error(`设备 ${serial} 的 ${args.slice(0, 3).join(' ')} 操作中断（${error.code ?? 'unknown'}），本轮不计通过。\n${details}`);
   }
 };
+if (networkSwitch) {
+  if (!/^emulator-\d+$/.test(serial || '')) throw new Error('网络切换验收只能使用 Pilot 专用模拟器');
+  if (!/^pilot[-_]/i.test((await runAdb('emu','avd','name')).stdout)) throw new Error('不能切换其他项目的模拟器网络');
+}
 const directory = await mkdtemp(path.join(tmpdir(), 'pilot-mobile-qa-'));
 const events = [{ sequence: 1, type: 'run.started', runId: 'run_test', payload: { input: '正在核对测试夹具' } }];
 const subscribers = new Set();
@@ -146,7 +151,7 @@ try {
   console.log(restored.stdout);
   if (!restored.stdout.includes('OK (1 test)')) throw new Error('重启恢复验收失败');
   const nextInvite = await (await fetch(new URL('/api/pair', admin), {method:'POST',headers:{'X-Pilot-Pairing':auth}})).json();
-  const boundaries = await runAdb('shell','am','instrument','-w','-r','-e','class','com.pilot.mobile.MobileSmokeTest#attachmentLimitsAndMultipleComputerStorage','-e','pairingCode',nextInvite.code,'com.pilot.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner');
+  const boundaries = await runAdb('shell','am','instrument','-w','-r','-e','class','com.pilot.mobile.MobileSmokeTest#attachmentLimitsAndMultipleComputerStorage','-e','pairingCode',nextInvite.code,...(networkSwitch?['-e','networkSwitch','true']:[]),'com.pilot.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner');
   console.log(boundaries.stdout.replaceAll(nextInvite.code,'[配对码已隐藏]'));
   if (!boundaries.stdout.includes('OK (1 test)')) throw new Error('附件与多电脑隔离验收失败');
   const design = await runAdb('shell', 'am', 'instrument', '-w', '-r', '-e', 'class', 'com.pilot.mobile.MobileDesignTest', 'com.pilot.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner');

@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -46,7 +47,8 @@ public class MobileConnectionService {
     private final String relay;
     private final SecurityProperties security;
     private final ObjectMapper mapper;
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    private final HttpClient http =
+        HttpClient.newBuilder().proxy(ProxySelector.of(null)).connectTimeout(Duration.ofSeconds(5)).build();
     private final ScheduledExecutorService supervisor = Executors
         .newSingleThreadScheduledExecutor(Thread.ofPlatform().daemon().name("pilot-mobile-supervisor").factory());
     private Process process;

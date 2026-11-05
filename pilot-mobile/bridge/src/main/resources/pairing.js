@@ -34,6 +34,7 @@ $('create').onclick = async () => {
       ? '后端已配置中继，必要时使用已配置的中继。'
       : '未配置中继，仅尝试 P2P 直连；两端需有可互达的网络地址。';
     $('network').textContent = result.networkMessage || '';
+    $('environment').textContent = result.networkEnvironment?.message || '';
   } catch (error) { $('status').textContent = error.message; }
   finally { $('create').disabled = false; }
 };
@@ -57,6 +58,7 @@ setInterval(() => {
     devices().catch(() => {});
     api('/api/status').then(result => {
       $('network').textContent = result.networkMessage || '';
+    $('environment').textContent = result.networkEnvironment?.message || '';
       if (code && result.invite) {
         code = result.invite.code; deadline = result.invite.expiresAt;
         if ($('qr').src !== result.invite.image) $('qr').src = result.invite.image;

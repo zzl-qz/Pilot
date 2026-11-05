@@ -17,7 +17,9 @@ class Bridge(
     private val port: Int,
     private val token: String = "",
 ) {
-    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).followRedirects(HttpClient.Redirect.NEVER).build()
+    // 本机令牌只能送到本机后台，不能跟随系统 HTTP 代理。
+    private val http = HttpClient.newBuilder().proxy(java.net.ProxySelector.of(null))
+        .connectTimeout(Duration.ofSeconds(5)).followRedirects(HttpClient.Redirect.NEVER).build()
     private val connections = ConcurrentHashMap.newKeySet<Connection>()
     private val slots = Semaphore(16)
 

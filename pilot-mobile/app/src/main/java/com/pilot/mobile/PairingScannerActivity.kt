@@ -188,7 +188,7 @@ private fun CameraScanner(torch: Boolean, onFailure: () -> Unit, onCode: (String
             statusView.visibility = View.GONE
             barcodeView.isUseTextureView = true
             barcodeView.marginFraction = 0.12
-            decoderFactory = DefaultDecoderFactory(listOf(BarcodeFormat.QR_CODE))
+            decoderFactory = DefaultDecoderFactory(listOf(BarcodeFormat.QR_CODE), mapOf(com.google.zxing.DecodeHintType.TRY_HARDER to true), null, 0)
             cameraSettings = cameraSettings.apply { isAutoFocusEnabled = true }
             barcodeView.addStateListener(object : CameraPreview.StateListener {
                 override fun previewSized() {}
