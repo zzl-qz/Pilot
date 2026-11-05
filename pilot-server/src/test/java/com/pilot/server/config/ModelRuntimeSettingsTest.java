@@ -1,9 +1,11 @@
 package com.pilot.server.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import java.math.BigDecimal;
@@ -90,5 +92,72 @@ class ModelRuntimeSettingsTest {
         assertNull(before.profile().pricing().input());
         assertNotNull(reports.getFirst().cost().total());
         assertNotNull(reports.getFirst().firstTokenMs());
+    }
+
+    @Test
+    void autoSearchCapabilityIsLimitedToKnownOfficialOpenAiModelsAndCanBeOverridden() {
+        var store = new InMemorySettingsStore();
+        var models = new ModelSettings(new ModelProperties("key", "https://api.openai.com/v1/chat/completions",
+            "gpt-4o-mini", null), store);
+        var runtime = new ModelRuntimeSettings(store, models, new JsonMapper());
+
+        assertTrue(runtime.nativeWebSearch(models.snapshot()));
+        models.update("https://gateway.test/v1/chat/completions", "gpt-4o-mini", null);
+        assertFalse(runtime.nativeWebSearch(models.snapshot()), "compatible gateway must not inherit vendor capabilities");
+        runtime.update("gpt-4o-mini", "https://gateway.test/v1/chat/completions",
+            new ModelRuntimeSettings.Options("openai", "auto", "", null, null, "short", "openai-responses", null));
+        assertTrue(runtime.nativeWebSearch(models.snapshot()), "manual mode enables only the confirmed Responses protocol");
+        runtime.update("gpt-4o-mini", "https://gateway.test/v1/chat/completions",
+            new ModelRuntimeSettings.Options("openai", "auto", "", null, null, "short", "local", null));
+        assertFalse(runtime.nativeWebSearch(models.snapshot()));
+    }
+
+    @Test
+    void autoDetectsAnthropicSearchWhileKeepingWebFetchInPilot() {
+        var store = new InMemorySettingsStore();
+        var models = new ModelSettings(new ModelProperties("key", "https://api.anthropic.com/v1/messages",
+            "claude-sonnet-5-5", null), store);
+        var runtime = new ModelRuntimeSettings(store, models, new JsonMapper());
+
+        assertEquals(java.util.Set.of(com.pilot.core.model.NativeCapability.WEB_SEARCH),
+            runtime.nativeCapabilities(models.snapshot()));
+        assertTrue(runtime.anthropicMessages(models.snapshot()));
+        assertThrows(IllegalArgumentException.class, () -> runtime.update("claude-sonnet-5-5",
+            "https://api.anthropic.com/v1/messages",
+            new ModelRuntimeSettings.Options("auto", "auto", "", null, null, "short", "openai-responses", null)));
+    }
+
+    @Test
+    void anthropicModelsOutsideTheVerifiedToolMatrixKeepLocalSearch() {
+        var store = new InMemorySettingsStore();
+        var models = new ModelSettings(new ModelProperties("key", "https://api.anthropic.com/v1/messages",
+            "claude-haiku-5-5", null), store);
+        var runtime = new ModelRuntimeSettings(store, models, new JsonMapper());
+
+        assertTrue(runtime.anthropicMessages(models.snapshot()));
+        assertTrue(runtime.nativeCapabilities(models.snapshot()).isEmpty());
+    }
+
+    @Test
+    void autoSearchDoesNotGuessUnknownModelFamilies() {
+        var store = new InMemorySettingsStore();
+        var models = new ModelSettings(new ModelProperties("key", "https://api.openai.com/v1", "gpt-6-sol", null), store);
+        var runtime = new ModelRuntimeSettings(store, models, new JsonMapper());
+
+        assertFalse(runtime.nativeWebSearch(models.snapshot()));
+    }
+
+    @Test
+    void manualResponsesModeRejectsAnthropicHostEvenWithGenericProvider() {
+        var store = new InMemorySettingsStore();
+        var models = new ModelSettings(new ModelProperties("key", "https://api.anthropic.com/v1/messages",
+            "claude-sonnet-5-5", null), store);
+        var runtime = new ModelRuntimeSettings(store, models, new JsonMapper());
+
+        assertThrows(IllegalArgumentException.class, () -> runtime.update("claude-sonnet-5-5",
+            "https://api.anthropic.com/v1/messages",
+            new ModelRuntimeSettings.Options("generic", "auto", "", null, null, "short", "openai-responses", null)),
+            "官方 Anthropic 主机名不能被通用兼容端点配置绕过协议校验");
+        assertTrue(runtime.anthropicMessages(models.snapshot()), "默认 auto 仍按端点识别 Messages 协议");
     }
 }

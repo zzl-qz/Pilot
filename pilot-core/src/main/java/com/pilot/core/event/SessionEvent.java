@@ -7,7 +7,8 @@ package com.pilot.core.event;
 public sealed interface SessionEvent permits ExecutionUpdated, RunStarted, RunUsageUpdated, ModelRequestCompleted,
     AssistantDelta, AssistantPreview, AssistantReasoning, ContextCompacted, PlanUpdated, RunSteered, RunContinued,
     RunRetrying, SubagentStarted, SubagentFinished, ToolStarted, ApprovalRequired, ApprovalResolved, ToolCompleted,
-    RunFailed, RunCompleted, RunCancelled, TaskUpdated, SandboxDiffReady, ArbitrationRequired, ArbitrationResolved {
+    RunFailed, RunCompleted, RunCancelled, TaskUpdated, MultiAgentBudgetUpdated, SandboxDiffReady, ArbitrationRequired,
+    ArbitrationResolved {
 
     EventType type();
 }

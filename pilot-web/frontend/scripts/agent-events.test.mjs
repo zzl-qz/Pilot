@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { produce } from 'immer';
-import { applyEvent, initialThread } from '../src/thread-reducer.js';
+import { applyEvent, initialThread, appendHistoryPage } from '../src/thread-reducer.js';
 import { agentStatusLabel, summarizeAgents } from '../src/lib/agents.js';
 
 // 使用真实 Immer 更新，普通可变对象会掩盖 thread.agents 与根 agents 的别名失效。
@@ -46,6 +46,46 @@ for (const live of [true, false]) {
     assert.equal(summarizeAgents(Object.values(s.state.agents)).running, 0);
   });
 }
+
+test('预算事件在 SSE 与历史回放中按派发合并并区分估算与软取消', () => {
+  for (const live of [true, false]) {
+    const s = session(live);
+    s.send('run.started', { input: '运行多智能体' });
+    s.send('multi.budget', {
+      dispatchId: 'dsp-a', status: 'running', maxDispatchSeconds: 1800, maxTotalTokens: 5000,
+      usedTokens: 1200, estimatedTokens: 300, reservedTokens: 800, inFlightRequests: 2,
+      stopReason: '', cancellationRequested: false
+    });
+    s.send('multi.budget', {
+      dispatchId: 'dsp-a', status: 'stopped', maxDispatchSeconds: 1800, maxTotalTokens: 5000,
+      usedTokens: 5200, estimatedTokens: 300, reservedTokens: 0, inFlightRequests: 0,
+      stopReason: '累计用量达到上限', cancellationRequested: true
+    });
+    const rows = s.state.timeline.filter(item => item.type === 'multi.budget' && item.dispatchId === 'dsp-a');
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].status, '软停止');
+    assert.match(rows[0].detail, /估算 300/);
+    assert.match(rows[0].detail, /达到上限/);
+    assert.match(rows[0].detail, /不保证供应商撤销请求/);
+  }
+});
+
+test('预算事件在真实历史页回放中按派发保留卡片', () => {
+  let state = { thread: initialThread(), ui: {}, timeline: [], agents: {}, pendingInputs: [], queue: [], pendingApprovals: {}, pendingArbitrations: {}, contextStatus: null };
+  const event = {
+    type: 'multi.budget', runId: 'run-a', sequence: 1, timestamp: 1700000001000,
+    payload: {
+      dispatchId: 'dsp-history', status: 'stopped', maxDispatchSeconds: 1800, maxTotalTokens: 5000,
+      usedTokens: 5200, estimatedTokens: 300, reservedTokens: 0, inFlightRequests: 0,
+      stopReason: '派发预算耗尽', cancellationRequested: true
+    }
+  };
+  state = produce(state, draft => appendHistoryPage(draft, [event]));
+  const rows = state.timeline.filter(item => item.type === 'multi.budget' && item.dispatchId === 'dsp-history');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, '软停止');
+  assert.match(rows[0].detail, /不保证供应商撤销请求/);
+});
 
 test('重复开始事件不新增智能体，迟到的完成事件归属原回合', () => {
   const s = session();

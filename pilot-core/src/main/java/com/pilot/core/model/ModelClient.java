@@ -1,6 +1,7 @@
 package com.pilot.core.model;
 
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import com.pilot.core.loop.Message;
@@ -13,6 +14,11 @@ public interface ModelClient {
 
     default ModelProfile profile() {
         return ModelProfile.generic();
+    }
+
+    /** Provider-side capabilities handled inside the model request rather than by Pilot tools. */
+    default Set<NativeCapability> nativeCapabilities() {
+        return Set.of();
     }
 
     /** 仅明确的参数拒绝允许去掉优化参数重试一次，网络失败不走此路径。 */

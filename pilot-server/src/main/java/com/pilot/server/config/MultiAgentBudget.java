@@ -9,8 +9,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * 不放进同一个 record 是因为 {@code @ConfigurationProperties} 的构造函数绑定要求唯一构造函数，
  * 多一个便利重载会让 Spring 选错构造函数，整个应用上下文都起不来。
  *
- * @param maxDispatchSeconds 单次派发的墙钟上限（秒）；超了只暂停未启动的任务，已完成的产物全部保留
- * @param maxTotalTokens     单次派发的 token 上限（输入 + 输出）；0 表示不限
+ * @param maxDispatchSeconds 单次派发的墙钟软上限（秒）；到期后阻止新请求并尽力中断在途任务，不保证立即停止
+ * @param maxTotalTokens     单次派发的 token 软上限（输入 + 输出）；0 表示不限，用量缺失时按本地估算
  */
 @ConfigurationProperties(prefix = "pilot.multi.budget")
 public record MultiAgentBudget(Integer maxDispatchSeconds, Integer maxTotalTokens) {

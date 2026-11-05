@@ -28,6 +28,12 @@ spring:
           no-cache: true
 
 pilot:
+  multi:
+    budget:
+      # 单次派发墙钟上限（秒）。到期后停止准入，并尽力中断在途子任务；仍是本地软限制。
+      max-dispatch-seconds: ${PILOT_MULTI_BUDGET_MAX_DISPATCH_SECONDS:1800}
+      # 输入 + 输出 token 总上限；0 表示不限。缺失 usage 会估算，在途输出可能导致超额。
+      max-total-tokens: ${PILOT_MULTI_BUDGET_MAX_TOTAL_TOKENS:0}
   mobile:
     # auto 使用内置公共连接服务，尽力直连、必要时中继；direct 完全关闭公共服务。
     # 二维码始终本地生成，跨网服务在后台准备，不阻塞出码。

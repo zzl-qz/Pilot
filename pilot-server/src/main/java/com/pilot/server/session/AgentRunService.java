@@ -1007,6 +1007,26 @@ public class AgentRunService implements RunStarter {
      * 写文件与派发工具对模型「不存在」而不是「被拒绝」，避免无谓的重试浪费。
      * 命令保留：git 只读子命令在内置白名单里，写命令照旧走权限门。
      */
+    private static void hideNativeTools(ToolRegistry tools,
+        Set<com.pilot.core.model.NativeCapability> capabilities) {
+        if (capabilities.contains(com.pilot.core.model.NativeCapability.WEB_SEARCH)) {
+            tools.remove("web_search");
+        }
+        if (capabilities.contains(com.pilot.core.model.NativeCapability.WEB_FETCH)) {
+            tools.remove("web_fetch");
+        }
+    }
+
+    private static void addNativeToolNames(Set<String> names,
+        Set<com.pilot.core.model.NativeCapability> capabilities) {
+        if (capabilities.contains(com.pilot.core.model.NativeCapability.WEB_SEARCH)) {
+            names.add("web_search");
+        }
+        if (capabilities.contains(com.pilot.core.model.NativeCapability.WEB_FETCH)) {
+            names.add("web_fetch");
+        }
+    }
+
     private ToolRegistry reviewTools(String workspace) {
         AgentScope scope = AgentScope.readOnly(List.of(), List.of()).withTools(
             List.of("read_*", "list_*", "glob_*", "search_*", "run_command", "web_search", "web_fetch"), List.of());
@@ -1229,6 +1249,8 @@ public class AgentRunService implements RunStarter {
     private String execute(String sessionId, String runId, String input, List<Attachment> attachments,
         List<Integer> imagePositions, RunHandle handle, boolean continuation) {
         List<Message> history = conversations.load(sessionId);
+        ModelClient runModel = modelClient.snapshot();
+        Set<com.pilot.core.model.NativeCapability> nativeCapabilities = runModel.nativeCapabilities();
         String workspace = sessions.find(sessionId).map(Session::workspace).orElse(null);
         // /review 独立审查模式：只读工具表 + 固定审查协议，写文件与派发工具在本 run 里不存在。
         // 权限语义不变（只读命令照常放行，写命令照旧审批），不新加档位也不影响普通 run。
@@ -1244,6 +1266,7 @@ public class AgentRunService implements RunStarter {
         };
         ToolRegistry tools =
             review.active() ? reviewTools(workspace) : sessionTools(sessionId, runId, workspace, planSink);
+        hideNativeTools(tools, nativeCapabilities);
         // 技能目录：本 run 内工具注册与目录段共用同一份快照，避免两次扫描之间目录变化造成不一致
         SkillCatalog catalog = skills.catalogFor(workspace);
         if (!review.active() && !catalog.list().isEmpty()) {
@@ -1257,7 +1280,8 @@ public class AgentRunService implements RunStarter {
         if (unattended && scheduleService != null) {
             tools.register(scheduleService.getObject().wakeTool(sessionId));
         }
-        Set<String> availableTools = review.active() ? tools.names() : sessionTools(tools);
+        Set<String> availableTools = new java.util.LinkedHashSet<>(review.active() ? tools.names() : sessionTools(tools));
+        addNativeToolNames(availableTools, nativeCapabilities);
         RunUsageAccumulator runUsage = new RunUsageAccumulator();
         // 收尾事件里的检查摘要要用于校验证据，sink 里先留一份
         AtomicReference<RunCompleted> lastCompleted = new AtomicReference<>();
@@ -1272,9 +1296,9 @@ public class AgentRunService implements RunStarter {
                 publish(sessionId, runId, runUsage.request(report));
             }
         };
-        ModelClient measuredMain = new MeteredModelClient(modelClient, sessionId, "main", promptSources, reports);
+        ModelClient measuredMain = new MeteredModelClient(runModel, sessionId, "main", promptSources, reports);
         ModelClient measuredChild =
-            new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(), reports);
+            new MeteredModelClient(runModel, sessionId + ":subagent", "subagent", List.of(), reports);
         AgentLoop.Config config =
             new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(), properties.repeatAbortAt(),
                 promptSources.stream().map(ContextComposition.Source::text)

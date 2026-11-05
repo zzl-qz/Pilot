@@ -410,7 +410,7 @@ public final class AgentLoop {
         try {
             for (int step = 1; step <= config.maxSteps(); step++) {
                 if (cancellation.cancelled()) {
-                    return cancel(messages, events);
+                    return stopForCancellation(messages, events);
                 }
                 ContextCompactor.dropStaleToolImages(messages, MAX_TOOL_IMAGE_MESSAGES);
                 budget.apply(messages, contextLimit(), events);
@@ -422,7 +422,7 @@ public final class AgentLoop {
 
                 ModelTurn turn = callModel(messages, events, usage, runtimeGuidance);
                 if (turn.stop() != null) {
-                    if ("CANCELLED".equals(turn.stop().failureCode())) {
+                    if ("CANCELLED".equals(turn.stop().failureCode()) || "BUDGET_EXHAUSTED".equals(turn.stop().failureCode())) {
                         return turn.stop();
                     }
                     return finalizeFailure(messages, events, usage, turn.stop().failureCode(), "模型请求未能完成；已有进度保留。",
@@ -430,7 +430,7 @@ public final class AgentLoop {
                 }
                 ModelResponse response = turn.response();
                 if (cancellation.cancelled()) {
-                    return cancel(messages, events);
+                    return stopForCancellation(messages, events);
                 }
 
                 String content = response.content() == null ? "" : response.content();
@@ -506,9 +506,9 @@ public final class AgentLoop {
                     }
                 } else {
                     for (int index = 0; index < calls.size(); index++) {
-                        if (cancellation.cancelled()) {
+                        if (cancellation.cancelledBeforeTool()) {
                             skipCalls(messages, calls, index, "运行已暂停或取消，本次调用未执行。");
-                            return cancel(messages, events);
+                            return stopForCancellation(messages, events);
                         }
                         Message nextCorrection = pendingInput.get();
                         if (hasInput(nextCorrection)) {
@@ -577,7 +577,7 @@ public final class AgentLoop {
                 // 每步落盘，进程被打断时最多丢当前这一步
                 safeCheckpoint(checkpoint, messages);
                 if (cancellation.cancelled()) {
-                    return cancel(messages, events);
+                    return stopForCancellation(messages, events);
                 }
             }
 
@@ -585,7 +585,7 @@ public final class AgentLoop {
                 "已达到本轮步数上限 " + config.maxSteps() + "，历史已保留，可以继续执行。", true);
         } catch (ExecutionPolicy.Stop stop) {
             if (cancellation.cancelled()) {
-                return cancel(messages, events);
+                return stopForCancellation(messages, events);
             }
             return finalizeFailure(messages, events, usage, stop.code(), stop.getMessage(), true);
         } finally {
@@ -627,7 +627,7 @@ public final class AgentLoop {
         if (executionPolicy != null) {
             String remaining = executionPolicy.review(List.copyOf(messages), changedFiles, checks);
             if (cancellation.cancelled()) {
-                return cancel(messages, events);
+                return stopForCancellation(messages, events);
             }
             if (remaining != null) {
                 runtimeGuidance.add(remaining);
@@ -638,7 +638,7 @@ public final class AgentLoop {
         }
         // 发出完成事件之前与输入入口原子交接，确保已接收的纠正不会落在完成之后。
         if (cancellation.cancelled()) {
-            return cancel(messages, events);
+            return stopForCancellation(messages, events);
         }
         if (applySteering(messages, events, pendingInput.get()) || !completionClaim.getAsBoolean()) {
             safeCheckpoint(checkpoint, messages);
@@ -677,7 +677,7 @@ public final class AgentLoop {
         }
         safeCheckpoint(checkpoint, messages);
         if (cancellation.cancelled()) {
-            return cancel(messages, events);
+            return stopForCancellation(messages, events);
         }
         return null;
     }
@@ -696,7 +696,7 @@ public final class AgentLoop {
             }
         };
         Supplier<String> parallelStartGuard = () -> {
-            if (cancellation.cancelled()) {
+            if (cancellation.cancelledBeforeTool()) {
                 return "运行已暂停或取消，本次调用未执行。";
             }
             synchronized (pendingInput) {
@@ -709,7 +709,7 @@ public final class AgentLoop {
                     return "用户已纠正当前任务，本次调用未执行，请重新规划。";
                 }
             }
-            return cancellation.cancelled() ? "运行已暂停或取消，本次调用未执行。" : null;
+            return cancellation.cancelledBeforeTool() ? "运行已暂停或取消，本次调用未执行。" : null;
         };
         List<Boolean> permitted = new ArrayList<>(calls.size());
         for (ToolCall call : calls) {
@@ -839,11 +839,11 @@ public final class AgentLoop {
 
         @Override
         public String get() {
-            if (cancellation.cancelled()) {
+            if (cancellation.cancelledBeforeTool()) {
                 return "运行已暂停或取消，本次调用未执行。";
             }
             correction = pendingInput.get();
-            if (cancellation.cancelled()) {
+            if (cancellation.cancelledBeforeTool()) {
                 return "运行已暂停或取消，本次调用未执行。";
             }
             return hasInput(correction) ? "用户已纠正当前任务，本次调用未执行，请重新规划。" : null;
@@ -950,7 +950,7 @@ public final class AgentLoop {
         String retainedGuidance = null;
         while (true) {
             if (cancellation.cancelled()) {
-                return new ModelTurn(null, cancel(messages, events));
+                return new ModelTurn(null, stopForCancellation(messages, events));
             }
             try {
                 // 用户纠正优先于策略提示；不要提前消费一次性 guidance 后再因为 steering 丢掉。
@@ -965,7 +965,7 @@ public final class AgentLoop {
                     policyGuidance = executionPolicy.requestGuidance();
                 }
                 if (cancellation.cancelled()) {
-                    return new ModelTurn(null, cancel(messages, events));
+                    return new ModelTurn(null, stopForCancellation(messages, events));
                 }
                 // 本地控制提示与 policy guidance 都只属于这次采样。模型请求发生瞬时失败时
                 // retainedGuidance 会沿重试保留；真正拿到响应后才消费。
@@ -1008,7 +1008,7 @@ public final class AgentLoop {
                 // 客户端抛错时会重新设置中断位；不清掉的话，后续每次请求都会立刻失败。
                 Thread.interrupted();
                 if (cancellation.cancelled()) {
-                    return new ModelTurn(null, cancel(messages, events));
+                    return new ModelTurn(null, stopForCancellation(messages, events));
                 }
                 ModelFailureKind kind = ModelRetryPolicy.classify(e);
                 if (kind == ModelFailureKind.INTERRUPTED) {
@@ -1032,7 +1032,7 @@ public final class AgentLoop {
                 events.accept(new RunRetrying(attempt, decision.delayMs(), ToolSupport.oneLine(reason, 300),
                     decision.elapsedMs(), decision.remainingMs(), retryBudget.maxAttempts()));
                 if (!pause(decision.delayMs())) {
-                    return new ModelTurn(null, cancel(messages, events));
+                    return new ModelTurn(null, stopForCancellation(messages, events));
                 }
             }
         }
@@ -1055,6 +1055,14 @@ public final class AgentLoop {
             waited += slice;
         }
         return !cancellation.cancelled();
+    }
+
+    private Result stopForCancellation(List<Message> messages, Consumer<SessionEvent> events) {
+        String reason = cancellation.reason();
+        if (reason != null && reason.startsWith("BUDGET_EXHAUSTED")) {
+            return new Result(null, "BUDGET_EXHAUSTED", conversation(messages));
+        }
+        return cancel(messages, events);
     }
 
     private Result cancel(List<Message> messages, Consumer<SessionEvent> events) {

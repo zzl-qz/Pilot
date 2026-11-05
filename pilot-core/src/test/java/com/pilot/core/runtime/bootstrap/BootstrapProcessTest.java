@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -19,7 +20,10 @@ class BootstrapProcessTest {
             } else if (args[0].equals("large")) {
                 System.out.write(new byte[5 * 1024 * 1024]);
             } else {
-                System.out.print(args[0]);
+                // System.out 在 Windows 上按平台编码（GBK）输出，而父进程按 UTF-8 解码；
+                // 显式写 UTF-8 字节，保证非 ASCII 参数在三平台一致。
+                System.out.write(args[0].getBytes(StandardCharsets.UTF_8));
+                System.out.flush();
             }
         }
     }

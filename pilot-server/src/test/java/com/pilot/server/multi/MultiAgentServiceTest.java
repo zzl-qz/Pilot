@@ -24,6 +24,7 @@ import org.mockito.Mockito;
 import org.springframework.beans.factory.ObjectProvider;
 
 import com.pilot.core.event.ArbitrationRequired;
+import com.pilot.core.event.MultiAgentBudgetUpdated;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.SubagentFinished;
 import com.pilot.core.event.TaskUpdated;
@@ -262,13 +263,13 @@ class MultiAgentServiceTest {
         assertEquals(result.arbitrationId(), restored.arbitrations("ses_test").getFirst().id());
     }
 
-    /** 预算超了要停住并说清原因，而不是继续烧钱，也不丢已完成的产物。 */
+    /** 预算用量在每个模型请求结束后结算；后续依赖任务被阻断且已完成产物保留。 */
     @Test
     void budgetPausesRemainingTasksWithAnExplanation() throws IOException {
         ModelClient client =
-            (messages, tools) -> new ModelResponse(REPORT, List.of(), new ModelUsage(4_000, 500, 0, true));
+            (messages, tools) -> new ModelResponse(REPORT, List.of(), new ModelUsage(400_000, 500, 0, true));
         MultiAgentService service = service(client);
-        service.setBudgetLimits(new MultiAgentBudget(600, 1_000));
+        service.setBudgetLimits(new MultiAgentBudget(600, 100_000));
         TaskSpec upstream = TaskSpec.readOnly("T1", "调研一", "盘点第一段代码", List.of(), List.of("src/**"));
         TaskSpec downstream = TaskSpec.readOnly("T2", "调研二", "接着盘点第二段", List.of("T1"), List.of("src/**"));
 
@@ -280,18 +281,83 @@ class MultiAgentServiceTest {
         assertTrue(result.outcomes().get(1).detail().contains("预算"), result.outcomes().get(1).detail());
         assertTrue(events.stream().anyMatch(
             event -> event instanceof TaskUpdated updated && "blocked".equals(updated.status())), "界面要能看到被暂停的任务");
+        assertTrue(events.stream().anyMatch(event -> event instanceof MultiAgentBudgetUpdated budget
+            && "stopped".equals(budget.status()) && budget.usedTokens() > budget.maxTotalTokens()));
     }
 
     @Test
     void missingUsageStillConsumesBudget() throws IOException {
-        MultiAgentService service = service((messages, tools) -> new ModelResponse(REPORT, List.of()));
-        service.setBudgetLimits(new MultiAgentBudget(600, 1));
-        var result =
-            service.dispatch(dispatch(List.of(TaskSpec.readOnly("T1", "调研一", "读取代码", List.of(), List.of("src/**")),
-                TaskSpec.readOnly("T2", "调研二", "继续读取", List.of("T1"), List.of("src/**")))));
+        String longResponse = REPORT + "x".repeat(500_000);
+        MultiAgentService service = service((messages, tools) -> new ModelResponse(longResponse, List.of()));
+        service.setBudgetLimits(new MultiAgentBudget(600, 100_000));
+        var result = service.dispatch(dispatch(List.of(
+            TaskSpec.readOnly("T1", "调研一", "读取代码", List.of(), List.of("src/**")),
+            TaskSpec.readOnly("T2", "调研二", "继续读取", List.of("T1"), List.of("src/**")))));
         assertFalse(result.completed());
+        assertEquals(TaskStatus.DONE, result.outcomes().get(0).status());
         assertEquals(TaskStatus.BLOCKED, result.outcomes().get(1).status());
-        assertTrue(result.outcomes().get(1).detail().contains("预算"));
+        assertTrue(result.report().contains("估算"), result.report());
+    }
+
+    @Test
+    void budgetDenialDoesNotCallModelOrRetry() throws IOException {
+        AtomicInteger requests = new AtomicInteger();
+        MultiAgentService service = service((messages, tools) -> {
+            requests.incrementAndGet();
+            return new ModelResponse(REPORT, List.of());
+        });
+        service.setBudgetLimits(new MultiAgentBudget(600, 1));
+
+        MultiAgentService.Result result = service.dispatch(dispatch(List.of(
+            TaskSpec.readOnly("T1", "预算前拒绝", "读取代码", List.of(), List.of("src/**")))));
+
+        assertEquals(0, requests.get(), "预算拒绝必须发生在底层模型调用之前");
+        assertEquals(TaskStatus.BLOCKED, result.outcomes().getFirst().status());
+        assertTrue(result.outcomes().getFirst().detail().contains("预算"));
+    }
+
+    @Test
+    void budgetStopInterruptsOtherInFlightRequestBestEffort() throws IOException {
+        AtomicInteger requests = new AtomicInteger();
+        java.util.concurrent.atomic.AtomicBoolean interrupted = new java.util.concurrent.atomic.AtomicBoolean();
+        CountDownLatch entered = new CountDownLatch(2);
+        ModelClient client = (messages, tools) -> {
+            int request = requests.incrementAndGet();
+            entered.countDown();
+            if (request == 1) {
+                try {
+                    assertTrue(entered.await(3, TimeUnit.SECONDS), "并发请求应同时进入模型客户端");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("第一个请求等待时被中断", e);
+                }
+                return new ModelResponse(REPORT, List.of(), new ModelUsage(2_000_000, 0, 0, true));
+            }
+            try {
+                if (!entered.await(3, TimeUnit.SECONDS)) {
+                    throw new AssertionError("第二个并发请求未进入模型客户端");
+                }
+                Thread.sleep(10_000);
+                return new ModelResponse(REPORT, List.of(), new ModelUsage(1, 1, 0, true));
+            } catch (InterruptedException e) {
+                interrupted.set(true);
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("模型请求被中断", e);
+            }
+        };
+        MultiAgentService service = service(client);
+        service.setBudgetLimits(new MultiAgentBudget(600, 1_000_000));
+
+        MultiAgentService.Result result = service.dispatch(dispatch(List.of(
+            TaskSpec.readOnly("T1", "并发一", "盘点代码 A", List.of(), List.of("src/**")),
+            TaskSpec.readOnly("T2", "并发二", "盘点代码 B", List.of(), List.of("src/**")))));
+
+        assertEquals(2, requests.get(), "停止后不能再发新的模型请求或重试");
+        assertTrue(interrupted.get(), "另一个在途请求应收到 best-effort 中断");
+        assertFalse(result.completed());
+        assertTrue(result.outcomes().stream().anyMatch(outcome -> outcome.status() == TaskStatus.BLOCKED));
+        assertTrue(events.stream().anyMatch(event -> event instanceof MultiAgentBudgetUpdated budget
+            && budget.cancellationRequested()));
     }
 
     @Test

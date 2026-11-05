@@ -15,6 +15,7 @@ export const EVENT_TYPES = [
   'subagent.started',
   'subagent.finished',
   'task.updated',
+  'multi.budget',
   'sandbox.diff',
   'arbitration.required',
   'arbitration.resolved',

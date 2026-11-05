@@ -13,6 +13,7 @@ import com.pilot.core.event.ArbitrationRequired;
 import com.pilot.core.event.ArbitrationResolved;
 import com.pilot.core.event.ContextCompacted;
 import com.pilot.core.event.ExecutionUpdated;
+import com.pilot.core.event.MultiAgentBudgetUpdated;
 import com.pilot.core.event.PlanUpdated;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
@@ -147,11 +148,14 @@ class EventCodecNewEventsTest {
         ArbitrationRequired required =
             new ArbitrationRequired("arb_1", "dissent", "T1", List.of("选用方案 A", "选用方案 B"), "报告正文");
         ArbitrationResolved resolved = new ArbitrationResolved("arb_1", "选用方案 A");
+        MultiAgentBudgetUpdated budget = new MultiAgentBudgetUpdated("dsp_1", "stopped", 1_800, 10_000,
+            10_400, 400, 2_000, 2, "token 预算耗尽", true);
 
         assertEquals(task, roundTrip("task.updated", task));
         assertEquals(diff, roundTrip("sandbox.diff", diff));
         assertEquals(required, roundTrip("arbitration.required", required));
         assertEquals(resolved, roundTrip("arbitration.resolved", resolved));
+        assertEquals(budget, roundTrip("multi.budget", budget));
     }
 
     @Test

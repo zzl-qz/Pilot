@@ -53,8 +53,16 @@ export function ModelRuntimeSettings({ model, endpoint }) {
       <label className="task-field">端点能力<select value={value.options.provider || 'auto'} onChange={e => { update('provider', e.target.value); }}>
         <option value="auto">自动识别官方端点</option><option value="generic">通用兼容端点</option>
         <option value="openai">已确认的 OpenAI 能力</option><option value="deepseek">已确认的 DeepSeek 能力</option>
+        <option value="anthropic">Anthropic Messages API</option>
         <option value="anthropic-compatible">支持 Anthropic 缓存标记的兼容网关</option>
       </select></label>
+      <label className="task-field">网页搜索<select value={value.options.webSearchMode || 'auto'} onChange={e => update('webSearchMode', e.target.value)}>
+        <option value="auto">自动使用已识别的原生搜索</option>
+        <option value="local">始终使用 Pilot 本地搜索</option>
+        <option value="openai-responses">使用 OpenAI Responses 原生搜索</option>
+        <option value="anthropic-messages">使用 Anthropic Messages 原生搜索</option>
+      </select></label>
+      <p className="request-setting-status">当前判定：{value.webSearchSource || '服务端未提供能力判定来源，按本地搜索处理'}。原生能力：{(value.nativeCapabilities || []).join('、') || '无'}。自动模式仅识别已验证的官方端点/模型，未知兼容端点不会探测或推测。</p>
       <label className="task-field">缓存策略<select value={value.options.cacheMode || 'auto'} onChange={e => update('cacheMode', e.target.value)}>
         <option value="auto">按端点能力自动选择</option><option value="explicit">显式缓存标记</option><option value="none">不附加缓存参数</option>
       </select></label>

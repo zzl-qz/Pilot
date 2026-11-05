@@ -15,13 +15,19 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public final class ModelRuntimeSettings {
     public record Options(String provider, String cacheMode, String cacheTtl, Boolean instructionMessages,
-        Boolean streamUsage, String compactionMode, ModelPricing pricing) {
+        Boolean streamUsage, String compactionMode, String webSearchMode, ModelPricing pricing) {
+        public Options(String provider, String cacheMode, String cacheTtl, Boolean instructionMessages,
+            Boolean streamUsage, String compactionMode, ModelPricing pricing) {
+            this(provider, cacheMode, cacheTtl, instructionMessages, streamUsage, compactionMode, "auto", pricing);
+        }
+
         public static Options defaults() {
-            return new Options("auto", "auto", "", null, null, "short", ModelPricing.unknown());
+            return new Options("auto", "auto", "", null, null, "short", "auto", ModelPricing.unknown());
         }
     }
 
-    public record View(String model, String endpoint, Options options, ModelProfile effective) {
+    public record View(String model, String endpoint, Options options, ModelProfile effective,
+        java.util.Set<String> nativeCapabilities, String webSearchSource) {
     }
 
     private final SettingsStore store;
@@ -50,16 +56,93 @@ public final class ModelRuntimeSettings {
         return profile(model, options(model));
     }
 
+    /**
+     * Capability selection is a deterministic endpoint/model allowlist, never a live probe that may incur charges.
+     * Custom gateways require an explicit protocol choice because their advertised models are not capability metadata.
+     */
+    public java.util.Set<com.pilot.core.model.NativeCapability> nativeCapabilities(ModelSettings.Snapshot model) {
+        Options options = options(model);
+        String mode = options.webSearchMode() == null ? "auto" : options.webSearchMode();
+        if ("local".equals(mode)) {
+            return java.util.Set.of();
+        }
+        if ("openai-responses".equals(mode)) {
+            return java.util.Set.of(com.pilot.core.model.NativeCapability.WEB_SEARCH);
+        }
+        if ("anthropic-messages".equals(mode)) {
+            return java.util.Set.of(com.pilot.core.model.NativeCapability.WEB_SEARCH);
+        }
+        URI endpoint = URI.create(model.endpoint());
+        String host = endpoint.getHost() == null ? "" : endpoint.getHost().toLowerCase(java.util.Locale.ROOT);
+        if (!"auto".equals(mode)) {
+            return java.util.Set.of();
+        }
+        if ("api.openai.com".equals(host) && profile(model).provider().equals("openai") && model.model() != null
+            && model.model().matches("(?:gpt-(?:4o(?:-.*)?|4\\.1(?:-.*)?|5(?:[.-].*)?)|o[134].*)")) {
+            return java.util.Set.of(com.pilot.core.model.NativeCapability.WEB_SEARCH);
+        }
+        if ("api.anthropic.com".equals(host) && profile(model).provider().equals("anthropic")
+            && supportsAnthropicWebSearch(model.model())) {
+            return java.util.Set.of(com.pilot.core.model.NativeCapability.WEB_SEARCH);
+        }
+        return java.util.Set.of();
+    }
+
+    public boolean anthropicMessages(ModelSettings.Snapshot model) {
+        String mode = options(model).webSearchMode();
+        // 手动选定的协议优先于端点探测，否则官方 Anthropic 主机名会覆盖用户选择的 Responses 协议
+        if ("openai-responses".equals(mode)) {
+            return false;
+        }
+        if ("anthropic-messages".equals(mode)) {
+            return true;
+        }
+        String host = URI.create(model.endpoint()).getHost();
+        return "anthropic".equals(profile(model).provider()) || "api.anthropic.com".equalsIgnoreCase(host);
+    }
+
+    private static boolean supportsAnthropicWebSearch(String model) {
+        return model != null && model.matches("claude-(?:opus-(?:5-5|5|4-[6-8])|sonnet-(?:5-5|5|4-6))(?:-.*)?");
+    }
+
+    public boolean nativeWebSearch(ModelSettings.Snapshot model) {
+        return nativeCapabilities(model).contains(com.pilot.core.model.NativeCapability.WEB_SEARCH);
+    }
+
     private ModelProfile profile(ModelSettings.Snapshot model, Options options) {
-        return ModelProfile.resolve(URI.create(model.endpoint()), model.model(), options.provider(),
+        String searchMode = options.webSearchMode() == null ? "auto" : options.webSearchMode();
+        if (!java.util.Set.of("auto", "local", "openai-responses", "anthropic-messages").contains(searchMode)) {
+            throw new IllegalArgumentException("不支持的原生网页搜索策略");
+        }
+        ModelProfile resolved = ModelProfile.resolve(URI.create(model.endpoint()), model.model(), options.provider(),
             options.cacheMode(), options.cacheTtl(), options.instructionMessages(), options.streamUsage(),
             options.compactionMode(), options.pricing());
+        String host = URI.create(model.endpoint()).getHost();
+        boolean anthropicHost = "api.anthropic.com".equalsIgnoreCase(host);
+        boolean openaiHost = "api.openai.com".equalsIgnoreCase(host);
+        if ("openai-responses".equals(searchMode) && ("anthropic".equals(resolved.provider()) || anthropicHost)) {
+            throw new IllegalArgumentException("Anthropic 端点不能使用 OpenAI Responses 协议");
+        }
+        if ("anthropic-messages".equals(searchMode) && ("openai".equals(resolved.provider()) || openaiHost)) {
+            throw new IllegalArgumentException("OpenAI 端点不能使用 Anthropic Messages 协议");
+        }
+        return resolved;
     }
 
     public View current() {
         ModelSettings.Snapshot model = models.snapshot();
         Options options = options(model);
-        return new View(model.model(), model.endpoint(), options, profile(model, options));
+        java.util.Set<com.pilot.core.model.NativeCapability> capabilities = nativeCapabilities(model);
+        java.util.Set<String> names = capabilities.stream().map(Enum::name).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        String mode = options.webSearchMode() == null ? "auto" : options.webSearchMode();
+        String source = switch (mode) {
+            case "local" -> "已手动指定 Pilot 本地搜索";
+            case "openai-responses" -> "已手动选择 OpenAI Responses 协议";
+            case "anthropic-messages" -> "已手动选择 Anthropic Messages 协议";
+            default -> capabilities.contains(com.pilot.core.model.NativeCapability.WEB_SEARCH)
+                ? "按官方端点与模型能力目录自动识别" : "原生能力未知或未确认，回退 Pilot 本地搜索";
+        };
+        return new View(model.model(), model.endpoint(), options, profile(model, options), names, source);
     }
 
     public synchronized View update(String expectedModel, String expectedEndpoint, Options options) {

@@ -9,15 +9,17 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.OpenAiCompatibleModelClient;
+import com.pilot.core.model.OpenAiResponsesModelClient;
 
 import tools.jackson.databind.ObjectMapper;
 
 @Configuration(proxyBeanMethods = false)
 public class ModelClientConfiguration {
     /**
-     * 返回的是可热切换的代理：真正构造 {@link OpenAiCompatibleModelClient} 的时机推迟到首次调用，
-     * 并在模型配置变化时重建，因此改模型 / 端点 / API Key 不需要重启。
+     * 返回热切换代理：按当前端点协议选择 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages，
+     * 配置变化时在下一次请求前重建对应客户端。
      */
     @Bean
     ModelClient modelClient(ModelSettings settings, ObjectMapper objectMapper, ModelRuntimeSettings runtime,
@@ -26,10 +28,21 @@ public class ModelClientConfiguration {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         Duration timeout = Duration.ofSeconds(Math.max(5, timeoutSeconds));
         // 显式缓存标记只给支持 cache_control 的端点；OpenAI 官方端点自动缓存，保持默认关闭
-        return new ModelClientProvider(settings,
-            snapshot -> new OpenAiCompatibleModelClient(httpClient, objectMapper, URI.create(snapshot.endpoint()),
-                snapshot.apiKey(), snapshot.model(), timeout).withProfile(runtime.profile(snapshot))
-                .withPromptCaching(promptCaching),
-            runtime::revision);
+        return new ModelClientProvider(settings, snapshot -> {
+            ModelProfile profile = runtime.profile(snapshot);
+            java.util.Set<com.pilot.core.model.NativeCapability> nativeCapabilities =
+                runtime.nativeCapabilities(snapshot);
+            URI endpoint = URI.create(snapshot.endpoint());
+            if (runtime.anthropicMessages(snapshot)) {
+                return new com.pilot.core.model.AnthropicMessagesModelClient(httpClient, objectMapper, endpoint,
+                    snapshot.apiKey(), snapshot.model(), timeout, profile, nativeCapabilities);
+            }
+            if (nativeCapabilities.contains(com.pilot.core.model.NativeCapability.WEB_SEARCH)) {
+                return new OpenAiResponsesModelClient(httpClient, objectMapper, endpoint, snapshot.apiKey(),
+                    snapshot.model(), timeout, profile);
+            }
+            return new OpenAiCompatibleModelClient(httpClient, objectMapper, endpoint, snapshot.apiKey(),
+                snapshot.model(), timeout).withProfile(profile).withPromptCaching(promptCaching);
+        }, runtime::revision);
     }
 }

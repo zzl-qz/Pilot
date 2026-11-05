@@ -36,6 +36,11 @@ public final class ToolRegistry {
         return name == null ? Optional.empty() : Optional.ofNullable(tools.get(name));
     }
 
+    /** Remove a run-specific tool that is superseded by a provider-native capability. */
+    public Optional<Tool> remove(String name) {
+        return name == null ? Optional.empty() : Optional.ofNullable(tools.remove(name));
+    }
+
     /** 全部已注册工具，含暂不可用的。 */
     public List<Tool> tools() {
         ArrayList<Tool> result = new ArrayList<>(tools.values());

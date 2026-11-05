@@ -9,6 +9,16 @@ package com.pilot.core.loop;
 public interface Cancellation {
     boolean cancelled();
 
+    /** 具体停止原因；默认将既有取消信号映射为用户取消。 */
+    default String reason() {
+        return cancelled() ? "CANCELLED" : null;
+    }
+
+    /** Tool side effects check cancellation without consuming a completed-response allowance. */
+    default boolean cancelledBeforeTool() {
+        return cancelled();
+    }
+
     static Cancellation none() {
         return () -> false;
     }

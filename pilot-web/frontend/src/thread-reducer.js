@@ -218,6 +218,11 @@ function pushRow(draft, row) {
   draft.thread.rows.push(row);
 }
 
+function formatBudgetCount(value) {
+  const count = Number(value);
+  return Number.isFinite(count) ? Math.max(0, count).toLocaleString() : '0';
+}
+
 function record(draft, event, entry) {
   if (event.type !== 'assistant.delta' && event.type !== 'assistant.preview') {
     draft.streamCard = null;
@@ -229,6 +234,7 @@ function record(draft, event, entry) {
   draft.thread.activityCount += 1;
   const item = {
     key: `${event.type}:${event.sequence}:${draft.thread.activityCount}`,
+    dispatchId: entry.dispatchId || null,
     kind: entry.kind,
     tone: entry.tone,
     status: entry.status,
@@ -773,6 +779,31 @@ export function applyEvent(draft, event, { live }) {
       break;
     }
 
+    case 'multi.budget': {
+      const payload = event.payload || {};
+      const tokenLimit = Number(payload.maxTotalTokens || 0) > 0
+        ? `${formatBudgetCount(payload.maxTotalTokens)} token` : '不限';
+      const detail = [
+        `墙钟上限 ${formatBudgetCount(payload.maxDispatchSeconds)} 秒 · token 上限 ${tokenLimit}`,
+        `已结算 ${formatBudgetCount(payload.usedTokens)} token（估算 ${formatBudgetCount(payload.estimatedTokens)}）`,
+        `在途输入预留 ${formatBudgetCount(payload.reservedTokens)} token · ${formatBudgetCount(payload.inFlightRequests)} 个请求未结算`,
+        payload.stopReason ? `停止原因：${payload.stopReason}` : null,
+        payload.cancellationRequested ? '已请求中断在途子任务；这不保证供应商撤销请求或停止计费。' : null,
+        '本地软预算；在途输出用量可能造成超额。'
+      ].filter(Boolean).join('\n');
+      const existing = draft.timeline.find((item) => item.type === event.type
+        && item.dispatchId === payload.dispatchId);
+      const status = payload.status === 'stopped' ? '软停止'
+        : payload.status === 'completed' ? '完成' : '运行中';
+      const tone = payload.status === 'stopped' ? 'warn' : payload.status === 'completed' ? 'ok' : 'run';
+      if (existing) {
+        Object.assign(existing, { tone, status, title: '多智能体派发预算', detail, sequence: event.sequence, timestamp: event.timestamp });
+      } else {
+        record(draft, event, { kind: 'run', tone, status, title: '多智能体派发预算', detail, dispatchId: payload.dispatchId });
+      }
+      break;
+    }
+
     case 'task.updated': {
       draft.task = { ...(draft.task || {}), ...(event.payload || {}) };
       record(draft, event, { kind: 'run', tone: 'ok', status: '契约', title: '任务契约更新', detail: null });
@@ -925,6 +956,19 @@ function applyEventInto(root, event, bucket) {
   applyEvent(isolated, event, { live: false });
   // activityCount 单调递增，回传避免 key 冲突
   thread.activityCount = isolated.thread.activityCount;
+  // 预算卡片只写根级 timeline 而不产生 row；真实历史回放需要把它合并回根状态，否则翻页后卡片消失
+  if (event.type === 'multi.budget') {
+    const timeline = root.timeline || (root.timeline = []);
+    for (const item of isolated.timeline) {
+      const index = timeline.findIndex(existing => existing.type === item.type
+        && (existing.dispatchId || null) === (item.dispatchId || null));
+      if (index >= 0) {
+        timeline[index] = item;
+      } else {
+        timeline.push(item);
+      }
+    }
+  }
 }
 
 /** 历史页（更新）追加：行加到尾部。 */

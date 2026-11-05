@@ -53,6 +53,11 @@ public final class ModelClientProvider implements ModelClient {
     }
 
     @Override
+    public java.util.Set<com.pilot.core.model.NativeCapability> nativeCapabilities() {
+        return client().nativeCapabilities();
+    }
+
+    @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools,
         java.util.function.Consumer<String> text) {
         return client().chat(messages, tools, text);

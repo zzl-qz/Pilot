@@ -10,10 +10,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -30,6 +32,7 @@ import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.ContextCompacted;
+import com.pilot.core.event.MultiAgentBudgetUpdated;
 import com.pilot.core.event.PlanUpdated;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
@@ -44,7 +47,9 @@ import com.pilot.core.event.SubagentStarted;
 import com.pilot.core.event.TaskUpdated;
 import com.pilot.core.event.ToolStarted;
 import com.pilot.core.loop.AgentLoop;
+import com.pilot.core.loop.Cancellation;
 import com.pilot.core.loop.ContextCompactor;
+import com.pilot.core.loop.ExecutionPolicy;
 import com.pilot.core.loop.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelProfile;
@@ -229,8 +234,19 @@ public class MultiAgentService {
             dispatchStore.saveNodes(dispatchId, graph.specs());
         }
         final Dispatch scoped = dispatch;
-        // 预算在派发开始时确定：墙钟与 token 上限都是整批共享，不是每个任务各一份
-        final Budget budget = new Budget(budgetLimits);
+        MultiAgentBudgetLedger budget = new MultiAgentBudgetLedger(budgetLimits,
+            snapshot -> publishBudget(scoped, snapshot));
+        publishBudget(scoped, budget.snapshot());
+        try {
+            return dispatchWithBudget(scoped, graph, dispatchId, budget);
+        } finally {
+            budget.close();
+        }
+    }
+
+    private Result dispatchWithBudget(Dispatch dispatch, TaskGraph graph, String dispatchId,
+        MultiAgentBudgetLedger budget) {
+        final Dispatch scoped = dispatch;
         Map<String, TaskState> states = new LinkedHashMap<>();
         for (TaskSpec spec : graph.specs()) {
             TaskState state = new TaskState(spec);
@@ -246,7 +262,7 @@ public class MultiAgentService {
         boolean cancelled = false;
 
         while (!halted) {
-            if (cancelled(dispatch)) {
+            if (MultiAgentService.cancelled(dispatch)) {
                 cancelled = true;
                 break;
             }
@@ -256,7 +272,7 @@ public class MultiAgentService {
             }
             // 预算超了就整批停住：不再开新的子 Agent，已完成的产物保留，报告里写清原因
             String overrun = budget.reason();
-            if (overrun != null) {
+            if (!overrun.isEmpty()) {
                 for (TaskSpec spec : ready) {
                     TaskState state = states.get(spec.id());
                     if (state.status == TaskStatus.PENDING) {
@@ -274,9 +290,23 @@ public class MultiAgentService {
             }
             for (Future<?> future : futures) {
                 try {
-                    future.get();
+                    long remaining = budget.remainingNanos();
+                    if (remaining <= 0) {
+                        budget.expireNow();
+                        throw new TimeoutException("派发预算墙钟时间已耗尽");
+                    }
+                    future.get(remaining, TimeUnit.NANOSECONDS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
+                    cancelled = true;
+                    halted = true;
+                    futures.forEach(active -> active.cancel(true));
+                    break;
+                } catch (TimeoutException e) {
+                    budget.expireNow();
+                    futures.forEach(active -> active.cancel(true));
+                    halted = true;
+                } catch (CancellationException e) {
                     halted = true;
                 } catch (Exception e) {
                     log.warn("子任务执行异常", e);
@@ -285,6 +315,10 @@ public class MultiAgentService {
             }
             for (TaskSpec spec : ready) {
                 TaskState state = states.get(spec.id());
+                if (state.status == TaskStatus.RUNNING && (cancelled || !budget.reason().isEmpty())) {
+                    update(state, cancelled ? TaskStatus.CANCELLED : TaskStatus.BLOCKED,
+                        cancelled ? "父运行已取消；已请求中断子任务" : budget.reason(), dispatch);
+                }
                 switch (state.status) {
                     case DONE -> finished.add(spec.id());
                     case FAILED, CANCELLED -> blockDownstream(graph, states, spec.id(), dispatch);
@@ -295,10 +329,11 @@ public class MultiAgentService {
             }
         }
 
+        String budgetStop = budget.reason();
         for (TaskState state : states.values()) {
             if (state.status == TaskStatus.PENDING) {
                 update(state, cancelled ? TaskStatus.CANCELLED : TaskStatus.BLOCKED,
-                    cancelled ? "父运行已取消" : "等待人工仲裁或上游阻塞", dispatch);
+                    cancelled ? "父运行已取消" : budgetStop.isEmpty() ? "等待人工仲裁或上游阻塞" : budgetStop, dispatch);
             }
         }
 
@@ -350,7 +385,12 @@ public class MultiAgentService {
 
         List<TaskOutcome> outcomes = states.values().stream().map(TaskState::outcome).toList();
         recordBoard(dispatch, states);
-        String report = buildReport(outcomes, merge, verificationReport, dissents, completed);
+        if (cancelled) {
+            budget.stopForCancellation();
+        } else {
+            budget.complete();
+        }
+        String report = buildReport(outcomes, merge, verificationReport, dissents, completed, budget.snapshot());
         if (dispatchStore != null) {
             dispatchStore.saveDispatch(dispatchId, dispatch.sessionId(), dispatch.runId(), dispatch.workspace(),
                 completed ? "awaiting_acceptance" : arbitrationId.isEmpty() ? "failed" : "awaiting_decision");
@@ -359,14 +399,14 @@ public class MultiAgentService {
     }
 
     private void execute(TaskSpec spec, TaskState state, Dispatch dispatch, Map<String, TaskState> states,
-        Budget budget) {
-        if (cancelled(dispatch)) {
+        MultiAgentBudgetLedger budget) {
+        if (MultiAgentService.cancelled(dispatch)) {
             update(state, TaskStatus.CANCELLED, "父运行已取消", dispatch);
             return;
         }
         // 预算先于执行：超了就不再开新的子 Agent，保留已有产物等用户决定
-        String overrun = budget == null ? null : budget.reason();
-        if (overrun != null) {
+        String overrun = budget.reason();
+        if (!overrun.isEmpty()) {
             update(state, TaskStatus.BLOCKED, overrun, dispatch);
             return;
         }
@@ -398,6 +438,9 @@ public class MultiAgentService {
         if (attempt.ok()) {
             collect(dispatch, state, attempt.sandbox());
             update(state, TaskStatus.DONE, summary(attempt.report()), dispatch);
+        } else if (attempt.budgetStopReason() != null && !attempt.budgetStopReason().isBlank()) {
+            collect(dispatch, state, attempt.sandbox());
+            update(state, TaskStatus.BLOCKED, attempt.budgetStopReason(), dispatch);
         } else {
             update(state, TaskStatus.FAILED, attempt.failure(), dispatch);
         }
@@ -425,6 +468,15 @@ public class MultiAgentService {
         List<Attempt> ok = attempts.stream().filter(Attempt::ok).toList();
         state.agentId = ok.isEmpty() ? "" : ok.get(0).agentId();
         if (ok.isEmpty()) {
+            List<Attempt> budgetStopped = attempts.stream()
+                .filter(attempt -> attempt.budgetStopReason() != null && !attempt.budgetStopReason().isBlank()).toList();
+            if (!budgetStopped.isEmpty()) {
+                budgetStopped.forEach(attempt -> collect(dispatch, state, attempt.sandbox()));
+                String reason = budgetStopped.stream().map(Attempt::budgetStopReason).distinct()
+                    .reduce((left, right) -> left + "；" + right).orElse("派发预算软停止");
+                update(state, TaskStatus.BLOCKED, reason, dispatch);
+                return;
+            }
             update(state, TaskStatus.FAILED,
                 "所有方案都未完成：" + attempts.stream().map(Attempt::failure).reduce((a, b) -> a + "；" + b).orElse("未知原因"),
                 dispatch);
@@ -445,37 +497,43 @@ public class MultiAgentService {
         update(state, TaskStatus.DONE, summary(reports.get(0)), dispatch);
     }
 
-    private Attempt runWithRetry(TaskSpec spec, Dispatch dispatch, Map<String, TaskState> states, Budget budget) {
-        Attempt last = null;
-        String lane = "lane_" + randomSuffix();
-        int attempts = properties.maxAttempts();
-        for (int round = 1; round <= attempts; round++) {
-            // 重试也要看预算：已经超了就停在这一次的结果上，不再发起新一轮请求
-            if (round > 1 && budget != null && budget.exhausted()) {
-                break;
+    private Attempt runWithRetry(TaskSpec spec, Dispatch dispatch, Map<String, TaskState> states,
+        MultiAgentBudgetLedger budget) {
+        try (MultiAgentBudgetLedger.WorkerLease ignored = budget.registerWorker()) {
+            Attempt last = null;
+            String lane = "lane_" + randomSuffix();
+            int attempts = properties.maxAttempts();
+            for (int round = 1; round <= attempts; round++) {
+                String overrun = budget.reason();
+                if (!overrun.isEmpty()) {
+                    return last != null ? last : Attempt.budgetStopped("", List.of(), null, overrun,
+                        JdbcDispatchStore.Usage.EMPTY);
+                }
+                if (MultiAgentService.cancelled(dispatch)) {
+                    return last != null ? last : Attempt.cancelled();
+                }
+                String note = round == 1 ? ""
+                    : "这是第 " + round + " 次尝试，上一次未完成：" + (last == null ? "未知原因" : last.failure())
+                        + "。请换一种做法，不要重复同样的调用。";
+                TaskState tracked = states.get(spec.id());
+                if (tracked != null) {
+                    tracked.attempts = round;
+                }
+                last = runOnce(spec, dispatch, note, states, lane, budget);
+                if (last.ok()) {
+                    return last;
+                }
+                if (last.budgetStopReason() != null) {
+                    return last;
+                }
+                log.info("子任务 {} 第 {} 次尝试失败：{}", spec.id(), round, last.failure());
             }
-            if (cancelled(dispatch)) {
-                return last != null ? last : Attempt.cancelled();
-            }
-            String note = round == 1 ? ""
-                : "这是第 " + round + " 次尝试，上一次未完成：" + (last == null ? "未知原因" : last.failure()) + "。请换一种做法，不要重复同样的调用。";
-            TaskState tracked = states.get(spec.id());
-            if (tracked != null) {
-                tracked.attempts = round;
-            }
-            last = runOnce(spec, dispatch, note, states, lane);
-            if (budget != null && last != null) {
-                budget.add(last.usage());
-            }
-            if (last.ok()) {
-                return last;
-            }
-            log.info("子任务 {} 第 {} 次尝试失败：{}", spec.id(), round, last.failure());
+            return last == null ? Attempt.cancelled() : last;
         }
-        return last == null ? Attempt.cancelled() : last;
     }
 
-    private Attempt runOnce(TaskSpec spec, Dispatch dispatch, String note, Map<String, TaskState> states, String lane) {
+    private Attempt runOnce(TaskSpec spec, Dispatch dispatch, String note, Map<String, TaskState> states, String lane,
+        MultiAgentBudgetLedger budget) {
         String agentId = "agent_" + randomSuffix();
         String sandboxId = "sbx_" + randomSuffix();
         DiffSandbox sandbox = new DiffSandbox(sandboxId, agentId, spec.id(), "");
@@ -529,12 +587,46 @@ public class MultiAgentService {
         JsonlTraceRecorder trace = new JsonlTraceRecorder(
             dataDir.file("traces", dispatch.sessionId() + "-" + agentId + ".jsonl"), objectMapper);
         UsageMeter meter = new UsageMeter();
-        AgentLoop loop = new AgentLoop(
-            usageCounting(
-                usageMetering(dispatch.executionClient() == null ? modelClient : dispatch.executionClient(), meter),
-                dispatch.usageSinkOrNull()),
-            tools, new PolicyPermissionGate(mode), ApprovalBroker.denyAll(), config, () -> cancelled(dispatch),
-            () -> null, trace);
+        ModelClient selected = dispatch.executionClient() == null ? modelClient : dispatch.executionClient();
+        ModelClient metered = usageCounting(selected, dispatch.usageSinkOrNull());
+        ModelClient budgeted = usageMetering(metered, meter, budget);
+        ThreadLocal<String> cancellationReason = new ThreadLocal<>();
+        Cancellation cancellation = new Cancellation() {
+            @Override
+            public boolean cancelled() {
+                if (MultiAgentService.cancelled(dispatch)) {
+                    cancellationReason.set("CANCELLED");
+                    return true;
+                }
+                if (budget.shouldCancelCurrentWorker()) {
+                    cancellationReason.set("BUDGET_EXHAUSTED:" + budget.reason());
+                    return true;
+                }
+                cancellationReason.remove();
+                return false;
+            }
+
+            @Override
+            public boolean cancelledBeforeTool() {
+                if (MultiAgentService.cancelled(dispatch)) {
+                    cancellationReason.set("CANCELLED");
+                    return true;
+                }
+                if (budget.shouldCancelBeforeTool()) {
+                    cancellationReason.set("BUDGET_EXHAUSTED:" + budget.reason());
+                    return true;
+                }
+                cancellationReason.remove();
+                return false;
+            }
+
+            @Override
+            public String reason() {
+                return cancellationReason.get();
+            }
+        };
+        AgentLoop loop = new AgentLoop(budgeted, tools, new PolicyPermissionGate(mode), ApprovalBroker.denyAll(), config,
+            cancellation, () -> null, trace);
 
         publish(dispatch.events(), new SubagentStarted(agentId, oneLine(spec.title() + "：" + spec.goal(), 200),
             oneLine(spec.id() + " " + spec.title(), 40)));
@@ -546,6 +638,11 @@ public class MultiAgentService {
             AgentLoop.Result result = loop.run(userPrompt(spec, note, dependencyContext(spec, states)), List.of(),
                 subagentSink(dispatch.events(), agentId));
             if (result.failed()) {
+                String budgetReason = budget.reason();
+                if (!cancelled(dispatch)
+                    && ("BUDGET_EXHAUSTED".equals(result.failureCode()) || !budgetReason.isEmpty())) {
+                    return budgetStopped(dispatch, lease, agentId, sandboxId, sandbox, meter.snapshot(), budgetReason);
+                }
                 String reason = "子 Agent 未完成：" + result.failureCode();
                 finish(lease, "failed", reason, meter.snapshot());
                 publish(dispatch.events(), new SubagentFinished(agentId, reason, false));
@@ -561,11 +658,23 @@ public class MultiAgentService {
             publish(dispatch.events(), new SubagentFinished(agentId, report.headline(), true));
             return new Attempt(agentId, List.of(sandboxId), sandbox, report, true, "", meter.snapshot());
         } catch (RuntimeException e) {
+            String budgetReason = budget.reason();
+            if (!cancelled(dispatch) && !budgetReason.isEmpty()) {
+                return budgetStopped(dispatch, lease, agentId, sandboxId, sandbox, meter.snapshot(), budgetReason);
+            }
             String reason = "子 Agent 异常：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
             finish(lease, "failed", reason, meter.snapshot());
             publish(dispatch.events(), new SubagentFinished(agentId, reason, false));
             return new Attempt(agentId, List.of(sandboxId), sandbox, null, false, reason, meter.snapshot());
         }
+    }
+
+    private Attempt budgetStopped(Dispatch dispatch, JdbcDispatchStore.Lease lease, String agentId, String sandboxId,
+        DiffSandbox sandbox, JdbcDispatchStore.Usage usage, String reason) {
+        String detail = "派发预算软停止：" + (reason == null || reason.isBlank() ? "预算已用尽" : reason);
+        finish(lease, "budget_stopped", detail, usage);
+        publish(dispatch.events(), new SubagentFinished(agentId, detail, false));
+        return Attempt.budgetStopped(agentId, List.of(sandboxId), sandbox, detail, usage);
     }
 
     /** 结算尝试；代次过期（被新尝试取代）时记一条日志，绝不让旧执行者改写状态。 */
@@ -594,8 +703,8 @@ public class MultiAgentService {
         return parent == null ? PermissionMode.READ_ONLY : parent;
     }
 
-    /** 只观测不改写：把每次请求的用量记到本次尝试上，per-agent 归集与预算判断都靠它。 */
-    private static ModelClient usageMetering(ModelClient delegate, UsageMeter meter) {
+    /** Admits every model request before dispatch and settles usage immediately after its response. */
+    private static ModelClient usageMetering(ModelClient delegate, UsageMeter meter, MultiAgentBudgetLedger budget) {
         return new ModelClient() {
             @Override
             public ModelProfile profile() {
@@ -615,23 +724,46 @@ public class MultiAgentService {
             @Override
             public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
                 Consumer<String> reasoningDelta) {
-                ModelResponse response = null;
-                try {
-                    response =
-                        ModelRequestScope.within(ModelRequestScope.current().purpose().isBlank() ? "subagent" : null,
-                            null, false, () -> delegate.chat(messages, tools, textDelta, reasoningDelta));
-                    return response;
-                } finally {
-                    ModelUsage usage = response == null ? null : response.usage();
-                    // 缺失 usage 和失败请求也必须记账，否则端点不报用量就能绕过派发预算。
-                    long input = usage != null && usage.inputTokens() > 0 ? usage.inputTokens()
-                        : ContextCompactor.estimateTokens(messages)
-                            + ContextCompactor.estimateTokens(String.valueOf(tools));
-                    long output = usage != null && usage.present() ? usage.outputTokens() : response == null ? 0
-                        : ContextCompactor.estimateTokens(response.content() + String.valueOf(response.toolCalls()));
-                    meter.record(
-                        new ModelUsage(input, output, 0, usage != null && usage.exact() && usage.inputTokens() > 0));
+                long estimatedInput = ContextCompactor.estimateTokens(messages)
+                    + ContextCompactor.estimateTokens(String.valueOf(tools));
+                MultiAgentBudgetLedger.RequestPermit permit = budget.beginRequest(estimatedInput);
+                if (permit == null) {
+                    throw new ExecutionPolicy.Stop("BUDGET_EXHAUSTED", budget.reason());
                 }
+
+                ModelResponse response = null;
+                RuntimeException failure = null;
+                try {
+                    response = ModelRequestScope.within(
+                        ModelRequestScope.current().purpose().isBlank() ? "subagent" : null, null, false,
+                        () -> delegate.chat(messages, tools, textDelta, reasoningDelta));
+                } catch (RuntimeException e) {
+                    failure = e;
+                }
+
+                ModelUsage reported = response == null ? null : response.usage();
+                long input = reported != null && reported.inputTokens() > 0 ? reported.inputTokens() : estimatedInput;
+                long output = reported != null && reported.present() ? reported.outputTokens()
+                    : response == null ? 0
+                        : ContextCompactor.estimateTokens(response.content() + String.valueOf(response.toolCalls()));
+                boolean exact = reported != null && reported.exact() && reported.inputTokens() > 0;
+                long total = input > Long.MAX_VALUE - output ? Long.MAX_VALUE : input + output;
+                meter.record(new ModelUsage(input, output, 0, exact));
+                MultiAgentBudgetLedger.Settlement settlement = permit.finish(total, exact ? 0 : total, response != null);
+
+                if (failure != null) {
+                    String stopReason = budget.reason();
+                    if (!stopReason.isEmpty()) {
+                        Thread.interrupted();
+                        throw new ExecutionPolicy.Stop("BUDGET_EXHAUSTED", stopReason);
+                    }
+                    throw failure;
+                }
+                if (settlement.stoppedBeforeSettle()) {
+                    Thread.interrupted();
+                    throw new ExecutionPolicy.Stop("BUDGET_EXHAUSTED", settlement.stopReason());
+                }
+                return response;
             }
         };
     }
@@ -879,7 +1011,8 @@ public class MultiAgentService {
     }
 
     private String buildReport(List<TaskOutcome> outcomes, MergePrecheck.Report merge,
-        VerificationGate.Report verification, List<DissentReport> dissents, boolean completed) {
+        VerificationGate.Report verification, List<DissentReport> dissents, boolean completed,
+        MultiAgentBudgetLedger.Snapshot budget) {
         StringBuilder out = new StringBuilder();
         out.append("## 多智能体调度结果：").append(completed ? "全部任务通过" : "需要人工处理").append('\n');
         out.append("### 任务状态\n");
@@ -923,6 +1056,21 @@ public class MultiAgentService {
                     .append(" 个方案结论不一致，已发起人工仲裁。\n");
             }
         }
+        out.append("\n### 派发预算\n");
+        out.append("- 状态：").append(budget.status()).append('\n');
+        out.append("- 墙钟上限：").append(budget.maxDispatchSeconds()).append(" 秒\n");
+        out.append("- token 上限：").append(budget.maxTotalTokens() == 0 ? "不限" : budget.maxTotalTokens()).append('\n');
+        out.append("- 已结算：").append(budget.usedTokens()).append(" token（估算 ").append(budget.estimatedTokens())
+            .append("，其余按端点 usage 记账）\n");
+        out.append("- 在途预留：").append(budget.reservedTokens()).append(" token 输入估算，")
+            .append(budget.inFlightRequests()).append(" 个请求尚未结算\n");
+        if (!budget.stopReason().isBlank()) {
+            out.append("- 停止原因：").append(oneLine(budget.stopReason(), 240)).append('\n');
+        }
+        if (budget.cancellationRequested()) {
+            out.append("- 已向在途子任务请求中断；这不保证供应商撤销请求或停止计费。\n");
+        }
+        out.append("- 这是本地软预算；输出用量在响应返回后结算，在途请求可能导致超额。\n");
         out.append("\n### 你现在要做的\n");
         if (completed) {
             out.append("- 改动都在沙箱里，等用户在变更面板接受后才会落地；向用户说明每个任务的结论与校验结果。\n");
@@ -942,6 +1090,13 @@ public class MultiAgentService {
             dispatchStore.updateNode(dispatch.dispatchId(), state.spec.id(), next.wireName(), state.agentId,
                 state.detail, state.attempts);
         }
+    }
+
+    private static void publishBudget(Dispatch dispatch, MultiAgentBudgetLedger.Snapshot snapshot) {
+        publish(dispatch.events(), new MultiAgentBudgetUpdated(dispatch.dispatchId(), snapshot.status(),
+            snapshot.maxDispatchSeconds(), snapshot.maxTotalTokens(), snapshot.usedTokens(),
+            snapshot.estimatedTokens(), snapshot.reservedTokens(), snapshot.inFlightRequests(), snapshot.stopReason(),
+            snapshot.cancellationRequested()));
     }
 
     private static void publish(Consumer<SessionEvent> events, SessionEvent event) {
@@ -974,9 +1129,19 @@ public class MultiAgentService {
 
     /** 一次子 Agent 实例的产出。 */
     private record Attempt(String agentId, List<String> sandboxIds, DiffSandbox sandbox, AgentReport report, boolean ok,
-        String failure, JdbcDispatchStore.Usage usage) {
+        String failure, JdbcDispatchStore.Usage usage, String budgetStopReason) {
+        private Attempt(String agentId, List<String> sandboxIds, DiffSandbox sandbox, AgentReport report, boolean ok,
+            String failure, JdbcDispatchStore.Usage usage) {
+            this(agentId, sandboxIds, sandbox, report, ok, failure, usage, "");
+        }
+
         static Attempt cancelled() {
-            return new Attempt("", List.of(), null, null, false, "父运行已取消", JdbcDispatchStore.Usage.EMPTY);
+            return new Attempt("", List.of(), null, null, false, "父运行已取消", JdbcDispatchStore.Usage.EMPTY, "");
+        }
+
+        static Attempt budgetStopped(String agentId, List<String> sandboxIds, DiffSandbox sandbox, String reason,
+            JdbcDispatchStore.Usage usage) {
+            return new Attempt(agentId, sandboxIds, sandbox, null, false, reason, usage, reason);
         }
     }
 
@@ -1000,44 +1165,6 @@ public class MultiAgentService {
 
         private JdbcDispatchStore.Usage snapshot() {
             return new JdbcDispatchStore.Usage(input.get(), output.get(), requests.get(), exact);
-        }
-    }
-
-    /**
-     * 单次派发的预算：墙钟与 token 任一超限就暂停未启动的任务，而不是继续烧钱。
-     *
-     * <p>超限不是失败：已完成的产物与沙箱全部保留，报告里写清为什么停，等用户决定要不要放宽。
-     */
-    private static final class Budget {
-        private final long deadline;
-        private final long maxTokens;
-        private final AtomicLong tokens = new AtomicLong();
-
-        private Budget(MultiAgentBudget limits) {
-            MultiAgentBudget effective = limits == null ? MultiAgentBudget.DEFAULT : limits;
-            this.deadline = System.currentTimeMillis() + effective.maxDispatchSeconds() * 1_000L;
-            this.maxTokens = effective.maxTotalTokens();
-        }
-
-        private void add(JdbcDispatchStore.Usage usage) {
-            if (usage != null) {
-                tokens.addAndGet(usage.total());
-            }
-        }
-
-        private boolean exhausted() {
-            return reason() != null;
-        }
-
-        /** 超限原因；未超限时返回 null。 */
-        private String reason() {
-            if (maxTokens > 0 && tokens.get() >= maxTokens) {
-                return "调度预算已用尽：累计 " + tokens.get() + " token 达到上限 " + maxTokens + "，未启动的任务已暂停";
-            }
-            if (System.currentTimeMillis() > deadline) {
-                return "调度预算已用尽：超过单次派发的墙钟上限，未启动的任务已暂停";
-            }
-            return null;
         }
     }
 

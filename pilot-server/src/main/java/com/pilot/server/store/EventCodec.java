@@ -10,6 +10,7 @@ import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.ContextCompacted;
 import com.pilot.core.event.ExecutionUpdated;
 import com.pilot.core.event.ModelRequestCompleted;
+import com.pilot.core.event.MultiAgentBudgetUpdated;
 import com.pilot.core.event.PlanUpdated;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
@@ -63,6 +64,7 @@ public class EventCodec {
             case "subagent.started" -> SubagentStarted.class;
             case "subagent.finished" -> SubagentFinished.class;
             case "task.updated" -> TaskUpdated.class;
+            case "multi.budget" -> MultiAgentBudgetUpdated.class;
             case "sandbox.diff" -> SandboxDiffReady.class;
             case "arbitration.required" -> ArbitrationRequired.class;
             case "arbitration.resolved" -> ArbitrationResolved.class;

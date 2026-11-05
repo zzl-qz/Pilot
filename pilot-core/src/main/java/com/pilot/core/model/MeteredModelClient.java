@@ -41,6 +41,11 @@ public final class MeteredModelClient implements ModelClient {
     }
 
     @Override
+    public java.util.Set<NativeCapability> nativeCapabilities() {
+        return delegate.nativeCapabilities();
+    }
+
+    @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
         return invoke(messages, tools, null, null, false);
     }

@@ -307,7 +307,9 @@ MCP 服务器在工作区的 `.mcp.json`（格式同 Claude Code：`{"mcpServers
 - 硬校验：在 `git worktree` 出来的隔离副本上套用「工作区未提交改动 + 沙箱改动」，执行 `mvnw compile` / `mvnw test`（可用 `pilot.multi.verify-commands` 覆盖）。编译器与测试结果优先于任何 Agent 的判断。
 - 人工仲裁：结论不一致、变更冲突、硬校验失败都会发出 `arbitration.required`，父 Agent 停止推进，由用户选择方案或放弃。
 
-配置项在 `pilot.multi.*`：`enabled`、`max-parallel`、`max-attempts`（默认 3，即最多 2 次重试）、`max-steps`、`verify-timeout-seconds`、`verify-commands`。
+配置项在 `pilot.multi.*`：`enabled`、`max-parallel`、`max-attempts`（默认 3，即最多 2 次重试）、`max-steps`、`verify-timeout-seconds`、`verify-commands`。派发预算使用 `pilot.multi.budget.max-dispatch-seconds`（默认 1800 秒，允许范围 30–21600 秒）和 `pilot.multi.budget.max-total-tokens`（输入 + 输出总 token，默认 0 表示不限；也可用 `PILOT_MULTI_BUDGET_MAX_DISPATCH_SECONDS` / `PILOT_MULTI_BUDGET_MAX_TOTAL_TOKENS` 设置）。
+
+**派发预算是本地软熔断，不是供应商侧硬上限。** 达到墙钟或 token 门槛后不再准入后续模型请求/任务，并尽力中断在途子任务；同步请求可能无法撤销，输出用量在响应返回后结算，因此在途并发仍可能超额。端点不返回 usage 时会按本地估算记账；活动时间线显示已结算、估算、在途输入预留与是否请求中断。
 
 ## 自定义子代理
 
