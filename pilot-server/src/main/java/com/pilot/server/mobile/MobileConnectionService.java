@@ -24,6 +24,7 @@ import jakarta.annotation.PreDestroy;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.server.context.WebServerInitializedEvent;
 import org.springframework.context.event.EventListener;
@@ -34,6 +35,7 @@ import com.pilot.server.security.SecurityProperties;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
 
 /** 连接桥随后台服务存活，Web 与桌面共用设备身份和授权。管理令牌不传给前端。 */
 @Service
@@ -55,6 +57,12 @@ public class MobileConnectionService {
     private boolean closed;
     private long retryAfter;
     private int failures;
+    private MobileEnvironment environment;
+
+    @Autowired
+    public void configureEnvironment(MobileEnvironment environment) {
+        this.environment = environment;
+    }
 
     public MobileConnectionService(PilotDataDir data, SecurityProperties security, ObjectMapper mapper,
         @Value("${pilot.mobile.libraries:}") String libraries, @Value("${pilot.mobile.relay:}") String relay) {
@@ -100,6 +108,19 @@ public class MobileConnectionService {
     }
 
     public synchronized JsonNode request(String operation, JsonNode body) {
+        if ("repair".equals(operation)) {
+            if (environment == null) {
+                throw new IllegalStateException("当前运行方式未启用自动环境补全");
+            }
+            environment.repair();
+            return environmentStatus();
+        }
+        if (environment != null && !environment.status().ready()) {
+            if ("status".equals(operation)) {
+                return environmentStatus();
+            }
+            throw new IllegalStateException(environment.status().message());
+        }
         String path = switch (operation) {
             case "status" -> "/api/status";
             case "pair" -> "/api/pair";
@@ -138,6 +159,12 @@ public class MobileConnectionService {
         }
     }
 
+    private JsonNode environmentStatus() {
+        var state = environment.status();
+        return JsonNodeFactory.instance.objectNode().put("version", 2).put("running", false).set("environment",
+            JsonNodeFactory.instance.objectNode().put("state", state.state()).put("message", state.message()));
+    }
+
     private void start() throws Exception {
         if (closed) {
             throw new IllegalStateException("Pilot 已关闭，请启动后重新连接");
@@ -148,16 +175,20 @@ public class MobileConnectionService {
         if (port == 0) {
             throw new IllegalStateException("Pilot 正在启动，请稍后重试");
         }
-        requirePlatform(System.getProperty("os.name", ""), System.getProperty("os.arch", ""));
+        if (environment == null || environment.prepared() == null) {
+            requirePlatform(System.getProperty("os.name", ""), System.getProperty("os.arch", ""));
+        }
         Path libraries = libraries();
         Files.createDirectories(data);
         String executable =
             System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java";
-        List<String> args =
-            new ArrayList<>(List.of(Path.of(System.getProperty("java.home"), "bin", executable).toString(),
-                "--enable-native-access=ALL-UNNAMED", "-cp", classpath(libraries), "com.pilot.mobile.bridge.MainKt",
-                "--pilot-port", Integer.toString(port), "--data-dir", data.toString(), "--no-open", "--parent-pid",
-                Long.toString(ProcessHandle.current().pid()), "--name", computerName()));
+        Path javaHome =
+            environment != null && environment.prepared() != null && environment.prepared().javaHome() != null
+                ? environment.prepared().javaHome() : Path.of(System.getProperty("java.home"));
+        List<String> args = new ArrayList<>(List.of(javaHome.resolve("bin").resolve(executable).toString(),
+            "--enable-native-access=ALL-UNNAMED", "-cp", classpath(libraries), "com.pilot.mobile.bridge.MainKt",
+            "--pilot-port", Integer.toString(port), "--data-dir", data.toString(), "--no-open", "--parent-pid",
+            Long.toString(ProcessHandle.current().pid()), "--name", computerName()));
         if (!relay.isBlank()) {
             args.addAll(List.of("--relay", relay));
         }
@@ -255,6 +286,9 @@ public class MobileConnectionService {
     }
 
     private Path libraries() {
+        if (environment != null && environment.prepared() != null && environment.prepared().libraries() != null) {
+            return environment.prepared().libraries();
+        }
         if (!configuredLibraries.isBlank()) {
             Path path = Path.of(configuredLibraries).toAbsolutePath().normalize();
             if (Files.isDirectory(path)) {

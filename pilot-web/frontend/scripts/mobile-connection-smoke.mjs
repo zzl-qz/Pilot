@@ -32,12 +32,16 @@ let browser, desktop;
 const code = 'pilot://pair/' + 'A'.repeat(80); // 无效测试凭证，不代表真实设备授权。
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="768" height="768"><rect width="768" height="768" fill="white"/><path d="M80 80h180v180H80zm428 0h180v180H508zM80 508h180v180H80zM310 310h150v150H310zM500 500h80v80H500z" fill="black"/></svg>`;
 let invite, pairedDevice = null, generation = 0, pairingState = 'none', fail = false;
+let environmentState = null, repairs = 0, failPair = false;
 const devices = [];
 const create = () => ({ code, image:'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64'), expiresAt: Date.now() + 300000, development:true });
 async function routes(page) {
   await page.route('**/api/mobile/connection**', async route => {
     const request = route.request();
+    if (request.url().endsWith('/repair')) { repairs++; environmentState = 'preparing'; return route.fulfill({json:{version:2,running:false,environment:{state:'preparing',message:'正在下载并校验连接组件'}}}); }
+    if (environmentState) return route.fulfill({json:{version:2,running:false,environment:{state:environmentState,message:environmentState==='failed'?'自动补全未完成，请检查系统授权':'正在下载并校验连接组件'}}});
     if (fail) return route.fulfill({status:503, json:{code:'MOBILE_CONNECTION_UNAVAILABLE',error:'Service Unavailable',message:'Windows x64 原生连接库加载失败，请检查 Microsoft Visual C++ x64 运行库'}});
+    if (request.url().endsWith('/pair') && failPair) return route.fulfill({status:503,json:{message:'测试中继连接超时，请重试'}});
     if (request.url().endsWith('/pair')) { generation++; await new Promise(resolve => setTimeout(resolve, 150)); invite = create(); pairingState = 'ready'; pairedDevice = null; return route.fulfill({json:invite}); }
     if (request.url().endsWith('/revoke')) { devices.length = 0; return route.fulfill({json:{}}); }
     return route.fulfill({json:{running:true, pairingState, pairedDevice, maxDevices:16, invite, devices}});
@@ -50,6 +54,31 @@ try {
   await routes(page);
   await page.addInitScript(() => { Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async()=>{throw new Error('denied')}}}); document.execCommand = () => false; });
   await page.goto(url);
+  environmentState = 'preparing';
+  await page.getByRole('button',{name:'连接手机',exact:true}).click();
+  await page.getByText('正在下载并校验连接组件',{exact:true}).waitFor();
+  assert.equal(generation,0,'准备依赖期间不能提前生成二维码');
+  assert.equal(await page.getByRole('button',{name:'正在准备环境…',exact:true}).isDisabled(),true);
+  environmentState = 'failed';
+  await page.getByRole('alert').filter({hasText:'自动补全未完成'}).waitFor();
+  await page.getByRole('button',{name:'检查并修复环境',exact:true}).click();
+  await page.getByText('正在下载并校验连接组件',{exact:true}).waitFor();
+  assert.equal(repairs,1,'只在用户主动修复时重试环境准备');
+  environmentState = null;
+  await page.getByAltText('用 Pilot 手机 App 扫描此配对二维码').waitFor();
+  assert.equal(generation,1,'准备完成后自动生成一次二维码');
+  await page.keyboard.press('Escape');
+  invite = null; generation = 0; pairingState = 'none';
+  failPair = true;
+  await page.getByRole('button',{name:'连接手机',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'测试中继连接超时'}).waitFor();
+  await page.waitForTimeout(3500);
+  assert.equal(await page.getByRole('alert').filter({hasText:'测试中继连接超时'}).count(),1,'状态轮询成功不能清除配对失败原因');
+  failPair = false;
+  await page.getByRole('button',{name:'重试连接',exact:true}).click();
+  await page.getByAltText('用 Pilot 手机 App 扫描此配对二维码').waitFor();
+  await page.keyboard.press('Escape');
+  invite = null; generation = 0; pairingState = 'none';
   fail = true;
   await page.getByRole('button',{name:'连接手机',exact:true}).click();
   await page.getByRole('alert').filter({hasText:'Microsoft Visual C++ x64 运行库'}).waitFor();

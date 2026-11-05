@@ -39,6 +39,11 @@ public class MobileConnectionController {
         return call(request, "pair", body);
     }
 
+    @PostMapping("/repair")
+    public ResponseEntity<JsonNode> repair(HttpServletRequest request) {
+        return call(request, "repair", null);
+    }
+
     @PostMapping("/revoke")
     public ResponseEntity<JsonNode> revoke(HttpServletRequest request, @RequestBody JsonNode body) {
         if (!body.path("id").asText("").matches("[A-Za-z0-9_-]{20,128}")) {

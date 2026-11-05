@@ -42,7 +42,9 @@ public class BundledRuntime implements SmartLifecycle {
         Path root = runtimeRoot();
         if (provision) {
             ensure(root.resolve("python"), pythonArchive(), "python3", "python.exe");
-            ensure(root.resolve("node"), nodeArchive(), "node", "node.exe");
+            if (bootstrapNode() == null) {
+                ensure(root.resolve("node"), nodeArchive(), "node", "node.exe");
+            }
         }
         publish(root);
         running = true;
@@ -124,6 +126,10 @@ public class BundledRuntime implements SmartLifecycle {
 
     private void publish(Path root) {
         List<String> bins = new ArrayList<>();
+        Path bootstrap = bootstrapNode();
+        if (bootstrap != null) {
+            bins.add(bootstrap.getParent().toString());
+        }
         addBin(bins, root.resolve("python"), "python3", "python.exe");
         addBin(bins, root.resolve("node"), "node", "node.exe");
         if (bins.isEmpty()) {
@@ -132,6 +138,11 @@ public class BundledRuntime implements SmartLifecycle {
         String value = String.join(java.io.File.pathSeparator, bins);
         System.setProperty(BIN_PROPERTY, value);
         log.info("技能脚本使用内置运行环境：{}", value);
+    }
+
+    private static Path bootstrapNode() {
+        String value = System.getenv("PILOT_BOOTSTRAP_NODE");
+        return value != null && !value.isBlank() && Files.isRegularFile(Path.of(value)) ? Path.of(value) : null;
     }
 
     private static void addBin(List<String> bins, Path root, String unixName, String windowsName) {

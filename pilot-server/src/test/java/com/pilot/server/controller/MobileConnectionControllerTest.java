@@ -58,6 +58,8 @@ class MobileConnectionControllerTest {
         for (MockHttpServletRequest request : new MockHttpServletRequest[] {remote, cross, rebinding, fetch}) {
             assertEquals(403,
                 assertThrows(ResponseStatusException.class, () -> controller.status(request)).getStatusCode().value());
+            assertEquals(403,
+                assertThrows(ResponseStatusException.class, () -> controller.repair(request)).getStatusCode().value());
         }
         verifyNoInteractions(service);
     }

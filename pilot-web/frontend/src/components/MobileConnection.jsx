@@ -24,55 +24,67 @@ export function MobileConnectionContent({ onDone }) {
   const codeArea = useRef(null);
   const activeCode = useRef('');
   const doneButton = useRef(null);
+  const needsInitialPair = useRef(true);
+  const operationError = useRef(false);
   useEffect(() => { if (paired) doneButton.current?.focus(); }, [paired]);
 
   const apply = result => {
     if (!alive.current) return;
     setStatus(result);
+    if (result.environment && result.environment.state !== 'ready' && result.environment.state !== 'disabled') {
+      setInvite(null); activeCode.current = ''; setPaired(false); setManual(false); return;
+    }
     if (result.invite) { setPaired(false); setInvite(result.invite); activeCode.current = result.invite.code; }
     else if (activeCode.current && result.pairingState === 'paired') {
+      operationError.current = false; setError('');
       setPaired(true); setPairedDevice(result.pairedDevice || null); setInvite(null);
       setManual(false); setCopyStatus(''); activeCode.current = '';
     } else if (result.pairingState !== 'paired') { setPaired(false); setPairedDevice(null); }
   };
   async function generate(reuse = false) {
     if (pending.current) return;
-    pending.current = true; setBusy(true); setError(''); setCopyStatus(''); setManual(false);
+    pending.current = true; operationError.current = false; setBusy(true); setError(''); setCopyStatus(''); setManual(false);
     try {
       const result = await post('pair', { reuse });
       if (alive.current) { setInvite(result); activeCode.current = result.code; setPaired(false); }
-    } catch (e) { if (alive.current) setError(e.message); }
+    } catch (e) { if (alive.current) { operationError.current = true; setError(e.message); } }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
   useEffect(() => {
     alive.current = true;
     const controller = new AbortController();
     let running = false;
-    async function refresh(first = false) {
+    async function refresh() {
       if (running || pending.current || document.hidden) return;
       running = true;
       try {
         const result = await apiJson(endpoint, { signal: controller.signal }, 40000);
         if (!alive.current || pending.current) return;
-        apply(result); setError('');
-        if (first && !result.invite) {
-          if (result.devices?.length) { setTab('devices'); setPaired(false); }
-          else await generate(true);
+        apply(result); if (!operationError.current) setError('');
+        if (result.environment?.state === 'preparing') return;
+        if (result.environment?.state === 'failed') { setError(result.environment.message || '环境补全未完成'); return; }
+        if (needsInitialPair.current) {
+          needsInitialPair.current = false;
+          if (!result.invite) {
+            if (result.devices?.length) { setTab('devices'); setPaired(false); }
+            else await generate(true);
+          }
         }
       } catch (e) { if (alive.current && !controller.signal.aborted) setError(e.message); }
       finally { running = false; }
     }
-    refresh(true);
+    refresh();
     const poll = setInterval(refresh, 3000);
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => { alive.current = false; controller.abort(); clearInterval(poll); clearInterval(tick); };
   }, []);
 
   const maxDevices = status?.maxDevices || 16;
+  const preparing = status?.environment?.state === 'preparing';
   const full = (status?.devices?.length || 0) >= maxDevices;
   function showAdd() {
     setTab('add');
-    if (tab !== 'add' && !invite && !full) generate(true);
+    if (tab !== 'add' && !invite && !full && !preparing) generate(true);
   }
   const seconds = Math.max(0, Math.ceil(((invite?.expiresAt || 0) - now) / 1000));
   async function copy() {
@@ -89,18 +101,25 @@ export function MobileConnectionContent({ onDone }) {
   }
   async function revoke() {
     if (!remove || pending.current) return;
-    pending.current = true; setBusy(true); setError('');
+    pending.current = true; operationError.current = false; setBusy(true); setError('');
     try { await post('revoke', { id: remove.id }); setRemove(null); apply(await apiJson(endpoint)); }
-    catch (e) { if (alive.current) setError(e.message); }
+    catch (e) { if (alive.current) { operationError.current = true; setError(e.message); } }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
   return <div className="mobile-connection-content">
     <p className="mobile-scope">连接这台电脑，管理全部项目与任务。任务继续在电脑上执行。</p>
     <div className="mobile-tabs" role="tablist" aria-label="手机连接">
       <button role="tab" aria-selected={tab === 'add'} onClick={showAdd}>添加设备</button>
-      <button role="tab" aria-selected={tab === 'devices'} onClick={() => setTab('devices')}>已配对设备{status ? ` · ${status.devices?.length || 0}` : ''}</button>
+      <button role="tab" aria-selected={tab === 'devices'} onClick={() => setTab('devices')}>已配对设备{Array.isArray(status?.devices) ? ` · ${status.devices.length}` : ''}</button>
     </div>
-    {error && <div className="mobile-connection-error" role="alert"><p>{error}</p><button className="btn" onClick={() => generate(true)} disabled={busy}>重试连接</button></div>}
+    {error && <div className="mobile-connection-error" role="alert"><p>{error}</p><button className="btn" onClick={() => generate(true)} disabled={busy || preparing}>重试连接</button><button className="btn" disabled={busy || preparing} onClick={async () => {
+      if (pending.current) return;
+      pending.current = true; operationError.current = false; setBusy(true); setError('');
+      try { apply(await post('repair', {})); needsInitialPair.current = true; }
+      catch (e) { if (alive.current) { operationError.current = true; setError(e.message); } }
+      finally { pending.current = false; if (alive.current) setBusy(false); }
+    }}>检查并修复环境</button></div>}
+    {preparing && <p role="status" className="mobile-environment-progress">{status.environment.message || '正在检查与补全连接环境…'}</p>}
     {tab === 'add' && paired ? <div className="mobile-pair-success" role="tabpanel" aria-label="配对完成">
       <Icon name="check" className="mobile-pair-success-icon" />
       <h3 role="status">配对成功</h3>
@@ -118,22 +137,22 @@ export function MobileConnectionContent({ onDone }) {
     </div> : tab === 'add' ? <div role="tabpanel" aria-label="添加设备" className="mobile-pair-layout">
       <div className="mobile-qr-area">
         {invite && seconds > 0 ? <img src={invite.image} alt="用 Pilot 手机 App 扫描此配对二维码" />
-          : <div className="mobile-qr-placeholder" role="status">{busy ? '正在准备连接…' : error ? '连接暂不可用' : !status ? '正在准备连接…' : invite ? '配对码已过期' : '还未生成配对码'}</div>}
+          : <div className="mobile-qr-placeholder" role="status">{busy || preparing ? '正在准备连接…' : error ? '连接暂不可用' : !status ? '正在准备连接…' : invite ? '配对码已过期' : '还未生成配对码'}</div>}
         <p role="status">{seconds > 0 ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} 后过期 · 仅限一次配对` : ''}</p>
       </div>
       <div className="mobile-pair-actions">
         <h3>用 Pilot App 扫码</h3>
         <p>打开手机上的 Pilot，选择“扫码连接电脑”。手机与电脑无需处于同一个网络。</p>
         <p className="chip-hint">请保持电脑在线。配对后，无需为每个任务重新扫码。</p>
-        <button className="btn btn-primary" disabled={!seconds || busy} onClick={copy}>复制配对码</button>
-        <button className="btn" disabled={busy} onClick={() => generate(false)}>{busy ? '正在生成…' : invite ? '重新生成' : '生成配对码'}</button>
+        <button className="btn btn-primary" disabled={!seconds || busy || preparing} onClick={copy}>复制配对码</button>
+        <button className="btn" disabled={busy || preparing} onClick={() => generate(false)}>{preparing ? '正在准备环境…' : busy ? '正在生成…' : invite ? '重新生成' : '生成配对码'}</button>
         <button className="link-btn" onClick={() => setManual(!manual)} disabled={!seconds}>手动复制配对码</button>
         <p className="chip-hint" role="status">{copyStatus}</p>
         {manual && seconds > 0 && <><label htmlFor="mobile-pair-code">完整配对码</label><textarea id="mobile-pair-code" ref={codeArea} readOnly rows={3} value={invite.code} onFocus={e => e.target.select()} /><button className="btn" onClick={() => { codeArea.current?.focus(); codeArea.current?.select(); }}>全选配对码</button></>}
         {invite?.development && <p className="chip-hint">已自动配置公共连接服务，无需自建服务器；连接速度与可用性受网络及公共服务影响。</p>}
       </div>
     </div> : <div role="tabpanel" aria-label="已配对设备" className="mobile-device-list">
-      {!status ? <p>正在读取设备…</p> : !status.devices?.length ? <p>还没有配对设备。添加手机后会显示在这里。</p> : status.devices.map(device => <div className="mobile-device-row" key={device.id}>
+      {!status || preparing ? <p>正在读取设备，环境准备完成后会自动更新…</p> : !status.devices?.length ? <p>还没有配对设备。添加手机后会显示在这里。</p> : status.devices.map(device => <div className="mobile-device-row" key={device.id}>
         <div><strong>{device.name}</strong><p>{device.online ? '在线' : '离线'} · 配对于 {new Date(device.pairedAt).toLocaleDateString()}</p></div>
         <button className="btn" onClick={() => setRemove(device)}>撤销授权</button>
       </div>)}

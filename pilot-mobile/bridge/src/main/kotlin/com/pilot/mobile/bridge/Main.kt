@@ -8,6 +8,26 @@ import java.net.URI
 import java.nio.file.Path
 
 fun main(args: Array<String>) = runBlocking {
+    if ("--check-runtime" in args) {
+        // 无设备身份、管理口或外网连接的启动探针，退出码用于判断是否需要修复。
+        val status = try {
+            val check = createEndpoint(computer.iroh.SecretKey.generate().toBytes(), development = false)
+            try {
+                val matrix = com.google.zxing.MultiFormatWriter().encode("pilot-runtime-check", com.google.zxing.BarcodeFormat.QR_CODE, 64, 64)
+                com.google.zxing.client.j2se.MatrixToImageWriter.writeToStream(matrix, "PNG", java.io.ByteArrayOutputStream())
+                0
+            } finally { check.shutdown() }
+        } catch (_: UnsatisfiedLinkError) { 12 }
+        catch (error: NoClassDefFoundError) {
+            var cause: Throwable? = error.cause
+            var nativeFailure = false
+            repeat(12) { if (cause is UnsatisfiedLinkError) nativeFailure = true; cause = cause?.cause }
+            if (nativeFailure) 12 else 11
+        }
+        catch (_: Exception) { 11 }
+        println(if (status == 0) "PILOT_MOBILE_RUNTIME_READY" else "PILOT_MOBILE_RUNTIME_UNAVAILABLE")
+        kotlin.system.exitProcess(status)
+    }
     if ("--probe-relay-server" in args) { relayProbeServer(); return@runBlocking }
     if (args.firstOrNull() == "--probe-relay-client") { relayProbeClient(args[1]); return@runBlocking }
     fun option(name: String): String? = args.indexOf(name).takeIf { it >= 0 }?.let {
