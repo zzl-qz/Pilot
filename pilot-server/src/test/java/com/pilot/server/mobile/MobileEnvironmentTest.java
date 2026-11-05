@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -23,6 +24,42 @@ import tools.jackson.databind.ObjectMapper;
 class MobileEnvironmentTest {
     @TempDir
     Path directory;
+
+    @Test
+    void desktopStartupLeavesOptionalPhoneComponentsUncheckedUntilRequested() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        var data = new PilotDataDir(directory.toString());
+        var environment = new MobileEnvironment(data, true, "", (root, cache, libraries, progress) -> {
+            entered.countDown();
+            return new SourceEnvironment.Mobile(null, null, false, "手机连接组件尚未打包");
+        });
+        var service = new MobileConnectionService(data, new SecurityProperties(null, null, null, null, null),
+            new ObjectMapper(), "", "");
+        service.configureEnvironment(environment);
+        try {
+            assertEquals("unchecked", environment.status().state());
+            assertEquals(1, entered.getCount());
+            service.request("status", null);
+            assertTrue(entered.await(2, TimeUnit.SECONDS));
+            awaitState(environment, "failed");
+        } finally {
+            service.close();
+            environment.close();
+        }
+    }
+
+    @Test
+    void ideModuleStartKeepsDefaultDownloadsInThePilotRoot() throws Exception {
+        Path root = directory.resolve("Pilot 中文 with spaces");
+        Files.createDirectories(root.resolve("pilot-mobile/bridge/src"));
+        Path module = root.resolve("pilot-server");
+        Files.createDirectories(module);
+        assertEquals(root.resolve(".pilot/bootstrap"),
+            MobileEnvironment.defaultCache(module, module.resolve(".pilot")));
+        assertEquals(directory.resolve("custom-data/bootstrap"),
+            MobileEnvironment.defaultCache(module, directory.resolve("custom-data")));
+        assertEquals(root.resolve(".pilot/bootstrap"), MobileEnvironment.defaultCache(root, root.resolve(".pilot")));
+    }
 
     @Test
     void preparingIsNonBlockingAndRepeatedRepairSharesOneJob() throws Exception {

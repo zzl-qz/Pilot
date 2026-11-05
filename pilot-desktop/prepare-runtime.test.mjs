@@ -21,7 +21,7 @@ for(const [platform,arch] of [['win32','x64'],['win32','arm64'],['darwin','arm64
  const f=await fixture();try{
   let calls=0;
   const options={root:f.root,platform,arch,env:{HTTPS_PROXY:'http://proxy.test:8080',electron_use_remote_checksums:'true'},brand:root=>electronBinary(root,platform),run:async(command,args,opts)=>{
-   calls++;assert.equal(command,process.execPath);assert.deepEqual(args,[join(f.folder,'install.js')]);assert.equal(opts.cwd,f.root);assert.equal(opts.shell,undefined);assert.equal(opts.env.ELECTRON_INSTALL_ARCH,arch);assert.equal(opts.env.ELECTRON_INSTALL_PLATFORM,platform);assert.equal(opts.env.electron_use_remote_checksums,undefined);await installed(f,platform,arch);
+   calls++;assert.equal(command,process.execPath);assert.deepEqual(args,[join(f.folder,'install.js')]);assert.equal(opts.cwd,f.root);assert.equal(opts.shell,undefined);assert.equal(opts.env.ELECTRON_INSTALL_ARCH,arch);assert.equal(opts.env.ELECTRON_INSTALL_PLATFORM,platform);assert.equal(opts.env.electron_use_remote_checksums,undefined);assert.equal(opts.env.electron_config_cache,join(dirname(f.root),'.pilot/cache/electron'));await installed(f,platform,arch);
   }};
   const result=await prepareDesktopRuntime(options);assert.equal(result.ready,true);assert.equal(calls,1);assert.equal(runtimeReady(f.root,platform,arch),true);
   assert.equal((await prepareDesktopRuntime(options)).ready,true);assert.equal(calls,1);

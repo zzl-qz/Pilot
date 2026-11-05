@@ -10,15 +10,13 @@ import jakarta.annotation.PreDestroy;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.web.server.context.WebServerInitializedEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.runtime.bootstrap.BootstrapPlatform;
 import com.pilot.core.runtime.bootstrap.SourceEnvironment;
 import com.pilot.server.config.PilotDataDir;
 
-/** IDE 直接启动也执行检查；后台下载与构建不占用 HTTP 请求线程。 */
+/** 仅在打开手机连接时检查已打包组件；不构建移动源码，原生修复不占用 HTTP 请求线程。 */
 @Component
 public final class MobileEnvironment {
     public record Status(String state, String message, boolean ready) {
@@ -54,28 +52,18 @@ public final class MobileEnvironment {
 
     MobileEnvironment(PilotDataDir data, boolean enabled, String libraries, Preparation preparation) {
         String custom = System.getenv("PILOT_BOOTSTRAP_DIR");
-        this.cache = custom == null || custom.isBlank() ? data.file("bootstrap") : Path.of(custom);
+        Path current = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+        this.cache = custom == null || custom.isBlank() ? defaultCache(current, data.root()) : Path.of(custom);
         this.libraries = libraries;
         this.enabled = enabled;
         this.preparation = preparation;
-        status = enabled ? new Status("preparing", "正在检查手机连接所需环境", false) : new Status("disabled", "已关闭自动环境补全", true);
+        status = enabled ? new Status("unchecked", "打开手机连接后检查已打包组件", false) : new Status("disabled", "已关闭自动环境补全", true);
     }
 
-    @EventListener
-    public void start(WebServerInitializedEvent event) {
-        if (enabled && "true".equals(System.getenv("PILOT_BOOTSTRAP_PREPARED"))) {
-            try {
-                var result = SourceEnvironment.preparedMobile(cache);
-                if (libraries.isBlank() || result.libraries() != null && result.libraries().toAbsolutePath().normalize()
-                    .equals(Path.of(libraries).toAbsolutePath().normalize())) {
-                    complete(result);
-                    return;
-                }
-            } catch (Exception e) {
-                // 源码启动器未留下完整结果时重新检查，不把缺失报告当成功。
-            }
+    public synchronized void ensureChecked() {
+        if ("unchecked".equals(status.state())) {
+            repair();
         }
-        repair();
     }
 
     public Status status() {
@@ -131,6 +119,12 @@ public final class MobileEnvironment {
             }
         }
         return initial.toAbsolutePath().normalize();
+    }
+
+    static Path defaultCache(Path current, Path data) {
+        Path root = current.toAbsolutePath().normalize();
+        return data.toAbsolutePath().normalize().equals(root.resolve(".pilot"))
+            ? projectRoot(root).resolve(".pilot/bootstrap") : data.resolve("bootstrap");
     }
 
     @PreDestroy

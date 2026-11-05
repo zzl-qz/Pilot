@@ -63,7 +63,7 @@ Windows PowerShell / 命令提示符：
 .\start.cmd
 ```
 
-脚本会切换到自身所在的仓库根目录，也可以从其他目录通过完整路径运行。传入参数会交给应用，例如 `bash start.sh --server.port=10001`（Windows 使用 `.\start.cmd --server.port=10001`）。启动时自动检查 Java 25、Node/npm、Maven 和手机连接组件：优先复用可用环境，缺失时从固定官方版本下载到私有缓存，验证后再使用，不修改全局 Java 或 PATH。源码连接桥需要的 Java 21 也会自动准备，不要求 Android SDK；Windows 原生运行库通过实际探针判断，必要时走经校验的微软安装器及正常系统授权。首次联网准备可能需要几分钟，之后复用缓存。IDE 直接运行后台也会在后台检查、补齐手机连接组件；IDE 编译器本身仍需能运行 Java 25。完整说明和限制见 [源码环境自动准备](SOURCE_ENVIRONMENT.md)。
+脚本会切换到自身所在的仓库根目录，也可以从其他目录通过完整路径运行。传入参数会交给应用，例如 `bash start.sh --server.port=10001`（Windows 使用 `.\start.cmd --server.port=10001`）。启动时只检查电脑端所需的 Java 25、Node/npm 和 Maven，缺失时从固定官方版本下载到 Pilot 私有缓存，验证后使用，不修改全局 Java 或 PATH。桌面壳缺失时自动补齐 Electron。普通 PC 启动不检查、不下载 Gradle、Android SDK 或移动构建用 Java 21；APK 和手机连接桥由开发者另外打包。只有打开“连接手机”时才检查已经打包的连接桥，缺组件时提示，Windows 原生运行库必要时通过微软安装器及正常系统授权修复。首次联网准备可能需要几分钟，之后复用缓存。IDE 编译器本身仍需支持 Java 25。完整说明见 [源码环境自动准备](SOURCE_ENVIRONMENT.md)。
 
 默认 profile 为 `local`，权限默认为 `AUTO`（完全放行；可在界面切到 `AUTO_EDIT` / `ASK` / `READ_ONLY`）。默认 Web/API 地址为 `http://localhost:9999`。服务启动后可在浏览器打开该地址。无模型密钥时可使用 Mock 模式体验界面；真实模型运行可用环境变量配置：
 

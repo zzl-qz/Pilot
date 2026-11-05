@@ -16,8 +16,6 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
@@ -35,8 +33,6 @@ public final class SourceEnvironment {
     private final Consumer<String> progress;
     private final Map<String, String> environment;
     private final boolean offline;
-    private Path verifiedBridgeJava;
-    private final String reportName = "mobile-" + UUID.randomUUID() + ".properties";
 
     public SourceEnvironment(Path root, Path cache, boolean network, Consumer<String> progress) throws IOException {
         this.root = root.toAbsolutePath().normalize();
@@ -45,7 +41,7 @@ public final class SourceEnvironment {
         this.bridgePlatform = platform.bridgeCandidate(appleSiliconHost());
         this.progress = progress;
         this.offline = !network;
-        this.environment = new HashMap<>(System.getenv());
+        this.environment = DependencyCaches.environment(this.root, System.getenv());
         this.assets = new RuntimeAssets(this.cache, RuntimeAssets.manifest(this.root), network, progress);
     }
 
@@ -60,47 +56,11 @@ public final class SourceEnvironment {
         Path node;
         try (var lock = bootstrap.lock()) {
             node = bootstrap.ensureNode();
-            try {
-                String configured = option(args, "--pilot.mobile.libraries");
-                boolean mobileEnabled = mobileProvisionEnabled(args, System.getenv());
-                bootstrap.environment.put("PILOT_MOBILE_PROVISION", Boolean.toString(mobileEnabled));
-                if (mobileEnabled) {
-                    bootstrap
-                        .prepareMobileUnlocked(configured == null || configured.isBlank() ? null : Path.of(configured));
-                }
-            } catch (Exception e) {
-                bootstrap.mobileResult(new Mobile(null, null, false, "手机连接环境准备未完成，请在连接手机窗口检查并修复；其他功能可继续使用"));
-            }
         }
-        bootstrap.environment.put("PILOT_BOOTSTRAP_PREPARED", "true");
         if ("prepare".equals(args[0])) {
             return;
         }
         bootstrap.launch(node, Arrays.copyOfRange(args, 2, args.length), "launch".equals(args[0]));
-    }
-
-    private static String option(String[] args, String name) {
-        for (int i = 2; i < args.length; i++) {
-            if (args[i].startsWith(name + "=")) {
-                return args[i].substring(name.length() + 1);
-            }
-            if (args[i].equals(name) && i + 1 < args.length) {
-                return args[i + 1];
-            }
-        }
-        return null;
-    }
-
-    static boolean mobileProvisionEnabled(String[] args, Map<String, String> env) {
-        String mobile = option(args, "--pilot.mobile.provision");
-        if (mobile == null) {
-            mobile = env.get("PILOT_MOBILE_PROVISION");
-        }
-        String runtime = option(args, "--pilot.runtime.provision");
-        if (runtime == null) {
-            runtime = env.getOrDefault("PILOT_RUNTIME_PROVISION", "true");
-        }
-        return !"false".equalsIgnoreCase(mobile == null ? runtime : mobile);
     }
 
     public static Path cache(Path root) {
@@ -118,41 +78,22 @@ public final class SourceEnvironment {
     }
 
     private Mobile prepareMobileUnlocked(Path configured) throws Exception {
-        if (!bridgePlatform.mobileSupported()) {
-            return mobileResult(new Mobile(null, null, false, "当前架构暂没有可用的手机连接原生库，电脑上的其他功能仍可使用：" + platform.key()));
-        }
         Path libraries = configured != null ? configured.toAbsolutePath().normalize()
             : Files.isDirectory(root.resolve("mobile-bridge/lib")) ? root.resolve("mobile-bridge/lib")
                 : root.resolve("pilot-mobile/bridge/build/install/bridge/lib");
-        Path javaHome = bridgePlatform.equals(platform) ? Path.of(System.getProperty("java.home")) : managedJava21();
-        Path source = root.resolve("pilot-mobile/bridge/src");
-        if (Files.isDirectory(source) && configured == null) {
-            javaHome = ensureJava21();
-            String fingerprint = fingerprint();
-            Path stamp = cache.resolve("bridge-source-" + projectKey() + ".sha256");
-            if (!Files.isRegularFile(libraries.resolve("bridge.jar")) || !Files.isRegularFile(stamp)
-                || !Files.readString(stamp).equals(fingerprint)) {
-                progress.accept("正在补齐手机连接组件，不需要 Android SDK");
-                List<String> command = new ArrayList<>(List.of(java(javaHome), "-classpath",
-                    root.resolve("pilot-mobile/gradle/wrapper/gradle-wrapper.jar").toString(),
-                    "org.gradle.wrapper.GradleWrapperMain", "-Ppilot.desktopOnly=true",
-                    "-Dorg.gradle.java.installations.paths=" + javaHome, ":bridge:installDist"));
-                if (offline) {
-                    command.add("--offline");
-                }
-                Map<String, String> env = childEnvironment(javaHome, null);
-                run(command, root.resolve("pilot-mobile"), env, Duration.ofMinutes(15));
-                Files.writeString(stamp, fingerprint);
-            }
-        }
         if (!Files.isRegularFile(libraries.resolve("bridge.jar"))) {
-            return mobileResult(new Mobile(libraries, javaHome, false, "手机连接组件缺失且当前目录没有可构建的源码，请使用完整安装包"));
+            return mobileResult(new Mobile(libraries, null, false, "手机连接组件尚未打包，请单独构建组件或使用完整安装包；电脑功能可正常使用"));
         }
+        if (!bridgePlatform.mobileSupported()) {
+            return mobileResult(new Mobile(null, null, false, "当前架构暂没有可用的手机连接原生库，电脑上的其他功能仍可使用：" + platform.key()));
+        }
+        Path javaHome =
+            bridgePlatform.equals(platform) ? Path.of(System.getProperty("java.home")) : managedBridgeJava();
         progress.accept("正在验证手机连接原生库与二维码能力");
         int probe = probe(javaHome, libraries);
         if (probe != 0 && platform.windows()) {
             // 先用私有 Temurin 重试，通常可直接复用 JDK 随附的 VC 运行库，无需管理员安装。
-            javaHome = managedJava21();
+            javaHome = managedBridgeJava();
             probe = probe(javaHome, libraries);
             if (probe == 12) {
                 progress.accept("正在补齐微软 VC++ 运行库，系统可能请求管理员授权");
@@ -166,41 +107,9 @@ public final class SourceEnvironment {
         return mobileResult(new Mobile(libraries, javaHome, true, "手机连接环境已就绪"));
     }
 
-    private Mobile mobileResult(Mobile result) throws IOException {
-        if (result.ready()) {
-            verifiedBridgeJava = result.javaHome();
-        }
+    private Mobile mobileResult(Mobile result) {
         progress.accept(result.message());
-        Properties report = new Properties();
-        report.setProperty("platform", platform.key());
-        report.setProperty("ready", Boolean.toString(result.ready()));
-        report.setProperty("message", result.message());
-        if (result.javaHome() != null) {
-            report.setProperty("javaHome", result.javaHome().toString());
-        }
-        if (result.libraries() != null) {
-            report.setProperty("libraries", result.libraries().toString());
-        }
-        Files.createDirectories(cache);
-        try (var output = Files.newOutputStream(cache.resolve(reportName))) {
-            report.store(output, "Pilot mobile environment");
-        }
         return result;
-    }
-
-    public static Mobile preparedMobile(Path cache) throws IOException {
-        String reportName = System.getenv("PILOT_BOOTSTRAP_REPORT");
-        if (reportName == null || !reportName.matches("mobile-[a-f0-9-]{36}\\.properties")) {
-            throw new IOException("本次启动没有完整的环境报告");
-        }
-        Properties report = new Properties();
-        try (var input = Files.newInputStream(cache.resolve(reportName))) {
-            report.load(input);
-        }
-        String libraries = report.getProperty("libraries");
-        String home = report.getProperty("javaHome");
-        return new Mobile(libraries == null ? null : Path.of(libraries), home == null ? null : Path.of(home),
-            Boolean.parseBoolean(report.getProperty("ready")), report.getProperty("message", "环境尚未准备"));
     }
 
     private String projectKey() throws Exception {
@@ -236,27 +145,15 @@ public final class SourceEnvironment {
         }
     }
 
-    private Path ensureJava21() throws Exception {
-        if (!bridgePlatform.equals(platform)) {
-            return managedJava21();
-        }
-        for (Path home : javaCandidates()) {
-            if (usableBridgeJava(home)) {
-                return home;
-            }
-        }
-        return managedJava21();
-    }
-
-    private Path managedJava21() throws Exception {
-        var asset = assets.asset("jdk21." + bridgePlatform.key());
+    private Path managedBridgeJava() throws Exception {
+        var asset = assets.asset("jdk25." + bridgePlatform.key());
         boolean cached = Files.exists(cache.resolve(asset.home()).resolve(".pilot-verified"));
         Path home = javaHome(assets.install(asset));
         if (!usableBridgeJava(home) && cached) {
             home = javaHome(assets.install(asset, true));
         }
         if (!usableBridgeJava(home)) {
-            throw new IOException("私有 Java 21 无法在当前系统运行，请检查系统版本与架构");
+            throw new IOException("私有 Java 25 无法在当前系统运行，请检查系统版本与架构");
         }
         return home;
     }
@@ -269,7 +166,8 @@ public final class SourceEnvironment {
             var result = execute(List.of(java(home), "-XshowSettings:properties", "-version"), root, environment,
                 Duration.ofSeconds(8), false);
             var arch = Pattern.compile("os.arch\\s*=\\s*(\\S+)").matcher(result.output());
-            return result.code() == 0 && result.output().matches("(?s).*java.specification.version\\s*=\\s*21\\s.*")
+            return result.code() == 0
+                && result.output().matches("(?s).*java.specification.version\\s*=\\s*(2[5-9]|[3-9][0-9])\\s.*")
                 && arch.find()
                 && BootstrapPlatform.detect(platform.os(), arch.group(1)).arch().equals(bridgePlatform.arch());
         } catch (Exception e) {
@@ -288,37 +186,6 @@ public final class SourceEnvironment {
         } catch (Exception e) {
             return false;
         }
-    }
-
-    private List<Path> javaCandidates() throws IOException {
-        List<Path> homes = new ArrayList<>();
-        for (String key : List.of("JAVA21_HOME", "JDK21_HOME", "JAVA_HOME")) {
-            String value = environment.get(key);
-            if (value != null && !value.isBlank()) {
-                homes.add(Path.of(value));
-            }
-        }
-        homes.add(Path.of(System.getProperty("java.home")));
-        Path user = Path.of(System.getProperty("user.home"));
-        List<Path> parents = new ArrayList<>(List.of(user.resolve("Library/Java/JavaVirtualMachines"),
-            Path.of("/Library/Java/JavaVirtualMachines"), Path.of("/usr/lib/jvm")));
-        String programFiles = environment.get("ProgramFiles");
-        if (programFiles != null) {
-            for (String name : List.of("Java", "Eclipse Adoptium", "Microsoft")) {
-                parents.add(Path.of(programFiles, name));
-            }
-        }
-        for (Path parent : parents) {
-            if (Files.isDirectory(parent)) {
-                try (var children = Files.list(parent)) {
-                    children.limit(128).forEach(path -> {
-                        homes.add(path);
-                        homes.add(path.resolve("Contents/Home"));
-                    });
-                }
-            }
-        }
-        return homes;
     }
 
     private Path ensureNode() throws Exception {
@@ -402,21 +269,6 @@ public final class SourceEnvironment {
         return Files.isDirectory(extracted.resolve("Contents/Home")) ? extracted.resolve("Contents/Home") : extracted;
     }
 
-    private String fingerprint() throws Exception {
-        MessageDigest hash = MessageDigest.getInstance("SHA-256");
-        for (String relative : List.of("pilot-mobile/bridge/src", "pilot-mobile/transport/src",
-            "pilot-mobile/build.gradle.kts", "pilot-mobile/settings.gradle.kts", "pilot-mobile/bridge/build.gradle.kts",
-            "pilot-mobile/transport/build.gradle.kts", "pilot-mobile/gradle/wrapper/gradle-wrapper.properties")) {
-            try (var paths = Files.walk(root.resolve(relative))) {
-                for (Path file : paths.filter(Files::isRegularFile).sorted().toList()) {
-                    hash.update(root.relativize(file).toString().getBytes(StandardCharsets.UTF_8));
-                    hash.update(Files.readAllBytes(file));
-                }
-            }
-        }
-        return HexFormat.of().formatHex(hash.digest());
-    }
-
     private void launch(Path node, String[] args, boolean startServer) throws Exception {
         Map<String, String> env = childEnvironment(Path.of(System.getProperty("java.home")), node);
         env.put("PILOT_BOOTSTRAP_NODE", node.toString());
@@ -456,9 +308,10 @@ public final class SourceEnvironment {
         }
         List<String> build = new ArrayList<>(List.of(java(Path.of(System.getProperty("java.home"))),
             "--enable-native-access=ALL-UNNAMED", "-Dmaven.home=" + maven, "-Dmaven.conf=" + maven.resolve("conf"),
+            "-Dmaven.repo.local=" + env.get("PILOT_MAVEN_REPOSITORY"),
             "-Dclassworlds.conf=" + maven.resolve("bin/m2.conf"), "-Dmaven.multiModuleProjectDirectory=" + root,
-            "-classpath", boot.toString(), "org.codehaus.plexus.classworlds.launcher.Launcher", "-pl", "pilot-server",
-            "-am", "install"));
+            "-classpath", boot.toString(), "org.codehaus.plexus.classworlds.launcher.Launcher", "-B", "-ntp", "-pl",
+            "pilot-server", "-am", "install"));
         if (offline) {
             build.add("-o");
         }
@@ -469,16 +322,12 @@ public final class SourceEnvironment {
         Map<String, String> env = new HashMap<>(environment);
         String key = env.keySet().stream().filter(name -> name.equalsIgnoreCase("PATH")).findFirst().orElse("PATH");
         String prefix = javaHome.resolve("bin") + File.pathSeparator;
-        if (verifiedBridgeJava != null && bridgePlatform.equals(platform)) {
-            prefix += verifiedBridgeJava.resolve("bin") + File.pathSeparator;
-        }
         if (node != null) {
             prefix = node.getParent() + File.pathSeparator + prefix;
         }
         env.put(key, prefix + env.getOrDefault(key, ""));
         env.put("JAVA_HOME", javaHome.toString());
         env.put("PILOT_BOOTSTRAP_DIR", cache.toString());
-        env.put("PILOT_BOOTSTRAP_REPORT", reportName);
         if (offline) {
             env.put("NPM_CONFIG_OFFLINE", "true");
             env.put("PILOT_RUNTIME_PROVISION", "false");

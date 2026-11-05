@@ -1,6 +1,6 @@
 import {spawn} from 'node:child_process';
 import {existsSync,readFileSync,statSync,openSync,readSync,closeSync,renameSync,realpathSync} from 'node:fs';
-import {join,relative} from 'node:path';
+import {join,relative,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {desktopRoot,electronBinary,prepareDevelopmentHost} from './brand-host.mjs';
@@ -52,6 +52,7 @@ export async function prepareDesktopRuntime({root=desktopRoot,env=process.env,pl
   if(!existsSync(installer))throw new Error('桌面依赖包不完整，请先安装 pilot-desktop 的 npm 依赖');
   const dist=join(folder,'dist');if(existsSync(dist))renameSync(dist,join(folder,`.dist-invalid-${randomUUID()}`));
   const childEnv={...env,ELECTRON_INSTALL_PLATFORM:platform,ELECTRON_INSTALL_ARCH:arch};
+  if(!childEnv.electron_config_cache)childEnv.electron_config_cache=join(resolve(root,'..',env.PILOT_DEPENDENCY_CACHE||'.pilot/cache'),'electron');
   // Keep package-pinned checksums even when the user selects a download mirror.
   delete childEnv.electron_use_remote_checksums;delete childEnv.npm_config_electron_use_remote_checksums;
   console.log('Pilot: 正在下载并验证对应系统与架构的桌面运行时…');

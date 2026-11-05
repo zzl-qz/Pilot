@@ -115,6 +115,9 @@ public class MobileConnectionService {
             environment.repair();
             return environmentStatus();
         }
+        if (environment != null) {
+            environment.ensureChecked();
+        }
         if (environment != null && !environment.status().ready()) {
             if ("status".equals(operation)) {
                 return environmentStatus();

@@ -4,24 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.Map;
-
 import org.junit.jupiter.api.Test;
 
 class BootstrapPlatformTest {
-    @Test
-    void sourceLauncherRespectsMobileProvisionConfiguration() {
-        String[] args = {"prepare", "."};
-        assertTrue(SourceEnvironment.mobileProvisionEnabled(args, Map.of()));
-        assertFalse(SourceEnvironment.mobileProvisionEnabled(args, Map.of("PILOT_MOBILE_PROVISION", "false")));
-        assertFalse(SourceEnvironment.mobileProvisionEnabled(args, Map.of("PILOT_RUNTIME_PROVISION", "false")));
-        assertTrue(SourceEnvironment.mobileProvisionEnabled(
-            new String[] {"launch", ".", "--pilot.mobile.provision=true"}, Map.of("PILOT_RUNTIME_PROVISION", "false")));
-        assertFalse(
-            SourceEnvironment.mobileProvisionEnabled(new String[] {"launch", ".", "--pilot.mobile.provision", "false"},
-                Map.of("PILOT_MOBILE_PROVISION", "true")));
-    }
-
     @Test
     void normalizesPlatformsAndDoesNotMistakeDarwinForWindows() {
         assertEquals(new BootstrapPlatform("windows", "x64"), BootstrapPlatform.detect("Windows 11", "amd64"));
