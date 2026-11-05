@@ -616,11 +616,11 @@ export function Composer() {
                   id="context-chip"
                   aria-haspopup="dialog"
                   aria-expanded={contextOpen}
-                  title={`上下文已用 ${contextPercent(contextStatus)} · 点击查看构成与压缩`}
+                  title={`上下文已用 ${contextPercent(contextStatus)}${runUsage?.details ? ` · 命中 ${formatCache(runUsage.details)}` : ''} · 点击查看构成与压缩`}
                   onClick={() => { setContextOpen(!contextOpen); setPermOpen(false); setModelOpen(false); useStore.getState().refreshContext(); }}
                 >
                   <svg className="context-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" opacity=".25" strokeWidth="2" /><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="2" pathLength="100" strokeDasharray={`${usagePercent(contextStatus)} 100`} transform="rotate(-90 10 10)" /></svg>
-                  上下文 · {contextPercent(contextStatus)}{runUsage?.details && <span className="context-cache-label"> · 命中 {formatCache(runUsage.details)}</span>}
+                  <span className="context-chip-label">上下文 · {contextPercent(contextStatus)}{runUsage?.details && <span className="context-cache-label"> · 命中 {formatCache(runUsage.details)}</span>}</span>
                 </button>
                 {contextOpen && <ContextUsagePanel status={contextStatus} compacting={compacting}
                   report={latestContextReport} reports={requestReports} usage={runUsage}

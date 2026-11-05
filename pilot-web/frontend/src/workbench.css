@@ -149,7 +149,13 @@ html[data-theme] .msg-assistant .reply-actions .icon-action { height: 22px; widt
 html[data-theme] .composer { border-radius: 12px; border: 1px solid var(--line); background: var(--panel); padding: 12px 14px 10px; box-shadow: 0 3px 14px #0000000a; }
 html[data-theme] .composer:focus-within { border-color: var(--muted); box-shadow: none; }
 html[data-theme] .input-flow { font-size: 14px; line-height: 1.65; min-height: 44px; padding: 2px 0 8px; }
-html[data-theme] .composer-bar { gap: 8px; padding-top: 8px; }
+html[data-theme] .composer-bar { flex-wrap: wrap; gap: 8px; padding-top: 8px; }
+/* 桌面分栏也可能很窄：按容器剩余空间换行，不依赖窗口断点。 */
+html[data-theme] .composer-left { max-width: 100%; }
+html[data-theme] .composer-chips { min-width: 0; flex-wrap: wrap; }
+html[data-theme] .composer-chips > .perm-picker { min-width: 0; max-width: 100%; }
+html[data-theme] .composer .context-chip { max-width: 100%; }
+.context-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-theme] .chip { min-height: 28px; border-radius: 5px; font-size: 12px; color: var(--muted); padding: 3px 7px; }
 html[data-theme] .chip:hover, html[data-theme] .chip[aria-expanded="true"] { color: var(--ink); background: var(--ui-hover); }
 html[data-theme] .composer-hint { font-size: 11px; color: var(--dim); }
@@ -160,7 +166,7 @@ html[data-theme] .chip-menu input { min-height: 34px; width: 100%; border: 1px s
 html[data-theme] .chip-menu-actions { flex-wrap: wrap; gap: 8px; }
 
 /* 输入区模型选择：搜索与列表优先，连接配置留在设置中。 */
-html[data-theme] .composer .model-chip { display: inline-flex; align-items: center; gap: 6px; max-width: min(240px, 38vw); font: 12px var(--sans); }
+html[data-theme] .composer .model-chip { display: inline-flex; align-items: center; gap: 6px; max-width: min(240px, 100%); font: 12px var(--sans); }
 .model-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-chip-chevron { flex: none; width: 12px; height: 12px; color: var(--dim); }
 .model-chip[aria-expanded="true"] .model-chip-chevron { transform: rotate(180deg); }

@@ -26,6 +26,51 @@ const server = await createServer({ root, server: { host: '127.0.0.1', port: 0 }
   });
 } }] });
 let browser, electron;
+async function checkToolbarLayout(page, name) {
+  const saved = await page.evaluate(() => {
+    const { settingsData, contextStatus, runUsage } = store.getState();
+    return { settingsData, contextStatus, runUsage };
+  });
+  const sizing = await page.addStyleTag({ content: '.composer-wrap { padding: 0 !important; zoom: var(--test-composer-zoom); } .composer { width: var(--test-composer-width); max-width: 100%; }' });
+  try {
+    for (const viewport of [1440, 768, 390]) {
+      await page.setViewportSize({ width: viewport, height: 900 });
+      for (const width of [280, 320, 480, 760].filter(width => width <= viewport)) {
+        for (const { longName, zoom } of [{ longName: false, zoom: 1 }, { longName: true, zoom: 1 }, { longName: true, zoom: 1.5 }]) {
+          await page.evaluate(({ width, longName, zoom }) => {
+            document.documentElement.style.setProperty('--test-composer-width', `${width}px`);
+            document.documentElement.style.setProperty('--test-composer-zoom', zoom);
+            store.setState({
+              settingsData: { ...store.getState().settingsData, model: longName ? 'provider/very-long-model-name-for-narrow-chat-panels-2026' : 'gpt-5.6-sol' },
+              contextStatus: { usedTokens: 100000, limitTokens: 100000 },
+              runUsage: { details: { observedCacheRequests: 1, observedCacheInputTokens: 100000, cacheReadTokens: 99900 } }
+            });
+          }, { width, longName, zoom });
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          const problems = await page.locator('.composer-bar').evaluate(bar => {
+            const bounds = bar.getBoundingClientRect();
+            const controls = [...bar.querySelectorAll('button')].map(el => ({ id: el.id || el.className, rect: el.getBoundingClientRect() }));
+            const issues = controls.filter(({ rect }) => rect.left < bounds.left - 1 || rect.right > bounds.right + 1 || rect.bottom > bounds.bottom + 1).map(({ id }) => `溢出: ${id}`);
+            controls.forEach((a, i) => controls.slice(i + 1).forEach(b => {
+              if (Math.min(a.rect.right, b.rect.right) - Math.max(a.rect.left, b.rect.left) > 1 && Math.min(a.rect.bottom, b.rect.bottom) - Math.max(a.rect.top, b.rect.top) > 1) issues.push(`重叠: ${a.id}/${b.id}`);
+            }));
+            return issues;
+          });
+          assert.deepEqual(problems, [], `${name}: viewport=${viewport}, composer=${width}, longName=${longName}, zoom=${zoom}`);
+          if (viewport === 1440 && width === 320 && longName) await page.locator('.composer').screenshot({ path: join(temp, `${name}-narrow-toolbar-${zoom}.png`) });
+        }
+      }
+    }
+  } finally {
+    await sizing.evaluate(el => el.remove());
+    await page.evaluate(saved => {
+      store.setState(saved);
+      document.documentElement.style.removeProperty('--test-composer-width');
+      document.documentElement.style.removeProperty('--test-composer-zoom');
+    }, saved);
+  }
+  console.log(`${name}: PASS toolbar bounds and non-overlap (desktop narrow pane/tablet/mobile/long model/cache usage/150% CSS zoom)`);
+}
 async function run(page, name) {
   const errors=[]; page.on('pageerror', e=>{errors.push(e.message); console.error(e.message);});
   page.on('console',m=>{if(m.type()==='error') console.error(m.text());}); await page.goto(url);
@@ -77,6 +122,7 @@ async function run(page, name) {
   await input.evaluate(el=>el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true})));
   assert.equal(await page.evaluate(()=>sent.length),before,'输入法不发送');
   await input.press('Shift+Enter'); await input.press('a'); assert.equal(await page.evaluate(()=>sent.length),before);
+  await checkToolbarLayout(page, name);
   await page.setViewportSize({width:390,height:844}); await page.screenshot({path:join(temp,`${name}-mobile.png`)});
   await page.setViewportSize({width:1440,height:900}); await page.screenshot({path:join(temp,`${name}-desktop.png`)});
   assert.deepEqual(errors,[]); console.log(`${name}: PASS (paste/drop/picker/limits/dedup/drafts/failure/attachment-only/thumbnail/IME/newline)`);
