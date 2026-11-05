@@ -1,10 +1,5 @@
 package com.pilot.mobile.bridge
 
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.MultiFormatWriter
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
-import com.google.zxing.client.j2se.MatrixToImageWriter
 import com.pilot.mobile.transport.*
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
@@ -12,7 +7,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.*
-import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
 import java.security.MessageDigest
 import java.util.Base64
@@ -117,12 +111,9 @@ class PairingAdmin(
     private fun payload(invite: PairingInvite, details: JsonObject): JsonObject {
         val code = invite.encode()
         val base = cachedInvite?.takeIf { it["code"]?.jsonPrimitive?.content == code } ?: run {
-            val matrix = MultiFormatWriter().encode(code, BarcodeFormat.QR_CODE, 768, 768,
-                mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M, EncodeHintType.MARGIN to 4))
-            val png = ByteArrayOutputStream()
-            MatrixToImageWriter.writeToStream(matrix, "PNG", png)
+            val png = PairingQr.png(code)
             buildJsonObject {
-                put("code", code); put("image", "data:image/png;base64," + Base64.getEncoder().encodeToString(png.toByteArray()))
+                put("code", code); put("image", "data:image/png;base64," + Base64.getEncoder().encodeToString(png))
                 put("expiresIn", 300); put("expiresAt", invite.expiresAt); put("name", invite.name)
                 put("development", invite.developmentRelays)
             }.also { cachedInvite = it }

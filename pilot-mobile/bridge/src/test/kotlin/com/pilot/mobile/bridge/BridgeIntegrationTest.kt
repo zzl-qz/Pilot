@@ -31,6 +31,7 @@ class BridgeIntegrationTest {
         val revision = "a".repeat(64)
         upstream.createContext("/") { e ->
             if (e.requestURI.path == "/api/sessions/ses_slow") Thread.sleep(700)
+            assertTrue(e.requestHeaders.getFirst("X-Pilot-Device-Id").matches(Regex("[a-f0-9]{64}")))
             e.responseHeaders.set("Content-Type", "application/json; charset=utf-8")
             val bytes = if (e.requestURI.path == "/api/sessions/ses_large") largeJson.toByteArray()
             else if (e.requestURI.path.endsWith("/download")) {
@@ -95,7 +96,9 @@ class BridgeIntegrationTest {
                     legacyConnection.close(0, byteArrayOf()); legacyConnection.close()
                 }
                 assertEquals(403, client.request(Request(path = "/api/settings")).first.status)
-                assertEquals(200, client.request(Request("POST", "/api/sessions/ses_1/messages", "{\"content\":\"测试\"}")).first.status)
+                assertEquals(200, client.request(Request("POST", "/api/sessions/ses_1/messages", "{\"content\":\"测试\"}", requestId = java.util.UUID.randomUUID().toString())).first.status)
+                assertEquals(426, client.request(Request("POST", "/api/sessions/ses_1/messages", "{}")).first.status)
+                assertEquals(403, client.request(Request(path = "/api/maintenance/mobile-receipts")).first.status)
                 assertEquals(1, mutations.get())
                 // 模拟已授权手机在弱网中上传暂停超过 10 秒，不能按陌生设备的短超时截断。
                 val slowConnection = phone.connect(desktop.addr(), Protocol.alpn)

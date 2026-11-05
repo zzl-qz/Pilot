@@ -19,7 +19,7 @@ const classpath = [path.join(root, 'bridge/build/classes/kotlin/test'), path.joi
 const probe = path.resolve(root, '../pilot-server/src/test/resources/mobile/BridgeProcessProbe.java');
 const recovery = process.argv.includes('--recovery');
 const phoneKey = randomBytes(32).toString('base64');
-const requestId = randomUUID();
+const requestFile = path.join(directory, 'request-id.txt');
 let server;
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
@@ -62,7 +62,7 @@ async function waitBridge(previous = '') {
 }
 async function checkPhone(code, reconnect = false) {
   const result = await exec(java, ['--enable-native-access=ALL-UNNAMED', '-cp', classpath, 'com.pilot.mobile.bridge.BackendSmokeKt'], {
-    env: {...process.env, PILOT_TEST_INVITE:code, PILOT_TEST_PHONE_KEY:phoneKey, PILOT_TEST_REQUEST_ID:requestId, PILOT_TEST_RECONNECT:String(reconnect)},
+    env: {...process.env, PILOT_TEST_INVITE:code, PILOT_TEST_PHONE_KEY:phoneKey, PILOT_TEST_REQUEST_FILE:requestFile, PILOT_TEST_RECONNECT:String(reconnect)},
     timeout:90000, maxBuffer:1024 * 1024,
   });
   console.log(result.stdout.trim());

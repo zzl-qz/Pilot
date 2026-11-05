@@ -75,6 +75,8 @@ class Bridge(
                 reply(send, 401, "{\"error\":\"设备未配对或已被移除\"}")
             } else if (!RoutePolicy.allowed(request)) {
                 reply(send, 403, "{\"error\":\"移动端不支持此操作\"}")
+            } else if (request.method != "GET" && request.path != ReceiptProtocol.ACK_PATH && request.requestId == null) {
+                reply(send, 426, "{\"error\":\"请更新手机，写操作必须提供持久请求标识\",\"uncertain\":true}")
             } else {
                 proxy(peer, request, send)
             }
@@ -91,6 +93,7 @@ class Bridge(
         val path = request.snapshotRevision?.let { "${request.path}?revision=$it" } ?: request.path
         val builder = HttpRequest.newBuilder(URI("http://127.0.0.1:$port$path"))
             .timeout(Duration.ofSeconds(30)).header("Accept", if (request.path.substringBefore('?').endsWith("/events")) "text/event-stream" else "application/json")
+        builder.header("X-Pilot-Device-Id", peer)
         if (token.isNotBlank()) builder.header("X-Pilot-Token", token)
         if (request.method != "GET") {
             builder.header("Content-Type", "application/json")

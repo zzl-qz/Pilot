@@ -60,7 +60,12 @@ try{
  console.log('检查第二次拒权');
  await click('取消');await click('扫码连接电脑');
  const second=await waitFor(s=>s.nodes.some(deny)||text('打开权限设置')(s));
- if(!text('打开权限设置')(second))await clickWhere(deny);
+ if(!text('打开权限设置')(second)){
+  // Android 8 使用“不再询问”复选框，Android 11+ 连续拒绝后自动进入永久拒权。
+  const neverAsk=n=>n['resource-id']?.endsWith('/do_not_ask_checkbox');
+  if(second.nodes.some(neverAsk))await clickWhere(neverAsk);
+  await clickWhere(deny);
+ }
  await waitFor(text('打开权限设置'));await screenshot('permission-settings');
  await click('打开权限设置');
  await waitFor(s=>s.nodes.some(n=>n.package==='com.android.settings'));
@@ -75,7 +80,8 @@ try{
  await run('shell','settings','put','system','user_rotation','1');
  await run('shell','settings','put','system','font_scale','1.5');
  const portrait=await waitFor(text('扫描电脑上的配对码'));assert.match(portrait.xml,/<hierarchy rotation="0"/);
- await run('shell','input','swipe','500','1600','500','700','300');
+ const size=await run('shell','wm','size');const [,width,height]=size.match(/(\d+)x(\d+)/).map(Number);
+ await run('shell','input','swipe',String(Math.floor(width/2)),String(Math.floor(height*.8)),String(Math.floor(width/2)),String(Math.floor(height*.35)),'300');
  await waitFor(text('改用配对码连接'));await screenshot('large-text-portrait');
  await click('改用配对码连接');await waitFor(text('电脑生成的配对码'));
  console.log('PASS: 相机首次拒权、永久拒权设置入口、拒权后粘贴、设置返回、取消无错误、系统横屏偏好下竖屏扫码、大字体替代操作');

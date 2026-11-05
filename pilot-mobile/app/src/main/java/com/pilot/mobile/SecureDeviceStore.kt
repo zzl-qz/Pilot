@@ -40,9 +40,24 @@ class SecureDeviceStore(context: Context) {
             doFinal(bytes.copyOfRange(12, bytes.size))
         }
     }
-    private fun write(name: String, bytes: ByteArray) {
+    private fun encrypt(bytes: ByteArray): String {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
-        check(preferences.edit().putString(name, Base64.getEncoder().encodeToString(cipher.iv + cipher.doFinal(bytes))).commit())
+        return Base64.getEncoder().encodeToString(cipher.iv + cipher.doFinal(bytes))
+    }
+    private fun write(name: String, bytes: ByteArray) {
+        check(preferences.edit().putString(name, encrypt(bytes)).commit())
+    }
+    /** 先原子落盘结果、确认队列和 pending 清除，再允许确认服务器回执。 */
+    @Synchronized fun completeRequest(host: String, requestId: String, result: String) {
+        val acknowledgments = (acknowledgments(host) + requestId).distinct()
+        check(preferences.edit()
+            .putString("host:$host:receipt-result", encrypt(result.toByteArray()))
+            .putString("host:$host:receipt-acks", encrypt(acknowledgments.joinToString("\n").toByteArray()))
+            .remove("host:$host:pending").commit())
+    }
+    @Synchronized fun acknowledgments(host: String): List<String> = value(host, "receipt-acks")?.lines()?.filter { it.isNotBlank() }.orEmpty()
+    @Synchronized fun acknowledged(host: String, requestId: String) {
+        value(host, "receipt-acks", acknowledgments(host).filterNot { it == requestId }.joinToString("\n"))
     }
     fun identity(): ByteArray = read("identity") ?: ByteArray(32).also { java.security.SecureRandom().nextBytes(it); write("identity", it) }
     fun computers(): List<PairedComputer> = read("computers")?.let {

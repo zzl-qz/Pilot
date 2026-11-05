@@ -1,6 +1,7 @@
 package com.pilot.mobile.bridge
 
 import com.pilot.mobile.transport.Request
+import com.pilot.mobile.transport.ReceiptProtocol
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -9,11 +10,11 @@ import java.nio.charset.StandardCharsets
 object RoutePolicy {
     private const val ID = "[A-Za-z0-9_-]{1,100}"
     private val routes = mapOf(
-        "GET" to listOf("/api/health", "/api/mobile/workbench", "/api/projects", "/api/projects/$ID", "/api/sessions", "/api/approvals",
+        "GET" to listOf("/api/mobile/receipts/token", "/api/health", "/api/mobile/workbench", "/api/projects", "/api/projects/$ID", "/api/sessions", "/api/approvals",
             "/api/results", "/api/results/$ID", "/api/workspaces/(roots|browse)",
             "/api/sessions/$ID", "/api/sessions/$ID/(history|events|queue|plan|runs/active|products|context|diff)",
             "/api/sessions/$ID/diff/file", "/api/sessions/$ID/products/$ID/(preview|download)"),
-        "POST" to listOf("/api/projects", "/api/sessions", "/api/sessions/$ID/(messages|steer|continue)",
+        "POST" to listOf("/api/mobile/receipts/ack", "/api/projects", "/api/sessions", "/api/sessions/$ID/(messages|steer|continue)",
             "/api/runs/$ID/(pause|cancel)", "/api/approvals/$ID", "/api/results/$ID/receipt",
             "/api/sessions/$ID/queue/[0-9]{1,4}/(steer|move)"),
         "PATCH" to listOf("/api/projects/$ID", "/api/sessions/$ID", "/api/sessions/$ID/archive"),
@@ -23,7 +24,7 @@ object RoutePolicy {
 
     fun allowed(request: Request): Boolean {
         if (request.path.length > 8192 || request.body.toByteArray().size > 12 * 1024 * 1024) return false
-        if (request.requestId?.matches(Regex("[a-f0-9-]{36}")) == false) return false
+        if (request.requestId?.let { !ReceiptProtocol.validId(it) } == true) return false
         val snapshotRevision = request.snapshotRevision
         if (snapshotRevision != null && (request.method != "GET" || request.path != "/api/mobile/workbench" || !snapshotRevision.matches(Regex("[a-f0-9]{64}")))) return false
         val uri = runCatching { URI(request.path) }.getOrNull() ?: return false

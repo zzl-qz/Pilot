@@ -5,15 +5,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
-import java.util.HexFormat;
-import java.util.stream.IntStream;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ReadListener;
@@ -29,10 +21,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
-import com.pilot.server.config.PilotDataDir;
-
-import tools.jackson.databind.ObjectMapper;
-
 /**
  * 手机写操作的持久回执。先落盘占位再执行；断电时宁可返回待核实，也不自动重做一次命令。
  * 相同标识必须对应相同方法、路径和请求体。回执不保存附件或指令正文。
@@ -40,14 +28,12 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
 public class MobileRequestFilter extends OncePerRequestFilter {
+    private static final int MAX_RESPONSE = 16 * 1024 * 1024;
     private static final int MAX_BODY = 12 * 1024 * 1024;
-    private final Path directory;
-    private final ObjectMapper mapper;
-    private final Object[] locks = IntStream.range(0, 64).mapToObj(index -> new Object()).toArray();
+    private final MobileReceiptStore receipts;
 
-    public MobileRequestFilter(PilotDataDir data, ObjectMapper mapper) {
-        directory = data.file("mobile", "receipts");
-        this.mapper = mapper;
+    public MobileRequestFilter(MobileReceiptStore receipts) {
+        this.receipts = receipts;
     }
 
     @Override
@@ -55,63 +41,62 @@ public class MobileRequestFilter extends OncePerRequestFilter {
         throws ServletException, IOException {
         String id = request.getHeader("X-Pilot-Request-Id");
         if (id == null || "GET".equals(request.getMethod())) {
+            if (id == null && request.getHeader("X-Pilot-Device-Id") != null && !"GET".equals(request.getMethod())
+                && !"/api/mobile/receipts/ack".equals(request.getRequestURI())) {
+                failure(response, 426, "请更新手机和电脑连接组件", true);
+                return;
+            }
             chain.doFilter(request, response);
             return;
         }
-        if (!id.matches("[a-f0-9]{64}:[a-f0-9-]{36}")) {
-            failure(response, 400, "无效的请求标识");
+        if (!id.matches("[a-f0-9]{64}:(?:[a-f0-9-]{36}|" + MobileReceiptStore.TOKEN_PATTERN + ")")) {
+            failure(response, 400, "无效的请求标识", true);
             return;
         }
         byte[] body = request.getInputStream().readNBytes(MAX_BODY + 1);
         if (body.length > MAX_BODY) {
-            failure(response, 413, "附件或消息过大");
+            failure(response, 413, "附件或消息过大", false);
             return;
         }
-        String fingerprint = digest(
-            (request.getMethod() + " " + request.getRequestURI() + "?" + request.getQueryString() + "\n" + digest(body))
-                .getBytes(StandardCharsets.UTF_8));
-        String key = digest(id.getBytes(StandardCharsets.UTF_8));
-        synchronized (locks[Math.floorMod(key.hashCode(), locks.length)]) {
-            Files.createDirectories(directory);
-            Path file = directory.resolve(key + ".json");
-            if (Files.exists(file)) {
-                Receipt saved = mapper.readValue(Files.readString(file), Receipt.class);
-                if (!saved.fingerprint().equals(fingerprint)) {
-                    failure(response, 409, "同一请求标识不能用于不同操作");
-                    return;
-                }
-                if (saved.status() == 0) {
-                    failure(response, 409, "上次操作的结果待核实，请查看任务记录；不会自动重复执行");
-                    return;
-                }
-                response.setStatus(saved.status());
-                response.setContentType(saved.contentType());
-                response.setHeader("X-Pilot-Replayed", "true");
-                response.getOutputStream().write(Base64.getDecoder().decode(saved.body()));
-                return;
-            }
-            save(file, new Receipt(fingerprint, 0, "application/json", ""));
-            ContentCachingResponseWrapper cached = new ContentCachingResponseWrapper(response);
-            chain.doFilter(repeatable(request, body), cached);
-            save(file,
-                new Receipt(fingerprint, cached.getStatus(),
-                    cached.getContentType() == null ? "application/json" : cached.getContentType(),
-                    Base64.getEncoder().encodeToString(cached.getContentAsByteArray())));
-            cached.copyBodyToResponse();
-        }
-    }
-
-    private void save(Path file, Receipt receipt) throws IOException {
-        Path temp = Files.createTempFile(directory, "receipt-", ".tmp");
-        try {
-            Files.writeString(temp, mapper.writeValueAsString(receipt));
+        String fingerprint = MobileReceiptStore.digest((request.getMethod() + " " + request.getRequestURI() + "?"
+            + request.getQueryString() + "\n" + MobileReceiptStore.digest(body)).getBytes(StandardCharsets.UTF_8));
+        synchronized (receipts) {
             try {
-                Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
+                MobileReceiptStore.Receipt saved = receipts.get(id);
+                if (saved != null) {
+                    if (!saved.fingerprint().equals(fingerprint)) {
+                        failure(response, 409, "同一请求标识不能用于不同操作", true);
+                        return;
+                    }
+                    if (saved.status() == 0) {
+                        failure(response, 409, "上次操作的结果待核实，请查看任务记录；不会自动重复执行", true);
+                        return;
+                    }
+                    response.setStatus(saved.status());
+                    response.setContentType(saved.contentType());
+                    response.setHeader("X-Pilot-Replayed", "true");
+                    response.getOutputStream().write(Base64.getDecoder().decode(saved.body()));
+                    return;
+                }
+                long expires = receipts.validateNew(id);
+                long created = receipts.now();
+                receipts.save(id,
+                    new MobileReceiptStore.Receipt(fingerprint, 0, "application/json", "", created, expires, 0));
+                ContentCachingResponseWrapper cached = new ContentCachingResponseWrapper(response);
+                chain.doFilter(repeatable(request, body), cached);
+                if (cached.getContentSize() > MAX_RESPONSE) {
+                    failure(response, 507, "响应超过回执上限，结果待核实，请查看任务记录", true);
+                    return;
+                }
+                receipts.save(id,
+                    new MobileReceiptStore.Receipt(fingerprint, cached.getStatus(),
+                        cached.getContentType() == null ? "application/json" : cached.getContentType(),
+                        Base64.getEncoder().encodeToString(cached.getContentAsByteArray()), created, expires, 0));
+                cached.copyBodyToResponse();
+            } catch (MobileReceiptStore.Rejected e) {
+                response.setHeader("X-Pilot-Receipt-Error", e.code());
+                failure(response, e.status(), e.getMessage(), e.uncertain());
             }
-        } finally {
-            Files.deleteIfExists(temp);
         }
     }
 
@@ -155,21 +140,10 @@ public class MobileRequestFilter extends OncePerRequestFilter {
         };
     }
 
-    private static String digest(byte[] bytes) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    private static void failure(HttpServletResponse response, int status, String message) throws IOException {
+    private static void failure(HttpServletResponse response, int status, String message, boolean uncertain)
+        throws IOException {
         response.setStatus(status);
         response.setContentType("application/json;charset=UTF-8");
-        response.getWriter()
-            .write("{\"message\":\"" + message + "\",\"uncertain\":" + message.startsWith("上次操作") + "}");
-    }
-
-    public record Receipt(String fingerprint, int status, String contentType, String body) {
+        response.getWriter().write("{\"message\":\"" + message + "\",\"uncertain\":" + uncertain + "}");
     }
 }

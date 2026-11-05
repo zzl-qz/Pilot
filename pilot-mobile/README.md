@@ -1,6 +1,6 @@
 # Pilot Android 与应用级移动连接
 
-当前版本 `0.2.6-preview`。手机连接的是一台运行 Pilot 的电脑，一次配对即可管理该电脑上的项目与任务。代码和命令仍在电脑上执行；手机不保存模型 API Key。
+当前版本 `0.2.7-preview`。手机连接的是一台运行 Pilot 的电脑，一次配对即可管理该电脑上的项目与任务。代码和命令仍在电脑上执行；手机不保存模型 API Key。
 
 ## 个人自用验收口径
 
@@ -8,7 +8,7 @@
 
 必需的配对、任务管理、审批、指令控制、草稿、断线恢复、重复提交保护已经实现并做自动化验收。另补充了连接组件异常退出后的自动恢复，以及后台被强制结束后连接子进程自动退出，避免遗留进程影响下次连接。恢复测试使用原手机身份和旧票据，验证授权、任务与提交回执保留。
 
-已在 vivo V2352A / Android 15 上记录到一次蜂窝网络经公网中继读取工作台成功；0.2.2 的连接恢复与性能优化包已完成专用模拟器回归，仍待真机覆盖回归，不能把单次成功当作所有网络均已验收。其他运营商、家庭宽带组合、扫码拒绝权限与长时运行仍待验证。电脑关机或休眠时手机无法执行任务；后台通知暂未启用，回到 App 会同步进度。公共连接服务受限速和可用性影响，这些限制对个人自用同样成立。
+`0.2.7-preview` 已由用户用自己的手机在不同网络下测试，确认正常使用，计入最终包真机跨网使用验收通过。此前 vivo V2352A / Android 15 的单次蜂窝网络经公网中继读取工作台记录保留为历史证据；不据此推断本次使用了同一手机、运营商或中继路径。其他未覆盖的机型、网络组合、相机权限边界与长时运行仍保留验证范围。电脑关机或休眠时手机无法执行任务；后台通知暂未启用，回到 App 会同步进度。公共连接服务受限速和可用性影响，这些限制对个人自用同样成立。
 
 自用时可沿用源码项目的现有后台。若改用便携包连接现有数据，应设置 `PILOT_DATA_DIR` 指向原数据目录；默认在包目录新建 `.pilot`，不会自动搬走原来的项目或历史。更新便携包时保留原数据目录和 APK 签名密钥。
 
@@ -81,7 +81,7 @@ node scripts/package-mobile-host.mjs <新的输出目录>
 | macOS | Apple Silicon 本机 Java / Electron / 原生剪贴板 / QUIC 已验收。Intel macOS 缺少上游 iroh 原生制品，明确拒绝启动连接桥。 |
 | Windows | x64 原生库、Java 参数数组、标准路径和 `java.exe` 分支；模拟测试和 CI 配置，未做 Windows 实机。ARM64 缺少上游原生制品。 |
 | Linux | x64 / ARM64 原生库；Linux 容器与 macOS 公网中继往返已验证，未做 Linux 桌面实机。 |
-| Android | minSdk 26，targetSdk 35，四种 ABI，Keystore、关闭备份。专用模拟器验收通过；vivo / Android 15 单次跨网读取已记录，最终修复包真机回归待完成。相机权限边界、全部 Android 版本和 OEM 尚未全面覆盖。 |
+| Android | minSdk 26，targetSdk 35，四种 ABI，Keystore、关闭备份。专用模拟器验收通过；0.2.7 最终包已由用户用自己的手机在不同网络下测试并确认正常使用。相机权限边界、全部 Android 版本和 OEM 尚未全面覆盖。 |
 
 - 单附件不超过 2 MB，单次总量 6 MB、最多 16 个；手机成果下载上限 16 MB。
 - 正文支持可选择的段落、标题、加粗、行内代码和可横向滚动、复制的代码块；未结束的流式代码块继续展示。复杂 Markdown 表格与内嵌 HTML 保留文本显示，复杂文件可保存到手机后由对应应用打开。iOS 不在此 APK 交付范围。
@@ -89,11 +89,11 @@ node scripts/package-mobile-host.mjs <新的输出目录>
 - 默认启用公共服务，尽力直连，必要时中继；不保证所有运营商、代理或防火墙下都可用。两个独立私网的纯直连仍取决于 NAT 和防火墙。共享付费中继的认证适配未实现。
 - 正式 APK / 桌面安装包签名、分发、更新回滚和全平台真机属于发布验收，不能用本机成功替代。
 
-测试明细见 [验收记录](../evaluation/MOBILE_2026-11-04.md)。所有本轮测试使用临时数据或专用 QA 包，模型 API 调用为 0。
+最新测试明细见 [0.2.7 验收记录](../evaluation/MOBILE_RECEIPTS_AND_CI_2026-11-05.md)，历史记录见 [移动端验收](../evaluation/MOBILE_2026-11-04.md)。代理执行的本轮自动化业务测试使用临时数据或专用 QA 包，模型 API 调用为 0；用户真机跨网实测单独记录。
 
 界面重设计与小屏验收见 [移动产品设计记录](../evaluation/MOBILE_DESIGN_2026-11-04.md)。`android-smoke.mjs` 同时验证业务流程和独立的 320dp / 大字体 / 深浅主题组件场景；不会用组件截图冒充真机验收。
 
-真机蜂窝网络排查、已观察到的中继往返与尚未完成的最终包回归见 [跨网连接记录](../evaluation/MOBILE_CROSS_NETWORK_2026-11-04.md)。
+历史真机蜂窝网络排查与中继往返见 [跨网连接记录](../evaluation/MOBILE_CROSS_NETWORK_2026-11-04.md)；0.2.7 最终包用户真机跨网使用结果见最新验收记录。
 
 0.2.2 的数据量对照、兼容策略与弱网模拟验收见 [延迟优化记录](../evaluation/MOBILE_LATENCY_2026-11-04.md)。
 
@@ -151,3 +151,44 @@ Android 使用默认网络回调处理 Wi-Fi、蜂窝、有线和 VPN 变化。�
 - `node pilot-mobile/scripts/android-smoke.mjs emulator-xxxx --automatic --network-switch`：只允许 Pilot 专用模拟器，实际关闭 / 恢复模拟器网络，验证自动读取、草稿保留和不重复提交；不操作真机。
 
 范围和实际结果见 [网络矩阵验收](../evaluation/MOBILE_NETWORK_MATRIX_2026-11-05.md)。
+
+## 0.2.7 回执生命周期与升级
+
+本版需要一起更新后台 Jar、连接桥和 APK；保留电脑 `.pilot/mobile` 与手机应用数据。配对传输仍为 v2，回执能力单独升级为 v3，不需要因为本次升级重新配对。旧 App 的新写请求会收到明确的升级提示；旧待核对请求只允许读取原有回执，缺少回执时拒绝重新执行。新 App 不会在旧后台不支持签发请求标识时退回无保护写入。
+
+新写操作先取得电脑签发、绑定设备身份的限时请求标识；手机加密保存后才发送。重试保留原标识，不按手机时间续期。电脑先持久化占位再执行；响应丢失可核对原回执，执行中崩溃或结果不确定不会自动重做。结果收到后，手机原子保存结果、待发送确认队列并清除 pending；确认失败可以在刷新或重启后重试，确认重试不执行业务操作。
+
+回执只有同时满足“请求已失效、已得到手机确认、确认后超过保留期”才自动删除。未知结果、未确认、损坏、旧版无有效期回执保留。已过期但仍保留的完成回执可以继续核对；过期且无回执的请求返回 410，不再执行。删除前持久化时间下限，防止重启或时钟回拨复活已清理请求。不要手动删除回执或单独删除 `state.json`；备份、恢复应覆盖整个数据目录。本机制不承诺硬盘损坏、外部删库或恢复旧备份下的 exactly-once。
+
+| 后台配置 | 默认 | 含义 |
+| --- | --- | --- |
+| `pilot.mobile.receipts.request-hours` | 24 | 新签发请求有效小时数，必须大于 0 |
+| `pilot.mobile.receipts.retention-days` | 30 | 手机确认后保留天数；0 仍需等待请求失效 |
+| `pilot.mobile.receipts.max-count` | 10000 | 回执数量上限 |
+| `pilot.mobile.receipts.max-bytes` | 536870912 | 回执容量上限；接收新写入前预留 24 MiB 响应空间 |
+| `pilot.mobile.receipts.cleanup-ms` | 3600000 | 自动清理间隔；启动 60 秒后首次执行 |
+
+配置通过正常 Spring 配置文件或后台 `--pilot.mobile.receipts.request-hours=24` 参数设置。容量不足时拒绝新的手机写操作，读取、已有回执核对和确认仍可使用。不要为释放容量直接删未知结果；先核对业务记录。旧版回执保守保留，但新版本不再接受创建旧式回执。
+
+电脑端维护接口遵循现有 API 鉴权与来源限制，且不在手机代理白名单中：
+
+- `GET /api/maintenance/mobile-receipts`：数量、字节、未知／未确认／旧版／损坏数量、容量状态及本进程最近清理结果。
+- `POST /api/maintenance/mobile-receipts/cleanup`：立即按同一安全规则清理，不提供强制删除未知结果选项。
+
+使用 Java 标准路径、文件强制写入及原子移动。文件系统不支持替换已有文件的原子移动时保留旧回执并拒绝继续写入，需换用支持原子移动的本地磁盘；不以非原子覆盖冒险恢复写操作。
+
+## Android 仪器测试 CI
+
+`.github/workflows/ci.yml` 新增独立的 API 26 / 35 Linux x86_64 模拟器作业，构建 QA 包与测试包，启动真实连接桥和隔离业务夹具，执行配对、任务、附件、回执确认、独立进程恢复、扫码、相机拒权与网络关闭／恢复。不依赖模型 API 或公共中继；公网连接另做真实后台验收。使用 [Android Emulator Runner](https://github.com/ReactiveCircus/android-emulator-runner) 的专用 AVD 和 KVM 配置。
+
+本地先设置 Java 21、`ANDROID_HOME`，启动名称以 `pilot-` 或 `pilot_` 开头的专用模拟器，再执行：
+
+```text
+node scripts/mobile.mjs test
+node scripts/mobile.mjs qa
+node pilot-mobile/scripts/instrumentation-ci.mjs emulator-5584 --network-switch
+```
+
+脚本拒绝真机和其他项目模拟器，使用独立 `com.pilot.mobile.qa` 包。报告写入 `pilot-mobile/build/instrumentation-ci`，截图另在 `build/mobile-qa` 和 `build/scanner-qa`。失败时非零退出，并保留 JUnit XML、文本日志、logcat 和截图；CI 无论成败上传报告，保留 14 天。每次运行先清空本次报告目录，避免旧成功记录混入失败报告。
+
+当前仓库远程为 Gitee；GitHub Actions 配置需要在 GitHub 镜像／对应仓库启用后才能持续运行。本地测试成功不代表托管 CI 已运行，也不代表 API 26 或其他 OEM 真机已验收。最新实际范围见 [0.2.7 收尾验收](../evaluation/MOBILE_RECEIPTS_AND_CI_2026-11-05.md)。

@@ -1,7 +1,7 @@
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer } from 'node:http';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -23,14 +23,15 @@ const runAdb = async (...args) => {
     throw new Error(`设备 ${serial} 的 ${args.slice(0, 3).join(' ')} 操作中断（${error.code ?? 'unknown'}），本轮不计通过。\n${details}`);
   }
 };
-if (networkSwitch) {
-  if (!/^emulator-\d+$/.test(serial || '')) throw new Error('网络切换验收只能使用 Pilot 专用模拟器');
-  if (!/^pilot[-_]/i.test((await runAdb('emu','avd','name')).stdout)) throw new Error('不能切换其他项目的模拟器网络');
+{
+  if (!/^emulator-\d+$/.test(serial || '')) throw new Error('应用验收只能使用 Pilot 专用模拟器');
+  if (!/^pilot[-_]/i.test((await runAdb('emu','avd','name')).stdout)) throw new Error('不能操作其他项目的模拟器');
 }
 const directory = await mkdtemp(path.join(tmpdir(), 'pilot-mobile-qa-'));
 const events = [{ sequence: 1, type: 'run.started', runId: 'run_test', payload: { input: '正在核对测试夹具' } }];
 const subscribers = new Set();
 let posted = 0;
+let acknowledged = 0;
 const receipts = new Map();
 let approved = 0, steered = 0, paused = 0, continued = 0, cancelled = 0;
 let activeRun = 'run_test', queue = [], revision = '1';
@@ -49,6 +50,14 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   res.setHeader('Content-Type', 'application/json');
   const json = value => res.end(JSON.stringify(value));
+  if (url.pathname === '/api/mobile/receipts/token' && req.method === 'GET') {
+    assertDevice();
+    json({requestId: `r3.${Date.now()+86400000}.${randomUUID()}.${'a'.repeat(64)}`, receiptVersion:3}); return;
+  }
+  if (url.pathname === '/api/mobile/receipts/ack' && req.method === 'POST') {
+    assertDevice(); acknowledged++; json({acknowledged:true}); return;
+  }
+  function assertDevice() { if (!/^[a-f0-9]{64}$/.test(req.headers['x-pilot-device-id'] || '')) throw new Error('连接桥必须绑定认证设备身份'); }
   // 每个任务读取人为增加 500ms，确认历史、运行状态、队列真实重叠，串行实现无法通过。
   const taskRead = url.pathname.match(/\/(history|runs\/active|queue)$/)?.[1];
   if (req.method === 'GET' && taskRead) {
@@ -98,7 +107,7 @@ const server = createServer(async (req, res) => {
     const payload = JSON.parse(raw);
     if (payload.content === '模拟断线提交') {
       const key = req.headers['x-pilot-request-id'];
-      if (!key || !/^[a-f0-9]{64}:[a-f0-9-]{36}$/.test(key)) { res.statusCode = 400; json({error:'缺少持久请求标识'}); return; }
+      if (!key || !/^[a-f0-9]{64}:r3\.[0-9]{1,16}\.[a-f0-9-]{36}\.[a-f0-9]{64}$/.test(key)) { res.statusCode = 400; json({error:'缺少持久请求标识'}); return; }
       if (receipts.has(key)) { json(receipts.get(key)); return; }
       posted++; receipts.set(key,{sessionId:'ses_test',runId:'run_test'});
       emit('assistant.delta',{text:'断线指令只执行了一次'});
@@ -116,6 +125,10 @@ const server = createServer(async (req, res) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const java = process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java') : 'java';
 const bridge = spawn(java, ['-cp', path.join(root, 'bridge/build/install/bridge/lib/*'), 'com.pilot.mobile.bridge.MainKt', '--pilot-port', String(server.address().port), '--data-dir', directory, ...(automatic ? [] : ['--no-relay']), '--no-open'], { stdio: ['ignore', 'pipe', 'pipe'] });
+for (const signal of ['SIGTERM','SIGINT']) process.once(signal, () => {
+  bridge.kill(); server.closeAllConnections(); server.close();
+  rm(directory,{recursive:true,force:true}).finally(()=>process.exit(1));
+});
 let bridgeErrors = '';
 bridge.stderr.on('data', chunk => { bridgeErrors += chunk; });
 try {
@@ -157,7 +170,11 @@ try {
   const design = await runAdb('shell', 'am', 'instrument', '-w', '-r', '-e', 'class', 'com.pilot.mobile.MobileDesignTest', 'com.pilot.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner');
   console.log(design.stdout);
   if (!design.stdout.includes('OK (4 tests)')) throw new Error('小屏、大字体、主题与消息排版验收失败');
-  const counts = { posted, approved, steered, paused, continued, cancelled };
+  const persistence = await runAdb('shell','am','instrument','-w','-r','-e','class','com.pilot.mobile.ReceiptPersistenceTest','com.pilot.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner');
+  console.log(persistence.stdout);
+  if (!persistence.stdout.includes('OK (1 test)')) throw new Error('回执本地持久化与确认队列恢复失败');
+  const counts = { posted, approved, steered, paused, continued, cancelled, acknowledged };
+  if (acknowledged < 1) throw new Error('手机必须在收到结果后发送回执确认');
   if (!output.stdout.includes('OK (1 test)') || posted !== 2 || [approved,steered,paused,continued,cancelled].some(count => count !== 1)) throw new Error(`Android 验收失败：${JSON.stringify(counts)}`);
   if (!parallelTaskReads || firstHistoryLimit !== 60 || unchangedSnapshots === 0) throw new Error(`性能回归：${JSON.stringify({parallelTaskReads,firstHistoryLimit,fullSnapshots,unchangedSnapshots})}`);
   console.log('性能验收：' + JSON.stringify({parallelTaskReads,firstHistoryLimit,fullSnapshots,unchangedSnapshots,perReadDelayMs:500}));

@@ -18,7 +18,6 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.*
 import java.net.URLEncoder
 import java.util.Base64
-import java.util.UUID
 
 class PilotViewModel(application: Application) : AndroidViewModel(application) {
     private val store = SecureDeviceStore(application)
@@ -33,6 +32,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
     private var foreground = false
     private var historyChars = 0
     private val syncMutex = Mutex()
+    private val acknowledgmentMutex = Mutex()
     private var workbench = WorkbenchSnapshot()
     private var networkAvailable = true
     private val networkRecovery = NetworkRecovery(viewModelScope,
@@ -152,6 +152,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         mutable.update { it.copy(syncing = true) }
         try {
             val incoming = api(workbench.request()).jsonObject
+            flushAcknowledgments()
             if (client !== owner || state.value.computerId != host) return@withLock
             val snapshot = workbench.accept(incoming)
             val sessions = snapshot.objects("sessions")
@@ -415,18 +416,28 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun api(original: Request, replay: Boolean = false): JsonElement {
         val mutation = original.method != "GET"
-        val request = if (mutation) original.copy(requestId = original.requestId ?: UUID.randomUUID().toString()) else original
+        val owner = client ?: error("请先连接电脑")
+        val host = state.value.computerId
+        if (mutation) require(replay || state.value.pending == null) { "有一条指令结果尚未确认，请先核对提交结果" }
+        // 重试沿用落盘的原标识，绝不为过期或旧版待核对请求申请新标识。
+        val request = if (mutation && !replay && original.requestId == null)
+            original.copy(requestId = ReceiptProtocol.issuedId(owner.request(Request(path = ReceiptProtocol.TOKEN_PATH))))
+        else original
         if (mutation) {
-            require(replay || state.value.pending == null) { "有一条指令结果尚未确认，请先核对提交结果" }
-            withContext(Dispatchers.IO) { store.value(state.value.computerId, "pending", Protocol.json.encodeToString(Request.serializer(), request)) }
+            require(!request.requestId.isNullOrBlank()) { "旧请求缺少标识，请在电脑端核对任务记录" }
+            withContext(Dispatchers.IO) {
+                require(replay || store.acknowledgments(host).size < 1000) { "回执确认积压，请恢复连接后再提交新指令" }
+                store.value(host, "pending", Protocol.json.encodeToString(Request.serializer(), request))
+            }
             mutable.update { it.copy(pending = request) }
         }
-        val result = client?.request(request) ?: error("请先连接电脑")
+        val result = owner.request(request)
         val parsed = withContext(Dispatchers.Default) { runCatching { Protocol.json.parseToJsonElement(result.second) }.getOrNull() }
-        val uncertain = result.first.status >= 500 || (parsed as? JsonObject)?.bool("uncertain") == true
-        if (mutation && !uncertain) {
-            withContext(Dispatchers.IO) { store.value(state.value.computerId, "pending", null) }
-            mutable.update { it.copy(pending = null) }
+        if (mutation && ReceiptProtocol.confirmable(result.first.status, parsed)) {
+            val record = buildJsonObject { put("requestId", request.requestId); put("status", result.first.status); put("result", parsed ?: JsonNull) }
+            withContext(Dispatchers.IO) { store.completeRequest(host, request.requestId!!, record.toString()) }
+            if (client === owner && state.value.computerId == host) mutable.update { it.copy(pending = null) }
+            flushAcknowledgments()
         }
         if (result.first.status !in 200..299) {
             val message = (parsed as? JsonObject)?.let { it.text("error").ifBlank { it.text("message") } }.orEmpty()
@@ -434,6 +445,28 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         }
         return parsed ?: JsonNull
     }
+    /** 只重试回执确认，不重发业务请求；网络失败保留加密队列，下次刷新继续。 */
+    private fun flushAcknowledgments() {
+        if (acknowledgmentMutex.isLocked) return
+        val owner = client ?: return
+        val host = state.value.computerId
+        viewModelScope.launch {
+            acknowledgmentMutex.withLock {
+                try {
+                    val pending = withContext(Dispatchers.IO) { store.acknowledgments(host).take(16) }
+                    for (id in pending) {
+                        if (client !== owner || state.value.computerId != host) break
+                        val response = withTimeout(10_000) { owner.request(ReceiptProtocol.acknowledge(id)) }
+                        if (response.first.status !in 200..299 || runCatching { Protocol.json.parseToJsonElement(response.second).jsonObject["acknowledged"]?.jsonPrimitive?.booleanOrNull }.getOrNull() != true) break
+                        withContext(Dispatchers.IO) { store.acknowledged(host, id) }
+                    }
+                } catch (e: CancellationException) {
+                    if (e !is TimeoutCancellationException) throw e
+                } catch (_: Exception) { /* 保留确认队列，不影响已完成业务的显示。 */ }
+            }
+        }
+    }
+
     private fun action(block: suspend () -> Unit) {
         if (state.value.busy) return
         mutable.update { it.copy(busy = true, error = "") }

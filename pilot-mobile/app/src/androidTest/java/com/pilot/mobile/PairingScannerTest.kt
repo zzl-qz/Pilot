@@ -22,7 +22,9 @@ class PairingScannerTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val name = instrumentation.targetContext.packageName
         if (Build.VERSION.SDK_INT >= 28) instrumentation.uiAutomation.grantRuntimePermission(name, Manifest.permission.CAMERA)
-        else instrumentation.uiAutomation.executeShellCommand("pm grant $name android.permission.CAMERA").close()
+        else android.os.ParcelFileDescriptor.AutoCloseInputStream(
+            instrumentation.uiAutomation.executeShellCommand("pm grant $name android.permission.CAMERA")
+        ).use { it.readBytes() }
     }
 
     @Test fun portraitScannerHasExplicitReturnAndCancellationIsQuiet() {

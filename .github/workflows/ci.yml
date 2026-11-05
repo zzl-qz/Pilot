@@ -138,3 +138,52 @@ jobs:
             pilot-mobile/transport/build/reports/**
             pilot-mobile/app/build/reports/**
             pilot-mobile/app/build/outputs/apk/debug/*.apk
+
+  mobile-instrumentation:
+    name: Android UI (API ${{ matrix.api }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 35]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: android-actions/setup-android@v3
+      - name: Enable KVM for the dedicated emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Build isolated QA APK, test APK, and connection bridge
+        run: node scripts/mobile.mjs qa
+      - name: Pairing, receipts, attachments, recovery, scanner and permissions
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          avd-name: pilot-ci-${{ matrix.api }}
+          emulator-port: 5580
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -camera-back emulated
+          script: node pilot-mobile/scripts/instrumentation-ci.mjs emulator-5580 --network-switch
+      - name: Preserve instrumentation results and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ui-api-${{ matrix.api }}
+          retention-days: 14
+          path: |
+            pilot-mobile/build/instrumentation-ci/**
+            pilot-mobile/build/mobile-qa/**
+            pilot-mobile/build/scanner-qa/**
+            pilot-mobile/app/build/reports/**

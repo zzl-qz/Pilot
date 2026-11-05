@@ -7,11 +7,11 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import jakarta.servlet.FilterChain;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -24,10 +24,20 @@ import tools.jackson.databind.ObjectMapper;
 class MobileRequestFilterTest {
     @TempDir
     Path directory;
-    private final String requestId = "a".repeat(64) + ":" + UUID.randomUUID();
+    private String requestId;
+
+    @BeforeEach
+    void issueRequest() throws Exception {
+        requestId = "a".repeat(64) + ":" + store().issue("a".repeat(64));
+    }
+
+    private MobileReceiptStore store() {
+        return new MobileReceiptStore(new PilotDataDir(directory.toString()), new ObjectMapper(), 24, 30, 10000,
+            536870912);
+    }
 
     private MobileRequestFilter filter() {
-        return new MobileRequestFilter(new PilotDataDir(directory.toString()), new ObjectMapper());
+        return new MobileRequestFilter(store());
     }
 
     private MockHttpServletRequest request(String body) {

@@ -4,6 +4,18 @@ import com.pilot.mobile.transport.Request
 import kotlin.test.*
 
 class RoutePolicyTest {
+    @Test fun `回执协议只开放设备令牌和确认不开放维护清理`() {
+        assertTrue(RoutePolicy.allowed(Request(path = "/api/mobile/receipts/token")))
+        assertTrue(RoutePolicy.allowed(Request("POST", "/api/mobile/receipts/ack", "{}")))
+        val token = "r3.1800000000000.12345678-1234-1234-1234-123456789abc." + "a".repeat(64)
+        assertTrue(RoutePolicy.allowed(Request("POST", "/api/sessions", "{}", requestId = token)))
+        assertFalse(RoutePolicy.allowed(Request("POST", "/api/sessions", "{}", requestId = token + "\n")))
+        for (path in listOf("/api/maintenance/mobile-receipts", "/api/mobile/receipts/token?peer=other")) {
+            assertFalse(RoutePolicy.allowed(Request(path = path)))
+        }
+        assertFalse(RoutePolicy.allowed(Request("POST", "/api/maintenance/mobile-receipts/cleanup", "{}")))
+    }
+
     @Test fun `条件快照只允许精确只读路由与固定格式版本`() {
         val revision = "a".repeat(64)
         assertTrue(RoutePolicy.allowed(Request(path = "/api/mobile/workbench", snapshotRevision = revision)))
