@@ -9,6 +9,7 @@ import com.pilot.mobile.transport.*
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.*
 import java.io.ByteArrayOutputStream
@@ -33,7 +34,12 @@ class PairingAdmin(
         server.executor = executor
         server.createContext("/") { exchange ->
             try { handle(exchange) }
-            catch (_: Exception) { runCatching { respond(exchange, 503, "application/json", "{\"error\":\"连接服务暂不可用，请检查网络后重试\"}".toByteArray()) } }
+            catch (error: Exception) {
+                val message = if (error is TimeoutCancellationException)
+                    "手机连接组件已启动，但连接中继超时，请检查这台电脑的网络、代理或防火墙后重试"
+                    else "连接服务暂不可用，请检查网络后重试"
+                runCatching { respond(exchange, 503, "application/json", buildJsonObject { put("error", message) }.toString().toByteArray()) }
+            }
             finally { exchange.close() }
         }
         server.start()

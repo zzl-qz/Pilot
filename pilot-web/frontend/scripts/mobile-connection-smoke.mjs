@@ -37,7 +37,7 @@ const create = () => ({ code, image:'data:image/svg+xml;base64,' + Buffer.from(s
 async function routes(page) {
   await page.route('**/api/mobile/connection**', async route => {
     const request = route.request();
-    if (fail) return route.fulfill({status:503, json:{message:'测试连接失败，请重试'}});
+    if (fail) return route.fulfill({status:503, json:{code:'MOBILE_CONNECTION_UNAVAILABLE',error:'Service Unavailable',message:'Windows x64 原生连接库加载失败，请检查 Microsoft Visual C++ x64 运行库'}});
     if (request.url().endsWith('/pair')) { generation++; await new Promise(resolve => setTimeout(resolve, 150)); invite = create(); pairingState = 'ready'; pairedDevice = null; return route.fulfill({json:invite}); }
     if (request.url().endsWith('/revoke')) { devices.length = 0; return route.fulfill({json:{}}); }
     return route.fulfill({json:{running:true, pairingState, pairedDevice, maxDevices:16, invite, devices}});
@@ -50,6 +50,15 @@ try {
   await routes(page);
   await page.addInitScript(() => { Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async()=>{throw new Error('denied')}}}); document.execCommand = () => false; });
   await page.goto(url);
+  fail = true;
+  await page.getByRole('button',{name:'连接手机',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'Microsoft Visual C++ x64 运行库'}).waitFor();
+  await page.getByText('连接暂不可用',{exact:true}).waitFor();
+  assert.equal(await page.getByText('正在准备连接…',{exact:true}).count(),0,'首次启动失败不能一直显示准备中');
+  fail = false;
+  await page.getByRole('button',{name:'重试连接',exact:true}).click();
+  await page.getByAltText('用 Pilot 手机 App 扫描此配对二维码').waitFor();
+  await page.keyboard.press('Escape');
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({width, height:900});
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -118,7 +127,8 @@ try {
   assert.equal(await page.getByRole('button',{name:'撤销授权'}).count(),2);
   fail = true;
   await page.getByRole('tab',{name:'添加设备',exact:true}).click();
-  await page.getByRole('alert').filter({hasText:'测试连接失败'}).waitFor();
+  await page.getByRole('alert').filter({hasText:'Microsoft Visual C++ x64 运行库'}).waitFor();
+  assert.equal(await page.getByRole('alert').filter({hasText:'Service Unavailable'}).count(),0,'不能用 HTTP 通用状态掩盖具体原因');
   fail = false;
   await page.getByRole('button',{name:'重试连接',exact:true}).click();
   await page.getByAltText('用 Pilot 手机 App 扫描此配对二维码').waitFor();

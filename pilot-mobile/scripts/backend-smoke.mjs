@@ -23,8 +23,8 @@ const requestId = randomUUID();
 let server;
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
-async function start() {
-  server = spawn(java, ['--enable-native-access=ALL-UNNAMED', '-jar', serverJar, '--server.address=127.0.0.1', '--server.port=0', `--pilot.data.dir=${data}`, `--pilot.agent.workspace=${workspace}`, `--pilot.mobile.libraries=${libraries}`, '--pilot.runtime.provision=false', '--pilot.web-search.local=false', '--pilot.model.api-key=', '--pilot.model.endpoint=http://127.0.0.1:9/v1/chat/completions', '--pilot.security.mode=token', `--pilot.security.token=${token}`], { cwd: directory, stdio: ['ignore', 'pipe', 'pipe'] });
+async function start(mobileLibraries = libraries) {
+  server = spawn(java, ['--enable-native-access=ALL-UNNAMED', '-jar', serverJar, '--server.address=127.0.0.1', '--server.port=0', `--pilot.data.dir=${data}`, `--pilot.agent.workspace=${workspace}`, `--pilot.mobile.libraries=${mobileLibraries}`, '--pilot.runtime.provision=false', '--pilot.web-search.local=false', '--pilot.model.api-key=', '--pilot.model.endpoint=http://127.0.0.1:9/v1/chat/completions', '--pilot.security.mode=token', `--pilot.security.token=${token}`], { cwd: directory, stdio: ['ignore', 'pipe', 'pipe'] });
   return new Promise((resolve, reject) => {
     let output = '';
     const timer = setTimeout(() => reject(new Error('真实服务启动超时，请先构建服务端 Jar 并使用 Java 25')), 30000);
@@ -68,7 +68,19 @@ async function checkPhone(code, reconnect = false) {
   console.log(result.stdout.trim());
 }
 try {
-  let base = await start();
+  const incompleteLibraries = path.join(directory, '不完整的连接组件 with spaces');
+  await mkdir(incompleteLibraries);
+  let base = await start(incompleteLibraries);
+  const failed = await fetch(`${base}/api/mobile/connection`, {headers:{'X-Pilot-Token':token}});
+  assert.equal(failed.status, 503);
+  assert.equal(failed.headers.get('cache-control'), 'no-store');
+  const failure = await failed.json();
+  assert.equal(failure.code, 'MOBILE_CONNECTION_UNAVAILABLE');
+  assert.match(failure.message, /node scripts\/mobile\.mjs build-bridge/);
+  assert.ok(!JSON.stringify(failure).includes(token) && !JSON.stringify(failure).includes(incompleteLibraries), '启动错误不能泄露令牌或本机路径');
+  await stop();
+  console.log('PASS: 真实服务启动连接桥失败时返回明确修复说明，独立于 Spring 默认错误页，未泄露凭证或路径');
+  base = await start();
   const created = await fetch(`${base}/api/projects`, { method:'POST', headers:{'X-Pilot-Token':token,'Content-Type':'application/json'},body:JSON.stringify({name:'移动契约验收',folders:[workspace]}) });
   if (!created.ok) throw new Error(`测试项目创建失败 ${created.status}`);
   const before = await fetch(`${base}/api/mobile/connection`, {headers:{'X-Pilot-Token':token}});

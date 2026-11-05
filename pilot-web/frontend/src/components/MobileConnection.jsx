@@ -118,7 +118,7 @@ export function MobileConnectionContent({ onDone }) {
     </div> : tab === 'add' ? <div role="tabpanel" aria-label="添加设备" className="mobile-pair-layout">
       <div className="mobile-qr-area">
         {invite && seconds > 0 ? <img src={invite.image} alt="用 Pilot 手机 App 扫描此配对二维码" />
-          : <div className="mobile-qr-placeholder" role="status">{busy || !status ? '正在准备连接…' : invite ? '配对码已过期' : '还未生成配对码'}</div>}
+          : <div className="mobile-qr-placeholder" role="status">{busy ? '正在准备连接…' : error ? '连接暂不可用' : !status ? '正在准备连接…' : invite ? '配对码已过期' : '还未生成配对码'}</div>}
         <p role="status">{seconds > 0 ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} 后过期 · 仅限一次配对` : ''}</p>
       </div>
       <div className="mobile-pair-actions">

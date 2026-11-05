@@ -2,6 +2,7 @@ package com.pilot.server.mobile;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -160,10 +161,30 @@ public class MobileConnectionService {
         if (!relay.isBlank()) {
             args.addAll(List.of("--relay", relay));
         }
-        ProcessBuilder builder = new ProcessBuilder(args).redirectError(ProcessBuilder.Redirect.DISCARD);
+        ProcessBuilder builder = new ProcessBuilder(args);
         builder.environment().put("PILOT_SECURITY_TOKEN", security.token());
-        Process child = builder.start();
+        Process child;
+        try {
+            child = builder.start();
+        } catch (IOException e) {
+            throw new IllegalStateException("无法启动手机连接的 Java 子进程，请检查 Java 安装、执行权限或安全软件拦截", e);
+        }
         process = child;
+        BridgeStartupDiagnostics diagnostics = new BridgeStartupDiagnostics(System.getProperty("os.name", ""));
+        CompletableFuture<Void> errorsRead = new CompletableFuture<>();
+        Thread.startVirtualThread(() -> {
+            try (BufferedReader reader =
+                new BufferedReader(new InputStreamReader(child.getErrorStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    diagnostics.accept(line);
+                }
+            } catch (IOException e) {
+                // 管道在退出时可能被关闭；未知错误保留固定提示，不输出原始异常。
+            } finally {
+                errorsRead.complete(null);
+            }
+        });
         CompletableFuture<URI> ready = new CompletableFuture<>();
         Thread.startVirtualThread(() -> {
             try (BufferedReader reader =
@@ -185,10 +206,21 @@ public class MobileConnectionService {
             admin = new URI("http", null, "127.0.0.1", address.getPort(), "/", null, null);
             Files.writeString(data.resolve("enabled"), "true");
             watch();
+        } catch (InterruptedException e) {
+            child.destroyForcibly();
+            admin = null;
+            throw e;
         } catch (Exception e) {
             child.destroyForcibly();
             admin = null;
-            throw new IllegalStateException("手机连接组件未能启动，请检查安装包或稍后重试", e);
+            try {
+                errorsRead.get(1, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } catch (Exception ignored) {
+                // 不能让错误诊断阻止退出，最多等待一秒读取已分类的故障。
+            }
+            throw new IllegalStateException(diagnostics.message(), e);
         }
     }
 
@@ -228,6 +260,7 @@ public class MobileConnectionService {
             if (Files.isDirectory(path)) {
                 return path;
             }
+            throw new IllegalStateException("配置的手机连接组件目录不存在，请检查 pilot.mobile.libraries");
         }
         Path current = Path.of(System.getProperty("user.dir")).toAbsolutePath();
         for (int depth = 0; depth < 4 && current != null; depth++, current = current.getParent()) {
@@ -238,7 +271,7 @@ public class MobileConnectionService {
                 }
             }
         }
-        throw new IllegalStateException("当前安装缺少手机连接组件，请安装包含移动连接的完整 Pilot 版本");
+        throw new IllegalStateException("未找到手机连接组件，源码运行请先执行 node scripts/mobile.mjs build-bridge；安装版请更新完整安装包");
     }
 
     private static String computerName() {

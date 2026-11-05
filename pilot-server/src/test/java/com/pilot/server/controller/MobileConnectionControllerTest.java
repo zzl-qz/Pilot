@@ -2,6 +2,8 @@ package com.pilot.server.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -15,6 +17,20 @@ import com.pilot.server.mobile.MobileConnectionService;
 import tools.jackson.databind.ObjectMapper;
 
 class MobileConnectionControllerTest {
+    @Test
+    void serviceFailureReturnsExplicitReasonIndependentOfSpringErrorSettings() {
+        MobileConnectionService service = mock(MobileConnectionService.class);
+        String reason = "Windows x64 原生连接库加载失败，请检查 Microsoft Visual C++ x64 运行库";
+        when(service.request(eq("pair"), any())).thenThrow(new IllegalStateException(reason));
+        var body = new ObjectMapper().createObjectNode().put("reuse", true);
+        var result = new MobileConnectionController(service).pair(local(), body);
+        assertEquals(503, result.getStatusCode().value());
+        assertEquals("no-store", result.getHeaders().getFirst("Cache-Control"));
+        assertEquals(reason, result.getBody().path("message").asText());
+        assertEquals(reason, result.getBody().path("error").asText());
+        assertEquals("MOBILE_CONNECTION_UNAVAILABLE", result.getBody().path("code").asText());
+    }
+
     @Test
     void localSameOriginWorksWithoutExposingAdministrativeToken() {
         MobileConnectionService service = mock(MobileConnectionService.class);

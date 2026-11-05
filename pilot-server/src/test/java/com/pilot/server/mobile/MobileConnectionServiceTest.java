@@ -2,12 +2,17 @@ package com.pilot.server.mobile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.io.File;
 import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.web.server.WebServer;
+import org.springframework.boot.web.server.context.WebServerInitializedEvent;
 
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.security.SecurityProperties;
@@ -17,6 +22,45 @@ import tools.jackson.databind.ObjectMapper;
 class MobileConnectionServiceTest {
     @TempDir
     Path directory;
+
+    @Test
+    void missingClasspathIsClassifiedFromRealChildProcessWithoutExposingItsOutput() {
+        var service = service(directory.toString());
+        try {
+            ready(service);
+            String message =
+                assertThrows(IllegalStateException.class, () -> service.request("status", null)).getMessage();
+            assertTrue(message.contains("缺少依赖"), message);
+            assertTrue(message.contains("node scripts/mobile.mjs build"));
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void invalidExplicitLibraryDirectoryDoesNotSilentlyUseAnotherInstallation() {
+        var service = service(directory.resolve("missing").toString());
+        try {
+            ready(service);
+            assertTrue(assertThrows(IllegalStateException.class, () -> service.request("status", null)).getMessage()
+                .contains("pilot.mobile.libraries"));
+        } finally {
+            service.close();
+        }
+    }
+
+    private MobileConnectionService service(String libraries) {
+        return new MobileConnectionService(new PilotDataDir(directory.toString()),
+            new SecurityProperties(null, null, null, null, null), new ObjectMapper(), libraries, "");
+    }
+
+    private static void ready(MobileConnectionService service) {
+        var server = mock(WebServer.class);
+        when(server.getPort()).thenReturn(9999);
+        var event = mock(WebServerInitializedEvent.class);
+        when(event.getWebServer()).thenReturn(server);
+        service.serverReady(event);
+    }
 
     @Test
     void shutdownCannotRestartTheBridge() {

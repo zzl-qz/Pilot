@@ -53,6 +53,12 @@ node scripts/mobile.mjs qa
 node pilot-mobile/scripts/android-smoke.mjs emulator-5580
 ```
 
+只需要在电脑生成配对二维码、已有手机 APK 时，安装 Java 21 后可单独执行 `node scripts/mobile.mjs build-bridge`。它只构建电脑连接组件，不需要 Android SDK；后台仍使用 Java 25。仅运行 Maven 不会生成 `pilot-mobile/bridge/build/install/bridge/lib`。更新源码后重新构建连接组件及后台，并重启原后台进程，旧 Jar 不会因拉取代码而自动更新。
+
+Windows x64 使用上游包内的 `win32-x86-64/iroh_ffi.dll`，并非仅支持 Mac。该 DLL 导入 `VCRUNTIME140.dll`；若界面明确提示“Windows x64 原生连接库加载失败”，请检查或修复 [Microsoft Visual C++ x64 运行库](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)，同时检查临时目录可写以及安全软件是否拦截原生库。运行库缺失只是可能原因，不能凭通用 Service Error 判定。不要从不明网站单独下载 DLL，也无需关闭全部防火墙或安全软件。
+
+旧代码曾使用 `Path.resolve("*")` 拼接 Java classpath，在 Windows 会触发非法路径；提交 `c2ee9a6` 已改为字符串拼接。Windows 源码启动遇到二维码不出现时，应先确认后台包含该修复。连接管理接口现在显式返回故障说明，不依赖 Spring 是否公开异常 message；子进程只提取已知故障类别，原始输出与管理凭证不会显示到页面。
+
 构建后端沿用仓库 Maven 流程。打包便携后台时 `JAVA_HOME` 指向 Java 25：
 
 ```text

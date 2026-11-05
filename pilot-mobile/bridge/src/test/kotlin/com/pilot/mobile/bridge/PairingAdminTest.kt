@@ -6,6 +6,8 @@ import com.google.zxing.common.HybridBinarizer
 import com.pilot.mobile.transport.*
 import computer.iroh.EndpointTicket
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.*
 import java.net.URI
 import java.net.http.HttpClient
@@ -21,7 +23,9 @@ class PairingAdminTest {
         val directory = Files.createTempDirectory("pilot-admin")
         val store = PairingStore(directory)
         val endpoint = createEndpoint(store.key, development = false)
+        var simulateRelayTimeout = false
         val admin = PairingAdmin(store, Bridge(endpoint, store, 9999)) {
+            if (simulateRelayTimeout) withTimeout(1) { delay(100) }
             store.issue(EndpointTicket.fromAddr(endpoint.addr()).toString(), "测试电脑", emptyList(), false)
         }
         try {
@@ -55,6 +59,12 @@ class PairingAdminTest {
             assertEquals("我的手机", status["pairedDevice"]!!.jsonObject.text("name"))
             assertEquals(JsonNull, status["invite"])
             assertFalse(status.toString().contains(invite.secret))
+            simulateRelayTimeout = true
+            val failed = request("/api/pair", "POST", origin = root)
+            assertEquals(503, failed.statusCode())
+            assertTrue(Protocol.json.parseToJsonElement(failed.body()).jsonObject.text("error").contains("连接中继超时"))
+            assertFalse(failed.body().contains(invite.secret))
+            assertEquals(200, request("/api/status").statusCode(), "配对超时不能误报为连接进程已退出")
         } finally { admin.close(); endpoint.shutdown(); directory.toFile().deleteRecursively() }
     }
 }

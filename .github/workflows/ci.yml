@@ -119,6 +119,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Build desktop connection bridge before configuring Android
+        run: node scripts/mobile.mjs build-bridge
       - uses: android-actions/setup-android@v3
       - name: Native transport, bridge, and Android compatibility checks
         run: node scripts/mobile.mjs test

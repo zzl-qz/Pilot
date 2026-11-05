@@ -17,6 +17,7 @@ import com.pilot.server.mobile.MobileConnectionService;
 import com.pilot.server.security.AccessControl;
 
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.JsonNodeFactory;
 
 /** 本机管理入口。远程配对手机不能转授其他设备；禁止跨来源网页创建配对凭证。 */
 @RestController
@@ -68,7 +69,11 @@ public class MobileConnectionController {
         try {
             return ResponseEntity.ok().header("Cache-Control", "no-store").body(service.request(operation, body));
         } catch (IllegalStateException e) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
+            // 默认 Spring 错误页可能不包含异常原因；本机管理接口显式返回经过服务层控制的提示。
+            JsonNode failure = JsonNodeFactory.instance.objectNode().put("code", "MOBILE_CONNECTION_UNAVAILABLE")
+                .put("message", e.getMessage()).put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store")
+                .body(failure);
         }
     }
 }
