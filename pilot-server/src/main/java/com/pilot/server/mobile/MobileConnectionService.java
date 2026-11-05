@@ -58,6 +58,15 @@ public class MobileConnectionService {
     private long retryAfter;
     private int failures;
     private MobileEnvironment environment;
+    private String connectionMode = "auto";
+
+    @Autowired
+    public void configureConnectionMode(@Value("${pilot.mobile.mode:auto}") String value) {
+        if (!List.of("auto", "direct").contains(value)) {
+            throw new IllegalArgumentException("pilot.mobile.mode 只能配置 auto 或 direct");
+        }
+        connectionMode = value;
+    }
 
     @Autowired
     public void configureEnvironment(MobileEnvironment environment) {
@@ -194,6 +203,12 @@ public class MobileConnectionService {
             Long.toString(ProcessHandle.current().pid()), "--name", computerName()));
         if (!relay.isBlank()) {
             args.addAll(List.of("--relay", relay));
+        }
+        if ("direct".equals(connectionMode)) {
+            if (!relay.isBlank()) {
+                throw new IllegalStateException("direct 模式不能同时配置中继，请清空 pilot.mobile.relay 或选择 auto");
+            }
+            args.add("--no-relay");
         }
         ProcessBuilder builder = new ProcessBuilder(args);
         builder.environment().put("PILOT_SECURITY_TOKEN", security.token());

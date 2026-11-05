@@ -12,6 +12,7 @@ const sdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
 if (!sdk) throw new Error('请设置 ANDROID_HOME');
 const adb = path.join(sdk, 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb');
 const serial = process.argv[2];
+const automatic = process.argv.includes('--automatic');
 if (!serial) throw new Error('传入专用测试设备编号：node scripts/android-smoke.mjs emulator-5580');
 const runAdb = async (...args) => {
   try { return await exec(adb, ['-s', serial, ...args], { timeout: 120000, maxBuffer: 1024 * 1024 }); }
@@ -109,7 +110,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const java = process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java') : 'java';
-const bridge = spawn(java, ['-cp', path.join(root, 'bridge/build/install/bridge/lib/*'), 'com.pilot.mobile.bridge.MainKt', '--pilot-port', String(server.address().port), '--data-dir', directory, '--no-relay', '--no-open'], { stdio: ['ignore', 'pipe', 'pipe'] });
+const bridge = spawn(java, ['-cp', path.join(root, 'bridge/build/install/bridge/lib/*'), 'com.pilot.mobile.bridge.MainKt', '--pilot-port', String(server.address().port), '--data-dir', directory, ...(automatic ? [] : ['--no-relay']), '--no-open'], { stdio: ['ignore', 'pipe', 'pipe'] });
 let bridgeErrors = '';
 bridge.stderr.on('data', chunk => { bridgeErrors += chunk; });
 try {
@@ -122,7 +123,18 @@ try {
   const auth = admin.hash.slice(1); admin.hash = '';
   const response = await fetch(new URL('/api/pair', admin), { method: 'POST', headers: { 'X-Pilot-Pairing': auth } });
   if (!response.ok) throw new Error('生成配对码失败');
-  const invite = await response.json();
+  let invite = await response.json();
+  if (automatic) {
+    const deadline = Date.now()+35000;
+    let state;
+    do {
+      state = await (await fetch(new URL('/api/status',admin),{headers:{'X-Pilot-Pairing':auth}})).json();
+      if (state.networkState==='ready') break;
+      await new Promise(resolve=>setTimeout(resolve,500));
+    } while (Date.now()<deadline);
+    if (state.networkState!=='ready' || !state.invite?.development) throw new Error('自动模式公共服务未就绪，不计跨网模式验收通过');
+    invite=state.invite;
+  }
   await runAdb('install', '-r', path.join(root, 'app/build/outputs/apk/qa/app-qa.apk'));
   await runAdb('install', '-r', path.join(root, 'app/build/outputs/apk/androidTest/qa/app-qa-androidTest.apk'));
   // 仅重置独立 .qa 包，用户安装的 com.pilot.mobile 不受影响。

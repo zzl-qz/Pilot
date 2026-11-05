@@ -45,23 +45,27 @@ fun main(args: Array<String>) = runBlocking {
         require(uri?.scheme == "https" && uri.host != null && uri.userInfo == null && uri.fragment == null) { "中继必须使用不含认证信息的 HTTPS 地址" }
     }
     require("--no-relay" !in args || relays.isEmpty()) { "不能同时配置中继与 --no-relay" }
-    val endpoint = createEndpoint(store.key, relays)
+    val publicServices = "--no-relay" !in args && relays.isEmpty()
+    val mode = if (relays.isNotEmpty()) "relay-enabled" else if (publicServices) "automatic" else "direct-only"
+    val endpoint = createEndpoint(store.key, relays, publicServices)
     val bridge = Bridge(endpoint, store, port, System.getenv("PILOT_SECURITY_TOKEN") ?: "")
-    val admin = PairingAdmin(store, bridge, relayConfigured = relays.isNotEmpty()) {
-        // 只有管理员明确配置了中继，才等待中继可用；默认出码完全在本机完成。
-        if (relays.isNotEmpty()) withTimeout(20_000) { endpoint.online() }
+    val network = PairingNetwork(store, mode, ticket = {
         endpoint.addr().use { address ->
             EndpointTicket.fromAddr(address).use { ticket ->
-                store.issue(ticket.toString(), option("--name") ?: "我的电脑", relays, false)
+                ticket.toString()
             }
         }
+    }, online = if (publicServices || relays.isNotEmpty()) ({ endpoint.online() }) else null,
+        diagnose = { diagnoseNetwork(URI(relays.firstOrNull() ?: "https://aps1-1.relay.n0.iroh.link").host) })
+    val admin = PairingAdmin(store, bridge, relayConfigured = relays.isNotEmpty(), network = network::snapshot) {
+        network.issue(option("--name") ?: "我的电脑", relays, publicServices)
     }
     val adminUrl = admin.start()
     println("PILOT_MOBILE_ADMIN $adminUrl")
-    println(if (relays.isEmpty()) "连接模式：P2P 直连，未启用中继。" else "连接模式：P2P 与已配置的中继。")
+    println("连接模式：$mode；二维码本机生成，网络探测在后台进行。")
     if ("--no-open" !in args && Desktop.isDesktopSupported()) runCatching { Desktop.getDesktop().browse(URI(adminUrl)) }
     Runtime.getRuntime().addShutdownHook(Thread {
-        admin.close()
+        admin.close(); network.close()
         runBlocking { withTimeoutOrNull(3000) { endpoint.shutdown() } }
     })
     // 后台被强制退出时也结束连接桥，避免 Windows 等系统遗留旧身份的进程。
@@ -69,5 +73,5 @@ fun main(args: Array<String>) = runBlocking {
         while (process.isAlive) delay(1000)
         this@runBlocking.cancel("Pilot 后台已经退出")
     } }
-    try { bridge.serve() } finally { parentWatch?.cancel(); admin.close(); endpoint.shutdown() }
+    try { bridge.serve() } finally { parentWatch?.cancel(); admin.close(); network.close(); endpoint.shutdown() }
 }

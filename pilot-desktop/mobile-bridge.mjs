@@ -36,7 +36,10 @@ export function mobileBridgeOptions({ pilotUrl, libraries, dataDir, env = proces
   }
   const java = env.JAVA_HOME ? join(env.JAVA_HOME, 'bin', platform === 'win32' ? 'java.exe' : 'java') : 'java';
   const args = ['--enable-native-access=ALL-UNNAMED', '-cp', join(libraries, '*'), 'com.pilot.mobile.bridge.MainKt', '--pilot-port', url.port || '80', '--data-dir', dataDir, '--no-open'];
+  if (env.PILOT_MOBILE_MODE && !['auto','direct'].includes(env.PILOT_MOBILE_MODE)) throw new Error('PILOT_MOBILE_MODE 只能配置 auto 或 direct');
+  if (env.PILOT_MOBILE_MODE === 'direct' && env.PILOT_MOBILE_RELAY?.trim()) throw new Error('direct 模式不能同时配置中继');
   if (env.PILOT_MOBILE_RELAY) args.push('--relay', env.PILOT_MOBILE_RELAY);
+  if (env.PILOT_MOBILE_MODE === 'direct') args.push('--no-relay');
   return { java, args };
 }
 

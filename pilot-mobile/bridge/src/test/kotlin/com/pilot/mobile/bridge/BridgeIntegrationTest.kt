@@ -40,9 +40,9 @@ class BridgeIntegrationTest {
         }
         upstream.start()
         val store = PairingStore(directory)
-        val desktop = createEndpoint(store.key)
-        val phone = createEndpoint(SecretKey.generate().toBytes())
-        val secondPhone = createEndpoint(SecretKey.generate().toBytes())
+        val desktop = createEndpoint(store.key, development = false)
+        val phone = createEndpoint(SecretKey.generate().toBytes(), development = false)
+        val secondPhone = createEndpoint(SecretKey.generate().toBytes(), development = false)
         val secondClient = RemoteClient(secondPhone, EndpointTicket.fromAddr(desktop.addr()).toString())
         val bridge = Bridge(desktop, store, upstream.address.port)
         val serving = launch { bridge.serve() }

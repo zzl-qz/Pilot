@@ -63,7 +63,7 @@ fun ConnectScreen(busy: Boolean, scan: () -> Unit, paste: () -> Unit) {
             SectionTitle("配对只需一步")
             Text("在电脑 Pilot 的左侧打开“连接手机”，扫描弹出的二维码。配对后，可以管理这台电脑上的全部项目与任务。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        item { InfoNote("电脑需保持在线。默认使用 P2P 直连；仅在电脑后端明确配置后才使用中继。不同网络能否直连取决于网络条件。") }
+        item { InfoNote("电脑需保持在线。自动模式会尽力直连，必要时经中继；不同网络时，请等待电脑显示跨网服务就绪后扫码。") }
     }
 }
 
@@ -232,8 +232,10 @@ fun DevicesScreen(state: MobileState, model: PilotViewModel, scan: () -> Unit, p
         item { Text("授权范围：这台电脑上的 Pilot 项目和任务。要撤销手机权限，请在电脑左侧“连接手机 → 已配对设备”中移除。", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item {
             val configured = state.computers.firstOrNull { it.id == state.computerId }?.relays?.isNotEmpty() == true
+            val automatic = state.computers.firstOrNull { it.id == state.computerId }?.development == true
             Text(if (configured) "电脑端已配置中继；连接优先尝试直连，必要时使用已配置的中继。"
-                else "未配置中继，仅尝试 P2P 直连。两端需有可互达的网络地址。",
+                else if (automatic) "自动模式已启用公共连接服务，尽力直连，必要时经中继。"
+                else "仅尝试 P2P 直连。两端需有可互达的网络地址。",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

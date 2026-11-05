@@ -29,8 +29,10 @@ spring:
 
 pilot:
   mobile:
-    # 留空时只尝试 P2P 直连，不启用公共中继、发现服务或等待中继上线。
-    # 只有明确配置后才使用，例如 https://relay.example.com:443；多个地址以逗号分隔。
+    # auto 使用内置公共连接服务，尽力直连、必要时中继；direct 完全关闭公共服务。
+    # 二维码始终本地生成，跨网服务在后台准备，不阻塞出码。
+    mode: ${PILOT_MOBILE_MODE:auto}
+    # 留空使用 auto 内置服务；填写后改用指定 iroh 中继，例如 https://relay.example.com:443。
     # 这里必须是可供双方访问的 iroh 中继服务，不是 HTTP 代理或普通路由器端口。
     relay: ${PILOT_MOBILE_RELAY:}
   desktop:

@@ -10,7 +10,7 @@ fun main() = runBlocking {
     val invite = PairingInvite.decode(System.getenv("PILOT_TEST_INVITE"))
     val key = System.getenv("PILOT_TEST_PHONE_KEY")?.let { java.util.Base64.getDecoder().decode(it) } ?: SecretKey.generate().toBytes()
     val endpoint = createEndpoint(key, invite.relays, invite.developmentRelays)
-    val client = RemoteClient(endpoint, invite.ticket, relays = invite.relays)
+    val client = RemoteClient(endpoint, invite.ticket, relays = invite.relays, allowPublicRelays = invite.developmentRelays)
     suspend fun json(request: Request): JsonElement {
         val (head, body) = client.request(request)
         check(head.status in 200..299) { "真实服务返回 ${head.status}" }

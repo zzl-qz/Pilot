@@ -23,6 +23,7 @@ class PairingAdmin(
     private val store: PairingStore,
     private val bridge: Bridge,
     private val relayConfigured: Boolean = false,
+    private val network: () -> JsonObject = { buildJsonObject { put("connectionMode", if (relayConfigured) "relay-enabled" else "direct-only") } },
     private val issue: suspend () -> PairingInvite,
 ) : AutoCloseable {
     @Volatile private var cachedInvite: JsonObject? = null
@@ -63,7 +64,7 @@ class PairingAdmin(
                 path == "/api/status" && e.requestMethod == "GET" -> buildJsonObject {
                     put("version", Protocol.VERSION)
                     put("running", true)
-                    put("connectionMode", if (relayConfigured) "relay-enabled" else "direct-only")
+                    network().forEach { (key, value) -> put(key, value) }
                     put("maxDevices", PairingStore.MAX_DEVICES)
                     put("pairedDevice", store.pairedDevice()?.let { device -> devicePayload(device) } ?: JsonNull)
                     put("pairingState", store.pairingState())
@@ -81,16 +82,8 @@ class PairingAdmin(
                     (current ?: synchronized(this) {
                         if (reuse) currentPayload()?.let { return@synchronized it }
                         val invite = runBlocking { issue() }
-                        val matrix = MultiFormatWriter().encode(invite.encode(), BarcodeFormat.QR_CODE, 768, 768,
-                            mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M, EncodeHintType.MARGIN to 4))
-                        val png = ByteArrayOutputStream()
-                        MatrixToImageWriter.writeToStream(matrix, "PNG", png)
-                        buildJsonObject {
-                            put("code", invite.encode()); put("image", "data:image/png;base64," + Base64.getEncoder().encodeToString(png.toByteArray()))
-                            put("expiresIn", 300); put("expiresAt", invite.expiresAt); put("name", invite.name)
-                            put("development", invite.developmentRelays)
-                            put("connectionMode", if (relayConfigured) "relay-enabled" else "direct-only")
-                        }.also { cachedInvite = it }
+                        val details = network()
+                        payload(store.currentInvite() ?: invite, details)
                     }).toString()
                 }
                 path == "/api/revoke" && e.requestMethod == "POST" -> {
@@ -115,9 +108,26 @@ class PairingAdmin(
         put("online", bridge.online(device.id))
     }
 
-    private fun currentPayload(): JsonObject? {
-        val active = store.currentInvite() ?: return null
-        return cachedInvite?.takeIf { it["code"]?.jsonPrimitive?.content == active.encode() }
+    private fun currentPayload(): JsonObject? = synchronized(this) {
+        val details = network()
+        val active = store.currentInvite() ?: return@synchronized null
+        payload(active, details)
+    }
+
+    private fun payload(invite: PairingInvite, details: JsonObject): JsonObject {
+        val code = invite.encode()
+        val base = cachedInvite?.takeIf { it["code"]?.jsonPrimitive?.content == code } ?: run {
+            val matrix = MultiFormatWriter().encode(code, BarcodeFormat.QR_CODE, 768, 768,
+                mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M, EncodeHintType.MARGIN to 4))
+            val png = ByteArrayOutputStream()
+            MatrixToImageWriter.writeToStream(matrix, "PNG", png)
+            buildJsonObject {
+                put("code", code); put("image", "data:image/png;base64," + Base64.getEncoder().encodeToString(png.toByteArray()))
+                put("expiresIn", 300); put("expiresAt", invite.expiresAt); put("name", invite.name)
+                put("development", invite.developmentRelays)
+            }.also { cachedInvite = it }
+        }
+        return JsonObject(base.toMutableMap().apply { putAll(details) })
     }
 
     private fun respond(e: HttpExchange, status: Int, type: String, bytes: ByteArray) {

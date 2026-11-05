@@ -49,6 +49,18 @@ class MobileConnectionServiceTest {
         }
     }
 
+    @Test
+    void acceptsOnlyExplicitConnectionModes() {
+        var service = service("");
+        try {
+            service.configureConnectionMode("auto");
+            service.configureConnectionMode("direct");
+            assertThrows(IllegalArgumentException.class, () -> service.configureConnectionMode("public"));
+        } finally {
+            service.close();
+        }
+    }
+
     private MobileConnectionService service(String libraries) {
         return new MobileConnectionService(new PilotDataDir(directory.toString()),
             new SecurityProperties(null, null, null, null, null), new ObjectMapper(), libraries, "");

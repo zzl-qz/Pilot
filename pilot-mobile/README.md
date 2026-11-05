@@ -1,6 +1,6 @@
 # Pilot Android 与应用级移动连接
 
-当前版本 `0.2.2-preview`。手机连接的是一台运行 Pilot 的电脑，一次配对即可管理该电脑上的项目与任务。代码和命令仍在电脑上执行；手机不保存模型 API Key。
+当前版本 `0.2.5-preview`。手机连接的是一台运行 Pilot 的电脑，一次配对即可管理该电脑上的项目与任务。代码和命令仍在电脑上执行；手机不保存模型 API Key。
 
 ## 个人自用验收口径
 
@@ -30,7 +30,7 @@
 
 后端 `MobileConnectionService` 统一管理连接桥的生命周期。Web 和桌面共用 `<pilot.data.dir>/mobile` 中的电脑密钥与设备授权；关闭配对弹窗不关闭连接。首次启用后，后端重启会自动启动连接桥；连接桥异常退出也会自动恢复，失败时逐步退避至每分钟重试。后台正常或强制退出后，连接桥随之结束。Java 子进程使用与后端一致的运行时和解析后的访问令牌；令牌不下发手机。
 
-传输采用 iroh 1.2.0 的加密 QUIC：默认关闭中继及公共发现，仅尝试 P2P 直连；只有后端明确配置了中继，才启用对应中继。二维码固定电脑公钥。配对码 5 分钟、一次有效，重新生成立即使旧码失效。管理入口只接受本机同源请求，手机路由白名单不开放设置、配对管理或任意代理。
+传输采用 iroh 的加密 QUIC（FFI 统一锁定 1.1.0，规避已复现的 1.2.0 原生 DNS / TUN 兼容问题）：默认自动使用公共发现与中继，尽力直连，必要时回退中继；后端可显式选择仅直连，或指定自己的中继。二维码固定电脑公钥。配对码 5 分钟、一次有效，重新生成立即使旧码失效。管理入口只接受本机同源请求，手机路由白名单不开放设置、配对管理或任意代理。
 
 协议升级为 `pilot/remote/2`，手机和连接组件需一起更新。旧 0.1 预览版的独立桌面桥使用过另一份身份目录，升级后需要重新扫码一次；任务和项目数据不迁移也不删除。新的协议版本避免旧桥忽略请求标识后静默重复执行。
 
@@ -71,7 +71,7 @@ node scripts/package-mobile-host.mjs <新的输出目录>
 
 发布签名：设置 `PILOT_ANDROID_KEYSTORE`、`PILOT_ANDROID_STORE_PASSWORD`、`PILOT_ANDROID_KEY_ALIAS`、`PILOT_ANDROID_KEY_PASSWORD` 后运行 `node scripts/mobile.mjs release`。缺少配置会直接失败，避免把未签名包误当正式发行包。普通 `build` 只生成开发签名的预览 APK；正式密钥不进入 Git。
 
-可用 `pilot.mobile.libraries` 指定连接桥 `lib` 目录；默认识别源码构建目录和便携包目录。只有后端的 `pilot.mobile.relay`（或对应 `PILOT_MOBILE_RELAY` 环境变量）明确配置了 HTTPS 地址与端口时才启用中继，手机用户无需填写。留空不会自动启用公共服务。独立诊断入口仍为 `node scripts/mobile.mjs bridge`，其数据目录需显式指定，不能把它与应用后台同时当作同一电脑身份运行。
+可用 `pilot.mobile.libraries` 指定连接桥 `lib` 目录；默认识别源码构建目录和便携包目录。`pilot.mobile.mode` / `PILOT_MOBILE_MODE` 默认为 `auto`，未指定中继时启用公共服务；设为 `direct` 则禁用公共发现和中继。`pilot.mobile.relay` / `PILOT_MOBILE_RELAY` 非空时只用指定中继，手机用户无需填写。独立诊断入口仍为 `node scripts/mobile.mjs bridge`，其数据目录需显式指定，不能把它与应用后台同时当作同一电脑身份运行。
 
 ## 平台与当前限制
 
@@ -86,7 +86,7 @@ node scripts/package-mobile-host.mjs <新的输出目录>
 - 单附件不超过 2 MB，单次总量 6 MB、最多 16 个；手机成果下载上限 16 MB。
 - 正文支持可选择的段落、标题、加粗、行内代码和可横向滚动、复制的代码块；未结束的流式代码块继续展示。复杂 Markdown 表格与内嵌 HTML 保留文本显示，复杂文件可保存到手机后由对应应用打开。iOS 不在此 APK 交付范围。
 - **尚未上线后台系统推送**。App 退后台可能被系统暂停；重新打开同步状态。界面与 capabilities 明确标为不支持，不能把常驻 SSE 当作锁屏推送。
-- 默认不启用公共中继，也不会因为未配置而自动补一个。两个独立私网能否直连取决于地址可达性、NAT 和防火墙；二维码本身不保证打洞成功。需要中继时，后端必须明确配置双方可访问的 iroh 服务。共享付费中继的认证适配未实现。
+- 默认启用公共服务，尽力直连，必要时中继；不保证所有运营商、代理或防火墙下都可用。两个独立私网的纯直连仍取决于 NAT 和防火墙。共享付费中继的认证适配未实现。
 - 正式 APK / 桌面安装包签名、分发、更新回滚和全平台真机属于发布验收，不能用本机成功替代。
 
 测试明细见 [验收记录](../evaluation/MOBILE_2026-11-04.md)。所有本轮测试使用临时数据或专用 QA 包，模型 API 调用为 0。
@@ -107,18 +107,29 @@ node scripts/package-mobile-host.mjs <新的输出目录>
 
 专用模拟器验收：先执行 `node scripts/mobile.mjs qa`，然后运行 `ANDROID_HOME=... node pilot-mobile/scripts/scanner-smoke.mjs emulator-xxxx`。该脚本只接受名为 Pilot 的模拟器，重置独立 `.qa` 包，不操作真机。Windows 请用对应 PowerShell 环境变量语法。
 
-## 0.2.4 的默认直连规则
+## 0.2.5 的跨网连接与本地出码
 
-未配置中继时，连接桥在本机生成二维码，不等待中继上线。明确配置后才准备对应中继，不会回退到公共服务。后端可在本机 application-local.yaml 配置（保留原有其他配置）：
+经用户确认，默认恢复自动公共连接服务。二维码在本机生成，不等待手机、DNS、发现或中继上线；跨网准备在后台超时重试。状态接口和窗口单独显示准备中 / 暂不可用 / 已完成初始化，不将二维码渲染成功视为跨网成功。网络地址就绪后，轮询自动刷新二维码路由，保留同一凭证和原有效期；不会复活已使用或过期的码。初始化状态不是持续在线保证，实际直连或中继路径以手机显示为准。
+
+后端 application-local.yaml（保留原有配置）：
 
 ```yaml
 pilot:
   mobile:
-    relay: "" # 默认直连；启用时填写实际的 https://relay.example.com:443
+    mode: auto # 默认公共发现与中继；只要纯直连则改为 direct
+    relay: "" # auto 时可指定真实的 https://relay.example.com:443
 ```
 
-这里必须是真正的 iroh 中继服务，不能随意填写 HTTP 代理、STUN 服务或路由器端口；HTTPS 证书需正常可信。修改后端配置后需重启后端并重新生成配对码。
+`direct` 与非空 `relay` 互斥。指定中继不会回退公共中继；即使指定服务不可达，本地仍可快速生成二维码并显示网络准备失败。中继必须是真正的 iroh HTTPS 服务，不能填写 HTTP 代理或 STUN 地址；证书仍正常校验。源码 PC 启动无需因此检查或下载 Gradle / Android SDK，移动构建继续单独进行。
 
-手机需更新至 0.2.4-preview，才能同时忽略旧保存数据的公共服务标记，并在未配置时剥离旧票据里的中继路由；原有电脑公钥与直连地址保留。更改后端中继配置后应重新扫码刷新保存的信息。
+手机和电脑连接桥一起更新至 0.2.5-preview 后，重新生成并扫码一次，更新 0.2.4 保存的仅直连信息；电脑身份、任务和项目保留。旧的显式直连记录不会被手机静默改为公共模式。
 
-断网出码验收：构建连接桥后运行 node pilot-mobile/scripts/direct-qr-smoke.mjs --container，容器使用已缓存 Java 镜像和 --network none。中继探针 relay-smoke.mjs 现在要求显式地址，未配置时直接停止，不再测试默认公共服务。
+FFI 1.2.0 在本次 TUN / Fake-IP 环境中持续 DNS 失败；相同设置下官方 1.1.0 完成握手及实际公网数据往返，因此电脑和 Android 从同一 Gradle 属性锁定 1.1.0。未修改系统代理、DNS、hosts 或证书。其他代理组合仍需各自验证，网络未就绪时给出 TUN / DNS 提示。
+
+验收命令（桥已构建，容器镜像已缓存）：
+
+- `node pilot-mobile/scripts/direct-qr-smoke.mjs --container`：自动模式的实际 PNG 出码及完全断网行为。
+- 同一命令加 `--direct`：显式直连模式。
+- `node pilot-mobile/scripts/relay-smoke.mjs https://aps1-1.relay.n0.iroh.link./`：两端只绑定回环且去除票据直连地址，强制验证公共中继实际往返。仅传固定探针文本，不读取用户项目。
+
+本轮范围和限制见 [0.2.5 跨网恢复验收](../evaluation/MOBILE_CROSS_NETWORK_RECOVERY_2026-11-05.md)。

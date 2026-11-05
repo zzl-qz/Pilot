@@ -28,11 +28,12 @@ async function devices() {
 $('create').onclick = async () => {
   $('create').disabled = true; $('status').textContent = '正在生成这台电脑的配对码…'; $('invite').hidden = true;
   try {
-    const result = await api('/api/pair', 'POST'); code = result.code; deadline = Date.now() + result.expiresIn * 1000;
+    const result = await api('/api/pair', 'POST'); code = result.code; deadline = result.expiresAt;
     $('qr').src = result.image; $('invite').hidden = false; $('status').textContent = '配对码已在本机生成，等待手机扫码。'; $('create').textContent = '重新生成';
-    $('mode').textContent = result.connectionMode === 'relay-enabled'
+    $('mode').textContent = result.connectionMode === 'automatic' ? '自动模式：尽力直连，必要时经公共中继。' : result.connectionMode === 'relay-enabled'
       ? '后端已配置中继，必要时使用已配置的中继。'
       : '未配置中继，仅尝试 P2P 直连；两端需有可互达的网络地址。';
+    $('network').textContent = result.networkMessage || '';
   } catch (error) { $('status').textContent = error.message; }
   finally { $('create').disabled = false; }
 };
@@ -51,4 +52,17 @@ setInterval(() => {
   if (!seconds) { $('invite').hidden = true; code = ''; }
 }, 1000);
 devices().catch(error => { $('devices').textContent = error.message; });
-setInterval(() => { if (!document.hidden) devices().catch(() => {}); }, 5000);
+setInterval(() => {
+  if (!document.hidden) {
+    devices().catch(() => {});
+    api('/api/status').then(result => {
+      $('network').textContent = result.networkMessage || '';
+      if (code && result.invite) {
+        code = result.invite.code; deadline = result.invite.expiresAt;
+        if ($('qr').src !== result.invite.image) $('qr').src = result.invite.image;
+      } else if (code && result.pairingState === 'paired') {
+        code = ''; deadline = 0; $('invite').hidden = true; $('status').textContent = '配对成功，可以关闭此窗口。';
+      }
+    }).catch(() => {});
+  }
+}, 3000);

@@ -7,14 +7,12 @@ import java.nio.file.Files
 import kotlin.test.*
 
 class ConnectionModeTest {
-    @Test fun `默认和旧开发标记均不会启用中继`(): Unit = runBlocking {
-        val first = createEndpoint(SecretKey.generate().toBytes())
-        val legacy = createEndpoint(SecretKey.generate().toBytes(), development = true)
+    @Test fun `显式直连模式不启用中继且拒绝无效中继配置`(): Unit = runBlocking {
+        val first = createEndpoint(SecretKey.generate().toBytes(), development = false)
         try {
             first.addr().use { assertNull(it.relayUrl()) }
-            legacy.addr().use { assertNull(it.relayUrl()) }
             val key = SecretKey.generate().toBytes()
             assertFails { createEndpoint(key, listOf("not-a-relay")) }
-        } finally { first.shutdown(); legacy.shutdown() }
+        } finally { first.shutdown() }
     }
 }

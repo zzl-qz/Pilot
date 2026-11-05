@@ -11,8 +11,8 @@ android {
         applicationId = "com.pilot.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.2.4-preview"
+        versionCode = 7
+        versionName = "0.2.5-preview"
         resValue("string", "app_name", "Pilot")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
@@ -34,9 +34,10 @@ android {
     packaging { resources.excludes += listOf("META-INF/AL2.0", "META-INF/LGPL2.1", "darwin-*/**", "linux-*/**", "win32-*/**") }
 }
 kotlin { jvmToolchain(21) }
+val irohVersion = providers.gradleProperty("pilot.irohVersion").get()
 dependencies {
     implementation(project(":transport")) { exclude(group = "net.java.dev.jna", module = "jna") }
-    implementation("computer.iroh:iroh-android:1.2.0")
+    implementation("computer.iroh:iroh-android:$irohVersion")
     // Android 必须使用带 JNI 库的 AAR，而不是桌面 JNA JAR。
     // 5.17+ 修复 Android 16 KiB 页大小设备的 JNI 加载问题。
     implementation("net.java.dev.jna:jna:5.18.1@aar")

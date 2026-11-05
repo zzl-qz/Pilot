@@ -61,6 +61,11 @@ class PairingStore(private val directory: Path, private val now: () -> Long = Sy
 
     @Synchronized fun currentInvite(): PairingInvite? = invite?.takeIf { it.expiresAt > now() }
 
+    /** 网络地址更新只刷新路由，不重置授权凭证、有效期或单次消费状态。 */
+    @Synchronized fun refreshRouting(ticket: String) {
+        currentInvite()?.let { if (it.ticket != ticket) invite = it.copy(ticket = ticket) }
+    }
+
     @Synchronized fun isTrusted(peer: String): Boolean = state.devices.any { it.id == peer }
     @Synchronized fun devices(): List<Device> = state.devices.toList()
     @Synchronized fun revoke(peer: String) {

@@ -14,6 +14,7 @@ class RemoteClient(
     private val requestTimeoutMillis: Long = 45_000,
     private val diagnostic: (String) -> Unit = {},
     private val relays: List<String> = emptyList(),
+    private val allowPublicRelays: Boolean = true,
 ) {
     private val mutex = Mutex()
     private var connection: Connection? = null
@@ -23,7 +24,7 @@ class RemoteClient(
     private suspend fun connect(): Connection = mutex.withLock {
         connection?.takeIf { it.closeReason() == null } ?: withTimeout(20_000) {
             trace("connect.start")
-            val address = dialAddress(ticket, relays)
+            val address = dialAddress(ticket, relays, allowPublicRelays)
             try { endpoint.connect(address, Protocol.alpn).also { connection = it; trace("connect.ready ${pathLabel()}") } }
             finally { address.close() }
         }
@@ -135,12 +136,12 @@ class RemoteClient(
     }
 }
 
-/** 旧版保存的票据可能含公共中继；未配置中继时也必须剥离该路由。 */
-internal fun dialAddress(ticket: String, relays: List<String>): EndpointAddr =
+/** 显式直连配置剥离旧票据的中继；自动模式保留票据中的跨网路由。 */
+internal fun dialAddress(ticket: String, relays: List<String>, allowPublicRelays: Boolean = false): EndpointAddr =
     EndpointTicket.fromString(ticket).use { parsed ->
         parsed.endpointAddr().use { address ->
             address.id().use { id ->
-                EndpointAddr(id, if (relays.isEmpty()) null else address.relayUrl(), address.directAddresses())
+                EndpointAddr(id, if (relays.isEmpty() && !allowPublicRelays) null else address.relayUrl(), address.directAddresses())
             }
         }
     }
@@ -148,12 +149,15 @@ internal fun dialAddress(ticket: String, relays: List<String>): EndpointAddr =
 internal fun requestTimeoutMessage(method: String): String = if (method == "GET")
     "读取数据超时，正在尝试重新连接电脑" else "请求超时，请先核对电脑端是否已收到指令"
 
-/** 未显式配置就只走直连；兼容旧数据中的 development 字段，但不据此启用公共服务。 */
-@Suppress("UNUSED_PARAMETER")
-suspend fun createEndpoint(key: ByteArray, relays: List<String> = emptyList(), development: Boolean = false): Endpoint {
-    val mode = if (relays.isEmpty()) RelayMode.disabled() else RelayMode.customFromUrls(relays)
+/** 自动模式使用公共发现 / 中继；显式直连模式完全禁用公共服务。 */
+suspend fun createEndpoint(key: ByteArray, relays: List<String> = emptyList(), development: Boolean = true): Endpoint {
+    val mode = when {
+        relays.isNotEmpty() -> RelayMode.customFromUrls(relays)
+        development -> RelayMode.defaultMode()
+        else -> RelayMode.disabled()
+    }
     return Endpoint.bind(EndpointOptions(
-        preset = presetMinimal(),
+        preset = if (development && relays.isEmpty()) presetN0() else presetMinimal(),
         secretKey = key, alpns = listOf(Protocol.alpn), relayMode = mode,
     ))
 }

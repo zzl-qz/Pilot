@@ -23,8 +23,8 @@ const requestId = randomUUID();
 let server;
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
-async function start(mobileLibraries = libraries, relay = '') {
-  server = spawn(java, ['--enable-native-access=ALL-UNNAMED', '-jar', serverJar, '--server.address=127.0.0.1', '--server.port=0', `--pilot.data.dir=${data}`, `--pilot.agent.workspace=${workspace}`, `--pilot.mobile.libraries=${mobileLibraries}`, `--pilot.mobile.relay=${relay}`, '--pilot.runtime.provision=false', '--pilot.web-search.local=false', '--pilot.model.api-key=', '--pilot.model.endpoint=http://127.0.0.1:9/v1/chat/completions', '--pilot.security.mode=token', `--pilot.security.token=${token}`], { cwd: directory, stdio: ['ignore', 'pipe', 'pipe'] });
+async function start(mobileLibraries = libraries, relay = '', mode = 'auto') {
+  server = spawn(java, ['--enable-native-access=ALL-UNNAMED', '-jar', serverJar, '--server.address=127.0.0.1', '--server.port=0', `--pilot.data.dir=${data}`, `--pilot.agent.workspace=${workspace}`, `--pilot.mobile.libraries=${mobileLibraries}`, `--pilot.mobile.relay=${relay}`, `--pilot.mobile.mode=${mode}`, '--pilot.runtime.provision=false', '--pilot.web-search.local=false', '--pilot.model.api-key=', '--pilot.model.endpoint=http://127.0.0.1:9/v1/chat/completions', '--pilot.security.mode=token', `--pilot.security.token=${token}`], { cwd: directory, stdio: ['ignore', 'pipe', 'pipe'] });
   return new Promise((resolve, reject) => {
     let output = '';
     const timer = setTimeout(() => reject(new Error('真实服务启动超时，请先构建服务端 Jar 并使用 Java 25')), 30000);
@@ -87,8 +87,19 @@ try {
   if (!before.ok || !(await before.json()).running) throw new Error('后台托管连接桥启动失败');
   const response = await fetch(`${base}/api/mobile/connection/pair`, {method:'POST',headers:{'X-Pilot-Token':token,'Content-Type':'application/json'},body:'{"reuse":true}'});
   if (!response.ok) throw new Error('工作台配对码生成失败');
-  const invite = await response.json();
-  assert.equal(invite.connectionMode, 'direct-only', '未配置后端中继必须是直连模式');
+  let invite = await response.json();
+  assert.equal(invite.connectionMode, 'automatic', '默认恢复公共发现与中继回退');
+  // 出码已改为本地即时操作；跨网/重启验收须使用后台就绪后自动刷新的路由，模拟界面提示的扫码时点。
+  const expiresAt = invite.expiresAt, networkDeadline = Date.now()+35000;
+  let network;
+  do {
+    network = await (await fetch(base+'/api/mobile/connection',{headers:{'X-Pilot-Token':token}})).json();
+    if (network.networkState === 'ready') break;
+    await delay(500);
+  } while (Date.now()<networkDeadline);
+  assert.equal(network.networkState,'ready','公共服务未完成初始化，不能把本地连接成功当作跨网恢复');
+  assert.equal(network.invite.expiresAt,expiresAt,'路由就绪不能延长配对授权');
+  invite = network.invite;
   const {code} = invite;
   await checkPhone(code);
   if (recovery) {
@@ -117,9 +128,26 @@ try {
     base = await start(libraries, 'https://127.0.0.1:9');
     const status = await (await fetch(base+'/api/mobile/connection', {headers:{'X-Pilot-Token':token}})).json();
     assert.equal(status.connectionMode,'relay-enabled','只有明确配置后端中继才进入中继模式');
-    const unavailable = await fetch(base+'/api/mobile/connection/pair',{method:'POST',headers:{'X-Pilot-Token':token,'Content-Type':'application/json'},body:'{}'});
-    assert.equal(unavailable.status,503);
-    assert.match((await unavailable.json()).message,/后端已配置的中继/);
-    console.log('PASS: 显式配置的不可达中继返回对应错误，没有回退到默认公共中继');
+    const started = Date.now();
+    const response = await fetch(base+'/api/mobile/connection/pair',{method:'POST',headers:{'X-Pilot-Token':token,'Content-Type':'application/json'},body:'{}'});
+    assert.equal(response.status,200);
+    const configured = await response.json();
+    assert.ok(configured.code && configured.image && Date.now()-started < 3000,'自建中继不可用也应在本地快速出码');
+    const deadline = Date.now()+25000;
+    let current;
+    do {
+      await delay(500);
+      current = await (await fetch(base+'/api/mobile/connection',{headers:{'X-Pilot-Token':token}})).json();
+    } while (current.networkState !== 'unavailable' && Date.now()<deadline);
+    assert.equal(current.networkState,'unavailable');
+    assert.equal(current.invite.code,configured.code,'网络准备失败不能销毁或刷新授权');
+    console.log('PASS: 自建中继故障只影响后台就绪状态，本地仍快速出码；不回退默认公共中继');
+    await stop();
+    base = await start(libraries, '', 'direct');
+    const direct = await (await fetch(base+'/api/mobile/connection/pair',{method:'POST',headers:{'X-Pilot-Token':token,'Content-Type':'application/json'},body:'{}'})).json();
+    assert.equal(direct.connectionMode,'direct-only');
+    assert.equal(direct.networkState,'local');
+    assert.equal(direct.development,false);
+    console.log('PASS: 后端显式 direct 配置仍完全关闭公共发现与中继');
   }
 } finally { await stop(); await rm(directory,{recursive:true,force:true}); }

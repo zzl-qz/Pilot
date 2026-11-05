@@ -26,6 +26,10 @@ class MobileSmokeTest {
         compose.onNodeWithText("电脑生成的配对码").performTextInput(code)
         compose.onNodeWithText("连接", useUnmergedTree = true).performClick()
         compose.waitUntil(30000) { compose.onAllNodesWithText("移动连接验收").fetchSemanticsNodes().isNotEmpty() }
+        val saved = requireNotNull(SecureDeviceStore(InstrumentationRegistry.getInstrumentation().targetContext).computer())
+        val scanned = com.pilot.mobile.transport.PairingInvite.decode(code)
+        org.junit.Assert.assertEquals(scanned.developmentRelays, saved.development)
+        org.junit.Assert.assertEquals(scanned.relays, saved.relays)
         screenshot("tasks")
         compose.onNodeWithContentDescription("搜索任务").performTextInput("移动")
         compose.onNodeWithText("移动连接验收").performClick()
@@ -62,6 +66,8 @@ class MobileSmokeTest {
         compose.waitUntil(10000) { compose.onAllNodesWithText("引导", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("引导", useUnmergedTree = true).performScrollTo().performClick()
         compose.waitUntil(10000) { compose.onAllNodesWithText("引导", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+        // 引导后的队列刷新尚在途时，暂停按钮仍可能禁用；等待实际可操作再点击。
+        compose.waitUntil(10000) { compose.onAllNodes(hasText("暂停") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("暂停").performClick()
         compose.waitUntil(10000) { compose.onAllNodes(hasText("继续") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("继续").performClick()

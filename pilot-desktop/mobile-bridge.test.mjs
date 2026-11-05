@@ -36,3 +36,13 @@ test('三个平台保留可用 Java；macOS 默认版本过低时查找已安装
   assert.deepEqual(calls[1], ['/usr/libexec/java_home', ['-v', '21+']]);
   await assert.rejects(resolveMobileJava({ ...base, platform: 'linux' }, async () => ({ stderr: 'openjdk version "17.0.1"' })), /Java 21/);
 });
+
+test('默认自动连接且显式直连不允许中继冲突，三个平台传参一致', () => {
+  for (const [platform,arch] of [['darwin','arm64'],['win32','x64'],['linux','arm64'],['linux','x64']]) {
+    const base={pilotUrl:'http://127.0.0.1:9999',libraries:'/lib',dataDir:'/data',platform,arch};
+    assert.equal(mobileBridgeOptions({...base,env:{}}).args.includes('--no-relay'),false);
+    assert.equal(mobileBridgeOptions({...base,env:{PILOT_MOBILE_MODE:'direct'}}).args.includes('--no-relay'),true);
+    assert.throws(()=>mobileBridgeOptions({...base,env:{PILOT_MOBILE_MODE:'unknown'}}),/只能配置/);
+    assert.throws(()=>mobileBridgeOptions({...base,env:{PILOT_MOBILE_MODE:'direct',PILOT_MOBILE_RELAY:'https:\/\/relay.example.com'}}),/不能同时/);
+  }
+});
