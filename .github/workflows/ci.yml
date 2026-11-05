@@ -33,6 +33,9 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Source bootstrap boundary tests
+        run: node --test scripts/bootstrap.test.mjs
+
       - name: Install desktop dependencies
         working-directory: pilot-desktop
         run: npm ci
@@ -40,7 +43,7 @@ jobs:
       # 三个平台都跑完整测试：路径大小写、符号链接、换行、进程清理的差异只会在跨平台时暴露
       - name: Maven verify
         shell: bash
-        run: ./mvnw -B -ntp verify
+        run: sh mvnw -B -ntp verify
 
       - name: Web unit tests
         working-directory: pilot-web

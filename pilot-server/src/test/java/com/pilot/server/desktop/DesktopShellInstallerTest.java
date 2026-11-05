@@ -11,6 +11,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -20,6 +21,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class DesktopShellInstallerTest {
+    @Test
+    void invokesNpmThroughNodeWithoutShellExpansion(@TempDir Path root) throws Exception {
+        Path npm = fakeNpm(root.resolve("中文 path & 100%"));
+        Path node = npm.getParent().resolve(nodeName());
+        Files.createFile(node);
+        Path cli = npm.getParent().resolve("node_modules/npm/bin/npm-cli.js");
+        Files.createDirectories(cli.getParent());
+        Files.createFile(cli);
+        assertEquals(List.of(node.toString(), cli.toString(), "install", "--no-audit", "--no-fund"),
+            DesktopShellInstaller.installCommand(npm, List.of()));
+        assertEquals("system-bin", DesktopShellInstaller.inheritedPath(Map.of("Path", "system-bin")));
+    }
 
     @Test
     void installedShellIsUsedWithoutInstalling(@TempDir Path root) throws Exception {

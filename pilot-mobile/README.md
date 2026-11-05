@@ -42,6 +42,8 @@
 
 ## 安装与开发
 
+普通源码使用直接运行仓库 `start.sh` / `start.cmd`，会自动检查并补齐 Java、Node、Maven 与连接桥；缺少 Java 21 时也无需手动配置。IDE 直接运行后台时，手机连接依赖在后台准备，窗口显示当前进度，失败后可主动“检查并修复环境”。下列手动命令用于独立开发和验收，不再是普通用户连接手机的必经步骤。说明见 [源码环境自动准备](../SOURCE_ENVIRONMENT.md)。
+
 普通预览包包含 Android APK、后台 Jar、连接桥和当前系统的 Java 运行时。启动 `start.sh` 或 `start.cmd`，浏览器打开 `http://localhost:9999`；Pilot 桌面也可连接这个后台。手机安装 APK 后扫描电脑的配对码。电脑需保持在线且不休眠。
 
 源码开发：后端使用 Java 25，Android / Gradle 构建使用 Java 21 与 Android SDK。设置 `JAVA_HOME`、`ANDROID_HOME` 后执行：

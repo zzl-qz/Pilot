@@ -166,6 +166,15 @@ public class DesktopShellInstaller {
     static List<String> installCommand(Path npm, List<String> extra) {
         List<String> arguments = new ArrayList<>(List.of("install", "--no-audit", "--no-fund"));
         arguments.addAll(extra);
+        Path node = sibling(npm, "node");
+        for (Path cli : List.of(npm.getParent().resolve("node_modules/npm/bin/npm-cli.js"),
+            npm.getParent().resolve("../lib/node_modules/npm/bin/npm-cli.js").normalize())) {
+            if (node != null && Files.isRegularFile(cli)) {
+                List<String> command = new ArrayList<>(List.of(node.toString(), cli.toString()));
+                command.addAll(arguments);
+                return command;
+            }
+        }
         if (isWindows()) {
             return List.of("cmd.exe", "/d", "/c", "\"" + npm + "\" " + String.join(" ", arguments));
         }
@@ -178,8 +187,23 @@ public class DesktopShellInstaller {
     /** npm 所在目录进 PATH（npm 要能找到同目录的 node），再叠加本次尝试的镜像变量。 */
     private static Map<String, String> environment(Path npm, Map<String, String> extra) {
         Map<String, String> environment = new LinkedHashMap<>(extra);
-        environment.put("PATH", npm.getParent() + File.pathSeparator + System.getenv().getOrDefault("PATH", ""));
+        List<String> bins = new ArrayList<>(
+            List.of(npm.getParent().toString(), Path.of(System.getProperty("java.home"), "bin").toString()));
+        String mobileBin = System.getProperty("pilot.mobile.runtime.bin", "");
+        if (!mobileBin.isBlank()) {
+            bins.add(mobileBin);
+        }
+        String inherited = inheritedPath(System.getenv());
+        if (!inherited.isBlank()) {
+            bins.add(inherited);
+        }
+        environment.put("PATH", String.join(File.pathSeparator, bins));
         return environment;
+    }
+
+    static String inheritedPath(Map<String, String> env) {
+        return env.entrySet().stream().filter(entry -> entry.getKey().equalsIgnoreCase("PATH")).map(Map.Entry::getValue)
+            .findFirst().orElse("");
     }
 
     /** 与 npm 同目录的 node（Electron 只接受 Node 22+，就用装它的那个 Node 补二进制）。 */
@@ -190,7 +214,7 @@ public class DesktopShellInstaller {
 
     /** 本机 npm 的位置；测试可覆盖成固定值。 */
     Path npm(Path root) {
-        return npm(root, System.getProperty("pilot.runtime.bin", ""), System.getenv().getOrDefault("PATH", ""));
+        return npm(root, System.getProperty("pilot.runtime.bin", ""), inheritedPath(System.getenv()));
     }
 
     /**

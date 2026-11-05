@@ -6,7 +6,7 @@
   "main": "main.mjs",
   "scripts": {
     "start": "node start.mjs",
-    "postinstall": "node brand-host.mjs",
+    "postinstall": "node prepare-runtime.mjs",
     "test": "node --test *.test.mjs",
     "smoke": "node smoke.mjs",
     "test:ui": "node ui-smoke.mjs"

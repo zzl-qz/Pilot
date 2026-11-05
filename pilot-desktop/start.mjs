@@ -1,10 +1,13 @@
 import { spawn } from 'node:child_process';
-import { desktopRoot, prepareDevelopmentHost } from './brand-host.mjs';
+import { desktopRoot } from './brand-host.mjs';
+import { prepareDesktopRuntime } from './prepare-runtime.mjs';
 
 try {
+  const runtime = await prepareDesktopRuntime();
+  if (!runtime.ready) throw new Error(runtime.message);
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  const child = spawn(prepareDevelopmentHost(), [desktopRoot, ...process.argv.slice(2)], {
+  const child = spawn(runtime.binary, [desktopRoot, ...process.argv.slice(2)], {
     cwd: desktopRoot, env, stdio: 'inherit'
   });
   child.on('error', error => { console.error(error.message); process.exitCode = 1; });
