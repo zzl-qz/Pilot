@@ -645,6 +645,44 @@ class SessionApiTest {
         mvc.perform(post("/api/sessions/{id}/continue", sessionId)).andExpect(status().isConflict());
     }
 
+    @Test
+    void sessionOrganizationPersistsAndRejectsInvalidEdits() throws Exception {
+        runStarter.setRunning(false);
+        String body = mvc.perform(post("/api/sessions").contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String id = json.readTree(body).get("sessionId").asText();
+        mvc.perform(post("/api/sessions/{id}/messages", id).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"content\":\"## 完善会话列表\\n检查边界\"}")).andExpect(status().isOk());
+        mvc.perform(get("/api/sessions/{id}", id)).andExpect(jsonPath("$.title").value("完善会话列表"))
+            .andExpect(jsonPath("$.titleManual").value(false)).andExpect(jsonPath("$.updatedAt").isNotEmpty());
+        mvc.perform(MockMvcRequestBuilders.patch("/api/sessions/{id}/preferences", id)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"pinned\":true,\"unread\":true}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.pinned").value(true))
+            .andExpect(jsonPath("$.unread").value(true));
+        mvc.perform(MockMvcRequestBuilders.patch("/api/sessions/{id}/preferences", id)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"unread\":false}")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.pinned").value(true)).andExpect(jsonPath("$.unread").value(false));
+        mvc.perform(MockMvcRequestBuilders.patch("/api/sessions/{id}/preferences", id)
+            .contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isBadRequest());
+        mvc.perform(MockMvcRequestBuilders.patch("/api/sessions/{id}", id).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"title\":\"手动名称\"}")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.titleManual").value(true));
+        for (String title : List.of("   ", "字".repeat(121))) {
+            mvc.perform(MockMvcRequestBuilders.patch("/api/sessions/{id}", id).contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("title", title)))).andExpect(status().isBadRequest());
+        }
+        mvc.perform(get("/api/sessions/{id}", id)).andExpect(jsonPath("$.title").value("手动名称"));
+        runStarter.setRunning(true);
+        try {
+            Instant before = sessions.find(id).orElseThrow().updatedAt();
+            mvc.perform(post("/api/sessions/{id}/messages", id).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"排队的后续消息\"}")).andExpect(status().isAccepted());
+            assertTrue(sessions.find(id).orElseThrow().updatedAt().isAfter(before));
+        } finally {
+            runStarter.setRunning(false);
+        }
+    }
+
     private String createSession() throws Exception {
         String body =
             mvc.perform(post("/api/sessions").contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"测试会话\"}"))

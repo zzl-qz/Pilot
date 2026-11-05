@@ -19,10 +19,12 @@ public final class ModelClientProvider implements ModelClient {
     private final ModelSettings settings;
     private final Function<ModelSettings.Snapshot, ModelClient> factory;
     private final java.util.function.Supplier<String> revision;
-    private volatile String appliedRevision;
 
-    private volatile ModelClient delegate;
-    private volatile ModelSettings.Snapshot applied;
+    /** 配置与对应客户端一次性发布，避免并发读取时把新配置和旧客户端配在一起。 */
+    private record AppliedClient(ModelSettings.Snapshot settings, String revision, ModelClient client) {
+    }
+
+    private volatile AppliedClient applied;
 
     public ModelClientProvider(ModelSettings settings, Function<ModelSettings.Snapshot, ModelClient> factory) {
         this(settings, factory, () -> "");
@@ -69,19 +71,19 @@ public final class ModelClientProvider implements ModelClient {
 
     private ModelClient client() {
         ModelSettings.Snapshot current = settings.snapshot();
-        ModelClient local = delegate;
-        if (local != null && current.equals(applied) && Objects.equals(revision.get(), appliedRevision)) {
-            return local;
+        AppliedClient local = applied;
+        if (local != null && current.equals(local.settings()) && Objects.equals(revision.get(), local.revision())) {
+            return local.client();
         }
         synchronized (this) {
             ModelSettings.Snapshot now = settings.snapshot();
             String version = revision.get();
-            if (delegate == null || !now.equals(applied) || !Objects.equals(version, appliedRevision)) {
-                delegate = factory.apply(now);
-                applied = now;
-                appliedRevision = version;
+            local = applied;
+            if (local == null || !now.equals(local.settings()) || !Objects.equals(version, local.revision())) {
+                local = new AppliedClient(now, version, factory.apply(now));
+                applied = local;
             }
-            return delegate;
+            return local.client();
         }
     }
 }

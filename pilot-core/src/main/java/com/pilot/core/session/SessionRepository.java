@@ -46,10 +46,10 @@ public interface SessionRepository {
 
     Optional<Session> find(String sessionId);
 
-    /** 按创建时间倒序返回全部会话。 */
+    /** 按置顶、最近活动时间倒序返回全部会话。 */
     List<Session> list();
 
-    /** 某个项目下的会话，按创建时间倒序。 */
+    /** 某个项目下的会话，按置顶、最近活动时间倒序。 */
     default List<Session> listByProject(String projectId) {
         return list().stream().filter(session -> Objects.equals(session.projectId(), projectId)).toList();
     }
@@ -67,6 +67,14 @@ public interface SessionRepository {
     boolean updateStatus(String sessionId, SessionStatus status);
 
     boolean rename(String sessionId, String title);
+
+    /** 自动标题仅在未被手动命名时更新。 */
+    boolean autoRename(String sessionId, String title);
+
+    boolean updatePreferences(String sessionId, Boolean pinned, Boolean unread);
+
+    /** 用户发言或后台产生新事件时更新；打开、重命名、置顶不改变活动时间。 */
+    boolean touch(String sessionId, Instant timestamp);
 
     /** 删除会话及其事件；返回是否真的删除了记录。 */
     boolean delete(String sessionId);

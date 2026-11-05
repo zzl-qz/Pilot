@@ -193,6 +193,13 @@ public final class SqliteStore {
         addColumnIfMissing(statement, "sessions", "archived", "INTEGER NOT NULL DEFAULT 0");
         // 侧边对话：从哪条主对话分叉出来。老库里的会话一律没有父会话，保持为普通对话
         addColumnIfMissing(statement, "sessions", "parent_session_id", "TEXT");
+        addColumnIfMissing(statement, "sessions", "updated_at", "TEXT");
+        addColumnIfMissing(statement, "sessions", "pinned", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(statement, "sessions", "unread", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(statement, "sessions", "title_manual", "INTEGER NOT NULL DEFAULT 0");
+        // 老会话用最后一条事件回填活动时间；无事件时沿用创建时间。仅迁移一次。
+        statement.execute("UPDATE sessions SET updated_at = COALESCE((SELECT created_at FROM events "
+            + "WHERE session_id = sessions.id ORDER BY sequence DESC LIMIT 1), created_at) WHERE updated_at IS NULL");
         addColumnIfMissing(statement, "projects", "base_commit", "TEXT");
         // 图片附件已经由 AttachmentService 复制到稳定的数据目录；这里持久化引用，
         // 让 checkpoint / resume / 进程重启后仍能重建同一条多模态消息。
@@ -202,9 +209,13 @@ public final class SqliteStore {
         statement.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, created_at)");
         // 按父会话找侧边对话（关闭父对话时一并清理）走这条索引
         statement.execute("CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)");
+        statement.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(pinned DESC, julianday(updated_at) DESC, id)");
+        statement.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_project_activity ON sessions(project_id, pinned DESC, julianday(updated_at) DESC, id)");
         initializeSearch(statement);
         // 记录结构版本，供数据迁移与备份恢复核对；写不进去不影响运行
-        statement.execute("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '4')");
+        statement.execute("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '5')");
     }
 
     private static void initializeSearch(Statement s) throws SQLException {

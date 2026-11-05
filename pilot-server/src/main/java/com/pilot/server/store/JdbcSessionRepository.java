@@ -21,7 +21,7 @@ import com.pilot.core.session.SessionStatus;
 public final class JdbcSessionRepository implements SessionRepository {
     private static final int WRITE_ATTEMPTS = 3;
     private static final String COLUMNS =
-        "id, title, workspace, created_at, status, project_id, is_blank, archived, parent_session_id";
+        "id, title, workspace, created_at, status, project_id, is_blank, archived, parent_session_id, updated_at, pinned, unread, title_manual";
 
     private final SqliteStore store;
     private final EventCodec codec;
@@ -36,7 +36,7 @@ public final class JdbcSessionRepository implements SessionRepository {
         boolean isBlank, String parentSessionId) {
         JdbcSupport.update(store,
             "INSERT INTO sessions (id, title, workspace, created_at, status, sequence, project_id, "
-                + "is_blank, archived, parent_session_id) VALUES (?, ?, ?, ?, ?, 0, ?, ?, 0, ?)",
+                + "is_blank, archived, parent_session_id, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?)",
             statement -> {
                 statement.setString(1, sessionId);
                 statement.setString(2, title);
@@ -46,6 +46,7 @@ public final class JdbcSessionRepository implements SessionRepository {
                 statement.setString(6, projectId);
                 statement.setInt(7, isBlank ? 1 : 0);
                 statement.setString(8, parentSessionId);
+                statement.setString(9, createdAt.toString());
             }, "创建会话失败: " + sessionId);
         return new Session(sessionId, title, createdAt, SessionStatus.CREATED, workspace, projectId, isBlank, false,
             parentSessionId);
@@ -76,8 +77,9 @@ public final class JdbcSessionRepository implements SessionRepository {
 
     @Override
     public List<Session> list() {
-        return JdbcSupport.query(store, "SELECT " + COLUMNS + " FROM sessions ORDER BY created_at DESC", statement -> {
-        }, JdbcSessionRepository::map, "读取会话列表失败");
+        return JdbcSupport.query(store,
+            "SELECT " + COLUMNS + " FROM sessions ORDER BY pinned DESC, julianday(updated_at) DESC, id", statement -> {
+            }, JdbcSessionRepository::map, "读取会话列表失败");
     }
 
     @Override
@@ -85,11 +87,14 @@ public final class JdbcSessionRepository implements SessionRepository {
         if (projectId == null) {
             // 未分组的历史会话：project_id 为空
             return JdbcSupport.query(store,
-                "SELECT " + COLUMNS + " FROM sessions WHERE project_id IS NULL ORDER BY created_at DESC", statement -> {
+                "SELECT " + COLUMNS
+                    + " FROM sessions WHERE project_id IS NULL ORDER BY pinned DESC, julianday(updated_at) DESC, id",
+                statement -> {
                 }, JdbcSessionRepository::map, "读取未分组会话失败");
         }
         return JdbcSupport.query(store,
-            "SELECT " + COLUMNS + " FROM sessions WHERE project_id = ? ORDER BY created_at DESC",
+            "SELECT " + COLUMNS
+                + " FROM sessions WHERE project_id = ? ORDER BY pinned DESC, julianday(updated_at) DESC, id",
             statement -> statement.setString(1, projectId), JdbcSessionRepository::map, "读取项目会话失败: " + projectId);
     }
 
@@ -111,10 +116,40 @@ public final class JdbcSessionRepository implements SessionRepository {
 
     @Override
     public boolean rename(String sessionId, String title) {
-        return JdbcSupport.update(store, "UPDATE sessions SET title = ? WHERE id = ?", statement -> {
+        return JdbcSupport.update(store, "UPDATE sessions SET title = ?, title_manual = 1 WHERE id = ?", statement -> {
             statement.setString(1, title);
             statement.setString(2, sessionId);
         }, "重命名会话失败: " + sessionId) > 0;
+    }
+
+    @Override
+    public boolean autoRename(String sessionId, String title) {
+        return JdbcSupport.update(store, "UPDATE sessions SET title = ? WHERE id = ? AND title_manual = 0",
+            statement -> {
+                statement.setString(1, title);
+                statement.setString(2, sessionId);
+            }, "自动命名失败: " + sessionId) > 0;
+    }
+
+    @Override
+    public boolean updatePreferences(String sessionId, Boolean pinned, Boolean unread) {
+        return JdbcSupport.update(store,
+            "UPDATE sessions SET pinned = COALESCE(?, pinned), unread = COALESCE(?, unread) WHERE id = ?",
+            statement -> {
+                statement.setObject(1, pinned == null ? null : pinned ? 1 : 0);
+                statement.setObject(2, unread == null ? null : unread ? 1 : 0);
+                statement.setString(3, sessionId);
+            }, "更新会话标记失败: " + sessionId) > 0;
+    }
+
+    @Override
+    public boolean touch(String sessionId, Instant timestamp) {
+        return JdbcSupport.update(store,
+            "UPDATE sessions SET updated_at = ? WHERE id = ? AND julianday(updated_at) <= julianday(?)", statement -> {
+                statement.setString(1, timestamp.toString());
+                statement.setString(2, sessionId);
+                statement.setString(3, timestamp.toString());
+            }, "更新会话活动时间失败: " + sessionId) > 0;
     }
 
     @Override
@@ -259,10 +294,13 @@ public final class JdbcSessionRepository implements SessionRepository {
                 // 一条 UPDATE ... RETURNING 同时完成「序号自增」和「读回新序号」，
                 // 比 UPDATE + SELECT 少一次往返，也少一次 BUSY 窗口。
                 long sequence;
-                try (PreparedStatement bump = connection.prepareStatement(
-                    "UPDATE sessions SET sequence = sequence + 1, status = ? WHERE id = ? RETURNING sequence")) {
+                try (PreparedStatement bump =
+                    connection.prepareStatement("UPDATE sessions SET sequence = sequence + 1, status = ?, updated_at = "
+                        + "CASE WHEN julianday(updated_at) > julianday(?) THEN updated_at ELSE ? END WHERE id = ? RETURNING sequence")) {
                     bump.setString(1, status.name());
-                    bump.setString(2, sessionId);
+                    bump.setString(2, timestamp.toString());
+                    bump.setString(3, timestamp.toString());
+                    bump.setString(4, sessionId);
                     try (ResultSet rows = bump.executeQuery()) {
                         if (!rows.next()) {
                             connection.rollback();
@@ -334,7 +372,9 @@ public final class JdbcSessionRepository implements SessionRepository {
     private static Session map(ResultSet rows) throws SQLException {
         return new Session(rows.getString("id"), rows.getString("title"), Instant.parse(rows.getString("created_at")),
             SessionStatus.valueOf(rows.getString("status")), rows.getString("workspace"), rows.getString("project_id"),
-            rows.getInt("is_blank") == 1, rows.getInt("archived") == 1, rows.getString("parent_session_id"));
+            rows.getInt("is_blank") == 1, rows.getInt("archived") == 1, rows.getString("parent_session_id"),
+            Instant.parse(rows.getString("updated_at")), rows.getInt("pinned") == 1, rows.getInt("unread") == 1,
+            rows.getInt("title_manual") == 1);
     }
 
     private static boolean isBusy(SQLException e) {

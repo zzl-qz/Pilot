@@ -80,8 +80,8 @@ public class InMemorySessionRepository implements SessionRepository {
 
     @Override
     public List<Session> list() {
-        return sessions.values().stream().map(State::snapshot)
-            .sorted(Comparator.comparing(Session::createdAt).reversed()).toList();
+        return sessions.values().stream().map(State::snapshot).sorted(Comparator.comparing(Session::pinned).reversed()
+            .thenComparing(Session::updatedAt, Comparator.reverseOrder()).thenComparing(Session::id)).toList();
     }
 
     @Override
@@ -92,8 +92,46 @@ public class InMemorySessionRepository implements SessionRepository {
         }
         synchronized (state) {
             state.title = title;
+            state.titleManual = true;
         }
         return true;
+    }
+
+    @Override
+    public boolean autoRename(String sessionId, String title) {
+        State state = require(sessionId);
+        synchronized (state) {
+            if (state.titleManual) {
+                return false;
+            }
+            state.title = title;
+            return true;
+        }
+    }
+
+    @Override
+    public boolean updatePreferences(String sessionId, Boolean pinned, Boolean unread) {
+        State state = require(sessionId);
+        synchronized (state) {
+            if (pinned != null) {
+                state.pinned = pinned;
+            }
+            if (unread != null) {
+                state.unread = unread;
+            }
+            return true;
+        }
+    }
+
+    @Override
+    public boolean touch(String sessionId, Instant timestamp) {
+        State state = require(sessionId);
+        synchronized (state) {
+            if (timestamp.isAfter(state.updatedAt)) {
+                state.updatedAt = timestamp;
+            }
+            return true;
+        }
     }
 
     @Override
@@ -151,6 +189,9 @@ public class InMemorySessionRepository implements SessionRepository {
         synchronized (state) {
             EventEnvelope envelope = EventEnvelope.of(++state.sequence, timestamp, sessionId, runId, event);
             state.events.add(envelope);
+            if (timestamp.isAfter(state.updatedAt)) {
+                state.updatedAt = timestamp;
+            }
             state.status = status;
             return envelope;
         }
@@ -176,6 +217,10 @@ public class InMemorySessionRepository implements SessionRepository {
         private long sequence;
         private boolean isBlank;
         private boolean archived;
+        private Instant updatedAt;
+        private boolean pinned;
+        private boolean unread;
+        private boolean titleManual;
 
         private State(String id, String title, String workspace, Instant createdAt, String projectId, boolean isBlank,
             String parentSessionId) {
@@ -183,6 +228,7 @@ public class InMemorySessionRepository implements SessionRepository {
             this.title = title;
             this.workspace = workspace;
             this.createdAt = createdAt;
+            this.updatedAt = createdAt;
             this.projectId = projectId;
             this.isBlank = isBlank;
             this.parentSessionId = parentSessionId;
@@ -191,7 +237,7 @@ public class InMemorySessionRepository implements SessionRepository {
         private Session snapshot() {
             synchronized (this) {
                 return new Session(id, title, createdAt, status, workspace, projectId, isBlank, archived,
-                    parentSessionId);
+                    parentSessionId, updatedAt, pinned, unread, titleManual);
             }
         }
     }

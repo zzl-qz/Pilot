@@ -13,7 +13,15 @@ import java.util.Objects;
  * @param parentSessionId 侧边对话（对齐 Codex 的 /side）：从哪条主对话分叉出来；普通对话为 {@code null}
  */
 public record Session(String id, String title, Instant createdAt, SessionStatus status, String workspace,
-    String projectId, boolean isBlank, boolean archived, String parentSessionId) {
+    String projectId, boolean isBlank, boolean archived, String parentSessionId, Instant updatedAt, boolean pinned,
+    boolean unread, boolean titleManual) {
+    /** 兼容历史调用：最近活动默认为创建时间，标题尚未手动编辑。 */
+    public Session(String id, String title, Instant createdAt, SessionStatus status, String workspace, String projectId,
+        boolean isBlank, boolean archived, String parentSessionId) {
+        this(id, title, createdAt, status, workspace, projectId, isBlank, archived, parentSessionId, createdAt, false,
+            false, false);
+    }
+
     /** 兼容旧调用：不归属项目，也不是空白对话。 */
     public Session(String id, String title, Instant createdAt, SessionStatus status, String workspace) {
         this(id, title, createdAt, status, workspace, null, false, false, null);
@@ -40,6 +48,7 @@ public record Session(String id, String title, Instant createdAt, SessionStatus 
         }
         Objects.requireNonNull(createdAt, "createdAt must not be null");
         Objects.requireNonNull(status, "status must not be null");
+        updatedAt = updatedAt == null ? createdAt : updatedAt;
         title = title.strip();
         if (workspace != null) {
             workspace = workspace.strip();
@@ -68,18 +77,22 @@ public record Session(String id, String title, Instant createdAt, SessionStatus 
 
     /** 发过消息之后就不能再变回空白对话。 */
     public Session withBlank(boolean blank) {
-        return new Session(id, title, createdAt, status, workspace, projectId, blank, archived, parentSessionId);
+        return new Session(id, title, createdAt, status, workspace, projectId, blank, archived, parentSessionId,
+            updatedAt, pinned, unread, titleManual);
     }
 
     public Session withArchived(boolean value) {
-        return new Session(id, title, createdAt, status, workspace, projectId, isBlank, value, parentSessionId);
+        return new Session(id, title, createdAt, status, workspace, projectId, isBlank, value, parentSessionId,
+            updatedAt, pinned, unread, titleManual);
     }
 
     public Session withTitle(String newTitle) {
-        return new Session(id, newTitle, createdAt, status, workspace, projectId, isBlank, archived, parentSessionId);
+        return new Session(id, newTitle, createdAt, status, workspace, projectId, isBlank, archived, parentSessionId,
+            updatedAt, pinned, unread, true);
     }
 
     public Session withWorkspace(String newWorkspace) {
-        return new Session(id, title, createdAt, status, newWorkspace, projectId, isBlank, archived, parentSessionId);
+        return new Session(id, title, createdAt, status, newWorkspace, projectId, isBlank, archived, parentSessionId,
+            updatedAt, pinned, unread, titleManual);
     }
 }

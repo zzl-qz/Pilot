@@ -118,12 +118,12 @@ public final class SessionService {
         return sessionId == null ? Optional.empty() : repository.find(sessionId);
     }
 
-    /** 按创建时间倒序返回全部会话。 */
+    /** 置顶优先，其余按最近活动时间倒序返回全部会话。 */
     public List<Session> list() {
         return repository.list();
     }
 
-    /** 某个项目下的会话，按创建时间倒序。 */
+    /** 某个项目下的会话，置顶优先、按最近活动时间倒序。 */
     public List<Session> listByProject(String projectId) {
         return repository.listByProject(projectId);
     }
@@ -133,6 +133,14 @@ public final class SessionService {
             throw new IllegalArgumentException("title must not be blank");
         }
         return repository.rename(sessionId, title.strip());
+    }
+
+    public boolean updatePreferences(String sessionId, Boolean pinned, Boolean unread) {
+        return repository.updatePreferences(sessionId, pinned, unread);
+    }
+
+    public boolean touch(String sessionId) {
+        return repository.touch(sessionId, clock.instant());
     }
 
     /** 删除会话：先摘掉订阅者再删数据，避免删除后仍有推送。 */
@@ -193,6 +201,9 @@ public final class SessionService {
             SessionStatus status = nextStatus(current.status(), event);
             // 发过第一条消息就不再是空白对话。放在 publish 里，发送、重新生成、改历史重跑都覆盖
             if (event.type() == EventType.RUN_STARTED) {
+                if (!current.titleManual() && (current.isBlank() || SessionTitles.placeholder(current.title()))) {
+                    repository.autoRename(sessionId, SessionTitles.from(((RunStarted)event).input()));
+                }
                 repository.markNotBlank(sessionId);
             }
             EventEnvelope envelope = repository.append(sessionId, runId, clock.instant(), event, status);

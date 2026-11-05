@@ -126,6 +126,10 @@ public class SessionController {
             }
         }
         Session session = sessions.createSession(title, workspaceOf(request, project), projectId, true);
+        if (request != null && request.title() != null && !request.title().isBlank()) {
+            sessions.rename(session.id(), title);
+            session = requireSession(session.id());
+        }
         return SessionResponse.of(session, 0);
     }
 
@@ -280,8 +284,24 @@ public class SessionController {
         if (request == null || request.title() == null || request.title().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "title must not be blank");
         }
+        if (request.title().strip().codePointCount(0, request.title().strip().length()) > 120) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "标题不能超过 120 个字符");
+        }
         sessions.rename(id, request.title());
         return SessionResponse.of(requireSession(id), countOf(id));
+    }
+
+    @PatchMapping("/{id}/preferences")
+    public SessionResponse preferences(@PathVariable String id, @RequestBody PreferencesRequest request) {
+        requireSession(id);
+        if (request == null || (request.pinned() == null && request.unread() == null)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请提供置顶或未读状态");
+        }
+        sessions.updatePreferences(id, request.pinned(), request.unread());
+        return SessionResponse.of(requireSession(id), countOf(id));
+    }
+
+    public record PreferencesRequest(Boolean pinned, Boolean unread) {
     }
 
     /** 事件总数走存储层计数，不把整表事件读进内存再 size()。 */
@@ -591,6 +611,7 @@ public class SessionController {
         }
         if (activeRun != null) {
             if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions())) {
+                sessions.touch(id);
                 return ResponseEntity.accepted().body(new MessageResponse(id, activeRun));
             }
         }
@@ -601,6 +622,7 @@ public class SessionController {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "运行状态已变化，请结束当前任务后重试");
             }
             if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions())) {
+                sessions.touch(id);
                 return ResponseEntity.accepted().body(new MessageResponse(id, runStarter.activeRun(id).orElse(null)));
             }
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行");
@@ -776,13 +798,15 @@ public class SessionController {
     }
 
     public record SessionResponse(String id, String sessionId, String title, Instant createdAt, SessionStatus status,
-        String workspace, String projectId, boolean isBlank, boolean archived, int eventCount, String parentSessionId) {
+        String workspace, String projectId, boolean isBlank, boolean archived, int eventCount, String parentSessionId,
+        Instant updatedAt, boolean pinned, boolean unread, boolean titleManual) {
         static SessionResponse of(Session session, int eventCount) {
             // 同时保留 id 与 sessionId：前端界面（含 React 版）统一按 id 读取会话标识，
             // 旧版 app.js 仍按 sessionId 读取，二者并存避免任一侧取到 undefined。
             return new SessionResponse(session.id(), session.id(), session.title(), session.createdAt(),
                 session.status(), session.workspace(), session.projectId(), session.isBlank(), session.archived(),
-                eventCount, session.parentSessionId());
+                eventCount, session.parentSessionId(), session.updatedAt(), session.pinned(), session.unread(),
+                session.titleManual());
         }
     }
 }
