@@ -51,6 +51,27 @@ public class RemoteAccessFilter extends OncePerRequestFilter {
         throws ServletException, IOException {
         String remote = request.getRemoteAddr();
         String path = request.getRequestURI();
+        String cookieToken = cookie(request, COOKIE_NAME);
+        String host = request.getHeader("Host");
+        // HTTP/1.0 与 MockMvc 可不携带 Host；Servlet 的本机服务器名称提供兼容回退。
+        if (host == null) {
+            host = request.getServerName() + ":" + request.getServerPort();
+        }
+        AccessControl.Request candidate = new AccessControl.Request(request.getMethod(), path, remote,
+            request.getHeader("Authorization"), request.getHeader("X-Pilot-Token"), request.getParameter("token"),
+            cookieToken, request.getHeader("Origin"), host, request.getScheme(), request.getHeader("Sec-Fetch-Site"),
+            request.getHeader("Referer"));
+        if (java.util.Collections.list(request.getHeaders("Origin")).size() > 1
+            || java.util.Collections.list(request.getHeaders("Host")).size() > 1) {
+            deny(response, remote, request, AccessControl.Decision.reject(403, "拒绝重复的来源或 Host 请求头"), candidate);
+            return;
+        }
+        AccessControl.Decision boundary = control.localBoundary(candidate);
+        if (!boundary.allow()) {
+            deny(response, remote, request, boundary, candidate);
+            return;
+        }
+        response.addHeader("Vary", "Origin, Sec-Fetch-Site, Referer, Host");
         if ("GET".equals(request.getMethod()) && "/connect".equals(path)) {
             connectPage(response);
             return;
@@ -59,10 +80,6 @@ public class RemoteAccessFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
-        String cookieToken = cookie(request, COOKIE_NAME);
-        AccessControl.Request candidate = new AccessControl.Request(request.getMethod(), path, remote,
-            request.getHeader("Authorization"), request.getHeader("X-Pilot-Token"), request.getParameter("token"),
-            cookieToken, request.getHeader("Origin"), request.getHeader("Host"));
         AccessControl.Decision decision = control.check(candidate);
         // 失败的登录也计入限流，避免只限制通过认证后的请求。
         if (limiter != null && !limiter.allow(remote)) {

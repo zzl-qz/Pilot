@@ -225,6 +225,8 @@ jobs:
       - name: Build isolated backend fixture
         shell: bash
         run: sh mvnw -B -ntp -pl pilot-server -am -DskipTests package
+      - name: Verify local request boundary in a real browser
+        run: node pilot-web/frontend/scripts/local-security-package-smoke.mjs
       - name: Prepare Linux display dependencies
         if: runner.os == 'Linux'
         run: |

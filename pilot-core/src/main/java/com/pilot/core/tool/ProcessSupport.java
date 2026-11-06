@@ -18,7 +18,8 @@ import java.util.Locale;
 public final class ProcessSupport {
     /** Windows 中文环境的默认编码，作为非 UTF-8 输出的回退。 */
     private static final Charset GBK = Charset.forName("GBK");
-    private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    private static final boolean WINDOWS =
+        System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows");
 
     private ProcessSupport() {
     }

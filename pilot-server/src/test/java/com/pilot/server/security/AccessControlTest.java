@@ -101,4 +101,52 @@ class AccessControlTest {
         assertFalse(AccessControl.isLoopback("10.0.0.2"));
         assertFalse(AccessControl.isLoopback(null));
     }
+
+    private static AccessControl.Request localRequest(String host, String origin, String fetchSite, String referer) {
+        return new AccessControl.Request("POST", "/api/messages", "127.0.0.1", null, null, null, null, origin, host,
+            "http", fetchSite, referer);
+    }
+
+    @Test
+    void localModeChecksHostEvenWhenBrowserOriginMatchesIt() {
+        var control = new AccessControl(local());
+        for (String host : List.of("evil.example:9999", "127.attacker.example:9999", "localhost.evil.example",
+            "127.0.0.999", "127.0.0.1@evil.example", "localhost:0", "localhost:99999", "localhost/path",
+            "localhost?bad")) {
+            assertFalse(control.check(localRequest(host, "http://" + host, null, null)).allow(), host);
+        }
+        assertFalse(control.check(localRequest(null, null, null, null)).allow());
+        for (String host : List.of("localhost:9999", "127.0.0.1:9999", "[::1]:9999", "127.8.9.10:9999")) {
+            assertTrue(control.check(localRequest(host, "http://" + host, "same-origin", null)).allow(), host);
+            assertTrue(control.check(localRequest(host, null, null, null)).allow(), host);
+        }
+    }
+
+    @Test
+    void localModeRejectsForeignAndOpaqueOriginsAndUnattributedBrowserRequests() {
+        var control = new AccessControl(local());
+        for (String origin : List.of("https://evil.example", "null", "http://localhost:9998", "https://localhost:9999",
+            "http://localhost:9999/path", "http://localhost:9999@evil.example")) {
+            assertFalse(control.check(localRequest("localhost:9999", origin, null, null)).allow(), origin);
+        }
+        for (String site : List.of("cross-site", "same-site")) {
+            assertFalse(control.check(localRequest("localhost:9999", null, site, null)).allow(), site);
+        }
+        assertFalse(control.check(localRequest("localhost:9999", null, null, "https://evil.example/page")).allow());
+        assertTrue(control.check(localRequest("localhost:9999", null, null, "http://localhost:9999/page?q=1")).allow());
+        assertTrue(control.check(localRequest("localhost:9999", null, "none", null)).allow());
+        assertFalse(AccessControl.isLoopback("127.attacker.example"));
+    }
+
+    @Test
+    void explicitProxyHostAndOriginDoNotTrustForwardedHeadersOrRemotePeers() {
+        var props = new SecurityProperties("local", "", List.of("https://pilot.example"), 0, false,
+            List.of("pilot.example:9999"));
+        var control = new AccessControl(props);
+        assertTrue(
+            control.check(localRequest("pilot.example:9999", "https://pilot.example", "cross-site", null)).allow());
+        assertFalse(control.check(localRequest("other.example:9999", "https://pilot.example", null, null)).allow());
+        assertFalse(control.check(new AccessControl.Request("GET", "/api/sessions", "10.0.0.1", null, null, null, null,
+            "https://pilot.example", "pilot.example:9999")).allow());
+    }
 }

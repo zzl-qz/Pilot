@@ -1,7 +1,9 @@
 package com.pilot.server.security;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
@@ -21,7 +23,13 @@ public final class AccessControl {
      *                    页面内的 fetch 与 EventSource 会自动带上它
      */
     public record Request(String method, String path, String remoteAddress, String authorizationHeader,
-        String tokenHeader, String queryToken, String cookieToken, String origin, String host) {
+        String tokenHeader, String queryToken, String cookieToken, String origin, String host, String scheme,
+        String fetchSite, String referer) {
+        public Request(String method, String path, String remote, String authorization, String token, String query,
+            String cookie, String origin, String host) {
+            this(method, path, remote, authorization, token, query, cookie, origin, host, null, null, null);
+        }
+
         /** 兼容没有 Cookie 的调用方。 */
         public Request(String method, String path, String remoteAddress, String authorizationHeader, String tokenHeader,
             String queryToken, String origin, String host) {
@@ -52,10 +60,8 @@ public final class AccessControl {
         if (request == null) {
             return Decision.reject(400, "无法识别的请求");
         }
-        boolean loopback = isLoopback(request.remoteAddress());
         if (properties.localOnly()) {
-            return loopback ? Decision.permit()
-                : Decision.reject(403, "当前只允许本机访问；如需远程访问请启用 pilot.security.mode=token 并配置令牌");
+            return localBoundary(request);
         }
         if (properties.token().isEmpty()) {
             // 配置了令牌模式却没有令牌，比放行更危险：直接拒绝并说明原因
@@ -64,7 +70,7 @@ public final class AccessControl {
         if (!matchesToken(request)) {
             return Decision.reject(401, "缺少或错误的访问令牌");
         }
-        if (!originAllowed(request, loopback)) {
+        if (!originAllowed(request)) {
             return Decision.reject(403, "来源 " + request.origin() + " 不在允许列表中");
         }
         return Decision.permit();
@@ -83,32 +89,94 @@ public final class AccessControl {
         return MessageDigest.isEqual(expected, actual);
     }
 
-    /**
-     * 浏览器来源校验：用于替代 cookie 会话下的 CSRF 令牌。
-     * 非浏览器客户端（没有 Origin）允许通过，因为它们仍受令牌约束。
-     */
-    private boolean originAllowed(Request request, boolean loopback) {
-        String origin = request.origin();
-        if (origin == null || origin.isBlank()) {
-            return true;
+    /** 本机边界也用于公开页面与健康检查；不能通过这些入口绕过 Host/来源检查。 */
+    public Decision localBoundary(Request request) {
+        if (!properties.localOnly()) {
+            return Decision.permit();
         }
-        String normalized = origin.strip().toLowerCase(Locale.ROOT);
-        if (loopback && isSameHost(normalized, request.host())) {
-            return true;
+        if (!isLoopback(request.remoteAddress())) {
+            return Decision.reject(403, "当前只允许本机访问；如需远程访问请启用 pilot.security.mode=token 并配置令牌");
         }
-        if (properties.allowedOrigins().stream().map(allowed -> allowed.toLowerCase(Locale.ROOT))
-            .anyMatch(normalized::equals)) {
-            return true;
+        URI host = authority(request.host());
+        if (host == null || !isLoopback(host.getHost()) && properties.allowedHosts().stream()
+            .map(AccessControl::authority).noneMatch(allowed -> sameAuthority(host, allowed))) {
+            return Decision.reject(403, "Host 不在本机允许列表中");
         }
-        return isSameHost(normalized, request.host());
+        if (!originAllowed(request)) {
+            return Decision.reject(403, "来源不在允许列表中");
+        }
+        // 没有 Origin 的浏览器 GET 仍可能由外站图片/跳转触发；CLI 不发送此浏览器标记。
+        if (request.origin() == null || request.origin().isBlank()) {
+            if (request.fetchSite() != null && !request.fetchSite().isBlank()
+                && !List.of("same-origin", "none").contains(request.fetchSite().toLowerCase(Locale.ROOT))) {
+                return Decision.reject(403, "拒绝跨站浏览器请求");
+            }
+            if (request.referer() != null && !request.referer().isBlank()) {
+                URI referer = url(request.referer(), false);
+                if (referer == null || !originMatches(request, originOf(referer))) {
+                    return Decision.reject(403, "Referer 来源不在允许列表中");
+                }
+            }
+        }
+        return Decision.permit();
     }
 
-    private static boolean isSameHost(String origin, String host) {
-        if (host == null || host.isBlank()) {
+    private boolean originAllowed(Request request) {
+        return request.origin() == null || request.origin().isBlank() || originMatches(request, request.origin());
+    }
+
+    private boolean originMatches(Request request, String value) {
+        URI origin = url(value, true);
+        if (origin == null) {
             return false;
         }
-        String hostName = host.strip().toLowerCase(Locale.ROOT);
-        return origin.equals("http://" + hostName) || origin.equals("https://" + hostName);
+        if (properties.allowedOrigins().stream().map(allowed -> url(allowed, true))
+            .anyMatch(allowed -> sameOrigin(origin, allowed))) {
+            return true;
+        }
+        URI host = authority(request.host());
+        URI target = host == null ? null
+            : url((request.scheme() == null ? origin.getScheme() : request.scheme()) + "://" + request.host(), true);
+        return sameOrigin(origin, target);
+    }
+
+    private static URI authority(String host) {
+        if (host == null || host.isBlank() || !host.equals(host.strip())) {
+            return null;
+        }
+        return url("http://" + host, true);
+    }
+
+    private static URI url(String value, boolean originOnly) {
+        try {
+            URI uri = URI.create(value);
+            if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
+                || uri.getHost() == null || uri.getRawUserInfo() != null || uri.getRawFragment() != null
+                || uri.getPort() == 0 || uri.getPort() > 65535 || originOnly
+                    && (uri.getRawQuery() != null || uri.getRawPath() != null && !uri.getRawPath().isEmpty())) {
+                return null;
+            }
+            return uri;
+        } catch (IllegalArgumentException invalid) {
+            return null;
+        }
+    }
+
+    private static String originOf(URI uri) {
+        return uri.getScheme() + "://" + uri.getRawAuthority();
+    }
+
+    private static boolean sameOrigin(URI a, URI b) {
+        return sameAuthority(a, b) && a.getScheme().equalsIgnoreCase(b.getScheme());
+    }
+
+    private static boolean sameAuthority(URI a, URI b) {
+        return a != null && b != null && a.getHost().equalsIgnoreCase(b.getHost())
+            && effectivePort(a) == effectivePort(b);
+    }
+
+    private static int effectivePort(URI uri) {
+        return uri.getPort() < 0 ? ("https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80) : uri.getPort();
     }
 
     /** 回环地址判断：IPv4 127/8、IPv6 ::1、以及未开启 DNS 反查时的 localhost 字面量。 */
@@ -124,8 +192,14 @@ public final class AccessControl {
         if (zone > 0) {
             value = value.substring(0, zone);
         }
-        return value.equals("127.0.0.1") || value.startsWith("127.") || value.equals("::1")
-            || value.equals("0:0:0:0:0:0:0:1") || value.equalsIgnoreCase("localhost");
+        if (value.equals("::1") || value.equals("0:0:0:0:0:0:0:1") || value.equalsIgnoreCase("localhost")) {
+            return true;
+        }
+        if (!value.matches("127\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}")) {
+            return false;
+        }
+        return Arrays.stream(value.split("\\.")).allMatch(part -> Integer.parseInt(part) <= 255);
+
     }
 
     private static String firstNonBlank(String... values) {

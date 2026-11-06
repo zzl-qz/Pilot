@@ -8,12 +8,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.hook.Hooks;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
@@ -54,8 +54,8 @@ class ToolExecutorHooksTest {
                 return "已写入";
             }
         });
-        return new ToolExecutor(registry, new PolicyPermissionGate(PermissionMode.AUTO), ApprovalBroker.denyAll(),
-            (call, result, latencyMs) -> {
+        return new ToolExecutor(registry, new PolicyPermissionGate(PermissionMode.AUTO),
+            (id, name, args) -> CompletableFuture.completedFuture(true), (call, result, latencyMs) -> {
             }, hooks);
     }
 
@@ -71,7 +71,6 @@ class ToolExecutorHooksTest {
         Hooks loaded = hooks("""
             {"hooks":{"PostToolUse":[{"matcher":"edit_file","command":"echo 还有 2 处告警"}]}}
             """);
-        assertTrue(loaded.run(Hooks.Event.POST_TOOL_USE, "edit_file").output().contains("告警"), "配置本身应能命中");
         ToolExecutor executor = executor(loaded);
 
         ToolExecutor.Outcome outcome =

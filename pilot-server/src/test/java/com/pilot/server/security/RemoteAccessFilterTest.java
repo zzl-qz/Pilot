@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.util.List;
 
 import jakarta.servlet.http.Cookie;
 
@@ -29,6 +30,7 @@ class RemoteAccessFilterTest {
     private MockHttpServletRequest request(String method, String path) {
         var request = new MockHttpServletRequest(method, path);
         request.setRemoteAddr("192.168.1.9");
+        request.setScheme("https");
         request.addHeader("Host", "pilot.test");
         request.addHeader("Origin", "https://pilot.test");
         return request;
@@ -113,5 +115,42 @@ class RemoteAccessFilterTest {
         var chain = new MockFilterChain();
         filter.doFilter(sse, new MockHttpServletResponse(), chain);
         assertEquals(sse, chain.getRequest());
+    }
+
+    @Test
+    void localModeRejectsForeignHeadersOnPrivateAndPublicRoutes() throws Exception {
+        var filter = filter("local", 0);
+        for (String path : List.of("/api/sessions", "/api/access/login", "/api/health", "/connect")) {
+            var foreign = request("POST", path);
+            foreign.setRemoteAddr("127.0.0.1");
+            foreign.removeHeader("Host");
+            foreign.addHeader("Host", "127.0.0.1:9999");
+            assertEquals(403, run(filter, foreign).getStatus());
+            foreign.removeHeader("Origin");
+            foreign.addHeader("Origin", "https://rebound.example");
+            foreign.removeHeader("Host");
+            foreign.addHeader("Host", "rebound.example");
+            assertEquals(403, run(filter, foreign).getStatus());
+        }
+    }
+
+    @Test
+    void localCliSameOriginAndFetchMetadataAreHandledExplicitly() throws Exception {
+        var filter = filter("local", 0);
+        var cli = new MockHttpServletRequest("GET", "/api/sessions");
+        cli.setRemoteAddr("127.0.0.1");
+        cli.addHeader("Host", "localhost:9999");
+        var chain = new MockFilterChain();
+        filter.doFilter(cli, new MockHttpServletResponse(), chain);
+        assertEquals(cli, chain.getRequest());
+        cli.addHeader("Sec-Fetch-Site", "cross-site");
+        assertEquals(403, run(filter, cli).getStatus());
+        cli.removeHeader("Sec-Fetch-Site");
+        cli.addHeader("Origin", "http://localhost:9999");
+        var sameOrigin = new MockFilterChain();
+        filter.doFilter(cli, new MockHttpServletResponse(), sameOrigin);
+        assertEquals(cli, sameOrigin.getRequest());
+        cli.addHeader("Origin", "https://evil.example");
+        assertEquals(403, run(filter, cli).getStatus());
     }
 }

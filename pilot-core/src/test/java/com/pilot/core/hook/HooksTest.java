@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -21,6 +22,15 @@ class HooksTest {
         Files.writeString(dir.resolve("settings.json"), json);
     }
 
+    /** 这些用例只验证配置解析，执行器权限由 HookPermissionsTest 覆盖。 */
+    private Hooks.Result run(Hooks hooks, Hooks.Event event, String name) {
+        return hooks.run(event, name, command -> {
+            var tool = new HookCommandTool(command, null);
+            tool.execute(Map.of());
+            return tool.result("");
+        });
+    }
+
     @Test
     void postToolUseOutputIsReturnedForMatchingTool() throws IOException {
         settings("""
@@ -30,8 +40,8 @@ class HooksTest {
             """);
         Hooks hooks = Hooks.load(workspace);
 
-        assertEquals("formatted", hooks.run(Hooks.Event.POST_TOOL_USE, "edit_file").output());
-        assertTrue(hooks.run(Hooks.Event.POST_TOOL_USE, "read_file").output().isEmpty(), "未匹配的工具不应执行钩子");
+        assertTrue(run(hooks, Hooks.Event.POST_TOOL_USE, "edit_file").output().contains("formatted"));
+        assertTrue(run(hooks, Hooks.Event.POST_TOOL_USE, "read_file").output().isEmpty(), "未匹配的工具不应执行钩子");
     }
 
     @Test
@@ -41,7 +51,7 @@ class HooksTest {
             """);
         Hooks hooks = Hooks.load(workspace);
 
-        assertEquals("any", hooks.run(Hooks.Event.POST_TOOL_USE, "run_command").output());
+        assertTrue(run(hooks, Hooks.Event.POST_TOOL_USE, "run_command").output().contains("any"));
     }
 
     @Test
@@ -53,7 +63,7 @@ class HooksTest {
             """);
         Hooks hooks = Hooks.load(workspace);
 
-        Hooks.Result blocked = hooks.run(Hooks.Event.PRE_TOOL_USE, "run_command");
+        Hooks.Result blocked = run(hooks, Hooks.Event.PRE_TOOL_USE, "run_command");
 
         assertTrue(blocked.blocked(), "配置了 blockOnFailure 时失败必须阻止工具执行");
     }
@@ -65,7 +75,7 @@ class HooksTest {
             """);
         Hooks hooks = Hooks.load(workspace);
 
-        assertFalse(hooks.run(Hooks.Event.PRE_TOOL_USE, "run_command").blocked());
+        assertFalse(run(hooks, Hooks.Event.PRE_TOOL_USE, "run_command").blocked());
     }
 
     @Test
@@ -74,7 +84,7 @@ class HooksTest {
 
         Hooks hooks = Hooks.load(workspace);
 
-        assertEquals("", hooks.run(Hooks.Event.POST_TOOL_USE, "edit_file").output());
+        assertEquals("", run(hooks, Hooks.Event.POST_TOOL_USE, "edit_file").output());
     }
 
     @Test
@@ -86,6 +96,6 @@ class HooksTest {
             """);
         Hooks hooks = Hooks.load(workspace);
 
-        assertEquals("nested", hooks.run(Hooks.Event.POST_TOOL_USE, "edit_file").output());
+        assertTrue(run(hooks, Hooks.Event.POST_TOOL_USE, "edit_file").output().contains("nested"));
     }
 }

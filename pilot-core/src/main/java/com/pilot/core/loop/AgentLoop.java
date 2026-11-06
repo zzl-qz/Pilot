@@ -26,6 +26,7 @@ import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.RunSteered;
 import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
+import com.pilot.core.exec.ExecutionBackends.Selection;
 import com.pilot.core.hook.Hooks;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelFailureKind;
@@ -218,6 +219,11 @@ public final class AgentLoop {
         this.hooks = hooks == null ? Hooks.none() : hooks;
         // 执行器在构造时已经建好，这里补挂一次，否则配置的钩子不会生效
         this.toolExecutor.withHooks(this.hooks);
+        return this;
+    }
+
+    public AgentLoop withHookExecution(Selection execution) {
+        this.toolExecutor.withHookExecution(execution);
         return this;
     }
 

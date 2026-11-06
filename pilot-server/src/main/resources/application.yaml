@@ -163,6 +163,8 @@ pilot:
     mode: ${PILOT_SECURITY_MODE:local}
     token: ${PILOT_SECURITY_TOKEN:}
     allowed-origins: ${PILOT_SECURITY_ALLOWED_ORIGINS:}
+    # local 模式默认只接受 localhost/127/8/::1；自定义代理域名显式列出 Host（含端口）。
+    allowed-hosts: ${PILOT_SECURITY_ALLOWED_HOSTS:}
     rate-limit-per-minute: ${PILOT_SECURITY_RATE_LIMIT:600}
     audit: ${PILOT_SECURITY_AUDIT:true}
   # 运行期数据保留：事件、快照、trace 默认只增不减。设成正数后每天清理一次早于 N 天的数据，

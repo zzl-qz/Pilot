@@ -9,10 +9,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-
-import com.pilot.core.tool.ProcessSupport;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -36,8 +32,8 @@ import tools.jackson.databind.ObjectMapper;
  * }
  * }</pre>
  *
- * <p>钩子命令来自配置文件而不是模型；输出默认只是回注给模型供参考，
- * 只有显式配置 {@code blockOnFailure} 才会阻止工具执行。
+ * <p>配置不是执行授权：工作区钩子必须逐条确认，所有钩子遵守当前命令权限和执行后端。
+ * PreToolUse 被拒绝或跳过时阻止原工具；已执行命令退出失败时按 {@code blockOnFailure} 处理。
  */
 public final class Hooks {
 
@@ -92,31 +88,31 @@ public final class Hooks {
     private static final int MAX_OUTPUT_CHARS = 8_000;
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private final Map<Event, List<Spec>> specs;
-    /** 钩子命令的工作目录：配置来自哪个工作区，就在哪个工作区跑。 */
-    private final Path workspace;
+    private final Map<Event, List<Command>> specs;
 
-    private Hooks(Map<Event, List<Spec>> specs, Path workspace) {
+    private Hooks(Map<Event, List<Command>> specs) {
         this.specs = Map.copyOf(specs);
-        this.workspace = workspace;
     }
 
     public static Hooks none() {
-        return new Hooks(Map.of(), null);
+        return new Hooks(Map.of());
     }
 
     /** 读取用户级与工作区级配置并合并；任何读取或格式问题都退化为「没有钩子」，不阻断运行。 */
     public static Hooks load(Path workspace) {
-        Map<Event, List<Spec>> merged = new LinkedHashMap<>();
-        Path userHome = Path.of(System.getProperty("user.home", "."));
-        merge(merged, userHome.resolve(".pilot").resolve("settings.json"));
-        if (workspace != null) {
-            merge(merged, workspace.resolve(".pilot").resolve("settings.json"));
-        }
-        return merged.isEmpty() ? none() : new Hooks(merged, workspace);
+        return load(workspace, Path.of(System.getProperty("user.home", ".")));
     }
 
-    private static void merge(Map<Event, List<Spec>> target, Path file) {
+    public static Hooks load(Path workspace, Path userHome) {
+        Map<Event, List<Command>> merged = new LinkedHashMap<>();
+        merge(merged, userHome.resolve(".pilot").resolve("settings.json"), workspace, false);
+        if (workspace != null) {
+            merge(merged, workspace.resolve(".pilot").resolve("settings.json"), workspace, true);
+        }
+        return merged.isEmpty() ? none() : new Hooks(merged);
+    }
+
+    private static void merge(Map<Event, List<Command>> target, Path file, Path workspace, boolean workspaceConfig) {
         if (!Files.isRegularFile(file)) {
             return;
         }
@@ -139,7 +135,20 @@ public final class Hooks {
             if (parsed.isEmpty()) {
                 continue;
             }
-            target.computeIfAbsent(event, key -> new ArrayList<>()).addAll(parsed);
+            Path source;
+            try {
+                source = file.toRealPath();
+            } catch (IOException invalidSource) {
+                continue;
+            }
+            boolean needsTrust =
+                workspaceConfig || workspace != null && source.startsWith(workspace.toAbsolutePath().normalize());
+            Path directory = workspace == null ? Path.of(System.getProperty("user.dir", ".")).toAbsolutePath()
+                : workspace.toAbsolutePath().normalize();
+            for (Spec spec : parsed) {
+                target.computeIfAbsent(event, key -> new ArrayList<>())
+                    .add(new Command(spec, directory, source, needsTrust));
+            }
         }
     }
 
@@ -193,69 +202,45 @@ public final class Hooks {
         }
     }
 
-    /**
-     * 按顺序执行匹配到的钩子命令。
-     *
-     * @return 合并后的输出；{@link Result#blocked()} 为 true 时调用方应跳过工具执行
-     */
+    /** 配置只描述命令；执行必须交给当前工具执行器进行权限、审批和隔离检查。 */
+    public record Command(Spec spec, Path workspace, Path source, boolean requiresTrust) {
+    }
+
+    public record CommandResult(String output, boolean ok, boolean executed) {
+    }
+
+    @FunctionalInterface
+    public interface Runner {
+        CommandResult run(Command command);
+    }
+
+    /** 没有执行上下文时拒绝执行，避免新增调用方绕过权限。 */
     public Result run(Event event, String toolName) {
-        List<Spec> matched =
-            specs.getOrDefault(event, List.of()).stream().filter(spec -> spec.matches(toolName)).toList();
+        return run(event, toolName, command -> new CommandResult("ERROR: 钩子缺少受控执行上下文，未执行", false, false));
+    }
+
+    public Result run(Event event, String toolName, Runner runner) {
+        List<Command> matched =
+            specs.getOrDefault(event, List.of()).stream().filter(command -> command.spec().matches(toolName)).toList();
         if (matched.isEmpty()) {
             return Result.NONE;
         }
-
         StringBuilder out = new StringBuilder();
-        for (Spec spec : matched) {
-            Exec executed = exec(spec, workspace);
-            // 阻止判定不依赖输出：`exit 1` 这类没有输出的钩子同样要拦住工具
-            boolean blocking = event == Event.PRE_TOOL_USE && spec.blockOnFailure() && executed.exit() != 0;
-            if (executed.output().isBlank()) {
-                if (blocking) {
-                    return new Result("退出码 " + executed.exit() + "：" + spec.command(), true);
+        for (Command command : matched) {
+            CommandResult result = runner.run(command);
+            boolean blocking =
+                event == Event.PRE_TOOL_USE && (!result.executed() || command.spec().blockOnFailure() && !result.ok());
+            if (!result.output().isBlank()) {
+                if (out.length() > 0) {
+                    out.append('\n');
                 }
-                continue;
+                out.append(result.output());
             }
-            if (out.length() > 0) {
-                out.append('\n');
-            }
-            out.append(executed.output());
             if (blocking) {
                 return new Result(clip(out.toString()), true);
             }
         }
         return new Result(clip(out.toString()), false);
-    }
-
-    /** 在工作区里跑一条钩子命令；超时、无法执行、被中断都记成失败，不抛给调用方。 */
-    private static Exec exec(Spec spec, Path workspace) {
-        ProcessBuilder builder = new ProcessBuilder(ProcessSupport.shell(spec.command()));
-        if (workspace != null) {
-            builder.directory(workspace.toFile());
-        }
-        builder.redirectErrorStream(true);
-        Process process = null;
-        try {
-            process = builder.start();
-            process.getOutputStream().close();
-            Process running = process;
-            CompletableFuture<String> output =
-                CompletableFuture.supplyAsync(() -> ProcessSupport.read(running.getInputStream()));
-            if (!process.waitFor(spec.timeoutSeconds(), TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                output.cancel(true);
-                return new Exec(-1, "钩子超时（" + spec.timeoutSeconds() + " 秒）：" + spec.command());
-            }
-            return new Exec(process.exitValue(), output.join());
-        } catch (IOException e) {
-            return new Exec(-1, "钩子无法执行 " + spec.command() + "：" + e.getMessage());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            if (process != null) {
-                process.destroyForcibly();
-            }
-            return new Exec(-1, "钩子被中断：" + spec.command());
-        }
     }
 
     /** 输出过长时截断，避免钩子日志把上下文撑爆。 */
@@ -264,6 +249,4 @@ public final class Hooks {
         return trimmed.length() <= MAX_OUTPUT_CHARS ? trimmed : trimmed.substring(0, MAX_OUTPUT_CHARS) + "\n…";
     }
 
-    private record Exec(int exit, String output) {
-    }
 }

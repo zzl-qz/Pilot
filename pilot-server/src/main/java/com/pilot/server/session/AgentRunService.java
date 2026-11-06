@@ -1355,6 +1355,7 @@ public class AgentRunService implements RunStarter {
             .withCompletionClaim(() -> claimCompletion(sessionId, handle))
             // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力
             .withHooks(com.pilot.core.hook.Hooks.load(toolFactory.resolve(workspace)))
+            .withHookExecution(toolFactory.executionSelection())
             // 重启接管后重复的写文件调用不重复落盘
             .withToolJournal(runId, journals == null ? com.pilot.core.tool.ToolCallJournal.none()
                 : journals.forWorkspace(sessionId, toolFactory.resolve(workspace)));

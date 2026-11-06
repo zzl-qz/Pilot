@@ -75,6 +75,10 @@ public class WorkspaceToolFactory {
         this.execution = execution;
     }
 
+    public Selection executionSelection() {
+        return execution;
+    }
+
     public WorkspaceToolFactory(AgentProperties properties, WebSearchProperties webSearchProperties,
         SnapshotSink snapshots, ObjectMapper mapper) {
         this.properties = properties;

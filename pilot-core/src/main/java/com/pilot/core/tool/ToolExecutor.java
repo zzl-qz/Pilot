@@ -7,8 +7,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -20,6 +22,8 @@ import com.pilot.core.event.ApprovalResolved;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.event.ToolStarted;
+import com.pilot.core.exec.ExecutionBackends;
+import com.pilot.core.hook.HookCommandTool;
 import com.pilot.core.hook.Hooks;
 import com.pilot.core.hook.Hooks.Result;
 import com.pilot.core.loop.Attachment;
@@ -83,6 +87,13 @@ public final class ToolExecutor {
     private final TraceRecorder traceRecorder;
     /** 运行时可替换：AgentLoop 先构造执行器，再按工作区挂上配置好的钩子。 */
     private volatile Hooks hooks;
+    private ExecutionBackends.Selection hookExecution;
+
+    public ToolExecutor withHookExecution(ExecutionBackends.Selection execution) {
+        this.hookExecution = execution;
+        return this;
+    }
+
     /** 工具调用幂等账本；为空表示不记录也不重放。 */
     private volatile ToolCallJournal journal = ToolCallJournal.none();
     private volatile String journalRunId;
@@ -135,6 +146,7 @@ public final class ToolExecutor {
         long startedAt = System.nanoTime();
 
         ToolResult execution;
+        AtomicBoolean invoked = new AtomicBoolean();
         Optional<Tool> tool = tools.find(call.name());
         Availability availability = tool.map(ToolRegistry::available).orElse(Availability.ready());
         ToolCallJournal.Recorded replayed = null;
@@ -148,12 +160,25 @@ public final class ToolExecutor {
             replayed = replay(call, tool.get());
             execution = replayed != null
                 ? ToolResult.text(replayed.result() + "\n\n[幂等重放] 这个调用在本次运行中已成功执行过，且文件内容仍与当时一致；" + "本次直接复用结果，没有重复写入。")
-                : executeTool(call, tool.get(), argsSummary, events, beforeStart);
+                : executeTool(call, tool.get(), argsSummary, events, beforeStart, () -> {
+                    Result pre = runHooks(Hooks.Event.PRE_TOOL_USE, call, events, beforeStart);
+                    if (pre.blocked()) {
+                        return ToolResult.text("ERROR: PreToolUse 钩子阻止了 " + call.name() + "：" + pre.output());
+                    }
+                    Supplier<ToolResult> invoke = () -> {
+                        invoked.set(true);
+                        return run(tool.get(), call);
+                    };
+                    // 仅钩子可能引入新的审批等待；普通调用不重复调用自定义权限门。
+                    return pre == Result.NONE ? runIfCurrent(beforeStart, invoke)
+                        : runWithCurrentPermission(call, tool.get(), beforeStart, invoke);
+                });
         }
         String result = execution.text();
+        String primaryResult = result;
         // PostToolUse：把格式化/lint 之类每次都要做的结果直接贴在工具结果后面，不用模型再问一次
-        if (tool.isPresent() && !blocked(result)) {
-            Result post = hooks.run(Hooks.Event.POST_TOOL_USE, call.name());
+        if (invoked.get()) {
+            Result post = runHooks(Hooks.Event.POST_TOOL_USE, call, events, beforeStart);
             if (!post.output().isBlank()) {
                 result = result + "\n\n[PostToolUse]\n" + post.output();
             }
@@ -182,7 +207,7 @@ public final class ToolExecutor {
             // Trace 写入故障不能阻断代理工具执行。
         }
         // 存档说明只是恢复元数据，不能把空结果变成可用证据。
-        OutcomeStatus status = classify(result, singleton(nativeCheck));
+        OutcomeStatus status = classify(primaryResult, singleton(nativeCheck));
         if (journalRunId != null) {
             try {
                 journal.recordObservation(journalRunId, call, result);
@@ -290,27 +315,20 @@ public final class ToolExecutor {
     }
 
     private ToolResult executeTool(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events,
-        Supplier<String> beforeStart) {
+        Supplier<String> beforeStart, Supplier<ToolResult> action) {
         PermissionResult permission = permissionGate.check(call, tool);
         if (permission.decision() == PermissionDecision.ALLOW && tool.confirm(call.args())) {
             permission = PermissionResult.ask("本次操作需要明确确认，通用 allow 规则不能替代动作授权");
         }
-        // PreToolUse：只在放行后跑，配置要求阻止时退出码非 0 就不执行工具
-        if (permission.decision() == PermissionDecision.ALLOW) {
-            Result pre = hooks.run(Hooks.Event.PRE_TOOL_USE, call.name());
-            if (pre.blocked()) {
-                return ToolResult.text("ERROR: PreToolUse 钩子阻止了 " + tool.name() + "：" + pre.output());
-            }
-        }
         return switch (permission.decision()) {
-            case ALLOW -> runIfCurrent(tool, call, beforeStart);
+            case ALLOW -> runIfCurrent(beforeStart, action);
             case DENY -> ToolResult.text("ERROR: 权限拒绝：" + permission.reason());
-            case ASK -> awaitApproval(call, tool, argsSummary, events, beforeStart);
+            case ASK -> awaitApproval(call, tool, argsSummary, events, beforeStart, action);
         };
     }
 
     private ToolResult awaitApproval(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events,
-        Supplier<String> beforeStart) {
+        Supplier<String> beforeStart, Supplier<ToolResult> action) {
         String detail = tool.approvalDescription(call.args());
         if (detail != null && !detail.isBlank()) {
             argsSummary = detail;
@@ -327,14 +345,40 @@ public final class ToolExecutor {
 
         events.accept(
             new ApprovalResolved(call.callId(), approved ? ApprovalDecision.APPROVED : ApprovalDecision.DENIED));
-        return approved ? runIfCurrent(tool, call, beforeStart)
+        return approved ? runWithCurrentPermission(call, tool, beforeStart, action)
             : ToolResult.text("ERROR: 用户拒绝执行 " + tool.name() + "，文件未修改。");
     }
 
-    private static ToolResult runIfCurrent(Tool tool, ToolCall call, Supplier<String> beforeStart) {
+    private ToolResult runWithCurrentPermission(ToolCall call, Tool tool, Supplier<String> guard,
+        Supplier<ToolResult> action) {
+        return runIfCurrent(guard, () -> {
+            PermissionResult current = permissionGate.check(call, tool);
+            return current.decision() == PermissionDecision.DENY ? ToolResult.text("ERROR: 权限拒绝：" + current.reason())
+                : action.get();
+        });
+    }
+
+    private static ToolResult runIfCurrent(Supplier<String> beforeStart, Supplier<ToolResult> action) {
         String interruption = beforeStart.get();
-        return interruption == null || interruption.isBlank() ? run(tool, call)
+        return interruption == null || interruption.isBlank() ? action.get()
             : ToolResult.text("SKIPPED: " + interruption);
+    }
+
+    private Result runHooks(Hooks.Event event, ToolCall trigger, Consumer<SessionEvent> events,
+        Supplier<String> guard) {
+        return hooks.run(event, trigger.name(), command -> {
+            var tool = new HookCommandTool(command, hookExecution);
+            var call = new ToolCall(trigger.callId() + ".hook." + UUID.randomUUID(), tool.name(),
+                Map.of("command", command.spec().command(), "source", command.source().toString(), "event",
+                    event.wireName(), "trigger_tool", trigger.name()));
+            events.accept(new ToolStarted(call.callId(), call.name(), tool.approvalDescription(call.args())));
+            long started = System.nanoTime();
+            ToolResult executed =
+                executeTool(call, tool, tool.approvalDescription(call.args()), events, guard, () -> run(tool, call));
+            events.accept(new ToolCompleted(call.callId(), ToolSupport.oneLine(executed.text(), 120),
+                (System.nanoTime() - started) / 1_000_000L));
+            return tool.result(executed.text());
+        });
     }
 
     private static ToolResult run(Tool tool, ToolCall call) {
