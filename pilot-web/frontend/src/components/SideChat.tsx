@@ -1,3 +1,6 @@
+import type { SideTranscript } from '../types/content.js';
+import type { EventEnvelope } from '../types/events.js';
+import { errorInfo } from '../lib/errors.js';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
@@ -69,7 +72,7 @@ export function SideChatPanel() {
           title="关闭并丢弃这条侧边对话（主任务不受影响）"
           aria-label="关闭并丢弃这条侧边对话"
           disabled={!activeId}
-          onClick={() => useStore.getState().closeSideChat(activeId)}
+          onClick={() => useStore.getState().closeSideChat(activeId!)}
         >×</button>
       </div>
       {items.length > 1 && (
@@ -117,11 +120,11 @@ export function SideChatPanel() {
   );
 }
 
-function SimpleSideChat({ sessionId }) {
+function SimpleSideChat({ sessionId }: { sessionId: string }) {
   const quote = useStore((state) => state.sideQuote);
-  const [thread, setThread] = useState({ messages: [], live: '' });
+  const [thread, setThread] = useState<SideTranscript>({ messages: [], live: '' });
   const draft = useStore(state => state.sideDrafts?.[sessionId] || '');
-  const setDraft = useCallback(value => useStore.getState().setSideDraft(sessionId, value), [sessionId]);
+  const setDraft = useCallback((value: string | ((current: string) => string)) => useStore.getState().setSideDraft(sessionId, value), [sessionId]);
   const alive = useRef(true);
   const pending = useRef(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -132,12 +135,12 @@ function SimpleSideChat({ sessionId }) {
   const stopRequested = useRef(false);
   const stopping = useRef(false);
   const [error, setError] = useState('');
-  const listRef = useRef(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
 
   useEffect(() => {
     let cancelled = false;
-    let source = null;
+    let source: EventSource | null = null;
     setThread({ messages: [], live: '' });
     setError('');
     stickRef.current = true;
@@ -150,10 +153,10 @@ function SimpleSideChat({ sessionId }) {
       setLoading(false);
       setThread({ messages: simplifyTranscript(events), live: '' });
       source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/events?after=${lastEventSequence(events)}`);
-      const onEvent = (message) => {
-        let event;
+      const onEvent = (message: MessageEvent<string>) => {
+        let event: EventEnvelope;
         try {
-          event = JSON.parse(message.data);
+          event = JSON.parse(message.data) as EventEnvelope;
         } catch {
           return;
         }
@@ -177,7 +180,7 @@ function SimpleSideChat({ sessionId }) {
       source.onerror = () => { if (!cancelled) setError('侧边对话连接中断，正在重连…'); };
       source.onopen = () => { if (!cancelled) setError(current => current === '侧边对话连接中断，正在重连…' ? '' : current); };
     }).catch((failure) => {
-      if (!cancelled) { setLoading(false); setError(failure.message || '读不到这条侧边对话'); }
+      if (!cancelled) { setLoading(false); setError(errorInfo(failure).message || '读不到这条侧边对话'); }
     });
     return () => {
       cancelled = true;
@@ -198,7 +201,7 @@ function SimpleSideChat({ sessionId }) {
     if (node && stickRef.current) node.scrollTop = node.scrollHeight;
   }, [thread]);
 
-  async function send(event) {
+  async function send(event: React.FormEvent) {
     event.preventDefault();
     const text = draft.trim();
     if (!text || pending.current || busy || loading) return;
@@ -217,7 +220,7 @@ function SimpleSideChat({ sessionId }) {
       }
     } catch (failure) {
       setDraft(current => current ? `${text}\n\n${current}` : text);
-      if (alive.current) { setError(failure.message || '发送失败'); setBusy(false); }
+      if (alive.current) { setError(errorInfo(failure).message || '发送失败'); setBusy(false); }
     } finally {
       pending.current = false;
       if (alive.current) setSending(false);
@@ -231,7 +234,7 @@ function SimpleSideChat({ sessionId }) {
     stopping.current = true;
     stopRequested.current = false;
     try { await api.cancelRun(runRef.current); }
-    catch (failure) { if (alive.current) setError(failure.message || '停止失败，请重试。'); }
+    catch (failure) { if (alive.current) setError(errorInfo(failure).message || '停止失败，请重试。'); }
     finally { stopping.current = false; }
   }
 
@@ -294,7 +297,7 @@ function SimpleSideChat({ sessionId }) {
 }
 
 /** 流式预览接在最后一条回复后面，避免和已落库的正文分成两段。 */
-function visibleSideMessages(thread) {
+function visibleSideMessages(thread: SideTranscript) {
   const messages = (thread.messages || []).slice();
   const live = thread.live || '';
   if (!live) return messages;
@@ -314,7 +317,7 @@ function visibleSideMessages(thread) {
  */
 export function SelectionQuote() {
   const embedded = useStore((state) => state.embeddedSessionId);
-  const [menu, setMenu] = useState(null);
+  const [menu, setMenu] = useState<{ text: string; left: number; top: number } | null>(null);
 
   useEffect(() => {
     if (embedded) {

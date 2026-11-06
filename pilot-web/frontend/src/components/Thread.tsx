@@ -1,3 +1,7 @@
+import type { ThreadRow, UserRow, TurnRow, PlanRow, CompactionRow, ResultRow, SandboxRow, ArbitrationRow, ToolRow as ToolView, Thinking, AgentView, RunUsage } from '../types/thread.js';
+import type { MessageAttachment, RequestReport } from '../types/runtime.js';
+import type { ApiResults } from '../types/api.js';
+import { errorInfo } from '../lib/errors.js';
 import { RequestList } from './RequestUsage.jsx';
 import { formatCache, totalCost } from '../lib/request-usage.js';
 import ThreadNavigator from './ThreadNavigator.jsx';
@@ -60,7 +64,7 @@ export function Thread() {
    */
   const lastScrollTop = useRef(0);
   const armed = useRef(false);
-  const earlierTimer = useRef(null);
+  const earlierTimer = useRef<ReturnType<typeof setTimeout>>();
   const navigationUntil = useRef(0);
   const beforeNavigation = useCallback(() => {
     clearTimeout(earlierTimer.current);
@@ -72,7 +76,7 @@ export function Thread() {
   }, [requestEarlierHistory]);
   useEffect(() => () => clearTimeout(earlierTimer.current), []);
 
-  const handleScroll = useCallback((event) => {
+  const handleScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const el = event.currentTarget;
     const threshold = historyPrefetchDistance(el.clientHeight);
     const toTop = el.scrollTop;
@@ -98,7 +102,7 @@ export function Thread() {
   }, [prefetchEarlier, requestLaterHistory, scheduleEarlier]);
 
   /* 已经贴在顶部时继续上滑不会再产生 scroll 事件，靠 wheel 兜住「还想看更早」的意图。 */
-  const handleWheel = useCallback((event) => {
+  const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     if (event.deltaY >= 0 || event.currentTarget.scrollTop > 0) {
       return;
     }
@@ -162,7 +166,7 @@ export function Thread() {
   );
 }
 
-function ThreadBottomButton({ visible, onJump }) {
+function ThreadBottomButton({ visible, onJump }: { visible: boolean; onJump: () => void }) {
   if (!visible) {
     return null;
   }
@@ -179,7 +183,7 @@ function ThreadBottomButton({ visible, onJump }) {
   );
 }
 
-function RetryRow({ label, onClick, disabled = false }) {
+function RetryRow({ label, onClick, disabled = false }: { label: string; onClick: () => void; disabled?: boolean }) {
   return (
     <div className="history-more-wrap">
       <button type="button" className="history-more" disabled={disabled} onClick={onClick}>{label}</button>
@@ -190,7 +194,7 @@ function RetryRow({ label, onClick, disabled = false }) {
 function EmptyState() {
   const workspace = useStore(state => state.workspace || state.draftSession?.workspace || '');
   const project = useStore(state => state.projects.find(item => item.id === state.currentProjectId));
-  const [scope, setScope] = useState(null);
+  const [scope, setScope] = useState<ApiResults['worktreeInfo'] | null>(null);
   useEffect(() => {
     let alive = true; setScope(null);
     if (workspace) api.worktreeInfo(workspace).then(info => { if (alive) setScope(info); }).catch(() => {});
@@ -251,7 +255,7 @@ function EmptyState() {
   );
 }
 
-const RowView = memo(function RowView({ row, isLast, duplicate }) {
+const RowView = memo(function RowView({ row, isLast, duplicate }: { row: ThreadRow; isLast: boolean; duplicate: boolean }) {
   switch (row.type) {
     case 'user': return <UserMessage row={row} />;
     case 'turn': return <Turn row={row} isLast={isLast} />;
@@ -266,7 +270,7 @@ const RowView = memo(function RowView({ row, isLast, duplicate }) {
 
 /* ---------- 用户消息 ---------- */
 
-function UserMessage({ row }) {
+function UserMessage({ row }: { row: UserRow }) {
   const text = row.text || '';
   const [open, setOpen] = useState(false);
   const parts = splitAttachmentMarkers(text);
@@ -301,7 +305,7 @@ function UserMessage({ row }) {
           aria-label="回退或另开分支"
           data-tip="分支"
           title="回退或另开分支"
-          onClick={() => useStore.getState().openCheckpoint(row.sequence)}
+          onClick={() => useStore.getState().openCheckpoint(row.sequence!)}
         >
           <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <circle cx="4.5" cy="3.6" r="1.7" />
@@ -339,27 +343,25 @@ function UserMessage({ row }) {
   );
 }
 
-function beginEdit(row) {
+function beginEdit(row: UserRow) {
   if (row.attachments?.length) {
     useStore.getState().showNotice('带附件的历史消息请作为新消息补充要求，原附件仍保留在对话中。');
     return;
   }
   const composerApi = useStore.getState().composerApi;
   const plain = row.text || '';
-  if (composerApi?.getText().trim() || composerApi?.attachmentIds().length) {
+  if (composerApi?.getText().trim() || composerApi?.attachmentIds?.().length) {
     useStore.getState().showNotice('输入框还有未发送的草稿，请先处理草稿再编辑历史消息。');
     composerApi?.focus(); return;
   }
   composerApi?.setText(plain);
-  for (const file of row.attachments || []) {
-    composerApi?.insertAttachments([{ id: file.id || file.name, name: file.name, kind: isImageAttachment(file) ? 'image' : 'file', url: attachmentUrl(useStore.getState().sessionId, file) }]);
-  }
+
   composerApi?.focus();
   useStore.setState((draft) => { draft._editTarget = row.sequence ?? null; });
 }
 
 /** 消息正文：文本 + 图片缩略 + 文件卡（与旧版 layoutMessageParts 顺序一致）。 */
-function renderMessageBody(body, files = [], images = [], imagePositions = []) {
+function renderMessageBody(body: string, files: MessageAttachment[] = [], images: MessageAttachment[] = [], imagePositions: number[] = []) {
   return layoutMessageParts(body, images, files, imagePositions).map((part, index) => {
     if (part.type === 'text') return <span key={index}>{part.text}</span>;
     if (part.type === 'image') return <ImageThumb key={index} image={part.image} />;
@@ -367,7 +369,7 @@ function renderMessageBody(body, files = [], images = [], imagePositions = []) {
   });
 }
 
-function ImageThumb({ image }) {
+function ImageThumb({ image }: { image: MessageAttachment }) {
   const sessionId = useStore((state) => state.sessionId);
   return (
     <span className="bubble-image">
@@ -376,7 +378,7 @@ function ImageThumb({ image }) {
   );
 }
 
-function FileCard({ file }) {
+function FileCard({ file }: { file: MessageAttachment }) {
   const sessionId = useStore((state) => state.sessionId);
   const url = attachmentUrl(sessionId, file);
   if (!url) return <span className="file-card" title={file.name}><span className="file-card-name">{file.name || file.id}</span></span>;
@@ -390,7 +392,7 @@ function FileCard({ file }) {
 
 /* ---------- 回合（操作组 + 思考 + 回复 + 统计） ---------- */
 
-const Turn = memo(function Turn({ row, isLast }) {
+const Turn = memo(function Turn({ row, isLast }: { row: TurnRow; isLast: boolean }) {
   // 正文 = 已落库的 delta + 还在路上的 preview；两者不能都拼进 text（会重复）
   const replyText = `${row.reply.text || ''}${row.reply.preview || ''}`;
   const running = useStore((state) => state.running);
@@ -453,10 +455,10 @@ const Turn = memo(function Turn({ row, isLast }) {
  * 操作组单独 memo：流式输出时只有 reply 在变，tools 数组引用不变，这一整块（可能几十行）
  * 直接跳过比对。旧实现靠命令式只改几个节点，React 这边靠这个切分拿到同样的代价。
  */
-const ToolGroup = memo(function ToolGroup({ tools }) {
+const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
   const running = tools.filter((tool) => tool.status === 'run').length;
   const needsAttention = tools.some(tool => ['error', 'wait', 'interrupted'].includes(tool.status));
-  const ref = useRef(null);
+  const ref = useRef<HTMLDetailsElement>(null);
   // 只在「是否还在跑」变化时改 open，别把用户手动折叠的状态每帧冲掉
   useEffect(() => {
     if (ref.current) {
@@ -483,16 +485,16 @@ const ToolGroup = memo(function ToolGroup({ tools }) {
 });
 
 /** 「计划 1 · 命令 3 · 读取 2」：按首次出现顺序，带次数（旧版 refreshToolGroup 的文案）。 */
-function toolCounts(tools) {
-  const order = [];
-  const counts = new Map();
+function toolCounts(tools: ToolView[]) {
+  const order: string[] = [];
+  const counts = new Map<string, number>();
   for (const tool of tools) {
     const label = toolLabel(tool.name);
     if (!counts.has(label)) {
       counts.set(label, 0);
       order.push(label);
     }
-    counts.set(label, counts.get(label) + 1);
+    counts.set(label, (counts.get(label) || 0) + 1);
   }
   return order.map((label) => `${label} ${counts.get(label)}`).join(' · ');
 }
@@ -503,7 +505,7 @@ function toolCounts(tools) {
  * <p>跑得久的工具（大目录 grep、npm test）每秒刷一次「执行中 Ns」——光一个不动的
  * 转圈会被当成卡死，用户只能干等。
  */
-const ToolRow = memo(function ToolRow({ tool }) {
+const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
   const body = String(tool.body || '').trim();
   const [open, setOpen] = useState(['error', 'wait', 'interrupted'].includes(tool.status));
   useEffect(() => { if (['error', 'wait', 'interrupted'].includes(tool.status)) setOpen(true); }, [tool.status]);
@@ -535,10 +537,10 @@ const ToolRow = memo(function ToolRow({ tool }) {
  * 进行中的回合：和 Cursor、Codex 一样，命令收成一行，思考原文放在卡片里。
  * 点「正在执行」能展开每条命令；这一轮结束后改回折叠摘要。
  */
-const LiveWork = memo(function LiveWork({ tools, thinking }) {
+const LiveWork = memo(function LiveWork({ tools, thinking }: { tools: ToolView[]; thinking: Thinking | null }) {
   const runningTools = tools.filter((tool) => tool.status === 'run');
   const live = Boolean(thinking?.live);
-  const cardRef = useRef(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   useSecondTick(live || runningTools.length > 0);
   useEffect(() => {
     const card = cardRef.current;
@@ -578,9 +580,9 @@ const LiveWork = memo(function LiveWork({ tools, thinking }) {
 });
 
 /** 思考块：思考中自动展开并滚到底，正文出来就收起（旧版 settleReasoning）；摘要带秒数和当前动作。 */
-const ThinkingBlock = memo(function ThinkingBlock({ thinking }) {
-  const ref = useRef(null);
-  const bodyRef = useRef(null);
+const ThinkingBlock = memo(function ThinkingBlock({ thinking }: { thinking: Thinking }) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const live = Boolean(thinking.live);
   useSecondTick(live);
   useEffect(() => {
@@ -605,7 +607,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ thinking }) {
 });
 
 /** 每秒重渲染一次，给计时类文案（思考中 Ns、运行耗时）用。 */
-function useSecondTick(active) {
+function useSecondTick(active: boolean) {
   const [, bump] = useState(0);
   useEffect(() => {
     if (!active) {
@@ -616,14 +618,14 @@ function useSecondTick(active) {
   }, [active]);
 }
 
-function elapsedSeconds(startedAt, finishedAt) {
+function elapsedSeconds(startedAt?: number, finishedAt?: number | null) {
   if (!startedAt) {
     return 0;
   }
   return Math.max(0, Math.round(((finishedAt || Date.now()) - startedAt) / 1000));
 }
 
-const AgentGroup = memo(function AgentGroup({ agents }) {
+const AgentGroup = memo(function AgentGroup({ agents }: { agents: Record<string, AgentView> }) {
   const list = Object.values(agents || {});
   if (!list.length) return null;
   const summary = summarizeAgents(list);
@@ -633,7 +635,7 @@ const AgentGroup = memo(function AgentGroup({ agents }) {
   </details>;
 });
 
-const AgentCard = memo(function AgentCard({ agent }) {
+const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
   useSecondTick(agent.status === 'running');
   // 回传正文末尾的 <subagent_result> 是给父模型合并用的清单，不该原样糊在界面上
   const split = splitSubagentResult(agent.result);
@@ -681,9 +683,9 @@ const AgentCard = memo(function AgentCard({ agent }) {
  * 复制按钮：图标点一下变对勾、1.4 秒后复原（旧版 copyControl 的手感）。
  * 剪贴板写入走 lib/clipboard 的双通道，内嵌 webview 里也能复制上。
  */
-const CopyControl = memo(function CopyControl({ text, label = '复制', tip = '复制' }) {
+const CopyControl = memo(function CopyControl({ text, label = '复制', tip = '复制' }: { text: string; label?: string; tip?: string }) {
   const [done, setDone] = useState(false);
-  const timer = useRef(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => () => clearTimeout(timer.current), []);
   async function copy() {
     const ok = await writeClipboard(text);
@@ -718,7 +720,7 @@ const CopyControl = memo(function CopyControl({ text, label = '复制', tip = '�
   );
 });
 
-const TurnStats = memo(function TurnStats({ stats, reports, agentCount }) {
+const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stats: RunUsage | null; reports?: RequestReport[]; agentCount: number }) {
   const running = Boolean(stats?.startedAt) && !stats?.finishedAt;
   useSecondTick(running);
   if (!stats) {
@@ -737,23 +739,23 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }) {
       {elapsed != null && <span className="turn-stat"><span>耗时</span><b>{elapsed}s</b></span>}
       <span className="turn-stat"><span>模型请求</span><b>{stats.modelRequests ?? '—'} 次</b></span>
       {agentCount > 0 && <span className="turn-stat"><span>子智能体</span><b>{agentCount} 个</b></span>}
-      <span className="turn-stat" title={stats.inputTokens ?? ''}><span>输入</span><b>{mark}{formatCount(stats.inputTokens)}</b></span>
-      <span className="turn-stat" title={stats.outputTokens ?? ''}><span>输出</span><b>{mark}{formatCount(stats.outputTokens)}</b></span>
+      <span className="turn-stat" title={String(stats.inputTokens ?? '')}><span>输入</span><b>{mark}{formatCount(stats.inputTokens)}</b></span>
+      <span className="turn-stat" title={String(stats.outputTokens ?? '')}><span>输出</span><b>{mark}{formatCount(stats.outputTokens)}</b></span>
       <span className="turn-stat" title={`命中缓存 ${formatCount(stats.cachedInputTokens)} / 总输入 ${formatCount(stats.inputTokens)}`}>
         <span>缓存命中</span><b>{cacheLabel}</b>
       </span>
-      <span className={`turn-stat is-context${crowded ? ' is-hot' : ''}`} title={stats.contextTokens ?? ''}>
+      <span className={`turn-stat is-context${crowded ? ' is-hot' : ''}`} title={String(stats.contextTokens ?? '')}>
         <span>上下文</span><b>{formatCount(stats.contextTokens)}</b>
       </span>
       <span className="turn-stat"><span>费用估算</span><b>{totalCost(stats.details)}</b></span>
       <span className="turn-stat-note">{stats.details ? `含压缩与子代理 · 可计价 ${stats.details.pricedRequests}/${stats.details.requests} 次` : '旧记录未提供完整缓存与计价数据'}</span>
-    </div>{reports?.length > 0 && <RequestList reports={reports} />}</details>
+    </div>{(reports?.length || 0) > 0 && <RequestList reports={reports} />}</details>
   );
 });
 
 /* ---------- 卡片 ---------- */
 
-const PlanCard = memo(function PlanCard({ row }) {
+const PlanCard = memo(function PlanCard({ row }: { row: PlanRow }) {
   const items = (row.items || []).filter(item => (item.step || item.text || '').trim());
   if (!items.length) return null;
   const done = items.filter((item) => item.status === 'completed' || item.status === 'done').length;
@@ -779,8 +781,8 @@ const PlanCard = memo(function PlanCard({ row }) {
   );
 });
 
-function planStatusLabel(status) {
-  const labels = {
+function planStatusLabel(status: string) {
+  const labels: Record<string, string> = {
     completed: '已完成', done: '已完成',
     in_progress: '进行中', doing: '进行中', running: '进行中',
     failed: '受阻', pending: '等待'
@@ -788,7 +790,7 @@ function planStatusLabel(status) {
   return labels[status] || '等待';
 }
 
-function CompactionCard({ row }) {
+function CompactionCard({ row }: { row: CompactionRow }) {
   return (
     <details className="ctx-card">
       <summary className="ctx-head">
@@ -799,7 +801,7 @@ function CompactionCard({ row }) {
   );
 }
 
-function ResultCard({ row, duplicate }) {
+function ResultCard({ row, duplicate }: { row: ResultRow; duplicate: boolean }) {
   const rollbackRun = useStore((state) => state.rollbackRun);
   const continueRun = useStore((state) => state.continueRun);
   return (
@@ -846,11 +848,11 @@ function ResultCard({ row, duplicate }) {
   );
 }
 
-function SandboxCard({ row }) {
+function SandboxCard({ row }: { row: SandboxRow }) {
   const [decision, setDecision] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | false>(false);
   /** 产物清单与校验结论：让「接受」不是盲批。 */
-  const [report, setReport] = useState(null);
+  const [report, setReport] = useState<ApiResults['sandboxManifest'] | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [loadError, setLoadError] = useState('');
   const sessionId = useStore((state) => state.sessionId);
@@ -864,12 +866,12 @@ function SandboxCard({ row }) {
     }
     let alive = true;
     api.sandboxManifest(sessionId, row.sandboxId)
-      .then((data) => { if (alive) { setReport(data); setDecision(({accepted:'已接受',rejected:'已拒绝',closed:'已处理',empty:'没有待处理变更'})[data.disposition] || ''); } })
-      .catch((error) => { if (alive) setLoadError(error.message || '读取候选版本失败'); });
+      .then((data) => { if (alive && data) { setReport(data); setDecision(({accepted:'已接受',rejected:'已拒绝',closed:'已处理',empty:'没有待处理变更'} as Record<string, string>)[data.disposition] || ''); } })
+      .catch((error) => { if (alive) setLoadError(errorInfo(error).message || '读取候选版本失败'); });
     return () => { alive = false; };
   }, [row.sandboxId, sessionId, refresh]);
 
-  const decide = async (action) => {
+  const decide = async (action: string) => {
     setBusy(action);
     try {
       const ok = await useStore.getState().decideSandbox(row.sandboxId, action, report?.reviewHash);
@@ -889,7 +891,7 @@ function SandboxCard({ row }) {
       <pre className="sandbox-body">{row.detail}</pre>
       {report && (
         <p className={`sandbox-verify${verified ? ' is-ok' : ' is-warn'}`}>
-          {verified ? '校验通过' : (verification ? `校验：${({passed:'通过',failed:'失败',skipped:'未执行',missing:'尚未校验'})[String(verification.status).toLowerCase()] || '状态未知'}${verification.reason ? ` · ${verification.reason}` : ''}` : '尚未校验')}
+          {verified ? '校验通过' : (verification ? `校验：${({passed:'通过',failed:'失败',skipped:'未执行',missing:'尚未校验'} as Record<string, string>)[String(verification.status).toLowerCase()] || '状态未知'}${verification.reason ? ` · ${verification.reason}` : ''}` : '尚未校验')}
           {` · 产物 ${files} 个文件`}
           {(report.dependencies || []).length > 0 && ` · 依赖 ${report.dependencies.length} 个`}
         </p>
@@ -898,14 +900,14 @@ function SandboxCard({ row }) {
       {report?.recovery && <p role="status" className="sandbox-verify is-warn">
         上次变更写入中断，需先恢复。恢复遇到外部修改时会停止并保留备份。
         {report.recovery.sessionId === sessionId && report.recovery.sandboxId === row.sandboxId
-          ? <button type="button" className="btn btn-sm" disabled={busy} onClick={() => decide('recover')}>恢复写入状态</button>
+          ? <button type="button" className="btn btn-sm" disabled={Boolean(busy)} onClick={() => decide('recover')}>恢复写入状态</button>
           : `请先处理 ${report.recovery.sandboxId} 的恢复。`}
       </p>}
       {row.sandboxId && (
         <div className="sandbox-actions">
           <span className="sandbox-label mono">{row.sandboxId}</span>
-          <button type="button" className="btn btn-primary btn-sm" disabled={busy || Boolean(decision) || !report?.reviewHash || Boolean(report?.recovery)} onClick={() => decide('accept')}>{busy === 'accept' ? '校验并写入中…' : '接受变更'}</button>
-          <button type="button" className="btn btn-sm" disabled={busy || Boolean(decision) || !report?.reviewHash || Boolean(report?.recovery)} onClick={() => decide('reject')}>拒绝</button>
+          <button type="button" className="btn btn-primary btn-sm" disabled={Boolean(busy) || Boolean(decision) || !report?.reviewHash || Boolean(report?.recovery)} onClick={() => decide('accept')}>{busy === 'accept' ? '校验并写入中…' : '接受变更'}</button>
+          <button type="button" className="btn btn-sm" disabled={Boolean(busy) || Boolean(decision) || !report?.reviewHash || Boolean(report?.recovery)} onClick={() => decide('reject')}>拒绝</button>
           {decision && <span className="sandbox-decision">{decision}</span>}
         </div>
       )}
@@ -913,7 +915,7 @@ function SandboxCard({ row }) {
   );
 }
 
-function ArbitrationCard({ row }) {
+function ArbitrationCard({ row }: { row: ArbitrationRow }) {
   const resolve = useStore((state) => state.resolveArbitration);
   return (
     <aside className={`arb-card${row.resolved ? ' is-resolved' : ''}`} data-arb-id={row.arbitrationId}>
@@ -923,12 +925,12 @@ function ArbitrationCard({ row }) {
         <div className="arb-options">
           {(row.options || []).map((option) => (
             <button
-              key={option.id || option}
+              key={typeof option === 'string' ? option : option.id}
               type="button"
               className="arb-option"
-              onClick={() => resolve(row.arbitrationId, option.id || option)}
+              onClick={() => resolve(row.arbitrationId, typeof option === 'string' ? option : option.id)}
             >
-              {option.label || option}
+              {typeof option === 'string' ? option : option.label}
             </button>
           ))}
         </div>
@@ -939,6 +941,6 @@ function ArbitrationCard({ row }) {
 
 export { formatTime };
 
-function StatusMark({failed = false}) {
+function StatusMark({failed = false}: { failed?: boolean }) {
   return <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d={failed ? 'M4 4l8 8M12 4l-8 8' : 'M3 8l3 3 7-7'} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>;
 }

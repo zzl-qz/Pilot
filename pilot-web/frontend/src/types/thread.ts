@@ -3,7 +3,7 @@ import type { MessageAttachment, ContextStatus, RequestReport, AgentSummary } fr
 import type { ChangeFile } from './core.js';
 import type * as S from './server.js';
 
-export interface PlanItem { step: string; status: string }
+export interface PlanItem { text?: string; step: string; status: string }
 export interface ToolRow { callId: string; name: string; args: string; status: string; meta: string; body: string; startedAt?: number; finishedAt?: number; agentId: string | null }
 export interface AgentView extends AgentSummary { name: string; task: string; status: string; startedAt: number; finishedAt?: number; tools: ToolRow[]; result: string }
 export interface RunUsage {
@@ -29,7 +29,7 @@ export interface ResultRow extends RowBase { type: 'result'; tone: string; title
 export interface CompactionRow extends RowBase { type: 'compaction'; coveredMessages: number; charactersBefore: number; charactersAfter: number; summary: string }
 export interface PlanRow extends RowBase { type: 'plan'; items: PlanItem[] }
 export interface SandboxRow extends RowBase { type: 'sandbox'; sandboxId: string; title: string; detail: string }
-export interface ArbitrationRow extends RowBase { type: 'arb'; arbitrationId: string; title: string; detail: string; options: string[]; resolved: boolean; resolution?: string | null }
+export interface ArbitrationRow extends RowBase { type: 'arb'; arbitrationId: string; title: string; detail: string; options: (string | { id: string; label: string })[]; resolved: boolean; resolution?: string | null }
 export type ThreadRow = UserRow | TurnRow | ResultRow | CompactionRow | PlanRow | SandboxRow | ArbitrationRow;
 export interface ThreadHistory { hasMore: boolean; hasNewer: boolean; loading: boolean; forwardError: boolean; error: boolean; pageSize: number; loadId: number }
 export interface ThreadState { rows: ThreadRow[]; windowEvents: EventEnvelope[]; cursor: number; replaying: boolean; history: ThreadHistory; activityCount: number }

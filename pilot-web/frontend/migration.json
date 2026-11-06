@@ -328,8 +328,13 @@
         "审阅操作",
         "窄屏/键盘/过期响应"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T08-37-02-032Z/report.json",
+          "result": "373 项前端单元、41 项桌面单元、严格类型检查、构建和 navigation/composer/markdown/thread-scroll/interaction/p1/sandbox-recovery/request-usage/agent-usage 九套 Web/Electron 回归通过。覆盖流式滚动/分页书签定位/存储失败/会话隔离、完整历史搜索与失效响应、侧边输入/引用/失败保留/停止竞态、沙箱恢复与审阅冲突；各卡片使用明确的可辨识联合类型，保留历史选项对象和附件字段兼容。"
+        }
+      ]
     },
     {
       "batch": 12,

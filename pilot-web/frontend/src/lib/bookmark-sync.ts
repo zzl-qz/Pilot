@@ -3,8 +3,8 @@ interface LocalBookmark { sequence: number; title: string; preview?: string; key
 export interface BookmarkView extends MessageLibraryBookmark { id: string }
 interface BookmarkSyncResult { values: BookmarkView[]; skipped: number[] }
 import { api } from '../api.js';
-const key = (session: string) => `pilot.message-bookmarks:${session}`;
-export function localBookmarks(session: string): LocalBookmark[] {
+const key = (session: string | null) => `pilot.message-bookmarks:${session}`;
+export function localBookmarks(session: string | null): LocalBookmark[] {
   try { const values = JSON.parse(localStorage.getItem(key(session)) || '[]'); return Array.isArray(values) ? values.filter((e: LocalBookmark) => Number.isSafeInteger(e?.sequence) && typeof e.title === 'string').slice(0, 500) : []; }
   catch { return []; }
 }

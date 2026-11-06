@@ -18,7 +18,7 @@ export interface EventPayloads {
   'run.cancelled': S.RunCancelled;
   'run.completed': S.RunCompleted;
   'run.continued': S.RunContinued;
-  'run.failed': S.RunFailed & { error?: string };
+  'run.failed': S.RunFailed & { error?: string; reason?: string };
   'run.retrying': S.RunRetrying & { until?: number };
   'run.started': S.RunStarted;
   'run.steered': S.RunSteered & { message?: string };

@@ -1,3 +1,5 @@
+import type { MessageLibraryPage, MessageLibraryHit } from '../types/server.js';
+import { errorInfo } from '../lib/errors.js';
 import { restoreFocus } from '../lib/interaction.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
@@ -7,32 +9,33 @@ import { DialogHeader } from './DialogHeader.jsx';
 import { migrateLocalBookmarks, bookmarksChanged } from '../lib/bookmark-sync.js';
 export default function MessageSearch() { const open = useStore(s => s.ui.searchOpen); return open ? <Dialog /> : null; }
 function Dialog() {
-  const ref = useRef(null), input = useRef(null), revision = useRef(0), alive = useRef(true);
+  const ref = useRef<HTMLDialogElement>(null), input = useRef<HTMLInputElement>(null), revision = useRef(0), alive = useRef(true);
   const session = useStore(s => s.sessionId);
   const [migration, setMigration] = useState(''), [syncing, setSyncing] = useState(false);
   const [query, setQuery] = useState(''), [scope, setScope] = useState('all'), [saved, setSaved] = useState(false);
-  const [page, setPage] = useState({ items: [], hasMore: false, nextOffset: 0 }), [error, setError] = useState(''), [busy, setBusy] = useState(false), [searched, setSearched] = useState(false);
+  const [page, setPage] = useState<MessageLibraryPage>({ items: [], hasMore: false, nextOffset: 0 }), [error, setError] = useState(''), [busy, setBusy] = useState(false), [searched, setSearched] = useState(false);
   const close = () => useStore.getState().setUi({ searchOpen: false });
-  useEffect(() => { const previous = document.activeElement; alive.current = true; ref.current.showModal(); input.current.focus(); migrate(); return () => { alive.current = false; revision.current++; restoreFocus(previous); }; }, []);
+  useEffect(() => { const previous = document.activeElement; alive.current = true; ref.current?.showModal(); input.current?.focus(); migrate(); return () => { alive.current = false; revision.current++; restoreFocus(previous); }; }, []);
   async function migrate() {
     setSyncing(true);
     try { const data = await migrateLocalBookmarks(); if (alive.current) setMigration(data.failed.length ? `${data.failed.length} 个对话的旧书签同步失败，备份仍在此设备，可重试。` : data.count ? `已迁移 ${data.count} 个对话的旧书签。` : '旧书签已同步。'); }
-    catch (e) { if (alive.current) setMigration(e.message); }
+    catch (e) { if (alive.current) setMigration(errorInfo(e).message || '操作失败'); }
     finally { if (alive.current) setSyncing(false); }
   }
   async function search(more = false) {
     const token = ++revision.current; setBusy(true); setError(''); setSearched(true);
-    try { const data = await api.searchMessages({ q: query, sessionId: scope === 'current' ? session : '', saved, offset: more ? page.nextOffset : 0 });
+    try { const data = await api.searchMessages({ q: query, sessionId: scope === 'current' ? session || '' : '', saved, offset: more ? page.nextOffset : 0 });
+      if (!data) throw new Error('搜索返回空响应，请重试');
       if (alive.current && token === revision.current) setPage(old => ({ ...data, items: more ? [...old.items, ...data.items] : data.items }));
-    } catch (e) { if (alive.current && token === revision.current) setError(e.message); }
+    } catch (e) { if (alive.current && token === revision.current) setError(errorInfo(e).message || '操作失败'); }
     finally { if (alive.current && token === revision.current) setBusy(false); }
   }
-  function change(fn) { revision.current++; setBusy(false); setSearched(false); setPage({ items: [], hasMore: false, nextOffset: 0 }); fn(); }
-  async function open(hit) {
+  function change(fn: () => void) { revision.current++; setBusy(false); setSearched(false); setPage({ items: [], hasMore: false, nextOffset: 0 }); fn(); }
+  async function open(hit: MessageLibraryHit) {
     setBusy(true); setError('');
     try { const activated = await useStore.getState().activate(hit.sessionId); if (activated === false) throw new Error('无法打开该对话，请刷新搜索结果后重试。'); if (useStore.getState().sessionId !== hit.sessionId) throw new Error('对话已变化，请重新选择');
       useStore.getState().setUi({ navigationTarget: { sessionId: hit.sessionId, sequence: hit.anchor }, searchOpen: false });
-    } catch (e) { if (alive.current) setError(e.message); } finally { if (alive.current) setBusy(false); }
+    } catch (e) { if (alive.current) setError(errorInfo(e).message || '操作失败'); } finally { if (alive.current) setBusy(false); }
   }
   return <dialog className="schedule-dialog search-dialog" ref={ref} aria-labelledby="message-search-title" onCancel={e => { e.preventDefault(); close(); }} onKeyDown={e => e.stopPropagation()}>
     <DialogHeader id="message-search-title" title="搜索消息与书签" subtitle="Pilot / 对话资料" closeLabel="关闭消息搜索" onClose={close} />
@@ -42,7 +45,7 @@ function Dialog() {
     <div className="search-sync"><small role="status">{syncing ? '正在同步本机旧书签…' : migration}</small><button className="btn" disabled={syncing} onClick={migrate}>同步旧书签</button></div>
     {error && <p className="schedule-error" role="alert">{error}</p>}{busy && <p role="status">正在处理…</p>}
     {searched && !busy && !error && !page.items.length && <p>没有匹配的消息，请更换关键词或搜索范围。</p>}
-    <section className="search-results" aria-label="搜索结果">{page.items.map(hit => <article key={`${hit.sessionId}:${hit.sequence}`}><button className="search-hit" disabled={busy} onClick={() => open(hit)}><strong>{hit.title} · {hit.role === 'assistant' ? '助手' : '你'}</strong><p>{hit.text}</p><small>打开所在轮次 · 消息 #{hit.sequence}</small></button><button className="btn" disabled={busy} onClick={async () => { setBusy(true); try { await api.saveBookmark(hit.sessionId, hit.anchor); bookmarksChanged(hit.sessionId); useStore.getState().showNotice('已收藏所在轮次'); } catch (e) { setError(e.message); } finally { setBusy(false); } }}>收藏所在轮次</button></article>)}</section>
+    <section className="search-results" aria-label="搜索结果">{page.items.map(hit => <article key={`${hit.sessionId}:${hit.sequence}`}><button className="search-hit" disabled={busy} onClick={() => open(hit)}><strong>{hit.title} · {hit.role === 'assistant' ? '助手' : '你'}</strong><p>{hit.text}</p><small>打开所在轮次 · 消息 #{hit.sequence}</small></button><button className="btn" disabled={busy} onClick={async () => { setBusy(true); try { await api.saveBookmark(hit.sessionId, hit.anchor); bookmarksChanged(hit.sessionId); useStore.getState().showNotice('已收藏所在轮次'); } catch (e) { setError(errorInfo(e).message || '操作失败'); } finally { setBusy(false); } }}>收藏所在轮次</button></article>)}</section>
     {page.hasMore && <button className="btn" disabled={busy} onClick={() => search(true)}>加载更多结果</button>}
     </div>
   </dialog>;

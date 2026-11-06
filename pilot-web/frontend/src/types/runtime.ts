@@ -63,6 +63,7 @@ export interface CommandLogChunk {
   eof?: boolean;
 }
 export interface MessageAttachment {
+  filename?: string;
   id?: string;
   name?: string;
   mimeType?: string;

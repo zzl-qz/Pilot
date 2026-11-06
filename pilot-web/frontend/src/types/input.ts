@@ -43,7 +43,7 @@ export interface VoiceOptions {
 }
 export interface PhaseRow {
   type: string;
-  detail?: string;
+  detail?: string | null;
   reply?: { text?: string; live?: boolean };
   tools?: { status?: string; name?: string; args?: string }[];
 }

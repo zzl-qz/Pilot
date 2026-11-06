@@ -1,3 +1,5 @@
+import type { ChangeFile } from '../types/core.js';
+type ActionDialog = { type: 'branch' | 'undo'; files: ChangeFile[]; partial?: boolean };
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '../store.js';
@@ -5,30 +7,30 @@ import { Icon } from './Icon.jsx';
 import { Modal } from './Modals.jsx';
 
 /** 审阅时只露出常用操作；Git 操作按需打开，不挤占文件统计。 */
-export function ReviewActions({ files, isGit, canUndo, loading, restoring, onRefresh }) {
+export function ReviewActions({ files, isGit, canUndo, loading, restoring, onRefresh }: { files: ChangeFile[]; isGit: boolean; canUndo: boolean; loading: boolean; restoring: boolean; onRefresh: () => void }) {
   const running = useStore(state => state.running);
   const [open, setOpen] = useState(false);
-  const [dialog, setDialog] = useState(null);
+  const [dialog, setDialog] = useState<ActionDialog | null>(null);
   const [branch, setBranch] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const root = useRef(null);
-  const trigger = useRef(null);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const pending = useRef(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
     if (!open) return;
-    const items = () => [...root.current.querySelectorAll('[role="menuitem"]:not(:disabled)')];
+    const items = () => [...(root.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') || [])];
     items()[0]?.focus();
-    const outside = event => { if (!root.current.contains(event.target)) setOpen(false); };
-    const key = event => {
+    const outside = (event: Event) => { if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false); };
+    const key = (event: KeyboardEvent) => {
       if (event.isComposing) return;
       if (event.key === 'Escape') {
         event.preventDefault(); event.stopImmediatePropagation(); setOpen(false); trigger.current?.focus();
       } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
         event.preventDefault(); event.stopImmediatePropagation();
-        const options = items(), index = options.indexOf(document.activeElement);
+        const options = items(), index = options.findIndex(option => option === document.activeElement);
         const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
         options[next]?.focus();
       } else if (event.key === 'Tab') setOpen(false);
@@ -42,23 +44,23 @@ export function ReviewActions({ files, isGit, canUndo, loading, restoring, onRef
       window.removeEventListener('keydown', key, true);
     };
   }, [open]);
-  const show = type => {
+  const show = (type: ActionDialog['type']) => {
     setOpen(false); setError('');
     // 固定确认时可见的文件，避免撤销刷新后新出现、尚未审阅的文件。
     setDialog({ type, files: files.map(file => ({ ...file })) });
     trigger.current?.focus();
   };
   const close = () => { if (!pending.current) setDialog(null); };
-  const submit = async event => {
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (pending.current || restoring || running) return;
+    if (!dialog || pending.current || restoring || running) return;
     if (dialog.type === 'branch' && !branch.trim()) return;
     pending.current = true; setBusy(true); setError('');
     try {
       if (dialog.type === 'branch') {
         const result = await useStore.getState().createBranch(branch.trim());
         if (!mounted.current) return;
-        if (!result.ok) { setError(result.error); return; }
+        if (!result.ok) { setError(result.error || '创建分支失败'); return; }
         setBranch('');
       } else {
         const result = await useStore.getState().restoreChanges(dialog.files.map(file => file.path), false);
@@ -66,7 +68,7 @@ export function ReviewActions({ files, isGit, canUndo, loading, restoring, onRef
         if (!result || result.error || result.failed?.length) {
           setError(result?.error || (result?.failed?.length ? `${result.failed.length} 个文件未能撤销：${result.failed[0].path}（${result.failed[0].reason}）。请关闭弹窗，检查剩余改动后重试。` : '撤销失败，请检查连接后重试。'));
           // 部分成功后重新打开确认，不能重复删除已撤销后又被修改的文件。
-          if (result?.failed?.length) setDialog(current => ({ ...current, partial: true }));
+          if (result?.failed?.length) setDialog(current => current && ({ ...current, partial: true }));
           return;
         }
       }
