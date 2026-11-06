@@ -94,8 +94,13 @@
         "队列兼容",
         "镜像 URL/坐标/按键"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T07-26-59-462Z/report.json",
+          "result": "300 项前端单元、41 项桌面单元、严格类型检查、构建和 navigation/composer/agent-usage/request-usage/interaction 五套 Web/Electron 回归通过。用量类型已对照 Java RequestReport、ModelUsage、ContextComposition、RequestTotals 与 ContextStatus；删除从未调用且引用不存在函数的旧 refreshToolGroup。"
+        }
+      ]
     },
     {
       "batch": 4,

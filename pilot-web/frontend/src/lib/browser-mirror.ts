@@ -1,3 +1,4 @@
+export interface ImageRect { left: number; top: number; width: number; height: number }
 /**
  * 浏览器镜像面板的纯逻辑：帧解析、延迟文案、涟漪坐标与状态机。
  *
@@ -18,7 +19,7 @@
  * 没写协议的 `localhost:5173` 补上 http。外网地址返回 null。
  */
 /** 人在地址栏输入的地址。本机没写协议时用 http，其它主机用 https。 */
-export function userPageUrl(input) {
+export function userPageUrl(input: unknown) {
   const text = String(input || '').trim();
   if (!text) return null;
   const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text);
@@ -38,7 +39,7 @@ export function userPageUrl(input) {
   return url.href;
 }
 
-export function embeddablePageUrl(url) {
+export function embeddablePageUrl(url: unknown) {
   const text = String(url || '').trim();
   if (!text || text === 'about:blank') {
     return null;
@@ -65,7 +66,7 @@ export function embeddablePageUrl(url) {
  * 服务端明确说嵌不了（DENY / frame-ancestors）时退回截图。
  * SAMEORIGIN 只有页面和面板同源才嵌。
  */
-export function shouldEmbedPage(url, embed, frameOptions) {
+export function shouldEmbedPage(url: unknown, embed?: boolean, frameOptions?: string) {
   if (embed === false) {
     return false;
   }
@@ -82,7 +83,7 @@ export function shouldEmbedPage(url, embed, frameOptions) {
   return true;
 }
 
-export function frameSrc(payload) {
+export function frameSrc(payload: string | { frame?: string | null } | null | undefined) {
   const frame = typeof payload === 'string' ? payload : payload && payload.frame;
   if (typeof frame !== 'string' || !frame) {
     return null;
@@ -94,11 +95,11 @@ export function frameSrc(payload) {
  * 帧延迟文案：本机回环通常毫秒级；异常变大的延迟才值得让用户看见。
  * @param frameTs 帧自带的产生时间（sidecar 的 Date.now()，与服务端同机，可直接作差）
  */
-export function latencyLabel(now, frameTs) {
-  if (!Number.isFinite(frameTs) || frameTs <= 0) {
+export function latencyLabel(now: number, frameTs: number | undefined) {
+  if (!Number.isFinite(frameTs) || frameTs! <= 0) {
     return '';
   }
-  const delay = Math.max(0, now - frameTs);
+  const delay = Math.max(0, now - frameTs!);
   if (delay < 300) {
     return '实时';
   }
@@ -116,7 +117,7 @@ export function latencyLabel(now, frameTs) {
  *
  * @returns {{x: number, y: number}} 相对镜像容器左上角的像素；无坐标返回 null
  */
-export function ripplePosition(action, frameW, frameH, displayW) {
+export function ripplePosition(action: { x?: unknown; y?: unknown } | null | undefined, frameW: number, frameH: number, displayW: number) {
   if (!action) {
     return null;
   }
@@ -139,7 +140,7 @@ export function ripplePosition(action, frameW, frameH, displayW) {
  *
  * @param kind 'frame' | 'closed' | 'reset'
  */
-export function nextMirrorMode(current, kind) {
+export function nextMirrorMode(current: string, kind: string) {
   if (kind === 'frame') {
     return 'live';
   }
@@ -160,7 +161,7 @@ export function nextMirrorMode(current, kind) {
  * @param autoSwitchPref localStorage 的原始字符串（null = 未设置 = 默认开）
  * @param alreadySwitched 本会话是否已经自动切过
  */
-export function shouldAutoSwitch(autoSwitchPref, alreadySwitched) {
+export function shouldAutoSwitch(autoSwitchPref: string | null, alreadySwitched: boolean) {
   if (alreadySwitched) {
     return false;
   }
@@ -168,7 +169,7 @@ export function shouldAutoSwitch(autoSwitchPref, alreadySwitched) {
 }
 
 /** 镜像状态行的 URL 文案：空地址给个可读占位。 */
-export function urlLabel(url) {
+export function urlLabel(url: unknown) {
   const text = String(url || '').trim();
   return text || '等待智能体打开页面…';
 }
@@ -177,7 +178,7 @@ export function urlLabel(url) {
  * 接管按钮文案。服务端 paused 是唯一事实源，按钮只是它的投影：
  * 点击后不本地翻转，等 state 事件回推再变，双击/多端不会不一致。
  */
-export function pauseToggleLabel(paused) {
+export function pauseToggleLabel(paused: boolean) {
   return paused ? '恢复智能体操作' : '暂停智能体操作';
 }
 
@@ -199,11 +200,11 @@ export const PAGE_VIEWPORT = { width: DEFAULT_FRAME_W, height: DEFAULT_FRAME_H }
  *
  * @returns {{left: number, top: number, width: number, height: number, scale: number}}
  */
-export function imageContentBox(rect, frameW, frameH) {
+export function imageContentBox(rect: ImageRect | null | undefined, frameW?: number, frameH?: number) {
   const width = Number(frameW) > 0 ? Number(frameW) : DEFAULT_FRAME_W;
   const height = Number(frameH) > 0 ? Number(frameH) : DEFAULT_FRAME_H;
-  const boxWidth = Number(rect?.width) > 0 ? Number(rect.width) : width;
-  const boxHeight = Number(rect?.height) > 0 ? Number(rect.height) : height;
+  const boxWidth = Number(rect?.width) > 0 ? Number(rect!.width) : width;
+  const boxHeight = Number(rect?.height) > 0 ? Number(rect!.height) : height;
   const scale = Math.min(boxWidth / width, boxHeight / height);
   const drawnWidth = width * scale;
   const drawnHeight = height * scale;
@@ -224,7 +225,7 @@ export function imageContentBox(rect, frameW, frameH) {
  * @param viewportH   页面 CSS 视口高
  * @returns {{x: number, y: number}|null} 参数非法时返回 null
  */
-export function pointFromEvent(clientX, clientY, rect, viewportW = PAGE_VIEWPORT.width, viewportH = PAGE_VIEWPORT.height) {
+export function pointFromEvent(clientX: number, clientY: number, rect: ImageRect | null | undefined, viewportW = PAGE_VIEWPORT.width, viewportH = PAGE_VIEWPORT.height) {
   if (!Number.isFinite(clientX) || !Number.isFinite(clientY) || !rect) {
     return null;
   }
@@ -236,7 +237,7 @@ export function pointFromEvent(clientX, clientY, rect, viewportW = PAGE_VIEWPORT
   const y = (clientY - box.top) / box.scale;
   const width = Number(viewportW) > 0 ? Number(viewportW) : DEFAULT_FRAME_W;
   const height = Number(viewportH) > 0 ? Number(viewportH) : DEFAULT_FRAME_H;
-  const clamp = (value, max) => Math.max(0, Math.min(max, Math.round(value)));
+  const clamp = (value: number, max: number) => Math.max(0, Math.min(max, Math.round(value)));
   return { x: clamp(x, width - 1), y: clamp(y, height - 1) };
 }
 
@@ -255,7 +256,7 @@ const NAMED_KEYS = new Set([
  *
  * @param {{key?: string, ctrlKey?: boolean, metaKey?: boolean, altKey?: boolean, isComposing?: boolean}} event
  */
-export function keyCommand(event) {
+export function keyCommand(event: Partial<Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'isComposing'>> | null | undefined) {
   if (!event || event.isComposing) {
     return null;
   }

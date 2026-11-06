@@ -1,10 +1,11 @@
+import type { AgentSummary, ManifestFacts } from '../types/runtime.js';
 /**
  * 多智能体的纯逻辑：谁发起了这条工具调用、一组子智能体怎么概括、耗时怎么显示。
  * 画界面在 app.js，这里只放不碰 DOM 的部分，方便单测。
  */
 
 /** `agent_ab12cd34` → `ab12cd`：界面上只需要能区分，不必看完整 ID。 */
-export function shortAgentId(id) {
+export function shortAgentId(id: unknown) {
   return String(id || '').replace(/^agent_/, '').slice(0, 6);
 }
 
@@ -14,7 +15,7 @@ export function shortAgentId(id) {
  * - 老数据没有归属：只有「恰好一个子智能体在运行」时才能确定是它在干活（主智能体在等它），
  *   有多个在跑就宁可留在主智能体名下，也不乱归属。
  */
-export function pickOwner(agentId, agents) {
+export function pickOwner<T extends AgentSummary>(agentId: string | null | undefined, agents: Iterable<T> | null | undefined): T | null {
   const list = [...(agents || [])];
   if (agentId) {
     return list.find((agent) => agent.id === agentId) || null;
@@ -24,9 +25,9 @@ export function pickOwner(agentId, agents) {
 }
 
 /** 一组子智能体的概括：「3 个子智能体 · 2 运行中 · 1 失败」。 */
-export function summarizeAgents(agents) {
+export function summarizeAgents(agents: Iterable<AgentSummary> | null | undefined) {
   const list = [...(agents || [])];
-  const count = (status) => list.filter((agent) => agent.status === status).length;
+  const count = (status: string) => list.filter((agent) => agent.status === status).length;
   const running = count('running');
   const failed = count('failed');
   const stopped = count('stopped') + count('interrupted');
@@ -39,12 +40,12 @@ export function summarizeAgents(agents) {
   return { total: list.length, running, failed, stopped, done, text: bits.join(' · ') };
 }
 
-export function agentStatusLabel(status) {
-  return { running: '运行中', done: '已完成', failed: '失败', stopped: '已中止', interrupted: '已中止' }[status] || '状态未知';
+export function agentStatusLabel(status: string) {
+  return ({ running: '运行中', done: '已完成', failed: '失败', stopped: '已中止', interrupted: '已中止' } as Record<string, string>)[status] || '状态未知';
 }
 
 /** 毫秒 → 「850ms」「12s」「2m 05s」。 */
-export function spanText(ms) {
+export function spanText(ms: unknown) {
   const value = Number(ms);
   if (!Number.isFinite(value) || value < 0) return '';
   if (value < 1000) return `${Math.round(value)}ms`;
@@ -54,7 +55,7 @@ export function spanText(ms) {
 }
 
 /** 卡片右侧的小字：操作数 + 耗时（还在运行就只显示已有的部分）。 */
-export function agentMeta({ tools = 0, ms = null, status = 'running' }) {
+export function agentMeta({ tools = 0, ms = null, status = 'running' }: { tools?: number; ms?: number | null; status?: string }) {
   const bits = [];
   if (tools > 0) bits.push(`${tools} 项操作`);
   const span = ms == null ? '' : spanText(ms);
@@ -67,13 +68,13 @@ export function agentMeta({ tools = 0, ms = null, status = 'running' }) {
  * 子智能体的回传文本末尾带一段 `<subagent_result>` 清单（改了哪些文件、跑了哪些检查、还剩哪些步骤），
  * 给父模型合并用。界面上把它从正文里摘出来，单独画成一行事实。
  */
-export function splitSubagentResult(raw) {
+export function splitSubagentResult(raw: unknown) {
   const text = String(raw || '');
   const match = /\n*<subagent_result>\n([\s\S]*?)\n?<\/subagent_result>\s*$/.exec(text);
   if (!match) {
     return { text: text.trim(), changed: [], checks: [], openSteps: [], hasManifest: false };
   }
-  const list = (key) => {
+  const list = (key: string) => {
     const line = new RegExp(`^${key}:\\s*\\[(.*)\\]\\s*$`, 'm').exec(match[1]);
     return line && line[1].trim() ? line[1].split(/,\s*(?![^()]*\))/).map((item) => item.trim()).filter(Boolean) : [];
   };
@@ -87,7 +88,7 @@ export function splitSubagentResult(raw) {
 }
 
 /** 清单 → 一行小字：「未改动文件 · 校验 1 项 · 未完成步骤 0」。 */
-export function manifestFacts({ changed = [], checks = [], openSteps = [], hasManifest = false }) {
+export function manifestFacts({ changed = [], checks = [], openSteps = [], hasManifest = false }: ManifestFacts) {
   if (!hasManifest) return [];
   const facts = [changed.length ? `改动 ${changed.length} 个文件` : '未改动文件'];
   if (checks.length) facts.push(`校验 ${checks.length} 项`);
@@ -96,7 +97,7 @@ export function manifestFacts({ changed = [], checks = [], openSteps = [], hasMa
 }
 
 /** 给子智能体起个像样的名字：取任务描述的第一个分句，太长就截断（路径里的点不当句号）。 */
-export function agentTitle(task) {
+export function agentTitle(task: unknown) {
   const text = String(task || '').replace(/\s+/g, ' ').trim();
   if (!text) return '子智能体';
   const body = text.replace(/^请(只读|务必|帮我)?/, '').trim() || text;
@@ -105,7 +106,7 @@ export function agentTitle(task) {
 }
 
 /** 面板里每个子智能体下面那行小字：运行中显示正在做什么，结束后显示结论的第一行。 */
-export function agentLine({ status, latest = '', conclusion = '' }) {
+export function agentLine({ status, latest = '', conclusion = '' }: Pick<AgentSummary, 'status' | 'latest' | 'conclusion'>) {
   if (status === 'running') return latest ? `正在 ${latest}` : '正在思考…';
   if (status === 'stopped') return '运行结束时仍未完成';
   const first = String(conclusion || '').split('\n').map((line) => line.trim()).find(Boolean) || '';

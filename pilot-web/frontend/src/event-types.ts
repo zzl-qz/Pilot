@@ -26,4 +26,5 @@ export const EVENT_TYPES = [
   'run.failed',
   'run.cancelled',
   'run.completed'
-];
+] as const;
+export type EventType = typeof EVENT_TYPES[number] | 'user.message';

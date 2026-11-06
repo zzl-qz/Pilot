@@ -40,7 +40,7 @@ try {
     const desktopTests = (await readdir(resolve(repo, 'pilot-desktop'))).filter(name => name.endsWith('.test.mjs')).sort().map(name => resolve(repo, 'pilot-desktop', name));
     await run('desktop-units', ['--test', ...desktopTests]);
     const smoke = all ? (await readdir(join(root, 'scripts'))).filter(name => name.endsWith('-smoke.mjs') && !name.includes('-package-')).sort()
-      : selected.length ? selected.map(name => name.endsWith('.mjs') ? name : name + '-smoke.mjs') : ['navigation-smoke.mjs', 'composer-smoke.mjs'];
+      : [...new Set(['navigation-smoke.mjs', 'composer-smoke.mjs', ...selected.map(name => name.endsWith('.mjs') ? name : name + '-smoke.mjs')])];
     for (const script of smoke) {
       if (!/^[a-z0-9-]+\.mjs$/.test(script)) throw new Error('无效的测试脚本名');
       await run(script.replace('.mjs', ''), [join('scripts', script), ...(['p1-smoke.mjs', 'results-smoke.mjs', 'schedule-smoke.mjs'].includes(script) ? ['--production'] : [])]);

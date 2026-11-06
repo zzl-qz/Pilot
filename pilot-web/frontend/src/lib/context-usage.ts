@@ -1,3 +1,4 @@
+import type { ContextStatus } from '../types/runtime.js';
 /**
  * 上下文占用的展示口径。
  *
@@ -12,7 +13,7 @@ export const COMPACT_RATIO = 0.8;
 /** 与 ContextBudget 的 DROP_RATIO 对齐：到这里开始硬裁剪最旧的组。 */
 export const DROP_RATIO = 0.97;
 
-const ROLE_LABELS = {
+const ROLE_LABELS: Record<string, string> = {
   system: '系统提示',
   user: '你的输入',
   assistant: '助手回复',
@@ -20,10 +21,10 @@ const ROLE_LABELS = {
 };
 
 /** 0-100 的整数占用比；没有预算时返回 0。 */
-export function usagePercent(status) {
+export function usagePercent(status: ContextStatus | null | undefined) {
   const limit = Number(status?.limitTokens);
   if (Number.isFinite(Number(status?.percent))) {
-    return Math.max(0, Math.min(100, Math.round(Number(status.percent))));
+    return Math.max(0, Math.min(100, Math.round(Number(status!.percent))));
   }
   if (!Number.isFinite(limit) || limit <= 0) {
     return 0;
@@ -33,7 +34,7 @@ export function usagePercent(status) {
 }
 
 /** 占用档位：normal 正常、warn 已进入自动折叠区、danger 快要硬裁剪。 */
-export function usageLevel(percent) {
+export function usageLevel(percent: unknown) {
   const value = Number(percent) || 0;
   if (value >= DROP_RATIO * 100) {
     return 'danger';
@@ -42,7 +43,7 @@ export function usageLevel(percent) {
 }
 
 /** 1.2k / 128k / 1.1M；未知返回 —。 */
-export function formatTokens(value) {
+export function formatTokens(value: unknown) {
   // Number(null) === 0：先挡掉空值，否则「没有数据」会被显示成 0
   if (value === null || value === undefined || value === '') {
     return '—';
@@ -60,12 +61,12 @@ export function formatTokens(value) {
   return String(Math.round(tokens));
 }
 
-function trim(size) {
+function trim(size: number) {
   return size >= 100 ? String(Math.round(size)) : size.toFixed(1).replace(/\.0$/, '');
 }
 
 /** 剩余可用 token（不小于 0）；预算未知返回 null。 */
-export function remainingTokens(status) {
+export function remainingTokens(status: ContextStatus | null | undefined) {
   const limit = Number(status?.limitTokens);
   if (!Number.isFinite(limit) || limit <= 0) {
     return null;
@@ -74,7 +75,7 @@ export function remainingTokens(status) {
 }
 
 /** 记忆构成：按字符数降序、丢掉空项，字符占比用于画分段条。 */
-export function usageSegments(status) {
+export function usageSegments(status: ContextStatus | null | undefined) {
   const segments = Array.isArray(status?.segments) ? status.segments : [];
   const totalChars = segments.reduce((sum, item) => sum + Math.max(0, Number(item?.chars) || 0), 0);
   return segments
@@ -94,7 +95,7 @@ export function usageSegments(status) {
 }
 
 /** 一句话说清现在处在哪一档，界面上直接显示，不用记水位。 */
-export function usageNote(status, percent) {
+export function usageNote(status: ContextStatus | null | undefined, percent: unknown) {
   const limit = Number(status?.limitTokens);
   if (!Number.isFinite(limit) || limit <= 0) {
     return '还没有可统计的模型记忆：发一条消息后这里会显示占用。';

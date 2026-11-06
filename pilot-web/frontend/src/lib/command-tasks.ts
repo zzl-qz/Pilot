@@ -1,5 +1,6 @@
+import type { CommandLog, CommandLogChunk } from '../types/runtime.js';
 const ACTIVE_STATUSES = new Set(['RUNNING', 'STOPPING']);
-const STATUS_LABELS = {
+const STATUS_LABELS: Record<string, string> = {
   RUNNING: '运行中',
   STOPPING: '停止中',
   COMPLETED: '已完成',
@@ -10,20 +11,20 @@ const STATUS_LABELS = {
   OUTPUT_LIMIT: '输出已达上限'
 };
 
-function normalizedStatus(status) {
+function normalizedStatus(status: unknown) {
   return String(status || '').trim().toUpperCase();
 }
 
 /** 同时接受状态字符串和后端任务对象：传错形态时给出「未知」而不是静默判成非运行中。 */
-function statusOf(value) {
+function statusOf(value: string | { status?: string } | null | undefined) {
   return typeof value === 'string' ? value : (value?.status || '');
 }
 
-export function isCommandActive(value) {
+export function isCommandActive(value: string | { status?: string } | null | undefined) {
   return ACTIVE_STATUSES.has(normalizedStatus(statusOf(value)));
 }
 
-export function commandStatusLabel(value) {
+export function commandStatusLabel(value: string | { status?: string } | null | undefined) {
   return STATUS_LABELS[normalizedStatus(statusOf(value))] || '未知状态';
 }
 
@@ -31,7 +32,7 @@ export function commandStatusLabel(value) {
  * 命令输出里带的是终端控制序列：直接塞进 <pre> 会显示成一堆 `[0m`、`[32m`。
  * 这里剥掉颜色、光标移动、窗口标题（OSC）和进度条用的裸回车，只留人能读的文字。
  */
-export function stripAnsi(text) {
+export function stripAnsi(text: unknown) {
   return String(text || '')
     .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, '')
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
@@ -40,11 +41,11 @@ export function stripAnsi(text) {
     .replace(/\r(?!\n)/g, '');
 }
 
-function validOffset(value) {
-  return Number.isSafeInteger(value) && value >= 0;
+function validOffset(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
-function codePointLength(text) {
+function codePointLength(text: string) {
   let count = 0;
   for (const character of text) count++;
   return count;
@@ -54,7 +55,7 @@ function codePointLength(text) {
  * 合并增量日志；服务端游标按 Unicode 码点计数，始终以 nextOffset 为准。
  * text 保留最近 limit 个 UTF-16 单元，trimmed 统计已省略的码点数。
  */
-export function mergeCommandLog(current, chunk, limit = 200000) {
+export function mergeCommandLog(current: Partial<CommandLog> | null | undefined, chunk: CommandLogChunk | null | undefined, limit = 200000): CommandLog {
   const result = {
     text: String(current?.text || ''),
     offset: validOffset(current?.offset) ? current.offset : 0,

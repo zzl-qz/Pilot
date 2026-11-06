@@ -14,7 +14,7 @@
  */
 export const EPHEMERAL_EVENTS = new Set(['assistant.preview', 'assistant.reasoning']);
 
-export function isEphemeral(type) {
+export function isEphemeral(type: string) {
   return EPHEMERAL_EVENTS.has(type);
 }
 
@@ -31,8 +31,8 @@ export function isEphemeral(type) {
  *
  * @returns {{apply: boolean, cursor: number}}
  */
-export function applyRule(event, cursor) {
-  const current = Number.isFinite(cursor) ? cursor : 0;
+export function applyRule(event: { type: string; sequence?: number } | null | undefined, cursor: number | undefined) {
+  const current = Number.isFinite(cursor) ? cursor! : 0;
   if (!event || event.type === 'assistant.preview' || event.type === 'assistant.reasoning') {
     return { apply: false, cursor: current };
   }
@@ -51,7 +51,7 @@ export function applyRule(event, cursor) {
  * <p>「步数触顶」和「中断」都不是任务失败——历史还在，继续跑就行，
  * 界面上要显示成暂停而不是红色错误。
  */
-export function classifyRunFailure(code) {
+export function classifyRunFailure(code: unknown) {
   const value = String(code || '');
   const cancelled = value === 'CANCELLED';
   const paused = value === 'MAX_STEPS' || value === 'PAUSED';
@@ -72,7 +72,7 @@ export function classifyRunFailure(code) {
 }
 
 /** 计划进度文案：没有计划时返回空串，避免界面上出现「· 计划 0/0」。 */
-export function planProgressLabel(done, total) {
+export function planProgressLabel(done: unknown, total: unknown) {
   const totalCount = Number(total || 0);
   if (!totalCount) {
     return '';
