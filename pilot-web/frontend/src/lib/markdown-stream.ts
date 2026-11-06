@@ -1,3 +1,4 @@
+import type { MarkdownBlock, HistoryRange } from '../types/content.js';
 /**
  * 流式 Markdown 的块级增量渲染。
  *
@@ -17,7 +18,7 @@
  * @returns {number} -1 表示两行完全一致；否则返回首个不同下标（可能是上一份的长度，
  *                    也就是「新文本只是在尾部多了内容」）
  */
-export function firstDifferenceIndex(previous, next) {
+export function firstDifferenceIndex(previous: readonly unknown[] | null | undefined, next: readonly unknown[] | null | undefined) {
   const prev = Array.isArray(previous) ? previous : [];
   const list = Array.isArray(next) ? next : [];
   const shared = Math.min(prev.length, list.length);
@@ -37,7 +38,7 @@ export function firstDifferenceIndex(previous, next) {
  *
  * @param {Array<{start: number, end: number}>} blocks 已渲染块的绝对行区间
  */
-export function resumeLineIndex(blocks, lineIndex) {
+export function resumeLineIndex(blocks: readonly HistoryRange[] | null | undefined, lineIndex: number) {
   if (!Array.isArray(blocks) || !Number.isFinite(lineIndex)) {
     return 0;
   }
@@ -58,7 +59,7 @@ export function resumeLineIndex(blocks, lineIndex) {
 }
 
 /** 两个块是否可以复用同一个 DOM 节点：区间与原文都要一致。 */
-export function sameBlock(left, right) {
+export function sameBlock(left: Pick<MarkdownBlock, 'start' | 'end' | 'source'> | null | undefined, right: Pick<MarkdownBlock, 'start' | 'end' | 'source'> | null | undefined) {
   if (!left || !right) {
     return false;
   }
@@ -68,7 +69,7 @@ export function sameBlock(left, right) {
 }
 
 /** 新旧块序列从头开始能原样保留多少个。 */
-export function sharedBlockPrefix(previous, next) {
+export function sharedBlockPrefix(previous: readonly MarkdownBlock[] | null | undefined, next: readonly MarkdownBlock[] | null | undefined) {
   const prev = Array.isArray(previous) ? previous : [];
   const list = Array.isArray(next) ? next : [];
   const shared = Math.min(prev.length, list.length);
@@ -87,15 +88,16 @@ export function sharedBlockPrefix(previous, next) {
  * @param {(lines: string[], offset: number) => Array<{node: Node, start: number, end: number}>} options.parse
  *        把行切片解析成块节点；start/end 是相对于整段文本的绝对行号。
  */
-export function createBlockStreamRenderer(container, { parse } = {}) {
+export function createBlockStreamRenderer(container: HTMLElement, { parse }: { parse?: (lines: string[], offset: number) => MarkdownBlock[] } = {}) {
   if (!container || typeof parse !== 'function') {
     throw new Error('createBlockStreamRenderer: 需要容器与 parse 函数');
   }
 
-  let lines = [];
-  let blocks = [];
+  const parseBlocks = parse;
+  let lines: string[] = [];
+  let blocks: MarkdownBlock[] = [];
 
-  function normalize(text) {
+  function normalize(text: unknown) {
     return String(text == null ? '' : text).replace(/\r\n/g, '\n').split('\n');
   }
 
@@ -110,7 +112,7 @@ export function createBlockStreamRenderer(container, { parse } = {}) {
    *
    * @returns {boolean} 是否真的动过 DOM；没动可以用来跳过滚动写入。
    */
-  function update(text) {
+  function update(text: unknown) {
     const nextLines = normalize(text);
     const changedAt = firstDifferenceIndex(lines, nextLines);
     if (changedAt < 0) {
@@ -118,7 +120,7 @@ export function createBlockStreamRenderer(container, { parse } = {}) {
     }
     const resume = resumeLineIndex(blocks, changedAt);
     const head = blocks.filter((block) => Number(block.end) <= resume);
-    const parsed = parse(nextLines.slice(resume), resume) || [];
+    const parsed = parseBlocks(nextLines.slice(resume), resume) || [];
     const next = head.concat(parsed.map((record) => ({
       node: record.node,
       start: Number(record.start),
@@ -130,7 +132,7 @@ export function createBlockStreamRenderer(container, { parse } = {}) {
     // 先砍掉尾部多出来的旧节点，再按下标依次对齐。
     let removed = false;
     while (container.childNodes.length > next.length) {
-      container.lastChild.remove();
+      container.lastChild!.remove();
       removed = true;
     }
     for (let index = shared; index < next.length; index += 1) {
@@ -151,7 +153,7 @@ export function createBlockStreamRenderer(container, { parse } = {}) {
     return touched;
   }
 
-  function sliceText(source, start, end) {
+  function sliceText(source: readonly string[], start: number, end: number) {
     return source.slice(Number(start) || 0, Number(end) || 0).join('\n');
   }
 

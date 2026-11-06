@@ -1,4 +1,4 @@
-const CALLOUTS = {
+const CALLOUTS: Record<string, { kind: string; label: string }> = {
   NOTE: { kind: 'note', label: '说明' },
   TIP: { kind: 'tip', label: '建议' },
   IMPORTANT: { kind: 'important', label: '重点' },
@@ -6,7 +6,7 @@ const CALLOUTS = {
   CAUTION: { kind: 'caution', label: '风险' }
 };
 
-export function parseCallout(lines) {
+export function parseCallout(lines: readonly string[] | null | undefined) {
   if (!Array.isArray(lines) || !lines.length) {
     return null;
   }
@@ -21,7 +21,7 @@ export function parseCallout(lines) {
   };
 }
 
-export function resolveFileReference(href, workspace) {
+export function resolveFileReference(href: unknown, workspace: unknown) {
   if (typeof href !== 'string' || !href.startsWith('/') || href.startsWith('//')) {
     return null;
   }
@@ -60,9 +60,9 @@ export function resolveFileReference(href, workspace) {
   };
 }
 
-export function languageLabel(language) {
+export function languageLabel(language: unknown) {
   const value = String(language || '').trim().toLowerCase();
-  const labels = {
+  const labels: Record<string, string> = {
     js: 'JavaScript',
     javascript: 'JavaScript',
     ts: 'TypeScript',
@@ -104,7 +104,7 @@ export function languageLabel(language) {
  * 模型输出按类型分流，和常见编码产品一致：
  * 能画出来的（SVG、完整 HTML）默认预览；Diff 按行着色；其余保持源码。
  */
-export function outputKind(language, code) {
+export function outputKind(language: unknown, code: unknown) {
   const lang = String(language || '').trim().toLowerCase();
   const body = String(code || '').trim();
   if ((lang === 'svg' || /^<svg\b/i.test(body)) && /<\/svg>/i.test(body)) {
@@ -126,7 +126,7 @@ export function outputKind(language, code) {
 }
 
 /** 聊天里的图片只接受网页地址和图片 data URL，避免 javascript: 一类源。 */
-export function safeImageSource(url) {
+export function safeImageSource(url: unknown) {
   const value = String(url || '').trim();
   if (/^https?:\/\//i.test(value)) {
     return value;
@@ -138,12 +138,12 @@ export function safeImageSource(url) {
 }
 
 /** 与服务端一致的保守估算：ASCII 约 4 字符/token，中文等宽字符约 1 字符/token。 */
-export function estimateTextTokens(content) {
+export function estimateTextTokens(content: unknown) {
   const text = String(content || '');
   let ascii = 0;
   let wide = 0;
   for (const char of text) {
-    if (char.codePointAt(0) < 0x80) ascii += 1;
+    if (char.codePointAt(0)! < 0x80) ascii += 1;
     else wide += 1;
   }
   return Math.ceil(ascii / 4) + wide;

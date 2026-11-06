@@ -150,8 +150,13 @@
         "导出",
         "侧边会话/引用/旧存储"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T07-36-39-345Z/report.json",
+          "result": "302 项前端单元、41 项桌面单元、严格类型检查、构建和 navigation/composer/markdown/thread-scroll/interaction/work-products 六套 Web/Electron 回归通过。新增富文本语法/文件链接/复制失败/SVG 清理/HTML 沙箱/公式图表回退/DOM 复用回归，迁移前 JS 副本和 TS 均通过；移除未导出且未调用的旧预览函数。"
+        }
+      ]
     },
     {
       "batch": 6,

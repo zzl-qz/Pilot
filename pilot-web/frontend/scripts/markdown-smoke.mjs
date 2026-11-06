@@ -1,0 +1,77 @@
+import assert from 'node:assert/strict';
+import { createServer } from 'vite';
+import { chromium, _electron } from 'playwright-core';
+import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = process.env.PILOT_MIGRATION_BASELINE_ROOT || fileURLToPath(new URL('..', import.meta.url));
+const output = await mkdtemp(join(tmpdir(), 'pilot-markdown-'));
+const fixture = `<html lang="zh-CN"><meta charset="utf-8"><div id="target"></div><div id="stream"></div><script type="module">
+import {renderMarkdown,markdownBlockRecords,setMarkdownContext,setMarkdownNotifier} from '/src/lib/markdown-render.js';
+import {createBlockStreamRenderer} from '/src/lib/markdown-stream.js';
+window.opens=[];window.notices=[];window.copies=[];window.copyFails=false;
+Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{if(window.copyFails)throw Error('denied');window.copies.push(text);}},configurable:true});document.execCommand=()=>false;
+setMarkdownNotifier(text=>notices.push(text));setMarkdownContext({getWorkspace:()=>'/workspace/pilot',openFile:(path,line)=>opens.push({path,line})});
+window.render=text=>document.getElementById('target').replaceChildren(renderMarkdown(text));
+window.stream=createBlockStreamRenderer(document.getElementById('stream'),{parse:markdownBlockRecords});window.ready=true;
+</script></html>`;
+const server = await createServer({ root, server: { host: '127.0.0.1', port: 0, proxy: {} }, plugins: [{ name: 'markdown-fixture', configureServer(server) {
+  server.middlewares.use('/__markdown', async (_request, response) => { response.setHeader('Content-Type', 'text/html;charset=utf-8'); response.end(await server.transformIndexHtml('/__markdown', fixture)); });
+} }] });
+let browser, desktop;
+async function run(page, name, url) {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.route('**/vendor/**', route => route.fulfill({ status: 404, body: '' }));
+  await page.goto(url); await page.waitForFunction(() => window.ready);
+  await page.evaluate(() => render('# 标题\n\n**粗体** *斜体* ~~删除~~ `代码`\n\n> [!NOTE]\n> 提示\n\n3. 第三项\n4. 第四项\n\n- [x] 完成\n\n| 列一 | 列二 |\n| --- | ---: |\n| 中文 | 12 |'));
+  assert.equal(await page.locator('h1').innerText(), '标题');
+  assert.equal(await page.locator('ol').getAttribute('start'), '3');
+  assert.equal(await page.locator('ol li').count(), 2);
+  assert.equal(await page.locator('input[type=checkbox]').isChecked(), true);
+  assert.equal(await page.locator('input[type=checkbox]').isDisabled(), true);
+  assert.equal(await page.locator('tbody td').last().innerText(), '12');
+  assert.equal(await page.locator('.md-callout-label').innerText(), '说明');
+  await page.evaluate(() => render('[源文件](/workspace/pilot/src/a.ts:12) [外部](https://example.invalid/) [拒绝](javascript:alert(1))'));
+  await page.locator('.file-ref').click();
+  assert.deepEqual(await page.evaluate(() => opens), [{ path: 'src/a.ts', line: 12 }]);
+  assert.equal(await page.locator('a').count(), 1);
+  assert.match(await page.locator('a').getAttribute('rel'), /noopener/);
+  await page.evaluate(() => render('```js\nconst text = "中文";\n```'));
+  await page.getByRole('button', { name: '复制代码', exact: true }).click();
+  assert.deepEqual(await page.evaluate(() => copies), ['const text = "中文";']);
+  await page.evaluate(() => { copyFails = true; render('```js\ncopy failure\n```'); });
+  await page.getByRole('button', { name: '复制代码', exact: true }).click();
+  await page.waitForFunction(() => notices.includes('复制失败'));
+  await page.evaluate(() => render('```svg\n<svg xmlns="http://www.w3.org/2000/svg"><script>bad()</script><foreignObject>bad</foreignObject><rect onclick="bad()" width="10" height="10"/></svg>\n```'));
+  assert.equal(await page.locator('.md-preview script,.md-preview foreignObject,.md-preview [onclick]').count(), 0);
+  await page.evaluate(() => render('```html\n<html><body><script>parent.__escaped = true</script>预览</body></html>\n```'));
+  assert.equal(await page.locator('iframe').getAttribute('sandbox'), '');
+  assert.equal(await page.evaluate(() => window.__escaped), undefined);
+  await page.getByRole('button', { name: '代码', exact: true }).click();
+  assert.equal(await page.locator('#target pre').isVisible(), true);
+  await page.evaluate(() => { window.mermaid = { initialize() {}, async render() { return { svg: '<svg><text>图表成功</text></svg>' }; } }; window.katex = { render(text, host) { host.textContent = '公式成功:' + text; } }; render('```mermaid\ngraph TD; A-->B\n```\n\n$$\nx^2\n$$'); });
+  await page.getByText('图表成功', { exact: true }).waitFor();
+  await page.getByText('公式成功:x^2', { exact: true }).waitFor();
+  await page.evaluate(() => { delete window.mermaid; delete window.katex; render('```mermaid\ngraph TD; fail\n```\n\n$$\nfallback^2\n$$'); });
+  await page.waitForFunction(() => document.querySelector('#target pre')?.hidden === false && document.querySelector('.md-math')?.textContent === 'fallback^2');
+  await page.evaluate(() => { stream.update('# 稳定标题\n\n增长的内容'); window.stableNode = document.querySelector('#stream h1'); stream.update('# 稳定标题\n\n增长的内容，第二段'); });
+  assert.equal(await page.evaluate(() => stableNode === document.querySelector('#stream h1')), true);
+  await page.evaluate(() => stream.update('# 稳定标题'));
+  assert.equal(await page.locator('#stream p').count(), 0);
+  await page.evaluate(() => stream.reset());
+  assert.equal(await page.locator('#stream > *').count(), 0);
+  assert.deepEqual(errors, []);
+  await page.screenshot({ path: join(output, `${name}.png`) });
+  console.log(`${name}: PASS Markdown grammar, links, copy/failure, SVG sanitizing, sandboxed HTML, math/diagram/fallback, stream node reuse/reset`);
+}
+try {
+  await server.listen(); const url = `http://127.0.0.1:${server.httpServer.address().port}/__markdown`;
+  browser = await chromium.launch({ channel: 'chrome', headless: true }); await run(await browser.newPage(), 'chromium', url); await browser.close(); browser = null;
+  const main = join(output, 'main.cjs'); await writeFile(main, `const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}}).loadURL(${JSON.stringify(url)}));`);
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+  desktop = await _electron.launch({ executablePath: electronBinary(), args: [main], env }); await run(await desktop.firstWindow(), 'electron', url);
+  console.log('Screenshots:', output);
+} finally { await browser?.close(); await desktop?.close(); await server.close(); }

@@ -1,3 +1,4 @@
+import type { MarkdownBlock } from '../types/content.js';
 /**
  * Markdown 渲染引擎：从旧版原生实现原样搬运（块级流式解析 + 代码块复制按钮 + katex + mermaid）。
  * katex / mermaid 依旧从 /vendor 下的静态脚本加载，行为与旧版一致。
@@ -6,19 +7,19 @@
 import { writeClipboard as tryWriteClipboard } from './clipboard.js';
 import { parseCallout, resolveFileReference, languageLabel, outputKind, safeImageSource } from './content-format.js';
 
-let notify = () => {};
+let notify: (text: string) => void = () => {};
 /** React 侧把 showNotice 注入进来，渲染引擎不依赖框架。 */
-export function setMarkdownNotifier(fn) { notify = fn; }
+export function setMarkdownNotifier(fn: (text: string) => void) { notify = fn; }
 
 let getWorkspace = () => '';
-let openFile = () => {};
+let openFile: (path: string, line?: number | null) => void = () => {};
 /** 注入工作区与打开文件的回调，避免渲染引擎直接依赖 store。 */
-export function setMarkdownContext(ctx) {
+export function setMarkdownContext(ctx: { getWorkspace?: () => string; openFile?: (path: string, line?: number | null) => void }) {
   if (ctx?.getWorkspace) getWorkspace = ctx.getWorkspace;
   if (ctx?.openFile) openFile = ctx.openFile;
 }
 
-const ACTION_ICONS = {
+const ACTION_ICONS: Record<string, string> = {
   edit: '<path d="M10.8 2.7l2.5 2.5-7.6 7.6-3.2.7.7-3.2z"/><path d="M9.4 4.1l2.5 2.5"/>',
   branch: '<circle cx="4.5" cy="3.6" r="1.7"/><circle cx="4.5" cy="12.4" r="1.7"/><circle cx="11.5" cy="5.6" r="1.7"/><path d="M4.5 5.3v5.4M11.5 7.3c0 2.5-2.3 3.4-6 3.9"/>',
   copy: '<rect x="5.6" y="5.6" width="7.9" height="7.9" rx="2"/><path d="M10.4 3.4A1.4 1.4 0 0 0 9 2H4.2A1.7 1.7 0 0 0 2.5 3.7V9c0 .8.6 1.4 1.4 1.4"/>',
@@ -26,12 +27,12 @@ const ACTION_ICONS = {
 };
 
 
-function actionIconSvg(name) {
+function actionIconSvg(name: string) {
   return `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ACTION_ICONS[name]}</svg>`;
 }
 
 /** 图标按钮：不写字，悬停时用自带的小气泡说明（data-tip），读屏和键盘用 aria-label。 */
-function actionIcon(label, icon, className, onClick) {
+function actionIcon(label: string, icon: string, className: string, onClick: (event: MouseEvent) => void) {
   const node = document.createElement('button');
   node.type = 'button';
   node.className = 'icon-action ' + className;
@@ -44,7 +45,7 @@ function actionIcon(label, icon, className, onClick) {
 
 
 /** 复用同一复制兼容路径；UI 层仍保留已有的成功/失败反馈。 */
-async function writeClipboard(value) {
+async function writeClipboard(value: unknown) {
   if (!await tryWriteClipboard(value)) throw new Error('当前环境不支持复制，请手动选择文本');
 }
 
@@ -54,7 +55,7 @@ async function writeClipboard(value) {
  * 之前这里调用的是一个从未定义过的 copyControl，带代码块的回复一渲染就抛
  * ReferenceError，整条消息中断——这也是代码块看起来「渲染不出来」的原因。
  */
-function copyControl(label, getText, options = {}) {
+function copyControl(label: string, getText: () => string, options: { tip?: boolean } = {}) {
   const { tip = true } = options;
   const node = document.createElement('button');
   node.type = 'button';
@@ -88,7 +89,7 @@ const TABLE_DIVIDER = /^:?-{2,}:?$/;
  * 支持：围栏代码块、标题、表格、引用、有序/无序列表、分隔线、粗体/斜体/删除线/行内代码/链接。
  * 流式期间未闭合的代码围栏会一直按代码渲染，避免逐字闪烁。
  */
-function renderMarkdown(text) {
+function renderMarkdown(text: unknown) {
   const fragment = document.createDocumentFragment();
   for (const node of markdownBlocks(String(text).replace(/\r\n/g, '\n').split('\n'))) {
     fragment.append(node);
@@ -96,7 +97,7 @@ function renderMarkdown(text) {
   return fragment;
 }
 
-function markdownBlocks(lines) {
+function markdownBlocks(lines: string[]) {
   return markdownBlockRecords(lines).map((record) => record.node);
 }
 
@@ -106,12 +107,12 @@ function markdownBlocks(lines) {
  * <p>行区间是流式增量渲染的依据：只要一个块的输入没变，它对应 DOM 就可以原样留着。
  * offset 用于解析「从中间某个位置切出来的行片段」时把行号还原成整篇坐标。
  */
-function markdownBlockRecords(lines, offset = 0) {
-  const records = [];
+function markdownBlockRecords(lines: string[], offset = 0): MarkdownBlock[] {
+  const records: MarkdownBlock[] = [];
   let i = 0;
 
   /** blocks 的每一次 Push 都带上当前块的起止行；end 是不包含的下标。 */
-  const push = (node, start) => {
+  const push = (node: Node, start: number) => {
     records.push({ node, start: start + offset, end: i + offset });
   };
 
@@ -250,7 +251,7 @@ function markdownBlockRecords(lines, offset = 0) {
 }
 
 /** 模型有时会直接输出 XML/SVG 源码而不加 Markdown 围栏。空行不能把一份 SVG 拆开。 */
-function sourceBlockAt(lines, start) {
+function sourceBlockAt(lines: string[], start: number) {
   const first = lines[start].trim();
   const svg = /^<svg\b/i.test(first);
   const html = /^<(!doctype\s+html|html)\b/i.test(first);
@@ -279,7 +280,7 @@ function sourceBlockAt(lines, start) {
   return { lines: taken, next: end, language: svg ? 'svg' : 'html' };
 }
 
-function safeSvg(source) {
+function safeSvg(source: string) {
   const doc = new DOMParser().parseFromString(source, 'image/svg+xml');
   const svg = doc.documentElement;
   if (!svg || svg.nodeName.toLowerCase() !== 'svg' || doc.querySelector('parsererror')) {
@@ -298,7 +299,7 @@ function safeSvg(source) {
   return document.importNode(svg, true);
 }
 
-function codeBlock(code, language) {
+function codeBlock(code: string, language: string) {
   const text = code.replace(/\n+$/, '');
   const kind = outputKind(language, text);
   const figure = document.createElement('figure');
@@ -332,7 +333,7 @@ function codeBlock(code, language) {
   return figure;
 }
 
-function buildPreview(kind, text, source) {
+function buildPreview(kind: string, text: string, source: HTMLElement) {
   if (kind === 'svg') {
     const svg = safeSvg(text);
     if (!svg) {
@@ -348,7 +349,7 @@ function buildPreview(kind, text, source) {
     preview.className = 'md-preview';
     const frame = document.createElement('iframe');
     frame.className = 'md-preview-frame';
-    frame.sandbox = '';
+    frame.setAttribute('sandbox', '');
     frame.srcdoc = text;
     frame.title = 'HTML 预览';
     preview.append(frame);
@@ -369,14 +370,14 @@ function buildPreview(kind, text, source) {
   return null;
 }
 
-function mathBlock(tex) {
+function mathBlock(tex: string) {
   const node = document.createElement('div');
   node.className = 'md-math';
   paintWhenAttached(node, () => renderMath(node, tex, true));
   return node;
 }
 
-function paintWhenAttached(node, paint) {
+function paintWhenAttached(node: HTMLElement, paint: () => void) {
   queueMicrotask(() => {
     if (node.isConnected) {
       paint();
@@ -384,9 +385,9 @@ function paintWhenAttached(node, paint) {
   });
 }
 
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${src}"]`);
+function loadScript(src: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
     if (existing) {
       if (existing.dataset.loaded === '1') {
         resolve();
@@ -407,7 +408,7 @@ function loadScript(src) {
   });
 }
 
-let mermaidLoading;
+let mermaidLoading: Promise<Window['mermaid']> | undefined;
 function loadMermaid() {
   if (window.mermaid) {
     return Promise.resolve(window.mermaid);
@@ -418,7 +419,7 @@ function loadMermaid() {
   return mermaidLoading;
 }
 
-let katexLoading;
+let katexLoading: Promise<Window['katex']> | undefined;
 function loadKatex() {
   if (window.katex) {
     return Promise.resolve(window.katex);
@@ -436,16 +437,16 @@ function loadKatex() {
   return katexLoading;
 }
 
-async function renderMermaid(host, source, code) {
+async function renderMermaid(host: HTMLElement, source: string, code: HTMLElement) {
   try {
     const mermaid = await loadMermaid();
-    mermaid.initialize({
+    mermaid!.initialize({
       startOnLoad: false,
       securityLevel: 'strict',
       theme: document.documentElement.dataset.theme === 'light' ? 'default' : 'dark'
     });
     const id = 'pilot-mermaid-' + Math.random().toString(36).slice(2);
-    const drawn = await mermaid.render(id, source);
+    const drawn = await mermaid!.render(id, source);
     host.replaceChildren();
     const wrap = document.createElement('div');
     wrap.className = 'md-mermaid';
@@ -457,17 +458,17 @@ async function renderMermaid(host, source, code) {
   }
 }
 
-async function renderMath(host, tex, display) {
+async function renderMath(host: HTMLElement, tex: string, display: boolean) {
   try {
     const katex = await loadKatex();
     host.replaceChildren();
-    katex.render(tex, host, { throwOnError: false, displayMode: display });
+    katex!.render(tex, host, { throwOnError: false, displayMode: display });
   } catch (error) {
     host.textContent = tex;
   }
 }
 
-function sourcePre(code, language) {
+function sourcePre(code: string, language: string) {
   const pre = document.createElement('pre');
   if (outputKind(language, code) === 'diff') {
     pre.className = 'is-diff';
@@ -495,7 +496,7 @@ function sourcePre(code, language) {
   return pre;
 }
 
-function splitRow(line) {
+function splitRow(line: string) {
   let value = line.trim();
   if (value.startsWith('|')) {
     value = value.slice(1);
@@ -506,7 +507,7 @@ function splitRow(line) {
   return value.split('|').map((cell) => cell.trim());
 }
 
-function isTableStart(lines, index) {
+function isTableStart(lines: string[], index: number) {
   const header = lines[index];
   if (!header || !header.includes('|')) {
     return false;
@@ -519,7 +520,7 @@ function isTableStart(lines, index) {
   return cells.length > 0 && cells.every((cell) => TABLE_DIVIDER.test(cell.replace(/\s/g, '')));
 }
 
-function buildTable(lines, start) {
+function buildTable(lines: string[], start: number) {
   const header = splitRow(lines[start]);
   const aligns = splitRow(lines[start + 1]).map((cell) => {
     const value = cell.replace(/\s/g, '');
@@ -569,11 +570,11 @@ function buildTable(lines, start) {
   return { node: wrap, next: i };
 }
 
-function buildList(lines, start) {
+function buildList(lines: string[], start: number) {
   const ordered = /^\s{0,3}\d/.test(lines[start]);
   const list = document.createElement(ordered ? 'ol' : 'ul');
   if (ordered) {
-    const first = Number(lines[start].match(/^\s*(\d+)/)[1]);
+    const first = Number(lines[start].match(/^\s*(\d+)/)![1]);
     if (Number.isSafeInteger(first) && first !== 1) list.setAttribute('start', String(first));
   }
   let i = start;
@@ -612,7 +613,7 @@ function buildList(lines, start) {
   return { node: list, next: i };
 }
 
-function inlineFragment(text) {
+function inlineFragment(text: string) {
   const fragment = document.createDocumentFragment();
   const pattern = /(!\[[^\]\n]*\]\([^)\s]+\)|(?<!\$)\$(?!\$)(?:\\.|[^$\n])+\$(?!\$)|`[^`\n]+`|\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*[^*\n]+\*|\[[^\]\n]+\]\([^)\s]+\))/g;
   let last = 0;
@@ -630,7 +631,7 @@ function inlineFragment(text) {
   return fragment;
 }
 
-function inlineToken(token) {
+function inlineToken(token: string) {
   if (token.startsWith('$') && !token.startsWith('$$')) {
     const tex = token.slice(1, -1);
     if (/[\\^_]/.test(tex)) {
@@ -647,7 +648,7 @@ function inlineToken(token) {
     if (src) {
       const node = document.createElement('img');
       node.className = 'md-image';
-      node.alt = image[1];
+      node.alt = image![1];
       node.src = src;
       return node;
     }
@@ -705,29 +706,5 @@ function inlineToken(token) {
   }
   return document.createTextNode(token);
 }
-
-function formatTime(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-  return date.toLocaleTimeString('zh-CN', { hour12: false });
-}
-
-/** 去掉服务端拼进消息的附件块，只留用户写的话；只发了文件时退回文件名。标题、摘要都不该带整份文件内容。 */
-function plainBody(value) {
-  const text = String(value || '');
-  const { body, files } = splitAttachmentMarkers(text);
-  if (body.trim()) {
-    return body;
-  }
-  return files.length ? files.map((file) => file.name).join('、') : text;
-}
-
-function preview(value, maxLength) {
-  const single = plainBody(value).replace(/\s+/g, ' ').trim();
-  return single.length <= maxLength ? single : single.slice(0, maxLength) + '…';
-}
-
 
 export { renderMarkdown, markdownBlocks, markdownBlockRecords, actionIconSvg, actionIcon };
