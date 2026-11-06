@@ -19,4 +19,6 @@ import('./store.js').then(({ useStore }) => {
   });
 });
 
-createRoot(document.getElementById('root')).render(<App />);
+const root = document.getElementById('root');
+if (!root) throw new Error('找不到应用挂载节点');
+createRoot(root).render(<App />);

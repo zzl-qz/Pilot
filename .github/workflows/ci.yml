@@ -48,12 +48,9 @@ jobs:
       - name: Automatic model capabilities through isolated gateway
         run: node scripts/verify-model-capabilities.mjs
 
-      - name: Web unit tests
-        working-directory: pilot-web
-        run: npm test
-
-      - name: Agent delivery and browser policy regressions
-        run: node --import ./pilot-web/frontend/scripts/register-typescript.mjs --test pilot-web/frontend/scripts/agent-delivery.test.mjs pilot-web/frontend/scripts/local-capabilities.test.mjs
+      - name: Web and TypeScript regressions
+        working-directory: pilot-web/frontend
+        run: node scripts/verify-migration.mjs --unit-only
 
       - name: Desktop unit tests
         working-directory: pilot-desktop

@@ -1,3 +1,6 @@
+import type { ApiResults } from '../types/api.js';
+import { errorInfo } from '../lib/errors.js';
+type ResizeKind = 'sidebar' | 'activity';
 import RecurringPlans from './RecurringPlans.jsx';
 import MessageSearch from './MessageSearch.jsx';
 import Notifications from './Notifications.jsx';
@@ -26,16 +29,19 @@ export default function App() {
   const init = useStore((state) => state.init);
   const notice = useStore((state) => state.ui.notice);
   useEffect(() => window.pilotDesktop?.onMobileConnection?.(() => useStore.getState().setUi({ mobileConnectionOpen: true })), []);
-  useEffect(() => window.pilotDesktop?.onBrowserOpen?.(async url => {
-    const state = useStore.getState();
-    try {
-      await window.pilotDesktop.ensureTab(state.sessionId || null);
-      const result = await window.pilotDesktop.navigate(url);
-      if (!result?.ok) throw new Error(result?.error || '链接暂时无法打开');
-      state.setUi({ inspectorOpen: true, inspectorTab: 'browser' });
-      state.showNotice('已在内置浏览器打开链接');
-    } catch (error) { state.showNotice(error.message || '链接暂时无法打开'); }
-  }), []);
+  useEffect(() => {
+    const bridge = window.pilotDesktop;
+    return bridge?.onBrowserOpen(async url => {
+      const state = useStore.getState();
+      try {
+        await bridge.ensureTab(state.sessionId || null);
+        const result = await bridge.navigate(url);
+        if (!result?.ok) throw new Error(result?.error || '链接暂时无法打开');
+        state.setUi({ inspectorOpen: true, inspectorTab: 'browser' });
+        state.showNotice('已在内置浏览器打开链接');
+      } catch (error) { state.showNotice(errorInfo(error).message || '链接暂时无法打开'); }
+    });
+  }, []);
   useEffect(() => window.pilotDesktop?.onNavigationNotice?.(message => useStore.getState().showNotice(message)), []);
   const ready = useStore(state => state.ready);
   const refreshing = useStore(state => state.ui.refreshing);
@@ -65,8 +71,8 @@ export default function App() {
   const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 960px)').matches);
   /** 两侧面板宽度：拖过分才写内联变量，没拖过就用 CSS 里的默认/自适应值。 */
   const [layout, setLayout] = useState(readLayout);
-  const [resizing, setResizing] = useState(null);
-  const appRef = useRef(null);
+  const [resizing, setResizing] = useState<{ kind: ResizeKind; startX: number; startWidth: number } | null>(null);
+  const appRef = useRef<HTMLDivElement>(null);
   // 75 秒没有任何事件就提示可能卡住（与旧版 STALL_SECONDS 一致）
   const idleSeconds = running && lastEventAt ? Math.round((Date.now() - lastEventAt) / 1000) : 0;
   const stalled = idleSeconds >= 75;
@@ -121,11 +127,11 @@ export default function App() {
     if (!narrow) return;
     main?.setAttribute('inert', '');
     const frame = requestAnimationFrame(() => document.getElementById('new-session')?.focus());
-    const onKey = event => {
+    const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Tab' || event.defaultPrevented || document.querySelector('.modal, dialog[open]')) return;
-      const items = [toggle, ...document.querySelectorAll('.navigation-rail button, #sidebar button:not([disabled]):not([tabindex="-1"]), #sidebar input, #sidebar summary, #sidebar [tabindex="0"]')]
-        .filter(el => el && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
-      const index = items.indexOf(document.activeElement);
+      const items = [toggle, ...document.querySelectorAll<HTMLElement>('.navigation-rail button, #sidebar button:not([disabled]):not([tabindex="-1"]), #sidebar input, #sidebar summary, #sidebar [tabindex="0"]')]
+        .filter((el): el is HTMLElement => Boolean(el && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden'));
+      const index = items.findIndex(item => item === document.activeElement);
       event.preventDefault();
       const next = index < 0 ? 0 : (index + (event.shiftKey ? -1 : 1) + items.length) % items.length;
       items[next]?.focus();
@@ -148,7 +154,7 @@ export default function App() {
   }, [embedded]);
 
   useEffect(() => {
-    const onKey = (event) => {
+    const onKey = (event: KeyboardEvent) => {
       // 内嵌页不接管快捷键：Ctrl K / Ctrl N 之类在侧边对话里应当留给浏览器与输入框
       if (embedded || event.defaultPrevented) {
         return;
@@ -238,7 +244,7 @@ export default function App() {
       return undefined;
     }
     document.body.classList.add('is-resizing');
-    const onMove = (event) => {
+    const onMove = (event: PointerEvent) => {
       const width = (appRef.current?.getBoundingClientRect().width || window.innerWidth) - 52;
       const key = resizing.kind === 'sidebar' ? 'sidebarW' : 'activityW';
       setLayout((current) => ({
@@ -264,7 +270,7 @@ export default function App() {
     }
   }, [resizing, layout]);
 
-  function startResize(kind, event) {
+  function startResize(kind: ResizeKind, event: React.PointerEvent) {
     if (event.button !== undefined && event.button !== 0) {
       return;
     }
@@ -272,11 +278,11 @@ export default function App() {
     const app = appRef.current;
     const styles = app ? window.getComputedStyle(app) : null;
     const defaults = { sidebar: 264, activity: 336 };
-    const startWidth = parseFloat(styles?.getPropertyValue(`--${kind === 'sidebar' ? 'sidebar-w' : 'activity-w'}`)) || defaults[kind];
+    const startWidth = parseFloat(styles?.getPropertyValue(`--${kind === 'sidebar' ? 'sidebar-w' : 'activity-w'}`) || '') || defaults[kind];
     setResizing({ kind, startX: event.clientX, startWidth });
   }
 
-  const appStyle = {};
+  const appStyle: React.CSSProperties & { '--sidebar-w'?: string; '--activity-w'?: string } = {};
   if (layout.sidebarW) {
     appStyle['--sidebar-w'] = `${layout.sidebarW}px`;
   }
@@ -435,7 +441,7 @@ export default function App() {
 }
 
 /** 工作区菜单：该对话可用的文件夹 + worktree 的两个动作（旧版 folderMenu）。 */
-function WorkspaceMenu({ onClose }) {
+function WorkspaceMenu({ onClose }: { onClose: () => void }) {
   const workspace = useStore((state) => state.workspace);
   const projects = useStore((state) => state.projects);
   const sessions = useStore((state) => state.sessions);
@@ -444,13 +450,13 @@ function WorkspaceMenu({ onClose }) {
   const projectId = currentProjectId || sessions.find((item) => item.id === sessionId)?.projectId || null;
   const project = projects.find((item) => item.id === projectId) || null;
   const folders = resolveFolders(project, workspace);
-  const [worktree, setWorktree] = useState(null);
+  const [worktree, setWorktree] = useState<ApiResults['worktreeInfo'] | null>(null);
   const [worktreeBranch, setWorktreeBranch] = useState('');
 
   // 点外面就收起：菜单是绝对定位的浮层，没有遮罩可以点
   useEffect(() => {
     const onDown = () => onClose();
-    const onKey = (event) => {
+    const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); onClose(); document.getElementById('workspace-name')?.focus(); }
     };
     document.addEventListener('keydown', onKey, true);
@@ -498,7 +504,7 @@ function WorkspaceMenu({ onClose }) {
           value={worktreeBranch}
           onChange={(event) => setWorktreeBranch(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.keyCode !== 229) {
               onClose();
               useStore.getState().openWorktree(worktreeBranch.trim());
             }
@@ -541,7 +547,7 @@ function WorkspaceMenu({ onClose }) {
                       await useStore.getState().switchWorkspace(worktree.base);
                     }
                   } catch (error) {
-                    useStore.getState().showNotice('删除 worktree 失败：' + error.message);
+                    useStore.getState().showNotice('删除 worktree 失败：' + errorInfo(error).message);
                   }
                 }
               });

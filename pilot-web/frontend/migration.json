@@ -426,8 +426,54 @@
         "全量 Web/Electron 回归",
         "应用源码全部 TS/TSX"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T09-05-34-949Z/report.json",
+          "result": "374 项前端单元、41 项桌面单元、严格类型检查、隔离构建及全部 19 套 Chromium/Electron 回归通过。App/启动入口已迁移，移除 JS 混编；全部 72 个既有模块均有 TS/TSX 对应，应用源码不含 any 或检查豁免。新增 worktree 分支输入法确认键回归。"
+        },
+        {
+          "evidence": [
+            "/private/tmp/pilot-ts-final-maven-verify.log"
+          ],
+          "result": "Java 25 下离线 Maven 全工程 verify 成功，含生产前端/Jar 打包、Spotless、Checkstyle。后端共 1263 项，1250 项通过、13 项按既有条件跳过：7 项容器隔离、3 项项目构建、2 项外部模型评测、1 项 Maven wrapper 环境前提；无失败。"
+        },
+        {
+          "evidence": [
+            "/var/folders/v3/fbb0zyg91pd0qyt0gp6fnqcc0000gn/T/pilot-packaged-session-tKTV5C/report.json",
+            "/var/folders/v3/fbb0zyg91pd0qyt0gp6fnqcc0000gn/T/pilot-api-contract-7XyqhG/report.json",
+            "/var/folders/v3/fbb0zyg91pd0qyt0gp6fnqcc0000gn/T/pilot-packaged-login-2PVXjD",
+            "/var/folders/v3/fbb0zyg91pd0qyt0gp6fnqcc0000gn/T/pilot-local-security-igLhcA"
+          ],
+          "result": "新生产 Jar 的真实入口/会话/SSE/用量/历史刷新恢复、上游 401 失败及再次发送、长流取消和控件复位通过；全部前端 API 契约、令牌登录/退出/窄屏及同源/跨源/陌生 Host 验证通过。使用独立数据与中文空格工作区，模型仅为本地模拟 HTTP 服务。"
+        }
+      ]
     }
-  ]
+  ],
+  "completion": {
+    "completedAt": "2026-11-06T09:12:20.572Z",
+    "applicationModules": 72,
+    "strict": true,
+    "allowJs": false,
+    "anyTypeAnnotations": 0,
+    "typecheckExemptions": 0,
+    "frontendTestsPassed": 374,
+    "desktopTestsPassed": 41,
+    "browserSuitesPassed": 19,
+    "backendTestsPassed": 1250,
+    "backendTestsSkipped": 13,
+    "productionJarVerified": true,
+    "ci": "三平台 CI 已统一接入全部前端/类型/协议回归；远端 CI 尚未执行",
+    "commandsCwd": "pilot-web/frontend",
+    "commands": [
+      "npm run typecheck",
+      "npm run test:unit",
+      "npm run test:migration -- --all"
+    ],
+    "notes": [
+      "构建/测试 MJS 与 Electron 主进程保留原语言，迁移范围内应用源码全部 TS/TSX",
+      "兼容 .js/.jsx 导入标识符由 TypeScript/Vite 解析为 TS/TSX，保留已验证的模块解析行为",
+      "仅 macOS 为实机 Web/Electron 验证；Windows/Linux 路径、快捷键和能力降级为模拟覆盖，未声明三平台实机通过"
+    ]
+  }
 }

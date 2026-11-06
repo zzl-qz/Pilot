@@ -38,6 +38,18 @@ export async function checkWorkbench(page, name, output) {
   await page.locator('#task-add-criterion').press('Enter');
   assert.match(await page.locator('#task-acceptance').inputValue(), /新增验收条件/);
   await page.evaluate(() => store.setState({ task: null, taskDirty: false }));
+  await page.evaluate(() => {
+    window.savedOpenWorktree = store.getState().openWorktree; window.branchCalls = [];
+    store.setState({ openWorktree: async branch => branchCalls.push(branch) });
+  });
+  await page.locator('#workspace-name').click();
+  const branchInput = page.getByLabel('worktree 分支', { exact: true });
+  await branchInput.fill('中文分支');
+  await branchInput.dispatchEvent('keydown', { key: 'Enter', isComposing: true });
+  assert.deepEqual(await page.evaluate(() => branchCalls), [], '确认输入法候选字不能创建 worktree');
+  await branchInput.press('Enter');
+  assert.deepEqual(await page.evaluate(() => branchCalls), ['中文分支']);
+  await page.evaluate(() => store.setState({ openWorktree: window.savedOpenWorktree }));
   const tree = page.getByRole('tree', { name: '工作区文件' });
   const folder = tree.getByRole('treeitem', { name: 'src', exact: true });
   await folder.click();
