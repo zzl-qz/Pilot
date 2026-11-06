@@ -1,3 +1,6 @@
+import type { ScheduleDraft } from '../types/api.js';
+import type * as S from '../types/server.js';
+import { errorInfo } from '../lib/errors.js';
 import { restoreFocus } from '../lib/interaction.js';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
@@ -5,9 +8,9 @@ import { api } from '../api.js';
 import './schedules.css';
 import { DialogHeader } from './DialogHeader.jsx';
 
-const labels = { SCHEDULED: '待执行', DISPATCHING: '正在启动', RUNNING: '执行中', WAITING: '等待唤醒', PAUSED: '已暂停', COMPLETED: '已完成', CANCELLED: '已取消', NEEDS_ATTENTION: '需要处理', INTERRUPTED: '已中断' };
-const ended = (job) => ['COMPLETED', 'CANCELLED', 'NEEDS_ATTENTION'].includes(job.state);
-export function localTime(date, zone) {
+const labels: Record<string, string> = { SCHEDULED: '待执行', DISPATCHING: '正在启动', RUNNING: '执行中', WAITING: '等待唤醒', PAUSED: '已暂停', COMPLETED: '已完成', CANCELLED: '已取消', NEEDS_ATTENTION: '需要处理', INTERRUPTED: '已中断' };
+const ended = (job: S.ScheduledTask) => ['COMPLETED', 'CANCELLED', 'NEEDS_ATTENTION'].includes(job.state);
+export function localTime(date: number | string, zone?: string) {
   const d = new Date(date);
   if (zone) {
     const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(d).map(p => [p.type, p.value]));
@@ -15,7 +18,7 @@ export function localTime(date, zone) {
   }
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
-function stamp(value, zone) {
+function stamp(value?: string | null, zone?: string) {
   if (!value) return '—';
   try { return new Intl.DateTimeFormat('zh-CN', { timeZone: zone || undefined, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)); }
   catch { return value; }
@@ -25,9 +28,9 @@ export default function Schedules() {
   const seed = useStore(s => s.ui.scheduleDraft);
   return open ? <ScheduleDialog seed={seed} /> : null;
 }
-function ScheduleDialog({ seed }) {
-  const ref = useRef(null);
-  const [jobs, setJobs] = useState([]);
+function ScheduleDialog({ seed }: { seed?: string | null }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [jobs, setJobs] = useState<S.ScheduledTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -38,8 +41,8 @@ function ScheduleDialog({ seed }) {
   const [repeat, setRepeat] = useState(() => useStore.getState().ui.scheduleRepeat ? 'daily' : 'once');
   const [cron, setCron] = useState('0 0 9 * * MON-FRI');
   const [misfire, setMisfire] = useState('ONCE');
-  const [times, setTimes] = useState([]);
-  const [templates, setTemplates] = useState([]);
+  const [times, setTimes] = useState<string[]>([]);
+  const [templates, setTemplates] = useState<S.RecurringScheduleServiceTemplate[]>([]);
   const [templateId, setTemplateId] = useState('');
   const [templateName, setTemplateName] = useState('');
   const [name, setName] = useState('');
@@ -55,70 +58,70 @@ function ScheduleDialog({ seed }) {
   const close = () => useStore.getState().setUi({ schedulesOpen: false, scheduleDraft: null, scheduleTarget: null, scheduleRepeat: false });
   const refresh = useCallback(async () => {
     try { const rows = await api.schedules(); if (alive.current) { setJobs(Array.isArray(rows) ? rows : []); } }
-    catch (e) { if (alive.current) setError(`读取任务失败：${e.message}`); }
+    catch (e) { if (alive.current) setError(`读取任务失败：${errorInfo(e).message}`); }
     finally { if (alive.current) setLoading(false); }
   }, []);
   useEffect(() => {
     const previous = document.activeElement;
     alive.current = true;
-    ref.current.showModal(); refresh();
-    api.templates().then(rows => { if (alive.current) setTemplates(Array.isArray(rows) ? rows : []); }).catch(e => { if (alive.current) setError(`读取模板失败：${e.message}`); });
+    ref.current?.showModal(); refresh();
+    api.templates().then(rows => { if (alive.current) setTemplates(Array.isArray(rows) ? rows : []); }).catch(e => { if (alive.current) setError(`读取模板失败：${errorInfo(e).message}`); });
     const timer = setInterval(refresh, 5000);
     return () => { alive.current = false; clearInterval(timer); restoreFocus(previous); };
   }, [refresh]);
   const job = jobs.find(j => j.id === selected);
   const visible = jobs.filter(j => filter === 'all' || (filter === 'active' ? !ended(j) : j.state === 'NEEDS_ATTENTION'));
-  async function action(id, command, at) {
+  async function action(id: string, command: string, at?: string) {
     setBusy(true); setError('');
     try {
       const timing = at ? await api.scheduleTimes({ localTime: at, timezone: zone, cron: '' }) : null;
-      if (at && (!timing.runAt || new Date(timing.runAt) <= new Date())) throw new Error('请选择有效的未来时间');
+      if (at && (!timing?.runAt || new Date(timing.runAt).getTime() <= Date.now())) throw new Error('请选择有效的未来时间');
       await api.controlSchedule(id, { action: command, ...(timing ? { runAt: timing.runAt } : {}) }); await refresh(); setChangedTime('');
     }
-    catch (e) { setError(e.message); }
+    catch (e) { setError(errorInfo(e).message || '操作失败'); }
     finally { setBusy(false); }
   }
   function expression() {
     const date = new Date(`${when.split('T')[0]}T12:00:00Z`), [hour, minute] = (when.split('T')[1] || '09:00').split(':').map(Number);
     return repeat === 'once' ? '' : repeat === 'custom' ? cron : `0 ${minute} ${hour} * * ${repeat === 'weekdays' ? 'MON-FRI' : repeat === 'weekly' ? date.getUTCDay() : '*'}`;
   }
-  function draft(sourceSessionId) {
-    const lines = value => value.split('\n').map(v => v.trim()).filter(Boolean);
+  function draft(sourceSessionId: string | null): ScheduleDraft {
+    const lines = (value: string) => value.split('\n').map(v => v.trim()).filter(Boolean);
     return { name: name.trim() || content.trim().slice(0, 40), sourceSessionId, content, timezone: zone,
       requirements: { constraints: lines(constraints), acceptance: lines(acceptance).map(text => ({ text, checked: false, evidence: '' })) }, skill: skill.trim() || null, fullAccess, isolated };
   }
   async function previewTimes() {
     setBusy(true); setError(''); setTimes([]);
-    try { const data = await api.scheduleTimes({ localTime: when, timezone: zone, cron: expression() }); setTimes(data.next || []); }
-    catch (e) { setError(e.message); } finally { setBusy(false); }
+    try { const data = required(await api.scheduleTimes({ localTime: when, timezone: zone, cron: expression() })); setTimes(data.next || []); }
+    catch (e) { setError(errorInfo(e).message || '操作失败'); } finally { setBusy(false); }
   }
-  async function save(event) {
+  async function save(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setError('');
     try {
       const sourceSessionId = await useStore.getState().ensureSession();
       if (!sourceSessionId) throw new Error('请先选择工作区和对话');
-      const timing = await api.scheduleTimes({ localTime: when, timezone: zone, cron: expression() });
-      if (!timing.runAt || new Date(timing.runAt) <= new Date()) throw new Error('请选择有效的未来时间');
-      const task = { ...draft(sourceSessionId), runAt: timing.runAt };
+      const timing = required(await api.scheduleTimes({ localTime: when, timezone: zone, cron: expression() }));
+      if (!timing.runAt || new Date(timing.runAt).getTime() <= Date.now()) throw new Error('请选择有效的未来时间');
+      const task = { ...draft(sourceSessionId), sourceSessionId, runAt: timing.runAt };
       if (repeat !== 'once') {
         await api.createRecurring({ task, cron: expression(), misfire }); close(); useStore.getState().setUi({ recurringOpen: true });
       } else {
-        const created = await api.createSchedule(task);
+        const created = required(await api.createSchedule(task));
         await refresh(); await useStore.getState().loadSessions(); setSelected(created.id); setEditing(false); setContent('');
       }
-    } catch (e) { setError(e.message); } finally { setBusy(false); }
+    } catch (e) { setError(errorInfo(e).message || '操作失败'); } finally { setBusy(false); }
   }
-  function applyTemplate(id) {
+  function applyTemplate(id: string) {
     setTemplateId(id); const template = templates.find(t => t.id === id); if (!template) return;
     const task = template.task; setTemplateName(template.name); setName(task.name || ''); setContent(task.content || '');
     setConstraints((task.requirements?.constraints || []).join('\n')); setAcceptance((task.requirements?.acceptance || []).map(a => a.text).join('\n'));
     setSkill(task.skill || ''); setFullAccess(task.fullAccess !== false); setIsolated(task.isolated !== false);
   }
-  async function saveTemplate(update) {
+  async function saveTemplate(update: boolean) {
     setBusy(true); setError('');
-    try { const old = templates.find(t => t.id === templateId); const row = await api.saveTemplate({ id: update ? old?.id : null, version: update ? old?.version : 0, name: templateName, task: draft(null) });
-      setTemplates(await api.templates()); setTemplateId(row.id); useStore.getState().showNotice(`模板已保存：第 ${row.version} 版`);
-    } catch (e) { setError(e.message); } finally { setBusy(false); }
+    try { const old = templates.find(t => t.id === templateId); const row = required(await api.saveTemplate({ id: update ? old?.id : null, version: update && old ? old.version : 0, name: templateName, task: draft(null) }));
+      setTemplates(await api.templates() || []); setTemplateId(row.id); useStore.getState().showNotice(`模板已保存：第 ${row.version} 版`);
+    } catch (e) { setError(errorInfo(e).message || '操作失败'); } finally { setBusy(false); }
   }
   return <dialog className="schedule-dialog" ref={ref} aria-labelledby="schedule-title" onCancel={e => { e.preventDefault(); close(); }} onKeyDown={e => e.stopPropagation()}>
     <DialogHeader id="schedule-title" title="定时任务" subtitle="Pilot / 自动执行" closeLabel="关闭定时任务" onClose={close} />
@@ -131,7 +134,7 @@ function ScheduleDialog({ seed }) {
         <details className="schedule-templates"><summary>任务模板{templates.length ? ` · ${templates.length} 个` : ''}</summary>
           <label>使用模板<select aria-label="使用模板" value={templateId} onChange={e => applyTemplate(e.target.value)}><option value="">选择模板</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name} · v{t.version}</option>)}</select></label>
           <label>模板名称<input value={templateName} onChange={e => setTemplateName(e.target.value)} maxLength={120} /></label>
-          <div className="schedule-actions"><button type="button" className="btn" disabled={busy || !content.trim() || !templateName.trim()} onClick={() => saveTemplate(false)}>另存为模板</button>{templateId && <><button type="button" className="btn" disabled={busy || !content.trim() || !templateName.trim()} onClick={() => saveTemplate(true)}>更新所选模板</button><button type="button" className="btn" disabled={busy} onClick={async () => { setBusy(true); try { const old = templates.find(t => t.id === templateId); await api.deleteTemplate(old.id, old.version); setTemplates(await api.templates()); setTemplateId(''); } catch (e) { setError(e.message); } finally { setBusy(false); } }}>删除模板</button></>}</div>
+          <div className="schedule-actions"><button type="button" className="btn" disabled={busy || !content.trim() || !templateName.trim()} onClick={() => saveTemplate(false)}>另存为模板</button>{templateId && <><button type="button" className="btn" disabled={busy || !content.trim() || !templateName.trim()} onClick={() => saveTemplate(true)}>更新所选模板</button><button type="button" className="btn" disabled={busy} onClick={async () => { setBusy(true); try { const old = templates.find(t => t.id === templateId); if (!old) throw new Error('所选模板已不存在，请重新加载'); await api.deleteTemplate(old.id, old.version); setTemplates(await api.templates() || []); setTemplateId(''); } catch (e) { setError(errorInfo(e).message || '操作失败'); } finally { setBusy(false); } }}>删除模板</button></>}</div>
           <p>模板保存目标、验收与执行策略；更新不会改变已有计划。</p>
         </details>
         <label>任务名称<input aria-label="任务名称" maxLength={120} value={name} onChange={e => setName(e.target.value)} placeholder="例如：检查依赖升级并修复测试" /></label>
@@ -148,7 +151,7 @@ function ScheduleDialog({ seed }) {
         <button type="button" className="btn" disabled={busy} onClick={previewTimes}>预览执行时间</button>
         {!!times.length && <ol className="schedule-times">{times.map(at => <li key={at}>{stamp(at, zone)} · {zone}</li>)}</ol>}
         <p>时间按所填时区解释；夏令时重复时刻的首次执行采用较早偏移。</p>
-        <div className="schedule-presets">{[[10, '10 分钟后'], [60, '1 小时后'], [1440, '24 小时后']].map(([minutes, title]) => <button type="button" key={minutes} onClick={() => { try { setWhen(localTime(Date.now() + minutes * 60000, zone)); setTimes([]); setError(''); } catch { setError('请填写有效时区后再选择快捷时间'); } }}>{title}</button>)}</div>
+        <div className="schedule-presets">{([[10, '10 分钟后'], [60, '1 小时后'], [1440, '24 小时后']] as const).map(([minutes, title]) => <button type="button" key={minutes} onClick={() => { try { setWhen(localTime(Date.now() + minutes * 60000, zone)); setTimes([]); setError(''); } catch { setError('请填写有效时区后再选择快捷时间'); } }}>{title}</button>)}</div>
         <div className="schedule-policy"><strong>先调研，再实现</strong><p>必须阅读开源项目并记录复用理由；完成前自动核验证据。</p></div>
         <label className="schedule-checkbox"><input type="checkbox" checked={isolated} onChange={e => setIsolated(e.target.checked)} />使用独立工作区</label>
         <p>{isolated ? `${repeat === 'once' ? '从创建计划时' : '每轮从触发时'}已提交的 Git HEAD 开始，不复制未提交或忽略的文件；结果可预览后交回。需要已有提交的 Git 仓库。` : '直接在原目录执行，任务改动会影响当前工作区。'}</p>
@@ -173,7 +176,7 @@ function ScheduleDialog({ seed }) {
           <button className="schedule-back" onClick={() => setSelected(null)}>返回任务列表</button><h2>{job.name}</h2><p className="schedule-goal">{job.content}</p>
           <dl><dt>当前状态</dt><dd>{labels[job.state]} · {job.message}</dd><dt>执行时间</dt><dd>{stamp(job.runAt, job.timezone)} · {job.timezone}</dd><dt>执行策略</dt><dd>先调研开源 · 自动核验 · {job.requirements?.automation?.fullAccess ? '自主执行' : '沿用权限'}</dd></dl>
           {job.workspace && <dl><dt>{job.workspace.mode === 'ISOLATED' ? '独立工作区' : '原目录执行'}</dt><dd>{job.workspace.path || '默认工作区'}</dd>{job.workspace.commit && <><dt>创建基线</dt><dd>{job.workspace.commit}</dd></>}</dl>}
-          <div className="schedule-actions">{['COMPLETED', 'NEEDS_ATTENTION'].includes(job.state) && <button className="btn btn-primary" onClick={() => { close(); useStore.getState().setUi({ resultsOpen: true, resultTarget: job.id }); }}>查看结果</button>}<button className="btn" disabled={busy} onClick={async () => { try { await useStore.getState().activate(job.sessionId); close(); } catch (e) { setError(e.message); } }}>打开执行对话</button>
+          <div className="schedule-actions">{['COMPLETED', 'NEEDS_ATTENTION'].includes(job.state) && <button className="btn btn-primary" onClick={() => { close(); useStore.getState().setUi({ resultsOpen: true, resultTarget: job.id }); }}>查看结果</button>}<button className="btn" disabled={busy} onClick={async () => { try { await useStore.getState().activate(job.sessionId); close(); } catch (e) { setError(errorInfo(e).message || '操作失败'); } }}>打开执行对话</button>
             {!ended(job) && <button className="btn" disabled={busy} onClick={() => action(job.id, job.state === 'PAUSED' ? 'resume' : 'pause')}>{job.state === 'PAUSED' ? '恢复计划' : '暂停任务'}</button>}
             {!ended(job) && <button className="btn" disabled={busy} onClick={() => action(job.id, 'cancel')}>取消任务</button>}
           </div>
@@ -185,3 +188,5 @@ function ScheduleDialog({ seed }) {
     </div>
   </dialog>;
 }
+
+function required<T>(value: T | null): T { if (value === null) throw new Error('服务端返回空计划数据，请重新加载'); return value; }

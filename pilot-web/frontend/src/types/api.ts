@@ -124,3 +124,10 @@ export interface ApiResults {
   regenerate: S.SessionControllerSessionResponse;
   deleteSession: null;
 }
+
+/** 模板尚未绑定会话/时间；提交任务时这两项必须存在。验收自动化由服务端补齐。 */
+export interface ScheduleDraft extends Omit<S.ScheduleServiceCreate, 'sourceSessionId' | 'runAt' | 'skill' | 'requirements'> {
+  sourceSessionId: string | null; runAt?: string | null; skill: string | null;
+  requirements: Pick<S.TaskControlServiceRequirements, 'constraints' | 'acceptance'>;
+}
+export type ScheduleInput = ScheduleDraft & { sourceSessionId: string; runAt: string };

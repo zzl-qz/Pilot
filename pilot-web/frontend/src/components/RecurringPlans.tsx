@@ -1,18 +1,20 @@
+import type * as S from '../types/server.js';
+import { errorInfo } from '../lib/errors.js';
 import { restoreFocus } from '../lib/interaction.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
 import './schedules.css';
 import { DialogHeader } from './DialogHeader.jsx';
-const labels = { ACTIVE: '已启用', PAUSED: '已暂停', CANCELLED: '已取消', ERROR: '需要处理' };
+const labels: Record<string, string> = { ACTIVE: '已启用', PAUSED: '已暂停', CANCELLED: '已取消', ERROR: '需要处理' };
 export default function RecurringPlans() { const open = useStore(s => s.ui.recurringOpen); return open ? <Dialog /> : null; }
 function Dialog() {
-  const ref = useRef(null), alive = useRef(true);
-  const [rows, setRows] = useState([]), [error, setError] = useState(''), [busy, setBusy] = useState(false), [loading, setLoading] = useState(true);
+  const ref = useRef<HTMLDialogElement>(null), alive = useRef(true);
+  const [rows, setRows] = useState<S.RecurringScheduleServiceSeries[]>([]), [error, setError] = useState(''), [busy, setBusy] = useState(false), [loading, setLoading] = useState(true);
   const close = () => useStore.getState().setUi({ recurringOpen: false });
-  async function refresh() { try { const data = await api.recurring(); if (alive.current) { setRows(Array.isArray(data) ? data : []); setError(''); } } catch (e) { if (alive.current) setError(e.message); } finally { if (alive.current) setLoading(false); } }
-  useEffect(() => { const previous = document.activeElement; alive.current = true; ref.current.showModal(); refresh(); const timer = setInterval(refresh, 10000); return () => { alive.current = false; clearInterval(timer); restoreFocus(previous); }; }, []);
-  async function action(row, action) { setBusy(true); setError(''); try { await api.controlRecurring(row.id, { version: row.version, action }); await refresh(); } catch (e) { setError(e.message); } finally { setBusy(false); } }
+  async function refresh() { try { const data = await api.recurring(); if (alive.current) { setRows(Array.isArray(data) ? data : []); setError(''); } } catch (e) { if (alive.current) setError(errorInfo(e).message || '操作失败'); } finally { if (alive.current) setLoading(false); } }
+  useEffect(() => { const previous = document.activeElement; alive.current = true; ref.current?.showModal(); refresh(); const timer = setInterval(refresh, 10000); return () => { alive.current = false; clearInterval(timer); restoreFocus(previous); }; }, []);
+  async function action(row: S.RecurringScheduleServiceSeries, action: string) { setBusy(true); setError(''); try { await api.controlRecurring(row.id, { version: row.version, action }); await refresh(); } catch (e) { setError(errorInfo(e).message || '操作失败'); } finally { setBusy(false); } }
   return <dialog className="schedule-dialog" ref={ref} aria-labelledby="recurring-title" onCancel={e => { e.preventDefault(); close(); }} onKeyDown={e => e.stopPropagation()}>
     <DialogHeader id="recurring-title" title="周期计划" subtitle="Pilot / 自动执行" closeLabel="关闭周期计划" onClose={close} />
     <div className="schedule-dialog-body">

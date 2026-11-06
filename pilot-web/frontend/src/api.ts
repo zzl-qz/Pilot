@@ -1,4 +1,4 @@
-import type { ApiResults, InputMessage, Update } from './types/api.js';
+import type { ApiResults, InputMessage, Update, ScheduleDraft, ScheduleInput } from './types/api.js';
 import type * as S from './types/server.js';
 import { errorInfo } from './lib/errors.js';
 import { voiceFilename } from './lib/voice-input.js';
@@ -73,11 +73,11 @@ export const api = {
     return response.blob();
   },
   recurring: () => apiJson<ApiResults['recurring']>('/api/automation/series'),
-  createRecurring: (body: S.RecurringScheduleServiceCreate) => apiJson<ApiResults['createRecurring']>('/api/automation/series', jsonBody('POST', body)),
+  createRecurring: (body: { task: ScheduleInput; cron: string; misfire: string }) => apiJson<ApiResults['createRecurring']>('/api/automation/series', jsonBody('POST', body)),
   controlRecurring: (id: string, body: { action: string; version: number }) => apiJson<ApiResults['controlRecurring']>(`/api/automation/series/${encodeURIComponent(id)}`, jsonBody('POST', body)),
   scheduleTimes: (body: { localTime: string; timezone: string; cron?: string }) => apiJson<ApiResults['scheduleTimes']>('/api/automation/times', jsonBody('POST', body)),
   templates: () => apiJson<ApiResults['templates']>('/api/automation/templates'),
-  saveTemplate: (body: { id?: string; version: number; name: string; task: S.ScheduleServiceCreate }) => apiJson<ApiResults['saveTemplate']>('/api/automation/templates', jsonBody('POST', body)),
+  saveTemplate: (body: { id?: string | null; version: number; name: string; task: ScheduleDraft }) => apiJson<ApiResults['saveTemplate']>('/api/automation/templates', jsonBody('POST', body)),
   deleteTemplate: (id: string, version: number) => apiJson<ApiResults['deleteTemplate']>(`/api/automation/templates/${encodeURIComponent(id)}?version=${version}`, { method: 'DELETE' }),
   searchMessages: ({ q = '', sessionId = '', saved = false, offset = 0 }: { q?: string; sessionId?: string; saved?: boolean; offset?: number }) => apiJson<ApiResults['searchMessages']>('/api/library/search?' + new URLSearchParams({ q, sessionId, saved: String(saved), offset: String(offset) })),
   bookmarks: (session: string) => apiJson<ApiResults['bookmarks']>(`/api/library/${encodeURIComponent(session)}/bookmarks`),
@@ -192,7 +192,7 @@ export const api = {
   scheduleHandoffPreview: (id: string) => apiJson<ApiResults['scheduleHandoffPreview']>(`/api/schedules/${encodeURIComponent(id)}/handoff`),
   scheduleHandoff: (id: string, body: { revision: string }) => apiJson<ApiResults['scheduleHandoff']>(`/api/schedules/${encodeURIComponent(id)}/handoff`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   schedules: () => apiJson<ApiResults['schedules']>('/api/schedules'),
-  createSchedule: (body: S.ScheduleServiceCreate) => apiJson<ApiResults['createSchedule']>('/api/schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  createSchedule: (body: ScheduleInput) => apiJson<ApiResults['createSchedule']>('/api/schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   controlSchedule: (id: string, body: { action: string; runAt?: string }) => apiJson<ApiResults['controlSchedule']>(`/api/schedules/${encodeURIComponent(id)}/control`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   metrics: () => apiJson<ApiResults['metrics']>('/api/metrics'),
   regenerate: (id: string) => apiJson<ApiResults['regenerate']>(`/api/sessions/${encodeURIComponent(id)}/regenerate`, { method: 'POST' }),

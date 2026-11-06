@@ -1,3 +1,5 @@
+import type * as S from '../types/server.js';
+import { errorInfo } from '../lib/errors.js';
 import { restoreFocus } from '../lib/interaction.js';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
@@ -8,32 +10,32 @@ import './schedules.css';
 import { DialogHeader } from './DialogHeader.jsx';
 import './results.css';
 
-const labels = { COMPLETED: '执行结束', NEEDS_ATTENTION: '需要处理', AWAITING_REVIEW: '待验收' };
-function count(items) { useStore.getState().setUi({ resultUnread: items.filter(i => !i.read && !i.handled).length }); }
+const labels: Record<string, string> = { COMPLETED: '执行结束', NEEDS_ATTENTION: '需要处理', AWAITING_REVIEW: '待验收' };
+function count(items: S.ResultInboxServiceItem[]) { useStore.getState().setUi({ resultUnread: items.filter(i => !i.read && !i.handled).length }); }
 export default function ResultInbox() {
   const open = useStore(s => s.ui.resultsOpen);
   const target = useStore(s => s.ui.resultTarget);
   useEffect(() => {
     let alive = true;
-    const poll = async () => { try { const data = await api.results(); if (alive && Array.isArray(data.items)) count(data.items); } catch { /* 面板显示读取错误 */ } };
+    const poll = async () => { try { const data = await api.results(); if (alive && Array.isArray(data?.items)) count(data!.items); } catch { /* 面板显示读取错误 */ } };
     poll(); const timer = setInterval(poll, 15000); return () => { alive = false; clearInterval(timer); };
   }, []);
   return open ? <InboxDialog target={target} /> : null;
 }
-function InboxDialog({ target }) {
-  const ref = useRef(null), alive = useRef(true), request = useRef(0);
-  const [items, setItems] = useState([]), [truncated, setTruncated] = useState(false), [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState(target || null), [detail, setDetail] = useState(null), [detailLoading, setDetailLoading] = useState(false);
+function InboxDialog({ target }: { target?: string | null }) {
+  const ref = useRef<HTMLDialogElement>(null), alive = useRef(true), request = useRef(0);
+  const [items, setItems] = useState<S.ResultInboxServiceItem[]>([]), [truncated, setTruncated] = useState(false), [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(target || null), [detail, setDetail] = useState<S.ResultInboxServiceDetail | null>(null), [detailLoading, setDetailLoading] = useState(false);
   const [reload, setReload] = useState(0);
-  const [filter, setFilter] = useState('pending'), [error, setError] = useState(''), [busy, setBusy] = useState(false), [preview, setPreview] = useState(null), [diff, setDiff] = useState(null);
+  const [filter, setFilter] = useState('pending'), [error, setError] = useState(''), [busy, setBusy] = useState(false), [preview, setPreview] = useState<S.GitWorktreesPreview | null>(null), [diff, setDiff] = useState<string | null>(null);
   const close = () => useStore.getState().setUi({ resultsOpen: false, resultTarget: null });
   const refresh = useCallback(async () => {
-    try { const data = await api.results(); if (alive.current) { const rows = data.items || []; setItems(rows); setTruncated(!!data.truncated); count(rows); } }
-    catch (e) { if (alive.current) setError(`读取结果失败：${e.message}`); }
+    try { const data = required(await api.results()); if (alive.current) { const rows = data.items || []; setItems(rows); setTruncated(!!data.truncated); count(rows); } }
+    catch (e) { if (alive.current) setError(`读取结果失败：${errorInfo(e).message}`); }
     finally { if (alive.current) setLoading(false); }
   }, []);
   useEffect(() => {
-    const previous = document.activeElement; alive.current = true; ref.current.showModal(); refresh();
+    const previous = document.activeElement; alive.current = true; ref.current?.showModal(); refresh();
     const timer = setInterval(refresh, 15000);
     return () => { alive.current = false; request.current++; clearInterval(timer); restoreFocus(previous); };
   }, [refresh]);
@@ -41,24 +43,25 @@ function InboxDialog({ target }) {
     const token = ++request.current; setDetail(null); setPreview(null); setDiff(null); setError(''); setDetailLoading(!!selected);
     if (selected) (async () => {
       try {
-        const data = await api.result(selected); if (!alive.current || token !== request.current) return;
-        if (!data.item.read) data.item = await api.resultReceipt(selected, { revision: data.item.revision, action: 'read' });
+        const data = required(await api.result(selected)); if (!alive.current || token !== request.current) return;
+        if (!data.item.read) data.item = required(await api.resultReceipt(selected, { revision: data.item.revision, action: 'read' }));
         if (!alive.current || token !== request.current) return;
         setDetail(data); await refresh();
-      } catch (e) { if (alive.current && token === request.current) setError(e.message); }
+      } catch (e) { if (alive.current && token === request.current) setError(errorInfo(e).message || '操作失败'); }
       finally { if (alive.current && token === request.current) setDetailLoading(false); }
     })();
   }, [selected, refresh, reload]);
-  async function act(fn) {
+  async function act(fn: (current: () => boolean) => Promise<void>) {
     const token = request.current; setBusy(true); setError('');
     try { await fn(() => alive.current && token === request.current); }
-    catch (e) { if (alive.current && token === request.current) setError(e.message); }
+    catch (e) { if (alive.current && token === request.current) setError(errorInfo(e).message || '操作失败'); }
     finally { if (alive.current) setBusy(false); }
   }
   const item = detail?.item;
   const visible = items.filter(i => filter === 'all' || (filter === 'pending' ? !i.handled : filter === 'unread' ? !i.read && !i.handled : i.handled));
-  async function receipt(action) {
-    await act(async current => { const updated = await api.resultReceipt(item.id, { revision: item.revision, action }); if (current()) { setDetail(d => ({ ...d, item: updated })); await refresh(); } });
+  async function receipt(action: string) {
+    if (!item) return;
+    await act(async current => { const updated = required(await api.resultReceipt(item.id, { revision: item.revision, action })); if (current()) { setDetail(d => d && ({ ...d, item: updated })); await refresh(); } });
   }
   return <dialog ref={ref} className="schedule-dialog results-dialog" aria-labelledby="results-title" onCancel={e => { e.preventDefault(); close(); }} onKeyDown={e => e.stopPropagation()}>
     <DialogHeader id="results-title" title="任务收件箱" subtitle="Pilot / 执行结果" closeLabel="关闭任务收件箱" onClose={close} />
@@ -79,9 +82,9 @@ function InboxDialog({ target }) {
       {selected && <section className="schedule-detail result-detail" aria-label="结果详情" aria-busy={detailLoading}>
         <button className="schedule-back" disabled={busy} onClick={() => setSelected(null)}>返回结果列表</button>
         {detailLoading && <p role="status">正在读取详情…</p>}
-        {item && <><h2>{item.title || '未命名任务'}</h2><p>{labels[item.state] || item.state} · {item.handled ? '已处理' : '待处理'}</p><p className="schedule-goal">{item.summary || '暂无摘要，请打开执行对话查看。'}</p>
+        {item && detail && <><h2>{item.title || '未命名任务'}</h2><p>{labels[item.state] || item.state} · {item.handled ? '已处理' : '待处理'}</p><p className="schedule-goal">{item.summary || '暂无摘要，请打开执行对话查看。'}</p>
           <div className="schedule-actions"><button className={`btn${preview ? '' : ' btn-primary'}`} disabled={busy} onClick={() => receipt(item.handled ? 'reopen' : 'handle')}>{item.handled ? '重新打开' : '标记已处理'}</button><button className="btn" disabled={busy} onClick={() => receipt(item.read ? 'unread' : 'read')}>{item.read ? '标记未读' : '标记已读'}</button><button className="btn" disabled={busy} onClick={() => act(async () => { await useStore.getState().activate(item.sessionId); close(); })}>打开执行对话</button></div>
-          <nav className="result-sections" aria-label="结果内容导航">{[['verification', '验收'], ['changes', '改动'], ...(item.workspace ? [['workspace', '工作区']] : []), ['research', '开源参考']].map(([key, text]) => <button key={key} onClick={() => ref.current.querySelector(`#result-${key}`)?.scrollIntoView({ block: 'start' })}>{text}</button>)}</nav>
+          <nav className="result-sections" aria-label="结果内容导航">{[['verification', '验收'], ['changes', '改动'], ...(item.workspace ? [['workspace', '工作区']] : []), ['research', '开源参考']].map(([key, text]) => <button key={key} onClick={() => ref.current?.querySelector(`#result-${key}`)?.scrollIntoView({ block: 'start' })}>{text}</button>)}</nav>
           <h3 id="result-verification">验收与验证</h3><p data-verification-phase={detail.verification}>{verificationLabel(detail.verification)}</p>
           {verificationHint(detail.verification) && <p className="task-help">{verificationHint(detail.verification)}</p>}
           {detail.verificationDetail && <p className="task-help">{detail.verificationDetail}</p>}
@@ -89,7 +92,7 @@ function InboxDialog({ target }) {
           <ResultList title="记录的验证项" rows={item.checks} empty="没有记录验证项。" />
           {!!item.openSteps.length && <ResultList title="未完成事项" rows={item.openSteps} />}
           <h3 id="result-changes">文件改动</h3><ResultList rows={item.changedFiles} empty="没有记录文件改动。" />
-          {item.runId && <button className="btn" disabled={busy} onClick={() => act(async current => { const data = await api.runChanges(item.runId); if (current()) setDiff((data.files || []).map(f => f.diff || '').join('\n') || '没有可用的运行差异。'); })}>查看本次运行差异</button>}
+          {item.runId && <button className="btn" disabled={busy} onClick={() => act(async current => { const data = required(await api.runChanges(item.runId)); if (current()) setDiff((data.files || []).map(f => f.diff || '').join('\n') || '没有可用的运行差异。'); })}>查看本次运行差异</button>}
           {diff !== null && <pre className="result-diff" tabIndex={0} aria-label="运行差异">{diff}</pre>}
           {item.workspace && <><h3 id="result-workspace">执行工作区</h3><dl><dt>{item.workspace.mode === 'ISOLATED' ? '独立工作区' : '原目录执行'}</dt><dd>{item.workspace.path || '默认工作区'}</dd>{item.workspace.mode === 'ISOLATED' && <><dt>交回目录</dt><dd>{item.workspace.base}</dd><dt>创建基线</dt><dd>{item.workspace.commit}</dd></>}</dl>
             {item.workspace.handedOffAt ? <p role="status">已于 {new Date(item.workspace.handedOffAt).toLocaleString()} 交回；执行目录仍保留。</p> : item.workspace.mode === 'ISOLATED' && <button className="btn" disabled={busy} onClick={() => act(async current => { setPreview(null); const data = await api.scheduleHandoffPreview(item.scheduleId); if (current()) setPreview(data); })}>预览交回改动</button>}
@@ -102,4 +105,6 @@ function InboxDialog({ target }) {
     </div>
   </dialog>;
 }
-function ResultList({ title, rows = [], empty }) { return <>{title && <h4>{title}</h4>}{rows.length ? <ul>{rows.map((row, i) => <li key={i}>{row}</li>)}</ul> : empty ? <p>{empty}</p> : null}</>; }
+function ResultList({ title, rows = [], empty }: { title?: string; rows?: string[]; empty?: string }) { return <>{title && <h4>{title}</h4>}{rows.length ? <ul>{rows.map((row, i) => <li key={i}>{row}</li>)}</ul> : empty ? <p>{empty}</p> : null}</>; }
+
+function required<T>(value: T | null): T { if (value === null) throw new Error('服务端返回空结果，请重新加载'); return value; }

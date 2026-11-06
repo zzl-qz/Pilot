@@ -403,8 +403,13 @@
         "交回版本冲突/恢复",
         "过期响应/失败/窄屏"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T08-59-59-624Z/report.json",
+          "result": "373 项前端单元、41 项桌面单元、严格类型检查、构建及 navigation/composer/p1/results/schedule/work-products/notification 七套 Web/Electron 回归通过。覆盖定时与周期/时区/夏令时/错过策略/模板、暂停恢复取消、收件箱已读处理、预览下载失败、技能版本冲突、交回预览冲突与恢复、迟到响应和窄屏；新增编译正反例保证模板可以暂缺会话/时间，而提交计划必须提供。"
+        }
+      ]
     },
     {
       "batch": 15,
