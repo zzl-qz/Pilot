@@ -53,7 +53,7 @@ jobs:
         run: npm test
 
       - name: Agent delivery and browser policy regressions
-        run: node --test pilot-web/frontend/scripts/agent-delivery.test.mjs pilot-web/frontend/scripts/local-capabilities.test.mjs
+        run: node --import ./pilot-web/frontend/scripts/register-typescript.mjs --test pilot-web/frontend/scripts/agent-delivery.test.mjs pilot-web/frontend/scripts/local-capabilities.test.mjs
 
       - name: Desktop unit tests
         working-directory: pilot-desktop

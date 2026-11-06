@@ -25,7 +25,7 @@ if (flags.has('--containers')) {
 await run(windows ? (process.env.ComSpec || 'cmd.exe') : 'sh', windows ? ['/d', '/s', '/c', 'mvnw.cmd', ...javaArgs] : ['./mvnw', ...javaArgs]);
 async function tests(folder) {
   const files = (await readdir(resolve(root, folder))).filter(name => /\.test\.(m?js)$/.test(name)).sort().map(name => `${folder}/${name}`);
-  await run(process.execPath, ['--test', ...files]);
+  await run(process.execPath, ['--import', new URL('../pilot-web/frontend/scripts/register-typescript.mjs', import.meta.url).href, '--test', ...files]);
 }
 await tests('pilot-web/src/test/js');
 await tests('pilot-web/frontend/scripts');

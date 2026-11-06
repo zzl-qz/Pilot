@@ -1,0 +1,341 @@
+{
+  "scope": "pilot-web/frontend/src 的 72 个既有 JS/JSX 文件；构建/测试脚本保留 MJS，Electron 主进程不迁移",
+  "process": "逐批梳理完整功能、补足基线、严格迁移、验证、中文本地提交，再进入下一批",
+  "platforms": {
+    "native": [
+      "macOS"
+    ],
+    "simulated": [
+      "Windows/POSIX 路径",
+      "Ctrl/Meta/AltGr/IME",
+      "存储/剪贴板/录音能力失败"
+    ],
+    "not_executed": [
+      "Windows 实机",
+      "Linux 实机",
+      "远端三平台 CI"
+    ]
+  },
+  "batches": [
+    {
+      "batch": 1,
+      "name": "基线与类型检查、跨平台测试入口",
+      "files": [],
+      "features": [
+        "现有全部单元测试",
+        "全部 Web/Electron 交互回归",
+        "严格类型检查和隔离构建"
+      ],
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T07-17-55-034Z/report.json",
+          "result": "严格类型检查、构建、296 项既有前端单元、41 项桌面单元、16 套真实 Chromium/Electron 交互回归全部通过"
+        },
+        {
+          "report": ".tmp-check/migration/2026-11-06T07-21-32-364Z/report.json",
+          "result": "加入含中文空格路径的 TS 加载器回归后，297 项前端单元全部通过"
+        }
+      ]
+    },
+    {
+      "batch": 2,
+      "name": "基础工具",
+      "files": [
+        "lib/permission.js",
+        "lib/layout.js",
+        "lib/attention.js",
+        "lib/drafts.js",
+        "lib/input-history.js",
+        "lib/mention.js",
+        "lib/projects.js",
+        "lib/diff.js",
+        "lib/changes.js",
+        "lib/verification.js"
+      ],
+      "features": [
+        "权限回退",
+        "存储损坏/拒绝/配额",
+        "草稿隔离/长度/空白清理",
+        "历史去重/边界",
+        "Windows UNC/POSIX/中文空格路径",
+        "分组/归档/排序",
+        "diff hunk/重命名/二进制/无换行",
+        "变更合并/排序/摘要"
+      ],
+      "status": "pending",
+      "verification": []
+    },
+    {
+      "batch": 3,
+      "name": "事件与运行辅助",
+      "files": [
+        "event-types.js",
+        "thread-utils.js",
+        "lib/events.js",
+        "lib/tool-meta.js",
+        "lib/agents.js",
+        "lib/command-tasks.js",
+        "lib/context-usage.js",
+        "lib/request-usage.js",
+        "lib/queue.js",
+        "lib/browser-mirror.js"
+      ],
+      "features": [
+        "事件/失败分类",
+        "智能体派发归属",
+        "命令状态/增量日志",
+        "未知/零用量与费用",
+        "队列兼容",
+        "镜像 URL/坐标/按键"
+      ],
+      "status": "pending",
+      "verification": []
+    },
+    {
+      "batch": 4,
+      "name": "输入底层",
+      "files": [
+        "lib/interaction.js",
+        "lib/commands.js",
+        "lib/attachments.js",
+        "lib/attachment-input.js",
+        "lib/clipboard.js",
+        "lib/composer-state.js",
+        "lib/composer-input.js",
+        "lib/voice-input.js"
+      ],
+      "features": [
+        "Ctrl/Cmd/AltGr/IME",
+        "指令匹配",
+        "附件限制/读取失败/取消",
+        "剪贴板回退/无能力反馈",
+        "编辑器选区/芯片",
+        "语音授权/超时/大小/取消/重试"
+      ],
+      "status": "pending",
+      "verification": []
+    },
+    {
+      "batch": 5,
+      "name": "内容与历史",
+      "files": [
+        "lib/content-format.js",
+        "lib/markdown-render.js",
+        "lib/markdown-stream.js",
+        "lib/history.js",
+        "lib/transcript.js",
+        "lib/side-chat.js"
+      ],
+      "features": [
+        "Markdown/列表/代码/表格/安全链接",
+        "Mermaid/KaTeX 失败回退",
+        "流式块复用",
+        "分页/去重/裁剪",
+        "导出",
+        "侧边会话/引用/旧存储"
+      ],
+      "status": "pending",
+      "verification": []
+    },
+    {
+      "batch": 6,
+      "name": "API 与同步",
+      "files": [
+        "api.js",
+        "lib/model-settings.js",
+        "lib/skills.js",
+        "lib/bookmark-sync.js",
+        "lib/workbench-sync.js"
+      ],
+      "features": [
+        "对照后端响应/请求",
+        "超时/取消/HTTP 错误/204/空响应",
+        "模型密钥/探测",
+        "技能安装来源/错误",
+        "书签持久化迁移/失败保留",
+        "刷新并发合并/迟到响应/草稿保护"
+      ],
+      "status": "pending",
+      "verification": []
+    },
+    {
+      "batch": 7,
+      "name": "线程 reducer",
+      "files": [
+        "thread-reducer.js"
+      ],
+      "features": [
+        "所有 EVENT_TYPES 和 user.message",
+        "实时/回放一致",
+        "重复/迟到/乱序事件",
+        "工具/智能体归属",
+        "失败/取消/恢复",
+        "长回合与分页边界"
+      ],
+      "status": "pending",
+      "verification": []
+    },
+    {
+      "batch": 8,
+      "name": "全局状态",
+      "files": [
+        "store.js"
+      ],
+      "features": [
+        "项目/会话生命周期",
+        "草稿和惰性建会话",
+        "SSE 合帧/游标/重连",
+        "预取并发/切换隔离",
+        "队列/审批/取消/恢复",
+        "设置/预览/命令/镜像",
+        "订阅和定时器清理"
+      ],
+      "status": "pending",
+      "verification": []
+    },
+    {
+      "batch": 9,
+      "name": "通用组件与导航",
+      "files": [
+        "components/Icon.jsx",
+        "components/DialogHeader.jsx",
+        "components/ErrorBoundary.jsx",
+        "components/NavigationRail.jsx",
+        "components/Sidebar.jsx",
+        "components/SessionMenu.jsx",
+        "components/WorkspaceTree.jsx",
+        "components/Notifications.jsx"
+      ],
+      "features": [
+        "导航/折叠/搜索/归档",
+        "文件树",
+        "通知/权限",
+        "错误边界",
+        "焦点/键盘/IME",
+        "主题/390-768-1440 视口"
+      ],
+      "status": "pending",
+      "verification": []
+    },
+    {
+      "batch": 10,
+      "name": "输入与模型组件",
+      "files": [
+        "components/Composer.jsx",
+        "components/VoiceInput.jsx",
+        "components/ModelPicker.jsx",
+        "components/ModelForm.jsx",
+        "components/ModelDiscovery.jsx",
+        "components/ModelRuntimeSettings.jsx",
+        "components/RequestUsage.jsx"
+      ],
+      "features": [
+        "发送/停止/排队/编辑重发",
+        "附件/语音/草稿保留",
+        "模型选择/配置/探测/密钥清理",
+        "权限",
+        "上下文/用量",
+        "忙碌/失败/过期响应"
+      ],
+      "status": "pending",
+      "verification": []
+    },
+    {
+      "batch": 11,
+      "name": "消息与检索组件",
+      "files": [
+        "components/MarkdownBody.jsx",
+        "components/Thread.jsx",
+        "components/ThreadNavigator.jsx",
+        "components/SideChat.jsx",
+        "components/MessageSearch.jsx",
+        "components/ReviewActions.jsx"
+      ],
+      "features": [
+        "消息与工具/审批/结果卡",
+        "长回复/历史滚动/定位",
+        "书签/搜索/旧数据迁移",
+        "侧边会话",
+        "审阅操作",
+        "窄屏/键盘/过期响应"
+      ],
+      "status": "pending",
+      "verification": []
+    },
+    {
+      "batch": 12,
+      "name": "Inspector",
+      "files": [
+        "components/Inspector.jsx"
+      ],
+      "features": [
+        "活动筛选",
+        "diff/恢复/冲突",
+        "文件预览",
+        "命令日志/终止",
+        "能力列表",
+        "Web 镜像/桌面原生浏览器",
+        "坐标/键盘/订阅清理"
+      ],
+      "status": "pending",
+      "verification": []
+    },
+    {
+      "batch": 13,
+      "name": "设置与手机连接",
+      "files": [
+        "components/Modals.jsx",
+        "components/MobileConnection.jsx"
+      ],
+      "features": [
+        "全部设置分区",
+        "确认与关闭/焦点恢复",
+        "错误时保留表单",
+        "配对/撤销/修复/过期",
+        "剪贴板降级"
+      ],
+      "status": "pending",
+      "verification": []
+    },
+    {
+      "batch": 14,
+      "name": "自动化与成果",
+      "files": [
+        "components/ResultInbox.jsx",
+        "components/ResearchPanel.jsx",
+        "components/WorkProductsPanel.jsx",
+        "components/Schedules.jsx",
+        "components/RecurringPlans.jsx"
+      ],
+      "features": [
+        "定时/时区/重复/模板",
+        "暂停/恢复/取消",
+        "已读/处理/筛选",
+        "预览/下载/技能草稿",
+        "交回版本冲突/恢复",
+        "过期响应/失败/窄屏"
+      ],
+      "status": "pending",
+      "verification": []
+    },
+    {
+      "batch": 15,
+      "name": "应用入口与收尾",
+      "files": [
+        "components/App.jsx",
+        "main.jsx"
+      ],
+      "features": [
+        "完整初始化",
+        "全局事件/布局/刷新恢复",
+        "真实后端和 SSE",
+        "生产 Maven/Jar 登录/会话/产品",
+        "全量 Web/Electron 回归",
+        "应用源码全部 TS/TSX"
+      ],
+      "status": "pending",
+      "verification": []
+    }
+  ]
+}
