@@ -1,12 +1,14 @@
+import { errorInfo } from '../lib/errors.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { buildModelProbe, describeModelsFetched, normalizeModelNames } from '../lib/model-settings.js';
 
-const EMPTY = [];
+const EMPTY: string[] = [];
+interface DiscoveryResult { endpoint: string; apiKey: string; models: string[]; probing?: boolean; hint: string; error?: boolean }
 
 /** 探测只属于当前表单和连接参数，不把未保存端点的结果写入全局模型配置。 */
-export function useModelDiscovery({ endpoint = '', apiKey = '', initialModels = EMPTY, initialEndpoint = '' }) {
-  const [result, setResult] = useState(null);
+export function useModelDiscovery({ endpoint = '', apiKey = '', initialModels = EMPTY, initialEndpoint = '' }: { endpoint?: string; apiKey?: string; initialModels?: string[]; initialEndpoint?: string }) {
+  const [result, setResult] = useState<DiscoveryResult | null>(null);
   const sequence = useRef(0);
   const target = buildModelProbe({ endpoint, apiKey });
   const current = useRef(target);
@@ -36,16 +38,16 @@ export function useModelDiscovery({ endpoint = '', apiKey = '', initialModels = 
         const models = normalizeModelNames(response.models);
         setResult({ ...target, models, hint: describeModelsFetched({ models }, target) });
       } catch (error) {
-        if (matches()) setResult({ ...target, models: EMPTY, error: true, hint: '探测失败：' + (error?.message || '无法读取模型列表') });
+        if (matches()) setResult({ ...target, models: EMPTY, error: true, hint: '探测失败：' + (errorInfo(error).message || '无法读取模型列表') });
       }
     }
   };
 }
 
 /** 设置页和输入区共用完整列表；长列表可搜索，支持方向键和 Enter 选择。 */
-export function ModelOptions({ models, value, onSelect, disabled = false, discovered = false }) {
+export function ModelOptions({ models, value, onSelect, disabled = false, discovered = false }: { models: string[]; value: string; onSelect: (value: string) => void; disabled?: boolean; discovered?: boolean }) {
   const [query, setQuery] = useState('');
-  const firstOption = useRef(null);
+  const firstOption = useRef<HTMLButtonElement>(null);
   useEffect(() => { setQuery(''); }, [models]);
   useEffect(() => {
     if (discovered) firstOption.current?.scrollIntoView({ block: 'nearest' });
@@ -58,8 +60,9 @@ export function ModelOptions({ models, value, onSelect, disabled = false, discov
     {models.length > 8 && <input type="search" aria-label="筛选模型" placeholder="搜索模型名称" value={query} onChange={event => setQuery(event.target.value)} />}
     <div className="model-options" role="listbox" aria-label={discovered ? '探测到的模型' : '候选模型'} onKeyDown={event => {
       if (disabled) return;
-      const options = [...event.currentTarget.querySelectorAll('[role="option"]')];
-      const index = options.indexOf(event.target.closest('[role="option"]'));
+      const options = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="option"]')];
+      const target = event.target instanceof Element ? event.target.closest('[role="option"]') : null;
+      const index = options.findIndex(option => option === target);
       if (index < 0 || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;

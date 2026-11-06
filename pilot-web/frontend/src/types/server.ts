@@ -427,10 +427,10 @@ export interface ModelPricingCost {
 /** ModelPricing.java / ModelPricing */
 export interface ModelPricing {
   currency: string;
-  input: number;
-  cachedInput: number;
-  cacheWrite: number;
-  output: number;
+  input: number | null;
+  cachedInput: number | null;
+  cacheWrite: number | null;
+  output: number | null;
   source: string;
 }
 
@@ -464,8 +464,8 @@ export interface ModelRuntimeSettingsOptions {
   provider: string;
   cacheMode: string;
   cacheTtl: string;
-  instructionMessages: boolean;
-  streamUsage: boolean;
+  instructionMessages: boolean | null;
+  streamUsage: boolean | null;
   compactionMode: string;
   webSearchMode: string;
   pricing: ModelPricing;

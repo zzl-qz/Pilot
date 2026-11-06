@@ -37,7 +37,7 @@ export interface VoiceEnvironment {
 }
 export interface VoiceOptions {
   environment?: VoiceEnvironment;
-  transcribe: (audio: Blob, signal: AbortSignal) => Promise<{ text?: string | null }>;
+  transcribe: (audio: Blob, signal: AbortSignal) => Promise<{ text?: string | null } | null>;
   onState: (state: VoiceState) => void;
   onText: (text: string) => void;
 }

@@ -1,3 +1,8 @@
+import type { DraftAttachment, BuiltinCommand, SkillCommand } from '../types/input.js';
+import type { ContextStatus, QueueEntry } from '../types/runtime.js';
+type QuickCommand = BuiltinCommand | SkillCommand;
+interface ReferenceMenu { items: string[]; message?: string; loading?: boolean }
+import { errorInfo } from '../lib/errors.js';
 import { formatCache } from '../lib/request-usage.js';
 import { ContextUsagePanel } from './RequestUsage.jsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -51,30 +56,30 @@ export function Composer() {
   const runUsage = useStore((state) => state.runUsage);
   const editTarget = useStore((state) => state._editTarget);
 
-  const flowRef = useRef(null);
+  const flowRef = useRef<HTMLDivElement>(null);
   const referenceRequest = useRef(0);
-  const inputRef = useRef(null);
-  const fileRef = useRef(null);
+  const inputRef = useRef<ReturnType<typeof createComposerInput> | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [sendAction, setSendAction] = useState({ mode: 'send', stop: false, disabled: true, label: '发送', ariaLabel: '发送任务', title: '发送任务 (Enter)' });
   const [permOpen, setPermOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
-  const [refMenu, setRefMenu] = useState(null);
-  const [slashMenu, setSlashMenu] = useState(null);
+  const [refMenu, setRefMenu] = useState<ReferenceMenu | null>(null);
+  const [slashMenu, setSlashMenu] = useState<{ items: QuickCommand[]; query: string } | null>(null);
   const [menuIndex, setMenuIndex] = useState(0);
-  const menuRef = useRef(null);
-  const draftFilesRef = useRef(new Map());
+  const menuRef = useRef<HTMLDivElement>(null);
+  const draftFilesRef = useRef(new Map<string, DraftAttachment>());
   const fileQueueRef = useRef(Promise.resolve());
   const pendingFilesRef = useRef(0);
   const submittingRef = useRef(false);
-  const submittingEpoch = useRef(null);
+  const submittingEpoch = useRef<number | null>(null);
   const [pendingFiles, setPendingFiles] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState(false);
   const voiceBusyRef = useRef(false);
   const [dragging, setDragging] = useState(false);
   const dragDepthRef = useRef(0);
-  const sessionDraftsRef = useRef(new Map());
+  const sessionDraftsRef = useRef(new Map<string | null, { html: string; files: Map<string, DraftAttachment> }>());
   const previousSessionRef = useRef(sessionId);
 
   /*
@@ -177,7 +182,7 @@ export function Composer() {
   }, [running, queueHeld, lastOutcome, pendingInputs.length, steering, pausing, cancelling, editTarget, modelSaving]);
 
   /* 附件上传：选择 / 拖放 / 粘贴共用 */
-  function addFiles(fileList) {
+  function addFiles(fileList: ArrayLike<File> | null) {
     if (submittingRef.current) return;
     const files = Array.from(fileList || []);
     const owner = useStore.getState().sessionId;
@@ -189,7 +194,7 @@ export function Composer() {
         try {
           if ((useStore.getState().sessionId !== owner || useStore.getState().sessionEpoch !== epoch)) continue;
           const existing = (inputRef.current?.attachmentIds() || [])
-            .map((id) => draftFilesRef.current.get(id)).filter(Boolean);
+            .map((id) => draftFilesRef.current.get(id)).filter((item): item is DraftAttachment => Boolean(item));
           const result = checkIncomingFile(existing, file);
           if (!result.ok) {
             if (!result.silent) useStore.getState().showNotice(result.reason);
@@ -200,7 +205,7 @@ export function Composer() {
           draftFilesRef.current.set(item.id, item);
           inputRef.current.insertAttachments([item]);
         } catch (error) {
-          useStore.getState().showNotice('读取附件失败：' + error.message);
+          useStore.getState().showNotice('读取附件失败：' + errorInfo(error).message);
         } finally {
           pendingFilesRef.current -= 1;
           setPendingFiles(pendingFilesRef.current);
@@ -216,7 +221,7 @@ export function Composer() {
       return;
     }
     const { text, imagePositions } = input.getDraft();
-    const attachments = input.attachmentIds().map((id) => draftFilesRef.current.get(id)).filter(Boolean);
+    const attachments = input.attachmentIds().map((id) => draftFilesRef.current.get(id)).filter((item): item is DraftAttachment => Boolean(item));
     const state = useStore.getState();
     if (!text.trim() && !attachments.length) {
       return;
@@ -270,7 +275,7 @@ export function Composer() {
     setSlashMenu(null);
   }
 
-  async function openRefMenu(query) {
+  async function openRefMenu(query: string) {
     const state = useStore.getState();
     const owner = state.sessionId;
     const workspace = state.workspace || state.draftSession?.workspace;
@@ -286,7 +291,7 @@ export function Composer() {
     try {
       let items = state.fileIndex.key === key ? state.fileIndex.items : null;
       if (!items) {
-        const data = owner ? await api.filesFlat(owner) : await api.workspaceFiles(workspace);
+        const data = owner ? await api.filesFlat(owner) : await api.workspaceFiles(workspace || '');
         items = data?.files || (Array.isArray(data) ? data : []);
         if (request !== referenceRequest.current) return;
         useStore.setState({ fileIndex: { items, key, sessionId: owner, loading: false } });
@@ -297,15 +302,15 @@ export function Composer() {
     }
   }
 
-  function pickRef(path) {
+  function pickRef(path: string) {
     inputRef.current?.insertMention(path);
     inputRef.current?.focus();
     referenceRequest.current += 1;
     setRefMenu(null);
   }
 
-  function pickSlash(command) {
-    const expansion = command.skill
+  function pickSlash(command: QuickCommand) {
+    const expansion = 'skill' in command
       ? `${command.name.startsWith('/') ? command.name : '/' + command.name} `
       : expandQuickCommand(command, '');
     if (expansion) inputRef.current?.replaceCommand(expansion);
@@ -326,12 +331,12 @@ export function Composer() {
       setPermOpen(false); setModelOpen(false); setContextOpen(false);
       setRefMenu(null); setSlashMenu(null);
     };
-    const key = (event) => {
+    const key = (event: KeyboardEvent) => {
       if (permOpen && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
-        const items = [...document.querySelectorAll('#perm-menu button')];
+        const items = [...document.querySelectorAll<HTMLElement>('#perm-menu button')];
         if (items.length) {
           event.preventDefault();
-          const index = items.indexOf(document.activeElement);
+          const index = items.findIndex(item => item === document.activeElement);
           const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length;
           items[next].focus();
         }
@@ -342,7 +347,8 @@ export function Composer() {
       const trigger = permOpen ? 'perm-chip' : modelOpen ? 'model-chip' : contextOpen ? 'context-chip' : 'input-flow';
       close(); document.getElementById(trigger)?.focus();
     };
-    const outside = (event) => {
+    const outside = (event: PointerEvent) => {
+      if (!(event.target instanceof Element)) return;
       if (!event.target.closest('.perm-picker, .ref-menu, #input-flow')) close();
     };
     document.addEventListener('keydown', key, true);
@@ -362,7 +368,7 @@ export function Composer() {
   }, [menuIndex, refMenu, slashMenu]);
 
   /** ↑/↓ 翻本会话发过的输入；多行草稿靠 caretOnEdgeLine 判断，只在首/末行接管。 */
-  function handleHistoryKey(event) {
+  function handleHistoryKey(event: React.KeyboardEvent<HTMLDivElement>) {
     const state = useStore.getState();
     const input = inputRef.current;
     if (!state.inputHistory.length || !input || input.hasChips?.()) {
@@ -391,9 +397,9 @@ export function Composer() {
     return true;
   }
 
-  function onComposerKeydown(event) {
+  function onComposerKeydown(event: React.KeyboardEvent<HTMLDivElement>) {
     // 中文输入法组字期间的回车不是发送
-    if (event.isComposing || event.nativeEvent?.isComposing || event.keyCode === 229) {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) {
       return;
     }
     const items = refMenu ? (refMenu.items || []) : slashMenu ? (slashMenu.items || []) : [];
@@ -409,9 +415,9 @@ export function Composer() {
         event.preventDefault();
         const picked = items[Math.min(menuIndex, items.length - 1)];
         if (refMenu) {
-          pickRef(picked.path || picked);
+          pickRef(refMenu.items[Math.min(menuIndex, refMenu.items.length - 1)]);
         } else {
-          pickSlash(picked);
+          if (slashMenu) pickSlash(slashMenu.items[Math.min(menuIndex, slashMenu.items.length - 1)]);
         }
         return;
       }
@@ -452,15 +458,15 @@ export function Composer() {
             ? <div className="ref-empty" role="status">{refMenu.loading ? '正在读取文件…' : refMenu.message || '没有匹配的文件'}</div>
             : refMenu.items.map((item, index) => (
               <button
-                key={item.path || item}
+                key={item}
                 type="button"
                 className={`ref-item${index === menuIndex ? ' is-on' : ''}`}
                 onMouseDown={(event) => event.preventDefault()}
                 role="option" aria-selected={index === menuIndex}
               onMouseEnter={() => setMenuIndex(index)}
-                onClick={() => pickRef(item.path || item)}
+                onClick={() => pickRef(item)}
               >
-                {item.path || item}
+                {item}
               </button>
             ))}
         </div>
@@ -506,7 +512,7 @@ export function Composer() {
           dragDepthRef.current = 0;
           setDragging(false);
           if (files.length) { event.preventDefault(); addFiles(files); }
-          else if (hasFileTransferHint(event.clipboardData || event.dataTransfer)) {
+          else if (hasFileTransferHint(event.dataTransfer)) {
             event.preventDefault();
             useStore.getState().showNotice('当前环境未提供文件内容，请拖入文件或使用“添加文件或图片”。');
           }
@@ -514,7 +520,7 @@ export function Composer() {
         onPaste={(event) => {
           const files = readTransferFiles(event.clipboardData);
           if (files.length) { event.preventDefault(); addFiles(files); }
-          else if (hasFileTransferHint(event.clipboardData || event.dataTransfer)) {
+          else if (hasFileTransferHint(event.clipboardData)) {
             event.preventDefault();
             useStore.getState().showNotice('当前环境未提供文件内容，请拖入文件或使用“添加文件或图片”。');
           }
@@ -634,7 +640,7 @@ export function Composer() {
             <button type="button" className="icon-btn schedule-compose" aria-label="定时执行" title="安排稍后执行" disabled={pendingFiles > 0 || submitting}
               onClick={() => {
                 const state = useStore.getState();
-                if (state.composerApi?.attachmentIds()?.length) { state.showNotice('定时入口暂不携带附件。请将文件放入工作区，在目标中注明相对路径；当前草稿与附件已保留。'); return; }
+                if (state.composerApi?.attachmentIds?.()?.length) { state.showNotice('定时入口暂不携带附件。请将文件放入工作区，在目标中注明相对路径；当前草稿与附件已保留。'); return; }
                 state.setUi({ schedulesOpen: true, scheduleDraft: state.composerApi?.getText() || '' });
               }}>
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.5V8l2.5 1.5"/></svg>
@@ -661,7 +667,7 @@ export function Composer() {
   );
 }
 
-function contextPercent(status) {
+function contextPercent(status: ContextStatus | null) {
   if (!status?.limitTokens) {
     return '—';
   }
@@ -669,7 +675,7 @@ function contextPercent(status) {
 }
 
 /** 权限档位的图标：放行的速度感 / 改文件 / 逐次确认 / 只看。 */
-function PermissionIcon({ mode }) {
+function PermissionIcon({ mode }: { mode: string }) {
   if (mode === 'AUTO') {
     return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.8 3.6 9h3.3l-.9 5.2L12.4 7H9.1z" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinejoin="round" /></svg>;
   }
@@ -747,8 +753,8 @@ function MessageQueue() {
   );
 }
 
-function QueueList({ entries, queueEdit, collapsed, header }) {
-  const [dragFrom, setDragFrom] = useState(null);
+function QueueList({ entries, queueEdit, collapsed, header }: { entries: QueueEntry[]; queueEdit: number | null; collapsed: boolean; header: NonNullable<ReturnType<typeof queueHeader>> }) {
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
   return (
     <div id="message-queue" className="message-queue">
       <button type="button" className="queue-head" aria-expanded={!collapsed} onClick={() => useStore.getState().setUi({ queueCollapsed: !collapsed })}>
@@ -785,16 +791,16 @@ function QueueList({ entries, queueEdit, collapsed, header }) {
   );
 }
 
-function QueueRow({ entry, index, count, onDragStart, onDragEnd }) {
+function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: QueueEntry; index: number; count: number; onDragStart: () => void; onDragEnd: () => void }) {
   const running = useStore(state => state.running);
   const busy = useStore(state => state.queueBusy || state.cancelling || state.pausing);
   const [more, setMore] = useState(false);
-  const moreRef = useRef(null);
+  const moreRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     if (!more) return;
-    const close = event => {
-      if (event.type === 'keydown' && event.key !== 'Escape') return;
-      if (event.type === 'pointerdown' && moreRef.current?.contains(event.target)) return;
+    const close = (event: KeyboardEvent | PointerEvent) => {
+      if (event instanceof KeyboardEvent && event.key !== 'Escape') return;
+      if (event.type === 'pointerdown' && event.target instanceof Node && moreRef.current?.contains(event.target)) return;
       if (event.type === 'keydown') { event.preventDefault(); event.stopPropagation(); moreRef.current?.querySelector('button')?.focus(); }
       setMore(false);
     };
@@ -855,7 +861,7 @@ function QueueRow({ entry, index, count, onDragStart, onDragEnd }) {
   );
 }
 
-function QueueEditor({ index, text }) {
+function QueueEditor({ index, text }: { index: number; text: string }) {
   const spoken = splitAttachmentMarkers(text);
   const [value, setValue] = useState(spoken.body);
   const [saving, setSaving] = useState(false);

@@ -1,14 +1,15 @@
+import type { VoiceState } from '../types/input.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { createVoiceInput, VOICE_MAX_MS } from '../lib/voice-input.js';
 import { Icon } from './Icon.jsx';
 
-const clock = ms => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+const clock = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
 
-export function VoiceInput({ ownerKey, disabled, onBusy, onText }) {
-  const [state, setState] = useState({ phase: 'idle' });
+export function VoiceInput({ ownerKey, disabled, onBusy, onText }: { ownerKey: string; disabled?: boolean; onBusy: (busy: boolean) => void; onText: (text: string) => void }) {
+  const [state, setState] = useState<VoiceState>({ phase: 'idle' });
   const callbacks = useRef({ onBusy, onText }); callbacks.current = { onBusy, onText };
-  const voice = useRef(null);
+  const voice = useRef<ReturnType<typeof createVoiceInput> | null>(null);
   useEffect(() => {
     const input = createVoiceInput({ transcribe: (...args) => api.transcribeVoice(...args),
       onState: next => { setState(next); callbacks.current.onBusy(!['idle', 'error'].includes(next.phase)); },
@@ -19,7 +20,7 @@ export function VoiceInput({ ownerKey, disabled, onBusy, onText }) {
   const active = state.phase !== 'idle';
   useEffect(() => {
     if (!active) return;
-    const escape = event => {
+    const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.isComposing) return;
       event.preventDefault(); event.stopPropagation(); voice.current?.cancel();
     };

@@ -16,7 +16,7 @@ export interface MirrorState {
   canGoBack: boolean; canGoForward: boolean;
 }
 export interface ComposerBridge {
-  setText(text: string): void; getText(): string; appendText(text: string): void; focus(): void;
+  setText(text: string): void; getText(): string; getDraft?(): { text: string; imagePositions: number[] }; attachmentIds?(): string[]; insertAttachments?: ReturnType<typeof import('../lib/composer-input.js').createComposerInput>['insertAttachments']; appendText(text: string): void; focus(): void;
   prepareReload?(): { ok: boolean; reason?: string };
   insertMention?(path: string): void;
   editMessage?(sequence: number, text: string): void;
@@ -57,7 +57,7 @@ export interface StoreData extends Omit<ReducerState, 'ui'> {
   quickCommands: (BuiltinCommand | SkillCommand)[]; modelOptions: string[]; remoteModels: string[];
   settingsData: S.SettingsControllerSettingsResponse | null; modelSave: { busy: boolean; message: string; error: boolean };
   notifyEnabled: boolean; permissionMode: string; usageData: S.UsageServiceUsageReport | null;
-  fileIndex: { items: string[]; sessionId: string | null; loading: boolean };
+  fileIndex: { key?: string; items: string[]; sessionId: string | null; loading: boolean };
   commandTasks: CommandTask[]; commandDetail: CommandTask | null; commandLog: CommandLog | null; commandLogTaskId: string | null;
   capabilities: S.CapabilitiesControllerCapabilitiesResponse | null; capabilitiesState: string;
   changeReport: S.ChangeServiceChangeReport | null; changesState: string; runChanges: S.ChangeServiceRunChangeReport | null;

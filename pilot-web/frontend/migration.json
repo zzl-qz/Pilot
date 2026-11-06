@@ -301,8 +301,13 @@
         "上下文/用量",
         "忙碌/失败/过期响应"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T08-32-03-137Z/report.json",
+          "result": "373 项前端单元、41 项桌面单元、严格类型检查、构建和 navigation/composer/model-discovery/request-usage/agent-usage/interaction/schedule 七套 Chromium/Electron 回归通过。覆盖附件选择/粘贴/拖放/限制/失败保留/切换草稿、IME、队列、侧边输入、权限、模型长列表键盘导航、探测迟到响应、保存锁/超时/密钥清除、未知与零价格及缓存能力轮询；明确区分价格表单字符串和持久化数字/空值。"
+        }
+      ]
     },
     {
       "batch": 11,

@@ -1,12 +1,14 @@
+import type { RequestReport, ContextStatus } from '../types/runtime.js';
+import type { RunUsage } from '../types/thread.js';
 import React, { useState } from 'react';
 import { formatTokens } from '../lib/context-usage.js';
 import { formatCache, formatCost, totalCost, requestContext, REQUEST_PURPOSES, groupRequests } from '../lib/request-usage.js';
 import './request-usage.css';
 
-const CHANGE_LABELS = { initial: '首次请求', append_only: '历史前缀保持一致', instructions_changed: '系统内容已变化',
+const CHANGE_LABELS: Record<string, string> = { initial: '首次请求', append_only: '历史前缀保持一致', instructions_changed: '系统内容已变化',
   tools_changed: '工具定义已变化', history_changed: '历史已压缩或调整', model_changed: '模型已切换' };
 
-export function RequestList({ reports = [] }) {
+export function RequestList({ reports = [] }: { reports?: RequestReport[] }) {
   if (!reports.length) return <p className="request-empty">还没有请求明细。后续模型请求会在这里记录。</p>;
   return <div className="request-groups">
     {groupRequests(reports).map(group => <details key={group.purpose} className="request-group" data-purpose={group.purpose}>
@@ -21,7 +23,7 @@ export function RequestList({ reports = [] }) {
   </div>;
 }
 
-function RequestRows({ reports }) {
+function RequestRows({ reports }: { reports: RequestReport[] }) {
   return <ol className="request-list">
     {[...reports].reverse().map((report, index) => <li key={report.id || index}>
       <details className="request-item">
@@ -40,13 +42,13 @@ function RequestRows({ reports }) {
           </>}
         </dl>
         <p className="request-note">{report.cost?.note || '费用未知'}{report.cost?.source ? ` · ${report.cost.source}` : ''}</p>
-        {report.prefix && <p className="request-note">请求结构：{CHANGE_LABELS[report.prefix.change] || report.prefix.change}。实际缓存命中以端点用量为准。</p>}
+        {report.prefix && <p className="request-note">请求结构：{CHANGE_LABELS[report.prefix.change || ''] || report.prefix.change}。实际缓存命中以端点用量为准。</p>}
       </details>
     </li>)}
   </ol>;
 }
 
-export function ContextUsagePanel({ status, report, reports, usage, compacting, onCompact, onClose, onSettings }) {
+export function ContextUsagePanel({ status, report, reports, usage, compacting, onCompact, onClose, onSettings }: { status?: ContextStatus | null; report?: RequestReport | null; reports?: RequestReport[]; usage?: RunUsage | null; compacting?: boolean; onCompact: () => void; onClose: () => void; onSettings: () => void }) {
   const [view, setView] = useState('context');
   const context = requestContext(status, report);
   const latest = reports?.at(-1) || report;
@@ -64,7 +66,7 @@ export function ContextUsagePanel({ status, report, reports, usage, compacting, 
       <div className="context-composition-bar" role="img" aria-label={`上下文预算已用 ${percent == null ? '未知' : Math.round(percent) + '%'}`}>
         {context.parts.length ? context.parts.map(part => <span key={part.category} className={`context-part part-${part.category}`}
           title={`${part.label}：约 ${Number(part.tokens).toLocaleString()} tokens`}
-          style={{ width: `${context.limit ? part.tokens / Math.max(context.limit, context.used) * 100 : 0}%` }} />)
+          style={{ width: `${context.limit ? Number(part.tokens) / Math.max(context.limit, context.used || 0) * 100 : 0}%` }} />)
           : <span className="context-part part-conversation" style={{ width: `${percent || 0}%` }} />}
       </div>
       {context.parts.length ? <ul className="context-composition-list">{context.parts.map(part => <li key={part.category}>
@@ -76,9 +78,9 @@ export function ContextUsagePanel({ status, report, reports, usage, compacting, 
         <div><dt>最近请求命中</dt><dd>{formatCache(latest?.usage)}</dd></div>
         <div><dt>最近请求费用</dt><dd>{latest?.cost?.total != null ? '≈ ' : ''}{formatCost(latest?.cost?.total, latest?.cost?.currency)}</dd></div>
         <div><dt>本轮缓存命中</dt><dd>{formatCache(details)}</dd></div>
-        <div><dt>本轮费用</dt><dd>{details?.pricedRequests > 0 ? '≈ ' : ''}{totalCost(details)}</dd></div>
+        <div><dt>本轮费用</dt><dd>{(details?.pricedRequests || 0) > 0 ? '≈ ' : ''}{totalCost(details)}</dd></div>
       </dl>
-      {details?.requests > 0 && <p className="request-note">缓存数据 {details.observedCacheRequests}/{details.requests} 次 · 可计价 {details.pricedRequests}/{details.requests} 次{details.pricedRequests < details.requests ? '，费用合计不完整' : ''}</p>}
+      {details && details.requests > 0 && <p className="request-note">缓存数据 {details.observedCacheRequests}/{details.requests} 次 · 可计价 {details.pricedRequests}/{details.requests} 次{details.pricedRequests < details.requests ? '，费用合计不完整' : ''}</p>}
       {latest?.cost?.total == null && <button type="button" className="request-text-action request-price-link" onClick={onSettings}>配置当前模型单价</button>}
       <div className="request-panel-foot"><span>{context.fromRequest ? '最近请求快照' : '历史消息'} · token 估算</span>
         <button type="button" className="btn" disabled={compacting || status?.canCompact === false} onClick={onCompact}>{compacting ? '正在压缩…' : '压缩上下文'}</button></div>

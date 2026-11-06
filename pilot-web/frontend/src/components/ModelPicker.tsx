@@ -4,17 +4,17 @@ import { buildModelUpdate, normalizeModelNames } from '../lib/model-settings.js'
 import { useModelDiscovery } from './ModelDiscovery.jsx';
 
 /** 输入区只负责快速切换；连接配置和手动填写统一进入模型设置。 */
-export function ModelPicker({ onClose, models, initialModel = '', initialEndpoint = '' }) {
+export function ModelPicker({ onClose, models, initialModel = '', initialEndpoint = '' }: { onClose: () => void; models: string[]; initialModel?: string; initialEndpoint?: string }) {
   const feedback = useStore(state => state.modelSave);
   const discovery = useModelDiscovery({ endpoint: initialEndpoint, initialModels: models, initialEndpoint });
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(initialModel);
   const [pending, setPending] = useState('');
-  const [position, setPosition] = useState(null);
-  const input = useRef(null);
-  const menu = useRef(null);
+  const [position, setPosition] = useState<React.CSSProperties | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   const mounted = useRef(false);
-  const cached = useRef(null);
+  const cached = useRef<string[] | null>(null);
   const probe = useRef(discovery.probe);
   probe.current = discovery.probe;
   const listId = useId();
@@ -80,7 +80,7 @@ export function ModelPicker({ onClose, models, initialModel = '', initialEndpoin
     menu.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [focused, query]);
 
-  async function select(model) {
+  async function select(model: string) {
     if (!model || useStore.getState().modelSave.busy) return;
     if (model === initialModel) { onClose(); return; }
     setPending(model);
@@ -92,8 +92,8 @@ export function ModelPicker({ onClose, models, initialModel = '', initialEndpoin
     else input.current?.focus({ preventScroll: true });
   }
 
-  function navigate(event) {
-    if (event.isComposing || event.nativeEvent?.isComposing || feedback.busy) return;
+  function navigate(event: React.KeyboardEvent<HTMLElement>) {
+    if (event.nativeEvent?.isComposing || feedback.busy) return;
     if (event.key === 'Enter') {
       event.preventDefault();
       void select(focused);

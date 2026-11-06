@@ -1,4 +1,5 @@
-export interface ComposerActionInput { running?: boolean; editing?: boolean; hasText?: boolean; attachmentCount?: number; composerEnabled?: boolean; steering?: boolean; pausing?: boolean; cancelling?: boolean; modelSaving?: boolean }
+export interface ComposerActionInput {
+  queuePaused?: boolean; running?: boolean; editing?: boolean; hasText?: boolean; attachmentCount?: number; composerEnabled?: boolean; steering?: boolean; pausing?: boolean; cancelling?: boolean; modelSaving?: boolean }
 /** 空草稿运行中显示停止；有草稿只排队，引导在对应队列行操作。 */
 export function resolveComposerAction({ running = false, editing = false, hasText = false,
   attachmentCount = 0, composerEnabled = false, steering = false, pausing = false, cancelling = false, modelSaving = false }: ComposerActionInput = {}) {

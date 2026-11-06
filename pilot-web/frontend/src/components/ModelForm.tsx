@@ -1,9 +1,10 @@
+import type { StoreState } from '../types/store.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { buildModelUpdate } from '../lib/model-settings.js';
 
 /** 两个模型入口共用保存反馈；输入在请求期间锁定，失败保留，成功清空明文密钥。 */
-export function useModelForm({ model = '', endpoint: savedEndpoint = '' }) {
+export function useModelForm({ model = '', endpoint: savedEndpoint = '' }: { model?: string; endpoint?: string }) {
   const [name, updateName] = useState(model);
   const [endpoint, updateEndpoint] = useState(savedEndpoint);
   const [key, updateKey] = useState('');
@@ -15,17 +16,17 @@ export function useModelForm({ model = '', endpoint: savedEndpoint = '' }) {
     // 保存期间重开的表单使用响应中的新配置，保留已编辑的草稿。
     if (!dirty.current) { updateName(model); updateEndpoint(savedEndpoint); }
   }, [model, savedEndpoint]);
-  const edit = setter => value => {
+  const edit = (setter: React.Dispatch<React.SetStateAction<string>>) => (value: string) => {
     if (useStore.getState().modelSave.busy) return;
     dirty.current = true;
     setter(value);
     useStore.getState().resetModelFeedback();
   };
-  const submit = async (action, resetFields = true) => {
+  const submit = async (action: () => Promise<boolean>, resetFields = true) => {
     const success = await action();
     if (!mounted.current || !success) return false;
     const settings = useStore.getState().settingsData;
-    if (resetFields) {
+    if (resetFields && settings) {
       dirty.current = false;
       updateName(settings.model);
       updateEndpoint(settings.modelEndpoint);
@@ -41,8 +42,8 @@ export function useModelForm({ model = '', endpoint: savedEndpoint = '' }) {
   };
 }
 
-export function ModelSaveFeedback({ feedback, id }) {
-  const node = useRef(null);
+export function ModelSaveFeedback({ feedback, id }: { feedback: StoreState['modelSave']; id?: string }) {
+  const node = useRef<HTMLParagraphElement>(null);
   useEffect(() => { node.current?.scrollIntoView({ block: 'nearest' }); }, [feedback.message]);
   if (!feedback.message) return null;
   return <p ref={node} id={id} className={`model-save-feedback${feedback.error ? ' is-error' : ''}`} role={feedback.error ? 'alert' : 'status'}>

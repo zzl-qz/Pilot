@@ -1,10 +1,17 @@
+import type * as S from '../types/server.js';
+import type { Update } from '../types/api.js';
+type RateKey = 'input' | 'cachedInput' | 'cacheWrite' | 'output';
+type PricingForm = Omit<S.ModelPricing, RateKey> & Record<RateKey, number | string | null>;
+type RuntimeOptions = Omit<S.ModelRuntimeSettingsOptions, 'pricing'> & { pricing: PricingForm };
+type RuntimeView = Omit<S.ModelRuntimeSettingsView, 'options'> & { options: RuntimeOptions };
+import { errorInfo } from '../lib/errors.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import './request-usage.css';
 
-const RATE_FIELDS = [['input', '普通输入'], ['cachedInput', '缓存读取'], ['cacheWrite', '缓存写入'], ['output', '输出']];
-export function ModelRuntimeSettings({ model, endpoint }) {
-  const [value, setValue] = useState(null);
+const RATE_FIELDS = [['input', '普通输入'], ['cachedInput', '缓存读取'], ['cacheWrite', '缓存写入'], ['output', '输出']] as const;
+export function ModelRuntimeSettings({ model, endpoint }: { model: string; endpoint: string }) {
+  const [value, setValue] = useState<RuntimeView | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -15,7 +22,7 @@ export function ModelRuntimeSettings({ model, endpoint }) {
     api.modelRuntime().then(data => {
       if (!data?.options || !data.model || !data.endpoint) throw new Error('端点未提供完整的缓存与计价配置，请刷新或升级服务端。');
       if (live) setValue(data);
-    }).catch(e => { if (live) setError(e.message); });
+    }).catch(e => { if (live) setError(errorInfo(e).message || '操作失败'); });
     return () => { live = false; generation.current++; };
   }, [model, endpoint, refresh]);
   useEffect(() => {
@@ -24,12 +31,12 @@ export function ModelRuntimeSettings({ model, endpoint }) {
     const revision = generation.current;
     let live = true;
     const delay = report.state === 'checking' ? 1000 : Math.max(1000, Math.min(60000, report.expiresAt - Date.now()));
-    let timer;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     async function poll() {
       let updated = false;
       try {
         const next = await api.modelRuntime();
-        if (!live || revision !== generation.current || next.model !== value.model || next.endpoint !== value.endpoint) return;
+        if (!live || !next || !value || revision !== generation.current || next.model !== value.model || next.endpoint !== value.endpoint) return;
         // 后台状态刷新只合并检测结果，不覆盖用户正在编辑的报价和兼容选项。
         setValue(current => current && ({ ...current, nativeCapabilities: next.nativeCapabilities,
           webSearchSource: next.webSearchSource, capabilityDiscovery: next.capabilityDiscovery }));
@@ -40,21 +47,23 @@ export function ModelRuntimeSettings({ model, endpoint }) {
     timer = setTimeout(poll, delay);
     return () => { live = false; clearTimeout(timer); };
   }, [value?.capabilityDiscovery, value?.model, value?.endpoint]);
-  const update = (key, next) => { setNotice(''); setValue(current => ({ ...current, options: { ...current.options, [key]: next } })); };
-  const price = (key, next) => update('pricing', { ...(value.options.pricing || {}), [key]: next });
-  async function save(event) {
+  const update = <K extends keyof RuntimeOptions,>(key: K, next: RuntimeOptions[K]) => { setNotice(''); setValue(current => current && ({ ...current, options: { ...current.options, [key]: next } })); };
+  const price = (key: keyof PricingForm, next: string) => { if (value) update('pricing', { ...value.options.pricing, [key]: next }); };
+  async function save(event: React.FormEvent) {
+    if (!value) return;
     const revision = generation.current;
     event.preventDefault(); setBusy(true); setError(''); setNotice('');
     try {
-      const pricing = { ...(value.options.pricing || {}) };
+      const pricing: Update<S.ModelPricing> = { currency: value.options.pricing.currency, source: value.options.pricing.source };
       for (const [key] of RATE_FIELDS) {
-        const raw = pricing[key];
+        const raw = value.options.pricing[key];
         pricing[key] = raw == null || String(raw).trim() === '' ? null : Number(raw);
         if (pricing[key] != null && (!Number.isFinite(pricing[key]) || pricing[key] < 0)) throw new Error('单价必须是非负数字，未知时请留空。');
       }
       const saved = await api.saveModelRuntime({ model: value.model, endpoint: value.endpoint, options: { ...value.options, pricing } });
+      if (!saved) throw new Error('服务端返回空模型配置，请重新加载后重试');
       if (revision === generation.current) { setValue(saved); setNotice('已保存，仅对该端点与模型的后续请求生效。'); }
-    } catch (e) { if (revision === generation.current) setError(e.message); }
+    } catch (e) { if (revision === generation.current) setError(errorInfo(e).message || '操作失败'); }
     finally { if (revision === generation.current) setBusy(false); }
   }
   return <details className="request-runtime-settings" open>
@@ -96,7 +105,7 @@ export function ModelRuntimeSettings({ model, endpoint }) {
         <option value="">端点默认</option><option value="5m">5 分钟</option><option value="1h">1 小时</option>
       </select></label>
       <details><summary>兼容与压缩选项</summary>
-        {[['instructionMessages', '支持对话中的 system 指令更新'], ['streamUsage', '流式请求允许 include_usage']].map(([key, label]) =>
+        {([['instructionMessages', '支持对话中的 system 指令更新'], ['streamUsage', '流式请求允许 include_usage']] as const).map(([key, label]) =>
           <label className="task-field" key={key}>{label}<select value={value.options[key] == null ? 'auto' : String(value.options[key])}
             onChange={e => update(key, e.target.value === 'auto' ? null : e.target.value === 'true')}>
             <option value="auto">按端点能力</option><option value="true">已确认支持</option><option value="false">不支持</option>
