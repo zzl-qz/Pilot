@@ -68,6 +68,7 @@ export interface MessageAttachment {
   mimeType?: string;
   size?: number;
   url?: string;
+  path?: string;
   dataBase64?: string;
   kind?: string;
   raw?: string;

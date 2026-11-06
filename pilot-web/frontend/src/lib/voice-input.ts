@@ -1,10 +1,12 @@
+import type { VoiceEnvironment, VoiceOptions, VoicePhase, VoiceState } from '../types/input.js';
+import { errorInfo } from './errors.js';
 export const VOICE_MAX_BYTES = 10 * 1024 * 1024;
 export const VOICE_MAX_MS = 120000;
 const FORMATS = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
-export function voiceFormat(Recorder) {
+export function voiceFormat(Recorder: Pick<typeof MediaRecorder, 'isTypeSupported'> | null | undefined) {
   return FORMATS.find(type => Recorder?.isTypeSupported?.(type)) || '';
 }
-export function voiceFilename(type) {
+export function voiceFilename(type: string | null | undefined) {
   if (type?.includes('wav')) return 'recording.wav';
   return `recording.${type?.includes('mp4') ? 'mp4' : type?.includes('ogg') ? 'ogg' : 'webm'}`;
 }
@@ -12,10 +14,10 @@ export function voiceFilename(type) {
 /** 转写统一用 16k 单声道：多数服务只认 mp3/wav，webm/opus 会被判「不支持当前文件格式」。 */
 export const VOICE_SAMPLE_RATE = 16000;
 
-function wavBytes(samples, rate) {
+function wavBytes(samples: Float32Array, rate: number) {
   const bytes = new Uint8Array(44 + samples.length * 2);
   const view = new DataView(bytes.buffer);
-  const ascii = (offset, text) => { for (let i = 0; i < text.length; i++) bytes[offset + i] = text.charCodeAt(i); };
+  const ascii = (offset: number, text: string) => { for (let i = 0; i < text.length; i++) bytes[offset + i] = text.charCodeAt(i); };
   ascii(0, 'RIFF'); view.setUint32(4, 36 + samples.length * 2, true); ascii(8, 'WAVE');
   ascii(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
   view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
@@ -31,7 +33,7 @@ function wavBytes(samples, rate) {
  * 把 MediaRecorder 的 webm/mp4 解成 16k 单声道 WAV。
  * 解码失败（老浏览器、罕见编码）时原样返回，让服务端给出明确报错，而不是静默丢录音。
  */
-export async function toWav(blob, environment = globalThis) {
+export async function toWav(blob: Blob, environment: VoiceEnvironment = globalThis) {
   const Ctx = environment.AudioContext || environment.webkitAudioContext;
   const Offline = environment.OfflineAudioContext || environment.webkitOfflineAudioContext;
   if (!Ctx || !Offline || typeof blob.arrayBuffer !== 'function') return blob;
@@ -51,18 +53,22 @@ export async function toWav(blob, environment = globalThis) {
     context.close?.();
   }
 }
-export function voiceError(error) {
+export function voiceError(value: unknown) {
+  const error = errorInfo(value);
   return ({ NotAllowedError: '麦克风权限被拒绝。请在浏览器或系统设置中允许 Pilot 使用麦克风。',
     NotFoundError: '没有找到麦克风，请连接麦克风后重试。',
     NotReadableError: '麦克风无法使用，可能正被其他应用占用。',
-    AbortError: '录音已中断，请重试。' })[error?.name] || error?.message || '语音输入失败，请重试。';
+    AbortError: '录音已中断，请重试。' } as Record<string, string>)[error.name ?? ''] || error?.message || '语音输入失败，请重试。';
 }
 
 /** 录音与转写共用代次：取消、切换会话后迟到的权限/转写结果不会回填。 */
-export function createVoiceInput({ environment = globalThis, transcribe, onState, onText }) {
-  let generation = 0, phase = 'idle', stream, recorder, timer, permissionTimer, controller, recording;
-  let chunks = [], bytes = 0, started = 0;
-  const emit = (next, extra = {}) => { phase = next; onState({ phase, ...extra }); };
+export function createVoiceInput({ environment = globalThis, transcribe, onState, onText }: VoiceOptions) {
+  let generation = 0, phase: VoicePhase = 'idle';
+  let stream: MediaStream | null | undefined, recorder: MediaRecorder | null | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined, permissionTimer: ReturnType<typeof setTimeout> | undefined;
+  let controller: AbortController | null | undefined, recording: Blob | null | undefined;
+  let chunks: Blob[] = [], bytes = 0, started = 0;
+  const emit = (next: VoicePhase, extra: Partial<VoiceState> = {}) => { phase = next; onState({ phase, ...extra }); };
   const release = () => {
     // 只有真正创建过定时器才清理：Node 20 的 mock timers 对 undefined 句柄会抛错，
     // 浏览器里 clearTimeout(undefined) 虽是无操作，但显式判断更稳。
@@ -76,16 +82,16 @@ export function createVoiceInput({ environment = globalThis, transcribe, onState
     if (recorder && recorder.state !== 'inactive') recorder.stop();
     recorder = null; release(); chunks = []; recording = null; emit('idle');
   }
-  function fail(error) {
+  function fail(error: unknown) {
     generation++;
     if (recorder && recorder.state !== 'inactive') recorder.stop();
     release(); chunks = []; emit('error', { error: voiceError(error), retry: Boolean(recording) });
   }
-  async function upload(token) {
+  async function upload(token: number) {
     controller = new AbortController(); emit('transcribing');
     try {
-      let audio = recording;
-      try { audio = await toWav(recording, environment); }
+      let audio = recording!;
+      try { audio = await toWav(recording!, environment); }
       catch { /* 解码不了就按原格式上传，服务端会给出明确原因 */ }
       if (token !== generation) return;
       const result = await transcribe(audio, controller.signal);
@@ -110,7 +116,7 @@ export function createVoiceInput({ environment = globalThis, transcribe, onState
       const media = await environment.navigator.mediaDevices.getUserMedia({ audio: true });
       if (token !== generation) { media.getTracks().forEach(track => track.stop()); return; }
       clearTimeout(permissionTimer); stream = media;
-      recorder = new Recorder(media, { mimeType, audioBitsPerSecond: 64000 });
+      recorder = new Recorder!(media, { mimeType, audioBitsPerSecond: 64000 });
       chunks = []; bytes = 0; started = Date.now();
       recorder.ondataavailable = event => {
         if (token !== generation || !event.data.size) return;
@@ -122,7 +128,7 @@ export function createVoiceInput({ environment = globalThis, transcribe, onState
       recorder.onstop = () => {
         if (token !== generation) return;
         release();
-        recording = new Blob(chunks, { type: recorder.mimeType || mimeType }); chunks = [];
+        recording = new Blob(chunks, { type: recorder!.mimeType || mimeType }); chunks = [];
         if (!recording.size) { recording = null; fail(new Error('没有录到声音，请重新录音。')); return; }
         upload(token);
       };
@@ -138,7 +144,7 @@ export function createVoiceInput({ environment = globalThis, transcribe, onState
   }
   function stop() {
     if (phase !== 'recording') return;
-    emit('finishing'); clearInterval(timer); recorder.stop(); release();
+    emit('finishing'); clearInterval(timer); recorder!.stop(); release();
   }
   return { start, stop, cancel, retry() { if (phase === 'error' && recording) upload(++generation); } };
 }

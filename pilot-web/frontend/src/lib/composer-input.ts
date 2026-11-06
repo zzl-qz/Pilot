@@ -1,3 +1,5 @@
+import type { DraftAttachment } from '../types/input.js';
+interface SerializedDraft { text: string; positions: number[]; query: boolean }
 import { readTransferFiles, hasFileTransferHint } from './clipboard.js';
 import { fileBadge, formatBytes, isImageAttachment } from './attachments.js';
 
@@ -10,21 +12,22 @@ import { fileBadge, formatBytes, isImageAttachment } from './attachments.js';
  *
  * DOM 是唯一的真相：草稿里有哪些附件，就看里面有哪些芯片，不再另存一份会漂移的数组。
  */
-export function createComposerInput(root, { onChange = () => {}, onRemove = () => {} } = {}) {
+export function createComposerInput(root: HTMLElement, { onChange = () => {}, onRemove = () => {} }: { onChange?: () => void; onRemove?: (id: string) => void } = {}) {
   // 不能用 plaintext-only：它会在第一次键入时把 DOM 压平成纯文本，芯片就变成了一串字。
   // 用普通可编辑，粘贴时自己剥掉格式（见下面的 paste 处理）。
   root.contentEditable = 'true';
   const listeners = new AbortController();
 
-  function walk(parent, out) {
-    for (const node of parent.childNodes) {
-      if (node.nodeType === Node.TEXT_NODE) {
-        out.text += (node.nodeValue || '').replace(/\u00a0/g, ' ');
+  function walk(parent: Node, out: SerializedDraft) {
+    for (const child of parent.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        out.text += (child.nodeValue || '').replace(/\u00a0/g, ' ');
         continue;
       }
-      if (node.nodeType !== Node.ELEMENT_NODE) {
+      if (child.nodeType !== Node.ELEMENT_NODE) {
         continue;
       }
+      const node = child as HTMLElement;
       const chip = node.dataset && node.dataset.chip;
       if (chip === 'attachment') {
         if (node.dataset.kind === 'image') {
@@ -51,8 +54,8 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     }
   }
 
-  function serialize(container, query = false) {
-    const out = { text: '', positions: [], query };
+  function serialize(container: Node, query = false) {
+    const out: SerializedDraft = { text: '', positions: [], query };
     walk(container, out);
     return out;
   }
@@ -67,7 +70,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
   }
 
   function selectionRange() {
-    const selection = window.getSelection();
+    const selection = window.getSelection()!;
     if (!selection || !selection.rangeCount) {
       return null;
     }
@@ -75,13 +78,13 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     return root.contains(range.startContainer) && root.contains(range.endContainer) ? range : null;
   }
 
-  function placeCaret(node, offset) {
+  function placeCaret(node: Node, offset: number) {
     const range = document.createRange();
     range.setStart(node, offset);
-    range.collapse(true);
-    const selection = window.getSelection();
+    range!.collapse(true);
+    const selection = window.getSelection()!;
     selection.removeAllRanges();
-    selection.addRange(range);
+    selection.addRange(range!);
   }
 
   function focusEnd() {
@@ -89,13 +92,13 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     const range = document.createRange();
     range.selectNodeContents(root);
     range.collapse(false);
-    const selection = window.getSelection();
+    const selection = window.getSelection()!;
     selection.removeAllRanges();
-    selection.addRange(range);
+    selection.addRange(range!);
   }
 
   // 只替换光标前的触发词，保留两边文字、附件和已有引用；兼容浏览器拆开的文字节点。
-  function selectTrigger(marker) {
+  function selectTrigger(marker: string) {
     const caret = selectionRange();
     if (!caret || !caret.collapsed) return false;
     const probe = document.createRange();
@@ -108,17 +111,17 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
-      if (node.parentElement.closest('[data-chip]')) continue;
+      if (node.parentElement!.closest('[data-chip]')) continue;
       const prefix = document.createRange();
       prefix.selectNodeContents(root);
       prefix.setEnd(node, 0);
       const start = serialize(prefix.cloneContents(), true).text.length;
-      if (target >= start && target < start + node.length) {
+      if (target >= start && target < start + (node as Text).length) {
         const range = caret.cloneRange();
         range.setStart(node, target - start);
-        const selection = window.getSelection();
+        const selection = window.getSelection()!;
         selection.removeAllRanges();
-        selection.addRange(range);
+        selection.addRange(range!);
         return true;
       }
     }
@@ -126,7 +129,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
   }
 
   /** 把节点放到光标处（光标不在输入框里就追加到末尾），并把光标移到它们后面。 */
-  function insertAtCaret(nodes) {
+  function insertAtCaret(nodes: Node[]) {
     const fragment = document.createDocumentFragment();
     nodes.forEach((node) => fragment.append(node));
     const last = nodes[nodes.length - 1];
@@ -135,20 +138,20 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
       focusEnd();
       range = selectionRange();
     }
-    range.deleteContents();
-    range.insertNode(fragment);
+    range!.deleteContents();
+    range!.insertNode(fragment);
     if (last.nodeType === Node.TEXT_NODE) {
-      placeCaret(last, last.nodeValue.length);
+      placeCaret(last, last.nodeValue!.length);
     } else {
-      range.setStartAfter(last);
-      range.collapse(true);
-      const selection = window.getSelection();
+      range!.setStartAfter(last);
+      range!.collapse(true);
+      const selection = window.getSelection()!;
       selection.removeAllRanges();
-      selection.addRange(range);
+      selection.addRange(range!);
     }
   }
 
-  function chipRoot(kind, attributes) {
+  function chipRoot(kind: string, attributes: Record<string, string>) {
     const chip = document.createElement('span');
     chip.className = 'flow-chip';
     chip.contentEditable = 'false';
@@ -159,7 +162,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     return chip;
   }
 
-  function badge(name, mimeType) {
+  function badge(name: string, mimeType = '') {
     const info = fileBadge(name, mimeType);
     const node = document.createElement('span');
     node.className = `chip-badge ft-${info.tone}`;
@@ -167,7 +170,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     return node;
   }
 
-  function attachmentChip(item) {
+  function attachmentChip(item: DraftAttachment) {
     const isImage = isImageAttachment(item) && item.dataBase64;
     const chip = chipRoot('attachment', { attachmentId: item.id, kind: isImage ? 'image' : 'file' });
     chip.classList.add(isImage ? 'is-image' : 'is-file');
@@ -201,7 +204,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     return chip;
   }
 
-  function mentionChip(path) {
+  function mentionChip(path: string) {
     const chip = chipRoot('mention', { path });
     chip.classList.add('is-mention');
     chip.title = path;
@@ -218,7 +221,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
       return;
     }
     event.preventDefault();
-    const chip = button.closest('.flow-chip');
+    const chip = button.closest<HTMLElement>('.flow-chip');
     if (!chip) {
       return;
     }
@@ -273,7 +276,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     },
 
     attachmentIds() {
-      return [...root.querySelectorAll('[data-chip="attachment"]')].map((chip) => chip.dataset.attachmentId);
+      return [...root.querySelectorAll<HTMLElement>('[data-chip="attachment"]')].map((chip) => chip.dataset.attachmentId!);
     },
 
     hasChips() {
@@ -281,14 +284,14 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     },
 
     /** 整个草稿替换成纯文字，芯片一并清掉。 */
-    setText(text) {
+    setText(text: unknown) {
       root.replaceChildren(...(text ? [document.createTextNode(String(text))] : []));
       refresh();
       onChange();
     },
 
     /** 在草稿末尾追加文字，已有的芯片保持不动。 */
-    appendText(text) {
+    appendText(text: unknown) {
       if (!text) {
         return;
       }
@@ -327,14 +330,14 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
     },
 
     /** 光标是否在第一行 / 最后一行：上下键翻历史前用来判断，多行文字里不能抢方向键。 */
-    caretOnEdgeLine(edge) {
+    caretOnEdgeLine(edge: string) {
       const before = this.textBeforeCaret();
       const after = this.textAfterCaret();
       return edge === 'first' ? !before.includes('\n') : !after.includes('\n');
     },
 
-    insertAttachments(items) {
-      const nodes = [];
+    insertAttachments(items: readonly DraftAttachment[]) {
+      const nodes: Node[] = [];
       items.forEach((item) => {
         nodes.push(attachmentChip(item), document.createTextNode(' '));
       });
@@ -349,7 +352,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
      * 选中一个 @ 文件：把光标前正在输入的 `@查询` 换成引用芯片。
      * 找不到那段查询（光标不在文字节点里）就直接在光标处插入。
      */
-    insertMention(path) {
+    insertMention(path: string) {
       const chip = mentionChip(path);
       const gap = document.createTextNode(' ');
       selectTrigger('@');
@@ -358,7 +361,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
       onChange();
     },
 
-    replaceCommand(text) {
+    replaceCommand(text: string) {
       if (!selectTrigger('/')) return false;
       insertAtCaret([document.createTextNode(text)]);
       refresh();
@@ -374,7 +377,7 @@ export function createComposerInput(root, { onChange = () => {}, onRemove = () =
       return nodes;
     },
 
-    restore(nodes) {
+    restore(nodes: readonly Node[] | null | undefined) {
       root.replaceChildren(...(nodes || []));
       refresh();
     }

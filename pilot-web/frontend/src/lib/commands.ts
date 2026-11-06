@@ -1,5 +1,6 @@
+import type { BuiltinCommand, QuickCommand } from '../types/input.js';
 import { shortcut } from './interaction.js';
-export const QUICK_COMMANDS = [
+export const QUICK_COMMANDS: BuiltinCommand[] = [
   {
     name: '/test',
     label: '运行测试',
@@ -56,7 +57,7 @@ const COMMAND_PALETTE_ACTIONS = [
   { label: '重新连接事件流', hint: '', keywords: ['重连', '事件', '连接', 'reconnect'], action: 'reconnect' }
 ];
 
-export function filterQuickCommands(query, commands = QUICK_COMMANDS) {
+export function filterQuickCommands(query: unknown, commands: readonly QuickCommand[] = QUICK_COMMANDS) {
   const needle = String(query || '').trim().toLowerCase();
   return (commands || []).filter((command) => {
     const fields = [command.name, command.label, command.hint, ...command.aliases];
@@ -64,7 +65,7 @@ export function filterQuickCommands(query, commands = QUICK_COMMANDS) {
   });
 }
 
-export function filterPaletteActions(query) {
+export function filterPaletteActions(query: unknown) {
   const needle = String(query || '').trim().toLowerCase();
   return COMMAND_PALETTE_ACTIONS.filter((command) => {
     const fields = [command.label, command.hint, ...command.keywords];
@@ -72,6 +73,6 @@ export function filterPaletteActions(query) {
   });
 }
 
-export function expandQuickCommand(command, args = '') {
+export function expandQuickCommand(command: BuiltinCommand, args = '') {
   return command.prompt(String(args).trim());
 }

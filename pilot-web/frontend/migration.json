@@ -123,8 +123,13 @@
         "编辑器选区/芯片",
         "语音授权/超时/大小/取消/重试"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T07-31-25-344Z/report.json",
+          "result": "302 项前端单元、41 项桌面单元、严格类型检查、构建和 navigation/composer/interaction 三套 Web/Electron 回归通过。新增附件读取/错误/取消测试同时对迁移前 JS 副本与 TS 通过；覆盖 Ctrl/Meta/AltGr/IME、粘贴降级、附件限制、录音权限/取消/重试/迟到响应。"
+        }
+      ]
     },
     {
       "batch": 5,

@@ -1,7 +1,8 @@
+import type { DraftAttachment } from '../types/input.js';
 let localId = 0;
 
 /** 仅用于草稿内去重，不是鉴权令牌；普通 HTTP 下 randomUUID 可能不可用。 */
-export function attachmentId(cryptoApi = globalThis.crypto) {
+export function attachmentId(cryptoApi: Partial<Pick<Crypto, 'randomUUID' | 'getRandomValues'>> | null | undefined = globalThis.crypto) {
   try {
     if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID();
     if (typeof cryptoApi?.getRandomValues === 'function') {
@@ -13,7 +14,7 @@ export function attachmentId(cryptoApi = globalThis.crypto) {
 }
 
 /** 服务端消息接口接收 dataBase64；读取阶段不创建会话或上传。 */
-export function readAttachmentFile(file) {
+export function readAttachmentFile(file: File): Promise<DraftAttachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error(`无法读取「${file.name}」`));
@@ -21,7 +22,7 @@ export function readAttachmentFile(file) {
     reader.onload = () => resolve({
       id: attachmentId(), name: file.name || 'clipboard.png',
       mimeType: file.type || 'application/octet-stream', size: file.size,
-      dataBase64: reader.result
+      dataBase64: reader.result as string
     });
     reader.readAsDataURL(file);
   });

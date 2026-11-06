@@ -1,3 +1,5 @@
+import type { MessageAttachment } from '../types/runtime.js';
+import type { AttachmentMarker, MessagePart } from '../types/input.js';
 /**
  * 输入框附件相关的纯函数：限制校验、文件类型徽标、大小格式化，
  * 以及把服务端内联进正文的文件块还原成「正文 + 文件卡片」。
@@ -20,13 +22,13 @@ const DATA_EXTENSIONS = new Set(['json', 'xml', 'yml', 'yaml', 'toml', 'ini', 'c
 const DOC_EXTENSIONS = new Set(['md', 'txt', 'pdf', 'doc', 'docx', 'rtf', 'ppt', 'pptx', 'xls', 'xlsx']);
 const ARCHIVE_EXTENSIONS = new Set(['zip', 'tar', 'gz', 'tgz', '7z', 'rar', 'jar']);
 
-function extensionOf(name) {
+function extensionOf(name: unknown) {
   const text = String(name || '');
   const dot = text.lastIndexOf('.');
   return dot > 0 && dot < text.length - 1 ? text.slice(dot + 1).toLowerCase() : '';
 }
 
-export function isImageAttachment(item) {
+export function isImageAttachment(item: MessageAttachment | null | undefined) {
   if (!item) {
     return false;
   }
@@ -38,7 +40,7 @@ export function isImageAttachment(item) {
 }
 
 /** 文件卡片左侧的小徽标：扩展名大写（最多 4 个字符）+ 一个用来上色的类别。 */
-export function fileBadge(name, mimeType = '') {
+export function fileBadge(name: unknown, mimeType = '') {
   const ext = extensionOf(name);
   let tone = 'file';
   if (IMAGE_EXTENSIONS.has(ext) || String(mimeType).startsWith('image/')) {
@@ -55,7 +57,7 @@ export function fileBadge(name, mimeType = '') {
   return { label: (ext || 'file').slice(0, 4).toUpperCase(), tone };
 }
 
-export function formatBytes(bytes) {
+export function formatBytes(bytes: unknown) {
   const size = Number(bytes);
   if (!Number.isFinite(size) || size < 0) {
     return '';
@@ -73,7 +75,7 @@ export function formatBytes(bytes) {
  * 判断一个新文件能不能加入当前草稿。
  * 重复（同名同大小）直接静默忽略，其余情况返回一句能直接展示给用户的原因。
  */
-export function checkIncomingFile(existing, file) {
+export function checkIncomingFile(existing: readonly MessageAttachment[] | null | undefined, file: { name?: string; size: number; mimeType?: string; type?: string }): { ok: boolean; silent?: boolean; reason: string } {
   const name = (file && file.name) || '未命名文件';
   const list = Array.isArray(existing) ? existing : [];
   const mime = String((file && (file.mimeType || file.type)) || '').toLowerCase();
@@ -105,9 +107,9 @@ const SAVED_BLOCK = /\[附件 (.+?) \(([^()\]\s]+)\) 已保存到 (.+?)，需要
  * @returns {{body: string, files: Array<{name: string, mimeType: string, kind: 'inline'|'saved',
  *   lines: number, raw: string}>}} body 是去掉文件块后的用户原话，raw 保留原文便于编辑后原样拼回
  */
-export function splitAttachmentMarkers(text) {
+export function splitAttachmentMarkers(text: unknown): { body: string; files: AttachmentMarker[] } {
   const source = String(text || '');
-  const found = [];
+  const found: { index: number; end: number; file: AttachmentMarker }[] = [];
   for (const match of source.matchAll(INLINE_BLOCK)) {
     found.push({
       index: match.index,
@@ -154,7 +156,7 @@ export function splitAttachmentMarkers(text) {
  *
  * @returns {Array<{type:'text', text:string}|{type:'image', image: object}|{type:'files', files: object[]}>}
  */
-export function layoutMessageParts(body, images, files, positions = []) {
+export function layoutMessageParts(body: unknown, images: MessageAttachment[] | null | undefined, files: MessageAttachment[] | null | undefined, positions: readonly number[] = []): MessagePart[] {
   const text = String(body || '');
   const pics = Array.isArray(images) ? images : [];
   const spots = Array.isArray(positions) && positions.length === pics.length
@@ -166,7 +168,7 @@ export function layoutMessageParts(body, images, files, positions = []) {
       return Math.max(0, Math.min(text.length, index));
     })
     : null;
-  const parts = [];
+  const parts: MessagePart[] = [];
   if (!spots) {
     if (text) {
       parts.push({ type: 'text', text });
@@ -193,7 +195,7 @@ export function layoutMessageParts(body, images, files, positions = []) {
 }
 
 /** {@link splitAttachmentMarkers} 的逆操作：编辑排队消息后，把原来的文件块接回正文末尾。 */
-export function joinAttachmentMarkers(body, files) {
+export function joinAttachmentMarkers(body: unknown, files: readonly Pick<AttachmentMarker, 'raw'>[] | null | undefined) {
   return [String(body || '').trim(), ...(files || []).map((file) => file.raw)]
     .filter((part) => part)
     .join('\n\n');
@@ -203,7 +205,7 @@ export function joinAttachmentMarkers(body, files) {
  * 附件缩略图地址。本地刚选的文件有 dataBase64，历史/队列里的图片只有服务端落盘路径，
  * 按文件名走附件接口取回。
  */
-export function attachmentUrl(sessionId, item) {
+export function attachmentUrl(sessionId: string | null | undefined, item: MessageAttachment | null | undefined) {
   if (!item) {
     return '';
   }

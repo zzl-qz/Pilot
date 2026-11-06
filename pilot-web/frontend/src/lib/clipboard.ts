@@ -1,3 +1,4 @@
+import type { TransferData } from '../types/input.js';
 /**
  * 写剪贴板：优先异步 API，失败退回 execCommand。
  *
@@ -6,7 +7,7 @@
  *
  * @returns {Promise<boolean>} 是否真的写进去了
  */
-export async function writeClipboard(text, env = {}) {
+export async function writeClipboard(text: unknown, env: { navigator?: { clipboard?: { writeText?: (text: string) => Promise<void> } } | null; document?: Document | null } = {}) {
   const value = text == null ? '' : String(text);
   const nav = env.navigator || (typeof navigator === 'undefined' ? null : navigator);
   const doc = env.document || (typeof document === 'undefined' ? null : document);
@@ -21,10 +22,10 @@ export async function writeClipboard(text, env = {}) {
   if (!doc || typeof doc.createElement !== 'function' || typeof doc.execCommand !== 'function') {
     return false;
   }
-  const previous = doc.activeElement;
+  const previous = doc.activeElement as HTMLElement | null;
   const selection = doc.getSelection?.();
   const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index).cloneRange()) : [];
-  let area;
+  let area: HTMLTextAreaElement | undefined;
   try {
     area = doc.createElement('textarea');
     area.value = value;
@@ -52,21 +53,21 @@ export async function writeClipboard(text, env = {}) {
 }
 
 /** 两种浏览器剪贴板表示择一读取，避免同一文件重复加入。 */
-export function readTransferFiles(data) {
+export function readTransferFiles(data: TransferData | null | undefined): File[] {
   if (!data) return [];
   const files = Array.from(data.files || []);
   if (files.length) return files;
   return Array.from(data.items || [])
     .filter((item) => item.kind === 'file')
-    .map((item) => { try { return item.getAsFile?.(); } catch { return null; } }).filter(Boolean);
+    .map((item) => { try { return item.getAsFile?.(); } catch { return null; } }).filter((file): file is File => Boolean(file));
 }
 
 /** File 不可读时识别传输标记和 URI；部分 Linux 文件管理器只提供这些。普通路径文本仍可粘贴。 */
-export function hasFileTransferHint(data) {
+export function hasFileTransferHint(data: TransferData | null | undefined) {
   if (Array.from(data?.types || []).includes('Files')) return true;
   if (!data?.getData) return false;
   try {
     return ['text/uri-list', 'x-special/gnome-copied-files'].some(type =>
-      /(?:^|[\r\n])file:\/\//i.test(data.getData(type) || ''));
+      /(?:^|[\r\n])file:\/\//i.test(data.getData!(type) || ''));
   } catch { return false; }
 }
