@@ -1,3 +1,10 @@
+import type { TimelineItem } from '../types/thread.js';
+import type { ChangeFile, ChangeReport, DiffFile } from '../types/core.js';
+import type { CommandTask } from '../types/store.js';
+import type { DesktopBrowserState, BrowserRecent } from '../types/desktop.js';
+import { errorInfo } from '../lib/errors.js';
+interface ReviewReport extends ChangeReport { diff?: string }
+interface BrowserReply { ok?: boolean; error?: string; message?: string; text?: string; url?: string }
 import { reviewQuote } from '../lib/interaction.js';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.js';
@@ -31,13 +38,13 @@ const TABS = [
 ];
 
 /** 选择器默认值必须稳定，否则每次返回新数组会让 zustand 反复触发重渲染。 */
-const NO_TASKS = [];
+const NO_TASKS: never[] = [];
 
 /** 右侧工作区：对话 / 变更 / 预览 / 命令 / 能力 / 浏览器镜像 / 活动时间线。 */
 export function Inspector() {
   const tab = useStore((state) => state.ui.inspectorTab);
   const open = useStore((state) => state.ui.inspectorOpen);
-  const navRef = useRef(null);
+  const navRef = useRef<HTMLElement>(null);
 
   /*
    * 7 个页签在窄面板里放不下，横向滚动时选中的那个可能滑出视野；
@@ -75,8 +82,8 @@ export function Inspector() {
         const keys = ['ArrowUp', 'ArrowDown', 'Home', 'End'];
         if (!keys.includes(event.key)) return;
         event.preventDefault();
-        const buttons = [...navRef.current.querySelectorAll('[role="tab"]')];
-        const index = buttons.indexOf(event.target);
+        const buttons = [...(navRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') || [])];
+        const index = buttons.findIndex(button => button === event.target);
         const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
         buttons[next].click(); buttons[next].focus();
       }}>
@@ -105,7 +112,7 @@ export function Inspector() {
   );
 }
 
-function RailIcon({ id }) {
+function RailIcon({ id }: { id: string }) {
   const common = { viewBox: '0 0 16 16', 'aria-hidden': true };
   if (id === 'products') return <svg {...common}><path d="M4 2.5h5l3 3v8H4zM9 2.5v3h3M6 8h4M6 10.5h4" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
   if (id === 'research') return <svg {...common}><path d="M8 4C6 2.5 3 3 2 3v9c2-.5 4-.5 6 1 2-1.5 4-1.5 6-1V3c-2-.5-4-.5-6 1Zm0 0v9" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
@@ -145,7 +152,7 @@ function Filters() {
 
   // 每个筛选后面跟条数：不用切来切去试，就知道哪一类有事发生
   const counts = useMemo(() => {
-    const map = { all: timeline.length, tool: 0, approval: 0, run: 0 };
+    const map: Record<string, number> = { all: timeline.length, tool: 0, approval: 0, run: 0 };
     timeline.forEach((item) => {
       if (map[item.kind] != null) {
         map[item.kind] += 1;
@@ -180,15 +187,15 @@ function ActivityPanel() {
   const timeline = useStore((state) => state.timeline);
   const filter = useStore((state) => state.ui.filters);
   const [query, setQuery] = useState('');
-  const [openKeys, setOpenKeys] = useState(() => new Set());
-  const listRef = useRef(null);
+  const [openKeys, setOpenKeys] = useState(() => new Set<string>());
+  const listRef = useRef<HTMLOListElement>(null);
   const stickRef = useRef(true);
 
   const byKind = filter === 'all' ? timeline : timeline.filter((item) => item.kind === filter);
   const keyword = query.trim().toLowerCase();
   const items = keyword ? byKind.filter((item) => matchesActivity(item, keyword)) : byKind;
 
-  const toggle = useCallback((key) => setOpenKeys((current) => {
+  const toggle = useCallback((key: string) => setOpenKeys((current) => {
     const next = new Set(current);
     if (next.has(key)) {
       next.delete(key);
@@ -215,7 +222,7 @@ function ActivityPanel() {
    * run.usage 一轮会刷几十条，连续出现时折成一行「×N」，
    * 否则时间线里全是用量事件，工具调用反而被冲走。
    */
-  const groups = [];
+  const groups: { type: string; count: number; firstSequence: number; lastSequence: number; item: TimelineItem }[] = [];
   for (const item of items) {
     const last = groups[groups.length - 1];
     if (last && item.type === 'run.usage' && last.type === 'run.usage') {
@@ -273,7 +280,7 @@ function ActivityPanel() {
   );
 }
 
-function matchesActivity(item, keyword) {
+function matchesActivity(item: TimelineItem, keyword: string) {
   return [item.type, item.title, item.detail, item.foot, item.status]
     .some((value) => String(value || '').toLowerCase().includes(keyword));
 }
@@ -282,7 +289,7 @@ function matchesActivity(item, keyword) {
  * 每条活动单独 memo：流式增量只改最后一张卡，其余几百条不该跟着每帧重渲染。
  * 点卡片展开完整内容（默认两行截断），长脚本才不需要整屏滚动。
  */
-const ActivityItem = memo(function ActivityItem({ item, open, onToggle }) {
+const ActivityItem = memo(function ActivityItem({ item, open, onToggle }: { item: TimelineItem; open: boolean; onToggle: (key: string) => void }) {
   return (
     <li
       className={`event tone-${item.tone}${open ? ' is-open' : ''}`}
@@ -303,7 +310,7 @@ const ActivityItem = memo(function ActivityItem({ item, open, onToggle }) {
   );
 });
 
-function ApprovalInline({ callId }) {
+function ApprovalInline({ callId }: { callId: string }) {
   const pending = useStore((state) => state.pendingApprovals[callId]);
   if (!pending) {
     return null;
@@ -323,7 +330,7 @@ function ChangesPanel() {
   const expanded = useStore(state => state.ui.reviewExpanded);
   const lastRunId = useStore(state => state.lastRunId || state.runId);
   const [scope, setScope] = useState('workspace');
-  const [runReport, setRunReport] = useState(null);
+  const [runReport, setRunReport] = useState<ReviewReport | null>(null);
   const [runError, setRunError] = useState('');
   const [refresh, setRefresh] = useState(0);
   const report = scope === 'run' ? runReport : workspaceReport;
@@ -335,7 +342,7 @@ function ChangesPanel() {
   const [showUntracked, setShowUntracked] = useState(false);
   const [query, setQuery] = useState('');
   /** 单文件撤销的行内确认。 */
-  const [confirm, setConfirm] = useState(null);
+  const [confirm, setConfirm] = useState<{ type: 'one'; path: string } | null>(null);
 
   /*
    * 后端 /diff 的 files 是数组、没有顶层 totals：增删行要从每个文件累加，
@@ -344,7 +351,7 @@ function ChangesPanel() {
    * 未跟踪文件（git status 的 ??）单列：它们的「+行数」其实是整个文件的行数，
    * 混进总计会把 +984 变成 +35757，列表也会被几十个临时文件淹掉。
    */
-  const files = useMemo(() => sortChangeFiles(Array.isArray(report?.files) ? report.files : []), [report]);
+  const files = useMemo(() => sortChangeFiles<ChangeFile>(Array.isArray(report?.files) ? report.files : []), [report]);
   const tracked = useMemo(() => files.filter((file) => file.status !== '??'), [files]);
   const untracked = useMemo(() => files.filter((file) => file.status === '??'), [files]);
   const totals = useMemo(() => tracked.reduce(
@@ -363,7 +370,7 @@ function ChangesPanel() {
     ? untracked.filter((file) => file.path.toLowerCase().includes(keyword))
     : untracked;
   const trackedPaths = useMemo(() => tracked.map((file) => file.path), [tracked]);
-  const viewIndex = trackedPaths.indexOf(view);
+  const viewIndex = trackedPaths.indexOf(view || '');
 
   useEffect(() => {
     if (sessionId) {
@@ -378,6 +385,7 @@ function ChangesPanel() {
     if (scope !== 'run' || !lastRunId) return;
     let alive = true; setRunReport(null); setRunError('');
     api.runChanges(lastRunId).then(data => {
+      if (!data) throw new Error('任务改动返回空响应');
       if (alive && data.error) setRunError(data.error);
       if (alive) setRunReport({ ...data, diff: (data.files || []).map(file => file.diff || '').join('\n') });
     }).catch(() => { if (alive) setRunError('读取任务改动失败，请刷新重试'); });
@@ -394,12 +402,12 @@ function ChangesPanel() {
    * 输入框里不抢键，方向键仍然用来挪光标。
    */
   useEffect(() => {
-    const onKey = (event) => {
+    const onKey = (event: KeyboardEvent) => {
       if (event.altKey || event.ctrlKey || event.metaKey || document.querySelector('.modal')) {
         return;
       }
       const panel = document.getElementById('panel-changes');
-      const active = document.activeElement;
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       if (!panel || !active || !panel.contains(active) || active.closest('[role="menu"], [role="dialog"]') || active.closest('.changes-actions')?.querySelector('[aria-expanded="true"]')) {
         return;
       }
@@ -429,7 +437,7 @@ function ChangesPanel() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [view, viewIndex, trackedPaths, confirm]);
 
-  const restore = async (paths, all) => {
+  const restore = async (paths: string[], all: boolean) => {
     setConfirm(null);
     await useStore.getState().restoreChanges(paths, all);
   };
@@ -580,7 +588,7 @@ function ChangesPanel() {
 const UNTRACKED_LIMIT = 80;
 
 /** 变更列表的一行：状态徽标 + 文件名（目录弱化）+ 增删行，悬停露出撤销。 */
-function ChangeRow({ file, active, untracked, confirming, busy, onAskUndo, onCancelUndo, onUndo }) {
+function ChangeRow({ file, active, untracked, confirming, busy, onAskUndo, onCancelUndo, onUndo }: { file: ChangeFile; active: boolean; untracked?: boolean; confirming?: boolean; busy?: boolean; onAskUndo: () => void; onCancelUndo: () => void; onUndo: () => void }) {
   const { name, dir } = splitPath(file.path);
   if (confirming) {
     return (
@@ -635,12 +643,12 @@ function ChangeRow({ file, active, untracked, confirming, busy, onAskUndo, onCan
 const DIFF_LINE_LIMIT = 4000;
 
 /** git 状态码 → 一个字母的徽标。 */
-function statusLetter(status) {
+function statusLetter(status?: string) {
   const raw = String(status || 'M').replace(/\?/g, 'U');
   return raw.slice(0, 1).toUpperCase();
 }
 
-function DiffView({ report, scoped, path, status, prevPath, nextPath, index, total, busy, onUndo }) {
+function DiffView({ report, scoped, path, status, prevPath, nextPath, index, total, busy, onUndo }: { report: ReviewReport | null; scoped: boolean; path: string; status?: string; prevPath: string | null; nextPath: string | null; index: number; total: number; busy: boolean; onUndo: () => void }) {
   const sessionId = useStore((state) => state.sessionId);
   const untracked = status === '??';
   /*
@@ -652,11 +660,11 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
   const summaryFile = parsed.find((item) => normalizePath(item.path) === normalizePath(path));
   const [confirming, setConfirming] = useState(false);
   /** 按需取回的单文件补丁：{ file, truncated }。 */
-  const [patch, setPatch] = useState(null);
+  const [patch, setPatch] = useState<{ file: DiffFile | null; truncated: boolean } | null>(null);
   const [patchState, setPatchState] = useState('');
   /** 未跟踪文件不在补丁里，直接展示正文。 */
-  const [content, setContent] = useState(null);
-  const [selection, setSelection] = useState(null);
+  const [content, setContent] = useState<string | null>(null);
+  const [selection, setSelection] = useState<{ anchor: number; end: number } | null>(null);
   const [feedback, setFeedback] = useState('');
 
   useEffect(() => {
@@ -707,7 +715,7 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
     requestAnimationFrame(() => state.composerApi?.focus());
   };
   const close = () => useStore.getState().setUi({ changeView: '' });
-  const select = (target) => {
+  const select = (target: string | null) => {
     setConfirming(false);
     useStore.getState().setUi({ changeView: target });
   };
@@ -810,7 +818,7 @@ function PreviewPanel() {
   const report = useStore((state) => state.changeReport);
   const [wrap, setWrap] = useState(true);
 
-  const changed = useMemo(() => sortChangeFiles(Array.isArray(report?.files) ? report.files : []).slice(0, 12), [report]);
+  const changed = useMemo(() => sortChangeFiles<ChangeFile>(Array.isArray(report?.files) ? report.files : []).slice(0, 12), [report]);
   const isMarkdown = /\.(md|markdown|mdx)$/i.test(path || '');
   const content = data?.content || '';
   const lineCount = content ? content.split('\n').length : 0;
@@ -901,7 +909,7 @@ function PreviewPanel() {
   );
 }
 
-function formatBytes(size) {
+function formatBytes(size: unknown) {
   const value = Number(size);
   if (!Number.isFinite(value) || value <= 0) {
     return '0 B';
@@ -922,7 +930,7 @@ function CommandsPanel() {
   const tasks = useStore((state) => state.commandTasks || NO_TASKS);
   const detail = useStore((state) => state.commandDetail);
   const log = useStore((state) => state.commandLog);
-  const logRef = useRef(null);
+  const logRef = useRef<HTMLPreElement>(null);
   const [follow, setFollow] = useState(true);
   const active = tasks.filter((task) => isCommandActive(task));
   const sessionId = useStore((state) => state.sessionId);
@@ -1074,7 +1082,7 @@ function CommandsPanel() {
 }
 
 /** 命令耗时：运行中的任务算到现在，结束的按 startedAt→finishedAt。 */
-function durationLabel(task, running) {
+function durationLabel(task: CommandTask | null | undefined, running: boolean) {
   const start = parseTimestamp(task?.startedAt);
   if (!start) {
     return '';
@@ -1095,7 +1103,7 @@ function durationLabel(task, running) {
   return `${minutes}m ${seconds}s`;
 }
 
-function parseTimestamp(value) {
+function parseTimestamp(value: string | number | null | undefined) {
   if (value == null || value === '') {
     return 0;
   }
@@ -1108,7 +1116,7 @@ function parseTimestamp(value) {
 
 /* ---------- 能力清单 ---------- */
 
-const PERMISSION_LABELS = {
+const PERMISSION_LABELS: Record<string, string> = {
   AUTO: '完全放行',
   AUTO_EDIT: '自动改文件',
   ASK: '每次确认',
@@ -1151,7 +1159,7 @@ function CapabilitiesPanel() {
           <h3>运行环境</h3>
           <dl className="cap-kv">
             <div><dt>模型</dt><dd>{data?.model || '—'}</dd></div>
-            <div><dt>权限</dt><dd>{PERMISSION_LABELS[data?.permissionMode] || data?.permissionMode || '—'}</dd></div>
+            <div><dt>权限</dt><dd>{PERMISSION_LABELS[data?.permissionMode || ''] || data?.permissionMode || '—'}</dd></div>
             <div><dt>工作区</dt><dd className="cap-path" title={data?.workspace || ''}>{data?.workspace || '—'}</dd></div>
           </dl>
         </section>
@@ -1247,7 +1255,7 @@ function CapabilitiesPanel() {
  * 页面禁止被嵌入时才退回截图，点击和滚轮仍转发给同一个 Playwright 页面。
  */
 /** 原生页面不吃 CSS 裁剪。按祖先的 overflow 把矩形收到真正看得见的那一块。 */
-function visibleStageRect(element) {
+function visibleStageRect(element: HTMLElement) {
   const rect = element.getBoundingClientRect();
   let top = rect.top;
   let left = rect.left;
@@ -1291,7 +1299,7 @@ function visibleStageRect(element) {
   };
 }
 
-function recentHost(url) {
+function recentHost(url: string) {
   try {
     return new URL(url).host;
   } catch {
@@ -1299,14 +1307,14 @@ function recentHost(url) {
   }
 }
 
-function RecentMark({ item }) {
+function RecentMark({ item }: { item: BrowserRecent }) {
   const [broken, setBroken] = useState(false);
   const mark = (item.title || item.url || '·').trim().slice(0, 1).toUpperCase();
   if (!item.favicon || broken) return <span className="browser-recent-mark">{mark}</span>;
   return <img src={item.favicon} alt="" onError={() => setBroken(true)} />;
 }
 
-function cleanLaunchNote(text) {
+function cleanLaunchNote(text?: string) {
   return String(text || '')
     .replace(/（浏览器进程自上次使用后重启过[\s\S]*?）/g, '')
     .replace(/\s+/g, ' ')
@@ -1317,12 +1325,12 @@ function BrowserPanel() {
   const sessionId = useStore((state) => state.sessionId);
   const mirror = useStore((state) => state.ui.mirror);
   const status = useStore((state) => state.ui.browserStatus);
-  const stageRef = useRef(null);
-  const imageRef = useRef(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
   const pendingSrc = useRef('');
   const sawFrame = useRef(false);
   const [sawFrameTick, setSawFrameTick] = useState(false);
-  const addressRef = useRef(null);
+  const addressRef = useRef<HTMLInputElement>(null);
   const [address, setAddress] = useState('');
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1337,27 +1345,28 @@ function BrowserPanel() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [findText, setFindText] = useState('');
-  const menuRef = useRef(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const freshTabRef = useRef(false);
-  const desktopOn = typeof window !== 'undefined' && !!window.pilotDesktop;
-  const [desktopState, setDesktopState] = useState(null);
+  const desktopBridge = typeof window !== 'undefined' ? window.pilotDesktop : undefined;
+  const desktopOn = !!desktopBridge;
+  const [desktopState, setDesktopState] = useState<DesktopBrowserState | null>(null);
   /** 已经同步给页面的视口尺寸：避免重复下发 setViewportSize。 */
   const viewportSize = useRef({ width: 0, height: 0 });
   // 连续敲字符合并成一次 insertText；回车/退格这类整键立刻发
-  const typing = useRef({ tokens: [], timer: null });
-  const wheel = useRef({ deltaY: 0, x: 0, y: 0, timer: null });
+  const typing = useRef<{ tokens: string[]; timer: ReturnType<typeof setTimeout> | undefined }>({ tokens: [], timer: undefined });
+  const wheel = useRef<{ deltaY: number; x: number; y: number; timer: ReturnType<typeof setTimeout> | undefined }>({ deltaY: 0, x: 0, y: 0, timer: undefined });
 
   useEffect(() => {
     if (desktopOn) {
-      window.pilotDesktop.setWorkspace(useStore.getState().workspace || '');
-      if (sessionId) window.pilotDesktop.ensureTab(sessionId);
-      const stopState = window.pilotDesktop.onState(setDesktopState);
-      const stopFocus = window.pilotDesktop.focusAddress(() => addressRef.current?.focus());
-      const stopDownload = window.pilotDesktop.onDownload?.((info) => {
+      desktopBridge.setWorkspace(useStore.getState().workspace || '');
+      if (sessionId) desktopBridge.ensureTab(sessionId);
+      const stopState = desktopBridge.onState(setDesktopState);
+      const stopFocus = desktopBridge.focusAddress(() => addressRef.current?.focus());
+      const stopDownload = desktopBridge.onDownload?.((info) => {
         const done = info?.state === 'completed';
         useStore.getState().showNotice(done ? `已下载 ${info.name}` : `下载没有完成：${info?.name || ''}`);
       });
-      const stopQuote = window.pilotDesktop.onQuote?.((text) => {
+      const stopQuote = desktopBridge.onQuote?.((text) => {
         const api = useStore.getState().composerApi;
         if (!text || !api) return;
         const quoted = String(text).split('\n').map((line) => `> ${line}`).join('\n');
@@ -1369,7 +1378,7 @@ function BrowserPanel() {
         stopFocus();
         stopDownload?.();
         stopQuote?.();
-        window.pilotDesktop.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
+        desktopBridge.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
       };
     }
     if (sessionId) {
@@ -1422,7 +1431,7 @@ function BrowserPanel() {
     const push = () => {
       const rect = visibleStageRect(stage);
       const covered = document.querySelector('[role="dialog"][aria-modal="true"]');
-      window.pilotDesktop.setBounds({
+      desktopBridge.setBounds({
         x: rect.x,
         y: rect.y,
         width: rect.width,
@@ -1442,16 +1451,16 @@ function BrowserPanel() {
       window.removeEventListener('resize', push);
       document.removeEventListener('scroll', push, true);
       clearInterval(timer);
-      window.pilotDesktop.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
+      desktopBridge.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
     };
   }, [desktopOn, menuOpen, desktopState?.url]);
 
   useEffect(() => {
     if (!menuOpen) return undefined;
-    const close = (event) => {
-      if (!menuRef.current?.contains(event.target)) setMenuOpen(false);
+    const close = (event: MouseEvent) => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) setMenuOpen(false);
     };
-    const onKey = (event) => {
+    const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setMenuOpen(false);
     };
     document.addEventListener('mousedown', close);
@@ -1481,7 +1490,7 @@ function BrowserPanel() {
     return () => clearTimeout(timer);
   }, [loading]);
 
-  const blocked = status && status.capable === false;
+  const blocked = Boolean(status && status.capable === false);
   const reason = status?.reason || '';
   const live = mirror.mode === 'live';
   const pageUrl = shouldEmbedPage(mirror.url, mirror.embed, mirror.frameOptions)
@@ -1506,7 +1515,7 @@ function BrowserPanel() {
    * @param quiet 点击/滚轮/键盘这类高频动作传 true：不显示地址栏的「执行中」，
    *              否则每点一下画面地址栏就会闪一下省略号。
    */
-  async function command(action, body, quiet = false) {
+  async function command(action: string, body?: Record<string, string | number | boolean | undefined>, quiet = false) {
     if (!sessionId) {
       return null;
     }
@@ -1520,7 +1529,7 @@ function BrowserPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body || {})
       });
-      const data = await response.json().catch(() => ({}));
+      const data = await response.json().catch(() => ({})) as BrowserReply;
       if (!response.ok) {
         const detail = data.message || data.error;
         setError(detail ? `${detail}（HTTP ${response.status}）` : `浏览器接口不可用（HTTP ${response.status}）`);
@@ -1532,7 +1541,7 @@ function BrowserPanel() {
       }
       return data;
     } catch (failure) {
-      setError(failure.message || '无法连接浏览器运行时');
+      setError(errorInfo(failure).message || '无法连接浏览器运行时');
       return null;
     } finally {
       if (!quiet) {
@@ -1541,7 +1550,7 @@ function BrowserPanel() {
     }
   }
 
-  function submitAddress(event) {
+  function submitAddress(event: React.FormEvent) {
     event.preventDefault();
     const value = address.trim();
     if (!value) {
@@ -1556,7 +1565,7 @@ function BrowserPanel() {
         return;
       }
       setError('');
-      window.pilotDesktop.navigate(page);
+      desktopBridge.navigate(page);
       return;
     }
     setEditing(false);
@@ -1573,12 +1582,12 @@ function BrowserPanel() {
   }
 
   /** 导航类动作统一置一次 loading，收到新帧就复位。 */
-  function navigate(action) {
+  function navigate(action: string) {
     if (desktopOn) {
-      if (action === 'back') window.pilotDesktop.back();
-      else if (action === 'forward') window.pilotDesktop.forward();
-      else if (action === 'stop') window.pilotDesktop.stop();
-      else window.pilotDesktop.reload();
+      if (action === 'back') desktopBridge.back();
+      else if (action === 'forward') desktopBridge.forward();
+      else if (action === 'stop') desktopBridge.stop();
+      else desktopBridge.reload();
       return;
     }
     setLoading(true);
@@ -1595,7 +1604,7 @@ function BrowserPanel() {
    * <p>导航前先发一次：新页面直接按面板宽度加载，少一次「先按 1280 排版再重排」的闪动；
    * 浏览器还没起来时这次会失败，忽略即可，等第一帧到达后 ResizeObserver 会补上。
    */
-  function syncViewport(width, height) {
+  function syncViewport(width?: number, height?: number) {
     const rect = stageRef.current?.getBoundingClientRect();
     const nextWidth = Math.round(Number(width) || rect?.width || 0);
     const nextHeight = Math.round(Number(height) || rect?.height || 0);
@@ -1607,7 +1616,7 @@ function BrowserPanel() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ width: nextWidth, height: nextHeight })
     }).then(async (response) => {
-      const data = await response.json().catch(() => ({}));
+      const data = await response.json().catch(() => ({})) as BrowserReply;
       // 只有真的生效才记住：浏览器还没起来时这次会失败，要留给后面的重试
       if (response.ok && data?.ok) {
         viewportSize.current = { width: nextWidth, height: nextHeight };
@@ -1616,7 +1625,7 @@ function BrowserPanel() {
   }
 
   /** 选择元素：把点到的元素描述成引用，塞进主输入框待发送。 */
-  async function pickAt(point) {
+  async function pickAt(point: { x: number; y: number }) {
     setPicking(false);
     const data = await command('pick', { x: point.x, y: point.y }, true);
     if (!data?.text) {
@@ -1637,7 +1646,7 @@ function BrowserPanel() {
       return;
     }
     if (desktopOn) {
-      const data = await window.pilotDesktop.logs(network);
+      const data = await desktopBridge.logs(network);
       setNetworkLog(network);
       setConsoleText(data?.text || (network ? '没有网络记录' : '没有控制台记录'));
       setConsoleOpen(true);
@@ -1650,8 +1659,8 @@ function BrowserPanel() {
   }
 
   useEffect(() => {
-    if (!desktopOn || !consoleOpen || !window.pilotDesktop.onLog) return undefined;
-    return window.pilotDesktop.onLog((entry) => {
+    if (!desktopOn || !consoleOpen || !desktopBridge.onLog) return undefined;
+    return desktopBridge.onLog((entry) => {
       if (Boolean(entry?.network) !== networkLog || !entry?.line) return;
       setConsoleText((text) => (text && !text.startsWith('没有') ? `${text}\n${entry.line}` : entry.line));
     });
@@ -1659,7 +1668,7 @@ function BrowserPanel() {
 
   useEffect(() => {
     if (!desktopOn) return undefined;
-    const onKey = (event) => {
+    const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'l') return;
       event.preventDefault();
       addressRef.current?.focus();
@@ -1670,12 +1679,13 @@ function BrowserPanel() {
   }, [desktopOn]);
 
   async function openDesktopMenu() {
-    const action = await window.pilotDesktop.openMenu();
+    if (!desktopBridge) return;
+    const action = await desktopBridge.openMenu();
     if (action === 'find') setFindOpen(true);
     if (action === 'console') toggleConsole(false);
     if (action === 'network') toggleConsole(true);
     if (action === 'pick') {
-      const result = await window.pilotDesktop.pick();
+      const result = await desktopBridge.pick();
       if (!result?.text) return;
       const quoted = result.text.split('\n').map((line) => `> ${line}`).join('\n');
       const composer = useStore.getState().composerApi;
@@ -1692,14 +1702,14 @@ function BrowserPanel() {
    * <p>视口跟着面板走（见下面的 ResizeObserver），所以用帧自带的 w/h 换算就与页面 1:1；
    * 还没收到帧时回退到 sidecar 的默认视口。
    */
-  function bindMirrorImage(node) {
+  function bindMirrorImage(node: HTMLImageElement | null) {
     imageRef.current = node;
     if (node && pendingSrc.current) {
       node.src = pendingSrc.current;
     }
   }
 
-  function pointOf(event) {
+  function pointOf(event: { clientX: number; clientY: number }) {
     const rect = imageRef.current?.getBoundingClientRect();
     return pointFromEvent(event.clientX, event.clientY, rect, mirror.frameW, mirror.frameH);
   }
@@ -1708,7 +1718,7 @@ function BrowserPanel() {
     const buffer = typing.current;
     if (buffer.timer) {
       clearTimeout(buffer.timer);
-      buffer.timer = null;
+      buffer.timer = undefined;
     }
     const text = buffer.tokens.join('');
     buffer.tokens = [];
@@ -1717,8 +1727,10 @@ function BrowserPanel() {
     }
   }
 
-  function onStageKeyDown(event) {
-    const cmd = keyCommand(event);
+  function onStageKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    // 新标签地址框属于本地表单，输入按键不能被画布转发逻辑截走。
+    if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]')) return;
+    const cmd = keyCommand(event.nativeEvent);
     if (!cmd) {
       return;
     }
@@ -1727,7 +1739,7 @@ function BrowserPanel() {
       typing.current.tokens.push(cmd.text);
       if (!typing.current.timer) {
         typing.current.timer = setTimeout(() => {
-          typing.current.timer = null;
+          typing.current.timer = undefined;
           flushTyping();
         }, 60);
       }
@@ -1737,7 +1749,7 @@ function BrowserPanel() {
     command('keys', { key: cmd.key }, true);
   }
 
-  function onClick(event) {
+  function onClick(event: React.MouseEvent<HTMLDivElement>) {
     if (!live) {
       return;
     }
@@ -1768,7 +1780,7 @@ function BrowserPanel() {
     }
     // 新画面/新会话：之前记下的尺寸可能属于已经失效的页面，先作废再对齐
     viewportSize.current = { width: 0, height: 0 };
-    let timer = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const push = () => {
       const rect = stage.getBoundingClientRect();
       const width = Math.round(rect.width);
@@ -1804,7 +1816,7 @@ function BrowserPanel() {
     if (!stage || !live || pageUrl) {
       return undefined;
     }
-    const onWheel = (event) => {
+    const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       const point = pointOf(event);
       if (!point) {
@@ -1820,7 +1832,7 @@ function BrowserPanel() {
       acc.timer = setTimeout(() => {
         const deltaY = Math.round(acc.deltaY);
         acc.deltaY = 0;
-        acc.timer = null;
+        acc.timer = undefined;
         if (deltaY) {
           command('pointer', { action: 'wheel', x: acc.x, y: acc.y, deltaY }, true);
         }
@@ -1849,7 +1861,7 @@ function BrowserPanel() {
         setLaunchNote(message || '窗口已打开。');
       }
     } catch (failure) {
-      const message = failure.message || '';
+      const message = errorInfo(failure).message || '';
       setLaunchNote(/404|Not Found/.test(message)
         ? '服务还是刚才那一版。重新从 IDEA 启动一次后再点。'
         : (message || '没能打开浏览器窗口'));
@@ -1897,7 +1909,7 @@ function BrowserPanel() {
                 aria-selected={tab.id === desktopState?.activeId}
                 className="browser-tab-label"
                 title={!tab.url || tab.url.includes('/marker/') ? (tab.title || '新标签') : tab.url}
-                onClick={() => window.pilotDesktop.selectTab(tab.id)}
+                onClick={() => desktopBridge.selectTab(tab.id)}
               >
                 {tab.loading
                   ? <span className="browser-tab-spin" aria-hidden="true" />
@@ -1909,11 +1921,11 @@ function BrowserPanel() {
                 className="browser-tab-close"
                 aria-label={`关闭 ${tab.title || '标签'}`}
                 title="关闭标签"
-                onClick={() => window.pilotDesktop.closeTab(tab.id)}
+                onClick={() => desktopBridge.closeTab(tab.id)}
               >×</button>
             </div>
           ))}
-          <button type="button" className="browser-tab-add" title="新标签" aria-label="新标签" onClick={() => window.pilotDesktop.newTab()}>+</button>
+          <button type="button" className="browser-tab-add" title="新标签" aria-label="新标签" onClick={() => desktopBridge.newTab()}>+</button>
         </div>
       )}
       <div className="browser-chrome" ref={menuRef}>
@@ -1980,7 +1992,7 @@ function BrowserPanel() {
         </div>
       </div>
       {desktopOn && findOpen && (
-        <form className="browser-find" onSubmit={(event) => { event.preventDefault(); window.pilotDesktop.find(findText); }}>
+        <form className="browser-find" onSubmit={(event) => { event.preventDefault(); desktopBridge.find(findText); }}>
           <input
             autoFocus
             aria-label="页内查找"
@@ -1989,7 +2001,7 @@ function BrowserPanel() {
             onChange={(event) => setFindText(event.target.value)}
           />
           <button type="submit">查找</button>
-          <button type="button" onClick={() => { setFindOpen(false); setFindText(''); window.pilotDesktop.find(''); }}>关闭</button>
+          <button type="button" onClick={() => { setFindOpen(false); setFindText(''); desktopBridge.find(''); }}>关闭</button>
         </form>
       )}
       {menuOpen && (
@@ -2001,7 +2013,7 @@ function BrowserPanel() {
             onClick={() => {
               setMenuOpen(false);
               if (desktopOn) {
-                window.pilotDesktop.pick().then((result) => {
+                desktopBridge.pick().then((result) => {
                   if (!result?.text) return;
                   const quoted = result.text.split('\n').map((line) => `> ${line}`).join('\n');
                   const api = useStore.getState().composerApi;
@@ -2016,12 +2028,12 @@ function BrowserPanel() {
             }}
           >选择页面元素</button>
           {desktopOn && (
-            <button type="button" role="menuitem" disabled={!desktopState?.activeId || freshTab} onClick={() => { setMenuOpen(false); window.pilotDesktop.detach(); }}>
+            <button type="button" role="menuitem" disabled={!desktopState?.activeId || freshTab} onClick={() => { setMenuOpen(false); desktopBridge.detach(); }}>
               在独立窗口打开
             </button>
           )}
           {desktopOn && (
-            <button type="button" role="menuitem" disabled={!desktopState?.activeId || freshTab} onClick={() => { setMenuOpen(false); window.pilotDesktop.devtools(); }}>
+            <button type="button" role="menuitem" disabled={!desktopState?.activeId || freshTab} onClick={() => { setMenuOpen(false); desktopBridge.devtools(); }}>
               开发工具
             </button>
           )}
@@ -2038,6 +2050,7 @@ function BrowserPanel() {
             disabled={blocked || !sessionId}
             onClick={async () => {
               setMenuOpen(false);
+              if (!sessionId) return;
               const next = !mirror.paused;
               useStore.getState().setUi({ mirror: { ...mirror, paused: next } });
               const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/browser/${next ? 'pause' : 'resume'}`, { method: 'POST' });
@@ -2081,12 +2094,12 @@ function BrowserPanel() {
               {(desktopState?.recents || []).length > 0 && (
                 <div className="browser-recents">
                   <p>最近访问</p>
-                  {desktopState.recents.map((item) => (
+                  {(desktopState?.recents || []).map((item) => (
                     <button
                       key={item.url}
                       type="button"
                       className="browser-recent"
-                      onClick={() => window.pilotDesktop.navigate(item.url)}
+                      onClick={() => desktopBridge.navigate(item.url)}
                     >
                       <RecentMark item={item} />
                       <span className="browser-recent-copy">
@@ -2130,7 +2143,7 @@ function BrowserPanel() {
               ? `设备模拟 ${desktopState.emulated.width}×${desktopState.emulated.height}`
               : '完整浏览器需要桌面壳。'}
             {desktopState?.emulated && (
-              <button type="button" className="browser-reset" onClick={() => window.pilotDesktop.resetEmulation()}>还原</button>
+              <button type="button" className="browser-reset" onClick={() => desktopBridge.resetEmulation()}>还原</button>
             )}
           </p>
         </div>

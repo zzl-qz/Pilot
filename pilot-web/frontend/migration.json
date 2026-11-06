@@ -351,8 +351,13 @@
         "Web 镜像/桌面原生浏览器",
         "坐标/键盘/订阅清理"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T08-45-06-083Z/report.json",
+          "result": "373 项前端单元、41 项桌面单元、严格类型检查、构建与 navigation/composer/inspector/interaction/sandbox-recovery/workbench-refresh/workbench-style/markdown 八套 Web/Electron 回归通过。桌面桥类型对照 preload.cjs/main.mjs；新隔离测试覆盖 Web 不可用反馈、桌面导航/查找/元素引用/日志/下载/订阅清理/活动筛选和三种宽度，真实 Electron 刷新回归也通过。旧 JS 基线发现并修正新标签输入框 Enter 被画布按键截走的问题，JS 修正后和 TS 均通过。"
+        }
+      ]
     },
     {
       "batch": 13,

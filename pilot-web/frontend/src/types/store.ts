@@ -9,7 +9,7 @@ import type { SideChatTab, SideChatsState } from './content.js';
 import type { DraftSession, RefreshOptions } from './sync.js';
 import type { EventEnvelope } from './events.js';
 
-export interface MirrorFrame { url?: string; w?: number; h?: number; jpeg?: string; data?: string }
+export interface MirrorFrame { frame?: string | null; url?: string; w?: number; h?: number; jpeg?: string; data?: string }
 export interface MirrorState {
   mode: string; frame: MirrorFrame | null; url: string; embed: boolean; frameOptions: string;
   latency: number; paused: boolean; headless: boolean; frameW: number; frameH: number;

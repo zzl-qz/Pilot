@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 interface Window {
-  pilotDesktop?: { reloadWorkbench(): Promise<{ ok: boolean; error?: string }> };
+  pilotDesktop?: import('./types/desktop.js').DesktopBridge;
 
   mermaid?: {
     initialize(options: { startOnLoad: boolean; securityLevel: string; theme: string }): void;
