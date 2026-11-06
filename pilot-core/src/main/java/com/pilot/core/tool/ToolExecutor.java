@@ -181,10 +181,25 @@ public final class ToolExecutor {
         } catch (RuntimeException ignored) {
             // Trace 写入故障不能阻断代理工具执行。
         }
+        // 存档说明只是恢复元数据，不能把空结果变成可用证据。
+        OutcomeStatus status = classify(result, singleton(nativeCheck));
+        if (journalRunId != null) {
+            try {
+                journal.recordObservation(journalRunId, call, result);
+                if (Objects.equals(result, journal.observation(journalRunId, call.callId()).orElse(null))) {
+                    result += "\n[工具输出存档 run_id=" + journalRunId + " call_id=" + call.callId()
+                        + "；使用 read_tool_output 分页读取，禁止重放原操作]";
+                } else {
+                    result += "\n[工具输出未归档，禁止清理原文]";
+                }
+            } catch (RuntimeException ignored) {
+                result += "\n[工具输出未归档，禁止清理原文]";
+            }
+        }
         events.accept(new ToolCompleted(call.callId(), ToolSupport.oneLine(result, 120), latencyMs));
         // 结构化子结果里的历史检查不决定外层工具本身成败；外层状态只看正文与本工具自产检查。
         List<Attachment> images = succeeded(result) && !blocked(result) ? execution.images() : List.of();
-        return new Outcome(call.name(), result, changedPaths, checks, classify(result, singleton(nativeCheck)), images);
+        return new Outcome(call.name(), result, changedPaths, checks, status, images);
     }
 
     /** 只对写文件类工具重放：命令重跑是预期行为，不能当成重复调用。 */
@@ -202,16 +217,15 @@ public final class ToolExecutor {
 
     private void remember(ToolCall call, ToolCallJournal.Recorded replayed, String result, List<String> changedPaths,
         List<String> checks) {
-        if (journalRunId == null || replayed != null || changedPaths.isEmpty()) {
+        if (journalRunId == null) {
             return;
         }
-        if (!succeeded(result) || blocked(result)) {
-            return;
-        }
-        try {
-            journal.record(journalRunId, call, result, changedPaths, checks, true);
-        } catch (RuntimeException ignored) {
-            // 同上：账本失败不影响本次写入结果
+        if (replayed == null && !changedPaths.isEmpty() && succeeded(result) && !blocked(result)) {
+            try {
+                journal.record(journalRunId, call, result, changedPaths, checks, true);
+            } catch (RuntimeException ignored) {
+                // 同上：账本失败不影响本次写入结果
+            }
         }
     }
 
@@ -278,6 +292,9 @@ public final class ToolExecutor {
     private ToolResult executeTool(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events,
         Supplier<String> beforeStart) {
         PermissionResult permission = permissionGate.check(call, tool);
+        if (permission.decision() == PermissionDecision.ALLOW && tool.confirm(call.args())) {
+            permission = PermissionResult.ask("本次操作需要明确确认，通用 allow 规则不能替代动作授权");
+        }
         // PreToolUse：只在放行后跑，配置要求阻止时退出码非 0 就不执行工具
         if (permission.decision() == PermissionDecision.ALLOW) {
             Result pre = hooks.run(Hooks.Event.PRE_TOOL_USE, call.name());
@@ -294,6 +311,10 @@ public final class ToolExecutor {
 
     private ToolResult awaitApproval(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events,
         Supplier<String> beforeStart) {
+        String detail = tool.approvalDescription(call.args());
+        if (detail != null && !detail.isBlank()) {
+            argsSummary = detail;
+        }
         CompletableFuture<Boolean> decision = approvals.register(call.callId(), tool.name(), argsSummary);
         events.accept(new ApprovalRequired(call.callId(), tool.name(), argsSummary));
 

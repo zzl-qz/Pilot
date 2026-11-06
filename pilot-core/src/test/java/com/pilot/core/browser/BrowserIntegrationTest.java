@@ -99,6 +99,9 @@ class BrowserIntegrationTest {
         try (InputStream in = getClass().getResourceAsStream("/browser/browser-sidecar.mjs")) {
             Files.copy(in, script, StandardCopyOption.REPLACE_EXISTING);
         }
+        try (InputStream in = getClass().getResourceAsStream("/browser/browser-policy.mjs")) {
+            Files.copy(in, home.resolve("browser-policy.mjs"), StandardCopyOption.REPLACE_EXISTING);
+        }
         // 测试只操作独立浏览器，不能捡到真实桌面壳遗留的 CDP 连接信息。
         backend = new PlaywrightBackend(node, script, artifacts, new ObjectMapper(), 120_000,
             Map.of("PILOT_DESKTOP_ENDPOINT", artifacts.resolve("no-desktop.json").toString(),
@@ -214,7 +217,7 @@ class BrowserIntegrationTest {
         ToolCall evaluate = new ToolCall("3", "browser", Map.of("action", "evaluate", "expression", "1"));
         assertEquals(PermissionDecision.ASK,
             new PolicyPermissionGate(PermissionMode.AUTO_EDIT).check(evaluate, probe).decision());
-        assertEquals(PermissionDecision.ALLOW,
+        assertEquals(PermissionDecision.ASK,
             new PolicyPermissionGate(PermissionMode.AUTO).check(evaluate, probe).decision());
     }
 

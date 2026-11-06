@@ -43,6 +43,15 @@ public interface ToolCallJournal {
     void record(String runId, ToolCall call, String result, List<String> changedPaths, List<String> checks,
         boolean replayable);
 
+    /** Persist a bounded, non-replayable observation for recovery without re-executing the tool. */
+    default void recordObservation(String runId, ToolCall call, String result) {
+    }
+
+    /** Retrieve the exact recorded observation for a model call id, if retained. */
+    default Optional<String> observation(String runId, String callId) {
+        return Optional.empty();
+    }
+
     int deleteBySession(String sessionId);
 
     static ToolCallJournal none() {
@@ -55,6 +64,15 @@ public interface ToolCallJournal {
             @Override
             public void record(String runId, ToolCall call, String result, List<String> changedPaths,
                 List<String> checks, boolean replayable) {
+            }
+
+            @Override
+            public void recordObservation(String runId, ToolCall call, String result) {
+            }
+
+            @Override
+            public Optional<String> observation(String runId, String callId) {
+                return Optional.empty();
             }
 
             @Override

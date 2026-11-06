@@ -146,10 +146,20 @@ class ContextCompactorTest {
     }
 
     @Test
+    void neverPrunesTheNewestToolObservation() {
+        List<Message> messages = history(6, 5_000);
+        Message newest = messages.getLast();
+
+        ContextCompactor.pruneToolOutputs(messages, 20_000);
+
+        assertEquals(newest, messages.getLast());
+    }
+
+    @Test
     void truncatesOversizedToolOutputKeepingHeadAndTail() {
         List<Message> messages = history(1, 20_000);
 
-        int changed = ContextCompactor.truncateLongToolOutputs(messages);
+        int changed = ContextCompactor.truncateLongToolOutputs(messages, 3);
 
         assertEquals(1, changed);
         String content = messages.get(2).content();

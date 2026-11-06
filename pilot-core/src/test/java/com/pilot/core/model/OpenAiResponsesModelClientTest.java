@@ -41,6 +41,7 @@ class OpenAiResponsesModelClientTest {
                     new ToolDefinition("web_search", "Local search", Map.of("type", "object"))));
 
             JsonNode body = mapper.readTree(requestBody.get());
+            assertEquals(ModelCapacity.configured().outputTokens(), body.path("max_output_tokens").asInt());
             assertEquals("test-model", body.path("model").asString());
             assertEquals("system", body.path("input").get(0).path("role").asString());
             assertEquals("web_search", body.path("tools").get(1).path("type").asString());
@@ -71,6 +72,7 @@ class OpenAiResponsesModelClientTest {
                 List.of(new ToolDefinition("read_file", "Read", Map.of("type", "object"))));
 
             JsonNode body = mapper.readTree(requestBody.get());
+            assertEquals(ModelCapacity.configured().outputTokens(), body.path("max_output_tokens").asInt());
             assertEquals("function_call", body.path("input").get(1).path("type").asString());
             assertEquals("function_call_output", body.path("input").get(2).path("type").asString());
             assertEquals("pom.xml", response.toolCalls().getFirst().args().get("path"));

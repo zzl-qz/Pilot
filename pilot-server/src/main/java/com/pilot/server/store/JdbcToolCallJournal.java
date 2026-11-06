@@ -25,6 +25,7 @@ import tools.jackson.databind.ObjectMapper;
  * 保证幂等不会变成「覆盖别人的修改」。
  */
 public final class JdbcToolCallJournal implements ToolCallJournal {
+    private static final int MAX_OBSERVATION_CHARS = 200_000;
     private final SqliteStore store;
     private final ObjectMapper mapper;
     private final String sessionId;
@@ -82,8 +83,41 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
     }
 
     @Override
+    public void recordObservation(String runId, ToolCall call, String result) {
+        if (runId == null || runId.isBlank() || call == null || result == null
+            || result.length() > MAX_OBSERVATION_CHARS) {
+            return;
+        }
+        JdbcSupport.update(store, """
+            INSERT INTO tool_observations(run_id, session_id, call_id, fingerprint, tool, result, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id, call_id) DO NOTHING
+            """, statement -> {
+            statement.setString(1, runId);
+            statement.setString(2, sessionId);
+            statement.setString(3, call.callId());
+            statement.setString(4, ToolCallJournal.fingerprint(call));
+            statement.setString(5, call.name());
+            statement.setString(6, result);
+            statement.setString(7, Instant.now().toString());
+        }, "保存工具观察记录失败");
+    }
+
+    @Override
+    public Optional<String> observation(String runId, String callId) {
+        return JdbcSupport.queryOne(store,
+            "SELECT result FROM tool_observations WHERE run_id = ? AND call_id = ? AND session_id = ?", statement -> {
+                statement.setString(1, runId);
+                statement.setString(2, callId);
+                statement.setString(3, sessionId);
+            }, rows -> rows.getString("result"), "读取工具观察记录失败");
+    }
+
+    @Override
     public int deleteBySession(String sessionId) {
-        return JdbcSupport.update(store, "DELETE FROM tool_call_journal WHERE session_id = ?",
+        int observations = JdbcSupport.update(store, "DELETE FROM tool_observations WHERE session_id = ?",
+            statement -> statement.setString(1, sessionId), "删除工具观察记录失败: " + sessionId);
+        return observations + JdbcSupport.update(store, "DELETE FROM tool_call_journal WHERE session_id = ?",
             statement -> statement.setString(1, sessionId), "删除工具调用账本失败: " + sessionId);
     }
 

@@ -12,6 +12,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.pilot.core.tool.ReadToolOutputTool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolCallJournal;
 
@@ -47,6 +48,41 @@ class JdbcToolCallJournalTest {
         assertTrue(recorded.replayable());
         assertEquals("已写入 a.txt", recorded.result());
         assertEquals(List.of("a.txt"), recorded.changedPaths());
+    }
+
+    @Test
+    void retrievesRawObservationWithoutReplayingTheTool() {
+        JdbcToolCallJournal journal = journal(dir);
+        ToolCall call = new ToolCall("call_observe", "read_file", Map.of("path", "large.txt"));
+        String raw = "原始工具输出".repeat(100);
+
+        journal.recordObservation("run_observe", call, raw);
+
+        assertEquals(raw, journal.observation("run_observe", "call_observe").orElseThrow());
+        assertTrue(journal.observation("other_run", "call_observe").isEmpty());
+        var other = new JdbcToolCallJournal(new SqliteStore(dir.resolve("pilot.db")), JsonMapper.builder().build(),
+            "ses_other", dir);
+        assertTrue(other.observation("run_observe", "call_observe").isEmpty());
+        other.recordObservation("run_observe", call, "other session cannot overwrite");
+        journal.recordObservation("run_observe", call, "duplicate call cannot overwrite");
+        assertEquals(raw, journal.observation("run_observe", "call_observe").orElseThrow());
+        var reader = new ReadToolOutputTool(journal);
+        String page =
+            reader.execute(Map.of("run_id", "run_observe", "call_id", "call_observe", "offset", 3, "limit", 10));
+        assertTrue(page.endsWith(raw.substring(3, 13)));
+        assertTrue(page.contains("next_offset=13"));
+        assertTrue(reader.execute(Map.of("run_id", "run_observe", "call_id", "call_observe", "offset", -1))
+            .startsWith("ERROR:"));
+    }
+
+    @Test
+    void skipsObservationsAboveTheConfiguredBound() {
+        JdbcToolCallJournal journal = journal(dir);
+        ToolCall call = new ToolCall("call_big", "read_file", Map.of("path", "huge.txt"));
+
+        journal.recordObservation("run_big", call, "x".repeat(200_001));
+
+        assertTrue(journal.observation("run_big", "call_big").isEmpty());
     }
 
     @Test

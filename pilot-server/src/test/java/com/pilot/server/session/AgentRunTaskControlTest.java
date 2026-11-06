@@ -246,8 +246,9 @@ class AgentRunTaskControlTest {
             assertEquals(1, executions.get());
             assertTrue(f.sessions.events(f.id).stream().anyMatch(e -> e.payload() instanceof RunFailed failure
                 && "PAUSED".equals(failure.code()) && failure.retryable()));
-            assertTrue(f.conversations.load(f.id).stream()
-                .anyMatch(m -> "tool".equals(m.role()) && m.content().equals("连接状态已记录")), "续跑必须能看到已经完成的工具结果");
+            assertTrue(f.conversations.load(f.id).stream().anyMatch(
+                m -> "tool".equals(m.role()) && m.content().startsWith("连接状态已记录") && m.content().contains("[工具输出未归档")),
+                "续跑必须能看到已经完成的工具结果");
 
             String resumed = f.service.claimRun(f.id).orElseThrow();
             f.sessions.publish(f.id, resumed, new RunStarted("（继续上一次未完成的任务）"));
@@ -450,9 +451,9 @@ class AgentRunTaskControlTest {
             f.plans.save(f.id, List.of(new PlanItem("已经被目标核验覆盖的旧计划", PlanItem.PENDING)));
 
             f.start(null);
-            f.finished("COMPLETED");
+            f.finished("AWAITING_REVIEW");
 
-            assertEquals("COMPLETED", f.tasks.load(f.id).status());
+            assertEquals("AWAITING_REVIEW", f.tasks.load(f.id).status());
             assertFalse(f.plans.load(f.id).isEmpty(), "普通收尾不能假装核验已覆盖未完成计划");
             assertEquals("UNVERIFIED", f.tasks.load(f.id).execution().phase());
             RunCompleted completed = f.sessions.events(f.id).stream().map(EventEnvelope::payload)
@@ -527,6 +528,15 @@ class AgentRunTaskControlTest {
 
     @Test
     void unattendedUsesTaskPermissionAndAutomaticallyAcceptsOnlyVerifiedEvidence() throws Exception {
+        unattendedAction(false);
+    }
+
+    @Test
+    void unattendedCannotBypassExplicitActionConfirmation() throws Exception {
+        unattendedAction(true);
+    }
+
+    private void unattendedAction(boolean requiresConfirmation) throws Exception {
         AtomicReference<TaskControlService> taskRef = new AtomicReference<>();
         AtomicReference<String> sessionRef = new AtomicReference<>();
         AtomicInteger effects = new AtomicInteger();
@@ -548,7 +558,7 @@ class AgentRunTaskControlTest {
             }
 
             public boolean confirm(Map<String, Object> args) {
-                return true;
+                return requiresConfirmation;
             }
 
             public String execute(Map<String, Object> args) {
@@ -578,6 +588,12 @@ class AgentRunTaskControlTest {
             f.start(new TaskControlService.Requirements(List.of(),
                 List.of(new TaskControlService.Acceptance("操作成功", false, "")),
                 new TaskControlService.Automation("scheduled", true, false)));
+            if (requiresConfirmation) {
+                f.finished("NO_PROGRESS");
+                assertEquals(0, effects.get());
+                assertFalse(f.tasks.load(f.id).acceptance().getFirst().checked());
+                return;
+            }
             f.finished("COMPLETED");
             assertEquals(1, effects.get());
             assertEquals("COMPLETED", f.tasks.load(f.id).status());

@@ -15,6 +15,7 @@
 //   PLAYWRIGHT_BROWSERS_PATH      内置缓存目录（chromium.executablePath() 由此解析）。
 
 import { createRequire } from 'node:module';
+import { publicHttps, externalRequestAllowed, externalMutations, requireExternalApproval } from './browser-policy.mjs';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -402,6 +403,7 @@ function agentMayTouchPage(url, desktop) {
 }
 
 function refuseOffAllowlist(current) {
+  if (current.externalOrigin && new URL(current.page.url()).origin === current.externalOrigin) return;
   const page = current.page;
   if (!page || page.isClosed()) return;
   if (agentMayTouchPage(page.url(), current.desktop)) return;
@@ -464,14 +466,28 @@ async function createLocalSession(id, browser) {
     embed: true, frameOptions: '', mirrorWidth: 960, mirrorQuality: 55,
     cdp: null, cdpPage: null, lastFrameAt: 0, historyCdp: null, historyCdpPage: null };
   // 主框架导航只允许回环地址，页面里的链接也不能把它带去外网。
-  await context.route('**/*', (route) => {
+  await context.route('**/*', async (route) => {
     const request = route.request();
+    if (session.externalOrigin) {
+      const allowed = await externalRequestAllowed({ url: request.url(), method: request.method(),
+        navigation: request.isNavigationRequest(), origin: session.externalOrigin, actionApproved: Boolean(session.actionApproved) });
+      if (!allowed) {
+        pushLimited(session.console, { type: 'blocked', text: `已拦截未授权请求：${request.method()} ${request.url()}`, at: '' });
+        return route.abort('blockedbyclient');
+      }
+      return route.continue();
+    }
     if (request.isNavigationRequest() && request.frame() === session.page?.mainFrame()
       && !loopbackUrl(request.url()) && request.url() !== 'about:blank') {
       pushLimited(session.console, { type: 'blocked', text: `已拦截对非本机地址的导航：${request.url()}`, at: '' });
       return route.abort('blockedbyclient');
     }
     return route.continue();
+  });
+  // WebSocket 不经过 HTTP route；外网任务关闭此旁路，本地开发 HMR 仍可用。
+  await context.routeWebSocket('**/*', (socket) => {
+    if (session.externalOrigin) socket.close();
+    else socket.connectToServer();
   });
   context.on('page', (page) => attachPage(session, page));
   // attachPage 会在 mirror 开启时自动挂 screencast（含首个页面）。
@@ -900,7 +916,10 @@ const handlers = {
   },
 
   async navigate(args, current) {
-    if (!args.url || !loopbackUrl(args.url)) {
+    if (args.approvedExternal) {
+      if (!await publicHttps(args.url)) throw new Error("目标不是可访问的公开 HTTPS 域名");
+      current.externalOrigin = new URL(args.url).origin;
+    } else if (!args.url || !loopbackUrl(args.url) || current.externalOrigin) {
       throw new Error(`只允许打开本机地址（http(s)://localhost、127.0.0.1、[::1]）：${args.url}`);
     }
     let page = pageOf(current);
@@ -1376,7 +1395,24 @@ async function dispatch(request) {
   }
   const handler = handlers[op];
   if (!handler) throw new Error(`未知操作：${op}`);
-  const current = await session(request.session);
+  if (request.userInitiated && op === 'navigate' && !loopbackUrl(request.url)) {
+    request.approvedExternal = true;
+  }
+  let current;
+  const existing = sessions.get(request.session);
+  if (op === 'navigate' && request.approvedExternal && !existing?.externalOrigin) {
+    // 外网任务使用独立上下文；关闭本地旧上下文，但不关闭用户桌面浏览器。
+    if (existing && !existing.desktop) await existing.context.close();
+    current = await createLocalSession(request.session, await getBrowser());
+  } else {
+    current = await session(request.session);
+  }
+  if (current.externalOrigin && (externalMutations.has(op) || ['mouse', 'keys'].includes(op))) {
+    if (!request.userInitiated) requireExternalApproval(request, current.page.url());
+    current.actionApproved = true;
+    try { return await handler(request, current); }
+    finally { current.actionApproved = false; }
+  }
   return handler(request, current);
 }
 

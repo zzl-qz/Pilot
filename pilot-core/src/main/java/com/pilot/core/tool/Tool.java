@@ -45,6 +45,11 @@ public interface Tool {
         return false;
     }
 
+    /** 高风险动作可提供完整审批内容；普通日志摘要不应用作最终内容确认。 */
+    default String approvalDescription(Map<String, Object> args) {
+        return null;
+    }
+
     /** 运行时能力。依赖外部进程的工具覆盖；不可用时不向模型声明。 */
     default Availability availability() {
         return Availability.ready();

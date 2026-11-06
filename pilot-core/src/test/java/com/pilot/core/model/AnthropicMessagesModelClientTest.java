@@ -41,6 +41,7 @@ class AnthropicMessagesModelClientTest {
                 List.of(new ToolDefinition("web_fetch", "Fetch safely", Map.of("type", "object"))));
 
             JsonNode body = mapper.readTree(requestBody.get());
+            assertEquals(ModelCapacity.configured().outputTokens(), body.path("max_tokens").asInt());
             assertEquals("rules", body.path("system").asString());
             assertEquals("web_search_20250305", body.path("tools").get(1).path("type").asString());
             assertFalse(body.path("tools").toString().contains("web_fetch_20250910"));
@@ -68,6 +69,7 @@ class AnthropicMessagesModelClientTest {
                 List.of(new ToolDefinition("read_file", "Read", Map.of("type", "object"))));
 
             JsonNode body = mapper.readTree(requestBody.get());
+            assertEquals(ModelCapacity.configured().outputTokens(), body.path("max_tokens").asInt());
             assertEquals("tool_use", body.path("messages").get(1).path("content").get(0).path("type").asString());
             assertEquals("tool_result", body.path("messages").get(2).path("content").get(0).path("type").asString());
             assertEquals("pom.xml", response.toolCalls().getFirst().args().get("path"));

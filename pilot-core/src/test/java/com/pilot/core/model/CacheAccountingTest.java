@@ -16,6 +16,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
+import com.pilot.core.loop.Attachment;
 import com.pilot.core.loop.Message;
 
 import tools.jackson.databind.ObjectMapper;
@@ -180,12 +181,16 @@ class CacheAccountingTest {
     }
 
     @Test
-    void compositionUsesActualPartsAndDoesNotInventImageTokens() {
+    void compositionCountsImagesConservativelyInsteadOfTreatingThemAsFree() {
         var parts = List.of(new ContextComposition.Source("system", "fixed"),
             new ContextComposition.Source("rules", "rules text"));
-        var context = ContextComposition.estimate(List.of(Message.system("fixed\n\nrules text"), Message.user("hello")),
+        var context = ContextComposition.estimate(
+            List.of(Message.system("fixed\n\nrules text"),
+                Message.user("hello", List.of(new Attachment("image.png", "image/png", "/tmp/image.png")))),
             List.of(new ToolDefinition("read", "read", Map.of("type", "object"))), parts);
         assertTrue(context.estimated());
+        assertEquals(1, context.attachments());
+        assertTrue(context.totalTokens() >= 1_025, "图片必须占用保守预算");
         assertEquals(context.totalTokens(), context.parts().stream().mapToLong(ContextComposition.Part::tokens).sum());
         assertEquals(List.of("system", "tools", "rules", "conversation"),
             context.parts().stream().map(ContextComposition.Part::category).toList());

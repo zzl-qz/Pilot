@@ -137,7 +137,10 @@ class ReviewApiTest {
         mvc.perform(get("/api/sessions/{id}/capabilities", id)).andExpect(status().isOk())
             .andExpect(jsonPath("$.workspace").value(workspace.toAbsolutePath().normalize().toString()))
             .andExpect(jsonPath("$.permissionMode").isNotEmpty()).andExpect(jsonPath("$.tools").isArray())
-            .andExpect(jsonPath("$.tools[0].name").isNotEmpty()).andExpect(jsonPath("$.mcpServers").isArray());
+            .andExpect(jsonPath("$.tools[0].name").isNotEmpty()).andExpect(jsonPath("$.mcpServers").isArray())
+            .andExpect(jsonPath("$.localCapabilities").isArray())
+            .andExpect(jsonPath("$.localCapabilities[?(@.id=='python')]").isNotEmpty())
+            .andExpect(jsonPath("$.localCapabilities[0].preparationAdvice").isNotEmpty());
     }
 
     /**

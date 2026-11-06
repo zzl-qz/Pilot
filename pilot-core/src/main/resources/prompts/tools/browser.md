@@ -21,3 +21,10 @@
 - 返回 ERROR 时读原因再换办法；「浏览器当前不可用」说明环境缺少浏览器，不要重试，如实告知用户。
 - 连接被拒绝通常是服务没起来或端口不对，先查应用日志，不要反复 navigate。
 - 浏览器里的 DELETE、提交表单等操作会真实改变应用数据，只对用户要求验证的流程执行。
+
+
+外网流程：使用 external=true、purpose 明确目标与影响，navigate 只支持公开 HTTPS 域名；每次均请求用户确认。
+外网 click/fill/type/press/select/upload/download/evaluate 还必须携带最近观察的 expected_url，页面改变后旧授权失效。
+搜索筛选与申请准备使用 snapshot/text/links 读取；外网变更须用 external=true，不能用普通本机动作绕过确认。
+提交申请/发送/发布前 purpose 必须列出最终对象、字段和影响，让用户对本次具体动作确认。不要把一次导航授权当作后续提交授权。
+跨域重定向/新站点会拦截，需重新 navigate 并确认；登录、验证码和 MFA 交由用户接管。外网使用隔离浏览器，不导入桌面登录态。

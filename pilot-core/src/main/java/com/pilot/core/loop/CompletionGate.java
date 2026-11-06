@@ -54,6 +54,7 @@ final class CompletionGate {
     private final PromptLibrary prompts;
     private final boolean enabled;
     private final String goal;
+    private int planPrompts;
     private int verifyPrompts;
     private int reviewPrompts;
     private int actionPrompts;
@@ -132,6 +133,14 @@ final class CompletionGate {
         boolean independentReview) {
         if (!enabled) {
             return null;
+        }
+        if (!openSteps.isEmpty() && planPrompts < 2) {
+            planPrompts++;
+            return new Nudge(
+                "原始用户目标：" + (goal == null ? "见持久任务上下文" : goal) + "\n计划进度："
+                    + plan.stream().filter(PlanItem::done).count() + "/" + plan.size() + "\n仍未完成的计划：\n"
+                    + bullets(openSteps) + "\n继续完成可执行工作。仅在取得验证证据后更新步骤；不要删除或缩小要求来通过完成检查。确有阻塞请如实交付部分结果与阻塞原因。",
+                "计划仍有未完成项，继续执行并核对原始目标", planPrompts, 2);
         }
         boolean changed = !changedFiles.isEmpty();
         // 只读任务没有改动，但「目标像调研、工具却只用了两三次」同样要核对覆盖范围

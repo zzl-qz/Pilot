@@ -23,6 +23,16 @@
         <module>pilot-server</module>
         <module>pilot-web</module>
     </modules>
+    <dependencyManagement>
+        <dependencies>
+            <!-- core 与单模块编译 core 源码的 server 使用相同 Office 依赖版本。 -->
+            <dependency>
+                <groupId>org.apache.poi</groupId>
+                <artifactId>poi-ooxml</artifactId>
+                <version>5.5.1</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
     <build>
         <plugins>
             <plugin>

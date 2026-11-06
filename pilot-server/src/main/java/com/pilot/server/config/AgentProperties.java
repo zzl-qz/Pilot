@@ -16,9 +16,9 @@ import com.pilot.core.permission.PermissionMode;
  * @param repeatAbortAt         兼容旧配置的阈值；不填默认 5，重复调用不再据此中断运行
  * @param approvalTimeoutSeconds 审批等待超时（秒），超时按拒绝处理
  * @param runThreads            同时执行的 run 数，单个 run 卡住时不影响其他会话
- * @param maxPlanContinues      兼容旧配置，默认 0；计划未完成不再自动催模型继续
+ * @param maxPlanContinues      兼容旧配置，默认 0；保留兼容字段；启用完成检查时最多提醒两次
  * @param contextMaxChars       上下文预算（字符估算）。太小会频繁压缩、丢细节，任务做得浅
- * @param completionChecks      通用收尾提醒门，默认关闭；不决定 Direct 的验证状态，也不关闭 Goal 独立核验
+ * @param completionChecks      通用收尾检查门，默认开启；不决定 Direct 的验证状态，也不关闭 Goal 独立核验
  * @param directMaxRequests     普通执行模型请求的高位事故熔断；不用它判断任务是否完成
  * @param directMaxInputTokens  普通执行累计输入的高位事故熔断
  * @param directMaxOutputTokens 普通执行累计输出的高位事故熔断
@@ -65,17 +65,17 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
         repeatAbortAt = abort;
         approvalTimeoutSeconds = approvalTimeoutSeconds < 1 ? 300 : approvalTimeoutSeconds;
         runThreads = runThreads < 1 ? 4 : Math.min(runThreads, 16);
-        // 计划不再拦住收尾：默认不自动继续，只把未完成项如实报给用户。
+        // 旧字段仅为兼容配置保留；启用完成检查后固定最多提醒两次。
         int continues = maxPlanContinues == null ? 0 : maxPlanContinues;
         maxPlanContinues = continues < 0 ? 0 : Math.min(continues, 10);
         contextMaxChars =
             contextMaxChars == null || contextMaxChars < 20_000 ? 400_000 : Math.min(contextMaxChars, 2_000_000);
-        // 通用收尾提醒门默认关闭；Direct 收尾仍按实际证据区分检查通过、失败、陈旧或未验证。
+        // 通用收尾检查门默认开启；Direct 收尾仍按实际证据区分检查通过、失败、陈旧或未验证。
         // Goal 的独立核验不受此开关影响；执行结束本身不代表已核验。
         // 可配置 pilot.agent.completion-checks；仅未显式配置时才回退读取 -Dpilot.completion.checks。
         String flag = System.getProperty("pilot.completion.checks");
         if (completionChecks == null) {
-            completionChecks = flag != null && !flag.isBlank() && "true".equalsIgnoreCase(flag.strip());
+            completionChecks = flag == null || flag.isBlank() || "true".equalsIgnoreCase(flag.strip());
         }
         directMaxRequests =
             directMaxRequests == null || directMaxRequests < 4 ? maxSteps : Math.min(directMaxRequests, maxSteps);

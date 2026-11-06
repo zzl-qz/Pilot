@@ -109,11 +109,19 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions, boolean streaming) {
+        ModelCapacity capacity = ModelCapacity.configured();
+        RequestBudget.enforce(messages, definitions, capacity);
         Map<String, Object> body = new LinkedHashMap<>();
         List<Map<String, Object>> items = new ArrayList<>(messages.stream().map(this::messagePayload).toList());
         List<Map<String, Object>> tools = definitions == null ? new ArrayList<>()
             : new ArrayList<>(definitions.stream().map(this::toolPayload).map(LinkedHashMap::new).toList());
         body.put("model", model);
+        String outputParameter = System.getProperty("pilot.model.chat-output-parameter",
+            "openai".equals(profile.provider()) ? "max_completion_tokens" : "max_tokens");
+        if (!java.util.Set.of("max_tokens", "max_completion_tokens").contains(outputParameter)) {
+            throw new IllegalArgumentException("Invalid chat output parameter");
+        }
+        body.put(outputParameter, capacity.outputTokens());
         body.put("messages", items);
         if (streaming) {
             body.put("stream", true);

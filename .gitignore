@@ -93,3 +93,6 @@ local.properties
 *.jks
 *.keystore
 pilot-mobile/.kotlin/
+
+# Per-task managed Python environments and installation receipts
+.pilot-task-envs/

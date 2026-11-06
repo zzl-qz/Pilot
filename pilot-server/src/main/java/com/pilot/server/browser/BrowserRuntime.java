@@ -418,6 +418,13 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     }
 
     private void writeIfChanged(Path script) throws IOException {
+        Path policy = script.resolveSibling("browser-policy.mjs");
+        try (InputStream input = new ClassPathResource("browser/browser-policy.mjs").getInputStream()) {
+            byte[] bytes = input.readAllBytes();
+            if (!Files.isRegularFile(policy) || !java.util.Arrays.equals(Files.readAllBytes(policy), bytes)) {
+                Files.write(policy, bytes);
+            }
+        }
         byte[] bundled;
         try (InputStream in = new ClassPathResource(SCRIPT_RESOURCE).getInputStream()) {
             bundled = in.readAllBytes();

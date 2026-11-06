@@ -164,6 +164,8 @@ public final class OpenAiResponsesModelClient implements ModelClient {
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions) {
+        ModelCapacity capacity = ModelCapacity.configured();
+        RequestBudget.enforce(messages, definitions, capacity);
         List<Map<String, Object>> input = new ArrayList<>();
         for (Message message : messages) {
             if ("tool".equals(message.role())) {
@@ -194,6 +196,7 @@ public final class OpenAiResponsesModelClient implements ModelClient {
         }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
+        body.put("max_output_tokens", capacity.outputTokens());
         body.put("store", false);
         body.put("input", input);
         body.put("tools", requestTools);

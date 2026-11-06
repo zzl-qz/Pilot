@@ -572,13 +572,25 @@ function buildTable(lines, start) {
 function buildList(lines, start) {
   const ordered = /^\s{0,3}\d/.test(lines[start]);
   const list = document.createElement(ordered ? 'ol' : 'ul');
+  if (ordered) {
+    const first = Number(lines[start].match(/^\s*(\d+)/)[1]);
+    if (Number.isSafeInteger(first) && first !== 1) list.setAttribute('start', String(first));
+  }
   let i = start;
   while (i < lines.length) {
-    const item = lines[i].match(LIST_PATTERN);
-    if (!item) {
-      break;
+    if (!lines[i].trim()) {
+      let next = i;
+      while (next < lines.length && !lines[next].trim()) {
+        next++;
+      }
+      if (next >= lines.length || !LIST_PATTERN.test(lines[next])
+          || /^\s{0,3}\d/.test(lines[next]) !== ordered) {
+        break;
+      }
+      i = next;
     }
-    if (/^\s{0,3}\d/.test(lines[i]) !== ordered) {
+    const item = lines[i].match(LIST_PATTERN);
+    if (!item || /^\s{0,3}\d/.test(lines[i]) !== ordered) {
       break;
     }
     const li = document.createElement('li');

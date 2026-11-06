@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:delivery": "node --test scripts/agent-delivery.test.mjs",
     "test:models": "node scripts/model-discovery-smoke.mjs",
     "test:refresh": "node scripts/workbench-refresh-smoke.mjs",
     "test:mobile": "node scripts/mobile-connection-smoke.mjs",

@@ -218,6 +218,26 @@ class BrowserToolTest {
         }
     }
 
+    @Test
+    void externalActionsRequireExplicitScopeAndDoNotForwardUserControlFlags() {
+        BrowserTool browser = tool();
+        assertTrue(browser.execute(Map.of("action", "navigate", "url", "https://example.com")).startsWith("ERROR:"));
+        assertTrue(browser.execute(Map.of("action", "navigate", "url", "https://example.com", "external", true))
+            .startsWith("ERROR:"));
+        assertTrue(backend.commands.isEmpty());
+        Map<String, Object> navigate = Map.of("action", "navigate", "url", "https://example.com", "external", true,
+            "purpose", "查看公开岗位", "userInitiated", true);
+        assertTrue(browser.confirm(navigate));
+        assertEquals("ok", browser.execute(navigate));
+        assertEquals(true, backend.commands.getLast().get("approvedExternal"));
+        assertFalse(backend.commands.getLast().containsKey("userInitiated"));
+        assertTrue(browser.execute(Map.of("action", "click", "ref", "e1", "external", true, "purpose", "提交最终内容"))
+            .startsWith("ERROR:"));
+        assertEquals("ok", browser.execute(Map.of("action", "click", "ref", "e1", "external", true, "purpose", "提交最终内容",
+            "expected_url", "https://example.com/job/1")));
+        assertEquals("https://example.com/job/1", backend.commands.getLast().get("expected_url"));
+    }
+
     private static final class FakeBackend implements BrowserBackend {
         private Availability availability = Availability.ready();
         private final List<Map<String, Object>> commands = new ArrayList<>();

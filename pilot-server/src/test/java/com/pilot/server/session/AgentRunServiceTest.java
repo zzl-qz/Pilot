@@ -489,11 +489,11 @@ class AgentRunServiceTest {
         assertKeepsQueue(1, List.of(), AgentRunServiceTest::readFile, "MAX_STEPS");
     }
 
-    /** 计划未完成不再把正常收尾改判成中断，队列仍按原顺序继续。 */
+    /** 关闭循环完成检查时，服务器仍保留未完成计划并等待复核，不自动出队。 */
     @Test
     void keepsQueueWhenModelStopsWithAnOpenPlan() throws Exception {
         assertKeepsQueue(8, List.of(new PlanItem("还没做完的原任务", PlanItem.PENDING)), AgentRunServiceTest::done,
-            "COMPLETED");
+            "AWAITING_REVIEW");
     }
 
     @Test
@@ -668,7 +668,8 @@ class AgentRunServiceTest {
             release.countDown();
             fixture.awaitFinished(status);
             assertEquals(List.of("下一条"), fixture.queue());
-            assertEquals("COMPLETED".equals(status) ? 1 : 2, calls.get(), "正常完成不追加收尾请求；真正停止时才额外执行一次禁用工具的收尾请求");
+            assertEquals(List.of("COMPLETED", "AWAITING_REVIEW").contains(status) ? 1 : 2, calls.get(),
+                "正常完成不追加收尾请求；真正停止时才额外执行一次禁用工具的收尾请求");
             assertTrue(fixture.service.activeRun(fixture.sessionId).isEmpty());
         } finally {
             release.countDown();

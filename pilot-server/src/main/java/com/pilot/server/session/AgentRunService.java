@@ -242,8 +242,12 @@ public class AgentRunService implements RunStarter {
         }
         // 规则对只读工具同样生效（例如禁止读 .env），未命中才回落到档位
         return (call, tool) -> {
+            com.pilot.core.permission.PermissionResult baseline = base.check(call, tool);
+            if (baseline.decision() == com.pilot.core.permission.PermissionDecision.DENY) {
+                return baseline;
+            }
             com.pilot.core.permission.PermissionResult ruled = rules.evaluate(call);
-            return ruled != null ? ruled : base.check(call, tool);
+            return ruled != null ? ruled : baseline;
         };
     }
 
@@ -997,7 +1001,8 @@ public class AgentRunService implements RunStarter {
     }
 
     private String currentTaskContext(String sessionId) {
-        return taskControls.prompt(sessionId) + commandContext(sessionId) + "\n\n"
+        return taskControls.prompt(sessionId) + "\n历史目标或验收范围不明时，先 read_task_history 恢复用户原文，不能按摘要自行缩小范围。"
+            + commandContext(sessionId) + "\n\n"
             + PROMPTS.render("system/today", Map.of("today", java.time.LocalDate.now().toString())).strip() + "\n\n"
             + planBrief(sessionId);
     }
@@ -1488,8 +1493,9 @@ public class AgentRunService implements RunStarter {
                     completed.planTotal(), completed.planTotal(), List.of());
             }
         }
-        // 计划未完成只作为如实上报的信息，不再把正常收尾改判成中断
-        TaskControlService.TaskContract task = taskControls.finish(sessionId);
+        // 显式未完成的计划保留为待复核，不能直接把任务置为已完成。
+        TaskControlService.TaskContract task = effective.openSteps().isEmpty() ? taskControls.finish(sessionId)
+            : taskControls.status(sessionId, "AWAITING_REVIEW");
         RunCompleted delivered = effective;
         if (task != null && "AWAITING_REVIEW".equals(task.status())) {
             ArrayList<String> open = new ArrayList<>(effective.openSteps());
@@ -1615,6 +1621,7 @@ public class AgentRunService implements RunStarter {
         tools.register(new CommandStatusTool(commandTasks, sessionId, snapshots));
         tools.register(new CommandLogsTool(commandTasks, sessionId));
         tools.register(new StopCommandTool(commandTasks, sessionId));
+        tools.register(new ReadTaskHistoryTool(sessions, sessionId));
         if (workProducts != null) {
             tools.register(new com.pilot.server.work.PublishArtifactTool(workProducts, objectMapper, sessionId, runId));
         }

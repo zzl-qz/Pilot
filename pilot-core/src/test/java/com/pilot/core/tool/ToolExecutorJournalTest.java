@@ -84,13 +84,24 @@ class ToolExecutorJournalTest {
         @Override
         public String execute(Map<String, Object> args) {
             executions++;
-            return "退出码: 0";
+            return String.valueOf(args.getOrDefault("result", "退出码: 0"));
         }
     }
 
     /** 按 fingerprint 记录，模拟持久化账本。 */
     static final class RecordingJournal implements ToolCallJournal {
         final Map<String, Recorded> entries = new LinkedHashMap<>();
+        final Map<String, String> observations = new LinkedHashMap<>();
+
+        @Override
+        public void recordObservation(String runId, ToolCall call, String result) {
+            observations.put(runId + "|" + call.callId(), result);
+        }
+
+        @Override
+        public Optional<String> observation(String runId, String callId) {
+            return Optional.ofNullable(observations.get(runId + "|" + callId));
+        }
 
         @Override
         public Optional<Recorded> replay(String runId, ToolCall call) {
@@ -115,12 +126,26 @@ class ToolExecutorJournalTest {
         }
     }
 
-    private static ToolExecutor executor(Tool tool, RecordingJournal journal) {
+    private static ToolExecutor executor(Tool tool, ToolCallJournal journal) {
         ToolRegistry registry = new ToolRegistry();
         registry.register(tool);
         return new ToolExecutor(registry, new PolicyPermissionGate(PermissionMode.AUTO), ApprovalBroker.denyAll(),
             (call, result, latencyMs) -> {
             }, Hooks.none()).withJournal("run_1", journal);
+    }
+
+    @Test
+    void archiveMetadataCannotTurnBlankResultIntoSuccessfulEvidence() {
+        for (ToolCallJournal journal : List.of(new RecordingJournal(), ToolCallJournal.none())) {
+            for (String raw : List.of("", " \n\t")) {
+                ToolExecutor.Outcome outcome = executor(new CommandTool(), journal)
+                    .execute(new ToolCall("empty", "run_command", Map.of("result", raw)), event -> {
+                    });
+                assertEquals(ToolExecutor.OutcomeStatus.EMPTY, outcome.status());
+                assertFalse(outcome.usableEvidence());
+                assertTrue(outcome.result().contains("[工具输出"));
+            }
+        }
     }
 
     @Test

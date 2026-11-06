@@ -31,10 +31,13 @@ import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelFailureKind;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
+import com.pilot.core.model.RequestBudget;
+import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.core.tool.ReadToolOutputTool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolCallJournal;
 import com.pilot.core.tool.ToolExecutor;
@@ -67,8 +70,8 @@ public final class AgentLoop {
     /**
      * @param repeatRemindAt       相同调用连续得到相同结果达到该次数时注入提醒；0 表示不提醒
      * @param repeatAbortAt         保留兼容：重复调用不再中断运行
-     * @param plan                  当前计划快照，收尾时如实上报未完成项；不拦住收尾
-     * @param maxPlanContinues      保留兼容：计划未完成不再自动催模型继续
+     * @param plan                  当前计划快照；启用完成检查时未完成项阻止成功收尾
+     * @param maxPlanContinues      保留兼容字段；完成门固定最多提醒两次
      * @param contextLimit          上下文预算（按字符估算）；太小会频繁压缩、丢细节
      */
     public record Config(int maxSteps, int repeatRemindAt, int repeatAbortAt, String systemPrompt,
@@ -204,6 +207,9 @@ public final class AgentLoop {
     /** 工具调用幂等账本：重启接管后同一参数写文件调用不重复落盘。 */
     public AgentLoop withToolJournal(String runId, ToolCallJournal journal) {
         this.toolExecutor.withJournal(runId, journal);
+        if (journal != null && tools.find("read_tool_output").isEmpty()) {
+            tools.register(new ReadToolOutputTool(journal));
+        }
         return this;
     }
 
@@ -371,6 +377,7 @@ public final class AgentLoop {
         if (history != null) {
             messages.addAll(history);
         }
+        observedThroughIndex = ContextCompactor.observedPrefix(messages);
         return messages;
     }
 
@@ -412,8 +419,10 @@ public final class AgentLoop {
                 if (cancellation.cancelled()) {
                     return stopForCancellation(messages, events);
                 }
-                ContextCompactor.dropStaleToolImages(messages, MAX_TOOL_IMAGE_MESSAGES);
-                budget.apply(messages, contextLimit(), events);
+                int beforeCompression = messages.size();
+                ContextCompactor.dropStaleToolImages(messages, MAX_TOOL_IMAGE_MESSAGES, observedThroughIndex);
+                budget.apply(messages, contextLimit(), events, observedThroughIndex);
+                observedThroughIndex = Math.max(0, observedThroughIndex - (beforeCompression - messages.size()));
 
                 if (applySteering(messages, events, pendingInput.get())) {
                     // 真实用户纠正优先，上一状态推导出的内部催办可能已经过期。
@@ -425,6 +434,12 @@ public final class AgentLoop {
                     if ("CANCELLED".equals(turn.stop().failureCode())
                         || "BUDGET_EXHAUSTED".equals(turn.stop().failureCode())) {
                         return turn.stop();
+                    }
+                    if ("CONTEXT_TOO_LARGE".equals(turn.stop().failureCode())) {
+                        messages.add(Message.assistant(turn.stop().finalText(), List.of()));
+                        events.accept(new AssistantDelta(turn.stop().finalText()));
+                        events.accept(new RunFailed("CONTEXT_TOO_LARGE", turn.stop().finalText(), false));
+                        return new Result(turn.stop().finalText(), turn.stop().failureCode(), conversation(messages));
                     }
                     return finalizeFailure(messages, events, usage, turn.stop().failureCode(), "模型请求未能完成；已有进度保留。",
                         false);
@@ -607,7 +622,7 @@ public final class AgentLoop {
         List<PlanItem> plan = planSnapshot();
         int done = (int)plan.stream().filter(PlanItem::done).count();
         List<String> openSteps = plan.stream().filter(item -> !item.done()).map(PlanItem::step).toList();
-        // 计划只是给模型和用户的进度提示，不再拦住收尾：模型说完成就完成。
+        // 启用完成检查时，未完成计划必须继续或明确交付部分结果。
         // 旧版本成功的定向检查不能证明当前源码；仅复跑策略明确选出的受限命令。
         // 仍由 ToolExecutor 走权限审批、工作区边界、超时及变更追踪。
         ToolCall reverification = executionPolicy == null ? null : executionPolicy.reverificationCall();
@@ -645,7 +660,14 @@ public final class AgentLoop {
             safeCheckpoint(checkpoint, messages);
             return null;
         }
-        // 模型给出纯文本就收尾，但计划没做完≠任务完成，把差距如实交给客户端
+        if (config.completionChecks() && !openSteps.isEmpty()) {
+            String partial = content + "\n\n本轮为部分交付，尚未完成：" + String.join("；", openSteps);
+            messages.set(messages.size() - 1, Message.assistant(partial, List.of()));
+            events.accept(new AssistantDelta(partial));
+            events.accept(new RunFailed("TASK_INCOMPLETE", "计划仍有未完成项；已保存进度，可继续执行。", false));
+            return new Result(partial, "TASK_INCOMPLETE", conversation(messages));
+        }
+        // 仅在剩余计划与验收检查通过后发出完成事件。
         if (!content.isBlank()) {
             events.accept(new AssistantDelta(content));
         }
@@ -757,6 +779,9 @@ public final class AgentLoop {
                 request.add(
                     Message.user("[系统收尾要求] 本轮必须现在结束，禁止调用工具，也不要假装任务已经完成。" + "请基于已有对话和证据给用户一份可直接阅读的阶段交付：先说明实际完成了什么和证据，"
                         + "再说明未完成项；最后写明停止原因与恢复所需条件。停止代码：" + code + "；停止原因：" + reason));
+                if (!RequestBudget.assessRequest(request, List.of(), contextLimit()).fits()) {
+                    throw new IllegalStateException("收尾请求超出安全上下文预算");
+                }
                 usage.start(request, contextLimit());
                 ModelResponse response = client.chat(List.copyOf(request), List.of());
                 usage.finish(response);
@@ -790,6 +815,8 @@ public final class AgentLoop {
 
     /** 工具产出的图片；等本批 tool 结果全部落进历史后再统一作为一条 user 消息发出。 */
     private final List<PendingToolImages> pendingToolImages = new ArrayList<>();
+    /** Exclusive message index that was included in the last successful model request. */
+    private int observedThroughIndex;
 
     private record PendingToolImages(ToolCall call, List<Attachment> images) {
     }
@@ -832,6 +859,12 @@ public final class AgentLoop {
         if (executionPolicy != null) {
             executionPolicy.observed(call, outcome);
         }
+    }
+
+    private boolean recordToolObservationBoundary(List<Message> messages) {
+        int pruned = ContextCompactor.pruneToolOutputs(messages, 0, observedThroughIndex);
+        int truncated = ContextCompactor.truncateLongToolOutputs(messages, observedThroughIndex);
+        return pruned > 0 || truncated > 0;
     }
 
     /** 审批通过不等于仍可执行；开始产生副作用前再消费一次控制信号。 */
@@ -880,7 +913,9 @@ public final class AgentLoop {
             return;
         }
         // 切到只支持首条 system 的兼容端点时，把可信任务约束归并回头部，接受明确的前缀失效。
+        int beforeRemoval = messages.size();
         messages.removeIf(AgentLoop::runtimeContext);
+        observedThroughIndex = Math.max(0, observedThroughIndex - (beforeRemoval - messages.size()));
         StringBuilder system = new StringBuilder(config.systemPrompt());
         if (context != null && !context.isBlank()) {
             system.append("\n\n[Runtime task context]\n").append(context);
@@ -974,7 +1009,19 @@ public final class AgentLoop {
                 // 阶段性纠偏属于运行时上下文，只进入当前请求的 system 消息；下一次请求会
                 // 重新构造 system，checkpoint/conversation 也从不保存它。
                 List<Message> request = requestMessages(messages, retainedGuidance);
-                usage.start(request, contextLimit());
+                RequestBudget.Assessment admission =
+                    RequestBudget.assessRequest(request, tools.definitions(), contextLimit());
+                if (!admission.fits()) {
+                    if (recordToolObservationBoundary(messages)) {
+                        request = requestMessages(messages, retainedGuidance);
+                    }
+                    admission = RequestBudget.assessRequest(request, tools.definitions(), contextLimit());
+                }
+                if (!admission.fits()) {
+                    throw new ExecutionPolicy.Stop("CONTEXT_TOO_LARGE", "完整模型请求估算为 " + admission.estimatedInputTokens()
+                        + " token，安全输入预算为 " + admission.inputLimit() + "；未发送请求。请缩小输入或拆分任务后继续。");
+                }
+                usage.start(request, contextLimit(), tools.definitions());
                 ModelResponse response = client.chat(request, tools.definitions(), delta -> {
                     if (liveText == null || delta == null || delta.isEmpty()) {
                         return;
@@ -995,6 +1042,7 @@ public final class AgentLoop {
                     }
                 });
                 usage.finish(response);
+                observedThroughIndex = messages.size();
                 // 一次成功请求说明端点恢复了，下一次故障重新计算退避与预算
                 retryBudget.reset();
                 runtimeGuidance.clear();
@@ -1003,9 +1051,15 @@ public final class AgentLoop {
                 return new ModelTurn(response, null);
             } catch (ExecutionPolicy.Stop stop) {
                 usage.abort();
+                if ("CONTEXT_TOO_LARGE".equals(stop.code())) {
+                    return new ModelTurn(null, new Result(stop.getMessage(), stop.code(), conversation(messages)));
+                }
                 throw stop;
             } catch (RuntimeException e) {
                 usage.abort();
+                if (e instanceof RequestBudget.BudgetExceeded) {
+                    return new ModelTurn(null, new Result(e.getMessage(), "CONTEXT_TOO_LARGE", conversation(messages)));
+                }
                 // 客户端抛错时会重新设置中断位；不清掉的话，后续每次请求都会立刻失败。
                 Thread.interrupted();
                 if (cancellation.cancelled()) {
@@ -1229,7 +1283,11 @@ public final class AgentLoop {
         }
 
         private void start(List<Message> messages, int limit) {
-            pendingInput = ContextCompactor.estimateTokens(messages);
+            start(messages, limit, List.of());
+        }
+
+        private void start(List<Message> messages, int limit, List<ToolDefinition> tools) {
+            pendingInput = RequestBudget.assessRequest(messages, tools, limit).estimatedInputTokens();
             contextTokens = (int)Math.min(Integer.MAX_VALUE, pendingInput);
             contextLimit = Math.max(1, limit);
             requests++;

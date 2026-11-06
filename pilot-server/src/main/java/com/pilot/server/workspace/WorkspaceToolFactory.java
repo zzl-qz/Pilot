@@ -26,6 +26,8 @@ import com.pilot.core.tool.CreateFileTool;
 import com.pilot.core.tool.EditFileTool;
 import com.pilot.core.tool.GlobFilesTool;
 import com.pilot.core.tool.ListDirTool;
+import com.pilot.core.tool.OfficeTool;
+import com.pilot.core.tool.PrepareRuntimeTool;
 import com.pilot.core.tool.ReadFileTool;
 import com.pilot.core.tool.ReadTracker;
 import com.pilot.core.tool.RememberTool;
@@ -42,6 +44,7 @@ import com.pilot.core.tool.UpdatePlanTool;
 import com.pilot.core.tool.WebFetchTool;
 import com.pilot.core.tool.WebSearchTool;
 import com.pilot.core.workspace.PathValidator;
+import com.pilot.server.capability.LocalResourcesTool;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.WebSearchProperties;
 
@@ -199,6 +202,9 @@ public class WorkspaceToolFactory {
         registry.register(new EditFileTool(validator, snapshots, reads));
         registry.register(new CreateFileTool(validator, snapshots, reads));
         registry.register(new RememberTool(validator, snapshots));
+        registry.register(new OfficeTool(validator, snapshots));
+        registry.register(new PrepareRuntimeTool(validator));
+        registry.register(new LocalResourcesTool());
         registry.register(new ApplyPatchTool(validator, snapshots, reads));
         registry.register(new RunCommandTool(validator, commandChanges()));
         if (planSink != null) {

@@ -70,6 +70,11 @@ final class ContextBudget {
      * @return 本次是否真的压缩过
      */
     boolean apply(List<Message> messages, int limit, Consumer<SessionEvent> events) {
+        return apply(messages, limit, events, ContextCompactor.observedPrefix(messages));
+    }
+
+    boolean apply(List<Message> messages, int limit, Consumer<SessionEvent> events, int observedThrough) {
+        int boundary = Math.max(1, Math.min(observedThrough, messages.size()));
         applyIndex++;
         // 字符预算与 token 预算同值：英文按 4 字符 1 token 远远够用，中文接近 1 字符 1 token，
         // 取两者里更满的那个，避免中文会话被「字符还不多」骗过去，一路涨到超窗。
@@ -88,12 +93,12 @@ final class ContextBudget {
         // 达到摘要水位后立即恢复裁剪，不为缓存牺牲上下文预算。
         if (usage >= PRUNE_RATIO
             && (usage >= PRE_COMPACT_RATIO || ContextCompactor.totalChars(messages) >= nextPruneAt)) {
-            ContextCompactor.pruneToolOutputs(messages, limit);
+            ContextCompactor.pruneToolOutputs(messages, limit, boundary);
             nextPruneAt = ContextCompactor.totalChars(messages) + rewriteStep;
         }
         if (usage >= TRUNCATE_RATIO
             && (usage >= PRE_COMPACT_RATIO || ContextCompactor.totalChars(messages) >= nextTruncateAt)) {
-            ContextCompactor.truncateLongToolOutputs(messages);
+            ContextCompactor.truncateLongToolOutputs(messages, boundary);
             nextTruncateAt = ContextCompactor.totalChars(messages) + rewriteStep;
         }
 
@@ -112,20 +117,20 @@ final class ContextBudget {
                 lastSuccessfulCompactApply = -1;
                 rapidRefillCounted = false;
             }
-            dropIfOverBudget(messages, limit);
+            dropIfOverBudget(messages, limit, boundary);
             return false;
         }
 
         recordRapidRefill();
         if (compactCircuitOpen) {
-            dropIfOverBudget(messages, limit);
+            dropIfOverBudget(messages, limit, boundary);
             return false;
         }
 
         // 上一次摘要白跑了一趟模型：上下文再涨 5% 之前别再试
         int current = ContextCompactor.totalChars(messages);
         if (backoffUntil > 0 && current < backoffUntil) {
-            dropIfOverBudget(messages, limit);
+            dropIfOverBudget(messages, limit, boundary);
             return false;
         }
 
@@ -134,7 +139,10 @@ final class ContextBudget {
         int targetTokens = (int)(tokenBudget * TARGET_RATIO);
         boolean reduced = false;
         for (int round = 0; round < rounds; round++) {
-            ContextCompactor.Outcome outcome = compactor.compact(messages, targetChars, targetTokens);
+            int before = messages.size();
+            ContextCompactor.Outcome outcome =
+                compactor.compact(messages.subList(0, boundary), targetChars, targetTokens);
+            boundary -= before - messages.size();
             if (!outcome.compacted()) {
                 break;
             }
@@ -159,7 +167,7 @@ final class ContextBudget {
                 compactCircuitOpen = true;
             }
         }
-        dropIfOverBudget(messages, limit);
+        dropIfOverBudget(messages, limit, boundary);
         return reduced;
     }
 
@@ -187,9 +195,10 @@ final class ContextBudget {
         return Math.max(byChars, byTokens);
     }
 
-    private static void dropIfOverBudget(List<Message> messages, int limit) {
+    private static void dropIfOverBudget(List<Message> messages, int limit, int boundary) {
         if (ContextCompactor.totalChars(messages) > limit * DROP_RATIO) {
-            ContextCompactor.dropOldestGroups(messages, limit);
+            int tail = ContextCompactor.totalChars(messages.subList(boundary, messages.size()));
+            ContextCompactor.dropOldestGroups(messages.subList(0, boundary), Math.max(1, limit - tail));
         }
     }
 }

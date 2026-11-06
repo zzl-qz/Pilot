@@ -167,15 +167,15 @@ class CacheContextTest {
 
     @Test
     void insufficientHeadroomUsesShortSummaryDirectly() {
-        compact(false, 100, false);
+        compact(false, 10000, false);
     }
 
     private void compact(boolean rejectPrefix, int limit, boolean prefixExpected) {
         List<Message> history = new ArrayList<>();
         history.add(Message.system("stable-system"));
         for (int i = 0; i < 12; i++) {
-            history.add(Message.user("question " + i + "x".repeat(2000)));
-            history.add(Message.assistant("answer", List.of()));
+            history.add(Message.user("question " + i));
+            history.add(Message.assistant("answer" + "x".repeat(2000), List.of()));
         }
         var original = List.copyOf(history);
         var requests = new ArrayList<List<Message>>();

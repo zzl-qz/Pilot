@@ -153,6 +153,9 @@ public class BrowserControlService implements BrowserEventListener {
         if (args != null) {
             command.putAll(args);
         }
+        // 只由用户面板入口设置；模型 BrowserTool 不转发此字段。
+        command.put("op", op);
+        command.put("userInitiated", true);
         try {
             BrowserBackend.Reply reply = runtime.execute(sessionId, command, Duration.ofSeconds(45));
             Map<String, Object> result = new LinkedHashMap<>();

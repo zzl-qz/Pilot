@@ -162,6 +162,8 @@ public final class AnthropicMessagesModelClient implements ModelClient {
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions) {
+        ModelCapacity capacity = ModelCapacity.configured();
+        RequestBudget.enforce(messages, definitions, capacity);
         List<String> system = new ArrayList<>();
         List<Map<String, Object>> conversation = new ArrayList<>();
         for (int index = 0; index < messages.size(); index++) {
@@ -195,7 +197,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
-        body.put("max_tokens", 16_000);
+        body.put("max_tokens", capacity.outputTokens());
         if (!system.isEmpty()) {
             body.put("system", String.join("\n\n", system));
         }

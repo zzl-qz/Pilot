@@ -1,11 +1,15 @@
 # Pilot
 
-Pilot 是一个以 Java 构建、从代码开发向通用任务扩展的本地 Agent 原型。用户通过 Web 或桌面界面提交开发、调研和资料整理任务，服务端调用兼容 OpenAI Chat Completions 的模型，并在配置的工作区内读取资料、搜索、执行受控工具操作和运行验证。会话、工具调用、审批与运行状态通过事件流呈现。
+Pilot 的目标是成为本机优先的任务执行 Agent：用户给出期望结果，Pilot 规划并组合浏览器、本机文件、应用和可复用技能完成任务；缺少能力时先检查并提出经授权的准备方案，最后交付可审阅、可验证的结果。当前仓库仍是开发与评估中的原型，实际能力和安全边界以已实现功能及验证记录为准；最终产品方向与分阶段门槛见 [产品方向与发展路线](PRODUCT_DIRECTION.md)。
 
 当前项目适合本地开发和评估，不是可无监督修改生产代码的成熟产品。模型质量取决于所配置的服务；权限策略也不是操作系统级沙箱。使用前请阅读下方的安全说明，并优先在可丢弃的工作区中试用。
 
 ## 功能概览
 
+- 办公交付：内置 `office` 创建真实 XLSX/PPTX，重新解析、计算公式并渲染幻灯片；通过 `publish_artifact` 保存最终成果。复杂排版、宏和任意现有文件编辑不在内置生成器范围。
+- 本机资源：`local_resources` 与能力面板发现 PATH、Windows/macOS 常见应用目录；`prepare_runtime` 先展示方案，经具体操作确认后准备任务私有 Python 环境，失败清理环境并保留日志。
+- 外网浏览器：公开 HTTPS 站点可经确认进入独立上下文；页面交互绑定当前 URL，每次确认后执行。登录、验证码可由用户接管；提交申请前须核对目标及最终内容。具体范围见 [补齐记录](evaluation/AGENT_DELIVERY_2026-11-06.md)。
+- 上下文恢复：保留用户原文、最新整批工具观察与摘要来源指纹；`read_task_history` 恢复原始任务，`read_tool_output` 分页恢复本会话工具输出，避免为了找回证据重放操作。
 - 成果面板：保存报告、表格等文件的独立快照，支持预览、下载与引用读取记录；文件保存和结论验证分别呈现。
 - 技能草稿：Agent 提出可复用步骤，由用户接受、拒绝或撤回；比较版本与文件指纹，服务重启后核对未完成写入。
 - 远程工作台：令牌模式下通过 `/connect` 登录，手机与桌面使用同一套任务、成果和审核流程；不会自动开启网络暴露或穿透。使用方法与验证范围见 [通用任务工作流](GENERAL_AGENT_WORKFLOW.md)。
@@ -24,7 +28,7 @@ Pilot 是一个以 Java 构建、从代码开发向通用任务扩展的本地 A
 - 可配置的权限模式、命令审批、运行取消和变更回滚。
 - 消息检查点：消息旁「回退 / 分支」可选择只撤代码、只撤对话或一起撤，回到该消息发送前；支持另开对话分支并保留原聊天。
 - 回退前展示文件清单并校验后续修改；发现手工修改、缺失快照、链接文件或跨工作区时阻止代码回退。Git 分支可在变更面板单独创建，未提交改动继续保留。
-- 收尾门：默认关闭（与 Codex / OpenCode 一致，模型说完成就完成）；需要时用 `pilot.agent.completion-checks=true` 打开。
+- 收尾检查默认开启：未完成计划最多提醒两次，仍有缺口则保存进度并返回 `TASK_INCOMPLETE`；不会把它标为全部完成。可显式设置 `pilot.agent.completion-checks=false` 关闭循环检查，服务器仍保留未完成计划并等待复核。
 - 项目约定：先加载用户级 `~/.pilot/PILOT.md`、`AGENTS.md`、`CLAUDE.md`（优先级最低），再沿工作区祖先目录逐级加载同名文件，每层按此顺序取首份，标明来源并限制长度后注入系统提示词。
 - 结构化记忆（克制版）：`MEMORY.md` 与约定是两条独立通道——沿工作区祖先目录逐级 + 用户级 `~/.pilot/MEMORY.md` 注入"项目记忆"段（独立 4k 字符预算，不挤占约定）；代理用 `remember` 工具沉淀候选条目到 `.pilot/memory-draft.md`（带日期一行一条），**候选区刻意不注入**，由用户审阅后整理进 `MEMORY.md` 才生效——模型不能把任意内容直接写进自己的记忆。
 - 确定性钩子：`.pilot/settings.json` 的 `hooks` 支持 `PreToolUse` / `PostToolUse`，格式兼容 Claude Code；配置后编辑完自动跑格式化或 lint，结果直接贴在工具结果后面，`blockOnFailure` 可让前置钩子阻止执行。
@@ -86,7 +90,7 @@ bash mvnw -pl pilot-server -am install
 bash mvnw -pl pilot-server spring-boot:run
 ```
 
-只构建 `pilot-server` 时，同一次编译会带上 `pilot-core` 的源码，不依赖本机仓库里可能过期的 JAR，也不另起一次 Maven。IDEA 里运行 `PilotServerApplication` 即可。项目不使用 Spring Boot DevTools，改了 Java 后由你再点一次运行。若 9999 仍被旧进程占用，先停掉那个进程。
+只构建 `pilot-server` 时，同一次编译会带上当前 `pilot-core` 的源码和资源，也不另起一次 Maven。Maven 仍会读取本地 core 的依赖清单，因此随 core 新增的运行依赖必须同步在 server 声明，版本由父 POM 统一管理；Office 的 POI 依赖已按此处理。新增或调整依赖后，在 IDEA 重新加载 Maven 项目，再运行 `PilotServerApplication`。单模块回归可用 `bash mvnw -f pilot-server/pom.xml clean verify`（Windows 使用 `.\mvnw.cmd`）；首次构建没有 core 本地构件时仍按上面的联合安装命令准备。项目不使用 Spring Boot DevTools，改了 Java 后由你再点一次运行。若 9999 仍被旧进程占用，先停掉那个进程。
 
 前端产物 `pilot-web/src/main/resources/static/index.html` 与 `static/assets/` 是 vite 构建结果，不入库：每次构建的 hash 文件名都会变，入库后拉代码不重新构建就会引用不存在的资源。Maven 的 `generate-resources` 会自动构建，`start.cmd` / `start.sh` 走的就是这条路径。**在 IDEA 里直接运行前**，先执行一次 `npm --prefix pilot-web/frontend run build`（或 `.\mvnw.cmd -pl pilot-server -am install`）。漏构建时：缺 `index.html` 首页会返回 404；缺 `assets` 里的入口脚本，页面会直接说明缺哪个文件并给出构建命令，不再是无声黑屏。
 
@@ -94,7 +98,7 @@ Java 代码采用基于阿里巴巴开发手册的[格式与可读性规范](con
 
 ## 权限说明
 
-- `AUTO`：注册工具直接执行（默认，与 Codex / OpenCode 一致）。
+- `AUTO`：普通注册工具直接执行；声明必须确认的安装、外网操作、任意页面脚本等仍逐次审批，通用 allow 规则不能跳过。
 - `AUTO_EDIT`：写文件直接执行，命令仍需审批。
 - `ASK`：只读工具放行；每次写入或命令请求用户审批，拒绝/超时不得执行。
 - `READ_ONLY`：只读工具放行，写文件和命令拒绝（相当于 plan 模式）。

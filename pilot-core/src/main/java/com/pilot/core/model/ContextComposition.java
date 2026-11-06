@@ -12,7 +12,7 @@ import com.pilot.core.loop.Message;
 
 import tools.jackson.databind.ObjectMapper;
 
-/** 对实际请求做可复核的文本估算；图片和厂商隐藏开销不伪造为精确 token。 */
+/** 对实际请求做可复核的文本估算；图片采用保守容量估值，厂商隐藏开销不伪造为精确 token。 */
 public record ContextComposition(long totalTokens, boolean estimated, int attachments, List<Part> parts) {
     public record Part(String category, String label, long tokens) {
     }
@@ -74,14 +74,23 @@ public record ContextComposition(long totalTokens, boolean estimated, int attach
             add(totals, category,
                 tool.name() + tool.description() + JSON.writeValueAsString(CanonicalJson.ordered(tool.parameters())));
         }
+        if (attachments > 0) {
+            totals.put("conversation", totals.getOrDefault("conversation", 0L) + attachments * 1_024L);
+        }
         List<Part> result = new ArrayList<>();
         LABELS.forEach((key, label) -> {
             if (totals.getOrDefault(key, 0L) > 0) {
                 result.add(new Part(key, label, totals.get(key)));
             }
         });
-        return new ContextComposition(result.stream().mapToLong(Part::tokens).sum(), true, attachments,
-            List.copyOf(result));
+        long total = result.stream().mapToLong(Part::tokens).sum();
+        return new ContextComposition(total, true, attachments, List.copyOf(result));
+    }
+
+    /** Estimate the complete visible request, including tools and provenance sources. */
+    public static ContextComposition estimateRequest(List<Message> messages, List<ToolDefinition> tools,
+        List<Source> sources) {
+        return estimate(messages, tools, sources);
     }
 
     private static void add(Map<String, Long> totals, String category, String text) {

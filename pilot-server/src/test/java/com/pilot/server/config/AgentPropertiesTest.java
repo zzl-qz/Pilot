@@ -1,7 +1,7 @@
 package com.pilot.server.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -24,7 +24,7 @@ class AgentPropertiesTest {
     }
 
     @Test
-    void defaultsFollowCodexAndOpenCodeFullyPermissiveAndNoCompletionGates() {
+    void defaultsRequireEvidenceBeforeCompleting() {
         AgentProperties properties = new AgentProperties(".", null, 0, null, null, 0, 0, null, null, null);
 
         assertEquals(PermissionMode.AUTO, properties.permissionMode(), "默认完全放行");
@@ -32,6 +32,6 @@ class AgentPropertiesTest {
         assertEquals(1_000, properties.directMaxRequests());
         assertEquals(400_000, properties.contextMaxChars());
         assertEquals(0, properties.maxPlanContinues(), "计划不再自动催继续");
-        assertFalse(properties.completionChecksEnabled(), "收尾门默认关闭");
+        assertTrue(properties.completionChecksEnabled(), "收尾门默认开启");
     }
 }

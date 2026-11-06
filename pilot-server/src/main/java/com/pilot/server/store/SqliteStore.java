@@ -129,7 +129,19 @@ public final class SqliteStore {
                 post_hash TEXT,
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (run_id, fingerprint)
-            )""", "CREATE INDEX IF NOT EXISTS idx_events_result_time ON events(type, created_at DESC)",
+            )""", """
+            CREATE TABLE IF NOT EXISTS tool_observations (
+                run_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                call_id TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                tool TEXT NOT NULL,
+                result TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (run_id, call_id)
+            )""",
+        "CREATE INDEX IF NOT EXISTS idx_tool_observations_session ON tool_observations(session_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_events_result_time ON events(type, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_events_run_sequence ON events(run_id, sequence DESC)",
         "CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"};
 

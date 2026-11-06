@@ -75,6 +75,33 @@ class AgentLoopTest {
     }
 
     @Test
+    void oversizedCompleteRequestDoesNotReachModelClient() {
+        ScriptedModelClient client = new ScriptedModelClient(new ModelResponse("不应到达", List.of()));
+        AgentLoop.Config constrained = new AgentLoop.Config(2, 0, 3, "系统提示".repeat(200), List::of, 0, 1_000, false);
+
+        AgentLoop.Result result =
+            new AgentLoop(client, registry(), readOnlyGate(), constrained).run("目标", List.of(), events::add);
+
+        assertEquals("CONTEXT_TOO_LARGE", result.failureCode());
+        assertTrue(client.requests.isEmpty());
+    }
+
+    @Test
+    void rejectsOversizedCompleteRequestBeforeCallingModel() {
+        ScriptedModelClient client = new ScriptedModelClient(new ModelResponse("不应到达", List.of()));
+        AgentLoop.Config small = new AgentLoop.Config(2, 0, 3, "系统提示".repeat(200), List::of, 0, 1_000, false);
+        AgentLoop.Result result =
+            new AgentLoop(client, registry(), readOnlyGate(), small).run("目标", List.of(), events::add);
+
+        assertEquals("CONTEXT_TOO_LARGE", result.failureCode());
+        assertTrue(client.requests.isEmpty(), "超预算请求不能发送给模型");
+        assertEquals(1, events.stream()
+            .filter(event -> event instanceof RunFailed failed && "CONTEXT_TOO_LARGE".equals(failed.code())).count());
+        assertFalse(events.stream().anyMatch(RunCompleted.class::isInstance));
+        assertTrue(result.conversation().getLast().content().contains("未发送请求"));
+    }
+
+    @Test
     void independentReadsRunConcurrentlyButResultsKeepCallOrder() {
         CountDownLatch bothStarted = new CountDownLatch(2);
         Tool reader = new Tool() {
@@ -559,22 +586,17 @@ class AgentLoopTest {
     }
 
     @Test
-    void compactsLargeToolOutputBeforeNextRequest() {
+    void protectsNewestToolObservationUntilItHasBeenSent() {
         CountingTool tool = new CountingTool("read_file", "x".repeat(20_000));
         ScriptedModelClient client = new ScriptedModelClient(
             new ModelResponse("", List.of(new ToolCall("call_1", "read_file", Map.of("path", "big.txt")))),
             new ModelResponse("读完了", List.of()));
-        System.setProperty("pilot.context.max-chars", "2000");
-        try {
-            AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
-            loop.run("读大文件", List.of(), events::add);
-        } finally {
-            System.clearProperty("pilot.context.max-chars");
-        }
-
-        List<Message> secondRequest = client.requests.get(1);
-        String toolResult = secondRequest.getLast().content();
-        assertTrue(toolResult.startsWith("[旧工具输出已清理"), toolResult);
+        AgentLoop.Result result =
+            new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3)).run("读大文件", List.of(), events::add);
+        String toolResult = result.conversation().stream()
+            .filter(message -> "tool".equals(message.role()) && message.content().startsWith("x")).findFirst()
+            .orElseThrow().content();
+        assertEquals("x".repeat(20_000), toolResult);
     }
 
     @Test
@@ -883,7 +905,7 @@ class AgentLoopTest {
         try {
             ArrayList<Message> history = new ArrayList<Message>();
             for (int i = 0; i < 12; i++) {
-                history.add(Message.user("第 " + i + " 轮：" + "y".repeat(300)));
+                history.add(Message.assistant("第 " + i + " 轮观察：" + "y".repeat(300), List.of()));
             }
             ScriptedModelClient client = new ScriptedModelClient(new ModelResponse("## 目标\n继续任务", List.of()),
                 new ModelResponse("完成", List.of()));
@@ -921,7 +943,7 @@ class AgentLoopTest {
         List<PlanItem> plan =
             List.of(new PlanItem("检查分支状态", PlanItem.COMPLETED), new PlanItem("跑回归测试", PlanItem.PENDING));
         AgentLoop loop = new AgentLoop(client, registry(new CountingTool("list_dir", "a.txt")), readOnlyGate(),
-            new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 0));
+            new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 0, 120_000, false));
 
         loop.run("继续", List.of(), events::add);
 
@@ -957,7 +979,7 @@ class AgentLoopTest {
         List<PlanItem> plan =
             List.of(new PlanItem("检查分支状态", PlanItem.COMPLETED), new PlanItem("跑回归测试", PlanItem.PENDING));
         AgentLoop loop = new AgentLoop(client, registry(new CountingTool("list_dir", "a.txt")), readOnlyGate(),
-            new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 3));
+            new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 3, 120_000, false));
         List<List<Message>> checkpoints = new ArrayList<>();
 
         AgentLoop.Result result =
@@ -991,9 +1013,8 @@ class AgentLoopTest {
                 return null;
             }
         };
-        AgentLoop loop =
-            new AgentLoop(client, registry(), readOnlyGate(), new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 3))
-                .withExecutionPolicy(policy);
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(),
+            new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 3, 120_000, false)).withExecutionPolicy(policy);
 
         AgentLoop.Result result = loop.run("继续完成计划", List.of(), events::add);
 
@@ -1092,9 +1113,8 @@ class AgentLoopTest {
                 return null;
             }
         };
-        AgentLoop loop =
-            new AgentLoop(client, registry(), readOnlyGate(), new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 0))
-                .withExecutionPolicy(policy);
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(),
+            new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 0, 120_000, false)).withExecutionPolicy(policy);
 
         loop.run("继续", List.of(), events::add);
 
@@ -1141,20 +1161,17 @@ class AgentLoopTest {
 
     /** 计划没做完也直接收尾，未完成项如实交回界面。 */
     @Test
-    void finishesWithOpenPlanStepsInsteadOfAutoContinuing() {
-        ScriptedModelClient client =
-            new ScriptedModelClient(new ModelResponse("做到这里。", List.of()), new ModelResponse("还是做到这里。", List.of()));
+    void incompletePlanContinuesBoundedlyAndNeverEmitsCompleted() {
+        ScriptedModelClient client = new ScriptedModelClient(new ModelResponse("做到这里。", List.of()),
+            new ModelResponse("还是做到这里。", List.of()), new ModelResponse("确有阻塞。", List.of()));
         List<PlanItem> plan = List.of(new PlanItem("跑回归测试", PlanItem.PENDING));
-        AgentLoop loop = new AgentLoop(client, registry(new CountingTool("list_dir", "a.txt")), readOnlyGate(),
-            new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 1));
-
-        loop.run("继续", List.of(), events::add);
-
-        assertEquals(0, events.stream().filter(RunContinued.class::isInstance).count());
-        RunCompleted completed = events.stream().filter(RunCompleted.class::isInstance).map(RunCompleted.class::cast)
-            .findFirst().orElseThrow();
-        assertTrue(completed.planOpen(), "到达上限后仍未完成，要如实标出来");
-        assertEquals(List.of("跑回归测试"), completed.openSteps());
+        AgentLoop loop =
+            new AgentLoop(client, registry(), readOnlyGate(), new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 1));
+        AgentLoop.Result result = loop.run("继续", List.of(), events::add);
+        assertEquals(2, events.stream().filter(RunContinued.class::isInstance).count());
+        assertEquals("TASK_INCOMPLETE", result.failureCode());
+        assertTrue(result.finalText().contains("跑回归测试"));
+        assertFalse(events.stream().anyMatch(RunCompleted.class::isInstance));
     }
 
     /** 只读但属于「分析 / 梳理」的请求：工具用得太少时先自查一轮，别读两个文件就下结论。 */

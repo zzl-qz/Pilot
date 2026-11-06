@@ -1,8 +1,12 @@
 package com.pilot.core.loop;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -15,9 +19,11 @@ import java.util.stream.Collectors;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelRequestScope;
 import com.pilot.core.model.ModelResponse;
+import com.pilot.core.model.RequestBudget;
 import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.ToolCall;
+import com.pilot.core.tool.ToolCallJournal;
 
 /**
  * 上下文压缩，分四层，先做不花钱的，再动模型：
@@ -91,7 +97,7 @@ public final class ContextCompactor {
     private final ModelClient client;
     private final int minKeepGroups;
     private Supplier<List<ToolDefinition>> tools = List::of;
-    private IntSupplier contextLimit = () -> 0;
+    private IntSupplier contextLimit = () -> Integer.MAX_VALUE;
 
     public ContextCompactor withTools(Supplier<List<ToolDefinition>> value) {
         this.tools = value;
@@ -172,11 +178,20 @@ public final class ContextCompactor {
         }
 
         int end = groups.get(start)[0];
-        String transcript = transcript(messages, 1, end);
+        if (messages.subList(1, end).stream().anyMatch(message -> message.content().contains("[工具输出未归档"))) {
+            return Outcome.none(beforeChars);
+        }
+        String pins = ContextPins.capture(messages, end, sourceFingerprint(messages.subList(0, end)));
+        if (pins.length() > SUMMARY_INPUT_CHARS / 2) {
+            return Outcome.none(beforeChars);
+        }
+        String transcript = pins + "\n" + transcript(messages, 1, end);
         if (transcript.isBlank()) {
             return Outcome.none(beforeChars);
         }
 
+        List<Message> sourceSnapshot = List.copyOf(messages);
+        String sourceFingerprint = sourceFingerprint(sourceSnapshot);
         String summary;
         try {
             summary = summarize(messages, transcript);
@@ -187,6 +202,9 @@ public final class ContextCompactor {
         if (summary.isBlank()) {
             return Outcome.none(beforeChars);
         }
+        if (!sourceFingerprint(messages).equals(sourceFingerprint)) {
+            return Outcome.none(beforeChars);
+        }
         if (summary.length() > MAX_SUMMARY_CHARS) {
             summary = summary.substring(0, MAX_SUMMARY_CHARS) + "\n…（摘要过长已截断）";
         }
@@ -194,7 +212,7 @@ public final class ContextCompactor {
 
         int covered = end - 1;
         String head = header(covered);
-        String replacement = head + summary;
+        String replacement = head + summary + pins;
         int foldedChars = chars(messages, 1, end);
         int foldedTokens = tokens(messages, 1, end);
         double charGain = (foldedChars - replacement.length()) / (double)Math.max(1, targetChars);
@@ -217,6 +235,10 @@ public final class ContextCompactor {
      * @return 被替换的条数
      */
     public static int pruneToolOutputs(List<Message> messages, int limit) {
+        return pruneToolOutputs(messages, limit, observedPrefix(messages));
+    }
+
+    public static int pruneToolOutputs(List<Message> messages, int limit, int observedThroughIndex) {
         int keep = Math.max(1, (int)(limit * PRUNE_KEEP_RATIO));
         Map<String, String> calls = callIndex(messages);
         int seen = 0;
@@ -228,15 +250,64 @@ public final class ContextCompactor {
             }
             int length = message.content().length();
             seen += length;
-            if (seen <= keep || length < PRUNE_MIN_CHARS || message.content().startsWith(PRUNED_PREFIX)) {
+            // Only prune observations that the model has already seen. The newest tool result
+            // is appended after the previous request and must survive until the next request.
+            if (i >= Math.min(observedThroughIndex, messages.size()) || seen <= keep || length < PRUNE_MIN_CHARS
+                || message.content().startsWith(PRUNED_PREFIX) || message.content().contains("[工具输出未归档")) {
                 continue;
             }
             String target = calls.getOrDefault(message.toolCallId(), "工具");
-            messages.set(i,
-                Message.tool(message.toolCallId(), PRUNED_PREFIX + "：" + target + "，约 " + length + " 字符，需要时重新读取]"));
+            messages.set(i, Message.tool(message.toolCallId(),
+                PRUNED_PREFIX + "：" + target + "，约 " + length + " 字符]" + archiveReference(message.content())));
             pruned++;
         }
         return pruned;
+    }
+
+    /** 保留尾部整批调用、结果和图片，而不只是最后一条结果。 */
+    public static int observedPrefix(List<Message> messages) {
+        int end = messages.size();
+        while (end > 1 && messages.get(end - 1).isToolImages()) {
+            end--;
+        }
+        if (end > 1 && "tool".equals(messages.get(end - 1).role())) {
+            while (end > 1 && "tool".equals(messages.get(end - 1).role())) {
+                end--;
+            }
+            if (end > 1 && messages.get(end - 1).hasToolCalls()) {
+                end--;
+            }
+        }
+        return end;
+    }
+
+    private static String archiveReference(String text) {
+        int start = text.lastIndexOf("[工具输出存档 run_id=");
+        return start < 0 ? "（旧记录没有存档引用；不得重放有副作用的操作）" : "\n" + text.substring(start);
+    }
+
+    private static String sourceFingerprint(List<Message> messages) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (Message message : messages) {
+                digest.update(message.role().getBytes(StandardCharsets.UTF_8));
+                digest.update((byte)0);
+                digest.update(message.content().getBytes(StandardCharsets.UTF_8));
+                digest.update(String.valueOf(message.toolCallId()).getBytes(StandardCharsets.UTF_8));
+                digest.update(message.imagePositions().toString().getBytes(StandardCharsets.UTF_8));
+                digest.update((byte)0);
+                for (ToolCall call : message.toolCalls()) {
+                    digest.update(call.callId().getBytes(StandardCharsets.UTF_8));
+                    digest.update(ToolCallJournal.fingerprint(call).getBytes(StandardCharsets.UTF_8));
+                }
+                for (Attachment attachment : message.attachments()) {
+                    digest.update(attachment.path().getBytes(StandardCharsets.UTF_8));
+                }
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
     }
 
     /**
@@ -246,6 +317,10 @@ public final class ContextCompactor {
      * @return 被去掉图片的消息条数
      */
     public static int dropStaleToolImages(List<Message> messages, int keep) {
+        return dropStaleToolImages(messages, keep, observedPrefix(messages));
+    }
+
+    public static int dropStaleToolImages(List<Message> messages, int keep, int observedThrough) {
         int kept = 0;
         int dropped = 0;
         for (int i = messages.size() - 1; i >= 0; i--) {
@@ -253,7 +328,7 @@ public final class ContextCompactor {
             if (!message.isToolImages() || message.attachments().isEmpty()) {
                 continue;
             }
-            if (++kept <= Math.max(0, keep)) {
+            if (++kept <= Math.max(0, keep) || i >= observedThrough) {
                 continue;
             }
             String names = message.attachments().stream().map(Attachment::name).collect(Collectors.joining(", "));
@@ -270,14 +345,19 @@ public final class ContextCompactor {
      * @return 被截断的条数
      */
     public static int truncateLongToolOutputs(List<Message> messages) {
+        return truncateLongToolOutputs(messages, observedPrefix(messages));
+    }
+
+    public static int truncateLongToolOutputs(List<Message> messages, int observedThroughIndex) {
         int changed = 0;
-        for (int i = 0; i < messages.size(); i++) {
+        for (int i = 0; i < Math.min(messages.size(), observedThroughIndex); i++) {
             Message message = messages.get(i);
             if (!"tool".equals(message.role())) {
                 continue;
             }
             String content = message.content();
-            if (content.length() <= TRUNCATE_TRIGGER_CHARS || content.startsWith(PRUNED_PREFIX)) {
+            if (content.length() <= TRUNCATE_TRIGGER_CHARS || content.startsWith(PRUNED_PREFIX)
+                || content.contains("[工具输出未归档")) {
                 continue;
             }
             String trimmed = content.substring(0, TRUNCATE_HEAD_CHARS) + "\n" + TRUNCATE_MARK + "\n"
@@ -294,17 +374,24 @@ public final class ContextCompactor {
      * @return 被丢弃的消息条数
      */
     public static int dropOldestGroups(List<Message> messages, int limit) {
+        String pinnedState = ContextPins.capture(messages, messages.size(), sourceFingerprint(messages));
+        if (pinnedState.length() >= limit) {
+            return 0;
+        }
         int dropped = 0;
         LinkedHashMap<String, Attachment> pinnedAttachments = new LinkedHashMap<>();
         // 兜底上限：即使分组逻辑写错也不能把调用方卡死
         int guard = messages.size() + 1;
-        while (totalChars(messages) > limit && guard-- > 0) {
+        while (totalChars(messages) + pinnedState.length() + 80 > limit && guard-- > 0) {
             List<int[]> groups = groups(messages);
             if (groups.size() <= HARD_DROP_MIN_KEEP_GROUPS) {
                 break;
             }
             // 参数是 [start, end)：要删的是第一组本体，取它的结束下标，别取开始下标
             int end = groups.get(0)[1];
+            if (messages.subList(1, end).stream().anyMatch(message -> message.content().contains("[工具输出未归档"))) {
+                break;
+            }
             for (Attachment attachment : attachments(messages, 1, end)) {
                 pinnedAttachments.putIfAbsent(attachment.path(), attachment);
             }
@@ -312,8 +399,8 @@ public final class ContextCompactor {
             messages.subList(1, end).clear();
         }
         if (dropped > 0) {
-            messages.add(1,
-                Message.user("[更早的 " + dropped + " 条消息已因上下文超限丢弃]", List.copyOf(pinnedAttachments.values())));
+            messages.add(1, Message.user("[更早的 " + dropped + " 条消息已因上下文超限丢弃]" + pinnedState,
+                List.copyOf(pinnedAttachments.values())));
         }
         return dropped;
     }
@@ -379,8 +466,12 @@ public final class ContextCompactor {
             List<Message> request = new ArrayList<>(history);
             request.add(Message.user(instruction));
             try {
-                ModelResponse response = ModelRequestScope.within("compaction", null, true,
-                    () -> client.chat(List.copyOf(request), definitions));
+                if (!RequestBudget.assessRequest(request, definitions, contextLimit.getAsInt()).fits()) {
+                    throw new IllegalArgumentException("摘要请求超过安全预算");
+                }
+                List<Message> admittedRequest = List.copyOf(request);
+                ModelResponse response =
+                    ModelRequestScope.within("compaction", null, true, () -> client.chat(admittedRequest, definitions));
                 if (response.toolCalls().isEmpty() && response.content() != null && !response.content().isBlank()) {
                     return response.content().strip();
                 }
@@ -391,6 +482,9 @@ public final class ContextCompactor {
             }
         }
         List<Message> request = List.of(Message.system(SUMMARY_PROMPT), Message.user(transcript));
+        if (!RequestBudget.assessRequest(request, List.of(), contextLimit.getAsInt()).fits()) {
+            return "";
+        }
         ModelResponse response =
             ModelRequestScope.within("compaction", null, true, () -> client.chat(request, List.of()));
         if (!response.toolCalls().isEmpty()) {

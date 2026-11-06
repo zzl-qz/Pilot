@@ -30,7 +30,7 @@ import com.pilot.core.workspace.PathValidator;
  * 并查看控制台与网络记录。每个 Pilot 会话一个独立的浏览器上下文。
  *
  * <p>能力随运行时握手声明（{@link #availability()}）：浏览器没装或没起来时模型根本看不到这个工具。
- * 只允许打开回环地址；上传的文件必须在工作区内。
+ * 默认打开回环地址；公开 HTTPS 站点需 external=true 并逐次确认。上传的文件必须在工作区内。
  *
  * <p>权限按动作区分：看（导航 / 快照 / 截图 / 控制台 / 网络 / 等待）视为只读；
  * 点击、输入、选择、上传是本机交互（{@link LocalInteraction}），READ_ONLY 拒绝、ASK 审批、AUTO_EDIT 放行；
@@ -78,7 +78,11 @@ public final class BrowserTool implements Tool, LocalInteraction {
         properties.put("action", Map.of("type", "string", "enum", ACTIONS, "description",
             "要执行的动作；先 navigate，再 snapshot 取得元素 ref，之后用 ref 操作"));
         properties.put("url",
-            Map.of("type", "string", "description", "navigate 的地址，只能是 http(s)://localhost、127.0.0.1 或 [::1]"));
+            Map.of("type", "string", "description", "navigate 地址：默认回环；外网公开 HTTPS 需 external=true 和 purpose"));
+        properties.put("external",
+            Map.of("type", "boolean", "description", "外网站点导航/操作必须设 true；每次操作都需用户即时确认，普通本机动作不能绕过"));
+        properties.put("expected_url", Map.of("type", "string", "description", "外网交互的当前完整页面 URL，审批后页面变化则拒绝执行"));
+        properties.put("purpose", Map.of("type", "string", "description", "外网操作的目标、最终提交内容和影响；提交申请/发送前明确列出对象与内容"));
         properties.put("ref",
             Map.of("type", "string", "description", "元素引用，形如 e3，来自最近一次 snapshot；页面变化后旧 ref 可能失效，需要重新 snapshot"));
         properties.put("selector", Map.of("type", "string", "description", "ref 之外的备选：CSS 选择器（取第一个匹配）"));
@@ -122,6 +126,17 @@ public final class BrowserTool implements Tool, LocalInteraction {
     @Override
     public Availability availability() {
         return backend.availability();
+    }
+
+    @Override
+    public boolean confirm(Map<String, Object> args) {
+        return args != null && (Boolean.TRUE.equals(args.get("external")) || "evaluate".equals(action(args)));
+    }
+
+    @Override
+    public String approvalDescription(Map<String, Object> args) {
+        return "浏览器动作只授权本次调用。请核对目标页面、元素、最终文本和影响：\n"
+            + new tools.jackson.databind.ObjectMapper().writeValueAsString(args);
     }
 
     @Override
@@ -180,13 +195,24 @@ public final class BrowserTool implements Tool, LocalInteraction {
 
     /** 校验并拼装 sidecar 命令；返回非空表示参数错误。 */
     private String build(String action, Map<String, Object> args, Map<String, Object> command) {
+        if (Boolean.TRUE.equals(args.get("external"))) {
+            String purpose = ToolSupport.stringArg(args, "purpose");
+            if (purpose == null) {
+                return "外网操作需要 purpose 说明目标、最终内容和影响";
+            }
+            if (!"navigate".equals(action) && ToolSupport.stringArg(args, "expected_url") == null) {
+                return "外网交互需要 expected_url 绑定审批时的页面";
+            }
+            command.put("approvedExternal", true);
+            copy(args, command, "expected_url");
+        }
         switch (action) {
             case "navigate" -> {
                 String url = ToolSupport.stringArg(args, "url");
                 if (url == null) {
                     return "navigate 需要 url";
                 }
-                String problem = checkUrl(url);
+                String problem = Boolean.TRUE.equals(args.get("external")) ? checkExternalUrl(url) : checkUrl(url);
                 if (problem != null) {
                     return problem;
                 }
@@ -395,6 +421,23 @@ public final class BrowserTool implements Tool, LocalInteraction {
             return "browser 只能打开本机地址（localhost / 127.0.0.1 / [::1]）: " + url + "；外部网页内容请用 web_fetch";
         }
         return null;
+    }
+
+    static String checkExternalUrl(String value) {
+        try {
+            URI uri = new URI(value);
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null) {
+                return "外网仅支持无用户名/密码的 HTTPS 地址";
+            }
+            String host = uri.getHost().toLowerCase(Locale.ROOT);
+            if (host.equals("localhost") || host.endsWith(".localhost") || host.matches("[0-9.]+")
+                || host.contains(":")) {
+                return "外网流程不接受本机或 IP 地址；请使用公开 HTTPS 域名";
+            }
+            return null;
+        } catch (URISyntaxException e) {
+            return "外网 URL 无效";
+        }
     }
 
     private static Duration timeout(String action, Map<String, Object> args) {

@@ -1131,6 +1131,7 @@ function CapabilitiesPanel() {
   const tools = useMemo(() => (Array.isArray(data?.tools) ? [...data.tools] : [])
     .sort((a, b) => Number(b.available) - Number(a.available) || String(a.name).localeCompare(String(b.name))), [data]);
   const servers = Array.isArray(data?.mcpServers) ? data.mcpServers : [];
+  const localCapabilities = Array.isArray(data?.localCapabilities) ? data.localCapabilities : [];
   const available = tools.filter((tool) => tool.available).length;
 
   if (!sessionId) {
@@ -1171,6 +1172,28 @@ function CapabilitiesPanel() {
               ))}
             </ul>
           ) : <p className="panel-empty">没有注册任何工具。</p>}
+        </section>
+        <section className="cap-section">
+          <h3>本机资源<span className="cap-count">{localCapabilities.filter((item) => item.available).length} / {localCapabilities.length}</span></h3>
+          <p className="cap-desc">只检查已存在的程序，不会启动、下载或安装。需要补充环境时，先确认任务是否有可用替代方案。</p>
+          {localCapabilities.length ? (
+            <ul className="cap-list">
+              {localCapabilities.map((item) => (
+                <li key={item.id} className={`cap-item${item.available ? '' : ' is-off'}`}>
+                  <div className="cap-item-head">
+                    <span className="cap-name">{item.name}</span>
+                    <span className={`cap-tag${item.available ? ' is-on' : ' is-off'}`}>{item.available ? '已发现' : '未发现'}</span>
+                  </div>
+                  <p className="cap-desc">{item.purpose}</p>
+                  {item.available ? (
+                    <p className="cap-desc cap-mono" title={item.executable}>{item.executable}</p>
+                  ) : (
+                    <p className="cap-reason">{item.preparationAdvice}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : <p className="panel-empty">本机资源清单尚未加载。</p>}
         </section>
         <section className="cap-section">
           <h3>MCP 服务器<span className="cap-count">{servers.length}</span></h3>

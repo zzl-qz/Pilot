@@ -23,6 +23,7 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
+import com.pilot.server.capability.LocalCapabilityService;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.ModelSettings;
 import com.pilot.server.config.PermissionSettings;
@@ -47,10 +48,12 @@ public class CapabilitiesController {
     private final ObjectProvider<ToolRegistry> toolRegistry;
     private final ObjectProvider<WorkspaceToolFactory> toolFactory;
     private final ObjectProvider<McpManager> mcpManager;
+    private final LocalCapabilityService localCapabilities;
 
     public CapabilitiesController(SessionService sessions, AgentProperties agentProperties,
         PermissionSettings permissionSettings, ModelSettings modelSettings, ObjectProvider<ToolRegistry> toolRegistry,
-        ObjectProvider<WorkspaceToolFactory> toolFactory, ObjectProvider<McpManager> mcpManager) {
+        ObjectProvider<WorkspaceToolFactory> toolFactory, ObjectProvider<McpManager> mcpManager,
+        LocalCapabilityService localCapabilities) {
         this.sessions = sessions;
         this.agentProperties = agentProperties;
         this.permissionSettings = permissionSettings;
@@ -58,6 +61,7 @@ public class CapabilitiesController {
         this.toolRegistry = toolRegistry;
         this.toolFactory = toolFactory;
         this.mcpManager = mcpManager;
+        this.localCapabilities = localCapabilities;
     }
 
     @GetMapping("/capabilities")
@@ -69,7 +73,7 @@ public class CapabilitiesController {
         Path root = Path.of(workspace);
 
         return new CapabilitiesResponse(root.toString(), modelSettings.snapshot().model(),
-            permissionSettings.mode().name(), tools(id, workspace), servers(root));
+            permissionSettings.mode().name(), tools(id, workspace), servers(root), localCapabilities.discover());
     }
 
     /**
@@ -171,6 +175,6 @@ public class CapabilitiesController {
     }
 
     public record CapabilitiesResponse(String workspace, String model, String permissionMode, List<ToolPayload> tools,
-        List<McpServerPayload> mcpServers) {
+        List<McpServerPayload> mcpServers, List<LocalCapabilityService.LocalCapability> localCapabilities) {
     }
 }
