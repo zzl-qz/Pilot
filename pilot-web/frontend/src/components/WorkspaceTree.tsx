@@ -1,11 +1,16 @@
+import type { SessionFilesControllerEntry } from '../types/server.js';
+import { errorInfo } from '../lib/errors.js';
+type TreeEntry = SessionFilesControllerEntry & { type?: string };
+interface DirectoryData { entries: TreeEntry[]; status: string; error?: string; truncated?: boolean }
+interface TreeContext { sessionId: string | null; workspace: string; revision: number; focused: React.MutableRefObject<string | null>; previewPath: string; refresh: () => void; ensureFocus: () => void }
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
 import { FileIcon, Icon } from './Icon.jsx';
 
 // 每个目录独立加载，折叠目录不请求。工作区切换/刷新时丢弃旧响应。
-function useDirectory(sessionId, workspace, path, enabled, revision) {
-  const [data, setData] = useState({ entries: [], status: 'loading' });
+function useDirectory(sessionId: string | null, workspace: string, path: string, enabled: boolean, revision: number) {
+  const [data, setData] = useState<DirectoryData>({ entries: [], status: 'loading' });
   useEffect(() => {
     if (!enabled) return;
     let current = true;
@@ -14,7 +19,7 @@ function useDirectory(sessionId, workspace, path, enabled, revision) {
     request.then(result => {
       if (current) setData({ entries: result?.entries || [], truncated: result?.truncated, status: 'ready' });
     }).catch(error => {
-      if (current) setData(previous => ({ ...previous, status: 'error', error: error.message }));
+      if (current) setData(previous => ({ ...previous, status: 'error', error: errorInfo(error).message }));
     });
     return () => { current = false; };
   }, [sessionId, workspace, path, enabled, revision]);
@@ -27,28 +32,29 @@ export function WorkspaceTree() {
   return <WorkspaceFiles key={`${sessionId || ''}:${workspace}`} sessionId={sessionId} workspace={workspace} />;
 }
 
-function WorkspaceFiles({ sessionId, workspace }) {
+function WorkspaceFiles({ sessionId, workspace }: { sessionId: string | null; workspace: string }) {
   const [open, setOpen] = useState(true);
   const [localRevision, setRevision] = useState(0);
   const syncRevision = useStore(state => state.ui.filesRevision || 0);
   const revision = localRevision + syncRevision;
-  const focused = useRef(null);
+  const focused = useRef<string | null>(null);
   const previewPath = useStore(state => state.ui.previewPath);
-  const root = useRef(null);
+  const root = useRef<HTMLDivElement>(null);
   const typeahead = useRef({ text: '', time: 0 });
   const data = useDirectory(sessionId, workspace, '', open && !!workspace, revision);
   const refresh = () => setRevision(value => value + 1);
   const ensureFocus = useCallback(() => {
-    const rows = [...(root.current?.querySelectorAll('[role="treeitem"]') || [])];
+    const rows = [...(root.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') || [])];
     const active = rows.find(row => row.dataset.path === focused.current) || rows[0];
     focused.current = active?.dataset.path || null;
     for (const row of rows) row.tabIndex = row === active ? 0 : -1;
   }, []);
 
-  function onKeyDown(event) {
-    const row = event.target.closest('[role="treeitem"]');
+  function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (!(event.target instanceof Element) || !root.current) return;
+    const row = event.target.closest<HTMLElement>('[role="treeitem"]');
     if (!row) return;
-    const rows = [...root.current.querySelectorAll('[role="treeitem"]')].filter(item => item.getClientRects().length);
+    const rows = [...root.current.querySelectorAll<HTMLElement>('[role="treeitem"]')].filter(item => item.getClientRects().length);
     const index = rows.indexOf(row);
     let next;
     if (event.key === 'ArrowDown') next = rows[Math.min(index + 1, rows.length - 1)];
@@ -64,7 +70,7 @@ function WorkspaceFiles({ sessionId, workspace }) {
     } else if (event.key.length === 1 && event.key !== ' ' && !event.metaKey && !event.ctrlKey && !event.altKey) {
       const now = Date.now();
       typeahead.current = { text: (now - typeahead.current.time < 650 ? typeahead.current.text : '') + event.key.toLowerCase(), time: now };
-      next = [...rows.slice(index + 1), ...rows.slice(0, index + 1)].find(item => item.dataset.name.toLowerCase().startsWith(typeahead.current.text));
+      next = [...rows.slice(index + 1), ...rows.slice(0, index + 1)].find(item => (item.dataset.name || '').toLowerCase().startsWith(typeahead.current.text));
     } else return;
     event.preventDefault();
     next?.focus();
@@ -85,7 +91,7 @@ function WorkspaceFiles({ sessionId, workspace }) {
   </section>;
 }
 
-function TreeEntries({ data, context, parent, depth, groupId }) {
+function TreeEntries({ data, context, parent, depth, groupId }: { data: DirectoryData; context: TreeContext; parent: string; depth: number; groupId?: string }) {
   useLayoutEffect(() => { context.ensureFocus(); }, [data, context.ensureFocus]);
   return <>
     {!!data.entries.length && <ul id={groupId} className="file-tree-list" role={depth === 1 ? 'none' : 'group'}>
@@ -98,7 +104,7 @@ function TreeEntries({ data, context, parent, depth, groupId }) {
   </>;
 }
 
-function TreeNode({ entry, context, parent, depth, first }) {
+function TreeNode({ entry, context, parent, depth, first }: { entry: TreeEntry; context: TreeContext; parent: string; depth: number; first: boolean }) {
   const [open, setOpen] = useState(false);
   const groupId = useId();
   const directory = entry.directory || entry.type === 'dir';

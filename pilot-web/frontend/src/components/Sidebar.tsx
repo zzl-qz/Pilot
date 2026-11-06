@@ -1,3 +1,7 @@
+import type { SessionSummary } from '../types/core.js';
+import type { SessionMenuAnchor } from './SessionMenu.jsx';
+type MenuHandler = (session: SessionSummary, anchor: SessionMenuAnchor) => void;
+type SessionProps = { session: SessionSummary; activeId: string | null; onMenu: MenuHandler; menuId?: string };
 import { shortcut } from '../lib/interaction.js';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store.js';
@@ -17,9 +21,9 @@ export function Sidebar() {
   const sidebarOpen = useStore((state) => state.ui.sidebarOpen);
   const sideChats = useStore((state) => state.sideChats);
   const [query, setQuery] = useState('');
-  const [menu, setMenu] = useState(null);
+  const [menu, setMenu] = useState<(SessionMenuAnchor & { id: string }) | null>(null);
   const menuSession = menu && sessions.find(session => session.id === menu.id);
-  const [collapsed, setCollapsed] = useState(() => new Set());
+  const [collapsed, setCollapsed] = useState(() => new Set<string>());
   useEffect(() => { if (!sidebarOpen) setMenu(null); }, [sidebarOpen]);
 
   // 侧边对话属于当前任务：换任务后这里只列出那条任务的，跨项目也不会串台
@@ -39,7 +43,7 @@ export function Sidebar() {
     return q ? grouped.filter(group => group.active.length || group.archived.length) : grouped;
   }, [sessions, projects, query, sideIds]);
 
-  function toggleProject(key) {
+  function toggleProject(key: string) {
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key); else next.add(key);
@@ -142,12 +146,12 @@ export function Sidebar() {
           {workspace ? workspace.split(/[\\/]/).filter(Boolean).pop() : ''}
         </button>
       </div>
-      {menuSession && <SessionMenu key={menu.id} session={menuSession} anchor={menu} onClose={() => setMenu(null)} />}
+      {menu && menuSession && <SessionMenu key={menu.id} session={menuSession} anchor={menu} onClose={() => setMenu(null)} />}
     </aside>
   );
 }
 
-function ProjectGroup({ group, activeId, collapsed, onToggle, onMenu, menuId }) {
+function ProjectGroup({ group, activeId, collapsed, onToggle, onMenu, menuId }: { group: ReturnType<typeof groupSessionsByProject>[number]; activeId: string | null; collapsed: boolean; onToggle: () => void; onMenu: MenuHandler; menuId?: string }) {
   // 空白对话（isBlank）是旧版「先建后聊」的遗留：新对话不再落库，这里也不再给它留位置
   const { project, active, archived } = group;
   const count = active.length;
@@ -224,12 +228,12 @@ function ProjectGroup({ group, activeId, collapsed, onToggle, onMenu, menuId }) 
   );
 }
 
-function SessionRow({ session, activeId, onMenu, menuId }) {
+function SessionRow({ session, activeId, onMenu, menuId }: SessionProps) {
   const blank = session.isBlank === true;
   const status = String(session.status || '').trim().toLowerCase();
   return (
     <li className={`session-row${session.unread ? ' is-unread' : ''}`} data-session-id={session.id}
-      onContextMenu={event => { event.preventDefault(); onMenu(session, {x:event.clientX,y:event.clientY,trigger:event.currentTarget.querySelector('.session-more')}); }}>
+      onContextMenu={event => { event.preventDefault(); onMenu(session, {x:event.clientX,y:event.clientY,trigger:event.currentTarget.querySelector<HTMLElement>('.session-more')}); }}>
       <button
         type="button"
         className={`session-item${session.id === activeId ? ' is-active' : ''}${blank ? ' is-blank' : ''}${session.archived ? ' is-archived' : ''}`}

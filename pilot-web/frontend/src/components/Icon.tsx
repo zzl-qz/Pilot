@@ -1,6 +1,6 @@
 import React from 'react';
 
-const paths = {
+const paths: Record<string, string> = {
   pin: 'm6 2 6 3-2 3v3l-3-1-3 2-1-3 3-2Z M5 11l-3 3',
   unread: 'M13 7a5 5 0 1 1-4-4 M14 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0',
   home: 'M2 7 8 2l6 5v7H9v-4H7v4H2Z',
@@ -36,11 +36,11 @@ const paths = {
   pulse: 'M1 8h3l2-5 4 10 2-5h3',
   info: 'M8 7v5 M8 4h.01 M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0',
 };
-export function Icon({ name, className = '' }) {
+export function Icon({ name, className = '' }: { name: string; className?: string }) {
   return <svg className={`ui-icon ${className}`} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name] || paths.file} /></svg>;
 }
 
-export function FileIcon({ name = '', directory, open }) {
+export function FileIcon({ name = '', directory, open }: { name?: string; directory?: boolean; open?: boolean }) {
   const icon = directory ? (open ? 'folderOpen' : 'folder') : /\.(png|jpe?g|gif|webp|svg|ico)$/i.test(name) ? 'image' : /\.(jsx?|tsx?|java|py|json|xml|html|css|sh|ya?ml)$/i.test(name) ? 'code' : 'file';
   return <Icon name={icon} className={`file-kind ${directory ? 'is-folder' : ''}`} />;
 }

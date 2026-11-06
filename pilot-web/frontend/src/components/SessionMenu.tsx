@@ -1,3 +1,6 @@
+import type { SessionSummary } from '../types/core.js';
+import { errorInfo } from '../lib/errors.js';
+export interface SessionMenuAnchor { x: number; y: number; trigger: HTMLElement | null }
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '../store.js';
@@ -7,15 +10,15 @@ import { writeClipboard } from '../lib/clipboard.js';
 import { restoreFocus } from '../lib/interaction.js';
 
 /** 所有操作绑定打开菜单时的会话，不随当前对话切换而误改其它会话。 */
-export function SessionMenu({ session, anchor, onClose }) {
-  const menu = useRef(null);
+export function SessionMenu({ session, anchor, onClose }: { session: SessionSummary; anchor: SessionMenuAnchor; onClose: () => void }) {
+  const menu = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(session.title || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copyFallback, setCopyFallback] = useState('');
   const mounted = useRef(true);
-  const [position, setPosition] = useState(null);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   const previous = useRef(anchor.trigger);
@@ -36,25 +39,26 @@ export function SessionMenu({ session, anchor, onClose }) {
 
   useEffect(() => {
     if (editing || !position) return;
-    menu.current?.querySelector('[role="menuitem"]')?.focus();
+    menu.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }, [editing, Boolean(position)]);
 
   useEffect(() => {
     if (editing) return;
-    const key = event => {
+    const key = (event: KeyboardEvent) => {
       if (event.isComposing) return;
       if (event.key === 'Escape' || event.key === 'Tab') {
         event.preventDefault(); event.stopImmediatePropagation(); closeRef.current(); return;
       }
       if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault(); event.stopImmediatePropagation();
-      const items = [...menu.current.querySelectorAll('[role="menuitem"]:not(:disabled)')];
-      const index = items.indexOf(document.activeElement);
+      const items = [...(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') || [])];
+      const index = items.findIndex(item => item === document.activeElement);
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
         : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
       items[next]?.focus();
     };
-    const outside = event => {
+    const outside = (event: PointerEvent) => {
+      if (!(event.target instanceof Element)) return;
       if (!menu.current?.contains(event.target) && !event.target.closest('.session-more')) closeRef.current();
     };
     document.addEventListener('keydown', key, true);
@@ -65,7 +69,7 @@ export function SessionMenu({ session, anchor, onClose }) {
     };
   }, [editing]);
 
-  async function perform(action) {
+  async function perform(action: () => unknown | Promise<unknown>) {
     if (busy) return;
     setBusy(true); setError('');
     try {
@@ -73,12 +77,12 @@ export function SessionMenu({ session, anchor, onClose }) {
       if (!mounted.current) return;
       if (result === false) { setError('操作未成功，请重试。'); return; }
       onClose();
-    } catch (failure) { if (mounted.current) setError(failure.message || '操作失败，请重试。'); }
+    } catch (failure) { if (mounted.current) setError(errorInfo(failure).message || '操作失败，请重试。'); }
     finally { if (mounted.current) setBusy(false); }
   }
-  async function copy(value) {
+  async function copy(value: string | undefined) {
     if (!await writeClipboard(value)) {
-      if (mounted.current) setCopyFallback(value);
+      if (mounted.current) setCopyFallback(value || '');
       throw new Error('剪贴板不可用，请选中下方内容手动复制。');
     }
     useStore.getState().showNotice('已复制');
@@ -104,7 +108,7 @@ export function SessionMenu({ session, anchor, onClose }) {
     </form>
   </Modal>, document.body);
 
-  const item = (name, icon, action, danger = false) => <button type="button" role="menuitem" disabled={busy}
+  const item = (name: string, icon: string, action: () => void, danger = false) => <button type="button" role="menuitem" disabled={busy}
     className={danger ? 'is-danger' : ''} onClick={action}><Icon name={icon} /><span>{name}</span></button>;
   return createPortal(<div ref={menu} className="session-menu" role="menu" aria-label="对话操作"
     style={position || { visibility: 'hidden' }}>

@@ -273,8 +273,13 @@
         "焦点/键盘/IME",
         "主题/390-768-1440 视口"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T08-27-54-936Z/report.json",
+          "result": "373 项前端单元、41 项桌面单元、类型检查、构建及 navigation/composer/interaction/session-management/notification/results/workbench-style 七套 Web/Electron 回归通过。新增通知授权拒绝、保存失败草稿、投递回执、结果跳转、加载重试、局部渲染错误恢复测试先在旧 JS、再在 TS 通过；模拟系统通知，不宣称实机通知服务投递。"
+        }
+      ]
     },
     {
       "batch": 10,

@@ -1,4 +1,5 @@
 import React from 'react';
+import type { UiState } from '../types/store.js';
 import { useStore } from '../store.js';
 import { shortcut } from '../lib/interaction.js';
 import { Icon } from './Icon.jsx';
@@ -7,7 +8,7 @@ import { Icon } from './Icon.jsx';
 export function NavigationRail() {
   const ui = useStore(state => state.ui);
   const unread = ui.resultUnread || 0;
-  const open = patch => useStore.getState().setUi(patch);
+  const open = (patch: Partial<UiState>) => useStore.getState().setUi(patch);
   return <nav className="navigation-rail" aria-label="全局功能">
     <div className="navigation-rail-group">
       <RailButton id="nav-projects" icon="home" label="项目与对话" active={ui.sidebarOpen}
@@ -32,7 +33,7 @@ export function NavigationRail() {
   </nav>;
 }
 
-function RailButton({ id, icon, label, hint, active, count = 0, onClick }) {
+function RailButton({ id, icon, label, hint, active, count = 0, onClick }: { id?: string; icon: string; label: string; hint?: string; active?: boolean; count?: number; onClick: () => void }) {
   const description = `${label}${count > 0 ? ` · ${count} 条未读` : ''}${hint ? ` (${hint})` : ''}`;
   return <button id={id} className={`rail-button${active ? ' is-active' : ''}`} type="button"
     aria-label={label} aria-pressed={active} title={description} onClick={onClick}>

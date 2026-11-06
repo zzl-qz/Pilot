@@ -196,6 +196,7 @@ function ConfirmDialog() {
   );
 }
 
+/** @param {{ id: string, title: import('react').ReactNode, onClose: () => void, children: import('react').ReactNode, wide?: boolean }} props */
 export function Modal({ id, title, onClose, children, wide }) {
   const container = useRef(null);
   const close = useRef(onClose);
