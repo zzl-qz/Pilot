@@ -1,4 +1,5 @@
 import { installMicrophonePermissions } from './media-permission.mjs';
+import { workbenchOrigin, workbenchIpc, installWorkbenchNavigation } from './workbench-security.mjs';
 import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, nativeImage, systemPreferences, dialog, clipboard } from 'electron';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
@@ -13,6 +14,8 @@ import { windowSizeMenuItem, workbenchMenuItems, workbenchShortcut } from './pla
 
 const here = dirname(fileURLToPath(import.meta.url));
 const smoke = process.env.PILOT_DESKTOP_SMOKE === '1';
+const workbenchUrl = process.env.PILOT_URL || 'http://127.0.0.1:9999';
+const origin = workbenchOrigin(workbenchUrl);
 app.setName('Pilot');
 process.on('uncaughtException', (error) => {
   process.stderr.write('uncaught: ' + (error && error.stack || error) + '\n');
@@ -54,8 +57,10 @@ const tabsByContentsId = new Map();
 let pageHooksReady = false;
 
 function shellUrl() {
-  return process.env.PILOT_URL || 'http://127.0.0.1:9999';
+  return workbenchUrl;
 }
+
+const workbench = workbenchIpc(ipcMain, () => shell, workbenchUrl);
 
 function activeTab() {
   return tabs.get(activeId) || null;
@@ -151,7 +156,7 @@ function rememberRecent(contents) {
 
 function broadcast() {
   if (shell && !shell.isDestroyed()) {
-    shell.webContents.send('pilot-browser-state', state());
+    workbench.send('pilot-browser-state', state());
   }
 }
 
@@ -209,7 +214,7 @@ function hookPageSession(ses) {
     };
     pushLog(tab.network, entry);
     if (shell && !shell.isDestroyed() && tab.id === activeId) {
-      shell.webContents.send('pilot-browser-log', { network: true, line: formatPageLogs([entry], 'network') });
+      workbench.send('pilot-browser-log', { network: true, line: formatPageLogs([entry], 'network') });
     }
   };
   ses.webRequest.onCompleted(note);
@@ -221,7 +226,7 @@ function hookPageSession(ses) {
     item.setSavePath(join(dir, `${Date.now()}-${name}`));
     item.once('done', (_done, state) => {
       if (shell && !shell.isDestroyed()) {
-        shell.webContents.send('pilot-browser-download', { state, name, path: item.getSavePath() });
+        workbench.send('pilot-browser-download', { state, name, path: item.getSavePath() });
       }
     });
   });
@@ -258,7 +263,7 @@ function wire(tab) {
       {
         label: '加进输入框',
         enabled: Boolean(params.selectionText),
-        click: () => shell?.webContents.send('pilot-browser-quote', String(params.selectionText || '').slice(0, 4000))
+        click: () => workbench.send('pilot-browser-quote', String(params.selectionText || '').slice(0, 4000))
       },
       { type: 'separator' },
       { label: '复制', role: 'copy', enabled: params.editFlags.canCopy },
@@ -277,7 +282,7 @@ function wire(tab) {
     };
     pushLog(tab.console, entry);
     if (shell && !shell.isDestroyed() && tab.id === activeId) {
-      shell.webContents.send('pilot-browser-log', { network: false, line: formatPageLogs([entry], 'console') });
+      workbench.send('pilot-browser-log', { network: false, line: formatPageLogs([entry], 'console') });
     }
   });
   contents.setWindowOpenHandler(({ url }) => {
@@ -292,7 +297,7 @@ function wire(tab) {
     if (!mod || input.type !== 'keyDown') return;
     if (key === 'l') {
       event.preventDefault();
-      shell?.webContents.send('pilot-browser-focus-address');
+      workbench.send('pilot-browser-focus-address');
     } else if (key === 't') {
       event.preventDefault();
       createTab({ url: null, sessionId: null });
@@ -559,18 +564,18 @@ function clearEndpoint() {
   if (endpointFile) rmSync(endpointFile, { force: true });
 }
 
-ipcMain.handle('pilot-browser-ensure', (_event, sessionId) => {
+workbench.handle('pilot-browser-ensure', (_event, sessionId) => {
   ensureTab(sessionId || null);
   return state();
 });
-ipcMain.handle('pilot-browser-navigate', (_event, url) => {
+workbench.handle('pilot-browser-navigate', (_event, url) => {
   const tab = activeTab() || createTab({ url: null, sessionId: null });
   const next = userPageUrl(url);
   if (!next) return { ok: false, error: '地址无效' };
   tab.view.webContents.loadURL(next);
   return { ok: true, url: next };
 });
-ipcMain.handle('pilot-browser-go', (_event, action) => {
+workbench.handle('pilot-browser-go', (_event, action) => {
   const contents = activeTab()?.view.webContents;
   if (!contents) return { ok: false };
   const history = contents.navigationHistory;
@@ -585,45 +590,46 @@ ipcMain.handle('pilot-browser-go', (_event, action) => {
   else if (action === 'stop') contents.stop();
   return { ok: true };
 });
-ipcMain.handle('pilot-browser-new', () => {
+workbench.handle('pilot-browser-new', () => {
   createTab({ url: null, sessionId: null });
   return state();
 });
-ipcMain.handle('pilot-browser-close', (_event, id) => {
+workbench.handle('pilot-browser-close', (_event, id) => {
   closeTab(id);
   return state();
 });
-ipcMain.handle('pilot-browser-select', (_event, id) => {
+workbench.handle('pilot-browser-select', (_event, id) => {
   selectTab(id);
   return state();
 });
-ipcMain.handle('pilot-browser-detach', () => {
+workbench.handle('pilot-browser-detach', () => {
   detachActive();
   return state();
 });
-ipcMain.handle('pilot-browser-menu', () => new Promise((resolve) => {
+workbench.handle('pilot-browser-menu', (event) => new Promise((resolve) => {
   let settled = false;
   const finish = (action) => {
     if (settled) return;
     settled = true;
     resolve(action);
   };
+  const choose = (action, effect) => { if (!workbench.trusted(event)) return finish(''); effect?.(); finish(action); };
   const menu = Menu.buildFromTemplate([
-    { label: '页内查找', click: () => finish('find') },
-    { label: '放大', click: () => { zoomBy(0.1); finish('zoom'); } },
-    { label: '缩小', click: () => { zoomBy(-0.1); finish('zoom'); } },
-    { label: '实际大小', click: () => { zoomBy(1 - (activeTab()?.view.webContents.getZoomFactor() || 1)); finish('zoom'); } },
+    { label: '页内查找', click: () => choose('find') },
+    { label: '放大', click: () => choose('zoom', () => zoomBy(0.1)) },
+    { label: '缩小', click: () => choose('zoom', () => zoomBy(-0.1)) },
+    { label: '实际大小', click: () => choose('zoom', () => zoomBy(1 - (activeTab()?.view.webContents.getZoomFactor() || 1))) },
     { type: 'separator' },
-    { label: '选择页面元素', click: () => finish('pick') },
-    { label: '在独立窗口打开', click: () => { detachActive(); finish('detach'); } },
-    { label: '开发工具', click: () => { activeTab()?.view.webContents.openDevTools({ mode: 'detach' }); finish('devtools'); } },
+    { label: '选择页面元素', click: () => choose('pick') },
+    { label: '在独立窗口打开', click: () => choose('detach', detachActive) },
+    { label: '开发工具', click: () => choose('devtools', () => activeTab()?.view.webContents.openDevTools({ mode: 'detach' })) },
     { type: 'separator' },
-    { label: '页面控制台', click: () => finish('console') },
-    { label: '网络记录', click: () => finish('network') }
+    { label: '页面控制台', click: () => choose('console') },
+    { label: '网络记录', click: () => choose('network') }
   ]);
   menu.popup({ callback: () => finish('') });
 }));
-ipcMain.handle('pilot-browser-find', (_event, text) => {
+workbench.handle('pilot-browser-find', (_event, text) => {
   const contents = activeTab()?.view.webContents;
   if (!contents || contents.isDestroyed()) return { ok: false };
   const query = String(text || '');
@@ -634,25 +640,25 @@ ipcMain.handle('pilot-browser-find', (_event, text) => {
   contents.findInPage(query);
   return { ok: true };
 });
-ipcMain.handle('pilot-browser-logs', (_event, network) => {
+workbench.handle('pilot-browser-logs', (_event, network) => {
   const tab = activeTab();
   if (!tab) return { ok: false, text: network ? '没有网络记录' : '没有控制台记录' };
   return { ok: true, text: formatPageLogs(network ? tab.network : tab.console, network ? 'network' : 'console') };
 });
-ipcMain.handle('pilot-browser-devtools', () => {
+workbench.handle('pilot-browser-devtools', () => {
   activeTab()?.view.webContents.openDevTools({ mode: 'detach' });
   return { ok: true };
 });
-ipcMain.handle('pilot-browser-pick', () => {
+workbench.handle('pilot-browser-pick', () => {
   const tab = activeTab();
   if (!tab) return { ok: false, error: '没有打开的页面' };
   return pickElement(tab).then((text) => ({ ok: true, text })).catch((error) => ({ ok: false, error: String(error.message || error) }));
 });
-ipcMain.handle('pilot-browser-reset-emulation', () => {
+workbench.handle('pilot-browser-reset-emulation', () => {
   emulate(activeTab(), 0, 0);
   return state();
 });
-ipcMain.on('pilot-browser-bounds', (_event, bounds) => {
+workbench.on('pilot-browser-bounds', (_event, bounds) => {
   const tab = activeTab();
   if (!tab || !shell || shell.isDestroyed()) return;
   const zoom = shell.webContents.getZoomFactor() || 1;
@@ -675,7 +681,7 @@ ipcMain.on('pilot-browser-bounds', (_event, bounds) => {
   };
   place(tab);
 });
-ipcMain.on('pilot-browser-workspace', (_event, value) => {
+workbench.on('pilot-browser-workspace', (_event, value) => {
   workspace = String(value || '');
 });
 
@@ -689,8 +695,8 @@ function appIcon() {
 let workbenchReady = false;
 function dispatchWorkbenchCommand(command) {
   if (!shell || shell.isDestroyed()) return;
-  if (workbenchReady) shell.webContents.send('pilot-workbench-command', command);
-  else if (shell.webContents.getURL().startsWith('data:')) shell.loadURL(shellUrl()).catch(() => {});
+  if (workbenchReady && workbench.current()) workbench.send('pilot-workbench-command', command);
+  else if (!workbench.current()) shell.loadURL(shellUrl()).catch(() => {});
   else shell.webContents.reloadIgnoringCache();
 }
 function installWorkbenchKeys(contents) {
@@ -707,32 +713,22 @@ function installWorkbenchKeys(contents) {
 async function openMobileConnection() {
   if (!shell || shell.isDestroyed()) throw new Error('请先打开 Pilot 工作台');
   shell.show(); shell.focus();
-  shell.webContents.send('pilot-mobile-open');
+  if (!workbench.send('pilot-mobile-open')) throw new Error('请先连接 Pilot 工作台，再打开手机连接');
 }
 
-function trustedWorkbench(event) {
-  try {
-    return shell && !shell.isDestroyed() && event.sender === shell.webContents
-      && event.senderFrame === shell.webContents.mainFrame
-      && new URL(event.senderFrame.url).origin === new URL(shellUrl()).origin;
-  } catch { return false; }
-}
-
-ipcMain.on('pilot-workbench-ready', event => { if (trustedWorkbench(event)) workbenchReady = true; });
-ipcMain.handle('pilot-workbench-reload', event => {
-  if (!trustedWorkbench(event)) return { ok: false, error: '请从 Pilot 工作台重新载入界面' };
+workbench.on('pilot-workbench-ready', () => { workbenchReady = true; });
+workbench.handle('pilot-workbench-reload', event => {
   shell.webContents.reloadIgnoringCache();
   return { ok: true };
 });
 
-ipcMain.handle('pilot-mobile-open', async event => {
-  if (!trustedWorkbench(event)) return { ok: false, error: '请从 Pilot 工作台打开手机连接。' };
+workbench.handle('pilot-mobile-open', async event => {
   await openMobileConnection();
   return { ok: true };
 });
 
-ipcMain.handle('pilot-mobile-copy', async (event, code) => {
-  if (!trustedWorkbench(event) || typeof code !== 'string' || !/^pilot:\/\/pair\/[A-Za-z0-9_-]{20,8192}$/.test(code)) {
+workbench.handle('pilot-mobile-copy', async (event, code) => {
+  if (typeof code !== 'string' || !/^pilot:\/\/pair\/[A-Za-z0-9_-]{20,8192}$/.test(code)) {
     return { ok: false };
   }
   try {
@@ -820,11 +816,17 @@ app.whenReady().then(async () => {
       preload: join(here, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      additionalArguments: [`--pilot-workbench-origin=${origin}`]
     }
   });
+  installWorkbenchNavigation(shell.webContents, workbenchUrl, {
+    // 等取消导航生效后再检查当前文档，避免将候选 URL 当成已提交页面。
+    openPage: url => setImmediate(() => workbench.send('pilot-browser-open', url)),
+    notify: message => setImmediate(() => workbench.send('pilot-navigation-notice', message))
+  });
   installWorkbenchKeys(shell.webContents);
-  shell.webContents.on('did-start-navigation', (_event, _url, _inPlace, mainFrame) => { if (mainFrame) workbenchReady = false; });
+  shell.webContents.on('did-navigate', () => { workbenchReady = false; });
   installMicrophonePermissions(shell.webContents, shellUrl(), systemPreferences);
   shell.webContents.on('did-fail-load', (_event, code, _desc, _url, isMainFrame) => {
     if (!isMainFrame || code === -3 || smoke || _url?.startsWith('data:')) return;

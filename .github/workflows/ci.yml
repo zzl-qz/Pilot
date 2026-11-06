@@ -187,3 +187,58 @@ jobs:
             pilot-mobile/build/mobile-qa/**
             pilot-mobile/build/scanner-qa/**
             pilot-mobile/app/build/reports/**
+
+  desktop-host:
+    name: desktop host (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Build and test native connection components without Android SDK
+        run: node scripts/mobile.mjs test-bridge
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - name: Install desktop and UI test dependencies
+        run: |
+          npm --prefix pilot-desktop ci
+          npm --prefix pilot-web/frontend ci
+      - name: Build isolated backend fixture
+        shell: bash
+        run: sh mvnw -B -ntp -pl pilot-server -am -DskipTests package
+      - name: Prepare Linux display dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0 libnss3 libgbm1 libasound2t64
+          sudo chown root:root pilot-desktop/node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 pilot-desktop/node_modules/electron/dist/chrome-sandbox
+      - name: Verify actual Linux GUI process, native libraries and recovery
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node scripts/verify-desktop-host.mjs
+      - name: Verify actual Windows or macOS GUI process, native libraries and recovery
+        if: runner.os != 'Linux'
+        run: node scripts/verify-desktop-host.mjs
+      - name: Preserve host verification reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-host-${{ matrix.os }}
+          retention-days: 14
+          path: |
+            pilot-desktop/out/host-report/**
+            pilot-mobile/bridge/build/reports/**
+            pilot-mobile/transport/build/reports/**

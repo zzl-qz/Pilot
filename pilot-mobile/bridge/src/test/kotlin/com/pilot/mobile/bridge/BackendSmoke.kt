@@ -37,7 +37,8 @@ fun main() = runBlocking {
             val project = json(Request(path = "/api/projects")).jsonArray.single().jsonObject.text("id")
             val repeated = Request("POST", "/api/sessions", buildJsonObject { put("projectId", project); put("title", "移动契约验收"); put("replaceBlank", false) }.toString(), requestId = java.io.File(System.getenv("PILOT_TEST_REQUEST_FILE")).readText())
             check(json(repeated).jsonObject.text("id") == sessions.single().jsonObject.text("id"))
-            println("PASS: 原手机身份和旧连接票据恢复访问，任务与提交回执保留，无需重新配对")
+            val route = if (System.getenv("PILOT_TEST_DIRECT_ROUTE_REFRESH") == "true") "刷新后的纯直连路由" else "旧连接票据"
+            println("PASS: 原手机身份和${route}恢复访问，任务与提交回执保留，无需重新配对")
             return@runBlocking
         }
         json(Request("POST", "/pair", pairingSecret = invite.secret, deviceName = "契约测试"))

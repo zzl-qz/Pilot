@@ -28,3 +28,7 @@
 日志：`/tmp/pilot-windows-mobile-maven.log`、`/tmp/pilot-windows-mobile-target.log`、`/tmp/pilot-windows-mobile-unit.log`、`/tmp/pilot-windows-mobile-bridge-build.log`、`/tmp/pilot-windows-mobile-ui.log`、`/tmp/pilot-windows-mobile-backend.log`。
 
 Windows 真机尚未验收；本轮测试包含平台参数模拟及 Windows DLL 制品检查，不能当成 Windows 上实际加载 DLL 成功。故障电脑需更新源码、用 Java 21 执行 `node scripts/mobile.mjs build-bridge`，再用 Java 25 重新编译并启动后台；若仍失败，依据新的中文提示和该电脑的启动日志继续定位。
+
+## 后续统一宿主验证入口
+
+本轮后续已补齐桌面 IPC 与导航限制，并提供 `node scripts/verify-desktop-host.mjs`，实际检查源码启动、GUI、缓存复用、原生库、进程退出和恢复，失败时保存阶段报告。macOS ARM64 已完整通过；用户明确表示 Windows／Linux 实机由其自行验证，本记录不代填成功。前置构建步骤与报告路径见 [桌面验证说明](../pilot-desktop/README.md)，本轮结果见 [IPC 与宿主验收](DESKTOP_IPC_AND_HOST_2026-11-05.md)。

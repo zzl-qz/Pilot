@@ -19,7 +19,7 @@ const env = { ...process.env, PILOT_URL: `http://127.0.0.1:${port}`, PILOT_BROWS
 delete env.ELECTRON_RUN_AS_NODE; delete env.PILOT_DESKTOP_SMOKE;
 let desktop;
 try {
-  desktop = await _electron.launch({ executablePath: prepareDevelopmentHost(), args: [root, `--user-data-dir=${join(temp, 'profile')}`], env });
+  desktop = await _electron.launch({ chromiumSandbox: true, executablePath: prepareDevelopmentHost(), args: [root, `--user-data-dir=${join(temp, 'profile')}`], env });
   const page = await desktop.firstWindow();
   await page.getByRole('heading', { name: '暂时无法连接服务' }).waitFor();
   assert.match(await page.locator('code').innerText(), new RegExp(':' + port));
@@ -48,5 +48,5 @@ try {
 } finally {
   await desktop?.close();
   if (server.listening) await new Promise(resolve => server.close(resolve));
-  await rm(join(temp, 'profile'), { recursive: true, force: true });
+  await rm(join(temp, 'profile'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

@@ -17,10 +17,11 @@ if (operation === 'bridge') {
     release: [':app:assembleRelease', ':bridge:installDist'],
     build: [':app:assembleDebug', ':bridge:installDist'],
     'build-bridge': ['-Ppilot.desktopOnly=true', ':bridge:installDist'],
+    'test-bridge': ['-Ppilot.desktopOnly=true', ':transport:test', ':bridge:test', ':bridge:installDist'],
     test: [':transport:test', ':bridge:test', ':app:testDebugUnitTest', ':app:lintDebug'],
     qa: [':app:assembleQa', ':app:assembleQaAndroidTest', ':bridge:installDist'],
   }[operation];
-  if (!tasks) throw new Error('用法：node scripts/mobile.mjs build|build-bridge|test|qa|bridge');
+  if (!tasks) throw new Error('用法：node scripts/mobile.mjs build|build-bridge|test-bridge|test|qa|release|bridge');
   args = ['-classpath', path.join(root, 'gradle/wrapper/gradle-wrapper.jar'), 'org.gradle.wrapper.GradleWrapperMain', ...tasks];
 }
 const child = spawn(java, args, { cwd: root, env: process.env, stdio: 'inherit', windowsHide: true });

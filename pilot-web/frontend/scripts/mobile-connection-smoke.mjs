@@ -35,10 +35,12 @@ let invite, pairedDevice = null, generation = 0, pairingState = 'none', fail = f
 let environmentState = null, repairs = 0, failPair = false;
 let connectionMode = 'direct-only', pairDelay = 150, networkState = 'local', networkMessage = '', networkEnvironment = null;
 const devices = [];
+const recentRequests = [];
 const create = () => ({ code, image:'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64'), expiresAt: Date.now() + 300000, development:connectionMode==='automatic', connectionMode, networkState, networkMessage, networkEnvironment });
 async function routes(page) {
   await page.route('**/api/mobile/connection**', async route => {
     const request = route.request();
+    recentRequests.push({at:Date.now(),method:request.method(),path:new URL(request.url()).pathname,networkMessage,hasEnvironment:Boolean(networkEnvironment)});if(recentRequests.length>16)recentRequests.shift();
     if (request.url().endsWith('/repair')) { repairs++; environmentState = 'preparing'; return route.fulfill({json:{version:2,running:false,environment:{state:'preparing',message:'正在下载并校验连接组件'}}}); }
     if (environmentState) return route.fulfill({json:{version:2,running:false,environment:{state:environmentState,message:environmentState==='failed'?'自动补全未完成，请检查系统授权':'正在下载并校验连接组件'}}});
     if (fail) return route.fulfill({status:503, json:{code:'MOBILE_CONNECTION_UNAVAILABLE',error:'Service Unavailable',message:'Windows x64 原生连接库加载失败，请检查 Microsoft Visual C++ x64 运行库'}});
@@ -55,6 +57,8 @@ try {
   await routes(page);
   await page.addInitScript(() => { Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async()=>{throw new Error('denied')}}}); document.execCommand = () => false; });
   await page.goto(url);
+  await page.bringToFront();
+  await page.waitForFunction(()=>!document.hidden);
   environmentState = 'preparing';
   await page.getByRole('button',{name:'连接手机',exact:true}).click();
   await page.getByText('正在下载并校验连接组件',{exact:true}).waitFor();
@@ -115,6 +119,7 @@ try {
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'代理说明不能撑宽窄屏');
   await page.setViewportSize({width:1440,height:900});
   const expiry = invite.expiresAt, issued = generation;
+  await page.bringToFront();await page.waitForFunction(()=>!document.hidden);
   networkState = 'unavailable'; networkMessage = '跨网服务暂未就绪，检查 TUN';
   await page.getByText(networkMessage,{exact:true}).waitFor();
   assert.equal(await page.getByAltText('用 Pilot 手机 App 扫描此配对二维码').count(),1,'公网失败不应隐藏本地二维码');
@@ -233,8 +238,12 @@ try {
   await shell.evaluate(() => window.pilotDesktop.openMobileConnection());
   await shell.getByRole('tab',{name:'已配对设备 · 2',selected:true}).waitFor();
   await shell.screenshot({path:join(output,'desktop-pairing.png')});
-  await shell.goto(url.replace('127.0.0.1','localhost'));
-  assert.equal((await shell.evaluate(value=>window.pilotDesktop.copyPairingCode(value),code)).ok,false,'不同来源不能调用剪贴板 IPC');
+  await desktop.evaluate(({BrowserWindow},target)=>BrowserWindow.getAllWindows()[0].loadURL(target),url.replace('127.0.0.1','localhost'));
+  assert.equal(await shell.evaluate(()=>typeof window.pilotDesktop),'undefined','不同来源不获得剪贴板或其他桌面桥能力');
   console.log('PASS: 配对完成退出、成功后旧操作清理、重开设备管理、多设备与满额处理、三种宽度/明暗主题、复制兜底、真实 Electron 剪贴板和来源限制');
   console.log('Screenshots:', output);
+} catch(error) {
+  const current=desktop?.windows()[0]||browser?.contexts()[0]?.pages()[0];
+  console.log('Fixture failure state:',JSON.stringify({recentRequests,page:await current?.evaluate(()=>({hidden:document.hidden,visibility:document.visibilityState,text:document.querySelector('#mobile-connection')?.innerText})).catch(()=>null)}));
+  throw error;
 } finally { await browser?.close(); await desktop?.close(); await new Promise(resolve=>server.httpServer.close(resolve)); }

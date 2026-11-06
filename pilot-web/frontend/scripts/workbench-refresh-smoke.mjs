@@ -67,6 +67,11 @@ async function run(page, name) {
   await input.fill('保留中文草稿和附件');
   await input.evaluate(el => { const data = new DataTransfer(); data.items.add(new File(['content'], '边界测试.txt', { type: 'text/plain' })); el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true })); });
   await page.locator('[data-chip="attachment"]').waitFor();
+  // 等待字体和真实向上滚动完成，避免把首屏贴底过程误当成已停留在阅读中途。
+  await page.evaluate(() => document.fonts.ready);
+  await page.locator('.thread').hover();
+  await page.mouse.wheel(0, -800);
+  await page.waitForFunction(() => { const el = document.querySelector('.thread'); return el && el.scrollTop < el.scrollHeight - el.clientHeight - 30; });
   // 阅读中途刷新，不触发重新激活或历史重建。
   await page.locator('.thread').evaluate(el => { el.scrollTop = 250; el.dispatchEvent(new Event('scroll')); });
   const before = await page.evaluate(() => ({ instance: pageInstance, text: store.getState().composerApi.getText(), scroll: document.querySelector('.thread').scrollTop }));
@@ -113,9 +118,12 @@ async function run(page, name) {
   revision = 3; await page.evaluate(() => window.dispatchEvent(new Event('online')));
   await page.waitForFunction(() => store.getState().sessionTitle === '手机更新 3');
   await settled(page);
-  // 真正等待默认 15 秒轮询，验证其他设备新建任务无需刷新页面。
+  // 后台页面会主动暂停轮询；先确认测试窗口可见，再等待真实的默认 15 秒轮询。
+  await page.bringToFront();
+  await page.waitForFunction(() => !document.hidden);
+  // 验证其他设备新建任务无需刷新页面。
   revision = 4;
-  await page.waitForFunction(() => store.getState().projects[0].name === '项目版本 4', null, { timeout: 20000 });
+  await page.waitForFunction(() => store.getState().projects[0].name === '项目版本 4', null, { timeout: 30000 });
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await page.locator('#refresh-workbench').waitFor({ state: 'visible' });
@@ -132,7 +140,9 @@ try {
   const env = { ...process.env, PILOT_URL: url, PILOT_BROWSER_HOME: join(output, 'browser') };
   delete env.ELECTRON_RUN_AS_NODE; delete env.PILOT_DESKTOP_SMOKE;
   desktop = await _electron.launch({ executablePath: prepareDevelopmentHost(), args: [desktopRoot, `--user-data-dir=${join(output, 'profile')}`], env });
-  const page = await desktop.firstWindow(); await run(page, 'electron');
+  const page = await desktop.firstWindow();
+  await desktop.evaluate(({ BrowserWindow }) => { const win = BrowserWindow.getAllWindows()[0]; win.show(); win.focus(); });
+  await run(page, 'electron');
   await page.setViewportSize({ width: 1440, height: 900 });
   revision = 5;
   await desktop.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('workbench-refresh').click());
@@ -150,8 +160,18 @@ try {
   await desktop.evaluate(({ webContents }, id) => { const contents = webContents.fromId(id); contents.focus(); contents.sendInputEvent({ type: 'keyDown', keyCode: 'F5' }); contents.sendInputEvent({ type: 'keyUp', keyCode: 'F5' }); }, embeddedId);
   await page.waitForFunction(() => store.getState().sessionTitle === '手机更新 6');
   assert.equal(await desktop.evaluate(({ webContents }, id) => webContents.fromId(id).executeJavaScript('pageInstance'), embeddedId), embeddedInstance);
-  await page.goto(url.replace('127.0.0.1', 'localhost'));
-  assert.equal((await page.evaluate(() => pilotDesktop.reloadWorkbench())).ok, false, '不同来源不能通过工作台重载 IPC');
+  const external = url.replace('127.0.0.1', 'localhost').replace('/__refresh', '/__embedded');
+  await page.evaluate(target => { const link = document.createElement('a'); link.href = target; document.body.append(link); link.click(); link.remove(); }, external);
+  await page.waitForFunction(() => store.getState().ui.inspectorOpen && store.getState().ui.inspectorTab === 'browser');
+  await page.waitForFunction(() => store.getState().ui.notice?.text === '已在内置浏览器打开链接');
+  assert.equal(page.url(), url, '外部链接不能替换工作台');
+  let externalLoaded = false; const externalDeadline = Date.now() + 10000;
+  while (!externalLoaded && Date.now() < externalDeadline) { externalLoaded = await desktop.evaluate(({ webContents }, target) => webContents.getAllWebContents().some(c => c.getURL() === target), external); if (!externalLoaded) await new Promise(resolve => setTimeout(resolve, 50)); }
+  assert.ok(externalLoaded, '内置浏览器加载目标网页');
+  // 主进程主动加载不经过导航事件；独立检查 preload 和 IPC 的防护。
+  await desktop.evaluate(({ BrowserWindow }, target) => BrowserWindow.getAllWindows()[0].loadURL(target), url.replace('127.0.0.1', 'localhost'));
+
+  assert.equal(await page.evaluate(() => typeof window.pilotDesktop), 'undefined', '不同来源不获得桌面桥');
   console.log('PASS: 真实桌面原生菜单、内置浏览器焦点下刷新工作台、重载 IPC 来源限制');
   console.log('Screenshots:', output);
 } finally {

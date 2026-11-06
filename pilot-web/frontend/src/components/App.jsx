@@ -26,6 +26,17 @@ export default function App() {
   const init = useStore((state) => state.init);
   const notice = useStore((state) => state.ui.notice);
   useEffect(() => window.pilotDesktop?.onMobileConnection?.(() => useStore.getState().setUi({ mobileConnectionOpen: true })), []);
+  useEffect(() => window.pilotDesktop?.onBrowserOpen?.(async url => {
+    const state = useStore.getState();
+    try {
+      await window.pilotDesktop.ensureTab(state.sessionId || null);
+      const result = await window.pilotDesktop.navigate(url);
+      if (!result?.ok) throw new Error(result?.error || '链接暂时无法打开');
+      state.setUi({ inspectorOpen: true, inspectorTab: 'browser' });
+      state.showNotice('已在内置浏览器打开链接');
+    } catch (error) { state.showNotice(error.message || '链接暂时无法打开'); }
+  }), []);
+  useEffect(() => window.pilotDesktop?.onNavigationNotice?.(message => useStore.getState().showNotice(message)), []);
   const ready = useStore(state => state.ready);
   const refreshing = useStore(state => state.ui.refreshing);
   const syncError = useStore(state => state.ui.syncError);
