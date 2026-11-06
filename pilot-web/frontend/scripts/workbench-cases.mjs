@@ -12,9 +12,32 @@ export async function checkWorkbench(page, name, output) {
       if (path === '/missing') throw Error('目录不存在');
       return { path: path || '/workspace', parent: path === '/workspace' ? '/' : '/workspace', directories: path === '/workspace' ? [{ name: 'demo', path: '/workspace/demo' }] : [] };
     };
-    store.setState({ workspace: '/workspace/demo', sessionId: 'ui-audit', running: false });
+    store.setState({ workspace: '/workspace/demo', sessionId: 'ui-audit', running: false,
+      projects: [{ id: 'existing-project', name: '现有项目', folders: ['D:\\项目 空格', '/workspace/demo'] }] });
     store.getState().setUi({ sidebarOpen: true, inspectorOpen: false, reviewExpanded: false });
   });
+  await page.evaluate(() => store.getState().setUi({ projectEditor: { id: 'existing-project' } }));
+  await page.locator('#project-name').waitFor();
+  assert.equal(await page.locator('#project-name').inputValue(), '现有项目');
+  assert.equal(await page.locator('#project-folders').inputValue(), 'D:\\项目 空格\n/workspace/demo');
+  await page.evaluate(() => { window.savedProjectRename = api.renameProject; api.renameProject = async () => { throw Error('保存项目失败'); }; });
+  await page.locator('#project-name').fill('修改后的名称'); await page.locator('#project-save').click();
+  assert.equal(await page.locator('#project-name').inputValue(), '修改后的名称');
+  await page.evaluate(() => { api.renameProject = window.savedProjectRename; });
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => store.getState().setUi({ paletteOpen: true }));
+  await page.locator('#palette-input').fill('新任务');
+  await page.locator('#palette-input').dispatchEvent('keydown', { key: 'Enter', isComposing: true });
+  assert.equal(await page.locator('#palette').count(), 1, '输入法确认候选字不能执行命令');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => store.setState({ task: { originalGoal: '验证输入法', constraints: [], acceptance: [] } }));
+  await page.locator('#task-contract-summary').click();
+  await page.locator('#task-add-criterion').fill('新增验收条件');
+  await page.locator('#task-add-criterion').dispatchEvent('keydown', { key: 'Enter', isComposing: true });
+  assert.equal(await page.locator('#task-acceptance').inputValue(), '', '输入法确认候选字不能提前新增验收项');
+  await page.locator('#task-add-criterion').press('Enter');
+  assert.match(await page.locator('#task-acceptance').inputValue(), /新增验收条件/);
+  await page.evaluate(() => store.setState({ task: null, taskDirty: false }));
   const tree = page.getByRole('tree', { name: '工作区文件' });
   const folder = tree.getByRole('treeitem', { name: 'src', exact: true });
   await folder.click();
@@ -65,6 +88,7 @@ export async function checkWorkbench(page, name, output) {
   // 每个设置页必须留在视口内；Tab/Shift-Tab 被约束在弹窗，Escape 返回触发按钮。
   await page.evaluate(() => {
     api.validation = async () => ({ report: { current: true, reason: '当前检查已通过' } });
+    api.maintenanceStatus = async () => ({ storage: { healthy: false, issues: [{ area: '数据目录', reason: '权限不足，无法写入', at: '2026-11-06T00:00:00Z' }] } });
   });
   await page.locator('#settings-open').click();
   for (const section of ['外观', '模型', '权限', '技能', '用量', '诊断', '关于']) {
@@ -78,6 +102,10 @@ export async function checkWorkbench(page, name, output) {
   await page.getByRole('option', { name: 'probe-second', exact: true }).click();
   assert.equal(await page.locator('#settings-model-name').inputValue(), 'probe-second');
   await page.locator('.settings-nav').getByRole('button', { name: '诊断', exact: true }).click();
+  await page.getByText('存储告警：权限不足，无法写入', { exact: true }).waitFor();
+  await page.evaluate(() => { api.purgeNow = async () => ({ events: 2, snapshotRuns: 1, traces: 3, backups: 4, validationFiles: 5 }); });
+  await page.getByRole('button', { name: '清理过期数据', exact: true }).click();
+  await page.getByText('已清理：事件 2 条，快照 1 轮，调用记录 3 条，备份 4 份，校验文件 5 个', { exact: true }).waitFor();
   const validation = page.getByText('校验证据：', { exact: false });
   await validation.waitFor();
   assert.match(await validation.innerText(), /已覆盖当前产物/);

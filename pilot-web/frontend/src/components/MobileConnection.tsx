@@ -1,34 +1,37 @@
+import type { MobileStatus, MobileInvite, MobileDevice } from '../types/mobile.js';
+import { errorInfo } from '../lib/errors.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { apiJson } from '../api.js';
 import { Icon } from './Icon.jsx';
 import { writeClipboard } from '../lib/clipboard.js';
 
 const endpoint = '/api/mobile/connection';
-const post = (path, body) => apiJson(`${endpoint}/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 65000);
+const post = <T,>(path: string, body: object) => apiJson<T>(`${endpoint}/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 65000);
 
 /** 管理页与具体任务无关；Web 和桌面使用同一个后台连接服务。 */
-export function MobileConnectionContent({ onDone }) {
+export function MobileConnectionContent({ onDone }: { onDone: () => void }) {
   const [tab, setTab] = useState('add');
-  const [status, setStatus] = useState(null);
-  const [invite, setInvite] = useState(null);
+  const [status, setStatus] = useState<MobileStatus | null>(null);
+  const [invite, setInvite] = useState<MobileInvite | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copyStatus, setCopyStatus] = useState('');
   const [manual, setManual] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [paired, setPaired] = useState(false);
-  const [pairedDevice, setPairedDevice] = useState(null);
-  const [remove, setRemove] = useState(null);
+  const [pairedDevice, setPairedDevice] = useState<MobileDevice | null>(null);
+  const [remove, setRemove] = useState<MobileDevice | null>(null);
   const pending = useRef(false);
   const alive = useRef(false);
-  const codeArea = useRef(null);
+  const codeArea = useRef<HTMLTextAreaElement>(null);
   const activeCode = useRef('');
-  const doneButton = useRef(null);
+  const doneButton = useRef<HTMLButtonElement>(null);
   const needsInitialPair = useRef(true);
   const operationError = useRef(false);
   useEffect(() => { if (paired) doneButton.current?.focus(); }, [paired]);
 
-  const apply = result => {
+  const apply = (result: MobileStatus | null) => {
+    if (!result) throw new Error('服务端返回空连接状态，请重试');
     if (!alive.current) return;
     setStatus(result);
     if (result.environment && result.environment.state !== 'ready' && result.environment.state !== 'disabled') {
@@ -45,9 +48,10 @@ export function MobileConnectionContent({ onDone }) {
     if (pending.current) return;
     pending.current = true; operationError.current = false; setBusy(true); setError(''); setCopyStatus(''); setManual(false);
     try {
-      const result = await post('pair', { reuse });
+      const result = await post<MobileInvite>('pair', { reuse });
+      if (!result) throw new Error('服务端返回空配对信息，请重试');
       if (alive.current) { setInvite(result); activeCode.current = result.code; setPaired(false); setStatus(current => ({...current, connectionMode: result.connectionMode || current?.connectionMode, networkState:result.networkState, networkMessage:result.networkMessage, networkEnvironment:result.networkEnvironment || current?.networkEnvironment})); }
-    } catch (e) { if (alive.current) { operationError.current = true; setError(e.message); } }
+    } catch (e) { if (alive.current) { operationError.current = true; setError(errorInfo(e).message || '操作失败'); } }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
   useEffect(() => {
@@ -58,8 +62,9 @@ export function MobileConnectionContent({ onDone }) {
       if (running || pending.current || document.hidden) return;
       running = true;
       try {
-        const result = await apiJson(endpoint, { signal: controller.signal }, 40000);
+        const result = await apiJson<MobileStatus>(endpoint, { signal: controller.signal }, 40000);
         if (!alive.current || pending.current) return;
+        if (!result) throw new Error('服务端返回空连接状态，请重试');
         apply(result); if (!operationError.current) setError('');
         if (result.environment?.state === 'preparing') return;
         if (result.environment?.state === 'failed') { setError(result.environment.message || '环境补全未完成'); return; }
@@ -70,7 +75,7 @@ export function MobileConnectionContent({ onDone }) {
             else await generate(true);
           }
         }
-      } catch (e) { if (alive.current && !controller.signal.aborted) setError(e.message); }
+      } catch (e) { if (alive.current && !controller.signal.aborted) setError(errorInfo(e).message || '操作失败'); }
       finally { running = false; }
     }
     refresh();
@@ -103,8 +108,8 @@ export function MobileConnectionContent({ onDone }) {
   async function revoke() {
     if (!remove || pending.current) return;
     pending.current = true; operationError.current = false; setBusy(true); setError('');
-    try { await post('revoke', { id: remove.id }); setRemove(null); apply(await apiJson(endpoint)); }
-    catch (e) { if (alive.current) { operationError.current = true; setError(e.message); } }
+    try { await post('revoke', { id: remove.id }); setRemove(null); apply(await apiJson<MobileStatus>(endpoint)); }
+    catch (e) { if (alive.current) { operationError.current = true; setError(errorInfo(e).message || '操作失败'); } }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
   return <div className="mobile-connection-content">
@@ -116,11 +121,11 @@ export function MobileConnectionContent({ onDone }) {
     {error && <div className="mobile-connection-error" role="alert"><p>{error}</p><button className="btn" onClick={() => generate(true)} disabled={busy || preparing}>重新生成配对码</button><button className="btn" disabled={busy || preparing} onClick={async () => {
       if (pending.current) return;
       pending.current = true; operationError.current = false; setBusy(true); setError('');
-      try { apply(await post('repair', {})); needsInitialPair.current = true; }
-      catch (e) { if (alive.current) { operationError.current = true; setError(e.message); } }
+      try { apply(await post<MobileStatus>('repair', {})); needsInitialPair.current = true; }
+      catch (e) { if (alive.current) { operationError.current = true; setError(errorInfo(e).message || '操作失败'); } }
       finally { pending.current = false; if (alive.current) setBusy(false); }
     }}>检查并修复环境</button></div>}
-    {preparing && <p role="status" className="mobile-environment-progress">{status.environment.message || '正在检查与补全连接环境…'}</p>}
+    {preparing && <p role="status" className="mobile-environment-progress">{status?.environment?.message || '正在检查与补全连接环境…'}</p>}
     {tab === 'add' && paired ? <div className="mobile-pair-success" role="tabpanel" aria-label="配对完成">
       <Icon name="check" className="mobile-pair-success-icon" />
       <h3 role="status">配对成功</h3>
@@ -149,7 +154,7 @@ export function MobileConnectionContent({ onDone }) {
         <button className="btn" disabled={busy || preparing} onClick={() => generate(false)}>{preparing ? '正在准备环境…' : busy ? '正在生成…' : invite ? '重新生成' : '生成配对码'}</button>
         {invite && seconds > 0 && <button className="link-btn" onClick={() => setManual(!manual)} disabled={busy}>手动复制配对码</button>}
         <p className="chip-hint" role="status">{copyStatus}</p>
-        {manual && seconds > 0 && <><label htmlFor="mobile-pair-code">完整配对码</label><textarea id="mobile-pair-code" ref={codeArea} readOnly rows={3} value={invite.code} onFocus={e => e.target.select()} /><button className="btn" onClick={() => { codeArea.current?.focus(); codeArea.current?.select(); }}>全选配对码</button></>}
+        {manual && invite && seconds > 0 && <><label htmlFor="mobile-pair-code">完整配对码</label><textarea id="mobile-pair-code" ref={codeArea} readOnly rows={3} value={invite.code} onFocus={e => e.target.select()} /><button className="btn" onClick={() => { codeArea.current?.focus(); codeArea.current?.select(); }}>全选配对码</button></>}
         {status?.connectionMode && <p className="chip-hint" role="status">{status.connectionMode === 'automatic'
           ? '自动连接：已启用公共发现与中继，尽力直连，必要时经中继。'
           : relayConfigured

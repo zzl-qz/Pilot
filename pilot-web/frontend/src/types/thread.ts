@@ -37,7 +37,7 @@ export interface TimelineInput { kind: string; tone: string; status: string; tit
 export interface TimelineItem extends TimelineInput { key: string; sequence: number; type: string; timestamp?: string | number; _stream?: string }
 export interface PendingApproval { callId: string; agent: string | null; name: string; args: string; busy?: boolean }
 export interface Notice { text: string; at: number }
-export type TaskView = Partial<S.TaskControlServiceTaskContract> & Partial<S.TaskUpdated>;
+export type TaskView = Partial<S.TaskControlServiceTaskContract> & Partial<S.TaskUpdated> & { goal?: string };
 /** reducer 在历史重放时也使用这组最小状态，不能依赖 Store 的 UI 或网络动作。 */
 export interface ReducerState {
   thread: ThreadState;

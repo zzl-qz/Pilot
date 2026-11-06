@@ -1,3 +1,9 @@
+import type * as S from '../types/server.js';
+import type { ApiResults } from '../types/api.js';
+import type { SessionSummary } from '../types/core.js';
+type DiagnosticsData = { [K in 'maintenanceStatus' | 'metrics' | 'recovery' | 'diagnostics' | 'validation']: ApiResults[K] | null };
+type PaletteItem = { label: string; hint: string; run: () => unknown };
+import { errorInfo } from '../lib/errors.js';
 import { restoreFocus } from '../lib/interaction.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { ModelRuntimeSettings } from './ModelRuntimeSettings.jsx';
@@ -17,14 +23,14 @@ import { MobileConnectionContent } from './MobileConnection.jsx';
 import { verificationLabel, verificationHint } from '../lib/verification.js';
 
 /** 任务契约状态 → 中文（与旧版 renderTaskContract 的映射一致）。 */
-const TASK_STATUS_LABELS = {
+const TASK_STATUS_LABELS: Record<string, string> = {
   ACTIVE: '执行中', PAUSED: '已暂停', INTERRUPTED: '已中断',
   AWAITING_REVIEW: '待验收', COMPLETED: '已验收', FAILED: '待处理',
   BLOCKED: '遇到阻塞', BUDGET_LIMITED: '已达预算',
   WAITING: '等待外部事件', NEED_INPUT: '需要输入',
   UNVERIFIED: '结果未验证', NO_PROGRESS: '暂无有效进展', REVIEW_UNAVAILABLE: '核验暂不可用'
 };
-const EXECUTION_MODES = { DIRECT: '普通执行', GOAL: '持续推进目标', PROBE: '旧版探查任务', UNASSESSED: '旧版待迁移任务' };
+const EXECUTION_MODES: Record<string, string> = { DIRECT: '普通执行', GOAL: '持续推进目标', PROBE: '旧版探查任务', UNASSESSED: '旧版待迁移任务' };
 
 /** 任务契约：目标 / 约束 / 验收记录 / 执行评估，随事件更新，可手动补充约束。 */
 export function TaskContract() {
@@ -54,7 +60,7 @@ export function TaskContract() {
     : (TASK_STATUS_LABELS[status] || status || '已保存');
   const execution = task.execution || null;
   return (
-    <details id="task-contract" className="task-contract" open={open} onToggle={(event) => setOpen(event.target.open)}>
+    <details id="task-contract" className="task-contract" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary id="task-contract-summary">
         <span className="task-contract-label">任务契约</span>
         <span className="task-contract-goal" title={goal}>{goal || '未设定目标'}</span>
@@ -87,7 +93,7 @@ export function TaskContract() {
         {(task.corrections || []).length > 0 && (
           <div id="task-corrections" className="task-corrections">
             <p className="task-help">已记录的引导</p>
-            <ol>{task.corrections.map((text, index) => <li key={index}>{text}</li>)}</ol>
+            <ol>{(task.corrections || []).map((text, index) => <li key={index}>{text}</li>)}</ol>
           </div>
         )}
         <label className="task-field">
@@ -105,7 +111,7 @@ export function TaskContract() {
             value={newCriterion}
             onChange={(event) => setNewCriterion(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && newCriterion.trim()) {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.keyCode !== 229 && newCriterion.trim()) {
                 setCriteria((current) => `${current}\n[ ] ${newCriterion.trim()}`.trim());
                 setNewCriterion('');
                 useStore.setState((draft) => { draft.taskDirty = true; });
@@ -133,7 +139,7 @@ export function TaskContract() {
  * 后端字段是 {checked,text,evidence}，之前发的是 {done,text}：Jackson 不认 done，
  * 勾选的验收项在保存后会全部变回未勾选，证据也丢了。
  */
-function parseAcceptanceLines(text, previous = []) {
+function parseAcceptanceLines(text: string, previous: S.TaskControlServiceAcceptance[] = []) {
   const evidence = new Map((previous || []).map((item) => [item.text, item.evidence]));
   return String(text || '')
     .split('\n')
@@ -177,6 +183,7 @@ export function Modals() {
 function ConfirmDialog() {
   const dialog = useStore((state) => state.ui.confirm);
   const close = () => useStore.getState().setUi({ confirm: null });
+  if (!dialog) return null;
   return (
     <Modal id="confirm-dialog" title={dialog.title || '确认操作'} onClose={close}>
       <p className="confirm-message">{dialog.message}</p>
@@ -196,19 +203,19 @@ function ConfirmDialog() {
   );
 }
 
-/** @param {{ id: string, title: import('react').ReactNode, onClose: () => void, children: import('react').ReactNode, wide?: boolean }} props */
-export function Modal({ id, title, onClose, children, wide }) {
-  const container = useRef(null);
+export function Modal({ id, title, onClose, children, wide }: { id: string; title: React.ReactNode; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
+  const container = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
   useEffect(() => {
     const previous = document.activeElement;
     const node = container.current;
-    const focusable = () => [...node.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, a[href], [tabindex="0"]')]
+    if (!node) return;
+    const focusable = () => [...node.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, a[href], [tabindex="0"]')]
       .filter(el => el.tabIndex >= 0 && el.getClientRects().length);
     const topmost = () => [...document.querySelectorAll('.modal')].at(-1) === node;
-    const frame = requestAnimationFrame(() => (node.querySelector('input:not([disabled]), textarea, [aria-current="page"]') || focusable()[0] || node).focus());
-    const onKey = event => {
+    const frame = requestAnimationFrame(() => (node.querySelector<HTMLElement>('input:not([disabled]), textarea, [aria-current="page"]') || focusable()[0] || node).focus());
+    const onKey = (event: KeyboardEvent) => {
       if (!topmost()) return;
       if (event.key === 'Escape' && !event.isComposing) {
         event.preventDefault(); event.stopImmediatePropagation(); close.current();
@@ -216,11 +223,11 @@ export function Modal({ id, title, onClose, children, wide }) {
         const items = focusable();
         if (!items.length) { event.preventDefault(); node.focus(); return; }
         const first = items[0], last = items.at(-1);
-        if (event.shiftKey && (document.activeElement === first || !node.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+        if (event.shiftKey && (document.activeElement === first || !node.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && (document.activeElement === last || !node.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
       }
     };
-    const onFocus = event => { if (topmost() && !node.contains(event.target)) (focusable()[0] || node).focus(); };
+    const onFocus = (event: FocusEvent) => { if (topmost() && event.target instanceof Node && !node.contains(event.target)) (focusable()[0] || node).focus(); };
     document.addEventListener('keydown', onKey, true);
     document.addEventListener('focusin', onFocus);
     return () => {
@@ -248,10 +255,10 @@ export function Modal({ id, title, onClose, children, wide }) {
 function WorkspacePicker() {
   const picker = useStore(state => state.ui.picker);
   const workspace = useStore(state => state.workspace);
-  const [roots, setRoots] = useState([]);
-  const [entries, setEntries] = useState([]);
+  const [roots, setRoots] = useState<(S.WorkspaceServiceRootEntry & { name?: string })[]>([]);
+  const [entries, setEntries] = useState<S.WorkspaceServiceDirectoryEntry[]>([]);
   const [path, setPath] = useState(workspace || '');
-  const [directory, setDirectory] = useState(null);
+  const [directory, setDirectory] = useState<ApiResults['workspaceBrowse'] | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(true);
   const version = useRef(0);
@@ -259,27 +266,29 @@ function WorkspacePicker() {
     let active = true;
     api.workspaceRoots().then(data => {
       if (!active) return;
-      const roots = Array.isArray(data) ? data : data?.roots || [];
+      const legacy = data as S.WorkspaceServiceRootEntry[] | { roots?: S.WorkspaceServiceRootEntry[] } | null;
+      const roots = Array.isArray(legacy) ? legacy : legacy?.roots || [];
       setRoots(roots);
       browse(workspace || roots[0]?.path || '');
-    }).catch(err => { if (active) { setError(err.message); setBusy(false); } });
+    }).catch(err => { if (active) { setError(errorInfo(err).message || '操作失败'); setBusy(false); } });
     return () => { active = false; version.current++; };
   }, []);
-  async function browse(target) {
+  async function browse(target: string) {
     const request = ++version.current;
     setBusy(true); setError('');
     try {
       const data = await api.workspaceBrowse(target);
+      if (!data) throw new Error('服务端返回空目录信息，请重试');
       if (request !== version.current) return;
       setEntries(data?.directories || data?.entries || []);
       setPath(data.path); setDirectory(data);
-    } catch (err) { if (request === version.current) setError(err.message); }
+    } catch (err) { if (request === version.current) setError(errorInfo(err).message || '操作失败'); }
     finally { if (request === version.current) setBusy(false); }
   }
   return <Modal id="picker" title={picker?.title || '选择工作区'} onClose={() => useStore.getState().setUi({ picker: null })}>
     <div className="picker-roots">{roots.map(root => <button key={root.path} type="button" className="btn" onClick={() => browse(root.path)}>{root.label || root.name || root.path}</button>)}</div>
     <form className="picker-toolbar" onSubmit={event => { event.preventDefault(); browse(path); }}>
-      <button type="button" className="btn" id="picker-up" disabled={busy || !directory?.parent} onClick={() => browse(directory.parent)}>上一级</button>
+      <button type="button" className="btn" id="picker-up" disabled={busy || !directory?.parent} onClick={() => browse(directory?.parent || '')}>上一级</button>
       <input id="picker-path" aria-label="工作区路径" value={path} onChange={event => setPath(event.target.value)} />
       <button type="submit" className="btn" id="picker-go" disabled={busy}>前往</button>
     </form>
@@ -292,12 +301,13 @@ function WorkspacePicker() {
     <footer className="modal-foot">
       <span id="picker-selected" title={directory?.path}>{directory?.path || '选择一个文件夹'}</span>
       <button type="button" className="btn btn-primary" id="picker-confirm" disabled={busy || !!error || !directory?.path || path.trim() !== directory.path} onClick={async () => {
+        if (!directory) return;
         setBusy(true); setError('');
         try {
           if (picker?.onPick) await picker.onPick(directory.path);
           else await useStore.getState().switchWorkspace(directory.path, { throwOnError: true });
           useStore.getState().setUi({ picker: null });
-        } catch (err) { setError(err.message); setBusy(false); }
+        } catch (err) { setError(errorInfo(err).message || '操作失败'); setBusy(false); }
       }}>选择此文件夹</button>
     </footer>
   </Modal>;
@@ -307,8 +317,9 @@ function WorkspacePicker() {
 
 function ProjectEditor() {
   const editor = useStore((state) => state.ui.projectEditor);
-  const [name, setName] = useState(editor?.name || '');
-  const [folders, setFolders] = useState((editor?.folders || []).join('\n'));
+  const project = useStore(state => state.projects.find(item => item.id === state.ui.projectEditor?.id));
+  const [name, setName] = useState(editor?.name ?? project?.name ?? '');
+  const [folders, setFolders] = useState((editor?.folders ?? project?.folders ?? []).join('\n'));
   return (
     <Modal id="project-modal" title={editor?.id ? '编辑项目' : '新建项目'} onClose={() => useStore.getState().setUi({ projectEditor: null })}>
       <label className="task-field">项目名称<input id="project-name" value={name} onChange={(event) => setName(event.target.value)} /></label>
@@ -318,11 +329,11 @@ function ProjectEditor() {
         {editor?.id && (
           <button type="button" className="btn btn-danger" id="project-delete" onClick={async () => {
             try {
-              await api.deleteProject(editor.id);
+              await api.deleteProject(editor.id!);
               await useStore.getState().loadProjects();
               useStore.getState().setUi({ projectEditor: null });
             } catch (error) {
-              useStore.getState().showNotice('删除失败：' + error.message);
+              useStore.getState().showNotice('删除失败：' + errorInfo(error).message);
             }
           }}>删除项目</button>
         )}
@@ -338,7 +349,7 @@ function ProjectEditor() {
             await useStore.getState().loadProjects();
             useStore.getState().setUi({ projectEditor: null });
           } catch (error) {
-            useStore.getState().showNotice(error.message);
+            useStore.getState().showNotice(errorInfo(error).message || '操作失败');
           }
         }}>保存</button>
       </footer>
@@ -353,7 +364,7 @@ const SETTINGS_SECTIONS = [
   ['skills', '技能'], ['usage', '用量'], ['diagnostics', '诊断'], ['about', '关于']
 ];
 
-const SETTINGS_META = {
+const SETTINGS_META: Record<string, [string, string]> = {
   appearance: ['palette', '选择适合你的工作环境的主题与强调色。更改即时生效。'],
   model: ['model', '配置模型与连接信息，保存后用于后续请求。'],
   permission: ['shield', '决定哪些操作需要你确认。'],
@@ -512,17 +523,17 @@ function ModelSettings() {
       {discovery.hint && <p id="settings-model-hint" className="chip-hint" role={discovery.error ? 'alert' : 'status'}>{discovery.hint}</p>}
       <ModelOptions models={discovery.models} value={name} onSelect={setName} disabled={saving} discovered={discovery.discovered} />
       <VoiceSettings />
-      <ModelRuntimeSettings model={settings?.model} endpoint={settings?.modelEndpoint} />
+      <ModelRuntimeSettings model={settings?.model || ''} endpoint={settings?.modelEndpoint || ''} />
     </div>
   );
 }
 
 function VoiceSettings() {
-  const [value, setValue] = useState(null);
+  const [value, setValue] = useState<ApiResults['voiceSettings'] | null>(null);
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState('');
-  const load = () => api.voiceSettings().then(setValue).catch(error => setHint(error.message));
+  const load = () => api.voiceSettings().then(setValue).catch(error => setHint(errorInfo(error).message || '操作失败'));
   useEffect(() => { load(); }, []);
   return <details className="voice-settings"><summary>语音输入</summary>
     <p className="task-help">录音完成后发送到语音服务，转写文字加入草稿。默认沿用聊天服务的端点和 Key；该服务需支持音频转写。若提示「服务不可用」，通常是聊天端点是中转站、没有转写能力：在下面填写独立端点（例如 https://api.openai.com/v1）与对应模型。</p>
@@ -535,12 +546,12 @@ function VoiceSettings() {
         <button type="button" className="btn" disabled={busy || !value.model?.trim()} onClick={async () => {
           setBusy(true);
           try { setValue(await api.saveVoiceSettings({ endpoint: value.endpoint, model: value.model, apiKey: key })); setKey(''); setHint('语音设置已保存'); }
-          catch (error) { setHint(error.message); } finally { setBusy(false); }
+          catch (error) { setHint(errorInfo(error).message || '操作失败'); } finally { setBusy(false); }
         }}>{busy ? '保存中…' : '保存语音设置'}</button>
         {value.apiKeySet && <button type="button" className="btn" disabled={busy} onClick={async () => {
           setBusy(true);
           try { setValue(await api.saveVoiceSettings({ clearApiKey: true })); setKey(''); setHint('已清除独立语音 Key'); }
-          catch (error) { setHint(error.message); } finally { setBusy(false); }
+          catch (error) { setHint(errorInfo(error).message || '操作失败'); } finally { setBusy(false); }
         }}>清除语音 Key</button>}
       </div>
     </> : <button type="button" className="btn" onClick={load}>重新加载语音设置</button>}
@@ -616,17 +627,17 @@ function SkillsSettings() {
  * 安装向导：来源 → 预览候选 → 选目标级别 → 安装；同名冲突时才出现「覆盖安装」。
  * 安装只复制文件，不带任何钩子（与后端协议一致）。
  */
-function SkillsInstall({ onDone }) {
+function SkillsInstall({ onDone }: { onDone?: () => void }) {
   const sessionId = useStore((state) => state.sessionId);
   const meta = useStore((state) => state.skillsMeta);
   const [source, setSource] = useState('');
   const [token, setToken] = useState('');
-  const [candidates, setCandidates] = useState([]);
-  const [picked, setPicked] = useState(() => new Set());
+  const [candidates, setCandidates] = useState<S.SkillsControllerCandidatePayload[]>([]);
+  const [picked, setPicked] = useState(() => new Set<string>());
   const [target, setTarget] = useState('project');
   const [busy, setBusy] = useState('');
   const [hint, setHint] = useState('填 git 地址或本机目录，先「查看内容」再安装。');
-  const [conflicts, setConflicts] = useState([]);
+  const [conflicts, setConflicts] = useState<string[]>([]);
 
   const preview = async () => {
     // 与后端同一套口径：git 必须带协议，本机路径必须是绝对路径
@@ -654,13 +665,13 @@ function SkillsInstall({ onDone }) {
     } catch (error) {
       setToken('');
       setCandidates([]);
-      setHint('查看内容失败：' + error.message);
+      setHint('查看内容失败：' + errorInfo(error).message);
     } finally {
       setBusy('');
     }
   };
 
-  const install = async (names, overwrite) => {
+  const install = async (names: string[], overwrite: boolean) => {
     if (!token || !names.length) {
       return;
     }
@@ -692,14 +703,14 @@ function SkillsInstall({ onDone }) {
         parts.push(`同名冲突：${conflicted.join('、')}（点「覆盖安装」删旧装新）`);
       }
       if (failed.length) {
-        parts.push(`失败：${failed.map((item) => `${item.name}（${item.reason || item.status}）`).join('；')}`);
+        parts.push(`失败：${failed.map((item) => `${item.name}（${item.reason}）`).join('；')}`);
       }
       setHint(parts.length ? `${parts.join('；')}。` : '没有执行任何安装。');
       if (installed.length) {
         onDone?.();
       }
     } catch (error) {
-      setHint('安装失败：' + error.message);
+      setHint('安装失败：' + errorInfo(error).message);
     } finally {
       setBusy('');
     }
@@ -716,7 +727,7 @@ function SkillsInstall({ onDone }) {
             value={source}
             placeholder="https://github.com/you/skills 或 D:\\skills\\review"
             onChange={(event) => setSource(event.target.value)}
-            onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); preview(); } }}
+            onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); preview(); } }}
           />
           <button
             type="button"
@@ -788,7 +799,7 @@ function SkillsInstall({ onDone }) {
 }
 
 /** token 数字口径：与旧版一致（万级以上转 k/M/B）。 */
-function formatCount(value) {
+function formatCount(value: unknown) {
   const number = Number(value) || 0;
   if (number >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(1)}B`;
   if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(1)}M`;
@@ -850,7 +861,7 @@ function UsageSettings() {
                 style={{
                   height: `${Math.round((total / maxTokens) * 56)}px`,
                   '--bar-out': `${(day.outputTokens / Math.max(total, 1)) * 100}%`
-                }}
+                } as React.CSSProperties}
               />
               <span>{(day.date || '').slice(5)}</span>
             </div>
@@ -879,7 +890,7 @@ function UsageSettings() {
  */
 function DiagnosticsSettings() {
   const sessionId = useStore((state) => state.sessionId);
-  const [data, setData] = useState(null);
+  const [data, setData] = useState<{ maintenance: DiagnosticsData['maintenanceStatus']; metrics: DiagnosticsData['metrics']; recovery: DiagnosticsData['recovery']; diagnostics: DiagnosticsData['diagnostics']; validation: DiagnosticsData['validation'] } | null>(null);
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -896,13 +907,13 @@ function DiagnosticsSettings() {
       ]);
       setData({ maintenance, metrics, recovery, diagnostics, validation });
     } catch (err) {
-      setError(err.message);
+      setError(errorInfo(err).message || '操作失败');
     }
   };
 
   useEffect(() => { load(); }, [sessionId]);
 
-  const run = async (kind) => {
+  const run = async (kind: string) => {
     setBusy(kind);
     setMessage('');
     try {
@@ -911,11 +922,11 @@ function DiagnosticsSettings() {
         setMessage(report?.ok ? `已备份 ${report.files} 个文件到 ${report.directory}` : (report?.message || '备份未完成'));
       } else {
         const report = await api.purgeNow();
-        setMessage(`已清理：${report?.removed ?? 0} 条过期数据`);
+        setMessage(`已清理：事件 ${report?.events ?? 0} 条，快照 ${report?.snapshotRuns ?? 0} 轮，调用记录 ${report?.traces ?? 0} 条，备份 ${report?.backups ?? 0} 份，校验文件 ${report?.validationFiles ?? 0} 个`);
       }
       await load();
     } catch (err) {
-      setMessage('操作失败：' + err.message);
+      setMessage('操作失败：' + errorInfo(err).message);
     } finally {
       setBusy('');
     }
@@ -948,7 +959,7 @@ function DiagnosticsSettings() {
           </dl>
           {!maintenance.storage?.healthy && (
             <p className="chip-hint is-error">
-              存储告警：{(maintenance.storage?.issues || []).map((issue) => issue.message || issue.kind || String(issue)).join('；') || '未知问题'}
+              存储告警：{(maintenance.storage?.issues || []).map((issue) => issue.reason || issue.area || String(issue)).join('；') || '未知问题'}
             </p>
           )}
           {maintenance.degraded && maintenance.degradedReason && (
@@ -1033,7 +1044,7 @@ function DiagnosticsSettings() {
   );
 }
 
-function formatBytes(value) {
+function formatBytes(value: unknown) {
   const size = Number(value) || 0;
   if (size <= 0) return '0 B';
   if (size < 1024) return `${size} B`;
@@ -1041,7 +1052,7 @@ function formatBytes(value) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function formatDuration(ms) {
+function formatDuration(ms: unknown) {
   const value = Number(ms) || 0;
   if (value < 1000) return `${Math.round(value)} ms`;
   if (value < 60000) return `${(value / 1000).toFixed(1)} s`;
@@ -1070,7 +1081,7 @@ function Palette() {
   const [index, setIndex] = useState(0);
   const sessions = useStore((state) => state.sessions);
   const items = paletteItems(query, sessions);
-  const pick = (item) => {
+  const pick = (item: PaletteItem | undefined) => {
     if (!item) {
       return;
     }
@@ -1086,6 +1097,7 @@ function Palette() {
         placeholder="搜索会话或输入命令…"
         onChange={(event) => { setQuery(event.target.value); setIndex(0); }}
         onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             if (!items.length) {
               return;
@@ -1123,9 +1135,9 @@ function Palette() {
 }
 
 /** 面板条目 = 会话 + 旧版动作表（lib/commands.js 里那份，之前没人用）。 */
-function paletteItems(query, sessions) {
+function paletteItems(query: string, sessions: SessionSummary[]) {
   const needle = String(query || '').trim().toLowerCase();
-  const items = [];
+  const items: PaletteItem[] = [];
   for (const session of sessions || []) {
     if (!needle || (session.title || '').toLowerCase().includes(needle)) {
       items.push({
@@ -1141,7 +1153,7 @@ function paletteItems(query, sessions) {
   return items.slice(0, 16);
 }
 
-function runPaletteAction(action) {
+function runPaletteAction(action: string) {
   const state = useStore.getState();
   switch (action) {
     case 'refresh-workbench':
@@ -1195,7 +1207,7 @@ function exportTranscript() {
   import('../lib/transcript.js').then(({ buildTranscript, transcriptFileName }) => {
     const state = useStore.getState();
     const rows = state.thread.rows.filter((row) => row.type === 'user' || row.type === 'turn');
-    const messages = [];
+    const messages: { role: string; text?: string; summary?: string }[] = [];
     for (const row of rows) {
       if (row.type === 'user') {
         messages.push({ role: 'user', text: row.text });
@@ -1234,7 +1246,7 @@ function exportTranscript() {
 function CheckpointDialog() {
   const dialog = useStore((state) => state.ui.checkpointDialog);
   const info = dialog?.info;
-  const code = info?.code || {};
+  const code: Partial<S.RunSnapshotServiceRestorePreview> & { ready?: boolean } = info?.code || {};
   const canCode = Boolean(info) && code.ready !== false && (code.files || []).length > 0;
   const canConversation = Boolean(info?.conversationAvailable);
   const [mode, setMode] = useState('');
@@ -1259,7 +1271,7 @@ function CheckpointDialog() {
     ['both', '一起撤', '还原文件，移除这条消息及之后的对话，并把原消息回填到输入框', canCode && canConversation],
     ['code', '只撤代码', '只还原后续任务改过的文件，保留当前对话', canCode],
     ['conversation', '只撤对话', '移除这条消息及之后的对话并回填输入框，文件保持现状', canConversation]
-  ];
+  ] as const;
   const busy = Boolean(dialog?.applying);
 
   return (
@@ -1275,19 +1287,19 @@ function CheckpointDialog() {
           {!!(code.conflicts || []).length && (
             <div className="checkpoint-block">
               <p>检测到后续修改，代码回退已被阻止：</p>
-              <ul>{code.conflicts.map((path) => <li key={path}>{path}</li>)}</ul>
+              <ul>{(code.conflicts || []).map((path) => <li key={path}>{path}</li>)}</ul>
             </div>
           )}
           {!!(code.unavailable || []).length && (
             <div className="checkpoint-block">
               <p>快照不可用，无法回退代码：</p>
-              <ul>{code.unavailable.map((text) => <li key={text}>{text}</li>)}</ul>
+              <ul>{(code.unavailable || []).map((text) => <li key={text}>{text}</li>)}</ul>
             </div>
           )}
           {!!(code.files || []).length && (
             <details className="checkpoint-block">
-              <summary>涉及 {code.files.length} 个文件</summary>
-              <ul>{code.files.map((path) => <li key={path}>{path}</li>)}</ul>
+              <summary>涉及 {(code.files || []).length} 个文件</summary>
+              <ul>{(code.files || []).map((path) => <li key={path}>{path}</li>)}</ul>
             </details>
           )}
           {!canConversation && (
@@ -1322,14 +1334,14 @@ function CheckpointDialog() {
           className="btn"
           id="checkpoint-fork"
           disabled={!info || !canConversation || busy}
-          onClick={() => useStore.getState().forkCheckpoint(dialog.sequence, info?.revision)}
+          onClick={() => { if (dialog?.sequence != null && info) useStore.getState().forkCheckpoint(dialog.sequence, info.revision); }}
         >另开对话</button>
         <button
           type="button"
           className="btn btn-danger"
           id="checkpoint-restore"
           disabled={!info || !mode || busy}
-          onClick={() => useStore.getState().restoreCheckpoint(dialog.sequence, mode, info?.revision)}
+          onClick={() => { if (dialog?.sequence != null && info) useStore.getState().restoreCheckpoint(dialog.sequence, mode, info.revision); }}
         >{busy ? '回退中…' : '确认回退'}</button>
       </footer>
     </Modal>

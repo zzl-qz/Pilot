@@ -373,8 +373,17 @@
         "配对/撤销/修复/过期",
         "剪贴板降级"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T08-51-49-589Z/report.json",
+          "result": "373 项前端单元、41 项桌面单元、严格类型检查、构建及 navigation/composer/model-discovery/mobile-connection/interaction/workbench-refresh/notification/request-usage 八套 Web/Electron 回归通过。手机状态对照 Java 环境响应及 Kotlin 配对协议；修复项目表单回填、真实清理统计和存储告警原因。"
+        },
+        {
+          "report": ".tmp-check/migration/2026-11-06T08-55-02-722Z/report.json",
+          "result": "补齐命令面板、验收项与技能来源的输入法确认键保护后，重新通过前端和桌面单元、严格类型检查、构建与 navigation/composer/interaction 回归；旧 JS 基线复现项目表单缺陷，修正后 JS 和 TS 均通过。"
+        }
+      ]
     },
     {
       "batch": 14,

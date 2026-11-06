@@ -30,7 +30,7 @@ export interface UiState {
   themeMode: string; accent: string; sidebarOpen: boolean; inspectorOpen: boolean; inspectorTab: string;
   reviewExpanded: boolean; filters: string; settingsSection: string; settingsOpen: boolean; paletteOpen: boolean;
   picker: { title?: string; onPick?: (path: string) => unknown } | null;
-  projectEditor: { id: string | null } | null; skillsInstall: object | null;
+  projectEditor: { id: string | null; name?: string; folders?: string[] } | null; skillsInstall: object | null;
   checkpointDialog: CheckpointDialog | null; confirm: ConfirmDialog | null;
   agentsDockOpen: boolean; queueCollapsed: boolean; queueEdit: number | null; draftFiles: DraftAttachment[];
   connection: { status: string; text: string }; bottomSignal: number; attentionKind: string; browserDot: boolean;
@@ -53,7 +53,7 @@ export interface StoreData extends Omit<ReducerState, 'ui'> {
   lastOutcome: string; queueHeld: boolean; turnRuns: string[]; changedFiles: ChangeFile[];
   contextStatus: ContextStatus | null; compactingContext: boolean; queueEntries: QueueEntry[];
   taskDirty: boolean; taskBusy: boolean; planItems: PlanItem[];
-  skills: S.SkillsControllerSkillPayload[]; skillsMeta: { projectRoot: string; userRoot: string; invalid: S.SkillProblem[] };
+  skills: (S.SkillsControllerSkillPayload & { id?: string })[]; skillsMeta: { projectRoot: string; userRoot: string; invalid: S.SkillProblem[] };
   quickCommands: (BuiltinCommand | SkillCommand)[]; modelOptions: string[]; remoteModels: string[];
   settingsData: S.SettingsControllerSettingsResponse | null; modelSave: { busy: boolean; message: string; error: boolean };
   notifyEnabled: boolean; permissionMode: string; usageData: S.UsageServiceUsageReport | null;

@@ -93,7 +93,7 @@ export interface ApiResults {
   worktreeRemove: ActionResponse;
   worktreeHandoff: S.WorktreeControllerHanded;
   workspaceRoots: S.WorkspaceServiceRootEntry[];
-  workspaceBrowse: S.WorkspaceServiceBrowseResult;
+  workspaceBrowse: S.WorkspaceServiceBrowseResult & { entries?: S.WorkspaceServiceDirectoryEntry[] };
   settings: S.SettingsControllerSettingsResponse;
   savePermissionMode: S.SettingsControllerSettingsResponse;
   saveModel: S.SettingsControllerSettingsResponse;
