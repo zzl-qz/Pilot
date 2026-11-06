@@ -152,7 +152,7 @@ export function reduceSideChat(state: Partial<SideTranscript> | null | undefined
     live: state?.live || ''
   };
   const type = event?.type;
-  const payload = event?.payload || {};
+  const payload = (event?.payload || {}) as { input?: string; text?: string };
   if (type === 'user.message' || type === 'run.started') {
     const text = String(payload.input || payload.text || '');
     if (!text.trim()) {

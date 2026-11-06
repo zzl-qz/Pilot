@@ -12,14 +12,14 @@ test('HTTP 类型接受正常请求并拒绝错误标识符、游标、请求体
   try {
     const module = relative(directory, join(root, 'src/api.ts')).replaceAll('\\', '/');
     const valid = join(directory, 'valid.ts'), invalid = join(directory, 'invalid.ts');
-    await writeFile(valid, `import {api} from ${JSON.stringify(module)};\napi.history('s',{before:0});\napi.importBookmarks('s',[1]);\napi.saveModel({clearApiKey:true});\napi.createProject({name:'项目'});\napi.session('s').then(value=>value?.title);\n`);
-    await writeFile(invalid, `import {api} from ${JSON.stringify(module)};\napi.history(123,{before:'bad'});\napi.importBookmarks('s',['bad']);\napi.saveModel({clearApiKey:'bad'});\napi.createProject({name:123});\napi.session('s').then(value=>value?.doesNotExist);\n`);
+    await writeFile(valid, `import {api} from ${JSON.stringify(module)};\napi.history('s',{before:0});\napi.importBookmarks('s',[1]);\napi.saveModel({clearApiKey:true});\napi.createProject({name:'项目'});\napi.session('s').then(value=>value?.title);\napi.resolveArbitration('s','a',{choice:'保留'});\n`);
+    await writeFile(invalid, `import {api} from ${JSON.stringify(module)};\napi.history(123,{before:'bad'});\napi.importBookmarks('s',['bad']);\napi.saveModel({clearApiKey:'bad'});\napi.createProject({name:123});\napi.session('s').then(value=>value?.doesNotExist);\napi.resolveArbitration('s','a',{decision:'错误字段'});\n`);
     const configPath = join(root, 'tsconfig.json');
     const config = ts.readConfigFile(configPath, ts.sys.readFile);
     const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root, undefined, configPath);
     const program = ts.createProgram([...parsed.fileNames, valid, invalid], parsed.options);
     const diagnostics = ts.getPreEmitDiagnostics(program).filter(item => item.category === ts.DiagnosticCategory.Error);
     assert.deepEqual(diagnostics.filter(item => item.file?.fileName !== invalid).map(item => ts.flattenDiagnosticMessageText(item.messageText, '\n')), []);
-    assert.deepEqual(diagnostics.filter(item => item.file?.fileName === invalid).map(item => item.file.getLineAndCharacterOfPosition(item.start).line + 1), [2, 3, 4, 5, 6]);
+    assert.deepEqual(diagnostics.filter(item => item.file?.fileName === invalid).map(item => item.file.getLineAndCharacterOfPosition(item.start).line + 1), [2, 3, 4, 5, 6, 7]);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

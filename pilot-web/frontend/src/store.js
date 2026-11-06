@@ -1168,7 +1168,7 @@ export const useStore = create(immer((set, get) => {
   async resolveArbitration(arbitrationId, decision) {
     const { sessionId } = get();
     try {
-      await api.resolveArbitration(sessionId, arbitrationId, { decision });
+      await api.resolveArbitration(sessionId, arbitrationId, { choice: decision });
     } catch (error) {
       get().showNotice('提交裁决失败：' + error.message);
     }

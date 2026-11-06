@@ -35,6 +35,27 @@ function draft() {
 
 const turnOf = (state) => state.thread.rows.find((row) => row.type === 'turn');
 
+test('后端 summary 字段回填子任务结果，旧 result 字段仍兼容', () => {
+  for (const payload of [{ agentId: 'agent-a', summary: '后端结论', ok: true }, { agentId: 'agent-a', result: '旧结论', ok: true }]) {
+    const state = draft();
+    applyEvent(state, { type: 'run.started', sequence: 1, runId: 'r', payload: { input: '任务' } }, { live: true });
+    applyEvent(state, { type: 'subagent.started', sequence: 2, runId: 'r', payload: { agentId: 'agent-a', task: '子任务' } }, { live: true });
+    applyEvent(state, { type: 'subagent.finished', sequence: 3, runId: 'r', payload }, { live: true });
+    assert.equal(state.agents['agent-a'].result, payload.result || payload.summary);
+    assert.equal(turnOf(state).agents['agent-a'].result, payload.result || payload.summary);
+  }
+});
+
+test('仲裁显示后端 report，choice 回放为已裁决并清理等待项', () => {
+  const state = draft();
+  applyEvent(state, { type: 'arbitration.required', sequence: 1, payload: { arbitrationId: 'arb-a', options: ['保留'], report: '存在文件冲突' } }, { live: true });
+  const row = state.thread.rows.find(row => row.type === 'arb');
+  assert.equal(row.detail, '存在文件冲突');
+  applyEvent(state, { type: 'arbitration.resolved', sequence: 2, payload: { arbitrationId: 'arb-a', choice: '保留' } }, { live: true });
+  assert.equal(row.resolved, true); assert.equal(row.resolution, '保留');
+  assert.equal(state.pendingArbitrations['arb-a'], undefined);
+});
+
 test('长回复收尾保留完整最新问答和翻页游标，不能只剩结束卡片', () => {
   for (const ending of ['run.completed', 'run.failed', 'run.cancelled']) {
     const state = draft();

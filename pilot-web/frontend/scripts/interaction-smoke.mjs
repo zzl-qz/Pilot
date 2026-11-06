@@ -51,6 +51,16 @@ async function run(page,name,url) {
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(url); await page.locator('#input-flow').waitFor();
   const input=page.locator('#input-flow'), chips=page.locator('[data-chip=attachment]');
+  // 按真实后端的 choice 字段提交；回放 choice 事件后关闭该卡片的操作入口。
+  await page.evaluate(() => {
+    const state=store.getState();window.arbitrationBefore={thread:state.thread,timeline:state.timeline};
+    store.setState({pendingArbitrations:{'arb-ui':{arbitrationId:'arb-ui',options:['保留']}},thread:{...state.thread,rows:[{type:'arb',key:'arb-ui',arbitrationId:'arb-ui',title:'处理冲突',detail:'后端仲裁报告',options:['保留'],resolved:false,start:1,end:1}]}});
+  });
+  await page.getByRole('button',{name:'保留',exact:true}).click();
+  assert.deepEqual(await page.evaluate(()=>calls.find(call=>call.name==='resolveArbitration').args),['test-a','arb-ui',{choice:'保留'}]);
+  await page.evaluate(async()=>{const {applyEvent}=await import('/src/thread-reducer.js');store.setState(draft=>applyEvent(draft,{type:'arbitration.resolved',sequence:2,payload:{arbitrationId:'arb-ui',choice:'保留'}},{live:true}));});
+  await page.locator('.arb-card.is-resolved').waitFor();assert.equal(await page.getByRole('button',{name:'保留',exact:true}).count(),0);
+  await page.evaluate(()=>{store.setState({...window.arbitrationBefore,pendingArbitrations:{}});delete window.arbitrationBefore;});
   const mod=process.platform==='darwin'?'Meta':'Control';
   async function paste(name='note.txt') {
     await input.evaluate((el,name)=>{const data=new DataTransfer();data.items.add(new File(['content'],name,{type:'text/plain'}));el.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));},name);

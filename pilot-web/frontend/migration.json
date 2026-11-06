@@ -211,8 +211,19 @@
         "失败/取消/恢复",
         "长回合与分页边界"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T08-11-54-460Z/report.json",
+          "result": "366 项前端单元、41 项桌面单元、严格类型检查、构建、全部 17 套 Chromium/Electron 交互回归通过；26 类事件逐一覆盖实时与回放，真实 Immer 验证审批同意/拒绝和工具完成。对照 Java 事件记录修正子任务 summary、仲裁 report/choice；修复数组与索引对象被 Immer 分离后工具行状态不更新。新增断言在旧 JS 副本上复现既有缺陷，未降低检查。"
+        },
+        {
+          "evidence": [
+            "/var/folders/v3/fbb0zyg91pd0qyt0gp6fnqcc0000gn/T/pilot-api-contract-2EeSwn/report.json"
+          ],
+          "result": "真实 Jar 与前端 API 契约通过，仲裁 choice 请求抵达业务层并正确返回不存在记录的 404；UI 验证裁决发送、结果落地和按钮移除。"
+        }
+      ]
     },
     {
       "batch": 8,

@@ -52,6 +52,17 @@ function json(data) {
 const { useStore } = await import('../../../frontend/src/store.js');
 const { writeDraft, readDraft, draftKey } = await import('../../../frontend/src/lib/drafts.js');
 
+test('人工仲裁按后端 choice 字段提交选择', async t => {
+  const { api } = await import('../../../frontend/src/api.js');
+  const original = api.resolveArbitration, sessionId = useStore.getState().sessionId;
+  t.after(() => { api.resolveArbitration = original; useStore.setState({ sessionId }); });
+  const calls = [];
+  api.resolveArbitration = async (...args) => { calls.push(args); return null; };
+  useStore.setState({ sessionId: 'arb-session' });
+  await useStore.getState().resolveArbitration('arb-a', '保留');
+  assert.deepEqual(calls, [['arb-session', 'arb-a', { choice: '保留' }]]);
+});
+
 function sessionsPosts() {
   return calls.filter((call) => call.url === '/api/sessions' && call.method === 'POST');
 }

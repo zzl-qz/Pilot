@@ -1,5 +1,33 @@
 /** 对照项目 Java record 核实的 HTTP 数据结构；运行时 JSON 和旧记录仍在各入口处理。 */
 
+/** ApprovalRequired.java / ApprovalRequired */
+export interface ApprovalRequired {
+  callId: string;
+  name: string;
+  argsSummary: string;
+}
+
+/** ApprovalResolved.java / ApprovalResolved */
+export interface ApprovalResolved {
+  callId: string;
+  decision: string;
+}
+
+/** ArbitrationRequired.java / ArbitrationRequired */
+export interface ArbitrationRequired {
+  arbitrationId: string;
+  kind: string;
+  taskId: string;
+  options: (string)[];
+  report: string;
+}
+
+/** ArbitrationResolved.java / ArbitrationResolved */
+export interface ArbitrationResolved {
+  arbitrationId: string;
+  choice: string;
+}
+
 /** ArtifactDiff.java / ArtifactDiff */
 export interface ArtifactDiff {
   previousCandidate: string;
@@ -32,6 +60,28 @@ export interface ArtifactManifest {
   revision: number;
   candidateHash: string;
   createdAt: string;
+}
+
+/** AssistantDelta.java / AssistantDelta */
+export interface AssistantDelta {
+  text: string;
+}
+
+/** AssistantPreview.java / AssistantPreview */
+export interface AssistantPreview {
+  text: string;
+}
+
+/** AssistantReasoning.java / AssistantReasoning */
+export interface AssistantReasoning {
+  text: string;
+}
+
+/** Attachment.java / Attachment */
+export interface Attachment {
+  name: string;
+  mimeType: string;
+  path: string;
 }
 
 /** BackupService.java / BackupReport */
@@ -211,6 +261,29 @@ export interface CommandTaskManagerTask {
   changeTracking: CommandChangeTrackerHandle;
 }
 
+/** ContextCompacted.java / ContextCompacted */
+export interface ContextCompacted {
+  coveredMessages: number;
+  charactersBefore: number;
+  charactersAfter: number;
+  summary: string;
+}
+
+/** ContextComposition.java / ContextComposition */
+export interface ContextComposition {
+  totalTokens: number;
+  estimated: boolean;
+  attachments: number;
+  parts: (ContextCompositionPart)[];
+}
+
+/** ContextComposition.java / Part */
+export interface ContextCompositionPart {
+  category: string;
+  label: string;
+  tokens: number;
+}
+
 /** DeliveryService.java / Delivery */
 export interface DeliveryServiceDelivery {
   id: string;
@@ -243,6 +316,15 @@ export interface DeliveryServiceSettings {
 export interface DiagnosticsControllerValidationView {
   report: ValidationLedgerReport;
   recent: (ValidationEvidence)[];
+}
+
+/** ExecutionUpdated.java / ExecutionUpdated */
+export interface ExecutionUpdated {
+  mode: string;
+  phase: string;
+  requests: number;
+  reason: string;
+  gap: string;
 }
 
 /** GitWorktrees.java / Preview */
@@ -330,6 +412,18 @@ export interface ModelCapabilityDiscoveryReport {
   outputTokens: number;
 }
 
+/** ModelPricing.java / Cost */
+export interface ModelPricingCost {
+  currency: string;
+  total: number;
+  input: number;
+  cachedInput: number;
+  cacheWrite: number;
+  output: number;
+  source: string;
+  note: string;
+}
+
 /** ModelPricing.java / ModelPricing */
 export interface ModelPricing {
   currency: string;
@@ -351,6 +445,11 @@ export interface ModelProfile {
   cacheKey: boolean;
   compactionMode: string;
   pricing: ModelPricing;
+}
+
+/** ModelRequestCompleted.java / ModelRequestCompleted */
+export interface ModelRequestCompleted {
+  report: RequestReport;
 }
 
 /** ModelRuntimeController.java / Update */
@@ -383,6 +482,32 @@ export interface ModelRuntimeSettingsView {
   capabilityDiscovery: ModelCapabilityDiscoveryReport;
 }
 
+/** ModelUsage.java / ModelUsage */
+export interface ModelUsage {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+  exact: boolean;
+  cacheReadObserved: boolean;
+  cacheWriteObserved: boolean;
+}
+
+/** MultiAgentBudgetUpdated.java / MultiAgentBudgetUpdated */
+export interface MultiAgentBudgetUpdated {
+  dispatchId: string;
+  status: string;
+  maxDispatchSeconds: number;
+  maxTotalTokens: number;
+  usedTokens: number;
+  estimatedTokens: number;
+  reservedTokens: number;
+  inFlightRequests: number;
+  stopReason: string;
+  cancellationRequested: boolean;
+}
+
 /** MultiAgentController.java / SandboxManifestReport */
 export interface MultiAgentControllerSandboxManifestReport {
   manifest: ArtifactManifest;
@@ -398,6 +523,18 @@ export interface MultiAgentControllerSandboxManifestReport {
 export interface PlanItem {
   step: string;
   status: string;
+}
+
+/** PlanUpdated.java / PlanItemPayload */
+export interface PlanUpdatedPlanItemPayload {
+  step: string;
+  status: string;
+}
+
+/** PlanUpdated.java / PlanUpdated */
+export interface PlanUpdated {
+  plan: (PlanUpdatedPlanItemPayload)[];
+  explanation: string;
 }
 
 /** ProjectController.java / ProjectResponse */
@@ -461,6 +598,30 @@ export interface RecurringScheduleServiceTimes {
   runAt: string;
   next: (string)[];
   timezone: string;
+}
+
+/** RequestReport.java / Prefix */
+export interface RequestReportPrefix {
+  strategy: string;
+  fingerprint: string;
+  unchangedMessages: number;
+  change: string;
+}
+
+/** RequestReport.java / RequestReport */
+export interface RequestReport {
+  id: string;
+  purpose: string;
+  model: string;
+  provider: string;
+  startedAt: number;
+  durationMs: number;
+  firstTokenMs: number;
+  status: string;
+  usage: ModelUsage;
+  context: ContextComposition;
+  cost: ModelPricingCost;
+  prefix: RequestReportPrefix;
 }
 
 /** RequestTotals.java / Summary */
@@ -534,12 +695,51 @@ export interface RetentionServicePurgeReport {
   validationDays: number;
 }
 
+/** RunCancelled.java / RunCancelled */
+export interface RunCancelled {
+  reason: string;
+}
+
+/** RunCompleted.java / RunCompleted */
+export interface RunCompleted {
+  summary: string;
+  changedFiles: (string)[];
+  checks: (string)[];
+  planDone: number;
+  planTotal: number;
+  openSteps: (string)[];
+}
+
+/** RunContinued.java / RunContinued */
+export interface RunContinued {
+  attempt: number;
+  maxAttempts: number;
+  reason: string;
+}
+
+/** RunFailed.java / RunFailed */
+export interface RunFailed {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
 /** RunMetrics.java / Snapshot */
 export interface RunMetricsSnapshot {
   counters: Record<string, number>;
   runs: number;
   totalRunMs: number;
   averageRunMs: number;
+}
+
+/** RunRetrying.java / RunRetrying */
+export interface RunRetrying {
+  attempt: number;
+  delayMs: number;
+  reason: string;
+  elapsedMs: number;
+  remainingMs: number;
+  maxAttempts: number;
 }
 
 /** RunSnapshotService.java / RestorePreview */
@@ -560,6 +760,13 @@ export interface RunSnapshotServiceRollbackReport {
   conflicts: (string)[];
 }
 
+/** RunStarted.java / RunStarted */
+export interface RunStarted {
+  input: string;
+  attachments: (Attachment)[];
+  imagePositions: (number)[];
+}
+
 /** RunStateTracker.java / RecoveryEntry */
 export interface RunStateTrackerRecoveryEntry {
   runId: string;
@@ -570,6 +777,35 @@ export interface RunStateTrackerRecoveryEntry {
   workspace: string;
   leaseState: string;
   updatedAt: string;
+}
+
+/** RunSteered.java / RunSteered */
+export interface RunSteered {
+  input: string;
+  attachments: (Attachment)[];
+  imagePositions: (number)[];
+}
+
+/** RunUsageUpdated.java / RunUsageUpdated */
+export interface RunUsageUpdated {
+  modelRequests: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  contextTokens: number;
+  contextLimit: number;
+  exact: boolean;
+  details: RequestTotalsSummary;
+}
+
+/** SandboxDiffReady.java / SandboxDiffReady */
+export interface SandboxDiffReady {
+  sandboxId: string;
+  agentId: string;
+  taskId: string;
+  path: string;
+  added: number;
+  removed: number;
 }
 
 /** SandboxStore.java / ApplyReport */
@@ -842,6 +1078,20 @@ export interface StorageHealthSnapshot {
   checkedAt: string;
 }
 
+/** SubagentFinished.java / SubagentFinished */
+export interface SubagentFinished {
+  agentId: string;
+  summary: string;
+  ok: boolean;
+}
+
+/** SubagentStarted.java / SubagentStarted */
+export interface SubagentStarted {
+  agentId: string;
+  task: string;
+  name: string;
+}
+
 /** TaskControlService.java / Acceptance */
 export interface TaskControlServiceAcceptance {
   text: string;
@@ -989,6 +1239,30 @@ export interface TaskDiagnosticsServiceValidationView {
   checks: (string)[];
   recordedAt: string;
   runId: string;
+}
+
+/** TaskUpdated.java / TaskUpdated */
+export interface TaskUpdated {
+  taskId: string;
+  agentId: string;
+  title: string;
+  status: string;
+  detail: string;
+}
+
+/** ToolCompleted.java / ToolCompleted */
+export interface ToolCompleted {
+  callId: string;
+  resultSummary: string;
+  latencyMs: number;
+}
+
+/** ToolStarted.java / ToolStarted */
+export interface ToolStarted {
+  callId: string;
+  name: string;
+  summary: string;
+  agentId: string;
 }
 
 /** UsageService.java / DayTotal */

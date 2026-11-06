@@ -1,6 +1,6 @@
 export interface HistoryRange { start: number; end: number }
 export interface MarkdownBlock extends HistoryRange { node: Node; source?: string }
-export interface SimpleEvent { type?: string; sequence?: number; payload?: { input?: string; text?: string } }
+export interface SimpleEvent { type?: string; sequence?: number; payload?: object }
 export interface SideMessage { role: 'user' | 'assistant'; text: string }
 export interface SideTranscript { messages: SideMessage[]; live: string }
 export interface SideChatTab { id: string; parentId?: string | null; title: string; workspace?: string | null; projectId?: string | null }

@@ -1,3 +1,6 @@
+import type { ReducerState, ThreadState, ThreadRow, TurnRow, PlanRow, UserRow, ToolRow, TimelineInput, TimelineItem, ArbitrationRow } from './types/thread.js';
+import type { EventEnvelope, EventMetadata } from './types/events.js';
+import type { MessageAttachment } from './types/runtime.js';
 /**
  * SSE 事件 → 线程行模型的纯 reducer。
  *
@@ -22,7 +25,7 @@ import { preview, estimateTokens } from './thread-utils.js';
 /** 活动流保留上限，与旧版 MAX_TIMELINE_EVENTS 一致。 */
 const MAX_TIMELINE_EVENTS = 300;
 
-export const initialThread = () => ({
+export const initialThread = (): ThreadState => ({
   /** 行注册表：[{ key, type, start, end, ... }]，显示顺序 = 数组顺序（旧→新）。 */
   rows: [],
   /** 当前渲染的事件窗口（升序），翻页游标与裁剪都用它。 */
@@ -34,12 +37,12 @@ export const initialThread = () => ({
 });
 
 /** 该事件是否来自历史回放窗口的 user.message（不在 EVENT_TYPES 里）。 */
-export function isUserMessageType(event) {
+export function isUserMessageType(event: { type: string }) {
   return event.type === 'user.message';
 }
 
 /** 计划跟着当前这段用户消息走。上一问的计划卡片留在原处，不再被后来的更新改掉。 */
-function planInOpenSegment(draft) {
+function planInOpenSegment(draft: ReducerState): PlanRow | null {
   const rows = draft.thread.rows;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     const row = rows[i];
@@ -54,7 +57,7 @@ function planInOpenSegment(draft) {
 }
 
 /** 子智能体可能挂在更早的回合上，完成事件不能只看最后一轮。 */
-function turnWithAgent(draft, id) {
+function turnWithAgent(draft: ReducerState, id: string | null | undefined): TurnRow | null {
   if (!id) {
     return null;
   }
@@ -68,7 +71,7 @@ function turnWithAgent(draft, id) {
   return null;
 }
 
-function openTurn(draft) {
+function openTurn(draft: ReducerState): TurnRow | null {
   const rows = draft.thread.rows;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     const row = rows[i];
@@ -83,7 +86,7 @@ function openTurn(draft) {
 }
 
 /** 按 runId 找回那一次运行的回合。对不上就留空，不拿「最后一轮」凑。 */
-function turnForRun(draft, runId) {
+function turnForRun(draft: ReducerState, runId: string | null | undefined): TurnRow | null {
   if (!runId) {
     return null;
   }
@@ -98,12 +101,12 @@ function turnForRun(draft, runId) {
 }
 
 /** 结束、失败、取消只收自己那一轮。runId 对不上时，才落到当前这段还开着的回合。 */
-function turnToClose(draft, runId) {
+function turnToClose(draft: ReducerState, runId: string | null | undefined) {
   return turnForRun(draft, runId) || openTurn(draft);
 }
 
 /** 工具结果要回到发起它的那一轮。新一轮已经开了之后，不能写到更靠后的空回合上。 */
-function turnOwning(draft, callId) {
+function turnOwning(draft: ReducerState, callId: string | null | undefined): TurnRow | null {
   const rows = draft.thread.rows;
   if (callId) {
     for (let i = rows.length - 1; i >= 0; i -= 1) {
@@ -114,18 +117,19 @@ function turnOwning(draft, callId) {
     }
   }
   for (let i = rows.length - 1; i >= 0; i -= 1) {
-    if (rows[i].type === 'turn') {
-      return rows[i];
+    const row = rows[i];
+    if (row.type === 'turn') {
+      return row;
     }
   }
   return null;
 }
 
-function ensureTurn(draft) {
+function ensureTurn(draft: ReducerState): TurnRow {
   const thread = draft.thread;
   const rows = thread.rows;
   // 从末尾往前找。中间夹了用户消息，说明上一轮已经结束，不能把新工具接回去。
-  let turn = null;
+  let turn: TurnRow | null = null;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     const row = rows[i];
     if (row.type === 'user') {
@@ -161,7 +165,7 @@ function ensureTurn(draft) {
  * 运行已经结束，却还挂在「运行中」的工具行：不可能再等到 tool.completed 了
  * （事件丢失、进程被中断、或整轮被取消）。留着转圈会让人以为卡死，统一收成中断态。
  */
-function settleUnfinishedTools(turn, event) {
+function settleUnfinishedTools(turn: TurnRow | null, event: EventMetadata) {
   if (!turn?.tools) {
     return;
   }
@@ -171,15 +175,26 @@ function settleUnfinishedTools(turn, event) {
       tool.status = 'interrupted';
       tool.meta = tool.meta || '未返回结果';
       tool.finishedAt = finishedAt;
+      turn.toolIndex[tool.callId] = { ...tool };
     }
   }
+}
+
+/** Immer 会分离数组与索引里的对象引用，更新工具后显式同步两个视图。 */
+function syncToolRow(turn: TurnRow, tool: ToolRow) {
+  for (let index = 0; index < turn.tools.length; index++) {
+    if (turn.tools[index]?.callId === tool.callId) {
+      turn.tools[index] = { ...turn.tools[index], ...tool };
+    }
+  }
+  turn.toolIndex[tool.callId] = { ...tool };
 }
 
 /**
  * 这一轮已经结束。用量上的结束时间要写回这一轮自己的统计，
  * 否则界面会拿「现在」继续加秒，看起来像还在跑。
  */
-function finishTurnClock(draft, turn, event) {
+function finishTurnClock(draft: ReducerState, turn: TurnRow | null, event: EventMetadata) {
   const finishedAt = eventTimestamp(event);
   if (draft.runUsage) {
     draft.runUsage.finishedAt = finishedAt;
@@ -205,25 +220,25 @@ function finishTurnClock(draft, turn, event) {
 }
 
 /** 正文或工具出来了，思考块就该收起（旧版 settleReasoning），秒数保留。 */
-function settleThinking(turn, event) {
+function settleThinking(turn: TurnRow, event: EventMetadata) {
   if (turn.thinking && turn.thinking.live) {
     turn.thinking.live = false;
     turn.thinking.finishedAt = eventTimestamp(event);
   }
 }
 
-function pushRow(draft, row) {
+function pushRow(draft: ReducerState, row: ThreadRow) {
   row.start = row.start ?? draft.thread.cursor;
   row.end = row.end ?? draft.thread.cursor;
   draft.thread.rows.push(row);
 }
 
-function formatBudgetCount(value) {
+function formatBudgetCount(value: unknown) {
   const count = Number(value);
   return Number.isFinite(count) ? Math.max(0, count).toLocaleString() : '0';
 }
 
-function record(draft, event, entry) {
+function record(draft: ReducerState, event: EventEnvelope, entry: TimelineInput) {
   if (event.type !== 'assistant.delta' && event.type !== 'assistant.preview') {
     draft.streamCard = null;
   }
@@ -232,7 +247,7 @@ function record(draft, event, entry) {
     draft.timeline.shift();
   }
   draft.thread.activityCount += 1;
-  const item = {
+  const item: TimelineItem = {
     key: `${event.type}:${event.sequence}:${draft.thread.activityCount}`,
     dispatchId: entry.dispatchId || null,
     kind: entry.kind,
@@ -263,12 +278,12 @@ function record(draft, event, entry) {
 }
 
 /** 用户消息行（run.started 的 input / user.message 回放 / 乐观发送共用）。 */
-export function appendUserRow(draft, text, sequence, { attachments = [], imagePositions = [], pendingKey = null } = {}) {
+export function appendUserRow(draft: ReducerState, text: string, sequence: number | null | undefined, { attachments = [], imagePositions = [], pendingKey = null }: { attachments?: MessageAttachment[]; imagePositions?: number[]; pendingKey?: string | null } = {}): UserRow {
   const thread = draft.thread;
-  const row = {
+  const row: UserRow = {
     key: pendingKey || (Number.isFinite(sequence) ? `message:${sequence}` : `message:p${thread.activityCount}`),
     type: 'user',
-    sequence: Number.isFinite(sequence) ? sequence : null,
+    sequence: Number.isFinite(sequence) ? sequence! : null,
     text,
     attachments,
     imagePositions,
@@ -279,7 +294,7 @@ export function appendUserRow(draft, text, sequence, { attachments = [], imagePo
   return row;
 }
 
-function stampLastUserRow(draft, sequence, text) {
+function stampLastUserRow(draft: ReducerState, sequence: number, text: string) {
   const rows = draft.thread.rows;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     const row = rows[i];
@@ -296,7 +311,7 @@ function stampLastUserRow(draft, sequence, text) {
   }
 }
 
-export function applyEvent(draft, event, { live }) {
+export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: { live: boolean }) {
   const thread = draft.thread;
   // 流式增量只用于界面，不推进游标（否则重连后正式事件会被判成重复而丢掉）
   if (!isEphemeral(event.type)) {
@@ -344,7 +359,7 @@ export function applyEvent(draft, event, { live }) {
       }
       const payload = event.payload || {};
       const input = payload.input || '';
-      const same = (a, b) => String(a || '').replace(/\s+/g, ' ').trim() === String(b || '').replace(/\s+/g, ' ').trim();
+      const same = (a: unknown, b: unknown) => String(a || '').replace(/\s+/g, ' ').trim() === String(b || '').replace(/\s+/g, ' ').trim();
       if (draft.pendingInputs.length && same(draft.pendingInputs[0], input)) {
         draft.pendingInputs.shift();
         stampLastUserRow(draft, event.sequence, input);
@@ -375,11 +390,11 @@ export function applyEvent(draft, event, { live }) {
       if (current || String(event.runId || '').startsWith('compact_')) {
         const reports = draft.requestReports || [];
         if (!reports.some(item => item.id === report.id)) draft.requestReports = [...reports, report].slice(-200);
-        if (report.purpose === 'main' && (!draft.latestContextReport || report.startedAt >= draft.latestContextReport.startedAt))
+        if (report.purpose === 'main' && (!draft.latestContextReport || report.startedAt >= draft.latestContextReport.startedAt!))
           draft.latestContextReport = report;
       }
       if (!String(event.runId || '').startsWith('compact_')) {
-        const turn = draft.thread.rows.findLast(row => row.type === 'turn' && row.runIds?.includes(event.runId)) || (current ? ensureTurn(draft) : null);
+        const turn = draft.thread.rows.findLast((row): row is TurnRow => row.type === 'turn' && row.runIds.includes(event.runId!)) || (current ? ensureTurn(draft) : null);
         if (turn && !(turn.requests || []).some(item => item.id === report.id)) turn.requests = [...(turn.requests || []), report].slice(-200);
       }
       break;
@@ -413,7 +428,7 @@ export function applyEvent(draft, event, { live }) {
         ...(draft.contextStatus || {}),
         usedTokens: draft.runUsage.contextTokens,
         limitTokens: draft.runUsage.contextLimit,
-        percent: Math.min(100, Math.round(draft.runUsage.contextTokens / draft.runUsage.contextLimit * 100)),
+        percent: Math.min(100, Math.round(draft.runUsage.contextTokens! / draft.runUsage.contextLimit! * 100)),
         estimated: true,
         canCompact: false
       };
@@ -504,6 +519,7 @@ export function applyEvent(draft, event, { live }) {
         row.status = failed ? 'error' : 'ok';
         row.meta = `${event.payload.latencyMs} ms`;
         row.body = event.payload.resultSummary || '';
+        syncToolRow(turn!, row);
       }
       record(draft, event, {
         kind: 'tool', tone: failed ? 'error' : 'ok', status: failed ? '失败' : '完成',
@@ -532,6 +548,7 @@ export function applyEvent(draft, event, { live }) {
         name: event.payload.name,
         args: event.payload.argsSummary
       };
+      syncToolRow(turn, row);
       record(draft, event, {
         kind: 'approval', tone: 'warn', status: '待审批',
         title: `${event.payload.name} · ${event.payload.argsSummary}`,
@@ -554,6 +571,7 @@ export function applyEvent(draft, event, { live }) {
       if (row) {
         row.status = approved ? 'run' : 'error';
         row.meta = approved ? '已批准' : '已拒绝';
+        syncToolRow(turn!, row);
       }
       record(draft, event, {
         kind: 'approval', tone: approved ? 'ok' : 'error',
@@ -599,7 +617,7 @@ export function applyEvent(draft, event, { live }) {
       // 传的是失败码：暂停/中断/阻塞都不是「失败」，界面上要区分开并且可继续
       const code = String(event.payload?.code || '');
       const failure = classifyRunFailure(code);
-      const outcomeLabels = {
+      const outcomeLabels: Record<string, string> = {
         WAITING: '等待外部事件', NEED_INPUT: '需要输入', UNVERIFIED: '结果未验证',
         NO_PROGRESS: '暂无有效进展', REVIEW_UNAVAILABLE: '核验暂不可用'
       };
@@ -768,14 +786,14 @@ export function applyEvent(draft, event, { live }) {
     case 'subagent.finished': {
       const id = event.payload?.agentId || event.payload?.id;
       const turn = turnWithAgent(draft, id);
-      const agent = turn?.agents?.[id] || draft.agents[id];
-      if (agent) {
+      const agent = id ? turn?.agents?.[id] || draft.agents[id] : undefined;
+      if (agent && id) {
         agent.status = event.payload?.ok === false ? 'failed' : 'done';
-        agent.result = event.payload?.result || agent.result || '';
+        agent.result = event.payload?.result || event.payload?.summary || agent.result || '';
         agent.finishedAt = eventTimestamp(event);
         if (draft.agents[id]) draft.agents[id] = { ...agent };
       }
-      record(draft, event, { kind: 'run', tone: 'ok', status: '完成', title: `子智能体完成 · ${id}`, detail: preview(event.payload?.result || '', 160) });
+      record(draft, event, { kind: 'run', tone: 'ok', status: '完成', title: `子智能体完成 · ${id}`, detail: preview(event.payload?.result || event.payload?.summary || '', 160) });
       break;
     }
 
@@ -827,21 +845,21 @@ export function applyEvent(draft, event, { live }) {
       pushRow(draft, {
         key: `arb:${payload.arbitrationId || event.sequence}`,
         type: 'arb', arbitrationId: payload.arbitrationId,
-        title: payload.title || '多智能体仲裁', detail: payload.summary || '',
+        title: payload.title || '多智能体仲裁', detail: payload.summary || payload.report || '',
         options: payload.options || [], resolved: false,
         start: event.sequence, end: event.sequence
       });
-      record(draft, event, { kind: 'approval', tone: 'warn', status: '仲裁', title: payload.title || '多智能体仲裁', detail: payload.summary || null });
+      record(draft, event, { kind: 'approval', tone: 'warn', status: '仲裁', title: payload.title || '多智能体仲裁', detail: payload.summary || payload.report || null });
       break;
     }
 
     case 'arbitration.resolved': {
       const id = event.payload?.arbitrationId;
       delete draft.pendingArbitrations[id];
-      const row = draft.thread.rows.find((item) => item.type === 'arb' && item.arbitrationId === id);
+      const row = draft.thread.rows.find((item): item is ArbitrationRow => item.type === 'arb' && item.arbitrationId === id);
       if (row) {
         row.resolved = true;
-        row.resolution = event.payload?.decision || null;
+        row.resolution = event.payload?.decision || event.payload?.choice || null;
       }
       record(draft, event, { kind: 'approval', tone: 'ok', status: '已裁决', title: id, detail: null });
       break;
@@ -863,7 +881,7 @@ export function applyEvent(draft, event, { live }) {
 }
 
 /** 窗口裁剪：与旧版 trimHistoryDom 相同的边界规则，只丢最前面的行。 */
-function trimThreadWindow(draft) {
+function trimThreadWindow(draft: ReducerState) {
   const thread = draft.thread;
   const trim = trimHistoryWindowAtRows(
     thread.windowEvents,
@@ -893,13 +911,13 @@ function trimThreadWindow(draft) {
 }
 
 /** 历史页（更早）前插：合并事件窗口 + 行注册表，位置由浏览器 scroll anchoring 保持。 */
-export function prependHistoryPage(draft, events) {
+export function prependHistoryPage(draft: ReducerState, events: EventEnvelope[]) {
   const thread = draft.thread;
   const before = thread.windowEvents.length;
   thread.windowEvents = mergeHistoryEvents(events, thread.windowEvents);
   const added = thread.windowEvents.length - before;
   // 新行插到最前面（按事件顺序重建前段）
-  const replayed = [];
+  const replayed: ThreadRow[] = [];
   for (const event of events) {
     applyEventInto(draft, event, replayed);
   }
@@ -912,7 +930,7 @@ export function prependHistoryPage(draft, events) {
  * 也不会误写根级状态（running/pendingApprovals 等）——历史重放只负责产出行。
  */
 /** 翻历史时不能借用当前这次运行的 runId，否则旧回合会被盖上新运行的编号。 */
-function replayRunId(bucket, event) {
+function replayRunId(bucket: ThreadRow[], event: EventEnvelope) {
   if (event.runId) {
     return event.runId;
   }
@@ -928,9 +946,9 @@ function replayRunId(bucket, event) {
   return null;
 }
 
-function applyEventInto(root, event, bucket) {
+function applyEventInto(root: ReducerState, event: EventEnvelope, bucket: ThreadRow[]) {
   const thread = root.thread;
-  const isolated = {
+  const isolated: ReducerState = {
     thread: {
       rows: bucket,
       cursor: 0,
@@ -983,10 +1001,10 @@ function applyEventInto(root, event, bucket) {
 }
 
 /** 历史页（更新）追加：行加到尾部。 */
-export function appendHistoryPage(draft, events) {
+export function appendHistoryPage(draft: ReducerState, events: EventEnvelope[]) {
   const thread = draft.thread;
   thread.windowEvents = mergeHistoryEvents(thread.windowEvents, events);
-  const bucket = [];
+  const bucket: ThreadRow[] = [];
   for (const event of events) {
     applyEventInto(draft, event, bucket);
   }

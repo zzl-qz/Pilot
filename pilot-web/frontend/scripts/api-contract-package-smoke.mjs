@@ -67,6 +67,7 @@ try {
   const template = await api.saveTemplate({ version: 0, name: '测试模板', task }); assert.ok(template.id);
   assert.ok((await api.templates()).some(row => row.id === template.id)); assert.equal(await api.deleteTemplate(template.id, template.version), null);
   results.push('未来定时任务创建/暂停/恢复/取消、模板保存/删除');
+  await assert.rejects(api.resolveArbitration(session.id, 'missing', { choice: '保留' }), error => error instanceof ApiError && error.status === 404); results.push('仲裁请求使用后端 choice 字段并保留不存在记录的 404');
   assert.equal(await api.deleteSession(session.id), null); assert.equal(await api.deleteProject(project.id), null);
   await assert.rejects(api.session(session.id), error => error instanceof ApiError && error.status === 404); results.push('空响应删除/404 状态保留');
   await writeFile(join(output, 'report.json'), JSON.stringify({ success: true, platform: process.platform, results }, null, 2));

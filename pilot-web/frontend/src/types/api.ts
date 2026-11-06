@@ -2,9 +2,8 @@ import type * as S from './server.js';
 import type { ContextStatus, QueueResponse } from './runtime.js';
 import type { DraftAttachment } from './input.js';
 
-/** SSE / 历史窗口共享的线上信封；各事件载荷在 reducer 中分别处理。 */
-export interface EventPayload { input?: string; text?: string }
-export interface EventEnvelope { type: string; sequence: number; sessionId?: string; runId?: string; timestamp?: string | number; payload: EventPayload }
+import type { EventEnvelope } from './events.js';
+export type { EventEnvelope } from './events.js';
 export interface HistoryPage { events: EventEnvelope[]; hasMore: boolean; total?: number }
 export interface ActionResponse { ok?: boolean; message?: string; error?: string }
 export interface BrowserStatus { enabled: boolean; capable: boolean; available: boolean; reason?: string; paused?: boolean; headless?: boolean }
@@ -56,8 +55,8 @@ export interface ApiResults {
   checkpoints: S.CheckpointControllerPreview;
   restoreCheckpoint: S.CheckpointControllerRestoreResponse;
   forkCheckpoint: S.CheckpointControllerForkResponse;
-  task: S.TaskControlServiceTaskSnapshot;
-  saveTask: S.TaskControlServiceTaskSnapshot;
+  task: S.TaskControlServiceTaskContract;
+  saveTask: S.TaskControlServiceTaskContract;
   queue: QueueResponse;
   updateQueueItem: QueueResponse;
   deleteQueueItem: QueueResponse;
