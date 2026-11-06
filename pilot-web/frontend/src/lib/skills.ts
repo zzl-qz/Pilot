@@ -1,3 +1,5 @@
+import type { SkillsControllerSkillPayload as SkillPayload, SkillsControllerOutcomePayload as OutcomePayload } from '../types/server.js';
+import type { QuickCommand, SkillCommand } from '../types/input.js';
 // 技能命令的纯逻辑：把 /api/skills 的清单映射成快捷指令、与内置指令合并、发送时解析技能调用。
 // 纯函数模块，不碰 DOM 与网络；app.js 负责拉取与渲染。
 
@@ -8,7 +10,7 @@
  * skill（技能名，发送时作为 skill 字段）、kind: 'skill'（菜单打徽标）、prompt: null
  * （技能没有本地展开模板，发送时由后端注入指引）。
  */
-export function toSkillCommands(available) {
+export function toSkillCommands(available: readonly SkillPayload[] | null | undefined): SkillCommand[] {
   return (available || [])
     .filter((skill) => skill && skill.command)
     .map((skill) => ({
@@ -28,8 +30,8 @@ export function toSkillCommands(available) {
  * 内置指令与技能指令合并；同名时技能遮蔽内置——用户显式安装的技能是更强的意图。
  * 两个技能的 command 重名由后端判无效，不会同时出现在这里。
  */
-export function mergeCommands(builtin, skillCommands) {
-  const merged = new Map();
+export function mergeCommands(builtin: readonly QuickCommand[] | null | undefined, skillCommands: readonly QuickCommand[] | null | undefined): QuickCommand[] {
+  const merged = new Map<string, QuickCommand>();
   for (const command of builtin || []) {
     merged.set(command.name, command);
   }
@@ -43,7 +45,7 @@ export function mergeCommands(builtin, skillCommands) {
  * 解析输入框里的技能调用：`/命令 参数…` 命中某个技能命令时返回 { skill, args }。
  * 仅精确命中（不做前缀匹配），不带该前缀或命中的是内置指令时返回 null。
  */
-export function resolveSkillCommand(text, skillCommands) {
+export function resolveSkillCommand(text: unknown, skillCommands: readonly SkillCommand[] | null | undefined) {
   const match = /^\/([\w-]+)(?:\s+([\s\S]*))?$/.exec(String(text || '').trim());
   if (!match) {
     return null;
@@ -56,7 +58,7 @@ export function resolveSkillCommand(text, skillCommands) {
 }
 
 /** 设置页单条技能的展示：{ name, meta, description }，meta 含来源与快捷命令。 */
-export function skillEntry(skill) {
+export function skillEntry(skill: Partial<SkillPayload> | null | undefined) {
   const source = skill?.source === 'project' ? '项目级' : skill?.source === 'user' ? '用户级' : '';
   const command = skill?.command ? `快捷命令 ${skill.command}` : '';
   const meta = [source, command].filter(Boolean).join(' · ');
@@ -68,7 +70,7 @@ export function skillEntry(skill) {
 }
 
 /** 设置页空态引导：告诉用户往哪个目录放什么文件。 */
-export function emptySkillsHint(projectRoot) {
+export function emptySkillsHint(projectRoot: string | null | undefined) {
   const where = projectRoot && projectRoot !== '-'
     ? `在 ${projectRoot} 下`
     : '在技能目录下';
@@ -81,7 +83,7 @@ export function emptySkillsHint(projectRoot) {
  * <p>严格优先：裸域名不自动补 https（提示文案教用户带协议），相对路径与 ~ 不接受——
  * 服务端对两者同样拒绝，两边口径一致比宽容更重要。
  */
-export function parseInstallSource(text) {
+export function parseInstallSource(text: unknown): { type: 'git' | 'local'; value: string } | null {
   const value = String(text || '').trim();
   if (!value) {
     return null;
@@ -102,7 +104,7 @@ export function parseInstallSource(text) {
  * <p>与后端 SkillInstallService.diagnoseGitUrl 同口径——前端拦一次省一个网络往返，
  * 后端仍是权威（API 是公共面，不能只靠前端）。
  */
-export function gitUrlProblem(url) {
+export function gitUrlProblem(url: unknown) {
   const value = String(url || '').trim();
   if (!/^https?:\/\//i.test(value)) {
     return null;
@@ -122,7 +124,7 @@ export function gitUrlProblem(url) {
 }
 
 /** 安装结果三组化：成功的 / 冲突的 / 失败的，供弹窗结果行渲染。 */
-export function summarizeInstallResults(results) {
+export function summarizeInstallResults(results: readonly Partial<OutcomePayload>[] | null | undefined) {
   const installed = [];
   const conflicts = [];
   const errors = [];

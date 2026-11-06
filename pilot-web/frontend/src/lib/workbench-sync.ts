@@ -1,5 +1,7 @@
+import type { WorkbenchRefresherOptions, RefreshOptions, WorkbenchView } from '../types/sync.js';
+import { errorInfo } from './errors.js';
 /** 不重建编辑器和历史窗口的数据同步；Web 与桌面共用，后台窗口暂停轮询。 */
-export function watchWorkbench({ refresh, window: win = window, document: doc = document, interval = 15000 }) {
+export function watchWorkbench({ refresh, window: win = window, document: doc = document, interval = 15000 }: { refresh: (options: RefreshOptions) => unknown; window?: Pick<Window, 'addEventListener' | 'removeEventListener' | 'setInterval' | 'clearInterval'>; document?: Pick<Document, 'hidden' | 'addEventListener' | 'removeEventListener'>; interval?: number }) {
   let lastWake = 0;
   const wake = () => {
     if (doc.hidden || Date.now() - lastWake < 1000) return;
@@ -20,12 +22,12 @@ export function watchWorkbench({ refresh, window: win = window, document: doc = 
 }
 
 /** 同步只读数据，不重发指令、不切换任务；同一窗口的并发刷新合并。 */
-export function createWorkbenchRefresher({ get, set, api }) {
-  let flight = null;
+export function createWorkbenchRefresher({ get, set, api }: WorkbenchRefresherOptions) {
+  let flight: Promise<boolean> | null = null;
   let reconnectWanted = false;
   let notifyWanted = false;
   let fullWanted = false;
-  return function refreshWorkbench({ silent = false, full = !silent, reconnect = !silent } = {}) {
+  return function refreshWorkbench({ silent = false, full = !silent, reconnect = !silent }: RefreshOptions = {}) {
     reconnectWanted ||= reconnect;
     notifyWanted ||= !silent;
     fullWanted ||= full;
@@ -47,7 +49,7 @@ export function createWorkbenchRefresher({ get, set, api }) {
           if (!current()) { superseded = true; return false; }
           get().flushEvents();
           set(state => {
-            if ((detail?.id || detail?.sessionId) === sessionId) {
+            if (detail && (detail.id || detail.sessionId) === sessionId) {
               if (state.sessionTitle === sessionTitle) state.sessionTitle = detail.title || state.sessionTitle;
               if (state.workspace === workspace && typeof detail.workspace === 'string' && state.workspace !== detail.workspace) {
                 state.workspace = detail.workspace; state.fileIndex = { items: [], sessionId: null, loading: false };
@@ -84,7 +86,7 @@ export function createWorkbenchRefresher({ get, set, api }) {
         });
       } catch (error) {
         ok = false;
-        set(state => { state.ui.syncError = error?.message || '无法读取最新数据'; });
+        set(state => { state.ui.syncError = errorInfo(error).message || '无法读取最新数据'; });
       } finally {
         if (notifyWanted && !superseded) get().showNotice(ok ? '已同步最新数据，草稿与附件已保留' : `刷新失败：${get().ui.syncError}，当前内容已保留`);
         flight = null; reconnectWanted = false; notifyWanted = false; fullWanted = false;
@@ -97,18 +99,18 @@ export function createWorkbenchRefresher({ get, set, api }) {
 }
 
 const RESTORE_KEY = 'pilot.workbench.restore.v1';
-export function saveWorkbenchView(storage, state) {
+export function saveWorkbenchView(storage: Pick<Storage, 'setItem'>, state: Partial<WorkbenchView>) {
   try {
     storage.setItem(RESTORE_KEY, JSON.stringify({ sessionId: state.sessionId, draftSession: state.draftSession,
       workspace: state.workspace, currentProjectId: state.currentProjectId }));
     return true;
   } catch { return false; }
 }
-export function takeWorkbenchView(storage) {
+export function takeWorkbenchView(storage: Pick<Storage, 'getItem' | 'removeItem'>): Partial<WorkbenchView> | null {
   try {
     const raw = storage.getItem(RESTORE_KEY);
     storage.removeItem(RESTORE_KEY);
-    const view = raw ? JSON.parse(raw) : null;
+    const view: Partial<WorkbenchView> | null = raw ? JSON.parse(raw) : null;
     return view && typeof view === 'object' && (typeof view.sessionId === 'string' || view.draftSession) ? view : null;
   } catch { return null; }
 }

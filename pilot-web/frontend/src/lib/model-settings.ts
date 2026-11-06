@@ -1,3 +1,4 @@
+import type { SettingsControllerSettingsResponse } from '../types/server.js';
 /**
  * 模型设置的前端纯逻辑：请求体拼装、保存结果文案、错误归类。
  *
@@ -10,7 +11,7 @@
  * <p>勾选「清除已保存密钥」时必须把 apiKey 置空：否则后端会先看到显式 key
  * 再看到 clear 标记，语义容易含糊。clearApiKey 单独为 true 才是唯一信号。
  */
-export function buildModelUpdate({ model, endpoint, apiKey, clearKey } = {}) {
+export function buildModelUpdate({ model, endpoint, apiKey, clearKey }: { model?: string; endpoint?: string; apiKey?: string; clearKey?: boolean } = {}) {
   const clearApiKey = Boolean(clearKey);
   return {
     model: String(model ?? '').trim(),
@@ -21,7 +22,7 @@ export function buildModelUpdate({ model, endpoint, apiKey, clearKey } = {}) {
 }
 
 /** 保存成功后的提示文案；clearKey 优先于「密钥已更新」。 */
-export function describeModelSaved(data, { clearKey = false, keyChanged = false } = {}) {
+export function describeModelSaved(data: Pick<SettingsControllerSettingsResponse, 'model'> | null | undefined, { clearKey = false, keyChanged = false }: { clearKey?: boolean; keyChanged?: boolean } = {}) {
   const model = (data && data.model) || '未设置';
   if (clearKey) {
     return `已清除保存的 API Key：模型「${model}」保留，填好新密钥前模型调用会失败。`;
@@ -38,7 +39,7 @@ export function describeModelSaved(data, { clearKey = false, keyChanged = false 
  * <p>两个字段留空都表示「用已保存的值」，由服务端回退；密钥只在本次探测中使用，
  * 不落盘。
  */
-export function buildModelProbe({ endpoint, apiKey } = {}) {
+export function buildModelProbe({ endpoint, apiKey }: { endpoint?: string; apiKey?: string } = {}) {
   return {
     endpoint: String(endpoint ?? '').trim(),
     apiKey: String(apiKey ?? '').trim()
@@ -46,13 +47,13 @@ export function buildModelProbe({ endpoint, apiKey } = {}) {
 }
 
 /** 模型 ID 区分大小写；忽略空值与重复值，保证数量和可选行一致。 */
-export function normalizeModelNames(models) {
+export function normalizeModelNames(models: unknown): string[] {
   return [...new Set((Array.isArray(models) ? models : [])
     .filter(model => typeof model === 'string').map(model => model.trim()).filter(Boolean))];
 }
 
 /** 「获取可用模型」成功后的状态行文案：有结果引导点击选择，无结果提示手填。 */
-export function describeModelsFetched(data, { endpoint = '' } = {}) {
+export function describeModelsFetched(data: { models?: unknown } | null | undefined, { endpoint = '' }: { endpoint?: string } = {}) {
   const models = normalizeModelNames(data?.models);
   const from = endpoint ? `，来自 ${endpoint}` : '';
   if (!models.length) {
@@ -66,10 +67,10 @@ export function describeModelsFetched(data, { endpoint = '' } = {}) {
  *
  * <p>兼容 Spring 的 {@code message}、RFC 7807 的 {@code detail}，以及框架默认的 {@code error}。
  */
-export function errorText(response, body) {
+export function errorText(response: { status: number } | null | undefined, body: unknown) {
   if (body && typeof body === 'object') {
     for (const key of ['message', 'detail', 'error']) {
-      const value = body[key];
+      const value = (body as Record<string, unknown>)[key];
       if (typeof value === 'string' && value.trim()) {
         return value.trim();
       }
@@ -87,7 +88,7 @@ export function errorText(response, body) {
  *
  * @returns {{kind: string, hint: string, action: string|null}}
  */
-export function classifyModelError(message) {
+export function classifyModelError(message: unknown) {
   const text = String(message ?? '');
   if (/\b(401|403)\b/.test(text) || /unauthori[sz]ed|invalid[^;]*key|api[ _-]?key/i.test(text)) {
     return {

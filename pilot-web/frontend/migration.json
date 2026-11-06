@@ -176,8 +176,26 @@
         "书签持久化迁移/失败保留",
         "刷新并发合并/迟到响应/草稿保护"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T07-46-50-478Z/report.json",
+          "result": "306 项前端单元、41 项桌面单元、类型检查、构建和全部 17 套 Chromium/Electron 交互回归通过；新增 API 与书签测试对照旧 JS 通过。"
+        },
+        {
+          "report": ".tmp-check/migration/2026-11-06T07-54-18-043Z/report.json",
+          "result": "加入 HTTP 类型正反例编译测试后，307 项前端单元通过。请求参数、布尔值、零游标、错误码、并发书签导入及失败重试保持语义。"
+        },
+        {
+          "result": "Maven 离线生产打包成功（Java 25）；新 Jar 的真实前端 API 契约、Chromium 登录/退出/窄屏、同源访问/跨源与陌生 Host 拒绝回归通过。全部使用独立数据和随机端口，不连接真实模型。",
+          "evidence": [
+            "/private/tmp/pilot-ts-maven-package.log",
+            "/var/folders/v3/fbb0zyg91pd0qyt0gp6fnqcc0000gn/T/pilot-api-contract-9Hb0Ge/report.json",
+            "/var/folders/v3/fbb0zyg91pd0qyt0gp6fnqcc0000gn/T/pilot-packaged-login-Sl2Au8",
+            "/var/folders/v3/fbb0zyg91pd0qyt0gp6fnqcc0000gn/T/pilot-local-security-bvw3VI"
+          ]
+        }
+      ]
     },
     {
       "batch": 7,
