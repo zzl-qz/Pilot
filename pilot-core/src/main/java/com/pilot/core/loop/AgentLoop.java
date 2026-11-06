@@ -422,7 +422,8 @@ public final class AgentLoop {
 
                 ModelTurn turn = callModel(messages, events, usage, runtimeGuidance);
                 if (turn.stop() != null) {
-                    if ("CANCELLED".equals(turn.stop().failureCode()) || "BUDGET_EXHAUSTED".equals(turn.stop().failureCode())) {
+                    if ("CANCELLED".equals(turn.stop().failureCode())
+                        || "BUDGET_EXHAUSTED".equals(turn.stop().failureCode())) {
                         return turn.stop();
                     }
                     return finalizeFailure(messages, events, usage, turn.stop().failureCode(), "模型请求未能完成；已有进度保留。",

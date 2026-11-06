@@ -1,12 +1,16 @@
 package com.pilot.server.config;
 
 import java.net.URI;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelPricing;
 import com.pilot.core.model.ModelProfile;
+import com.pilot.core.model.NativeCapability;
 import com.pilot.server.store.SettingsStore;
 
 import tools.jackson.databind.ObjectMapper;
@@ -27,7 +31,7 @@ public final class ModelRuntimeSettings {
     }
 
     public record View(String model, String endpoint, Options options, ModelProfile effective,
-        java.util.Set<String> nativeCapabilities, String webSearchSource) {
+        Set<String> nativeCapabilities, String webSearchSource) {
     }
 
     private final SettingsStore store;
@@ -60,32 +64,32 @@ public final class ModelRuntimeSettings {
      * Capability selection is a deterministic endpoint/model allowlist, never a live probe that may incur charges.
      * Custom gateways require an explicit protocol choice because their advertised models are not capability metadata.
      */
-    public java.util.Set<com.pilot.core.model.NativeCapability> nativeCapabilities(ModelSettings.Snapshot model) {
+    public Set<NativeCapability> nativeCapabilities(ModelSettings.Snapshot model) {
         Options options = options(model);
         String mode = options.webSearchMode() == null ? "auto" : options.webSearchMode();
         if ("local".equals(mode)) {
-            return java.util.Set.of();
+            return Set.of();
         }
         if ("openai-responses".equals(mode)) {
-            return java.util.Set.of(com.pilot.core.model.NativeCapability.WEB_SEARCH);
+            return Set.of(NativeCapability.WEB_SEARCH);
         }
         if ("anthropic-messages".equals(mode)) {
-            return java.util.Set.of(com.pilot.core.model.NativeCapability.WEB_SEARCH);
+            return Set.of(NativeCapability.WEB_SEARCH);
         }
         URI endpoint = URI.create(model.endpoint());
-        String host = endpoint.getHost() == null ? "" : endpoint.getHost().toLowerCase(java.util.Locale.ROOT);
+        String host = endpoint.getHost() == null ? "" : endpoint.getHost().toLowerCase(Locale.ROOT);
         if (!"auto".equals(mode)) {
-            return java.util.Set.of();
+            return Set.of();
         }
         if ("api.openai.com".equals(host) && profile(model).provider().equals("openai") && model.model() != null
             && model.model().matches("(?:gpt-(?:4o(?:-.*)?|4\\.1(?:-.*)?|5(?:[.-].*)?)|o[134].*)")) {
-            return java.util.Set.of(com.pilot.core.model.NativeCapability.WEB_SEARCH);
+            return Set.of(NativeCapability.WEB_SEARCH);
         }
         if ("api.anthropic.com".equals(host) && profile(model).provider().equals("anthropic")
             && supportsAnthropicWebSearch(model.model())) {
-            return java.util.Set.of(com.pilot.core.model.NativeCapability.WEB_SEARCH);
+            return Set.of(NativeCapability.WEB_SEARCH);
         }
-        return java.util.Set.of();
+        return Set.of();
     }
 
     public boolean anthropicMessages(ModelSettings.Snapshot model) {
@@ -106,12 +110,12 @@ public final class ModelRuntimeSettings {
     }
 
     public boolean nativeWebSearch(ModelSettings.Snapshot model) {
-        return nativeCapabilities(model).contains(com.pilot.core.model.NativeCapability.WEB_SEARCH);
+        return nativeCapabilities(model).contains(NativeCapability.WEB_SEARCH);
     }
 
     private ModelProfile profile(ModelSettings.Snapshot model, Options options) {
         String searchMode = options.webSearchMode() == null ? "auto" : options.webSearchMode();
-        if (!java.util.Set.of("auto", "local", "openai-responses", "anthropic-messages").contains(searchMode)) {
+        if (!Set.of("auto", "local", "openai-responses", "anthropic-messages").contains(searchMode)) {
             throw new IllegalArgumentException("不支持的原生网页搜索策略");
         }
         ModelProfile resolved = ModelProfile.resolve(URI.create(model.endpoint()), model.model(), options.provider(),
@@ -132,15 +136,15 @@ public final class ModelRuntimeSettings {
     public View current() {
         ModelSettings.Snapshot model = models.snapshot();
         Options options = options(model);
-        java.util.Set<com.pilot.core.model.NativeCapability> capabilities = nativeCapabilities(model);
-        java.util.Set<String> names = capabilities.stream().map(Enum::name).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        Set<NativeCapability> capabilities = nativeCapabilities(model);
+        Set<String> names = capabilities.stream().map(Enum::name).collect(Collectors.toUnmodifiableSet());
         String mode = options.webSearchMode() == null ? "auto" : options.webSearchMode();
         String source = switch (mode) {
             case "local" -> "已手动指定 Pilot 本地搜索";
             case "openai-responses" -> "已手动选择 OpenAI Responses 协议";
             case "anthropic-messages" -> "已手动选择 Anthropic Messages 协议";
-            default -> capabilities.contains(com.pilot.core.model.NativeCapability.WEB_SEARCH)
-                ? "按官方端点与模型能力目录自动识别" : "原生能力未知或未确认，回退 Pilot 本地搜索";
+            default ->
+                capabilities.contains(NativeCapability.WEB_SEARCH) ? "按官方端点与模型能力目录自动识别" : "原生能力未知或未确认，回退 Pilot 本地搜索";
         };
         return new View(model.model(), model.endpoint(), options, profile(model, options), names, source);
     }

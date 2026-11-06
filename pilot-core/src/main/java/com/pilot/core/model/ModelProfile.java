@@ -19,8 +19,7 @@ public record ModelProfile(String provider, String model, String cacheMode, Stri
         Boolean instructionMessages, Boolean streamUsage, String compactionMode, ModelPricing pricing) {
         String host = endpoint == null || endpoint.getHost() == null ? "" : endpoint.getHost().toLowerCase(Locale.ROOT);
         String detected = "api.openai.com".equals(host) ? "openai"
-            : "api.deepseek.com".equals(host) ? "deepseek"
-                : "api.anthropic.com".equals(host) ? "anthropic" : "generic";
+            : "api.deepseek.com".equals(host) ? "deepseek" : "api.anthropic.com".equals(host) ? "anthropic" : "generic";
         String actual = provider == null || provider.equals("auto") ? detected : provider;
         if (!Set.of("openai", "deepseek", "anthropic", "anthropic-compatible", "generic").contains(actual)) {
             throw new IllegalArgumentException("不支持的模型端点类型");
@@ -33,7 +32,8 @@ public record ModelProfile(String provider, String model, String cacheMode, Stri
             throw new IllegalArgumentException("显式缓存需要已确认支持 Anthropic 缓存格式的兼容端点");
         }
         if (mode.equals("auto")) {
-            mode = actual.equals("anthropic-compatible") ? "explicit" : actual.equals("anthropic") ? "none" : "implicit";
+            mode =
+                actual.equals("anthropic-compatible") ? "explicit" : actual.equals("anthropic") ? "none" : "implicit";
         }
         String lifetime = ttl == null ? "" : ttl;
         if (!Set.of("", "5m", "1h").contains(lifetime)) {

@@ -148,8 +148,8 @@ class EventCodecNewEventsTest {
         ArbitrationRequired required =
             new ArbitrationRequired("arb_1", "dissent", "T1", List.of("选用方案 A", "选用方案 B"), "报告正文");
         ArbitrationResolved resolved = new ArbitrationResolved("arb_1", "选用方案 A");
-        MultiAgentBudgetUpdated budget = new MultiAgentBudgetUpdated("dsp_1", "stopped", 1_800, 10_000,
-            10_400, 400, 2_000, 2, "token 预算耗尽", true);
+        MultiAgentBudgetUpdated budget =
+            new MultiAgentBudgetUpdated("dsp_1", "stopped", 1_800, 10_000, 10_400, 400, 2_000, 2, "token 预算耗尽", true);
 
         assertEquals(task, roundTrip("task.updated", task));
         assertEquals(diff, roundTrip("sandbox.diff", diff));

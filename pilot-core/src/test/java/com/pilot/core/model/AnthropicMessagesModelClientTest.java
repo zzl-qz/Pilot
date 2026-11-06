@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 import com.pilot.core.loop.Message;
+import com.pilot.core.tool.ToolCall;
 import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.JsonNode;
@@ -29,9 +30,10 @@ class AnthropicMessagesModelClientTest {
     @Test
     void declaresNativeSearchSeparatelyFromPilotFetchAndKeepsCitationSources() throws Exception {
         AtomicReference<String> requestBody = new AtomicReference<>();
-        HttpServer server = server(requestBody, """
-            {"stop_reason":"end_turn","content":[{"type":"text","text":"Summary.","citations":[{"type":"web_search_result_location","url":"https://example.com/article","title":"Example article"}]}],"usage":{"input_tokens":30,"output_tokens":8}}
-            """);
+        HttpServer server = server(requestBody,
+            """
+                {"stop_reason":"end_turn","content":[{"type":"text","text":"Summary.","citations":[{"type":"web_search_result_location","url":"https://example.com/article","title":"Example article"}]}],"usage":{"input_tokens":30,"output_tokens":8}}
+                """);
         server.start();
         try {
             AnthropicMessagesModelClient client = client(server, Set.of(NativeCapability.WEB_SEARCH));
@@ -53,14 +55,17 @@ class AnthropicMessagesModelClientTest {
     @Test
     void mapsPilotToolUseAndToolResultsToMessagesProtocol() throws Exception {
         AtomicReference<String> requestBody = new AtomicReference<>();
-        HttpServer server = server(requestBody, """
-            {"stop_reason":"tool_use","content":[{"type":"tool_use","id":"use-1","name":"read_file","input":{"path":"pom.xml"}}]}
-            """);
+        HttpServer server = server(requestBody,
+            """
+                {"stop_reason":"tool_use","content":[{"type":"tool_use","id":"use-1","name":"read_file","input":{"path":"pom.xml"}}]}
+                """);
         server.start();
         try {
-            ModelResponse response = client(server, Set.of()).chat(List.of(Message.user("read"),
-                Message.assistant("", List.of(new com.pilot.core.tool.ToolCall("use-0", "list_dir", Map.of("path", ".")))),
-                Message.tool("use-0", "pom.xml")), List.of(new ToolDefinition("read_file", "Read", Map.of("type", "object"))));
+            ModelResponse response = client(server, Set.of()).chat(
+                List.of(Message.user("read"),
+                    Message.assistant("", List.of(new ToolCall("use-0", "list_dir", Map.of("path", ".")))),
+                    Message.tool("use-0", "pom.xml")),
+                List.of(new ToolDefinition("read_file", "Read", Map.of("type", "object"))));
 
             JsonNode body = mapper.readTree(requestBody.get());
             assertEquals("tool_use", body.path("messages").get(1).path("content").get(0).path("type").asString());

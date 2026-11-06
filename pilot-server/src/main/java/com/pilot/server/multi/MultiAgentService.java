@@ -9,8 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -234,8 +234,8 @@ public class MultiAgentService {
             dispatchStore.saveNodes(dispatchId, graph.specs());
         }
         final Dispatch scoped = dispatch;
-        MultiAgentBudgetLedger budget = new MultiAgentBudgetLedger(budgetLimits,
-            snapshot -> publishBudget(scoped, snapshot));
+        MultiAgentBudgetLedger budget =
+            new MultiAgentBudgetLedger(budgetLimits, snapshot -> publishBudget(scoped, snapshot));
         publishBudget(scoped, budget.snapshot());
         try {
             return dispatchWithBudget(scoped, graph, dispatchId, budget);
@@ -469,7 +469,8 @@ public class MultiAgentService {
         state.agentId = ok.isEmpty() ? "" : ok.get(0).agentId();
         if (ok.isEmpty()) {
             List<Attempt> budgetStopped = attempts.stream()
-                .filter(attempt -> attempt.budgetStopReason() != null && !attempt.budgetStopReason().isBlank()).toList();
+                .filter(attempt -> attempt.budgetStopReason() != null && !attempt.budgetStopReason().isBlank())
+                .toList();
             if (!budgetStopped.isEmpty()) {
                 budgetStopped.forEach(attempt -> collect(dispatch, state, attempt.sandbox()));
                 String reason = budgetStopped.stream().map(Attempt::budgetStopReason).distinct()
@@ -506,15 +507,14 @@ public class MultiAgentService {
             for (int round = 1; round <= attempts; round++) {
                 String overrun = budget.reason();
                 if (!overrun.isEmpty()) {
-                    return last != null ? last : Attempt.budgetStopped("", List.of(), null, overrun,
-                        JdbcDispatchStore.Usage.EMPTY);
+                    return last != null ? last
+                        : Attempt.budgetStopped("", List.of(), null, overrun, JdbcDispatchStore.Usage.EMPTY);
                 }
                 if (MultiAgentService.cancelled(dispatch)) {
                     return last != null ? last : Attempt.cancelled();
                 }
                 String note = round == 1 ? ""
-                    : "这是第 " + round + " 次尝试，上一次未完成：" + (last == null ? "未知原因" : last.failure())
-                        + "。请换一种做法，不要重复同样的调用。";
+                    : "这是第 " + round + " 次尝试，上一次未完成：" + (last == null ? "未知原因" : last.failure()) + "。请换一种做法，不要重复同样的调用。";
                 TaskState tracked = states.get(spec.id());
                 if (tracked != null) {
                     tracked.attempts = round;
@@ -625,8 +625,8 @@ public class MultiAgentService {
                 return cancellationReason.get();
             }
         };
-        AgentLoop loop = new AgentLoop(budgeted, tools, new PolicyPermissionGate(mode), ApprovalBroker.denyAll(), config,
-            cancellation, () -> null, trace);
+        AgentLoop loop = new AgentLoop(budgeted, tools, new PolicyPermissionGate(mode), ApprovalBroker.denyAll(),
+            config, cancellation, () -> null, trace);
 
         publish(dispatch.events(), new SubagentStarted(agentId, oneLine(spec.title() + "：" + spec.goal(), 200),
             oneLine(spec.id() + " " + spec.title(), 40)));
@@ -724,8 +724,8 @@ public class MultiAgentService {
             @Override
             public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
                 Consumer<String> reasoningDelta) {
-                long estimatedInput = ContextCompactor.estimateTokens(messages)
-                    + ContextCompactor.estimateTokens(String.valueOf(tools));
+                long estimatedInput =
+                    ContextCompactor.estimateTokens(messages) + ContextCompactor.estimateTokens(String.valueOf(tools));
                 MultiAgentBudgetLedger.RequestPermit permit = budget.beginRequest(estimatedInput);
                 if (permit == null) {
                     throw new ExecutionPolicy.Stop("BUDGET_EXHAUSTED", budget.reason());
@@ -734,22 +734,22 @@ public class MultiAgentService {
                 ModelResponse response = null;
                 RuntimeException failure = null;
                 try {
-                    response = ModelRequestScope.within(
-                        ModelRequestScope.current().purpose().isBlank() ? "subagent" : null, null, false,
-                        () -> delegate.chat(messages, tools, textDelta, reasoningDelta));
+                    response =
+                        ModelRequestScope.within(ModelRequestScope.current().purpose().isBlank() ? "subagent" : null,
+                            null, false, () -> delegate.chat(messages, tools, textDelta, reasoningDelta));
                 } catch (RuntimeException e) {
                     failure = e;
                 }
 
                 ModelUsage reported = response == null ? null : response.usage();
                 long input = reported != null && reported.inputTokens() > 0 ? reported.inputTokens() : estimatedInput;
-                long output = reported != null && reported.present() ? reported.outputTokens()
-                    : response == null ? 0
-                        : ContextCompactor.estimateTokens(response.content() + String.valueOf(response.toolCalls()));
+                long output = reported != null && reported.present() ? reported.outputTokens() : response == null ? 0
+                    : ContextCompactor.estimateTokens(response.content() + String.valueOf(response.toolCalls()));
                 boolean exact = reported != null && reported.exact() && reported.inputTokens() > 0;
                 long total = input > Long.MAX_VALUE - output ? Long.MAX_VALUE : input + output;
                 meter.record(new ModelUsage(input, output, 0, exact));
-                MultiAgentBudgetLedger.Settlement settlement = permit.finish(total, exact ? 0 : total, response != null);
+                MultiAgentBudgetLedger.Settlement settlement =
+                    permit.finish(total, exact ? 0 : total, response != null);
 
                 if (failure != null) {
                     String stopReason = budget.reason();
@@ -1062,8 +1062,8 @@ public class MultiAgentService {
         out.append("- token 上限：").append(budget.maxTotalTokens() == 0 ? "不限" : budget.maxTotalTokens()).append('\n');
         out.append("- 已结算：").append(budget.usedTokens()).append(" token（估算 ").append(budget.estimatedTokens())
             .append("，其余按端点 usage 记账）\n");
-        out.append("- 在途预留：").append(budget.reservedTokens()).append(" token 输入估算，")
-            .append(budget.inFlightRequests()).append(" 个请求尚未结算\n");
+        out.append("- 在途预留：").append(budget.reservedTokens()).append(" token 输入估算，").append(budget.inFlightRequests())
+            .append(" 个请求尚未结算\n");
         if (!budget.stopReason().isBlank()) {
             out.append("- 停止原因：").append(oneLine(budget.stopReason(), 240)).append('\n');
         }
@@ -1093,10 +1093,10 @@ public class MultiAgentService {
     }
 
     private static void publishBudget(Dispatch dispatch, MultiAgentBudgetLedger.Snapshot snapshot) {
-        publish(dispatch.events(), new MultiAgentBudgetUpdated(dispatch.dispatchId(), snapshot.status(),
-            snapshot.maxDispatchSeconds(), snapshot.maxTotalTokens(), snapshot.usedTokens(),
-            snapshot.estimatedTokens(), snapshot.reservedTokens(), snapshot.inFlightRequests(), snapshot.stopReason(),
-            snapshot.cancellationRequested()));
+        publish(dispatch.events(),
+            new MultiAgentBudgetUpdated(dispatch.dispatchId(), snapshot.status(), snapshot.maxDispatchSeconds(),
+                snapshot.maxTotalTokens(), snapshot.usedTokens(), snapshot.estimatedTokens(), snapshot.reservedTokens(),
+                snapshot.inFlightRequests(), snapshot.stopReason(), snapshot.cancellationRequested()));
     }
 
     private static void publish(Consumer<SessionEvent> events, SessionEvent event) {

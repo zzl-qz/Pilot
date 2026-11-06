@@ -14,9 +14,9 @@ package com.pilot.core.event;
  * @param stopReason 软停止原因；运行中为空
  * @param cancellationRequested 是否已向在途任务发出中断请求，不代表供应商已撤销请求
  */
-public record MultiAgentBudgetUpdated(String dispatchId, String status, int maxDispatchSeconds,
-    long maxTotalTokens, long usedTokens, long estimatedTokens, long reservedTokens, int inFlightRequests,
-    String stopReason, boolean cancellationRequested) implements SessionEvent {
+public record MultiAgentBudgetUpdated(String dispatchId, String status, int maxDispatchSeconds, long maxTotalTokens,
+    long usedTokens, long estimatedTokens, long reservedTokens, int inFlightRequests, String stopReason,
+    boolean cancellationRequested) implements SessionEvent {
 
     public MultiAgentBudgetUpdated {
         dispatchId = dispatchId == null ? "" : dispatchId;

@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
@@ -290,9 +291,9 @@ class MultiAgentServiceTest {
         String longResponse = REPORT + "x".repeat(500_000);
         MultiAgentService service = service((messages, tools) -> new ModelResponse(longResponse, List.of()));
         service.setBudgetLimits(new MultiAgentBudget(600, 100_000));
-        var result = service.dispatch(dispatch(List.of(
-            TaskSpec.readOnly("T1", "调研一", "读取代码", List.of(), List.of("src/**")),
-            TaskSpec.readOnly("T2", "调研二", "继续读取", List.of("T1"), List.of("src/**")))));
+        var result =
+            service.dispatch(dispatch(List.of(TaskSpec.readOnly("T1", "调研一", "读取代码", List.of(), List.of("src/**")),
+                TaskSpec.readOnly("T2", "调研二", "继续读取", List.of("T1"), List.of("src/**")))));
         assertFalse(result.completed());
         assertEquals(TaskStatus.DONE, result.outcomes().get(0).status());
         assertEquals(TaskStatus.BLOCKED, result.outcomes().get(1).status());
@@ -308,8 +309,8 @@ class MultiAgentServiceTest {
         });
         service.setBudgetLimits(new MultiAgentBudget(600, 1));
 
-        MultiAgentService.Result result = service.dispatch(dispatch(List.of(
-            TaskSpec.readOnly("T1", "预算前拒绝", "读取代码", List.of(), List.of("src/**")))));
+        MultiAgentService.Result result =
+            service.dispatch(dispatch(List.of(TaskSpec.readOnly("T1", "预算前拒绝", "读取代码", List.of(), List.of("src/**")))));
 
         assertEquals(0, requests.get(), "预算拒绝必须发生在底层模型调用之前");
         assertEquals(TaskStatus.BLOCKED, result.outcomes().getFirst().status());
@@ -319,7 +320,7 @@ class MultiAgentServiceTest {
     @Test
     void budgetStopInterruptsOtherInFlightRequestBestEffort() throws IOException {
         AtomicInteger requests = new AtomicInteger();
-        java.util.concurrent.atomic.AtomicBoolean interrupted = new java.util.concurrent.atomic.AtomicBoolean();
+        AtomicBoolean interrupted = new AtomicBoolean();
         CountDownLatch entered = new CountDownLatch(2);
         ModelClient client = (messages, tools) -> {
             int request = requests.incrementAndGet();
@@ -348,16 +349,16 @@ class MultiAgentServiceTest {
         MultiAgentService service = service(client);
         service.setBudgetLimits(new MultiAgentBudget(600, 1_000_000));
 
-        MultiAgentService.Result result = service.dispatch(dispatch(List.of(
-            TaskSpec.readOnly("T1", "并发一", "盘点代码 A", List.of(), List.of("src/**")),
-            TaskSpec.readOnly("T2", "并发二", "盘点代码 B", List.of(), List.of("src/**")))));
+        MultiAgentService.Result result =
+            service.dispatch(dispatch(List.of(TaskSpec.readOnly("T1", "并发一", "盘点代码 A", List.of(), List.of("src/**")),
+                TaskSpec.readOnly("T2", "并发二", "盘点代码 B", List.of(), List.of("src/**")))));
 
         assertEquals(2, requests.get(), "停止后不能再发新的模型请求或重试");
         assertTrue(interrupted.get(), "另一个在途请求应收到 best-effort 中断");
         assertFalse(result.completed());
         assertTrue(result.outcomes().stream().anyMatch(outcome -> outcome.status() == TaskStatus.BLOCKED));
-        assertTrue(events.stream().anyMatch(event -> event instanceof MultiAgentBudgetUpdated budget
-            && budget.cancellationRequested()));
+        assertTrue(events.stream()
+            .anyMatch(event -> event instanceof MultiAgentBudgetUpdated budget && budget.cancellationRequested()));
     }
 
     @Test

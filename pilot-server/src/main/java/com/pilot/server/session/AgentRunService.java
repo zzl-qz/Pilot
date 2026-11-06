@@ -1007,8 +1007,7 @@ public class AgentRunService implements RunStarter {
      * 写文件与派发工具对模型「不存在」而不是「被拒绝」，避免无谓的重试浪费。
      * 命令保留：git 只读子命令在内置白名单里，写命令照旧走权限门。
      */
-    private static void hideNativeTools(ToolRegistry tools,
-        Set<com.pilot.core.model.NativeCapability> capabilities) {
+    private static void hideNativeTools(ToolRegistry tools, Set<com.pilot.core.model.NativeCapability> capabilities) {
         if (capabilities.contains(com.pilot.core.model.NativeCapability.WEB_SEARCH)) {
             tools.remove("web_search");
         }
@@ -1017,8 +1016,7 @@ public class AgentRunService implements RunStarter {
         }
     }
 
-    private static void addNativeToolNames(Set<String> names,
-        Set<com.pilot.core.model.NativeCapability> capabilities) {
+    private static void addNativeToolNames(Set<String> names, Set<com.pilot.core.model.NativeCapability> capabilities) {
         if (capabilities.contains(com.pilot.core.model.NativeCapability.WEB_SEARCH)) {
             names.add("web_search");
         }
@@ -1280,7 +1278,8 @@ public class AgentRunService implements RunStarter {
         if (unattended && scheduleService != null) {
             tools.register(scheduleService.getObject().wakeTool(sessionId));
         }
-        Set<String> availableTools = new java.util.LinkedHashSet<>(review.active() ? tools.names() : sessionTools(tools));
+        Set<String> availableTools =
+            new java.util.LinkedHashSet<>(review.active() ? tools.names() : sessionTools(tools));
         addNativeToolNames(availableTools, nativeCapabilities);
         RunUsageAccumulator runUsage = new RunUsageAccumulator();
         // 收尾事件里的检查摘要要用于校验证据，sink 里先留一份

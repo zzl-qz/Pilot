@@ -39,7 +39,8 @@ final class MultiAgentBudgetLedger implements AutoCloseable {
         this.maxDispatchSeconds = effective.maxDispatchSeconds();
         this.maxTotalTokens = effective.maxTotalTokens();
         this.deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(maxDispatchSeconds);
-        this.listener = listener == null ? ignored -> { } : listener;
+        this.listener = listener == null ? ignored -> {
+        } : listener;
         this.deadlineTask = DEADLINES.schedule(this::expire, maxDispatchSeconds, TimeUnit.SECONDS);
     }
 
@@ -94,8 +95,7 @@ final class MultiAgentBudgetLedger implements AutoCloseable {
             usedTokens = saturatedAdd(usedTokens, Math.max(0L, tokens));
             estimatedTokens = saturatedAdd(estimatedTokens, Math.min(Math.max(0L, estimated), Math.max(0L, tokens)));
             if (stopReason.isEmpty() && maxTotalTokens > 0 && usedTokens >= maxTotalTokens) {
-                interrupt = stopLocked("派发预算耗尽：累计用量 " + usedTokens + " token 达到上限 " + maxTotalTokens,
-                    permit.thread);
+                interrupt = stopLocked("派发预算耗尽：累计用量 " + usedTokens + " token 达到上限 " + maxTotalTokens, permit.thread);
                 stoppedByThisRequest = true;
                 if (responseReceived) {
                     completedResponses.add(permit.thread);
@@ -216,8 +216,8 @@ final class MultiAgentBudgetLedger implements AutoCloseable {
 
     private Snapshot snapshotLocked() {
         String status = !stopReason.isEmpty() ? "stopped" : terminalStatus.isEmpty() ? "running" : terminalStatus;
-        return new Snapshot(status, maxDispatchSeconds, maxTotalTokens, usedTokens, estimatedTokens,
-            reservedTokens, inFlightRequests, stopReason, cancellationRequested);
+        return new Snapshot(status, maxDispatchSeconds, maxTotalTokens, usedTokens, estimatedTokens, reservedTokens,
+            inFlightRequests, stopReason, cancellationRequested);
     }
 
     private void publish(Snapshot snapshot) {
@@ -266,9 +266,8 @@ final class MultiAgentBudgetLedger implements AutoCloseable {
         }
     }
 
-    record Snapshot(String status, int maxDispatchSeconds, long maxTotalTokens, long usedTokens,
-        long estimatedTokens, long reservedTokens, int inFlightRequests, String stopReason,
-        boolean cancellationRequested) {
+    record Snapshot(String status, int maxDispatchSeconds, long maxTotalTokens, long usedTokens, long estimatedTokens,
+        long reservedTokens, int inFlightRequests, String stopReason, boolean cancellationRequested) {
     }
 
     record Settlement(boolean stoppedBeforeSettle, boolean stoppedByThisRequest, String stopReason) {
@@ -287,8 +286,7 @@ final class MultiAgentBudgetLedger implements AutoCloseable {
         }
 
         Settlement finish(long tokens, long estimated, boolean responseReceived) {
-            return finished.compareAndSet(false, true)
-                ? owner.finishRequest(this, tokens, estimated, responseReceived)
+            return finished.compareAndSet(false, true) ? owner.finishRequest(this, tokens, estimated, responseReceived)
                 : new Settlement(true, false, owner.reason());
         }
     }

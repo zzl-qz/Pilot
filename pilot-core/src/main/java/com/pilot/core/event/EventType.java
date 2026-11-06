@@ -12,10 +12,11 @@ public enum EventType {
     ASSISTANT_REASONING("assistant.reasoning"), CONTEXT_COMPACTED("context.compacted"), PLAN_UPDATED("plan.updated"),
     RUN_STEERED("run.steered"), RUN_CONTINUED("run.continued"), RUN_RETRYING("run.retrying"),
     SUBAGENT_STARTED("subagent.started"), SUBAGENT_FINISHED("subagent.finished"), TASK_UPDATED("task.updated"),
-    MULTI_AGENT_BUDGET_UPDATED("multi.budget"), SANDBOX_DIFF("sandbox.diff"), ARBITRATION_REQUIRED("arbitration.required"),
-    ARBITRATION_RESOLVED("arbitration.resolved"), TOOL_STARTED("tool.started"), APPROVAL_REQUIRED("approval.required"),
-    APPROVAL_RESOLVED("approval.resolved"), TOOL_COMPLETED("tool.completed"), RUN_FAILED("run.failed"),
-    RUN_CANCELLED("run.cancelled"), RUN_COMPLETED("run.completed");
+    MULTI_AGENT_BUDGET_UPDATED("multi.budget"), SANDBOX_DIFF("sandbox.diff"),
+    ARBITRATION_REQUIRED("arbitration.required"), ARBITRATION_RESOLVED("arbitration.resolved"),
+    TOOL_STARTED("tool.started"), APPROVAL_REQUIRED("approval.required"), APPROVAL_RESOLVED("approval.resolved"),
+    TOOL_COMPLETED("tool.completed"), RUN_FAILED("run.failed"), RUN_CANCELLED("run.cancelled"),
+    RUN_COMPLETED("run.completed");
 
     private final String wireName;
 

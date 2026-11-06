@@ -78,9 +78,8 @@ public final class OpenAiResponsesModelClient implements ModelClient {
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
         Map<String, Object> body = requestBody(messages, tools);
         HttpRequest request = HttpRequest.newBuilder(endpoint).header("Authorization", "Bearer " + apiKey)
-            .header("Content-Type", "application/json").timeout(timeout)
-            .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(CanonicalJson.ordered(body)),
-                StandardCharsets.UTF_8))
+            .header("Content-Type", "application/json").timeout(timeout).POST(HttpRequest.BodyPublishers
+                .ofString(mapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
             .build();
         HttpResponse<String> response;
         try {
@@ -121,16 +120,15 @@ public final class OpenAiResponsesModelClient implements ModelClient {
                 String id = string(item.get("call_id"));
                 String name = string(item.get("name"));
                 if (id.isBlank() || name.isBlank()) {
-                    throw new ModelClientException(ModelFailureKind.PERMANENT,
-                        "模型返回的 function_call 缺少 call_id 或 name");
+                    throw new ModelClientException(ModelFailureKind.PERMANENT, "模型返回的 function_call 缺少 call_id 或 name");
                 }
                 calls.add(new ToolCall(id, name, arguments(item.get("arguments"))));
             }
         }
         appendCitations(text, citations);
-        ModelResponse.FinishReason reason = "incomplete".equals(string(root.get("status")))
-            ? ModelResponse.FinishReason.LENGTH
-            : calls.isEmpty() ? ModelResponse.FinishReason.STOP : ModelResponse.FinishReason.TOOL_CALLS;
+        ModelResponse.FinishReason reason =
+            "incomplete".equals(string(root.get("status"))) ? ModelResponse.FinishReason.LENGTH
+                : calls.isEmpty() ? ModelResponse.FinishReason.STOP : ModelResponse.FinishReason.TOOL_CALLS;
         ModelUsage usage = ModelUsageParser.parse(root.get("usage"));
         return new ModelResponse(text.toString(), calls, usage, reason);
     }
@@ -149,15 +147,16 @@ public final class OpenAiResponsesModelClient implements ModelClient {
         List<Map<String, Object>> input = new ArrayList<>();
         for (Message message : messages) {
             if ("tool".equals(message.role())) {
-                input.add(Map.of("type", "function_call_output", "call_id", message.toolCallId(),
-                    "output", message.content()));
+                input.add(Map.of("type", "function_call_output", "call_id", message.toolCallId(), "output",
+                    message.content()));
             } else if (message.hasToolCalls()) {
                 if (!message.content().isBlank()) {
                     input.add(Map.of("role", "assistant", "content", message.content()));
                 }
                 for (ToolCall call : message.toolCalls()) {
                     input.add(Map.of("type", "function_call", "call_id", call.callId(), "name", call.name(),
-                        "arguments", mapper.writeValueAsString(CanonicalJson.ordered(call.args() == null ? Map.of() : call.args()))));
+                        "arguments", mapper
+                            .writeValueAsString(CanonicalJson.ordered(call.args() == null ? Map.of() : call.args()))));
                 }
             } else {
                 input.add(Map.of("role", message.role(), "content", content(message)));
@@ -165,7 +164,8 @@ public final class OpenAiResponsesModelClient implements ModelClient {
         }
         List<Map<String, Object>> requestTools = new ArrayList<>();
         if (definitions != null) {
-            definitions.stream().filter(definition -> !NativeToolNames.isHidden(definition.name(), nativeCapabilities()))
+            definitions.stream()
+                .filter(definition -> !NativeToolNames.isHidden(definition.name(), nativeCapabilities()))
                 .forEach(definition -> requestTools.add(Map.of("type", "function", "name", definition.name(),
                     "description", definition.description(), "parameters", definition.parameters())));
         }
@@ -238,8 +238,8 @@ public final class OpenAiResponsesModelClient implements ModelClient {
             return;
         }
         text.append("\n\n来源：\n");
-        citations.forEach((url, title) -> text.append("- [").append(markdown(title)).append("](").append(url)
-            .append(")\n"));
+        citations
+            .forEach((url, title) -> text.append("- [").append(markdown(title)).append("](").append(url).append(")\n"));
     }
 
     private static String markdown(String value) {

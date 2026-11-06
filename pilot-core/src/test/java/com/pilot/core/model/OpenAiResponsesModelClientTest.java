@@ -9,6 +9,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -16,6 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 import com.pilot.core.loop.Message;
+import com.pilot.core.tool.ToolCall;
 import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.JsonNode;
@@ -27,9 +29,10 @@ class OpenAiResponsesModelClientTest {
     @Test
     void convertsChatHistoryAndLocalToolsToResponsesWireFormatAndAddsNativeSearch() throws Exception {
         AtomicReference<String> requestBody = new AtomicReference<>();
-        HttpServer server = server(requestBody, """
-            {"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Found it.","annotations":[{"type":"url_citation","title":"Example","url":"https://example.com"}]}]}],"usage":{"input_tokens":20,"output_tokens":5}}
-            """);
+        HttpServer server = server(requestBody,
+            """
+                {"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Found it.","annotations":[{"type":"url_citation","title":"Example","url":"https://example.com"}]}]}],"usage":{"input_tokens":20,"output_tokens":5}}
+                """);
         server.start();
         try {
             OpenAiResponsesModelClient client = client(server);
@@ -55,14 +58,17 @@ class OpenAiResponsesModelClientTest {
     @Test
     void mapsFunctionCallsAndResultsAcrossResponsesTurns() throws Exception {
         AtomicReference<String> requestBody = new AtomicReference<>();
-        HttpServer server = server(requestBody, """
-            {"status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"read_file","arguments":"{\\"path\\":\\"pom.xml\\"}"}]}
-            """);
+        HttpServer server = server(requestBody,
+            """
+                {"status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"read_file","arguments":"{\\"path\\":\\"pom.xml\\"}"}]}
+                """);
         server.start();
         try {
-            ModelResponse response = client(server).chat(List.of(Message.user("read"),
-                Message.assistant("", List.of(new com.pilot.core.tool.ToolCall("call-0", "list_dir", Map.of("path", ".")))),
-                Message.tool("call-0", "pom.xml")), List.of(new ToolDefinition("read_file", "Read", Map.of("type", "object"))));
+            ModelResponse response = client(server).chat(
+                List.of(Message.user("read"),
+                    Message.assistant("", List.of(new ToolCall("call-0", "list_dir", Map.of("path", ".")))),
+                    Message.tool("call-0", "pom.xml")),
+                List.of(new ToolDefinition("read_file", "Read", Map.of("type", "object"))));
 
             JsonNode body = mapper.readTree(requestBody.get());
             assertEquals("function_call", body.path("input").get(1).path("type").asString());
@@ -85,7 +91,7 @@ class OpenAiResponsesModelClientTest {
     private static OpenAiResponsesModelClient client(HttpServer server) {
         return new OpenAiResponsesModelClient(HttpClient.newHttpClient(), JsonMapper.builder().build(),
             URI.create("http://localhost:" + server.getAddress().getPort() + "/v1/chat/completions"), "key",
-            "test-model", java.time.Duration.ofSeconds(10), ModelProfile.generic());
+            "test-model", Duration.ofSeconds(10), ModelProfile.generic());
     }
 
     private static HttpServer server(AtomicReference<String> requestBody, String response) throws IOException {

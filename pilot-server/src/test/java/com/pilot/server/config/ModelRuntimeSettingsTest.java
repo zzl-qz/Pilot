@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -23,6 +24,7 @@ import com.pilot.core.model.ModelPricing;
 import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
+import com.pilot.core.model.NativeCapability;
 import com.pilot.core.model.RequestReport;
 import com.pilot.core.model.ToolDefinition;
 import com.pilot.server.store.InMemorySettingsStore;
@@ -97,16 +99,18 @@ class ModelRuntimeSettingsTest {
     @Test
     void autoSearchCapabilityIsLimitedToKnownOfficialOpenAiModelsAndCanBeOverridden() {
         var store = new InMemorySettingsStore();
-        var models = new ModelSettings(new ModelProperties("key", "https://api.openai.com/v1/chat/completions",
-            "gpt-4o-mini", null), store);
+        var models = new ModelSettings(
+            new ModelProperties("key", "https://api.openai.com/v1/chat/completions", "gpt-4o-mini", null), store);
         var runtime = new ModelRuntimeSettings(store, models, new JsonMapper());
 
         assertTrue(runtime.nativeWebSearch(models.snapshot()));
         models.update("https://gateway.test/v1/chat/completions", "gpt-4o-mini", null);
-        assertFalse(runtime.nativeWebSearch(models.snapshot()), "compatible gateway must not inherit vendor capabilities");
+        assertFalse(runtime.nativeWebSearch(models.snapshot()),
+            "compatible gateway must not inherit vendor capabilities");
         runtime.update("gpt-4o-mini", "https://gateway.test/v1/chat/completions",
             new ModelRuntimeSettings.Options("openai", "auto", "", null, null, "short", "openai-responses", null));
-        assertTrue(runtime.nativeWebSearch(models.snapshot()), "manual mode enables only the confirmed Responses protocol");
+        assertTrue(runtime.nativeWebSearch(models.snapshot()),
+            "manual mode enables only the confirmed Responses protocol");
         runtime.update("gpt-4o-mini", "https://gateway.test/v1/chat/completions",
             new ModelRuntimeSettings.Options("openai", "auto", "", null, null, "short", "local", null));
         assertFalse(runtime.nativeWebSearch(models.snapshot()));
@@ -115,23 +119,22 @@ class ModelRuntimeSettingsTest {
     @Test
     void autoDetectsAnthropicSearchWhileKeepingWebFetchInPilot() {
         var store = new InMemorySettingsStore();
-        var models = new ModelSettings(new ModelProperties("key", "https://api.anthropic.com/v1/messages",
-            "claude-sonnet-5-5", null), store);
+        var models = new ModelSettings(
+            new ModelProperties("key", "https://api.anthropic.com/v1/messages", "claude-sonnet-5-5", null), store);
         var runtime = new ModelRuntimeSettings(store, models, new JsonMapper());
 
-        assertEquals(java.util.Set.of(com.pilot.core.model.NativeCapability.WEB_SEARCH),
-            runtime.nativeCapabilities(models.snapshot()));
+        assertEquals(Set.of(NativeCapability.WEB_SEARCH), runtime.nativeCapabilities(models.snapshot()));
         assertTrue(runtime.anthropicMessages(models.snapshot()));
-        assertThrows(IllegalArgumentException.class, () -> runtime.update("claude-sonnet-5-5",
-            "https://api.anthropic.com/v1/messages",
-            new ModelRuntimeSettings.Options("auto", "auto", "", null, null, "short", "openai-responses", null)));
+        assertThrows(IllegalArgumentException.class,
+            () -> runtime.update("claude-sonnet-5-5", "https://api.anthropic.com/v1/messages",
+                new ModelRuntimeSettings.Options("auto", "auto", "", null, null, "short", "openai-responses", null)));
     }
 
     @Test
     void anthropicModelsOutsideTheVerifiedToolMatrixKeepLocalSearch() {
         var store = new InMemorySettingsStore();
-        var models = new ModelSettings(new ModelProperties("key", "https://api.anthropic.com/v1/messages",
-            "claude-haiku-5-5", null), store);
+        var models = new ModelSettings(
+            new ModelProperties("key", "https://api.anthropic.com/v1/messages", "claude-haiku-5-5", null), store);
         var runtime = new ModelRuntimeSettings(store, models, new JsonMapper());
 
         assertTrue(runtime.anthropicMessages(models.snapshot()));
@@ -141,7 +144,8 @@ class ModelRuntimeSettingsTest {
     @Test
     void autoSearchDoesNotGuessUnknownModelFamilies() {
         var store = new InMemorySettingsStore();
-        var models = new ModelSettings(new ModelProperties("key", "https://api.openai.com/v1", "gpt-6-sol", null), store);
+        var models =
+            new ModelSettings(new ModelProperties("key", "https://api.openai.com/v1", "gpt-6-sol", null), store);
         var runtime = new ModelRuntimeSettings(store, models, new JsonMapper());
 
         assertFalse(runtime.nativeWebSearch(models.snapshot()));
@@ -150,13 +154,13 @@ class ModelRuntimeSettingsTest {
     @Test
     void manualResponsesModeRejectsAnthropicHostEvenWithGenericProvider() {
         var store = new InMemorySettingsStore();
-        var models = new ModelSettings(new ModelProperties("key", "https://api.anthropic.com/v1/messages",
-            "claude-sonnet-5-5", null), store);
+        var models = new ModelSettings(
+            new ModelProperties("key", "https://api.anthropic.com/v1/messages", "claude-sonnet-5-5", null), store);
         var runtime = new ModelRuntimeSettings(store, models, new JsonMapper());
 
-        assertThrows(IllegalArgumentException.class, () -> runtime.update("claude-sonnet-5-5",
-            "https://api.anthropic.com/v1/messages",
-            new ModelRuntimeSettings.Options("generic", "auto", "", null, null, "short", "openai-responses", null)),
+        assertThrows(IllegalArgumentException.class,
+            () -> runtime.update("claude-sonnet-5-5", "https://api.anthropic.com/v1/messages",
+                new ModelRuntimeSettings.Options("generic", "auto", "", null, null, "short", "openai-responses", null)),
             "官方 Anthropic 主机名不能被通用兼容端点配置绕过协议校验");
         assertTrue(runtime.anthropicMessages(models.snapshot()), "默认 auto 仍按端点识别 Messages 协议");
     }

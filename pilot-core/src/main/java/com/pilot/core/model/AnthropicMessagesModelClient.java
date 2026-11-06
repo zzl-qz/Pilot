@@ -79,10 +79,11 @@ public final class AnthropicMessagesModelClient implements ModelClient {
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
         Map<String, Object> body = requestBody(messages, tools);
-        HttpRequest request = HttpRequest.newBuilder(endpoint).header("x-api-key", apiKey)
-            .header("anthropic-version", "2023-06-01").header("Content-Type", "application/json")
-            .timeout(timeout).POST(HttpRequest.BodyPublishers.ofString(
-                mapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8)).build();
+        HttpRequest request =
+            HttpRequest.newBuilder(endpoint).header("x-api-key", apiKey).header("anthropic-version", "2023-06-01")
+                .header("Content-Type", "application/json").timeout(timeout).POST(HttpRequest.BodyPublishers
+                    .ofString(mapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
+                .build();
         HttpResponse<String> response;
         try {
             response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -118,8 +119,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
                 String id = string(block.get("id"));
                 String name = string(block.get("name"));
                 if (id.isBlank() || name.isBlank()) {
-                    throw new ModelClientException(ModelFailureKind.PERMANENT,
-                        "模型返回的 tool_use 缺少 id 或 name");
+                    throw new ModelClientException(ModelFailureKind.PERMANENT, "模型返回的 tool_use 缺少 id 或 name");
                 }
                 calls.add(new ToolCall(id, name, objectMap(block.get("input"))));
             } else if (type.startsWith("web_search") || type.startsWith("web_fetch")) {
@@ -159,8 +159,8 @@ public final class AnthropicMessagesModelClient implements ModelClient {
                 List<Map<String, Object>> results = new ArrayList<>();
                 while (index < messages.size() && "tool".equals(messages.get(index).role())) {
                     Message result = messages.get(index++);
-                    results.add(Map.of("type", "tool_result", "tool_use_id", result.toolCallId(),
-                        "content", result.content()));
+                    results.add(
+                        Map.of("type", "tool_result", "tool_use_id", result.toolCallId(), "content", result.content()));
                 }
                 index--;
                 conversation.add(Map.of("role", "user", "content", results));
@@ -170,8 +170,8 @@ public final class AnthropicMessagesModelClient implements ModelClient {
                     blocks.add(Map.of("type", "text", "text", message.content()));
                 }
                 for (ToolCall call : message.toolCalls()) {
-                    blocks.add(Map.of("type", "tool_use", "id", call.callId(), "name", call.name(),
-                        "input", call.args() == null ? Map.of() : call.args()));
+                    blocks.add(Map.of("type", "tool_use", "id", call.callId(), "name", call.name(), "input",
+                        call.args() == null ? Map.of() : call.args()));
                 }
                 conversation.add(Map.of("role", "assistant", "content", blocks));
             } else {
@@ -188,18 +188,18 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         List<Map<String, Object>> requestTools = new ArrayList<>();
         if (definitions != null) {
             definitions.stream().filter(definition -> !NativeToolNames.isHidden(definition.name(), nativeCapabilities))
-                .forEach(definition -> requestTools.add(Map.of("name", definition.name(),
-                    "description", definition.description(), "input_schema", definition.parameters())));
+                .forEach(definition -> requestTools.add(Map.of("name", definition.name(), "description",
+                    definition.description(), "input_schema", definition.parameters())));
         }
         if (nativeCapabilities.contains(NativeCapability.WEB_SEARCH)) {
             // _20260209 及之后的版本默认只从 code execution 调用；不支持程序化工具调用的模型
             // 必须显式声明 allowed_callers，否则官方端点会返回 400。
-            requestTools.add(Map.of("type", "web_search_20260209", "name", "web_search",
-                "allowed_callers", List.of("direct")));
+            requestTools
+                .add(Map.of("type", "web_search_20260209", "name", "web_search", "allowed_callers", List.of("direct")));
         }
         if (nativeCapabilities.contains(NativeCapability.WEB_FETCH)) {
-            requestTools.add(Map.of("type", "web_fetch_20260209", "name", "web_fetch",
-                "allowed_callers", List.of("direct")));
+            requestTools
+                .add(Map.of("type", "web_fetch_20260209", "name", "web_fetch", "allowed_callers", List.of("direct")));
         }
         if (!ModelRequestScope.current().toolsDisabled() && !requestTools.isEmpty()) {
             body.put("tools", requestTools);
@@ -274,9 +274,9 @@ public final class AnthropicMessagesModelClient implements ModelClient {
             return;
         }
         text.append("\n\n来源：\n");
-        citations.forEach((url, title) -> text.append("- [").append(title.replace("[", "\\[").replace("]", "\\]")
-            .replace("\n", " ")).append("](").append(url.replace("(", "%28").replace(")", "%29"))
-            .append(")\n"));
+        citations.forEach(
+            (url, title) -> text.append("- [").append(title.replace("[", "\\[").replace("]", "\\]").replace("\n", " "))
+                .append("](").append(url.replace("(", "%28").replace(")", "%29")).append(")\n"));
     }
 
     private static String string(JsonNode node) {
