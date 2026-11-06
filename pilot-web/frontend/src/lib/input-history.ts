@@ -8,17 +8,17 @@
 const PREFIX = 'pilot.inputHistory.';
 const LIMIT = 100;
 
-export function historyKey(sessionId) {
+export function historyKey(sessionId: unknown) {
   return sessionId ? PREFIX + sessionId : null;
 }
 
-export function loadInputHistory(storage, sessionId) {
+export function loadInputHistory(storage: Pick<Storage, 'getItem'>, sessionId: unknown): string[] {
   const key = historyKey(sessionId);
   if (!key) {
     return [];
   }
   try {
-    const parsed = JSON.parse(storage.getItem(key) || '[]');
+    const parsed: unknown = JSON.parse(storage.getItem(key) || '[]');
     return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
   } catch {
     return [];
@@ -26,7 +26,7 @@ export function loadInputHistory(storage, sessionId) {
 }
 
 /** 记一条发出去的内容，返回更新后的历史（存不下也返回内存里的结果）。 */
-export function rememberInput(storage, sessionId, text) {
+export function rememberInput(storage: Pick<Storage, 'getItem' | 'setItem'>, sessionId: unknown, text: unknown) {
   const value = String(text || '').trim();
   const key = historyKey(sessionId);
   if (!value || !key) {
@@ -49,7 +49,7 @@ export function rememberInput(storage, sessionId, text) {
  *
  * @returns {{index: number, text: string|null}} text 为 null 表示「回到草稿」
  */
-export function stepHistory(history, index, direction, draft) {
+export function stepHistory(history: readonly string[] | null | undefined, index: number, direction: string, draft: string | null | undefined): { index: number; text: string | null } {
   const list = Array.isArray(history) ? history : [];
   if (!list.length) {
     return { index: -1, text: null };

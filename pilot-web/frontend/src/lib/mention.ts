@@ -5,7 +5,7 @@
  * 同一档里路径越短越靠前，所以输入 "App" 时根目录的 App.java 不会被深层同名文件挤到后面。
  * 没有输入时按路径长度排序，先给出顶层文件。
  */
-export function rankFileMatches(paths, query, limit = 40) {
+export function rankFileMatches(paths: readonly string[] | null | undefined, query: unknown, limit = 40) {
   const needle = String(query || '').trim().toLowerCase();
   const scored = [];
   for (const path of Array.isArray(paths) ? paths : []) {
@@ -36,7 +36,7 @@ export function rankFileMatches(paths, query, limit = 40) {
 }
 
 /** needle 的字符是否按顺序出现在 haystack 里（typo 容忍用）。 */
-export function isSubsequence(haystack, needle) {
+export function isSubsequence(haystack: string, needle: string) {
   if (!needle) {
     return true;
   }

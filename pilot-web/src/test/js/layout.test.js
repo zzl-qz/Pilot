@@ -43,3 +43,11 @@ test('readLayout 读回保存的宽度，坏数据当没存过', () => {
   assert.deepEqual(readLayout(memoryStorage({ 'pilot.layout': '{"sidebarW":-5}' })), { sidebarW: null, activityW: null });
   assert.deepEqual(readLayout(null), { sidebarW: null, activityW: null });
 });
+
+test('存储读取或写入拒绝时保留可用布局，未知栏位仍有数值回退', () => {
+  const unavailable = { getItem() { throw Error('denied'); }, setItem() { throw Error('quota'); } };
+  assert.deepEqual(readLayout(unavailable), { sidebarW: null, activityW: null });
+  assert.doesNotThrow(() => writeLayout({ sidebarW: 300, activityW: 460 }, unavailable));
+  assert.equal(clampPanelWidth('unknown', '123.6', 800), 124);
+  assert.equal(clampPanelWidth('unknown', 'invalid', 800), 0);
+});

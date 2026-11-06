@@ -1,3 +1,5 @@
+interface LayoutStorage { getItem(key: string): string | null; setItem(key: string, value: string): void }
+export interface PanelLayout { sidebarW: number | null; activityW: number | null }
 /**
  * 三栏布局的可调宽度：左侧会话栏与右侧审阅栏都能拖，宽度记在本地。
  *
@@ -10,12 +12,12 @@ const STORAGE_KEY = 'pilot.layout';
 const MIN_MAIN_WIDTH = 420;
 
 /** 各栏的可拖范围（像素）。 */
-export const LAYOUT_LIMITS = {
+export const LAYOUT_LIMITS: Record<string, readonly [number, number]> = {
   sidebar: [200, 520],
   activity: [280, 760]
 };
 
-function storageOf(storage) {
+function storageOf(storage?: LayoutStorage | null) {
   if (storage) {
     return storage;
   }
@@ -33,7 +35,7 @@ function storageOf(storage) {
  * @param value 目标宽度
  * @param viewportWidth 应用区总宽（不含浏览器窗口外框）
  */
-export function clampPanelWidth(kind, value, viewportWidth) {
+export function clampPanelWidth(kind: string, value: unknown, viewportWidth: unknown) {
   const limits = LAYOUT_LIMITS[kind];
   if (!limits) {
     return Math.round(Number(value) || 0);
@@ -51,7 +53,7 @@ export function clampPanelWidth(kind, value, viewportWidth) {
 }
 
 /** 读本地保存的宽度；坏数据一律当没存过。 */
-export function readLayout(storage) {
+export function readLayout(storage?: LayoutStorage | null) {
   const store = storageOf(storage);
   if (!store || typeof store.getItem !== 'function') {
     return { sidebarW: null, activityW: null };
@@ -67,7 +69,7 @@ export function readLayout(storage) {
   }
 }
 
-export function writeLayout(layout, storage) {
+export function writeLayout(layout: Partial<PanelLayout> | null | undefined, storage?: LayoutStorage | null) {
   const store = storageOf(storage);
   if (!store || typeof store.setItem !== 'function') {
     return;
@@ -89,7 +91,7 @@ export function writeLayout(layout, storage) {
  * @param startWidth 按下时的宽度
  * @param deltaX 相对按下点的水平位移
  */
-export function dragWidth(kind, startWidth, deltaX, viewportWidth) {
+export function dragWidth(kind: string, startWidth: unknown, deltaX: unknown, viewportWidth: unknown) {
   const direction = kind === 'activity' ? -1 : 1;
   return clampPanelWidth(kind, (Number(startWidth) || 0) + direction * (Number(deltaX) || 0), viewportWidth);
 }

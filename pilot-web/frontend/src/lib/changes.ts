@@ -1,3 +1,4 @@
+import type { ChangeFile, ChangeReport } from '../types/core.js';
 /**
  * 变更面板的纯逻辑：多轮运行报告的合并、文件排序、git 状态归类。
  *
@@ -15,8 +16,8 @@ import { normalizePath } from './diff.js';
  *
  * @param {Array<{gitRepository?: boolean, truncated?: boolean, files?: Array<{path: string, added?: number, removed?: number}>}>} reports
  */
-export function mergeRunReports(reports) {
-  const files = new Map();
+export function mergeRunReports(reports: readonly ChangeReport[] | null | undefined) {
+  const files = new Map<string, ChangeFile>();
   let gitRepository = false;
   let truncated = false;
   for (const report of reports || []) {
@@ -42,11 +43,11 @@ export function mergeRunReports(reports) {
  * @param {Array<{path: string}>} files
  * @param {string[]} runOrderPaths 本轮改过的路径，按出现顺序
  */
-export function sortChangeFiles(files, runOrderPaths = []) {
+export function sortChangeFiles<T extends { path: string }>(files: readonly T[] | null | undefined, runOrderPaths: readonly string[] = []): T[] {
   const runOrder = new Map((runOrderPaths || []).map((path, index) => [normalizePath(path), index]));
   return (files || []).slice().sort((a, b) => {
-    const left = runOrder.has(normalizePath(a.path)) ? runOrder.get(normalizePath(a.path)) : Number.MAX_SAFE_INTEGER;
-    const right = runOrder.has(normalizePath(b.path)) ? runOrder.get(normalizePath(b.path)) : Number.MAX_SAFE_INTEGER;
+    const left = runOrder.has(normalizePath(a.path)) ? runOrder.get(normalizePath(a.path))! : Number.MAX_SAFE_INTEGER;
+    const right = runOrder.has(normalizePath(b.path)) ? runOrder.get(normalizePath(b.path))! : Number.MAX_SAFE_INTEGER;
     if (left !== right) {
       return left - right;
     }
@@ -63,11 +64,11 @@ export function sortChangeFiles(files, runOrderPaths = []) {
  * @param {Array<{path: string, added?: number, removed?: number}>} files
  * @param {number} limit 默认展示的文件数
  */
-export function editSummary(files, limit = 3) {
+export function editSummary(files: readonly (ChangeFile | null | undefined)[] | ChangeFile | null | undefined, limit = 3) {
   // 容错：调用方偶尔会把单个文件记录传进来（曾导致整页 TypeError 白屏），
   // 这里统一成数组，宁可摘要不准也不要炸掉整个界面
   const input = Array.isArray(files) ? files : (files ? [files] : []);
-  const list = input.filter(Boolean).map((file) => ({ ...file, path: normalizePath(file.path) }));
+  const list = input.filter((file): file is ChangeFile => Boolean(file)).map((file) => ({ ...file, path: normalizePath(file.path) }));
   const size = Number.isFinite(limit) && limit >= 0 ? Math.floor(limit) : 3;
   return {
     total: list.length,
@@ -80,13 +81,13 @@ export function editSummary(files, limit = 3) {
 }
 
 /** 单个文件的悬停说明：状态 + 增删行（别把摘要对象塞进 title，那会渲染成 [object Object]）。 */
-export function changeFileTitle(file) {
+export function changeFileTitle(file: ChangeFile | null | undefined) {
   const status = file?.status || 'M';
   return `${status} · +${Number(file?.added || 0)} -${Number(file?.removed || 0)}`;
 }
 
 /** 路径拆成「目录 + 文件名」，界面上目录用弱化色，长路径省略时仍能看到文件名。 */
-export function splitPath(path) {
+export function splitPath(path: unknown) {
   const normalized = normalizePath(path);
   const index = normalized.lastIndexOf('/');
   return index < 0
@@ -95,7 +96,7 @@ export function splitPath(path) {
 }
 
 /** git 的两字母状态码归类：未跟踪/新增算 added，删除算 deleted，其余都算 modified。 */
-export function statusKind(status) {
+export function statusKind(status: unknown) {
   if (status === '??' || status === 'A') {
     return 'added';
   }

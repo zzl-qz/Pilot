@@ -1,3 +1,4 @@
+import type { ChangeFile, DiffFile } from '../types/core.js';
 /**
  * unified diff 解析：把 git 补丁拆成「文件 → 行」两级结构。
  *
@@ -7,7 +8,7 @@
  */
 
 /** 统一路径分隔符，便于和工具返回的相对路径比对。 */
-export function normalizePath(path) {
+export function normalizePath(path: unknown) {
   return String(path || '').replace(/\\/g, '/').replace(/^\.\//, '');
 }
 
@@ -29,9 +30,9 @@ const META_PREFIXES = [
 /**
  * @returns {Array<{path: string, lines: Array<{kind: string, text: string, old: string|number, next: string|number}>, added: number, removed: number}>}
  */
-export function parseDiff(text) {
-  const files = [];
-  let current = null;
+export function parseDiff(text: unknown): DiffFile[] {
+  const files: DiffFile[] = [];
+  let current: DiffFile | null = null;
   let inHunk = false;
   let oldLine = 0;
   let newLine = 0;
@@ -86,7 +87,7 @@ export function parseDiff(text) {
 }
 
 /** 合计增删行，用于摘要行（+12 −3）。 */
-export function totalDiffLines(files) {
+export function totalDiffLines(files: readonly ChangeFile[] | null | undefined) {
   return (files || []).reduce(
     (sum, file) => ({ added: sum.added + Number(file.added || 0), removed: sum.removed + Number(file.removed || 0) }),
     { added: 0, removed: 0 }

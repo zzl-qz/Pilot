@@ -63,8 +63,13 @@
         "diff hunk/重命名/二进制/无换行",
         "变更合并/排序/摘要"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T07-24-00-258Z/report.json",
+          "result": "300 项前端单元、41 项桌面单元、严格类型检查、构建；navigation/composer/interaction/results/sandbox-recovery 五套 Chromium/Electron 回归通过。新增验证状态与存储拒绝测试先在 JS 上通过，再在 TS 上通过。"
+        }
+      ]
     },
     {
       "batch": 3,

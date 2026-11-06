@@ -2,16 +2,16 @@
  * 标签页上的「注意力信号」：运行中、需要你处理、完成、失败。
  * 切到别的窗口干活时，只看标签页标题和图标就知道该不该回来。
  */
-const PREFIX = { idle: '', running: '● ', attention: '! ', done: '✓ ', error: '✕ ' };
-const BADGE = { running: '#4fa3ea', attention: '#f2b544', done: '#3ecf8e', error: '#ff6f6f' };
+const PREFIX: Record<string, string> = { idle: '', running: '● ', attention: '! ', done: '✓ ', error: '✕ ' };
+const BADGE: Record<string, string> = { running: '#4fa3ea', attention: '#f2b544', done: '#3ecf8e', error: '#ff6f6f' };
 
-export function tabTitle(base, kind) {
+export function tabTitle(base: unknown, kind: string) {
   const name = String(base || 'Pilot').trim() || 'Pilot';
   return (PREFIX[kind] ?? '') + name;
 }
 
 /** 圆环 + 箭头的品牌图标；有状态时右下角加一枚状态色圆点。 */
-export function faviconHref(kind) {
+export function faviconHref(kind: string) {
   const badge = BADGE[kind]
     ? `%3Ccircle cx='25' cy='25' r='6.5' fill='${encodeURIComponent(BADGE[kind])}' stroke='%23171717' stroke-width='2'/%3E`
     : '';
@@ -24,7 +24,7 @@ export function faviconHref(kind) {
 }
 
 /** 只有页面在后台、用户开了通知、浏览器也授权了、且事件值得打扰时才弹系统通知。 */
-export function shouldNotify({ kind, hidden, enabled, permission }) {
+export function shouldNotify({ kind, hidden, enabled, permission }: { kind: string; hidden: boolean; enabled: boolean; permission: string }) {
   return Boolean(hidden && enabled && permission === 'granted'
     && (kind === 'attention' || kind === 'done' || kind === 'error'));
 }

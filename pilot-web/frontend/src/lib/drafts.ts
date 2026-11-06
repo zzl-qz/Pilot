@@ -11,11 +11,11 @@ const MAX_LENGTH = 20000;
  */
 const NEW_SESSION_DRAFT_KEY = '__new__';
 
-export function draftKey(sessionId) {
+export function draftKey(sessionId: unknown) {
   return PREFIX + (sessionId || NEW_SESSION_DRAFT_KEY);
 }
 
-export function readDraft(storage, sessionId) {
+export function readDraft(storage: Pick<Storage, 'getItem'>, sessionId: unknown) {
   const key = draftKey(sessionId);
   if (!key) {
     return '';
@@ -28,7 +28,7 @@ export function readDraft(storage, sessionId) {
 }
 
 /** 空白草稿直接删掉键，避免 localStorage 里堆满空条目。 */
-export function writeDraft(storage, sessionId, text) {
+export function writeDraft(storage: Pick<Storage, 'setItem' | 'removeItem'>, sessionId: unknown, text: unknown) {
   const key = draftKey(sessionId);
   if (!key) {
     return;
@@ -46,6 +46,6 @@ export function writeDraft(storage, sessionId, text) {
 }
 
 /** 会话被删除后顺手清掉它的草稿。 */
-export function dropDraft(storage, sessionId) {
+export function dropDraft(storage: Pick<Storage, 'setItem' | 'removeItem'>, sessionId: unknown) {
   writeDraft(storage, sessionId, '');
 }
