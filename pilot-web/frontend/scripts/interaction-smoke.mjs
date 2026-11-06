@@ -102,7 +102,15 @@ async function run(page,name,url) {
   await page.evaluate(()=>api.saveModel=async()=>{throw Error('offline');});
   await page.locator('#settings-model-save').click();
   assert.equal(await page.getByLabel('模型名称',{exact:true}).inputValue(),'test-model');
+  const settingsClose = page.getByRole('button', { name: '关闭弹窗', exact: true });
+  const closeBounds = await settingsClose.boundingBox();
+  assert.ok(closeBounds.width >= 36 && closeBounds.height >= 36);
+  assert.match(await settingsClose.getAttribute('title'), /Esc/);
+  await page.screenshot({path:join(temp,`${name}-settings-close.png`)});
   await page.keyboard.press('Escape');
+  await page.evaluate(()=>store.getState().setUi({settingsOpen:true}));
+  await settingsClose.click();
+  assert.equal(await page.locator('.modal').count(),0,'统一关闭按钮关闭设置弹窗');
   await input.fill('暂停请求中不能发'); await page.evaluate(()=>store.setState({pausing:true}));
   await input.press('Enter');assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='sendMessage').length),0);
   await page.evaluate(()=>store.setState({pausing:false}));

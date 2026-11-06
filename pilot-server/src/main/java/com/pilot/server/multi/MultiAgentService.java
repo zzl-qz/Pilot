@@ -56,6 +56,7 @@ import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelRequestScope;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
+import com.pilot.core.model.NativeCapability;
 import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.multi.AgentReport;
 import com.pilot.core.multi.AgentScope;
@@ -709,6 +710,16 @@ public class MultiAgentService {
             @Override
             public ModelProfile profile() {
                 return delegate.profile();
+            }
+
+            @Override
+            public Set<NativeCapability> nativeCapabilities() {
+                return delegate.nativeCapabilities();
+            }
+
+            @Override
+            public boolean disableRejectedNativeTools(Throwable failure) {
+                return delegate.disableRejectedNativeTools(failure);
             }
 
             @Override

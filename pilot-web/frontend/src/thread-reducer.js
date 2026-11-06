@@ -874,11 +874,22 @@ function trimThreadWindow(draft) {
   if (!trim.evictedBefore) {
     return;
   }
-  thread.windowEvents = trim.events;
-  thread.history.hasMore = true;
-  if (trim.removeStartCount > 0) {
-    thread.rows = thread.rows.slice(trim.removeStartCount);
+  // 事件数是软上限：一轮流式回复可能就超过整个窗口。最新提问和回答必须一起保留，
+  // 否则 turn.end 与结束卡片共用序号时，会删光事件游标，只剩一张无法向上翻页的结束卡。
+  const latestUser = thread.rows.findLastIndex((row) => row.type === 'user');
+  const protectedStart = latestUser >= 0 ? latestUser : thread.rows.findLastIndex((row) => row.type === 'turn');
+  let removeCount = Math.min(trim.removeStartCount, Math.max(0, protectedStart));
+  if (!removeCount) {
+    return;
   }
+  // 从下一条完整提问开始，避免把上一轮的孤立结束卡留在窗口头。
+  if (latestUser >= 0) {
+    while (removeCount < latestUser && thread.rows[removeCount].type !== 'user') removeCount += 1;
+  }
+  const boundary = thread.rows[removeCount].start;
+  thread.windowEvents = thread.windowEvents.filter((event) => event.sequence >= boundary);
+  thread.history.hasMore = true;
+  thread.rows = thread.rows.slice(removeCount);
 }
 
 /** 历史页（更早）前插：合并事件窗口 + 行注册表，位置由浏览器 scroll anchoring 保持。 */

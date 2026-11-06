@@ -3,6 +3,8 @@ package com.pilot.server.config;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,6 +47,11 @@ public class ModelSettings {
     private final SettingsStore store;
     private final List<String> options;
     private volatile Snapshot current;
+    private final List<Consumer<Snapshot>> listeners = new CopyOnWriteArrayList<>();
+
+    public void onChange(Consumer<Snapshot> listener) {
+        listeners.add(listener);
+    }
 
     public ModelSettings(ModelProperties defaults, SettingsStore store) {
         this.store = store;
@@ -100,6 +107,15 @@ public class ModelSettings {
         Snapshot next = new Snapshot(nextEndpoint, nextModel, nextKey);
         store.saveAll(Map.of(KEY_ENDPOINT, next.endpoint(), KEY_MODEL, next.model(), KEY_API_KEY, next.apiKey()));
         current = next;
+        if (!next.equals(before)) {
+            listeners.forEach(listener -> {
+                try {
+                    listener.accept(next);
+                } catch (RuntimeException failure) {
+                    log.warn("模型配置已保存，后台能力验证暂未启动");
+                }
+            });
+        }
         log.info("模型配置已更新：model={} endpoint={} apiKey={}", next.model(), next.endpoint(),
             next.hasApiKey() ? "已配置" : "未配置");
         return next;

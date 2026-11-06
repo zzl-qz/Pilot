@@ -1011,6 +1011,10 @@ public final class AgentLoop {
                 if (cancellation.cancelled()) {
                     return new ModelTurn(null, stopForCancellation(messages, events));
                 }
+                if (client.disableRejectedNativeTools(e)) {
+                    events.accept(new RunContinued(1, 1, "服务端拒绝原生工具，已自动恢复 Pilot 工具继续当前任务"));
+                    continue;
+                }
                 ModelFailureKind kind = ModelRetryPolicy.classify(e);
                 if (kind == ModelFailureKind.INTERRUPTED) {
                     // 用户取消已在上面的分支返回。能走到这里说明是外部中断：服务重启、

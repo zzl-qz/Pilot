@@ -38,6 +38,11 @@ public final class ModelClientProvider implements ModelClient {
     }
 
     @Override
+    public boolean disableRejectedNativeTools(Throwable failure) {
+        return client().disableRejectedNativeTools(failure);
+    }
+
+    @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
         return client().chat(messages, tools);
     }

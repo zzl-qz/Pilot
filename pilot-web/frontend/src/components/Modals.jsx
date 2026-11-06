@@ -5,6 +5,7 @@ import { formatCache, totalCost } from '../lib/request-usage.js';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { Icon, FileIcon } from './Icon.jsx';
+import { DialogCloseButton } from './DialogHeader.jsx';
 import { shortcut } from '../lib/interaction.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { filterPaletteActions } from '../lib/commands.js';
@@ -233,7 +234,7 @@ export function Modal({ id, title, onClose, children, wide }) {
       <div className={`modal-box${wide ? ' is-wide' : ''}`}>
         <header className="modal-head">
           <h2 id={`${id}-title`}>{title}</h2>
-          <button type="button" className="icon-action" aria-label="关闭弹窗" onClick={onClose}><Icon name="close" /></button>
+          <DialogCloseButton onClose={onClose} />
         </header>
         {children}
       </div>

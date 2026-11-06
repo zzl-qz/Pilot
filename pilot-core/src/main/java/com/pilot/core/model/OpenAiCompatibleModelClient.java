@@ -241,6 +241,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             String errorBody = snippet(response.body());
+            if ((response.statusCode() == 404 || response.statusCode() == 405)
+                && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {
+                throw new NativeToolRejectedException("端点未提供当前聊天协议路由", true);
+            }
             throw new ModelClientException(ModelFailureSignals.statusKind(response.statusCode(), errorBody),
                 "模型接口返回 HTTP " + response.statusCode() + "（" + elapsedMs(startedAt) + " ms, model=" + model + "）："
                     + errorBody);
@@ -292,6 +296,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 try (InputStream stream = response.body()) {
                     String errorBody = snippet(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
+                    if ((response.statusCode() == 404 || response.statusCode() == 405)
+                        && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {
+                        throw new NativeToolRejectedException("端点未提供当前聊天协议路由", true);
+                    }
                     throw new ModelClientException(ModelFailureSignals.statusKind(response.statusCode(), errorBody),
                         "模型接口返回 HTTP " + response.statusCode() + "：" + errorBody);
                 }

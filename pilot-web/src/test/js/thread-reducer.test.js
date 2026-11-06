@@ -35,6 +35,43 @@ function draft() {
 
 const turnOf = (state) => state.thread.rows.find((row) => row.type === 'turn');
 
+test('长回复收尾保留完整最新问答和翻页游标，不能只剩结束卡片', () => {
+  for (const ending of ['run.completed', 'run.failed', 'run.cancelled']) {
+    const state = draft();
+    let sequence = 0;
+    const send = (type, payload, runId) => applyEvent(state, { type, payload, runId, sequence: ++sequence }, { live: true });
+    send('run.started', { input: '上一问' }, 'old');
+    send('assistant.delta', { text: '上一答' }, 'old');
+    send('run.completed', { summary: '上一答' }, 'old');
+    send('run.started', { input: '当前问题' }, 'latest');
+    const start = sequence;
+    for (let i = 0; i < 330; i++) send('assistant.delta', { text: '长回复。' }, 'latest');
+    send(ending, { summary: '长结论。'.repeat(80), message: '停止', code: 'MAX_STEPS' }, 'latest');
+    assert.equal(state.thread.rows[0].text, '当前问题', ending);
+    assert.equal(turnOf(state).reply.text, '长回复。'.repeat(330), ending);
+    assert.equal(state.thread.windowEvents[0].sequence, start, ending);
+    assert.equal(state.thread.windowEvents.at(-1).sequence, sequence, ending);
+    assert.equal(state.thread.history.hasMore, true, ending);
+  }
+});
+
+test('单个超长回合按完整问答保留，后续短回合仍能正常回收旧窗口', () => {
+  const state = draft();
+  let sequence = 0;
+  const send = (type, payload, runId) => applyEvent(state, { type, payload, runId, sequence: ++sequence }, { live: true });
+  send('run.started', { input: '第一问' }, 'long');
+  for (let i = 0; i < 330; i++) send('assistant.delta', { text: '长' }, 'long');
+  send('run.completed', { summary: '长' }, 'long');
+  assert.equal(state.thread.rows[0].text, '第一问');
+  assert.equal(state.thread.windowEvents.length, sequence);
+  send('run.started', { input: '第二问' }, 'short');
+  send('assistant.delta', { text: '短答' }, 'short');
+  send('run.completed', { summary: '短答' }, 'short');
+  assert.equal(state.thread.rows[0].text, '第二问');
+  assert.equal(state.thread.windowEvents.length, 3);
+  assert.equal(state.thread.history.hasMore, true);
+});
+
 test('预览只是临时文本，正式增量到达后不重复拼接', () => {
   const state = draft();
   applyEvent(state, { type: 'assistant.preview', payload: { text: '你' } }, { live: true });

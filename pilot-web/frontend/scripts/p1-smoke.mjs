@@ -1,3 +1,4 @@
+import { checkDialogLayout } from './dialog-layout.mjs';
 import { createServer, build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
@@ -101,6 +102,7 @@ async function run(page,name,url) {
     for(const screen of ['series','form','search','notifications']) {
       await page.goto(url+'?screen='+screen);await page.locator('dialog').waitFor();
       assert.ok(await page.locator('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+      await checkDialogLayout(page);
       await page.screenshot({path:join(output,`${name}-${width}-${screen}.png`)});
     }
   }

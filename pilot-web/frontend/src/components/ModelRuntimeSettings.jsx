@@ -18,6 +18,28 @@ export function ModelRuntimeSettings({ model, endpoint }) {
     }).catch(e => { if (live) setError(e.message); });
     return () => { live = false; generation.current++; };
   }, [model, endpoint, refresh]);
+  useEffect(() => {
+    const report = value?.capabilityDiscovery;
+    if (!report || !value?.model) return;
+    const revision = generation.current;
+    let live = true;
+    const delay = report.state === 'checking' ? 1000 : Math.max(1000, Math.min(60000, report.expiresAt - Date.now()));
+    let timer;
+    async function poll() {
+      let updated = false;
+      try {
+        const next = await api.modelRuntime();
+        if (!live || revision !== generation.current || next.model !== value.model || next.endpoint !== value.endpoint) return;
+        // 后台状态刷新只合并检测结果，不覆盖用户正在编辑的报价和兼容选项。
+        setValue(current => current && ({ ...current, nativeCapabilities: next.nativeCapabilities,
+          webSearchSource: next.webSearchSource, capabilityDiscovery: next.capabilityDiscovery }));
+        updated = true;
+      } catch { /* 保留当前表单并继续自动重试。 */ }
+      finally { if (live && !updated) timer = setTimeout(poll, 3000); }
+    }
+    timer = setTimeout(poll, delay);
+    return () => { live = false; clearTimeout(timer); };
+  }, [value?.capabilityDiscovery, value?.model, value?.endpoint]);
   const update = (key, next) => { setNotice(''); setValue(current => ({ ...current, options: { ...current.options, [key]: next } })); };
   const price = (key, next) => update('pricing', { ...(value.options.pricing || {}), [key]: next });
   async function save(event) {
@@ -51,18 +73,22 @@ export function ModelRuntimeSettings({ model, endpoint }) {
       </div>
       <p className="request-setting-status">缓存写入无额外计费时，填写与普通输入相同的单价。估算不包含税费、订阅优惠或服务商额外收费。</p>
       <label className="task-field">端点能力<select value={value.options.provider || 'auto'} onChange={e => { update('provider', e.target.value); }}>
-        <option value="auto">自动识别官方端点</option><option value="generic">通用兼容端点</option>
+        <option value="auto">自动识别端点协议</option><option value="generic">通用兼容端点</option>
         <option value="openai">已确认的 OpenAI 能力</option><option value="deepseek">已确认的 DeepSeek 能力</option>
         <option value="anthropic">Anthropic Messages API</option>
         <option value="anthropic-compatible">支持 Anthropic 缓存标记的兼容网关</option>
       </select></label>
       <label className="task-field">网页搜索<select value={value.options.webSearchMode || 'auto'} onChange={e => update('webSearchMode', e.target.value)}>
-        <option value="auto">自动使用已识别的原生搜索</option>
+        <option value="auto">自动检测并优先使用服务端能力</option>
         <option value="local">始终使用 Pilot 本地搜索</option>
         <option value="openai-responses">使用 OpenAI Responses 原生搜索</option>
         <option value="anthropic-messages">使用 Anthropic Messages 原生搜索</option>
       </select></label>
-      <p className="request-setting-status">当前判定：{value.webSearchSource || '服务端未提供能力判定来源，按本地搜索处理'}。原生能力：{(value.nativeCapabilities || []).join('、') || '无'}。自动模式仅识别已验证的官方端点/模型，未知兼容端点不会探测或推测。</p>
+      <p className="request-setting-status">当前判定：{value.webSearchSource || '服务端未提供能力判定来源，按本地搜索处理'}。原生能力：{(value.nativeCapabilities || []).join('、') || '无'}。自动验证在后台进行，未确认时继续使用 Pilot 工具。</p>
+      {value.capabilityDiscovery && <p className="request-setting-status" role="status">
+        {value.capabilityDiscovery.state === 'checking' ? '正在自动验证，无需手动配置。' : `本轮能力验证请求：${value.capabilityDiscovery.probeRequests || 0} 次。`}
+        自动验证可能产生少量服务商调用费用，不发送会话内容或附件。
+      </p>}
       <label className="task-field">缓存策略<select value={value.options.cacheMode || 'auto'} onChange={e => update('cacheMode', e.target.value)}>
         <option value="auto">按端点能力自动选择</option><option value="explicit">显式缓存标记</option><option value="none">不附加缓存参数</option>
       </select></label>

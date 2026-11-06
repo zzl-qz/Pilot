@@ -29,7 +29,7 @@ const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="view
       window.event=(event,live=true)=>{if(live) { window.sse.handlers[event.type]?.({data:JSON.stringify(event)}); useStore.getState().flushEvents(); } else useStore.setState(d=>applyEvent(d,event,{live:false}));};
       window.reset=()=>useStore.setState({sessionId:'usage-test',runId:null,running:false,cursor:0,requestReports:[],latestContextReport:null,runUsage:null,thread:initialThread(),pendingInputs:[],queue:[],contextStatus:{limitTokens:300000,usedTokens:61200,canCompact:true},settingsData:{model:'test-model',modelEndpoint:'https://example.test/v1'}});
       reset(); useStore.getState().connectSse('usage-test',0);
-      api.modelRuntime=async()=>({model:'test-model',endpoint:'https://example.test/v1',options:{provider:'auto',cacheMode:'auto',pricing:{currency:'USD'}},effective:{provider:'generic'}});
+      api.modelRuntime=async()=>({capabilityDiscovery:window.capabilityReport,webSearchSource:window.capabilityReport?.message,model:'test-model',endpoint:'https://example.test/v1',options:{provider:'auto',cacheMode:'auto',pricing:{currency:'USD'}},effective:{provider:'generic'}});
       const realSaveModelRuntime=api.saveModelRuntime;
       api.saveModelRuntime=async(value)=>{window.saved=value; if(window.failSave)throw Error('测试保存失败');return realSaveModelRuntime(value);};
       const mount=createRoot(document.getElementById('root'));
@@ -118,6 +118,16 @@ async function run(page,name){
   assert.equal(await page.evaluate(()=>saved.options.pricing.output),null);
   await page.evaluate(()=>window.failSave=true); await page.getByRole('button',{name:'保存计价与缓存设置'}).click(); await page.getByRole('alert').waitFor();
   assert.match(await page.getByRole('alert').innerText(),/测试保存失败/); assert.equal(await input.inputValue(),'1.5');
+  await page.evaluate(()=>{
+    window.failSave=false;
+    window.capabilityReport={state:'checking',message:'后台正在验证',expiresAt:Date.now()+60000};
+    renderSettings();
+  });
+  await page.getByText('正在自动验证，无需手动配置。',{exact:false}).waitFor();
+  await input.fill('7.25');
+  await page.evaluate(()=>{window.capabilityReport={state:'verified',message:'已自动验证服务端搜索',probeRequests:1,expiresAt:Date.now()+3600000};});
+  await page.getByText('已自动验证服务端搜索',{exact:false}).waitFor();
+  assert.equal(await input.inputValue(),'7.25','后台能力刷新不能覆盖未保存的报价');
   await page.evaluate(()=>{api.modelRuntime=async()=>({});renderSettings();});
   await page.getByText('端点未提供完整的缓存与计价配置，请刷新或升级服务端。').waitFor();
   assert.equal(await page.getByRole('button',{name:'重试',exact:true}).count(),1);

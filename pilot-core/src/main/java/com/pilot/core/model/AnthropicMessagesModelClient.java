@@ -51,7 +51,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         int queryIndex = raw.indexOf('?');
         String base = queryIndex >= 0 ? raw.substring(0, queryIndex) : raw;
         String query = queryIndex >= 0 ? raw.substring(queryIndex) : "";
-        if (base.endsWith("/v1/messages")) {
+        if (base.endsWith("/messages")) {
             return endpoint;
         }
         if (base.endsWith("/v1/chat/completions")) {
@@ -95,6 +95,10 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         }
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             String detail = snippet(response.body());
+            if (NativeToolRejectedException.rejected(response.statusCode(), detail)) {
+                throw new NativeToolRejectedException("服务端未接受原生工具或协议",
+                    response.statusCode() == 404 || response.statusCode() == 405);
+            }
             throw new ModelClientException(ModelFailureSignals.statusKind(response.statusCode(), detail),
                 "模型接口返回 HTTP " + response.statusCode() + "：" + detail);
         }
@@ -106,6 +110,9 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         }
         if (!root.path("content").isArray()) {
             throw new ModelClientException(ModelFailureKind.PERMANENT, "模型响应缺少 content：" + snippet(response.body()));
+        }
+        if ("pause_turn".equals(root.path("stop_reason").asString())) {
+            throw new NativeToolRejectedException("原生工具需要分段续传，当前自动切回 Pilot 工具");
         }
         StringBuilder text = new StringBuilder();
         List<ToolCall> calls = new ArrayList<>();
@@ -123,6 +130,14 @@ public final class AnthropicMessagesModelClient implements ModelClient {
                 }
                 calls.add(new ToolCall(id, name, objectMap(block.get("input"))));
             } else if (type.startsWith("web_search") || type.startsWith("web_fetch")) {
+                JsonNode result = block.path("content");
+                if (result.path("type").asString().endsWith("_error")) {
+                    String code = result.path("error_code").asString();
+                    if (NativeToolRejectedException.rejected(400, block.toString())) {
+                        throw new NativeToolRejectedException("服务端执行时拒绝原生工具");
+                    }
+                    text.append("\n原生工具未成功完成：").append(code).append('\n');
+                }
                 collectCitations(block, citations);
             }
         }
@@ -192,14 +207,11 @@ public final class AnthropicMessagesModelClient implements ModelClient {
                     definition.description(), "input_schema", definition.parameters())));
         }
         if (nativeCapabilities.contains(NativeCapability.WEB_SEARCH)) {
-            // _20260209 及之后的版本默认只从 code execution 调用；不支持程序化工具调用的模型
-            // 必须显式声明 allowed_callers，否则官方端点会返回 400。
-            requestTools
-                .add(Map.of("type", "web_search_20260209", "name", "web_search", "allowed_callers", List.of("direct")));
+            // 与后台实际验证使用同一基础工具版本，避免新版本依赖造成假阳性。
+            requestTools.add(Map.of("type", "web_search_20250305", "name", "web_search", "max_uses", 1));
         }
         if (nativeCapabilities.contains(NativeCapability.WEB_FETCH)) {
-            requestTools
-                .add(Map.of("type", "web_fetch_20260209", "name", "web_fetch", "allowed_callers", List.of("direct")));
+            requestTools.add(Map.of("type", "web_fetch_20250910", "name", "web_fetch", "max_uses", 1));
         }
         if (!ModelRequestScope.current().toolsDisabled() && !requestTools.isEmpty()) {
             body.put("tools", requestTools);

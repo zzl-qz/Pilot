@@ -42,8 +42,8 @@ class AnthropicMessagesModelClientTest {
 
             JsonNode body = mapper.readTree(requestBody.get());
             assertEquals("rules", body.path("system").asString());
-            assertEquals("web_search_20260209", body.path("tools").get(1).path("type").asString());
-            assertFalse(body.path("tools").toString().contains("web_fetch_20260209"));
+            assertEquals("web_search_20250305", body.path("tools").get(1).path("type").asString());
+            assertFalse(body.path("tools").toString().contains("web_fetch_20250910"));
             assertTrue(body.path("tools").toString().contains("Fetch safely"));
             assertTrue(response.content().contains("https://example.com/article"));
             assertEquals(new ModelUsage(30, 8, 0, true), response.usage());
@@ -81,6 +81,12 @@ class AnthropicMessagesModelClientTest {
     void resolvesAnthropicMessagesEndpoint() {
         assertEquals(URI.create("https://api.anthropic.com/v1/messages"),
             AnthropicMessagesModelClient.resolveEndpoint(URI.create("https://api.anthropic.com/v1")));
+    }
+
+    @Test
+    void preservesNonVersionedMessagesPathAndQuery() {
+        assertEquals(URI.create("https://relay.test/api/messages?tenant=a"),
+            AnthropicMessagesModelClient.resolveEndpoint(URI.create("https://relay.test/api/messages?tenant=a")));
     }
 
     private static AnthropicMessagesModelClient client(HttpServer server, Set<NativeCapability> capabilities) {

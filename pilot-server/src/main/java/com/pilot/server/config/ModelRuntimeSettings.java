@@ -31,12 +31,53 @@ public final class ModelRuntimeSettings {
     }
 
     public record View(String model, String endpoint, Options options, ModelProfile effective,
-        Set<String> nativeCapabilities, String webSearchSource) {
+        Set<String> nativeCapabilities, String webSearchSource, ModelCapabilityDiscovery.Report capabilityDiscovery) {
     }
 
     private final SettingsStore store;
     private final ModelSettings models;
     private final ObjectMapper mapper;
+    private ModelCapabilityDiscovery discovery;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setCapabilityDiscovery(ModelCapabilityDiscovery discovery) {
+        this.discovery = discovery;
+        models.onChange(ignored -> discover());
+    }
+
+    @jakarta.annotation.PostConstruct
+    public void discover() {
+        if (discovery != null && models.snapshot().hasApiKey()) {
+            capabilityReport(models.snapshot());
+        }
+    }
+
+    public ModelCapabilityDiscovery.Report capabilityReport(ModelSettings.Snapshot model) {
+        if (discovery == null || "local".equals(options(model).webSearchMode())) {
+            return null;
+        }
+        return discovery.inspect(model, discoveryHint(model));
+    }
+
+    private String discoveryHint(ModelSettings.Snapshot model) {
+        String mode = options(model).webSearchMode();
+        if (mode != null && !"auto".equals(mode)) {
+            return mode;
+        }
+        String provider = profile(model).provider();
+        if ("anthropic".equals(provider) || URI.create(model.endpoint()).getPath().endsWith("/messages")) {
+            return "anthropic-messages";
+        }
+        return "auto";
+    }
+
+    public boolean rejectNative(ModelSettings.Snapshot model, String protocol, boolean protocolRejected) {
+        if (discovery == null || "local".equals(options(model).webSearchMode())) {
+            return false;
+        }
+        discovery.reject(model, discoveryHint(model), protocol, protocolRejected);
+        return true;
+    }
 
     public ModelRuntimeSettings(SettingsStore store, ModelSettings models, ObjectMapper mapper) {
         this.store = store;
@@ -61,10 +102,14 @@ public final class ModelRuntimeSettings {
     }
 
     /**
-     * Capability selection is a deterministic endpoint/model allowlist, never a live probe that may incur charges.
-     * Custom gateways require an explicit protocol choice because their advertised models are not capability metadata.
+     * 生产模式按实际端点后台验证；未知状态保留本地工具，调用不等待探测。
+     * 未接入发现服务的嵌入式调用保持静态兼容逻辑。
      */
     public Set<NativeCapability> nativeCapabilities(ModelSettings.Snapshot model) {
+        ModelCapabilityDiscovery.Report report = capabilityReport(model);
+        if (report != null) {
+            return report.capabilities();
+        }
         Options options = options(model);
         String mode = options.webSearchMode() == null ? "auto" : options.webSearchMode();
         if ("local".equals(mode)) {
@@ -93,6 +138,10 @@ public final class ModelRuntimeSettings {
     }
 
     public boolean anthropicMessages(ModelSettings.Snapshot model) {
+        ModelCapabilityDiscovery.Report report = capabilityReport(model);
+        if (report != null && !report.protocol().isBlank()) {
+            return "anthropic-messages".equals(report.protocol());
+        }
         String mode = options(model).webSearchMode();
         // 手动选定的协议优先于端点探测，否则官方 Anthropic 主机名会覆盖用户选择的 Responses 协议
         if ("openai-responses".equals(mode)) {
@@ -136,7 +185,8 @@ public final class ModelRuntimeSettings {
     public View current() {
         ModelSettings.Snapshot model = models.snapshot();
         Options options = options(model);
-        Set<NativeCapability> capabilities = nativeCapabilities(model);
+        ModelCapabilityDiscovery.Report report = capabilityReport(model);
+        Set<NativeCapability> capabilities = report == null ? nativeCapabilities(model) : report.capabilities();
         Set<String> names = capabilities.stream().map(Enum::name).collect(Collectors.toUnmodifiableSet());
         String mode = options.webSearchMode() == null ? "auto" : options.webSearchMode();
         String source = switch (mode) {
@@ -146,7 +196,10 @@ public final class ModelRuntimeSettings {
             default ->
                 capabilities.contains(NativeCapability.WEB_SEARCH) ? "按官方端点与模型能力目录自动识别" : "原生能力未知或未确认，回退 Pilot 本地搜索";
         };
-        return new View(model.model(), model.endpoint(), options, profile(model, options), names, source);
+        if (report != null) {
+            source = report.message();
+        }
+        return new View(model.model(), model.endpoint(), options, profile(model, options), names, source, report);
     }
 
     public synchronized View update(String expectedModel, String expectedEndpoint, Options options) {

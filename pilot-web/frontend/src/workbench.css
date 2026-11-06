@@ -270,8 +270,8 @@ html[data-theme] .browser-reason, html[data-theme] .chip-hint { font-size: 12px;
 .modal[hidden] { display: none; }
 .modal-box { display: flex; flex-direction: column; min-width: 0; width: 560px; max-width: 100%; max-height: min(780px, calc(100dvh - 48px)); overflow: auto; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink-2); box-shadow: 0 20px 70px #0005; }
 .modal-box.is-wide { width: 820px; overflow: hidden; }
-.modal-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; flex: none; gap: 16px; min-height: 58px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line-soft); }
-.modal-head h2 { margin: 0; color: var(--ink); font-size: 15px; font-weight: 600; }
+.modal-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; flex: none; gap: 16px; min-height: 58px; padding: 16px 16px 16px 20px; background: var(--panel); border-bottom: 1px solid var(--line-soft); }
+.modal-head h2 { min-width: 0; overflow-wrap: anywhere; margin: 0; color: var(--ink); font-size: 15px; font-weight: 600; }
 .modal-box > :not(.modal-head):not(.settings-layout) { margin-inline: 20px; }
 .modal-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; padding: 16px 0; border-top: 1px solid var(--line-soft); margin-top: 16px; flex: none; }
 .modal-foot > span { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -346,7 +346,7 @@ html[data-theme] .usage-card { flex: 1; padding: 0 16px; border: 0; border-radiu
 @media (max-width: 600px) {
   .modal { padding: 10px; }
   .modal-box { max-height: calc(100dvh - 20px); border-radius: 10px; }
-  .modal-head { min-height: 52px; padding: 10px 16px; }
+  .modal-head { min-height: 52px; padding: 12px 12px 12px 16px; }
   .settings-layout { display: flex; flex-direction: column; height: calc(100dvh - 100px); min-height: 0; }
   .settings-nav { flex-direction: row; flex: none; padding: 8px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line-soft); }
   .settings-nav-item { flex: none; min-height: 40px; gap: 6px; padding: 8px; }

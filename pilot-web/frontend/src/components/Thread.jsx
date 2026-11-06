@@ -32,6 +32,7 @@ const BACK_TO_LATEST = { stiffness: 0.2, damping: 0.9, mass: 1 };
 export function Thread() {
   const rows = useStore((state) => state.thread.rows);
   const history = useStore((state) => state.thread.history);
+  const eventCount = useStore((state) => state.thread.windowEvents.length);
   const bottomSignal = useStore((state) => state.ui.bottomSignal);
   const requestEarlierHistory = useStore((state) => state.requestEarlierHistory);
   const requestLaterHistory = useStore((state) => state.requestLaterHistory);
@@ -101,22 +102,26 @@ export function Thread() {
     if (event.deltaY >= 0 || event.currentTarget.scrollTop > 0) {
       return;
     }
+    stopScroll();
     // 顶到头还在推：缓冲里有就当场插进去，不用再等那 140ms 的空闲计时
     if (!applyEarlierPage()) {
       scheduleEarlier();
     }
-  }, [applyEarlierPage, scheduleEarlier]);
+  }, [applyEarlierPage, scheduleEarlier, stopScroll]);
 
   /* 内容不足一屏时不会产生滚动事件，主动补更早的一页，否则历史永远加载不出来。 */
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || !history.hasMore || history.loading) {
+    if (!el || !history.hasMore || history.loading || history.error) {
       return;
     }
     if (el.scrollHeight - el.clientHeight < 8) {
-      requestEarlierHistory();
+      // 等当前分页 Promise 的 finally 清理完成；同步调用会复用刚结束的请求，
+      // 没有新增可见行的那一页就不会再有变化来唤醒下一次加载。
+      const timer = setTimeout(() => requestEarlierHistory(), 0);
+      return () => clearTimeout(timer);
     }
-  }, [rows.length, history.hasMore, history.loading, requestEarlierHistory, scrollRef]);
+  }, [rows.length, eventCount, history.hasMore, history.loading, history.error, requestEarlierHistory, scrollRef]);
 
   /* 发送消息 / 切换会话后主动贴底：此刻用户要看的是刚发出的内容。 */
   const lastSignal = useRef(bottomSignal);
@@ -128,7 +133,7 @@ export function Thread() {
     scrollToBottom({ animation: BACK_TO_LATEST });
   }, [bottomSignal, scrollToBottom]);
 
-  if (!rows.length) {
+  if (!rows.length && !eventCount && !history.hasMore) {
     return <EmptyState />;
   }
 
@@ -136,8 +141,12 @@ export function Thread() {
     <div className="thread-scroll-region">
       <div className="thread" ref={scrollRef} onScroll={handleScroll} onWheel={handleWheel}>
         <div className="thread-column" ref={contentRef}>
-          {history.hasMore && history.error && (
-            <RetryRow label="加载更早失败，点击重试" onClick={() => requestEarlierHistory({ force: true })} />
+          {history.hasMore && (
+            <RetryRow
+              label={history.error ? '加载更早失败，点击重试' : history.loading ? '正在加载更早消息…' : '加载更早消息'}
+              disabled={history.loading}
+              onClick={() => { stopScroll(); requestEarlierHistory({ force: true }); }}
+            />
           )}
           {rows.map((row, index) => (
             <RowView key={row.key} row={row} duplicate={row.type === 'result' && duplicateResult(rows, index)} isLast={!rows.slice(index + 1).some(item => item.type === 'turn' || item.type === 'user')} />
@@ -170,10 +179,10 @@ function ThreadBottomButton({ visible, onJump }) {
   );
 }
 
-function RetryRow({ label, onClick }) {
+function RetryRow({ label, onClick, disabled = false }) {
   return (
     <div className="history-more-wrap">
-      <button type="button" className="history-more" onClick={onClick}>{label}</button>
+      <button type="button" className="history-more" disabled={disabled} onClick={onClick}>{label}</button>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import './schedules.css';
+import { DialogHeader } from './DialogHeader.jsx';
 
 const labels = { SCHEDULED: '待执行', DISPATCHING: '正在启动', RUNNING: '执行中', WAITING: '等待唤醒', PAUSED: '已暂停', COMPLETED: '已完成', CANCELLED: '已取消', NEEDS_ATTENTION: '需要处理', INTERRUPTED: '已中断' };
 const ended = (job) => ['COMPLETED', 'CANCELLED', 'NEEDS_ATTENTION'].includes(job.state);
@@ -120,9 +121,9 @@ function ScheduleDialog({ seed }) {
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
   return <dialog className="schedule-dialog" ref={ref} aria-labelledby="schedule-title" onCancel={e => { e.preventDefault(); close(); }} onKeyDown={e => e.stopPropagation()}>
-    <header className="schedule-header"><div><span className="schedule-product">Pilot / 自动执行</span><h1 id="schedule-title">定时任务</h1></div>
-      <div className="schedule-actions">{editing && <button type="submit" form="schedule-create-form" className="btn btn-primary" disabled={busy}>{busy ? '保存中…' : '创建计划'}</button>}<button className="btn" onClick={() => { close(); useStore.getState().setUi({ recurringOpen: true }); }}>周期计划</button>{!editing && <button className="btn btn-primary" onClick={() => { setEditing(true); setSelected(null); setError(''); }}>新建任务</button>}<button className="icon-btn" aria-label="关闭定时任务" onClick={close}>×</button></div>
-    </header>
+    <DialogHeader id="schedule-title" title="定时任务" subtitle="Pilot / 自动执行" closeLabel="关闭定时任务" onClose={close} />
+    <div className="schedule-dialog-body">
+    <div className="schedule-actions schedule-dialog-toolbar">{editing && <button type="submit" form="schedule-create-form" className="btn btn-primary" disabled={busy}>{busy ? '保存中…' : '创建计划'}</button>}<button className="btn" onClick={() => { close(); useStore.getState().setUi({ recurringOpen: true }); }}>周期计划</button>{!editing && <button className="btn btn-primary" onClick={() => { setEditing(true); setSelected(null); setError(''); }}>新建任务</button>}</div>
     <p className="schedule-runtime">到期后自动执行，结果保存在独立对话。需要 Pilot 服务保持运行；一次性任务离线后补执行；周期计划按选择的错过策略执行。</p>
     {error && <div className="schedule-error" role="alert">{error} <button type="button" onClick={() => { setError(''); refresh(); }}>重新加载</button></div>}
     {editing ? <form id="schedule-create-form" className="schedule-form" onSubmit={save} aria-busy={busy}>
@@ -181,5 +182,6 @@ function ScheduleDialog({ seed }) {
         </section>}
       </div>
     </>}
+    </div>
   </dialog>;
 }

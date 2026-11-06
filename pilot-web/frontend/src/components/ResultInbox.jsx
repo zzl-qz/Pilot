@@ -5,6 +5,7 @@ import { useStore } from '../store.js';
 import { ResearchRecords } from './ResearchPanel.jsx';
 import { verificationLabel, verificationHint } from '../lib/verification.js';
 import './schedules.css';
+import { DialogHeader } from './DialogHeader.jsx';
 import './results.css';
 
 const labels = { COMPLETED: '执行结束', NEEDS_ATTENTION: '需要处理', AWAITING_REVIEW: '待验收' };
@@ -60,7 +61,9 @@ function InboxDialog({ target }) {
     await act(async current => { const updated = await api.resultReceipt(item.id, { revision: item.revision, action }); if (current()) { setDetail(d => ({ ...d, item: updated })); await refresh(); } });
   }
   return <dialog ref={ref} className="schedule-dialog results-dialog" aria-labelledby="results-title" onCancel={e => { e.preventDefault(); close(); }} onKeyDown={e => e.stopPropagation()}>
-    <header className="schedule-header"><div><span className="schedule-product">Pilot / 执行结果</span><h1 id="results-title">任务收件箱</h1></div><div className="schedule-actions"><button className="btn" onClick={() => { close(); useStore.getState().setUi({ notificationsOpen: true }); }}>通知与投递</button><button className="icon-btn" aria-label="关闭任务收件箱" onClick={close}>×</button></div></header>
+    <DialogHeader id="results-title" title="任务收件箱" subtitle="Pilot / 执行结果" closeLabel="关闭任务收件箱" onClose={close} />
+    <div className="schedule-dialog-body">
+    <div className="schedule-actions schedule-dialog-toolbar"><button className="btn" onClick={() => { close(); useStore.getState().setUi({ notificationsOpen: true }); }}>通知与投递</button></div>
     <p className="schedule-runtime">集中查看完成与异常结果。打开即标记已读；验收后可单独标记已处理。</p>
     <nav className="schedule-tabs" aria-label="结果筛选">{[['pending', '待处理'], ['unread', '未读'], ['all', '全部'], ['handled', '已处理']].map(([key, title]) => <button key={key} disabled={busy} aria-pressed={filter === key} onClick={() => { setFilter(key); setSelected(null); }}>{title}</button>)}<span>{visible.length} 条结果</span><button disabled={busy} onClick={() => { setError(''); refresh(); }}>刷新</button></nav>
     {error && <div className="schedule-error" role="alert">{error} <button disabled={busy} onClick={() => { setError(''); refresh(); setReload(v => v + 1); }}>重新加载</button></div>}
@@ -95,6 +98,7 @@ function InboxDialog({ target }) {
           <h3 id="result-research">开源参考</h3><ResearchRecords records={detail.research} />
         </>}
       </section>}
+    </div>
     </div>
   </dialog>;
 }

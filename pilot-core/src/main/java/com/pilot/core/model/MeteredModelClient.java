@@ -46,6 +46,11 @@ public final class MeteredModelClient implements ModelClient {
     }
 
     @Override
+    public boolean disableRejectedNativeTools(Throwable failure) {
+        return delegate.disableRejectedNativeTools(failure);
+    }
+
+    @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
         return invoke(messages, tools, null, null, false);
     }

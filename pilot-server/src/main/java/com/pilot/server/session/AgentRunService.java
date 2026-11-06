@@ -1002,20 +1002,6 @@ public class AgentRunService implements RunStarter {
             + planBrief(sessionId);
     }
 
-    /**
-     * 审查 run 的只读工具表：复用子代理的 scope 裁剪机制（同一条硬隔离路径），
-     * 写文件与派发工具对模型「不存在」而不是「被拒绝」，避免无谓的重试浪费。
-     * 命令保留：git 只读子命令在内置白名单里，写命令照旧走权限门。
-     */
-    private static void hideNativeTools(ToolRegistry tools, Set<com.pilot.core.model.NativeCapability> capabilities) {
-        if (capabilities.contains(com.pilot.core.model.NativeCapability.WEB_SEARCH)) {
-            tools.remove("web_search");
-        }
-        if (capabilities.contains(com.pilot.core.model.NativeCapability.WEB_FETCH)) {
-            tools.remove("web_fetch");
-        }
-    }
-
     private static void addNativeToolNames(Set<String> names, Set<com.pilot.core.model.NativeCapability> capabilities) {
         if (capabilities.contains(com.pilot.core.model.NativeCapability.WEB_SEARCH)) {
             names.add("web_search");
@@ -1025,6 +1011,11 @@ public class AgentRunService implements RunStarter {
         }
     }
 
+    /**
+     * 审查 run 的只读工具表：复用子代理的 scope 裁剪机制（同一条硬隔离路径），
+     * 写文件与派发工具对模型「不存在」而不是「被拒绝」，避免无谓的重试浪费。
+     * 命令保留：git 只读子命令在内置白名单里，写命令照旧走权限门。
+     */
     private ToolRegistry reviewTools(String workspace) {
         AgentScope scope = AgentScope.readOnly(List.of(), List.of()).withTools(
             List.of("read_*", "list_*", "glob_*", "search_*", "run_command", "web_search", "web_fetch"), List.of());
@@ -1264,7 +1255,7 @@ public class AgentRunService implements RunStarter {
         };
         ToolRegistry tools =
             review.active() ? reviewTools(workspace) : sessionTools(sessionId, runId, workspace, planSink);
-        hideNativeTools(tools, nativeCapabilities);
+        // 本地工具保留供同一轮自动降级；原生客户端只在请求序列化时隐藏对应定义。
         // 技能目录：本 run 内工具注册与目录段共用同一份快照，避免两次扫描之间目录变化造成不一致
         SkillCatalog catalog = skills.catalogFor(workspace);
         if (!review.active() && !catalog.list().isEmpty()) {

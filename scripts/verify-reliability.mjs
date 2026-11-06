@@ -34,7 +34,7 @@ await tests('evaluation/harness');
 await run(process.execPath, ['--test', 'evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-final.test.mjs']);
 await run(process.execPath, ['pilot-web/frontend/scripts/check.mjs']);
 if (flags.has('--ui')) {
-  for (const script of ['sandbox-recovery-smoke.mjs', 'work-products-smoke.mjs']) {
+  for (const script of ['sandbox-recovery-smoke.mjs', 'work-products-smoke.mjs', 'thread-scroll-smoke.mjs']) {
     await run(process.execPath, [`pilot-web/frontend/scripts/${script}`, ...(flags.has('--web-only') ? ['--web-only'] : [])]);
   }
 }

@@ -26,6 +26,11 @@ public interface ModelClient {
         return false;
     }
 
+    /** 实际端点明确拒绝原生工具时，恢复本地工具；网络/权限错误不能通过此入口重放。 */
+    default boolean disableRejectedNativeTools(Throwable failure) {
+        return false;
+    }
+
     ModelResponse chat(List<Message> messages, List<ToolDefinition> tools);
 
     default ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta) {

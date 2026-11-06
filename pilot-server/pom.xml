@@ -125,6 +125,10 @@
                     <!-- JDK 25 显式预加载 Mockito agent，避免依赖运行中的动态挂载。
                          混用 mock maker 的断言缺陷由父 pom 中的 Mockito 修复版本处理。 -->
                     <argLine>-javaagent:${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar --enable-native-access=ALL-UNNAMED</argLine>
+                    <!-- 单元测试不探测外部模型服务；隔离 HTTP 用例和后台验收显式验证自动发现。 -->
+                    <systemPropertyVariables>
+                        <pilot.model.capability-discovery.enabled>false</pilot.model.capability-discovery.enabled>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
             <plugin>

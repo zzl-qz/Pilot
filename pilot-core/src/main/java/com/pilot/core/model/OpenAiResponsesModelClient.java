@@ -29,9 +29,16 @@ public final class OpenAiResponsesModelClient implements ModelClient {
     private final String model;
     private final Duration timeout;
     private ModelProfile profile;
+    private final Set<NativeCapability> capabilities;
 
     public OpenAiResponsesModelClient(HttpClient httpClient, ObjectMapper mapper, URI endpoint, String apiKey,
         String model, Duration timeout, ModelProfile profile) {
+        this(httpClient, mapper, endpoint, apiKey, model, timeout, profile, Set.of(NativeCapability.WEB_SEARCH));
+    }
+
+    public OpenAiResponsesModelClient(HttpClient httpClient, ObjectMapper mapper, URI endpoint, String apiKey,
+        String model, Duration timeout, ModelProfile profile, Set<NativeCapability> capabilities) {
+        this.capabilities = Set.copyOf(capabilities);
         this.httpClient = httpClient;
         this.mapper = mapper;
         this.endpoint = resolveEndpoint(endpoint);
@@ -71,7 +78,7 @@ public final class OpenAiResponsesModelClient implements ModelClient {
 
     @Override
     public Set<NativeCapability> nativeCapabilities() {
-        return Set.of(NativeCapability.WEB_SEARCH);
+        return capabilities;
     }
 
     @Override
@@ -92,6 +99,10 @@ public final class OpenAiResponsesModelClient implements ModelClient {
         }
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             String detail = snippet(response.body());
+            if (NativeToolRejectedException.rejected(response.statusCode(), detail)) {
+                throw new NativeToolRejectedException("服务端未接受原生工具或协议",
+                    response.statusCode() == 404 || response.statusCode() == 405);
+            }
             throw new ModelClientException(ModelFailureSignals.statusKind(response.statusCode(), detail),
                 "模型接口返回 HTTP " + response.statusCode() + "：" + detail);
         }
@@ -100,6 +111,15 @@ public final class OpenAiResponsesModelClient implements ModelClient {
             root = mapper.readTree(response.body());
         } catch (RuntimeException e) {
             throw new ModelClientException(ModelFailureKind.PERMANENT, "模型响应不是合法 JSON：" + snippet(response.body()), e);
+        }
+        if (!root.path("output").isArray() && root.path("choices").isArray()) {
+            throw new NativeToolRejectedException("端点忽略了 Responses 协议，已返回聊天协议响应", true);
+        }
+        if ("failed".equals(root.path("status").asString()) || root.hasNonNull("error")) {
+            if (NativeToolRejectedException.rejected(400, root.path("error").toString())) {
+                throw new NativeToolRejectedException("服务端执行时拒绝原生工具");
+            }
+            throw new ModelClientException(ModelFailureKind.PERMANENT, "服务端未完成模型请求");
         }
         if (!root.path("output").isArray()) {
             throw new ModelClientException(ModelFailureKind.PERMANENT, "模型响应缺少 output：" + snippet(response.body()));
@@ -169,9 +189,12 @@ public final class OpenAiResponsesModelClient implements ModelClient {
                 .forEach(definition -> requestTools.add(Map.of("type", "function", "name", definition.name(),
                     "description", definition.description(), "parameters", definition.parameters())));
         }
-        requestTools.add(Map.of("type", "web_search"));
+        if (capabilities.contains(NativeCapability.WEB_SEARCH)) {
+            requestTools.add(Map.of("type", "web_search"));
+        }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
+        body.put("store", false);
         body.put("input", input);
         body.put("tools", requestTools);
         if (ModelRequestScope.current().toolsDisabled()) {

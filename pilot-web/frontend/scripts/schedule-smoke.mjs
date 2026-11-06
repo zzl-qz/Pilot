@@ -1,3 +1,4 @@
+import { checkDialogLayout } from './dialog-layout.mjs';
 import { createServer, build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
@@ -78,6 +79,7 @@ async function run(page, name, url) {
     await page.setViewportSize({width,height:900}); await page.goto(url+'?preview=1');
     await page.locator('.schedule-row').first().waitFor();
     assert.ok(await page.locator('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+    await checkDialogLayout(page);
     await page.screenshot({path:join(output,`${name}-${width}-list.png`)});
     await page.locator('.schedule-row').first().click();
     await page.screenshot({path:join(output,`${name}-${width}-detail.png`)});

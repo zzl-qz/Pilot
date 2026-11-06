@@ -45,6 +45,9 @@ jobs:
         shell: bash
         run: sh mvnw -B -ntp verify
 
+      - name: Automatic model capabilities through isolated gateway
+        run: node scripts/verify-model-capabilities.mjs
+
       - name: Web unit tests
         working-directory: pilot-web
         run: npm test
