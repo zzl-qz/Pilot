@@ -1,3 +1,13 @@
+import type { Draft } from 'immer';
+import type { StoreState, UiState, MirrorState, MirrorFrame, CommandTask } from './types/store.js';
+import type { EventEnvelope } from './types/events.js';
+import type { ApiResults, InputMessage } from './types/api.js';
+import type { SideChatTab } from './types/content.js';
+import type { PlanRow, ResultRow } from './types/thread.js';
+import type * as S from './types/server.js';
+import { errorInfo } from './lib/errors.js';
+type StoreGet = () => StoreState;
+type StoreSet = (change: (draft: Draft<StoreState>) => void) => void;
 /**
  * 全局状态：zustand + immer。
  *
@@ -36,8 +46,8 @@ let projectLoadSequence = 0;
 let sessionLoadSequence = 0;
 let settingsLoadSequence = 0;
 /** 侧边对话正在创建：打开面板的同时又点「新开」时共用一个请求，别建出两条。 */
-const sideChatPending = new Map();
-const sideChatClosing = new Map();
+const sideChatPending = new Map<string, Promise<SideChatTab | null>>();
+const sideChatClosing = new Map<string, Promise<boolean>>();
 const RECONNECT_BASE_MS = 800;
 const RECONNECT_MAX_MS = 15000;
 
@@ -47,7 +57,7 @@ const RECONNECT_MAX_MS = 15000;
  * <p>每次会话切换都造一份新的：地址栏、前进/后退可用性都跟着上一轮页面走，
  * 复用同一个对象会让新会话的地址栏还挂着上一个会话的地址。
  */
-function emptyMirror() {
+function emptyMirror(): MirrorState {
   return {
     mode: 'idle', frame: null, url: '', embed: true, frameOptions: '', latency: 0, paused: false,
     // 实际生效的 headless（含无桌面降级）：后台模式没有窗口可置前，提示文案也跟着换
@@ -58,23 +68,23 @@ function emptyMirror() {
 /** 桌面通知开关（与旧版同名键）。 */
 const NOTIFY_KEY = 'pilot.notify';
 
-let eventSource = null;
-let reconnectTimer = null;
-let mirrorSource = null;
+let eventSource: EventSource | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+let mirrorSource: EventSource | null = null;
 /** 截图帧直接画到面板上，不进 store。JPEG 进 React 状态会把整页拖卡。 */
-let paintMirrorFrame = null;
-let lastMirrorPayload = null;
+let paintMirrorFrame: ((frame: MirrorFrame) => void) | null = null;
+let lastMirrorPayload: MirrorFrame | null = null;
 
-export function setMirrorPainter(painter) {
+export function setMirrorPainter(painter: typeof paintMirrorFrame) {
   paintMirrorFrame = painter;
   if (painter && lastMirrorPayload) {
     painter(lastMirrorPayload);
   }
 }
-let commandTimer = null;
-let runClockTimer = null;
-let usageRefreshTimer = null;
-let noticeTimer = null;
+let commandTimer: ReturnType<typeof setTimeout> | undefined;
+let runClockTimer: ReturnType<typeof setTimeout> | undefined;
+let usageRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
 /*
  * 更早历史的「一页缓冲」。
@@ -86,9 +96,9 @@ let noticeTimer = null;
  * 不放进 zustand state：预取不该触发任何重渲染；插入时机由组件按「滚动是否停稳」决定，
  * 因为滚动过程中前插内容——浏览器的 scroll anchoring 在滚动时会被抑制——视口会被推走一截。
  */
-let earlierPage = null;      // { sessionId, before, events, hasMore }
-let earlierInflight = null;  // { sessionId, before, promise }
-let earlierRequest = null;   // 同一次边界触发的并发去重
+let earlierPage: { sessionId: string; before: number; events: EventEnvelope[]; hasMore: boolean } | null = null;      // { sessionId, before, events, hasMore }
+let earlierInflight: { sessionId: string; before: number; promise: Promise<boolean> } | null = null;  // { sessionId, before, promise }
+let earlierRequest: Promise<boolean> | null = null;   // 同一次边界触发的并发去重
 
 /*
  * SSE 事件按帧合并。
@@ -102,16 +112,16 @@ let earlierRequest = null;   // 同一次边界触发的并发去重
  * assistant.preview / assistant.reasoning 是纯界面增量，不推进游标（否则正式事件会被当成重复丢掉）。
  */
 const EPHEMERAL_EVENTS = new Set(['assistant.preview', 'assistant.reasoning']);
-let eventQueue = [];
-let flushHandle = null;
-let flushRunner = null;
+let eventQueue: EventEnvelope[] = [];
+let flushHandle: number | undefined;
+let flushRunner: (() => void) | null = null;
 
 function scheduleFlush() {
   if (flushHandle != null) {
     return;
   }
   const run = () => {
-    flushHandle = null;
+    flushHandle = undefined;
     flushRunner?.();
   };
   flushHandle = typeof requestAnimationFrame === 'function'
@@ -127,7 +137,7 @@ function discardQueuedEvents() {
     } else {
       clearTimeout(flushHandle);
     }
-    flushHandle = null;
+    flushHandle = undefined;
   }
 }
 
@@ -135,20 +145,20 @@ function discardQueuedEvents() {
  * 清空当前会话的全部界面状态：切换会话与「开新对话」共用同一套重置。
  * 放在模块级是为了让 startNewSession / activate 不会各写一份、漏字段。
  */
-function resetFilePreview(draft) {
+function resetFilePreview(draft: StoreState) {
   draft._previewRequest = (draft._previewRequest || 0) + 1;
   draft._previewData = null;
   draft._previewLoading = false;
   draft.ui.previewPath = '';
 }
 
-function applySettings(draft, data) {
+function applySettings(draft: StoreState, data: ApiResults['settings'] | null) {
   draft.settingsData = data;
   if (data?.permissionMode) draft.permissionMode = normalizePermission(data.permissionMode);
   draft.modelOptions = Array.isArray(data?.modelOptions) ? data.modelOptions : [];
 }
 
-function resetSessionState(draft) {
+function resetSessionState(draft: StoreState) {
   resetFilePreview(draft);
   draft.sessionEpoch = (draft.sessionEpoch || 0) + 1;
   draft._editTarget = null;
@@ -199,7 +209,7 @@ function resetSessionState(draft) {
   draft.commandLogTaskId = null;
 }
 
-export const initialUi = () => ({
+export const initialUi = (): UiState => ({
   notice: null,
   noticeTimer: null,
   refreshing: false,
@@ -239,7 +249,7 @@ export const initialUi = () => ({
   usageDays: 7
 });
 
-export const useStore = create(immer((set, get) => {
+export const useStore = create<StoreState>()(immer((set, get) => {
   flushRunner = () => get().flushEvents();
   return {
   /* ---------- 会话 / 项目 ---------- */
@@ -269,7 +279,7 @@ export const useStore = create(immer((set, get) => {
         const result = await window.pilotDesktop.reloadWorkbench();
         if (!result?.ok) throw new Error(result?.error || '重新载入失败，请重试');
       } else window.location.reload();
-    } catch (error) { state.showNotice('重新载入失败：' + error.message); return false; }
+    } catch (error) { state.showNotice('重新载入失败：' + errorInfo(error).message); return false; }
     return true;
   },
   /** 草稿态的新对话：{ projectId, workspace }，还没有对应会话记录。 */
@@ -358,7 +368,7 @@ export const useStore = create(immer((set, get) => {
     });
     clearTimeout(noticeTimer);
     noticeTimer = setTimeout(() => get().hideNotice(), 7000);
-    noticeTimer.unref?.();
+    unrefTimer(noticeTimer);
   },
   hideNotice() {
     set((draft) => { draft.ui.notice = null; });
@@ -382,12 +392,12 @@ export const useStore = create(immer((set, get) => {
         const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
         if (permission !== 'granted') throw new Error('通知权限未获授权，请在浏览器或系统设置中允许。');
       }
-      const current = await api.deliverySettings();
+      const current = requireData(await api.deliverySettings());
       await api.saveDeliverySettings({ ...current, desktop: next });
       set(draft => { draft.notifyEnabled = next; });
       try { localStorage.setItem(NOTIFY_KEY, next ? '1' : '0'); } catch { /* 当前设备仍生效 */ }
       get().showNotice(next ? '已开启可靠桌面通知，可在收件箱查看投递状态。' : '已关闭桌面通知');
-    } catch (e) { get().showNotice(e.message); }
+    } catch (e) { get().showNotice(errorInfo(e).message || '操作失败'); }
   },
   setUi(patch) {
     set((draft) => { Object.assign(draft.ui, typeof patch === 'function' ? patch(draft.ui) : patch); });
@@ -516,7 +526,7 @@ export const useStore = create(immer((set, get) => {
     if (!draftSession) {
       return null;
     }
-    const body = { replaceBlank: true };
+    const body: Parameters<typeof api.createSession>[0] = { replaceBlank: true };
     if (draftSession.projectId) {
       body.projectId = draftSession.projectId;
     }
@@ -564,7 +574,7 @@ export const useStore = create(immer((set, get) => {
     try {
       detail = await api.session(sessionId);
     } catch (error) {
-      if (current()) get().showNotice('读取会话失败：' + error.message);
+      if (current()) get().showNotice('读取会话失败：' + errorInfo(error).message);
       return false;
     }
     if (!current()) return false;
@@ -574,7 +584,7 @@ export const useStore = create(immer((set, get) => {
       draft.workspace = detail?.workspace || '';
       draft.sessionTitle = detail?.title || '';
       draft.currentProjectId = detail?.projectId || null;
-      if (detail?.permissionMode) {
+      if (detail && 'permissionMode' in detail && typeof detail.permissionMode === 'string') {
         draft.permissionMode = normalizePermission(detail.permissionMode);
       }
       // 侧边对话跟着主任务走：切到别的任务后，只选中属于它的那一条
@@ -618,7 +628,7 @@ export const useStore = create(immer((set, get) => {
     earlierInflight = null;
     earlierRequest = null;
     try {
-      const data = await api.history(sessionId, { limit: thread.history.pageSize });
+      const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize }));
       if (get().sessionId !== sessionId) {
         return;
       }
@@ -640,7 +650,7 @@ export const useStore = create(immer((set, get) => {
         draft.ui.bottomSignal += 1;
       });
     } catch (error) {
-      get().showNotice('读取历史失败：' + error.message);
+      get().showNotice('读取历史失败：' + errorInfo(error).message);
     }
   },
 
@@ -664,7 +674,8 @@ export const useStore = create(immer((set, get) => {
       return earlierInflight.promise;
     }
     const promise = api.history(sessionId, { limit: thread.history.pageSize, before })
-      .then((data) => {
+      .then((result) => {
+        const data = requireData(result);
         if (get().sessionId !== sessionId) {
           return false;
         }
@@ -727,7 +738,7 @@ export const useStore = create(immer((set, get) => {
       draft.thread.history.error = false;
     });
     try {
-      const data = await api.history(sessionId, { limit: thread.history.pageSize, before });
+      const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, before }));
       if (get().sessionId !== sessionId) {
         return false;
       }
@@ -753,7 +764,7 @@ export const useStore = create(immer((set, get) => {
         draft.thread.history.loading = false;
         draft.thread.history.error = true;
       });
-      get().showNotice('加载更早的消息失败：' + error.message);
+      get().showNotice('加载更早的消息失败：' + errorInfo(error).message);
       return false;
     }
   },
@@ -806,7 +817,7 @@ export const useStore = create(immer((set, get) => {
       return false;
     }
     try {
-      const data = await api.history(sessionId, { limit: thread.history.pageSize, after });
+      const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, after }));
       if (get().sessionId !== sessionId) {
         return false;
       }
@@ -823,7 +834,7 @@ export const useStore = create(immer((set, get) => {
       return true;
     } catch (error) {
       set((draft) => { draft.thread.history.forwardError = true; });
-      get().showNotice('加载更新的消息失败：' + error.message);
+      get().showNotice('加载更新的消息失败：' + errorInfo(error).message);
       return false;
     }
   },
@@ -850,13 +861,13 @@ export const useStore = create(immer((set, get) => {
       eventSource = null;
     }
     clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+    reconnectTimer = undefined;
     const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/events?after=${cursor}`);
     eventSource = source;
-    const handle = (message) => {
+    const handle = (message: MessageEvent<string>) => {
       if (eventSource !== source || get().sessionId !== sessionId) return;
       try {
-        get().handleEvent(JSON.parse(message.data));
+        get().handleEvent(JSON.parse(message.data) as EventEnvelope);
       } catch (error) {
         console.warn('[sse] 事件解析失败', error);
       }
@@ -892,7 +903,7 @@ export const useStore = create(immer((set, get) => {
     const base = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(attempt - 1, 5));
     const delay = base + Math.round(base * 0.2 * Math.random());
     reconnectTimer = setTimeout(async () => {
-      reconnectTimer = null;
+      reconnectTimer = undefined;
       if (get().sessionId !== sessionId) {
         return;
       }
@@ -933,10 +944,13 @@ export const useStore = create(immer((set, get) => {
     }
     const batch = eventQueue;
     eventQueue = [];
+    const applied: EventEnvelope[] = [];
     const beforeKind = get().ui.attentionKind;
     set((draft) => {
       for (const item of batch) {
+        if (!EPHEMERAL_EVENTS.has(item.type) && typeof item.sequence === 'number' && item.sequence <= draft.thread.cursor) continue;
         applyEvent(draft, item, { live: true });
+        applied.push(item);
       }
       draft.lastEventAt = Date.now();
     });
@@ -944,7 +958,7 @@ export const useStore = create(immer((set, get) => {
     if (after.ui.attentionKind !== beforeKind) {
       applyAttention(after.ui.attentionKind, after.sessionTitle);
     }
-    for (const item of batch) {
+    for (const item of applied) {
       get().settleEvent(item, after);
     }
   },
@@ -968,8 +982,9 @@ export const useStore = create(immer((set, get) => {
       const runId = after.runChangesFetch;
       set((draft) => { draft.runChangesFetch = null; });
       api.runChanges(runId).then((report) => {
+        if (!report) return;
         set((draft) => {
-          const row = [...draft.thread.rows].reverse().find((item) => item.type === 'result' && item.runIds.includes(runId));
+          const row = [...draft.thread.rows].reverse().find((item): item is Draft<ResultRow> => item.type === 'result' && item.runIds.includes(runId));
           if (row) {
             row.changedFiles = sortChangeFiles(report.files || []);
             row.changedSummary = report.summary || null;
@@ -1020,7 +1035,7 @@ export const useStore = create(immer((set, get) => {
       try {
         sessionId = await get().ensureSession();
       } catch (error) {
-        get().showNotice('创建对话失败：' + error.message);
+        get().showNotice('创建对话失败：' + errorInfo(error).message);
         return false;
       }
       if (!sessionId || get().sessionEpoch !== ownerEpoch) {
@@ -1034,7 +1049,7 @@ export const useStore = create(immer((set, get) => {
     const payloadContent = skillCall
       ? (skillCall.args || '（用户未提供额外要求，按技能指引执行）')
       : text;
-    const body = { content: payloadContent, attachments: attachments || [], imagePositions: imagePositions || [] };
+    const body: InputMessage = { content: payloadContent, attachments: attachments || [], imagePositions: imagePositions || [] };
     if (skillCall) {
       body.skill = skillCall.skill;
     }
@@ -1071,11 +1086,11 @@ export const useStore = create(immer((set, get) => {
         draft.pendingInputs = draft.pendingInputs.filter((item) => !sameUserInput(item, payloadContent));
         const rows = draft.thread.rows;
         const index = rows.map((row) => row.text).lastIndexOf(payloadContent);
-        if (index >= 0 && rows[index].sequence == null) {
+        if (index >= 0 && (!('sequence' in rows[index]) || rows[index].sequence == null)) {
           rows.splice(index, 1);
         }
       });
-      get().showNotice('发送失败：' + error.message);
+      get().showNotice('发送失败：' + errorInfo(error).message);
       return false;
     }
   },
@@ -1086,6 +1101,7 @@ export const useStore = create(immer((set, get) => {
       return false;
     }
     const { sessionId, runId } = get();
+    if (!sessionId) return false;
     set((draft) => { draft.steering = true; });
     try {
       await api.steer(sessionId, { content: text, runId });
@@ -1093,7 +1109,7 @@ export const useStore = create(immer((set, get) => {
       return true;
     } catch (error) {
       set((draft) => { draft.steering = false; });
-      get().showNotice('引导失败：' + error.message);
+      get().showNotice('引导失败：' + errorInfo(error).message);
       return false;
     }
   },
@@ -1107,7 +1123,7 @@ export const useStore = create(immer((set, get) => {
     try {
       await api.pauseRun(runId);
     } catch (error) {
-      get().showNotice('暂停失败：' + error.message);
+      get().showNotice('暂停失败：' + errorInfo(error).message);
     } finally {
       set((draft) => { draft.pausing = false; });
     }
@@ -1122,7 +1138,7 @@ export const useStore = create(immer((set, get) => {
     try {
       await api.cancelRun(runId);
     } catch (error) {
-      get().showNotice('取消失败：' + error.message);
+      get().showNotice('取消失败：' + errorInfo(error).message);
     } finally {
       set((draft) => { draft.cancelling = false; });
     }
@@ -1131,10 +1147,11 @@ export const useStore = create(immer((set, get) => {
   async continueRun() {
     if (!get().modelReady()) return false;
     const { sessionId } = get();
+    if (!sessionId) return false;
     try {
       await api.continueRun(sessionId);
     } catch (error) {
-      get().showNotice('继续失败：' + error.message);
+      get().showNotice('继续失败：' + errorInfo(error).message);
     }
   },
 
@@ -1145,11 +1162,12 @@ export const useStore = create(immer((set, get) => {
       return false;
     }
     const { sessionId } = get();
+    if (!sessionId) return false;
     try {
       await api.resend(sessionId, { sequence, content: text });
       return true;
     } catch (error) {
-      get().showNotice('重新发送失败：' + error.message);
+      get().showNotice('重新发送失败：' + errorInfo(error).message);
       return false;
     }
   },
@@ -1160,17 +1178,18 @@ export const useStore = create(immer((set, get) => {
     try {
       await api.approval(callId, approved);
     } catch (error) {
-      get().showNotice('提交审批失败：' + error.message);
+      get().showNotice('提交审批失败：' + errorInfo(error).message);
       set((draft) => { if (draft.pendingApprovals[callId]) draft.pendingApprovals[callId].busy = false; });
     }
   },
 
   async resolveArbitration(arbitrationId, decision) {
     const { sessionId } = get();
+    if (!sessionId) return;
     try {
       await api.resolveArbitration(sessionId, arbitrationId, { choice: decision });
     } catch (error) {
-      get().showNotice('提交裁决失败：' + error.message);
+      get().showNotice('提交裁决失败：' + errorInfo(error).message);
     }
   },
 
@@ -1185,7 +1204,7 @@ export const useStore = create(immer((set, get) => {
       if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
       if (Array.isArray(data?.plan) && data.plan.length) {
         set((draft) => {
-          let existing = null;
+          let existing: PlanRow | null = null;
           for (let i = draft.thread.rows.length - 1; i >= 0; i -= 1) {
             const row = draft.thread.rows[i];
             if (row.type === 'user') {
@@ -1226,7 +1245,7 @@ export const useStore = create(immer((set, get) => {
       set((draft) => {
         draft.queue = normalized.texts;
         draft.queueEntries = normalized.rows;
-        draft.queueRevision = data.revision || null;
+        draft.queueRevision = data?.revision || null;
       });
     } catch (error) { if (strict) throw error; /* 队列读取失败不阻塞 */ }
   },
@@ -1242,7 +1261,7 @@ export const useStore = create(immer((set, get) => {
       return current();
     } catch (error) {
       if (current()) {
-        get().showNotice(failure + error.message);
+        get().showNotice(failure + errorInfo(error).message);
         await get().loadQueue();
       }
       return false;
@@ -1287,6 +1306,7 @@ export const useStore = create(immer((set, get) => {
 
   async saveTask(constraints, acceptance) {
     const { sessionId } = get();
+    if (!sessionId) return;
     set((draft) => { draft.taskBusy = true; });
     try {
       const task = await api.saveTask(sessionId, { constraints, acceptance });
@@ -1298,7 +1318,7 @@ export const useStore = create(immer((set, get) => {
       get().showNotice('任务契约已保存');
     } catch (error) {
       set((draft) => { draft.taskBusy = false; });
-      get().showNotice('保存失败：' + error.message);
+      get().showNotice('保存失败：' + errorInfo(error).message);
     }
   },
 
@@ -1333,12 +1353,13 @@ export const useStore = create(immer((set, get) => {
 
   async compactContext() {
     const { sessionId } = get();
+    if (!sessionId) return;
     set((draft) => { draft.compactingContext = true; });
     try {
       await api.compactContext(sessionId);
       await get().refreshContext();
     } catch (error) {
-      get().showNotice('压缩失败：' + error.message);
+      get().showNotice('压缩失败：' + errorInfo(error).message);
     } finally {
       set((draft) => { draft.compactingContext = false; });
     }
@@ -1347,17 +1368,19 @@ export const useStore = create(immer((set, get) => {
   /* ---------- 检查点 ---------- */
   async openCheckpoint(sequence) {
     const { sessionId } = get();
+    if (!sessionId) return;
     set((draft) => { draft.ui.checkpointDialog = { sequence, loading: true }; });
     try {
       const info = await api.checkpoints(sessionId, sequence);
       set((draft) => { draft.ui.checkpointDialog = { sequence, loading: false, info }; });
     } catch (error) {
       set((draft) => { draft.ui.checkpointDialog = null; });
-      get().showNotice('读取检查点失败：' + error.message);
+      get().showNotice('读取检查点失败：' + errorInfo(error).message);
     }
   },
   async restoreCheckpoint(sequence, mode, revision) {
     const { sessionId } = get();
+    if (!sessionId) return;
     if (!['code', 'conversation', 'both'].includes(mode)) {
       get().showNotice('请选择回退范围');
       return;
@@ -1368,11 +1391,11 @@ export const useStore = create(immer((set, get) => {
     try {
       const result = await api.restoreCheckpoint(sessionId, { sequence, mode, revision });
       if (!result?.applied) {
-        const code = result?.code || {};
+        const code: Partial<S.RunSnapshotServiceRollbackReport> & { unavailable?: string[] } = result?.code || {};
         const reason = [
-          (code.conflicts || []).length ? `检测到后续修改：${code.conflicts.join('、')}` : '',
-          (code.failed || []).length ? `写入失败：${code.failed.join('、')}` : '',
-          (code.unavailable || []).length ? code.unavailable.join('；') : ''
+          code.conflicts?.length ? `检测到后续修改：${code.conflicts.join('、')}` : '',
+          code.failed?.length ? `写入失败：${code.failed.join('、')}` : '',
+          code.unavailable?.length ? code.unavailable.join('；') : ''
         ].filter(Boolean).join('；') || '回退未完成，请刷新后重试';
         set((draft) => {
           draft.ui.checkpointDialog = { ...(draft.ui.checkpointDialog || {}), applying: false, error: reason };
@@ -1399,17 +1422,18 @@ export const useStore = create(immer((set, get) => {
       }
     } catch (error) {
       set((draft) => {
-        draft.ui.checkpointDialog = { ...(draft.ui.checkpointDialog || {}), applying: false, error: error.message };
+        draft.ui.checkpointDialog = { ...(draft.ui.checkpointDialog || {}), applying: false, error: errorInfo(error).message };
       });
     }
   },
   async forkCheckpoint(sequence, revision) {
     const { sessionId } = get();
+    if (!sessionId) return;
     set((draft) => {
       draft.ui.checkpointDialog = { ...(draft.ui.checkpointDialog || {}), sequence, applying: true, error: '' };
     });
     try {
-      const session = await api.forkCheckpoint(sessionId, { sequence, revision });
+      const session = requireData(await api.forkCheckpoint(sessionId, { sequence, revision }));
       set((draft) => { draft.ui.checkpointDialog = null; });
       await get().loadSessions();
       await get().activate(session.sessionId);
@@ -1420,7 +1444,7 @@ export const useStore = create(immer((set, get) => {
       get().showNotice('已创建对话分支，原聊天保留');
     } catch (error) {
       set((draft) => {
-        draft.ui.checkpointDialog = { ...(draft.ui.checkpointDialog || {}), applying: false, error: error.message };
+        draft.ui.checkpointDialog = { ...(draft.ui.checkpointDialog || {}), applying: false, error: errorInfo(error).message };
       });
     }
   },
@@ -1457,12 +1481,15 @@ export const useStore = create(immer((set, get) => {
       return existing;
     }
     const key = JSON.stringify([sessionId, sessionEpoch, workspace]);
-    if (sideChatPending.has(key)) return sideChatPending.get(key);
+    const pending = sideChatPending.get(key);
+    if (pending) return pending;
     const request = (async () => {
       try {
         const session = await api.createSideChat(sessionId);
-        const item = {
-          id: session?.sessionId || session?.id,
+        const id = session?.sessionId || session?.id;
+        if (!id) throw new Error('后端没有返回会话 ID');
+        const item: SideChatTab = {
+          id,
           parentId: session?.parentSessionId || sessionId,
           title: sideChatTitle(get().sideChats.items, sessionId),
           workspace: session?.workspace || workspace || null,
@@ -1481,7 +1508,7 @@ export const useStore = create(immer((set, get) => {
         get().loadSessions();
         return current() ? item : null;
       } catch (error) {
-        if (current()) get().showNotice('创建侧边对话失败：' + error.message);
+        if (current()) get().showNotice('创建侧边对话失败：' + errorInfo(error).message);
         return null;
       } finally {
         sideChatPending.delete(key);
@@ -1508,11 +1535,12 @@ export const useStore = create(immer((set, get) => {
    * 后端会话连同事件与记忆一起删掉，主对话不受影响。
    */
   async closeSideChat(id) {
-    if (sideChatClosing.has(id)) return sideChatClosing.get(id);
+    const closing = sideChatClosing.get(id);
+    if (closing) return closing;
     if (!get().sideChats.items.some(item => item.id === id)) return false;
     const request = (async () => {
       try {
-        try { await api.deleteSession(id); } catch (error) { if (error.status !== 404) throw error; }
+        try { await api.deleteSession(id); } catch (error) { if (errorInfo(error).status !== 404) throw error; }
         set(draft => {
           draft.sideChats.items = draft.sideChats.items.filter(item => item.id !== id);
           draft.sideChats.activeId = sideChatsFor(draft.sideChats, { sessionId: draft.sessionId, workspace: draft.workspace }).activeId;
@@ -1522,7 +1550,7 @@ export const useStore = create(immer((set, get) => {
         persistSideChats();
         return true;
       } catch (error) {
-        get().showNotice('侧边对话未能关闭，已保留，请重试：' + error.message);
+        get().showNotice('侧边对话未能关闭，已保留，请重试：' + errorInfo(error).message);
         return false;
       } finally { sideChatClosing.delete(id); }
     })();
@@ -1577,8 +1605,8 @@ export const useStore = create(immer((set, get) => {
     if (!sessionId) {
       set((draft) => {
         draft.workspace = workspace;
-        draft.draftSession = { ...draft.draftSession, workspace };
-        draft.fileIndex = { items: [], sessionId: null };
+        draft.draftSession = { projectId: draft.draftSession?.projectId || null, ...draft.draftSession, workspace };
+        draft.fileIndex = { items: [], sessionId: null, loading: false };
         resetFilePreview(draft);
       });
       return;
@@ -1587,7 +1615,7 @@ export const useStore = create(immer((set, get) => {
       await api.switchWorkspace(sessionId, workspace);
       await get().activate(sessionId);
     } catch (error) {
-      get().showNotice('切换文件夹失败：' + error.message);
+      get().showNotice('切换文件夹失败：' + errorInfo(error).message);
       if (throwOnError) throw error;
     }
   },
@@ -1615,7 +1643,7 @@ export const useStore = create(immer((set, get) => {
       }
       get().showNotice(`已从 ${opened?.branch || branch || '当前分支'} 建立 worktree，对话在这份检出里进行`);
     } catch (error) {
-      get().showNotice('建立 worktree 失败：' + error.message);
+      get().showNotice('建立 worktree 失败：' + errorInfo(error).message);
     }
   },
 
@@ -1637,7 +1665,7 @@ export const useStore = create(immer((set, get) => {
       await get().loadSessions();
       get().showNotice(handed?.note || 'worktree 改动已交回本地');
     } catch (error) {
-      get().showNotice('交回失败：' + error.message);
+      get().showNotice('交回失败：' + errorInfo(error).message);
     }
   },
 
@@ -1648,7 +1676,7 @@ export const useStore = create(immer((set, get) => {
     if (!sessionId || !sandboxId || !['accept', 'reject', 'recover'].includes(action)) {
       return false;
     }
-    const post = (acknowledge) => apiFetch(
+    const post = (acknowledge: boolean) => apiFetch(
       `/api/sessions/${encodeURIComponent(sessionId)}/multi/sandboxes/${encodeURIComponent(sandboxId)}/${action}`,
       {
         method: 'POST',
@@ -1674,7 +1702,7 @@ export const useStore = create(immer((set, get) => {
         response = await post(true);
         if (get().sessionId !== sessionId) return false;
       }
-      const data = await response.json().catch(() => ({}));
+      const data = await response.json().catch(() => ({})) as Partial<S.SandboxStoreApplyReport> & { message?: string };
       if (response.ok && data?.ok !== false) {
         get().showNotice(`已接受 ${sandboxId}：写入 ${(data.written || []).length} 个文件`);
         return true;
@@ -1684,7 +1712,7 @@ export const useStore = create(immer((set, get) => {
       return false;
     } catch (error) {
       if (get().sessionId !== sessionId) return false;
-      get().showNotice('操作失败：' + error.message + (error.message?.includes('超时') ? '；服务端可能仍在处理，请刷新核对写入状态后再操作。' : ''));
+      get().showNotice('操作失败：' + errorInfo(error).message + (errorInfo(error).message?.includes('超时') ? '；服务端可能仍在处理，请刷新核对写入状态后再操作。' : ''));
       return false;
     }
   },
@@ -1699,7 +1727,7 @@ export const useStore = create(immer((set, get) => {
     const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().workspace === workspace && get()._changesRequest === request;
     set((draft) => { draft.changesState = 'loading'; draft._changesRequest = request; });
     try {
-      const report = await api.diff(sessionId);
+      const report = requireData(await api.diff(sessionId));
       if (!current()) return;
       set((draft) => {
         draft.changeReport = report;
@@ -1710,7 +1738,7 @@ export const useStore = create(immer((set, get) => {
       if (!current()) return;
       set((draft) => { draft.changesState = 'error'; });
       if (strict) throw error;
-      get().showNotice('读取变更失败：' + error.message);
+      get().showNotice('读取变更失败：' + errorInfo(error).message);
     }
   },
   /**
@@ -1762,7 +1790,7 @@ export const useStore = create(immer((set, get) => {
     } catch (error) {
       if (!current()) return null;
       set((draft) => { draft.changesState = ''; });
-      get().showNotice('撤销失败：' + error.message);
+      get().showNotice('撤销失败：' + errorInfo(error).message);
       return null;
     }
   },
@@ -1772,7 +1800,7 @@ export const useStore = create(immer((set, get) => {
       get().showNotice('已回滚本次运行改动');
       await get().loadChanges();
     } catch (error) {
-      get().showNotice('回滚失败：' + error.message);
+      get().showNotice('回滚失败：' + errorInfo(error).message);
     }
   },
   async createBranch(name) {
@@ -1786,7 +1814,7 @@ export const useStore = create(immer((set, get) => {
       }
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: '创建分支失败：' + error.message };
+      return { ok: false, error: '创建分支失败：' + errorInfo(error).message };
     }
   },
   async openPreview(path) {
@@ -1811,19 +1839,20 @@ export const useStore = create(immer((set, get) => {
     } catch (error) {
       if (current()) {
         set((draft) => { draft._previewLoading = false; });
-        get().showNotice('读取文件失败：' + error.message);
+        get().showNotice('读取文件失败：' + errorInfo(error).message);
       }
     }
   },
 
   /* ---------- 命令任务 ---------- */
   async loadCommandTasks() {
-    const { sessionId } = get();
+    const { sessionId, sessionEpoch } = get();
     if (!sessionId) {
       return;
     }
     try {
-      const data = await apiJson(`/api/sessions/${encodeURIComponent(sessionId)}/commands`);
+      const data = await apiJson<{ tasks: CommandTask[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/commands`);
+      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
       // 任务列表是数组，日志才是增量片段：早先这里把 mergeCommandLog 用在任务上，
       // 结果 commandTasks 变成 {text, offset...} 对象，面板里 .filter 直接 TypeError
       set((draft) => {
@@ -1841,22 +1870,23 @@ export const useStore = create(immer((set, get) => {
 
   /** 选中某个命令任务并把它的日志拉到最新（offset 用上次的 nextOffset 续读）。 */
   async loadCommandLog(task) {
-    const { sessionId } = get();
+    const { sessionId, sessionEpoch } = get();
     const taskId = task?.taskId || task?.id;
     if (!sessionId || !taskId) {
       return;
     }
     const sameTask = get().commandLogTaskId === taskId;
-    const offset = sameTask ? (get().commandLog?.nextOffset || 0) : 0;
+    const offset = sameTask ? (get().commandLog?.offset || 0) : 0;
     set((draft) => {
       draft.commandDetail = { ...(task || {}) };
       if (!sameTask) {
         draft.commandLogTaskId = taskId;
-        draft.commandLog = { text: '', offset: 0, nextOffset: 0, trimmed: 0, truncated: false, eof: false };
+        draft.commandLog = { text: '', offset: 0, trimmed: 0, truncated: false, eof: false };
       }
     });
     try {
-      const chunk = await apiJson(`/api/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(taskId)}/logs?offset=${offset}&limit=200000`);
+      const chunk = await apiJson<S.CommandTaskManagerLogChunk>(`/api/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(taskId)}/logs?offset=${offset}&limit=200000`);
+      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
       set((draft) => {
         if (draft.commandLogTaskId !== taskId) {
           return;
@@ -1878,7 +1908,7 @@ export const useStore = create(immer((set, get) => {
       get().showNotice('已请求停止：' + (task.command || taskId));
       await get().loadCommandTasks();
     } catch (error) {
-      get().showNotice('停止失败：' + error.message);
+      get().showNotice('停止失败：' + errorInfo(error).message);
     }
   },
 
@@ -1890,6 +1920,7 @@ export const useStore = create(immer((set, get) => {
       return false;
     }
     try {
+      if (!id) return false;
       const response = await api.renameSession(id, normalized);
       sessionLoadSequence++;
       set(draft => {
@@ -1899,7 +1930,7 @@ export const useStore = create(immer((set, get) => {
       });
       return true;
     } catch (error) {
-      get().showNotice('重命名失败：' + error.message);
+      get().showNotice('重命名失败：' + errorInfo(error).message);
       return false;
     }
   },
@@ -1914,7 +1945,7 @@ export const useStore = create(immer((set, get) => {
       });
       return true;
     } catch (error) {
-      get().showNotice('会话设置保存失败：' + error.message);
+      get().showNotice('会话设置保存失败：' + errorInfo(error).message);
       return false;
     }
   },
@@ -1929,7 +1960,7 @@ export const useStore = create(immer((set, get) => {
       }
       return true;
     } catch (error) {
-      get().showNotice('归档失败：' + error.message);
+      get().showNotice('归档失败：' + errorInfo(error).message);
       return false;
     }
   },
@@ -1966,7 +1997,7 @@ export const useStore = create(immer((set, get) => {
         get().startNewSession();
       }
     } catch (error) {
-      get().showNotice('删除失败：' + error.message);
+      get().showNotice('删除失败：' + errorInfo(error).message);
     }
   },
   /** 用上一条用户输入重跑一轮，历史里不会多一条重复的用户消息。 */
@@ -1983,7 +2014,7 @@ export const useStore = create(immer((set, get) => {
         draft.lastOutcome = '';
       });
     } catch (error) {
-      get().showNotice('重新生成失败：' + error.message);
+      get().showNotice('重新生成失败：' + errorInfo(error).message);
     }
   },
   /** 通用二次确认：危险操作统一走这里，避免各处 window.confirm 风格不一。 */
@@ -2019,7 +2050,7 @@ export const useStore = create(immer((set, get) => {
       });
       get().showNotice('权限模式已切换为「' + permissionLabel(next) + '」');
     } catch (error) {
-      get().showNotice('保存权限模式失败：' + error.message);
+      get().showNotice('保存权限模式失败：' + errorInfo(error).message);
     }
   },
   /** 清除已保存的 API Key（后端独立接口，和「留空表示不改」区分开）。 */
@@ -2053,7 +2084,7 @@ export const useStore = create(immer((set, get) => {
       get().showNotice(message);
       return true;
     } catch (error) {
-      const message = (clearKey ? '清除失败：' : '保存失败：') + (error?.message || '无法连接服务，请检查网络后重试');
+      const message = (clearKey ? '清除失败：' : '保存失败：') + (errorInfo(error).message || '无法连接服务，请检查网络后重试');
       set((draft) => { draft.modelSave = { busy: false, message, error: true }; });
       get().showNotice(message);
       return false;
@@ -2105,7 +2136,7 @@ export const useStore = create(immer((set, get) => {
       return data;
     } catch (error) {
       set((draft) => { draft.capabilitiesState = 'error'; });
-      get().showNotice('读取能力清单失败：' + error.message);
+      get().showNotice('读取能力清单失败：' + errorInfo(error).message);
       return null;
     }
   },
@@ -2163,10 +2194,10 @@ function persistSideChats() {
  * <p>Spring 默认错误体把业务原因放在 {@code message}，{@code error} 只是状态短语
  * （如 "Precondition Failed"）；先取 error 会把「为什么被拦」整段丢掉。
  */
-async function describeError(response) {
-  let body = null;
+async function describeError(response: Response) {
+  let body: Record<string, unknown> | null = null;
   try {
-    body = await response.json();
+    body = await response.json() as Record<string, unknown> | null;
   } catch {
     // 非 JSON 错误体（网关返回的 HTML 之类）
   }
@@ -2181,7 +2212,7 @@ async function describeError(response) {
   return `HTTP ${response.status}`;
 }
 
-function applyTheme(mode, accent) {
+function applyTheme(mode: string, accent: string) {
   const prefersDark = Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const resolved = mode === 'system' ? (prefersDark ? 'dark' : 'light') : (mode === 'dark' ? 'dark' : 'light');
   document.documentElement.dataset.theme = resolved;
@@ -2202,10 +2233,10 @@ function readNotifyEnabled() {
   }
 }
 
-function applyAttention(kind, title) {
+function applyAttention(kind: string, title: string) {
   // tabTitle(base, kind)：参数顺序反了标题会变成「● 需要你」这种状态词
   document.title = tabTitle(title || '新任务', kind);
-  const link = document.querySelector('link[rel="icon"]');
+  const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
   if (link) {
     link.href = faviconHref(kind);
   }
@@ -2216,7 +2247,7 @@ function applyAttention(kind, title) {
     return;
   }
   try {
-    const body = { attention: '任务需要确认', done: '本轮已完成', error: '本轮运行失败' }[kind];
+    const body = ({ attention: '任务需要确认', done: '本轮已完成', error: '本轮运行失败' } as Record<string, string>)[kind];
     new Notification(`Pilot · ${title || '新任务'}`, { body: body || '' });
   } catch {
     // 通知失败不影响主流程
@@ -2234,14 +2265,14 @@ function closeStreams() {
   }
   lastMirrorPayload = null;
   clearInterval(commandTimer);
-  commandTimer = null;
+  commandTimer = undefined;
   clearTimeout(reconnectTimer);
-  reconnectTimer = null;
+  reconnectTimer = undefined;
   clearInterval(runClockTimer);
-  runClockTimer = null;
+  runClockTimer = undefined;
 }
 
-function connectMirror(get, set) {
+function connectMirror(get: StoreGet, set: StoreSet) {
   const { sessionId, ui } = get();
   if (!sessionId || !ui.mirror) {
     return;
@@ -2252,9 +2283,9 @@ function connectMirror(get, set) {
   const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/browser/stream`);
   mirrorSource = source;
   source.addEventListener('frame', (message) => {
-    let payload;
+    let payload: MirrorFrame;
     try {
-      payload = JSON.parse(message.data);
+      payload = JSON.parse(message.data) as MirrorFrame;
     } catch {
       return;
     }
@@ -2280,7 +2311,7 @@ function connectMirror(get, set) {
   });
   source.addEventListener('status', (message) => {
     try {
-      const payload = JSON.parse(message.data);
+      const payload = JSON.parse(message.data) as { paused?: boolean; headless?: boolean; url?: string };
       set((draft) => {
         draft.ui.mirror.paused = Boolean(payload.paused);
         if (typeof payload.headless === 'boolean') {
@@ -2295,7 +2326,7 @@ function connectMirror(get, set) {
   // 页面跳转（用户点链接 / 地址栏 / 智能体导航）：地址栏跟着变，前进后退按钮跟着亮灭
   source.addEventListener('nav', (message) => {
     try {
-      const payload = JSON.parse(message.data);
+      const payload = JSON.parse(message.data) as { url?: string; canGoBack?: boolean; canGoForward?: boolean; embed?: boolean; frameOptions?: string };
       set((draft) => {
         if (payload.url) {
           draft.ui.mirror.url = payload.url;
@@ -2332,10 +2363,10 @@ function connectMirror(get, set) {
   };
 }
 
-function connectCommandTasks(get, set) {
-  const { sessionId } = get();
+function connectCommandTasks(get: StoreGet, set: StoreSet) {
+  const { sessionId, sessionEpoch } = get();
   clearInterval(commandTimer);
-  commandTimer = null;
+  commandTimer = undefined;
   if (!sessionId) {
     return;
   }
@@ -2345,7 +2376,8 @@ function connectCommandTasks(get, set) {
       return;
     }
     try {
-      const data = await apiJson(`/api/sessions/${encodeURIComponent(sessionId)}/commands`);
+      const data = await apiJson<{ tasks: CommandTask[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/commands`);
+      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
       const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
       set((draft) => {
         draft.commandTasks = tasks;
@@ -2366,7 +2398,17 @@ function connectCommandTasks(get, set) {
   poll();
   commandTimer = setInterval(poll, 5000);
   // Node（单元测试）里定时器会吊住事件循环，让测试文件永远不退出；浏览器里没有 unref
-  commandTimer.unref?.();
+  unrefTimer(commandTimer);
 }
 
 export { closeStreams };
+
+/** 浏览器计时器是数字，Node 测试计时器可主动释放事件循环。 */
+function unrefTimer(timer: number | { unref?: () => void }) {
+  if (typeof timer === 'object') timer.unref?.();
+}
+
+function requireData<T>(value: T | null): T {
+  if (value === null) throw new Error('服务端返回空响应，请刷新后重试');
+  return value;
+}

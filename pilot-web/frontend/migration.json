@@ -240,8 +240,17 @@
         "设置/预览/命令/镜像",
         "订阅和定时器清理"
       ],
-      "status": "pending",
-      "verification": []
+      "status": "verified",
+      "verification": [
+        {
+          "report": ".tmp-check/migration/2026-11-06T08-21-02-917Z/report.json",
+          "result": "严格类型检查、构建、41 项桌面单元和全部 17 套 Chromium/Electron 交互通过。完整定义 Store、UI、Composer 桥与动作契约，保留浏览器数字计时器和 Node 测试计时器的能力检测。"
+        },
+        {
+          "report": ".tmp-check/migration/2026-11-06T08-22-06-120Z/report.json",
+          "result": "373 项前端单元通过；新增 SSE 合帧/预览/重复/切换清理、迟到命令列表及日志、Unicode 码点续读、状态与动作及事件载荷的正反例编译。旧 JS 基线复现同帧重复应用、旧命令响应覆盖与日志从零续读，修正后先在 JS 验证，再迁移 TS。"
+        }
+      ]
     },
     {
       "batch": 9,

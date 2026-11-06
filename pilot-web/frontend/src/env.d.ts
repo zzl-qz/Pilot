@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 
 interface Window {
+  pilotDesktop?: { reloadWorkbench(): Promise<{ ok: boolean; error?: string }> };
+
   mermaid?: {
     initialize(options: { startOnLoad: boolean; securityLevel: string; theme: string }): void;
     render(id: string, source: string): Promise<{ svg: string }>;

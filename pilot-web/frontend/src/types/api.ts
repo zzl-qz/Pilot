@@ -74,7 +74,7 @@ export interface ApiResults {
   capabilities: S.CapabilitiesControllerCapabilitiesResponse;
   browserStatus: BrowserStatus;
   stopCommand: S.CommandTaskManagerTask;
-  runChanges: S.ChangeServiceRunChangeReport;
+  runChanges: S.ChangeServiceRunChangeReport & { summary?: string };
   rollbackRun: S.RunSnapshotServiceRollbackReport;
   branch: S.BranchControllerBranchResponse;
   files: S.SessionFilesControllerTreeResponse;
