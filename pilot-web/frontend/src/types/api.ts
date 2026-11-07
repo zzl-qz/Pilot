@@ -20,8 +20,30 @@ export interface StudioArtifact {
   bytes: number; sha256: string; verification: string; createdAt: string;
 }
 export interface StudioRenderResult { document: StudioDocument; artifacts: StudioArtifact[] }
+
+/** 文件工作台：工作区里的真实文件就是唯一源，下面只是它的索引与审阅元数据。 */
+export interface WorkbenchFile {
+  id: string; sessionId: string; path: string; filename: string; format: string;
+  bytes: number; sha256: string; modifiedAt: string; changedExternally: boolean;
+}
+export interface WorkbenchPreview { fileId: string; pages: number; notice: string }
+export interface WorkbenchVersion { version: number; sha256: string; createdAt: string; label: string }
+export interface WorkbenchAnnotation {
+  id: string; fileId: string; page: number; anchor: string; text: string; createdAt: string; status: string;
+}
+export interface WorkbenchOpenResult { ok: boolean; reason: string; alternative: string }
+
 export interface ApiResults {
   workProducts: S.WorkProductServiceProduct[];
+  workbenchFiles: WorkbenchFile[];
+  workbenchFile: WorkbenchFile;
+  workbenchPreview: WorkbenchPreview;
+  workbenchVersions: WorkbenchVersion[];
+  workbenchVersion: WorkbenchVersion;
+  workbenchAnnotations: WorkbenchAnnotation[];
+  workbenchAnnotation: WorkbenchAnnotation;
+  workbenchOpen: WorkbenchOpenResult;
+  workbenchChangeRequest: { prompt: string };
   studioDocuments: StudioDocument[];
   studioDocument: StudioDocument;
   studioCreate: StudioDocument;

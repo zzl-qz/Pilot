@@ -39,7 +39,8 @@ export interface UiState {
   schedulesOpen?: boolean; searchOpen?: boolean; composerEnabled?: boolean; resultUnread?: number;
   resultTarget?: string | null; scheduleTarget?: string | null; scheduleDraft?: string | null; scheduleRepeat?: boolean;
   navigationTarget?: { sessionId: string; sequence: number } | null; changeCount?: number;
-  studioDocumentId?: string | null;
+  /** 文件工作台要聚焦的工作区文件 id；不改文件本身，只影响面板选中项。 */
+  workbenchFileId?: string | null;
 }
 /** 命令面板也接受历史版本的 id 字段。 */
 export type CommandTask = Partial<S.CommandTaskManagerTask> & { id?: string };

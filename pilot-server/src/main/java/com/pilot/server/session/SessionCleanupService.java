@@ -14,6 +14,7 @@ import com.pilot.core.tool.CommandTaskManager;
 import com.pilot.server.multi.SandboxStore;
 import com.pilot.server.store.ToolCallJournalFactory;
 import com.pilot.server.validation.ValidationLedger;
+import com.pilot.server.work.FileWorkbenchService;
 import com.pilot.server.work.SkillDraftService;
 import com.pilot.server.work.WorkProductService;
 
@@ -39,12 +40,14 @@ public class SessionCleanupService {
     private final RunCheckpointRepository checkpoints;
     private final WorkProductService products;
     private final SkillDraftService skillDrafts;
+    private final FileWorkbenchService fileWorkbench;
 
     public SessionCleanupService(SessionService sessions, ConversationRepository conversations, PlanRepository plans,
         RunRepository runs, SandboxStore sandboxes, RunStarter runStarter, TaskControlService taskControls,
         CommandTaskManager commandTasks, ObjectProvider<BrowserBackend> browser, ValidationLedger validations,
         ToolCallJournalFactory journals, RunCheckpointRepository checkpoints, WorkProductService products,
-        SkillDraftService skillDrafts) {
+        SkillDraftService skillDrafts, FileWorkbenchService fileWorkbench) {
+        this.fileWorkbench = fileWorkbench;
         this.products = products;
         this.skillDrafts = skillDrafts;
         this.validations = validations;
@@ -80,6 +83,8 @@ public class SessionCleanupService {
         boolean removed = sessions.delete(sessionId);
         products.deleteBySession(sessionId);
         skillDrafts.deleteBySession(sessionId);
+        // 文件工作台的批注、快照索引与预览缓存都属于会话；工作区里的真实文件保留给用户。
+        fileWorkbench.deleteBySession(sessionId);
         conversations.delete(sessionId);
         plans.delete(sessionId);
         runs.deleteBySession(sessionId);

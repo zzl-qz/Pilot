@@ -24,11 +24,11 @@ import { MarkdownBody } from './MarkdownBody.jsx';
 
 import ResearchPanel from './ResearchPanel.jsx';
 import WorkProductsPanel from './WorkProductsPanel.jsx';
-import DocumentStudio from './DocumentStudio.jsx';
+import FileWorkbench from './FileWorkbench.js';
 
 const TABS = [
   { id: 'products', label: '成果', title: '交付文件、来源与技能审核' },
-  { id: 'studio', label: '工作台', title: '手动编辑文档、一键导出与版本回滚，不经过模型' },
+  { id: 'files', label: '文件工作台', title: '预览工作区里的真实 Office 文件、批注与发布成果' },
   { id: 'chat', label: '对话', title: '侧边对话：问和主线无关的问题，不打断正在跑的任务' },
   { id: 'changes', label: '变更', title: '工作区改动：逐个文件看差异、撤销' },
   { id: 'preview', label: '预览', title: '只读预览文件内容' },
@@ -63,7 +63,7 @@ export function Inspector() {
   return (
     <aside id="activity" className={`activity inspector is-rail is-open${tab === 'products' ? ' products-inspector' : ''}`} aria-label="工作区面板">
       <div className="inspector-main">
-      <header className="inspector-panel-head"><div><strong>{TABS.find(item => item.id === tab)?.label}</strong><span>{tab === 'products' ? '交付文件与可复用的经验' : tab === 'studio' ? '手动编辑、一键导出与版本回滚，不经过模型' : tab === 'research' ? '当前任务记录的开源依据' : tab === 'preview' ? '只读文件预览' : tab === 'changes' ? '检查工作区的代码改动' : tab === 'commands' ? '命令状态与输出' : tab === 'activity' ? '任务执行记录' : tab === 'capabilities' ? '当前可用的工具与技能' : tab === 'browser' ? '浏览页面与引用内容' : '从当前任务分叉的临时对话，关掉即丢弃'}</span></div><button type="button" className="icon-btn" aria-label="关闭工作区面板" onClick={() => useStore.getState().setUi({ inspectorOpen: false, reviewExpanded: false })}><Icon name="close" /></button></header>
+      <header className="inspector-panel-head"><div><strong>{TABS.find(item => item.id === tab)?.label}</strong><span>{tab === 'products' ? '交付文件与可复用的经验' : tab === 'files' ? '工作区文件预览、批注与交付，真实文件是唯一源' : tab === 'research' ? '当前任务记录的开源依据' : tab === 'preview' ? '只读文件预览' : tab === 'changes' ? '检查工作区的代码改动' : tab === 'commands' ? '命令状态与输出' : tab === 'activity' ? '任务执行记录' : tab === 'capabilities' ? '当前可用的工具与技能' : tab === 'browser' ? '浏览页面与引用内容' : '从当前任务分叉的临时对话，关掉即丢弃'}</span></div><button type="button" className="icon-btn" aria-label="关闭工作区面板" onClick={() => useStore.getState().setUi({ inspectorOpen: false, reviewExpanded: false })}><Icon name="close" /></button></header>
       {tab === 'activity' && <div className="inspector-head"><Filters /></div>}
       <div className="inspector-body" id={`inspector-panel-${tab}`} role="tabpanel" aria-labelledby={`inspector-tab-${tab}`}>
         {/* 每个面板单独兜底：某个页签渲染出错时只废掉这一块，别把整页卸载成白屏 */}
@@ -75,7 +75,7 @@ export function Inspector() {
           {tab === 'capabilities' && <CapabilitiesPanel />}
           {tab === 'browser' && <BrowserPanel />}
           {tab === 'products' && <WorkProductsPanel />}
-          {tab === 'studio' && <DocumentStudio />}
+          {tab === 'files' && <FileWorkbench />}
           {tab === 'research' && <ResearchPanel />}
           {tab === 'activity' && <ActivityPanel />}
         </ErrorBoundary>

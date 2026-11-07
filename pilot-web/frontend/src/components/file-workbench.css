@@ -1,0 +1,32 @@
+/* 文件工作台：窄侧栏下先保证预览可读，表单纵向铺开。 */
+.fw { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 24px; font-size: 13px; }
+.fw-intro, .fw-hint { color: var(--muted, #6b7280); line-height: 1.55; margin: 0; }
+.fw-alert, .fw-notice { border-radius: 8px; padding: 8px 10px; line-height: 1.5; }
+.fw-alert { background: rgba(220, 38, 38, .1); color: #b91c1c; }
+.fw-notice { background: rgba(16, 185, 129, .1); color: #047857; }
+.fw-layout { display: grid; grid-template-columns: minmax(160px, 34%) 1fr; gap: 12px; align-items: start; }
+@media (max-width: 900px) { .fw-layout { grid-template-columns: 1fr; } }
+.fw-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow: auto; }
+.fw-file { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border, rgba(127, 127, 127, .25)); background: transparent; color: inherit; cursor: pointer; }
+.fw-file.is-active { border-color: var(--accent, #2563eb); background: rgba(37, 99, 235, .08); }
+.fw-file-name { font-weight: 600; word-break: break-all; }
+.fw-file-meta, .fw-empty { color: var(--muted, #6b7280); font-size: 12px; }
+.fw-file-flag { color: #b45309; font-size: 11px; }
+.fw-detail { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.fw-detail h3 { margin: 0; font-size: 15px; word-break: break-all; }
+.fw-detail h4 { margin: 0 0 6px; font-size: 13px; }
+.fw-toolbar, .fw-preview-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.fw-toolbar > div { display: flex; gap: 6px; }
+.fw-preview { border: 1px solid var(--border, rgba(127, 127, 127, .25)); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.fw-preview-head { justify-content: space-between; }
+.fw-preview-image { width: 100%; height: auto; display: block; background: #fff; border-radius: 6px; }
+.fw-annotation, .fw-versions, .fw-pdf { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border, rgba(127, 127, 127, .25)); padding-top: 10px; }
+.fw input[type="text"], .fw input:not([type]), .fw textarea, .fw select { width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border, rgba(127, 127, 127, .3)); background: transparent; color: inherit; font: inherit; }
+.fw textarea { min-height: 62px; resize: vertical; }
+.fw label { display: flex; flex-direction: column; gap: 4px; color: var(--muted, #6b7280); font-size: 12px; }
+.fw .fw-check { flex-direction: row; align-items: center; gap: 6px; }
+.fw .fw-check input { width: auto; }
+.fw-annotations, .fw-versions ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.fw-annotations li, .fw-versions li { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: 6px; background: rgba(127, 127, 127, .08); word-break: break-word; }
+.fw-text { max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; padding: 8px; border-radius: 6px; background: rgba(127, 127, 127, .08); font-size: 12px; margin: 0; }
+.fw-empty { padding: 8px 2px; line-height: 1.5; }

@@ -15,3 +15,5 @@
 - render_pptx / render_pdf: 生成每页 PNG，首四页回传图片；确认没有缺字、溢出和遮挡后再交付。render_pptx 的图片写在工作区，其余页可 read_file 逐页查看；render_pdf 的图片在产物目录，其余页用 pages 指定范围分段渲染，不能用 read_file 读取。
 
 最后使用 publish_artifact（若可用）保存最终文件和来源；清楚区分结构检查、公式计算、视觉检查以及未验证项。read_file 也能直接抽取 docx/xlsx/pptx/pdf 的文本用于独立读回。
+
+生成的真实文件留在工作区，文件工作台会自动索引、逐页预览并感知外部修改。不要为工作台另建 spec 可编辑源，也不要把产物放进私有目录导致 publish_artifact 不可达。用户在工作台留下批注时，以该文件为 source_path 用 edit_* 生成修订版，只改批注指向的部分，并报告输出路径与读回检查结果。

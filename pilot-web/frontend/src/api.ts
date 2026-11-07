@@ -59,8 +59,11 @@ export async function apiJson<T = unknown>(url: RequestInfo | URL, init?: Reques
 export class ApiError extends Error { readonly status: number; constructor(message: string, status: number) { super(message); this.status = status; } }
 
 const jsonBody = (method: string, body: unknown) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+/** 文件工作台的根路径；会话 id 必须转义，避免路径注入。 */
+const workbenchBase = (session: string) => `/api/sessions/${encodeURIComponent(session)}/workbench/files`;
+
 export const api = {
-  /* 产物工作台：与 office 工具同源，但这些调用完全不经过模型。 */
+  /* 旧版产物工作台保留为只读兼容，新的文件工作台不再产生这类数据。 */
   studioDocuments: (session: string, signal?: AbortSignal) => apiJson<ApiResults['studioDocuments']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents`, { signal }),
   studioDocument: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['studioDocument']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}`, { signal }),
   studioCreate: (session: string, body: Record<string, unknown>) => apiJson<ApiResults['studioCreate']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents`, jsonBody('POST', body)),
@@ -75,6 +78,38 @@ export const api = {
     if (!response.ok) throw new ApiError(`下载失败（HTTP ${response.status}）`, response.status);
     return response.blob();
   },
+  /* 文件工作台：所有端点都指向会话工作区里的真实文件，没有第二套可编辑源。 */
+  workbenchFiles: (session: string, signal?: AbortSignal) => apiJson<ApiResults['workbenchFiles']>(`${workbenchBase(session)}`, { signal }),
+  workbenchFile: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['workbenchFile']>(`${workbenchBase(session)}/${encodeURIComponent(id)}`, { signal }),
+  workbenchText: (session: string, id: string, signal?: AbortSignal) => apiJson<{ text: string }>(`${workbenchBase(session)}/${encodeURIComponent(id)}/text`, { signal }),
+  workbenchPreview: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['workbenchPreview']>(`${workbenchBase(session)}/${encodeURIComponent(id)}/preview`, { signal }, 60000),
+  /** 预览图需要走带鉴权的 fetch，转成 object URL 供 img 使用，调用方负责 revoke。 */
+  workbenchPreviewImage: async (session: string, id: string, page: number, signal?: AbortSignal) => {
+    const response = await apiFetch(`${workbenchBase(session)}/${encodeURIComponent(id)}/preview/${page}`, { signal }, 60000);
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `预览失败（${response.status}）`);
+    }
+    return URL.createObjectURL(await response.blob());
+  },
+  workbenchDownload: async (session: string, id: string, signal?: AbortSignal) => {
+    const response = await apiFetch(`${workbenchBase(session)}/${encodeURIComponent(id)}/download`, { signal }, 60000);
+    if (!response.ok) throw new Error(`下载失败（${response.status}）`);
+    return response.blob();
+  },
+  workbenchOpen: (session: string, id: string) => apiJson<ApiResults['workbenchOpen']>(`${workbenchBase(session)}/${encodeURIComponent(id)}/open`, { method: 'POST' }, 60000),
+  workbenchPublish: (session: string, id: string, body: { title?: string; summary?: string }) =>
+    apiJson<Record<string, unknown>>(`${workbenchBase(session)}/${encodeURIComponent(id)}/publish`, jsonBody('POST', body)),
+  workbenchVersions: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['workbenchVersions']>(`${workbenchBase(session)}/${encodeURIComponent(id)}/versions`, { signal }),
+  workbenchSnapshot: (session: string, id: string, label: string) => apiJson<ApiResults['workbenchVersion']>(`${workbenchBase(session)}/${encodeURIComponent(id)}/versions`, jsonBody('POST', { label })),
+  workbenchRevert: (session: string, id: string, version: number) => apiJson<ApiResults['workbenchVersion']>(`${workbenchBase(session)}/${encodeURIComponent(id)}/revert`, jsonBody('POST', { version })),
+  workbenchAnnotations: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['workbenchAnnotations']>(`${workbenchBase(session)}/${encodeURIComponent(id)}/annotations`, { signal }),
+  workbenchAnnotate: (session: string, id: string, body: { page: number; anchor?: string; text: string }) =>
+    apiJson<ApiResults['workbenchAnnotation']>(`${workbenchBase(session)}/${encodeURIComponent(id)}/annotations`, jsonBody('POST', body)),
+  workbenchChangeRequest: (session: string, id: string, annotationId: string) =>
+    apiJson<ApiResults['workbenchChangeRequest']>(`${workbenchBase(session)}/${encodeURIComponent(id)}/annotations/${encodeURIComponent(annotationId)}/request`, { method: 'POST' }),
+  workbenchPdfOperations: (session: string, id: string, operations: Record<string, unknown>) =>
+    apiJson<ApiResults['workbenchFile']>(`${workbenchBase(session)}/${encodeURIComponent(id)}/pdf-operations`, jsonBody('POST', operations), 60000),
   workProducts: (session: string, signal?: AbortSignal) => apiJson<ApiResults['workProducts']>(`/api/sessions/${encodeURIComponent(session)}/products`, { signal }),
   productPreview: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['productPreview']>(`/api/sessions/${encodeURIComponent(session)}/products/${encodeURIComponent(id)}/preview`, { signal }),
   skillDrafts: (session: string, signal?: AbortSignal) => apiJson<ApiResults['skillDrafts']>(`/api/sessions/${encodeURIComponent(session)}/skill-drafts`, { signal }),
