@@ -33,7 +33,7 @@ export function WorkspaceTree() {
 }
 
 function WorkspaceFiles({ sessionId, workspace }: { sessionId: string | null; workspace: string }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [localRevision, setRevision] = useState(0);
   const syncRevision = useStore(state => state.ui.filesRevision || 0);
   const revision = localRevision + syncRevision;

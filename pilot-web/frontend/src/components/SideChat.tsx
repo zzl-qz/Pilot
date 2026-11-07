@@ -160,7 +160,7 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
         } catch {
           return;
         }
-        if (cancelled) return;
+        if (cancelled || event.sessionId !== sessionId) return;
         if (event.sequence && event.sequence <= sequence) return;
         sequence = Math.max(sequence, Number(event.sequence) || 0);
         setThread((current) => reduceSideChat(current, event));

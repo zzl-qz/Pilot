@@ -178,7 +178,6 @@ export default function FileWorkbench() {
   const select = (id: string) => { setActiveId(id); setPage(1); setError(''); setShowText(false); };
 
   return <div className="fw">
-    <p className="fw-intro">工作区里的 Word / Excel / PPT / PDF 就是唯一源。可以直接在这里预览、批注并让模型按批注做最小改动，也可以用本机应用打开编辑，保存后这里会自动感知。</p>
     {error && <div role="alert" className="fw-alert">{error}</div>}
     {notice && <div role="status" className="fw-notice">{notice}</div>}
     {!session && <p role="status">请先打开一个会话。</p>}

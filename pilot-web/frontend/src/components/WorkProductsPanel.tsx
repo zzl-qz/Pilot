@@ -101,14 +101,14 @@ function ProductDetail({ session, product }: { session: string; product: S.WorkP
     } catch (e) { if (alive.current) setError(errorInfo(e).message || '操作失败'); }
     finally { if (alive.current) setDownloading(false); }
   };
-  /** 成果本来就是工作区里的真实文件，直接切到文件工作台查看，不再抽取文本另建一份源。 */
+  /** 专项文件审阅只从具体成果进入，不在全局导航占一个平级入口。 */
   const openInWorkbench = () => {
     useStore.getState().setUi({ inspectorOpen: true, inspectorTab: 'files', workbenchFileId: null });
   };
   return <article className="work-detail">
     <h2 tabIndex={-1}>{product.title}</h2><p>{product.summary}</p>
     <div className="work-toolbar"><small>{product.filename} · {dateText(product.createdAt)}</small>
-      <button className="btn" onClick={openInWorkbench}>在文件工作台查看</button>
+      <button className="btn" onClick={openInWorkbench}>审阅工作区文件</button>
       <button className="btn" onClick={download} disabled={downloading}>{downloading ? '正在下载…' : '下载文件'}</button></div>
     {error && <div role="alert" className="work-error">{error}<button className="btn" onClick={() => setRetry(v => v + 1)}>重试预览</button></div>}
     {!preview && !error && <p role="status">正在读取预览…</p>}

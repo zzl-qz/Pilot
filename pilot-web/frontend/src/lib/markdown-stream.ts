@@ -80,6 +80,13 @@ export function sharedBlockPrefix(previous: readonly MarkdownBlock[] | null | un
   return index;
 }
 
+function continuesList(block: MarkdownBlock | undefined, line: string | undefined) {
+  if (!block || !line) return false;
+  if (block.node.nodeName === 'OL') return /^\s{0,3}(?:\d+[.)]\s+.*|\d+[.)]?)\s*$/.test(line);
+  if (block.node.nodeName === 'UL') return /^\s{0,3}(?:[-*+]\s+.*|[-*+])\s*$/.test(line);
+  return false;
+}
+
 /**
  * 创建一块容器上的流式 Markdown 渲染器。
  *
@@ -118,7 +125,17 @@ export function createBlockStreamRenderer(container: HTMLElement, { parse }: { p
     if (changedAt < 0) {
       return false;
     }
-    const resume = resumeLineIndex(blocks, changedAt);
+    let resume = resumeLineIndex(blocks, changedAt);
+    const precedingBlock = blocks.find((block) => Number(block.end) === changedAt);
+    if (continuesList(precedingBlock, nextLines[changedAt])) {
+      resume = Math.min(resume, precedingBlock!.start);
+    }
+    const lastBlock = blocks.at(-1);
+    // An unfinished list/table/paragraph can absorb newly appended lines, even when
+    // the new line starts exactly at the previous block's exclusive end.
+    if (lastBlock && changedAt >= lastBlock.end) {
+      resume = Math.min(resume, lastBlock.start);
+    }
     const head = blocks.filter((block) => Number(block.end) <= resume);
     const parsed = parseBlocks(nextLines.slice(resume), resume) || [];
     const next = head.concat(parsed.map((record) => ({

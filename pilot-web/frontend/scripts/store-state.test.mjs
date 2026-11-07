@@ -16,9 +16,9 @@ function reset() {
 }
 test('SSE 同帧批处理保留顺序，临时预览不占正式游标', () => {
   reset(); const state = useStore.getState();
-  state.handleEvent({ type: 'run.started', sequence: 1, runId: 'r', payload: { input: '任务' } });
-  state.handleEvent({ type: 'assistant.preview', sequence: 2, runId: 'r', payload: { text: '预览' } });
-  state.handleEvent({ type: 'assistant.delta', sequence: 2, runId: 'r', payload: { text: '结果' } });
+  state.handleEvent({ type: 'run.started', sessionId: 's', sequence: 1, runId: 'r', payload: { input: '任务' } });
+  state.handleEvent({ type: 'assistant.preview', sessionId: 's', sequence: 2, runId: 'r', payload: { text: '预览' } });
+  state.handleEvent({ type: 'assistant.delta', sessionId: 's', sequence: 2, runId: 'r', payload: { text: '结果' } });
   assert.equal(useStore.getState().thread.rows.length, 0);
   state.flushEvents();
   assert.equal(useStore.getState().thread.rows.at(-1).reply.text, '结果');
@@ -27,23 +27,32 @@ test('SSE 同帧批处理保留顺序，临时预览不占正式游标', () => {
 test('已提交游标前的重复事件和其它会话的事件不进入当前线程', () => {
   reset(); useStore.setState(draft => { draft.thread.cursor = 5; });
   const state = useStore.getState();
-  state.handleEvent({ type: 'assistant.delta', sequence: 4, payload: { text: '重复' } });
+  state.handleEvent({ type: 'assistant.delta', sessionId: 's', sequence: 4, payload: { text: '重复' } });
   state.handleEvent({ type: 'run.started', sequence: 6, sessionId: 'other', payload: { input: '别的会话' } });
+  state.handleEvent({ type: 'run.started', sequence: 6, payload: { input: '缺少会话 ID' } });
   state.flushEvents(); assert.equal(useStore.getState().thread.rows.length, 0);
 });
 test('切换至新任务会清空尚未提交的 SSE 事件', () => {
   reset(); const state = useStore.getState();
-  state.handleEvent({ type: 'run.started', sequence: 1, payload: { input: '旧任务' } });
+  state.handleEvent({ type: 'run.started', sessionId: 's', sequence: 1, payload: { input: '旧任务' } });
   state.startNewSession(); state.flushEvents();
   assert.equal(useStore.getState().thread.rows.length, 0);
   assert.equal(useStore.getState().running, false); closeStreams();
 });
 test('同一帧内重复的正式 SSE 事件只能应用一次', () => {
   reset(); const state = useStore.getState();
-  state.handleEvent({ type: 'run.started', sequence: 1, payload: { input: '任务' } });
-  const event = { type: 'assistant.delta', sequence: 2, payload: { text: '一次' } };
+  state.handleEvent({ type: 'run.started', sessionId: 's', sequence: 1, payload: { input: '任务' } });
+  const event = { type: 'assistant.delta', sessionId: 's', sequence: 2, payload: { text: '一次' } };
   state.handleEvent(event); state.handleEvent(event); state.flushEvents();
   assert.equal(useStore.getState().thread.rows.at(-1).reply.text, '一次');
+});
+test('会话切换后，已排队的旧会话事件不会写入新会话', () => {
+  reset(); const state = useStore.getState();
+  state.handleEvent({ type: 'run.started', sessionId: 's', sequence: 1, payload: { input: '旧会话任务' } });
+  useStore.setState(draft => { draft.sessionId = 'new'; draft.sessionEpoch = 2; draft.thread = initialThread(); });
+  state.flushEvents();
+  assert.equal(useStore.getState().thread.rows.length, 0);
+  assert.equal(useStore.getState().running, false);
 });
 test('命令任务列表的迟到响应不能覆盖新会话', async () => {
   const pending = deferred(); const saved = fetchHandler;

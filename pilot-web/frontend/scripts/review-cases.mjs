@@ -117,9 +117,9 @@ export async function checkReview(page, name, temp) {
     assert.ok(bounds.scroll <= bounds.width + 1, `${width}px 工具栏无横向溢出`);
     await more.click();
     const box = await menu.boundingBox(); assert.ok(box.x >= 0 && box.x + box.width <= width, `${width}px 菜单保持可见`);
-    await page.screenshot({ path: join(temp, `${name}-review-menu-${width}.png`) });
+    if (name === 'chromium') await page.screenshot({ path: join(temp, `${name}-review-menu-${width}.png`), animations: 'disabled' });
     await page.keyboard.press('Escape');
-    await page.screenshot({ path: join(temp, `${name}-review-toolbar-${width}.png`) });
+    if (name === 'chromium') await page.screenshot({ path: join(temp, `${name}-review-toolbar-${width}.png`), animations: 'disabled' });
     await openBranch();
     const form = await dialog.locator('.modal-box').boundingBox(); assert.ok(form.x >= 0 && form.x + form.width <= width);
     await page.keyboard.press('Escape');

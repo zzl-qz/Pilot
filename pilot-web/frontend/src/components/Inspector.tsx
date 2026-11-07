@@ -21,23 +21,25 @@ import { setMirrorPainter } from '../store.js';
 import { formatTime } from '../thread-utils.js';
 import { SideChatPanel } from './SideChat.jsx';
 import { MarkdownBody } from './MarkdownBody.jsx';
+import FileWorkbench from './FileWorkbench.js';
 
 import ResearchPanel from './ResearchPanel.jsx';
 import WorkProductsPanel from './WorkProductsPanel.jsx';
-import FileWorkbench from './FileWorkbench.js';
 
 const TABS = [
   { id: 'products', label: '成果', title: '交付文件、来源与技能审核' },
-  { id: 'files', label: '文件工作台', title: '预览工作区里的真实 Office 文件、批注与发布成果' },
   { id: 'chat', label: '对话', title: '侧边对话：问和主线无关的问题，不打断正在跑的任务' },
   { id: 'changes', label: '变更', title: '工作区改动：逐个文件看差异、撤销' },
   { id: 'preview', label: '预览', title: '只读预览文件内容' },
   { id: 'commands', label: '命令', title: '命令任务、实时输出与停止' },
+];
+const MORE_TABS = [
   { id: 'capabilities', label: '能力', title: '当前生效的工具、技能与 MCP 服务器' },
-  { id: 'browser', label: '浏览器', title: '内置浏览器：直接输地址使用，也能看到智能体的操作' },
+  { id: 'browser', label: '浏览器', title: '内置浏览器与智能体操作' },
   { id: 'research', label: '开源参考', title: '已阅读来源、复用决定与许可证说明' },
   { id: 'activity', label: '活动', title: '事件时间线' }
 ];
+const ALL_TABS = [...TABS, ...MORE_TABS];
 
 /** 选择器默认值必须稳定，否则每次返回新数组会让 zustand 反复触发重渲染。 */
 const NO_TASKS: never[] = [];
@@ -46,12 +48,11 @@ const NO_TASKS: never[] = [];
 export function Inspector() {
   const tab = useStore((state) => state.ui.inspectorTab);
   const open = useStore((state) => state.ui.inspectorOpen);
-  const navRef = useRef<HTMLElement>(null);
+  const navRef = useRef<HTMLDivElement>(null);
+  const moreRef = useRef<HTMLDetailsElement>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
 
-  /*
-   * 7 个页签在窄面板里放不下，横向滚动时选中的那个可能滑出视野；
-   * 切换后把它滚回可见区域，用户才知道自己在哪一页。
-   */
+  // 切换后将当前常用页签滚回可见区域。
   useEffect(() => {
     const active = navRef.current?.querySelector('[aria-selected="true"]');
     active?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
@@ -63,9 +64,9 @@ export function Inspector() {
   return (
     <aside id="activity" className={`activity inspector is-rail is-open${tab === 'products' ? ' products-inspector' : ''}`} aria-label="工作区面板">
       <div className="inspector-main">
-      <header className="inspector-panel-head"><div><strong>{TABS.find(item => item.id === tab)?.label}</strong><span>{tab === 'products' ? '交付文件与可复用的经验' : tab === 'files' ? '工作区文件预览、批注与交付，真实文件是唯一源' : tab === 'research' ? '当前任务记录的开源依据' : tab === 'preview' ? '只读文件预览' : tab === 'changes' ? '检查工作区的代码改动' : tab === 'commands' ? '命令状态与输出' : tab === 'activity' ? '任务执行记录' : tab === 'capabilities' ? '当前可用的工具与技能' : tab === 'browser' ? '浏览页面与引用内容' : '从当前任务分叉的临时对话，关掉即丢弃'}</span></div><button type="button" className="icon-btn" aria-label="关闭工作区面板" onClick={() => useStore.getState().setUi({ inspectorOpen: false, reviewExpanded: false })}><Icon name="close" /></button></header>
+      <header className="inspector-panel-head"><strong id="inspector-title">{tab === 'files' ? '审阅文件' : ALL_TABS.find(item => item.id === tab)?.label}</strong><button type="button" className="icon-btn" aria-label="关闭工作区面板" onClick={() => useStore.getState().setUi({ inspectorOpen: false, reviewExpanded: false })}><Icon name="close" /></button></header>
       {tab === 'activity' && <div className="inspector-head"><Filters /></div>}
-      <div className="inspector-body" id={`inspector-panel-${tab}`} role="tabpanel" aria-labelledby={`inspector-tab-${tab}`}>
+      <div className="inspector-body" id={`inspector-panel-${tab}`} role="tabpanel" aria-labelledby={tab === 'files' ? 'inspector-title' : `inspector-tab-${tab}`}>
         {/* 每个面板单独兜底：某个页签渲染出错时只废掉这一块，别把整页卸载成白屏 */}
         <ErrorBoundary key={tab} name={TABS.find((item) => item.id === tab)?.label || '面板'} onReset={() => useStore.getState().setUi({ inspectorTab: 'activity' })}>
           {tab === 'chat' && <SideChatPanel />}
@@ -81,7 +82,7 @@ export function Inspector() {
         </ErrorBoundary>
       </div>
       </div>
-      <nav id="panel-tabs" className="inspector-rail" role="tablist" aria-label="面板切换" aria-orientation="vertical" ref={navRef} onKeyDown={event => {
+      <nav className="inspector-rail" aria-label="工作区面板导航"><div id="panel-tabs" role="tablist" aria-label="常用面板" aria-orientation="vertical" ref={navRef} onKeyDown={event => {
         const keys = ['ArrowUp', 'ArrowDown', 'Home', 'End'];
         if (!keys.includes(event.key)) return;
         event.preventDefault();
@@ -110,6 +111,21 @@ export function Inspector() {
             {item.id === 'browser' && <BrowserDot />}
           </button>
         ))}
+      </div>
+      <details className="inspector-more-menu" ref={moreRef} onToggle={event => setMoreOpen(event.currentTarget.open)}>
+        <summary role="button" className={`rail-button${MORE_TABS.some(item => item.id === tab) ? ' is-on' : ''}`} aria-label="更多工具" aria-haspopup="menu" aria-expanded={moreOpen} title="更多工具" onKeyDown={event => {
+          if (event.key === 'Escape' && moreRef.current?.open) { event.preventDefault(); moreRef.current.open = false; setMoreOpen(false); event.currentTarget.focus(); }
+        }}><RailIcon id="more" /><span className="rail-tab-label">更多工具</span></summary>
+        <div className="inspector-more-items" role="menu" aria-label="更多工具">
+          {MORE_TABS.map(item => <button key={item.id} type="button" role="menuitem" title={item.title} onKeyDown={event => {
+            if (event.key === 'Escape') { event.preventDefault(); if (moreRef.current) moreRef.current.open = false; setMoreOpen(false); moreRef.current?.querySelector('summary')?.focus(); }
+          }} onClick={() => {
+            useStore.getState().setUi({ inspectorTab: item.id });
+            if (moreRef.current) moreRef.current.open = false;
+            setMoreOpen(false);
+          }}><RailIcon id={item.id} /><span>{item.label}</span></button>)}
+        </div>
+      </details>
       </nav>
     </aside>
   );
@@ -820,7 +836,7 @@ function PreviewPanel() {
   const data = useStore((state) => state._previewData);
   const loading = useStore((state) => state._previewLoading);
   const report = useStore((state) => state.changeReport);
-  const [wrap, setWrap] = useState(true);
+  const [wrap, setWrap] = useState(false);
 
   const changed = useMemo(() => sortChangeFiles<ChangeFile>(Array.isArray(report?.files) ? report.files : []).slice(0, 12), [report]);
   const isMarkdown = /\.(md|markdown|mdx)$/i.test(path || '');

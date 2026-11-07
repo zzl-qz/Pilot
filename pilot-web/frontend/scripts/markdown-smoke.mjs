@@ -59,13 +59,30 @@ async function run(page, name, url) {
   await page.waitForFunction(() => document.querySelector('#target pre')?.hidden === false && document.querySelector('.md-math')?.textContent === 'fallback^2');
   await page.evaluate(() => { stream.update('# 稳定标题\n\n增长的内容'); window.stableNode = document.querySelector('#stream h1'); stream.update('# 稳定标题\n\n增长的内容，第二段'); });
   assert.equal(await page.evaluate(() => stableNode === document.querySelector('#stream h1')), true);
+  await page.evaluate(() => {
+    stream.reset();
+    stream.update('1. **建立');
+    stream.update('1. **建立\n\n1. **建立真实任务质量');
+    stream.update('1. **建立\n\n1. **建立真实任务质量\n\n1. **建立真实任务质量基线');
+  });
+  assert.equal(await page.locator('#stream ol').count(), 1, '流式列表必须持续复用同一个有序列表');
+  assert.equal(await page.locator('#stream ol li').count(), 3, '追加列表项不能把旧尾块留成另一个 1.');
+  assert.equal(await page.locator('#stream ol li').nth(2).innerText(), '**建立真实任务质量基线');
+  await page.evaluate(() => {
+    stream.reset();
+    const text = '1. ALPHA\n2. BRAVO\n3. CHARLIE\n4. DELTA';
+    for (let index = 1; index <= text.length; index += 1) stream.update(text.slice(0, index));
+  });
+  assert.equal(await page.locator('#stream ol').count(), 1, '逐字增长的真实编号列表不能拆成多个 ol');
+  assert.equal(await page.locator('#stream ol li').count(), 4, '逐字增长的编号列表必须恰好保留四项');
+  assert.equal(await page.locator('#stream ol').innerText(), 'ALPHA\nBRAVO\nCHARLIE\nDELTA');
   await page.evaluate(() => stream.update('# 稳定标题'));
   assert.equal(await page.locator('#stream p').count(), 0);
   await page.evaluate(() => stream.reset());
   assert.equal(await page.locator('#stream > *').count(), 0);
   assert.deepEqual(errors, []);
   await page.screenshot({ path: join(output, `${name}.png`) });
-  console.log(`${name}: PASS Markdown grammar, links, copy/failure, SVG sanitizing, sandboxed HTML, math/diagram/fallback, stream node reuse/reset`);
+  console.log(`${name}: PASS Markdown grammar, links, copy/failure, SVG sanitizing, sandboxed HTML, math/diagram/fallback, streaming list, node reuse/reset`);
 }
 try {
   await server.listen(); const url = `http://127.0.0.1:${server.httpServer.address().port}/__markdown`;

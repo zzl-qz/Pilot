@@ -761,7 +761,7 @@ const PlanCard = memo(function PlanCard({ row }: { row: PlanRow }) {
   const done = items.filter((item) => item.status === 'completed' || item.status === 'done').length;
   const finished = items.length > 0 && done === items.length;
   return (
-    <aside className="plan-card">
+    <aside className={`plan-card${finished ? ' is-complete' : ''}`}>
       <details open={!finished}>
       <summary className="plan-head">
         <span className="plan-title">执行计划</span>
@@ -803,15 +803,22 @@ function CompactionCard({ row }: { row: CompactionRow }) {
 
 function ResultCard({ row, duplicate }: { row: ResultRow; duplicate: boolean }) {
   const rollbackRun = useStore((state) => state.rollbackRun);
-  const continueRun = useStore((state) => state.continueRun);
+  const compact = (!row.detail || duplicate || row.continued || row.resumable) && !row.changedFiles?.length;
   return (
-    <article className={`turn-card is-${row.tone}${(!row.detail || duplicate) && !row.changedFiles?.length && !row.resumable ? ' is-compact' : ''}`}>
+    <article className={`turn-card is-${row.tone}${compact ? ' is-compact' : ''}${row.continued ? ' is-continued' : ''}`}>
       <div className="turn-card-head">
         <span className="turn-card-title">{row.title}</span>
         {row.continued && <span className="turn-resolved">已继续执行</span>}
       </div>
       {row.detail && !duplicate && (
-        String(row.detail).length > 280
+        row.continued || row.resumable
+          ? (
+            <details className="turn-card-more">
+              <summary>{row.continued ? '查看错误详情' : '查看运行详情'}</summary>
+              <div className="turn-card-detail"><MarkdownBody text={row.detail} /></div>
+            </details>
+          )
+          : String(row.detail).length > 280
           ? (
             <details className="turn-card-more">
               <summary>查看结论</summary>
@@ -837,9 +844,6 @@ function ResultCard({ row, duplicate }: { row: ResultRow; duplicate: boolean }) 
         </div>
       )}
       <div className="turn-actions">
-        {row.resumable && !row.continued && !useStore.getState().running && (
-          <button type="button" className="btn is-continue" onClick={() => continueRun()}>继续执行</button>
-        )}
         {!row.continued && !!(row.changedFiles || []).length && (
           <button type="button" className="btn" onClick={() => rollbackRun(row.runIds?.[0])}>回滚本次改动</button>
         )}

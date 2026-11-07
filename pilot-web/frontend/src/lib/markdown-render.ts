@@ -142,8 +142,8 @@ function markdownBlockRecords(lines: string[], offset = 0): MarkdownBlock[] {
 
     const source = sourceBlockAt(lines, i);
     if (source) {
-      push(codeBlock(source.lines.join('\n'), source.language), start);
       i = source.next;
+      push(codeBlock(source.lines.join('\n'), source.language), start);
       continue;
     }
 
@@ -184,8 +184,8 @@ function markdownBlockRecords(lines: string[], offset = 0): MarkdownBlock[] {
 
     if (isTableStart(lines, i)) {
       const table = buildTable(lines, i);
-      push(table.node, start);
       i = table.next;
+      push(table.node, start);
       continue;
     }
 
@@ -214,8 +214,8 @@ function markdownBlockRecords(lines: string[], offset = 0): MarkdownBlock[] {
 
     if (LIST_PATTERN.test(line)) {
       const list = buildList(lines, i);
-      push(list.node, start);
       i = list.next;
+      push(list.node, start);
       continue;
     }
 

@@ -50,7 +50,7 @@ final class StreamRepeatGuard {
             tail.delete(0, tail.length() - WINDOW_CHARS);
         }
         sinceCheck += delta.length();
-        if (sinceCheck < CHECK_EVERY_CHARS) {
+        if (sinceCheck < CHECK_EVERY_CHARS && delta.indexOf('\n') < 0) {
             return 0;
         }
         sinceCheck = 0;

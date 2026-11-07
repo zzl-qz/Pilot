@@ -59,6 +59,18 @@ class StreamRepeatGuardTest {
     }
 
     @Test
+    void flagsScreenshotLikeRepeatedNumberedItemsAtLineBoundaries() {
+        String prefix = "3. 按产品方向建立 PO 真实任务评测。这比继续堆局部功能更能决定后续该优化什么：覆盖调研、Excel";
+        String[] lines = {prefix.substring(0, 30), prefix.substring(0, 35), prefix.substring(0, 40), prefix.substring(0, 45), prefix};
+        StreamRepeatGuard guard = new StreamRepeatGuard();
+        int hits = 0;
+        for (String line : lines) {
+            hits = Math.max(hits, guard.accept(line + "\n\n"));
+        }
+        assertTrue(hits >= 5, "重复编号且逐项扩写应在换行时及时拦截");
+    }
+
+    @Test
     void keepsNormalChecklists() {
         String raw = "- 核对时间线\n- 精简技术技能\n- 让量化结果可复核\n- 区分开发验证与生产结果\n- 减少职责描述里的实现细节密度\n";
         StreamRepeatGuard guard = new StreamRepeatGuard();

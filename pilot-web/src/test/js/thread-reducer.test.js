@@ -115,6 +115,15 @@ test('重试或复读中止时作废旧预览，新一段从空白开始', () =>
   assert.equal(turnOf(state).reply.preview, '重新组织');
 });
 
+test('思考流被中止时清空旧片段，再显示重试内容', () => {
+  const state = draft();
+  applyEvent(state, { type: 'assistant.reasoning', payload: { text: '重复思考' } }, { live: true });
+  applyEvent(state, { type: 'assistant.reasoning', payload: { text: '', reset: true } }, { live: true });
+  assert.equal(turnOf(state).thinking.text, '');
+  applyEvent(state, { type: 'assistant.reasoning', payload: { text: '重新检查' } }, { live: true });
+  assert.equal(turnOf(state).thinking.text, '重新检查');
+});
+
 test('瞬时事件不推进游标，落库事件才推进', () => {
   const state = draft();
   applyEvent(state, { type: 'assistant.preview', sequence: 7, payload: { text: 'x' } }, { live: true });

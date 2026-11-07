@@ -77,6 +77,8 @@ export interface AssistantPreview {
 /** AssistantReasoning.java / AssistantReasoning */
 export interface AssistantReasoning {
   text: string;
+  /** 丢弃此前的推理片段：本次模型尝试被判定为复读。 */
+  reset?: boolean;
 }
 
 /** Attachment.java / Attachment */

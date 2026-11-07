@@ -34,13 +34,73 @@ async function run(page,name){
   await page.setViewportSize({width,height:900});await page.goto(url);await page.locator('.msg-assistant').last().waitFor();
   await page.evaluate(theme=>store.getState().setTheme(theme),theme);
   await page.evaluate(async()=>{await document.fonts.ready;await Promise.allSettled(document.getAnimations().filter(a=>a.effect.getComputedTiming().iterations!==Infinity).map(a=>a.finished));});
-  await page.screenshot({path:join(output,`${name}-${theme}-${width}.png`)});
+  await page.screenshot({path:join(output,`${name}-${theme}-${width}.png`),timeout:20000,animations:'disabled'});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   const box=await page.locator('#run-state').boundingBox();assert.ok(box.width>32&&box.x+box.width<=width);
   const composer=await page.locator('.composer').boundingBox();assert.ok(composer.x>=0&&composer.y+composer.height<=900);
  }
- if(process.argv.includes('--capture-only'))return;
  await page.setViewportSize({width:1440,height:900});await page.goto(url);await page.locator('#run-state').waitFor();
+ await page.evaluate(()=>store.setState(s=>({thread:{...s.thread,rows:[...s.thread.rows,
+  {type:'plan',key:'plan-done',items:[{step:'准备输入',status:'completed'},{step:'执行任务',status:'completed'},{step:'检查结果',status:'completed'},{step:'整理交付',status:'completed'}]},
+  {type:'result',key:'continued-error',tone:'error',title:'运行失败 · MODEL_ERROR',detail:'模型调用失败：模型请求被中断',runIds:['previous-run'],continued:true,changedFiles:[]},
+  {type:'result',key:'resumable-run',tone:'warn',title:'运行已取消',detail:'运行已被用户取消。',runIds:['interrupted-run'],resumable:true,changedFiles:[]}
+ ]}})));
+ await page.locator('.plan-card.is-complete').waitFor();
+ assert.equal(await page.locator('.plan-card.is-complete .plan-list').isVisible(),false,'完成计划默认收起步骤');
+ await page.locator('.plan-card.is-complete summary').click();
+ assert.equal(await page.locator('.plan-card.is-complete .plan-item').count(),4,'完成计划仍可展开查看全部步骤');
+ await page.locator('.plan-card.is-complete summary').click();
+ assert.equal(await page.locator('.turn-card.is-continued .turn-card-detail').isVisible(),false,'已继续执行的错误默认不展开诊断详情');
+ await page.locator('.turn-card.is-continued summary').click();
+ assert.equal(await page.locator('#task-resume').count(),1,'需要恢复时输入区只显示一个继续操作');
+ assert.equal(await page.locator('.turn-card .btn.is-continue').count(),0,'历史运行结果不重复显示继续按钮');
+ await page.getByText('模型调用失败：模型请求被中断',{exact:true}).waitFor();
+ await page.locator('.turn-card.is-continued summary').click();
+ await page.screenshot({path:join(output,`${name}-history-hierarchy.png`),timeout:20000,animations:'disabled'});
+ await page.reload();await page.locator('#run-state').waitFor();
+ await page.evaluate(()=>{
+  const state=store.getState();
+  state.setUi({inspectorOpen:true,inspectorTab:'preview',previewPath:'pilot-core/src/main/java/Example.java'});
+  store.setState({_previewData:{path:'pilot-core/src/main/java/Example.java',content:'public class Example {\n  public static void main(String[] args) { System.out.println("a long line that should remain horizontally scrollable in code preview"); }\n}',size:140}});
+ });
+ await page.locator('#preview-body').waitFor();
+ assert.equal(await page.locator('.inspector-rail [role="tab"]').count(),5,'常用面板保持精简');
+ assert.equal(await page.getByRole('tab',{name:'文件工作台'}).count(),0,'文件专项能力不与预览、变更并列');
+ assert.equal(await page.getByRole('menuitem',{name:'活动',exact:true}).count(),0,'低频工具默认收起');
+ await page.getByRole('button',{name:'更多工具',exact:true}).click();
+ assert.equal(await page.getByRole('menuitem',{name:'活动',exact:true}).count(),1,'低频工具仍可从更多菜单访问');
+ await page.keyboard.press('Escape');
+ await page.waitForFunction(()=>!document.querySelector('.inspector-more-menu')?.open);
+ assert.equal(await page.getByRole('button',{name:'更多工具',exact:true}).getAttribute('aria-expanded'),'false','Escape 收起更多工具菜单');
+ assert.equal(await page.locator('.inspector-rail [role="tab"]').evaluateAll(items=>items.every(item=>item.getAttribute('aria-label')&&item.getAttribute('title'))),true,'图标导航仍提供可访问名称与悬停说明');
+ assert.equal(await page.locator('.inspector-rail .rail-tab-label').first().evaluate(el=>getComputedStyle(el).clipPath),'inset(50%)','面板名称由页头显示，避免导航标签挤成多行');
+ assert.equal(await page.locator('.preview-wrap').getAttribute('aria-pressed'),'false','代码预览默认保持源码行结构');
+ assert.equal(await page.locator('#preview-body').evaluate(el=>getComputedStyle(el).whiteSpace),'pre','代码预览默认横向滚动，不把源码挤成窄列');
+ await page.screenshot({path:join(output,`${name}-preview-desktop.png`),timeout:20000,animations:'disabled'});
+ for(const width of [1440,1100,961,768,390]){
+  await page.setViewportSize({width,height:900});
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  await page.waitForFunction(()=>![...document.querySelector('.activity.inspector')?.getAnimations()||[]].some(animation=>animation.playState==='running'));
+  await page.waitForFunction(()=>document.querySelector('.activity.inspector')?.getBoundingClientRect().width>0);
+  const panel=await page.locator('.activity.inspector').boundingBox();
+  assert.ok(panel.x>=0&&panel.x+panel.width<=width+1,`预览面板在 ${width}px 视口内`);
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`预览面板在 ${width}px 不制造横向溢出`);
+  if(width===1440)assert.ok(panel.width>=450,`桌面预览面板获得源码可读宽度，实际 ${panel.width}px`);
+  if(width<=960){
+   const layout=await page.locator('.activity.inspector').evaluate(el=>({className:el.parentElement?.parentElement?.className,viewport:innerWidth,inline:el.parentElement?.parentElement?.getAttribute('style'),position:getComputedStyle(el).position,width:getComputedStyle(el).width,activity:el.getBoundingClientRect().width,rail:getComputedStyle(document.querySelector('.navigation-rail')).display}));
+   assert.ok(Math.abs(panel.x)<1&&Math.abs(panel.width-width)<1,`窄屏预览进入单面板布局，实际 ${panel.x}/${panel.width}，布局 ${JSON.stringify(layout)}`);
+   if(width===390)await page.screenshot({path:join(output,`${name}-preview-mobile.png`),timeout:20000,animations:'disabled'});
+  }
+ }
+ await page.setViewportSize({width:1440,height:900});
+ const previewGutter=await page.locator('#gutter-right').boundingBox();
+ const previewWidthBefore=await page.locator('.activity.inspector').evaluate(el=>el.getBoundingClientRect().width);
+ await page.mouse.move(previewGutter.x+5,300);await page.mouse.down();await page.mouse.move(previewGutter.x-35,300);await page.mouse.up();
+ const previewWidthAfter=await page.locator('.activity.inspector').evaluate(el=>el.getBoundingClientRect().width);
+ assert.ok(previewWidthAfter>=previewWidthBefore+35,'预览拖拽从当前自适应宽度连续调整');
+ await page.locator('.preview-wrap').click();
+ assert.equal(await page.locator('#preview-body').evaluate(el=>getComputedStyle(el).whiteSpace),'pre-wrap','用户可切换源码自动换行');
+ await page.reload();await page.locator('#run-state').waitFor();
  for(const [patch,tone,label] of [
   [{running:false,lastOutcome:'completed',queueHeld:false,pendingApprovals:{}},'ready','就绪'],
   [{running:true,lastOutcome:'',pendingApprovals:{},lastEventAt:Date.now()},'running','正在思考'],
@@ -51,7 +111,7 @@ async function run(page,name){
   [{lastOutcome:'HTTP_502'},'error','运行失败']]){
   await page.evaluate(patch=>store.setState(patch),patch);
   await page.waitForFunction(({tone,label})=>document.getElementById('run-state').dataset.tone===tone&&document.getElementById('run-state').textContent.includes(label),{tone,label});
-  await page.screenshot({path:join(output,`${name}-state-${tone}-${label}.png`)});
+  await page.screenshot({path:join(output,`${name}-state-${tone}-${label}.png`),timeout:20000,animations:'disabled'});
   await page.setViewportSize({width:390,height:900});
   assert.ok(await page.locator('.run-state-label').evaluate(el=>el.scrollWidth<=el.clientWidth),`状态文字在窄屏被截断: ${label}`);
   await page.setViewportSize({width:1440,height:900});
@@ -60,7 +120,7 @@ async function run(page,name){
  await page.locator('#input-flow').fill('继续检查');assert.equal(await page.locator('#send').isDisabled(),false);
  await page.evaluate(async()=>{await Promise.allSettled(document.getAnimations().filter(a=>a.effect.getComputedTiming().iterations!==Infinity).map(a=>a.finished));await new Promise(requestAnimationFrame);});
  assert.equal(await page.locator('.composer').evaluate(el=>getComputedStyle(el).borderTopWidth),'1px');
- await page.screenshot({path:join(output,`${name}-composer-focus.png`)});
+ await page.screenshot({path:join(output,`${name}-composer-focus.png`),timeout:20000,animations:'disabled'});
  await page.locator('#input-flow').fill('');assert.equal(await page.locator('#send').isDisabled(),true);
  if(await page.locator('#sidebar-toggle').getAttribute('aria-expanded')!=='true')await page.locator('#sidebar-toggle').click();
  await page.locator('.session-more').first().focus();await page.keyboard.press('Enter');await page.getByRole('menu').waitFor();await page.keyboard.press('Escape');
@@ -87,7 +147,20 @@ async function run(page,name){
 }
 try{
  if(process.argv.includes('--serve')){console.log(url);await new Promise(()=>{});}
- browser=await chromium.launch({channel:'chrome',headless:true});await run(await browser.newPage(),'chromium');await browser.close();browser=null;
+ browser=await chromium.launch({channel:'chrome',headless:true});await run(await browser.newPage(),'chromium');
+ const touchContext=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+ const touchPage=await touchContext.newPage();await touchPage.route('**/api/**',route=>route.fulfill({json:{}}));await touchPage.goto(url);
+ await touchPage.evaluate(()=>store.getState().setUi({inspectorOpen:true,inspectorTab:'preview'}));
+ await touchPage.locator('#panel-tabs').waitFor();
+ assert.equal(await touchPage.locator('.inspector-rail .rail-tab-label').first().evaluate(el=>getComputedStyle(el).position),'static','触屏设备保留可见面板名称');
+ await touchPage.getByRole('button',{name:'更多工具',exact:true}).click();
+ const moreBox=await touchPage.getByRole('menu',{name:'更多工具'}).boundingBox();
+ assert.ok(moreBox.x>=0&&moreBox.x+moreBox.width<=390,'触屏更多工具菜单保持在视口内');
+ assert.equal(await touchPage.getByRole('menuitem',{name:'能力',exact:true}).count(),1,'触屏仍能访问低频工具');
+ await touchPage.screenshot({path:join(output,'chromium-touch-preview.png'),timeout:20000,animations:'disabled'});
+ await touchPage.getByRole('menuitem',{name:'能力',exact:true}).click();
+ assert.equal(await touchPage.evaluate(()=>store.getState().ui.inspectorTab),'capabilities','触屏菜单可以切换工具面板');
+ await touchContext.close();await browser.close();browser=null;
  if(!process.argv.includes('--capture-only')){
   const main=join(output,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;electron=await _electron.launch({executablePath:electronBinary(),args:[main],env});await run(await electron.firstWindow(),'electron');

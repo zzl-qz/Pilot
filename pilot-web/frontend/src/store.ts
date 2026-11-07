@@ -112,7 +112,7 @@ let earlierRequest: Promise<boolean> | null = null;   // 同一次边界触发�
  * assistant.preview / assistant.reasoning 是纯界面增量，不推进游标（否则正式事件会被当成重复丢掉）。
  */
 const EPHEMERAL_EVENTS = new Set(['assistant.preview', 'assistant.reasoning']);
-let eventQueue: EventEnvelope[] = [];
+let eventQueue: Array<{ event: EventEnvelope; sessionId: string; sessionEpoch: number }> = [];
 let flushHandle: number | undefined;
 let flushRunner: (() => void) | null = null;
 
@@ -924,8 +924,8 @@ export const useStore = create<StoreState>()(immer((set, get) => {
 
   /** SSE 事件统一入口：先入队，帧末合并提交（见 eventQueue 注释）。 */
   handleEvent(event) {
-    const sessionId = get().sessionId;
-    if (!sessionId || event.sessionId && event.sessionId !== sessionId) {
+    const { sessionId, sessionEpoch } = get();
+    if (!sessionId || event.sessionId !== sessionId) {
       return;
     }
     const thread = get().thread;
@@ -934,7 +934,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       // 重连/重放重复推送：同一序号不再应用一次
       return;
     }
-    eventQueue.push(event);
+    eventQueue.push({ event, sessionId, sessionEpoch });
     scheduleFlush();
   },
 
@@ -948,7 +948,9 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     const applied: EventEnvelope[] = [];
     const beforeKind = get().ui.attentionKind;
     set((draft) => {
-      for (const item of batch) {
+      for (const queued of batch) {
+        if (draft.sessionId !== queued.sessionId || draft.sessionEpoch !== queued.sessionEpoch) continue;
+        const item = queued.event;
         if (!EPHEMERAL_EVENTS.has(item.type) && typeof item.sequence === 'number' && item.sequence <= draft.thread.cursor) continue;
         applyEvent(draft, item, { live: true });
         applied.push(item);

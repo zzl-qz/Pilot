@@ -54,12 +54,15 @@ export async function checkShell(page, name, output) {
   await rail.getByRole('button', { name: '搜索消息与书签', exact: true }).click();
   await page.locator('dialog[open]').waitFor(); await page.keyboard.press('Escape');
   await page.evaluate(() => { api.schedules = async () => { throw Error('离线测试'); }; });
-  await rail.getByRole('button', { name: '定时任务', exact: true }).click();
+  await rail.getByRole('button', { name: '更多功能', exact: true }).click();
+  await rail.getByRole('menuitem', { name: '定时任务', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: '读取任务失败：离线测试' }).waitFor();
   await page.keyboard.press('Escape');
+  await rail.getByRole('button', { name: '更多功能', exact: true }).click();
   await page.locator('#settings-open').click(); await page.locator('#settings').waitFor();
-  await page.keyboard.press('Escape'); assert.equal(await page.evaluate(() => document.activeElement.id), 'settings-open');
-  await rail.getByRole('button', { name: '命令面板', exact: true }).click();
+  await page.keyboard.press('Escape'); assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), '更多功能');
+  await rail.getByRole('button', { name: '更多功能', exact: true }).click();
+  await rail.getByRole('menuitem', { name: /命令面板/ }).click();
   await page.locator('.modal').waitFor(); await page.keyboard.press('Escape');
   // Windows/Linux Ctrl 和 macOS Meta 共用行为；输入法组合键不能触发。
   for (const modifier of ['Control', 'Meta']) {
@@ -78,8 +81,10 @@ export async function checkShell(page, name, output) {
   assert.ok(await page.evaluate(() => JSON.parse(localStorage.getItem('pilot.layout')).sidebarW) > side.width);
   await page.mouse.move(gutter.x + 65, 240); await page.mouse.down(); await page.mouse.move(gutter.x + 5, 240); await page.mouse.up();
   await capture(`${name}-shell-desktop.png`);
+  await rail.getByRole('button', { name: '更多功能', exact: true }).click();
   await page.locator('#theme-toggle').click(); assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
   await capture(`${name}-shell-light.png`);
+  await rail.getByRole('button', { name: '更多功能', exact: true }).click();
   await page.locator('#theme-toggle').click();
   for (const width of [961, 768, 390]) {
     await page.setViewportSize({ width, height: 820 });

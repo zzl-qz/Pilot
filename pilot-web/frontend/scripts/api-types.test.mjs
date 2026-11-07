@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import ts from 'typescript';
 
 test('HTTP 与 Store 类型接受正确调用并拒绝错误请求、响应、状态和事件载荷', async () => {
@@ -26,7 +26,7 @@ test('HTTP 与 Store 类型接受正确调用并拒绝错误请求、响应、�
     const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root, undefined, configPath);
     const program = ts.createProgram([...parsed.fileNames, valid, invalid], parsed.options);
     const diagnostics = ts.getPreEmitDiagnostics(program).filter(item => item.category === ts.DiagnosticCategory.Error);
-    assert.deepEqual(diagnostics.filter(item => item.file?.fileName !== invalid).map(item => ts.flattenDiagnosticMessageText(item.messageText, '\n')), []);
-    assert.deepEqual(diagnostics.filter(item => item.file?.fileName === invalid).map(item => item.file.getLineAndCharacterOfPosition(item.start).line + 1), [2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 14, 15]);
+    assert.deepEqual(diagnostics.filter(item => resolve(item.file?.fileName || '') !== resolve(invalid)).map(item => ts.flattenDiagnosticMessageText(item.messageText, '\n')), []);
+    assert.deepEqual(diagnostics.filter(item => resolve(item.file?.fileName || '') === resolve(invalid)).map(item => item.file.getLineAndCharacterOfPosition(item.start).line + 1), [2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 14, 15]);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

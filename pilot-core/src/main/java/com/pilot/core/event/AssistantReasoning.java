@@ -4,9 +4,17 @@ package com.pilot.core.event;
  * 模型正在吐的推理。只推给已经连着的界面，不写入会话历史。
  * 回答正文仍走 {@link AssistantPreview} / {@link AssistantDelta}。
  */
-public record AssistantReasoning(String text) implements SessionEvent {
+public record AssistantReasoning(String text, boolean reset) implements SessionEvent {
+    public AssistantReasoning(String text) {
+        this(text, false);
+    }
+
     public AssistantReasoning {
         text = text == null ? "" : text;
+    }
+
+    public static AssistantReasoning discarded() {
+        return new AssistantReasoning("", true);
     }
 
     @Override

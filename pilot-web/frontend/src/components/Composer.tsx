@@ -707,9 +707,9 @@ function ResumeBar() {
     return null;
   }
   return (
-    <div id="task-resume-controls" className="task-live-controls">
+    <div id="task-resume-controls" className="task-live-controls" role="status">
       <span>{bar.text}</span>
-      <button id="task-resume" type="button" onClick={() => useStore.getState().continueRun()}>{bar.label}</button>
+      <button id="task-resume" className="btn btn-primary btn-sm" type="button" onClick={() => useStore.getState().continueRun()}>{bar.label}</button>
     </div>
   );
 }

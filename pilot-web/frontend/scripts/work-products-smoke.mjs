@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'pilot-products-ui-'));
+const capture = !process.argv.includes('--no-screenshots');
 const keep = new Set(['workProducts', 'productPreview', 'skillDrafts', 'decideSkill', 'downloadProduct']);
 const fixture = `<html lang="zh-CN" data-theme="dark"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react'; import {createRoot} from 'react-dom/client'; import App from '/src/components/App.jsx'; import {useStore} from '/src/store.js'; import {api} from '/src/api.js'; import {initialThread} from '/src/thread-reducer.js';
@@ -47,6 +48,12 @@ async function run(page, name, url) {
   await page.setViewportSize({width:1440,height:900}); await page.goto(url);
   await page.getByRole('button',{name:/技术选型调研报告/}).click();
   await page.getByRole('heading',{name:'调研结论',exact:true}).waitFor();
+  await page.getByRole('button',{name:'审阅工作区文件',exact:true}).click();
+  assert.equal(await page.evaluate(()=>store.getState().ui.inspectorTab),'files');
+  await page.locator('.fw').waitFor();
+  await page.getByRole('tab',{name:'成果',exact:true}).click();
+  await page.getByRole('button',{name:/技术选型调研报告/}).click();
+  await page.getByRole('heading',{name:'调研结论',exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'技术选型调研报告');
   assert.equal(await page.getByText('有工具读取记录',{exact:true}).count(),1);
   assert.equal(await page.getByText('未记录工具读取',{exact:true}).count(),1);
@@ -65,15 +72,15 @@ async function run(page, name, url) {
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true,`${name} page overflow at ${width}`);
     assert.equal(await page.locator('.work-products').evaluate(el=>el.scrollWidth <= el.clientWidth+1),true);
     if(width<961) assert.ok((await page.getByRole('button',{name:'下载文件',exact:true}).boundingBox()).height>=44);
-    await page.screenshot({animations:'disabled',path:join(output,`${name}-report-${width}.png`)});
+    if(capture)await page.screenshot({animations:'disabled',path:join(output,`${name}-report-${width}.png`)});
   }
   await page.evaluate(()=>document.documentElement.dataset.theme='light');
-  await page.screenshot({animations:'disabled',path:join(output,`${name}-light-390.png`)});
+  if(capture)await page.screenshot({animations:'disabled',path:join(output,`${name}-light-390.png`)});
   await page.evaluate(()=>document.documentElement.dataset.theme='dark');
   await page.getByRole('button',{name:'返回成果列表',exact:true}).click();
   assert.equal(await page.evaluate(()=>document.activeElement?.dataset.workKey),'product:p1');
   await page.getByRole('button',{name:/research-report/}).click();
-  await page.screenshot({animations:'disabled',path:join(output,`${name}-draft-390.png`)});
+  if(capture)await page.screenshot({animations:'disabled',path:join(output,`${name}-draft-390.png`)});
   failure='技能文件已被其他操作修改'; await page.getByRole('button',{name:'接受技能',exact:true}).click();
   await page.getByRole('alert').filter({hasText:failure}).waitFor();
   assert.equal(await page.getByRole('button',{name:'撤回此版本'}).count(),0);
@@ -94,7 +101,7 @@ async function run(page, name, url) {
   await page.goto(new URL('/connect',url).href);
   await page.getByLabel('访问令牌').fill('wrong-token'); await page.getByRole('button',{name:'连接',exact:true}).click();
   await page.getByRole('alert').filter({hasText:'访问令牌错误'}).waitFor(); assert.equal(new URL(page.url()).search,'');
-  await page.screenshot({animations:'disabled',path:join(output,`${name}-connect-390.png`)});
+  if(capture)await page.screenshot({animations:'disabled',path:join(output,`${name}-connect-390.png`)});
   await page.unroute('**/api/access/login');
   await page.route('**/api/access/login',async route=>{assert.equal(route.request().headers()['x-pilot-token'],'correct-token');return route.fulfill({status:204});});
   await page.route(new URL('/',url).href,route=>route.fulfill({contentType:'text/html',body:'<meta charset="UTF-8"><p>已连接工作台</p>'}));

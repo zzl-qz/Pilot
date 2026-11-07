@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -19,6 +20,7 @@ import java.util.stream.Collectors;
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.AssistantPreview;
+import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
@@ -184,8 +186,7 @@ public final class AgentLoop {
     /** 正在生成的文字，只给界面看。为空表示不推预览。 */
     private final Consumer<String> liveText;
     /** 模型推理增量，只给界面看，不进会话历史。 */
-    private Consumer<String> liveReasoning = ignored -> {
-    };
+    private Consumer<String> liveReasoning;
     /** 收尾门：有了目标之后在 run/resume 里创建，一次运行一个。 */
     private CompletionGate completionGate;
     private ExecutionPolicy executionPolicy;
@@ -193,8 +194,7 @@ public final class AgentLoop {
 
     /** 把模型的推理增量推到界面。不影响最终回答。 */
     public AgentLoop withLiveReasoning(Consumer<String> reasoning) {
-        liveReasoning = reasoning == null ? ignored -> {
-        } : reasoning;
+        liveReasoning = reasoning;
         return this;
     }
 
@@ -493,10 +493,7 @@ public final class AgentLoop {
                     throw new ExecutionPolicy.Stop("MODEL_INCOMPLETE",
                         "模型未正常结束（" + response.finishReason() + "），现有进度已保留。");
                 }
-                // 请求成功后只落一条完整回复。预览过程中的片段不进历史，重试也不会粘成两段。
-                if (!content.isBlank() && !calls.isEmpty()) {
-                    events.accept(new AssistantDelta(content));
-                }
+                // 带工具调用的正文属于中间轮次，不是给用户的答复；只提交最终轮正文。
                 if (calls.isEmpty()) {
                     Result completed = completeTurn(content, context);
                     if (completed != null) {
@@ -997,11 +994,13 @@ public final class AgentLoop {
         int attempt = 0;
         int repeatAborts = 0;
         String retainedGuidance = null;
+        AtomicBoolean reasoningPreviewVisible = new AtomicBoolean();
         while (true) {
             if (cancellation.cancelled()) {
                 return new ModelTurn(null, stopForCancellation(messages, events));
             }
             StreamRepeatGuard repeatGuard = new StreamRepeatGuard();
+            StreamRepeatGuard reasoningRepeatGuard = new StreamRepeatGuard();
             try {
                 // 用户纠正优先于策略提示；不要提前消费一次性 guidance 后再因为 steering 丢掉。
                 if (applySteering(messages, events, pendingInput.get())) {
@@ -1040,6 +1039,9 @@ public final class AgentLoop {
                 if (liveText != null) {
                     events.accept(AssistantPreview.discarded());
                 }
+                if (reasoningPreviewVisible.getAndSet(false)) {
+                    events.accept(AssistantReasoning.discarded());
+                }
                 usage.start(request, contextLimit(), tools.definitions());
                 ModelResponse response = client.chat(request, tools.definitions(), delta -> {
                     if (delta == null || delta.isEmpty()) {
@@ -1061,10 +1063,16 @@ public final class AgentLoop {
                     if (delta == null || delta.isEmpty()) {
                         return;
                     }
-                    try {
-                        liveReasoning.accept(delta);
-                    } catch (RuntimeException ignored) {
-                        // 推理预览失败不影响这一次模型请求
+                    if (reasoningRepeatGuard.accept(delta) > 0) {
+                        throw new StreamRepeatException();
+                    }
+                    if (liveReasoning != null) {
+                        try {
+                            liveReasoning.accept(delta);
+                            reasoningPreviewVisible.set(true);
+                        } catch (RuntimeException ignored) {
+                            // 推理预览失败不影响这一次模型请求
+                        }
                     }
                 });
                 usage.finish(response);
@@ -1087,6 +1095,9 @@ public final class AgentLoop {
                 repeatAborts++;
                 // 界面上已经出现的重复段落作废：重试会从头重新输出，不能和残留内容拼在一起。
                 events.accept(AssistantPreview.discarded());
+                if (reasoningPreviewVisible.getAndSet(false)) {
+                    events.accept(AssistantReasoning.discarded());
+                }
                 if (repeatAborts >= MAX_REPEAT_ABORTS) {
                     throw new ExecutionPolicy.Stop("MODEL_REPEATED",
                         "模型连续 " + repeatAborts + " 次陷入逐行重复，已中止本轮生成；已有进度已保存。可以继续执行，或把问题拆小后重新发送。");

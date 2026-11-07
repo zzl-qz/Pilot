@@ -468,12 +468,17 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     }
 
     case 'assistant.reasoning': {
-      const turn = ensureTurn(draft);
-      const text = event.payload?.text || '';
-      if (!turn.thinking) {
-        turn.thinking = { text: '', live: true, action: '', startedAt: eventTimestamp(event), finishedAt: null };
+      const turn = openTurn(draft);
+      if (event.payload?.reset) {
+        if (turn?.thinking) turn.thinking.text = '';
+        break;
       }
-      turn.thinking.text += text;
+      const activeTurn = turn || ensureTurn(draft);
+      const text = event.payload?.text || '';
+      if (!activeTurn.thinking) {
+        activeTurn.thinking = { text: '', live: true, action: '', startedAt: eventTimestamp(event), finishedAt: null };
+      }
+      activeTurn.thinking.text += text;
       break;
     }
 

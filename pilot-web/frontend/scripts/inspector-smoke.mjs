@@ -58,7 +58,8 @@ async function run(page, name) {
     await page.setViewportSize({ width, height: 900 });
     assert.ok(await page.locator('#panel-browser').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
   }
-  await page.getByRole('tab', { name: '活动', exact: true }).click();
+  await page.getByRole('button', { name: '更多工具', exact: true }).click();
+  await page.getByRole('menuitem', { name: '活动', exact: true }).click();
   await page.waitForFunction(() => Object.keys(listeners).length === 0);
   assert.ok(await page.evaluate(() => calls.some(row => row[0] === 'bounds' && row[1].visible === false)));
   await page.getByText('×2', { exact: true }).waitFor();

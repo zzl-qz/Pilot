@@ -71,7 +71,7 @@ export async function checkSideChat(page, name, temp) {
   await page.evaluate(() => {
     const source = sideSources.get(store.getState().sideChats.activeId);
     source.onerror(); source.onopen();
-    source.dispatchEvent(new MessageEvent('run.completed', { data: JSON.stringify({ type: 'run.completed', sequence: 1, runId: 'side-running', payload: {} }) }));
+    source.dispatchEvent(new MessageEvent('run.completed', { data: JSON.stringify({ type: 'run.completed', sessionId: store.getState().sideChats.activeId, sequence: 1, runId: 'side-running', payload: {} }) }));
     api.sendMessage = id => { sideEvents.push(['pending-send', id]); return new Promise(resolve => window.resolveSideSend = resolve); };
   });
   assert.equal(await panel.getByRole('alert').count(), 0, '恢复连接后清理断线提示');

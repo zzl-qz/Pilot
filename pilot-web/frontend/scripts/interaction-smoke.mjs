@@ -196,8 +196,8 @@ async function run(page,name,url) {
   await checkWorkbench(page, name, temp).catch(async error => {
     console.error('Page errors:', errors);
     console.error(await page.locator('body').innerText());
-    await page.screenshot({ path: join(temp, name + '-failure.png') });
-    console.error('Failure screenshot:', join(temp, name + '-failure.png')); throw error;
+    if(name==='chromium') await page.screenshot({ path: join(temp, name + '-failure.png') }).catch(() => {});
+    throw error;
   });
   // Final responsive evidence; reject page-level overflow and hidden stop action.
   await page.evaluate(()=>store.getState().setUi({inspectorOpen:false,sidebarOpen:false}));
@@ -206,20 +206,22 @@ async function run(page,name,url) {
     if(width<=960) await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().right<=1);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,`${width}px 不横向溢出`);
     assert.ok(await page.locator('.main').evaluate(el=>el.getBoundingClientRect().width)>=width-(width>960?52:0)-2,`${width}px 主区占满可用宽度`);
-    await page.screenshot({path:join(temp,`${name}-${width}.png`)});
+    if(name==='chromium') await page.screenshot({path:join(temp,`${name}-${width}.png`),animations:'disabled'});
     if(width===390) {
       await page.evaluate(()=>store.setState({running:true,runId:'run-a'}));
       await page.waitForFunction(()=>document.querySelector('#send')?.getBoundingClientRect().right<=innerWidth);
       assert.ok(await page.locator('#send').isVisible());
-      await page.screenshot({path:join(temp,`${name}-mobile-running.png`)});
+      if(name==='chromium') await page.screenshot({path:join(temp,`${name}-mobile-running.png`),animations:'disabled'});
       await page.evaluate(()=>store.setState({running:false}));
     }
   }
   await page.setViewportSize({width:1440,height:900});await page.evaluate(()=>store.getState().setUi({inspectorOpen:true,reviewExpanded:true,changeView:'src/App.jsx'}));
-  await page.waitForTimeout(250); await page.screenshot({path:join(temp,`${name}-review.png`)});
+  await page.waitForTimeout(250); if(name==='chromium') await page.screenshot({path:join(temp,`${name}-review.png`),animations:'disabled'});
   await page.setViewportSize({width:390,height:844});await page.reload();await input.waitFor();
   await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().right<=1);
-  await page.locator('#sidebar-toggle').click();await page.getByRole('button',{name:'关闭导航',exact:true}).click();
+  await page.locator('#sidebar-toggle').click();
+  await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().left<=innerWidth-52);
+  await page.getByRole('button',{name:'关闭导航',exact:true}).click({position:{x:380,y:100}});
   await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().right<=1);
   assert.deepEqual(errors,[]);console.log(`${name}: PASS combined interactions, failure/race boundaries, review, responsive layouts`);
 }

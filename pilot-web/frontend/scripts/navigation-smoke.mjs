@@ -32,11 +32,26 @@ let browser,electron;
 async function run(page,name) {
   page.setDefaultTimeout(8000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setViewportSize({width:1440,height:900});await page.goto(url);
+  assert.equal(await page.locator('.workspace-files-body').count(),0,'工作区文件树默认收起，不占用会话列表空间');
+  await page.getByRole('button',{name:'更多功能'}).click();
+  await page.screenshot({path:join(output,`${name}-more-menu.png`),timeout:20000,animations:'disabled'});
+  await page.getByRole('menuitem',{name:/定时任务/}).click();
+  assert.equal(await page.evaluate(()=>store.getState().ui.schedulesOpen),true);
+  assert.equal(await page.locator('.navigation-rail-more').getAttribute('open'),null,'选择功能后更多菜单自动收起');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.getByRole('menuitem',{name:/文件工作台/}).count(),0,'专用文件工作台不再占全局入口');
+  assert.equal(await page.getByRole('tab',{name:'文件工作台'}).count(),0,'文件专项能力不再与预览、变更并列');
+  await page.evaluate(()=>store.getState().setUi({inspectorOpen:false,schedulesOpen:false}));
+  const more = page.getByRole('button',{name:'更多功能'});
+  await more.focus();await page.keyboard.press('Space');
+  await page.getByRole('menu',{name:'更多功能'}).waitFor();
+  await page.keyboard.press('Escape');
+  assert.equal(await more.getAttribute('aria-expanded'),'false','Escape 关闭更多菜单并保留焦点入口');
   await page.locator('.thread-nav-tick').last().waitFor();assert.equal(await page.locator('.thread-nav-tick').count(),12);
   await page.waitForFunction(()=>document.querySelector('.thread-nav-tick:last-child').getAttribute('aria-current')==='location');
   await page.locator('.thread-nav-tick').nth(2).hover();await page.getByRole('dialog',{name:'消息预览'}).waitFor();
   await page.getByRole('button',{name:'添加书签',exact:true}).click();assert.equal(await page.locator('.thread-nav-tick.is-saved').count(),1);
-  await page.screenshot({path:join(output,`${name}-1440-preview.png`)});
+  await page.screenshot({path:join(output,`${name}-1440-preview.png`),timeout:20000,animations:'disabled'});
   await page.locator('.thread-nav-preview-title').click();
   await page.waitForFunction(()=>{const el=document.querySelector('[data-sequence="3"]'),scroll=document.querySelector('.thread');return Math.abs(el.getBoundingClientRect().top-scroll.getBoundingClientRect().top-24)<3;});
   // Streaming content must not pull a navigated viewport back to the latest message.
@@ -71,12 +86,12 @@ async function run(page,name) {
   assert.ok(tick.y>=track.y-1&&tick.y+tick.height<=track.y+track.height+1);
   for(const width of [1440,768,390]) {
     await page.setViewportSize({width,height:900});await page.reload();await page.locator('.thread-nav-menu').waitFor();
-    await page.getByRole('button',{name:'打开对话导航和书签'}).click();await page.screenshot({path:join(output,`${name}-${width}-list.png`)});
+    await page.getByRole('button',{name:'打开对话导航和书签'}).click();await page.screenshot({path:join(output,`${name}-${width}-list.png`),timeout:20000,animations:'disabled'});
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     const box=await page.locator('.thread-nav-panel').boundingBox();assert.ok(box.x>=0&&box.x+box.width<=width&&box.y>=0&&box.y+box.height<=900);
     await page.keyboard.press('Escape');
   }
-  await page.evaluate(()=>document.documentElement.dataset.theme='light');await page.getByRole('button',{name:'打开对话导航和书签'}).click();await page.screenshot({path:join(output,`${name}-390-light.png`)});
+  await page.evaluate(()=>document.documentElement.dataset.theme='light');await page.getByRole('button',{name:'打开对话导航和书签'}).click();await page.screenshot({path:join(output,`${name}-390-light.png`),timeout:20000,animations:'disabled'});
   await checkShell(page,name,output);
   assert.deepEqual(errors,[]);console.log(name+': PASS preview/jump/bookmarks/persistence/history/streaming/keyboard/errors/session/responsive');
 }

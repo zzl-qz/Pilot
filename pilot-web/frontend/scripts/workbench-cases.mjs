@@ -50,6 +50,7 @@ export async function checkWorkbench(page, name, output) {
   await branchInput.press('Enter');
   assert.deepEqual(await page.evaluate(() => branchCalls), ['中文分支']);
   await page.evaluate(() => store.setState({ openWorktree: window.savedOpenWorktree }));
+  await page.getByRole('button', { name: '工作区文件', exact: true }).click();
   const tree = page.getByRole('tree', { name: '工作区文件' });
   const folder = tree.getByRole('treeitem', { name: 'src', exact: true });
   await folder.click();
@@ -102,6 +103,7 @@ export async function checkWorkbench(page, name, output) {
     api.validation = async () => ({ report: { current: true, reason: '当前检查已通过' } });
     api.maintenanceStatus = async () => ({ storage: { healthy: false, issues: [{ area: '数据目录', reason: '权限不足，无法写入', at: '2026-11-06T00:00:00Z' }] } });
   });
+  await page.getByRole('button', { name: '更多功能', exact: true }).click();
   await page.locator('#settings-open').click();
   for (const section of ['外观', '模型', '权限', '技能', '用量', '诊断', '关于']) {
     await page.locator('.settings-nav').getByRole('button', { name: section, exact: true }).click();
@@ -134,7 +136,7 @@ export async function checkWorkbench(page, name, output) {
   await page.locator('.settings-nav').getByRole('button', { name: '外观', exact: true }).click();
   await page.getByRole('button', { name: '浅色', exact: false }).click();
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
-  await page.screenshot({ path: join(output, `${name}-settings-light.png`) });
+  if (name === 'chromium') await page.screenshot({ path: join(output, `${name}-settings-light.png`), animations: 'disabled' });
   await page.getByRole('button', { name: '深色', exact: false }).click();
   await page.setViewportSize({ width: 390, height: 700 });
   for (const section of ['模型', '诊断', '关于']) {
@@ -142,7 +144,7 @@ export async function checkWorkbench(page, name, output) {
     assert.equal(await page.locator('.settings-body').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true, '窄屏 ' + section);
     assert.equal(await page.locator('.modal-box').evaluate(el => el.getBoundingClientRect().right <= innerWidth), true);
   }
-  await page.screenshot({ path: join(output, `${name}-settings-mobile.png`) });
+  if (name === 'chromium') await page.screenshot({ path: join(output, `${name}-settings-mobile.png`), animations: 'disabled' });
   await page.setViewportSize({ width: 900, height: 420 });
   assert.equal(await page.locator('.modal-box').evaluate(el => el.getBoundingClientRect().bottom <= innerHeight), true, '短窗口仍能容纳完整弹窗');
   assert.equal(await page.locator('.settings-body').evaluate(el => el.clientHeight > 100 && el.getBoundingClientRect().bottom <= innerHeight), true);
@@ -153,7 +155,10 @@ export async function checkWorkbench(page, name, output) {
   const firstTab = page.locator('#panel-tabs [role="tab"]').first();
   assert.equal(await firstTab.getAttribute('aria-selected'), 'true');
   await firstTab.press('End');
-  assert.equal(await page.getByRole('tab', { name: '活动', exact: true }).getAttribute('aria-selected'), 'true');
+  assert.equal(await page.getByRole('tab', { name: '命令', exact: true }).getAttribute('aria-selected'), 'true');
+  await page.getByRole('button', { name: '更多工具', exact: true }).click();
+  await page.getByRole('menuitem', { name: '活动', exact: true }).click();
+  assert.equal(await page.evaluate(() => store.getState().ui.inspectorTab), 'activity');
   await page.getByLabel('关闭工作区面板', { exact: true }).click();
   console.log(`${name}: PASS file tree, picker contract/errors, modal focus, settings/theme and panel keyboard navigation`);
 }

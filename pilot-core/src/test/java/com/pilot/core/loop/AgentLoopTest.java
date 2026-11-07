@@ -17,11 +17,14 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Test;
 
 import com.pilot.core.approval.ApprovalBroker;
+import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.AssistantPreview;
+import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
@@ -73,6 +76,22 @@ class AgentLoopTest {
         assertEquals("call_1", toolMessage.toolCallId());
         assertEquals("a.txt\nsrc/", toolMessage.content());
         assertTrue(secondRequest.get(secondRequest.size() - 2).hasToolCalls());
+    }
+
+    @Test
+    void doesNotAppendIntermediateToolRoundTextToFinalReply() {
+        CountingTool tool = new CountingTool("list_dir", "a.txt");
+        ScriptedModelClient client = new ScriptedModelClient(
+            new ModelResponse("中间轮次文字", List.of(new ToolCall("call_1", "list_dir", Map.of("path", ".")))),
+            new ModelResponse("最终答复", List.of()));
+        AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
+
+        AgentLoop.Result result = loop.run("列出目录", List.of(), events::add);
+
+        assertEquals("最终答复", result.finalText());
+        assertEquals(List.of("tool.started", "tool.completed", "assistant.delta", "run.completed"), eventTypesWithoutUsage());
+        assertEquals("最终答复", events.stream().filter(AssistantDelta.class::isInstance)
+            .map(AssistantDelta.class::cast).map(AssistantDelta::text).findFirst().orElseThrow());
     }
 
     @Test
@@ -692,6 +711,59 @@ class AgentLoopTest {
             events.stream()
                 .anyMatch(event -> event instanceof RunContinued continued && continued.reason().contains("重复")),
             "要告诉界面这次生成被中止的原因");
+    }
+
+    @Test
+    void abortsRepeatedReasoningAndResetsTheVisibleThoughtBeforeRetry() {
+        String repeated = "正在检查当前方案是否覆盖全部场景。\n".repeat(12);
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient client = new ModelClient() {
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
+                Consumer<String> reasoningDelta) {
+                if (calls.getAndIncrement() == 0) {
+                    for (String line : repeated.split("\\n")) reasoningDelta.accept(line + "\n");
+                }
+                return new ModelResponse(calls.get() == 1 ? "" : "已重新检查并给出结论。", List.of());
+            }
+        };
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(),
+            new AgentLoop.Config(8, 0, 3, "你是测试代理", List::of, 0, 120_000, false))
+                .withLiveReasoning(ignored -> { });
+
+        AgentLoop.Result result = loop.run("检查方案", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals("已重新检查并给出结论。", result.finalText());
+        assertTrue(events.stream().anyMatch(event -> event instanceof AssistantReasoning reasoning && reasoning.reset()),
+            "推理复读中止后必须清空已经显示的旧思考");
+    }
+
+    @Test
+    void abortsScreenshotLikeGrowingNumberedItemsBeforeTheyBecomeTheReply() {
+        String base = "3. 按产品方向建立 PO 真实任务评测。这比继续堆局部功能更能决定后续该优化什么：覆盖调研、Excel";
+        String repeated = String.join("\n\n", base.substring(0, 30), base.substring(0, 35), base.substring(0, 40),
+            base.substring(0, 45), base, base + " 工作流") + "\n";
+        ScriptedModelClient client = new ScriptedModelClient(new ModelResponse(repeated, List.of()),
+            new ModelResponse("我会按产品方向评估当前工作。", List.of()));
+        StringBuilder preview = new StringBuilder();
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(),
+            new AgentLoop.Config(8, 0, 3, "你是测试代理", List::of, 0, 120_000, false), Cancellation.none(),
+            () -> null, (call, result, latencyMs) -> { }, preview::append);
+
+        AgentLoop.Result result = loop.run("你看一下接下来要怎么优化", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals("我会按产品方向评估当前工作。", result.finalText());
+        assertTrue(events.stream().anyMatch(event -> event instanceof AssistantPreview p && p.reset()),
+            "作废事件必须清掉用户已看到的重复流式片段");
+        assertFalse(events.stream().filter(AssistantDelta.class::isInstance).map(AssistantDelta.class::cast)
+            .anyMatch(delta -> delta.text().contains("PO 真实任务评测")), "重复内容不能落入最终回复");
     }
 
     /** 重试后仍然复读就不是偶发抖动：停下并给出可继续的失败码，避免反复烧上下文。 */

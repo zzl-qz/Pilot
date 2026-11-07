@@ -62,6 +62,7 @@ export default function App() {
   const phase = useStore(runPhase);
   const reviewExpanded = useStore(state => state.ui.reviewExpanded && state.ui.inspectorOpen && state.ui.inspectorTab === 'changes');
   const inspectorOpen = useStore((state) => state.ui.inspectorOpen);
+  const inspectorTab = useStore((state) => state.ui.inspectorTab);
   const embedded = useStore((state) => state.embeddedSessionId);
   const sessionId = useStore((state) => state.sessionId);
   const eventCount = useStore((state) => state.timeline.length);
@@ -69,6 +70,7 @@ export default function App() {
   const [, setTick] = useState(0);
   const [folderMenu, setFolderMenu] = useState(false);
   const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 960px)').matches);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   /** 两侧面板宽度：拖过分才写内联变量，没拖过就用 CSS 里的默认/自适应值。 */
   const [layout, setLayout] = useState(readLayout);
   const [resizing, setResizing] = useState<{ kind: ResizeKind; startX: number; startWidth: number } | null>(null);
@@ -110,6 +112,12 @@ export default function App() {
     };
     collapse(); narrow.addEventListener('change', collapse);
     return () => narrow.removeEventListener('change', collapse);
+  }, []);
+
+  useEffect(() => {
+    const resize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
   }, []);
 
   // 抽屉打开时键盘留在导航内；折叠后不把焦点遗留在隐藏的项目按钮上。
@@ -245,7 +253,11 @@ export default function App() {
     }
     document.body.classList.add('is-resizing');
     const onMove = (event: PointerEvent) => {
-      const width = (appRef.current?.getBoundingClientRect().width || window.innerWidth) - 52;
+      const appWidth = appRef.current?.getBoundingClientRect().width || window.innerWidth;
+      const sidebarWidth = resizing.kind === 'activity' && sidebarOpen
+        ? appRef.current?.querySelector('.sidebar')?.getBoundingClientRect().width || 0
+        : 0;
+      const width = appWidth - 52 - sidebarWidth;
       const key = resizing.kind === 'sidebar' ? 'sidebarW' : 'activityW';
       setLayout((current) => ({
         ...current,
@@ -262,7 +274,7 @@ export default function App() {
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
     };
-  }, [resizing]);
+  }, [resizing, sidebarOpen]);
 
   useEffect(() => {
     if (!resizing && (layout.sidebarW || layout.activityW)) {
@@ -278,7 +290,10 @@ export default function App() {
     const app = appRef.current;
     const styles = app ? window.getComputedStyle(app) : null;
     const defaults = { sidebar: 264, activity: 336 };
-    const startWidth = parseFloat(styles?.getPropertyValue(`--${kind === 'sidebar' ? 'sidebar-w' : 'activity-w'}`) || '') || defaults[kind];
+    const actualActivityWidth = app?.querySelector('.activity.inspector')?.getBoundingClientRect().width;
+    const startWidth = kind === 'activity' && actualActivityWidth
+      ? actualActivityWidth
+      : parseFloat(styles?.getPropertyValue(`--${kind === 'sidebar' ? 'sidebar-w' : 'activity-w'}`) || '') || defaults[kind];
     setResizing({ kind, startX: event.clientX, startWidth });
   }
 
@@ -286,14 +301,20 @@ export default function App() {
   if (layout.sidebarW) {
     appStyle['--sidebar-w'] = `${layout.sidebarW}px`;
   }
-  if (layout.activityW) {
+  if (inspectorTab === 'preview' && inspectorOpen && !embedded) {
+    const available = narrowViewport
+      ? Math.max(280, viewportWidth - 52)
+      : Math.min(760, Math.max(280, viewportWidth - 52 - (sidebarOpen ? 240 : 0) - 420));
+    const preferred = narrowViewport ? available : Math.min(560, Math.max(420, viewportWidth * 0.34));
+    appStyle['--activity-w'] = `${Math.max(Math.min(420, available), Math.min(available, layout.activityW || preferred))}px`;
+  } else if (layout.activityW) {
     appStyle['--activity-w'] = `${layout.activityW}px`;
   }
 
   return (
     <div
       ref={appRef}
-      className={`app${sidebarOpen ? ' sidebar-open' : ' sidebar-collapsed'}${inspectorOpen ? '' : ' inspector-collapsed'}${embedded ? ' side-chat-embedded-app' : ''}${resizing ? ' is-resizing' : ''}${reviewExpanded ? ' review-expanded' : ''}`}
+      className={`app${sidebarOpen ? ' sidebar-open' : ' sidebar-collapsed'}${inspectorOpen ? '' : ' inspector-collapsed'}${inspectorTab === 'preview' ? ' inspector-preview' : ''}${embedded ? ' side-chat-embedded-app' : ''}${resizing ? ' is-resizing' : ''}${reviewExpanded ? ' review-expanded' : ''}`}
       style={appStyle}
     >
       {/* 各区块单独兜底：任何一块渲染异常都不该把整页卸载成白屏 */}

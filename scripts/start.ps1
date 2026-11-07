@@ -2,6 +2,17 @@ param([Parameter(ValueFromRemainingArguments=$true)][string[]]$PilotArgs)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $root
+if ($env:SystemRoot) {
+    $socketTemp = Join-Path $env:SystemRoot 'Temp'
+    if ((Test-Path -LiteralPath $socketTemp -PathType Container) -and $env:JAVA_TOOL_OPTIONS -notmatch '(^|\s)-Djdk\.net\.unixdomain\.tmpdir(?:=|\s)') {
+        $socketOption = "-Djdk.net.unixdomain.tmpdir=$socketTemp"
+        $env:JAVA_TOOL_OPTIONS = if ([string]::IsNullOrWhiteSpace($env:JAVA_TOOL_OPTIONS)) {
+            $socketOption
+        } else {
+            "$env:JAVA_TOOL_OPTIONS $socketOption"
+        }
+    }
+}
 $manifest = @{}
 Get-Content -LiteralPath (Join-Path $root 'pilot-core/src/main/resources/bootstrap/runtime.properties') | ForEach-Object {
     if ($_ -match '^([^#=]+)=(.*)$') { $manifest[$matches[1]] = $matches[2] }
