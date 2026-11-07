@@ -28,6 +28,7 @@ try{
     try{info=JSON.parse(await readFile(join(temp,'desktop-browser.json'),'utf8'));}catch{await pause(100);}
   }
   assert.ok(info,'桌面源码入口未启动 GUI 或未写出控制端点');
+  assert.ok(Number.isFinite(info.startMillis),'端点必须记录进程启动时间，用于识别 PID 复用');
   const endpoint=`http://127.0.0.1:${info.controlPort}`;
   assert.equal((await fetch(endpoint+'/tabs')).status,401);
   assert.equal((await fetch(endpoint+'/tabs',{headers:{'x-pilot-token':info.token}})).status,200);

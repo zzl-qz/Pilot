@@ -553,6 +553,8 @@ function writeEndpoint() {
   endpointFile = join(home, 'desktop-browser.json');
   writeFileSync(endpointFile, JSON.stringify({
     pid: process.pid,
+    // 进程启动时刻：后端据此识别「PID 被系统复用」的残留端点，避免误判窗口已开。
+    startMillis: Math.round(Date.now() - process.uptime() * 1000),
     cdpPort,
     controlPort,
     token,

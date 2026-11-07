@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { mobileBridgeOptions, parseMobileAdmin, resolveMobileJava } from './mobile-bridge.mjs';
 
 test('移动连接仅接入本机，拒绝外部服务与不支持的平台', () => {
   const options = { pilotUrl: 'http://127.0.0.1:9999', libraries: '/tmp/path with spaces/lib', dataDir: '/tmp/data with spaces', env: {}, platform: 'linux', arch: 'x64' };
   const command = mobileBridgeOptions(options);
   assert.equal(command.java, 'java');
-  assert.ok(command.args.includes('/tmp/path with spaces/lib/*'));
+  assert.ok(command.args.includes('--no-open'), '电脑端启动不能自动弹出配对页');
+  assert.ok(command.args.includes(join('/tmp/path with spaces/lib', '*')));
   assert.throws(() => mobileBridgeOptions({ ...options, pilotUrl: 'http://example.com' }));
   assert.throws(() => mobileBridgeOptions({ ...options, platform: 'darwin', arch: 'x64' }));
   for (const [platform, arch] of [['darwin', 'arm64'], ['win32', 'x64'], ['linux', 'arm64']]) {
@@ -32,7 +34,7 @@ test('三个平台保留可用 Java；macOS 默认版本过低时查找已安装
     if (file === '/usr/libexec/java_home') return { stdout: '/installed jdk\n' };
     return { stderr: `openjdk version "${file === 'java' ? 17 : 21}.0.1"` };
   });
-  assert.equal(resolved, '/installed jdk/bin/java');
+  assert.equal(resolved, join('/installed jdk', 'bin', 'java'));
   assert.deepEqual(calls[1], ['/usr/libexec/java_home', ['-v', '21+']]);
   await assert.rejects(resolveMobileJava({ ...base, platform: 'linux' }, async () => ({ stderr: 'openjdk version "17.0.1"' })), /Java 21/);
 });

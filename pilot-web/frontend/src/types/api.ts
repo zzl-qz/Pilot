@@ -9,8 +9,28 @@ export interface ActionResponse { ok?: boolean; message?: string; error?: string
 export interface BrowserStatus { enabled: boolean; capable: boolean; available: boolean; reason?: string; paused?: boolean; headless?: boolean }
 export interface InputMessage { content: string; attachments?: Pick<DraftAttachment, 'name' | 'mimeType' | 'dataBase64'>[]; imagePositions?: number[]; skill?: string }
 export type Update<T> = { [K in keyof T]?: T[K] extends readonly unknown[] ? T[K] : T[K] extends object ? Update<T[K]> : T[K] | null };
+/** 产物工作台：人直接编辑的可编辑源、版本与派生产物，全程不经过模型。 */
+export interface StudioDocument {
+  id: string; sessionId: string; title: string; kind: string; spec: string; specHash: string;
+  version: number; createdBy: string; createdAt: string; updatedAt: string;
+}
+export interface StudioVersion { version: number; spec: string; specHash: string; createdAt: string; createdBy: string }
+export interface StudioArtifact {
+  id: string; documentId: string; documentVersion: number; format: string; filename: string;
+  bytes: number; sha256: string; verification: string; createdAt: string;
+}
+export interface StudioRenderResult { document: StudioDocument; artifacts: StudioArtifact[] }
 export interface ApiResults {
   workProducts: S.WorkProductServiceProduct[];
+  studioDocuments: StudioDocument[];
+  studioDocument: StudioDocument;
+  studioCreate: StudioDocument;
+  studioSave: StudioDocument;
+  studioImport: StudioDocument;
+  studioVersions: StudioVersion[];
+  studioRollback: StudioDocument;
+  studioRender: StudioRenderResult;
+  studioArtifacts: StudioArtifact[];
   productPreview: S.WorkProductServicePreview;
   skillDrafts: S.SkillDraftServiceDraft[];
   decideSkill: S.SkillDraftServiceDraft;

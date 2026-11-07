@@ -333,7 +333,8 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         return headlessConfigured;
     }
 
-    private static boolean desktopAvailable() {
+    /** 桌面开窗与浏览器运行时共用同一套会话判定，避免各平台各写一份。 */
+    public static boolean desktopAvailable() {
         return desktopAvailable(System.getProperty("os.name"), System.getenv("SESSIONNAME"), System.getenv("DISPLAY"),
             System.getenv("WAYLAND_DISPLAY"));
     }

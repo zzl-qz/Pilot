@@ -18,11 +18,10 @@
             <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
-        <!-- read_file 读取 PDF：抽取文本，扫描件按页渲染成图片 -->
+        <!-- read_file 抽取 PDF 文本、office 生成/渲染 PDF；版本由父 POM 统一管理。 -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
-            <version>3.0.5</version>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>

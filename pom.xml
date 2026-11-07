@@ -31,6 +31,12 @@
                 <artifactId>poi-ooxml</artifactId>
                 <version>5.5.1</version>
             </dependency>
+            <!-- office 生成 PDF 与 read_file 抽取 PDF 文本共用同一版本，core 与 server 都直接声明。 -->
+            <dependency>
+                <groupId>org.apache.pdfbox</groupId>
+                <artifactId>pdfbox</artifactId>
+                <version>3.0.5</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
     <build>

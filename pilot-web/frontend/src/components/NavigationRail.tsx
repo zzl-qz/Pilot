@@ -19,6 +19,8 @@ export function NavigationRail() {
         onClick={() => open({ resultsOpen: true, resultTarget: null })} />
       <RailButton icon="clock" label="定时任务" active={ui.schedulesOpen}
         onClick={() => open({ schedulesOpen: true, scheduleDraft: null })} />
+      <RailButton icon="edit" label="产物工作台" active={ui.inspectorOpen && ui.inspectorTab === 'studio'}
+        onClick={() => open({ inspectorOpen: true, inspectorTab: 'studio' })} />
     </div>
     <div className="navigation-rail-group navigation-rail-bottom">
       <RailButton id="mobile-connect" icon="phone" label="连接手机" active={ui.mobileConnectionOpen}

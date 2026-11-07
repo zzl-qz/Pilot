@@ -71,7 +71,7 @@ node scripts/package-mobile-host.mjs <新的输出目录>
 
 发布签名：设置 `PILOT_ANDROID_KEYSTORE`、`PILOT_ANDROID_STORE_PASSWORD`、`PILOT_ANDROID_KEY_ALIAS`、`PILOT_ANDROID_KEY_PASSWORD` 后运行 `node scripts/mobile.mjs release`。缺少配置会直接失败，避免把未签名包误当正式发行包。普通 `build` 只生成开发签名的预览 APK；正式密钥不进入 Git。
 
-可用 `pilot.mobile.libraries` 指定连接桥 `lib` 目录；默认识别源码构建目录和便携包目录。`pilot.mobile.mode` / `PILOT_MOBILE_MODE` 默认为 `auto`，未指定中继时启用公共服务；设为 `direct` 则禁用公共发现和中继。`pilot.mobile.relay` / `PILOT_MOBILE_RELAY` 非空时只用指定中继，手机用户无需填写。独立诊断入口仍为 `node scripts/mobile.mjs bridge`，其数据目录需显式指定，不能把它与应用后台同时当作同一电脑身份运行。
+可用 `pilot.mobile.libraries` 指定连接桥 `lib` 目录；默认识别源码构建目录和便携包目录。`pilot.mobile.mode` / `PILOT_MOBILE_MODE` 默认为 `auto`，未指定中继时启用公共服务；设为 `direct` 则禁用公共发现和中继。`pilot.mobile.relay` / `PILOT_MOBILE_RELAY` 非空时只用指定中继，手机用户无需填写。独立诊断入口仍为 `node scripts/mobile.mjs bridge`，其数据目录需显式指定，不能把它与应用后台同时当作同一电脑身份运行。该入口默认带 `--no-open`；连接桥不会自动打开任何浏览器窗口，配对管理只在工作台「连接手机」弹窗里完成。显式追加 `--open-admin` 只会打印一份可手动复制的诊断地址。电脑端（Web / Electron）启动时一律不弹配对页。
 
 ## 平台与当前限制
 

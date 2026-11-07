@@ -23,6 +23,11 @@
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>
         </dependency>
+        <!-- office 的 PDF 生成/渲染在 core 源码里，单模块编译时必须直接可见。 -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.pilot</groupId>
             <artifactId>pilot-core</artifactId>

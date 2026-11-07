@@ -4,8 +4,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
+import java.util.function.LongFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -16,15 +21,25 @@ import org.springframework.context.event.EventListener;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
+import com.pilot.server.browser.BrowserRuntime;
+
 /**
- * 服务起来后打开桌面窗口。浏览器访问同一个端口仍然可用。
+ * 服务起来后打开桌面窗口（Electron），浏览器访问同一个端口仍然是同一个 Web 工作台。
  * 桌面壳没装时交给 {@link DesktopShellInstaller} 后台安装，装好自动开窗。
- * 测试和打包后的 jar 不打开窗口。
+ *
+ * <p>官方启动脚本、打包后的 jar、IDE / spring-boot:run 走同一条开窗链路，
+ * 不再按 code source 路径区分；只有确实没有图形桌面会话时才明确降级到 Web 工作台。
  */
 @Component
 public class DesktopWindowLauncher {
     private static final Logger log = LoggerFactory.getLogger(DesktopWindowLauncher.class);
     private static final Pattern PID = Pattern.compile("\"pid\"\\s*:\\s*(\\d+)");
+    private static final Pattern CONTROL_PORT = Pattern.compile("\"controlPort\"\\s*:\\s*(\\d+)");
+    private static final Pattern TOKEN = Pattern.compile("\"token\"\\s*:\\s*\"([^\"]+)\"");
+    private static final Pattern START_MILLIS = Pattern.compile("\"startMillis\"\\s*:\\s*(\\d+)");
+    /** 墙钟在两个进程里可能略有偏差，但足够区分系统复用 PID 后的另一个进程。 */
+    private static final long START_TOLERANCE_MILLIS = 10_000L;
+    private static final Duration WINDOW_TIMEOUT = Duration.ofSeconds(20);
 
     private final Environment environment;
     private final DesktopShellInstaller installer;
@@ -57,10 +72,18 @@ public class DesktopWindowLauncher {
 
     /** 服务启动时打开桌面窗口。窗口已经在就不再开第二个。 */
     public LaunchResult launch() {
+        return launch(BrowserRuntime::desktopAvailable);
+    }
+
+    /** 桌面会话能力可注入，便于在没有图形会话的平台上做单元测试。 */
+    LaunchResult launch(BooleanSupplier desktopAvailable) {
         try {
             Path root = repositoryRoot();
-            if (root == null || !runningFromClasses()) {
-                return LaunchResult.unavailable("当前不是从源码启动，没有可打开的桌面窗口。");
+            if (root == null) {
+                return LaunchResult.unavailable("没有找到 Pilot 源码目录，桌面窗口不可用；可访问 " + webUrl() + " 使用 Web 工作台。");
+            }
+            if (!desktopAvailable.getAsBoolean()) {
+                return LaunchResult.unavailable("当前没有可用的图形桌面，桌面窗口无法打开；请访问 " + webUrl() + " 使用 Web 工作台。");
             }
             if (alreadyOpen(root)) {
                 return LaunchResult.already("桌面窗口已经在运行，请切换到那个窗口使用内置浏览器。");
@@ -78,7 +101,7 @@ public class DesktopWindowLauncher {
                 }
                 electron = electronBinary(root);
             }
-            String url = "http://127.0.0.1:" + port();
+            String url = webUrl();
             electron = prepareDesktopBinary(root, electron, logFile);
             ProcessBuilder builder = new ProcessBuilder(electron.toString(), root.resolve("pilot-desktop").toString());
             builder.directory(root.resolve("pilot-desktop").toFile());
@@ -86,11 +109,41 @@ public class DesktopWindowLauncher {
             builder.environment().put("PILOT_URL", url);
             builder.redirectErrorStream(true);
             builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
-            builder.start();
-            return LaunchResult.started("已打开桌面窗口。内置浏览器在那个窗口里。");
+            Process process = builder.start();
+            watchWindow(root, process, logFile, url);
+            return LaunchResult.started("正在打开桌面窗口；Web 工作台同样可用：" + url + "。");
         } catch (IOException e) {
-            return LaunchResult.failed("桌面窗口没有打开：" + e.getMessage());
+            return LaunchResult.failed("桌面窗口没有打开：" + e.getMessage() + "；请访问 " + webUrl()
+                + " 使用 Web 工作台，或查看 .pilot/browser/desktop-launch.log。");
         }
+    }
+
+    private String webUrl() {
+        return "http://127.0.0.1:" + port();
+    }
+
+    /** 不阻塞服务启动：后台确认窗口真的就绪，失败时给出明确原因和可用的替代操作。 */
+    private void watchWindow(Path root, Process process, Path logFile, String url) {
+        Thread thread = new Thread(() -> {
+            long deadline = System.nanoTime() + WINDOW_TIMEOUT.toNanos();
+            try {
+                while (System.nanoTime() < deadline) {
+                    if (alreadyOpen(root)) {
+                        return;
+                    }
+                    if (!process.isAlive()) {
+                        log.warn("桌面窗口进程已退出（退出码 {}），请查看 {}；可访问 {} 使用 Web 工作台。", process.exitValue(), logFile, url);
+                        return;
+                    }
+                    Thread.sleep(200);
+                }
+                log.warn("桌面窗口在 {} 秒内没有就绪，请查看 {}；可访问 {} 使用 Web 工作台。", WINDOW_TIMEOUT.toSeconds(), logFile, url);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, "pilot-desktop-window-check");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     public record LaunchResult(String status, String message) {
@@ -122,20 +175,6 @@ public class DesktopWindowLauncher {
 
     private String port() {
         return environment.getProperty("local.server.port", environment.getProperty("server.port", "9999"));
-    }
-
-    /** 开发态才打开：从 classes 目录启动，并且能找到源码仓库。 */
-    static boolean runningFromClasses() {
-        try {
-            var source = DesktopWindowLauncher.class.getProtectionDomain().getCodeSource();
-            if (source == null || source.getLocation() == null) {
-                return false;
-            }
-            String path = source.getLocation().getPath();
-            return path != null && path.contains("target/classes");
-        } catch (RuntimeException e) {
-            return false;
-        }
     }
 
     static Path repositoryRoot() {
@@ -195,19 +234,73 @@ public class DesktopWindowLauncher {
         }
     }
 
+    static Path endpointFile(Path root) {
+        return root.resolve(".pilot").resolve("browser").resolve("desktop-browser.json");
+    }
+
     static boolean alreadyOpen(Path root) {
-        Path file = root.resolve(".pilot").resolve("browser").resolve("desktop-browser.json");
+        return alreadyOpen(root, pid -> ProcessHandle.of(pid).filter(ProcessHandle::isAlive)
+            .flatMap(handle -> handle.info().command()).orElse(null));
+    }
+
+    /**
+     * 残留端点不能再只凭「PID 还活着」判定：Windows 上 PID 可能被系统复用给 conhost 等无关进程。
+     * 端点必须完整、进程必须是桌面壳，且新格式记录的启动时间要与进程一致。
+     */
+    static boolean alreadyOpen(Path root, LongFunction<String> commandOf) {
+        Path file = endpointFile(root);
         if (!Files.isRegularFile(file)) {
             return false;
         }
         try {
-            Matcher matcher = PID.matcher(Files.readString(file));
+            String json = Files.readString(file);
+            Matcher matcher = PID.matcher(json);
             if (!matcher.find()) {
+                discard(file);
                 return false;
             }
-            return ProcessHandle.of(Long.parseLong(matcher.group(1))).map(ProcessHandle::isAlive).orElse(false);
+            long pid = Long.parseLong(matcher.group(1));
+            Optional<ProcessHandle> handle = ProcessHandle.of(pid);
+            if (handle.isEmpty() || !handle.get().isAlive()) {
+                discard(file);
+                return false;
+            }
+            String command = commandOf.apply(pid);
+            if (command != null && !isDesktopShell(command)) {
+                discard(file);
+                return false;
+            }
+            if (!CONTROL_PORT.matcher(json).find() || !TOKEN.matcher(json).find()) {
+                discard(file);
+                return false;
+            }
+            Matcher start = START_MILLIS.matcher(json);
+            if (start.find()) {
+                Optional<Instant> actual = handle.get().info().startInstant();
+                if (actual.isPresent() && Math
+                    .abs(actual.get().toEpochMilli() - Long.parseLong(start.group(1))) > START_TOLERANCE_MILLIS) {
+                    discard(file);
+                    return false;
+                }
+            }
+            return true;
         } catch (IOException | NumberFormatException e) {
             return false;
+        }
+    }
+
+    /** 统一按路径分隔符归一，Windows / macOS / Linux 的桌面壳可执行文件都能识别。 */
+    static boolean isDesktopShell(String command) {
+        String name = command.toLowerCase(Locale.ROOT).replace('\\', '/');
+        return name.contains("electron") || name.contains("pilot.app") || name.endsWith("/pilot")
+            || name.contains("pilot.exe");
+    }
+
+    private static void discard(Path file) {
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException ignored) {
+            // 只读或并发写入时保留即可，下次启动会再校验一次
         }
     }
 }

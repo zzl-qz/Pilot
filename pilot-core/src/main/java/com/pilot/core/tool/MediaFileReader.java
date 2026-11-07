@@ -51,6 +51,21 @@ final class MediaFileReader {
         return "pdf".equals(extension(file));
     }
 
+    /** Office 四类文件在 read_file 里走纯文本抽取，用于独立读回核对，不还原排版。 */
+    static boolean isOfficeText(Path file) {
+        return OfficeSupport.isOoxml(file);
+    }
+
+    static ToolResult readOfficeText(Path file, String display) {
+        try {
+            String text = OfficeSupport.extractText(file);
+            return ToolResult.text("Office 文件 " + display + " 的抽取文本（仅用于内容核对，不含排版）\n" + text);
+        } catch (IOException | RuntimeException e) {
+            return ToolResult
+                .text("ERROR: 无法抽取 Office 文件文本：" + e.getMessage() + "；可用 office inspect 重新解析，或用 read_file 读取 PDF 文本");
+        }
+    }
+
     static ToolResult readImage(Path file, String display) throws IOException {
         long size = Files.size(file);
         if (size > MAX_IMAGE_BYTES) {

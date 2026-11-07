@@ -24,9 +24,11 @@ import { MarkdownBody } from './MarkdownBody.jsx';
 
 import ResearchPanel from './ResearchPanel.jsx';
 import WorkProductsPanel from './WorkProductsPanel.jsx';
+import DocumentStudio from './DocumentStudio.jsx';
 
 const TABS = [
   { id: 'products', label: '成果', title: '交付文件、来源与技能审核' },
+  { id: 'studio', label: '工作台', title: '手动编辑文档、一键导出与版本回滚，不经过模型' },
   { id: 'chat', label: '对话', title: '侧边对话：问和主线无关的问题，不打断正在跑的任务' },
   { id: 'changes', label: '变更', title: '工作区改动：逐个文件看差异、撤销' },
   { id: 'preview', label: '预览', title: '只读预览文件内容' },
@@ -61,7 +63,7 @@ export function Inspector() {
   return (
     <aside id="activity" className={`activity inspector is-rail is-open${tab === 'products' ? ' products-inspector' : ''}`} aria-label="工作区面板">
       <div className="inspector-main">
-      <header className="inspector-panel-head"><div><strong>{TABS.find(item => item.id === tab)?.label}</strong><span>{tab === 'products' ? '交付文件与可复用的经验' : tab === 'research' ? '当前任务记录的开源依据' : tab === 'preview' ? '只读文件预览' : tab === 'changes' ? '检查工作区的代码改动' : tab === 'commands' ? '命令状态与输出' : tab === 'activity' ? '任务执行记录' : tab === 'capabilities' ? '当前可用的工具与技能' : tab === 'browser' ? '浏览页面与引用内容' : '从当前任务分叉的临时对话，关掉即丢弃'}</span></div><button type="button" className="icon-btn" aria-label="关闭工作区面板" onClick={() => useStore.getState().setUi({ inspectorOpen: false, reviewExpanded: false })}><Icon name="close" /></button></header>
+      <header className="inspector-panel-head"><div><strong>{TABS.find(item => item.id === tab)?.label}</strong><span>{tab === 'products' ? '交付文件与可复用的经验' : tab === 'studio' ? '手动编辑、一键导出与版本回滚，不经过模型' : tab === 'research' ? '当前任务记录的开源依据' : tab === 'preview' ? '只读文件预览' : tab === 'changes' ? '检查工作区的代码改动' : tab === 'commands' ? '命令状态与输出' : tab === 'activity' ? '任务执行记录' : tab === 'capabilities' ? '当前可用的工具与技能' : tab === 'browser' ? '浏览页面与引用内容' : '从当前任务分叉的临时对话，关掉即丢弃'}</span></div><button type="button" className="icon-btn" aria-label="关闭工作区面板" onClick={() => useStore.getState().setUi({ inspectorOpen: false, reviewExpanded: false })}><Icon name="close" /></button></header>
       {tab === 'activity' && <div className="inspector-head"><Filters /></div>}
       <div className="inspector-body" id={`inspector-panel-${tab}`} role="tabpanel" aria-labelledby={`inspector-tab-${tab}`}>
         {/* 每个面板单独兜底：某个页签渲染出错时只废掉这一块，别把整页卸载成白屏 */}
@@ -73,6 +75,7 @@ export function Inspector() {
           {tab === 'capabilities' && <CapabilitiesPanel />}
           {tab === 'browser' && <BrowserPanel />}
           {tab === 'products' && <WorkProductsPanel />}
+          {tab === 'studio' && <DocumentStudio />}
           {tab === 'research' && <ResearchPanel />}
           {tab === 'activity' && <ActivityPanel />}
         </ErrorBoundary>
@@ -115,6 +118,7 @@ export function Inspector() {
 function RailIcon({ id }: { id: string }) {
   const common = { viewBox: '0 0 16 16', 'aria-hidden': true };
   if (id === 'products') return <svg {...common}><path d="M4 2.5h5l3 3v8H4zM9 2.5v3h3M6 8h4M6 10.5h4" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
+  if (id === 'studio') return <svg {...common}><path d="M3 2.5h6l4 4v7H3zM9 2.5v4h4M6 9h4M6 11h4" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
   if (id === 'research') return <svg {...common}><path d="M8 4C6 2.5 3 3 2 3v9c2-.5 4-.5 6 1 2-1.5 4-1.5 6-1V3c-2-.5-4-.5-6 1Zm0 0v9" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
   if (id === 'chat') return <svg {...common}><path d="M3 3.5h10v7H6.2L3 12.8z" fill="none" stroke="currentColor" strokeWidth="1.3" /></svg>;
   if (id === 'changes') return <svg {...common}><path d="M4 3.5h5.2L12 6.2V12.5H4z" fill="none" stroke="currentColor" strokeWidth="1.3" /></svg>;

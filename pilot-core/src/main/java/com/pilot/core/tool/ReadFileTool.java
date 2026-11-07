@@ -68,7 +68,7 @@ public final class ReadFileTool implements Tool {
         return true;
     }
 
-    /** 图片与 PDF 走媒体分支，其余沿用文本读取。 */
+    /** 图片、PDF 与 Office 文件走媒体/抽取分支，其余沿用文本读取。 */
     @Override
     public ToolResult executeResult(Map<String, Object> args) {
         String rawPath = ToolSupport.stringArg(args, "path");
@@ -81,6 +81,9 @@ public final class ReadFileTool implements Tool {
                     }
                     if (MediaFileReader.isPdf(file)) {
                         return MediaFileReader.readPdf(file, rawPath, args.get("pages"));
+                    }
+                    if (MediaFileReader.isOfficeText(file)) {
+                        return MediaFileReader.readOfficeText(file, rawPath);
                     }
                 }
             } catch (RuntimeException e) {

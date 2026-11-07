@@ -3,9 +3,14 @@ package com.pilot.mobile.bridge
 import com.pilot.mobile.transport.*
 import computer.iroh.EndpointTicket
 import kotlinx.coroutines.*
-import java.awt.Desktop
 import java.net.URI
 import java.nio.file.Path
+
+/**
+ * 配对只在工作台的「连接手机」弹窗里完成，连接桥一律不打开独立的浏览器窗口。
+ * 只有显式诊断调用才额外打印一份可手动复制的管理地址；参数开关不再控制任何弹窗。
+ */
+fun diagnosticAdminUrlRequested(args: Array<String>): Boolean = "--open-admin" in args && "--no-open" !in args
 
 fun main(args: Array<String>) = runBlocking {
     // 仅作用于这个连接桥 JVM，用于读取系统代理线索；不改变系统代理，也不代表原生库支持 HTTP 代理。
@@ -68,7 +73,9 @@ fun main(args: Array<String>) = runBlocking {
     val adminUrl = admin.start()
     println("PILOT_MOBILE_ADMIN $adminUrl")
     println("连接模式：$mode；二维码本机生成，网络探测在后台进行。")
-    if ("--no-open" !in args && Desktop.isDesktopSupported()) runCatching { Desktop.getDesktop().browse(URI(adminUrl)) }
+    if (diagnosticAdminUrlRequested(args)) {
+        println("诊断用管理地址（不会自动打开浏览器）：$adminUrl")
+    }
     Runtime.getRuntime().addShutdownHook(Thread {
         admin.close(); network.close()
         runBlocking { withTimeoutOrNull(3000) { endpoint.shutdown() } }

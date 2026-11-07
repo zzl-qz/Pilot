@@ -60,6 +60,21 @@ export class ApiError extends Error { readonly status: number; constructor(messa
 
 const jsonBody = (method: string, body: unknown) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 export const api = {
+  /* 产物工作台：与 office 工具同源，但这些调用完全不经过模型。 */
+  studioDocuments: (session: string, signal?: AbortSignal) => apiJson<ApiResults['studioDocuments']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents`, { signal }),
+  studioDocument: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['studioDocument']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}`, { signal }),
+  studioCreate: (session: string, body: Record<string, unknown>) => apiJson<ApiResults['studioCreate']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents`, jsonBody('POST', body)),
+  studioImport: (session: string, body: Record<string, unknown>) => apiJson<ApiResults['studioImport']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/import`, jsonBody('POST', body)),
+  studioSave: (session: string, id: string, body: Record<string, unknown>) => apiJson<ApiResults['studioSave']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}`, jsonBody('PUT', body)),
+  studioVersions: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['studioVersions']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}/versions`, { signal }),
+  studioRollback: (session: string, id: string, body: Record<string, unknown>) => apiJson<ApiResults['studioRollback']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}/rollback`, jsonBody('POST', body)),
+  studioRender: (session: string, id: string, body: Record<string, unknown>) => apiJson<ApiResults['studioRender']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}/render`, jsonBody('POST', body)),
+  studioArtifacts: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['studioArtifacts']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}/artifacts`, { signal }),
+  studioDownload: async (session: string, id: string, artifactId: string, signal?: AbortSignal) => {
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}/artifacts/${encodeURIComponent(artifactId)}/download`, { signal });
+    if (!response.ok) throw new ApiError(`下载失败（HTTP ${response.status}）`, response.status);
+    return response.blob();
+  },
   workProducts: (session: string, signal?: AbortSignal) => apiJson<ApiResults['workProducts']>(`/api/sessions/${encodeURIComponent(session)}/products`, { signal }),
   productPreview: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['productPreview']>(`/api/sessions/${encodeURIComponent(session)}/products/${encodeURIComponent(id)}/preview`, { signal }),
   skillDrafts: (session: string, signal?: AbortSignal) => apiJson<ApiResults['skillDrafts']>(`/api/sessions/${encodeURIComponent(session)}/skill-drafts`, { signal }),

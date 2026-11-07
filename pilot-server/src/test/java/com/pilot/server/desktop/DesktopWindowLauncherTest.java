@@ -9,13 +9,24 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.StandardEnvironment;
+
+import com.pilot.server.desktop.DesktopWindowLauncher.LaunchResult;
 
 class DesktopWindowLauncherTest {
+
+    private static final String WINDOWS_SHELL = "C:\\repo\\pilot-desktop\\node_modules\\electron\\dist\\electron.exe";
+    private static final String MAC_SHELL = "/Applications/Pilot.app/Contents/MacOS/Pilot";
+    private static final String LINUX_SHELL = "/repo/pilot-desktop/node_modules/electron/dist/electron";
 
     @Test
     void electronBinaryPointsAtThePlatformExecutable() {
@@ -65,17 +76,79 @@ class DesktopWindowLauncherTest {
 
     @Test
     void deadPidDoesNotCountAsAnOpenWindow(@TempDir Path root) throws Exception {
-        Path file = root.resolve(".pilot").resolve("browser").resolve("desktop-browser.json");
-        Files.createDirectories(file.getParent());
-        Files.writeString(file, "{\"pid\": 99999999, \"cdpPort\": 1}");
-        assertFalse(DesktopWindowLauncher.alreadyOpen(root));
+        Path file = endpoint(root, endpointJson(99999999L, currentStartMillis()));
+        assertFalse(DesktopWindowLauncher.alreadyOpen(root, pid -> WINDOWS_SHELL));
+        assertFalse(Files.exists(file), "失效端点要被清理，避免每次启动都误判");
     }
 
     @Test
-    void currentProcessCountsAsAnOpenWindow(@TempDir Path root) throws Exception {
-        Path file = root.resolve(".pilot").resolve("browser").resolve("desktop-browser.json");
+    void liveDesktopShellEndpointCountsAsAnOpenWindow(@TempDir Path root) throws Exception {
+        long pid = ProcessHandle.current().pid();
+        endpoint(root, endpointJson(pid, currentStartMillis()));
+        assertTrue(DesktopWindowLauncher.alreadyOpen(root, ignored -> WINDOWS_SHELL));
+    }
+
+    @Test
+    void reusedPidDoesNotCountAsAnOpenWindow(@TempDir Path root) throws Exception {
+        long pid = ProcessHandle.current().pid();
+        Path file = endpoint(root, endpointJson(pid, currentStartMillis()));
+        assertFalse(DesktopWindowLauncher.alreadyOpen(root, ignored -> "C:\\Windows\\System32\\conhost.exe"));
+        assertFalse(Files.exists(file), "PID 被系统复用时残留端点必须失效");
+    }
+
+    @Test
+    void staleStartMillisDoesNotCountAsAnOpenWindow(@TempDir Path root) throws Exception {
+        assumeTrue(ProcessHandle.current().info().startInstant().isPresent());
+        long pid = ProcessHandle.current().pid();
+        Path file = endpoint(root, endpointJson(pid, 1L));
+        assertFalse(DesktopWindowLauncher.alreadyOpen(root, ignored -> LINUX_SHELL));
+        assertFalse(Files.exists(file));
+    }
+
+    @Test
+    void incompleteEndpointIsDiscarded(@TempDir Path root) throws Exception {
+        long pid = ProcessHandle.current().pid();
+        Path file = endpoint(root, "{\"pid\": " + pid + "}");
+        assertFalse(DesktopWindowLauncher.alreadyOpen(root, ignored -> MAC_SHELL));
+        assertFalse(Files.exists(file));
+    }
+
+    @Test
+    void desktopShellCommandIsRecognizedOnAllPlatforms() {
+        assertTrue(DesktopWindowLauncher.isDesktopShell(WINDOWS_SHELL));
+        assertTrue(DesktopWindowLauncher.isDesktopShell(MAC_SHELL));
+        assertTrue(DesktopWindowLauncher.isDesktopShell(LINUX_SHELL));
+        assertTrue(DesktopWindowLauncher.isDesktopShell("C:\\Program Files\\Pilot\\pilot.exe"));
+        assertFalse(DesktopWindowLauncher.isDesktopShell("C:\\Windows\\System32\\conhost.exe"));
+        assertFalse(DesktopWindowLauncher.isDesktopShell("/usr/bin/java"));
+    }
+
+    @Test
+    void noDesktopSessionFallsBackToWebWorkbench() {
+        ConfigurableEnvironment environment = new StandardEnvironment();
+        environment.getPropertySources().addFirst(new MapPropertySource("test", Map.of("local.server.port", "10001")));
+        DesktopWindowLauncher launcher = new DesktopWindowLauncher(environment,
+            new DesktopShellInstaller(false, (dir, cmd, env, log, timeout) -> 1));
+        LaunchResult result = launcher.launch(() -> false);
+        assertEquals("unavailable", result.status());
+        assertTrue(result.message().contains("http://127.0.0.1:10001"));
+        assertTrue(result.message().contains("Web 工作台"));
+        assertFalse(result.message().contains("不是从源码启动"), "官方脚本 / fat jar 不应再被路径嗅探拦截");
+    }
+
+    private static long currentStartMillis() {
+        return ProcessHandle.current().info().startInstant().map(Instant::toEpochMilli).orElse(0L);
+    }
+
+    private static String endpointJson(long pid, long startMillis) {
+        return "{\"pid\": " + pid + ", \"startMillis\": " + startMillis
+            + ", \"cdpPort\": 42756, \"controlPort\": 63187, \"token\": \"secret-token\"}";
+    }
+
+    private static Path endpoint(Path root, String json) throws IOException {
+        Path file = DesktopWindowLauncher.endpointFile(root);
         Files.createDirectories(file.getParent());
-        Files.writeString(file, "{\"pid\": " + ProcessHandle.current().pid() + "}");
-        assertTrue(DesktopWindowLauncher.alreadyOpen(root));
+        Files.writeString(file, json);
+        return file;
     }
 }

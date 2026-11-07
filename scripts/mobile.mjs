@@ -10,7 +10,11 @@ let args;
 if (operation === 'bridge') {
   const libraries = path.join(root, 'bridge/build/install/bridge/lib');
   if (!existsSync(libraries)) throw new Error('先运行 node scripts/mobile.mjs build 构建连接组件');
-  args = ['--enable-native-access=ALL-UNNAMED', '-cp', path.join(libraries, '*'), 'com.pilot.mobile.bridge.MainKt', ...process.argv.slice(3)];
+  const extra = process.argv.slice(3);
+  // 连接桥不再打开独立浏览器窗口；配对只在工作台「连接手机」弹窗里完成。
+  // 保留 --no-open 兼容旧参数，显式 --open-admin 仅打印可手动复制的诊断地址。
+  if (!extra.includes('--open-admin') && !extra.includes('--no-open')) extra.push('--no-open');
+  args = ['--enable-native-access=ALL-UNNAMED', '-cp', path.join(libraries, '*'), 'com.pilot.mobile.bridge.MainKt', ...extra];
 } else {
   if (operation === 'release' && ['PILOT_ANDROID_KEYSTORE','PILOT_ANDROID_STORE_PASSWORD','PILOT_ANDROID_KEY_ALIAS','PILOT_ANDROID_KEY_PASSWORD'].some(key => !process.env[key])) throw new Error('正式签名需要配置 PILOT_ANDROID_KEYSTORE、PILOT_ANDROID_STORE_PASSWORD、PILOT_ANDROID_KEY_ALIAS、PILOT_ANDROID_KEY_PASSWORD');
   const tasks = {

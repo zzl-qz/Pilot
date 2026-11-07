@@ -31,9 +31,11 @@ export function runtimeReady(root=desktopRoot,platform=process.platform,arch=pro
   const folder=join(root,'node_modules/electron');
   const version=JSON.parse(readFileSync(join(folder,'package.json'),'utf8')).version;
   const binary=electronBinary(root,platform);
+  // Windows 文件系统不表达 POSIX 执行位；在 Windows 上模拟其它平台时不能据此判为损坏。
+  const executable=platform==='win32'||process.platform==='win32'||(statSync(binary).mode&0o111)!==0;
   return Boolean(version)&&readFileSync(join(folder,'dist/version'),'utf8').trim().replace(/^v/,'')===version
    &&readFileSync(join(folder,'path.txt'),'utf8').trim()===relative(join(folder,'dist'),binary)
-   &&statSync(binary).isFile()&&(platform==='win32'||(statSync(binary).mode&0o111)!==0)&&binaryArchitectures(binary).includes(arch);
+   &&statSync(binary).isFile()&&executable&&binaryArchitectures(binary).includes(arch);
  }catch{return false;}
 }
 function execute(command,args,options){

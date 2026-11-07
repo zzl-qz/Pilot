@@ -82,6 +82,7 @@ function SessionProducts({ session }: { session: string }) {
 function ProductDetail({ session, product }: { session: string; product: S.WorkProductServiceProduct }) {
   const [preview, setPreview] = useState<S.WorkProductServicePreview | null>(null), [error, setError] = useState('');
   const [downloading, setDownloading] = useState(false), [retry, setRetry] = useState(0);
+  const [importing, setImporting] = useState(false);
   const alive = useRef(true), downloadAbort = useRef<AbortController | null>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; downloadAbort.current?.abort(); }; }, []);
   useEffect(() => {
@@ -101,9 +102,21 @@ function ProductDetail({ session, product }: { session: string; product: S.WorkP
     } catch (e) { if (alive.current) setError(errorInfo(e).message || '操作失败'); }
     finally { if (alive.current) setDownloading(false); }
   };
+  /** 把成果抽取为可编辑源（仅文本，不含原排版），再切到工作台由人手动定稿。 */
+  const openInStudio = async () => {
+    setImporting(true); setError('');
+    try {
+      const created = await api.studioImport(session, { product_id: product.id, title: product.title });
+      if (!created) throw new Error('导入未返回结果');
+      useStore.getState().setUi({ inspectorOpen: true, inspectorTab: 'studio', studioDocumentId: created.id });
+    } catch (e) { setError(errorInfo(e).message || '操作失败'); }
+    finally { if (alive.current) setImporting(false); }
+  };
   return <article className="work-detail">
     <h2 tabIndex={-1}>{product.title}</h2><p>{product.summary}</p>
-    <div className="work-toolbar"><small>{product.filename} · {dateText(product.createdAt)}</small><button className="btn" onClick={download} disabled={downloading}>{downloading ? '正在下载…' : '下载文件'}</button></div>
+    <div className="work-toolbar"><small>{product.filename} · {dateText(product.createdAt)}</small>
+      <button className="btn" onClick={() => void openInStudio()} disabled={importing}>{importing ? '正在导入…' : '在编辑器中打开'}</button>
+      <button className="btn" onClick={download} disabled={downloading}>{downloading ? '正在下载…' : '下载文件'}</button></div>
     {error && <div role="alert" className="work-error">{error}<button className="btn" onClick={() => setRetry(v => v + 1)}>重试预览</button></div>}
     {!preview && !error && <p role="status">正在读取预览…</p>}
     {preview && <><p className="work-hint">{preview.notice}{preview.truncated ? ' 预览已截断，完整内容请下载。' : ''}</p>

@@ -17,7 +17,7 @@
 
 
 - 用户要求按此前方案完成时，必须沿用此前完整范围；上下文摘要写着“目标已省略/无法确认”时先用 read_task_history 恢复原文，不能把剩余局部工作重新定义成全部目标。
-- 文件生成成功后继续独立读回、计算或渲染检查；office 的结构通过不等于视觉通过。缺依赖时先 prepare_runtime plan，再由具体 prepare 动作请求授权。
+- 文件生成成功后继续独立读回、计算或渲染检查；office 的结构通过不等于视觉通过。xlsx/pptx/docx/pdf 都可用 office inspect 读回，pptx 与 pdf 用 render_pptx / render_pdf 逐页看图；PDF 视觉通过不等于 Word 排版一致，不能互相替代。缺依赖时先 prepare_runtime plan，再由具体 prepare 动作请求授权。
 - 证据已清理时使用 read_tool_output 按原 run/call ID 恢复，不为找回输出重新执行有副作用的命令。未归档的证据不得宣称已有可恢复引用。
 
 - 开始非编码任务时先 local_resources 查看已有能力；可用 office 直接交付时不要额外安装。发现程序路径不等于已验证功能，使用后仍须检查实际产物。

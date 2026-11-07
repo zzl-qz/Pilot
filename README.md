@@ -6,7 +6,7 @@ Pilot 的目标是成为本机优先的任务执行 Agent：用户给出期望�
 
 ## 功能概览
 
-- 办公交付：内置 `office` 创建真实 XLSX/PPTX，重新解析、计算公式并渲染幻灯片；通过 `publish_artifact` 保存最终成果。复杂排版、宏和任意现有文件编辑不在内置生成器范围。
+- 办公交付：内置 `office` 创建真实 XLSX/PPTX/DOCX/PDF，统一读回检查、计算公式、逐页渲染幻灯片与 PDF，并支持把已有文件编辑后另存为新文件；`read_file` 可抽取四类文件的文本用于独立核对，成果通过 `publish_artifact` 保存。PDF 含中文时按平台探测并嵌入可编码字体，找不到就明确报错并给出 `font_path`、改用 docx 等替代，不生成缺字文件。复杂排版、宏/VBA、原地覆盖已有文件以及 Microsoft Office 实机等价不在内置生成器范围；PDF 视觉通过不等于 Word 排版一致。侧栏「产物工作台」与全局导航的编辑图标可直接打开可编辑源：人手动改标题、段落、表格、页序并保存版本，一键确定性导出（不调用模型、不消耗 token），产物带读回检查与 sha256，版本可对比回滚；「成果」页的「在编辑器中打开」会把已有成果抽取为可编辑文本后带入工作台，明确不含原排版。
 - 本机资源：`local_resources` 与能力面板发现 PATH、Windows/macOS 常见应用目录；`prepare_runtime` 先展示方案，经具体操作确认后准备任务私有 Python 环境，失败清理环境并保留日志。
 - 外网浏览器：公开 HTTPS 站点可经确认进入独立上下文；页面交互绑定当前 URL，每次确认后执行。登录、验证码可由用户接管；提交申请前须核对目标及最终内容。具体范围见 [补齐记录](evaluation/AGENT_DELIVERY_2026-11-06.md)。
 - 上下文恢复：保留用户原文、最新整批工具观察与摘要来源指纹；`read_task_history` 恢复原始任务，`read_tool_output` 分页恢复本会话工具输出，避免为了找回证据重放操作。
@@ -67,9 +67,9 @@ Windows PowerShell / 命令提示符：
 .\start.cmd
 ```
 
-脚本会切换到自身所在的仓库根目录，也可以从其他目录通过完整路径运行。传入参数会交给应用，例如 `bash start.sh --server.port=10001`（Windows 使用 `.\start.cmd --server.port=10001`）。启动时只检查电脑端所需的 Java 25、Node/npm 和 Maven，缺失时从固定官方版本下载到 Pilot 私有缓存，验证后使用，不修改全局 Java 或 PATH。桌面壳缺失时自动补齐 Electron。普通 PC 启动不检查、不下载 Gradle、Android SDK 或移动构建用 Java 21；APK 和手机连接桥由开发者另外打包。只有打开“连接手机”时才检查已经打包的连接桥，缺组件时提示，Windows 原生运行库必要时通过微软安装器及正常系统授权修复。首次联网准备可能需要几分钟，之后复用缓存。IDE 编译器本身仍需支持 Java 25。完整说明见 [源码环境自动准备](SOURCE_ENVIRONMENT.md)。
+脚本会切换到自身所在的仓库根目录，也可以从其他目录通过完整路径运行。传入参数会交给应用，例如 `bash start.sh --server.port=10001`（Windows 使用 `.\start.cmd --server.port=10001`）。启动时只检查电脑端所需的 Java 25、Node/npm 和 Maven，缺失时从固定官方版本下载到 Pilot 私有缓存，验证后使用，不修改全局 Java 或 PATH。服务启动后会打开 Electron 桌面工作台（桌面壳缺失时自动补齐 Electron）；浏览器访问同一地址仍是同一个 Web 工作台。官方脚本、打包后的 jar 与 IDE 运行走同一条开窗链路。普通 PC 启动不检查、不下载 Gradle、Android SDK 或移动构建用 Java 21；APK 和手机连接桥由开发者另外打包。只有打开“连接手机”时才检查已经打包的连接桥，缺组件时提示，Windows 原生运行库必要时通过微软安装器及正常系统授权修复。首次联网准备可能需要几分钟，之后复用缓存。IDE 编译器本身仍需支持 Java 25。完整说明见 [源码环境自动准备](SOURCE_ENVIRONMENT.md)。
 
-默认 profile 为 `local`，权限默认为 `AUTO`（完全放行；可在界面切到 `AUTO_EDIT` / `ASK` / `READ_ONLY`）。默认 Web/API 地址为 `http://localhost:9999`。服务启动后可在浏览器打开该地址。无模型密钥时可使用 Mock 模式体验界面；真实模型运行可用环境变量配置：
+默认 profile 为 `local`，权限默认为 `AUTO`（完全放行；可在界面切到 `AUTO_EDIT` / `ASK` / `READ_ONLY`）。默认 Web/API 地址为 `http://localhost:9999`。服务启动后可在浏览器打开该地址。配对只在工作台「连接手机」弹窗里完成；连接桥不会自动打开 `http://127.0.0.1:<随机端口>` 这类独立页面，电脑端启动不会弹出配对页。无模型密钥时可使用 Mock 模式体验界面；真实模型运行可用环境变量配置：
 
 ```sh
 PILOT_MODEL_API_KEY=你的密钥 \
@@ -90,7 +90,7 @@ bash mvnw -pl pilot-server -am install
 bash mvnw -pl pilot-server spring-boot:run
 ```
 
-只构建 `pilot-server` 时，同一次编译会带上当前 `pilot-core` 的源码和资源，也不另起一次 Maven。Maven 仍会读取本地 core 的依赖清单，因此随 core 新增的运行依赖必须同步在 server 声明，版本由父 POM 统一管理；Office 的 POI 依赖已按此处理。新增或调整依赖后，在 IDEA 重新加载 Maven 项目，再运行 `PilotServerApplication`。单模块回归可用 `bash mvnw -f pilot-server/pom.xml clean verify`（Windows 使用 `.\mvnw.cmd`）；首次构建没有 core 本地构件时仍按上面的联合安装命令准备。项目不使用 Spring Boot DevTools，改了 Java 后由你再点一次运行。若 9999 仍被旧进程占用，先停掉那个进程。
+只构建 `pilot-server` 时，同一次编译会带上当前 `pilot-core` 的源码和资源，也不另起一次 Maven。Maven 仍会读取本地 core 的依赖清单，因此随 core 新增的运行依赖必须同步在 server 声明，版本由父 POM 统一管理；Office 的 POI 与 PDFBox 依赖已按此处理。新增或调整依赖后，在 IDEA 重新加载 Maven 项目，再运行 `PilotServerApplication`。单模块回归可用 `bash mvnw -f pilot-server/pom.xml clean verify`（Windows 使用 `.\mvnw.cmd`）；首次构建没有 core 本地构件时仍按上面的联合安装命令准备。项目不使用 Spring Boot DevTools，改了 Java 后由你再点一次运行。若 9999 仍被旧进程占用，先停掉那个进程。
 
 前端产物 `pilot-web/src/main/resources/static/index.html` 与 `static/assets/` 是 vite 构建结果，不入库：每次构建的 hash 文件名都会变，入库后拉代码不重新构建就会引用不存在的资源。Maven 的 `generate-resources` 会自动构建，`start.cmd` / `start.sh` 走的就是这条路径。**在 IDEA 里直接运行前**，先执行一次 `npm --prefix pilot-web/frontend run build`（或 `.\mvnw.cmd -pl pilot-server -am install`）。漏构建时：缺 `index.html` 首页会返回 404；缺 `assets` 里的入口脚本，页面会直接说明缺哪个文件并给出构建命令，不再是无声黑屏。
 
