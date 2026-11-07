@@ -45,6 +45,26 @@ class ModelCapacityTest {
             () -> RequestBudget.validateProtocol(List.of(Message.assistant("", List.of(a, a)))));
     }
 
+    /** 兼容网关把输出上限误解成「要写满」时，能整条参数关掉并对照验证。 */
+    @Test
+    void canDisableChatOutputLimitForUncooperativeGateways() {
+        String previous = System.getProperty("pilot.model.chat-send-output-limit");
+        System.setProperty("pilot.model.chat-send-output-limit", "false");
+        try {
+            var raw = new OpenAiCompatibleModelClient(HttpClient.newHttpClient(), new JsonMapper(),
+                URI.create("https://api.openai.com"), "unused", "alias");
+            Map<String, Object> body = raw.requestBody(List.of(Message.user("hi")), List.of(), false);
+            assertFalse(body.containsKey("max_completion_tokens"));
+            assertFalse(body.containsKey("max_tokens"));
+        } finally {
+            if (previous == null) {
+                System.clearProperty("pilot.model.chat-send-output-limit");
+            } else {
+                System.setProperty("pilot.model.chat-send-output-limit", previous);
+            }
+        }
+    }
+
     @Test
     void chatWireSetsOutputLimitAndRejectsOversizeInEveryPurpose() {
         var raw = new OpenAiCompatibleModelClient(HttpClient.newHttpClient(), new JsonMapper(),

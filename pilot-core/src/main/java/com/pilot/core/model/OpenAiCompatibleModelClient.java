@@ -108,6 +108,13 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         return false;
     }
 
+    /** 是否在聊天请求里带上输出上限；默认带上，可用系统属性或环境变量关闭以对照端点行为。 */
+    static boolean sendOutputLimit() {
+        String value = System.getProperty("pilot.model.chat-send-output-limit",
+            System.getenv("PILOT_MODEL_CHAT_SEND_OUTPUT_LIMIT"));
+        return value == null || !"false".equalsIgnoreCase(value.strip());
+    }
+
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions, boolean streaming) {
         ModelCapacity capacity = ModelCapacity.configured();
         RequestBudget.enforce(messages, definitions, capacity);
@@ -121,7 +128,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (!java.util.Set.of("max_tokens", "max_completion_tokens").contains(outputParameter)) {
             throw new IllegalArgumentException("Invalid chat output parameter");
         }
-        body.put(outputParameter, capacity.outputTokens());
+        // 个别兼容网关把 max_tokens 当成「要写满」的目标，反而诱发长文复读；可关掉这个参数对照验证。
+        if (sendOutputLimit()) {
+            body.put(outputParameter, capacity.outputTokens());
+        }
         body.put("messages", items);
         if (streaming) {
             body.put("stream", true);

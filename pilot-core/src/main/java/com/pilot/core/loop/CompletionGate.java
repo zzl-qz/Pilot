@@ -39,6 +39,18 @@ final class CompletionGate {
         List.of("修复", "修改", "实现", "添加", "增加", "新增", "重构", "优化", "改成", "改为", "开发", "落地");
     private static final List<String> ACTION_HINTS_EN =
         List.of("fix", "implement", "add ", "change", "refactor", "update", "build");
+    /** 代码落点：目标里没有这些词时，「优化」更可能是在问建议，不是在要求改仓库。 */
+    private static final List<String> CODE_HINTS =
+        List.of("代码", "函数", "方法", "接口", "模块", "文件", "仓库", "页面", "组件", "测试", "脚本", "配置", "依赖", "构建", "部署", "报错", "异常",
+            "性能", "数据库", "sql", "前端", "后端", "服务", "日志", "样式", "工程", "分支", "提交", "路由", "bug");
+    private static final List<String> CODE_HINTS_EN =
+        List.of("code", "function", "method", "api", "module", "file", "repo", "page", "component", "test", "script",
+            "config", "build", "deploy", "error", "database", "service", "log", "style", "bug");
+    /** 明确在征求意见的措辞：即使带「优化/修改」，也不该被催着改文件。 */
+    private static final List<String> CONSULT_HINTS =
+        List.of("建议", "看看", "评估", "分析", "意见", "思路", "方案", "对比", "解释", "为什么", "是否", "值不值", "有什么", "怎么看", "判断一下", "调研");
+    private static final List<String> CONSULT_HINTS_EN =
+        List.of("suggest", "advice", "opinion", "evaluate", "compare", "explain", "review");
     /** 只改这些后缀的文档不算「改了代码」，不强制跑构建。 */
     private static final Set<String> DOC_SUFFIXES = Set.of(".md", ".txt", ".rst", ".adoc");
     /** 目标像「调研 / 解释 / 定位」时，只读任务也要核对覆盖范围，不能读两个文件就下结论。 */
@@ -187,7 +199,21 @@ final class CompletionGate {
             return false;
         }
         String lower = goal.toLowerCase(Locale.ROOT);
-        return ACTION_HINTS.stream().anyMatch(goal::contains) || ACTION_HINTS_EN.stream().anyMatch(lower::contains);
+        boolean action =
+            ACTION_HINTS.stream().anyMatch(goal::contains) || ACTION_HINTS_EN.stream().anyMatch(lower::contains);
+        if (!action) {
+            return false;
+        }
+        // 有明确的代码落点，才允许按「该动手却没动手」催办
+        boolean codeTarget =
+            CODE_HINTS.stream().anyMatch(lower::contains) || CODE_HINTS_EN.stream().anyMatch(lower::contains);
+        if (codeTarget) {
+            return true;
+        }
+        // 没有代码落点时，带「看看 / 建议 / 评估」的是在征求意见：「看看怎么优化简历」不是偷懒
+        boolean consult =
+            CONSULT_HINTS.stream().anyMatch(goal::contains) || CONSULT_HINTS_EN.stream().anyMatch(lower::contains);
+        return !consult;
     }
 
     private static boolean looksLikeResearch(String goal) {

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import com.pilot.core.event.ArbitrationRequired;
 import com.pilot.core.event.ArbitrationResolved;
+import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.event.ContextCompacted;
 import com.pilot.core.event.ExecutionUpdated;
 import com.pilot.core.event.MultiAgentBudgetUpdated;
@@ -166,6 +167,16 @@ class EventCodecNewEventsTest {
 
         assertInstanceOf(RunCancelled.class, decoded);
         assertEquals(event, decoded);
+    }
+
+    /** 旧版本曾把「作废预览」写进事件表；历史回放必须能读出来，否则整条会话读不出历史。 */
+    @Test
+    void decodesPersistedPreviewReset() {
+        SessionEvent decoded = codec.decode("assistant.preview", "{\"text\":\"\",\"reset\":true}");
+
+        AssistantPreview preview = assertInstanceOf(AssistantPreview.class, decoded);
+        assertTrue(preview.reset());
+        assertEquals("", preview.text());
     }
 
     private SessionEvent roundTrip(String type, SessionEvent event) {

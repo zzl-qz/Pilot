@@ -12,6 +12,7 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -135,6 +136,31 @@ class OpenAiCompatibleModelClientTest {
             assertEquals("部分结果", response.content());
             assertEquals("部分结果", streamed.toString());
             assertEquals(ModelResponse.FinishReason.LENGTH, response.finishReason());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** 给界面的流式回调必须是增量：每帧只含新生成的字，不能把之前的内容重发一遍。 */
+    @Test
+    void streamsEachChunkOnlyOnceWithoutRepeatingEarlierText() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200, """
+            data: {"choices":[{"delta":{"content":"第一段"},"finish_reason":null}]}
+
+            data: {"choices":[{"delta":{"content":"第二段"},"finish_reason":null}]}
+
+            data: {"choices":[{"delta":{"content":"第三段"},"finish_reason":"stop"}]}
+
+            data: [DONE]
+
+            """);
+        server.start();
+        try {
+            List<String> frames = new ArrayList<String>();
+            ModelResponse response = client(server).chat(List.of(Message.user("开始")), List.of(), frames::add);
+
+            assertEquals(List.of("第一段", "第二段", "第三段"), frames, "每一帧必须是增量，不能把已经发过的内容再发一次");
+            assertEquals("第一段第二段第三段", response.content());
         } finally {
             server.stop(0);
         }

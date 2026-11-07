@@ -47,6 +47,10 @@ class ProtocolTest {
         transcript.accept(event(1, "run.started", """{"input":"检查代码"}"""))
         transcript.accept(event(2, "assistant.preview", """{"text":"我正在"}"""))
         assertEquals(1, transcript.cursor)
+        // 请求重试或输出被判为复读：旧预览作废，不能和重试后的内容拼成两段。
+        transcript.accept(event(2, "assistant.preview", """{"reset":true}"""))
+        assertEquals(1, transcript.snapshot().size)
+        transcript.accept(event(2, "assistant.preview", """{"text":"我正在"}"""))
         transcript.accept(event(2, "assistant.delta", """{"text":"我正在检查。"}"""))
         transcript.accept(event(2, "assistant.delta", """{"text":"我正在检查。"}"""))
         assertEquals(2, transcript.snapshot().size)

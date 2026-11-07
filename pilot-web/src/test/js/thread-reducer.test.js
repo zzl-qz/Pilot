@@ -105,6 +105,16 @@ test('预览只是临时文本，正式增量到达后不重复拼接', () => {
   assert.equal(turnOf(state).reply.preview, '');
 });
 
+test('重试或复读中止时作废旧预览，新一段从空白开始', () => {
+  const state = draft();
+  applyEvent(state, { type: 'assistant.preview', payload: { text: '减少简历中的方案细节。' } }, { live: true });
+  applyEvent(state, { type: 'assistant.preview', payload: { text: '', reset: true } }, { live: true });
+  assert.equal(turnOf(state).reply.preview, '', '旧预览不能和重试后的内容拼在一起');
+
+  applyEvent(state, { type: 'assistant.preview', payload: { text: '重新组织' } }, { live: true });
+  assert.equal(turnOf(state).reply.preview, '重新组织');
+});
+
 test('瞬时事件不推进游标，落库事件才推进', () => {
   const state = draft();
   applyEvent(state, { type: 'assistant.preview', sequence: 7, payload: { text: 'x' } }, { live: true });

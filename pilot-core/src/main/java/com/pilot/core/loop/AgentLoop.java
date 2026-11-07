@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.AssistantDelta;
+import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
@@ -165,6 +166,9 @@ public final class AgentLoop {
     private static final int DEFAULT_MAX_PLAN_CONTINUES = 3;
     /** 等待重试时拆成小段，取消能在这段时间内停下来。 */
     private static final long RETRY_SLICE_MS = 250L;
+    /** 同一轮里允许因复读中止并重试的次数；第二次仍然复读说明不是偶发抖动。 */
+    private static final int MAX_REPEAT_ABORTS = 2;
+    private static final String REPEAT_GUIDANCE = "上一次回复陷入逐行重复（同一行连续出现多次），已中止。" + "请重新组织答案：不要重复相同句子或列表项，直接推进未完成的部分。";
 
     private final ModelClient client;
     private final ToolRegistry tools;
@@ -476,6 +480,8 @@ public final class AgentLoop {
                     if (outputLimitStreak >= 3) {
                         throw new ExecutionPolicy.Stop("OUTPUT_LIMIT", "模型连续 3 次达到输出长度上限，已停止自动续写以避免重复消耗。");
                     }
+                    // 被截断的中间稿作废：留着会和下一轮重新生成的内容拼成重复段落。
+                    events.accept(AssistantPreview.discarded());
                     runtimeGuidance.add("上一条响应因输出长度上限被截断。不要重复已经完成的内容；把剩余工作拆小，" + "优先完成当前最小可验证步骤。若工作已完成，直接给出简洁最终答复。");
                     events.accept(new RunContinued(outputLimitStreak, 3, "模型输出被截断，按剩余工作继续"));
                     safeCheckpoint(checkpoint, messages);
@@ -989,11 +995,13 @@ public final class AgentLoop {
     private ModelTurn callModel(List<Message> messages, Consumer<SessionEvent> events, UsageTracker usage,
         RuntimeGuidance runtimeGuidance) {
         int attempt = 0;
+        int repeatAborts = 0;
         String retainedGuidance = null;
         while (true) {
             if (cancellation.cancelled()) {
                 return new ModelTurn(null, stopForCancellation(messages, events));
             }
+            StreamRepeatGuard repeatGuard = new StreamRepeatGuard();
             try {
                 // 用户纠正优先于策略提示；不要提前消费一次性 guidance 后再因为 steering 丢掉。
                 if (applySteering(messages, events, pendingInput.get())) {
@@ -1027,9 +1035,21 @@ public final class AgentLoop {
                     throw new ExecutionPolicy.Stop("CONTEXT_TOO_LARGE", "完整模型请求估算为 " + admission.estimatedInputTokens()
                         + " token，安全输入预算为 " + admission.inputLimit() + "；未发送请求。请缩小输入或拆分任务后继续。");
                 }
+                // 每次真正发请求前都作废上一段预览：工具调用、策略催办或重试都会开启新一轮生成，
+                // 上一轮的字如果留着，会和这次从头输出的内容拼成重复段落。
+                if (liveText != null) {
+                    events.accept(AssistantPreview.discarded());
+                }
                 usage.start(request, contextLimit(), tools.definitions());
                 ModelResponse response = client.chat(request, tools.definitions(), delta -> {
-                    if (liveText == null || delta == null || delta.isEmpty()) {
+                    if (delta == null || delta.isEmpty()) {
+                        return;
+                    }
+                    // 同一行连续重复到阈值就止损：继续流下去只会把上下文和界面一起刷满。
+                    if (repeatGuard.accept(delta) > 0) {
+                        throw new StreamRepeatException();
+                    }
+                    if (liveText == null) {
                         return;
                     }
                     try {
@@ -1061,6 +1081,19 @@ public final class AgentLoop {
                     return new ModelTurn(null, new Result(stop.getMessage(), stop.code(), conversation(messages)));
                 }
                 throw stop;
+            } catch (StreamRepeatException repeat) {
+                usage.abort();
+                Thread.interrupted();
+                repeatAborts++;
+                // 界面上已经出现的重复段落作废：重试会从头重新输出，不能和残留内容拼在一起。
+                events.accept(AssistantPreview.discarded());
+                if (repeatAborts >= MAX_REPEAT_ABORTS) {
+                    throw new ExecutionPolicy.Stop("MODEL_REPEATED",
+                        "模型连续 " + repeatAborts + " 次陷入逐行重复，已中止本轮生成；已有进度已保存。可以继续执行，或把问题拆小后重新发送。");
+                }
+                runtimeGuidance.add(REPEAT_GUIDANCE);
+                events.accept(new RunContinued(1, 1, "模型输出陷入逐行重复，已中止本次生成并重试"));
+                continue;
             } catch (RuntimeException e) {
                 usage.abort();
                 if (e instanceof RequestBudget.BudgetExceeded) {
@@ -1096,6 +1129,8 @@ public final class AgentLoop {
                 attempt = decision.attempt();
                 events.accept(new RunRetrying(attempt, decision.delayMs(), ToolSupport.oneLine(reason, 300),
                     decision.elapsedMs(), decision.remainingMs(), retryBudget.maxAttempts()));
+                // 上一次尝试可能已经推过一段预览：重试会重新输出全文，旧片段必须先作废。
+                events.accept(AssistantPreview.discarded());
                 if (!pause(decision.delayMs())) {
                     return new ModelTurn(null, stopForCancellation(messages, events));
                 }
@@ -1157,6 +1192,13 @@ public final class AgentLoop {
     private static String signature(List<ToolCall> calls) {
         return calls.stream().map(call -> call.name() + "(" + canonical(call.args()) + ")")
             .collect(Collectors.joining(";"));
+    }
+
+    /** 流式正文陷入逐行复读：只用于在当前请求内部止损，不参与模型错误分类。 */
+    private static final class StreamRepeatException extends RuntimeException {
+        StreamRepeatException() {
+            super("模型输出逐行重复", null, false, false);
+        }
     }
 
     /**

@@ -437,6 +437,15 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     }
 
     case 'assistant.preview': {
+      // 请求重试或输出被判为逐行复读：上一次尝试的片段作废，既不进正文也不进活动流。
+      if (event.payload?.reset) {
+        const previous = openTurn(draft);
+        if (previous) {
+          previous.reply.preview = '';
+          draft.liveOutputTokens = estimateTokens(previous.reply.text || '');
+        }
+        break;
+      }
       // 预览只是「模型还在吐字」，落库的 assistant.delta 才是正文：两段不能都往正文里接。
       const turn = ensureTurn(draft);
       turn.reply.preview = (turn.reply.preview || '') + (event.payload?.text || '');

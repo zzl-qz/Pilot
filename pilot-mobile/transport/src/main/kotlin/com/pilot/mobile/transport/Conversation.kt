@@ -33,7 +33,12 @@ class Conversation(private val maxRows: Int = 300) {
                 if (rows.lastOrNull()?.let { it.role == "user" && it.text == input } != true) add(sequence, "user", input)
             }
             "user.message" -> add(sequence, "user", payload.text("input").ifBlank { payload.text("text") })
-            "assistant.preview" -> { if (id == runId || runId.isBlank()) preview = (preview + payload.text("text")).takeLast(128_000) }
+            "assistant.preview" -> {
+                // reset：请求重试或输出被判为复读，上一次尝试的片段作废。
+                val reset = (payload["reset"] as? JsonPrimitive)?.booleanOrNull == true
+                if (reset) preview = ""
+                else if (id == runId || runId.isBlank()) preview = (preview + payload.text("text")).takeLast(128_000)
+            }
             "assistant.delta" -> { preview = ""; add(sequence, "assistant", payload.text("text")) }
             "tool.started" -> { phase = "正在调用 ${payload.text("name")}"; add(sequence, "activity", phase + "\n" + payload.text("summary")) }
             "tool.completed" -> phase = "正在处理结果"

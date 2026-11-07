@@ -1438,6 +1438,11 @@ public class AgentRunService implements RunStarter {
     private Consumer<SessionEvent> runEventSink(String sessionId, String runId, RunHandle handle, PlanSink planSink,
         RunUsageAccumulator runUsage, AtomicReference<RunCompleted> lastCompleted) {
         return event -> {
+            // 预览只给当前界面，不写会话历史：正文以 assistant.delta 为准，重连后也不该回放临时片段。
+            if (event instanceof AssistantPreview preview) {
+                sessions.preview(sessionId, runId, preview);
+                return;
+            }
             if (event instanceof RunCompleted completed) {
                 lastCompleted.set(completed);
             }

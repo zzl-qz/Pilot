@@ -152,7 +152,7 @@ export function reduceSideChat(state: Partial<SideTranscript> | null | undefined
     live: state?.live || ''
   };
   const type = event?.type;
-  const payload = (event?.payload || {}) as { input?: string; text?: string };
+  const payload = (event?.payload || {}) as { input?: string; text?: string; reset?: boolean };
   if (type === 'user.message' || type === 'run.started') {
     const text = String(payload.input || payload.text || '');
     if (!text.trim()) {
@@ -176,7 +176,9 @@ export function reduceSideChat(state: Partial<SideTranscript> | null | undefined
     return { messages: current.messages, live: '' };
   }
   if (type === 'assistant.preview') {
-    return { messages: current.messages, live: current.live + (payload.text || '') };
+    // reset 表示上一次尝试的输出作废：旧片段不能和重试后的内容拼在一起。
+    const live = payload.reset ? '' : current.live + (payload.text || '');
+    return { messages: current.messages, live };
   }
   if (type === 'run.completed' || type === 'run.failed' || type === 'run.cancelled') {
     return { messages: current.messages, live: '' };

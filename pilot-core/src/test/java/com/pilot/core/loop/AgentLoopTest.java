@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 import com.pilot.core.approval.ApprovalBroker;
+import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
@@ -669,6 +670,46 @@ class AgentLoopTest {
         assertNotNull(retries.get(1).maxAttempts(), "重试事件要带上预算，界面才能显示进度");
         assertNotNull(retries.get(1).remainingMs());
         assertNotNull(retries.get(1).elapsedMs());
+    }
+
+    /** 模型把同一行反复吐出来时要当场止损：作废界面预览、带提示重试，而不是刷满整个回答。 */
+    @Test
+    void abortsRepeatedStreamAndRetriesOnce() {
+        String repeated = "**减少简历中的方案细节。**\n".repeat(12);
+        ScriptedModelClient client =
+            new ScriptedModelClient(new ModelResponse(repeated, List.of()), new ModelResponse("简历建议已重新整理。", List.of()));
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(),
+            new AgentLoop.Config(8, 0, 3, "你是测试代理", List::of, 0, 120_000, false));
+
+        AgentLoop.Result result = loop.run("优化简历", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals("简历建议已重新整理。", result.finalText());
+        assertEquals(2, client.requests.size(), "复读应中止当前请求并重试一次");
+        assertTrue(events.stream().anyMatch(event -> event instanceof AssistantPreview preview && preview.reset()),
+            "重试前必须作废旧预览，否则界面会把两段内容拼在一起");
+        assertTrue(
+            events.stream()
+                .anyMatch(event -> event instanceof RunContinued continued && continued.reason().contains("重复")),
+            "要告诉界面这次生成被中止的原因");
+    }
+
+    /** 重试后仍然复读就不是偶发抖动：停下并给出可继续的失败码，避免反复烧上下文。 */
+    @Test
+    void stopsAfterRepeatedStreamsPersist() {
+        String repeated = "**减少简历中的方案细节。**\n".repeat(12);
+        ScriptedModelClient client = new ScriptedModelClient(new ModelResponse(repeated, List.of()),
+            new ModelResponse(repeated, List.of()), new ModelResponse("阶段交付。", List.of()));
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(),
+            new AgentLoop.Config(8, 0, 3, "你是测试代理", List::of, 0, 120_000, false));
+
+        AgentLoop.Result result = loop.run("优化简历", List.of(), events::add);
+
+        assertEquals("MODEL_REPEATED", result.failureCode());
+        assertEquals(3, client.requests.size(), "前两次是复读中止，第三次是收尾请求；不再自动重试");
+        RunFailed failed =
+            events.stream().filter(RunFailed.class::isInstance).map(RunFailed.class::cast).findFirst().orElseThrow();
+        assertTrue(failed.retryable(), "失败后可继续执行");
     }
 
     @Test

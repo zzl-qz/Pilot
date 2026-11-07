@@ -70,6 +70,8 @@ export interface AssistantDelta {
 /** AssistantPreview.java / AssistantPreview */
 export interface AssistantPreview {
   text: string;
+  /** 丢弃此前的预览内容：请求重试或被判定为复读时，旧片段作废，从空白重新开始。 */
+  reset?: boolean;
 }
 
 /** AssistantReasoning.java / AssistantReasoning */

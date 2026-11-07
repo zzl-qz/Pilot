@@ -38,6 +38,28 @@ class CompletionGateTest {
         assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of()));
     }
 
+    /** 征求意见的目标不该被当成「该动手却没动手」：Codex 也不会要求把简历改成文件。 */
+    @Test
+    void consultationGoalWithActionWordIsNotPushedToAct() {
+        for (String goal : List.of("看看怎么优化", "给我一些简历优化建议", "评估这份简历的优化空间")) {
+            CompletionGate gate = new CompletionGate(PROMPTS, true, goal);
+
+            assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of()), goal);
+        }
+    }
+
+    @Test
+    void codeGoalWithActionWordStillRequiresAction() {
+        for (String goal : List.of("优化首页加载性能", "修复登录接口的空指针")) {
+            CompletionGate gate = new CompletionGate(PROMPTS, true, goal);
+
+            CompletionGate.Nudge nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
+
+            assertNotNull(nudge, goal);
+            assertTrue(nudge.reason().contains("动手"), goal);
+        }
+    }
+
     @Test
     void questionGoalMentioningActionWordsIsNotPushedToAct() {
         CompletionGate gate = new CompletionGate(PROMPTS, true, "为什么这里没有修复");
