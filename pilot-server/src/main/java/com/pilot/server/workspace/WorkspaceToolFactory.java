@@ -1,6 +1,7 @@
 package com.pilot.server.workspace;
 
 import java.net.http.HttpClient;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -47,6 +48,8 @@ import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.capability.LocalResourcesTool;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.WebSearchProperties;
+import com.pilot.server.session.AttachmentService;
+import com.pilot.server.session.ReadAttachmentTool;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -69,6 +72,7 @@ public class WorkspaceToolFactory {
     private BrowserBackend browser;
     private McpManager mcp;
     private Selection execution;
+    private AttachmentService attachments;
 
     @Autowired(required = false)
     public void setExecution(Selection execution) {
@@ -97,6 +101,11 @@ public class WorkspaceToolFactory {
         this.mcp = mcp;
     }
 
+    @Autowired(required = false)
+    public void setAttachments(AttachmentService attachments) {
+        this.attachments = attachments;
+    }
+
     /**
      * 只在「某个会话的某次运行」里才有意义的外部能力：浏览器按会话隔离，MCP 按工作区查配置。
      * 工具本身始终注册，是否对模型可见由各自的 {@code availability()} 在运行时决定——
@@ -111,6 +120,10 @@ public class WorkspaceToolFactory {
         if (mcp != null) {
             extras.add(new McpToolsTool(mcp, root));
             extras.add(new McpCallTool(mcp, root));
+        }
+        // 会话上传过附件才暴露 read_attachment：目录不存在时模型也没有可读的附件
+        if (attachments != null && Files.isDirectory(attachments.sessionDir(sessionId))) {
+            extras.add(new ReadAttachmentTool(attachments.sessionDir(sessionId)));
         }
         return extras;
     }

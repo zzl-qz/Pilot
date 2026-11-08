@@ -85,6 +85,18 @@ test('没有文件块时原样返回', () => {
   assert.deepEqual(splitAttachmentMarkers(''), { body: '', files: [] });
 });
 
+test('新文案（read_attachment）与旧文案的落盘块都能拆出', () => {
+  const path = '/tmp/x/12345678-1234-1234-1234-123456789abc-report.pdf';
+  const parsed = splitAttachmentMarkers(
+    `[附件 report.pdf (application/pdf) 已保存到 ${path}，可用 read_attachment 读取]`
+  );
+  assert.deepEqual(parsed.files.map((file) => [file.name, file.kind, file.path]), [
+    ['report.pdf', 'saved', path]
+  ]);
+  const legacy = splitAttachmentMarkers(`[附件 report.pdf (application/pdf) 已保存到 ${path}，需要时用工具读取]`);
+  assert.equal(legacy.files[0].kind, 'saved', '旧消息仍可解析');
+});
+
 test('文件内容里出现方括号也不会误拆', () => {
   const text = '[附件 b.md (text/markdown)]\n里面有 [附件 假的 (text/plain)] 字样\n[附件结束 b.md]';
   const parsed = splitAttachmentMarkers(text);

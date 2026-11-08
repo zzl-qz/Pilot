@@ -99,7 +99,8 @@ export function checkIncomingFile(existing: readonly MessageAttachment[] | null 
 }
 
 const INLINE_BLOCK = /\[附件 (.+?) \(([^()\]\s]+)\)\]\n([\s\S]*?)\n\[附件结束 \1\]/g;
-const SAVED_BLOCK = /\[附件 (.+?) \(([^()\]\s]+)\) 已保存到 (.+?)，需要时用工具读取\]/g;
+// 后缀兼容两种文案：旧消息「需要时用工具读取」与现行「可用 read_attachment 读取」
+const SAVED_BLOCK = /\[附件 (.+?) \(([^()\]\s]+)\) 已保存到 (.+?)，(?:需要时用工具读取|可用 read_attachment 读取)\]/g;
 
 /**
  * 把正文里服务端拼进去的文件块拆出来。

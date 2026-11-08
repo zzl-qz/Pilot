@@ -188,6 +188,7 @@ class AttachmentServiceTest {
 
         assertTrue(prepared.content().contains("doc.pdf"));
         assertTrue(prepared.content().contains("已保存到"));
+        assertTrue(prepared.content().contains("read_attachment"), "保存提示应指到会话附件读取工具");
         assertTrue(prepared.attachments().isEmpty(), "二进制不该走多模态附件通道");
         Path saved = Path.of(prepared.content().split("已保存到 ")[1].split("，")[0].trim());
         assertTrue(Files.exists(saved), "二进制应落盘");

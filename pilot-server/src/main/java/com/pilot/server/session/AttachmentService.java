@@ -138,10 +138,10 @@ public class AttachmentService {
                 } else if (item.inlineText()) {
                     text.append("\n\n").append(inline(item.name(), item.mime(), item.bytes(), saved.path()));
                     text.append("\n\n[附件 ").append(item.name()).append(" (").append(item.mime()).append(") 已保存到 ")
-                        .append(saved.path()).append("，需要时用工具读取]");
+                        .append(saved.path()).append("，可用 read_attachment 读取]");
                 } else {
                     text.append("\n\n[附件 ").append(item.name()).append(" (").append(item.mime()).append(") 已保存到 ")
-                        .append(saved.path()).append("，需要时用工具读取]");
+                        .append(saved.path()).append("，可用 read_attachment 读取]");
                 }
             }
         } catch (RuntimeException e) {
@@ -221,6 +221,11 @@ public class AttachmentService {
         return file;
     }
 
+    /** 会话的附件目录；可能尚不存在（该会话还没有上传过附件）。 */
+    public Path sessionDir(String sessionId) {
+        return root.resolve(safeName(sessionId, 80));
+    }
+
     private Attachment save(String sessionId, String name, String mime, byte[] bytes) {
         try {
             Path dir = root.resolve(safeName(sessionId, 80));
@@ -247,7 +252,7 @@ public class AttachmentService {
         String head = text.substring(0, headChars);
         String tail = text.substring(text.length() - tailChars);
         return "[附件 " + name + " (" + mime + ")]\n" + head + "\n…（正文过长：共 " + text.length() + " 字符，保留头尾、省略中段。原文件已保存到 "
-            + savedPath + "，需要时用工具读取全文）\n" + tail + "\n[附件结束 " + name + "]";
+            + savedPath + "，可用 read_attachment 读取全文）\n" + tail + "\n[附件结束 " + name + "]";
     }
 
     private static String resolveMime(String mime, String name) {
