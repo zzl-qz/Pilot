@@ -12,6 +12,8 @@ import type { AttachmentMarker, MessagePart } from '../types/input.js';
 // 单条消息允许批量附加图片或文件，避免截图类任务被过早截断。
 export const MAX_ATTACHMENTS = 64;
 export const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+// 服务端 pilot.attachments.max-total-bytes 的前端镜像；漂移时以服务端拒绝为准
+export const MAX_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024;
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp', 'ico']);
 const CODE_EXTENSIONS = new Set([
@@ -93,6 +95,13 @@ export function checkIncomingFile(existing: readonly MessageAttachment[] | null 
     return {
       ok: false,
       reason: `「${name}」${formatBytes(file.size)}，超过单个 ${formatBytes(MAX_ATTACHMENT_BYTES)} 的上限，已跳过。`
+    };
+  }
+  const existingBytes = list.reduce((total, item) => total + (Number(item.size) || 0), 0);
+  if (existingBytes + file.size > MAX_ATTACHMENT_TOTAL_BYTES) {
+    return {
+      ok: false,
+      reason: `「${name}」加入后附件总量 ${formatBytes(existingBytes + file.size)}，超过单条 ${formatBytes(MAX_ATTACHMENT_TOTAL_BYTES)} 的预算，已跳过。`
     };
   }
   return { ok: true, reason: '' };

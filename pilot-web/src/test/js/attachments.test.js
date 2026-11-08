@@ -57,6 +57,16 @@ test('新文件校验：重复静默忽略，超限与超大给出原因', () =>
   assert.match(checkIncomingFile(full, { name: 'x', size: 66 }).reason, /最多附加 64 个/);
 });
 
+test('附件总量预算：累计超限给出原因', () => {
+  const twoMb = 2 * 1024 * 1024;
+  const existing = Array.from({ length: 12 }, (_, i) => ({ name: `f${i}.bin`, size: twoMb }));
+  const incoming = { name: 'more.bin', size: twoMb };
+  const result = checkIncomingFile(existing, incoming);
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /预算/);
+  assert.equal(checkIncomingFile(existing.slice(0, 11), incoming).ok, true, '11×2MB + 2MB 未超 25MB 预算');
+});
+
 const INLINE = '[附件 A.java (text/plain)]\nclass A {}\nclass B {}\n[附件结束 A.java]';
 const SAVED = '[附件 report.pdf (application/pdf) 已保存到 /tmp/x/12345678-1234-1234-1234-123456789abc-report.pdf，需要时用工具读取]';
 
