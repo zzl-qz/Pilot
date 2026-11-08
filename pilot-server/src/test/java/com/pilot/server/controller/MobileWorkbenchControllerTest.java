@@ -22,6 +22,7 @@ import com.pilot.core.approval.PendingApproval;
 import com.pilot.core.event.ApprovalRequired;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.session.SessionRepository;
+import com.pilot.server.config.AttachmentLimits;
 import com.pilot.server.results.ResultInboxService;
 
 import tools.jackson.databind.ObjectMapper;
@@ -70,6 +71,10 @@ class MobileWorkbenchControllerTest {
     }
 
     private static MobileWorkbenchController controller(ResultInboxService results) {
+        return controller(results, AttachmentLimits.defaults());
+    }
+
+    private static MobileWorkbenchController controller(ResultInboxService results, AttachmentLimits limits) {
         var sessions = mock(SessionController.class);
         var projects = mock(ProjectController.class);
         var broker = mock(ApprovalBroker.class);
@@ -77,7 +82,7 @@ class MobileWorkbenchControllerTest {
         when(projects.list()).thenReturn(List.of());
         when(broker.pending()).thenReturn(List.of());
         return new MobileWorkbenchController(sessions, projects, broker, mock(SessionRepository.class), results,
-            new ObjectMapper());
+            new ObjectMapper(), limits);
     }
 
     private static ResultInboxService.Item item(String id, String summary, boolean read) {
@@ -107,9 +112,8 @@ class MobileWorkbenchControllerTest {
             new EventEnvelope(2, now, "approval.required", "ses_b", "run_b",
                 new ApprovalRequired("call_b", "edit_file", "B 改动")));
         when(repository.eventsOfType(eq("approval.required"), any())).thenReturn(events);
-        var snapshot =
-            new MobileWorkbenchController(sessions, projects, broker, repository, results, new ObjectMapper())
-                .snapshot(null);
+        var snapshot = new MobileWorkbenchController(sessions, projects, broker, repository, results,
+            new ObjectMapper(), AttachmentLimits.defaults()).snapshot(null);
         @SuppressWarnings("unchecked")
         var approvals = (List<MobileWorkbenchController.MobileApproval>)snapshot.get("approvals");
         assertEquals("ses_a", approvals.get(0).sessionId());
@@ -117,5 +121,17 @@ class MobileWorkbenchControllerTest {
         assertEquals("", approvals.get(2).sessionId());
         assertEquals(1, snapshot.get("version"));
         verify(repository).eventsOfType("approval.required", now.minusSeconds(60));
+    }
+
+    @Test
+    void advertisesAttachmentLimitsFromConfig() {
+        var results = mock(ResultInboxService.class);
+        when(results.list()).thenReturn(new ResultInboxService.Page(List.of(), false));
+        var controller = controller(results, new AttachmentLimits(64, 2 * 1024 * 1024, 25 * 1024 * 1024));
+        @SuppressWarnings("unchecked")
+        var capabilities = (Map<String, Object>)controller.snapshot(null).get("capabilities");
+        assertEquals(8L * 1024 * 1024, capabilities.get("attachmentsMaxBytes"));
+        assertEquals(2L * 1024 * 1024, capabilities.get("attachmentsMaxFileBytes"));
+        assertEquals(64, capabilities.get("attachmentsMaxFiles"));
     }
 }

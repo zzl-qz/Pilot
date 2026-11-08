@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.loop.Attachment;
+import com.pilot.server.config.AttachmentLimits;
 import com.pilot.server.config.PilotDataDir;
 
 /**
@@ -39,6 +40,7 @@ import com.pilot.server.config.PilotDataDir;
 public class AttachmentService {
     static final int MAX_FILES = 64;
     static final int MAX_BYTES = 2 * 1024 * 1024;
+    static final int MAX_TOTAL_BYTES = 25 * 1024 * 1024;
     static final int MAX_INLINE_CHARS = 200_000;
 
     private static final Set<String> IMAGE_TYPES = Set.of("image/png", "image/jpeg", "image/webp", "image/gif");
@@ -50,15 +52,26 @@ public class AttachmentService {
         ".vue", ".svelte", ".py", ".go", ".rs", ".c", ".h", ".cpp", ".hpp", ".cs", ".rb", ".php", ".sh", ".bat", ".ps1",
         ".toml", ".ini", ".cfg", ".conf", ".log", ".diff", ".patch", ".pom");
 
+    private final int maxFiles;
+    private final int maxFileBytes;
+    private final int maxTotalBytes;
     private final Path root;
 
     @Autowired
-    public AttachmentService(@Value("${pilot.attachments.dir:}") String configured, PilotDataDir dataDir) {
-        this(configured == null || configured.isBlank() ? dataDir.file("attachments") : Path.of(configured));
+    public AttachmentService(@Value("${pilot.attachments.dir:}") String configured, PilotDataDir dataDir,
+        AttachmentLimits limits) {
+        this(configured == null || configured.isBlank() ? dataDir.file("attachments") : Path.of(configured), limits);
     }
 
     AttachmentService(Path root) {
+        this(root, AttachmentLimits.defaults());
+    }
+
+    AttachmentService(Path root, AttachmentLimits limits) {
         this.root = root;
+        this.maxFiles = limits.maxFiles();
+        this.maxFileBytes = limits.maxFileBytes();
+        this.maxTotalBytes = limits.maxTotalBytes();
     }
 
     private record PendingAttachment(String name, String mime, byte[] bytes, boolean inlineText) {
@@ -84,8 +97,8 @@ public class AttachmentService {
         if (inbound == null || inbound.isEmpty()) {
             return new Prepared(body, List.of(), List.of());
         }
-        if (inbound.size() > MAX_FILES) {
-            throw new IllegalArgumentException("一次最多附加 " + MAX_FILES + " 个文件");
+        if (inbound.size() > maxFiles) {
+            throw new IllegalArgumentException("一次最多附加 " + maxFiles + " 个文件");
         }
         List<Integer> imagePositions = positions == null ? List.of() : List.copyOf(positions);
         long imageCount = inbound.stream()
@@ -97,11 +110,17 @@ public class AttachmentService {
         StringBuilder text = new StringBuilder(body);
         ArrayList<Attachment> attachments = new ArrayList<Attachment>();
         ArrayList<PendingAttachment> pending = new ArrayList<PendingAttachment>();
+        long totalBytes = 0L;
         for (Inbound item : inbound) {
             if (item == null || item.dataBase64() == null || item.dataBase64().isBlank()) {
                 continue;
             }
             byte[] bytes = decode(item);
+            totalBytes += bytes.length;
+            if (totalBytes > maxTotalBytes) {
+                throw new IllegalArgumentException(
+                    "附件总大小超过 " + maxTotalBytes / 1024 / 1024 + " MB（当前约 " + totalBytes / 1024 / 1024 + " MB）");
+            }
             String mime = resolveMime(item.mimeType(), item.name());
             pending.add(new PendingAttachment(item.name(), mime, bytes, isInlineText(bytes, mime, item.name())));
         }
@@ -147,6 +166,10 @@ public class AttachmentService {
         if (raw.startsWith("data:") && comma > 0) {
             raw = raw.substring(comma + 1);
         }
+        // 解码前先按编码长度预检，避免对超大 base64 先分配整块内存再拒绝
+        if (raw.length() > maxFileBytes / 3 * 4 + 1024) {
+            throw new IllegalArgumentException("附件「" + item.name() + "」超过 " + maxFileBytes / 1024 / 1024 + " MB");
+        }
         byte[] bytes;
         try {
             bytes = Base64.getMimeDecoder().decode(raw);
@@ -156,8 +179,8 @@ public class AttachmentService {
         if (bytes.length == 0) {
             throw new IllegalArgumentException("附件「" + item.name() + "」内容为空");
         }
-        if (bytes.length > MAX_BYTES) {
-            throw new IllegalArgumentException("附件「" + item.name() + "」超过 " + (MAX_BYTES / 1024 / 1024) + " MB");
+        if (bytes.length > maxFileBytes) {
+            throw new IllegalArgumentException("附件「" + item.name() + "」超过 " + maxFileBytes / 1024 / 1024 + " MB");
         }
         return bytes;
     }

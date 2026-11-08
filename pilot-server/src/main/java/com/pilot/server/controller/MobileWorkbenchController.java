@@ -20,6 +20,7 @@ import com.pilot.core.approval.PendingApproval;
 import com.pilot.core.event.ApprovalRequired;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.session.SessionRepository;
+import com.pilot.server.config.AttachmentLimits;
 import com.pilot.server.results.ResultInboxService;
 
 import tools.jackson.databind.ObjectMapper;
@@ -34,15 +35,17 @@ public class MobileWorkbenchController {
     private final SessionRepository repository;
     private final ResultInboxService results;
     private final ObjectMapper mapper;
+    private final AttachmentLimits limits;
 
     public MobileWorkbenchController(SessionController sessions, ProjectController projects, ApprovalBroker approvals,
-        SessionRepository repository, ResultInboxService results, ObjectMapper mapper) {
+        SessionRepository repository, ResultInboxService results, ObjectMapper mapper, AttachmentLimits limits) {
         this.sessions = sessions;
         this.projects = projects;
         this.approvals = approvals;
         this.repository = repository;
         this.results = results;
         this.mapper = mapper;
+        this.limits = limits;
     }
 
     @GetMapping
@@ -56,8 +59,11 @@ public class MobileWorkbenchController {
         snapshot.put("projects", projects.list());
         snapshot.put("approvals", pending());
         snapshot.put("results", new MobileResultPage(summaries, page.truncated()));
-        snapshot.put("capabilities", Map.of("applicationScope", true, "idempotency", true, "attachmentsMaxBytes",
-            6 * 1024 * 1024, "backgroundPush", false, "conditionalSnapshot", true));
+        long mobileMaxBytes = Math.min(limits.maxTotalBytes(), 8L * 1024 * 1024);
+        snapshot.put("capabilities",
+            Map.of("applicationScope", true, "idempotency", true, "attachmentsMaxBytes", mobileMaxBytes,
+                "attachmentsMaxFileBytes", (long)limits.maxFileBytes(), "attachmentsMaxFiles", limits.maxFiles(),
+                "backgroundPush", false, "conditionalSnapshot", true));
         String current = revision(snapshot);
         if (current.equals(revision)) {
             return Map.of("version", 1, "revision", current, "unchanged", true);

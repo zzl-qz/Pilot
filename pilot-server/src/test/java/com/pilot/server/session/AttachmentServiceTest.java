@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.core.loop.Attachment;
+import com.pilot.server.config.AttachmentLimits;
 
 class AttachmentServiceTest {
     @TempDir
@@ -122,6 +123,29 @@ class AttachmentServiceTest {
             "hi",
             List.of(new AttachmentService.Inbound("big.bin", "image/png", Base64.getEncoder().encodeToString(big)))));
         assertTrue(error.getMessage().contains("MB"), error.getMessage());
+    }
+
+    @Test
+    void rejectsCumulativeAttachmentSizeOverTotalBudget() {
+        AttachmentService service = new AttachmentService(root, new AttachmentLimits(64, 2 * 1024 * 1024, 150));
+        byte[] file = new byte[100];
+
+        IllegalArgumentException error =
+            assertThrows(IllegalArgumentException.class,
+                () -> service.prepare("ses_1", "hi", List.of(
+                    new AttachmentService.Inbound("a.bin", "image/png", Base64.getEncoder().encodeToString(file)),
+                    new AttachmentService.Inbound("b.bin", "image/png", Base64.getEncoder().encodeToString(file)))));
+        assertTrue(error.getMessage().contains("总大小"), error.getMessage());
+    }
+
+    @Test
+    void rejectsOversizedEncodedLengthBeforeDecoding() {
+        AttachmentService service = new AttachmentService(root, new AttachmentLimits(64, 1000, 1024 * 1024));
+        String oversized = "A".repeat(3000);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> service.prepare("ses_1",
+            "hi", List.of(new AttachmentService.Inbound("a.txt", "text/plain", oversized))));
+        assertTrue(error.getMessage().contains("超过"), error.getMessage());
     }
 
     @Test

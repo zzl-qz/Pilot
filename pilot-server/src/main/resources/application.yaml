@@ -51,6 +51,13 @@ pilot:
     # 会话库、快照、trace、附件默认放在项目下的 .pilot
     # 要换位置：环境变量 PILOT_DATA_DIR，或启动参数 -Dpilot.data.dir=...
     dir: ${PILOT_DATA_DIR:${user.dir}/.pilot}
+  # 附件请求边界：单条消息的文件数、单文件大小与解码后总量。
+  # 移动端能力值由此派生（另有 12MB 请求体回执上限，能力值取 min(总量, 8MB)）。
+  attachments:
+    dir: ${PILOT_ATTACHMENTS_DIR:}                    # 留空用数据目录下的 attachments
+    max-files: ${PILOT_ATTACHMENTS_MAX_FILES:64}
+    max-file-bytes: ${PILOT_ATTACHMENTS_MAX_FILE_BYTES:2097152}
+    max-total-bytes: ${PILOT_ATTACHMENTS_MAX_TOTAL_BYTES:26214400}
   # 浏览器（browser 工具 + 右侧「浏览器」面板）：内置 Chromium，默认无头。
   # 画面实时镜像到右侧面板里，地址栏与点击/滚轮/键盘都在面板内完成，不再另外弹一个浏览器窗口。
   browser:
