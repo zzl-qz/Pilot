@@ -127,7 +127,7 @@ class AttachmentServiceTest {
 
     @Test
     void rejectsCumulativeAttachmentSizeOverTotalBudget() {
-        AttachmentService service = new AttachmentService(root, new AttachmentLimits(64, 2 * 1024 * 1024, 150));
+        AttachmentService service = new AttachmentService(root, new AttachmentLimits(64, 2 * 1024 * 1024, 150, 20_000));
         byte[] file = new byte[100];
 
         IllegalArgumentException error =
@@ -140,12 +140,42 @@ class AttachmentServiceTest {
 
     @Test
     void rejectsOversizedEncodedLengthBeforeDecoding() {
-        AttachmentService service = new AttachmentService(root, new AttachmentLimits(64, 1000, 1024 * 1024));
+        AttachmentService service = new AttachmentService(root, new AttachmentLimits(64, 1000, 1024 * 1024, 20_000));
         String oversized = "A".repeat(3000);
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> service.prepare("ses_1",
             "hi", List.of(new AttachmentService.Inbound("a.txt", "text/plain", oversized))));
         assertTrue(error.getMessage().contains("超过"), error.getMessage());
+    }
+
+    @Test
+    void compressesOverlongTextInsteadOfTruncatingAway() throws IOException {
+        AttachmentService service =
+            new AttachmentService(root, new AttachmentLimits(64, 2 * 1024 * 1024, 25 * 1024 * 1024, 100));
+        String body = "HEAD" + "x".repeat(200) + "TAIL";
+
+        AttachmentService.Prepared prepared = service.prepare("ses_1", "看日志",
+            List.of(new AttachmentService.Inbound("log.txt", "text/plain", base64(body))));
+
+        assertTrue(prepared.content().contains("HEAD"), "保留头部");
+        assertTrue(prepared.content().contains("TAIL"), "保留尾部");
+        assertTrue(prepared.content().contains("省略中段"), "明确省略标记");
+        assertTrue(prepared.content().contains("共 208 字符"), prepared.content());
+        Path saved = Path.of(prepared.content().split("已保存到 ")[1].split("，")[0].trim());
+        assertTrue(Files.exists(saved), "原件应落盘");
+        assertEquals(body, Files.readString(saved), "原件完整可恢复");
+    }
+
+    @Test
+    void keepsShortTextFullyInlinedWithoutCompression() {
+        AttachmentService service =
+            new AttachmentService(root, new AttachmentLimits(64, 2 * 1024 * 1024, 25 * 1024 * 1024, 1000));
+
+        AttachmentService.Prepared prepared = service.prepare("ses_1", "看这个类",
+            List.of(new AttachmentService.Inbound("A.java", "text/plain", base64("class A {}"))));
+
+        assertTrue(prepared.content().contains("class A {}"));
+        assertFalse(prepared.content().contains("省略中段"), "未超预算不应压缩");
     }
 
     @Test

@@ -11,7 +11,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import com.pilot.server.config.AttachmentLimits;
 
 class AttachmentBodyLimitFilterTest {
-    private final AttachmentLimits limits = new AttachmentLimits(64, 2 * 1024 * 1024, 25 * 1024 * 1024);
+    private final AttachmentLimits limits = new AttachmentLimits(64, 2 * 1024 * 1024, 25 * 1024 * 1024, 20_000);
 
     @Test
     void rejectsOversizedMessageBodyBeforeReading() throws Exception {

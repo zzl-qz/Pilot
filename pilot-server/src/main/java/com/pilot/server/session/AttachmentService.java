@@ -41,7 +41,6 @@ public class AttachmentService {
     static final int MAX_FILES = 64;
     static final int MAX_BYTES = 2 * 1024 * 1024;
     static final int MAX_TOTAL_BYTES = 25 * 1024 * 1024;
-    static final int MAX_INLINE_CHARS = 200_000;
 
     private static final Set<String> IMAGE_TYPES = Set.of("image/png", "image/jpeg", "image/webp", "image/gif");
     private static final Set<String> TEXT_TYPES =
@@ -55,6 +54,7 @@ public class AttachmentService {
     private final int maxFiles;
     private final int maxFileBytes;
     private final int maxTotalBytes;
+    private final int inlineMaxChars;
     private final Path root;
 
     @Autowired
@@ -72,6 +72,7 @@ public class AttachmentService {
         this.maxFiles = limits.maxFiles();
         this.maxFileBytes = limits.maxFileBytes();
         this.maxTotalBytes = limits.maxTotalBytes();
+        this.inlineMaxChars = limits.inlineMaxChars();
     }
 
     private record PendingAttachment(String name, String mime, byte[] bytes, boolean inlineText) {
@@ -135,7 +136,7 @@ public class AttachmentService {
                 if (IMAGE_TYPES.contains(item.mime())) {
                     attachments.add(saved);
                 } else if (item.inlineText()) {
-                    text.append("\n\n").append(inline(item.name(), item.mime(), item.bytes()));
+                    text.append("\n\n").append(inline(item.name(), item.mime(), item.bytes(), saved.path()));
                     text.append("\n\n[附件 ").append(item.name()).append(" (").append(item.mime()).append(") 已保存到 ")
                         .append(saved.path()).append("，需要时用工具读取]");
                 } else {
@@ -232,12 +233,21 @@ public class AttachmentService {
         }
     }
 
-    private static String inline(String name, String mime, byte[] bytes) {
+    /**
+     * 文本附件的内联片段：不超过预算时完整内联；超过时保留头尾（约 70%/30%）、
+     * 省略中段，并在省略标记里写明全文长度与原件路径，模型可随时用工具读取全文。
+     */
+    private String inline(String name, String mime, byte[] bytes, String savedPath) {
         String text = new String(bytes, StandardCharsets.UTF_8);
-        boolean truncated = text.length() > MAX_INLINE_CHARS;
-        String body = truncated ? text.substring(0, MAX_INLINE_CHARS) : text;
-        return "[附件 " + name + " (" + mime + ")]\n" + body
-            + (truncated ? "\n…（附件过长已截断，原文件 " + text.length() + " 字符）" : "") + "\n[附件结束 " + name + "]";
+        if (text.length() <= inlineMaxChars) {
+            return "[附件 " + name + " (" + mime + ")]\n" + text + "\n[附件结束 " + name + "]";
+        }
+        int headChars = Math.max(1, (int)(inlineMaxChars * 0.7));
+        int tailChars = Math.max(1, inlineMaxChars - headChars);
+        String head = text.substring(0, headChars);
+        String tail = text.substring(text.length() - tailChars);
+        return "[附件 " + name + " (" + mime + ")]\n" + head + "\n…（正文过长：共 " + text.length() + " 字符，保留头尾、省略中段。原文件已保存到 "
+            + savedPath + "，需要时用工具读取全文）\n" + tail + "\n[附件结束 " + name + "]";
     }
 
     private static String resolveMime(String mime, String name) {

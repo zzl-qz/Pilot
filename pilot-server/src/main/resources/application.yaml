@@ -58,6 +58,8 @@ pilot:
     max-files: ${PILOT_ATTACHMENTS_MAX_FILES:64}
     max-file-bytes: ${PILOT_ATTACHMENTS_MAX_FILE_BYTES:2097152}
     max-total-bytes: ${PILOT_ATTACHMENTS_MAX_TOTAL_BYTES:26214400}
+    # 文本附件内联正文的单文件字符预算；超过则保留头尾（约70%/30%）省略中段，原件已落盘可回读
+    inline-max-chars: ${PILOT_ATTACHMENTS_INLINE_MAX_CHARS:20000}
   # 浏览器（browser 工具 + 右侧「浏览器」面板）：内置 Chromium，默认无头。
   # 画面实时镜像到右侧面板里，地址栏与点击/滚轮/键盘都在面板内完成，不再另外弹一个浏览器窗口。
   browser:
