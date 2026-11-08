@@ -21,6 +21,7 @@ import { ModelOptions, useModelDiscovery } from './ModelDiscovery.jsx';
 import { ModelSaveFeedback, useModelForm } from './ModelForm.jsx';
 import { MobileConnectionContent } from './MobileConnection.jsx';
 import { verificationLabel, verificationHint } from '../lib/verification.js';
+import { splitAttachmentMarkers } from '../lib/attachments.js';
 
 /** 任务契约状态 → 中文（与旧版 renderTaskContract 的映射一致）。 */
 const TASK_STATUS_LABELS: Record<string, string> = {
@@ -51,6 +52,10 @@ export function TaskContract() {
     return null;
   }
   const goal = task.originalGoal || task.goal || '';
+  const goalParts = splitAttachmentMarkers(goal);
+  const displayGoal = goalParts.body || (goalParts.files.length
+    ? `查看附件：${goalParts.files.map(file => file.name).join('、')}`
+    : goal);
   const items = Array.isArray(task.acceptance) ? task.acceptance : [];
   const checked = items.filter((item) => item.checked).length;
   const status = String(task.status || '').toUpperCase();
@@ -63,11 +68,11 @@ export function TaskContract() {
     <details id="task-contract" className="task-contract" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary id="task-contract-summary">
         <span className="task-contract-label">任务契约</span>
-        <span className="task-contract-goal" title={goal}>{goal || '未设定目标'}</span>
+        <span className="task-contract-goal" title={displayGoal}>{displayGoal || '未设定目标'}</span>
         <span className="task-contract-status">{lifecycle}{items.length ? ` · 验收 ${checked}/${items.length}` : ''}</span>
       </summary>
       <div className="task-contract-body">
-        <p id="task-original-goal"><b>目标：</b>{goal || '（未设定）'}</p>
+        <p id="task-original-goal"><b>目标：</b>{displayGoal || '（未设定）'}</p>
         {execution && (
           <div id="task-execution" className="task-execution">
             <p className="task-help">

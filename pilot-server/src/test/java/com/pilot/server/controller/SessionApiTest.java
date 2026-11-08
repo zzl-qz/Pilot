@@ -1,5 +1,6 @@
 package com.pilot.server.controller;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -64,6 +65,7 @@ class SessionApiTest {
         TestRunStarter testRunStarter() {
             return new TestRunStarter();
         }
+
     }
 
     static class TestRunStarter implements RunStarter {
@@ -282,7 +284,7 @@ class SessionApiTest {
         }
     }
 
-    /** 历史记录和队列里的缩略图靠这个接口取回；只放行图片，其余落盘文件不外露。 */
+    /** 历史附件按会话范围取回；图片内嵌预览，二进制文件作为下载响应。 */
     @Test
     void servesStoredImagesOnlyForTheOwningSession() throws Exception {
         String sessionId = createSession();
@@ -291,7 +293,10 @@ class SessionApiTest {
             List.of(
                 Map.of("name", "shot.png", "mimeType", "image/png", "dataBase64",
                     Base64.getEncoder().encodeToString(png)),
-                Map.of("name", "payload.bin", "mimeType", "application/octet-stream", "dataBase64", "AQIDBA=="))));
+                Map.of("name", "payload.bin", "mimeType", "application/octet-stream", "dataBase64", "AQIDBA=="),
+                Map.of("name", "report.docx", "mimeType",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "dataBase64",
+                    "AQIDBA=="))));
         mvc.perform(
             post("/api/sessions/{id}/messages", sessionId).contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isOk());
@@ -299,10 +304,12 @@ class SessionApiTest {
         Path dir = ATTACHMENT_ROOT.resolve(sessionId);
         String image;
         String binary;
+        String docx;
         try (var files = Files.list(dir)) {
             List<String> names = files.map(path -> path.getFileName().toString()).toList();
             image = names.stream().filter(name -> name.endsWith("-shot.png")).findFirst().orElseThrow();
             binary = names.stream().filter(name -> name.endsWith("-payload.bin")).findFirst().orElseThrow();
+            docx = names.stream().filter(name -> name.endsWith("-report.docx")).findFirst().orElseThrow();
         }
 
         byte[] served = mvc.perform(get("/api/sessions/{id}/attachments/{file}", sessionId, image))
@@ -310,7 +317,16 @@ class SessionApiTest {
             .andReturn().getResponse().getContentAsByteArray();
         assertEquals(png.length, served.length);
 
-        mvc.perform(get("/api/sessions/{id}/attachments/{file}", sessionId, binary)).andExpect(status().isNotFound());
+        byte[] downloaded =
+            mvc.perform(get("/api/sessions/{id}/attachments/{file}", sessionId, binary).param("name", "报告.docx"))
+                .andExpect(status().isOk())
+                .andExpect(MockMvcResultMatchers.content().contentType(MediaType.APPLICATION_OCTET_STREAM))
+                .andExpect(
+                    MockMvcResultMatchers.header().string("Content-Disposition", Matchers.containsString("attachment")))
+                .andExpect(MockMvcResultMatchers.header().string("Content-Disposition",
+                    Matchers.containsString("filename*=UTF-8''")))
+                .andReturn().getResponse().getContentAsByteArray();
+        assertArrayEquals(new byte[] {1, 2, 3, 4}, downloaded);
         mvc.perform(get("/api/sessions/{id}/attachments/{file}", sessionId, "../../etc-passwd"))
             .andExpect(status().isNotFound());
         String other = createSession();

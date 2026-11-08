@@ -1,10 +1,12 @@
 package com.pilot.server.controller;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -16,6 +18,8 @@ import java.util.function.Consumer;
 
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -44,6 +48,7 @@ import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
+import com.pilot.core.tool.DocumentRenderer;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.AttachmentService;
 import com.pilot.server.session.RunStarter;
@@ -413,16 +418,14 @@ public class SessionController {
             RunStarter.queueRevision(messages));
     }
 
-    /**
-     * 取回随消息上传的图片，用于历史记录和排队列表里的缩略图。
-     * 只放行图片：其余落盘文件是给模型工具读的，不该经浏览器暴露。
-     */
+    /** 取回当前会话上传的附件；二进制文件用 attachment disposition 下载。 */
     @GetMapping("/{id}/attachments/{file}")
-    public ResponseEntity<Resource> attachment(@PathVariable String id, @PathVariable String file) {
+    public ResponseEntity<Resource> attachment(@PathVariable String id, @PathVariable String file,
+        @RequestParam(name = "name", required = false) String originalName) {
         requireSession(id);
         Path path;
         try {
-            path = attachments.resolveImage(id, file);
+            path = attachments.resolveAttachment(id, file);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在");
         }
@@ -430,11 +433,45 @@ public class SessionController {
         MediaType type = lower.endsWith(".png") ? MediaType.IMAGE_PNG
             : lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? MediaType.IMAGE_JPEG : lower.endsWith(".gif")
                 ? MediaType.IMAGE_GIF : lower.endsWith(".webp") ? MediaType.parseMediaType("image/webp") : null;
-        if (type == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "附件不是图片");
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok().header("X-Content-Type-Options", "nosniff")
+            .header("Cache-Control", "private, max-age=86400");
+        if (type != null) {
+            return response.contentType(type).body(new FileSystemResource(path));
         }
-        return ResponseEntity.ok().contentType(type).header("X-Content-Type-Options", "nosniff")
-            .header("Cache-Control", "private, max-age=86400").body(new FileSystemResource(path));
+        String downloadName = safeDownloadName(originalName, path.getFileName().toString());
+        return response.contentType(MediaType.APPLICATION_OCTET_STREAM)
+            .header(HttpHeaders.CONTENT_DISPOSITION,
+                ContentDisposition.attachment().filename(downloadName, StandardCharsets.UTF_8).build().toString())
+            .body(new FileSystemResource(path));
+    }
+
+    /** Office 附件的纯文本读回；不还原版式，也不执行附件中的 HTML/脚本。 */
+    @GetMapping("/{id}/attachments/{file}/preview-text")
+    public ResponseEntity<?> attachmentPreviewText(@PathVariable String id, @PathVariable String file) {
+        requireSession(id);
+        Path path;
+        try {
+            path = attachments.resolveAttachment(id, file);
+            if (!DocumentRenderer.isRenderable(path.getFileName().toString())) {
+                throw new IllegalArgumentException("不支持此附件的内容预览");
+            }
+            String text = DocumentRenderer.inspect(path);
+            if (text.length() > 250_000) {
+                text = text.substring(0, 250_000) + "\n…内容过长，已截断";
+            }
+            return ResponseEntity.ok(Map.of("text", text));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "附件内容无法读取", e);
+        }
+    }
+
+    private static String safeDownloadName(String originalName, String storedName) {
+        String name = originalName == null || originalName.isBlank() ? storedName.replaceFirst("^[a-fA-F0-9-]{36}-", "")
+            : originalName;
+        String safe = name.replaceAll("[\\\\/\\r\\n\\p{Cntrl}]", "_").strip();
+        return safe.isBlank() ? "attachment" : safe;
     }
 
     /** 改队列里的某一句，下标从 0 开始。还没轮到的才能改。 */

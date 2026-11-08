@@ -21,6 +21,7 @@ import {
 import { classifyRunFailure, isEphemeral, planProgressLabel } from './lib/events.js';
 import { eventTimestamp, toolLabel } from './lib/tool-meta.js';
 import { preview, estimateTokens } from './thread-utils.js';
+import { splitAttachmentMarkers } from './lib/attachments.js';
 
 /** 活动流保留上限，与旧版 MAX_TIMELINE_EVENTS 一致。 */
 const MAX_TIMELINE_EVENTS = 300;
@@ -294,19 +295,19 @@ export function appendUserRow(draft: ReducerState, text: string, sequence: numbe
   return row;
 }
 
-function stampLastUserRow(draft: ReducerState, sequence: number, text: string) {
+function stampLastUserRow(draft: ReducerState, sequence: number, text: string, attachments: MessageAttachment[], imagePositions: number[]) {
   const rows = draft.thread.rows;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     const row = rows[i];
-    if (row.type === 'user' && row.sequence == null) {
-      const same = (row.text || '').replace(/\s+/g, ' ').trim() === String(text || '').replace(/\s+/g, ' ').trim();
-      if (same && Number.isFinite(sequence)) {
+    if (row.type === 'user' && row.sequence == null && Number.isFinite(sequence)) {
         row.sequence = sequence;
         row.key = `message:${sequence}`;
         row.start = sequence;
         row.end = sequence;
+        row.text = text;
+        row.attachments = attachments;
+        row.imagePositions = imagePositions;
         return;
-      }
     }
   }
 }
@@ -360,9 +361,16 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       const payload = event.payload || {};
       const input = payload.input || '';
       const same = (a: unknown, b: unknown) => String(a || '').replace(/\s+/g, ' ').trim() === String(b || '').replace(/\s+/g, ' ').trim();
-      if (draft.pendingInputs.length && same(draft.pendingInputs[0], input)) {
+      const parsedInput = splitAttachmentMarkers(input);
+      const pendingRow = draft.thread.rows.findLast((row): row is UserRow => row.type === 'user' && row.sequence == null);
+      const receivedNames = [...parsedInput.files, ...(payload.attachments || [])].map(item => item.name).filter(Boolean).sort();
+      const pendingNames = (pendingRow?.attachments || []).map(item => item.name).filter(Boolean).sort();
+      const sameAttachments = receivedNames.length > 0 && receivedNames.length === pendingNames.length
+        && receivedNames.every((name, index) => name === pendingNames[index]);
+      const inputForMatch = parsedInput.files.length ? parsedInput.body : input;
+      if (draft.pendingInputs.length && (same(draft.pendingInputs[0], inputForMatch) || sameAttachments)) {
         draft.pendingInputs.shift();
-        stampLastUserRow(draft, event.sequence, input);
+        stampLastUserRow(draft, event.sequence, input, payload.attachments || [], payload.imagePositions || []);
       } else if (draft.queue.length && same(draft.queue[0], input)) {
         draft.queue.shift();
         appendUserRow(draft, input, event.sequence, {

@@ -9,12 +9,12 @@ import { modifierKey, duplicateResult } from '../lib/interaction.js';
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useStickToBottom } from 'use-stick-to-bottom';
 import { useStore } from '../store.js';
-import { api } from '../api.js';
+import { api, apiFetch } from '../api.js';
 import { historyPrefetchDistance } from '../lib/history.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
 import { TOOL_ICONS, TOOL_STATUS_TITLES, toolArgsText, toolLabel } from '../lib/tool-meta.js';
 import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel } from '../lib/agents.js';
-import { splitAttachmentMarkers, layoutMessageParts, attachmentUrl, isImageAttachment, formatBytes } from '../lib/attachments.js';
+import { splitAttachmentMarkers, layoutMessageParts, attachmentUrl, isImageAttachment, fileBadge, formatBytes } from '../lib/attachments.js';
 import { changeFileTitle, splitPath, statusKind } from '../lib/changes.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { formatCount, formatTime } from '../thread-utils.js';
@@ -22,6 +22,7 @@ import { messagePeek } from '../lib/side-chat.js';
 
 /* 回到底部的弹簧参数：库的默认值在长距离上要 1s 以上，这里压到 ~200ms 收敛。 */
 const BACK_TO_LATEST = { stiffness: 0.2, damping: 0.9, mass: 1 };
+const PdfAttachmentPreview = React.lazy(() => import('./PdfAttachmentPreview.jsx'));
 
 /**
  * 消息流：真实 DOM + use-stick-to-bottom（MIT）+ 浏览器原生 scroll anchoring。
@@ -273,6 +274,7 @@ const RowView = memo(function RowView({ row, isLast, duplicate }: { row: ThreadR
 function UserMessage({ row }: { row: UserRow }) {
   const text = row.text || '';
   const [open, setOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState<MessageAttachment | null>(null);
   const parts = splitAttachmentMarkers(text);
   const peek = messagePeek(parts.body || text);
   const attachments = row.attachments || [];
@@ -331,15 +333,18 @@ function UserMessage({ row }: { row: UserRow }) {
     );
   }
   return (
+    <>
     <article className="msg msg-user" data-nav-key={row.key} data-sequence={row.sequence ?? undefined}>
       <div className="bubble">
-        <div className="bubble-flow">{renderMessageBody(parts.body, files, images, row.imagePositions)}</div>
+        <div className="bubble-flow">{renderMessageBody(parts.body, files, images, row.imagePositions, setPreviewFile)}</div>
       </div>
       {canPeek && (
         <button type="button" className="msg-peek-fold" onClick={() => setOpen(false)}>收起</button>
       )}
       {actions}
     </article>
+    {previewFile && <AttachmentPreview file={previewFile} onClose={() => setPreviewFile(null)} />}
+    </>
   );
 }
 
@@ -361,33 +366,103 @@ function beginEdit(row: UserRow) {
 }
 
 /** 消息正文：文本 + 图片缩略 + 文件卡（与旧版 layoutMessageParts 顺序一致）。 */
-function renderMessageBody(body: string, files: MessageAttachment[] = [], images: MessageAttachment[] = [], imagePositions: number[] = []) {
+function renderMessageBody(body: string, files: MessageAttachment[] = [], images: MessageAttachment[] = [], imagePositions: number[] = [], onPreview?: (file: MessageAttachment) => void) {
   return layoutMessageParts(body, images, files, imagePositions).map((part, index) => {
     if (part.type === 'text') return <span key={index}>{part.text}</span>;
-    if (part.type === 'image') return <ImageThumb key={index} image={part.image} />;
-    return <React.Fragment key={index}>{part.files.map((file, fileIndex) => <FileCard key={fileIndex} file={file} />)}</React.Fragment>;
+    if (part.type === 'image') return <ImageThumb key={index} image={part.image} onPreview={onPreview} />;
+    return <React.Fragment key={index}>{part.files.map((file, fileIndex) => <FileCard key={fileIndex} file={file} onPreview={onPreview} />)}</React.Fragment>;
   });
 }
 
-function ImageThumb({ image }: { image: MessageAttachment }) {
+function ImageThumb({ image, onPreview }: { image: MessageAttachment; onPreview?: (image: MessageAttachment) => void }) {
   const sessionId = useStore((state) => state.sessionId);
   return (
     <span className="bubble-image">
-      <img src={attachmentUrl(sessionId, image)} alt={image.name || '图片'} loading="lazy" />
+      <button className="bubble-image-action" type="button" aria-label={`预览图片 ${image.name || '图片'}`} onClick={() => onPreview?.(image)}>
+        <img src={attachmentUrl(sessionId, image)} alt={image.name || '图片'} loading="lazy" />
+      </button>
     </span>
   );
 }
 
-function FileCard({ file }: { file: MessageAttachment }) {
+function FileCard({ file, onPreview }: { file: MessageAttachment; onPreview?: (file: MessageAttachment) => void }) {
   const sessionId = useStore((state) => state.sessionId);
   const url = attachmentUrl(sessionId, file);
-  if (!url) return <span className="file-card" title={file.name}><span className="file-card-name">{file.name || file.id}</span></span>;
+  const badge = fileBadge(file.name, file.mimeType);
+  if (!url) return <span className="file-card" title={file.name}>
+    <span className={`file-card-badge ft-${badge.tone}`}>{badge.label}</span>
+    <span className="file-card-name">{file.name || file.id}</span>
+    <span className="file-card-meta">附件</span>
+  </span>;
   return (
-    <a className="file-card" href={url} target="_blank" rel="noreferrer">
+    <span className="file-card" title={file.name || file.id}>
+      <span className={`file-card-badge ft-${badge.tone}`}>{badge.label}</span>
       <span className="file-card-name">{file.name || file.id}</span>
-      <span className="file-card-size">{formatBytes(file.size)}</span>
-    </a>
+      <span className="file-card-meta">{formatBytes(file.size)}</span>
+      <button type="button" className="file-card-action" onClick={() => onPreview?.(file)} aria-label={`预览附件 ${file.name || file.id}`} title="预览附件">查看</button>
+      <a className="file-card-action" href={url} title="下载附件" aria-label={`下载附件 ${file.name || file.id}`} download={file.name || undefined}>下载</a>
+    </span>
   );
+}
+
+function AttachmentPreview({ file, onClose }: { file: MessageAttachment; onClose: () => void }) {
+  const sessionId = useStore(state => state.sessionId);
+  const [text, setText] = useState('');
+  const [blobUrl, setBlobUrl] = useState('');
+  const [officeFallback, setOfficeFallback] = useState(false);
+  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const name = file.name || '附件';
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  const office = ['docx', 'xlsx', 'pptx'].includes(ext);
+  const textual = ['txt', 'md', 'json', 'csv', 'xml', 'yaml', 'yml', 'log', 'js', 'ts', 'tsx', 'css', 'html', 'svg', 'java', 'py', 'sh', 'sql'].includes(ext);
+  const image = isImageAttachment(file);
+  const url = attachmentUrl(sessionId, file);
+
+  useEffect(() => {
+    let alive = true;
+    let currentUrl = '';
+    const controller = new AbortController();
+    setLoading(true); setError(''); setText(''); setBlobUrl(''); setPdfData(null); setOfficeFallback(false);
+    void (async () => {
+      try {
+        if (office && sessionId) {
+          const storedName = String(file.path || '').split(/[\\/]/).pop() || '';
+          const result = await api.attachmentPreviewText(sessionId, storedName, controller.signal);
+          if (!result || !alive) throw new Error('附件内容为空或无法读取');
+          setOfficeFallback(true);
+          setText(result.text || '（没有可读文本内容）');
+        } else if (image || ext === 'pdf' || textual) {
+          const response = await apiFetch(url, { signal: controller.signal });
+          if (!response.ok) throw new Error(`读取附件失败（HTTP ${response.status}）`);
+          const blob = await response.blob();
+          if (ext === 'pdf') { if (alive) setPdfData(await blob.arrayBuffer()); }
+          else if (image) { currentUrl = URL.createObjectURL(blob); if (alive) setBlobUrl(currentUrl); }
+          else setText((await blob.text()).slice(0, 250000));
+        } else {
+          setError('此格式暂不支持应用内预览，请下载后使用本机应用打开。');
+        }
+      } catch (failure) {
+        if (alive && !controller.signal.aborted) setError(errorInfo(failure).message || '预览失败，请下载附件后重试。');
+      } finally { if (alive) setLoading(false); }
+    })();
+    return () => { alive = false; controller.abort(); if (currentUrl) URL.revokeObjectURL(currentUrl); };
+  }, [file, sessionId, url, ext, office, textual, image]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return <div className="attachment-preview-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="attachment-preview" role="dialog" aria-modal="true" aria-label={`附件预览：${name}`}>
+      <header><strong title={name}>{name}</strong><div>{url && <a className="btn" href={url} download={name}>下载</a>}<button className="btn" type="button" onClick={onClose} aria-label="关闭预览">关闭</button></div></header>
+      <main>{loading ? <p role="status">正在读取附件…</p> : error ? <p role="alert">{error}</p> : blobUrl && image ? <img src={blobUrl} alt={name} /> : pdfData ? <React.Suspense fallback={<p role="status">正在加载 PDF 阅读器…</p>}><PdfAttachmentPreview data={pdfData} name={name} /></React.Suspense> : <pre>{text}</pre>}</main>
+      {office && officeFallback && <footer role="status">这里只展示可提取文本，不还原 Office 版式；完整文件可用右上角下载。</footer>}
+    </section>
+  </div>;
 }
 
 /* ---------- 回合（操作组 + 思考 + 回复 + 统计） ---------- */

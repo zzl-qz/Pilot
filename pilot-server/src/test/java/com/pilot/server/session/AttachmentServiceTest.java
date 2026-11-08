@@ -32,6 +32,9 @@ class AttachmentServiceTest {
         assertTrue(prepared.content().contains("看看这个类"));
         assertTrue(prepared.content().contains("[附件 A.java"));
         assertTrue(prepared.content().contains("class A {}"));
+        assertTrue(prepared.content().contains("已保存到"), "文本原件也应保留为可下载附件");
+        Path saved = Path.of(prepared.content().split("已保存到 ")[1].split("，")[0].trim());
+        assertTrue(Files.exists(saved), "文本附件原件应落盘");
         assertTrue(prepared.attachments().isEmpty(), "文本附件内联即可，不需要再交给模型编码");
     }
 
@@ -134,6 +137,19 @@ class AttachmentServiceTest {
         assertTrue(prepared.attachments().isEmpty(), "二进制不该走多模态附件通道");
         Path saved = Path.of(prepared.content().split("已保存到 ")[1].split("，")[0].trim());
         assertTrue(Files.exists(saved), "二进制应落盘");
+    }
+
+    @Test
+    void resolvesOnlyRegularAttachmentsOwnedByTheSession() throws IOException {
+        AttachmentService service = new AttachmentService(root);
+        Path directory = root.resolve("ses_1");
+        Files.createDirectories(directory);
+        String fileName = "12345678-1234-1234-1234-123456789abc-report.docx";
+        Path saved = Files.writeString(directory.resolve(fileName), "docx");
+
+        assertEquals(saved, service.resolveAttachment("ses_1", fileName));
+        assertThrows(IllegalArgumentException.class, () -> service.resolveAttachment("ses_2", fileName));
+        assertThrows(IllegalArgumentException.class, () -> service.resolveAttachment("ses_1", "../" + fileName));
     }
 
     @Test

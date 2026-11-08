@@ -80,6 +80,8 @@ export const api = {
   },
   /* 文件工作台：所有端点都指向会话工作区里的真实文件，没有第二套可编辑源。 */
   workbenchFiles: (session: string, signal?: AbortSignal) => apiJson<ApiResults['workbenchFiles']>(`${workbenchBase(session)}`, { signal }),
+  attachmentPreviewText: (session: string, file: string, signal?: AbortSignal) =>
+    apiJson<{ text: string }>(`/api/sessions/${encodeURIComponent(session)}/attachments/${encodeURIComponent(file)}/preview-text`, { signal }),
   workbenchFile: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['workbenchFile']>(`${workbenchBase(session)}/${encodeURIComponent(id)}`, { signal }),
   workbenchText: (session: string, id: string, signal?: AbortSignal) => apiJson<{ text: string }>(`${workbenchBase(session)}/${encodeURIComponent(id)}/text`, { signal }),
   workbenchPreview: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['workbenchPreview']>(`${workbenchBase(session)}/${encodeURIComponent(id)}/preview`, { signal }, 60000),

@@ -458,6 +458,41 @@ html[data-theme] .voice-settings summary { cursor: pointer; font-size: 13px; col
 
 html[data-theme] .bubble-image { display: inline-flex; max-width: min(100%, 240px); vertical-align: middle; margin: 4px; }
 html[data-theme] .bubble-image img { max-width: 100%; max-height: 240px; object-fit: contain; border-radius: 6px; }
+html[data-theme] .file-card { display: inline-flex; align-items: center; gap: 9px; max-width: min(100%, 360px); min-height: 44px; margin: 5px 4px 2px 0; padding: 6px 10px 6px 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); text-decoration: none; vertical-align: middle; }
+html[data-theme] a.file-card { cursor: pointer; }
+html[data-theme] a.file-card:hover { border-color: var(--accent); background: var(--panel-3); }
+html[data-theme] .file-card-badge { display: grid; flex: none; width: 34px; height: 30px; place-items: center; border-radius: 5px; background: var(--panel-3); color: var(--ink-2); font: 600 9px/1 var(--mono); }
+html[data-theme] .file-card-badge.ft-code { color: #6e9dff; }
+html[data-theme] .file-card-badge.ft-data { color: #d5a248; }
+html[data-theme] .file-card-badge.ft-doc { color: #55b98c; }
+html[data-theme] .file-card-badge.ft-image { color: #bf7bd8; }
+html[data-theme] .file-card-badge.ft-archive { color: #b0a58c; }
+html[data-theme] .file-card-name { min-width: 0; overflow: hidden; color: inherit; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+html[data-theme] .file-card-meta { flex: none; color: var(--muted); font-size: 11px; }
+html[data-theme] .file-card-action { flex: none; border: 0; border-radius: 5px; padding: 5px 7px; background: var(--panel-3); color: var(--ink-2); font: inherit; font-size: 11px; text-decoration: none; cursor: pointer; }
+html[data-theme] .file-card-action:hover { color: var(--ink); background: var(--line); }
+html[data-theme] .bubble-image-action { display: block; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: zoom-in; }
+html[data-theme] .bubble-image-action img { display: block; max-width: min(100%, 520px); max-height: 340px; object-fit: contain; }
+.attachment-preview-backdrop { position: fixed; z-index: 120; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / .68); }
+.attachment-preview { display: flex; flex-direction: column; width: min(1000px, 100%); height: min(850px, 90dvh); min-height: 240px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); box-shadow: 0 20px 70px rgb(0 0 0 / .45); }
+.attachment-preview > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 54px; padding: 8px 14px; border-bottom: 1px solid var(--line-soft); }
+.attachment-preview > header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-preview > header > div { display: flex; flex: none; gap: 6px; }
+.attachment-preview > main { flex: 1; min-height: 0; overflow: auto; display: grid; place-items: center; background: var(--bg); }
+.attachment-preview > main > img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+.attachment-preview > main > pre { width: 100%; height: 100%; box-sizing: border-box; margin: 0; padding: 20px; overflow: auto; color: var(--ink); font: 13px/1.65 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.attachment-preview > main > p { padding: 20px; color: var(--ink-2); }
+.attachment-preview > footer { padding: 9px 14px; border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 12px; }
+.attachment-preview > main:has(.pdf-attachment-viewer) { display: block; }
+.pdf-attachment-viewer { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; }
+.pdf-attachment-toolbar { display: flex; flex: none; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 4px 8px; border-bottom: 1px solid var(--line-soft); background: var(--panel); font-size: 12px; }
+.pdf-attachment-toolbar .btn { min-height: 30px; padding: 4px 8px; }
+.pdf-attachment-toolbar > span { min-width: 36px; text-align: center; }
+.pdf-attachment-toolbar .pdf-attachment-divider { width: 1px; min-width: 1px; height: 22px; background: var(--line-soft); }
+.pdf-attachment-scroll { flex: 1; min-height: 0; overflow: auto; padding: 16px; text-align: center; }
+.pdf-attachment-scroll canvas { display: block; height: auto; margin: 0 auto 16px; background: #fff; box-shadow: 0 2px 12px rgb(0 0 0 / .2); }
+.pdf-attachment-scroll > p, .pdf-attachment-error { padding: 20px; color: var(--ink-2); }
+@media (max-width: 640px) { .attachment-preview-backdrop { padding: 8px; } .attachment-preview { height: calc(100dvh - 16px); } }
 
 /* 智能体与请求都先给摘要；展开长列表时在自身区域滚动，不拉长整段对话。 */
 html[data-theme] .agent-group { margin: 6px 0; }

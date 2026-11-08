@@ -35,6 +35,43 @@ function draft() {
 
 const turnOf = (state) => state.thread.rows.find((row) => row.type === 'turn');
 
+test('附件提交回执认领乐观消息并替换为可恢复的服务端引用', () => {
+  const cases = [
+    {
+      text: '检查这个',
+      input: '检查这个\n\n[附件 报告.docx (application/vnd.openxmlformats-officedocument.wordprocessingml.document) 已保存到 /data/attachments/ses_1/12345678-1234-1234-1234-123456789abc-report.docx，需要时用工具读取]',
+      draft: [{ name: '报告.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', dataBase64: 'data:application/docx;base64,AA' }],
+      attachments: []
+    },
+    {
+      text: '',
+      input: '请看随消息附上的文件：shot.png',
+      draft: [{ name: 'shot.png', mimeType: 'image/png', dataBase64: 'data:image/png;base64,AA' }],
+      attachments: [{ name: 'shot.png', mimeType: 'image/png', path: '/data/attachments/ses_1/12345678-1234-1234-1234-123456789abc-shot.png' }]
+    }
+  ];
+
+  for (const [index, fixture] of cases.entries()) {
+    const state = draft();
+    state.pendingInputs = [fixture.text];
+    state.thread.rows = [{
+      key: 'pending:1', type: 'user', sequence: null, text: fixture.text, attachments: fixture.draft,
+      imagePositions: [], start: 0, end: 0
+    }];
+    applyEvent(state, {
+      type: 'run.started', sequence: index + 1, runId: `run-${index}`,
+      payload: { input: fixture.input, attachments: fixture.attachments }
+    }, { live: true });
+
+    assert.equal(state.thread.rows.filter(row => row.type === 'user').length, 1);
+    const row = state.thread.rows[0];
+    assert.equal(row.sequence, index + 1);
+    assert.equal(row.text, fixture.input);
+    assert.deepEqual(row.attachments, fixture.attachments);
+    assert.equal(state.pendingInputs.length, 0);
+  }
+});
+
 test('后端 summary 字段回填子任务结果，旧 result 字段仍兼容', () => {
   for (const payload of [{ agentId: 'agent-a', summary: '后端结论', ok: true }, { agentId: 'agent-a', result: '旧结论', ok: true }]) {
     const state = draft();

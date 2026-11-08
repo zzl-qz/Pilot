@@ -127,7 +127,7 @@ export function splitAttachmentMarkers(text: unknown): { body: string; files: At
     found.push({
       index: match.index,
       end: match.index + match[0].length,
-      file: { name: match[1], mimeType: match[2], kind: 'saved', lines: 0, raw: match[0] }
+      file: { name: match[1], mimeType: match[2], kind: 'saved', lines: 0, raw: match[0], path: match[3] }
     });
   }
   if (!found.length) {
@@ -143,7 +143,15 @@ export function splitAttachmentMarkers(text: unknown): { body: string; files: At
     }
     body += source.slice(cursor, item.index);
     cursor = item.end;
-    files.push(item.file);
+    const previousInline = item.file.kind === 'saved'
+      ? [...files].reverse().find(file => file.kind === 'inline' && file.name === item.file.name && file.mimeType === item.file.mimeType && !file.path)
+      : undefined;
+    if (previousInline) {
+      previousInline.path = item.file.path;
+      previousInline.raw = `${previousInline.raw}\n\n${item.file.raw}`;
+    } else {
+      files.push(item.file);
+    }
   }
   body += source.slice(cursor);
   return { body: body.replace(/\n{3,}/g, '\n\n').trim(), files };
@@ -220,5 +228,6 @@ export function attachmentUrl(sessionId: string | null | undefined, item: Messag
   if (!sessionId || !file) {
     return '';
   }
-  return `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(file)}`;
+  const name = item.name ? `?name=${encodeURIComponent(item.name)}` : '';
+  return `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(file)}${name}`;
 }

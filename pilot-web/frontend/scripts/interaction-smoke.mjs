@@ -13,6 +13,25 @@ import { checkReview } from './review-cases.mjs';
 import { checkSideChat } from './side-chat-cases.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const temp = await mkdtemp(join(tmpdir(), 'pilot-interaction-'));
+function makePdfFixture() {
+  const stream = 'BT /F1 24 Tf 72 720 Td (PDF.js preview works) Tj ET';
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
+  ];
+  let source = '%PDF-1.4\n';
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(source));
+    source += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xref = Buffer.byteLength(source);
+  source += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  return Buffer.from(source, 'ascii');
+}
 const fixture = `<html><head><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react'; import {createRoot} from 'react-dom/client';
 import App from '/src/components/App.jsx'; import {useStore} from '/src/store.js'; import {api} from '/src/api.js';
@@ -168,6 +187,80 @@ async function run(page,name,url) {
   assert.equal(await page.locator('.turn-stats-detail').getAttribute('open'),null);
   assert.equal(await page.locator('.tool-group').getAttribute('open'),'');
   assert.equal(await page.locator('.tool-row.is-open').count(),1);
+  // Submitted text files survive history replay as one downloadable card; task summary omits local paths.
+  await page.evaluate(()=>{
+    const filePath='/home/u/.pilot/attachments/test-a/12345678-1234-1234-1234-123456789abc-notes.docx';
+    const inline='[附件 notes.docx (application/vnd.openxmlformats-officedocument.wordprocessingml.document)]\nline one\nline two\n[附件结束 notes.docx]';
+    const saved=`[附件 notes.docx (application/vnd.openxmlformats-officedocument.wordprocessingml.document) 已保存到 ${filePath}，需要时用工具读取]`;
+    const text=`检查这个\n\n${inline}\n\n${saved}`;
+    store.setState(s=>{
+      s.task={originalGoal:text};
+      s.thread.rows=[{key:'attachment',type:'user',text,sequence:2,attachments:[],imagePositions:[],start:2,end:2}];
+    });
+  });
+  assert.equal(await page.locator('.msg-user .file-card').count(),1);
+  assert.equal(await page.locator('.msg-user .file-card-action[download]').getAttribute('href'),'/api/sessions/test-a/attachments/12345678-1234-1234-1234-123456789abc-notes.docx?name=notes.docx');
+  assert.equal(await page.locator('.msg-user .file-card-name').innerText(),'notes.docx');
+  await page.evaluate(()=>{window.api.attachmentPreviewText=async()=>({text:'line one\nline two'});});
+  await page.getByRole('button',{name:'预览附件 notes.docx'}).click();
+  await page.getByRole('dialog',{name:'附件预览：notes.docx'}).waitFor();
+  assert.match(await page.locator('.attachment-preview pre').innerText(),/line one\nline two/);
+  assert.match(await page.locator('.attachment-preview footer[role="status"]').innerText(),/不还原 Office 版式/);
+  if(name==='chromium') {
+    await page.screenshot({path:join(temp,'chromium-attachment-preview.png'),animations:'disabled'});
+    await page.setViewportSize({width:390,height:844});
+    const previewBounds=await page.locator('.attachment-preview').boundingBox();
+    assert.ok(previewBounds.x>=0 && previewBounds.x+previewBounds.width<=390,'附件预览在手机宽度内');
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'附件预览不造成横向溢出');
+    await page.screenshot({path:join(temp,'chromium-attachment-preview-mobile.png'),animations:'disabled'});
+    await page.setViewportSize({width:1440,height:900});
+  }
+  await page.keyboard.press('Escape');assert.equal(await page.locator('.attachment-preview').count(),0);
+  assert.equal(await page.locator('#task-contract-summary').innerText().then(text=>text.includes('/home/u/.pilot/attachments')),false);
+  // PDF is fetched as attachment data and rendered by PDF.js; never navigate to the PDF URL.
+  await page.evaluate(()=>{
+    const path='/home/u/.pilot/attachments/test-a/12345678-1234-1234-1234-123456789abc-sample.pdf';
+    const inline='[附件 sample.pdf (application/pdf)]\n[附件结束 sample.pdf]';
+    const saved=`[附件 sample.pdf (application/pdf) 已保存到 ${path}，需要时用工具读取]`;
+    const text=`查看 PDF\n\n${inline}\n\n${saved}`;
+    store.setState(s=>{s.task={originalGoal:text};s.thread.rows=[{key:'pdf-attachment',type:'user',text,sequence:3,attachments:[],imagePositions:[],start:3,end:3}];});
+  });
+  let pdfRequestType='';
+  const pdfConsoleErrors=[];
+  const capturePdfConsole=message=>{if(message.type()==='error')pdfConsoleErrors.push(message.text());};
+  page.on('console',capturePdfConsole);
+  await page.route('**/api/sessions/test-a/attachments/*',route=>{
+    if(!route.request().url().includes('sample.pdf')) return route.continue();
+    pdfRequestType=route.request().resourceType();
+    return route.fulfill({status:200,contentType:'application/pdf',body:makePdfFixture()});
+  });
+  await page.getByRole('button',{name:'预览附件 sample.pdf'}).click();
+  await page.getByRole('toolbar',{name:'PDF 阅读工具'}).waitFor();
+  await page.waitForFunction(()=>{
+    const canvas=document.querySelector('.pdf-attachment-scroll canvas');
+    if(!canvas || canvas.width<500 || canvas.height<600) return false;
+    if(document.querySelector('[aria-live="polite"]')?.textContent?.trim()!=='1 / 1') return false;
+    const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+    let ink=0;for(let i=0;i<pixels.length;i+=4) if(pixels[i]<180&&pixels[i+1]<180&&pixels[i+2]<180) ink++;
+    return ink>100;
+  });
+  page.off('console',capturePdfConsole);
+  assert.deepEqual(pdfConsoleErrors,[],`PDF.js 控制台错误: ${pdfConsoleErrors.join(' | ')}`);
+  assert.equal(pdfRequestType,'fetch','PDF 作为数据请求，不通过浏览器文档导航触发系统下载器');
+  assert.equal(await page.getByRole('button',{name:'下一页'}).isDisabled(),true);
+  const pdfWidthBeforeZoom=await page.locator('.pdf-attachment-scroll canvas').evaluate(canvas=>canvas.clientWidth);
+  await page.getByRole('button',{name:'放大'}).click();
+  assert.equal(await page.getByText('110%').count(),1);
+  await page.waitForFunction(before=>document.querySelector('.pdf-attachment-scroll canvas')?.clientWidth>before,pdfWidthBeforeZoom);
+  if(name==='chromium') {
+    await page.screenshot({path:join(temp,'chromium-pdf-preview.png'),animations:'disabled'});
+    await page.setViewportSize({width:390,height:844});
+    const pdfBounds=await page.locator('.attachment-preview').boundingBox();
+    assert.ok(pdfBounds.x>=0 && pdfBounds.x+pdfBounds.width<=390,'PDF 预览在手机宽度内');
+    await page.screenshot({path:join(temp,'chromium-pdf-preview-mobile.png'),animations:'disabled'});
+    await page.setViewportSize({width:1440,height:900});
+  }
+  await page.keyboard.press('Escape');
   // Review expanded, line-range feedback preserves draft attachments; never sends automatically.
   await page.locator('#toggle-activity').click();await page.locator('#panel-changes').waitFor();
   await page.getByText('全屏审阅',{exact:true}).click();await page.locator('.change-row-name').getByText('App.jsx',{exact:true}).click();
@@ -229,9 +322,11 @@ try {
   await server.listen();const url=`http://127.0.0.1:${server.httpServer.address().port}/__interaction`;
   if(process.argv.includes('--serve')) { console.log('Fixture:',url); await new Promise(()=>{}); }
   browser=await chromium.launch({channel:'chrome',headless:true,args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});await run(await browser.newPage(), 'chromium',url);await browser.close();browser=null;
-  const main=join(temp,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.commandLine.appendSwitch('use-fake-device-for-media-stream');app.commandLine.appendSwitch('use-fake-ui-for-media-stream');app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
-  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
-  electron=await _electron.launch({executablePath:electronBinary(),args:[main],env});
-  await run(await electron.firstWindow(),'electron',url);
+  if (!process.argv.includes('--chromium-only')) {
+    const main=join(temp,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.commandLine.appendSwitch('use-fake-device-for-media-stream');app.commandLine.appendSwitch('use-fake-ui-for-media-stream');app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
+    const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
+    electron=await _electron.launch({executablePath:electronBinary(),args:[main],env});
+    await run(await electron.firstWindow(),'electron',url);
+  }
   console.log('Screenshots:',temp);
 } finally {await browser?.close();await electron?.close();await server.close();}

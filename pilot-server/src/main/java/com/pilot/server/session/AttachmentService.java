@@ -6,6 +6,7 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -60,7 +61,7 @@ public class AttachmentService {
         this.root = root;
     }
 
-    private record PendingAttachment(String name, String mime, byte[] bytes) {
+    private record PendingAttachment(String name, String mime, byte[] bytes, boolean inlineText) {
     }
 
     /** 客户端提交的原始附件：文件名、MIME 与 base64 内容（可带 data URL 前缀）。 */
@@ -102,13 +103,9 @@ public class AttachmentService {
             }
             byte[] bytes = decode(item);
             String mime = resolveMime(item.mimeType(), item.name());
-            if (isInlineText(bytes, mime, item.name())) {
-                text.append("\n\n").append(inline(item.name(), mime, bytes));
-            } else {
-                pending.add(new PendingAttachment(item.name(), mime, bytes));
-            }
+            pending.add(new PendingAttachment(item.name(), mime, bytes, isInlineText(bytes, mime, item.name())));
         }
-        if (text.toString().isBlank() && pending.stream().noneMatch(item -> IMAGE_TYPES.contains(item.mime()))) {
+        if (text.toString().isBlank() && pending.isEmpty()) {
             throw new IllegalArgumentException("消息正文和附件不能同时为空");
         }
         ArrayList<Path> savedPaths = new ArrayList<Path>();
@@ -118,6 +115,10 @@ public class AttachmentService {
                 savedPaths.add(Path.of(saved.path()));
                 if (IMAGE_TYPES.contains(item.mime())) {
                     attachments.add(saved);
+                } else if (item.inlineText()) {
+                    text.append("\n\n").append(inline(item.name(), item.mime(), item.bytes()));
+                    text.append("\n\n[附件 ").append(item.name()).append(" (").append(item.mime()).append(") 已保存到 ")
+                        .append(saved.path()).append("，需要时用工具读取]");
                 } else {
                     text.append("\n\n[附件 ").append(item.name()).append(" (").append(item.mime()).append(") 已保存到 ")
                         .append(saved.path()).append("，需要时用工具读取]");
@@ -175,12 +176,22 @@ public class AttachmentService {
     }
 
     public Path resolveImage(String sessionId, String fileName) {
+        Path file = resolveAttachment(sessionId, fileName);
+        String lower = fileName.toLowerCase(Locale.ROOT);
+        if (!(lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".gif")
+            || lower.endsWith(".webp"))) {
+            throw new IllegalArgumentException("attachment is not an image");
+        }
+        return file;
+    }
+
+    public Path resolveAttachment(String sessionId, String fileName) {
         if (sessionId == null || fileName == null || !fileName.matches("[a-fA-F0-9-]{36}-.+")) {
             throw new IllegalArgumentException("invalid attachment reference");
         }
         Path sessionDir = root.resolve(safeName(sessionId, 80)).normalize();
         Path file = sessionDir.resolve(fileName).normalize();
-        if (!file.getParent().equals(sessionDir) || !Files.isRegularFile(file)) {
+        if (!file.getParent().equals(sessionDir) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalArgumentException("attachment not found");
         }
         return file;

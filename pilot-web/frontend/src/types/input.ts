@@ -7,7 +7,7 @@ export interface DraftAttachment extends MessageAttachment {
   size: number;
   dataBase64: string;
 }
-export interface AttachmentMarker { name: string; mimeType: string; kind: 'inline' | 'saved'; lines: number; raw: string }
+export interface AttachmentMarker { name: string; mimeType: string; kind: 'inline' | 'saved'; lines: number; raw: string; path?: string }
 export type MessagePart = { type: 'text'; text: string } | { type: 'image'; image: MessageAttachment } | { type: 'files'; files: MessageAttachment[] };
 export interface TransferData {
   files?: ArrayLike<File>;

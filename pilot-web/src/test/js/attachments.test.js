@@ -58,7 +58,7 @@ test('新文件校验：重复静默忽略，超限与超大给出原因', () =>
 });
 
 const INLINE = '[附件 A.java (text/plain)]\nclass A {}\nclass B {}\n[附件结束 A.java]';
-const SAVED = '[附件 report.pdf (application/pdf) 已保存到 /tmp/x/report.pdf，需要时用工具读取]';
+const SAVED = '[附件 report.pdf (application/pdf) 已保存到 /tmp/x/12345678-1234-1234-1234-123456789abc-report.pdf，需要时用工具读取]';
 
 test('从正文里拆出内联与落盘文件，用户原话保持不变', () => {
   const parsed = splitAttachmentMarkers(`看一下这个\n\n${INLINE}\n\n${SAVED}`);
@@ -68,6 +68,16 @@ test('从正文里拆出内联与落盘文件，用户原话保持不变', () =>
     ['report.pdf', 'saved', 'application/pdf']
   ]);
   assert.equal(parsed.files[0].lines, 2);
+  assert.equal(parsed.files[1].path, '/tmp/x/12345678-1234-1234-1234-123456789abc-report.pdf');
+});
+
+test('内联文本原件与内容合并成一个可恢复附件卡', () => {
+  const path = '/tmp/x/12345678-1234-1234-1234-123456789abc-A.java';
+  const parsed = splitAttachmentMarkers(`看一下\n\n${INLINE}\n\n[附件 A.java (text/plain) 已保存到 ${path}，需要时用工具读取]`);
+  assert.equal(parsed.files.length, 1);
+  assert.equal(parsed.files[0].kind, 'inline');
+  assert.equal(parsed.files[0].path, path);
+  assert.equal(joinAttachmentMarkers(parsed.body, parsed.files), `看一下\n\n${INLINE}\n\n[附件 A.java (text/plain) 已保存到 ${path}，需要时用工具读取]`);
 });
 
 test('没有文件块时原样返回', () => {
@@ -96,6 +106,10 @@ test('附件地址优先用本地数据，其次服务端落盘文件名', () =>
   assert.equal(
     attachmentUrl('ses 1', { path: '/home/u/.pilot/attachments/ses_1/1234-shot.png' }),
     '/api/sessions/ses%201/attachments/1234-shot.png'
+  );
+  assert.equal(
+    attachmentUrl('ses 1', { name: '实习 报告.docx', path: '/home/u/.pilot/attachments/ses_1/1234-report.docx' }),
+    '/api/sessions/ses%201/attachments/1234-report.docx?name=%E5%AE%9E%E4%B9%A0%20%E6%8A%A5%E5%91%8A.docx'
   );
   assert.equal(attachmentUrl('s1', { path: 'C:\\data\\a\\shot.png' }), '/api/sessions/s1/attachments/shot.png');
   assert.equal(attachmentUrl('', { path: '/x/y.png' }), '');
