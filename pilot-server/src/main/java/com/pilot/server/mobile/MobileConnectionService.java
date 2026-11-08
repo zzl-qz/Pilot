@@ -20,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import jakarta.annotation.PreDestroy;
 
@@ -61,6 +62,7 @@ public class MobileConnectionService {
     private int failures;
     private MobileEnvironment environment;
     private String connectionMode = "auto";
+    private String lastStatusDiagnostic = "";
 
     @Autowired
     public void configureConnectionMode(@Value("${pilot.mobile.mode:auto}") String value) {
@@ -131,6 +133,8 @@ public class MobileConnectionService {
         }
         if (environment != null && !environment.status().ready()) {
             if ("status".equals(operation)) {
+                MobileEnvironment.Status state = environment.status();
+                logStatusDiagnostic("environment=" + state.state(), "手机连接诊断：环境状态={}，二维码尚未生成", state.state());
                 return environmentStatus();
             }
             throw new IllegalStateException(environment.status().message());
@@ -154,22 +158,47 @@ public class MobileConnectionService {
             HttpResponse<String> response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
             JsonNode result = mapper.readTree(response.body());
             if (response.statusCode() != 200) {
+                if ("pair".equals(operation)) {
+                    log.warn("手机连接诊断：配对码申请失败，桥接服务 HTTP 状态码={}", response.statusCode());
+                }
                 throw new IllegalStateException(result.path("error").asText("手机连接暂不可用，请重试"));
             }
             if ("status".equals(operation) && result.path("version").asInt() != 2) {
                 throw new IllegalStateException("手机连接组件版本不兼容，请更新完整安装包");
+            }
+            if ("status".equals(operation)) {
+                boolean invite = !result.path("invite").isMissingNode() && !result.path("invite").isNull();
+                int devices = result.path("devices").isArray() ? result.path("devices").size() : 0;
+                String pairing = result.path("pairingState").asText("unknown");
+                String mode = result.path("connectionMode").asText("unknown");
+                String key = "pairing=" + pairing + ",invite=" + invite + ",devices=" + devices + ",mode=" + mode;
+                logStatusDiagnostic(key, "手机连接诊断：配对状态={}，有效配对码={}，已配对设备数={}，连接模式={}{}", pairing, invite, devices, mode,
+                    !invite && devices > 0 ? "；前端将显示设备列表，选择‘添加设备’生成新码" : "");
+            } else if ("pair".equals(operation)) {
+                log.info("手机连接诊断：配对码申请成功，有效配对码={}，二维码图像={}", !result.path("code").asText("").isBlank(),
+                    !result.path("image").asText("").isBlank());
             }
             return result;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("连接请求已中断", e);
         } catch (IllegalStateException e) {
+            if ("pair".equals(operation)) {
+                log.warn("手机连接诊断：配对码申请失败：{}", e.getMessage());
+            }
             throw e;
         } catch (RuntimeException e) {
             // 路径非法这类非受检异常也转成可读的 503，界面不该只看到 Internal Server Error。
             throw new IllegalStateException("手机连接服务暂不可用，请重试", e);
         } catch (Exception e) {
             throw new IllegalStateException("手机连接服务暂不可用，请重试", e);
+        }
+    }
+
+    private void logStatusDiagnostic(String key, String message, Object... arguments) {
+        if (!key.equals(lastStatusDiagnostic)) {
+            lastStatusDiagnostic = key;
+            log.info(message, arguments);
         }
     }
 
@@ -199,6 +228,9 @@ public class MobileConnectionService {
         Path javaHome =
             environment != null && environment.prepared() != null && environment.prepared().javaHome() != null
                 ? environment.prepared().javaHome() : Path.of(System.getProperty("java.home"));
+        log.info("手机连接诊断：启动连接桥，系统={} {}，Java {}，连接模式={}，已配置自定义中继={}，参数 no-open=true",
+            System.getProperty("os.name", "unknown"), System.getProperty("os.arch", "unknown"),
+            System.getProperty("java.version", "unknown"), connectionMode, !relay.isBlank());
         List<String> args = new ArrayList<>(List.of(javaHome.resolve("bin").resolve(executable).toString(),
             "--enable-native-access=ALL-UNNAMED", "-cp", classpath(libraries), "com.pilot.mobile.bridge.MainKt",
             "--pilot-port", Integer.toString(port), "--data-dir", data.toString(), "--no-open", "--parent-pid",
@@ -221,8 +253,10 @@ public class MobileConnectionService {
             throw new IllegalStateException("无法启动手机连接的 Java 子进程，请检查 Java 安装、执行权限或安全软件拦截", e);
         }
         process = child;
+        log.info("手机连接诊断：连接桥子进程已启动，PID={}", child.pid());
         BridgeStartupDiagnostics diagnostics = new BridgeStartupDiagnostics(System.getProperty("os.name", ""));
         CompletableFuture<Void> errorsRead = new CompletableFuture<>();
+        AtomicBoolean buildMarkerSeen = new AtomicBoolean();
         Thread.startVirtualThread(() -> {
             try (BufferedReader reader =
                 new BufferedReader(new InputStreamReader(child.getErrorStream(), StandardCharsets.UTF_8))) {
@@ -242,6 +276,10 @@ public class MobileConnectionService {
                 new BufferedReader(new InputStreamReader(child.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("PILOT_MOBILE_BRIDGE_BUILD ")) {
+                        buildMarkerSeen.set(true);
+                        log.info("手机连接诊断：{}", line);
+                    }
                     if (line.startsWith("PILOT_MOBILE_ADMIN ")) {
                         ready.complete(validateAdmin(line.substring("PILOT_MOBILE_ADMIN ".length())));
                     }
@@ -253,6 +291,9 @@ public class MobileConnectionService {
         });
         try {
             URI address = ready.get(30, TimeUnit.SECONDS);
+            if (!buildMarkerSeen.get()) {
+                log.warn("手机连接诊断：连接桥未报告当前构建标记，可能使用了旧版 bridge.jar；请使用当前完整安装包或重新构建连接桥");
+            }
             token = address.getFragment();
             admin = new URI("http", null, "127.0.0.1", address.getPort(), "/", null, null);
             Files.writeString(data.resolve("enabled"), "true");

@@ -71,6 +71,7 @@ fun main(args: Array<String>) = runBlocking {
         network.issue(option("--name") ?: "我的电脑", relays, publicServices)
     }
     val adminUrl = admin.start()
+    println("PILOT_MOBILE_BRIDGE_BUILD 2026-11-no-open")
     println("PILOT_MOBILE_ADMIN $adminUrl")
     println("连接模式：$mode；二维码本机生成，网络探测在后台进行。")
     if (diagnosticAdminUrlRequested(args)) {

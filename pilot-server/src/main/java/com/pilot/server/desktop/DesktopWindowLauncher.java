@@ -52,8 +52,11 @@ public class DesktopWindowLauncher {
     @EventListener(ApplicationReadyEvent.class)
     public void open() {
         if (!environment.getProperty("pilot.desktop.launch", Boolean.class, true)) {
+            log.info("桌面启动诊断：已关闭（pilot.desktop.launch=false）；当前服务不会自动启动 Electron");
             return;
         }
+        log.info("桌面启动诊断：已启用，系统={} {}，服务端口={}", System.getProperty("os.name", "unknown"),
+            System.getProperty("os.arch", "unknown"), port());
         report(launch());
     }
 
