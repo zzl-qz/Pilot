@@ -8,14 +8,20 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -23,6 +29,7 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.loop.Attachment;
 import com.pilot.server.config.AttachmentLimits;
 import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.maintenance.StorageHealth;
 
 /**
  * 把用户随消息粘贴的文件变成模型能看懂的上下文。
@@ -38,6 +45,8 @@ import com.pilot.server.config.PilotDataDir;
  */
 @Component
 public class AttachmentService {
+    private static final Logger log = LoggerFactory.getLogger(AttachmentService.class);
+
     static final int MAX_FILES = 64;
     static final int MAX_BYTES = 2 * 1024 * 1024;
     static final int MAX_TOTAL_BYTES = 25 * 1024 * 1024;
@@ -224,6 +233,120 @@ public class AttachmentService {
     /** 会话的附件目录；可能尚不存在（该会话还没有上传过附件）。 */
     public Path sessionDir(String sessionId) {
         return root.resolve(safeName(sessionId, 80));
+    }
+
+    /** 附件清理结果：删除的文件数与目录数。 */
+    public record PurgeStats(int files, int dirs) {
+    }
+
+    /** 删除会话的整个附件目录；清理失败只记日志，不阻断会话删除。 */
+    public void deleteBySession(String sessionId) {
+        deleteTree(sessionDir(sessionId));
+    }
+
+    /**
+     * 按保留策略清理附件：目录名不在在册会话里的整目录删除（孤儿，含图片）；
+     * 在册会话只删早于 cutoff 的文件（图片与非图片都参与），目录清空后删除。
+     */
+    public PurgeStats purge(Instant cutoff, Collection<String> liveSessionIds) {
+        Set<String> live = liveSessionIds == null ? Set.of()
+            : liveSessionIds.stream().map(id -> safeName(id, 80)).collect(Collectors.toSet());
+        if (!Files.isDirectory(root)) {
+            return new PurgeStats(0, 0);
+        }
+        int files = 0;
+        int dirs = 0;
+        try (Stream<Path> entries = Files.list(root)) {
+            for (Path sessionDir : entries.filter(Files::isDirectory).toList()) {
+                String dirName = sessionDir.getFileName().toString();
+                if (!live.contains(dirName)) {
+                    PurgeStats removed = deleteTreeCounting(sessionDir);
+                    files += removed.files();
+                    dirs += removed.dirs();
+                    continue;
+                }
+                files += deleteFilesBefore(sessionDir, cutoff);
+                if (isEmptyDirectory(sessionDir)) {
+                    deleteTree(sessionDir);
+                    dirs++;
+                }
+            }
+        } catch (IOException e) {
+            log.warn("遍历附件目录失败: {}", root, e);
+            StorageHealth.markDegraded("attachment-purge", e.getMessage());
+        }
+        return new PurgeStats(files, dirs);
+    }
+
+    private static void deleteTree(Path dir) {
+        if (!Files.isDirectory(dir)) {
+            return;
+        }
+        try (Stream<Path> entries = Files.walk(dir)) {
+            entries.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException e) {
+                    log.warn("清理附件 {} 失败", path, e);
+                }
+            });
+        } catch (IOException e) {
+            log.warn("遍历附件目录失败: {}", dir, e);
+        }
+    }
+
+    private static PurgeStats deleteTreeCounting(Path dir) {
+        if (!Files.isDirectory(dir)) {
+            return new PurgeStats(0, 0);
+        }
+        int files = 0;
+        int dirs = 0;
+        try (Stream<Path> entries = Files.walk(dir)) {
+            for (Path path : entries.sorted(Comparator.reverseOrder()).toList()) {
+                try {
+                    if (Files.isDirectory(path)) {
+                        if (Files.deleteIfExists(path)) {
+                            dirs++;
+                        }
+                    } else if (Files.deleteIfExists(path)) {
+                        files++;
+                    }
+                } catch (IOException e) {
+                    log.warn("清理附件 {} 失败", path, e);
+                }
+            }
+        } catch (IOException e) {
+            log.warn("遍历附件目录失败: {}", dir, e);
+        }
+        return new PurgeStats(files, dirs);
+    }
+
+    private static int deleteFilesBefore(Path directory, Instant cutoff) {
+        int removed = 0;
+        try (Stream<Path> entries = Files.list(directory)) {
+            for (Path file : entries.filter(Files::isRegularFile).toList()) {
+                try {
+                    if (Files.getLastModifiedTime(file).toInstant().isBefore(cutoff)) {
+                        if (Files.deleteIfExists(file)) {
+                            removed++;
+                        }
+                    }
+                } catch (IOException e) {
+                    log.warn("清理附件 {} 失败", file, e);
+                }
+            }
+        } catch (IOException e) {
+            log.warn("遍历附件目录失败: {}", directory, e);
+        }
+        return removed;
+    }
+
+    private static boolean isEmptyDirectory(Path dir) {
+        try (Stream<Path> entries = Files.list(dir)) {
+            return entries.findFirst().isEmpty();
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     private Attachment save(String sessionId, String name, String mime, byte[] bytes) {

@@ -41,12 +41,13 @@ public class SessionCleanupService {
     private final WorkProductService products;
     private final SkillDraftService skillDrafts;
     private final FileWorkbenchService fileWorkbench;
+    private final AttachmentService attachments;
 
     public SessionCleanupService(SessionService sessions, ConversationRepository conversations, PlanRepository plans,
         RunRepository runs, SandboxStore sandboxes, RunStarter runStarter, TaskControlService taskControls,
         CommandTaskManager commandTasks, ObjectProvider<BrowserBackend> browser, ValidationLedger validations,
         ToolCallJournalFactory journals, RunCheckpointRepository checkpoints, WorkProductService products,
-        SkillDraftService skillDrafts, FileWorkbenchService fileWorkbench) {
+        SkillDraftService skillDrafts, FileWorkbenchService fileWorkbench, AttachmentService attachments) {
         this.fileWorkbench = fileWorkbench;
         this.products = products;
         this.skillDrafts = skillDrafts;
@@ -62,6 +63,7 @@ public class SessionCleanupService {
         this.taskControls = taskControls;
         this.commandTasks = commandTasks;
         this.browser = browser;
+        this.attachments = attachments;
     }
 
     /**
@@ -85,6 +87,8 @@ public class SessionCleanupService {
         skillDrafts.deleteBySession(sessionId);
         // 文件工作台的批注、快照索引与预览缓存都属于会话；工作区里的真实文件保留给用户。
         fileWorkbench.deleteBySession(sessionId);
+        // 聊天附件随会话一起回收，不留孤儿目录
+        attachments.deleteBySession(sessionId);
         conversations.delete(sessionId);
         plans.delete(sessionId);
         runs.deleteBySession(sessionId);

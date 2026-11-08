@@ -32,8 +32,8 @@ public class MaintenanceController {
     @GetMapping("/status")
     public Status status() {
         BackupService.Status status = backups.status();
-        return new Status(status, retention.retentionDays(), StorageHealth.snapshot(), execution.describe(),
-            execution.isolated(), execution.degraded(), execution.reason());
+        return new Status(status, retention.retentionDays(), retention.attachmentsDays(), StorageHealth.snapshot(),
+            execution.describe(), execution.isolated(), execution.degraded(), execution.reason());
     }
 
     @PostMapping("/backup")
@@ -46,7 +46,8 @@ public class MaintenanceController {
         return retention.purgeNow();
     }
 
-    public record Status(BackupService.Status backup, int retentionDays, StorageHealth.Snapshot storage,
-        String executionIsolation, boolean isolated, boolean degraded, String degradedReason) {
+    public record Status(BackupService.Status backup, int retentionDays, int attachmentsDays,
+        StorageHealth.Snapshot storage, String executionIsolation, boolean isolated, boolean degraded,
+        String degradedReason) {
     }
 }

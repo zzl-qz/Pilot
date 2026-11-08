@@ -9,6 +9,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -192,6 +195,41 @@ class AttachmentServiceTest {
         assertTrue(prepared.attachments().isEmpty(), "二进制不该走多模态附件通道");
         Path saved = Path.of(prepared.content().split("已保存到 ")[1].split("，")[0].trim());
         assertTrue(Files.exists(saved), "二进制应落盘");
+    }
+
+    @Test
+    void deleteBySessionRemovesAttachmentDirectory() throws IOException {
+        AttachmentService service = new AttachmentService(root);
+        service.prepare("ses_1", "hi", List.of(new AttachmentService.Inbound("doc.pdf", "application/pdf",
+            Base64.getEncoder().encodeToString(new byte[] {'%', 'P', 'D', 'F'}))));
+        Path dir = root.resolve("ses_1");
+        assertTrue(Files.isDirectory(dir));
+
+        service.deleteBySession("ses_1");
+
+        assertFalse(Files.exists(dir), "会话删除后附件目录应回收");
+    }
+
+    @Test
+    void purgeRemovesOrphansAndExpiredFilesForLiveSessions() throws IOException {
+        AttachmentService service = new AttachmentService(root);
+        Path liveOld = attachment(root.resolve("ses_1"), "old.png");
+        Path liveNew = attachment(root.resolve("ses_1"), "new.txt");
+        Path orphan = attachment(root.resolve("ses_gone"), "gone.pdf");
+        Files.setLastModifiedTime(liveOld, FileTime.from(Instant.now().minus(3, ChronoUnit.DAYS)));
+
+        AttachmentService.PurgeStats stats = service.purge(Instant.now().minus(1, ChronoUnit.DAYS), List.of("ses_1"));
+
+        assertEquals(2, stats.files(), "孤儿文件 + 过期文件");
+        assertEquals(1, stats.dirs(), "孤儿目录");
+        assertFalse(Files.exists(orphan), "孤儿整目录回收");
+        assertFalse(Files.exists(liveOld), "过期图片也参与清理");
+        assertTrue(Files.exists(liveNew), "未过期文件保留");
+    }
+
+    private static Path attachment(Path dir, String name) throws IOException {
+        Files.createDirectories(dir);
+        return Files.writeString(dir.resolve("12345678-1234-1234-1234-123456789abc-" + name), "content");
     }
 
     @Test

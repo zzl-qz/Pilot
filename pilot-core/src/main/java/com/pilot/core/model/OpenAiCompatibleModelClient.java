@@ -474,11 +474,11 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     /**
-     * 用户上传的图片丢失时直接报错（用户需要知道）；工具产出的图片只是一次性观察，
-     * 文件被清理后改成文字说明，不让整段历史因此再也发不出去。
+     * 图片文件丢失时降级为文字占位：工具产出的截图是一次性观察，用户上传的图片也可能
+     * 被附件保留策略清理，都不能让整段历史再也发不出去。
      */
     private static Map<String, Object> imagePart(Message message, Attachment image) {
-        if (message.isToolImages() && !Files.isRegularFile(Path.of(image.path()))) {
+        if (!Files.isRegularFile(Path.of(image.path()))) {
             return Map.of("type", "text", "text", "[图片已不存在：" + image.name() + "]");
         }
         return Map.of("type", "image_url", "image_url", Map.of("url", dataUrl(image)));

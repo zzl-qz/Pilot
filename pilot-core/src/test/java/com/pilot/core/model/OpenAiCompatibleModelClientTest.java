@@ -362,6 +362,19 @@ class OpenAiCompatibleModelClientTest {
     }
 
     @Test
+    void degradesMissingUserImageToPlaceholderInsteadOfFailing() {
+        // 附件保留策略可能清理掉旧图片；历史回放不能因为图片缺失整段发不出去
+        Message message = Message.user("看这张截图",
+            List.of(new Attachment("shot.png", "image/png", "C:\\不存在的目录\\shot.png")));
+
+        JsonNode content = json.valueToTree(OpenAiCompatibleModelClient.contentFor(message));
+
+        assertEquals("text", content.get(0).get("type").asText());
+        assertEquals("text", content.get(1).get("type").asText(), "用户图片缺失也应降级为文字占位");
+        assertTrue(content.get(1).get("text").asText().contains("图片已不存在"));
+    }
+
+    @Test
     void surfacesHttpErrorStatus() throws IOException {
         HttpServer server = startServer(new AtomicReference<>(), 503, "{\"error\":\"overloaded\"}");
         server.start();
