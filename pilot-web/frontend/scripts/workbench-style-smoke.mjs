@@ -38,8 +38,30 @@ async function run(page,name){
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   const box=await page.locator('#run-state').boundingBox();assert.ok(box.width>32&&box.x+box.width<=width);
   const composer=await page.locator('.composer').boundingBox();assert.ok(composer.x>=0&&composer.y+composer.height<=900);
+  const workspace=page.locator('#workspace-name');
+  await workspace.click();
+  const workspaceDialog=page.getByRole('dialog',{name:'工作区',exact:true});
+  await workspaceDialog.getByRole('textbox',{name:'分支',exact:true}).waitFor();
+  await workspaceDialog.evaluate(el=>Promise.allSettled(el.getAnimations().map(animation=>animation.finished)));
+  assert.ok(await workspaceDialog.evaluate(el=>el.scrollWidth<=el.clientWidth+1),'工作区弹窗无横向溢出');
+  assert.equal(await workspaceDialog.getByRole('button',{name:'/workspace/pilot',exact:true}).getAttribute('aria-current'),'true');
+  await page.screenshot({path:join(output,`${name}-workspace-${theme}-${width}.png`),animations:'disabled'});
+  await page.keyboard.press('Escape');
+  await workspaceDialog.waitFor({state:'hidden'});
+  assert.equal(await workspace.evaluate(el=>el===document.activeElement),true,'工作区关闭后回到触发按钮');
  }
  await page.setViewportSize({width:1440,height:900});await page.goto(url);await page.locator('#run-state').waitFor();
+ await page.evaluate(()=>{
+  api.worktreeInfo=async()=>{throw Error('模拟检出状态读取失败');};
+  store.setState({openWorktree:async branch=>{window.submittedBranch=branch;}});
+ });
+ await page.locator('#workspace-name').click();
+ const workspaceDialog=page.getByRole('dialog',{name:'工作区',exact:true});
+ await workspaceDialog.getByRole('alert').filter({hasText:'模拟检出状态读取失败'}).waitFor();
+ await workspaceDialog.getByRole('textbox',{name:'分支',exact:true}).fill('  feature/ui  ');
+ await workspaceDialog.getByRole('textbox',{name:'分支',exact:true}).press('Enter');
+ await workspaceDialog.waitFor({state:'hidden'});
+ assert.equal(await page.evaluate(()=>window.submittedBranch),'feature/ui');
  await page.evaluate(()=>store.setState(s=>({thread:{...s.thread,rows:[...s.thread.rows,
   {type:'plan',key:'plan-done',items:[{step:'准备输入',status:'completed'},{step:'执行任务',status:'completed'},{step:'检查结果',status:'completed'},{step:'整理交付',status:'completed'}]},
   {type:'result',key:'continued-error',tone:'error',title:'运行失败 · MODEL_ERROR',detail:'模型调用失败：模型请求被中断',runIds:['previous-run'],continued:true,changedFiles:[]},

@@ -7,6 +7,9 @@ import Notifications from './Notifications.jsx';
 import ResultInbox from './ResultInbox.jsx';
 import Schedules from './Schedules.jsx';
 import React, { useEffect, useRef, useState } from 'react';
+import { Button } from '@astryxdesign/core/Button';
+import { Dialog } from '@astryxdesign/core/Dialog';
+import { TextInput } from '@astryxdesign/core/TextInput';
 import { useStore } from '../store.js';
 import { NavigationRail } from './NavigationRail.jsx';
 import { Icon } from './Icon.jsx';
@@ -24,6 +27,7 @@ import { watchWorkbench } from '../lib/workbench-sync.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { dragWidth, readLayout, writeLayout } from '../lib/layout.js';
 import { UiProvider } from './UiProvider.js';
+import './workbench-shell.css';
 
 /** 应用外壳：左栏 + 主区（topbar / 通知 / 对话 / 输入） + 右侧工作区 + 弹层。 */
 export default function App() {
@@ -31,7 +35,6 @@ export default function App() {
 }
 
 function Workbench() {
-  const init = useStore((state) => state.init);
   const notice = useStore((state) => state.ui.notice);
   useEffect(() => window.pilotDesktop?.onMobileConnection?.(() => useStore.getState().setUi({ mobileConnectionOpen: true })), []);
   useEffect(() => {
@@ -70,10 +73,9 @@ function Workbench() {
   const inspectorTab = useStore((state) => state.ui.inspectorTab);
   const embedded = useStore((state) => state.embeddedSessionId);
   const sessionId = useStore((state) => state.sessionId);
-  const eventCount = useStore((state) => state.timeline.length);
   const lastEventAt = useStore((state) => state.lastEventAt);
   const [, setTick] = useState(0);
-  const [folderMenu, setFolderMenu] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 960px)').matches);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   /** 两侧面板宽度：拖过分才写内联变量，没拖过就用 CSS 里的默认/自适应值。 */
@@ -133,8 +135,9 @@ function Workbench() {
     const frame = requestAnimationFrame(() => document.getElementById('new-session')?.focus());
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Tab' || event.defaultPrevented || document.querySelector('.modal, dialog[open]')) return;
-      const items = [toggle, ...document.querySelectorAll<HTMLElement>('.navigation-rail button, #sidebar button:not([disabled]):not([tabindex="-1"]), #sidebar input, #sidebar summary, #sidebar [tabindex="0"]')]
-        .filter((el): el is HTMLElement => Boolean(el && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden'));
+      const items = [toggle, ...document.querySelectorAll<HTMLElement>('.navigation-rail :is(button, summary, [role="menuitem"]), #sidebar :is(button, input, summary, [tabindex="0"])')]
+        .filter((el): el is HTMLElement => Boolean(el && el.tabIndex >= 0 && !el.matches(':disabled,[aria-disabled="true"]')
+          && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden'));
       const index = items.findIndex(item => item === document.activeElement);
       event.preventDefault();
       const next = index < 0 ? 0 : (index + (event.shiftKey ? -1 : 1) + items.length) % items.length;
@@ -217,7 +220,8 @@ function Workbench() {
       const state = useStore.getState();
       const overlayOpen = Boolean(state.ui.picker || state.ui.projectEditor || state.ui.settingsOpen
         || state.ui.searchOpen || state.ui.resultsOpen || state.ui.schedulesOpen || state.ui.recurringOpen
-        || state.ui.paletteOpen || state.ui.checkpointDialog || state.ui.skillsInstall || state.ui.confirm || state.ui.mobileConnectionOpen);
+        || state.ui.paletteOpen || state.ui.checkpointDialog || state.ui.skillsInstall || state.ui.confirm
+        || state.ui.mobileConnectionOpen || state.ui.notificationsOpen || document.querySelector('dialog[open]'));
       if (overlayOpen) {
         return;
       }
@@ -329,63 +333,64 @@ function Workbench() {
         {!embedded && <div className="shell-brand"><span className="logo" aria-hidden="true">P</span><strong>Pilot</strong></div> }
           {/* 内嵌的 side chat 里侧栏恒为隐藏，切换按钮点了没反应，直接不渲染 */}
           {!embedded && (
-            <button
-              type="button"
-              className="icon-btn"
+            <Button
+              className="workbench-control"
               id="sidebar-toggle"
-              title={`切换侧栏 (${shortcut('B')})`}
-              aria-label="切换侧栏"
+              label="切换侧栏"
+              icon={<Icon name="sidebar" />}
+              isIconOnly
+              variant="ghost"
+              tooltip={`切换侧栏 (${shortcut('B')})`}
               aria-expanded={sidebarOpen}
               aria-controls="sidebar"
               onClick={() => useStore.getState().setUi((ui) => ({ sidebarOpen: !ui.sidebarOpen }))}
-            >
-              <Icon name="sidebar" />
-            </button>
+            />
           )}
           <div className="crumbs">
-            <button
-              type="button"
+            {!embedded && <Button
               id="workspace-name"
-              className="crumb-root"
-              title="切换该对话使用的文件夹"
-              aria-haspopup="menu"
-              aria-expanded={folderMenu}
-              // 菜单自己监听 document 的 mousedown 会先把它关掉，这里挡住才能在按钮上切换
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={() => setFolderMenu((open) => !open)}
+              className="crumb-root workbench-control"
+              label={workspace ? `切换工作区：${workspace.split(/[\\/]/).filter(Boolean).pop()}` : '选择工作区'}
+              icon={<Icon name="folder" />}
+              isIconOnly={viewportWidth <= 600}
+              variant="ghost"
+              tooltip={workspace || '选择工作区'}
+              aria-haspopup="dialog"
+              aria-expanded={workspaceOpen}
+              onClick={() => setWorkspaceOpen(true)}
             >
-              <Icon name="folder" />
               {workspace ? workspace.split(/[\\/]/).filter(Boolean).pop() : '选择工作区'}
-            </button>
-            <span className="crumb-sep">/</span>
+            </Button>}
+            {!embedded && <span className="crumb-sep" aria-hidden="true">/</span>}
             <h1 id="crumb-title" className="crumb-title" title={sessionTitle}>{sessionTitle || '新任务'}</h1>
           </div>
-          {folderMenu && <WorkspaceMenu onClose={() => setFolderMenu(false)} />}
           <div className="topbar-right">
             {Object.keys(agents || {}).length > 0 && (
-              <button
-                type="button"
+              <Button
                 id="agents-chip"
-                className="chip agents-chip"
-                title="查看本对话的子智能体"
+                className="workbench-agents"
+                label={`子智能体 · ${Object.keys(agents).length}`}
+                variant="ghost"
+                tooltip="查看本对话的子智能体"
                 aria-expanded={agentsDockOpen}
                 aria-controls="agents-dock"
                 onClick={() => useStore.getState().setUi({ agentsDockOpen: !useStore.getState().ui.agentsDockOpen })}
-              >
-                子智能体 · {Object.keys(agents).length}
-              </button>
+              />
             )}
-            {!embedded && <button type="button" id="refresh-workbench" className="icon-btn"
-              aria-label="刷新工作台数据" aria-busy={Boolean(refreshing)} disabled={refreshing}
-              title={syncError ? `同步失败：${syncError}，点击重试` : '刷新工作台数据，保留草稿与附件 (F5)'}
-              onClick={() => useStore.getState().refreshWorkbench()}><Icon name="refresh" /></button>}
+            {!embedded && <Button id="refresh-workbench" className="workbench-control"
+              label="刷新工作台数据" icon={<Icon name="refresh" />} isIconOnly variant="ghost"
+              aria-busy={Boolean(refreshing)} isDisabled={Boolean(refreshing)}
+              tooltip={syncError ? `同步失败：${syncError}，点击重试` : '刷新工作台数据，保留草稿与附件 (F5)'}
+              onClick={() => useStore.getState().refreshWorkbench()} />}
             {sessionId && (
-              <button
-                type="button"
+              <Button
                 id="session-chip"
-                className="icon-btn session-chip"
-                aria-label="复制会话 ID"
-                title={`点击复制会话 ID：${sessionId}`}
+                className="workbench-control session-chip"
+                label="复制会话 ID"
+                icon={<Icon name="copy" />}
+                variant="ghost"
+                isIconOnly
+                tooltip={`复制会话 ID：${sessionId}`}
                 onClick={async () => {
                   try {
                     if (!await writeClipboard(sessionId)) throw new Error('clipboard unavailable');
@@ -394,7 +399,7 @@ function Workbench() {
                     useStore.getState().showNotice('复制失败');
                   }
                 }}
-              ><Icon name="copy" /></button>
+              />
             )}
             <span
               id="run-state"
@@ -407,18 +412,19 @@ function Workbench() {
             </span>
             {/* 内嵌页再展开审阅面板会把窄 iframe 挤成两栏，这里不给入口 */}
             {!embedded && (
-              <button
-                type="button"
+              <Button
                 id="toggle-activity"
-                className="icon-btn review-toggle"
-                aria-label="切换审阅面板"
+                className="workbench-control workbench-review"
+                label="切换审阅面板"
+                icon={<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11zM9.5 3.5v9" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round" /></svg>}
+                isIconOnly={narrowViewport}
+                variant={inspectorOpen ? 'secondary' : 'ghost'}
                 aria-pressed={inspectorOpen}
-                title={`审阅面板 (${shortcut('J')})`}
+                tooltip={`审阅面板 (${shortcut('J')})`}
                 onClick={() => useStore.getState().setUi((ui) => ({ inspectorOpen: !ui.inspectorOpen }))}
               >
-                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11zM9.5 3.5v9" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round" /></svg>
-                <span>审阅</span>
-              </button>
+                审阅
+              </Button>
             )}
           </div>
       </header>
@@ -447,6 +453,7 @@ function Workbench() {
         </div>
       </main>
       <SelectionQuote />
+      {workspaceOpen && <ErrorBoundary name="工作区"><WorkspaceDialog onClose={() => setWorkspaceOpen(false)} /></ErrorBoundary>}
       <ErrorBoundary name="定时任务"><Schedules /></ErrorBoundary>
       <ErrorBoundary name="任务收件箱"><ResultInbox /></ErrorBoundary>
       <ErrorBoundary name="周期计划"><RecurringPlans /></ErrorBoundary>
@@ -457,8 +464,7 @@ function Workbench() {
   );
 }
 
-/** 工作区菜单：该对话可用的文件夹 + worktree 的两个动作（旧版 folderMenu）。 */
-function WorkspaceMenu({ onClose }: { onClose: () => void }) {
+function WorkspaceDialog({ onClose }: { onClose: () => void }) {
   const workspace = useStore((state) => state.workspace);
   const projects = useStore((state) => state.projects);
   const sessions = useStore((state) => state.sessions);
@@ -470,108 +476,94 @@ function WorkspaceMenu({ onClose }: { onClose: () => void }) {
   const [worktree, setWorktree] = useState<ApiResults['worktreeInfo'] | null>(null);
   const [worktreeBranch, setWorktreeBranch] = useState('');
 
-  // 点外面就收起：菜单是绝对定位的浮层，没有遮罩可以点
-  useEffect(() => {
-    const onDown = () => onClose();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); onClose(); document.getElementById('workspace-name')?.focus(); }
-    };
-    document.addEventListener('keydown', onKey, true);
-    document.addEventListener('mousedown', onDown);
-    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey, true); };
-  }, [onClose]);
+  const [inspectionError, setInspectionError] = useState('');
 
   // 当前目录是不是某个 worktree：是的话给出分支与清理入口，否则遗留目录只能手工 rm
   useEffect(() => {
     let alive = true;
+    setWorktree(null);
+    setInspectionError('');
     if (!workspace) {
       return undefined;
     }
     api.worktreeInfo(workspace)
       .then((info) => { if (alive) setWorktree(info?.worktree ? info : null); })
-      .catch(() => { if (alive) setWorktree(null); });
+      .catch(error => {
+        if (!alive) return;
+        setWorktree(null);
+        setInspectionError(errorInfo(error).message || '无法读取工作区状态');
+      });
     return () => { alive = false; };
   }, [workspace]);
 
   return (
-    <div className="folder-menu" role="menu" onMouseDown={(event) => event.stopPropagation()}>
-      <p className="model-title">对话使用的文件夹</p>
-      {folders.map((folder) => (
-        <button
-          key={folder}
-          type="button"
-          role="menuitem"
-          className={`perm-item${samePath(folder, workspace) ? ' is-on' : ''}`}
-          title={folder}
-          onClick={() => {
-            onClose();
-            useStore.getState().switchWorkspace(folder);
-          }}
-        >
-          <span className="mono">{folder.split(/[\\/]/).filter(Boolean).pop()}</span>
-          <small>{folder}</small>
-        </button>
-      ))}
-      {!folders.length && <p className="panel-empty">还没有可用的文件夹。</p>}
-      <div className="folder-menu-row">
-        <input
-          className="branch-input"
-          placeholder="分支（留空=当前）"
-          aria-label="worktree 分支"
-          value={worktreeBranch}
-          onChange={(event) => setWorktreeBranch(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.keyCode !== 229) {
-              onClose();
-              useStore.getState().openWorktree(worktreeBranch.trim());
-            }
-          }}
-        />
-        <button
-          type="button"
-          role="menuitem"
-          className="perm-item"
-          title="在独立检出里开新对话，改动不会污染当前目录"
-          onClick={() => { onClose(); useStore.getState().openWorktree(worktreeBranch.trim()); }}
-        >建 worktree</button>
-      </div>
-      <button
-        type="button"
-        role="menuitem"
-        className="perm-item"
-        disabled={!sessionId}
-        onClick={() => { onClose(); useStore.getState().handoffWorktree(); }}
-      >把 worktree 改动交回本地</button>
-      {worktree && (
-        <>
-          <p className="model-title" title={worktree.path}>当前为 worktree · {worktree.branch} @ {(worktree.commit || '').slice(0, 7)}</p>
-          <button
-            type="button"
-            role="menuitem"
-            className="perm-item is-danger"
+    <Dialog isOpen onOpenChange={open => { if (!open) onClose(); }} purpose="form" width={560}
+      maxHeight="calc(100dvh - 32px)" className="workbench-workspace-dialog"
+      aria-labelledby="workbench-workspace-title" onKeyDown={event => event.stopPropagation()}>
+      <header className="workbench-workspace-heading">
+        <div>
+          <h2 id="workbench-workspace-title">工作区</h2>
+          <p>为当前对话选择文件夹，或创建独立检出。</p>
+        </div>
+        <Button label="关闭工作区" icon={<Icon name="close" />} isIconOnly variant="ghost" onClick={onClose} />
+      </header>
+      {folders.length > 0 && <div className="workbench-workspace-folders">
+        {folders.map(folder => {
+          const current = samePath(folder, workspace);
+          return <Button key={folder} label={folder} tooltip={folder}
+            variant={current ? 'secondary' : 'ghost'} className="workbench-workspace-folder"
+            aria-current={current ? 'true' : undefined}
             onClick={() => {
               onClose();
-              useStore.getState().askConfirm({
-                title: '删除 worktree',
-                message: `会删除 ${worktree.path} 这个检出目录（分支 ${worktree.branch} 保留）。未交回的改动会丢失，确定吗？`,
-                confirmText: '删除',
-                danger: true,
-                onConfirm: async () => {
-                  try {
-                    await api.worktreeRemove(worktree.path);
-                    useStore.getState().showNotice('已删除 worktree');
-                    if (worktree.base) {
-                      await useStore.getState().switchWorkspace(worktree.base);
+              if (!current) void useStore.getState().switchWorkspace(folder);
+            }} />;
+        })}
+      </div>}
+      <Button label={folders.length ? '选择其他文件夹' : '选择文件夹'} icon={<Icon name="folder" />}
+        onClick={() => { onClose(); useStore.getState().setUi({ picker: { title: '切换工作区' } }); }} />
+      <section className="workbench-workspace-section" aria-labelledby="workbench-worktree-title">
+        <h3 id="workbench-worktree-title">独立检出</h3>
+        {inspectionError && <p role="alert">读取检出状态失败：{inspectionError}</p>}
+        <form className="workbench-worktree-form" onSubmit={event => {
+          event.preventDefault();
+          if (!workspace) return;
+          onClose();
+          void useStore.getState().openWorktree(worktreeBranch.trim());
+        }}>
+          <TextInput label="分支" placeholder="留空使用当前分支" value={worktreeBranch}
+            isDisabled={!workspace} onChange={setWorktreeBranch} />
+          <Button type="submit" label="创建 worktree" variant="primary" isDisabled={!workspace} />
+        </form>
+        {worktree && (
+          <>
+            <p title={worktree.path}>当前检出：{worktree.branch} · {(worktree.commit || '').slice(0, 7)}</p>
+            <div className="workbench-worktree-actions">
+              <Button label="把改动交回本地" isDisabled={!sessionId}
+                onClick={() => { onClose(); void useStore.getState().handoffWorktree(); }} />
+              <Button label="删除这个 worktree" variant="destructive"
+                onClick={() => {
+                  onClose();
+                  useStore.getState().askConfirm({
+                    title: '删除 worktree',
+                    message: `会删除 ${worktree.path} 这个检出目录（分支 ${worktree.branch} 保留）。未交回的改动会丢失，确定吗？`,
+                    confirmText: '删除',
+                    danger: true,
+                    onConfirm: async () => {
+                      try {
+                        await api.worktreeRemove(worktree.path);
+                        useStore.getState().showNotice('已删除 worktree');
+                        if (worktree.base) await useStore.getState().switchWorkspace(worktree.base);
+                      } catch (error) {
+                        useStore.getState().showNotice('删除 worktree 失败：' + errorInfo(error).message);
+                      }
                     }
-                  } catch (error) {
-                    useStore.getState().showNotice('删除 worktree 失败：' + errorInfo(error).message);
-                  }
-                }
-              });
-            }}
-          >删除这个 worktree</button>
-        </>
-      )}
-    </div>
+                  });
+                }}
+              />
+            </div>
+          </>
+        )}
+      </section>
+    </Dialog>
   );
 }
