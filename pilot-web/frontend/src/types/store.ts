@@ -104,7 +104,7 @@ export interface StoreActions {
   rollbackRun(id: string): Promise<void>; createBranch(name: string): Promise<{ ok: boolean; error?: string }>; openPreview(path: string): Promise<void>;
   loadCommandTasks(): Promise<void>; loadCommandLog(task: CommandTask): Promise<void>; stopCommand(task: CommandTask): Promise<void>;
   renameSession(title: string, id?: string | null): Promise<boolean>; updateSessionPreferences(id: string, values: { pinned?: boolean; unread?: boolean }): Promise<boolean>;
-  archiveSession(id: string, archived?: boolean): Promise<boolean>; deleteSession(id: string): Promise<void>; regenerate(): Promise<void>;
+  archiveSession(id: string, archived?: boolean): Promise<boolean>; deleteSession(id: string): Promise<boolean>; regenerate(): Promise<void>;
   askConfirm(options: ConfirmDialog): void; loadSettings(): Promise<void>; savePermissionMode(mode: string): Promise<void>;
   clearModelKey(): Promise<boolean>; resetModelFeedback(): void;
   saveModel(body: Parameters<ApiClient['saveModel']>[0], options?: { clearKey?: boolean }): Promise<boolean>;

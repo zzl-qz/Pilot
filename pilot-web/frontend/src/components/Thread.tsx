@@ -6,22 +6,32 @@ import { RequestList } from './RequestUsage.jsx';
 import { formatCache, totalCost } from '../lib/request-usage.js';
 import ThreadNavigator from './ThreadNavigator.jsx';
 import { modifierKey, duplicateResult } from '../lib/interaction.js';
-import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Button } from '@astryxdesign/core/Button';
+import { Dialog } from '@astryxdesign/core/Dialog';
+import { IconButton } from '@astryxdesign/core/IconButton';
+import { Spinner } from '@astryxdesign/core/Spinner';
+import { StatusDot } from '@astryxdesign/core/StatusDot';
 import { useStickToBottom } from 'use-stick-to-bottom';
 import { useStore } from '../store.js';
 import { api, apiFetch } from '../api.js';
 import { historyPrefetchDistance } from '../lib/history.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
-import { TOOL_ICONS, TOOL_STATUS_TITLES, toolArgsText, toolLabel } from '../lib/tool-meta.js';
+import { TOOL_STATUS_TITLES, toolArgsText, toolLabel } from '../lib/tool-meta.js';
 import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel } from '../lib/agents.js';
 import { splitAttachmentMarkers, layoutMessageParts, attachmentUrl, isImageAttachment, fileBadge, formatBytes } from '../lib/attachments.js';
 import { changeFileTitle, splitPath, statusKind } from '../lib/changes.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { formatCount, formatTime } from '../thread-utils.js';
 import { messagePeek } from '../lib/side-chat.js';
+import { Icon } from './Icon.jsx';
+import './conversation.css';
 
 /* 回到底部的弹簧参数：库的默认值在长距离上要 1s 以上，这里压到 ~200ms 收敛。 */
 const BACK_TO_LATEST = { stiffness: 0.2, damping: 0.9, mass: 1 };
+function latestAnimation() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : BACK_TO_LATEST;
+}
 const PdfAttachmentPreview = React.lazy(() => import('./PdfAttachmentPreview.jsx'));
 
 /**
@@ -65,7 +75,7 @@ export function Thread() {
    */
   const lastScrollTop = useRef(0);
   const armed = useRef(false);
-  const earlierTimer = useRef<ReturnType<typeof setTimeout>>();
+  const earlierTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const navigationUntil = useRef(0);
   const beforeNavigation = useCallback(() => {
     clearTimeout(earlierTimer.current);
@@ -135,7 +145,7 @@ export function Thread() {
       return;
     }
     lastSignal.current = bottomSignal;
-    scrollToBottom({ animation: BACK_TO_LATEST });
+    scrollToBottom({ animation: latestAnimation() });
   }, [bottomSignal, scrollToBottom]);
 
   if (!rows.length && !eventCount && !history.hasMore) {
@@ -143,8 +153,8 @@ export function Thread() {
   }
 
   return (
-    <div className="thread-scroll-region">
-      <div className="thread" ref={scrollRef} onScroll={handleScroll} onWheel={handleWheel}>
+    <div className="thread-scroll-region conversation-thread">
+      <div className="thread" ref={scrollRef} role="region" aria-label="消息记录" tabIndex={0} onScroll={handleScroll} onWheel={handleWheel}>
         <div className="thread-column" ref={contentRef}>
           {history.hasMore && (
             <RetryRow
@@ -162,7 +172,7 @@ export function Thread() {
         </div>
       </div>
       <ThreadNavigator rows={rows} scrollRef={scrollRef} contentRef={contentRef} stopFollowing={stopScroll} beforeJump={beforeNavigation} />
-      <ThreadBottomButton visible={!isAtBottom} onJump={() => scrollToBottom({ animation: BACK_TO_LATEST })} />
+      <ThreadBottomButton visible={!isAtBottom} onJump={() => scrollToBottom({ animation: latestAnimation() })} />
     </div>
   );
 }
@@ -172,22 +182,15 @@ function ThreadBottomButton({ visible, onJump }: { visible: boolean; onJump: () 
     return null;
   }
   return (
-    <button
-      type="button"
-      className="thread-bottom"
-      aria-label="回到底部"
-      title="回到底部"
-      onClick={onJump}
-    >
-      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5v12M5.5 11l4.5 4.5 4.5-4.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
-    </button>
+    <IconButton className="conversation-latest" label="回到底部" onClick={onJump}
+      icon={<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5v12M5.5 11l4.5 4.5 4.5-4.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
   );
 }
 
 function RetryRow({ label, onClick, disabled = false }: { label: string; onClick: () => void; disabled?: boolean }) {
   return (
     <div className="history-more-wrap">
-      <button type="button" className="history-more" disabled={disabled} onClick={onClick}>{label}</button>
+      <Button size="sm" variant="ghost" label={label} isDisabled={disabled} onClick={onClick} />
     </div>
   );
 }
@@ -196,9 +199,14 @@ function EmptyState() {
   const workspace = useStore(state => state.workspace || state.draftSession?.workspace || '');
   const project = useStore(state => state.projects.find(item => item.id === state.currentProjectId));
   const [scope, setScope] = useState<ApiResults['worktreeInfo'] | null>(null);
+  const [scopeUnavailable, setScopeUnavailable] = useState(false);
   useEffect(() => {
-    let alive = true; setScope(null);
-    if (workspace) api.worktreeInfo(workspace).then(info => { if (alive) setScope(info); }).catch(() => {});
+    let alive = true;
+    setScope(null);
+    setScopeUnavailable(false);
+    if (workspace) api.worktreeInfo(workspace)
+      .then(info => { if (alive) setScope(info); })
+      .catch(() => { if (alive) setScopeUnavailable(true); });
     return () => { alive = false; };
   }, [workspace]);
   const prompts = [
@@ -207,49 +215,46 @@ function EmptyState() {
     { title: '整理资料', sub: '提取要点、核对数据与缺失项', prompt: '请根据我提供的文件整理要点或表格，核对数字和来源，缺失数据不要猜测，并将结果保存到成果面板。具体要求：' }
   ];
   return (
-    <div className="thread-scroll-region">
+    <div className="thread-scroll-region conversation-thread">
       <div className="thread is-empty">
         <div className="thread-column">
-          <div className="empty" id="empty-state">
-            <span className="empty-logo" aria-hidden="true">P</span>
-            <h2 className="empty-title">从一个任务开始</h2>
-            <p className="empty-sub">描述你想完成的工作。Pilot 会在所选工作区内执行，并把每一步和改动留给你审阅。</p>
-            <div className="task-scope">
-              <strong>{project?.name || '当前工作区'}</strong>
-              <span title={workspace}>{workspace || '尚未选择工作区'}</span>
-              <span>{scope?.branch ? `${scope.worktree ? '源分支' : 'Git 分支'} · ${scope.branch} · ` : ''}{scope?.worktree ? '独立 worktree' : '在所选目录执行'}</span>
-              <button type="button" className="btn" onClick={() => useStore.getState().setUi({ picker: { title: '选择任务工作区' } })}>选择工作区</button>
+          <section className="conversation-empty" id="empty-state" aria-labelledby="conversation-empty-title">
+            <h2 id="conversation-empty-title" className="empty-title">从一个任务开始</h2>
+            <p className="empty-sub">描述你想完成的工作。Pilot 会在所选工作区执行任务，执行记录和改动可随时审阅。</p>
+            <div className="conversation-scope">
+              <Icon name="folder" />
+              <div>
+                <strong>{project?.name || '当前工作区'}</strong>
+                <span title={workspace}>{workspace || '尚未选择工作区'}</span>
+                {scope?.branch && <span>{scope.worktree ? '源分支' : 'Git 分支'} · {scope.branch}{scope.worktree ? ' · 独立 worktree' : ''}</span>}
+                {scopeUnavailable && <span role="status">工作区详情暂不可用</span>}
+              </div>
+              <Button size="sm" label="选择工作区" onClick={() => useStore.getState().setUi({ picker: { title: '选择任务工作区' } })} />
             </div>
-            <div className="prompts">
-              {prompts.map((item) => (
-                <button
-                  key={item.title}
-                  type="button"
-                  onClick={() => {
-                    // 草稿态直接填进输入框就够了，真正建会话发生在发送那一刻
-                    const state = useStore.getState();
-                    if (!state.sessionId && !state.draftSession) {
-                      state.startNewSession();
-                    }
-                    state.composerApi?.appendText((state.composerApi.getText().trim() ? '\n' : '') + item.prompt);
-                    state.composerApi?.focus();
-                  }}
-                >
-                  <span className="prompt-title">{item.title}</span>
-                  <span className="prompt-sub">{item.sub}</span>
-                </button>
+            <ul className="conversation-prompts" aria-label="任务示例">
+              {prompts.map(item => (
+                <li key={item.title}>
+                  <Button className="conversation-prompt" label={item.title + ' · ' + item.sub} size="lg" variant="ghost" width="100%"
+                    endContent={<Icon name="chevron" />} onClick={() => {
+                      // 草稿态直接填进输入框；发送首条消息时才创建会话。
+                      const state = useStore.getState();
+                      if (!state.sessionId && !state.draftSession) state.startNewSession();
+                      state.composerApi?.appendText((state.composerApi.getText().trim() ? '\n' : '') + item.prompt);
+                      state.composerApi?.focus();
+                    }}>
+                    <span className="conversation-prompt-title">{item.title}</span>
+                    <span className="conversation-prompt-note">{item.sub}</span>
+                  </Button>
+                </li>
               ))}
-            </div>
+            </ul>
             <p className="empty-keys">
-              <kbd>{modifierKey}</kbd><kbd>N</kbd> 新任务
-              <span className="sep">·</span>
-              <kbd>@</kbd> 引用文件
-              <span className="sep">·</span>
-              <kbd>/</kbd> 快捷指令
-              <span className="sep">·</span>
-              <kbd>Esc</kbd> 停止
+              <span><kbd>{modifierKey}</kbd><kbd>N</kbd> 新任务</span>
+              <span><kbd>@</kbd> 引用文件</span>
+              <span><kbd>/</kbd> 快捷指令</span>
+              <span><kbd>Esc</kbd> 停止</span>
             </p>
-          </div>
+          </section>
         </div>
       </div>
     </div>
@@ -281,47 +286,19 @@ function UserMessage({ row }: { row: UserRow }) {
   const images = attachments.filter(isImageAttachment);
   const files = [...(parts.files || []), ...attachments.filter(item => !isImageAttachment(item))];
   const canPeek = peek.collapsed && !images.length && !files.length;
-  /*
-   * 操作只放图标：文字按钮会在气泡下方挤成一块黑板（旧版就是图标 + data-tip 气泡）。
-   * SVG 路径与旧版 ACTION_ICONS 的 edit / branch 保持一致。
-   */
   const actions = row.steered ? null : (
     <div className="msg-actions">
-      <button
-        type="button"
-        className="icon-action msg-edit-btn"
-        aria-label="编辑并重新发送"
-        data-tip="编辑"
-        title="编辑并重新发送"
-        onClick={() => beginEdit(row)}
-      >
-        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M10.8 2.7l2.5 2.5-7.6 7.6-3.2.7.7-3.2z" />
-          <path d="M9.4 4.1l2.5 2.5" />
-        </svg>
-      </button>
+      <IconButton className="message-action msg-edit-btn" size="sm" variant="ghost"
+        label="编辑并重新发送" icon={<Icon name="edit" />} onClick={() => beginEdit(row)} />
       {row.sequence != null && (
-        <button
-          type="button"
-          className="icon-action msg-edit-btn"
-          aria-label="回退或另开分支"
-          data-tip="分支"
-          title="回退或另开分支"
-          onClick={() => useStore.getState().openCheckpoint(row.sequence!)}
-        >
-          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <circle cx="4.5" cy="3.6" r="1.7" />
-            <circle cx="4.5" cy="12.4" r="1.7" />
-            <circle cx="11.5" cy="5.6" r="1.7" />
-            <path d="M4.5 5.3v5.4M11.5 7.3c0 2.5-2.3 3.4-6 3.9" />
-          </svg>
-        </button>
+        <IconButton className="message-action msg-edit-btn" size="sm" variant="ghost" label="回退或另开分支"
+          icon={<Icon name="branch" />} onClick={() => useStore.getState().openCheckpoint(row.sequence!)} />
       )}
     </div>
   );
   if (canPeek && !open) {
     return (
-      <article className="msg msg-user" data-nav-key={row.key} data-sequence={row.sequence ?? undefined}>
+      <article className="msg msg-user" tabIndex={-1} data-nav-key={row.key} data-sequence={row.sequence ?? undefined}>
         <button type="button" className="msg-peek" aria-expanded="false" title="展开这条消息" onClick={() => setOpen(true)}>
           <span className="msg-peek-grip" aria-hidden="true">
             <svg viewBox="0 0 16 16"><path d="M3 6.5h10M3 9.5h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
@@ -334,7 +311,7 @@ function UserMessage({ row }: { row: UserRow }) {
   }
   return (
     <>
-    <article className="msg msg-user" data-nav-key={row.key} data-sequence={row.sequence ?? undefined}>
+    <article className="msg msg-user" tabIndex={-1} data-nav-key={row.key} data-sequence={row.sequence ?? undefined}>
       <div className="bubble">
         <div className="bubble-flow">{renderMessageBody(parts.body, files, images, row.imagePositions, setPreviewFile)}</div>
       </div>
@@ -378,7 +355,7 @@ function ImageThumb({ image, onPreview }: { image: MessageAttachment; onPreview?
   const sessionId = useStore((state) => state.sessionId);
   return (
     <span className="bubble-image">
-      <button className="bubble-image-action" type="button" aria-label={`预览图片 ${image.name || '图片'}`} onClick={() => onPreview?.(image)}>
+      <button className="bubble-image-action" type="button" aria-label={`预览图片 ${image.name || '图片'}`} onClick={event => { event.currentTarget.focus({ preventScroll: true }); onPreview?.(image); }}>
         <img src={attachmentUrl(sessionId, image)} alt={image.name || '图片'} loading="lazy" />
       </button>
     </span>
@@ -399,7 +376,7 @@ function FileCard({ file, onPreview }: { file: MessageAttachment; onPreview?: (f
       <span className={`file-card-badge ft-${badge.tone}`}>{badge.label}</span>
       <span className="file-card-name">{file.name || file.id}</span>
       <span className="file-card-meta">{formatBytes(file.size)}</span>
-      <button type="button" className="file-card-action" onClick={() => onPreview?.(file)} aria-label={`预览附件 ${file.name || file.id}`} title="预览附件">查看</button>
+      <button type="button" className="file-card-action" onClick={event => { event.currentTarget.focus({ preventScroll: true }); onPreview?.(file); }} aria-label={`预览附件 ${file.name || file.id}`} title="预览附件">查看</button>
       <a className="file-card-action" href={url} title="下载附件" aria-label={`下载附件 ${file.name || file.id}`} download={file.name || undefined}>下载</a>
     </span>
   );
@@ -450,19 +427,44 @@ function AttachmentPreview({ file, onClose }: { file: MessageAttachment; onClose
     return () => { alive = false; controller.abort(); if (currentUrl) URL.revokeObjectURL(currentUrl); };
   }, [file, sessionId, url, ext, office, textual, image]);
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const supportsModal = typeof HTMLDialogElement !== 'undefined' && typeof HTMLDialogElement.prototype.showModal === 'function';
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (supportsModal) return;
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeRef.current?.focus();
+    return () => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); };
+  }, [supportsModal]);
 
-  return <div className="attachment-preview-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <section className="attachment-preview" role="dialog" aria-modal="true" aria-label={`附件预览：${name}`}>
-      <header><strong title={name}>{name}</strong><div>{url && <a className="btn" href={url} download={name}>下载</a>}<button className="btn" type="button" onClick={onClose} aria-label="关闭预览">关闭</button></div></header>
-      <main>{loading ? <p role="status">正在读取附件…</p> : error ? <p role="alert">{error}</p> : blobUrl && image ? <img src={blobUrl} alt={name} /> : pdfData ? <React.Suspense fallback={<p role="status">正在加载 PDF 阅读器…</p>}><PdfAttachmentPreview data={pdfData} name={name} /></React.Suspense> : <pre>{text}</pre>}</main>
-      {office && officeFallback && <footer role="status">这里只展示可提取文本，不还原 Office 版式；完整文件可用右上角下载。</footer>}
-    </section>
-  </div>;
+  const preview = <section className={'attachment-preview conversation-attachment-preview' + (supportsModal ? '' : ' is-inline')}
+    aria-label={supportsModal ? undefined : '附件预览：' + name} onKeyDown={event => {
+      if (event.key !== 'Escape' || event.nativeEvent.isComposing || event.keyCode === 229) return;
+      event.stopPropagation();
+      if (!supportsModal) { event.preventDefault(); onClose(); }
+    }}>
+    <header>
+      <strong title={name}>{name}</strong>
+      <div>
+        {url && <a className="btn" href={url} download={name}>下载</a>}
+        <IconButton ref={closeRef} variant="ghost" label="关闭预览" icon={<Icon name="close" />} onClick={onClose} />
+      </div>
+    </header>
+    <div className={'attachment-preview-content' + (pdfData ? ' is-pdf' : '')} aria-busy={loading}>
+      {loading ? <p role="status"><Spinner size="sm" shade="subtle" aria-hidden="true" />正在读取附件…</p>
+        : error ? <p role="alert">{error}</p>
+        : blobUrl && image ? <img src={blobUrl} alt={name} />
+        : pdfData ? <React.Suspense fallback={<p role="status">正在加载 PDF 阅读器…</p>}>
+          <PdfAttachmentPreview data={pdfData} name={name} />
+        </React.Suspense> : <pre tabIndex={0}>{text}</pre>}
+    </div>
+    {office && officeFallback && <footer role="status">这里只展示可提取文本，不还原 Office 版式；完整文件可用右上角下载。</footer>}
+  </section>;
+  if (!supportsModal) return preview;
+  return <Dialog isOpen padding={0} width="min(1000px, calc(100vw - 24px))" maxHeight="calc(100dvh - 24px)"
+    aria-label={'附件预览：' + name} className="conversation-attachment-dialog"
+    onOpenChange={open => { if (!open) onClose(); }}>
+    {preview}
+  </Dialog>;
 }
 
 /* ---------- 回合（操作组 + 思考 + 回复 + 统计） ---------- */
@@ -476,49 +478,27 @@ const Turn = memo(function Turn({ row, isLast }: { row: TurnRow; isLast: boolean
    * 只在最后一轮、且没有任务在跑时给入口，避免对中间轮次重放出错乱的历史。
    */
   const canRegenerate = isLast && !running && !row.reply.live && Boolean(replyText);
-  const toolsRunning = row.tools.some((tool) => tool.status === 'run');
-  const thinkingLive = Boolean(row.thinking?.live);
-  // 还在跑或还在想：用 Cursor / Codex 那一块（命令状态 + 思考卡片），收起后再回到折叠摘要。
-  const liveWork = toolsRunning || thinkingLive;
   return (
     <div className="turn-shell" data-run={row.runIds?.join(',') || undefined}>
-      {liveWork
-        ? <LiveWork tools={row.tools} thinking={row.thinking} />
-        : (
-          <>
-            {row.tools.length > 0 && <ToolGroup tools={row.tools} />}
-            {row.thinking && <ThinkingBlock thinking={row.thinking} />}
-          </>
-        )}
+      {row.tools.length > 0 && <ToolGroup tools={row.tools} />}
+      {row.thinking && <ThinkingBlock thinking={row.thinking} />}
       <AgentGroup agents={row.agents} />
       {(replyText || row.reply.live) && (
         <article className={`msg msg-assistant${row.reply.live ? ' is-streaming' : ''}`}>
-          <div className="who"><span className="who-mark">P</span>Pilot</div>
-          <div className="bubble">
-            {replyText
-              ? <MarkdownBody text={replyText} />
-              : <div className="bubble typing"><span /><span /><span /></div>}
-          </div>
-          {replyText && !row.reply.live && (
-            <div className="msg-actions reply-actions">
-              <CopyControl text={replyText} label="复制这条回复" tip="复制" />
-              {canRegenerate && (
-                <button
-                  type="button"
-                  className="icon-action"
-                  aria-label="重新生成"
-                  data-tip="重新生成"
-                  title="用上一条输入重新生成（不会重复用户消息）"
-                  onClick={() => useStore.getState().regenerate()}
-                >
-                  <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M13.2 8a5.2 5.2 0 1 1-1.7-3.9" />
-                    <path d="M13.4 2.6v3.2h-3.2" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          )}
+          <header className="conversation-reply-head">
+            <span className="who">Pilot</span>
+            {replyText && !row.reply.live && (
+              <div className="reply-actions">
+                <CopyControl text={replyText} label="复制这条回复" />
+                {canRegenerate && <IconButton className="message-action" size="sm" variant="ghost"
+                  label="重新生成" icon={<Icon name="refresh" />} onClick={() => useStore.getState().regenerate()} />}
+              </div>
+            )}
+            {row.reply.live && <span className="conversation-streaming" role="status">
+              <Spinner size="sm" shade="subtle" aria-hidden="true" />正在回复
+            </span>}
+          </header>
+          {replyText && <div className="bubble"><MarkdownBody text={replyText} /></div>}
         </article>
       )}
       <TurnStats stats={row.stats} reports={row.requests} agentCount={Object.keys(row.agents || {}).length} />
@@ -531,26 +511,25 @@ const Turn = memo(function Turn({ row, isLast }: { row: TurnRow; isLast: boolean
  * 直接跳过比对。旧实现靠命令式只改几个节点，React 这边靠这个切分拿到同样的代价。
  */
 const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
-  const running = tools.filter((tool) => tool.status === 'run').length;
-  const needsAttention = tools.some(tool => ['error', 'wait', 'interrupted'].includes(tool.status));
+  const running = tools.filter(tool => tool.status === 'run').length;
+  const attention = tools.filter(tool => ['error', 'wait', 'interrupted'].includes(tool.status));
+  const needsAttention = attention.length > 0;
+  const failed = attention.some(tool => tool.status === 'error');
   const ref = useRef<HTMLDetailsElement>(null);
-  // 只在「是否还在跑」变化时改 open，别把用户手动折叠的状态每帧冲掉
+  // 需要处理时提示一次，流式更新不冲掉用户手动展开的状态。
   useEffect(() => {
-    if (ref.current) {
-      ref.current.open = running > 0 || needsAttention;
-    }
-  }, [running > 0, needsAttention]);
+    if (ref.current && needsAttention) ref.current.open = true;
+  }, [needsAttention]);
   return (
-    <details className="tool-group" ref={ref}>
+    <details className="tool-group conversation-tools" ref={ref}>
       <summary className="tool-group-head">
         <span className="tool-group-chevron" aria-hidden="true" />
-        <span className="tool-group-label">{running > 0 ? `正在执行 ${tools.length} 项` : `${tools.length} 项操作`}</span>
+        <span className="tool-group-label">{running ? running + ' 项正在执行' : tools.length + ' 项操作'}</span>
         <span className="tool-group-count">{toolCounts(tools)}</span>
-        <span className="run-strip" aria-hidden="true">
-          {tools.slice(-40).map((tool, index) => (
-            <span key={tool.callId || index} className={`strip-dot is-${tool.status}`} />
-          ))}
-        </span>
+        {needsAttention ? <span className="conversation-tool-attention">
+          <StatusDot variant={failed ? 'error' : 'warning'} label="需要留意" aria-hidden="true" />
+          {attention.length} 项需留意
+        </span> : running > 0 && <Spinner size="sm" shade="subtle" aria-hidden="true" />}
       </summary>
       <div className="tool-group-list">
         {tools.map((tool) => <ToolRow key={tool.callId} tool={tool} />)}
@@ -587,69 +566,25 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
   const running = tool.status === 'run';
   useSecondTick(running);
   const seconds = running ? elapsedSeconds(tool.startedAt) : 0;
-  const meta = running && seconds >= 3
-    ? `执行中 ${seconds}s`
-    : (tool.meta === '未返回结果' ? '' : (tool.meta || ''));
+  const meta = tool.meta === '未返回结果' ? '' : (tool.meta || '');
   const args = toolArgsText(tool.name, tool.args);
-  const title = tool.name === 'run_command' ? '' : (toolLabel(tool.name));
+  const status = TOOL_STATUS_TITLES[tool.status] || '状态未知';
+  const Header = body ? 'button' : 'div';
   return (
-    <div className={`tool-row${open && body ? ' is-open' : ''}`}>
-      <button type="button" onClick={() => body && setOpen((value) => !value)} aria-expanded={open && Boolean(body)}>
-        <span className={`tool-status is-${tool.status}`} title={TOOL_STATUS_TITLES[tool.status] || ''}>
-          {running ? '…' : tool.status === 'ok' ? <StatusMark /> : tool.status === 'error' ? <StatusMark failed /> : '!'}
+    <div className={'tool-row' + (open && body ? ' is-open' : '')}>
+      <Header className="conversation-tool-line" type={body ? 'button' : undefined}
+        aria-expanded={body ? open : undefined} onClick={body ? () => setOpen(value => !value) : undefined}>
+        {body ? <span className="tool-group-chevron" aria-hidden="true" /> : <span aria-hidden="true" />}
+        <span className="conversation-tool-name">{toolLabel(tool.name)}</span>
+        <span className="tool-args" title={args}>{args}</span>
+        <span className={'conversation-tool-state is-' + tool.status} title={status}>
+          {running ? <Spinner size="sm" shade="subtle" aria-hidden="true" />
+            : tool.status === 'ok' ? <Icon name="check" /> : <Icon name="info" />}
+          {running && seconds >= 3 ? '执行中 ' + seconds + 's' : status.split('：')[0]}
         </span>
-        <span className="tool-icon">{TOOL_ICONS[tool.name] || '·'}</span>
-        {title && <span className="tool-name">{title}</span>}
-        <span className="tool-args">{args}</span>
-        {meta && <span className={`tool-meta${running && seconds >= 10 ? ' is-slow' : ''}`}>{meta}</span>}
-      </button>
-      {body && <div className="tool-body"><pre>{body}</pre></div>}
-    </div>
-  );
-});
-
-/**
- * 进行中的回合：和 Cursor、Codex 一样，命令收成一行，思考原文放在卡片里。
- * 点「正在执行」能展开每条命令；这一轮结束后改回折叠摘要。
- */
-const LiveWork = memo(function LiveWork({ tools, thinking }: { tools: ToolView[]; thinking: Thinking | null }) {
-  const runningTools = tools.filter((tool) => tool.status === 'run');
-  const live = Boolean(thinking?.live);
-  const cardRef = useRef<HTMLDivElement>(null);
-  useSecondTick(live || runningTools.length > 0);
-  useEffect(() => {
-    const card = cardRef.current;
-    if (card && live) {
-      card.scrollTop = card.scrollHeight;
-    }
-  }, [thinking?.text, live]);
-  const commandsOnly = runningTools.length > 0 && runningTools.every((tool) => tool.name === 'run_command');
-  const status = runningTools.length > 0
-    ? (commandsOnly ? `正在执行 ${runningTools.length} 条命令` : `正在执行 ${runningTools.length} 项`)
-    : '';
-  return (
-    <div className="live-work">
-      <div className="live-work-rail" aria-hidden="true" />
-      <div className="live-work-main">
-        {tools.length > 0 && (
-          <details className="live-work-tools">
-            <summary>{status || `${tools.length} 项操作`}</summary>
-            <div className="live-work-tool-list">
-              {tools.map((tool) => (
-                <div key={tool.callId} className={`live-work-tool is-${tool.status}`}>
-                  <span className={`live-work-dot is-${tool.status}`} />
-                  <span>{toolLabel(tool.name)}</span>
-                  <span className="live-work-tool-args">{toolArgsText(tool.name, tool.args)}</span>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-        {live && <p className="live-work-label">思考中</p>}
-        {live && thinking?.text && (
-          <div className="live-work-card" ref={cardRef}>{thinking.text}</div>
-        )}
-      </div>
+        {meta && !running && <span className="tool-meta" title={meta}>{meta}</span>}
+      </Header>
+      {open && body && <div className="tool-body"><pre tabIndex={0}>{body}</pre></div>}
     </div>
   );
 });
@@ -658,25 +593,26 @@ const LiveWork = memo(function LiveWork({ tools, thinking }: { tools: ToolView[]
 const ThinkingBlock = memo(function ThinkingBlock({ thinking }: { thinking: Thinking }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
   const live = Boolean(thinking.live);
   useSecondTick(live);
-  useEffect(() => {
-    if (ref.current) {
-      ref.current.open = live;
-    }
+  useLayoutEffect(() => {
+    if (ref.current) ref.current.open = live;
+    if (live) following.current = true;
   }, [live]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const body = bodyRef.current;
-    if (body && live) {
-      body.scrollTop = body.scrollHeight;
-    }
+    if (body && live && following.current) body.scrollTop = body.scrollHeight;
   }, [thinking.text, live]);
   const seconds = elapsedSeconds(thinking.startedAt, thinking.finishedAt);
   const action = thinking.action ? ` · ${thinking.action}` : '';
   return (
     <details className={`think-block${live ? ' is-live' : ''}`} ref={ref}>
       <summary>{live ? `思考中 ${seconds}s${action}` : `已思考 ${seconds}s`}</summary>
-      <div className="think-body" ref={bodyRef}>{thinking.text}</div>
+      <div className="think-body" ref={bodyRef} tabIndex={0} onScroll={event => {
+        const body = event.currentTarget;
+        following.current = body.scrollHeight - body.scrollTop - body.clientHeight < 12;
+      }}>{thinking.text}</div>
     </details>
   );
 });
@@ -721,7 +657,8 @@ const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
     <details className={`tool-group agent-card is-${agent.status || 'stopped'}`}>
       <summary className="tool-group-head agent-head">
         <span className="tool-group-chevron" aria-hidden="true" />
-        <span className="agent-dot" aria-hidden="true" />
+        <StatusDot variant={agent.status === 'failed' ? 'error' : agent.status === 'running' ? 'accent' : 'neutral'}
+          label={agentStatusLabel(agent.status)} aria-hidden="true" />
         <span className="tool-group-label agent-name" title={agent.task}>
           {agent.name || agentTitle(agent.task) || agent.id}
         </span>
@@ -733,12 +670,11 @@ const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
         <div className="tool-group-list agent-tools">
           {(agent.tools || []).map((tool, index) => (
             <div key={index} className="tool-row">
-              <button type="button">
-                <span className={`tool-status is-${tool.status}`}>{tool.status === 'run' ? '…' : tool.status === 'ok' ? <StatusMark /> : <StatusMark failed />}</span>
-                <span className="tool-icon">{TOOL_ICONS[tool.name] || '·'}</span>
-                <span className="tool-name">{tool.name}</span>
-                <span className="tool-args">{tool.args}</span>
-              </button>
+              <div className="conversation-agent-tool">
+                <span className="conversation-tool-name">{toolLabel(tool.name)}</span>
+                <span className="tool-args" title={tool.args}>{tool.args}</span>
+                <span className={'conversation-tool-state is-' + tool.status}>{(TOOL_STATUS_TITLES[tool.status] || '状态未知').split('：')[0]}</span>
+              </div>
             </div>
           ))}
         </div>
@@ -758,9 +694,9 @@ const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
  * 复制按钮：图标点一下变对勾、1.4 秒后复原（旧版 copyControl 的手感）。
  * 剪贴板写入走 lib/clipboard 的双通道，内嵌 webview 里也能复制上。
  */
-const CopyControl = memo(function CopyControl({ text, label = '复制', tip = '复制' }: { text: string; label?: string; tip?: string }) {
+const CopyControl = memo(function CopyControl({ text, label }: { text: string; label: string }) {
   const [done, setDone] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   async function copy() {
     const ok = await writeClipboard(text);
@@ -772,27 +708,8 @@ const CopyControl = memo(function CopyControl({ text, label = '复制', tip = '�
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setDone(false), 1400);
   }
-  return (
-    <button
-      type="button"
-      className={`copy-control icon-action${done ? ' is-done' : ''}`}
-      aria-label={label}
-      data-tip={done ? '已复制' : tip}
-      title={label}
-      onClick={copy}
-    >
-      {done ? (
-        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M3.4 8.6l3.1 3.1 6.1-7" />
-        </svg>
-      ) : (
-        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect x="5.6" y="5.6" width="7.9" height="7.9" rx="2" />
-          <path d="M10.4 3.4A1.4 1.4 0 0 0 9 2H4.2A1.7 1.7 0 0 0 2.5 3.7V9c0 .8.6 1.4 1.4 1.4" />
-        </svg>
-      )}
-    </button>
-  );
+  return <IconButton className={'copy-control message-action' + (done ? ' is-done' : '')}
+    label={done ? '已复制回复' : label} size="sm" variant="ghost" icon={<Icon name={done ? 'check' : 'copy'} />} onClick={copy} />;
 });
 
 const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stats: RunUsage | null; reports?: RequestReport[]; agentCount: number }) {
@@ -812,7 +729,7 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
   return (
     <details className="turn-stats-detail"><summary>{elapsed != null ? `${elapsed}s · ` : ''}用量详情</summary><div className="turn-stats">
       {elapsed != null && <span className="turn-stat"><span>耗时</span><b>{elapsed}s</b></span>}
-      <span className="turn-stat"><span>模型请求</span><b>{stats.modelRequests ?? '—'} 次</b></span>
+      <span className="turn-stat"><span>模型请求</span><b>{stats.modelRequests == null ? '—' : stats.modelRequests + ' 次'}</b></span>
       {agentCount > 0 && <span className="turn-stat"><span>子智能体</span><b>{agentCount} 个</b></span>}
       <span className="turn-stat" title={String(stats.inputTokens ?? '')}><span>输入</span><b>{mark}{formatCount(stats.inputTokens)}</b></span>
       <span className="turn-stat" title={String(stats.outputTokens ?? '')}><span>输出</span><b>{mark}{formatCount(stats.outputTokens)}</b></span>
@@ -920,7 +837,7 @@ function ResultCard({ row, duplicate }: { row: ResultRow; duplicate: boolean }) 
       )}
       <div className="turn-actions">
         {!row.continued && !!(row.changedFiles || []).length && (
-          <button type="button" className="btn" onClick={() => rollbackRun(row.runIds?.[0])}>回滚本次改动</button>
+          <Button size="sm" variant="ghost" label="回滚本次改动" onClick={() => rollbackRun(row.runIds?.[0])} />
         )}
       </div>
     </article>
@@ -975,18 +892,20 @@ function SandboxCard({ row }: { row: SandboxRow }) {
           {(report.dependencies || []).length > 0 && ` · 依赖 ${report.dependencies.length} 个`}
         </p>
       )}
-      {loadError && <p role="alert">{loadError} <button type="button" className="btn btn-sm" onClick={() => setRefresh((value) => value + 1)}>重新加载</button></p>}
+      {loadError && <p role="alert">{loadError} <Button size="sm" variant="ghost" label="重新加载" onClick={() => setRefresh(value => value + 1)} /></p>}
       {report?.recovery && <p role="status" className="sandbox-verify is-warn">
         上次变更写入中断，需先恢复。恢复遇到外部修改时会停止并保留备份。
         {report.recovery.sessionId === sessionId && report.recovery.sandboxId === row.sandboxId
-          ? <button type="button" className="btn btn-sm" disabled={Boolean(busy)} onClick={() => decide('recover')}>恢复写入状态</button>
+          ? <Button size="sm" label="恢复写入状态" isLoading={busy === 'recover'} isDisabled={Boolean(busy)} onClick={() => decide('recover')} />
           : `请先处理 ${report.recovery.sandboxId} 的恢复。`}
       </p>}
       {row.sandboxId && (
         <div className="sandbox-actions">
           <span className="sandbox-label mono">{row.sandboxId}</span>
-          <button type="button" className="btn btn-primary btn-sm" disabled={Boolean(busy) || Boolean(decision) || !report?.reviewHash || Boolean(report?.recovery)} onClick={() => decide('accept')}>{busy === 'accept' ? '校验并写入中…' : '接受变更'}</button>
-          <button type="button" className="btn btn-sm" disabled={Boolean(busy) || Boolean(decision) || !report?.reviewHash || Boolean(report?.recovery)} onClick={() => decide('reject')}>拒绝</button>
+          <Button size="sm" label={busy === 'accept' ? '校验并写入中…' : '接受变更'} isLoading={busy === 'accept'}
+            isDisabled={Boolean(busy) || Boolean(decision) || !report?.reviewHash || Boolean(report?.recovery)} onClick={() => decide('accept')} />
+          <Button size="sm" variant="ghost" label="拒绝"
+            isDisabled={Boolean(busy) || Boolean(decision) || !report?.reviewHash || Boolean(report?.recovery)} onClick={() => decide('reject')} />
           {decision && <span className="sandbox-decision">{decision}</span>}
         </div>
       )}
@@ -1003,14 +922,12 @@ function ArbitrationCard({ row }: { row: ArbitrationRow }) {
       {!row.resolved && (
         <div className="arb-options">
           {(row.options || []).map((option) => (
-            <button
+            <Button
               key={typeof option === 'string' ? option : option.id}
-              type="button"
-              className="arb-option"
+              label={typeof option === 'string' ? option : option.label}
+              size="sm"
               onClick={() => resolve(row.arbitrationId, typeof option === 'string' ? option : option.id)}
-            >
-              {typeof option === 'string' ? option : option.label}
-            </button>
+            />
           ))}
         </div>
       )}
@@ -1019,7 +936,3 @@ function ArbitrationCard({ row }: { row: ArbitrationRow }) {
 }
 
 export { formatTime };
-
-function StatusMark({failed = false}: { failed?: boolean }) {
-  return <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d={failed ? 'M4 4l8 8M12 4l-8 8' : 'M3 8l3 3 7-7'} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>;
-}

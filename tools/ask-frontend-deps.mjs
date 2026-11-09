@@ -1,29 +1,27 @@
 #!/usr/bin/env node
 /**
- * 启动前询问是否重新拉取前端依赖。
+ * 启动前检查锁定的前端依赖，依赖已就绪时保留手动更新入口。
  *
  * 挂在 Maven 的 validate 阶段（exec-maven-plugin + inheritIo），所以无论是
  * start.cmd / start.sh 还是 IDE 里直接跑 spring-boot:run，都会先经过这里。
  *
- * 三种输入形态：
- *   - TTY（命令行窗口）：按 1 / 2 立即生效，不用回车；
- *   - 非 TTY 但可写（IDE 运行控制台）：打印菜单后最多等 5 秒，输入 2 回车即安装；
- *   - 完全不可交互（CI、重定向、EOF）：立即跳过，绝不阻塞构建。
- *
- * 依赖目录缺失时不提问，直接装——否则后面 npm run build 必然失败。
+ * 必需依赖缺失或版本过旧时直接执行 npm ci，CI 和 IDE 也会执行；
+ * 不可交互的构建只跳过可选询问。安装失败则停止构建，避免后续出现一连串编译错误。
  *
  * 去重：问过之后写 .pilot/frontend-deps-ask.stamp，一分钟内不再问。
  * 这条标记与 Java 侧的 PilotServerApplication 启动检查共用——mvn spring-boot:run
  * 会先走 validate（这里）再拉起 JVM，没有它同一次启动会被问两遍。
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FRONTEND_DIR = path.join(ROOT, 'pilot-web', 'frontend');
+// 源码启动器会传入已验证的 npm CLI；直接从 Maven 运行时使用 PATH。
+const npmCli = process.argv[2];
 const WAIT_MS = 5000;
 const STAMP = path.join(ROOT, '.pilot', 'frontend-deps-ask.stamp');
 const STAMP_FRESH_MS = 60_000;
@@ -38,20 +36,65 @@ const reset = `${esc}[0m`;
 const NO = 1;
 const YES = 2;
 
-function install() {
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  process.stdout.write(`${ok}正在更新前端依赖…${reset}\n\n`);
-  const result = spawnSync(npm, ['install'], {
+function readJson(file) {
+  return JSON.parse(readFileSync(path.join(FRONTEND_DIR, file), 'utf8'));
+}
+
+function dependencyIssue() {
+  const manifest = readJson('package.json');
+  const { packages } = readJson('package-lock.json');
+  const root = packages?.[''];
+  if (!root) throw new Error('前端 package-lock.json 缺少依赖清单，请恢复仓库中的锁文件。');
+
+  for (const group of ['dependencies', 'devDependencies']) {
+    const declared = Object.entries(manifest[group] ?? {});
+    const locked = root[group] ?? {};
+    if (declared.length !== Object.keys(locked).length || declared.some(([name, range]) =>
+      locked[name] !== range || !packages[`node_modules/${name}`]?.version)) {
+      throw new Error('前端 package.json 与 package-lock.json 不一致，请在 pilot-web/frontend 更新锁文件后重试。');
+    }
+  }
+
+  for (const [location, pinned] of Object.entries(packages)) {
+    // Rollup、esbuild 等为各系统和架构分发不同的可选依赖。
+    if (!location || pinned.optional) continue;
+    if (!location.startsWith('node_modules/') || location.includes('\\') || location.split('/').includes('..') || !pinned.version) {
+      throw new Error(`前端锁文件包含无效的依赖条目：${location}`);
+    }
+    let installed;
+    try {
+      installed = readJson(`${location}/package.json`);
+    } catch (error) {
+      if (error.code === 'ENOENT' || error.code === 'ENOTDIR' || error instanceof SyntaxError) {
+        return `${location} 缺失或安装不完整`;
+      }
+      throw error;
+    }
+    if (installed?.version !== pinned.version) {
+      return `${location} 当前版本为 ${installed?.version ?? '未知'}，锁定版本为 ${pinned.version}`;
+    }
+  }
+  return null;
+}
+
+function install(mode) {
+  const useWindowsShim = !npmCli && process.platform === 'win32';
+  const npm = npmCli ? process.execPath : useWindowsShim ? 'npm.cmd' : 'npm';
+  const args = [mode, '--include=dev', '--prefer-offline', '--no-audit', '--no-fund'];
+  if (process.env.PILOT_OFFLINE?.toLowerCase() === 'true') args.push('--offline');
+  const result = spawnSync(npm, npmCli ? [npmCli, ...args] : args, {
     cwd: FRONTEND_DIR,
     stdio: 'inherit',
-    shell: process.platform === 'win32'
+    shell: useWindowsShim,
+    windowsHide: true
   });
-  if (result.error || result.status !== 0) {
-    process.stdout.write(`\n${warn}依赖更新失败，继续用现有依赖启动。${reset}\n\n`);
-    return false;
+  if (result.error) throw new Error(`无法执行 npm ${mode}：${result.error.message}`);
+  if (result.status !== 0) {
+    throw new Error(`npm ${mode} 未完成（${result.signal || `退出码 ${result.status}`}）。`);
   }
-  process.stdout.write(`\n${ok}依赖已更新${reset}\n\n`);
-  return true;
+  const remaining = dependencyIssue();
+  if (remaining) throw new Error(`npm ${mode} 完成后依赖仍未就绪：${remaining}`);
+  process.stdout.write(`\n${ok}前端依赖已就绪${reset}\n\n`);
 }
 
 /** 记下「刚刚问过」，与 Java 侧共用同一条标记。 */
@@ -157,14 +200,14 @@ function readPipedChoice(waitMs) {
 }
 
 async function main() {
-  if (!existsSync(path.join(FRONTEND_DIR, 'package.json'))) {
-    return;
-  }
-
-  // 依赖缺失：没得选
-  if (!existsSync(path.join(FRONTEND_DIR, 'node_modules'))) {
-    process.stdout.write(`\n  ${dim}Pilot 启动检查：前端依赖缺失，先安装${reset}\n\n`);
-    install();
+  const issue = dependencyIssue();
+  if (issue) {
+    process.stdout.write(`\nPilot 启动检查：${issue}，正在按锁文件安装前端依赖（npm ci）…\n\n`);
+    try {
+      install('ci');
+    } catch (error) {
+      throw new Error(`${error.message}\n请在 ${FRONTEND_DIR} 成功运行 npm ci --include=dev 后重试。`);
+    }
     stampAsked();
     return;
   }
@@ -193,12 +236,19 @@ async function main() {
     return;
   }
 
-  process.stdout.write('\n');
-  install();
+  process.stdout.write(`\n${ok}正在更新前端依赖…${reset}\n\n`);
+  try {
+    install('install');
+  } catch (error) {
+    const remaining = dependencyIssue();
+    if (remaining) throw new Error(`${error.message} 前端依赖仍未就绪：${remaining}`);
+    process.stderr.write(`\n${warn}${error.message} 继续使用已就绪的前端依赖。${reset}\n\n`);
+  }
 }
 
 try {
   await main();
-} finally {
-  process.exit(0);
+} catch (error) {
+  process.stderr.write(`Pilot 启动检查失败：${error.message}\n`);
+  process.exitCode = 1;
 }

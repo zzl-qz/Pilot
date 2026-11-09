@@ -65,7 +65,7 @@ function SessionProducts({ session }: { session: string }) {
       : draft ? <DraftDetail key={draft.id} session={session} draft={draft} onChange={updated => { setDrafts(items => items.map(item => item.id === updated.id ? updated : item)); }} onRefresh={refresh} />
         : <>
           <h3>交付文件</h3>
-          {!products.length && !loading && <p className="work-empty">还没有交付文件。可以让 Pilot 调研一个问题，或把资料整理成报告、表格，完成后会出现在这里。</p>}
+          {!products.length && !loading && !error && <p className="work-empty">还没有交付文件。可以让 Pilot 调研一个问题，或把资料整理成报告、表格，完成后会出现在这里。</p>}
           <ul className="work-list">{products.map(item => <li key={item.id}><button data-work-key={`product:${item.id}`} onClick={() => setSelected({ kind: 'product', id: item.id })}>
             <strong>{item.title}</strong><span>{item.summary || item.filename}</span><small>{item.filename} · {Math.max(1, Math.round(item.bytes / 1024))} KB · {dateText(item.createdAt)}</small>
           </button></li>)}</ul>
@@ -74,7 +74,7 @@ function SessionProducts({ session }: { session: string }) {
           <ul className="work-list">{drafts.map(item => <li key={item.id}><button data-work-key={`draft:${item.id}`} onClick={() => setSelected({ kind: 'draft', id: item.id })}>
             <strong>{item.name}<span className="work-state">{STATUS[item.status] || item.status}</span></strong><span>{item.description}</span>
           </button></li>)}</ul>
-          {!drafts.length && !loading && <p className="work-empty">暂无技能草稿。任务完成后，可以让 Pilot 将验证过的方法整理为技能草稿。</p>}
+          {!drafts.length && !loading && !error && <p className="work-empty">暂无技能草稿。任务完成后，可以让 Pilot 将验证过的方法整理为技能草稿。</p>}
         </>}
   </section>;
 }
@@ -127,7 +127,6 @@ function DraftDetail({ session, draft, onChange, onRefresh }: { session: string;
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const decide = async (action: string) => {
-    if (action === 'revert' && !window.confirm('撤回这个技能版本？已有技能将恢复为接受前的内容；之后另有修改时会停止操作。')) return;
     setBusy(true); setError('');
     try { const updated = await api.decideSkill(session, draft.id, action, draft.version); if (!updated) throw new Error('服务端返回空审核结果，请刷新后重试'); if (alive.current) onChange(updated); }
     catch (e) { if (alive.current) { setError(errorInfo(e).message || '操作失败'); onRefresh(); } }
@@ -142,7 +141,12 @@ function DraftDetail({ session, draft, onChange, onRefresh }: { session: string;
     <div className="work-actions">
       {draft.status === 'PENDING' && <button className="btn btn-primary" disabled={busy} onClick={() => decide('approve')}>接受技能</button>}
       {['PENDING', 'CONFLICT'].includes(draft.status) && <button className="btn" disabled={busy} onClick={() => decide('reject')}>拒绝草稿</button>}
-      {draft.status === 'APPROVED' && <button className="btn" disabled={busy} onClick={() => decide('revert')}>撤回此版本</button>}
+      {draft.status === 'APPROVED' && <button className="btn" disabled={busy} onClick={() => useStore.getState().askConfirm({
+        title: '撤回技能版本？',
+        message: '已有技能将恢复为接受前的内容。如果之后另有修改，撤回会停止。',
+        confirmText: '确认撤回',
+        onConfirm: () => decide('revert')
+      })}>撤回此版本</button>}
       {busy && <span role="status">正在保存审核结果…</span>}
     </div>
   </article>;

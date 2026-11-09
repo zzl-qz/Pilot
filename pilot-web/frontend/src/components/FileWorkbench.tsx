@@ -22,6 +22,8 @@ export default function FileWorkbench() {
   const [preview, setPreview] = useState<WorkbenchPreview | null>(null);
   const [page, setPage] = useState(1);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageError, setImageError] = useState('');
+  const [imageAttempt, retryImage] = useState(0);
   const [annotations, setAnnotations] = useState<WorkbenchAnnotation[]>([]);
   const [versions, setVersions] = useState<WorkbenchVersion[]>([]);
   const [text, setText] = useState('');
@@ -30,10 +32,13 @@ export default function FileWorkbench() {
   const [form, setForm] = useState<PdfForm>(emptyPdfForm);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [listError, setListError] = useState('');
   const [notice, setNotice] = useState('');
   const [showText, setShowText] = useState(false);
   const hashes = useRef<Record<string, string>>({});
   const alive = useRef(true);
+  const detailRequest = useRef(0);
+  const listRequest = useRef(0);
 
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const message = (failure: unknown) => errorInfo(failure).message || '操作失败';
@@ -42,66 +47,74 @@ export default function FileWorkbench() {
 
   const refresh = useCallback(async (preferId?: string) => {
     if (!session) { setFiles([]); return; }
+    const request = ++listRequest.current;
+    const isCurrent = () => alive.current && listRequest.current === request && useStore.getState().sessionId === session;
     try {
-      const next = (await api.workbenchFiles(session)) || [];
-      if (!alive.current) return;
-      const current = files.find(file => file.id === activeId);
-      const replacement = current ? next.find(file => file.id === current.id) : null;
-      const changed = !!(current && replacement && hashes.current[current.id]
-        && replacement.sha256 !== hashes.current[current.id]);
+      const next = await api.workbenchFiles(session);
+      if (!isCurrent()) return;
+      if (!Array.isArray(next)) throw new Error('服务端未返回文件列表');
+      setListError('');
+      const changed = next.some(file => hashes.current[file.id] && hashes.current[file.id] !== file.sha256);
       for (const file of next) hashes.current[file.id] = file.sha256;
       if (changed) setNotice('检测到文件在外部被修改，已按最新内容刷新预览');
       setFiles(next);
-      const wanted = preferId || focusId || activeId;
-      const found = wanted ? next.find(file => file.id === wanted) : null;
-      const selected = found || next[0] || null;
-      setActiveId(selected ? selected.id : null);
-    } catch (failure) { if (alive.current) setError(message(failure)); }
-  }, [session, activeId, files, focusId]);
+      setActiveId(current => (next.find(file => file.id === (preferId || current)) || next[0])?.id || null);
+    } catch (failure) { if (isCurrent()) setListError(message(failure)); }
+  }, [session]);
 
   useEffect(() => {
     if (!session) return;
     void refresh(focusId || undefined);
     const timer = window.setInterval(() => void refresh(), 6000);
     return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, focusId]);
+  }, [session, focusId, refresh]);
 
   const loadDetail = useCallback(async (id: string, force = false) => {
     if (!session) return;
+    const request = ++detailRequest.current;
+    const isCurrent = () => alive.current && detailRequest.current === request && useStore.getState().sessionId === session;
     try {
       const [loadedPreview, loadedAnnotations, loadedVersions, loadedText] = await Promise.all([
         api.workbenchPreview(session, id), api.workbenchAnnotations(session, id),
         api.workbenchVersions(session, id), api.workbenchText(session, id)
       ]);
-      if (!alive.current) return;
+      if (!isCurrent()) return;
       setPreview(loadedPreview);
       setAnnotations(loadedAnnotations || []);
       setVersions(loadedVersions || []);
       setText(loadedText?.text || '');
       setPage(previous => force || !loadedPreview ? 1 : Math.min(previous, Math.max(1, loadedPreview.pages)));
-    } catch (failure) { if (alive.current) setError(message(failure)); }
+    } catch (failure) { if (isCurrent()) setError(message(failure)); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
-  useEffect(() => { if (session && activeId) void loadDetail(activeId, true); }, [session, activeId, loadDetail]);
+  useEffect(() => {
+    setPreview(null);
+    setImageError('');
+    setAnnotations([]);
+    setVersions([]);
+    setText('');
+    if (session && activeId) void loadDetail(activeId, true);
+    return () => { detailRequest.current++; };
+  }, [session, activeId, active?.sha256, loadDetail]);
 
   useEffect(() => {
-    if (!session || !activeId || !preview) return;
+    if (!session || !activeId || preview?.fileId !== activeId || preview.pages < 1) return;
+    setImageError('');
     let objectUrl: string | null = null;
     let cancelled = false;
     void api.workbenchPreviewImage(session, activeId, page).then(url => {
       if (cancelled) { URL.revokeObjectURL(url); return; }
       objectUrl = url;
       setImageUrl(url);
-    }).catch(failure => { if (!cancelled) setError(message(failure)); });
+    }).catch(failure => { if (!cancelled) setImageError(message(failure)); });
     return () => {
       cancelled = true;
-      setImageUrl(previous => { if (previous) URL.revokeObjectURL(previous); return null; });
+      setImageUrl(null);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, activeId, page, preview?.fileId, preview?.notice]);
+  }, [session, activeId, page, preview?.fileId, preview?.notice, imageAttempt]);
 
   const run = async (label: string, action: () => Promise<void>) => {
     setBusy(label); setError('');
@@ -123,7 +136,8 @@ export default function FileWorkbench() {
     if (!session || !active) return;
     const result = await api.workbenchOpen(session, active.id);
     if (!result) { setError('打开请求没有返回结果，请点「下载文件」后用本机应用打开'); return; }
-    setNotice(result.ok ? result.reason : `${result.reason} ${result.alternative}`.trim());
+    if (result.ok) setNotice(result.reason);
+    else setError(`${result.reason} ${result.alternative}`.trim());
   });
 
   const publish = () => void run('发布', async () => {
@@ -139,13 +153,20 @@ export default function FileWorkbench() {
     setNotice('已保存一个快照，之后可对比外部改动或回退');
   });
 
-  const revert = (version: number) => void run('回退', async () => {
+  const revert = (version: number) => {
     if (!session || !active) return;
-    await api.workbenchRevert(session, active.id, version);
-    await refresh(active.id);
-    await loadDetail(active.id, true);
-    setNotice(`已回退到 v${version}，回退前的状态另存为新快照`);
-  });
+    useStore.getState().askConfirm({
+      title: '回退文件版本？',
+      message: `将「${active.filename}」回退到 v${version}。回退前的状态会保存为新快照。`,
+      confirmText: '确认回退',
+      onConfirm: () => run('回退', async () => {
+        await api.workbenchRevert(session, active.id, version);
+        await refresh(active.id);
+        await loadDetail(active.id, true);
+        setNotice(`已回退到 v${version}，回退前的状态另存为新快照`);
+      })
+    });
+  };
 
   const annotate = () => void run('批注', async () => {
     if (!session || !active) return;
@@ -175,10 +196,15 @@ export default function FileWorkbench() {
     setNotice(`已另存为 ${created.filename}，原文件未被覆盖`);
   });
 
-  const select = (id: string) => { setActiveId(id); setPage(1); setError(''); setShowText(false); };
+  const select = (id: string) => {
+    if (id === activeId) return;
+    setActiveId(id); setPage(1); setError(''); setNotice(''); setShowText(false);
+    setAnnotationText(''); setAnnotationAnchor(''); setForm(emptyPdfForm());
+  };
 
-  return <div className="fw">
+  return <section className="fw" aria-label="文件工作台">
     {error && <div role="alert" className="fw-alert">{error}</div>}
+    {listError && <div role="alert" className="fw-alert">{listError}</div>}
     {notice && <div role="status" className="fw-notice">{notice}</div>}
     {!session && <p role="status">请先打开一个会话。</p>}
     <div className="fw-layout">
@@ -190,7 +216,7 @@ export default function FileWorkbench() {
             {file.changedExternally && <span className="fw-file-flag">外部已修改</span>}
           </button>
         </li>)}
-        {!files.length && <li className="fw-empty">当前工作区还没有 Office 文件。让模型生成一份，或把文件放进工作区就会自动出现在这里。</li>}
+        {!files.length && !listError && <li className="fw-empty">当前工作区还没有 Office 文件。让模型生成一份，或把文件放进工作区就会自动出现在这里。</li>}
       </ul>
       {active && <section className="fw-detail" aria-label={active.filename}>
         <h3>{active.filename}</h3>
@@ -212,8 +238,10 @@ export default function FileWorkbench() {
               <button type="button" className="btn" disabled={page >= preview.pages} onClick={() => setPage(page + 1)}>下一页</button>
             </div>
           </div>
-          {imageUrl ? <img className="fw-preview-image" src={imageUrl} alt={`${active.filename} 第 ${page} 页预览`} />
-            : <p role="status">正在生成预览…</p>}
+          {imageError ? <p role="alert" className="fw-alert">{imageError}{' '}
+            <button type="button" className="btn" onClick={() => retryImage(value => value + 1)}>重试预览</button>
+          </p> : imageUrl ? <img className="fw-preview-image" src={imageUrl} alt={`${active.filename} 第 ${page} 页预览`} />
+            : <p role="status">{preview.pages ? '正在生成预览…' : '此文件没有可预览的页面。'}</p>}
           <p className="fw-hint">{preview.notice}</p>
         </div>}
 
@@ -268,5 +296,5 @@ export default function FileWorkbench() {
         </div>}
       </section>}
     </div>
-  </div>;
+  </section>;
 }

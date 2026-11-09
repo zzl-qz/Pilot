@@ -57,6 +57,7 @@ export async function checkSideChat(page, name, temp) {
   await page.evaluate(() => { api.deleteSession = async () => { throw Error('offline'); }; });
   await panel.getByRole('button', { name: '关闭并丢弃这条侧边对话', exact: true }).click();
   assert.equal(await page.evaluate(() => store.getState().sideChats.items.length), 2, '删除失败保留标签');
+  await page.getByText(/侧边对话未能关闭，已保留，请重试/).waitFor();
   await page.evaluate(() => { api.deleteSession = async () => {}; });
   await panel.getByRole('button', { name: '关闭并丢弃这条侧边对话', exact: true }).click();
   await page.waitForFunction(() => store.getState().sideChats.items.length === 1);

@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Banner } from '@astryxdesign/core/Banner';
+import { Button } from '@astryxdesign/core/Button';
+import { IconButton } from '@astryxdesign/core/IconButton';
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type RenderTask } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import './pdf-attachment.css';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -9,26 +13,28 @@ export default function PdfAttachmentPreview({ data, name }: { data: ArrayBuffer
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null);
   const [page, setPage] = useState(1);
-  const [pageCount, setPageCount] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [width, setWidth] = useState(0);
-  const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [renderError, setRenderError] = useState('');
+  const [rendering, setRendering] = useState(true);
+  const [attempt, setAttempt] = useState(0);
+  const pageCount = document?.numPages || 0;
 
   useEffect(() => {
     let active = true;
     const task = getDocument({ data: new Uint8Array(data.slice(0)) });
     setDocument(null);
     setPage(1);
-    setError('');
+    setLoadError(''); setRenderError(''); setRendering(true);
     void task.promise.then(pdf => {
       if (!active) return;
       setDocument(pdf);
-      setPageCount(pdf.numPages);
     }).catch(() => {
-      if (active) setError('PDF 无法读取或文件已损坏，请下载后重试。');
+      if (active) setLoadError('PDF 无法读取或文件已损坏，请下载后用 PDF 应用打开。');
     });
-    return () => { active = false; void task.destroy(); };
-  }, [data]);
+    return () => { active = false; void task.destroy().catch(() => {}); };
+  }, [data, attempt]);
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -48,6 +54,7 @@ export default function PdfAttachmentPreview({ data, name }: { data: ArrayBuffer
     if (!document || !canvasRef.current || !width) return;
     let cancelled = false;
     let renderTask: RenderTask | undefined;
+    setRenderError(''); setRendering(true);
     void document.getPage(page).then(pdfPage => {
       if (cancelled || !canvasRef.current) return;
       const base = pdfPage.getViewport({ scale: 1 });
@@ -68,27 +75,38 @@ export default function PdfAttachmentPreview({ data, name }: { data: ArrayBuffer
         transform: outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0],
       });
       return renderTask.promise;
+    }).then(() => {
+      if (!cancelled) setRendering(false);
     }).catch(reason => {
       if (!cancelled && (reason as { name?: string })?.name !== 'RenderingCancelledException') {
-        setError('PDF 页面渲染失败，请下载后重试。');
+        setRenderError('PDF 页面渲染失败，请重试或下载。');
+        setRendering(false);
       }
     });
     return () => { cancelled = true; renderTask?.cancel(); };
   }, [document, page, width, zoom]);
 
+  const error = loadError || renderError;
   return <section className="pdf-attachment-viewer" aria-label={`${name} PDF 阅读器`}>
-    <div className="pdf-attachment-toolbar" role="toolbar" aria-label="PDF 阅读工具">
-      <button className="btn" type="button" aria-label="上一页" title="上一页" disabled={page <= 1} onClick={() => setPage(value => value - 1)}>上一页</button>
-      <span aria-live="polite">{pageCount ? `${page} / ${pageCount}` : '读取中'}</span>
-      <button className="btn" type="button" aria-label="下一页" title="下一页" disabled={!pageCount || page >= pageCount} onClick={() => setPage(value => value + 1)}>下一页</button>
-      <span className="pdf-attachment-divider" aria-hidden="true" />
-      <button className="btn" type="button" aria-label="缩小" title="缩小" disabled={zoom <= 0.5} onClick={() => setZoom(value => Math.max(0.5, Math.round((value - 0.1) * 10) / 10))}>−</button>
-      <span>{Math.round(zoom * 100)}%</span>
-      <button className="btn" type="button" aria-label="放大" title="放大" disabled={zoom >= 2} onClick={() => setZoom(value => Math.min(2, Math.round((value + 0.1) * 10) / 10))}>+</button>
+    <div className="pdf-attachment-toolbar" role="group" aria-label="PDF 阅读工具">
+      <div className="pdf-attachment-control">
+        <Button label="上一页" variant="ghost" size="sm" isDisabled={page <= 1 || !pageCount} onClick={() => setPage(value => value - 1)} />
+        <span aria-live="polite">{loadError ? '读取失败' : pageCount ? `${page} / ${pageCount}` : '读取中'}</span>
+        <Button label="下一页" variant="ghost" size="sm" isDisabled={!pageCount || page >= pageCount} onClick={() => setPage(value => value + 1)} />
+      </div>
+      <div className="pdf-attachment-control">
+        <IconButton label="缩小" variant="ghost" size="sm" icon={<span aria-hidden="true">−</span>}
+          isDisabled={!pageCount || zoom <= 0.5} onClick={() => setZoom(value => Math.max(0.5, Math.round((value - 0.1) * 10) / 10))} />
+        <span>{Math.round(zoom * 100)}%</span>
+        <IconButton label="放大" variant="ghost" size="sm" icon={<span aria-hidden="true">+</span>}
+          isDisabled={!pageCount || zoom >= 2} onClick={() => setZoom(value => Math.min(2, Math.round((value + 0.1) * 10) / 10))} />
+      </div>
     </div>
-    {error ? <p className="pdf-attachment-error" role="alert">{error}</p> : <div className="pdf-attachment-scroll" ref={scrollRef}>
-      {!document && <p role="status">正在解析 PDF…</p>}
-      <canvas ref={canvasRef} aria-label={`${name} 第 ${page} 页`} />
-    </div>}
+    <div className="pdf-attachment-scroll" ref={scrollRef} tabIndex={0} aria-label="PDF 页面">
+      {error ? <Banner status="error" role="alert" title={error}
+        endContent={<Button label="重试 PDF 预览" variant="ghost" onClick={() => setAttempt(value => value + 1)} />} />
+        : rendering && <p role="status">{document ? '正在渲染页面…' : '正在解析 PDF…'}</p>}
+      <canvas ref={canvasRef} aria-label={`${name} 第 ${page} 页`} hidden={!!error || rendering} />
+    </div>
   </section>;
 }

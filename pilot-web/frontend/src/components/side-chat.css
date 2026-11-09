@@ -1,0 +1,4 @@
+.side-quote-actions { max-width: calc(100vw - 16px); }
+@media (max-width: 600px), (pointer: coarse) {
+  .side-quote-actions button { min-height: 44px; }
+}

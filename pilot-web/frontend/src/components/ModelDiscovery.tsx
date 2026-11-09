@@ -1,7 +1,9 @@
 import { errorInfo } from '../lib/errors.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { TextInput } from '@astryxdesign/core/TextInput';
 import { useStore } from '../store.js';
 import { buildModelProbe, describeModelsFetched, normalizeModelNames } from '../lib/model-settings.js';
+import { Icon } from './Icon.jsx';
 
 const EMPTY: string[] = [];
 interface DiscoveryResult { endpoint: string; apiKey: string; models: string[]; probing?: boolean; hint: string; error?: boolean }
@@ -57,9 +59,10 @@ export function ModelOptions({ models, value, onSelect, disabled = false, discov
   const focused = shown.includes(value) ? value : shown[0];
   return <section className="model-discovery" aria-label="可选模型">
     <p className="model-options-head">{discovered ? '端点可用模型' : '候选模型'}<span>{query ? `${shown.length} / ${models.length}` : models.length}</span></p>
-    {models.length > 8 && <input type="search" aria-label="筛选模型" placeholder="搜索模型名称" value={query} onChange={event => setQuery(event.target.value)} />}
+    {models.length > 8 && <TextInput type="search" label="筛选模型" isLabelHidden width="100%" startIcon={<Icon name="search" />}
+      placeholder="搜索模型名称" value={query} onChange={setQuery} isDisabled={disabled} />}
     <div className="model-options" role="listbox" aria-label={discovered ? '探测到的模型' : '候选模型'} onKeyDown={event => {
-      if (disabled) return;
+      if (disabled || event.nativeEvent.isComposing || event.keyCode === 229) return;
       const options = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="option"]')];
       const target = event.target instanceof Element ? event.target.closest('[role="option"]') : null;
       const index = options.findIndex(option => option === target);
@@ -72,7 +75,7 @@ export function ModelOptions({ models, value, onSelect, disabled = false, discov
       {shown.map((model, index) => <button ref={index === 0 ? firstOption : undefined} key={model} type="button" role="option" disabled={disabled} aria-selected={model === value} tabIndex={model === focused ? 0 : -1}
         className={`model-option${model === value ? ' is-on' : ''}`} title={model} onClick={() => onSelect(model)}>
         <span className="model-option-name">{model}</span>
-        {model === value && <span className="model-option-check" aria-hidden="true">✓</span>}
+        {model === value && <Icon name="check" className="model-option-check" />}
       </button>)}
     </div>
     {!shown.length && <p className="chip-hint" role="status">没有匹配的模型，请更换搜索内容；也可以直接填写模型名称。</p>}

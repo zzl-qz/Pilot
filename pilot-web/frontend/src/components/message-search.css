@@ -1,0 +1,131 @@
+.pilot-message-search {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  background: var(--color-background-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
+  font: 14px/1.5 var(--sans);
+}
+.pilot-message-search[open] { display: flex; flex-direction: column; }
+
+.message-search-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px 12px 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+.message-search-head h2 { margin: 0; font: 600 18px/25px var(--sans); }
+.message-search-head button { flex: none; width: 36px; height: 36px; }
+.message-search-scroll {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px 20px 20px;
+}
+.message-search-form { display: grid; gap: 10px; }
+.message-search-field { min-height: 38px; }
+.pilot-message-search .message-search-field input:focus-visible { outline: none; }
+.message-search-limit {
+  color: var(--err);
+  margin: 0;
+  font-size: 12px;
+}
+.message-search-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.message-search-filters > label { color: var(--color-text-secondary); font-size: 13px; }
+/* 复选框勾选标记的显隐由 Astryx 样式层决定。 */
+.message-search-bookmarks-only svg { display: revert-layer; }
+.message-search-filters select {
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--ui-field);
+  color: var(--ink);
+  font: inherit;
+}
+.message-search-filters > button { margin-inline-start: auto; }
+.message-search-results { margin-block-start: 18px; }
+.message-search-results-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  padding-block: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+.message-search-results-head h2 { margin: 0; font: 600 13px/20px var(--sans); }
+.message-search-results-head p,
+.message-search-empty,
+.message-search-meta,
+.message-search-sync p { margin: 0; color: var(--color-text-secondary); font-size: 12px; }
+.message-search-results-head p { font-variant-numeric: tabular-nums; }
+.message-search-results [role="alert"] { margin-block-start: 10px; }
+.message-search-empty { padding: 14px 0 16px; font-size: 13px; }
+.message-search-list { list-style: none; margin: 0; padding: 0; }
+.message-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.pilot-message-search .search-hit {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  text-align: start;
+  font: inherit;
+  cursor: pointer;
+}
+.pilot-message-search .search-hit:not([aria-disabled="true"]):hover { background: var(--ui-hover); }
+.pilot-message-search .search-hit[aria-disabled="true"] { cursor: progress; }
+.search-hit strong, .message-search-excerpt { min-width: 0; overflow-wrap: anywhere; }
+.search-hit strong { font-weight: 600; }
+.message-search-excerpt { white-space: pre-wrap; }
+.message-search-meta { font-variant-numeric: tabular-nums; }
+.message-search-bookmark { margin-block-start: 2px; }
+.message-search-more { margin-block-start: 12px; }
+.message-search-sync {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px 8px 20px;
+  border-top: 1px solid var(--color-border);
+}
+.message-search-sync p { overflow-wrap: anywhere; }
+.message-search-sync [role="alert"] { color: var(--err); }
+.pilot-message-search :is(.search-hit, select, .message-search-results-head h2):focus-visible {
+  outline: 2px solid var(--color-text-primary);
+  outline-offset: -2px;
+}
+
+@media (max-width: 600px) {
+  .message-search-head, .message-search-sync { padding-inline: 16px 12px; }
+  .message-search-scroll { padding-inline: 16px; }
+  .message-search-row { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .message-search-bookmark { justify-self: end; }
+}
+@media (max-width: 600px), (pointer: coarse) {
+  .message-search-field, .message-search-filters select,
+  .message-search-filters > button, .message-search-sync button,
+  .message-search-head button, .message-search-bookmark, .message-search-more { min-height: 44px; }
+  .message-search-head button { width: 44px; }
+  .message-search-field input { font-size: 16px; }
+}

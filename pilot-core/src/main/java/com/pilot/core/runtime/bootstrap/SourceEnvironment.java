@@ -9,7 +9,6 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -232,7 +231,7 @@ public final class SourceEnvironment {
         }
         int major = Integer.parseInt(match.group(1));
         int minor = Integer.parseInt(match.group(2));
-        return (major > 22 || major == 22 && minor >= 12)
+        return (major > 22 || major == 22 && minor >= 13)
             && BootstrapPlatform.detect(platform.os(), match.group(3)).arch().equals(platform.arch());
     }
 
@@ -287,19 +286,12 @@ public final class SourceEnvironment {
     }
 
     private void build(Path node, Map<String, String> env) throws Exception {
-        Path frontend = root.resolve("pilot-web/frontend");
-        if (Files.notExists(frontend.resolve("node_modules"))) {
-            Path npm = npmCli(node);
-            if (npm == null) {
-                throw new IOException("Node 安装缺少 npm，请重新准备运行环境");
-            }
-            progress.accept("正在按锁文件补齐前端依赖");
-            run(List.of(node.toString(), npm.toString(), "ci"), frontend, env, Duration.ofMinutes(15));
-            Files.createDirectories(root.resolve(".pilot"));
-            Files.writeString(root.resolve(".pilot/frontend-deps-ask.stamp"), Instant.now().toString());
+        Path npm = npmCli(node);
+        if (npm == null) {
+            throw new IOException("Node 安装缺少 npm，请重新准备运行环境");
         }
-        run(List.of(node.toString(), root.resolve("tools/ask-frontend-deps.mjs").toString()), root, env,
-            Duration.ofMinutes(10));
+        run(List.of(node.toString(), root.resolve("tools/ask-frontend-deps.mjs").toString(), npm.toString()), root, env,
+            Duration.ofMinutes(15));
         Path maven = assets.install(assets.asset("maven"));
         Path boot;
         try (var jars = Files.list(maven.resolve("boot"))) {

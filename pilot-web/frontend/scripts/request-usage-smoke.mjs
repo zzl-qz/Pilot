@@ -20,7 +20,7 @@ const report = { id:'request-1', purpose:'main', model:'test-model', provider:'g
 const totals = {requests:1,observedCacheRequests:1,observedCacheInputTokens:61200,cacheReadTokens:48960,cacheWriteTokens:0,pricedRequests:1,costs:{USD:0.005},exact:true};
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pilot 请求用量</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
       import React from 'react'; import {createRoot} from 'react-dom/client';
-      import {Composer} from '/src/components/Composer.jsx'; import {ModelRuntimeSettings} from '/src/components/ModelRuntimeSettings.jsx';
+      import {Composer} from '/src/components/Composer.jsx'; import {UiProvider} from '/src/components/UiProvider.js'; import {ModelRuntimeSettings} from '/src/components/ModelRuntimeSettings.jsx';
       import {useStore} from '/src/store.js'; import {api} from '/src/api.js';
       import {applyEvent, initialThread, prependHistoryPage} from '/src/thread-reducer.js';
       import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
@@ -28,14 +28,15 @@ const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="view
       window.EventSource=class { constructor(){window.sse=this;this.handlers={};} addEventListener(type,handler){this.handlers[type]=handler;} close(){} };
       window.event=(event,live=true)=>{if(live) { window.sse.handlers[event.type]?.({data:JSON.stringify(event)}); useStore.getState().flushEvents(); } else useStore.setState(d=>applyEvent(d,event,{live:false}));};
       window.reset=()=>useStore.setState({sessionId:'usage-test',runId:null,running:false,cursor:0,requestReports:[],latestContextReport:null,runUsage:null,thread:initialThread(),pendingInputs:[],queue:[],contextStatus:{limitTokens:300000,usedTokens:61200,canCompact:true},settingsData:{model:'test-model',modelEndpoint:'https://example.test/v1'}});
-      reset(); useStore.getState().connectSse('usage-test',0);
+      reset(); useStore.getState().setUi({themeMode:'dark'}); useStore.getState().connectSse('usage-test',0);
+      api.context=async()=>{if(window.failContext) throw Error('测试上下文离线');return {usedTokens:61200,limitTokens:300000,canCompact:!useStore.getState().running};};
       api.modelRuntime=async()=>({capabilityDiscovery:window.capabilityReport,webSearchSource:window.capabilityReport?.message,model:'test-model',endpoint:'https://example.test/v1',options:{provider:'auto',cacheMode:'auto',pricing:{currency:'USD'}},effective:{provider:'generic'}});
       const realSaveModelRuntime=api.saveModelRuntime;
       api.saveModelRuntime=async(value)=>{window.saved=value; if(window.failSave)throw Error('测试保存失败');return realSaveModelRuntime(value);};
       const mount=createRoot(document.getElementById('root'));
       window.settingsVersion=0;
       window.renderSettings=()=>mount.render(React.createElement('div',{style:{maxWidth:620,margin:'24px auto',padding:16}},React.createElement(ModelRuntimeSettings,{key:++window.settingsVersion,model:'test-model',endpoint:'https://example.test/v1'})));
-      mount.render(React.createElement('div',{style:{height:'100dvh',display:'flex',flexDirection:'column',justifyContent:'flex-end',padding:'20px'}},React.createElement(Composer)));
+      mount.render(React.createElement(UiProvider,null,React.createElement('div',{style:{height:'100dvh',display:'flex',flexDirection:'column',justifyContent:'flex-end',padding:'20px'}},React.createElement(Composer))));
       if(new URL(location.href).searchParams.has('inspect')) {
         const report=${JSON.stringify(report)},details=${JSON.stringify(totals)};
         useStore.setState({requestReports:[report],latestContextReport:report,runUsage:{details}});
@@ -81,9 +82,9 @@ async function run(page,name){
   await page.setViewportSize({width:390,height:500});
   assert.equal(await panel.evaluate(el=>el.clientHeight<el.scrollHeight),true,'低矮视口可以滚动查看全部明细');
   assert.ok((await panel.locator('.context-composition-bar').boundingBox()).height>=6,'进度条不被低矮视口挤没');
-  await page.evaluate(()=>document.documentElement.dataset.theme='light');
+  await page.evaluate(()=>store.getState().setTheme('light'));
   await page.screenshot({path:join(temp,`${name}-light-compact.png`)});
-  await page.setViewportSize({width:390,height:900}); await page.evaluate(()=>document.documentElement.dataset.theme='dark');
+  await page.setViewportSize({width:390,height:900}); await page.evaluate(()=>store.getState().setTheme('dark'));
   await panel.getByRole('button',{name:'查看请求明细'}).click();
   await panel.locator('.request-group > summary').click(); await panel.locator('.request-item > summary').click();
   assert.match(await panel.innerText(),/缓存读取/); assert.match(await panel.innerText(),/0.32s/); assert.match(await panel.innerText(),/实际缓存命中以端点用量为准/);
@@ -91,7 +92,14 @@ async function run(page,name){
   const failed={...report,id:'failed',purpose:'subagent',status:'failed',usage:{inputTokens:100,outputTokens:0,exact:false},cost:{total:null},startedAt:101};
   await send('model.request',{report:failed});
   await send('run.usage',{modelRequests:2,inputTokens:61300,outputTokens:500,contextTokens:61200,contextLimit:300000,exact:false,details:{...totals,requests:2}});
-  await page.locator('#context-chip').click(); assert.match(await panel.innerText(),/费用合计不完整/);
+  await page.evaluate(()=>window.failContext=true);
+  await page.locator('#context-chip').click();
+  await panel.getByRole('alert').filter({hasText:'测试上下文离线'}).waitFor();
+  assert.match(await panel.innerText(),/费用合计不完整/);
+  await page.evaluate(()=>window.failContext=false);
+  await panel.getByRole('button',{name:'重试',exact:true}).click();
+  await panel.getByRole('alert').waitFor({state:'hidden'});
+  assert.equal(await panel.getByRole('heading').evaluate(el=>el===document.activeElement),true);
   assert.equal(await panel.locator('.request-overview dd').first().innerText(),'—','缺失缓存不是 0%');
   await page.keyboard.press('Escape');
   // 手动压缩不污染上一任务的用量卡片；压缩后清除失效的请求组成。

@@ -7,6 +7,7 @@ interface ReviewReport extends ChangeReport { diff?: string }
 interface BrowserReply { ok?: boolean; error?: string; message?: string; text?: string; url?: string }
 import { reviewQuote } from '../lib/interaction.js';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DropdownMenu } from '@astryxdesign/core/DropdownMenu';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
@@ -19,6 +20,7 @@ import { isCommandActive, commandStatusLabel, stripAnsi } from '../lib/command-t
 import { embeddablePageUrl, frameSrc, keyCommand, pauseToggleLabel, pointFromEvent, shouldEmbedPage, userPageUrl } from '../lib/browser-mirror.js';
 import { setMirrorPainter } from '../store.js';
 import { formatTime } from '../thread-utils.js';
+import { supportsAnchoredLayers } from '../lib/theme.js';
 import { SideChatPanel } from './SideChat.jsx';
 import { MarkdownBody } from './MarkdownBody.jsx';
 import FileWorkbench from './FileWorkbench.js';
@@ -48,9 +50,10 @@ const NO_TASKS: never[] = [];
 export function Inspector() {
   const tab = useStore((state) => state.ui.inspectorTab);
   const open = useStore((state) => state.ui.inspectorOpen);
+  const sessionId = useStore((state) => state.sessionId);
   const navRef = useRef<HTMLDivElement>(null);
-  const moreRef = useRef<HTMLDetailsElement>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const anchored = supportsAnchoredLayers();
 
   // 切换后将当前常用页签滚回可见区域。
   useEffect(() => {
@@ -66,7 +69,7 @@ export function Inspector() {
       <div className="inspector-main">
       <header className="inspector-panel-head"><strong id="inspector-title">{tab === 'files' ? '审阅文件' : ALL_TABS.find(item => item.id === tab)?.label}</strong><button type="button" className="icon-btn" aria-label="关闭工作区面板" onClick={() => useStore.getState().setUi({ inspectorOpen: false, reviewExpanded: false })}><Icon name="close" /></button></header>
       {tab === 'activity' && <div className="inspector-head"><Filters /></div>}
-      <div className="inspector-body" id={`inspector-panel-${tab}`} role="tabpanel" aria-labelledby={tab === 'files' ? 'inspector-title' : `inspector-tab-${tab}`}>
+      <div className="inspector-body" id={`inspector-panel-${tab}`} role="tabpanel" aria-labelledby="inspector-title">
         {/* 每个面板单独兜底：某个页签渲染出错时只废掉这一块，别把整页卸载成白屏 */}
         <ErrorBoundary key={tab} name={TABS.find((item) => item.id === tab)?.label || '面板'} onReset={() => useStore.getState().setUi({ inspectorTab: 'activity' })}>
           {tab === 'chat' && <SideChatPanel />}
@@ -74,9 +77,9 @@ export function Inspector() {
           {tab === 'preview' && <PreviewPanel />}
           {tab === 'commands' && <CommandsPanel />}
           {tab === 'capabilities' && <CapabilitiesPanel />}
-          {tab === 'browser' && <BrowserPanel />}
+          {tab === 'browser' && <BrowserPanel toolsMenuOpen={moreOpen} />}
           {tab === 'products' && <WorkProductsPanel />}
-          {tab === 'files' && <FileWorkbench />}
+          {tab === 'files' && <FileWorkbench key={sessionId} />}
           {tab === 'research' && <ResearchPanel />}
           {tab === 'activity' && <ActivityPanel />}
         </ErrorBoundary>
@@ -112,27 +115,31 @@ export function Inspector() {
           </button>
         ))}
       </div>
-      <details className="inspector-more-menu" ref={moreRef} onToggle={event => setMoreOpen(event.currentTarget.open)}>
-        <summary role="button" className={`rail-button${MORE_TABS.some(item => item.id === tab) ? ' is-on' : ''}`} aria-label="更多工具" aria-haspopup="menu" aria-expanded={moreOpen} title="更多工具" onKeyDown={event => {
-          if (event.key === 'Escape' && moreRef.current?.open) { event.preventDefault(); moreRef.current.open = false; setMoreOpen(false); event.currentTarget.focus(); }
-        }}><RailIcon id="more" /><span className="rail-tab-label">更多工具</span></summary>
-        <div className="inspector-more-items" role="menu" aria-label="更多工具">
-          {MORE_TABS.map(item => <button key={item.id} type="button" role="menuitem" title={item.title} onKeyDown={event => {
-            if (event.key === 'Escape') { event.preventDefault(); if (moreRef.current) moreRef.current.open = false; setMoreOpen(false); moreRef.current?.querySelector('summary')?.focus(); }
-          }} onClick={() => {
-            useStore.getState().setUi({ inspectorTab: item.id });
-            if (moreRef.current) moreRef.current.open = false;
-            setMoreOpen(false);
-          }}><RailIcon id={item.id} /><span>{item.label}</span></button>)}
-        </div>
-      </details>
+      <div className="inspector-more-menu" data-workbench-menu-open={moreOpen || undefined}>
+        <DropdownMenu placement="start" alignment="end" menuWidth={176}
+          presentation={anchored ? 'popover' : 'bottom-sheet'}
+          isMenuOpen={moreOpen} onOpenChange={setMoreOpen}
+          renderTrigger={props => <button {...props} type="button"
+            className={`rail-button${MORE_TABS.some(item => item.id === tab) ? ' is-on' : ''}`} aria-label="更多工具" title="更多工具"
+            onKeyDown={event => {
+              props.onKeyDown(event);
+              if (!anchored && !moreOpen && event.key === 'ArrowDown' && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+                event.preventDefault();
+                setMoreOpen(true);
+              }
+            }}><RailIcon id="more" /><span className="rail-tab-label">更多工具</span></button>}
+          items={MORE_TABS.map(item => ({
+            id: item.id, label: item.label, icon: <RailIcon id={item.id} />,
+            onClick: () => useStore.getState().setUi({ inspectorTab: item.id })
+          }))} />
+      </div>
       </nav>
     </aside>
   );
 }
 
 function RailIcon({ id }: { id: string }) {
-  const common = { viewBox: '0 0 16 16', 'aria-hidden': true };
+  const common = { viewBox: '0 0 16 16', width: 16, height: 16, 'aria-hidden': true };
   if (id === 'products') return <svg {...common}><path d="M4 2.5h5l3 3v8H4zM9 2.5v3h3M6 8h4M6 10.5h4" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
   if (id === 'studio') return <svg {...common}><path d="M3 2.5h6l4 4v7H3zM9 2.5v4h4M6 9h4M6 11h4" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
   if (id === 'research') return <svg {...common}><path d="M8 4C6 2.5 3 3 2 3v9c2-.5 4-.5 6 1 2-1.5 4-1.5 6-1V3c-2-.5-4-.5-6 1Zm0 0v9" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
@@ -381,6 +388,7 @@ function ChangesPanel() {
   const isGit = report?.gitRepository !== false;
   const empty = !files.length;
   const restoring = state === 'restoring';
+  const canUndo = scope === 'workspace' && isGit && !empty && state !== 'error';
 
   const keyword = query.trim().toLowerCase();
   const visibleTracked = keyword
@@ -423,7 +431,7 @@ function ChangesPanel() {
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.altKey || event.ctrlKey || event.metaKey || document.querySelector('.modal')) {
+      if (event.altKey || event.ctrlKey || event.metaKey || document.querySelector('.modal, [data-workbench-menu-open]')) {
         return;
       }
       const panel = document.getElementById('panel-changes');
@@ -459,6 +467,7 @@ function ChangesPanel() {
 
   const restore = async (paths: string[], all: boolean) => {
     setConfirm(null);
+    if (!canUndo || restoring || useStore.getState().running) return;
     await useStore.getState().restoreChanges(paths, all);
   };
 
@@ -509,7 +518,7 @@ function ChangesPanel() {
         </div>
         <ReviewActions
           key={`${sessionId}:${sessionEpoch}:${workspace}:${scope}`}
-          files={files} isGit={isGit} canUndo={!empty && scope === 'workspace' && state !== 'error'}
+          files={files} isGit={isGit} canUndo={canUndo}
           loading={state === 'loading'} restoring={restoring}
           onRefresh={() => { useStore.getState().loadChanges(); setRefresh(value => value + 1); }}
         />
@@ -540,7 +549,8 @@ function ChangesPanel() {
                 file={file}
                 active={view === file.path}
                 confirming={confirm?.type === 'one' && confirm.path === file.path}
-                busy={restoring || scope !== 'workspace'}
+                canUndo={canUndo}
+                busy={restoring}
                 onAskUndo={() => setConfirm({ type: 'one', path: file.path })}
                 onCancelUndo={() => setConfirm(null)}
                 onUndo={() => restore([file.path], false)}
@@ -568,7 +578,8 @@ function ChangesPanel() {
                 active={view === file.path}
                 untracked
                 confirming={confirm?.type === 'one' && confirm.path === file.path}
-                busy={restoring || scope !== 'workspace'}
+                canUndo={canUndo}
+                busy={restoring}
                 onAskUndo={() => setConfirm({ type: 'one', path: file.path })}
                 onCancelUndo={() => setConfirm(null)}
                 onUndo={() => restore([file.path], false)}
@@ -594,7 +605,8 @@ function ChangesPanel() {
               nextPath={viewIndex >= 0 && viewIndex < trackedPaths.length - 1 ? trackedPaths[viewIndex + 1] : null}
               index={viewIndex >= 0 ? viewIndex + 1 : 0}
               total={trackedPaths.length}
-              busy={restoring || scope !== 'workspace'}
+              canUndo={canUndo}
+              busy={restoring}
               onUndo={() => restore([view], false)}
             />
           )
@@ -608,9 +620,9 @@ function ChangesPanel() {
 const UNTRACKED_LIMIT = 80;
 
 /** 变更列表的一行：状态徽标 + 文件名（目录弱化）+ 增删行，悬停露出撤销。 */
-function ChangeRow({ file, active, untracked, confirming, busy, onAskUndo, onCancelUndo, onUndo }: { file: ChangeFile; active: boolean; untracked?: boolean; confirming?: boolean; busy?: boolean; onAskUndo: () => void; onCancelUndo: () => void; onUndo: () => void }) {
+function ChangeRow({ file, active, untracked, confirming, canUndo, busy, onAskUndo, onCancelUndo, onUndo }: { file: ChangeFile; active: boolean; untracked?: boolean; confirming?: boolean; canUndo: boolean; busy: boolean; onAskUndo: () => void; onCancelUndo: () => void; onUndo: () => void }) {
   const { name, dir } = splitPath(file.path);
-  if (confirming) {
+  if (confirming && canUndo) {
     return (
       <div className="change-row is-confirm">
         <span className={`change-status is-${statusKind(file.status)}`}>{statusLetter(file.status)}</span>
@@ -647,14 +659,14 @@ function ChangeRow({ file, active, untracked, confirming, busy, onAskUndo, onCan
           </span>
         )}
       </button>
-      <button
+      {canUndo && <button
         type="button"
         className="change-undo"
         title={`撤销 ${file.path} 的改动`}
         aria-label={`撤销 ${file.path} 的改动`}
         disabled={busy}
         onClick={onAskUndo}
-      >撤销</button>
+      >撤销</button>}
     </div>
   );
 }
@@ -668,7 +680,7 @@ function statusLetter(status?: string) {
   return raw.slice(0, 1).toUpperCase();
 }
 
-function DiffView({ report, scoped, path, status, prevPath, nextPath, index, total, busy, onUndo }: { report: ReviewReport | null; scoped: boolean; path: string; status?: string; prevPath: string | null; nextPath: string | null; index: number; total: number; busy: boolean; onUndo: () => void }) {
+function DiffView({ report, scoped, path, status, prevPath, nextPath, index, total, canUndo, busy, onUndo }: { report: ReviewReport | null; scoped: boolean; path: string; status?: string; prevPath: string | null; nextPath: string | null; index: number; total: number; canUndo: boolean; busy: boolean; onUndo: () => void }) {
   const sessionId = useStore((state) => state.sessionId);
   const untracked = status === '??';
   /*
@@ -766,7 +778,7 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
           disabled={!nextPath}
           onClick={() => select(nextPath)}
         >›</button>
-        {confirming ? (
+        {canUndo && (confirming ? (
           <>
             <span className="change-view-confirm">撤销这个文件？</span>
             <button type="button" className="btn btn-danger" disabled={busy} onClick={onUndo}>确认</button>
@@ -780,7 +792,7 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
             disabled={busy}
             onClick={() => setConfirming(true)}
           >撤销</button>
-        )}
+        ))}
         <button type="button" className="icon-btn change-view-close" title="关闭差异" aria-label="关闭差异" onClick={close}>×</button>
       </div>
       <p className="review-line-hint">点击行号选择，Shift + 点击选择多行，再添加审阅意见。</p>
@@ -1341,7 +1353,7 @@ function cleanLaunchNote(text?: string) {
     .trim();
 }
 
-function BrowserPanel() {
+function BrowserPanel({ toolsMenuOpen }: { toolsMenuOpen: boolean }) {
   const sessionId = useStore((state) => state.sessionId);
   const mirror = useStore((state) => state.ui.mirror);
   const status = useStore((state) => state.ui.browserStatus);
@@ -1450,7 +1462,7 @@ function BrowserPanel() {
     if (!stage) return undefined;
     const push = () => {
       const rect = visibleStageRect(stage);
-      const covered = document.querySelector('[role="dialog"][aria-modal="true"]');
+      const covered = toolsMenuOpen || document.querySelector('dialog[open], [aria-modal="true"]');
       desktopBridge.setBounds({
         x: rect.x,
         y: rect.y,
@@ -1473,7 +1485,7 @@ function BrowserPanel() {
       clearInterval(timer);
       desktopBridge.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
     };
-  }, [desktopOn, menuOpen, desktopState?.url]);
+  }, [desktopOn, menuOpen, toolsMenuOpen, desktopState?.url]);
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -1865,6 +1877,7 @@ function BrowserPanel() {
 
   const [launching, setLaunching] = useState(false);
   const [launchNote, setLaunchNote] = useState('');
+  const [launchFailed, setLaunchFailed] = useState(false);
   const freshTab = desktopOn && (!desktopState?.url || desktopState.url.includes('/marker/'));
   freshTabRef.current = freshTab;
   const pageLoading = desktopOn ? Boolean(desktopState?.loading) : loading;
@@ -1872,15 +1885,18 @@ function BrowserPanel() {
   async function openDesktopWindow() {
     setLaunching(true);
     setLaunchNote('');
+    setLaunchFailed(false);
     try {
       const data = await api.openBrowserWindow();
       const message = cleanLaunchNote(data?.message);
       if (data?.ok === false) {
+        setLaunchFailed(true);
         setLaunchNote(message || '没能打开浏览器窗口');
       } else {
         setLaunchNote(message || '窗口已打开。');
       }
     } catch (failure) {
+      setLaunchFailed(true);
       const message = errorInfo(failure).message || '';
       setLaunchNote(/404|Not Found/.test(message)
         ? '服务还是刚才那一版。重新从 IDEA 启动一次后再点。'
@@ -1897,6 +1913,7 @@ function BrowserPanel() {
   } catch { /* 还不是完整地址 */ }
 
   if (!desktopOn) {
+    const externalUrl = /^https?:\/\//i.test(mirror.url || '') ? mirror.url : null;
     return (
       <div id="panel-browser" className="panel browser-panel">
         <div className="mirror-stage">
@@ -1905,7 +1922,8 @@ function BrowserPanel() {
             <button type="button" className="btn btn-primary" disabled={launching} onClick={openDesktopWindow}>
               {launching ? '正在打开…' : (/已打开|窗口已/.test(launchNote) ? '显示窗口' : '打开内置浏览器')}
             </button>
-            {launchNote && <p className="browser-web-note">{launchNote}</p>}
+            {launchNote && <p className="browser-web-note" role={launchFailed ? 'alert' : 'status'}>{launchNote}</p>}
+            {externalUrl && <a className="btn" href={externalUrl} target="_blank" rel="noreferrer">在新标签页打开当前网址</a>}
             {!launchNote && mirror.headless && (
               <p className="browser-web-note">
                 智能体的浏览器在后台无窗口运行；需要真实窗口共看时把 pilot.browser.headless 设为 false 重启。
@@ -2012,7 +2030,14 @@ function BrowserPanel() {
         </div>
       </div>
       {desktopOn && findOpen && (
-        <form className="browser-find" onSubmit={(event) => { event.preventDefault(); desktopBridge.find(findText); }}>
+        <form className="browser-find" onSubmit={(event) => { event.preventDefault(); desktopBridge.find(findText); }} onKeyDown={event => {
+          if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          setFindOpen(false);
+          setFindText('');
+          desktopBridge.find('');
+          document.querySelector<HTMLButtonElement>('.browser-menu button')?.focus();
+        }}>
           <input
             autoFocus
             aria-label="页内查找"

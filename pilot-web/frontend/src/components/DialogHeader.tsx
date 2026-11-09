@@ -2,8 +2,8 @@ import React from 'react';
 import { Icon } from './Icon.jsx';
 import './dialog-header.css';
 
-export function DialogCloseButton({ onClose, label = '关闭弹窗' }: { onClose?: () => void; label?: string }) {
-  return <button type="button" className="dialog-close" aria-label={label} title={`${label}（Esc）`} onClick={onClose}>
+export function DialogCloseButton({ onClose, label = '关闭弹窗', disabled }: { onClose?: () => void; label?: string; disabled?: boolean }) {
+  return <button type="button" className="dialog-close" aria-label={label} title={`${label}（Esc）`} onClick={onClose} disabled={disabled}>
     <Icon name="close" />
   </button>;
 }

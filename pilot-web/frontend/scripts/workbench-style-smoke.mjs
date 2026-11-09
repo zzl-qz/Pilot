@@ -20,6 +20,13 @@ const sessions=['完善工作台的状态与层次','检查模型选择与请求
 const rows=[{type:'user',key:'u1',sequence:1,text:'检查这次改动，重点看看会话状态和输入区。'},{type:'turn',key:'t1',runIds:['r1'],tools:[],reply:{text:'已整理工作台的状态与交互层次。\\n\\n**当前会话**、任务状态和消息内容分别呈现，发送前仍会等待模型配置保存完成。',live:false},stats:{startedAt:1000,finishedAt:5000,modelRequests:1,inputTokens:12040,outputTokens:328,contextTokens:12368,contextLimit:300000,exact:true}},{type:'result',key:'r1',tone:'text',title:'执行结束',detail:'',runIds:['r1']},{type:'user',key:'u2',sequence:2,text:'深色和浅色主题都检查一下，窄屏也要能正常使用。'},{type:'turn',key:'t2',runIds:['r2'],tools:[],reply:{text:'接下来检查三种窗口宽度，以及键盘焦点、菜单和等待批准时的状态。\\n\\n结果会保留在当前会话，方便继续审阅。',live:false},stats:{startedAt:6000,finishedAt:9000,modelRequests:1,inputTokens:12800,outputTokens:186,contextTokens:12986,contextLimit:300000,exact:true}},{type:'result',key:'r2',tone:'text',title:'执行结束',detail:'',runIds:['r2']}];
 useStore.setState({init:async()=>{},sessionId:'style-0',sessionTitle:sessions[0].title,workspace:'/workspace/pilot',sessions,projects:[{id:'pilot',name:'pilot',folders:['/workspace/pilot']}],settingsData:{model:'gpt-6.1-sol'},task:{goal:'检查工作台状态与交互层次',status:'COMPLETED',acceptance:[]},thread:{...useStore.getState().thread,rows,history:{...useStore.getState().thread.history,hasMore:false}},contextStatus:{usedTokens:12986,limitTokens:300000},lastOutcome:'completed'});
 useStore.getState().setUi({resultUnread:2,inspectorOpen:false,themeMode:'dark',accent:'sky'});
+if(new URLSearchParams(location.search).has('review')){
+ const changeDiff='diff --git a/src/workspace.ts b/src/workspace.ts\\n--- a/src/workspace.ts\\n+++ b/src/workspace.ts\\n@@ -7,4 +7,5 @@\\n export function workspaceLabel(path: string) {\\n-  return path.split("/").pop();\\n+  const parts = path.split(/[\\\\/]/).filter(Boolean);\\n+  return parts.at(-1) ?? path;\\n }\\n';
+ const report={gitRepository:true,files:[{path:'src/workspace.ts',status:'M',added:2,removed:1},{path:'src/preview.tsx',status:'M',added:8,removed:3},{path:'docs/验收记录.md',status:'??',added:12,removed:0}],diff:changeDiff};
+ api.diff=async()=>report;api.file=async()=>{throw Error('无法读取工作区中的文件');};
+ useStore.setState({changeReport:report,lastRunId:'r2'});
+ useStore.getState().setUi({sidebarOpen:innerWidth>960,inspectorOpen:true,inspectorTab:'changes',changeView:'src/workspace.ts'});
+}
 createRoot(document.getElementById('root')).render(React.createElement(App));
 </script></body></html>`;
 try{await writeFile(file,fixture);await build({root,build:{outDir:output,emptyOutDir:false,rollupOptions:{input:file}}});}finally{await rm(file,{force:true});}
@@ -38,8 +45,30 @@ async function run(page,name){
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   const box=await page.locator('#run-state').boundingBox();assert.ok(box.width>32&&box.x+box.width<=width);
   const composer=await page.locator('.composer').boundingBox();assert.ok(composer.x>=0&&composer.y+composer.height<=900);
+  const workspace=page.locator('#workspace-name');
+  await workspace.click();
+  const workspaceDialog=page.getByRole('dialog',{name:'工作区',exact:true});
+  await workspaceDialog.getByRole('textbox',{name:'分支',exact:true}).waitFor();
+  await workspaceDialog.evaluate(el=>Promise.allSettled(el.getAnimations().map(animation=>animation.finished)));
+  assert.ok(await workspaceDialog.evaluate(el=>el.scrollWidth<=el.clientWidth+1),'工作区弹窗无横向溢出');
+  assert.equal(await workspaceDialog.getByRole('button',{name:'/workspace/pilot',exact:true}).getAttribute('aria-current'),'true');
+  await page.screenshot({path:join(output,`${name}-workspace-${theme}-${width}.png`),animations:'disabled'});
+  await page.keyboard.press('Escape');
+  await workspaceDialog.waitFor({state:'hidden'});
+  assert.equal(await workspace.evaluate(el=>el===document.activeElement),true,'工作区关闭后回到触发按钮');
  }
  await page.setViewportSize({width:1440,height:900});await page.goto(url);await page.locator('#run-state').waitFor();
+ await page.evaluate(()=>{
+  api.worktreeInfo=async()=>{throw Error('模拟检出状态读取失败');};
+  store.setState({openWorktree:async branch=>{window.submittedBranch=branch;}});
+ });
+ await page.locator('#workspace-name').click();
+ const workspaceDialog=page.getByRole('dialog',{name:'工作区',exact:true});
+ await workspaceDialog.getByRole('alert').filter({hasText:'模拟检出状态读取失败'}).waitFor();
+ await workspaceDialog.getByRole('textbox',{name:'分支',exact:true}).fill('  feature/ui  ');
+ await workspaceDialog.getByRole('textbox',{name:'分支',exact:true}).press('Enter');
+ await workspaceDialog.waitFor({state:'hidden'});
+ assert.equal(await page.evaluate(()=>window.submittedBranch),'feature/ui');
  await page.evaluate(()=>store.setState(s=>({thread:{...s.thread,rows:[...s.thread.rows,
   {type:'plan',key:'plan-done',items:[{step:'准备输入',status:'completed'},{step:'执行任务',status:'completed'},{step:'检查结果',status:'completed'},{step:'整理交付',status:'completed'}]},
   {type:'result',key:'continued-error',tone:'error',title:'运行失败 · MODEL_ERROR',detail:'模型调用失败：模型请求被中断',runIds:['previous-run'],continued:true,changedFiles:[]},
@@ -70,10 +99,13 @@ async function run(page,name){
  await page.getByRole('button',{name:'更多工具',exact:true}).click();
  assert.equal(await page.getByRole('menuitem',{name:'活动',exact:true}).count(),1,'低频工具仍可从更多菜单访问');
  await page.keyboard.press('Escape');
- await page.waitForFunction(()=>!document.querySelector('.inspector-more-menu')?.open);
+ await page.getByRole('menu',{name:'更多工具'}).waitFor({state:'hidden'});
  assert.equal(await page.getByRole('button',{name:'更多工具',exact:true}).getAttribute('aria-expanded'),'false','Escape 收起更多工具菜单');
- assert.equal(await page.locator('.inspector-rail [role="tab"]').evaluateAll(items=>items.every(item=>item.getAttribute('aria-label')&&item.getAttribute('title'))),true,'图标导航仍提供可访问名称与悬停说明');
- assert.equal(await page.locator('.inspector-rail .rail-tab-label').first().evaluate(el=>getComputedStyle(el).clipPath),'inset(50%)','面板名称由页头显示，避免导航标签挤成多行');
+ assert.deepEqual(await page.locator('.inspector-rail [role="tab"]').evaluateAll(items=>items.map(el=>el.getAttribute('aria-label'))), ['成果', '对话', '变更', '预览', '命令']);
+ await page.getByRole('tab',{name:'预览',exact:true}).focus();
+ await page.keyboard.press('ArrowDown');
+ assert.equal(await page.evaluate(()=>document.activeElement.id),'inspector-tab-commands','向下方向键移动标签焦点');
+ await page.keyboard.press('ArrowUp');
  assert.equal(await page.locator('.preview-wrap').getAttribute('aria-pressed'),'false','代码预览默认保持源码行结构');
  assert.equal(await page.locator('#preview-body').evaluate(el=>getComputedStyle(el).whiteSpace),'pre','代码预览默认横向滚动，不把源码挤成窄列');
  await page.screenshot({path:join(output,`${name}-preview-desktop.png`),timeout:20000,animations:'disabled'});
@@ -93,11 +125,17 @@ async function run(page,name){
   }
  }
  await page.setViewportSize({width:1440,height:900});
+ // 窄屏切回桌面会更新 React 布局并播放宽度过渡，先等面板稳定再记录拖拽起点。
+ await page.waitForFunction(()=>{
+  const panel=document.querySelector('.activity.inspector');
+  return panel?.getBoundingClientRect().width>=450 && !panel.getAnimations().some(animation=>animation.playState==='running');
+ });
  const previewGutter=await page.locator('#gutter-right').boundingBox();
  const previewWidthBefore=await page.locator('.activity.inspector').evaluate(el=>el.getBoundingClientRect().width);
  await page.mouse.move(previewGutter.x+5,300);await page.mouse.down();await page.mouse.move(previewGutter.x-35,300);await page.mouse.up();
+ await page.waitForFunction(before=>document.querySelector('.activity.inspector').getBoundingClientRect().width>=before+35,previewWidthBefore);
  const previewWidthAfter=await page.locator('.activity.inspector').evaluate(el=>el.getBoundingClientRect().width);
- assert.ok(previewWidthAfter>=previewWidthBefore+35,'预览拖拽从当前自适应宽度连续调整');
+ assert.ok(previewWidthAfter>=previewWidthBefore+35,`预览拖拽从当前自适应宽度连续调整：${previewWidthBefore} → ${previewWidthAfter}，手柄 ${JSON.stringify(previewGutter)}`);
  await page.locator('.preview-wrap').click();
  assert.equal(await page.locator('#preview-body').evaluate(el=>getComputedStyle(el).whiteSpace),'pre-wrap','用户可切换源码自动换行');
  await page.reload();await page.locator('#run-state').waitFor();
@@ -152,7 +190,7 @@ try{
  const touchPage=await touchContext.newPage();await touchPage.route('**/api/**',route=>route.fulfill({json:{}}));await touchPage.goto(url);
  await touchPage.evaluate(()=>store.getState().setUi({inspectorOpen:true,inspectorTab:'preview'}));
  await touchPage.locator('#panel-tabs').waitFor();
- assert.equal(await touchPage.locator('.inspector-rail .rail-tab-label').first().evaluate(el=>getComputedStyle(el).position),'static','触屏设备保留可见面板名称');
+ assert.ok((await touchPage.getByRole('tab',{name:'变更',exact:true}).boundingBox()).height>=44,'触屏设备保留可见面板名称和足够的点击面积');
  await touchPage.getByRole('button',{name:'更多工具',exact:true}).click();
  const moreBox=await touchPage.getByRole('menu',{name:'更多工具'}).boundingBox();
  assert.ok(moreBox.x>=0&&moreBox.x+moreBox.width<=390,'触屏更多工具菜单保持在视口内');

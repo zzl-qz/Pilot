@@ -1,30 +1,120 @@
-import type * as S from '../types/server.js';
-import { errorInfo } from '../lib/errors.js';
-import { restoreFocus } from '../lib/interaction.js';
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { AlertDialog } from '@astryxdesign/core/AlertDialog';
+import { Badge } from '@astryxdesign/core/Badge';
+import { Banner } from '@astryxdesign/core/Banner';
+import { Button } from '@astryxdesign/core/Button';
+import { EmptyState } from '@astryxdesign/core/EmptyState';
 import { api } from '../api.js';
+import { errorInfo } from '../lib/errors.js';
 import { useStore } from '../store.js';
-import './schedules.css';
-import { DialogHeader } from './DialogHeader.jsx';
+import type { RecurringScheduleServiceSeries } from '../types/server.js';
+import { AutomationDialog } from './AutomationDialog.jsx';
+import { useAutomationList } from './useAutomationList.js';
+
 const labels: Record<string, string> = { ACTIVE: '已启用', PAUSED: '已暂停', CANCELLED: '已取消', ERROR: '需要处理' };
-export default function RecurringPlans() { const open = useStore(s => s.ui.recurringOpen); return open ? <Dialog /> : null; }
-function Dialog() {
-  const ref = useRef<HTMLDialogElement>(null), alive = useRef(true);
-  const [rows, setRows] = useState<S.RecurringScheduleServiceSeries[]>([]), [error, setError] = useState(''), [busy, setBusy] = useState(false), [loading, setLoading] = useState(true);
+
+function nextTime(row: RecurringScheduleServiceSeries) {
+  if (!row.nextAt) return '—';
+  try { return new Date(row.nextAt).toLocaleString('zh-CN', { timeZone: row.timezone || 'UTC', hourCycle: 'h23' }); }
+  catch { return row.nextAt; }
+}
+
+export default function RecurringPlans() {
+  const open = useStore(s => s.ui.recurringOpen);
+  return open ? <RecurringDialog /> : null;
+}
+
+function RecurringDialog() {
+  const plans = useAutomationList(api.recurring, 10000);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<{ id: string; message: string } | null>(null);
+  const [confirm, setConfirm] = useState<RecurringScheduleServiceSeries | null>(null);
+  const alive = useRef(true);
+  const pending = useRef(false);
   const close = () => useStore.getState().setUi({ recurringOpen: false });
-  async function refresh() { try { const data = await api.recurring(); if (alive.current) { setRows(Array.isArray(data) ? data : []); setError(''); } } catch (e) { if (alive.current) setError(errorInfo(e).message || '操作失败'); } finally { if (alive.current) setLoading(false); } }
-  useEffect(() => { const previous = document.activeElement; alive.current = true; ref.current?.showModal(); refresh(); const timer = setInterval(refresh, 10000); return () => { alive.current = false; clearInterval(timer); restoreFocus(previous); }; }, []);
-  async function action(row: S.RecurringScheduleServiceSeries, action: string) { setBusy(true); setError(''); try { await api.controlRecurring(row.id, { version: row.version, action }); await refresh(); } catch (e) { setError(errorInfo(e).message || '操作失败'); } finally { setBusy(false); } }
-  return <dialog className="schedule-dialog" ref={ref} aria-labelledby="recurring-title" onCancel={e => { e.preventDefault(); close(); }} onKeyDown={e => e.stopPropagation()}>
-    <DialogHeader id="recurring-title" title="周期计划" subtitle="Pilot / 自动执行" closeLabel="关闭周期计划" onClose={close} />
-    <div className="schedule-dialog-body">
-    <div className="schedule-actions schedule-dialog-toolbar"><button className="btn btn-primary" onClick={() => { close(); useStore.getState().setUi({ schedulesOpen: true, scheduleDraft: '', scheduleRepeat: true }); }}>新建周期计划</button></div>
-    <p className="schedule-runtime">每轮复用现有任务执行器，结果进入收件箱。暂停或取消周期只影响未来轮次；正在执行的任务可以单独控制。</p>
-    {error && <p className="schedule-error" role="alert">{error} <button onClick={refresh}>重新加载</button></p>}
-    {loading && <p role="status">正在读取周期计划…</p>}{!loading && !rows.length && <div className="schedule-empty"><h2>暂无周期计划</h2><p>把重复的检查与维护工作安排为每天、工作日或自定义周期。</p></div>}
-    {rows.map(row => <article className="recurring-row" key={row.id}><div><h2>{row.name}</h2><p>{labels[row.state]} · {row.message}</p><dl><dt>下次计划时间</dt><dd>{new Date(row.nextAt).toLocaleString('zh-CN', { timeZone: row.timezone })} · {row.timezone}</dd><dt>周期与错过策略</dt><dd>{row.cron} · {row.misfire === 'SKIP' ? '跳过错过轮次' : '合并补执行一次'} · 已创建 {row.occurrences} 轮</dd></dl></div>
-      <div className="schedule-actions">{row.activeId && <button className="btn" onClick={() => { close(); useStore.getState().setUi({ schedulesOpen: true, scheduleDraft: null, scheduleTarget: row.activeId }); }}>查看最近轮次</button>}{row.state !== 'CANCELLED' && <><button className="btn" disabled={busy} onClick={() => action(row, row.state === 'ACTIVE' ? 'pause' : 'resume')}>{row.state === 'ACTIVE' ? '暂停周期' : '恢复周期'}</button><button className="btn" disabled={busy} onClick={() => action(row, 'cancel')}>取消周期</button></>}</div>
-    </article>)}
-    </div>
-  </dialog>;
+
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+
+  function openSchedule(target?: string) {
+    useStore.getState().setUi({
+      recurringOpen: false, schedulesOpen: true, scheduleDraft: target ? null : '',
+      scheduleRepeat: !target, scheduleTarget: target ?? null
+    });
+  }
+
+  async function control(row: RecurringScheduleServiceSeries, action: string) {
+    if (pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    setFailure(null);
+    try {
+      const updated = await api.controlRecurring(row.id, { version: row.version, action });
+      if (!alive.current) return;
+      if (updated) plans.setRows(rows => rows?.map(item => item.id === row.id ? updated : item) ?? [updated]);
+      if (action === 'cancel') document.getElementById(`recurring-plan-${row.id}`)?.focus({ preventScroll: true });
+      await plans.refresh();
+    } catch (err) {
+      if (alive.current) setFailure({ id: row.id, message: errorInfo(err).message || '操作失败，请重试' });
+    } finally {
+      pending.current = false;
+      if (alive.current) setBusy(false);
+    }
+  }
+
+  return (
+    <AutomationDialog titleId="recurring-title" title="周期计划"
+      description="每轮独立执行，结果进入任务收件箱。" onClose={close}>
+      <div className="automation-toolbar">
+        <h2 id="recurring-list-title">计划列表</h2>
+        <div className="automation-actions">
+          <Button label="刷新周期计划" variant="ghost" isDisabled={busy || plans.loading} onClick={() => { void plans.refresh(); }} />
+          <Button label="新建周期计划" variant="primary" isDisabled={busy} onClick={() => openSchedule()} />
+        </div>
+      </div>
+      <p className="automation-meta automation-section-note">暂停或取消只影响未来轮次。正在执行的任务可以单独控制。</p>
+      {plans.loading && <p className="automation-meta" role="status">{plans.rows ? '正在刷新周期计划…' : '正在读取周期计划…'}</p>}
+      {plans.error && <Banner className="automation-message" status="error" role="alert" title={`读取周期计划失败：${plans.error}`}
+        description={plans.rows ? '当前显示上次成功读取的计划。' : undefined}
+        endContent={<Button label="重新加载" isDisabled={busy || plans.loading} onClick={() => { void plans.refresh(); }} />} />}
+      <section aria-labelledby="recurring-list-title" aria-busy={plans.loading}>
+        {plans.rows?.length === 0 && !plans.loading && !plans.error && <EmptyState title="暂无周期计划" isCompact
+          description="可以将重复的检查与维护安排为每天、工作日或自定义周期。" />}
+        {plans.rows?.map(row => (
+          <article className="automation-record recurring-plan" key={row.id}>
+            <div className="automation-record-content">
+              <div className="automation-record-heading">
+                <h3 id={`recurring-plan-${row.id}`} tabIndex={-1}>{row.name}</h3>
+                <Badge label={labels[row.state] || row.state} variant={row.state === 'ERROR' ? 'warning' : 'neutral'} />
+              </div>
+              {row.message && <p className="automation-meta">{row.message}</p>}
+              <dl className="recurring-facts">
+                <dt>{row.state === 'ACTIVE' ? '下次计划时间' : '原计划时间'}</dt>
+                <dd><time dateTime={row.nextAt}>{nextTime(row)}</time> · {row.timezone || 'UTC'}</dd>
+                <dt>周期与错过策略</dt>
+                <dd><code>{row.cron}</code> <span>· {row.misfire === 'SKIP' ? '跳过错过轮次' : '合并补执行一次'}</span> <span>· 已创建 {row.occurrences} 轮</span></dd>
+                {row.sourceWorkspace && <><dt>来源工作区</dt><dd>{row.sourceWorkspace}</dd></>}
+              </dl>
+            </div>
+            <div className="automation-actions">
+              {row.activeId && <Button label="查看最近轮次" isDisabled={busy} onClick={() => openSchedule(row.activeId)} />}
+              {row.state !== 'CANCELLED' && <>
+                <Button label={row.state === 'ACTIVE' ? '暂停周期' : '恢复周期'} variant="ghost" isDisabled={busy}
+                  onClick={() => { void control(row, row.state === 'ACTIVE' ? 'pause' : 'resume'); }} />
+                <Button label="取消周期" variant="ghost" isDisabled={busy} onClick={() => setConfirm(row)} />
+              </>}
+            </div>
+            {failure?.id === row.id && <Banner className="automation-record-feedback" status="error" role="alert" title={failure.message}
+              endContent={<Button label="刷新并核对计划" isDisabled={busy || plans.loading} onClick={() => { setFailure(null); void plans.refresh(); }} />} />}
+          </article>
+        ))}
+      </section>
+      {confirm && <AlertDialog className="automation-confirm" isOpen title={`取消“${confirm.name}”？`}
+        description="取消后将停止创建新轮次。已启动的任务和历史结果会保留。"
+        cancelLabel="返回" actionLabel="确认取消周期" onOpenChange={open => { if (!open) setConfirm(null); }}
+        onAction={() => { setConfirm(null); void control(confirm, 'cancel'); }} />}
+    </AutomationDialog>
+  );
 }

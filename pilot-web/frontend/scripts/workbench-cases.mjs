@@ -43,7 +43,8 @@ export async function checkWorkbench(page, name, output) {
     store.setState({ openWorktree: async branch => branchCalls.push(branch) });
   });
   await page.locator('#workspace-name').click();
-  const branchInput = page.getByLabel('worktree 分支', { exact: true });
+  const branchInput = page.getByRole('dialog', { name: '工作区', exact: true })
+    .getByRole('textbox', { name: '分支', exact: true });
   await branchInput.fill('中文分支');
   await branchInput.dispatchEvent('keydown', { key: 'Enter', isComposing: true });
   assert.deepEqual(await page.evaluate(() => branchCalls), [], '确认输入法候选字不能创建 worktree');
@@ -119,7 +120,8 @@ export async function checkWorkbench(page, name, output) {
   await page.getByText('存储告警：权限不足，无法写入', { exact: true }).waitFor();
   await page.evaluate(() => { api.purgeNow = async () => ({ events: 2, snapshotRuns: 1, traces: 3, backups: 4, validationFiles: 5 }); });
   await page.getByRole('button', { name: '清理过期数据', exact: true }).click();
-  await page.getByText('已清理：事件 2 条，快照 1 轮，调用记录 3 条，备份 4 份，校验文件 5 个', { exact: true }).waitFor();
+  await page.locator('#confirm-dialog').getByRole('button', { name: '确认清理' }).click();
+  await page.getByText('已清理 2 条事件、1 轮快照、3 条调用记录、4 份备份和 5 个校验文件。', { exact: true }).waitFor();
   const validation = page.getByText('校验证据：', { exact: false });
   await validation.waitFor();
   assert.match(await validation.innerText(), /已覆盖当前产物/);
@@ -134,13 +136,13 @@ export async function checkWorkbench(page, name, output) {
   for (let i = 0; i < 14; i++) await page.keyboard.press('Shift+Tab');
   assert.equal(await page.evaluate(() => !!document.activeElement.closest('#settings')), true);
   await page.locator('.settings-nav').getByRole('button', { name: '外观', exact: true }).click();
-  await page.getByRole('button', { name: '浅色', exact: false }).click();
+  await page.getByRole('radio', { name: '浅色', exact: true }).click();
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
   if (name === 'chromium') await page.screenshot({ path: join(output, `${name}-settings-light.png`), animations: 'disabled' });
-  await page.getByRole('button', { name: '深色', exact: false }).click();
+  await page.getByRole('radio', { name: '深色', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 700 });
   for (const section of ['模型', '诊断', '关于']) {
-    await page.locator('.settings-nav').getByRole('button', { name: section, exact: true }).click();
+    await page.getByRole('combobox', { name: '设置分类' }).selectOption({ label: section });
     assert.equal(await page.locator('.settings-body').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true, '窄屏 ' + section);
     assert.equal(await page.locator('.modal-box').evaluate(el => el.getBoundingClientRect().right <= innerWidth), true);
   }
@@ -149,13 +151,15 @@ export async function checkWorkbench(page, name, output) {
   assert.equal(await page.locator('.modal-box').evaluate(el => el.getBoundingClientRect().bottom <= innerHeight), true, '短窗口仍能容纳完整弹窗');
   assert.equal(await page.locator('.settings-body').evaluate(el => el.clientHeight > 100 && el.getBoundingClientRect().bottom <= innerHeight), true);
   await page.keyboard.press('Escape');
-  assert.equal(await page.evaluate(() => document.activeElement.id), 'sidebar-toggle', '窄屏收起全局入口后返回可见的导航开关');
+  await page.waitForFunction(() => document.activeElement.id === 'sidebar-toggle');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole('tab', { name: '预览', exact: true }).press('Home');
-  const firstTab = page.locator('#panel-tabs [role="tab"]').first();
+  const firstTab = page.getByRole('tab', { name: '成果', exact: true });
+  assert.equal(await firstTab.evaluate(tab => document.activeElement === tab), true);
+  await firstTab.press('Enter');
   assert.equal(await firstTab.getAttribute('aria-selected'), 'true');
   await firstTab.press('End');
-  assert.equal(await page.getByRole('tab', { name: '命令', exact: true }).getAttribute('aria-selected'), 'true');
+  assert.equal(await page.getByRole('tab', { name: '命令', exact: true }).evaluate(tab => document.activeElement === tab), true);
   await page.getByRole('button', { name: '更多工具', exact: true }).click();
   await page.getByRole('menuitem', { name: '活动', exact: true }).click();
   assert.equal(await page.evaluate(() => store.getState().ui.inspectorTab), 'activity');

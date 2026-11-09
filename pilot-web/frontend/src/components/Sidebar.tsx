@@ -1,14 +1,12 @@
 import type { SessionSummary } from '../types/core.js';
-import type { SessionMenuAnchor } from './SessionMenu.jsx';
-type MenuHandler = (session: SessionSummary, anchor: SessionMenuAnchor) => void;
-type SessionProps = { session: SessionSummary; activeId: string | null; onMenu: MenuHandler; menuId?: string };
+import { TextInput } from '@astryxdesign/core/TextInput';
 import { shortcut } from '../lib/interaction.js';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useStore } from '../store.js';
 import { WorkspaceTree } from './WorkspaceTree.jsx';
 import { groupSessionsByProject } from '../lib/projects.js';
 import { Icon } from './Icon.jsx';
-import { SessionMenu } from './SessionMenu.jsx';
+import { SessionMenu, SessionActionDialog, type SessionAction } from './SessionMenu.jsx';
 import { sideChatsFor } from '../lib/side-chat.js';
 
 /** 左侧导航：项目分组的会话列表 + 工作区文件树 + 连接状态。 */
@@ -21,10 +19,11 @@ export function Sidebar() {
   const sidebarOpen = useStore((state) => state.ui.sidebarOpen);
   const sideChats = useStore((state) => state.sideChats);
   const [query, setQuery] = useState('');
-  const [menu, setMenu] = useState<(SessionMenuAnchor & { id: string }) | null>(null);
-  const menuSession = menu && sessions.find(session => session.id === menu.id);
+  const [action, setAction] = useState<SessionAction | null>(null);
   const [collapsed, setCollapsed] = useState(() => new Set<string>());
-  useEffect(() => { if (!sidebarOpen) setMenu(null); }, [sidebarOpen]);
+  const [searchCollapsed, setSearchCollapsed] = useState(() => new Set<string>());
+  const filtering = Boolean(query.trim());
+  const showAction = (next: SessionAction) => setAction(current => current ?? next);
 
   // 侧边对话属于当前任务：换任务后这里只列出那条任务的，跨项目也不会串台
   const { items: sideItems, activeId: sideActiveId } = sideChatsFor(sideChats, { sessionId, workspace });
@@ -44,7 +43,8 @@ export function Sidebar() {
   }, [sessions, projects, query, sideIds]);
 
   function toggleProject(key: string) {
-    setCollapsed((prev) => {
+    const update = filtering ? setSearchCollapsed : setCollapsed;
+    update((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key); else next.add(key);
       return next;
@@ -59,19 +59,11 @@ export function Sidebar() {
         <kbd>{shortcut('N')}</kbd>
       </button>
 
-      <label className="session-search" htmlFor="session-search">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2" stroke="currentColor" strokeWidth="1.4" fill="none" /><path d="m10.2 10.2 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
-        <input
-          id="session-search"
-          type="search"
-          placeholder="搜索对话"
-          autoComplete="off"
-          spellCheck="false"
-          aria-label="搜索对话"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </label>
+      <TextInput id="session-search" type="search" label="搜索对话" isLabelHidden placeholder="搜索对话"
+        autoComplete="off" hasSpellCheck={false} hasClear value={query} width="100%"
+        containerClassName="session-search" controlClassName="session-search-control"
+        startIcon={<Icon name="search" />}
+        onChange={value => { setQuery(value); setSearchCollapsed(new Set()); }} />
 
       <div className="rail-scroll">
         <section className="nav-block" aria-label="项目">
@@ -96,9 +88,10 @@ export function Sidebar() {
                 key={group.project.id || 'ungrouped'}
                 group={group}
                 activeId={sessionId}
-                menuId={menu?.id}
-                onMenu={(session, anchor) => setMenu({id:session.id, ...anchor})}
-                collapsed={collapsed.has(group.project.id || 'ungrouped')}
+                sidebarOpen={sidebarOpen}
+                onAction={showAction}
+                collapsed={(filtering ? searchCollapsed : collapsed).has(group.project.id || 'ungrouped')}
+                filtering={filtering}
                 onToggle={() => toggleProject(group.project.id || 'ungrouped')}
               />
             ))}
@@ -146,12 +139,15 @@ export function Sidebar() {
           {workspace ? workspace.split(/[\\/]/).filter(Boolean).pop() : ''}
         </button>
       </div>
-      {menu && menuSession && <SessionMenu key={menu.id} session={menuSession} anchor={menu} onClose={() => setMenu(null)} />}
+      {action && <SessionActionDialog action={action} onClose={() => setAction(null)} />}
     </aside>
   );
 }
 
-function ProjectGroup({ group, activeId, collapsed, onToggle, onMenu, menuId }: { group: ReturnType<typeof groupSessionsByProject>[number]; activeId: string | null; collapsed: boolean; onToggle: () => void; onMenu: MenuHandler; menuId?: string }) {
+function ProjectGroup({ group, activeId, collapsed, filtering, onToggle, sidebarOpen, onAction }: {
+  group: ReturnType<typeof groupSessionsByProject>[number]; activeId: string | null; collapsed: boolean;
+  filtering: boolean; onToggle: () => void; sidebarOpen: boolean; onAction: (action: SessionAction) => void;
+}) {
   // 空白对话（isBlank）是旧版「先建后聊」的遗留：新对话不再落库，这里也不再给它留位置
   const { project, active, archived } = group;
   const count = active.length;
@@ -189,6 +185,7 @@ function ProjectGroup({ group, activeId, collapsed, onToggle, onMenu, menuId }: 
                 event.stopPropagation();
                 // 带上 projectId：否则从项目里新建的对话会掉进「未分组」
                 useStore.getState().startNewSession({ projectId: project.id, workspace: project.folders?.[0] });
+                requestAnimationFrame(() => useStore.getState().composerApi?.focus());
               }}
             >
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
@@ -210,17 +207,17 @@ function ProjectGroup({ group, activeId, collapsed, onToggle, onMenu, menuId }: 
       </div>
 
       <ul className="project-sessions" hidden={collapsed}>
-        {active.map((session) => <SessionRow key={session.id} session={session} activeId={activeId} onMenu={onMenu} menuId={menuId} />)}
-        {!active.length && (
+        {active.map((session) => <SessionRow key={session.id} session={session} activeId={activeId} visible={sidebarOpen && !collapsed} onAction={onAction} />)}
+        {!active.length && !filtering && (
           <li className="project-empty">{project.id ? '还没有对话' : '没有未分组的对话'}</li>
         )}
       </ul>
 
       {archived.length > 0 && (
-        <details className="project-archived" hidden={collapsed}>
+        <details className="project-archived" hidden={collapsed} open={filtering || undefined}>
           <summary>{`已归档 ${archived.length}`}</summary>
           <ul className="project-sessions">
-            {archived.map((session) => <SessionRow key={session.id} session={session} activeId={activeId} onMenu={onMenu} menuId={menuId} />)}
+            {archived.map((session) => <SessionRow key={session.id} session={session} activeId={activeId} visible={sidebarOpen && !collapsed} onAction={onAction} />)}
           </ul>
         </details>
       )}
@@ -228,38 +225,33 @@ function ProjectGroup({ group, activeId, collapsed, onToggle, onMenu, menuId }: 
   );
 }
 
-function SessionRow({ session, activeId, onMenu, menuId }: SessionProps) {
+function SessionRow({ session, activeId, visible, onAction }: {
+  session: SessionSummary; activeId: string | null; visible: boolean; onAction: (action: SessionAction) => void;
+}) {
   const blank = session.isBlank === true;
   const status = String(session.status || '').trim().toLowerCase();
   return (
-    <li className={`session-row${session.unread ? ' is-unread' : ''}`} data-session-id={session.id}
-      onContextMenu={event => { event.preventDefault(); onMenu(session, {x:event.clientX,y:event.clientY,trigger:event.currentTarget.querySelector<HTMLElement>('.session-more')}); }}>
-      <button
-        type="button"
-        className={`session-item${session.id === activeId ? ' is-active' : ''}${blank ? ' is-blank' : ''}${session.archived ? ' is-archived' : ''}`}
-        aria-current={session.id === activeId ? 'page' : undefined}
-        title={blank ? '新对话：还没有消息，发送第一条后自动变成历史对话' : (session.workspace ? `${session.title}\n${session.workspace}` : session.title)}
-        onClick={() => useStore.getState().activate(session.id)}
-        onKeyDown={event => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
-          event.preventDefault(); const box=event.currentTarget.getBoundingClientRect(); onMenu(session,{x:box.right,y:box.top,trigger:event.currentTarget});
-        } }}
-      >
-        {blank ? (
-          <span className="session-new-icon" aria-hidden="true">
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
-          </span>
-        ) : (
-          <span className={`dot is-${status || 'idle'}`} aria-hidden="true" />
-        )}
-        <span className="session-title">{blank ? '新对话' : session.title}</span>
-        {session.pinned && <span className="session-pin" aria-label="已置顶"><Icon name="pin" /></span>}
-        {session.unread && <span className="session-unread" aria-label="未读" />}
-      </button>
-      <button type="button" className="session-more icon-btn" title="更多操作" aria-label={`对话操作：${session.title}`}
-        aria-haspopup="menu" aria-expanded={menuId === session.id} onClick={event => {
-          const box = event.currentTarget.getBoundingClientRect();
-          onMenu(session, {x:box.right + 4, y:box.top, trigger:event.currentTarget});
-        }}><Icon name="more" /></button>
+    <li className={`session-row${session.unread ? ' is-unread' : ''}`} data-session-id={session.id}>
+      <SessionMenu key={visible ? 'visible' : 'collapsed'} session={session} onAction={onAction}>
+        <button
+          type="button"
+          className={`session-item${session.id === activeId ? ' is-active' : ''}${blank ? ' is-blank' : ''}${session.archived ? ' is-archived' : ''}`}
+          aria-current={session.id === activeId ? 'page' : undefined}
+          title={blank ? '新对话：还没有消息，发送第一条后自动变成历史对话' : (session.workspace ? `${session.title}\n${session.workspace}` : session.title)}
+          onClick={() => useStore.getState().activate(session.id)}
+        >
+          {blank ? (
+            <span className="session-new-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+            </span>
+          ) : (
+            <span className={`dot is-${status || 'idle'}`} aria-hidden="true" />
+          )}
+          <span className="session-title">{blank ? '新对话' : session.title}</span>
+          {session.pinned && <span className="session-pin" aria-label="已置顶"><Icon name="pin" /></span>}
+          {session.unread && <span className="session-unread" aria-label="未读" />}
+        </button>
+      </SessionMenu>
     </li>
   );
 }

@@ -7,6 +7,8 @@ import { api } from '../api.js';
 import {
   appendQuote, lastEventSequence, quoteMarkdown, reduceSideChat, sideChatsFor, simplifyTranscript
 } from '../lib/side-chat.js';
+import { Button } from '@astryxdesign/core/Button';
+import './side-chat.css';
 import { MarkdownBody } from './MarkdownBody.jsx';
 
 /**
@@ -318,12 +320,14 @@ function visibleSideMessages(thread: SideTranscript) {
 export function SelectionQuote() {
   const embedded = useStore((state) => state.embeddedSessionId);
   const [menu, setMenu] = useState<{ text: string; left: number; top: number } | null>(null);
+  const toolbar = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (embedded) {
       return undefined;
     }
     const update = () => {
+      if (toolbar.current?.contains(document.activeElement)) return;
       const selection = window.getSelection();
       const text = selection?.toString().trim();
       const thread = document.querySelector('.thread');
@@ -343,15 +347,20 @@ export function SelectionQuote() {
       }
       setMenu({
         text: text.slice(0, 8000),
-        left: Math.max(8, Math.min(window.innerWidth - 200, rect.left + rect.width / 2 - 92)),
-        top: Math.max(8, rect.top >= 56 ? rect.top - 44 : rect.bottom + 8)
+        left: Math.max(8, Math.min(window.innerWidth - 232, rect.left + rect.width / 2 - 112)),
+        top: Math.max(8, Math.min(window.innerHeight - 56, rect.top >= 64 ? rect.top - 52 : rect.bottom + 8))
       });
     };
+    let frame = 0;
+    const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(update); };
     document.addEventListener('mouseup', update);
     document.addEventListener('keyup', update);
+    document.addEventListener('selectionchange', schedule);
     return () => {
+      cancelAnimationFrame(frame);
       document.removeEventListener('mouseup', update);
       document.removeEventListener('keyup', update);
+      document.removeEventListener('selectionchange', schedule);
     };
   }, [embedded]);
 
@@ -374,15 +383,19 @@ export function SelectionQuote() {
 
   return (
     <div
-      className="selection-actions"
-      role="toolbar"
+      className="selection-actions side-quote-actions"
+      ref={toolbar}
+      role="group"
       aria-label="选中文本操作"
       style={{ left: `${menu.left}px`, top: `${menu.top}px` }}
+      onKeyDown={event => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMenu(null); }
+      }}
       // 按下时别让浏览器把选区清掉：否则点击动作执行前文本已经没了
       onMouseDown={(event) => event.preventDefault()}
     >
-      <button type="button" onClick={addToComposer}>加到输入框</button>
-      <button type="button" onClick={askInSideChat}>在侧边问</button>
+      <Button label="加到输入框" variant="ghost" onClick={addToComposer} />
+      <Button label="在侧边问" variant="ghost" onClick={askInSideChat} />
     </div>
   );
 }

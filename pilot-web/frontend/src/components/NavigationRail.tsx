@@ -21,7 +21,7 @@ export function NavigationRail() {
     <div className="navigation-rail-group">
       <RailButton id="nav-projects" icon="home" label="项目与对话" active={ui.sidebarOpen}
         onClick={() => open({ sidebarOpen: !ui.sidebarOpen })} />
-      <RailButton icon="search" label="搜索消息与书签" active={ui.searchOpen}
+      <RailButton id="nav-message-search" icon="search" label="搜索消息与书签" active={ui.searchOpen}
         onClick={() => open({ searchOpen: true })} />
       <RailButton icon="inbox" label="任务收件箱" active={ui.resultsOpen} count={unread}
         onClick={() => open({ resultsOpen: true, resultTarget: null })} />
@@ -29,12 +29,32 @@ export function NavigationRail() {
     <div className="navigation-rail-group navigation-rail-bottom">
       <details className="navigation-rail-more" ref={moreRef} onToggle={event => setMoreOpen(event.currentTarget.open)}
         onKeyDown={event => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+          const details = event.currentTarget;
+          const summary = details.querySelector('summary');
           if (event.key === 'Escape') {
+            if (!details.open) return;
             event.preventDefault();
-            event.currentTarget.open = false;
+            details.open = false;
             setMoreOpen(false);
-            event.currentTarget.querySelector('summary')?.focus();
+            summary?.focus();
+            return;
           }
+          if (event.target === summary && !details.open && ['Enter', ' ', 'ArrowDown'].includes(event.key)) {
+            event.preventDefault();
+            details.open = true;
+            setMoreOpen(true);
+            details.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+            return;
+          }
+          if (!details.open || !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+          const items = Array.from(details.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+          if (!items.length) return;
+          event.preventDefault();
+          const index = items.indexOf(document.activeElement as HTMLButtonElement);
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+            : index < 0 ? 0 : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length;
+          items[next]?.focus();
         }}>
         <summary className="rail-button" role="button" aria-label="更多功能" aria-haspopup="menu" aria-expanded={moreOpen}
           aria-controls="navigation-more-menu" title="更多功能">

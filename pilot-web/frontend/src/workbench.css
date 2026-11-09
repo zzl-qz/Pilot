@@ -25,7 +25,10 @@ html[data-theme="light"] {
 }
 .ui-icon { width: 16px; height: 16px; flex: none; display: inline-block; vertical-align: middle; }
 html[data-theme] :where(button, input, textarea, select) { font-family: var(--sans); }
-html[data-theme] :where(button, summary, input, textarea, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+html[data-theme] :where(button, summary, input, textarea, select):not(:where(.astryx-text-input input, .astryx-text-area textarea)):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 html[data-theme] :where(input, textarea)::placeholder { color: var(--dim); opacity: 1; }
 html[data-theme] :where(button):disabled { cursor: not-allowed; }
 html[data-theme] .btn {
@@ -71,33 +74,25 @@ html[data-theme] .session-item:not(.is-active):hover { transform: none; backgrou
 html[data-theme] .session-item.is-active { background: var(--ui-selected); color: var(--ink); box-shadow: inset 0 -1px var(--accent); }
 html[data-theme] .session-title { min-width: 0; }
 html[data-theme] .session-row { position: relative; }
-html[data-theme] .session-row > .session-item { width: 100%; flex: 1; }
+html[data-theme] .session-menu-trigger,
+html[data-theme] .session-context-target { display: block; width: 100%; }
+html[data-theme] .session-context-target > .session-item { width: 100%; }
 html[data-theme] .session-row .session-item { padding-right: 32px; }
 html[data-theme] .session-more { position: absolute; right: 2px; top: 3px; width: 28px; height: 28px; opacity: 0; }
-html[data-theme] .session-row:is(:hover, :focus-within) .session-more { opacity: 1; }
+html[data-theme] .session-row:is(:hover, :focus-within) .session-more,
+html[data-theme] .session-more[aria-expanded="true"] { opacity: 1; }
 .session-pin { flex: none; color: var(--muted); }
 .session-pin .ui-icon { width: 12px; height: 12px; }
 .session-unread { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .session-row.is-unread .session-title { color: var(--ink); font-weight: 600; }
-.session-menu { position: fixed; z-index: 250; width: min(244px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; padding: 6px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--ink); box-shadow: var(--shadow-pop); }
-.session-menu-title { margin: 4px 8px 7px; font: 12px/1.5 var(--sans); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.session-menu [role="menuitem"] { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 7px 9px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); font: 13px/20px var(--sans); text-align: left; cursor: pointer; }
-.session-menu [role="menuitem"]:is(:hover, :focus-visible) { background: var(--ui-selected); outline-offset: -2px; }
-.session-menu [role="menuitem"]:disabled { opacity: .5; }
-.session-menu [role="menuitem"] .ui-icon { color: var(--muted); }
-.session-menu [role="menuitem"].is-danger, .session-menu [role="menuitem"].is-danger .ui-icon { color: var(--err); }
-.session-menu [role="separator"] { height: 1px; margin: 5px 4px; background: var(--line-soft); }
-.session-menu-error { margin: 8px; color: var(--err); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
-.session-menu textarea { width: 100%; min-height: 60px; color: var(--ink); background: var(--ui-field); border: 1px solid var(--line); border-radius: 5px; }
+.session-action-error { margin: 8px 0; color: var(--err); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.session-rename-form textarea { width: 100%; min-height: 60px; color: var(--ink); background: var(--ui-field); border: 1px solid var(--line); border-radius: 5px; }
 .session-rename-form { padding: 16px 20px 0; }
-.session-rename-form label { display: block; margin-bottom: 8px; color: var(--ink); font-size: 13px; }
-.session-rename-form input { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--ui-field); color: var(--ink); font: 14px var(--sans); }
-.session-rename-form p { color: var(--muted); font-size: 12px; }
+.session-rename-form p { font-size: 12px; overflow-wrap: anywhere; }
 .session-rename-form .modal-foot { padding-inline: 0; }
 @media (pointer: coarse), (max-width: 640px) {
   html[data-theme] .session-more { opacity: 1; min-width: 36px; height: 36px; top: 1px; }
   html[data-theme] .session-row .session-item { min-height: 40px; padding-right: 38px; }
-  .session-menu [role="menuitem"] { min-height: 44px; }
 }
 html[data-theme] .rail-foot { padding: 10px 14px; gap: 7px; }
 
@@ -241,17 +236,9 @@ html[data-theme] .inspector-rail .rail-tab-label {
   white-space: nowrap;
 }
 html[data-theme] .inspector-rail [role="tab"].is-on { background: var(--ui-selected); color: var(--ink); }
-html[data-theme] .inspector-more-menu { position: relative; }
 html[data-theme] .inspector-more-menu { margin-top: auto; }
-html[data-theme] .inspector-more-menu > summary { list-style: none; cursor: pointer; }
-html[data-theme] .inspector-more-menu > summary::-webkit-details-marker { display: none; }
-html[data-theme] .inspector-more-menu[open] > summary,
-html[data-theme] .inspector-more-menu > summary:hover { background: var(--ui-hover); color: var(--ink); }
-html[data-theme] .inspector-more-items { position: absolute; z-index: 40; right: calc(100% + 8px); bottom: 0; display: grid; gap: 2px; width: 176px; padding: 5px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); box-shadow: 0 8px 24px #0004; }
-html[data-theme] .inspector-more-items > button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 36px; padding: 6px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--ink); text-align: left; }
-html[data-theme] .inspector-more-items > button:hover,
-html[data-theme] .inspector-more-items > button:focus-visible { background: var(--ui-hover); }
-html[data-theme] .inspector-more-items svg { width: 16px; height: 16px; flex: none; }
+html[data-theme] .inspector-more-menu > .rail-button[aria-expanded="true"],
+html[data-theme] .inspector-more-menu > .rail-button:hover { background: var(--ui-hover); color: var(--ink); }
 .rail-tab-label { display: block; font-size: 11px; line-height: 13px; }
 html[data-theme] .tab-count { top: 1px; right: 0; min-width: 14px; font-size: 10px; }
 html[data-theme] .inspector-body { min-width: 0; }
@@ -573,8 +560,16 @@ html[data-theme] .topbar .run-state[data-tone="running"]::before {
 html[data-theme] .topbar .session-chip { opacity: 1; }
 html[data-theme] .new-task { margin: 0 0 8px; padding: 0 10px; background: var(--panel-2); border: 1px solid var(--line-soft); min-height: 36px; }
 html[data-theme] .new-task:hover { background: var(--ui-hover); }
-html[data-theme] .session-search { margin: 0 0 12px; min-height: 32px; background: var(--bg-soft); border: 1px solid var(--line-soft); }
-html[data-theme] .session-search:focus-within { border-color: var(--accent); }
+html[data-theme] .session-search { margin: 0 0 12px; }
+html[data-theme] .session-search-control {
+  min-height: 32px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+html[data-theme] .session-search-control input { font: 12.5px var(--sans); }
+html[data-theme] .session-search-control input::placeholder { color: var(--dim); }
 html[data-theme] .rail-scroll { flex: 1 1 auto; min-height: 0; max-height: none; padding: 0 0 12px; }
 html[data-theme] .project-groups { gap: 12px; }
 html[data-theme] .project-head { gap: 2px; }
@@ -719,7 +714,6 @@ html[data-theme] .rail-button.is-active::after { left: 0; width: 2px; height: 18
 html[data-theme] .sidebar.rail { padding: 8px 10px 0; background: var(--side-bg); }
 html[data-theme] .sidebar-head.rail-head { height: 44px; padding-inline: 4px; }
 html[data-theme] .new-task { min-height: 34px; border-radius: 6px; }
-html[data-theme] .session-search { min-height: 30px; }
 html[data-theme] .project-head { min-height: 28px; }
 html[data-theme] .session-item { min-height: 30px; border-radius: 5px; }
 html[data-theme] .session-item.is-active { box-shadow: inset 2px 0 var(--accent); }
@@ -848,7 +842,7 @@ html[data-theme] .task-live-controls > .btn { min-height: 28px; }
 @media (pointer: coarse) {
   .navigation-more-item { min-height: 44px; }
   html[data-theme] .inspector-rail [role="tab"] { height: 48px; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 3px 0; }
-  html[data-theme] .inspector-more-menu > summary { height: 48px; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 3px 0; }
+  html[data-theme] .inspector-more-menu > .rail-button { height: 48px; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 3px 0; }
   html[data-theme] .inspector-rail .rail-tab-label {
     position: static;
     width: auto;

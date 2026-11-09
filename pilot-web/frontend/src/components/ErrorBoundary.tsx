@@ -1,6 +1,11 @@
 import React from 'react';
 import { errorInfo } from '../lib/errors.js';
-type BoundaryProps = { name?: string; children?: React.ReactNode; onReset?: () => void };
+type BoundaryProps = {
+  name?: string;
+  children?: React.ReactNode;
+  onReset?: () => void;
+  fallback?: React.ReactNode;
+};
 type BoundaryState = { error: unknown };
 
 /**
@@ -34,6 +39,7 @@ export class ErrorBoundary extends React.Component<BoundaryProps, BoundaryState>
     if (!error) {
       return this.props.children;
     }
+    if (this.props.fallback) return this.props.fallback;
     return (
       <div className="panel-error" role="alert">
         <p className="panel-error-title">{this.props.name || '这一块'}渲染失败了</p>

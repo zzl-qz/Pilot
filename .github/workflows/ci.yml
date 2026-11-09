@@ -34,7 +34,7 @@ jobs:
           node-version: "22"
 
       - name: Source bootstrap boundary tests
-        run: node --test scripts/bootstrap.test.mjs
+        run: node --test scripts/bootstrap.test.mjs scripts/frontend-deps.test.mjs
 
       - name: Install desktop dependencies
         working-directory: pilot-desktop

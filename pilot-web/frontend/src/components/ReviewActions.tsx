@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { useStore } from '../store.js';
 import { Icon } from './Icon.jsx';
 import { Modal } from './Modals.jsx';
+import { errorInfo } from '../lib/errors.js';
 
 /** 审阅时只露出常用操作；Git 操作按需打开，不挤占文件统计。 */
 export function ReviewActions({ files, isGit, canUndo, loading, restoring, onRefresh }: { files: ChangeFile[]; isGit: boolean; canUndo: boolean; loading: boolean; restoring: boolean; onRefresh: () => void }) {
@@ -45,6 +46,7 @@ export function ReviewActions({ files, isGit, canUndo, loading, restoring, onRef
     };
   }, [open]);
   const show = (type: ActionDialog['type']) => {
+    if (!isGit || running || restoring || pending.current || (type === 'undo' && (!canUndo || loading))) return;
     setOpen(false); setError('');
     // 固定确认时可见的文件，避免撤销刷新后新出现、尚未审阅的文件。
     setDialog({ type, files: files.map(file => ({ ...file })) });
@@ -53,8 +55,9 @@ export function ReviewActions({ files, isGit, canUndo, loading, restoring, onRef
   const close = () => { if (!pending.current) setDialog(null); };
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!dialog || pending.current || restoring || running) return;
+    if (!dialog || !isGit || pending.current || restoring || useStore.getState().running) return;
     if (dialog.type === 'branch' && !branch.trim()) return;
+    if (dialog.type === 'undo' && (!canUndo || loading || dialog.partial)) return;
     pending.current = true; setBusy(true); setError('');
     try {
       if (dialog.type === 'branch') {
@@ -73,6 +76,8 @@ export function ReviewActions({ files, isGit, canUndo, loading, restoring, onRef
         }
       }
       setDialog(null);
+    } catch (failure) {
+      if (mounted.current) setError(errorInfo(failure).message || '操作失败，请重试');
     } finally {
       pending.current = false;
       if (mounted.current) setBusy(false);
@@ -87,7 +92,7 @@ export function ReviewActions({ files, isGit, canUndo, loading, restoring, onRef
       {canUndo && <button type="button" role="menuitem" id="changes-undo-all" className="is-danger" disabled={running || loading} onClick={() => show('undo')}><Icon name="trash" />撤销全部改动…</button>}
       {running && <p className="review-menu-hint">任务结束后可操作 Git 改动</p>}
     </div>}
-    {dialog && createPortal(<Modal id="review-action-dialog" title={dialog.type === 'branch' ? '创建并切换分支' : '撤销全部改动？'} onClose={close}>
+    {dialog && createPortal(<Modal id="review-action-dialog" title={dialog.type === 'branch' ? '创建并切换分支' : '撤销全部改动？'} onClose={close} dismissible={!busy}>
       <form onSubmit={submit} aria-busy={busy}>
         {dialog.type === 'branch' ? <>
           <p className="review-dialog-note">从当前分支创建新分支并切换，未提交的改动会保留。</p>
@@ -97,7 +102,7 @@ export function ReviewActions({ files, isGit, canUndo, loading, restoring, onRef
         {running && <p role="status" className="review-dialog-note">当前任务正在运行，请等待结束后再操作。</p>}
         <footer className="modal-foot">
           <button type="button" className="btn" disabled={busy} onClick={close}>{dialog.partial ? '关闭' : '取消'}</button>
-          <button type="submit" id={dialog.type === 'branch' ? 'branch-create' : 'review-undo-confirm'} className={`btn ${dialog.type === 'branch' ? 'btn-primary' : 'btn-danger'}`} disabled={busy || restoring || running || dialog.partial || (dialog.type === 'branch' && !branch.trim())}>{busy ? (dialog.type === 'branch' ? '创建中…' : '撤销中…') : dialog.type === 'branch' ? '创建并切换' : `撤销 ${dialog.files.length} 个文件的改动`}</button>
+          <button type="submit" id={dialog.type === 'branch' ? 'branch-create' : 'review-undo-confirm'} className={`btn ${dialog.type === 'branch' ? 'btn-primary' : 'btn-danger'}`} disabled={busy || restoring || running || !isGit || (dialog.type === 'branch' ? !branch.trim() : !canUndo || loading || dialog.partial)}>{busy ? (dialog.type === 'branch' ? '创建中…' : '撤销中…') : dialog.type === 'branch' ? '创建并切换' : `撤销 ${dialog.files.length} 个文件的改动`}</button>
         </footer>
       </form>
     </Modal>, document.body)}

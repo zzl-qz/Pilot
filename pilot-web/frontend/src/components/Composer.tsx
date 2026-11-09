@@ -1,11 +1,14 @@
 import type { DraftAttachment, BuiltinCommand, SkillCommand } from '../types/input.js';
 import type { ContextStatus, QueueEntry } from '../types/runtime.js';
+import { Button } from '@astryxdesign/core/Button';
+import { IconButton } from '@astryxdesign/core/IconButton';
+import { StatusDot } from '@astryxdesign/core/StatusDot';
 type QuickCommand = BuiltinCommand | SkillCommand;
 interface ReferenceMenu { items: string[]; message?: string; loading?: boolean }
 import { errorInfo } from '../lib/errors.js';
 import { formatCache } from '../lib/request-usage.js';
 import { ContextUsagePanel } from './RequestUsage.jsx';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
@@ -21,10 +24,11 @@ import { checkIncomingFile } from '../lib/attachments.js';
 import { writeDraft, readDraft, dropDraft } from '../lib/drafts.js';
 import { splitAttachmentMarkers, joinAttachmentMarkers } from '../lib/attachments.js';
 import { queueHeader, resumeBar } from '../lib/queue.js';
-import { PERMISSION_MODES, permissionLabel, permissionHint } from '../lib/permission.js';
+import { PERMISSION_MODES, normalizePermission, permissionLabel } from '../lib/permission.js';
 import { ModelPicker } from './ModelPicker.jsx';
 import { usageLevel, usagePercent } from '../lib/context-usage.js';
 import { agentStatusLabel, summarizeAgents } from '../lib/agents.js';
+import './conversation.css';
 
 /**
  * 输入区：contenteditable 桥接旧版 composer-input（附件芯片 / @ 引用 / 粘贴纯文本），
@@ -38,11 +42,11 @@ export function Composer() {
   const lastOutcome = useStore((state) => state.lastOutcome);
   const queueHeld = useStore((state) => state.queueHeld);
   const pendingInputs = useStore((state) => state.pendingInputs);
-  const queue = useStore((state) => state.queue);
   const steering = useStore((state) => state.steering);
   const pausing = useStore((state) => state.pausing);
   const cancelling = useStore((state) => state.cancelling);
-  const permissionMode = useStore((state) => state.permissionMode);
+  const composerEnabled = useStore((state) => state.ui.composerEnabled);
+  const permissionMode = useStore((state) => normalizePermission(state.permissionMode));
   const modelOptions = useStore((state) => state.modelOptions);
   const modelSaving = useStore((state) => state.modelSave.busy);
   const settingsData = useStore((state) => state.settingsData);
@@ -57,13 +61,18 @@ export function Composer() {
   const editTarget = useStore((state) => state._editTarget);
 
   const flowRef = useRef<HTMLDivElement>(null);
+  const voiceFeedbackRef = useRef<HTMLDivElement>(null);
+  const permTriggerRef = useRef<HTMLButtonElement>(null);
+  const permMenuRef = useRef<HTMLDivElement>(null);
+  const contextTriggerRef = useRef<HTMLButtonElement>(null);
   const referenceRequest = useRef(0);
   const inputRef = useRef<ReturnType<typeof createComposerInput> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [sendAction, setSendAction] = useState({ mode: 'send', stop: false, disabled: true, label: '发送', ariaLabel: '发送任务', title: '发送任务 (Enter)' });
-  const [permOpen, setPermOpen] = useState(false);
-  const [modelOpen, setModelOpen] = useState(false);
-  const [contextOpen, setContextOpen] = useState(false);
+  const [toolbarPanel, setToolbarPanel] = useState<'perm' | 'model' | 'context' | null>(null);
+  const permOpen = toolbarPanel === 'perm';
+  const modelOpen = toolbarPanel === 'model';
+  const contextOpen = toolbarPanel === 'context';
   const [refMenu, setRefMenu] = useState<ReferenceMenu | null>(null);
   const [slashMenu, setSlashMenu] = useState<{ items: QuickCommand[]; query: string } | null>(null);
   const [menuIndex, setMenuIndex] = useState(0);
@@ -179,7 +188,7 @@ export function Composer() {
 
   useEffect(() => {
     setSendAction(sendState());
-  }, [running, queueHeld, lastOutcome, pendingInputs.length, steering, pausing, cancelling, editTarget, modelSaving]);
+  }, [running, queueHeld, lastOutcome, pendingInputs.length, steering, pausing, cancelling, editTarget, modelSaving, composerEnabled]);
 
   /* 附件上传：选择 / 拖放 / 粘贴共用 */
   function addFiles(fileList: ArrayLike<File> | null) {
@@ -216,7 +225,7 @@ export function Composer() {
 
   async function submit() {
     const input = inputRef.current;
-    if (voiceBusy || pendingFilesRef.current || submittingRef.current || sendState().disabled) return;
+    if (voiceBusyRef.current || pendingFilesRef.current || submittingRef.current || sendState().disabled) return;
     if (!input) {
       return;
     }
@@ -254,7 +263,8 @@ export function Composer() {
   }
 
   /* @ 引用菜单：按光标前文本过滤 */
-  function onInput() {
+  function onInput(event: React.FormEvent<HTMLDivElement>) {
+    if ((event.nativeEvent as InputEvent).isComposing) return;
     const textBefore = inputRef.current?.textBeforeCaret?.() || '';
     referenceRequest.current += 1;
     const atMatch = textBefore.match(/(^|\s)@([^\s@\uFFFC]*)$/);
@@ -318,53 +328,85 @@ export function Composer() {
     inputRef.current?.focus();
   }
 
-  useEffect(() => {
+  function clearSuggestions() {
     referenceRequest.current += 1;
-    setRefMenu(null); setSlashMenu(null);
-    setPermOpen(false); setModelOpen(false); setContextOpen(false);
+    setRefMenu(null);
+    setSlashMenu(null);
+  }
+
+  function toggleToolbarPanel(panel: NonNullable<typeof toolbarPanel>) {
+    clearSuggestions();
+    setToolbarPanel(current => current === panel ? null : panel);
+  }
+
+  useEffect(() => {
+    clearSuggestions();
+    setToolbarPanel(null);
   }, [sessionId, sessionEpoch, workspace]);
 
+  useLayoutEffect(() => {
+    if (permOpen) permMenuRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus({ preventScroll: true });
+  }, [permOpen]);
+
+  const suggestionItems = refMenu?.items || slashMenu?.items || [];
+  const suggestionsOpen = Boolean(refMenu || slashMenu);
   useEffect(() => {
-    if (!permOpen && !modelOpen && !contextOpen && !refMenu && !slashMenu) return;
-    const close = () => {
-      referenceRequest.current += 1;
-      setPermOpen(false); setModelOpen(false); setContextOpen(false);
-      setRefMenu(null); setSlashMenu(null);
-    };
+    if (!toolbarPanel) return;
     const key = (event: KeyboardEvent) => {
-      if (permOpen && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
-        const items = [...document.querySelectorAll<HTMLElement>('#perm-menu button')];
-        if (items.length) {
-          event.preventDefault();
-          const index = items.findIndex(item => item === document.activeElement);
-          const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length;
-          items[next].focus();
-        }
-        return;
-      }
-      if (event.key !== 'Escape' || event.isComposing) return;
-      event.preventDefault(); event.stopImmediatePropagation();
-      const trigger = permOpen ? 'perm-chip' : modelOpen ? 'model-chip' : contextOpen ? 'context-chip' : 'input-flow';
-      close(); document.getElementById(trigger)?.focus();
+      if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setToolbarPanel(null);
+      document.getElementById(toolbarPanel + '-chip')?.focus({ preventScroll: true });
     };
-    const outside = (event: PointerEvent) => {
-      if (!(event.target instanceof Element)) return;
-      if (!event.target.closest('.perm-picker, .ref-menu, #input-flow')) close();
+    const owned = '#' + toolbarPanel + '-chip, #' + toolbarPanel + '-menu';
+    const closeOutside = (event: Event) => {
+      if (event.target instanceof Element && !event.target.closest(owned)) {
+        setToolbarPanel(null);
+      }
     };
     document.addEventListener('keydown', key, true);
-    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('pointerdown', closeOutside, true);
+    document.addEventListener('focusin', closeOutside);
     return () => {
       document.removeEventListener('keydown', key, true);
-      document.removeEventListener('pointerdown', outside, true);
+      document.removeEventListener('pointerdown', closeOutside, true);
+      document.removeEventListener('focusin', closeOutside);
     };
-  }, [permOpen, modelOpen, contextOpen, Boolean(refMenu), Boolean(slashMenu)]);
+  }, [toolbarPanel]);
 
-  /* 菜单只有 250px 高，选中的那项滚出可视区就相当于没选中 */
+  function movePermissionFocus(event: React.KeyboardEvent) {
+    if (event.nativeEvent.isComposing || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const items = [...(permMenuRef.current?.querySelectorAll('button') || [])];
+    if (!items.length) {
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        toggleToolbarPanel('perm');
+      }
+      return;
+    }
+    event.preventDefault();
+    const index = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = {
+      Home: 0,
+      End: items.length - 1,
+      ArrowDown: (index + 1) % items.length,
+      ArrowUp: (Math.max(0, index) + items.length - 1) % items.length
+    }[event.key];
+    if (next !== undefined) items[next]?.focus();
+  }
+
+  /* 方向键只滚动候选列表，保持消息区和输入框的位置。 */
   useEffect(() => {
     if (!refMenu && !slashMenu) {
       return;
     }
-    menuRef.current?.querySelector('.ref-item.is-on')?.scrollIntoView({ block: 'nearest' });
+    const menu = menuRef.current;
+    const item = menu?.querySelector('[aria-selected="true"]');
+    if (!menu || !item) return;
+    const bounds = menu.getBoundingClientRect(), option = item.getBoundingClientRect();
+    if (option.top < bounds.top) menu.scrollTop += option.top - bounds.top;
+    if (option.bottom > bounds.bottom) menu.scrollTop += option.bottom - bounds.bottom;
   }, [menuIndex, refMenu, slashMenu]);
 
   /** ↑/↓ 翻本会话发过的输入；多行草稿靠 caretOnEdgeLine 判断，只在首/末行接管。 */
@@ -402,31 +444,28 @@ export function Composer() {
     if (event.nativeEvent.isComposing || event.keyCode === 229) {
       return;
     }
-    const items = refMenu ? (refMenu.items || []) : slashMenu ? (slashMenu.items || []) : [];
-    if (refMenu || slashMenu) {
-      if (refMenu?.loading && (event.key === 'Enter' || event.key === 'Tab')) { event.preventDefault(); return; }
-      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && items.length) {
-        event.preventDefault();
-        const delta = event.key === 'ArrowDown' ? 1 : -1;
-        setMenuIndex((current) => (current + delta + items.length) % items.length);
-        return;
-      }
-      if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey && items.length) {
-        event.preventDefault();
-        const picked = items[Math.min(menuIndex, items.length - 1)];
-        if (refMenu) {
-          pickRef(refMenu.items[Math.min(menuIndex, refMenu.items.length - 1)]);
-        } else {
-          if (slashMenu) pickSlash(slashMenu.items[Math.min(menuIndex, slashMenu.items.length - 1)]);
-        }
-        return;
-      }
+    if (suggestionsOpen) {
       if (event.key === 'Escape') {
-        // 关菜单的这一次 Esc 不往下传：否则全局监听会顺手把正在跑的任务取消掉
         event.preventDefault();
         event.stopPropagation();
-        setRefMenu(null);
-        setSlashMenu(null);
+        clearSuggestions();
+        return;
+      }
+      if (refMenu?.loading && event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        return;
+      }
+      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && suggestionItems.length) {
+        event.preventDefault();
+        const delta = event.key === 'ArrowDown' ? 1 : -1;
+        setMenuIndex(index => (index + delta + suggestionItems.length) % suggestionItems.length);
+        return;
+      }
+      if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey && suggestionItems.length) {
+        event.preventDefault();
+        const item = suggestionItems[Math.min(menuIndex, suggestionItems.length - 1)];
+        if (typeof item === 'string') pickRef(item);
+        else pickSlash(item);
         return;
       }
     }
@@ -439,55 +478,23 @@ export function Composer() {
       event.preventDefault();
       submit();
     }
-    if (event.key === 'Escape') {
-      setRefMenu(null);
-      setSlashMenu(null);
-    }
   }
 
   return (
-    <div className="composer-wrap">
-      {editTarget != null && <div className="send-mode-label">正在编辑历史消息 · 发送将重新执行<button type="button" className="btn" onClick={() => useStore.setState({ _editTarget: null })}>作为新消息发送</button></div>}
-      <ResumeBar />
-      <ApprovalDock />
-      <MessageQueue />
-      <AgentDock />
-      {refMenu && (
-        <div className="ref-menu" role="listbox" ref={menuRef}>
-          {refMenu.loading || (refMenu.items || []).length === 0
-            ? <div className="ref-empty" role="status">{refMenu.loading ? '正在读取文件…' : refMenu.message || '没有匹配的文件'}</div>
-            : refMenu.items.map((item, index) => (
-              <button
-                key={item}
-                type="button"
-                className={`ref-item${index === menuIndex ? ' is-on' : ''}`}
-                onMouseDown={(event) => event.preventDefault()}
-                role="option" aria-selected={index === menuIndex}
-              onMouseEnter={() => setMenuIndex(index)}
-                onClick={() => pickRef(item)}
-              >
-                {item}
-              </button>
-            ))}
-        </div>
-      )}
-      {slashMenu && (
-        <div className="ref-menu" role="listbox" ref={menuRef}>
-          {slashMenu.items.map((command, index) => (
-            <button
-              key={command.name}
-              type="button"
-              className={`ref-item${index === menuIndex ? ' is-on' : ''}`}
-              onMouseDown={(event) => event.preventDefault()}
-              role="option" aria-selected={index === menuIndex}
-              onMouseEnter={() => setMenuIndex(index)}
-              onClick={() => pickSlash(command)}
-            >
-              <b>{command.name.startsWith('/') ? command.name : `/${command.name}`}</b> — {command.hint || command.label || ''}
-            </button>
-          ))}
-        </div>
-      )}
+    <div className="composer-wrap conversation-composer">
+      <div className="composer-docks">
+        {editTarget != null && <div className="send-mode-label">
+          <span>正在编辑历史消息 · 发送将重新执行</span>
+          <Button size="sm" variant="ghost" label="作为新消息发送" onClick={() => {
+            useStore.setState({ _editTarget: null });
+            inputRef.current?.focus();
+          }} />
+        </div>}
+        <ApprovalDock />
+        <ResumeBar />
+        <MessageQueue />
+        <AgentDock />
+      </div>
       <form
         id="composer"
         className={`composer${dragging ? ' is-dragging' : ''}`}
@@ -531,137 +538,119 @@ export function Composer() {
         </div>}
         <div id="input-flow" className="input-flow" contentEditable={!submitting}
           role="textbox" aria-label="消息输入框" aria-multiline="true" aria-busy={pendingFiles > 0 || submitting}
+          aria-readonly={submitting || undefined} tabIndex={0} aria-autocomplete="list" aria-controls={suggestionItems.length ? 'composer-suggestions' : undefined}
+          aria-activedescendant={suggestionItems.length ? 'composer-option-' + menuIndex : undefined}
           ref={flowRef}
-          data-placeholder="描述任务，@ 引用文件，/ 使用技能，附件直接拖进来"
+          data-placeholder="描述任务，@ 引用文件，/ 快捷指令"
           onInput={onInput}
+          onCompositionEnd={onInput}
           onKeyDown={onComposerKeydown}
+          onBlur={clearSuggestions}
         />
+        {suggestionsOpen && (
+          <div className="composer-suggestions composer-flyout" ref={menuRef}>
+            {refMenu && !refMenu.items.length
+              ? <div className="ref-empty" role="status">{refMenu.loading ? '正在读取文件…' : refMenu.message || '没有匹配的文件'}</div>
+              : <div id="composer-suggestions" role="listbox" aria-label={refMenu ? '文件引用' : '快捷指令'}>
+                {suggestionItems.map((item, index) => (
+                  <Button key={typeof item === 'string' ? item : item.name}
+                    id={'composer-option-' + index}
+                    label={typeof item === 'string' ? item : item.name + (item.hint || item.label ? ' · ' + (item.hint || item.label) : '')}
+                    className="ref-item" size="sm" variant="ghost" width="100%"
+                    role="option" aria-selected={index === menuIndex} tabIndex={-1}
+                    onMouseDown={event => event.preventDefault()} onMouseEnter={() => setMenuIndex(index)}
+                    onClick={() => typeof item === 'string' ? pickRef(item) : pickSlash(item)}>
+                    <span className="composer-option-label">{typeof item === 'string' ? item
+                      : <><strong>{item.name.startsWith('/') ? item.name : '/' + item.name}</strong> · {item.hint || item.label}</>}</span>
+                  </Button>
+                ))}
+              </div>}
+          </div>
+        )}
         <div className="composer-bar">
           <input ref={fileRef} type="file" multiple hidden onChange={(event) => { addFiles(event.target.files); event.target.value = ''; }} />
-          <span className="composer-left">
-            <button
-              type="button"
-              className="attach-button"
-              id="attach-button"
-              disabled={submitting}
-              aria-label="添加文件或图片"
-              title="添加文件或图片（也可以拖入或粘贴）"
-              onClick={() => fileRef.current?.click()}
-            >
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 7.4 8.1 12.5a3.1 3.1 0 0 1-4.4-4.4l5.3-5.3a2.1 2.1 0 0 1 3 3L6.9 11a1.1 1.1 0 0 1-1.6-1.6l4.8-4.8" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </button>
-            <span className="composer-chips">
-              <span className="perm-picker">
-                <button
-                  type="button"
-                  className="perm-chip"
-                  id="perm-chip"
-                  aria-haspopup="menu"
-                  aria-expanded={permOpen}
-                  title={`${permissionHint(permissionMode)} · 点击切换`}
-                  onClick={() => { setPermOpen(!permOpen); setModelOpen(false); setContextOpen(false); }}
-                >
-                  {permissionLabel(permissionMode)}
-                </button>
-                {permOpen && (
-                  <div id="perm-menu" className="perm-menu" role="menu" aria-label="权限档位">
-                    <p className="menu-head">权限</p>
-                    {PERMISSION_MODES.map((item) => {
-                      const active = permissionMode === item.mode;
-                      return (
-                        <button
-                          key={item.mode}
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={active}
-                          className={`perm-option${active ? ' is-active' : ''}`}
-                          title={item.hint}
-                          onClick={() => { useStore.getState().savePermissionMode(item.mode); setPermOpen(false); }}
-                        >
-                          <span className="perm-option-icon" aria-hidden="true"><PermissionIcon mode={item.mode} /></span>
-                          <span className="perm-option-text">
-                            <strong>{item.label}</strong>
-                            <span className="perm-option-hint">{item.hint}</span>
-                          </span>
-                          <span className="perm-option-code">{item.code}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </span>
-              <span className="perm-picker">
-                <button
-                  type="button"
-                  className="perm-chip model-chip"
-                  id="model-chip"
-                  aria-haspopup="dialog"
-                  aria-expanded={modelOpen}
-                  aria-controls={modelOpen ? 'model-menu' : undefined}
-                  aria-label={currentModel ? `切换模型，当前 ${currentModel}` : '选择模型'}
-                  title={currentModel ? `当前模型：${currentModel} · 点击切换` : '选择模型'}
-                  onClick={() => { setModelOpen(!modelOpen); setPermOpen(false); setContextOpen(false); }}
-                >
-                  <span className="model-chip-name">{currentModel || '选择模型'}</span>
-                  <svg className="model-chip-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                </button>
-                {modelOpen && (
-                  <ModelPicker
-                    key={currentEndpoint}
-                    onClose={() => { setModelOpen(false); document.getElementById('model-chip')?.focus(); }}
-                    models={modelOptions}
-                    initialModel={currentModel}
-                    initialEndpoint={currentEndpoint}
-                  />
-                )}
-              </span>
-              <span className="perm-picker context-picker">
-                <button
-                  type="button"
-                  className={`perm-chip context-chip level-${usageLevel(usagePercent(contextStatus))}`}
-                  id="context-chip"
-                  aria-haspopup="dialog"
-                  aria-expanded={contextOpen}
-                  title={`上下文已用 ${contextPercent(contextStatus)}${runUsage?.details ? ` · 命中 ${formatCache(runUsage.details)}` : ''} · 点击查看构成与压缩`}
-                  onClick={() => { setContextOpen(!contextOpen); setPermOpen(false); setModelOpen(false); useStore.getState().refreshContext(); }}
-                >
-                  <svg className="context-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" opacity=".25" strokeWidth="2" /><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="2" pathLength="100" strokeDasharray={`${usagePercent(contextStatus)} 100`} transform="rotate(-90 10 10)" /></svg>
-                  <span className="context-chip-label">上下文 · {contextPercent(contextStatus)}{runUsage?.details && <span className="context-cache-label"> · 命中 {formatCache(runUsage.details)}</span>}</span>
-                </button>
-                {contextOpen && <ContextUsagePanel status={contextStatus} compacting={compacting}
-                  report={latestContextReport} reports={requestReports} usage={runUsage}
-                  onClose={() => { setContextOpen(false); document.getElementById('context-chip')?.focus(); }}
-                  onCompact={() => useStore.getState().compactContext()}
-                  onSettings={() => { setContextOpen(false); useStore.getState().setUi({ settingsOpen: true, settingsSection: 'model' }); }} /> }
-              </span>
+          <div className="composer-left">
+            <span title="添加文件或图片，也可以拖入或粘贴">
+              <IconButton id="attach-button" className="composer-icon" variant="ghost"
+                label="添加文件或图片" isDisabled={submitting} onClick={() => fileRef.current?.click()}
+                icon={<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 7.4 8.1 12.5a3.1 3.1 0 0 1-4.4-4.4l5.3-5.3a2.1 2.1 0 0 1 3 3L6.9 11a1.1 1.1 0 0 1-1.6-1.6l4.8-4.8" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
             </span>
-          </span>
+            <div className="perm-picker">
+              <Button id="perm-chip" ref={permTriggerRef} className="composer-choice" size="sm" variant="ghost"
+                label={permissionLabel(permissionMode)} icon={<Icon name="shield" />}
+                aria-haspopup="menu" aria-expanded={permOpen} aria-controls={permOpen ? 'perm-menu' : undefined}
+                onKeyDown={movePermissionFocus} onClick={() => toggleToolbarPanel('perm')} />
+              {permOpen && (
+                <div id="perm-menu" ref={permMenuRef} className="composer-permissions composer-flyout" role="menu" aria-label="权限档位"
+                  onKeyDown={movePermissionFocus}>
+                  <p className="composer-popover-label" aria-hidden="true">权限</p>
+                  {PERMISSION_MODES.map(item => (
+                    <Button key={item.mode} className="composer-permission-option" variant="ghost" width="100%"
+                      label={item.label + ' · ' + item.hint} role="menuitemradio" tabIndex={-1}
+                      aria-checked={permissionMode === item.mode} onClick={() => {
+                        void useStore.getState().savePermissionMode(item.mode);
+                        setToolbarPanel(null);
+                        permTriggerRef.current?.focus({ preventScroll: true });
+                      }}>
+                      <span className="composer-permission-content">
+                        <span className="composer-permission-text"><strong>{item.label}</strong><span>{item.hint}</span></span>
+                        {permissionMode === item.mode && <Icon name="check" />}
+                      </span>
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="perm-picker composer-model-picker">
+              <Button id="model-chip" className="composer-choice composer-model" size="sm" variant="ghost"
+                label={currentModel ? '切换模型，当前 ' + currentModel : '选择模型'}
+                aria-haspopup="dialog" aria-expanded={modelOpen} aria-controls={modelOpen ? 'model-menu' : undefined}
+                endContent={<Icon name="chevron" className="composer-chevron" />} onClick={() => toggleToolbarPanel('model')}>
+                <span className="model-chip-name" title={currentModel || undefined}>{currentModel || '选择模型'}</span>
+              </Button>
+              {modelOpen && (
+                <ModelPicker key={currentEndpoint} models={modelOptions} initialModel={currentModel} initialEndpoint={currentEndpoint}
+                  onClose={() => { setToolbarPanel(null); document.getElementById('model-chip')?.focus(); }} />
+              )}
+            </div>
+          </div>
           <div className="composer-actions">
-            <button type="button" className="icon-btn schedule-compose" aria-label="定时执行" title="安排稍后执行" disabled={pendingFiles > 0 || submitting}
+            <div className="perm-picker composer-context-picker">
+              <span title="上下文与请求用量"><Button id="context-chip" ref={contextTriggerRef} className={'composer-choice composer-context level-' + usageLevel(usagePercent(contextStatus))}
+                size="sm" variant="ghost" label={'上下文用量 ' + contextPercent(contextStatus) + (runUsage?.details ? ' · 缓存命中 ' + formatCache(runUsage.details) : '')}
+                aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls={contextOpen ? 'context-menu' : undefined}
+                icon={<svg className="context-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" opacity=".25" strokeWidth="2" /><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="2" pathLength="100" strokeDasharray={usagePercent(contextStatus) + ' 100'} transform="rotate(-90 10 10)" /></svg>}
+                onClick={() => toggleToolbarPanel('context')}>{contextPercent(contextStatus)}</Button></span>
+              {contextOpen && <ContextUsagePanel status={contextStatus} compacting={compacting}
+                report={latestContextReport} reports={requestReports} usage={runUsage}
+                onClose={() => { setToolbarPanel(null); contextTriggerRef.current?.focus({ preventScroll: true }); }}
+                onCompact={() => useStore.getState().compactContext()}
+                onSettings={() => { setToolbarPanel(null); useStore.getState().setUi({ settingsOpen: true, settingsSection: 'model' }); }} />}
+            </div>
+            <IconButton className="composer-icon schedule-compose" variant="ghost" label="定时执行" icon={<Icon name="clock" />}
+              isDisabled={pendingFiles > 0 || submitting}
               onClick={() => {
                 const state = useStore.getState();
                 if (state.composerApi?.attachmentIds?.()?.length) { state.showNotice('定时入口暂不携带附件。请将文件放入工作区，在目标中注明相对路径；当前草稿与附件已保留。'); return; }
                 state.setUi({ schedulesOpen: true, scheduleDraft: state.composerApi?.getText() || '' });
-              }}>
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.5V8l2.5 1.5"/></svg>
-            </button>
-            <VoiceInput ownerKey={`${sessionEpoch}:${sessionId || ''}:${workspace}`} disabled={submitting}
-              onBusy={value => { voiceBusyRef.current = value; setVoiceBusy(value); }} onText={(text) => { const input = inputRef.current; input?.appendText((input.getText().trim() ? '\n' : '') + text); input?.focus(); }} />
-
-            <button
-              type={sendAction.stop ? "button" : "submit"}
-              onClick={sendAction.stop ? () => useStore.getState().cancelRun() : undefined}
-              className={`send${sendAction.stop ? ' is-running' : ''}`}
-              id="send"
-              disabled={sendAction.disabled || (!sendAction.stop && (pendingFiles > 0 || submitting || voiceBusy))}
-              aria-label={sendAction.ariaLabel}
-              title={sendAction.title}
-            >
-              <svg className="icon-send" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.8M4.6 7.2 8 3.8l3.4 3.4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg>
-              <svg className="icon-stop" viewBox="0 0 16 16" aria-hidden="true"><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.6" fill="currentColor" /></svg>
-            </button>
+              }} />
+            <VoiceInput ownerKey={sessionEpoch + ':' + (sessionId || '') + ':' + workspace} disabled={submitting} feedbackRef={voiceFeedbackRef}
+              onBusy={value => { voiceBusyRef.current = value; setVoiceBusy(value); }}
+              onText={text => { const input = inputRef.current; input?.appendText((input.getText().trim() ? '\n' : '') + text); input?.focus(); }} />
+            <span title={sendAction.title}>
+              <IconButton id="send" className="composer-primary" variant="primary"
+                type={sendAction.stop ? 'button' : 'submit'} label={sendAction.ariaLabel}
+                aria-keyshortcuts={sendAction.stop ? 'Escape' : 'Enter'}
+                isLoading={sendAction.stop ? cancelling : submitting}
+                isDisabled={sendAction.disabled || (!sendAction.stop && (pendingFiles > 0 || submitting || voiceBusy))}
+                onClick={sendAction.stop ? () => useStore.getState().cancelRun() : undefined}
+                icon={sendAction.stop
+                  ? <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.6" fill="currentColor" /></svg>
+                  : <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.8M4.6 7.2 8 3.8l3.4 3.4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg>} />
+            </span>
           </div>
         </div>
+        <div className="composer-voice-feedback" ref={voiceFeedbackRef} />
       </form>
     </div>
   );
@@ -672,24 +661,6 @@ function contextPercent(status: ContextStatus | null) {
     return '—';
   }
   return `${usagePercent(status)}%`;
-}
-
-/** 权限档位的图标：放行的速度感 / 改文件 / 逐次确认 / 只看。 */
-function PermissionIcon({ mode }: { mode: string }) {
-  if (mode === 'AUTO') {
-    return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.8 3.6 9h3.3l-.9 5.2L12.4 7H9.1z" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinejoin="round" /></svg>;
-  }
-  if (mode === 'AUTO_EDIT') {
-    return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.6 2.9 13 5.3 6.4 11.9 3.4 12.6l.7-3zM9.4 4.1l2.4 2.4" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  }
-  if (mode === 'ASK') {
-    return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.6" stroke="currentColor" strokeWidth="1.2" fill="none" /><path d="M6.4 6.2a1.7 1.7 0 1 1 2.4 1.6c-.5.3-.8.6-.8 1.2" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" /><circle cx="8" cy="11" r=".8" fill="currentColor" /></svg>;
-  }
-  return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.6 8S4 3.9 8 3.9 14.4 8 14.4 8 12 12.1 8 12.1 1.6 8 1.6 8Z" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinejoin="round" /><circle cx="8" cy="8" r="1.9" stroke="currentColor" strokeWidth="1.2" fill="none" /></svg>;
-}
-
-function CheckIcon() {
-  return <svg className="menu-check" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.4 3 3 6-6.4" stroke="currentColor" strokeWidth="1.7" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
 function ResumeBar() {
@@ -709,7 +680,7 @@ function ResumeBar() {
   return (
     <div id="task-resume-controls" className="task-live-controls" role="status">
       <span>{bar.text}</span>
-      <button id="task-resume" className="btn btn-primary btn-sm" type="button" onClick={() => useStore.getState().continueRun()}>{bar.label}</button>
+      <Button id="task-resume" size="sm" label={bar.label} onClick={() => useStore.getState().continueRun()} />
     </div>
   );
 }
@@ -723,18 +694,19 @@ function ApprovalDock() {
     return null;
   }
   return (
-    <div id="approval-dock" className="approval-dock">
-      {entries.map((item) => (
-        <div key={item.callId} className="approval-card">
-          <p className="approval-title">需要你批准：{item.name}</p>
-          <pre className="approval-args">{item.args}</pre>
+    <section id="approval-dock" className="approval-dock" aria-label="待审批操作">
+      {entries.map(item => (
+        <article key={item.callId} className="approval-card" aria-busy={item.busy}>
+          <h3 className="approval-title"><StatusDot variant="warning" label="待审批" aria-hidden="true" />需要你批准：{item.name}</h3>
+          <pre className="approval-args" tabIndex={0} aria-label="操作参数">{item.args}</pre>
           <div className="approval-actions">
-            <button type="button" className="btn btn-primary" disabled={item.busy} onClick={() => resolve(item.callId, true)}>批准</button>
-            <button type="button" className="btn" disabled={item.busy} onClick={() => resolve(item.callId, false)}>拒绝</button>
+            {item.busy && <span role="status">正在确认审批…</span>}
+            <Button label="拒绝" size="sm" variant="ghost" isDisabled={item.busy} onClick={() => resolve(item.callId, false)} />
+            <Button label="批准" size="sm" isDisabled={item.busy} onClick={() => resolve(item.callId, true)} />
           </div>
-        </div>
+        </article>
       ))}
-    </div>
+    </section>
   );
 }
 
@@ -755,9 +727,14 @@ function MessageQueue() {
 
 function QueueList({ entries, queueEdit, collapsed, header }: { entries: QueueEntry[]; queueEdit: number | null; collapsed: boolean; header: NonNullable<ReturnType<typeof queueHeader>> }) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const headRef = useRef<HTMLButtonElement>(null);
+  const closeEditor = () => {
+    useStore.getState().setUi({ queueEdit: null });
+    headRef.current?.focus({ preventScroll: true });
+  };
   return (
     <div id="message-queue" className="message-queue">
-      <button type="button" className="queue-head" aria-expanded={!collapsed} onClick={() => useStore.getState().setUi({ queueCollapsed: !collapsed })}>
+      <button ref={headRef} type="button" className="queue-head" aria-expanded={!collapsed} onClick={() => useStore.getState().setUi({ queueCollapsed: !collapsed })}>
         <span className="queue-title">{header.title}</span>
         <span className="queue-head-meta">{header.meta}</span>
         {!!entries.length && <span className="queue-toggle">{collapsed ? '展开' : '收起'}</span>}
@@ -770,15 +747,22 @@ function QueueList({ entries, queueEdit, collapsed, header }: { entries: QueueEn
               <li
                 key={`${index}-${text}`}
                 className={`queue-item${dragFrom === index ? ' is-dragging' : ''}`}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={() => {
-                  if (dragFrom == null || dragFrom === index || useStore.getState().queueBusy) return;
-                  useStore.getState().moveQueueItem(dragFrom, index);
+                onDragOver={event => {
+                  if (dragFrom == null) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                }}
+                onDrop={event => {
+                  if (dragFrom == null) return;
+                  event.preventDefault();
                   setDragFrom(null);
+                  if (dragFrom !== index && !useStore.getState().queueBusy) {
+                    void useStore.getState().moveQueueItem(dragFrom, index);
+                  }
                 }}
               >
                 {queueEdit === index ? (
-                  <QueueEditor index={index} text={text} />
+                  <QueueEditor index={index} text={text} onClose={closeEditor} />
                 ) : (
                   <QueueRow entry={entry} index={index} count={entries.length} onDragStart={() => setDragFrom(index)} onDragEnd={() => setDragFrom(null)} />
                 )}
@@ -799,7 +783,7 @@ function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: Queu
   useEffect(() => {
     if (!more) return;
     const close = (event: KeyboardEvent | PointerEvent) => {
-      if (event instanceof KeyboardEvent && event.key !== 'Escape') return;
+      if (event instanceof KeyboardEvent && (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || event.defaultPrevented)) return;
       if (event.type === 'pointerdown' && event.target instanceof Node && moreRef.current?.contains(event.target)) return;
       if (event.type === 'keydown') { event.preventDefault(); event.stopPropagation(); moreRef.current?.querySelector('button')?.focus(); }
       setMore(false);
@@ -823,7 +807,12 @@ function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: Queu
         onDragEnd={onDragEnd}
         aria-label="拖动调整顺序"
         title="拖动调整顺序"
-        onDragStart={onDragStart}
+        tabIndex={-1}
+        onDragStart={event => {
+          event.dataTransfer.setData('application/x-pilot-queue', String(index));
+          event.dataTransfer.effectAllowed = 'move';
+          onDragStart();
+        }}
       >
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6h8M4 10h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
       </button>
@@ -841,19 +830,20 @@ function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: Queu
         )}
       </div>
       <div className="queue-actions">
-        {running && <button type="button" className="queue-steer" disabled={busy}
-          title="立即引导当前任务" aria-label="引导这条排队消息"
-          onClick={() => useStore.getState().steerQueueItem(index)}><Icon name="steer" />引导</button>}
-        <button type="button" className="queue-icon" disabled={busy} title="编辑" aria-label="编辑这条排队消息"
-          onClick={() => useStore.getState().setUi({ queueEdit: index })}><Icon name="edit" /></button>
-        <button type="button" className="queue-icon" disabled={busy} title="删除" aria-label="删除这条排队"
-          onClick={() => useStore.getState().removeQueueItem(index)}><Icon name="trash" /></button>
+        {running && <Button className="queue-steer-action" label="引导这条排队消息" icon={<Icon name="steer" />}
+          variant="ghost" size="sm" isDisabled={busy} onClick={() => useStore.getState().steerQueueItem(index)}>引导</Button>}
+        <IconButton variant="ghost" size="sm" isDisabled={busy} label="编辑这条排队消息" icon={<Icon name="edit" />}
+          onClick={() => useStore.getState().setUi({ queueEdit: index })} />
+        <IconButton variant="ghost" size="sm" isDisabled={busy} label="删除这条排队" icon={<Icon name="trash" />}
+          onClick={() => useStore.getState().removeQueueItem(index)} />
         {count > 1 && <span className="queue-more" ref={moreRef}>
-          <button type="button" className="queue-icon" aria-label="更多排队操作" aria-expanded={more} disabled={busy}
-            onClick={() => setMore(!more)}><Icon name="more" /></button>
+          <IconButton variant="ghost" size="sm" label="更多排队操作" icon={<Icon name="more" />} aria-expanded={more} isDisabled={busy}
+            onClick={() => setMore(!more)} />
           {more && <div className="queue-more-menu">
-            <button type="button" disabled={index === 0 || busy} onClick={() => { setMore(false); useStore.getState().moveQueueItem(index, index - 1); }}>上移</button>
-            <button type="button" disabled={index === count - 1 || busy} onClick={() => { setMore(false); useStore.getState().moveQueueItem(index, index + 1); }}>下移</button>
+            <Button label="上移" variant="ghost" size="sm" isDisabled={index === 0 || busy}
+              onClick={() => { setMore(false); useStore.getState().moveQueueItem(index, index - 1); }} />
+            <Button label="下移" variant="ghost" size="sm" isDisabled={index === count - 1 || busy}
+              onClick={() => { setMore(false); useStore.getState().moveQueueItem(index, index + 1); }} />
           </div>}
         </span>}
       </div>
@@ -861,25 +851,25 @@ function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: Queu
   );
 }
 
-function QueueEditor({ index, text }: { index: number; text: string }) {
+function QueueEditor({ index, text, onClose }: { index: number; text: string; onClose: () => void }) {
   const spoken = splitAttachmentMarkers(text);
   const [value, setValue] = useState(spoken.body);
   const [saving, setSaving] = useState(false);
   return (
     <div id="queue-edit" className="queue-edit" onKeyDown={event => {
       if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
-        event.preventDefault(); event.stopPropagation(); useStore.getState().setUi({ queueEdit: null });
+        event.preventDefault(); event.stopPropagation(); onClose();
       }
     }}>
-      <textarea aria-label="编辑排队消息" disabled={saving} value={value} onChange={(event) => setValue(event.target.value)} rows={2} />
+      <textarea autoFocus aria-label="编辑排队消息" disabled={saving} value={value} onChange={(event) => setValue(event.target.value)} rows={2} />
       <div className="queue-edit-actions">
-        <button type="button" className="btn btn-primary" disabled={saving || (!value.trim() && !spoken.files.length)} onClick={async () => {
+        <Button label="保存" size="sm" isLoading={saving} isDisabled={!value.trim() && !spoken.files.length} onClick={async () => {
           setSaving(true);
           try {
-            if (await useStore.getState().saveQueueItem(index, joinAttachmentMarkers(value, spoken.files))) useStore.getState().setUi({ queueEdit: null });
+            if (await useStore.getState().saveQueueItem(index, joinAttachmentMarkers(value, spoken.files))) onClose();
           } finally { setSaving(false); }
-        }}>保存</button>
-        <button type="button" className="btn" onClick={() => useStore.getState().setUi({ queueEdit: null })}>取消</button>
+        }} />
+        <Button label="取消" size="sm" variant="ghost" onClick={onClose} />
       </div>
     </div>
   );
@@ -910,7 +900,7 @@ function AgentDock() {
         <ul id="agents-dock-list" className="agents-dock-list">
           {list.map((agent) => (
             <li key={agent.id}>
-              <span className={`agent-status is-${agent.status}`} />
+              <StatusDot variant={agent.status === 'failed' ? 'error' : agent.status === 'running' ? 'accent' : 'neutral'} label={agentStatusLabel(agent.status)} aria-hidden="true" />
               <span className="agent-name" title={agent.task}>{agent.name || agent.task || agent.id}</span>
               <span className="agent-state">{agentStatusLabel(agent.status)}</span>
             </li>

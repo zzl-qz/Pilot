@@ -17,7 +17,8 @@ function useDirectory(sessionId: string | null, workspace: string, path: string,
     setData(previous => ({ ...previous, status: 'loading', error: '' }));
     const request = sessionId ? api.files(sessionId, path) : api.workspaceTree(workspace, path);
     request.then(result => {
-      if (current) setData({ entries: result?.entries || [], truncated: result?.truncated, status: 'ready' });
+      if (!result) throw new Error('服务端未返回目录内容');
+      if (current) setData({ entries: result.entries || [], truncated: result.truncated, status: 'ready' });
     }).catch(error => {
       if (current) setData(previous => ({ ...previous, status: 'error', error: errorInfo(error).message }));
     });

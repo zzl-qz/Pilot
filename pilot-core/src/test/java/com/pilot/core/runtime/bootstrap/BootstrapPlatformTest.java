@@ -39,10 +39,11 @@ class BootstrapPlatformTest {
     }
 
     @Test
-    void nodeRequiresTheDesktopMinimumVersionAndMatchingArchitecture() {
+    void nodeRequiresTheFrontendMinimumVersionAndMatchingArchitecture() {
         var platform = new BootstrapPlatform("windows", "x64");
         assertFalse(SourceEnvironment.nodeVersionMatches("PILOT_NODE_RUNTIME 22.11.0 x64", platform));
-        assertTrue(SourceEnvironment.nodeVersionMatches("PILOT_NODE_RUNTIME 22.12.0 x64", platform));
+        assertFalse(SourceEnvironment.nodeVersionMatches("PILOT_NODE_RUNTIME 22.12.0 x64", platform));
+        assertTrue(SourceEnvironment.nodeVersionMatches("PILOT_NODE_RUNTIME 22.13.0 x64", platform));
         assertTrue(SourceEnvironment.nodeVersionMatches("warning\nPILOT_NODE_RUNTIME 24.0.0 x64\n", platform));
         assertFalse(SourceEnvironment.nodeVersionMatches("PILOT_NODE_RUNTIME 22.23.4 arm64", platform));
         assertFalse(SourceEnvironment.nodeVersionMatches("unknown node", platform));

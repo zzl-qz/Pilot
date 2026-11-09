@@ -1,3 +1,4 @@
+import { once } from 'node:events';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
 import { createServer } from 'vite';
 import { chromium, _electron } from 'playwright-core';
@@ -60,8 +61,9 @@ if (new URL(location.href).searchParams.has('queue')) {
 }
 createRoot(document.getElementById('root')).render(React.createElement(App));
 </script></body></html>`;
-const server = await createServer({ root, server:{host:'127.0.0.1',port:0,proxy:{}},plugins:[{name:'interaction-fixture',configureServer(server){
+const server = await createServer({ configFile:false, root, optimizeDeps:{include:['react/jsx-dev-runtime','pdfjs-dist']}, server:{host:'127.0.0.1',port:0,hmr:false,proxy:{}},plugins:[{name:'interaction-fixture',configureServer(server){
   server.middlewares.use('/__interaction',async(_req,res)=>{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__interaction',fixture));});
+  server.middlewares.use('/api/sessions/ui-audit/commands',(_req,res)=>{res.setHeader('Content-Type','application/json');res.end('{"tasks":[]}');});
 }}]});
 let browser, electron;
 async function run(page,name,url) {
@@ -112,7 +114,7 @@ async function run(page,name,url) {
   await clear();await input.fill('@');await page.waitForFunction(()=>!!window.resolveFiles);
   const beforeLoadingEnter=await page.evaluate(()=>calls.length); await input.press('Enter'); assert.equal(await page.evaluate(()=>calls.length),beforeLoadingEnter,'读取引用时 Enter 不发送');
   await input.press('Escape');await page.evaluate(()=>resolveFiles({files:['late.txt']}));await page.waitForTimeout(50);
-  assert.equal(await page.locator('.ref-menu').count(),0);
+  assert.equal(await page.locator('.composer-suggestions').count(),0);
   // Popovers: only one open, outside click / Escape close before global task cancellation.
   await page.evaluate(()=>store.setState({sessionId:'test-a',running:true,runId:'run-a'}));
   for(const id of ['perm','model','context']) {
@@ -122,8 +124,59 @@ async function run(page,name,url) {
     await page.locator(`#${id}-chip`).click();await page.locator('.empty-title').click();
     assert.equal(await page.locator(`#${id}-chip`).getAttribute('aria-expanded'),'false');
   }
-  await page.locator('#perm-chip').click();await page.keyboard.press('ArrowDown');assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('role')),'menuitemradio');await page.locator('#model-chip').click();
+  const permission = page.locator('#perm-chip');
+  await permission.press('Enter');
+  assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('aria-checked')), 'true');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('role')), 'menuitemradio');
+  await page.keyboard.press('Home');
+  assert.equal(await page.locator('#perm-menu button').first().evaluate(el=>el===document.activeElement),true);
+  await page.locator('#model-chip').click();
   assert.equal(await page.locator('#perm-menu').count(),0);await page.keyboard.press('Escape');
+  // 权限与用量菜单在缺少 CSS Anchor / Popover API 时仍可键盘操作。
+  await page.evaluate(()=>{
+    window.savedLayerSupport={css:CSS.supports,popover:HTMLElement.prototype.showPopover};
+    CSS.supports=(...args)=>args.some(arg=>arg.includes('anchor')) ? false : savedLayerSupport.css(...args);
+    HTMLElement.prototype.showPopover=undefined;
+  });
+  await permission.press('ArrowDown');
+  await page.locator('#perm-menu').waitFor();
+  await page.keyboard.press('Escape');
+  assert.equal(await permission.evaluate(el=>el===document.activeElement),true);
+  const contextChip = page.locator('#context-chip');
+  await contextChip.press('Enter');
+  await page.getByRole('dialog',{name:'上下文与请求用量'}).waitFor();
+  await page.keyboard.press('Escape');
+  assert.equal(await contextChip.evaluate(el=>el===document.activeElement),true);
+  await page.evaluate(()=>{
+    CSS.supports=savedLayerSupport.css;
+    HTMLElement.prototype.showPopover=savedLayerSupport.popover;
+    delete window.savedLayerSupport;
+  });
+
+  // 审批失败后允许重试；发送给服务端的判定仍由用户选择，卡片等 SSE 确认后才消失。
+  await page.evaluate(()=>{
+    store.setState({pendingApprovals:{'approval-ui':{callId:'approval-ui',agent:null,name:'运行检查命令',args:'npm run check'}}});
+    window.failApproval=true;
+    api.approval=async (...args)=>{calls.push({name:'approval',args});if(failApproval) throw Error('模拟审批失败');};
+  });
+  const approval = page.getByRole('region',{name:'待审批操作'});
+  await approval.getByRole('button',{name:'拒绝',exact:true}).press('Enter');
+  await page.locator('#notice-text').filter({hasText:/模拟审批失败/}).waitFor();
+  assert.equal(await approval.getByRole('button',{name:'批准',exact:true}).isEnabled(),true);
+  await page.evaluate(()=>window.failApproval=false);
+  await approval.getByRole('button',{name:'批准',exact:true}).press('Enter');
+  await approval.getByRole('status').filter({hasText:'正在确认审批'}).waitFor();
+  assert.deepEqual(await page.evaluate(()=>calls.filter(call=>call.name==='approval').map(call=>call.args)),[
+    ['approval-ui',false],['approval-ui',true]
+  ]);
+  await page.evaluate(async()=>{
+    const {applyEvent}=await import('/src/thread-reducer.js');
+    store.setState(draft=>applyEvent(draft,{type:'approval.resolved',sequence:3,payload:{callId:'approval-ui',decision:'APPROVED'}},{live:true}));
+  });
+  await approval.waitFor({state:'hidden'});
+  await page.evaluate(()=>store.getState().hideNotice());
+
   // Failed settings save preserves the form; this fixture never changes real credentials.
   await page.locator('#model-chip').click();
   await page.locator('#model-menu').getByRole('button',{name:'模型设置'}).click();
@@ -215,7 +268,25 @@ async function run(page,name,url) {
     await page.screenshot({path:join(temp,'chromium-attachment-preview-mobile.png'),animations:'disabled'});
     await page.setViewportSize({width:1440,height:900});
   }
-  await page.keyboard.press('Escape');assert.equal(await page.locator('.attachment-preview').count(),0);
+  const previewTrigger = page.getByRole('button',{name:'预览附件 notes.docx'});
+  const beforeEscape = await page.evaluate(()=>calls.filter(call=>call.name==='cancelRun').length);
+  await page.evaluate(()=>store.setState({running:true}));
+  await page.keyboard.press('Escape');
+  await page.locator('.attachment-preview').waitFor({state:'hidden'});
+  assert.equal(await previewTrigger.evaluate(el=>el===document.activeElement),true);
+  assert.equal(await page.evaluate(()=>calls.filter(call=>call.name==='cancelRun').length),beforeEscape);
+  await page.evaluate(()=>{
+    store.setState({running:false});
+    window.savedShowModal=HTMLDialogElement.prototype.showModal;
+    HTMLDialogElement.prototype.showModal=undefined;
+  });
+  await previewTrigger.click();
+  const inlinePreview = page.getByRole('region',{name:'附件预览：notes.docx'});
+  await inlinePreview.getByText('line one', {exact:false}).waitFor();
+  await inlinePreview.getByRole('button',{name:'关闭预览'}).press('Escape');
+  await inlinePreview.waitFor({state:'hidden'});
+  assert.equal(await previewTrigger.evaluate(el=>el===document.activeElement),true);
+  await page.evaluate(()=>{HTMLDialogElement.prototype.showModal=savedShowModal;});
   assert.equal(await page.locator('#task-contract-summary').innerText().then(text=>text.includes('/home/u/.pilot/attachments')),false);
   // PDF is fetched as attachment data and rendered by PDF.js; never navigate to the PDF URL.
   await page.evaluate(()=>{
@@ -235,14 +306,25 @@ async function run(page,name,url) {
     return route.fulfill({status:200,contentType:'application/pdf',body:makePdfFixture()});
   });
   await page.getByRole('button',{name:'预览附件 sample.pdf'}).click();
-  await page.getByRole('toolbar',{name:'PDF 阅读工具'}).waitFor();
+  await page.getByRole('group',{name:'PDF 阅读工具'}).getByText('1 / 1',{exact:true}).waitFor().catch(async error => {
+    console.error('PDF preview:', await page.locator('body').innerText(), errors, pdfConsoleErrors);
+    throw error;
+  });
   await page.waitForFunction(()=>{
     const canvas=document.querySelector('.pdf-attachment-scroll canvas');
-    if(!canvas || canvas.width<500 || canvas.height<600) return false;
-    if(document.querySelector('[aria-live="polite"]')?.textContent?.trim()!=='1 / 1') return false;
+    if(!canvas || canvas.hidden || canvas.width<500 || canvas.height<600) return false;
     const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
     let ink=0;for(let i=0;i<pixels.length;i+=4) if(pixels[i]<180&&pixels[i+1]<180&&pixels[i+2]<180) ink++;
     return ink>100;
+  }).catch(async error=>{
+    const snapshot=await page.locator('.pdf-attachment-viewer').evaluate(viewer=>{
+      const canvas=viewer.querySelector('canvas'),context=canvas?.getContext('2d');
+      return {text:viewer.innerText,
+        canvas:canvas&&[canvas.width,canvas.height,canvas.clientWidth,canvas.hidden],
+        scroll:viewer.querySelector('.pdf-attachment-scroll')?.clientWidth,
+        darkPixels:context ? context.getImageData(0,0,canvas.width,canvas.height).data.filter((v,i)=>i%4===0&&v<180).length : null};
+    });
+    throw new Error(`PDF 预览没有完成：${JSON.stringify(snapshot)} ${pdfConsoleErrors.join(' | ')}`,{cause:error});
   });
   page.off('console',capturePdfConsole);
   assert.deepEqual(pdfConsoleErrors,[],`PDF.js 控制台错误: ${pdfConsoleErrors.join(' | ')}`);
@@ -263,25 +345,39 @@ async function run(page,name,url) {
   await page.keyboard.press('Escape');
   // Review expanded, line-range feedback preserves draft attachments; never sends automatically.
   await page.locator('#toggle-activity').click();await page.locator('#panel-changes').waitFor();
-  await page.getByText('全屏审阅',{exact:true}).click();await page.locator('.change-row-name').getByText('App.jsx',{exact:true}).click();
+  await page.getByRole('button',{name:'全屏审阅',exact:true}).click();await page.locator('.change-row-name').getByText('App.jsx',{exact:true}).click();
   await page.getByRole('button',{name:'选择原文件第 2 行',exact:true}).click();
   await page.getByRole('button',{name:'选择现文件第 2 行',exact:true}).click({modifiers:['Shift']});
   await page.getByLabel('审阅意见').fill('处理空输入边界');
   const sentBefore=await page.evaluate(()=>calls.filter(c=>c.name==='sendMessage').length);
-  await page.getByText('引用到输入框',{exact:true}).click();
+  await page.getByRole('button',{name:'引用到输入框',exact:true}).click();
   assert.equal(await chips.count(),1);assert.match(await input.innerText(),/处理空输入边界/);
   assert.match(await input.innerText(),/原文件:2 → 现文件:2/);
   assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='sendMessage').length),sentBefore);
   await page.getByLabel('审阅范围').selectOption('run');await page.waitForTimeout(80);
   assert.match(await page.locator('.review-scope-note').innerText(),/差异仍相对 HEAD/);
-  assert.equal(await page.locator('#changes-undo-all').count(),0);
+  await page.locator('.change-row-name').getByText('App.jsx',{exact:true}).click();
+  assert.equal(await page.locator('.change-view-undo').count(),0,'最近任务范围仅供审阅');
   await page.getByLabel('审阅范围').selectOption('workspace');
-  // Recovery has correct zero-file impact; only inspect, never restore.
-  await page.evaluate(()=>store.getState().setUi({checkpointDialog:{sequence:1,info:{input:'原输入',runs:1,conversationAvailable:true,code:{available:true,files:[]}}}}));
-  if(await page.locator('#checkpoint-dialog').count()) {
-    assert.equal((await page.locator('#checkpoint-dialog').innerText()).includes('新建的文件会被删除'),false);
-    await page.keyboard.press('Escape');
-  }
+  // 关闭尚在读取的检查点，旧响应到达时不能重新打开弹窗。
+  await page.evaluate(()=>{
+    api.checkpoints=()=>new Promise(resolve=>{window.finishCheckpoint=resolve;});
+    window.pendingCheckpoint=store.getState().openCheckpoint(1);
+  });
+  const checkpoint=page.locator('#checkpoint-dialog');
+  await checkpoint.getByRole('status').filter({hasText:'正在检查后续改动…'}).waitFor();
+  await page.keyboard.press('Escape');
+  await page.evaluate(async ()=>{
+    const info={input:'原输入',runs:1,conversationAvailable:true,code:{ready:true,files:[]}};
+    finishCheckpoint(info);
+    await pendingCheckpoint;
+    window.checkpointFixture=info;
+  });
+  assert.equal(await checkpoint.count(),0);
+  await page.evaluate(()=>store.getState().setUi({checkpointDialog:{sequence:1,info:checkpointFixture}}));
+  await checkpoint.getByText('没有文件需要还原。',{exact:false}).waitFor();
+  assert.equal(await checkpoint.getByRole('radio',{name:/只撤代码/}).isDisabled(),true);
+  await page.keyboard.press('Escape');
   await checkReview(page, name, temp);
   await checkSideChat(page, name, temp);
   await checkVoice(page, name, temp);
@@ -319,7 +415,10 @@ async function run(page,name,url) {
   assert.deepEqual(errors,[]);console.log(`${name}: PASS combined interactions, failure/race boundaries, review, responsive layouts`);
 }
 try {
-  await server.listen();const url=`http://127.0.0.1:${server.httpServer.address().port}/__interaction`;
+  const listening = once(server.httpServer, 'listening');
+  server.httpServer.listen(0, '127.0.0.1');
+  await listening;
+  const url=`http://127.0.0.1:${server.httpServer.address().port}/__interaction`;
   if(process.argv.includes('--serve')) { console.log('Fixture:',url); await new Promise(()=>{}); }
   browser=await chromium.launch({channel:'chrome',headless:true,args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});await run(await browser.newPage(), 'chromium',url);await browser.close();browser=null;
   if (!process.argv.includes('--chromium-only')) {

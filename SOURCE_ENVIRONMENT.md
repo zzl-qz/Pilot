@@ -7,9 +7,9 @@
 | 检查项 | 处理方式 |
 | --- | --- |
 | 启动 Java | 检查版本、JDK 编译能力及架构；优先复用本机 Java 25+，否则下载私有 Temurin JDK 25 |
-| Node 与 npm | 检查 Node 22.12+ 和 npm 是否齐全，缺失或残缺时下载完整私有 Node 22；不修改系统安装 |
+| Node 与 npm | 检查 Node 22.13+ 和 npm 是否齐全，缺失或残缺时下载完整私有 Node 22；不修改系统安装 |
 | Maven | 使用固定版本的私有 Maven，通过 Java 参数数组启动，避免 Windows 批处理路径转义问题 |
-| 前端依赖 | 首次缺失时按 package-lock 执行 npm ci；已有依赖保留原来的更新询问 |
+| 前端依赖 | 缺失或版本不符合锁文件时自动执行 npm ci；依赖齐全时保留终端中的更新询问 |
 | 可选手机连接桥 | 仅在打开“连接手机”时检查已打包组件；未打包时提示，不启动 Gradle，不构建 APK / 连接桥 |
 | 原生与二维码 | 手机连接窗口按需实际创建无中继的临时端点并生成 PNG，确认原生库能加载、二维码编码可运行；不创建配对身份 |
 | 桌面 Electron | npm 安装后显式运行官方二进制安装器；验证锁定版本、平台、架构、路径及执行权限后再准备桌面壳；失效副本保留后修复 |
@@ -48,10 +48,12 @@ IDE 或已打包后台仅在打开手机连接窗口时异步检查已打包组�
 
 完全离线的新机器无法凭空获得未携带的依赖。可先联网预热，或携带同系统 / 架构的完整便携包与缓存，再由启动探针确认。IDE 自身的 Java 编译器在程序运行前执行，无法由尚未启动的后台修改；没有 Java 25 时应先运行启动脚本，再按 IDE 需要选择生成的私有 JDK。
 
+直接从 IDE 运行 Maven 也会在编译前检查前端依赖，即使没有交互终端。若无法安装，启动会停在依赖检查，修好网络或缓存后可重试；只构建后端可指定 `-DskipFrontend=true`，同时跳过前端依赖安装与构建。
+
 ## 开发验证
 
 ```text
-node --test scripts/bootstrap.test.mjs
+node --test scripts/bootstrap.test.mjs scripts/frontend-deps.test.mjs
 npm --prefix pilot-desktop test
 node scripts/mobile.mjs test  # 仅移动端开发验收，由开发者自行准备 Java 21 / Gradle / Android SDK
 node pilot-mobile/scripts/environment-smoke.mjs

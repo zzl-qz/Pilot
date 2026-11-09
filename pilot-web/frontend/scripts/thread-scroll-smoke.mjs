@@ -79,13 +79,14 @@ async function run(page, name) {
   await page.waitForFunction(()=>{const el=document.querySelector('.thread');return el.scrollHeight-el.clientHeight-el.scrollTop<5;});
 
   await page.goto(url+'?mode=sparse');
-  await page.waitForFunction(()=>store.getState().thread.rows.some(row=>row.text==='之前的第一个问题'));
+  // 夹具先生成事件，再异步读取最后一页并挂载 App。等待真实消息出现，跳过挂载前的种子状态。
+  await page.getByText('之前的第一个问题',{exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>store.getState().thread.history.hasMore),false,'不足一屏时跨过全部不可见事件页');
   assert.ok(await page.evaluate(()=>historyCalls.length)<10,'分页请求有界');
   assert.equal(await page.evaluate(()=>store.getState().thread.windowEvents[0].sequence),1);
 
   await page.goto(url+'?mode=empty');
-  await page.waitForFunction(()=>store.getState().thread.rows.some(row=>row.text==='之前的第一个问题'));
+  await page.getByText('之前的第一个问题',{exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>store.getState().thread.history.hasMore),false,'末页全是不可见事件时仍能加载历史');
 
   await page.goto(url+'?mode=failure');

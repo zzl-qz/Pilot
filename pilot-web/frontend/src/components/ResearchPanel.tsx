@@ -31,6 +31,6 @@ export default function ResearchPanel() {
     return () => { alive = false; };
   }, [sessionId, version]);
   return <section className="research-panel" aria-label="开源参考"><div className="research-toolbar"><span>当前任务的调研依据</span><button className="btn" disabled={loading || !sessionId} onClick={() => setVersion(v => v + 1)}>刷新</button></div>
-    {error && <p role="alert">读取失败：{error}</p>}{loading ? <p role="status">正在读取调研记录…</p> : <ResearchRecords records={records} />}
+    {error && <p role="alert">读取失败：{error}</p>}{loading ? <p role="status">正在读取调研记录…</p> : !error && <ResearchRecords records={records} />}
   </section>;
 }

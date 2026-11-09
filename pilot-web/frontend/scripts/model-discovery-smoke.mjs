@@ -1,3 +1,4 @@
+import { openGlobalFunction } from './global-navigation.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium, _electron } from 'playwright-core';
@@ -79,7 +80,7 @@ async function run(page, name) {
   reset(); page.setDefaultTimeout(10000); const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({ width: 1440, height: 900 }); await page.goto(url);
-  await page.locator('#settings-open').click();
+  await openGlobalFunction(page, /^设置/);
   await page.locator('.settings-nav').getByRole('button', { name: '模型', exact: true }).click();
   const settings = page.locator('#settings'), fetch = settings.locator('#settings-model-fetch');
   await fetch.click(); await settings.getByRole('option', { name: models[0], exact: true }).waitFor();
@@ -111,13 +112,18 @@ async function run(page, name) {
   assert.equal(saves.length, 1); assert.equal(saves[0].model, models[5]);
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: 900 }); await fetch.click();
+    if (width < 800) {
+      assert.equal(await settings.locator('.settings-nav').isVisible(), false);
+      assert.equal(await settings.getByRole('combobox', { name: '设置分类' }).inputValue(), 'model');
+    }
     await settings.getByRole('option', { name: models[0], exact: true }).waitFor();
     await settings.getByRole('option', { name: models[0], exact: true }).click();
     await settings.locator('#settings-model-save').click();
     await feedback.getByText(new RegExp(`已保存：模型「${models[0]}」`)).waitFor();
     assert.equal(await feedback.isVisible(), true, '保存结果必须位于弹窗内');
     assert.ok(await settings.locator('.settings-body').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
-    const option = await settings.getByRole('option').first().boundingBox(), body = await settings.locator('.settings-body').boundingBox();
+    const option = await settings.getByRole('listbox').getByRole('option').first().boundingBox(), body = await settings.locator('.settings-body').boundingBox();
+    assert.ok(option && body);
     assert.ok(option.y >= body.y && option.y + option.height <= body.y + body.height, '探测后首个选项应可见');
     await page.screenshot({ path: join(output, `${name}-${width}.png`), animations: 'disabled' });
   }
@@ -178,7 +184,7 @@ async function run(page, name) {
   saveMode = 'slow'; await settings.locator('#settings-model-name').fill('reopened-model');
   await settings.locator('#settings-model-save').click(); await feedback.getByText(/正在保存/).waitFor();
   await until(() => heldSaves.length === 1);
-  await page.keyboard.press('Escape'); await page.locator('#settings-open').click();
+  await page.keyboard.press('Escape'); await openGlobalFunction(page, /^设置/);
   await feedback.getByText(/正在保存/).waitFor();
   assert.equal(await settings.locator('#settings-model-save').isDisabled(), true);
   heldSaves.splice(0).forEach(resolve => resolve()); saveMode = 'success';
@@ -188,6 +194,14 @@ async function run(page, name) {
   // 清 Key 同样在当前弹窗反馈，失败保留状态，成功更新掩码和按钮。
   await settings.locator('#settings-model-name').fill('unsaved-model');
   await settings.locator('#settings-model-endpoint').fill('https://unsaved.example/v1');
+  const clear = settings.locator('#settings-model-clear-key');
+  await clear.click();
+  await page.locator('#confirm-dialog').waitFor();
+  await page.keyboard.press('Escape');
+  await page.locator('#confirm-dialog').waitFor({ state: 'detached' });
+  await settings.waitFor();
+  await page.waitForFunction(() => document.activeElement?.id === 'settings-model-clear-key');
+  assert.equal(clears, 0, '关闭二次确认时保留设置及焦点');
   saveMode = 'error'; await settings.locator('#settings-model-clear-key').click(); await page.locator('#confirm-ok').click();
   await feedback.getByText(/清除失败：测试保存暂不可用/).waitFor();
   assert.equal(await settings.locator('#settings-model-clear-key').isEnabled(), true);
@@ -206,6 +220,10 @@ async function run(page, name) {
     assert.ok(await page.evaluate(() => Boolean(document.activeElement.closest('#settings'))), 'Tab 不应因未参与键盘顺序的模型选项而跳出设置弹窗');
   }
   await settings.getByRole('searchbox', { name: '筛选模型' }).fill('model-29');
+  const savesBeforeFiltering = saves.length;
+  await settings.getByRole('searchbox', { name: '筛选模型' }).press('Enter');
+  assert.equal(await page.evaluate(() => store.getState().modelSave.busy), false);
+  assert.equal(saves.length, savesBeforeFiltering, '筛选框回车不能提交服务配置');
   await settings.getByRole('option', { name: 'model-29', exact: true }).click();
   assert.equal(await settings.locator('#settings-model-name').inputValue(), 'model-29');
   await settings.getByRole('searchbox', { name: '筛选模型' }).fill('does-not-exist');

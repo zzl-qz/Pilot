@@ -36,8 +36,19 @@ try {
   const page = await context.newPage(), errors=[]; page.on('pageerror',e=>errors.push(e.message));
   await page.goto(base); await page.getByRole('heading',{name:'连接你的工作区'}).waitFor();
   assert.equal(new URL(page.url()).pathname,'/connect');
+  for (const scheme of ['light', 'dark']) {
+    await page.emulateMedia({colorScheme:scheme});
+    assert.equal(await page.locator('html').evaluate(el=>getComputedStyle(el).backgroundColor),
+      scheme==='light'?'rgb(250, 250, 250)':'rgb(23, 23, 23)');
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    await page.screenshot({path:join(output,`login-mobile-${scheme}.png`)});
+  }
+  await page.getByLabel('访问令牌').fill('   '); await page.getByRole('button',{name:'连接',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'请输入访问令牌'}).waitFor();
+  assert.ok(await page.getByLabel('访问令牌').evaluate(el=>el===document.activeElement));
   await page.getByLabel('访问令牌').fill('wrong'); await page.getByRole('button',{name:'连接',exact:true}).click();
   await page.getByRole('alert').filter({hasText:'缺少或错误的访问令牌'}).waitFor();
+  assert.ok(await page.getByLabel('访问令牌').evaluate(el=>el===document.activeElement));
   await page.getByLabel('访问令牌').fill(token); await page.getByRole('button',{name:'连接',exact:true}).click();
   await page.getByRole('heading',{name:'从一个任务开始'}).waitFor();
   assert.equal(new URL(page.url()).search,'');
