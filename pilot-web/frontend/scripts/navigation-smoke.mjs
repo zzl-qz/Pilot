@@ -117,7 +117,9 @@ async function run(page,name) {
     const box=await page.locator('.thread-nav-panel').boundingBox();assert.ok(box.x>=0&&box.x+box.width<=width&&box.y>=0&&box.y+box.height<=900);
     await page.keyboard.press('Escape');
   }
-  await page.evaluate(()=>document.documentElement.dataset.theme='light');await page.getByRole('button',{name:'打开对话导航和书签'}).click();await page.screenshot({path:join(output,`${name}-390-light.png`),timeout:20000,animations:'disabled'});
+  await page.evaluate(()=>store.getState().setTheme('light'));
+  await page.getByRole('button',{name:'打开对话导航和书签'}).click();
+  await page.screenshot({path:join(output,`${name}-390-light.png`),timeout:20000,animations:'disabled'});
   await checkShell(page,name,output);
   assert.deepEqual(errors,[]);console.log(name+': PASS preview/jump/bookmarks/persistence/history/streaming/keyboard/errors/session/responsive');
 }

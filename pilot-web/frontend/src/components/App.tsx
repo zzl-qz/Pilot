@@ -19,7 +19,6 @@ import { resolveFolders, samePath } from '../lib/projects.js';
 import { shortcut, runPhase, runTone, isShortcutModifier } from '../lib/interaction.js';
 import { api } from '../api.js';
 import { watchWorkbench } from '../lib/workbench-sync.js';
-import { writeClipboard } from '../lib/clipboard.js';
 import { dragWidth, readLayout, writeLayout } from '../lib/layout.js';
 import { UiProvider } from './UiProvider.js';
 import { useResultUnread } from '../lib/result-unread.js';
@@ -71,7 +70,6 @@ function Workbench() {
   const inspectorOpen = useStore((state) => state.ui.inspectorOpen);
   const inspectorTab = useStore((state) => state.ui.inspectorTab);
   const embedded = useStore((state) => state.embeddedSessionId);
-  const sessionId = useStore((state) => state.sessionId);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 960px)').matches);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
@@ -363,25 +361,6 @@ function Workbench() {
               aria-busy={Boolean(refreshing)} isDisabled={Boolean(refreshing)}
               tooltip={syncError ? `同步失败：${syncError}，点击重试` : '刷新工作台数据，保留草稿与附件 (F5)'}
               onClick={() => useStore.getState().refreshWorkbench()} />}
-            {sessionId && (
-              <Button
-                id="session-chip"
-                className="workbench-control session-chip"
-                label="复制会话 ID"
-                icon={<Icon name="copy" />}
-                variant="ghost"
-                isIconOnly
-                tooltip={`复制会话 ID：${sessionId}`}
-                onClick={async () => {
-                  try {
-                    if (!await writeClipboard(sessionId)) throw new Error('clipboard unavailable');
-                    useStore.getState().showNotice(`已复制会话 ID：${sessionId}`);
-                  } catch {
-                    useStore.getState().showNotice('复制失败');
-                  }
-                }}
-              />
-            )}
             <RunStatus />
             {/* 内嵌页再展开审阅面板会把窄 iframe 挤成两栏，这里不给入口 */}
             {!embedded && (
