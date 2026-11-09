@@ -30,7 +30,15 @@ api.saveBookmark=async(s,sequence)=>{calls.push({kind:'bookmark',s,sequence});co
 api.deleteBookmark=async(s,sequence)=>localStorage.setItem(key(s),JSON.stringify((await api.bookmarks(s)).filter(r=>r.sequence!==sequence)));
 api.importBookmarks=async(s,sequences)=>{calls.push({kind:'migration',s,sequences});for(const sequence of sequences)await api.saveBookmark(s,sequence);return {bookmarks:await api.bookmarks(s),skipped:[]};};
 if(!localStorage.getItem('mock-p1-seeded')){localStorage.setItem('pilot.message-bookmarks:source',JSON.stringify([{sequence:1,title:'旧书签',preview:'迁移测试'}]));localStorage.setItem('mock-p1-seeded','1');}
-api.searchMessages=async(body)=>{calls.push({kind:'search',...body});if(window.searchFail)throw Error('搜索连接断开');if(window.searchWait)await window.searchWait;return{items:body.q==='无匹配'?[]:[{sessionId:'source',title:'无人值守维护',sequence:2,anchor:1,role:'assistant',text:'已修复中文路径处理，参考成熟开源任务链路并完成验证。',bookmarked:false}],hasMore:false,nextOffset:1};};
+api.searchMessages=async(body)=>{
+  calls.push({kind:'search',...body});
+  if(window.searchFail)throw Error('搜索连接断开');
+  if(body.offset&&window.searchPageFail)throw Error('下一页暂时无法读取');
+  if(window.searchWait)await window.searchWait;
+  const text=body.q==='新条件'?'新条件的搜索结果':'已修复中文路径处理，参考成熟开源任务链路并完成验证。';
+  return{items:body.q==='无匹配'?[]:[{sessionId:'source',title:'无人值守维护',sequence:2+body.offset,anchor:1,role:'assistant',text,bookmarked:false}],
+    hasMore:body.q==='分页'&&body.offset===0,nextOffset:body.offset+1};
+};
 window.config={version:0,desktop:false,webhookUrl:''};window.deliveries=[{id:'failed',version:2,resultId:'result-1',title:'跨平台维护需要处理',channel:'WEBHOOK',state:'FAILED',attempts:6,nextAt:new Date().toISOString(),error:'Webhook 返回 HTTP 503'}];window.pendingNotice=null;window.notices=[];
 class FakeNotification{static permission='denied';static async requestPermission(){return this.permission;}constructor(title,options){notices.push({title,...options});setTimeout(()=>this.onshow?.(),10);}close(){}}
 window.Notification=FakeNotification;
@@ -41,7 +49,7 @@ api.claimDelivery=async()=>{const value=window.pendingNotice;window.pendingNotic
 api.deliveryReceipt=async(id,body)=>calls.push({kind:'receipt',id,...body});
 api.retryDelivery=async(id,version)=>{calls.push({kind:'notification-retry',id,version});deliveries[0].state='PENDING';deliveries[0].version++;};
 window.makeRows=()=>[{type:'user',key:'u1',sequence:1,text:'检查跨平台文件同步'},{type:'turn',key:'a1',runIds:['r1'],tools:[],reply:{text:'已修复中文目录路径处理。',live:false},stats:{}}];
-useStore.setState({init:async()=>{},activate:async(id)=>{useStore.setState({sessionId:id});window.activated=id;},sessionId:'source',workspace:'/workspace/pilot',sessionTitle:'无人值守维护',sessions:[{id:'source',title:'无人值守维护',workspace:'/workspace/pilot'}],projects:[],thread:{...useStore.getState().thread,rows:makeRows(),windowEvents:[{sequence:1},{sequence:2}],history:{...useStore.getState().thread.history,hasMore:false}}});
+useStore.setState({init:async()=>{},activate:async(id)=>{if(window.failOpen)return false;useStore.setState({sessionId:id});window.activated=id;},sessionId:'source',workspace:'/workspace/pilot',sessionTitle:'无人值守维护',sessions:[{id:'source',title:'无人值守维护',workspace:'/workspace/pilot'}],projects:[],thread:{...useStore.getState().thread,rows:makeRows(),windowEvents:[{sequence:1},{sequence:2}],history:{...useStore.getState().thread.history,hasMore:false}}});
 const query=new URL(location.href).searchParams;
 const screen=query.get('screen');
 useStore.getState().setTheme(query.get('theme') || 'dark');
@@ -124,12 +132,54 @@ async function run(page,name,url) {
   await page.getByRole('heading',{name:'工作日维护的最近一轮',exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>store.getState().ui.scheduleTarget),'recent-round');
   await page.keyboard.press('Escape');
-  await page.getByRole('button',{name:'搜索消息与书签',exact:true}).click();await page.getByLabel('搜索消息内容').fill('中文');await page.getByRole('button',{name:'搜索',exact:true}).click();await page.locator('.search-hit').waitFor();
+  const searchTrigger=page.getByRole('button',{name:'搜索消息与书签',exact:true});
+  const query=page.getByLabel('搜索消息内容'), search=page.getByRole('button',{name:'搜索',exact:true});
+  await searchTrigger.click();
+  await page.waitForFunction(()=>document.activeElement.id==='message-search-query');
+  await query.fill('字'.repeat(201));await page.getByText('关键词最多 200 个字符。',{exact:true}).waitFor();
+  assert.equal(await search.isDisabled(),true);
+  await query.fill('中文');
+  assert.equal(await query.evaluate(el=>!el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true}))),true);
+  assert.equal(await page.evaluate(()=>calls.some(c=>c.kind==='search')),false);
+  await search.click();await page.locator('.search-hit').waitFor();
   await page.getByRole('button',{name:'收藏所在轮次'}).click();assert.equal(await page.evaluate(()=>calls.filter(c=>c.kind==='bookmark').at(-1).sequence),1);
+  await page.getByRole('button',{name:'已收藏',exact:true}).waitFor();
+  await page.evaluate(()=>window.failOpen=true);
+  await page.locator('.search-hit').click();await page.getByRole('alert').filter({hasText:'无法打开该对话'}).waitFor();
+  await page.evaluate(()=>window.failOpen=false);
   await page.locator('.search-hit').click();await page.waitForFunction(()=>!document.querySelector('.search-dialog'));await page.waitForFunction(()=>document.querySelector('[data-sequence="1"]')?.classList.contains('is-navigation-target'));
-  await page.getByRole('button',{name:'搜索消息与书签',exact:true}).click();await page.getByLabel('搜索消息内容').fill('无匹配');await page.getByRole('button',{name:'搜索',exact:true}).click();await page.getByText('没有匹配的消息，请更换关键词或搜索范围。').waitFor();
-  await page.getByLabel('搜索消息内容').fill('中文');await page.evaluate(()=>{window.searchFail=true;});await page.getByRole('button',{name:'搜索',exact:true}).click();await page.getByRole('alert').filter({hasText:'搜索连接断开'}).waitFor();await page.evaluate(()=>{window.searchFail=false;});
-  await page.evaluate(()=>{window.searchWait=new Promise(r=>window.resolveSearch=r);});await page.getByRole('button',{name:'搜索',exact:true}).click();await page.getByLabel('搜索消息内容').fill('新条件');await page.evaluate(()=>{window.resolveSearch();window.searchWait=null;});assert.equal(await page.locator('.search-hit').count(),0);await page.keyboard.press('Escape');
+  await page.waitForFunction(()=>document.activeElement.getAttribute('aria-label')==='搜索消息与书签');
+  await searchTrigger.click();await query.fill('无匹配');await search.click();
+  await page.getByText('没有匹配的消息，请更换关键词或搜索范围。').waitFor();
+  await page.screenshot({path:join(output,`${name}-search-empty.png`),animations:'disabled'});
+  await query.fill('中文');await page.evaluate(()=>window.searchFail=true);await search.click();
+  await page.getByRole('alert').filter({hasText:'搜索连接断开'}).waitFor();
+  await page.screenshot({path:join(output,`${name}-search-error.png`),animations:'disabled'});
+  await page.evaluate(()=>{window.searchFail=false;window.searchWait=new Promise(resolve=>window.resolveSearch=resolve);});
+  await search.click();await query.fill('新条件');await page.evaluate(()=>window.searchWait=null);
+  await search.click();await page.locator('.search-hit').filter({hasText:'新条件的搜索结果'}).waitFor();
+  await page.evaluate(()=>window.resolveSearch());
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.equal(await page.locator('.search-hit').filter({hasText:'新条件的搜索结果'}).count(),1);
+
+  await query.clear();await page.getByLabel('范围',{exact:true}).selectOption('current');
+  const checkmark=page.locator('.message-search-bookmarks-only svg').first();
+  assert.equal(await checkmark.isVisible(),false,'未选中时没有勾选标记');
+  await page.getByRole('checkbox',{name:'仅书签',exact:true}).check();await search.click();
+  assert.equal(await checkmark.isVisible(),true);
+  await page.locator('.search-hit').waitFor();
+  assert.deepEqual(await page.evaluate(()=>calls.filter(c=>c.kind==='search').at(-1)),
+    {kind:'search',q:'',sessionId:'source',saved:true,offset:0});
+  await query.fill('分页');await search.click();
+  const more=page.getByRole('button',{name:'加载更多结果',exact:true});
+  await page.evaluate(()=>window.searchPageFail=true);await more.click();
+  await page.getByRole('alert').filter({hasText:'下一页暂时无法读取'}).waitFor();
+  assert.equal(await page.locator('.search-hit').count(),1,'分页失败时保留已经读取的结果');
+  await page.evaluate(()=>window.searchPageFail=false);
+  await more.focus();await page.keyboard.press('Enter');
+  await page.waitForFunction(()=>document.querySelectorAll('.search-hit').length===2);
+  await page.waitForFunction(()=>document.activeElement.id==='message-search-results-title');
+  await page.keyboard.press('Escape');
   await page.getByRole('button',{name:/任务收件箱/}).click();await page.getByRole('button',{name:'结果操作',exact:true}).click();await page.getByRole('menuitem',{name:'通知与投递',exact:true}).click();await page.getByRole('heading',{name:'通知与投递',exact:true}).waitFor();
   await page.getByLabel(/桌面通知/).check();await page.getByRole('button',{name:'保存通知设置'}).click();await page.getByRole('alert').filter({hasText:'系统通知未获授权'}).waitFor();assert.equal(await page.evaluate(()=>config.desktop),false);
   await page.evaluate(()=>{Notification.permission='granted';window.pendingNotice={id:'notice-1',lease:'lease-1',resultId:'result-1',title:'维护完成',summary:'相关测试通过'};});
@@ -154,11 +204,16 @@ async function run(page,name,url) {
       await page.setViewportSize({width,height:900});
       for(const screen of ['series','form','notifications','search']) {
         await page.goto(url+`?screen=${screen}&theme=${theme}`);
-        await page.locator('dialog[open]').waitFor();
+        await page.locator(screen==='search'?'.search-dialog[open]':'.automation-dialog[open]').waitFor();
         if(screen==='series') await page.getByRole('heading',{name:'工作日检查依赖升级'}).waitFor();
         if(screen==='notifications') await page.getByRole('heading',{name:'跨平台维护需要处理'}).waitFor();
         await page.evaluate(()=>document.fonts.ready);
-        await checkDialogLayout(page,screen==='search'?{}:automationLayout);
+        if(screen==='search') {
+          await query.fill('中文'); await search.click(); await page.locator('.search-hit').waitFor();
+        }
+        await checkDialogLayout(page,screen==='search'?{
+          close:'[aria-label="关闭消息搜索"]',header:'.message-search-head',body:'.message-search-scroll',
+        }:automationLayout);
         await page.screenshot({path:join(output,`${name}-${width}-${theme}-${screen}.png`),animations:'disabled'});
       }
     }

@@ -160,7 +160,10 @@ try {
       if (await page.locator('#sidebar-toggle').getAttribute('aria-expanded') !== 'true') await page.locator('#sidebar-toggle').click();
       await page.getByRole('button',{name:'更多功能',exact:true}).click();
       const button = page.getByRole('menuitem', {name:'连接手机', exact:true});
-      await button.waitFor(); assert.ok((await button.boundingBox()).height >= 44);
+      await button.waitFor();
+      await button.evaluate(el => Promise.all((el.closest('[popover], dialog')?.getAnimations() || [])
+        .map(animation => animation.finished.catch(() => {}))));
+      assert.ok((await button.boundingBox()).height >= 44);
       assert.equal(await page.locator('.sidebar #mobile-connect').count(), 0);
       await button.click();
       await page.getByAltText('用 Pilot 手机 App 扫描此配对二维码').waitFor();

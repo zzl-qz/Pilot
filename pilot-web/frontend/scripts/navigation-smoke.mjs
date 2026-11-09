@@ -33,20 +33,37 @@ async function run(page,name) {
   page.setDefaultTimeout(8000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setViewportSize({width:1440,height:900});await page.goto(url);
   assert.equal(await page.locator('.workspace-files-body').count(),0,'工作区文件树默认收起，不占用会话列表空间');
-  await page.getByRole('button',{name:'更多功能'}).click();
+  const more = page.getByRole('button',{name:'更多功能',exact:true});
+  const menu = page.getByRole('menu',{name:'更多功能',exact:true});
+  await more.click();
   await page.screenshot({path:join(output,`${name}-more-menu.png`),timeout:20000,animations:'disabled'});
   await page.getByRole('menuitem',{name:/定时任务/}).click();
   assert.equal(await page.evaluate(()=>store.getState().ui.schedulesOpen),true);
-  assert.equal(await page.locator('.navigation-rail-more').getAttribute('open'),null,'选择功能后更多菜单自动收起');
+  await menu.waitFor({state:'hidden'});
+  assert.equal(await more.getAttribute('aria-expanded'),'false','选择功能后更多菜单自动收起');
   await page.keyboard.press('Escape');
   assert.equal(await page.getByRole('menuitem',{name:/文件工作台/}).count(),0,'专用文件工作台不再占全局入口');
   assert.equal(await page.getByRole('tab',{name:'文件工作台'}).count(),0,'文件专项能力不再与预览、变更并列');
   await page.evaluate(()=>store.getState().setUi({inspectorOpen:false,schedulesOpen:false}));
-  const more = page.getByRole('button',{name:'更多功能'});
   await more.focus();await page.keyboard.press('Space');
-  await page.getByRole('menu',{name:'更多功能'}).waitFor();
+  await menu.waitFor();
+  await page.waitForFunction(() => document.activeElement.id === 'nav-schedules');
+  await page.keyboard.press('End');
+  await page.waitForFunction(() => document.activeElement.id === 'theme-toggle');
+  await page.evaluate(() => store.setState({running:true}));
   await page.keyboard.press('Escape');
+  await menu.waitFor({state:'hidden'});
   assert.equal(await more.getAttribute('aria-expanded'),'false','Escape 关闭更多菜单并保留焦点入口');
+  assert.equal(await more.evaluate(el => el === document.activeElement),true);
+  assert.equal(await page.evaluate(() => cancelled),0);
+  await page.evaluate(() => store.setState({running:false}));
+  await more.focus();await page.keyboard.press('Enter');await menu.waitFor();
+  await page.setViewportSize({width:390,height:900});
+  await page.waitForFunction(() => document.querySelector('button[aria-label="更多功能"]').getAttribute('aria-expanded')==='false');
+  await menu.waitFor({state:'hidden'});
+  assert.equal(await page.locator('#sidebar-toggle').evaluate(el=>el===document.activeElement),true);
+  await page.setViewportSize({width:1440,height:900});
+  await page.locator('#sidebar-toggle').click();
   await page.locator('.thread-nav-tick').last().waitFor();assert.equal(await page.locator('.thread-nav-tick').count(),12);
   await page.waitForFunction(()=>document.querySelector('.thread-nav-tick:last-child').getAttribute('aria-current')==='location');
   await page.locator('.thread-nav-tick').nth(2).hover();await page.getByRole('dialog',{name:'消息预览'}).waitFor();
@@ -104,9 +121,48 @@ async function run(page,name) {
   await checkShell(page,name,output);
   assert.deepEqual(errors,[]);console.log(name+': PASS preview/jump/bookmarks/persistence/history/streaming/keyboard/errors/session/responsive');
 }
+
+async function checkMenuFallback(browser, capability) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  try {
+    await page.addInitScript(missing => {
+      if (missing === 'popover') Object.defineProperty(HTMLElement.prototype,'showPopover',{value:undefined,configurable:true});
+      else {
+        const supports = CSS.supports.bind(CSS);
+        CSS.supports = (...args) => args[0] === 'anchor-name' ? false : supports(...args);
+      }
+    }, capability);
+    await page.goto(url);
+    await page.locator('#sidebar-toggle').click();
+    const more = page.getByRole('button',{name:'更多功能',exact:true});
+    await more.focus(); await page.keyboard.press('Enter');
+    const fallback = page.getByRole('dialog',{name:'更多功能',exact:true});
+    await fallback.waitFor();
+    await page.keyboard.press('End');
+    await page.waitForFunction(() => document.activeElement.id === 'theme-toggle');
+    await page.screenshot({path:join(output,`chromium-390-fallback-${capability}.png`),animations:'disabled'});
+    await fallback.getByRole('menuitem',{name:/^设置/}).click();
+    await page.locator('#settings').waitFor();
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.activeElement.getAttribute('aria-label') === '更多功能');
+    await page.getByRole('button',{name:'搜索消息与书签',exact:true}).click();
+    await page.waitForFunction(() => document.activeElement.id === 'message-search-query');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.activeElement.id === 'nav-message-search');
+    await page.getByRole('button',{name:'返回对话',exact:true}).click();
+    assert.equal(await page.locator('#sidebar-toggle').evaluate(el => el === document.activeElement),true);
+    assert.equal(await page.locator('.main').getAttribute('inert'),null);
+    console.log(`chromium: PASS ${capability} fallback / keyboard / focus / drawer close`);
+  } finally {
+    await page.close();
+  }
+}
+
 try {
   if(process.argv.includes('--serve')){console.log(url);await new Promise(()=>{});}
-  browser=await chromium.launch({channel:'chrome',headless:true});await run(await browser.newPage(),'chromium');await browser.close();browser=null;
-  const main=join(output,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
+  browser=await chromium.launch({channel:'chrome',headless:true});await run(await browser.newPage(),'chromium');
+  for (const capability of ['anchor','popover']) await checkMenuFallback(browser,capability);
+  await browser.close();browser=null;
+  const main=join(output,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(output,'profile'))});app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;electron=await _electron.launch({executablePath:electronBinary(),args:[main],env});await run(await electron.firstWindow(),'electron');console.log('Screenshots:',output);
 } finally {await browser?.close();await electron?.close();await new Promise(resolve=>server.httpServer.close(resolve));}
