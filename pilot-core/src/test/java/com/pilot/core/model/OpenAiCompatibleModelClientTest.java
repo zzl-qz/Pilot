@@ -364,8 +364,8 @@ class OpenAiCompatibleModelClientTest {
     @Test
     void degradesMissingUserImageToPlaceholderInsteadOfFailing() {
         // 附件保留策略可能清理掉旧图片；历史回放不能因为图片缺失整段发不出去
-        Message message = Message.user("看这张截图",
-            List.of(new Attachment("shot.png", "image/png", "C:\\不存在的目录\\shot.png")));
+        Message message =
+            Message.user("看这张截图", List.of(new Attachment("shot.png", "image/png", "C:\\不存在的目录\\shot.png")));
 
         JsonNode content = json.valueToTree(OpenAiCompatibleModelClient.contentFor(message));
 
