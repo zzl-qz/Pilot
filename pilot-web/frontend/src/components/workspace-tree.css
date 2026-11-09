@@ -1,0 +1,10 @@
+.workspace-files-head svg, .workspace-tree-row-content > svg { width: 16px; height: 16px; flex: none; }
+.workspace-files-head .workspace-tree-toggle { padding-inline: 8px; }
+.workspace-files.is-open .workspace-tree-toggle svg { transform: rotate(90deg); }
+.workspace-files .tree-row { justify-content: flex-start; text-align: start; }
+.workspace-files .tree-row.is-active { background: var(--panel-3); }
+.workspace-tree-row-content { display: flex; align-items: center; min-width: 0; gap: 6px; }
+.workspace-files .tree-banner { margin: 4px; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px), (pointer: coarse) {
+  html[data-theme] .workspace-files .tree-row, .workspace-files-head button { min-height: 44px; }
+}

@@ -1,23 +1,32 @@
 import type { TimelineItem } from '../types/thread.js';
 import type { ChangeFile, ChangeReport, DiffFile } from '../types/core.js';
 import type { CommandTask } from '../types/store.js';
-import type { DesktopBrowserState, BrowserRecent } from '../types/desktop.js';
+import type { DesktopBridge, DesktopBrowserState, BrowserRecent } from '../types/desktop.js';
 import { errorInfo } from '../lib/errors.js';
 interface ReviewReport extends ChangeReport { diff?: string }
-interface BrowserReply { ok?: boolean; error?: string; message?: string; text?: string; url?: string }
 import { reviewQuote } from '../lib/interaction.js';
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Badge } from '@astryxdesign/core/Badge';
+import { Banner } from '@astryxdesign/core/Banner';
+import { Button } from '@astryxdesign/core/Button';
+import { EmptyState } from '@astryxdesign/core/EmptyState';
+import { IconButton } from '@astryxdesign/core/IconButton';
+import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
+import { TabList, Tab } from '@astryxdesign/core/TabList';
+import { TextArea } from '@astryxdesign/core/TextArea';
+import { TextInput } from '@astryxdesign/core/TextInput';
+import { ToggleButton } from '@astryxdesign/core/ToggleButton';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
+import { WorkspaceMenu } from './WorkspaceMenu.jsx';
 import { ReviewActions } from './ReviewActions.jsx';
 import { writeClipboard } from '../lib/clipboard.js';
 import { normalizePath, parseDiff } from '../lib/diff.js';
 import { sortChangeFiles, splitPath, statusKind } from '../lib/changes.js';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { isCommandActive, commandStatusLabel, stripAnsi } from '../lib/command-tasks.js';
-import { embeddablePageUrl, frameSrc, keyCommand, pauseToggleLabel, pointFromEvent, shouldEmbedPage, userPageUrl } from '../lib/browser-mirror.js';
-import { setMirrorPainter } from '../store.js';
+import { userPageUrl } from '../lib/browser-mirror.js';
 import { formatTime } from '../thread-utils.js';
 import { SideChatPanel } from './SideChat.jsx';
 import { MarkdownBody } from './MarkdownBody.jsx';
@@ -26,143 +35,111 @@ import FileWorkbench from './FileWorkbench.js';
 import ResearchPanel from './ResearchPanel.jsx';
 import WorkProductsPanel from './WorkProductsPanel.jsx';
 
+import './inspector.css';
+
 const TABS = [
-  { id: 'products', label: '成果', title: '交付文件、来源与技能审核' },
-  { id: 'chat', label: '对话', title: '侧边对话：问和主线无关的问题，不打断正在跑的任务' },
-  { id: 'changes', label: '变更', title: '工作区改动：逐个文件看差异、撤销' },
-  { id: 'preview', label: '预览', title: '只读预览文件内容' },
-  { id: 'commands', label: '命令', title: '命令任务、实时输出与停止' },
+  { id: 'changes', label: '变更' },
+  { id: 'preview', label: '预览' },
+  { id: 'commands', label: '命令' },
+  { id: 'products', label: '成果' },
+  { id: 'chat', label: '侧聊' },
 ];
 const MORE_TABS = [
-  { id: 'capabilities', label: '能力', title: '当前生效的工具、技能与 MCP 服务器' },
-  { id: 'browser', label: '浏览器', title: '内置浏览器与智能体操作' },
-  { id: 'research', label: '开源参考', title: '已阅读来源、复用决定与许可证说明' },
-  { id: 'activity', label: '活动', title: '事件时间线' }
+  { id: 'files', label: '审阅文件' },
+  { id: 'browser', label: '浏览器' },
+  { id: 'activity', label: '活动' },
+  { id: 'research', label: '开源参考' },
+  { id: 'capabilities', label: '能力' },
 ];
-const ALL_TABS = [...TABS, ...MORE_TABS];
 
 /** 选择器默认值必须稳定，否则每次返回新数组会让 zustand 反复触发重渲染。 */
 const NO_TASKS: never[] = [];
 
-/** 右侧工作区：对话 / 变更 / 预览 / 命令 / 能力 / 浏览器镜像 / 活动时间线。 */
 export function Inspector() {
-  const tab = useStore((state) => state.ui.inspectorTab);
-  const open = useStore((state) => state.ui.inspectorOpen);
-  const navRef = useRef<HTMLDivElement>(null);
-  const moreRef = useRef<HTMLDetailsElement>(null);
+  const tab = useStore(state => state.ui.inspectorTab);
+  const open = useStore(state => state.ui.inspectorOpen);
   const [moreOpen, setMoreOpen] = useState(false);
 
-  // 切换后将当前常用页签滚回可见区域。
-  useEffect(() => {
-    const active = navRef.current?.querySelector('[aria-selected="true"]');
-    active?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-  }, [tab]);
+  if (!open) return null;
+  const primary = TABS.find(item => item.id === tab);
+  const current = primary || MORE_TABS.find(item => item.id === tab);
+  const switchTab = (id: string) => useStore.getState().setUi({ inspectorTab: id, reviewExpanded: false });
+  const close = () => {
+    setMoreOpen(false);
+    useStore.getState().setUi({ inspectorOpen: false, reviewExpanded: false });
+    document.getElementById('toggle-activity')?.focus();
+  };
 
-  if (!open) {
-    return null;
-  }
   return (
-    <aside id="activity" className={`activity inspector is-rail is-open${tab === 'products' ? ' products-inspector' : ''}`} aria-label="工作区面板">
-      <div className="inspector-main">
-      <header className="inspector-panel-head"><strong id="inspector-title">{tab === 'files' ? '审阅文件' : ALL_TABS.find(item => item.id === tab)?.label}</strong><button type="button" className="icon-btn" aria-label="关闭工作区面板" onClick={() => useStore.getState().setUi({ inspectorOpen: false, reviewExpanded: false })}><Icon name="close" /></button></header>
+    <aside id="activity" className={`activity inspector workspace-inspector is-open${tab === 'products' ? ' products-inspector' : ''}`} aria-label="工作区面板">
+      <header className="inspector-panel-head">
+        <h2 id="inspector-title">{current?.label || '审阅'}</h2>
+        <IconButton label="关闭工作区面板" icon={<Icon name="close" />} variant="ghost" onClick={close} />
+      </header>
+      <div className="inspector-nav">
+        <TabList id="panel-tabs" className="inspector-tabs" role="tablist" aria-label="常用面板" value={tab} onChange={switchTab} size="md">
+          {TABS.map(item => <Tab
+            key={item.id}
+            id={`inspector-tab-${item.id}`}
+            panelId={`inspector-panel-${item.id}`}
+            value={item.id}
+            label={item.label}
+            aria-label={item.label}
+            endContent={item.id === 'commands' ? <CommandDot /> : undefined}
+          />)}
+        </TabList>
+        <WorkspaceMenu
+          button={{ label: '更多工具', icon: <Icon name="more" />, isIconOnly: true, variant: 'ghost', className: 'inspector-more-trigger' }}
+          menuWidth={176}
+          onOpenChange={setMoreOpen}
+          items={MORE_TABS.map(item => ({
+            id: item.id,
+            label: item.label,
+            icon: <RailIcon id={item.id} />,
+            endContent: item.id === 'browser' ? <BrowserDot /> : undefined,
+            onClick: () => switchTab(item.id)
+          }))}
+        />
+      </div>
+      {TABS.filter(item => item.id !== tab).map(item => <div key={item.id} id={`inspector-panel-${item.id}`} role="tabpanel" aria-labelledby={`inspector-tab-${item.id}`} hidden />)}
       {tab === 'activity' && <div className="inspector-head"><Filters /></div>}
-      <div className="inspector-body" id={`inspector-panel-${tab}`} role="tabpanel" aria-labelledby={tab === 'files' ? 'inspector-title' : `inspector-tab-${tab}`}>
-        {/* 每个面板单独兜底：某个页签渲染出错时只废掉这一块，别把整页卸载成白屏 */}
-        <ErrorBoundary key={tab} name={TABS.find((item) => item.id === tab)?.label || '面板'} onReset={() => useStore.getState().setUi({ inspectorTab: 'activity' })}>
-          {tab === 'chat' && <SideChatPanel />}
+      <div className="inspector-body" id={`inspector-panel-${tab}`} role={primary ? 'tabpanel' : 'region'} aria-labelledby={primary ? `inspector-tab-${tab}` : 'inspector-title'}>
+        <ErrorBoundary key={tab} name={current?.label || '面板'} onReset={() => switchTab('activity')}>
           {tab === 'changes' && <ChangesPanel />}
           {tab === 'preview' && <PreviewPanel />}
           {tab === 'commands' && <CommandsPanel />}
-          {tab === 'capabilities' && <CapabilitiesPanel />}
-          {tab === 'browser' && <BrowserPanel />}
           {tab === 'products' && <WorkProductsPanel />}
+          {tab === 'chat' && <SideChatPanel />}
           {tab === 'files' && <FileWorkbench />}
-          {tab === 'research' && <ResearchPanel />}
+          {tab === 'browser' && <BrowserPanel coveredByTools={moreOpen} />}
           {tab === 'activity' && <ActivityPanel />}
+          {tab === 'research' && <ResearchPanel />}
+          {tab === 'capabilities' && <CapabilitiesPanel />}
         </ErrorBoundary>
       </div>
-      </div>
-      <nav className="inspector-rail" aria-label="工作区面板导航"><div id="panel-tabs" role="tablist" aria-label="常用面板" aria-orientation="vertical" ref={navRef} onKeyDown={event => {
-        const keys = ['ArrowUp', 'ArrowDown', 'Home', 'End'];
-        if (!keys.includes(event.key)) return;
-        event.preventDefault();
-        const buttons = [...(navRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') || [])];
-        const index = buttons.findIndex(button => button === event.target);
-        const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
-        buttons[next].click(); buttons[next].focus();
-      }}>
-        {TABS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={tab === item.id ? 'is-on' : ''}
-            role="tab"
-            id={`inspector-tab-${item.id}`}
-            aria-controls={`inspector-panel-${item.id}`}
-            tabIndex={tab === item.id ? 0 : -1}
-            title={item.title}
-            aria-label={item.label}
-            aria-selected={tab === item.id}
-            onClick={() => useStore.getState().setUi({ inspectorTab: item.id })}
-          >
-            <RailIcon id={item.id} /><span className="rail-tab-label">{item.label}</span>
-            {item.id === 'changes' && <ChangeBadge />}
-            {item.id === 'commands' && <CommandDot />}
-            {item.id === 'browser' && <BrowserDot />}
-          </button>
-        ))}
-      </div>
-      <details className="inspector-more-menu" ref={moreRef} onToggle={event => setMoreOpen(event.currentTarget.open)}>
-        <summary role="button" className={`rail-button${MORE_TABS.some(item => item.id === tab) ? ' is-on' : ''}`} aria-label="更多工具" aria-haspopup="menu" aria-expanded={moreOpen} title="更多工具" onKeyDown={event => {
-          if (event.key === 'Escape' && moreRef.current?.open) { event.preventDefault(); moreRef.current.open = false; setMoreOpen(false); event.currentTarget.focus(); }
-        }}><RailIcon id="more" /><span className="rail-tab-label">更多工具</span></summary>
-        <div className="inspector-more-items" role="menu" aria-label="更多工具">
-          {MORE_TABS.map(item => <button key={item.id} type="button" role="menuitem" title={item.title} onKeyDown={event => {
-            if (event.key === 'Escape') { event.preventDefault(); if (moreRef.current) moreRef.current.open = false; setMoreOpen(false); moreRef.current?.querySelector('summary')?.focus(); }
-          }} onClick={() => {
-            useStore.getState().setUi({ inspectorTab: item.id });
-            if (moreRef.current) moreRef.current.open = false;
-            setMoreOpen(false);
-          }}><RailIcon id={item.id} /><span>{item.label}</span></button>)}
-        </div>
-      </details>
-      </nav>
     </aside>
   );
 }
 
 function RailIcon({ id }: { id: string }) {
   const common = { viewBox: '0 0 16 16', 'aria-hidden': true };
-  if (id === 'products') return <svg {...common}><path d="M4 2.5h5l3 3v8H4zM9 2.5v3h3M6 8h4M6 10.5h4" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
-  if (id === 'studio') return <svg {...common}><path d="M3 2.5h6l4 4v7H3zM9 2.5v4h4M6 9h4M6 11h4" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
+  if (id === 'files') return <Icon name="file" />;
   if (id === 'research') return <svg {...common}><path d="M8 4C6 2.5 3 3 2 3v9c2-.5 4-.5 6 1 2-1.5 4-1.5 6-1V3c-2-.5-4-.5-6 1Zm0 0v9" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
-  if (id === 'chat') return <svg {...common}><path d="M3 3.5h10v7H6.2L3 12.8z" fill="none" stroke="currentColor" strokeWidth="1.3" /></svg>;
-  if (id === 'changes') return <svg {...common}><path d="M4 3.5h5.2L12 6.2V12.5H4z" fill="none" stroke="currentColor" strokeWidth="1.3" /></svg>;
-  if (id === 'preview') return <svg {...common}><path d="M2.5 8s2.2-3.5 5.5-3.5S13.5 8 13.5 8 11.3 11.5 8 11.5 2.5 8 2.5 8z" fill="none" stroke="currentColor" strokeWidth="1.3" /><circle cx="8" cy="8" r="1.4" fill="currentColor" /></svg>;
-  if (id === 'commands') return <svg {...common}><path d="M3.5 5.2 6.2 8 3.5 10.8M7.4 11h5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>;
   if (id === 'capabilities') return <svg {...common}><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" strokeWidth="1.3" /><path d="M8 2.8v1.6M8 11.6v1.6M2.8 8h1.6M11.6 8h1.6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>;
   if (id === 'browser') return <svg {...common}><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" strokeWidth="1.3" /><path d="M3 8h10M8 3c1.6 1.8 1.6 8.2 0 10M8 3c-1.6 1.8-1.6 8.2 0 10" fill="none" stroke="currentColor" strokeWidth="1.1" /></svg>;
   return <svg {...common}><path d="M3.5 4h9M3.5 8h9M3.5 12h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>;
 }
 
-function ChangeBadge() {
-  const report = useStore((state) => state.changeReport);
-  // 未跟踪文件动辄几百个，页签上只显示真正的改动数，否则和面板里的「N 个文件」对不上
-  const files = Array.isArray(report?.files) ? report.files : [];
-  const count = files.filter((file) => file.status !== '??').length;
-  return count ? <span className="tab-count">{count}</span> : null;
-}
-
 /** 有命令还在跑时页签上点一下：不用切过去也知道后台没空着。 */
 function CommandDot() {
   const tasks = useStore((state) => state.commandTasks || NO_TASKS);
-  return tasks.some((task) => isCommandActive(task)) ? <span className="tab-dot is-pulse" /> : null;
+  return tasks.some((task) => isCommandActive(task)) ? <span className="inspector-tab-dot" aria-label="有命令正在运行" /> : null;
 }
 
 function BrowserDot() {
   const dot = useStore((state) => state.ui.browserDot);
   const live = useStore((state) => state.ui.mirror.mode === 'live');
-  return (dot || live) ? <span className="tab-dot" /> : null;
+  return (dot || live) ? <span className="inspector-tab-dot" aria-label="浏览器正在使用" /> : null;
 }
 
 function Filters() {
@@ -182,22 +159,9 @@ function Filters() {
   }, [timeline]);
 
   return (
-    <div id="filters" className="filters" role="tablist" aria-label="事件过滤">
-      {options.map(([value, label]) => (
-        <button
-          key={value}
-          type="button"
-          className={`filter${current === value ? ' is-on' : ''}`}
-          role="tab"
-          aria-selected={current === value}
-          title={`只看${label}`}
-          onClick={() => useStore.getState().setFilters(value)}
-        >
-          {label}
-          <span className="filter-count">{counts[value]}</span>
-        </button>
-      ))}
-    </div>
+    <SegmentedControl id="filters" className="activity-filters" label="事件过滤" value={current} size="md" onChange={value => useStore.getState().setFilters(value)}>
+      {options.map(([value, label]) => <SegmentedControlItem key={value} value={value} label={`${label} ${counts[value]}`} />)}
+    </SegmentedControl>
   );
 }
 
@@ -235,7 +199,7 @@ function ActivityPanel() {
   }, [itemCount]);
 
   if (!timeline.length) {
-    return <p id="timeline-empty" className="panel-empty">还没有活动。发一条消息试试。</p>;
+    return <EmptyState id="timeline-empty" className="inspector-empty" title="还没有活动" description="发送消息后，工具调用和审批会记录在这里。" isCompact />;
   }
 
   /*
@@ -256,18 +220,13 @@ function ActivityPanel() {
   return (
     <div className="activity-panel">
       <div className="activity-search">
-        <input
-          className="activity-search-input"
-          placeholder="搜索事件类型 / 标题 / 详情"
-          aria-label="搜索活动"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
+        <TextInput type="search" size="md" label="搜索活动" isLabelHidden placeholder="搜索事件类型、标题或详情"
+          containerClassName="inspector-grow" value={query} onChange={setQuery} />
         <span className="activity-search-count">
           {keyword ? `${items.length} / ${byKind.length}` : `${byKind.length} 条`}
         </span>
       </div>
-      {!items.length && <p className="panel-empty">没有匹配的活动。</p>}
+      {!items.length && <EmptyState className="inspector-empty" title="没有匹配的活动。" isCompact />}
       <ol
         id="timeline"
         className="timeline"
@@ -314,7 +273,6 @@ const ActivityItem = memo(function ActivityItem({ item, open, onToggle }: { item
     <li
       className={`event tone-${item.tone}${open ? ' is-open' : ''}`}
       data-kind={item.kind}
-      onClick={() => onToggle(item.key)}
     >
       <div className="event-head">
         <span className="event-seq">#{item.sequence}</span>
@@ -325,6 +283,8 @@ const ActivityItem = memo(function ActivityItem({ item, open, onToggle }: { item
       {item.title && <p className="event-title">{item.title}</p>}
       {item.detail && <p className="event-detail">{item.detail}</p>}
       {item.foot && <p className="event-foot">{item.foot}</p>}
+      {(item.detail || item.foot) && <ToggleButton label={open ? '收起详情' : '展开详情'} size="sm"
+        isPressed={open} onPressedChange={() => onToggle(item.key)} />}
       {item.actions && item.callId && <ApprovalInline callId={item.callId} />}
     </li>
   );
@@ -336,9 +296,9 @@ function ApprovalInline({ callId }: { callId: string }) {
     return null;
   }
   return (
-    <div className="approval-actions" onClick={(event) => event.stopPropagation()}>
-      <button type="button" className="btn btn-primary" onClick={() => useStore.getState().resolveApproval(callId, true)}>批准</button>
-      <button type="button" className="btn" onClick={() => useStore.getState().resolveApproval(callId, false)}>拒绝</button>
+    <div className="approval-actions">
+      <Button label="批准" variant="primary" onClick={() => useStore.getState().resolveApproval(callId, true)} />
+      <Button label="拒绝" onClick={() => useStore.getState().resolveApproval(callId, false)} />
     </div>
   );
 }
@@ -406,8 +366,9 @@ function ChangesPanel() {
     let alive = true; setRunReport(null); setRunError('');
     api.runChanges(lastRunId).then(data => {
       if (!data) throw new Error('任务改动返回空响应');
-      if (alive && data.error) setRunError(data.error);
-      if (alive) setRunReport({ ...data, diff: (data.files || []).map(file => file.diff || '').join('\n') });
+      if (!alive) return;
+      if (data.error) setRunError(data.error);
+      else setRunReport({ ...data, diff: (data.files || []).map(file => file.diff || '').join('\n') });
     }).catch(() => { if (alive) setRunError('读取任务改动失败，请刷新重试'); });
     return () => { alive = false; };
   }, [scope, lastRunId, sessionId, refresh]);
@@ -417,75 +378,71 @@ function ChangesPanel() {
     setConfirm((current) => (current?.type === 'one' && current.path !== view ? null : current));
   }, [view]);
 
-  /*
-   * 键盘浏览（对齐 Codex 的审阅面板）：焦点在面板里时，上下键换文件、Esc 关闭差异。
-   * 输入框里不抢键，方向键仍然用来挪光标。
-   */
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.altKey || event.ctrlKey || event.metaKey || document.querySelector('.modal')) {
-        return;
-      }
-      const panel = document.getElementById('panel-changes');
-      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      if (!panel || !active || !panel.contains(active) || active.closest('[role="menu"], [role="dialog"]') || active.closest('.changes-actions')?.querySelector('[aria-expanded="true"]')) {
-        return;
-      }
-      if (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable) {
-        return;
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault(); event.stopImmediatePropagation();
-        if (confirm) {
-          setConfirm(null);
-        } else {
-          useStore.getState().setUi({ changeView: '' });
-        }
-        return;
-      }
-      if (!view || !trackedPaths.length || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) {
-        return;
-      }
-      event.preventDefault();
-      const current = viewIndex < 0 ? 0 : viewIndex;
-      const next = event.key === 'ArrowDown'
-        ? Math.min(trackedPaths.length - 1, current + 1)
-        : Math.max(0, current - 1);
-      useStore.getState().setUi({ changeView: trackedPaths[next] });
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [view, viewIndex, trackedPaths, confirm]);
+  const canRestore = scope === 'workspace' && isGit && !empty && state !== 'error' && state !== 'loading';
+  const running = useStore(state => state.running);
+  const undoDisabled = !canRestore || running || restoring;
 
-  const restore = async (paths: string[], all: boolean) => {
+  const closeDiff = () => {
+    useStore.getState().setUi({ changeView: '' });
+    requestAnimationFrame(() => {
+      const buttons = document.querySelectorAll<HTMLButtonElement>('#change-files button[data-change-path]');
+      const row = [...buttons].find(button => button.dataset.changePath === view);
+      (row || document.getElementById('inspector-tab-changes'))?.focus({ preventScroll: true });
+    });
+  };
+
+  function onReviewKey(event: React.KeyboardEvent<HTMLDivElement>) {
+    const target = event.target;
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey
+      || !(target instanceof HTMLElement) || !event.currentTarget.contains(target)
+      || target.closest('input, textarea, select, [contenteditable], [role="menu"], [role="radiogroup"], .changes-actions')) return;
+    if (event.key === 'Escape' && (confirm || view)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (confirm) setConfirm(null);
+      else closeDiff();
+      return;
+    }
+    if (!view || viewIndex < 0 || target.closest('#change-diff') || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
+    event.preventDefault();
+    const next = Math.min(trackedPaths.length - 1, Math.max(0, viewIndex + (event.key === 'ArrowDown' ? 1 : -1)));
+    useStore.getState().setUi({ changeView: trackedPaths[next] });
+  }
+
+  const restore = async (path: string) => {
+    if (undoDisabled || !files.some(file => file.path === path) || useStore.getState().running) return;
     setConfirm(null);
-    await useStore.getState().restoreChanges(paths, all);
+    await useStore.getState().restoreChanges([path]);
+    if (document.activeElement === document.body) document.getElementById('changes-refresh')?.focus({ preventScroll: true });
   };
 
   // 还没开始任务时没有会话，也就没有工作区可读；给一句明确的话，别显示「没有改动」
   if (!sessionId) {
-    return <p className="panel-empty">开始一个任务后，这里会显示工作区的改动与差异。</p>;
+    return <EmptyState className="inspector-empty" title="还没有可以审阅的任务" description="开始任务后，这里会列出工作区的文件改动。" isCompact />;
   }
 
   return (
-    <div id="panel-changes" className={`panel${expanded ? ' is-expanded' : ''}`}>
+    <div id="panel-changes" className={`panel${expanded ? ' is-expanded' : ''}`} onKeyDown={onReviewKey}>
       <div className="review-toolbar">
-        <label>审阅范围 <select aria-label="审阅范围" value={scope} onChange={event => {
-          setScope(event.target.value); setConfirm(null); useStore.getState().setUi({ changeView: null });
+        <SegmentedControl label="审阅范围" size="md" value={scope} onChange={value => {
+          setScope(value); setConfirm(null); useStore.getState().setUi({ changeView: null });
         }}>
-          <option value="workspace">工作区全部改动</option>
-          <option value="run" disabled={!lastRunId}>最近任务涉及的文件</option>
-        </select></label>
-        <button type="button" className="btn" aria-pressed={expanded} onClick={() => useStore.getState().setUi({ reviewExpanded: !expanded })}>{expanded ? '退出全屏审阅' : '全屏审阅'}</button>
+          <SegmentedControlItem value="workspace" label="工作区" />
+          <SegmentedControlItem value="run" label="最近任务" isDisabled={!lastRunId} />
+        </SegmentedControl>
+        <ToggleButton className="review-expand" label={expanded ? '退出全屏审阅' : '全屏审阅'} isPressed={expanded}
+          onPressedChange={value => useStore.getState().setUi({ reviewExpanded: value })} />
       </div>
       <p className="review-scope-note">{scope === 'run' ? '仅筛选最近任务涉及的文件；差异仍相对 HEAD，可能包含你或其他任务的修改。' : '包含你和其他任务的未提交改动。'}</p>
-      {runError && scope === 'run' && <p role="alert">{runError}</p>}
-      {scope === 'run' && !runReport && !runError && <p role="status">正在读取任务改动…</p>}
+      {runError && scope === 'run' && <Banner className="inspector-banner" status="error" role="alert" title={runError} />}
       <div className="changes-bar">
         <div className="changes-meta">
           {empty ? (
             <span id="changes-totals" className="changes-totals">
-              <span className="changes-count">{scope === 'workspace' && state === 'error' ? '变更读取失败' : scope === 'workspace' && state === 'loading' ? '读取中…' : isGit ? '没有改动' : '不是 git 仓库'}</span>
+              <span className="changes-count">{scope === 'run' && !report ? (runError ? '变更读取失败' : '正在读取任务改动…')
+                : state === 'error' && scope === 'workspace' ? '变更读取失败'
+                : state === 'loading' && scope === 'workspace' ? '读取中…'
+                : isGit ? '没有改动' : '不是 Git 仓库'}</span>
             </span>
           ) : (
             <>
@@ -493,45 +450,34 @@ function ChangesPanel() {
                 <span className="changes-count">{files.length} 个文件</span>
                 {tracked.length > 0 && <span className="changes-line-counts" title="已跟踪文件的增删行数"><span className="add">+{totals.added}</span><span className="del">−{totals.removed}</span></span>}
               </span>
-              {untracked.length > 0 && (
-                <button
-                  type="button"
-                  className={`changes-untracked${showUntracked ? ' is-on' : ''}`}
-                  title="未纳入 Git 版本管理的文件，不计入增删行"
-                  aria-expanded={showUntracked}
-                  onClick={() => setShowUntracked((open) => !open)}
-                >
-                  未跟踪 {untracked.length}
-                </button>
-              )}
+
             </>
           )}
         </div>
         <ReviewActions
           key={`${sessionId}:${sessionEpoch}:${workspace}:${scope}`}
-          files={files} isGit={isGit} canUndo={!empty && scope === 'workspace' && state !== 'error'}
+          files={files} isGit={isGit} canUndo={scope === 'workspace' && isGit && !empty && state !== 'error'}
           loading={state === 'loading'} restoring={restoring}
           onRefresh={() => { useStore.getState().loadChanges(); setRefresh(value => value + 1); }}
         />
       </div>
-      {restoring && <p className="changes-progress">撤销中…</p>}
-      {state === 'error' && scope === 'workspace' && <p className="changes-progress" role="alert">读取失败，请刷新重试。{!empty && '当前显示上次读取的改动。'}</p>}
+      {restoring && <p className="changes-progress" role="status">撤销中…</p>}
+      {running && scope === 'workspace' && !empty && <p className="changes-progress">任务运行结束后可撤销工作区改动。</p>}
+      {state === 'error' && scope === 'workspace' && <Banner className="inspector-banner" role="alert" status="error"
+        title="无法读取工作区变更" description={empty ? '刷新变更后重试。' : '当前显示上次成功读取的改动。'} />}
       {tracked.length > 5 && (
         <div className="changes-filter">
-          <input
-            className="changes-search"
-            placeholder="筛选文件路径"
-            aria-label="筛选变更文件"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
+          <TextInput label="筛选变更文件" type="search" isLabelHidden placeholder="筛选文件路径"
+            containerClassName="inspector-grow" value={query} onChange={setQuery} />
           <span className="changes-filter-count">
             {visibleTracked.length} / {tracked.length}{untracked.length ? ` · 未跟踪 ${untracked.length}` : ''}
           </span>
         </div>
       )}
       <div className="changes-body">
-        {state === 'loading' && empty && <p className="panel-empty change-empty">读取变更中…</p>}
+        {empty && !view && (scope === 'workspace' ? !!report && state !== 'error' : !!report && !runError) &&
+          <EmptyState className="inspector-empty" title={isGit ? '没有文件需要审阅' : '当前工作区没有 Git 仓库'}
+            description={isGit ? '工作区出现文件改动后，可在这里逐个查看差异。' : '仍可从预览页按路径打开工作区文件。'} isCompact />}
         {!empty && (
           <div id="change-files" className="change-files">
             {visibleTracked.map((file) => (
@@ -540,26 +486,17 @@ function ChangesPanel() {
                 file={file}
                 active={view === file.path}
                 confirming={confirm?.type === 'one' && confirm.path === file.path}
-                busy={restoring || scope !== 'workspace'}
+                undoDisabled={undoDisabled}
                 onAskUndo={() => setConfirm({ type: 'one', path: file.path })}
                 onCancelUndo={() => setConfirm(null)}
-                onUndo={() => restore([file.path], false)}
+                onUndo={() => restore(file.path)}
               />
             ))}
             {keyword && !visibleTracked.length && <p className="change-more">没有匹配「{query}」的文件。</p>}
             {untracked.length > 0 && (
-              <button
-                type="button"
-                className={`change-row change-untracked-toggle${showUntracked ? ' is-open' : ''}`}
-                onClick={() => setShowUntracked((open) => !open)}
-              >
-                <span className="change-status is-untracked">?</span>
-                <span className="change-row-main">
-                  <span className="change-row-name">未跟踪文件 · {untracked.length}</span>
-                  <span className="change-row-dir">{showUntracked ? '点击收起' : '没纳入版本管理，点开可看全文'}</span>
-                </span>
-                <span className="change-row-stat">{showUntracked ? '收起' : '展开'}</span>
-              </button>
+              <Button className="change-untracked-toggle" variant="ghost" label={`未跟踪文件 · ${untracked.length}`}
+                aria-expanded={showUntracked} icon={<Icon name="chevron" />}
+                onClick={() => setShowUntracked(open => !open)} />
             )}
             {showUntracked && visibleUntracked.slice(0, UNTRACKED_LIMIT).map((file) => (
               <ChangeRow
@@ -568,10 +505,10 @@ function ChangesPanel() {
                 active={view === file.path}
                 untracked
                 confirming={confirm?.type === 'one' && confirm.path === file.path}
-                busy={restoring || scope !== 'workspace'}
+                undoDisabled={undoDisabled}
                 onAskUndo={() => setConfirm({ type: 'one', path: file.path })}
                 onCancelUndo={() => setConfirm(null)}
-                onUndo={() => restore([file.path], false)}
+                onUndo={() => restore(file.path)}
               />
             ))}
             {showUntracked && visibleUntracked.length > UNTRACKED_LIMIT && (
@@ -594,11 +531,12 @@ function ChangesPanel() {
               nextPath={viewIndex >= 0 && viewIndex < trackedPaths.length - 1 ? trackedPaths[viewIndex + 1] : null}
               index={viewIndex >= 0 ? viewIndex + 1 : 0}
               total={trackedPaths.length}
-              busy={restoring || scope !== 'workspace'}
-              onUndo={() => restore([view], false)}
+              undoDisabled={undoDisabled || !files.some(file => file.path === view)}
+              onUndo={() => restore(view)}
+              onClose={closeDiff}
             />
           )
-          : (!empty && <p className="panel-empty change-empty">选一个文件看差异。</p>)}
+          : (!empty && <p className="change-empty">选择文件查看差异。</p>)}
       </div>
     </div>
   );
@@ -608,53 +546,44 @@ function ChangesPanel() {
 const UNTRACKED_LIMIT = 80;
 
 /** 变更列表的一行：状态徽标 + 文件名（目录弱化）+ 增删行，悬停露出撤销。 */
-function ChangeRow({ file, active, untracked, confirming, busy, onAskUndo, onCancelUndo, onUndo }: { file: ChangeFile; active: boolean; untracked?: boolean; confirming?: boolean; busy?: boolean; onAskUndo: () => void; onCancelUndo: () => void; onUndo: () => void }) {
+function ChangeRow({ file, active, untracked, confirming, undoDisabled, onAskUndo, onCancelUndo, onUndo }: {
+  file: ChangeFile; active: boolean; untracked?: boolean; confirming?: boolean; undoDisabled: boolean;
+  onAskUndo: () => void; onCancelUndo: () => void; onUndo: () => void;
+}) {
   const { name, dir } = splitPath(file.path);
-  if (confirming) {
-    return (
-      <div className="change-row is-confirm">
-        <span className={`change-status is-${statusKind(file.status)}`}>{statusLetter(file.status)}</span>
-        <span className="change-row-main">
-          <span className="change-row-confirm">
-            撤销 <b>{name}</b> 的改动？
-          </span>
-          <span className="change-row-dir">{untracked ? '未跟踪文件会被删除' : '内容会恢复成 HEAD 的样子'}</span>
-        </span>
-        <span className="change-row-actions">
-          <button type="button" className="btn btn-danger" disabled={busy} onClick={onUndo}>撤销</button>
-          <button type="button" className="btn" disabled={busy} onClick={onCancelUndo}>取消</button>
-        </span>
-      </div>
-    );
-  }
+  const undoRef = useRef<HTMLButtonElement>(null);
+  const cancel = () => { onCancelUndo(); requestAnimationFrame(() => undoRef.current?.focus()); };
+  if (confirming) return (
+    <div className="change-row is-confirm" onKeyDown={event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel(); }
+    }}>
+      <span className={`change-status is-${statusKind(file.status)}`}>{statusLetter(file.status)}</span>
+      <span className="change-row-main">
+        <span className="change-row-confirm">撤销 <b>{name}</b> 的改动？</span>
+        <span className="change-row-dir">{untracked ? '未跟踪文件会被删除' : '文件内容将恢复到 HEAD'}</span>
+      </span>
+      <span className="change-row-actions">
+        <Button label="取消" size="sm" ref={focusWithoutScroll} onClick={cancel} />
+        <Button label="撤销" variant="destructive" size="sm" isDisabled={undoDisabled} onClick={onUndo} />
+      </span>
+    </div>
+  );
   return (
     <div className={`change-row-wrap${active ? ' is-active' : ''}`}>
-      <button
-        type="button"
-        className={`change-row${active ? ' is-active' : ''}`}
-        title={file.path}
-        onClick={() => useStore.getState().setUi({ changeView: file.path })}
-      >
+      <button type="button" className={`change-row${active ? ' is-active' : ''}`} title={file.path} aria-pressed={active}
+        data-change-path={file.path} onClick={() => useStore.getState().setUi({ changeView: file.path })}>
         <span className={`change-status is-${statusKind(file.status)}`}>{statusLetter(file.status)}</span>
         <span className="change-row-main">
           <span className="change-row-name">{name}</span>
           {dir && <span className="change-row-dir">{dir}</span>}
         </span>
-        {!untracked && (
-          <span className="change-row-stat">
-            <span className="add">+{Number(file.added || 0)}</span>
-            <span className="del">−{Number(file.removed || 0)}</span>
-          </span>
-        )}
+        {!untracked && <span className="change-row-stat">
+          <span className="add">+{Number(file.added || 0)}</span>
+          <span className="del">−{Number(file.removed || 0)}</span>
+        </span>}
       </button>
-      <button
-        type="button"
-        className="change-undo"
-        title={`撤销 ${file.path} 的改动`}
-        aria-label={`撤销 ${file.path} 的改动`}
-        disabled={busy}
-        onClick={onAskUndo}
-      >撤销</button>
+      {!undoDisabled && <Button ref={undoRef} label={`撤销 ${file.path} 的改动`}
+        className="change-undo" size="sm" variant="ghost" onClick={onAskUndo}>撤销</Button>}
     </div>
   );
 }
@@ -663,12 +592,19 @@ function ChangeRow({ file, active, untracked, confirming, busy, onAskUndo, onCan
 const DIFF_LINE_LIMIT = 4000;
 
 /** git 状态码 → 一个字母的徽标。 */
+function focusWithoutScroll(node: HTMLButtonElement | null) {
+  node?.focus({ preventScroll: true });
+}
+
 function statusLetter(status?: string) {
   const raw = String(status || 'M').replace(/\?/g, 'U');
   return raw.slice(0, 1).toUpperCase();
 }
 
-function DiffView({ report, scoped, path, status, prevPath, nextPath, index, total, busy, onUndo }: { report: ReviewReport | null; scoped: boolean; path: string; status?: string; prevPath: string | null; nextPath: string | null; index: number; total: number; busy: boolean; onUndo: () => void }) {
+function DiffView({ report, scoped, path, status, prevPath, nextPath, index, total, undoDisabled, onUndo, onClose }: {
+  report: ReviewReport | null; scoped: boolean; path: string; status?: string; prevPath: string | null; nextPath: string | null;
+  index: number; total: number; undoDisabled: boolean; onUndo: () => void; onClose: () => void;
+}) {
   const sessionId = useStore((state) => state.sessionId);
   const untracked = status === '??';
   /*
@@ -682,6 +618,12 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
   /** 按需取回的单文件补丁：{ file, truncated }。 */
   const [patch, setPatch] = useState<{ file: DiffFile | null; truncated: boolean } | null>(null);
   const [patchState, setPatchState] = useState('');
+  const [retry, setRetry] = useState(0);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const undoRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 600px)').matches) closeRef.current?.focus();
+  }, []);
   /** 未跟踪文件不在补丁里，直接展示正文。 */
   const [content, setContent] = useState<string | null>(null);
   const [selection, setSelection] = useState<{ anchor: number; end: number } | null>(null);
@@ -696,9 +638,15 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
     let alive = true;
     if (untracked) {
       setContent(null);
+      setPatchState('loading');
       api.file(sessionId, path)
-        .then((data) => { if (alive) setContent(data?.content ?? ''); })
-        .catch(() => { if (alive) setContent('（无法读取该文件）'); });
+        .then(data => {
+          if (!data) throw new Error('文件读取为空');
+          if (alive) {
+            setContent(data.binary ? '（二进制文件，无法预览）' : (data.content || '（空文件）'));
+            setPatchState('');
+          }
+        }).catch(() => { if (alive) setPatchState('error'); });
       return () => { alive = false; };
     }
     setPatch(null);
@@ -708,7 +656,8 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
         if (!alive) {
           return;
         }
-        const files = parseDiff(data?.diff || '');
+        if (!data) throw new Error('差异读取为空');
+        const files = parseDiff(data.diff || '');
         setPatch({ file: files[0] || null, truncated: Boolean(data?.truncated) });
         setPatchState('');
       })
@@ -719,7 +668,7 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
         }
       });
     return () => { alive = false; };
-  }, [summaryFile, path, sessionId, untracked, scoped, report]);
+  }, [summaryFile, path, sessionId, untracked, scoped, report, retry]);
 
   const file = summaryFile || patch?.file || null;
   const lines = (file?.lines || []).filter(line => line.kind !== 'meta').slice(0, DIFF_LINE_LIMIT);
@@ -730,11 +679,12 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
     const quote = reviewQuote(path, selected, feedback);
     if (!quote || !state.composerApi) return;
     state.composerApi.appendText(quote);
-    state.setUi({ reviewExpanded: false });
+    const narrow = window.matchMedia('(max-width: 960px)').matches;
+    state.setUi({ reviewExpanded: false, ...(narrow ? { inspectorOpen: false } : {}) });
     setSelection(null); setFeedback('');
     requestAnimationFrame(() => state.composerApi?.focus());
   };
-  const close = () => useStore.getState().setUi({ changeView: '' });
+  const cancelUndo = () => { setConfirming(false); requestAnimationFrame(() => undoRef.current?.focus()); };
   const select = (target: string | null) => {
     setConfirming(false);
     useStore.getState().setUi({ changeView: target });
@@ -750,46 +700,34 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
           </span>
         ) : (untracked ? <span className="change-view-tag">未跟踪</span> : null)}
         {total > 0 && index > 0 && <span className="change-view-index">{index} / {total}</span>}
-        <button
-          type="button"
-          className="icon-btn diff-nav"
-          title="上一个改动文件"
-          aria-label="上一个改动文件"
-          disabled={!prevPath}
-          onClick={() => select(prevPath)}
-        >‹</button>
-        <button
-          type="button"
-          className="icon-btn diff-nav"
-          title="下一个改动文件"
-          aria-label="下一个改动文件"
-          disabled={!nextPath}
-          onClick={() => select(nextPath)}
-        >›</button>
-        {confirming ? (
-          <>
-            <span className="change-view-confirm">撤销这个文件？</span>
-            <button type="button" className="btn btn-danger" disabled={busy} onClick={onUndo}>确认</button>
-            <button type="button" className="btn" onClick={() => setConfirming(false)}>取消</button>
-          </>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-danger change-view-undo"
-            title="撤销这个文件的改动"
-            disabled={busy}
-            onClick={() => setConfirming(true)}
-          >撤销</button>
-        )}
-        <button type="button" className="icon-btn change-view-close" title="关闭差异" aria-label="关闭差异" onClick={close}>×</button>
+        <div className="diff-file-actions">
+          <IconButton className="diff-nav" label="上一个改动文件" variant="ghost" size="sm"
+            icon={<Icon name="chevron" className="points-back" />} isDisabled={!prevPath} onClick={() => select(prevPath)} />
+          <IconButton className="diff-nav" label="下一个改动文件" variant="ghost" size="sm"
+            icon={<Icon name="chevron" />} isDisabled={!nextPath} onClick={() => select(nextPath)} />
+          {!confirming && !undoDisabled && <Button ref={undoRef} label="撤销" variant="ghost" size="sm" className="change-view-undo"
+            onClick={() => setConfirming(true)} />}
+          <IconButton ref={closeRef} className="change-view-close" label="关闭差异" variant="ghost"
+            size="sm" icon={<Icon name="close" />} onClick={onClose} />
+        </div>
       </div>
-      <p className="review-line-hint">点击行号选择，Shift + 点击选择多行，再添加审阅意见。</p>
-      {selection && <div className="review-feedback" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setSelection(null); } }}>
-        <label>对选中代码的意见<textarea aria-label="审阅意见" value={feedback} onChange={event => setFeedback(event.target.value)} placeholder="描述需要调整的地方" rows={2} /></label>
-        <button type="button" className="btn" onClick={addFeedback}>引用到输入框</button>
-        <button type="button" className="btn" onClick={() => { setSelection(null); setFeedback(''); }}>取消选择</button>
+      {confirming && <div className="diff-confirm" onKeyDown={event => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancelUndo(); }
+      }}>
+        <p>{untracked ? '撤销将删除此未跟踪文件。' : '撤销将把此文件恢复到 HEAD。'}</p>
+        <Button label="取消" size="sm" ref={focusWithoutScroll} onClick={cancelUndo} />
+        <Button label="确认撤销" variant="destructive" size="sm" isDisabled={undoDisabled} onClick={onUndo} />
       </div>}
-      <div id="change-diff" className="change-diff">
+      {file && <p className="review-line-hint">选中行号可添加意见。按住 Shift 选择一段代码。</p>}
+      {selection && <div className="review-feedback" onKeyDown={event => {
+        if (event.key === 'Escape' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); setSelection(null); }
+      }}>
+        <TextArea label="审阅意见" value={feedback} onChange={setFeedback} placeholder="描述需要调整的地方" rows={2}
+          containerClassName="review-feedback-field" />
+        <Button label="引用到输入框" onClick={addFeedback} />
+        <Button label="取消选择" variant="ghost" onClick={() => { setSelection(null); setFeedback(''); }} />
+      </div>}
+      <div id="change-diff" className="change-diff" tabIndex={0} aria-label="文件差异">
         {file
           ? (
             <>
@@ -817,13 +755,14 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
               )}
             </>
           )
-          : untracked
-            ? <pre className="diff-raw">{content ?? '读取中…'}</pre>
-            : (patchState === 'loading'
-              ? <p className="diff-empty">读取差异中…</p>
-              : (patchState === 'error'
-                ? <p className="diff-empty">读取差异失败，点右上角的刷新再试一次。</p>
-                : <p className="diff-empty">这个文件没有可显示的文本差异（可能是二进制、纯重命名或权限变更）。</p>))}
+          : patchState === 'error'
+            ? <Banner className="inspector-banner" status="error" role="alert" title={untracked ? '无法读取文件内容' : '无法读取文件差异'}
+              endContent={<Button label="重试" variant="ghost" onClick={() => setRetry(value => value + 1)} />} />
+            : patchState === 'loading'
+              ? <p className="diff-empty" role="status">读取中…</p>
+              : untracked && !scoped && content !== null
+                ? <pre className="diff-raw">{content}</pre>
+                : <p className="diff-empty">这个文件没有可显示的文本差异。</p>}
       </div>
     </div>
   );
@@ -836,10 +775,14 @@ function PreviewPanel() {
   const data = useStore((state) => state._previewData);
   const loading = useStore((state) => state._previewLoading);
   const report = useStore((state) => state.changeReport);
+  const hasWorkspace = useStore(state => Boolean(state.sessionId || state.workspace));
+  const [draftPath, setDraftPath] = useState(path);
   const [wrap, setWrap] = useState(false);
+  useEffect(() => setDraftPath(path), [path]);
+  const open = (target: string) => { setDraftPath(target.trim()); void useStore.getState().openPreview(target); };
 
   const changed = useMemo(() => sortChangeFiles<ChangeFile>(Array.isArray(report?.files) ? report.files : []).slice(0, 12), [report]);
-  const isMarkdown = /\.(md|markdown|mdx)$/i.test(path || '');
+  const isMarkdown = /\.(md|markdown|mdx)$/i.test(data?.path || path);
   const content = data?.content || '';
   const lineCount = content ? content.split('\n').length : 0;
 
@@ -857,45 +800,29 @@ function PreviewPanel() {
 
   return (
     <div id="panel-preview" className={`panel${data && !data.binary ? ' has-content' : ''}`}>
-      <div className="panel-toolbar">
-        <input
-          id="preview-path"
-          className="preview-path"
-          value={path}
-          placeholder="文件路径"
-          aria-label="预览文件路径"
-          onChange={(event) => useStore.getState().setUi({ previewPath: event.target.value })}
-          onKeyDown={(event) => { if (event.key === 'Enter') useStore.getState().openPreview(path); }}
-        />
-        <button
-          type="button"
-          className="btn"
-          id="preview-refresh"
-          disabled={!path.trim()}
-          onClick={() => useStore.getState().openPreview(path)}
-        >打开</button>
-        <button
-          type="button"
-          className={`btn preview-wrap${wrap ? ' is-on' : ''}`}
-          title="长行是否自动换行"
-          aria-pressed={wrap}
-          onClick={() => setWrap((value) => !value)}
-        >换行</button>
-        <button type="button" className="btn" disabled={!content} onClick={copy}>复制</button>
-      </div>
+      <form className="panel-toolbar" onSubmit={event => { event.preventDefault(); open(draftPath); }}>
+        <TextInput id="preview-path" label="预览文件路径" isLabelHidden placeholder="工作区内的文件路径"
+          autoComplete="off" hasSpellCheck={false} value={draftPath} onChange={setDraftPath}
+          containerClassName="preview-path-field" isDisabled={!hasWorkspace}
+          onKeyDown={event => { if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault(); }} />
+        <Button type="submit" id="preview-refresh" label="打开" isDisabled={!draftPath.trim() || !hasWorkspace} />
+        <ToggleButton className="preview-wrap" label="换行"
+          isPressed={wrap} isDisabled={!content || isMarkdown} onPressedChange={setWrap} />
+        <Button label="复制" variant="ghost" isDisabled={!content} onClick={copy} />
+      </form>
       {data && !data.binary && (
         <div className="preview-meta">
           <span className="preview-meta-path" title={data.path || path}>{data.path || path}</span>
           <span className="preview-meta-item">{lineCount} 行</span>
           <span className="preview-meta-item">{formatBytes(data.size)}</span>
-          {isMarkdown && <span className="preview-meta-tag">Markdown</span>}
-          {data.truncated && <span className="preview-meta-tag is-warn">已截断</span>}
+          {isMarkdown && <Badge label="Markdown" variant="neutral" />}
+          {data.truncated && <Badge label="已截断" variant="warning" />}
         </div>
       )}
-      {loading && <p className="panel-empty">读取中…</p>}
+      {loading && <p className="inspector-status" role="status">正在读取文件…</p>}
       {!loading && data && (
         data.binary
-          ? <p className="panel-empty">（二进制文件，无法预览）</p>
+          ? <EmptyState className="inspector-empty" title="此文件没有文本预览" description="可从工作区用对应应用打开二进制文件。" isCompact />
           : (isMarkdown
             ? (
               <div className="bubble preview-markdown">
@@ -903,19 +830,23 @@ function PreviewPanel() {
               </div>
             )
             : (
-              <pre id="preview-body" className={`preview-body${wrap ? '' : ' is-nowrap'}`}>
+              <pre id="preview-body" className={`preview-body${wrap ? '' : ' is-nowrap'}`} tabIndex={0} aria-label="文件内容">
                 {data.truncated ? `${content}\n…（内容过长，已截断）` : (content || '（空文件）')}
               </pre>
             ))
       )}
+      {!loading && !data && path && <Banner className="inspector-banner" status="error" role="alert"
+        title="无法读取文件" description={`${path} · 核对路径和读取权限后重试。`}
+        endContent={<Button label="重试预览" variant="ghost" onClick={() => open(path)} />} />}
       {!loading && !data && (
         <div className="preview-empty">
-          <p>选一个改动文件直接预览，或在上面输入路径。</p>
+          {!path && <EmptyState className="inspector-empty" title="选择要预览的文件"
+            description={hasWorkspace ? '可输入工作区内的路径，或从下方选择一个改动文件。' : '先选择工作区，再打开文件预览。'} isCompact />}
           {changed.length > 0 && (
             <ul className="preview-suggest">
               {changed.map((file) => (
                 <li key={file.path}>
-                  <button type="button" title={file.path} onClick={() => useStore.getState().openPreview(file.path)}>
+                  <button type="button" title={file.path} onClick={() => open(file.path)}>
                     <span className={`change-status is-${statusKind(file.status)}`}>{statusLetter(file.status)}</span>
                     <span className="preview-suggest-name">{splitPath(file.path).name}</span>
                   </button>
@@ -1021,7 +952,8 @@ function CommandsPanel() {
     <div id="panel-commands" className="panel">
       <div className="panel-toolbar">
         <span id="commands-state" className="commands-state">{active.length ? `${active.length} 个命令运行中` : '没有运行中的命令'}</span>
-        <button type="button" className="btn" onClick={() => useStore.getState().loadCommandTasks()}>刷新</button>
+        <IconButton label="刷新命令" icon={<Icon name="refresh" />} variant="ghost"
+          isDisabled={!sessionId} onClick={() => useStore.getState().loadCommandTasks()} />
       </div>
       <div id="commands-list" className="commands-list">
         {tasks.map((task) => {
@@ -1033,6 +965,7 @@ function CommandsPanel() {
               type="button"
               className={`command-item${selectedId === taskId ? ' is-active' : ''}`}
               title={task.command || ''}
+              aria-pressed={selectedId === taskId}
               onClick={() => useStore.getState().loadCommandLog(task)}
             >
               <span className={`command-status is-${String(task.status || 'run').toLowerCase()}`} />
@@ -1046,12 +979,8 @@ function CommandsPanel() {
           );
         })}
         {!tasks.length && (
-          <div id="commands-empty" className="commands-empty">
-            <p>还没有命令任务</p>
-            <p className="commands-empty-hint">
-              智能体跑构建、测试或脚本时会在这里生成任务；命令在后台继续运行，随时可以回来看输出或停止。
-            </p>
-          </div>
+          <EmptyState id="commands-empty" className="inspector-empty" title="还没有命令任务"
+            description="任务启动构建、测试或脚本时，可在这里查看输出和停止命令。" isCompact />
         )}
       </div>
       {detail && (
@@ -1059,14 +988,10 @@ function CommandsPanel() {
           <div className="command-detail-head">
             <p id="command-title" className="command-title">{detail.command || detail.taskId}</p>
             {isCommandActive(detail) && (
-              <button
-                type="button"
-                className="btn btn-danger"
-                title="停止这个命令"
-                onClick={() => useStore.getState().stopCommand(detail)}
-              >停止</button>
+              <Button label="停止" variant="destructive"
+                clickAction={() => useStore.getState().stopCommand(detail)} />
             )}
-            <button type="button" className="btn" onClick={copyLog}>复制输出</button>
+            <Button label="复制输出" variant="ghost" isDisabled={!logText} onClick={copyLog} />
           </div>
           <dl className="command-facts">
             <div><dt>状态</dt><dd>{commandStatusLabel(detail)}</dd></div>
@@ -1079,14 +1004,14 @@ function CommandsPanel() {
           {log?.truncated && <p className="command-log-note">输出超过上限，已截断。</p>}
           <div className="command-log-head">
             <span className="command-log-note">{follow ? '自动跟随最新输出' : '已暂停跟随'}</span>
-            <button type="button" className={`btn${follow ? ' is-on' : ''}`} onClick={() => setFollow((value) => !value)}>
-              {follow ? '暂停跟随' : '跟随最新'}
-            </button>
+            <ToggleButton label={follow ? '暂停跟随' : '跟随最新'} isPressed={follow} onPressedChange={setFollow} />
           </div>
           <pre
             id="command-log"
             className={`command-log${logText ? '' : ' is-empty'}`}
             ref={logRef}
+            tabIndex={0}
+            aria-label="命令输出"
             onScroll={(event) => {
               const el = event.currentTarget;
               const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
@@ -1163,7 +1088,8 @@ function CapabilitiesPanel() {
   const available = tools.filter((tool) => tool.available).length;
 
   if (!sessionId) {
-    return <p className="panel-empty">开始一个任务后，这里会列出当前可用的工具、技能与 MCP 服务器。</p>;
+    return <EmptyState className="inspector-empty" title="还没有任务运行环境"
+      description="开始任务后，这里会列出工具、技能和 MCP 服务器。" isCompact />;
   }
 
   return (
@@ -1172,9 +1098,12 @@ function CapabilitiesPanel() {
         <span className="commands-state">
           {state === 'loading' ? '读取中…' : `${available} / ${tools.length} 个工具可用`}
         </span>
-        <button type="button" className="btn" onClick={() => useStore.getState().loadCapabilities()}>刷新</button>
+        <IconButton label="刷新能力清单" icon={<Icon name="refresh" />} variant="ghost"
+          isDisabled={state === 'loading'} onClick={() => useStore.getState().loadCapabilities()} />
       </div>
-      <div className="cap-scroll">
+      {state === 'error' && <Banner className="inspector-banner" status="error" role="alert"
+        title="无法读取能力清单" description="刷新清单后重试。" />}
+      {data && <div className="cap-scroll">
         <section className="cap-section">
           <h3>运行环境</h3>
           <dl className="cap-kv">
@@ -1260,20 +1189,13 @@ function CapabilitiesPanel() {
             </ul>
           ) : <p className="panel-empty">还没有安装技能。在设置 → 技能里可以从 git 仓库安装。</p>}
         </section>
-        {state === 'error' && <p className="panel-empty">读取能力清单失败，右上角「刷新」再试一次。</p>}
-      </div>
+      </div>}
     </div>
   );
 }
 
 /* ---------- 内置浏览器 ---------- */
 
-/**
- * 右侧「浏览器」页签：一个真正能用的内置浏览器。
- *
- * 本机页面直接嵌进面板，由浏览器引擎自己排版和滚动。
- * 页面禁止被嵌入时才退回截图，点击和滚轮仍转发给同一个 Playwright 页面。
- */
 /** 原生页面不吃 CSS 裁剪。按祖先的 overflow 把矩形收到真正看得见的那一块。 */
 function visibleStageRect(element: HTMLElement) {
   const rect = element.getBoundingClientRect();
@@ -1341,833 +1263,278 @@ function cleanLaunchNote(text?: string) {
     .trim();
 }
 
-function BrowserPanel() {
-  const sessionId = useStore((state) => state.sessionId);
-  const mirror = useStore((state) => state.ui.mirror);
-  const status = useStore((state) => state.ui.browserStatus);
+function BrowserPanel({ coveredByTools }: { coveredByTools: boolean }) {
+  const bridge = window.pilotDesktop;
+  return bridge
+    ? <DesktopBrowserPanel bridge={bridge} coveredByTools={coveredByTools} />
+    : <WebBrowserPanel />;
+}
+
+function WebBrowserPanel() {
+  const sessionId = useStore(state => state.sessionId);
+  const mirror = useStore(state => state.ui.mirror);
+  const status = useStore(state => state.ui.browserStatus);
+  const [launching, setLaunching] = useState(false);
+  const [opened, setOpened] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const target = /^https?:\/\//i.test(mirror.url || '') ? userPageUrl(mirror.url) : null;
+  const page = target ? new URL(target) : null;
+  const canOpenTab = page && !page.username && !page.password;
+
+  useEffect(() => {
+    if (!sessionId) return;
+    useStore.getState().loadBrowserStatus();
+    useStore.getState().ensureMirror();
+  }, [sessionId]);
+
+  async function openWindow() {
+    setLaunching(true); setError(''); setNotice('');
+    try {
+      const data = await api.openBrowserWindow();
+      const message = cleanLaunchNote(data?.message);
+      if (!data?.ok) {
+        setError(message || '无法打开内置浏览器');
+      } else {
+        setOpened(true); setNotice(message || '浏览器窗口已打开。');
+      }
+    } catch (failure) {
+      setError(errorInfo(failure).message || '无法打开内置浏览器');
+    } finally {
+      setLaunching(false);
+    }
+  }
+
+  return <div id="panel-browser" className="panel browser-panel browser-web">
+    <EmptyState className="inspector-empty" title="在单独窗口查看浏览器"
+      description="内置浏览器窗口由运行 Pilot 的电脑打开。"
+      actions={<Button label={opened ? '显示窗口' : '打开内置浏览器'} variant="primary" isLoading={launching} onClick={openWindow} />} isCompact />
+    {error && <Banner className="inspector-banner" status="error" role="alert" title={error}
+      description={canOpenTab ? '可用普通浏览器打开当前网址。' : '可用 Pilot 桌面版浏览，或在普通浏览器中新开标签页。'} />}
+    {notice && <p role="status" className="inspector-status">{notice}</p>}
+    {canOpenTab && <div className="browser-web-alternative"><Button label="在新标签页打开当前网址" href={page.href} target="_blank" rel="noreferrer" /></div>}
+    {!error && status?.capable === false && status.reason && <p className="inspector-status">{status.reason}</p>}
+    {!error && !notice && mirror.headless && <p className="inspector-status">
+      智能体的浏览器在后台运行。需要共看时，可将 pilot.browser.headless 设为 false 后重启。
+    </p>}
+  </div>;
+}
+
+function DesktopBrowserPanel({ bridge, coveredByTools }: { bridge: DesktopBridge; coveredByTools: boolean }) {
+  const sessionId = useStore(state => state.sessionId);
+  const workspace = useStore(state => state.workspace);
   const stageRef = useRef<HTMLDivElement>(null);
-  const imageRef = useRef<HTMLImageElement | null>(null);
-  const pendingSrc = useRef('');
-  const sawFrame = useRef(false);
-  const [sawFrameTick, setSawFrameTick] = useState(false);
   const addressRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLButtonElement>(null);
+  const [state, setState] = useState<DesktopBrowserState | null>(null);
   const [address, setAddress] = useState('');
   const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  /** 导航进行中：刷新按钮变成「停止」，地址栏下方走一条进度。 */
-  const [loading, setLoading] = useState(false);
-  /** 选择元素模式：下一次点击不转发，而是把元素描述成引用。 */
-  const [picking, setPicking] = useState(false);
-  const [consoleOpen, setConsoleOpen] = useState(false);
-  const [consoleText, setConsoleText] = useState('');
-  const [networkLog, setNetworkLog] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [findText, setFindText] = useState('');
-  const menuRef = useRef<HTMLDivElement>(null);
-  const freshTabRef = useRef(false);
-  const desktopBridge = typeof window !== 'undefined' ? window.pilotDesktop : undefined;
-  const desktopOn = !!desktopBridge;
-  const [desktopState, setDesktopState] = useState<DesktopBrowserState | null>(null);
-  /** 已经同步给页面的视口尺寸：避免重复下发 setViewportSize。 */
-  const viewportSize = useRef({ width: 0, height: 0 });
-  // 连续敲字符合并成一次 insertText；回车/退格这类整键立刻发
-  const typing = useRef<{ tokens: string[]; timer: ReturnType<typeof setTimeout> | undefined }>({ tokens: [], timer: undefined });
-  const wheel = useRef<{ deltaY: number; x: number; y: number; timer: ReturnType<typeof setTimeout> | undefined }>({ deltaY: 0, x: 0, y: 0, timer: undefined });
+  const [log, setLog] = useState<{ network: boolean; text: string } | null>(null);
+  const tabs = state?.tabs || [];
+  const active = tabs.find(tab => tab.id === state?.activeId);
+  const freshTab = !state?.url || state.url.includes('/marker/');
+  const networkLog = log?.network;
+
+  const invoke = async <T,>(action: () => Promise<T>): Promise<T | null> => {
+    setError('');
+    try {
+      const result = await action();
+      if (result && typeof result === 'object' && 'ok' in result && result.ok === false) {
+        throw new Error('error' in result && typeof result.error === 'string' ? result.error : '浏览器操作失败');
+      }
+      return result;
+    } catch (failure) {
+      setError(errorInfo(failure).message || '无法连接内置浏览器');
+      return null;
+    }
+  };
 
   useEffect(() => {
-    if (desktopOn) {
-      desktopBridge.setWorkspace(useStore.getState().workspace || '');
-      if (sessionId) desktopBridge.ensureTab(sessionId);
-      const stopState = desktopBridge.onState(setDesktopState);
-      const stopFocus = desktopBridge.focusAddress(() => addressRef.current?.focus());
-      const stopDownload = desktopBridge.onDownload?.((info) => {
-        const done = info?.state === 'completed';
-        useStore.getState().showNotice(done ? `已下载 ${info.name}` : `下载没有完成：${info?.name || ''}`);
-      });
-      const stopQuote = desktopBridge.onQuote?.((text) => {
-        const api = useStore.getState().composerApi;
-        if (!text || !api) return;
-        const quoted = String(text).split('\n').map((line) => `> ${line}`).join('\n');
-        api.appendText(`\n> 页面摘录\n${quoted}\n\n`);
-        api.focus();
-      });
-      return () => {
-        stopState();
-        stopFocus();
-        stopDownload?.();
-        stopQuote?.();
-        desktopBridge.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
-      };
-    }
-    if (sessionId) {
-      useStore.getState().loadBrowserStatus();
-      // 打开页签就确保镜像流连着：运行时可能比页面晚就绪，第一次订阅会被回 204
-      useStore.getState().ensureMirror();
-    }
-    sawFrame.current = false;
-    pendingSrc.current = '';
-    setSawFrameTick(false);
-    return undefined;
-  }, [sessionId, desktopOn]);
+    bridge.setWorkspace(workspace || '');
+  }, [bridge, workspace]);
 
-  // 截图不进 React 状态：直接写到 img 上，否则每帧一份 base64 会把整个界面拖卡
   useEffect(() => {
-    setMirrorPainter((payload) => {
-      const src = frameSrc(payload);
-      if (!src) {
-        return;
-      }
-      pendingSrc.current = src;
-      if (imageRef.current) {
-        imageRef.current.src = src;
-      }
-      if (!sawFrame.current) {
-        sawFrame.current = true;
-        setSawFrameTick(true);
-      }
-      setLoading(false);
+    const stopState = bridge.onState(setState);
+    const stopFocus = bridge.focusAddress(() => { addressRef.current?.focus(); addressRef.current?.select(); });
+    const stopDownload = bridge.onDownload?.(info => {
+      const done = info?.state === 'completed';
+      useStore.getState().showNotice(done ? `已下载 ${info.name}` : `下载没有完成：${info?.name || ''}`);
+      if (!done) setError('下载没有完成，请从页面重新下载。');
     });
-    return () => setMirrorPainter(null);
-  }, []);
-
-  // 地址栏跟随真实页面，用户正在编辑时不要被推回覆盖
-  useEffect(() => {
-    if (editing) return;
-    if (desktopOn) {
-      const url = desktopState?.url || '';
-      if (!url || url.includes('/marker/')) setAddress('');
-      else setAddress(url);
-      return;
-    }
-    setAddress(mirror.url || '');
-  }, [mirror.url, editing, desktopOn, desktopState]);
+    const stopQuote = bridge.onQuote?.(text => addPageQuote('页面摘录', text));
+    return () => { stopState(); stopFocus(); stopDownload?.(); stopQuote?.(); };
+  }, [bridge]);
 
   useEffect(() => {
-    if (!desktopOn) return undefined;
+    let active = true;
+    setError('');
+    if (sessionId) bridge.ensureTab(sessionId).catch(failure => {
+      if (active) setError(errorInfo(failure).message || '无法打开当前任务的浏览器');
+    });
+    return () => { active = false; };
+  }, [bridge, sessionId]);
+
+  useEffect(() => {
+    if (!editing) setAddress(freshTab ? '' : (state?.url || ''));
+  }, [editing, freshTab, state?.url]);
+
+  useLayoutEffect(() => {
     const stage = stageRef.current;
-    if (!stage) return undefined;
+    if (!stage) return;
+    const hasPopoverSelector = typeof CSS !== 'undefined' && CSS.supports?.('selector(:popover-open)');
     const push = () => {
       const rect = visibleStageRect(stage);
-      const covered = document.querySelector('[role="dialog"][aria-modal="true"]');
-      desktopBridge.setBounds({
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-        visible: rect.width >= 40 && rect.height >= 40 && !freshTabRef.current
+      const covered = coveredByTools
+        || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]:not([hidden])')
+        || (hasPopoverSelector && document.querySelector('[popover]:popover-open'));
+      bridge.setBounds({
+        ...rect,
+        visible: rect.width >= 40 && rect.height >= 40 && !freshTab
           && !covered && document.visibilityState === 'visible'
       });
     };
-    const observer = new ResizeObserver(push);
-    observer.observe(stage);
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(push) : null;
+    observer?.observe(stage);
     window.addEventListener('resize', push);
     document.addEventListener('scroll', push, true);
+    document.addEventListener('visibilitychange', push);
     const timer = setInterval(push, 400);
     push();
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
       window.removeEventListener('resize', push);
       document.removeEventListener('scroll', push, true);
+      document.removeEventListener('visibilitychange', push);
       clearInterval(timer);
-      desktopBridge.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
+      bridge.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
     };
-  }, [desktopOn, menuOpen, desktopState?.url]);
+  }, [bridge, coveredByTools, freshTab]);
 
   useEffect(() => {
-    if (!menuOpen) return undefined;
-    const close = (event: MouseEvent) => {
-      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) setMenuOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', close);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', close);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [menuOpen]);
-
-  useEffect(() => () => {
-    if (typing.current.timer) clearTimeout(typing.current.timer);
-    if (wheel.current.timer) clearTimeout(wheel.current.timer);
-  }, []);
-
-  // 来了新帧就说明页面确实在动，导航的等待可以收；再兜底 12 秒，别让「停止」一直挂着
-  useEffect(() => {
-    if (loading) {
-      setLoading(false);
-    }
-  }, [mirror.frame]);
-  useEffect(() => {
-    if (!loading) {
-      return undefined;
-    }
-    const timer = setTimeout(() => setLoading(false), 12000);
-    return () => clearTimeout(timer);
-  }, [loading]);
-
-  const blocked = Boolean(status && status.capable === false);
-  const reason = status?.reason || '';
-  const live = mirror.mode === 'live';
-  const pageUrl = shouldEmbedPage(mirror.url, mirror.embed, mirror.frameOptions)
-    ? embeddablePageUrl(mirror.url)
-    : null;
-
-  useEffect(() => {
-    if (!sessionId || desktopOn) {
-      return undefined;
-    }
-    fetch(`/api/sessions/${encodeURIComponent(sessionId)}/browser/capture`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ capture: !pageUrl })
-    }).catch(() => {});
-    return undefined;
-  }, [sessionId, pageUrl]);
-
-  /**
-   * 把动作转给服务端。
-   *
-   * @param quiet 点击/滚轮/键盘这类高频动作传 true：不显示地址栏的「执行中」，
-   *              否则每点一下画面地址栏就会闪一下省略号。
-   */
-  async function command(action: string, body?: Record<string, string | number | boolean | undefined>, quiet = false) {
-    if (!sessionId) {
-      return null;
-    }
-    if (!quiet) {
-      setBusy(true);
-    }
-    setError('');
-    try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/browser/${action}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body || {})
-      });
-      const data = await response.json().catch(() => ({})) as BrowserReply;
-      if (!response.ok) {
-        const detail = data.message || data.error;
-        setError(detail ? `${detail}（HTTP ${response.status}）` : `浏览器接口不可用（HTTP ${response.status}）`);
-        return null;
-      }
-      if (data.ok === false) {
-        setError(data.error || '浏览器操作失败');
-        return null;
-      }
-      return data;
-    } catch (failure) {
-      setError(errorInfo(failure).message || '无法连接浏览器运行时');
-      return null;
-    } finally {
-      if (!quiet) {
-        setBusy(false);
-      }
-    }
-  }
-
-  function submitAddress(event: React.FormEvent) {
-    event.preventDefault();
-    const value = address.trim();
-    if (!value) {
-      addressRef.current?.focus();
-      return;
-    }
-    if (desktopOn) {
-      const page = userPageUrl(value);
-      setEditing(false);
-      if (!page) {
-        setError('地址无效');
-        return;
-      }
-      setError('');
-      desktopBridge.navigate(page);
-      return;
-    }
-    setEditing(false);
-    setLoading(true);
-    useStore.getState().ensureMirror();
-    const page = embeddablePageUrl(value);
-    if (page && mirror.embed !== false) {
-      // 先把真页面嵌出来，不等截图。智能体用的浏览器同时打开同一地址。
-      useStore.getState().setUi({ mirror: { ...useStore.getState().ui.mirror, url: page, mode: 'live' } });
-    } else {
-      syncViewport();
-    }
-    command('navigate', { url: value });
-  }
-
-  /** 导航类动作统一置一次 loading，收到新帧就复位。 */
-  function navigate(action: string) {
-    if (desktopOn) {
-      if (action === 'back') desktopBridge.back();
-      else if (action === 'forward') desktopBridge.forward();
-      else if (action === 'stop') desktopBridge.stop();
-      else desktopBridge.reload();
-      return;
-    }
-    setLoading(true);
-    useStore.getState().ensureMirror();
-    if (!pageUrl) {
-      syncViewport();
-    }
-    command(action);
-  }
-
-  /**
-   * 把面板尺寸发给页面视口，失败静默。
-   *
-   * <p>导航前先发一次：新页面直接按面板宽度加载，少一次「先按 1280 排版再重排」的闪动；
-   * 浏览器还没起来时这次会失败，忽略即可，等第一帧到达后 ResizeObserver 会补上。
-   */
-  function syncViewport(width?: number, height?: number) {
-    const rect = stageRef.current?.getBoundingClientRect();
-    const nextWidth = Math.round(Number(width) || rect?.width || 0);
-    const nextHeight = Math.round(Number(height) || rect?.height || 0);
-    if (!sessionId || nextWidth < 240 || nextHeight < 160) {
-      return;
-    }
-    fetch(`/api/sessions/${encodeURIComponent(sessionId)}/browser/resize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ width: nextWidth, height: nextHeight })
-    }).then(async (response) => {
-      const data = await response.json().catch(() => ({})) as BrowserReply;
-      // 只有真的生效才记住：浏览器还没起来时这次会失败，要留给后面的重试
-      if (response.ok && data?.ok) {
-        viewportSize.current = { width: nextWidth, height: nextHeight };
-      }
-    }).catch(() => { /* 浏览器没起来，等首帧后补 */ });
-  }
-
-  /** 选择元素：把点到的元素描述成引用，塞进主输入框待发送。 */
-  async function pickAt(point: { x: number; y: number }) {
-    setPicking(false);
-    const data = await command('pick', { x: point.x, y: point.y }, true);
-    if (!data?.text) {
-      return;
-    }
-    const api = useStore.getState().composerApi;
-    const quoted = data.text.split('\n').map((line) => `> ${line}`).join('\n');
-    if (api) {
-      api.appendText(`\n> 页面元素引用（${mirror.url || '当前页面'}）\n${quoted}\n\n`);
-      api.focus();
-      useStore.getState().showNotice('已把页面元素加入输入框');
-    }
-  }
-
-  async function toggleConsole(network = false) {
-    if (consoleOpen && networkLog === network) {
-      setConsoleOpen(false);
-      return;
-    }
-    if (desktopOn) {
-      const data = await desktopBridge.logs(network);
-      setNetworkLog(network);
-      setConsoleText(data?.text || (network ? '没有网络记录' : '没有控制台记录'));
-      setConsoleOpen(true);
-      return;
-    }
-    const data = await command('logs', network ? { network: true } : {}, true);
-    setNetworkLog(network);
-    setConsoleText(data?.text || (network ? '没有网络记录' : '没有控制台记录'));
-    setConsoleOpen(true);
-  }
-
-  useEffect(() => {
-    if (!desktopOn || !consoleOpen || !desktopBridge.onLog) return undefined;
-    return desktopBridge.onLog((entry) => {
+    if (networkLog === undefined) return;
+    return bridge.onLog?.(entry => {
       if (Boolean(entry?.network) !== networkLog || !entry?.line) return;
-      setConsoleText((text) => (text && !text.startsWith('没有') ? `${text}\n${entry.line}` : entry.line));
+      setLog(current => current && { network: current.network, text: current.text ? `${current.text}\n${entry.line}` : entry.line });
     });
-  }, [desktopOn, consoleOpen, networkLog]);
+  }, [bridge, networkLog]);
 
   useEffect(() => {
-    if (!desktopOn) return undefined;
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'l') return;
+      if (event.defaultPrevented || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'l') return;
+      if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
       event.preventDefault();
       addressRef.current?.focus();
       addressRef.current?.select();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [desktopOn]);
+  }, []);
 
-  async function openDesktopMenu() {
-    if (!desktopBridge) return;
-    const action = await desktopBridge.openMenu();
-    if (action === 'find') setFindOpen(true);
-    if (action === 'console') toggleConsole(false);
-    if (action === 'network') toggleConsole(true);
-    if (action === 'pick') {
-      const result = await desktopBridge.pick();
-      if (!result?.text) return;
-      const quoted = result.text.split('\n').map((line) => `> ${line}`).join('\n');
-      const composer = useStore.getState().composerApi;
-      if (composer) {
-        composer.appendText(`\n> 页面元素引用\n${quoted}\n\n`);
-        composer.focus();
-      }
-    }
-  }
-
-  /**
-   * 面板里的指针坐标 → 页面坐标。
-   *
-   * <p>视口跟着面板走（见下面的 ResizeObserver），所以用帧自带的 w/h 换算就与页面 1:1；
-   * 还没收到帧时回退到 sidecar 的默认视口。
-   */
-  function bindMirrorImage(node: HTMLImageElement | null) {
-    imageRef.current = node;
-    if (node && pendingSrc.current) {
-      node.src = pendingSrc.current;
-    }
-  }
-
-  function pointOf(event: { clientX: number; clientY: number }) {
-    const rect = imageRef.current?.getBoundingClientRect();
-    return pointFromEvent(event.clientX, event.clientY, rect, mirror.frameW, mirror.frameH);
-  }
-
-  function flushTyping() {
-    const buffer = typing.current;
-    if (buffer.timer) {
-      clearTimeout(buffer.timer);
-      buffer.timer = undefined;
-    }
-    const text = buffer.tokens.join('');
-    buffer.tokens = [];
-    if (text) {
-      command('keys', { text }, true);
-    }
-  }
-
-  function onStageKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    // 新标签地址框属于本地表单，输入按键不能被画布转发逻辑截走。
-    if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]')) return;
-    const cmd = keyCommand(event.nativeEvent);
-    if (!cmd) {
-      return;
-    }
+  function submitAddress(event: React.FormEvent) {
     event.preventDefault();
-    if (cmd.text) {
-      typing.current.tokens.push(cmd.text);
-      if (!typing.current.timer) {
-        typing.current.timer = setTimeout(() => {
-          typing.current.timer = undefined;
-          flushTyping();
-        }, 60);
-      }
-      return;
-    }
-    flushTyping();
-    command('keys', { key: cmd.key }, true);
+    if (!address.trim()) { addressRef.current?.focus(); return; }
+    const page = userPageUrl(address);
+    if (!page) { setError('地址无效，请输入有效网址。'); return; }
+    setEditing(false);
+    void invoke(() => bridge.navigate(page));
   }
 
-  function onClick(event: React.MouseEvent<HTMLDivElement>) {
-    if (!live) {
-      return;
+  async function openMenu() {
+    const action = await invoke(() => bridge.openMenu());
+    if (action === 'find') setFindOpen(true);
+    if (action === 'console' || action === 'network') {
+      const network = action === 'network';
+      if (log?.network === network) { setLog(null); return; }
+      const result = await invoke(() => bridge.logs(network));
+      if (result) setLog({ network, text: result.text || '' });
     }
-    stageRef.current?.focus();
-    const point = pointOf(event);
-    if (!point) {
-      return;
-    }
-    // 选择元素模式下这一击只用来取样，不真的点到页面上
-    if (picking) {
-      pickAt(point);
-      return;
-    }
-    command('pointer', { action: 'click', x: point.x, y: point.y }, true);
-  }
-
-  /*
-   * 面板尺寸 → 页面视口。
-   *
-   * 内嵌浏览器必须这么做：视口跟着面板走，页面按真实宽度做响应式排版，镜像帧的比例
-   * 就等于面板比例，画面铺满而不留大片空白，点击坐标也能 1:1 对上。
-   * 拖拽分栏时尺寸会连续变化，这里防抖 260ms 再下发，避免每帧一次 setViewportSize。
-   */
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage || !live || pageUrl) {
-      return undefined;
-    }
-    // 新画面/新会话：之前记下的尺寸可能属于已经失效的页面，先作废再对齐
-    viewportSize.current = { width: 0, height: 0 };
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const push = () => {
-      const rect = stage.getBoundingClientRect();
-      const width = Math.round(rect.width);
-      const height = Math.round(rect.height);
-      if (width < 240 || height < 160) {
-        return;
-      }
-      const last = viewportSize.current;
-      if (last.width === width && last.height === height) {
-        return;
-      }
-      syncViewport(width, height);
-    };
-    const schedule = () => {
-      clearTimeout(timer);
-      timer = setTimeout(push, 260);
-    };
-    const observer = new ResizeObserver(schedule);
-    observer.observe(stage);
-    schedule();
-    return () => {
-      observer.disconnect();
-      clearTimeout(timer);
-    };
-  }, [live, sessionId, pageUrl]);
-
-  /*
-   * 滚轮要能 preventDefault 才不会把面板自己滚走，而 React 的 onWheel 是 passive 的，
-   * 只能在原生监听里挂 non-passive；deltaY 攒 80ms 再发一次，避免一帧一个请求。
-   */
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage || !live || pageUrl) {
-      return undefined;
-    }
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      const point = pointOf(event);
-      if (!point) {
-        return;
-      }
-      const acc = wheel.current;
-      acc.deltaY += event.deltaY;
-      acc.x = point.x;
-      acc.y = point.y;
-      if (acc.timer) {
-        return;
-      }
-      acc.timer = setTimeout(() => {
-        const deltaY = Math.round(acc.deltaY);
-        acc.deltaY = 0;
-        acc.timer = undefined;
-        if (deltaY) {
-          command('pointer', { action: 'wheel', x: acc.x, y: acc.y, deltaY }, true);
-        }
-      }, 80);
-    };
-    stage.addEventListener('wheel', onWheel, { passive: false });
-    return () => stage.removeEventListener('wheel', onWheel);
-    // 会话切换后命令要发给新会话，所以 sessionId 参与依赖
-  }, [live, sessionId, pageUrl]);
-
-  const [launching, setLaunching] = useState(false);
-  const [launchNote, setLaunchNote] = useState('');
-  const freshTab = desktopOn && (!desktopState?.url || desktopState.url.includes('/marker/'));
-  freshTabRef.current = freshTab;
-  const pageLoading = desktopOn ? Boolean(desktopState?.loading) : loading;
-
-  async function openDesktopWindow() {
-    setLaunching(true);
-    setLaunchNote('');
-    try {
-      const data = await api.openBrowserWindow();
-      const message = cleanLaunchNote(data?.message);
-      if (data?.ok === false) {
-        setLaunchNote(message || '没能打开浏览器窗口');
-      } else {
-        setLaunchNote(message || '窗口已打开。');
-      }
-    } catch (failure) {
-      const message = errorInfo(failure).message || '';
-      setLaunchNote(/404|Not Found/.test(message)
-        ? '服务还是刚才那一版。重新从 IDEA 启动一次后再点。'
-        : (message || '没能打开浏览器窗口'));
-    } finally {
-      setLaunching(false);
+    if (action === 'pick') {
+      const result = await invoke(() => bridge.pick());
+      if (result?.text) addPageQuote('页面元素引用', result.text);
     }
   }
-  const shownUrl = desktopOn && !editing ? (desktopState?.url || '') : address;
-  let localPage = false;
-  try {
-    const host = new URL(shownUrl).hostname.replace(/^\[|\]$/g, '');
-    localPage = host === 'localhost' || host === '127.0.0.1' || host === '::1';
-  } catch { /* 还不是完整地址 */ }
 
-  if (!desktopOn) {
-    return (
-      <div id="panel-browser" className="panel browser-panel">
-        <div className="mirror-stage">
-          <div className="browser-web-launch">
-            <p>画面在单独的窗口里，点一下才打开。</p>
-            <button type="button" className="btn btn-primary" disabled={launching} onClick={openDesktopWindow}>
-              {launching ? '正在打开…' : (/已打开|窗口已/.test(launchNote) ? '显示窗口' : '打开内置浏览器')}
-            </button>
-            {launchNote && <p className="browser-web-note">{launchNote}</p>}
-            {!launchNote && mirror.headless && (
-              <p className="browser-web-note">
-                智能体的浏览器在后台无窗口运行；需要真实窗口共看时把 pilot.browser.headless 设为 false 重启。
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
+  function closeFind() {
+    setFindOpen(false); setFindText('');
+    void invoke(() => bridge.find(''));
+    menuRef.current?.focus();
   }
 
-  return (
-    <div id="panel-browser" className={`panel browser-panel${desktopOn ? ' is-desktop' : ''}`}>
-      {desktopOn && (
-        <div className="browser-tabs" role="tablist" aria-label="浏览器标签">
-          {(desktopState?.tabs || []).map((tab) => (
-            <div key={tab.id} className={`browser-tab${tab.id === desktopState?.activeId ? ' is-on' : ''}`}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab.id === desktopState?.activeId}
-                className="browser-tab-label"
-                title={!tab.url || tab.url.includes('/marker/') ? (tab.title || '新标签') : tab.url}
-                onClick={() => desktopBridge.selectTab(tab.id)}
-              >
-                {tab.loading
-                  ? <span className="browser-tab-spin" aria-hidden="true" />
-                  : (tab.favicon ? <img className="browser-tab-icon" src={tab.favicon} alt="" /> : null)}
-                <span className="browser-tab-label-text">{tab.title || '新标签'}</span>
-              </button>
-              <button
-                type="button"
-                className="browser-tab-close"
-                aria-label={`关闭 ${tab.title || '标签'}`}
-                title="关闭标签"
-                onClick={() => desktopBridge.closeTab(tab.id)}
-              >×</button>
-            </div>
-          ))}
-          <button type="button" className="browser-tab-add" title="新标签" aria-label="新标签" onClick={() => desktopBridge.newTab()}>+</button>
-        </div>
-      )}
-      <div className="browser-chrome" ref={menuRef}>
-      <div className="browser-bar">
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label="后退"
-          title={mirror.canGoBack ? '后退' : '没有可后退的页面'}
-          disabled={desktopOn ? !desktopState?.canGoBack : (blocked || busy || !mirror.canGoBack)}
-          onClick={() => navigate('back')}
-        >
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </button>
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label="前进"
-          title={mirror.canGoForward ? '前进' : '没有可前进的页面'}
-          disabled={desktopOn ? !desktopState?.canGoForward : (blocked || busy || !mirror.canGoForward)}
-          onClick={() => navigate('forward')}
-        >
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </button>
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label={pageLoading ? '停止加载' : '刷新页面'}
-          title={pageLoading ? '停止加载' : '刷新当前页面'}
-          disabled={desktopOn ? !desktopState?.activeId : (blocked || busy || (!loading && !mirror.url))}
-          onClick={() => (pageLoading ? navigate('stop') : navigate('reload'))}
-        >
-          {pageLoading
-            ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.4 4.4l7.2 7.2M11.6 4.4l-7.2 7.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
-            : <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.6V5.4h-2.8" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-        </button>
-        <form className={`browser-address${pageLoading ? ' is-loading' : ''}`} onSubmit={submitAddress}>
-          {localPage && !editing && !freshTab && <span className="browser-address-lock">本机</span>}
-          <input
-            ref={addressRef}
-            className="browser-address-input mono"
-            aria-label="地址栏"
-            spellCheck={false}
-            autoComplete="off"
-            placeholder="搜索或输入网址"
-            value={address}
-            onChange={(event) => setAddress(event.target.value)}
-            onFocus={(event) => { setEditing(true); event.target.select(); }}
-            onBlur={() => setEditing(false)}
-          />
-          {busy && <span className="browser-address-busy" aria-label="正在执行">…</span>}
-        </form>
-        <div className="browser-menu">
-          <button
-            type="button"
-            className={`icon-btn${menuOpen ? ' is-on' : ''}`}
-            aria-label="浏览器菜单"
-            aria-expanded={menuOpen}
-            title="更多"
-            onClick={() => (desktopOn ? openDesktopMenu() : setMenuOpen((open) => !open))}
-          >
-            <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.15" fill="currentColor" /><circle cx="8" cy="8" r="1.15" fill="currentColor" /><circle cx="12.5" cy="8" r="1.15" fill="currentColor" /></svg>
-          </button>
-        </div>
-      </div>
-      {desktopOn && findOpen && (
-        <form className="browser-find" onSubmit={(event) => { event.preventDefault(); desktopBridge.find(findText); }}>
-          <input
-            autoFocus
-            aria-label="页内查找"
-            placeholder="在页面中查找"
-            value={findText}
-            onChange={(event) => setFindText(event.target.value)}
-          />
-          <button type="submit">查找</button>
-          <button type="button" onClick={() => { setFindOpen(false); setFindText(''); desktopBridge.find(''); }}>关闭</button>
-        </form>
-      )}
-      {menuOpen && (
-        <div className="browser-menu-row" role="menu">
-          <button
-            type="button"
-            role="menuitem"
-            disabled={blocked || (!desktopOn && !live) || freshTab}
-            onClick={() => {
-              setMenuOpen(false);
-              if (desktopOn) {
-                desktopBridge.pick().then((result) => {
-                  if (!result?.text) return;
-                  const quoted = result.text.split('\n').map((line) => `> ${line}`).join('\n');
-                  const api = useStore.getState().composerApi;
-                  if (api) {
-                    api.appendText(`\n> 页面元素引用\n${quoted}\n\n`);
-                    api.focus();
-                  }
-                });
-                return;
-              }
-              setPicking(true);
-            }}
-          >选择页面元素</button>
-          {desktopOn && (
-            <button type="button" role="menuitem" disabled={!desktopState?.activeId || freshTab} onClick={() => { setMenuOpen(false); desktopBridge.detach(); }}>
-              在独立窗口打开
-            </button>
-          )}
-          {desktopOn && (
-            <button type="button" role="menuitem" disabled={!desktopState?.activeId || freshTab} onClick={() => { setMenuOpen(false); desktopBridge.devtools(); }}>
-              开发工具
-            </button>
-          )}
-          <button type="button" role="menuitem" disabled={blocked || (!desktopOn && !live) || freshTab} onClick={() => { setMenuOpen(false); toggleConsole(false); }}>
-            页面控制台
-          </button>
-          <button type="button" role="menuitem" disabled={blocked || (!desktopOn && !live) || freshTab} onClick={() => { setMenuOpen(false); toggleConsole(true); }}>
-            网络记录
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className={mirror.paused ? 'is-on' : ''}
-            disabled={blocked || !sessionId}
-            onClick={async () => {
-              setMenuOpen(false);
-              if (!sessionId) return;
-              const next = !mirror.paused;
-              useStore.getState().setUi({ mirror: { ...mirror, paused: next } });
-              const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/browser/${next ? 'pause' : 'resume'}`, { method: 'POST' });
-              if (!response.ok) {
-                useStore.getState().setUi({ mirror: { ...mirror, paused: !next } });
-              }
-            }}
-          >{pauseToggleLabel(mirror.paused)}</button>
-        </div>
-      )}
-      </div>
-      {blocked && reason && <p className="browser-reason">{reason}</p>}
-      {!desktopOn && mirror.mode === 'closed' && <p className="browser-reason">浏览器已回收，重新导航即可再次打开。</p>}
-      {(desktopState?.error || error) && <p className="browser-reason is-error">{desktopState?.error || error}</p>}
-      {picking && !desktopOn && <p className="browser-reason is-pick">选择元素：点画面里要引用的元素，描述会加进输入框。</p>}
-      <div
-        id="mirror-stage"
-        className={`mirror-stage is-${mirror.mode}${pageUrl ? ' is-page' : ''}${picking ? ' is-picking' : ''}${freshTab ? ' is-fresh' : ''}`}
-        ref={stageRef}
-        tabIndex={pageUrl ? undefined : 0}
-        role="application"
-        aria-label="内置浏览器画面"
-        onClick={pageUrl ? undefined : onClick}
-        onKeyDown={pageUrl ? undefined : onStageKeyDown}
-      >
-        {freshTab
-          ? (
-            <div className="browser-newt">
-              <form onSubmit={submitAddress}>
-                <input
-                  aria-label="搜索或输入网址"
-                  placeholder="搜索或输入网址"
-                  spellCheck={false}
-                  autoComplete="off"
-                  value={address}
-                  onChange={(event) => setAddress(event.target.value)}
-                  onFocus={(event) => { setEditing(true); event.target.select(); }}
-                  onBlur={() => setEditing(false)}
-                />
-              </form>
-              {(desktopState?.recents || []).length > 0 && (
-                <div className="browser-recents">
-                  <p>最近访问</p>
-                  {(desktopState?.recents || []).map((item) => (
-                    <button
-                      key={item.url}
-                      type="button"
-                      className="browser-recent"
-                      onClick={() => desktopBridge.navigate(item.url)}
-                    >
-                      <RecentMark item={item} />
-                      <span className="browser-recent-copy">
-                        <strong>{item.title || recentHost(item.url)}</strong>
-                        <em>{recentHost(item.url)}</em>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )
-          : desktopOn
-          ? (
-            <div className="mirror-empty">
-              {desktopState?.cover && <img className="browser-cover" src={desktopState.cover} alt="" />}
-            </div>
-          )
-          : (
-            <div className="mirror-empty">
-              <p>完整浏览器在桌面壳里。</p>
-              <p className="mirror-empty-hint">在仓库里执行 npm --prefix pilot-desktop start。用普通浏览器打开本页时，这里不再用截图或内嵌页代替。</p>
-            </div>
-          )}
-      </div>
-      {consoleOpen && (
-        <div className="browser-console">
-          <div className="browser-console-head">
-            <span>页面控制台</span>
-            <button type="button" className="icon-btn" aria-label="关闭控制台" title="关闭" onClick={() => setConsoleOpen(false)}>
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.4 4.4l7.2 7.2M11.6 4.4l-7.2 7.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
-            </button>
-          </div>
-          <pre className="browser-console-body">{consoleText}</pre>
-        </div>
-      )}
-      {(desktopState?.emulated || (!desktopOn && !pageLoading)) && (
-        <div className="browser-status">
-          <p id="mirror-hint" className="mirror-hint">
-            {desktopState?.emulated
-              ? `设备模拟 ${desktopState.emulated.width}×${desktopState.emulated.height}`
-              : '完整浏览器需要桌面壳。'}
-            {desktopState?.emulated && (
-              <button type="button" className="browser-reset" onClick={() => desktopBridge.resetEmulation()}>还原</button>
-            )}
-          </p>
-        </div>
-      )}
+  return <div id="panel-browser" className="panel browser-panel is-desktop">
+    <div className="browser-tabbar">
+      <TabList role="tablist" aria-label="浏览器标签" className="browser-tablist" size="sm" value={state?.activeId || ''}
+        onChange={id => { void invoke(() => bridge.selectTab(id)); }}>
+        {tabs.map(tab => <Tab key={tab.id} value={tab.id} label={tab.title || '新标签'}
+          panelId="mirror-stage"
+          icon={tab.favicon ? <img className="browser-tab-icon" src={tab.favicon} alt="" /> : undefined} />)}
+      </TabList>
+      {active && <IconButton label={`关闭 ${active.title || '标签'}`} icon={<Icon name="close" />}
+        variant="ghost" size="sm" onClick={() => void invoke(() => bridge.closeTab(active.id))} />}
+      <IconButton label="新标签" icon={<span aria-hidden="true">+</span>}
+        variant="ghost" size="sm" onClick={() => void invoke(() => bridge.newTab())} />
     </div>
-  );
+    <div className="browser-chrome">
+      <div className="browser-bar">
+        <IconButton label="后退" icon={<Icon name="chevron" className="points-back" />} variant="ghost" size="sm"
+          isDisabled={!state?.canGoBack} onClick={() => void invoke(() => bridge.back())} />
+        <IconButton label="前进" icon={<Icon name="chevron" />} variant="ghost" size="sm"
+          isDisabled={!state?.canGoForward} onClick={() => void invoke(() => bridge.forward())} />
+        <IconButton label={state?.loading ? '停止加载' : '刷新页面'}
+          icon={<Icon name={state?.loading ? 'close' : 'refresh'} />} variant="ghost" size="sm"
+          isDisabled={!active} onClick={() => void invoke(() => state?.loading ? bridge.stop() : bridge.reload())} />
+        <form className="browser-address-form" onSubmit={submitAddress} aria-busy={!!state?.loading}>
+          <TextInput ref={addressRef} label="地址栏" isLabelHidden placeholder="输入网址" value={address} onChange={setAddress}
+            autoComplete="off" inputMode="url" enterKeyHint="go" hasSpellCheck={false} hasAutoCorrect={false}
+            containerClassName="inspector-grow" onFocus={() => { setEditing(true); addressRef.current?.select(); }} onBlur={() => setEditing(false)}
+            onKeyDown={event => { if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault(); }} />
+        </form>
+        <IconButton ref={menuRef} label="浏览器菜单" icon={<Icon name="more" />} variant="ghost" size="sm" onClick={openMenu} />
+      </div>
+      {findOpen && <form className="browser-find-form" onSubmit={event => { event.preventDefault(); void invoke(() => bridge.find(findText)); }}
+        onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); closeFind(); } }}>
+        <TextInput label="页内查找" isLabelHidden placeholder="在页面中查找" value={findText} onChange={setFindText}
+          containerClassName="inspector-grow" hasAutoFocus
+          onKeyDown={event => { if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault(); }} />
+        <Button type="submit" label="查找" />
+        <IconButton label="关闭页内查找" icon={<Icon name="close" />} variant="ghost" onClick={closeFind} />
+      </form>}
+    </div>
+    {(error || state?.error) && <Banner className="inspector-banner" status="error" role="alert" title={error || state?.error} />}
+    <div id="mirror-stage" className={`mirror-stage${freshTab ? ' is-fresh' : ''}`} ref={stageRef} role="tabpanel" aria-label="内置浏览器画面">
+      {freshTab ? <div className="browser-newt">
+        <EmptyState title="新标签页" description="从上方地址栏打开网页，或继续最近访问的页面。" isCompact />
+        {!!state?.recents?.length && <div className="browser-recents">
+          <p>最近访问</p>
+          {state.recents.map(item => <button key={item.url} type="button" className="browser-recent"
+            onClick={() => void invoke(() => bridge.navigate(item.url))}>
+            <RecentMark item={item} />
+            <span className="browser-recent-copy"><strong>{item.title || recentHost(item.url)}</strong><em>{recentHost(item.url)}</em></span>
+          </button>)}
+        </div>}
+      </div> : <div className="mirror-empty">{state?.cover && <img className="browser-cover" src={state.cover} alt="" />}</div>}
+    </div>
+    {log && <div className="browser-console">
+      <div className="browser-console-head">
+        <span>{log.network ? '网络记录' : '页面控制台'}</span>
+        <IconButton label="关闭控制台" icon={<Icon name="close" />} variant="ghost" size="sm" onClick={() => setLog(null)} />
+      </div>
+      <pre className="browser-console-body" tabIndex={0}>{log.text || (log.network ? '没有网络记录' : '没有控制台记录')}</pre>
+    </div>}
+    {state?.emulated && <div className="browser-status">
+      <span id="mirror-hint">设备模拟 ${state.emulated.width}×${state.emulated.height}</span>
+      <Button label="还原" variant="ghost" size="sm" onClick={() => void invoke(() => bridge.resetEmulation())} />
+    </div>}
+  </div>;
+}
+
+function addPageQuote(label: string, text: string) {
+  const state = useStore.getState();
+  if (!text || !state.composerApi) return;
+  const quoted = text.split('\n').map(line => `> ${line}`).join('\n');
+  state.composerApi.appendText(`\n> ${label}\n${quoted}\n\n`);
+  if (window.matchMedia('(max-width: 960px)').matches) state.setUi({ inspectorOpen: false });
+  requestAnimationFrame(() => state.composerApi?.focus());
 }

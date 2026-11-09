@@ -4,9 +4,13 @@ type TreeEntry = SessionFilesControllerEntry & { type?: string };
 interface DirectoryData { entries: TreeEntry[]; status: string; error?: string; truncated?: boolean }
 interface TreeContext { sessionId: string | null; workspace: string; revision: number; focused: React.MutableRefObject<string | null>; previewPath: string; refresh: () => void; ensureFocus: () => void }
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { Banner } from '@astryxdesign/core/Banner';
+import { Button } from '@astryxdesign/core/Button';
+import { IconButton } from '@astryxdesign/core/IconButton';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
 import { FileIcon, Icon } from './Icon.jsx';
+import './workspace-tree.css';
 
 // 每个目录独立加载，折叠目录不请求。工作区切换/刷新时丢弃旧响应。
 function useDirectory(sessionId: string | null, workspace: string, path: string, enabled: boolean, revision: number) {
@@ -17,9 +21,10 @@ function useDirectory(sessionId: string | null, workspace: string, path: string,
     setData(previous => ({ ...previous, status: 'loading', error: '' }));
     const request = sessionId ? api.files(sessionId, path) : api.workspaceTree(workspace, path);
     request.then(result => {
-      if (current) setData({ entries: result?.entries || [], truncated: result?.truncated, status: 'ready' });
+      if (!result) throw new Error('服务端未返回目录内容');
+      if (current) setData({ entries: result.entries || [], truncated: result.truncated, status: 'ready' });
     }).catch(error => {
-      if (current) setData(previous => ({ ...previous, status: 'error', error: errorInfo(error).message }));
+      if (current) setData(previous => ({ ...previous, status: 'error', error: errorInfo(error).message || '读取失败' }));
     });
     return () => { current = false; };
   }, [sessionId, workspace, path, enabled, revision]);
@@ -79,11 +84,13 @@ function WorkspaceFiles({ sessionId, workspace }: { sessionId: string | null; wo
   const context = { sessionId, workspace, revision, focused, previewPath, refresh, ensureFocus };
   return <section className={`workspace-files ${open ? 'is-open' : ''}`} aria-label="工作区文件">
     <header className="workspace-files-head">
-      <button type="button" className="workspace-files-toggle" aria-expanded={open} aria-controls="file-tree" onClick={() => setOpen(!open)}><Icon name="chevron" /><span>工作区文件</span></button>
-      {open && workspace && <button id="tree-refresh" type="button" className="icon-btn" title="刷新文件树" aria-label="刷新文件树" disabled={data.status === 'loading'} onClick={refresh}><Icon name="refresh" /></button>}
+      <Button label="工作区文件" variant="ghost" size="sm" className="workspace-tree-toggle" icon={<Icon name="chevron" />}
+        aria-expanded={open} aria-controls={open ? 'workspace-files-body' : undefined} onClick={() => setOpen(value => !value)} />
+      {open && workspace && <IconButton id="tree-refresh" label="刷新文件树" icon={<Icon name="refresh" />}
+        variant="ghost" size="sm" isDisabled={data.status === 'loading'} onClick={refresh} />}
     </header>
-    {open && <div className="workspace-files-body">
-      {workspace && <div className="workspace-root" title={workspace}><FileIcon directory /><span>{workspace.split(/[\\/]/).filter(Boolean).pop()}</span></div>}
+    {open && <div id="workspace-files-body" className="workspace-files-body">
+      {workspace && <div className="workspace-root" title={workspace}><FileIcon directory /><span>{workspace.split(/[\\/]/).filter(Boolean).pop() || workspace}</span></div>}
       {!workspace ? <p className="tree-message">选择工作区后浏览文件。</p> : <div id="file-tree" className="file-tree" role="tree" aria-label="工作区文件" ref={root} onKeyDown={onKeyDown}>
         <TreeEntries data={data} context={context} parent="" depth={1} />
       </div>}
@@ -98,7 +105,8 @@ function TreeEntries({ data, context, parent, depth, groupId }: { data: Director
       {data.entries.map((entry, index) => <TreeNode key={entry.path} entry={entry} context={context} parent={parent} depth={depth} first={depth === 1 && index === 0} />)}
     </ul>}
     {data.status === 'loading' && <p className="tree-message" role="status">正在读取…</p>}
-    {data.status === 'error' && <div className="tree-message is-error" role="alert"><span>无法读取目录：{data.error}</span><button type="button" className="text-action" onClick={context.refresh}>重试</button></div>}
+    {data.status === 'error' && <Banner className="tree-banner" status="error" role="alert" title="无法读取目录" description={data.error}
+      endContent={<Button label="重试" variant="ghost" size="sm" onClick={context.refresh} />} />}
     {data.status === 'ready' && !data.entries.length && <p className="tree-message">空目录</p>}
     {data.truncated && <p className="tree-message">此目录文件较多，仅显示部分条目。</p>}
   </>;
@@ -111,13 +119,22 @@ function TreeNode({ entry, context, parent, depth, first }: { entry: TreeEntry; 
   const data = useDirectory(context.sessionId, context.workspace, entry.path, directory && open, context.revision);
   const selected = !directory && context.previewPath === entry.path;
   return <li role="none">
-    <button type="button" role="treeitem" className={`tree-row${selected ? ' is-active' : ''}`} style={{ paddingInlineStart: 8 + (depth - 1) * 16 }}
+    <Button label={entry.name} role="treeitem" variant="ghost" size="sm" className={`tree-row${selected ? ' is-active' : ''}`}
+      style={{ paddingInlineStart: 8 + (depth - 1) * 12 }}
       data-path={entry.path} data-parent={parent} data-name={entry.name} aria-level={depth} aria-expanded={directory ? open : undefined} aria-selected={selected} aria-owns={directory && open && data.entries.length ? groupId : undefined}
-      tabIndex={first ? 0 : -1} title={entry.path}
-      onFocus={() => { context.focused.current = entry.path; context.ensureFocus(); }} onClick={() => directory ? setOpen(!open) : useStore.getState().openPreview(entry.path)}>
-      <span className={`tree-chevron${open ? ' is-open' : ''}`}>{directory && <Icon name="chevron" />}</span>
-      <FileIcon name={entry.name} directory={directory} open={open} /><span className="tree-label">{entry.name}</span>
-    </button>
+      tabIndex={first ? 0 : -1}
+      onFocus={() => { context.focused.current = entry.path; context.ensureFocus(); }} onClick={() => {
+        if (directory) { setOpen(value => !value); return; }
+        const state = useStore.getState();
+        if (window.matchMedia('(max-width: 960px)').matches) state.setUi({ sidebarOpen: false });
+        void state.openPreview(entry.path);
+      }}>
+      <span className="workspace-tree-row-content">
+        <span className={`tree-chevron${open ? ' is-open' : ''}`}>{directory && <Icon name="chevron" />}</span>
+        <FileIcon name={entry.name} directory={directory} open={open} />
+        <span className="tree-label">{entry.name}</span>
+      </span>
+    </Button>
     {directory && open && <TreeEntries groupId={groupId} data={data} context={context} parent={entry.path} depth={depth + 1} />}
   </li>;
 }

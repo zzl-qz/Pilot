@@ -1,20 +1,19 @@
 .work-products { padding: 16px; min-width: 0; font-size: 13px; line-height: 1.65; }
 html[data-theme] .topbar .product-toggle { width: auto; padding-inline: 8px; gap: 5px; white-space: nowrap; }
-.work-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.work-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .work-toolbar small { min-width: 0; overflow-wrap: anywhere; }
 .work-products h2 { font-size: 18px; line-height: 1.4; margin: 0 0 12px; font-weight: 600; }
 .work-products h3 { margin: 24px 0 8px; font-size: 13px; font-weight: 600; }
 .work-products p { margin: 8px 0 16px; }
 .work-hint, .work-empty, .work-list small, .work-sources small { color: var(--muted); }
-.work-empty { padding: 12px 0; }
+.work-empty { border: 1px solid var(--line-soft); border-radius: 8px; }
 .work-list { list-style: none; margin: 0; padding: 0; }
 .work-list li { border-bottom: 1px solid var(--line); }
 .work-list button { width: 100%; display: grid; gap: 6px; text-align: left; padding: 14px 8px; background: transparent; color: inherit; border: 0; border-radius: 6px; cursor: pointer; font: inherit; }
 .work-list button:hover { background: var(--panel-3); }
 .work-list button:focus-visible, .work-products button:focus-visible, .work-products a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.work-list strong { display: flex; align-items: baseline; gap: 12px; justify-content: space-between; }
+.work-list strong { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
 .work-list span, .work-list strong, .work-detail { overflow-wrap: anywhere; min-width: 0; }
-.work-state { font-size: 11px; font-weight: 400; color: var(--muted); flex-shrink: 0; }
 .work-preview { border-block: 1px solid var(--line); padding: 16px 0; }
 .work-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .work-evidence { white-space: pre-wrap; }
@@ -22,19 +21,13 @@ html[data-theme] .topbar .product-toggle { width: auto; padding-inline: 8px; gap
 .work-sources li { margin: 10px 0; }
 .work-sources a { color: var(--accent); overflow-wrap: anywhere; }
 .work-sources small { display: block; }
-.work-error { color: var(--danger, #ef8b8b); overflow-wrap: anywhere; }
-.work-error button { margin-left: 8px; }
-.work-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; padding-bottom: env(safe-area-inset-bottom, 0px); }
-html[data-theme] .work-products .btn { min-height: 36px; flex-shrink: 0; }
+.work-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 @media (min-width: 961px) {
   html .app:has(.products-inspector) { --activity-w: clamp(400px, 42vw, 640px); }
 }
 @media (max-width: 960px) {
   .work-products { padding: 16px; font-size: 14px; }
-  html[data-theme] .work-products .btn, .work-products summary { min-height: 44px; }
+  .work-products button { min-height: 44px; }
   html[data-theme] .topbar .product-toggle { min-width: 44px; min-height: 44px; }
-  html[data-theme] .activity.inspector.products-inspector { width: 100vw; max-width: none; inset-inline: 0; }
-  html[data-theme] .products-inspector .inspector-panel-head .icon-btn { min-width: 44px; min-height: 44px; }
-  html[data-theme] .products-inspector .inspector-rail > button { width: 44px; }
 }
 @media (max-width: 600px) { .topbar .product-toggle span { display: none; } }

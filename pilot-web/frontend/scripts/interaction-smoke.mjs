@@ -305,17 +305,25 @@ async function run(page,name,url) {
     return route.fulfill({status:200,contentType:'application/pdf',body:makePdfFixture()});
   });
   await page.getByRole('button',{name:'预览附件 sample.pdf'}).click();
-  await page.getByRole('toolbar',{name:'PDF 阅读工具'}).waitFor().catch(async error => {
+  await page.getByRole('group',{name:'PDF 阅读工具'}).getByText('1 / 1',{exact:true}).waitFor().catch(async error => {
     console.error('PDF preview:', await page.locator('body').innerText(), errors, pdfConsoleErrors);
     throw error;
   });
   await page.waitForFunction(()=>{
     const canvas=document.querySelector('.pdf-attachment-scroll canvas');
-    if(!canvas || canvas.width<500 || canvas.height<600) return false;
-    if(document.querySelector('.pdf-attachment-viewer [aria-live="polite"]')?.textContent?.trim()!=='1 / 1') return false;
+    if(!canvas || canvas.hidden || canvas.width<500 || canvas.height<600) return false;
     const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
     let ink=0;for(let i=0;i<pixels.length;i+=4) if(pixels[i]<180&&pixels[i+1]<180&&pixels[i+2]<180) ink++;
     return ink>100;
+  }).catch(async error=>{
+    const snapshot=await page.locator('.pdf-attachment-viewer').evaluate(viewer=>{
+      const canvas=viewer.querySelector('canvas'),context=canvas?.getContext('2d');
+      return {text:viewer.innerText,
+        canvas:canvas&&[canvas.width,canvas.height,canvas.clientWidth,canvas.hidden],
+        scroll:viewer.querySelector('.pdf-attachment-scroll')?.clientWidth,
+        darkPixels:context ? context.getImageData(0,0,canvas.width,canvas.height).data.filter((v,i)=>i%4===0&&v<180).length : null};
+    });
+    throw new Error(`PDF 预览没有完成：${JSON.stringify(snapshot)} ${pdfConsoleErrors.join(' | ')}`,{cause:error});
   });
   page.off('console',capturePdfConsole);
   assert.deepEqual(pdfConsoleErrors,[],`PDF.js 控制台错误: ${pdfConsoleErrors.join(' | ')}`);
@@ -336,19 +344,20 @@ async function run(page,name,url) {
   await page.keyboard.press('Escape');
   // Review expanded, line-range feedback preserves draft attachments; never sends automatically.
   await page.locator('#toggle-activity').click();await page.locator('#panel-changes').waitFor();
-  await page.getByText('全屏审阅',{exact:true}).click();await page.locator('.change-row-name').getByText('App.jsx',{exact:true}).click();
+  await page.getByRole('button',{name:'全屏审阅',exact:true}).click();await page.locator('.change-row-name').getByText('App.jsx',{exact:true}).click();
   await page.getByRole('button',{name:'选择原文件第 2 行',exact:true}).click();
   await page.getByRole('button',{name:'选择现文件第 2 行',exact:true}).click({modifiers:['Shift']});
   await page.getByLabel('审阅意见').fill('处理空输入边界');
   const sentBefore=await page.evaluate(()=>calls.filter(c=>c.name==='sendMessage').length);
-  await page.getByText('引用到输入框',{exact:true}).click();
+  await page.getByRole('button',{name:'引用到输入框',exact:true}).click();
   assert.equal(await chips.count(),1);assert.match(await input.innerText(),/处理空输入边界/);
   assert.match(await input.innerText(),/原文件:2 → 现文件:2/);
   assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='sendMessage').length),sentBefore);
-  await page.getByLabel('审阅范围').selectOption('run');await page.waitForTimeout(80);
+  await page.getByRole('radio',{name:'最近任务',exact:true}).click();await page.waitForTimeout(80);
   assert.match(await page.locator('.review-scope-note').innerText(),/差异仍相对 HEAD/);
-  assert.equal(await page.locator('#changes-undo-all').count(),0);
-  await page.getByLabel('审阅范围').selectOption('workspace');
+  await page.locator('.change-row-name').getByText('App.jsx',{exact:true}).click();
+  assert.equal(await page.locator('.change-view-undo').count(),0,'最近任务范围仅供审阅');
+  await page.getByRole('radio',{name:'工作区',exact:true}).click();
   // Recovery has correct zero-file impact; only inspect, never restore.
   await page.evaluate(()=>store.getState().setUi({checkpointDialog:{sequence:1,info:{input:'原输入',runs:1,conversationAvailable:true,code:{available:true,files:[]}}}}));
   if(await page.locator('#checkpoint-dialog').count()) {

@@ -37,7 +37,7 @@ export async function checkSideChat(page, name, temp) {
   await input.dispatchEvent('keydown', { key: 'Enter', isComposing: true });
   assert.equal(await page.evaluate(() => sideEvents.filter(e => e[0] === 'send').length), 0);
   await input.fill('A 的草稿');
-  await panel.getByRole('button', { name: '＋ 新开', exact: true }).click();
+  await panel.getByRole('button', { name: '新开侧聊', exact: true }).click();
   await page.waitForFunction(() => store.getState().sideChats.items.length === 2);
   assert.equal(await input.inputValue(), '', '新侧边会话不能继承另一条输入');
   await input.fill('B 的草稿');
@@ -57,6 +57,7 @@ export async function checkSideChat(page, name, temp) {
   await page.evaluate(() => { api.deleteSession = async () => { throw Error('offline'); }; });
   await panel.getByRole('button', { name: '关闭并丢弃这条侧边对话', exact: true }).click();
   assert.equal(await page.evaluate(() => store.getState().sideChats.items.length), 2, '删除失败保留标签');
+  await panel.getByRole('alert').filter({ hasText: '无法丢弃侧边对话' }).waitFor();
   await page.evaluate(() => { api.deleteSession = async () => {}; });
   await panel.getByRole('button', { name: '关闭并丢弃这条侧边对话', exact: true }).click();
   await page.waitForFunction(() => store.getState().sideChats.items.length === 1);
