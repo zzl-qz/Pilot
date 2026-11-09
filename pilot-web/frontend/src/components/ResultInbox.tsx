@@ -13,21 +13,14 @@ import { api } from '../api.js';
 import { useStore } from '../store.js';
 import { ResearchRecords } from './ResearchPanel.jsx';
 import { verificationLabel, verificationHint } from '../lib/verification.js';
+import { updateResultUnread } from '../lib/result-unread.js';
 import { Icon } from './Icon.jsx';
 import './results.css';
 
 const labels: Record<string, string> = { COMPLETED: '执行结束', NEEDS_ATTENTION: '需要处理', AWAITING_REVIEW: '待验收' };
-function count(items: S.ResultInboxServiceItem[]) { useStore.getState().setUi({ resultUnread: items.filter(i => !i.read && !i.handled).length }); }
 export default function ResultInbox() {
-  const open = useStore(s => s.ui.resultsOpen);
   const target = useStore(s => s.ui.resultTarget);
-  useEffect(() => {
-    if (open) return;
-    let alive = true;
-    const poll = async () => { try { const data = await api.results(); if (alive && Array.isArray(data?.items)) count(data!.items); } catch { /* 面板显示读取错误 */ } };
-    poll(); const timer = setInterval(poll, 15000); return () => { alive = false; clearInterval(timer); };
-  }, [open]);
-  return open ? <InboxDialog target={target} /> : null;
+  return <InboxDialog target={target} />;
 }
 function InboxDialog({ target }: { target?: string | null }) {
   const ref = useRef<HTMLDialogElement>(null), alive = useRef(true), request = useRef(0), listRequest = useRef(0);
@@ -49,7 +42,7 @@ function InboxDialog({ target }: { target?: string | null }) {
     try {
       const data = required(await api.results());
       if (alive.current && token === listRequest.current) {
-        const rows = data.items || []; setItems(rows); setTruncated(!!data.truncated); count(rows);
+        const rows = data.items || []; setItems(rows); setTruncated(!!data.truncated); updateResultUnread(rows);
         setHasLoaded(true); setListError('');
       }
     } catch (e) {

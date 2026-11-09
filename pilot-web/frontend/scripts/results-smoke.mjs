@@ -56,8 +56,8 @@ async function run(page, name, url) {
   await page.locator('.result-row').first().waitFor(); assert.equal(await page.locator('.result-row').count(),2);
   const menu = page.getByRole('button',{name:'结果操作',exact:true});
   await menu.focus(); await page.keyboard.press('ArrowDown');
-  await page.getByRole('menuitem',{name:'刷新结果',exact:true}).waitFor();
-  assert.equal(await page.getByRole('menuitem',{name:'刷新结果',exact:true}).evaluate(el=>el===document.activeElement),true);
+  await page.waitForFunction(()=>document.activeElement?.getAttribute('role')==='menuitem'
+    && document.activeElement.textContent.trim()==='刷新结果');
   await page.keyboard.press('Escape');
   await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='结果操作' || document.activeElement?.textContent.includes('结果操作'));
   assert.equal(await page.locator('dialog[open]').count(),1,'菜单 Escape 不关闭外层收件箱');
@@ -209,6 +209,37 @@ async function run(page, name, url) {
   });
   await page.screenshot({path:join(output,`${name}-390-light.png`),animations:'disabled'});
   assert.deepEqual(errors,[]); console.log(`${name}: PASS verification-states/receipts/filter/research/handoff/conflict/stale-preview/stale-response/error/responsive`);
+  if (process.argv.includes('--production')) {
+    const chunk = '**/assets/ResultInbox-*.js';
+    let failLoad;
+    const stalledChunk = new Promise(resolve => { failLoad = resolve; });
+    await page.route(chunk, async route => {
+      await stalledChunk;
+      await route.abort();
+    });
+    try {
+      await page.setViewportSize({width:1440,height:900});
+      await page.goto(url);
+      const opener = page.getByRole('button',{name:/任务收件箱/});
+      const waiting = page.getByRole('dialog',{name:'打开任务收件箱',exact:true});
+      await opener.click();
+      await waiting.getByText('正在打开任务收件箱…',{exact:true}).waitFor();
+      await page.keyboard.press('Escape');
+      await waiting.waitFor({state:'hidden'});
+      await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')?.includes('任务收件箱'));
+      await opener.click();
+      failLoad();
+      await waiting.getByRole('alert').filter({hasText:'任务收件箱加载失败'}).waitFor();
+      await waiting.getByRole('button',{name:'关闭',exact:true}).click();
+      await waiting.waitFor({state:'hidden'});
+      await page.getByRole('textbox',{name:'消息输入框',exact:true}).fill('加载失败后仍可输入');
+      assert.deepEqual(errors,[]);
+      console.log(`${name}: PASS delayed surface cancellation and missing chunk recovery`);
+    } finally {
+      failLoad();
+      await page.unroute(chunk);
+    }
+  }
 }
 
 try {

@@ -1,12 +1,8 @@
 import type { ApiResults } from '../types/api.js';
 import { errorInfo } from '../lib/errors.js';
 type ResizeKind = 'sidebar' | 'activity';
-import RecurringPlans from './RecurringPlans.jsx';
-import MessageSearch from './MessageSearch.jsx';
 import Notifications from './Notifications.jsx';
-import ResultInbox from './ResultInbox.jsx';
-import Schedules from './Schedules.jsx';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { Dialog } from '@astryxdesign/core/Dialog';
 import { TextInput } from '@astryxdesign/core/TextInput';
@@ -16,7 +12,6 @@ import { Icon } from './Icon.jsx';
 import { Sidebar } from './Sidebar.jsx';
 import { Thread } from './Thread.jsx';
 import { Composer } from './Composer.jsx';
-import { Inspector } from './Inspector.jsx';
 import { TaskContract, Modals } from './Modals.jsx';
 import { SelectionQuote } from './SideChat.jsx';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
@@ -27,7 +22,14 @@ import { watchWorkbench } from '../lib/workbench-sync.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { dragWidth, readLayout, writeLayout } from '../lib/layout.js';
 import { UiProvider } from './UiProvider.js';
+import { useResultUnread } from '../lib/result-unread.js';
 import './workbench-shell.css';
+
+const Schedules = lazy(() => import('./Schedules.jsx'));
+const RecurringPlans = lazy(() => import('./RecurringPlans.jsx'));
+const MessageSearch = lazy(() => import('./MessageSearch.jsx'));
+const ResultInbox = lazy(() => import('./ResultInbox.jsx'));
+const Inspector = lazy(() => import('./Inspector.jsx').then(module => ({ default: module.Inspector })));
 
 /** 应用外壳：左栏 + 主区（topbar / 通知 / 对话 / 输入） + 右侧工作区 + 弹层。 */
 export default function App() {
@@ -62,19 +64,14 @@ function Workbench() {
   useEffect(() => ready ? watchWorkbench({ refresh: options => useStore.getState().refreshWorkbench(options) }) : undefined, [ready]);
   const sidebarOpen = useStore((state) => state.ui.sidebarOpen);
   const agentsDockOpen = useStore((state) => state.ui.agentsDockOpen);
-  const running = useStore((state) => state.running);
-  const runStartedAt = useStore((state) => state.runStartedAt);
   const sessionTitle = useStore((state) => state.sessionTitle);
   const workspace = useStore((state) => state.workspace);
   const agents = useStore((state) => state.agents);
-  const phase = useStore(runPhase);
   const reviewExpanded = useStore(state => state.ui.reviewExpanded && state.ui.inspectorOpen && state.ui.inspectorTab === 'changes');
   const inspectorOpen = useStore((state) => state.ui.inspectorOpen);
   const inspectorTab = useStore((state) => state.ui.inspectorTab);
   const embedded = useStore((state) => state.embeddedSessionId);
   const sessionId = useStore((state) => state.sessionId);
-  const lastEventAt = useStore((state) => state.lastEventAt);
-  const [, setTick] = useState(0);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 960px)').matches);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
@@ -82,22 +79,6 @@ function Workbench() {
   const [layout, setLayout] = useState(readLayout);
   const [resizing, setResizing] = useState<{ kind: ResizeKind; startX: number; startWidth: number } | null>(null);
   const appRef = useRef<HTMLDivElement>(null);
-  // 75 秒没有任何事件就提示可能卡住（与旧版 STALL_SECONDS 一致）
-  const idleSeconds = running && lastEventAt ? Math.round((Date.now() - lastEventAt) / 1000) : 0;
-  const stalled = idleSeconds >= 75;
-  const statusTone = runTone(phase, running && stalled);
-  const statusLabel = running && stalled && runTone(phase) === 'running' ? '暂无新进展' : phase;
-  const statusDetail = running && stalled ? `${statusLabel} · 已经 ${idleSeconds} 秒没有新事件，请检查执行情况`
-    : phase === '就绪' ? '就绪，可以发送新消息' : phase;
-
-  useEffect(() => {
-    if (!running) {
-      return undefined;
-    }
-    const timer = setInterval(() => setTick((value) => value + 1), 1000);
-    return () => clearInterval(timer);
-  }, [running]);
-
   useEffect(() => {
     useStore.getState().init(embedded);
   }, [embedded]);
@@ -401,15 +382,7 @@ function Workbench() {
                 }}
               />
             )}
-            <span
-              id="run-state"
-              className={`run-state state-${statusTone}`}
-              data-tone={statusTone}
-              title={statusDetail}
-            >
-              <span className="run-state-label" role="status">{statusLabel}</span>
-              {running && runStartedAt ? <span className="run-state-time" aria-hidden="true">{Math.round((Date.now() - runStartedAt) / 1000)}s</span> : null}
-            </span>
+            <RunStatus />
             {/* 内嵌页再展开审阅面板会把窄 iframe 挤成两栏，这里不给入口 */}
             {!embedded && (
               <Button
@@ -449,19 +422,94 @@ function Workbench() {
             title="拖动调整审阅面板宽度"
             onPointerDown={(event) => startResize('activity', event)}
           />
-          <ErrorBoundary name="右侧面板"><Inspector /></ErrorBoundary>
+          {inspectorOpen && <ErrorBoundary name="右侧面板" fallback={<InspectorPlaceholder failed />}>
+            <Suspense fallback={<InspectorPlaceholder />}><Inspector /></Suspense>
+          </ErrorBoundary>}
         </div>
       </main>
       <SelectionQuote />
       {workspaceOpen && <ErrorBoundary name="工作区"><WorkspaceDialog onClose={() => setWorkspaceOpen(false)} /></ErrorBoundary>}
-      <ErrorBoundary name="定时任务"><Schedules /></ErrorBoundary>
-      <ErrorBoundary name="任务收件箱"><ResultInbox /></ErrorBoundary>
-      <ErrorBoundary name="周期计划"><RecurringPlans /></ErrorBoundary>
-      <ErrorBoundary name="消息搜索"><MessageSearch /></ErrorBoundary>
+      <WorkbenchDialogs embedded={Boolean(embedded)} />
       <ErrorBoundary name="结果通知"><Notifications /></ErrorBoundary>
       <ErrorBoundary name="弹层"><Modals /></ErrorBoundary>
     </div>
   );
+}
+
+function RunStatus() {
+  const running = useStore(state => state.running);
+  const runStartedAt = useStore(state => state.runStartedAt);
+  const lastEventAt = useStore(state => state.lastEventAt);
+  const phase = useStore(runPhase);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => setTick(value => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, [running]);
+
+  const now = Date.now();
+  const idleSeconds = running && lastEventAt ? Math.round((now - lastEventAt) / 1000) : 0;
+  const stalled = idleSeconds >= 75;
+  const tone = runTone(phase, running && stalled);
+  const label = running && stalled && runTone(phase) === 'running' ? '暂无新进展' : phase;
+  const detail = running && stalled ? `${label} · 已经 ${idleSeconds} 秒没有新事件，请检查执行情况`
+    : phase === '就绪' ? '就绪，可以发送新消息' : phase;
+  return <span id="run-state" className={`run-state state-${tone}`} data-tone={tone} title={detail}>
+    <span className="run-state-label" role="status">{label}</span>
+    {running && runStartedAt ? <span className="run-state-time" aria-hidden="true">{Math.round((now - runStartedAt) / 1000)}s</span> : null}
+  </span>;
+}
+
+function WorkbenchDialogs({ embedded }: { embedded: boolean }) {
+  const schedules = useStore(state => state.ui.schedulesOpen);
+  const results = useStore(state => state.ui.resultsOpen);
+  const recurring = useStore(state => state.ui.recurringOpen);
+  const search = useStore(state => state.ui.searchOpen);
+  useResultUnread(!embedded && !results);
+  const setUi = useStore.getState().setUi;
+  return <>
+    {schedules && <DeferredDialog name="定时任务" close={() => setUi({ schedulesOpen: false, scheduleDraft: null, scheduleTarget: null, scheduleRepeat: false })}><Schedules /></DeferredDialog>}
+    {results && <DeferredDialog name="任务收件箱" close={() => setUi({ resultsOpen: false, resultTarget: null })}><ResultInbox /></DeferredDialog>}
+    {recurring && <DeferredDialog name="周期计划" close={() => setUi({ recurringOpen: false })}><RecurringPlans /></DeferredDialog>}
+    {search && <DeferredDialog name="消息搜索" close={() => setUi({ searchOpen: false })}><MessageSearch /></DeferredDialog>}
+  </>;
+}
+
+function DeferredDialog({ name, close, children }: { name: string; close: () => void; children: ReactNode }) {
+  return <ErrorBoundary name={name} fallback={<DialogPlaceholder name={name} close={close} failed />}>
+    <Suspense fallback={<DialogPlaceholder name={name} close={close} />}>{children}</Suspense>
+  </ErrorBoundary>;
+}
+
+function DialogPlaceholder({ name, close, failed = false }: { name: string; close: () => void; failed?: boolean }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useLayoutEffect(() => {
+    const dialog = ref.current;
+    // 先关闭等待弹窗，让浏览器将焦点还给触发入口，再由正式弹窗捕获。
+    return () => { if (dialog?.open) dialog.close(); };
+  }, []);
+  return <Dialog ref={ref} isOpen onOpenChange={open => { if (!open) close(); }} aria-label={`打开${name}`}
+    className="workbench-deferred-dialog" onKeyDown={event => event.stopPropagation()}>
+    <p role={failed ? 'alert' : 'status'}>{failed ? `${name}加载失败，请重新载入工作台。` : `正在打开${name}…`}</p>
+    <div className="workbench-worktree-actions">
+      <Button label="关闭" onClick={close} />
+      {failed && <Button label="重新载入工作台" variant="primary" onClick={() => {
+        close();
+        void useStore.getState().reloadWorkbench();
+      }} />}
+    </div>
+  </Dialog>;
+}
+
+function InspectorPlaceholder({ failed = false }: { failed?: boolean }) {
+  return <aside className="activity inspector is-rail is-open workbench-inspector-placeholder" aria-label="工作区面板">
+    <p role={failed ? 'alert' : 'status'}>{failed ? '审阅面板加载失败。' : '正在打开审阅面板…'}</p>
+    <div className="workbench-worktree-actions">
+      <Button label="关闭工作区面板" onClick={() => useStore.getState().setUi({ inspectorOpen: false, reviewExpanded: false })} />
+      {failed && <Button label="重新载入工作台" variant="primary" onClick={() => { void useStore.getState().reloadWorkbench(); }} />}
+    </div>
+  </aside>;
 }
 
 function WorkspaceDialog({ onClose }: { onClose: () => void }) {

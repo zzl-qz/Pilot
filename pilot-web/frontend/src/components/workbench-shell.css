@@ -68,6 +68,16 @@ html[data-theme] .topbar .crumb-root.workbench-control {
   gap: 8px;
 }
 
+.workbench-deferred-dialog p,
+.workbench-inspector-placeholder p {
+  margin: 0 0 12px;
+}
+
+.workbench-inspector-placeholder {
+  display: block;
+  padding: 16px;
+}
+
 @media (max-width: 600px) {
   html[data-theme] .app > .topbar { padding-inline: 8px; gap: 4px; }
   html[data-theme] .app > .topbar .crumb-root.workbench-control { display: inline-flex; }
