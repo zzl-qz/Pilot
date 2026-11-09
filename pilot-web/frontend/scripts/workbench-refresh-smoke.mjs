@@ -21,7 +21,7 @@ import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-add
 window.store=useStore;window.pageInstance=crypto.randomUUID();
 createRoot(document.getElementById('root')).render(React.createElement(App));
 </script></body></html>`;
-const server = await createServer({ root, server: { host: '127.0.0.1', port: 0, proxy: {} }, plugins: [{
+const server = await createServer({ root, server: { host: '127.0.0.1', port: 0, proxy: {}, hmr: false }, plugins: [{
   name: 'workbench-refresh-fixture', configureServer(server) {
     server.middlewares.use('/__refresh', async (_req, res) => { res.setHeader('Content-Type', 'text/html;charset=utf-8'); res.end(await server.transformIndexHtml('/__refresh', fixture)); });
     server.middlewares.use('/__embedded', (_req, res) => { res.setHeader('Content-Type', 'text/html'); res.end('<h1>独立浏览器页面</h1><script>window.pageInstance=crypto.randomUUID()</script>'); });
@@ -170,6 +170,38 @@ try {
   let externalLoaded = false; const externalDeadline = Date.now() + 10000;
   while (!externalLoaded && Date.now() < externalDeadline) { externalLoaded = await desktop.evaluate(({ webContents }, target) => webContents.getAllWebContents().some(c => c.getURL() === target), external); if (!externalLoaded) await new Promise(resolve => setTimeout(resolve, 50)); }
   assert.ok(externalLoaded, '内置浏览器加载目标网页');
+  async function waitForBrowserVisibility(visible) {
+    let actual;
+    const deadline = Date.now() + 8000;
+    do {
+      actual = await desktop.evaluate(({ BrowserWindow }, target) => BrowserWindow.getAllWindows()[0].contentView.children
+        .some(view => view.webContents?.getURL() === target && view.getVisible()), external);
+      if (actual === visible) return;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    } while (Date.now() < deadline);
+    assert.equal(actual, visible, '内置浏览器 WebContentsView 的可见性应随菜单开关恢复');
+  }
+  await waitForBrowserVisibility(true);
+  await page.waitForFunction(() => document.querySelector('.inspector-more-menu > button')?.getClientRects().length);
+  await page.evaluate(() => document.querySelector('.inspector-more-menu > button').focus());
+  // 内嵌网页也能持有焦点。把键盘事件发给真实工作台 WebContents。
+  await desktop.evaluate(({ BrowserWindow }) => {
+    const web = BrowserWindow.getAllWindows()[0].webContents;
+    web.focus();
+    web.sendInputEvent({ type: 'keyDown', keyCode: 'Down' });
+    web.sendInputEvent({ type: 'keyUp', keyCode: 'Down' });
+  });
+  await page.waitForFunction(() => document.querySelector('.inspector-more-menu > button')?.getAttribute('aria-expanded') === 'true');
+  await waitForBrowserVisibility(false);
+  await page.screenshot({ path: join(output, 'electron-browser-tools-menu.png'), animations: 'disabled' });
+  await desktop.evaluate(({ BrowserWindow }) => {
+    const web = BrowserWindow.getAllWindows()[0].webContents;
+    web.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+    web.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+  });
+  await page.waitForFunction(() => document.querySelector('.inspector-more-menu > button')?.getAttribute('aria-expanded') === 'false');
+  await waitForBrowserVisibility(true);
+  console.log('electron: PASS 真实 WebContentsView 在更多工具菜单打开时隐藏，关闭后恢复');
   // 主进程主动加载不经过导航事件；独立检查 preload 和 IPC 的防护。
   await desktop.evaluate(({ BrowserWindow }, target) => BrowserWindow.getAllWindows()[0].loadURL(target), url.replace('127.0.0.1', 'localhost'));
 

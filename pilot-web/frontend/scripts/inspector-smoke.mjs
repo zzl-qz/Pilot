@@ -66,6 +66,19 @@ async function run(page, name) {
     assert.ok(await page.locator('#panel-browser').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
   }
   const more = page.getByRole('button', { name: '更多工具', exact: true });
+  const toolsMenu = page.getByRole('menu', { name: '更多工具', exact: true });
+  await page.evaluate(() => { calls.length = 0; });
+  await more.press('ArrowDown');
+  await page.waitForFunction(() => document.activeElement.textContent.trim() === '能力');
+  await page.waitForFunction(() => calls.some(([name, bounds]) => name === 'bounds' && !bounds.visible));
+  await page.keyboard.press('Escape');
+  await toolsMenu.waitFor({ state: 'hidden' });
+  await page.waitForFunction(() => document.activeElement.getAttribute('aria-label') === '更多工具');
+  await page.waitForFunction(() => calls.filter(([name]) => name === 'bounds').at(-1)?.[1].visible);
+  await more.click();
+  await toolsMenu.waitFor();
+  await page.locator('#inspector-title').click();
+  await toolsMenu.waitFor({ state: 'hidden' });
   await page.evaluate(() => { calls.length = 0; });
   await more.click();
   await page.waitForFunction(() => calls.some(([name, bounds]) => name === 'bounds' && !bounds.visible));
@@ -87,8 +100,10 @@ async function run(page, name) {
   }
   await page.addInitScript(() => { Object.defineProperty(HTMLElement.prototype, 'showPopover', { value: undefined, configurable: true }); });
   await page.goto(url);
-  await more.click();
-  await page.getByRole('menuitem', { name: '开源参考', exact: true }).click();
+  await more.press('ArrowDown');
+  const sheet = page.getByRole('dialog', { name: '更多工具', exact: true });
+  await sheet.getByRole('button', { name: '开源参考', exact: true }).click();
+  await sheet.waitFor({ state: 'hidden' });
   await page.locator('#inspector-title').filter({ hasText: '开源参考' }).waitFor();
   assert.deepEqual(errors, []);
   console.log(`${name}: PASS Web fallback/desktop bridge/navigation/find/pick/log/quote/download/cleanup/activity/responsive`);

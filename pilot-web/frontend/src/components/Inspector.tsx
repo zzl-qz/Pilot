@@ -7,6 +7,7 @@ interface ReviewReport extends ChangeReport { diff?: string }
 interface BrowserReply { ok?: boolean; error?: string; message?: string; text?: string; url?: string }
 import { reviewQuote } from '../lib/interaction.js';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DropdownMenu } from '@astryxdesign/core/DropdownMenu';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
@@ -19,6 +20,7 @@ import { isCommandActive, commandStatusLabel, stripAnsi } from '../lib/command-t
 import { embeddablePageUrl, frameSrc, keyCommand, pauseToggleLabel, pointFromEvent, shouldEmbedPage, userPageUrl } from '../lib/browser-mirror.js';
 import { setMirrorPainter } from '../store.js';
 import { formatTime } from '../thread-utils.js';
+import { supportsAnchoredLayers } from '../lib/theme.js';
 import { SideChatPanel } from './SideChat.jsx';
 import { MarkdownBody } from './MarkdownBody.jsx';
 import FileWorkbench from './FileWorkbench.js';
@@ -50,8 +52,8 @@ export function Inspector() {
   const open = useStore((state) => state.ui.inspectorOpen);
   const sessionId = useStore((state) => state.sessionId);
   const navRef = useRef<HTMLDivElement>(null);
-  const moreRef = useRef<HTMLDetailsElement>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const anchored = supportsAnchoredLayers();
 
   // 切换后将当前常用页签滚回可见区域。
   useEffect(() => {
@@ -75,7 +77,7 @@ export function Inspector() {
           {tab === 'preview' && <PreviewPanel />}
           {tab === 'commands' && <CommandsPanel />}
           {tab === 'capabilities' && <CapabilitiesPanel />}
-          {tab === 'browser' && <BrowserPanel />}
+          {tab === 'browser' && <BrowserPanel toolsMenuOpen={moreOpen} />}
           {tab === 'products' && <WorkProductsPanel />}
           {tab === 'files' && <FileWorkbench key={sessionId} />}
           {tab === 'research' && <ResearchPanel />}
@@ -113,27 +115,31 @@ export function Inspector() {
           </button>
         ))}
       </div>
-      <details className="inspector-more-menu" ref={moreRef} onToggle={event => setMoreOpen(event.currentTarget.open)}>
-        <summary role="button" className={`rail-button${MORE_TABS.some(item => item.id === tab) ? ' is-on' : ''}`} aria-label="更多工具" aria-haspopup="menu" aria-expanded={moreOpen} title="更多工具" onKeyDown={event => {
-          if (event.key === 'Escape' && moreRef.current?.open) { event.preventDefault(); moreRef.current.open = false; setMoreOpen(false); event.currentTarget.focus(); }
-        }}><RailIcon id="more" /><span className="rail-tab-label">更多工具</span></summary>
-        <div className="inspector-more-items" role="menu" aria-label="更多工具">
-          {MORE_TABS.map(item => <button key={item.id} type="button" role="menuitem" title={item.title} onKeyDown={event => {
-            if (event.key === 'Escape') { event.preventDefault(); if (moreRef.current) moreRef.current.open = false; setMoreOpen(false); moreRef.current?.querySelector('summary')?.focus(); }
-          }} onClick={() => {
-            useStore.getState().setUi({ inspectorTab: item.id });
-            if (moreRef.current) moreRef.current.open = false;
-            setMoreOpen(false);
-          }}><RailIcon id={item.id} /><span>{item.label}</span></button>)}
-        </div>
-      </details>
+      <div className="inspector-more-menu" data-workbench-menu-open={moreOpen || undefined}>
+        <DropdownMenu placement="start" alignment="end" menuWidth={176}
+          presentation={anchored ? 'popover' : 'bottom-sheet'}
+          isMenuOpen={moreOpen} onOpenChange={setMoreOpen}
+          renderTrigger={props => <button {...props} type="button"
+            className={`rail-button${MORE_TABS.some(item => item.id === tab) ? ' is-on' : ''}`} aria-label="更多工具" title="更多工具"
+            onKeyDown={event => {
+              props.onKeyDown(event);
+              if (!anchored && !moreOpen && event.key === 'ArrowDown' && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+                event.preventDefault();
+                setMoreOpen(true);
+              }
+            }}><RailIcon id="more" /><span className="rail-tab-label">更多工具</span></button>}
+          items={MORE_TABS.map(item => ({
+            id: item.id, label: item.label, icon: <RailIcon id={item.id} />,
+            onClick: () => useStore.getState().setUi({ inspectorTab: item.id })
+          }))} />
+      </div>
       </nav>
     </aside>
   );
 }
 
 function RailIcon({ id }: { id: string }) {
-  const common = { viewBox: '0 0 16 16', 'aria-hidden': true };
+  const common = { viewBox: '0 0 16 16', width: 16, height: 16, 'aria-hidden': true };
   if (id === 'products') return <svg {...common}><path d="M4 2.5h5l3 3v8H4zM9 2.5v3h3M6 8h4M6 10.5h4" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
   if (id === 'studio') return <svg {...common}><path d="M3 2.5h6l4 4v7H3zM9 2.5v4h4M6 9h4M6 11h4" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
   if (id === 'research') return <svg {...common}><path d="M8 4C6 2.5 3 3 2 3v9c2-.5 4-.5 6 1 2-1.5 4-1.5 6-1V3c-2-.5-4-.5-6 1Zm0 0v9" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
@@ -425,7 +431,7 @@ function ChangesPanel() {
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.altKey || event.ctrlKey || event.metaKey || document.querySelector('.modal')) {
+      if (event.altKey || event.ctrlKey || event.metaKey || document.querySelector('.modal, [data-workbench-menu-open]')) {
         return;
       }
       const panel = document.getElementById('panel-changes');
@@ -1347,7 +1353,7 @@ function cleanLaunchNote(text?: string) {
     .trim();
 }
 
-function BrowserPanel() {
+function BrowserPanel({ toolsMenuOpen }: { toolsMenuOpen: boolean }) {
   const sessionId = useStore((state) => state.sessionId);
   const mirror = useStore((state) => state.ui.mirror);
   const status = useStore((state) => state.ui.browserStatus);
@@ -1456,7 +1462,7 @@ function BrowserPanel() {
     if (!stage) return undefined;
     const push = () => {
       const rect = visibleStageRect(stage);
-      const covered = document.querySelector('dialog[open], [role="dialog"][aria-modal="true"], .inspector-more-menu[open]');
+      const covered = toolsMenuOpen || document.querySelector('dialog[open], [aria-modal="true"]');
       desktopBridge.setBounds({
         x: rect.x,
         y: rect.y,
@@ -1479,7 +1485,7 @@ function BrowserPanel() {
       clearInterval(timer);
       desktopBridge.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
     };
-  }, [desktopOn, menuOpen, desktopState?.url]);
+  }, [desktopOn, menuOpen, toolsMenuOpen, desktopState?.url]);
 
   useEffect(() => {
     if (!menuOpen) return undefined;

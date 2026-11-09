@@ -123,7 +123,7 @@ function Workbench() {
     main?.setAttribute('inert', '');
     const frame = requestAnimationFrame(() => document.getElementById('new-session')?.focus());
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab' || event.defaultPrevented || document.querySelector('.modal, dialog[open]')) return;
+      if (event.key !== 'Tab' || event.defaultPrevented || document.querySelector('.modal, dialog[open], [data-workbench-menu-open]')) return;
       const items = [toggle, ...document.querySelectorAll<HTMLElement>('.navigation-rail :is(button, summary, [role="menuitem"]), #sidebar :is(button, input, summary, [tabindex="0"])')]
         .filter((el): el is HTMLElement => Boolean(el && el.tabIndex >= 0 && !el.matches(':disabled,[aria-disabled="true"]')
           && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden'));
@@ -203,14 +203,14 @@ function Workbench() {
        * 弹层各自有 Esc 监听（Modal 组件），这里只负责「别在关弹层的同时把任务也取消了」，
        * 所以有弹层时直接让行，没有弹层且正在跑就中止 Agent。
        */
-      if (event.key !== 'Escape' || event.isComposing) {
+      if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229) {
         return;
       }
       const state = useStore.getState();
       const overlayOpen = Boolean(state.ui.picker || state.ui.projectEditor || state.ui.settingsOpen
         || state.ui.searchOpen || state.ui.resultsOpen || state.ui.schedulesOpen || state.ui.recurringOpen
         || state.ui.paletteOpen || state.ui.checkpointDialog || state.ui.skillsInstall || state.ui.confirm
-        || state.ui.mobileConnectionOpen || state.ui.notificationsOpen || document.querySelector('dialog[open]'));
+        || state.ui.mobileConnectionOpen || state.ui.notificationsOpen || document.querySelector('dialog[open], [aria-modal="true"], [data-workbench-menu-open]'));
       if (overlayOpen) {
         return;
       }

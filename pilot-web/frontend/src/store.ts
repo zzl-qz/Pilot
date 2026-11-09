@@ -1973,7 +1973,6 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   },
   /** 彻底删除会话（事件、检查点、计划一起清）；归档只是藏起来，列表会越积越多。 */
   async deleteSession(id) {
-    const wasActive = get().sessionId === id;
     try {
       await api.deleteSession(id);
       // 先本地摘掉这一行：后端的清理是异步的，紧接着的列表可能还带着它
@@ -1992,19 +1991,21 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       }
       get().showNotice('已删除对话');
       const list = await get().loadSessions();
-      if (!wasActive) {
-        return;
+      if (get().sessionId !== id) {
+        return true;
       }
-      const next = (list || []).find((session) => !session.archived && !session.isBlank)
-        || (list || []).find((session) => !session.archived);
+      const next = list.find(session => session.id !== id && !session.archived && !session.isBlank)
+        || list.find(session => session.id !== id && !session.archived);
       if (next) {
         await get().activate(next.id);
       } else {
         // 删的是最后一个对话：回到「新任务」，别继续对着不存在的会话轮询
         get().startNewSession();
       }
+      return true;
     } catch (error) {
       get().showNotice('删除失败：' + errorInfo(error).message);
+      return false;
     }
   },
   /** 用上一条用户输入重跑一轮，历史里不会多一条重复的用户消息。 */
