@@ -61,7 +61,7 @@ async function run(page,name) {
   await page.setViewportSize({width:390,height:900});
   await page.waitForFunction(() => document.querySelector('button[aria-label="更多功能"]').getAttribute('aria-expanded')==='false');
   await menu.waitFor({state:'hidden'});
-  assert.equal(await page.locator('#sidebar-toggle').evaluate(el=>el===document.activeElement),true);
+  await page.waitForFunction(()=>document.activeElement?.id==='sidebar-toggle');
   await page.setViewportSize({width:1440,height:900});
   await page.locator('#sidebar-toggle').click();
   await page.locator('.thread-nav-tick').last().waitFor();assert.equal(await page.locator('.thread-nav-tick').count(),12);

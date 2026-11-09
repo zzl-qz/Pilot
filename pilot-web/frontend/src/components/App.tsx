@@ -83,12 +83,22 @@ function Workbench() {
 
   useEffect(() => {
     const narrow = window.matchMedia('(max-width: 960px)');
+    let focusFrame = 0;
     const collapse = () => {
       setNarrowViewport(narrow.matches);
-      if (narrow.matches) useStore.getState().setUi({ sidebarOpen: false });
+      if (!narrow.matches) return;
+      const focusedInNavigation = document.activeElement?.closest('.navigation-rail, #sidebar');
+      useStore.getState().setUi({ sidebarOpen: false });
+      if (focusedInNavigation) {
+        cancelAnimationFrame(focusFrame);
+        focusFrame = requestAnimationFrame(() => document.getElementById('sidebar-toggle')?.focus());
+      }
     };
     collapse(); narrow.addEventListener('change', collapse);
-    return () => narrow.removeEventListener('change', collapse);
+    return () => {
+      cancelAnimationFrame(focusFrame);
+      narrow.removeEventListener('change', collapse);
+    };
   }, []);
 
   useEffect(() => {
@@ -297,7 +307,7 @@ function Workbench() {
       style={appStyle}
     >
       {/* 各区块单独兜底：任何一块渲染异常都不该把整页卸载成白屏 */}
-      {!embedded && <NavigationRail />}
+      {!embedded && <NavigationRail key={narrowViewport && !sidebarOpen ? 'closed-drawer' : 'navigation'} />}
       <ErrorBoundary name="侧栏"><Sidebar /></ErrorBoundary>
       {sidebarOpen && <button type="button" className="sidebar-scrim" tabIndex={-1} aria-label="关闭导航" onClick={() => useStore.getState().setUi({ sidebarOpen: false })} />}
       <div
@@ -558,7 +568,11 @@ function WorkspaceDialog({ onClose }: { onClose: () => void }) {
           void useStore.getState().openWorktree(worktreeBranch.trim());
         }}>
           <TextInput label="分支" placeholder="留空使用当前分支" value={worktreeBranch}
-            isDisabled={!workspace} onChange={setWorktreeBranch} />
+            isDisabled={!workspace} onChange={setWorktreeBranch} onKeyDown={event => {
+              if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) {
+                event.preventDefault();
+              }
+            }} />
           <Button type="submit" label="创建 worktree" variant="primary" isDisabled={!workspace} />
         </form>
         {worktree && (

@@ -25,7 +25,10 @@ html[data-theme="light"] {
 }
 .ui-icon { width: 16px; height: 16px; flex: none; display: inline-block; vertical-align: middle; }
 html[data-theme] :where(button, input, textarea, select) { font-family: var(--sans); }
-html[data-theme] :where(button, summary, input, textarea, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+html[data-theme] :where(button, summary, input, textarea, select):not(:where(.astryx-text-input input, .astryx-text-area textarea)):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 html[data-theme] :where(input, textarea)::placeholder { color: var(--dim); opacity: 1; }
 html[data-theme] :where(button):disabled { cursor: not-allowed; }
 html[data-theme] .btn {

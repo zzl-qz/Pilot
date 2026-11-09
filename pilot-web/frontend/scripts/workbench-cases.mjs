@@ -43,7 +43,8 @@ export async function checkWorkbench(page, name, output) {
     store.setState({ openWorktree: async branch => branchCalls.push(branch) });
   });
   await page.locator('#workspace-name').click();
-  const branchInput = page.getByLabel('worktree 分支', { exact: true });
+  const branchInput = page.getByRole('dialog', { name: '工作区', exact: true })
+    .getByRole('textbox', { name: '分支', exact: true });
   await branchInput.fill('中文分支');
   await branchInput.dispatchEvent('keydown', { key: 'Enter', isComposing: true });
   assert.deepEqual(await page.evaluate(() => branchCalls), [], '确认输入法候选字不能创建 worktree');
