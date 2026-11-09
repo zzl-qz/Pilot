@@ -65,7 +65,7 @@ export function Thread() {
    */
   const lastScrollTop = useRef(0);
   const armed = useRef(false);
-  const earlierTimer = useRef<ReturnType<typeof setTimeout>>();
+  const earlierTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const navigationUntil = useRef(0);
   const beforeNavigation = useCallback(() => {
     clearTimeout(earlierTimer.current);
@@ -760,7 +760,7 @@ const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
  */
 const CopyControl = memo(function CopyControl({ text, label = '复制', tip = '复制' }: { text: string; label?: string; tip?: string }) {
   const [done, setDone] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   async function copy() {
     const ok = await writeClipboard(text);

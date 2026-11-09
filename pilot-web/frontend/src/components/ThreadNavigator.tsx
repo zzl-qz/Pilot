@@ -39,7 +39,7 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
   const [panel, setPanel] = useState(false);
   const [onlySaved, setOnlySaved] = useState(false);
   const [jumping, setJumping] = useState<string | null>(null);
-  const root = useRef<HTMLElement>(null), popup = useRef<HTMLDivElement>(null), closeTimer = useRef<ReturnType<typeof setTimeout>>(), operation = useRef(0);
+  const root = useRef<HTMLElement>(null), popup = useRef<HTMLDivElement>(null), closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), operation = useRef(0);
   const entries = useMemo(() => {
     const map = new Map<string, NavEntry>(bookmarks.map(e => [String(e.sequence), e]));
     for (const row of rows) if (row.type === 'user') { const e = entryFor(row); map.set(e.id, e); }
