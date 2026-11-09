@@ -1,3 +1,4 @@
+import { once } from 'node:events';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium, _electron } from 'playwright-core';
@@ -18,7 +19,7 @@ setMarkdownNotifier(text=>notices.push(text));setMarkdownContext({getWorkspace:(
 window.render=text=>document.getElementById('target').replaceChildren(renderMarkdown(text));
 window.stream=createBlockStreamRenderer(document.getElementById('stream'),{parse:markdownBlockRecords});window.ready=true;
 </script></html>`;
-const server = await createServer({ root, server: { host: '127.0.0.1', port: 0, proxy: {} }, plugins: [{ name: 'markdown-fixture', configureServer(server) {
+const server = await createServer({ configFile: false, root, server: { host: '127.0.0.1', port: 0, hmr: false, proxy: {} }, plugins: [{ name: 'markdown-fixture', configureServer(server) {
   server.middlewares.use('/__markdown', async (_request, response) => { response.setHeader('Content-Type', 'text/html;charset=utf-8'); response.end(await server.transformIndexHtml('/__markdown', fixture)); });
 } }] });
 let browser, desktop;
@@ -85,7 +86,10 @@ async function run(page, name, url) {
   console.log(`${name}: PASS Markdown grammar, links, copy/failure, SVG sanitizing, sandboxed HTML, math/diagram/fallback, streaming list, node reuse/reset`);
 }
 try {
-  await server.listen(); const url = `http://127.0.0.1:${server.httpServer.address().port}/__markdown`;
+  const listening = once(server.httpServer, 'listening');
+  server.httpServer.listen(0, '127.0.0.1');
+  await listening;
+  const url = `http://127.0.0.1:${server.httpServer.address().port}/__markdown`;
   browser = await chromium.launch({ channel: 'chrome', headless: true }); await run(await browser.newPage(), 'chromium', url); await browser.close(); browser = null;
   const main = join(output, 'main.cjs'); await writeFile(main, `const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}}).loadURL(${JSON.stringify(url)}));`);
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;

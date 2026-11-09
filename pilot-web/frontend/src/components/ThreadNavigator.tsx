@@ -3,8 +3,10 @@ interface NavEntry { id: string; key: string; sequence: number | null; title: st
 type JumpEntry = Pick<NavEntry, 'id' | 'key' | 'sequence'>;
 interface NavigatorProps { rows: ThreadRow[]; scrollRef: { current?: HTMLElement | null }; contentRef: { current?: HTMLElement | null }; stopFollowing: () => void; beforeJump: () => void }
 import { errorInfo } from '../lib/errors.js';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Button } from '@astryxdesign/core/Button';
+import { IconButton } from '@astryxdesign/core/IconButton';
+import { Icon } from './Icon.jsx';
 import { useStore } from '../store.js';
 import { splitAttachmentMarkers } from '../lib/attachments.js';
 import './thread-navigator.css';
@@ -35,11 +37,17 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
   const mutation = useRef(0), mounted = useRef(true);
   const navigationTarget = useStore(s => s.ui.navigationTarget);
   const [active, setActive] = useState<string | null | undefined>(null);
-  const [peek, setPeek] = useState<{ entry: NavEntry; left: number; top: number; width: number } | null>(null);
+  const [peek, setPeek] = useState<{ entry: NavEntry; source: HTMLButtonElement; left: number; top: number; width: number } | null>(null);
   const [panel, setPanel] = useState(false);
   const [onlySaved, setOnlySaved] = useState(false);
   const [jumping, setJumping] = useState<string | null>(null);
-  const root = useRef<HTMLElement>(null), popup = useRef<HTMLDivElement>(null), closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), operation = useRef(0);
+  const root = useRef<HTMLElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const savedFilterRef = useRef<HTMLButtonElement>(null);
+  const popup = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const operation = useRef(0);
   const entries = useMemo(() => {
     const map = new Map<string, NavEntry>(bookmarks.map(e => [String(e.sequence), e]));
     for (const row of rows) if (row.type === 'user') { const e = entryFor(row); map.set(e.id, e); }
@@ -99,26 +107,49 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
     const entry = { id: String(navigationTarget.sequence), key: '', sequence: navigationTarget.sequence };
     jump(entry); useStore.getState().setUi({ navigationTarget: null });
   }, [navigationTarget]);
+  function closePanel(restoreFocus = false) {
+    clearTimeout(closeTimer.current);
+    if (restoreFocus && panel) triggerRef.current?.focus({ preventScroll: true });
+    if (restoreFocus && peek && popup.current?.contains(document.activeElement)) peek.source.focus({ preventScroll: true });
+    setPeek(null);
+    setPanel(false);
+    operation.current += 1;
+    setJumping(null);
+  }
+
+  useLayoutEffect(() => {
+    if (panel) headingRef.current?.focus({ preventScroll: true });
+  }, [panel]);
+
   useEffect(() => {
     if (!peek && !panel) return;
     const close = (event: KeyboardEvent | PointerEvent) => {
       if (event instanceof KeyboardEvent) {
-        if (event.key !== 'Escape') return;
-        event.preventDefault(); event.stopImmediatePropagation();
-      } else if (event.target instanceof Node && (root.current?.contains(event.target) || popup.current?.contains(event.target))) return;
-      setPeek(null); setPanel(false); operation.current++; setJumping(null);
+        if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
+        if (document.querySelector('dialog[open], [aria-modal="true"]')?.contains(document.activeElement)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        closePanel(true);
+      } else if (!(event.target instanceof Node) || (!root.current?.contains(event.target) && !popup.current?.contains(event.target))) {
+        closePanel();
+      }
     };
     const resize = () => setPeek(null);
     document.addEventListener('keydown', close, true); document.addEventListener('pointerdown', close); window.addEventListener('resize', resize);
     return () => { document.removeEventListener('keydown', close, true); document.removeEventListener('pointerdown', close); window.removeEventListener('resize', resize); };
   }, [peek, panel]);
-  function show(entry: NavEntry, el: HTMLElement) {
+  function show(entry: NavEntry, el: HTMLButtonElement) {
     clearTimeout(closeTimer.current);
     const rect = el.getBoundingClientRect();
     const width = Math.min(350, window.innerWidth - 24);
-    setPeek({ entry, left: Math.min(rect.right + 6, window.innerWidth - width - 12), top: Math.max(12, Math.min(rect.top - 30, window.innerHeight - 205)), width });
+    setPeek({ entry, source: el, left: Math.min(rect.right + 6, window.innerWidth - width - 12), top: Math.max(12, Math.min(rect.top - 30, window.innerHeight - 205)), width });
   }
-  function laterClose() { clearTimeout(closeTimer.current); closeTimer.current = setTimeout(() => setPeek(null), 180); }
+  function laterClose() {
+    clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => {
+      if (!popup.current?.contains(document.activeElement)) setPeek(null);
+    }, 180);
+  }
   async function toggle(entry: NavEntry) {
     if (saving) return;
     if (!session || entry.sequence == null || !Number.isSafeInteger(entry.sequence)) { useStore.getState().showNotice('消息保存后才能添加书签。'); return; }
@@ -129,11 +160,17 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
       await syncBookmarks(session);
       if (remove) await api.deleteBookmark(session, entry.sequence); else await api.saveBookmark(session, entry.sequence);
       const values = normalizeBookmarks(await api.bookmarks(session));
-      if (mounted.current) { setBookmarks(values); setSyncError(''); }
+      if (mounted.current) {
+        if (remove && onlySaved && document.activeElement?.closest('.thread-nav-item')) {
+          savedFilterRef.current?.focus({ preventScroll: true });
+        }
+        setBookmarks(values);
+        setSyncError('');
+      }
     } catch (e) { if (mounted.current) { setSyncError(errorInfo(e).message || '书签保存失败'); useStore.getState().showNotice(`书签保存失败：${errorInfo(e).message}`); } }
     finally { mutation.current++; if (mounted.current) setSaving(false); }
   }
-  async function jump(entry: JumpEntry) {
+  async function jump(entry: JumpEntry, focusTarget = false) {
     const token = ++operation.current;
     stopFollowing(); beforeJump(); setJumping(entry.id);
     try {
@@ -158,7 +195,8 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
       beforeJump(); stopFollowing();
       const scroll = scrollRef.current;
       if (!scroll) return;
-      scroll.scrollTo({ top: scroll.scrollTop + el.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 24, behavior: 'instant' });
+      scroll.scrollTop += el.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 24;
+      if (focusTarget) el.focus({ preventScroll: true });
       setActive(entry.id); setPeek(null); setPanel(false);
       const located = el; located.classList.add('is-navigation-target'); setTimeout(() => located.classList.remove('is-navigation-target'), 1400);
     } catch (error) {
@@ -172,24 +210,93 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
     if (event.key === 'ArrowUp') next = Math.max(0, index - 1);
     if (event.key === 'Home') next = 0;
     if (event.key === 'End') next = buttons.length - 1;
+    if ((event.key === 'ArrowRight' || (event.key === 'Tab' && !event.shiftKey)) && peek?.source === event.currentTarget && popup.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearTimeout(closeTimer.current);
+      popup.current.querySelector('button')?.focus();
+      return;
+    }
     if (next != null) { event.preventDefault(); event.stopPropagation(); buttons[next]?.focus(); }
   }
   if (!entries.length) return null;
   const preview = peek && entries.find(e => e.id === peek.entry.id);
-  return <nav className="thread-navigator" aria-label="对话导航" ref={root}>
-    <button className="thread-nav-menu" aria-label="打开对话导航和书签" aria-expanded={panel} onClick={() => { setPanel(!panel); setPeek(null); }}><Bookmark filled={bookmarks.length > 0} /></button>
-    <div className="thread-nav-track" onMouseLeave={laterClose}>
-      {entries.map((entry, index) => <button key={entry.id} className={`thread-nav-tick${active === entry.id ? ' is-current' : ''}${saved.has(entry.id) ? ' is-saved' : ''}`} aria-label={`跳转：${entry.title}`} aria-current={active === entry.id ? 'location' : undefined} tabIndex={active === entry.id || (!active && index === 0) ? 0 : -1} onMouseEnter={e => show(entry, e.currentTarget)} onFocus={e => show(entry, e.currentTarget)} onBlur={e => { if (!(e.relatedTarget instanceof Node && popup.current?.contains(e.relatedTarget))) laterClose(); }} onKeyDown={e => move(e, index)} onClick={() => jump(entry)}><span /></button>)}
-    </div>
-    {panel && <section className="thread-nav-panel" aria-label="消息导航列表">
-      <header><strong>对话导航</strong><button aria-label="关闭对话导航" onClick={() => setPanel(false)}>×</button></header>
-      <div className="thread-nav-filters"><button aria-pressed={!onlySaved} onClick={() => setOnlySaved(false)}>消息</button><button aria-pressed={onlySaved} onClick={() => setOnlySaved(true)}>书签 {bookmarks.length}</button></div>
-      <div className="thread-nav-list">{entries.filter(e => !onlySaved || saved.has(e.id)).map(entry => <div className="thread-nav-item" key={entry.id}><button onClick={() => jump(entry)} disabled={jumping != null}>{entry.title}<small>{jumping === entry.id ? '正在定位…' : entry.preview}</small></button><button disabled={saving} aria-label={saved.has(entry.id) ? '取消书签' : '添加书签'} aria-pressed={saved.has(entry.id)} onClick={() => toggle(entry)}><Bookmark filled={saved.has(entry.id)} /></button></div>)}{onlySaved && !bookmarks.length && <p>还没有书签。悬停刻度即可收藏消息。</p>}</div>
-      <footer>{history.hasMore && <button disabled={history.loading} onClick={() => { stopFollowing(); beforeJump(); useStore.getState().requestEarlierHistory({ force: true }); }}>{history.loading ? '正在加载…' : history.error ? '重试加载更早消息' : '加载更早的消息'}</button>}<small>书签已同步到当前 Pilot 服务，可在连接同一服务的设备查看。</small>{syncError && <p role="alert">{syncError} <button disabled={saving} onClick={refreshBookmarks}>重试同步</button></p>}</footer>
-    </section>}
-    {preview && peek && !panel && createPortal(<div className="thread-nav-preview" ref={popup} role="dialog" aria-label="消息预览" style={{ left: peek.left, top: peek.top, width: peek.width }} onMouseEnter={() => clearTimeout(closeTimer.current)} onMouseLeave={laterClose} onFocus={() => clearTimeout(closeTimer.current)} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) laterClose(); }}>
-      <div><button className="thread-nav-preview-title" onClick={() => jump(preview)}>{preview.title}</button><button disabled={saving} className="thread-nav-save" aria-label={saved.has(preview.id) ? '取消书签' : '添加书签'} aria-pressed={saved.has(preview.id)} onClick={() => toggle(preview)}><Bookmark filled={saved.has(preview.id)} /></button></div>
-      {preview.preview && <p>{preview.preview}</p>}<small>{jumping === preview.id ? '正在定位…' : '点击标题跳转'}{saved.has(preview.id) ? ' · 已收藏' : ''}</small>
-    </div>, document.body)}
-  </nav>;
+  const tabStop = entries.some(entry => entry.id === active) ? active : entries[0].id;
+  return <>
+    <nav className="thread-navigator" aria-label="对话导航" ref={root}>
+      <IconButton ref={triggerRef} className="thread-nav-menu" size="sm" variant="ghost"
+        label="打开对话导航和书签" icon={<Bookmark filled={bookmarks.length > 0} />}
+        aria-expanded={panel} aria-controls={panel ? 'thread-nav-panel' : undefined}
+        onClick={() => {
+          if (panel) closePanel(true);
+          else { clearTimeout(closeTimer.current); setPanel(true); setPeek(null); }
+        }} />
+      <div className="thread-nav-track" onMouseLeave={laterClose}>
+        {entries.map((entry, index) => (
+          <button key={entry.id} type="button"
+            className={'thread-nav-tick' + (active === entry.id ? ' is-current' : '') + (saved.has(entry.id) ? ' is-saved' : '')}
+            aria-label={'跳转：' + entry.title} aria-current={active === entry.id ? 'location' : undefined}
+            tabIndex={tabStop === entry.id ? 0 : -1}
+            onMouseEnter={event => { if (!panel) show(entry, event.currentTarget); }}
+            onFocus={event => { if (!panel) show(entry, event.currentTarget); }}
+            onBlur={event => { if (!(event.relatedTarget instanceof Node && popup.current?.contains(event.relatedTarget))) laterClose(); }}
+            onKeyDown={event => move(event, index)} onClick={() => jump(entry, true)}><span />
+          </button>
+        ))}
+      </div>
+      {panel && <section id="thread-nav-panel" className="thread-nav-panel" aria-labelledby="thread-nav-heading">
+        <header>
+          <h2 id="thread-nav-heading" tabIndex={-1} ref={headingRef}>对话导航</h2>
+          <IconButton label="关闭对话导航" icon={<Icon name="close" />} size="sm" variant="ghost" onClick={() => closePanel(true)} />
+        </header>
+        <div className="thread-nav-filters">
+          <Button size="sm" variant={onlySaved ? 'ghost' : 'secondary'} label="消息" aria-pressed={!onlySaved} onClick={() => setOnlySaved(false)} />
+          <Button ref={savedFilterRef} size="sm" variant={onlySaved ? 'secondary' : 'ghost'}
+            label={'书签 ' + bookmarks.length} aria-pressed={onlySaved} onClick={() => setOnlySaved(true)} />
+        </div>
+        <div className="thread-nav-list">
+          {entries.filter(entry => !onlySaved || saved.has(entry.id)).map(entry => (
+            <div className="thread-nav-item" key={entry.id}>
+              <button className="thread-nav-jump" type="button" onClick={() => jump(entry, true)} disabled={jumping != null}>
+                {entry.title}<small>{jumping === entry.id ? '正在定位…' : entry.preview}</small>
+              </button>
+              <IconButton size="sm" variant="ghost" isDisabled={saving} label={saved.has(entry.id) ? '取消书签' : '添加书签'}
+                aria-pressed={saved.has(entry.id)} icon={<Bookmark filled={saved.has(entry.id)} />} onClick={() => toggle(entry)} />
+            </div>
+          ))}
+          {onlySaved && !bookmarks.length && <p>还没有书签。在消息列表中可为任意已保存的消息添加书签。</p>}
+        </div>
+        <footer>
+          {history.hasMore && <Button className="thread-nav-retry" size="sm" variant="ghost" isDisabled={history.loading}
+            label={history.loading ? '正在加载…' : history.error ? '重试加载更早消息' : '加载更早的消息'}
+            onClick={() => { stopFollowing(); beforeJump(); void useStore.getState().requestEarlierHistory({ force: true }); }} />}
+          <small>连接到同一个 Pilot 服务的设备共享书签。</small>
+          {syncError && <div className="thread-nav-error"><p role="alert">{syncError}</p>
+            <Button size="sm" variant="ghost" isDisabled={saving} label="重试同步" onClick={refreshBookmarks} />
+          </div>}
+        </footer>
+      </section>}
+    </nav>
+    {preview && peek && !panel && (
+      <div className="thread-nav-preview" ref={popup} role="dialog" aria-label="消息预览"
+        style={{ left: peek.left, top: peek.top, width: peek.width }}
+        onMouseEnter={() => clearTimeout(closeTimer.current)} onMouseLeave={laterClose}
+        onFocus={() => clearTimeout(closeTimer.current)}
+        onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) laterClose(); }}
+        onKeyDown={event => {
+          if (event.key !== 'ArrowLeft' && !(event.key === 'Tab' && event.shiftKey && event.target === popup.current?.querySelector('button'))) return;
+          event.preventDefault();
+          peek.source.focus({ preventScroll: true });
+        }}>
+        <div>
+          <button type="button" className="thread-nav-preview-title" onClick={() => jump(preview, true)}>{preview.title}</button>
+          <IconButton size="sm" variant="ghost" className="thread-nav-save" isDisabled={saving}
+            label={saved.has(preview.id) ? '取消书签' : '添加书签'} aria-pressed={saved.has(preview.id)}
+            icon={<Bookmark filled={saved.has(preview.id)} />} onClick={() => toggle(preview)} />
+        </div>
+        {preview.preview && <p>{preview.preview}</p>}
+        <small>{jumping === preview.id ? '正在定位…' : '选择标题跳转'}{saved.has(preview.id) ? ' · 已收藏' : ''}</small>
+      </div>
+    )}
+  </>;
 }

@@ -1,65 +1,117 @@
 import type { VoiceState } from '../types/input.js';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
+import { Button } from '@astryxdesign/core/Button';
+import { IconButton } from '@astryxdesign/core/IconButton';
+import { Spinner } from '@astryxdesign/core/Spinner';
+import { StatusDot } from '@astryxdesign/core/StatusDot';
 import { api } from '../api.js';
 import { createVoiceInput, VOICE_MAX_MS } from '../lib/voice-input.js';
 import { Icon } from './Icon.jsx';
 
-const clock = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+const clock = (ms: number) => Math.floor(ms / 60000) + ':' + String(Math.floor(ms / 1000) % 60).padStart(2, '0');
 
-export function VoiceInput({ ownerKey, disabled, onBusy, onText }: { ownerKey: string; disabled?: boolean; onBusy: (busy: boolean) => void; onText: (text: string) => void }) {
+interface VoiceInputProps {
+  ownerKey: string;
+  disabled?: boolean;
+  feedbackRef: RefObject<HTMLDivElement | null>;
+  onBusy: (busy: boolean) => void;
+  onText: (text: string) => void;
+}
+
+export function VoiceInput({ ownerKey, disabled, feedbackRef, onBusy, onText }: VoiceInputProps) {
   const [state, setState] = useState<VoiceState>({ phase: 'idle' });
-  const callbacks = useRef({ onBusy, onText }); callbacks.current = { onBusy, onText };
+  const callbacks = useRef({ onBusy, onText });
+  callbacks.current = { onBusy, onText };
   const voice = useRef<ReturnType<typeof createVoiceInput> | null>(null);
-  useEffect(() => {
-    const input = createVoiceInput({ transcribe: (...args) => api.transcribeVoice(...args),
-      onState: next => { setState(next); callbacks.current.onBusy(!['idle', 'error'].includes(next.phase)); },
-      onText: text => callbacks.current.onText(text) });
+  const trigger = useRef<HTMLButtonElement>(null);
+
+  // 在会话切换的提交阶段取消录音，旧权限请求或转写结果就不会进入新草稿。
+  useLayoutEffect(() => {
+    const input = createVoiceInput({
+      transcribe: (...args) => api.transcribeVoice(...args),
+      onState: next => {
+        setState(next);
+        callbacks.current.onBusy(next.phase !== 'idle' && next.phase !== 'error');
+      },
+      onText: text => callbacks.current.onText(text)
+    });
     voice.current = input;
     return () => { input.cancel(); voice.current = null; };
   }, [ownerKey]);
+
   const active = state.phase !== 'idle';
-  useEffect(() => {
+  const recording = state.phase === 'recording';
+  const failed = state.phase === 'error';
+  const waiting = active && !recording && !failed;
+
+  function dismiss() {
+    const restoreFocus = feedbackRef.current?.contains(document.activeElement);
+    voice.current?.cancel();
+    if (restoreFocus) trigger.current?.focus({ preventScroll: true });
+  }
+
+  useLayoutEffect(() => {
     if (!active) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing) return;
-      event.preventDefault(); event.stopPropagation(); voice.current?.cancel();
+      if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
+      if (document.querySelector('#composer [aria-expanded="true"], .composer-suggestions')) return;
+      const dialog = document.querySelector('dialog[open], [aria-modal="true"]');
+      if (dialog?.contains(document.activeElement)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      dismiss();
     };
     document.addEventListener('keydown', escape, true);
     return () => document.removeEventListener('keydown', escape, true);
-  }, [active]);
-  const recording = state.phase === 'recording';
-  const failed = state.phase === 'error';
+  }, [active, feedbackRef]);
+
   const elapsed = state.elapsed || 0;
-  const progress = Math.min(100, Math.round(elapsed / VOICE_MAX_MS * 100));
-  return <div className="voice-input">
-    <button type="button" className={`voice-button${recording ? ' is-recording' : ''}`}
-      disabled={disabled || (!['idle', 'error', 'recording'].includes(state.phase))}
-      aria-label={recording ? '完成录音' : '语音输入'} aria-pressed={recording}
-      title={recording ? '完成录音并转为文字' : '语音输入 · 录音将发送到已配置的语音服务，转为草稿'}
-      onClick={() => recording ? voice.current?.stop() : voice.current?.start()}><Icon name={recording ? "check" : "mic"} /></button>
-    {active && <div className={`voice-panel is-${state.phase}`}>
-      <div className="voice-head">
-        {recording && <span className="voice-dot" aria-hidden="true" />}
-        <span className="voice-status" role={failed ? 'alert' : 'status'}>
-          {recording ? '正在录音' :
-            state.phase === 'requesting' ? '正在请求麦克风权限…' :
-              failed ? state.error :
-                state.phase === 'finishing' ? '正在收尾…' : '正在转为文字…'}
-        </span>
-        {recording && <span className="voice-timer" aria-hidden="true">{clock(elapsed)}</span>}
-      </div>
-      {recording && <>
-        <div className="voice-meter" role="presentation"><span style={{ width: `${progress}%` }} /></div>
-        <p className="voice-hint">最长 2 分钟 · 完成后转为草稿，确认后发送</p>
-      </>}
-      {!recording && !failed && <div className="voice-meter is-busy" role="presentation"><span /></div>}
-      <div className="voice-panel-actions">
-        {recording && <button type="button" className="btn btn-primary" onClick={() => voice.current?.stop()}>
-          <Icon name="check" />完成并转写
-        </button>}
-        {state.retry && <button type="button" className="btn btn-primary" onClick={() => voice.current?.retry()}>重试转写</button>}
-        <button type="button" className="btn" onClick={() => voice.current?.cancel()}>{failed ? '关闭' : '取消'}</button>
-      </div>
-    </div>}
-  </div>;
+  const status = {
+    idle: '',
+    requesting: '正在请求麦克风权限…',
+    recording: '正在录音',
+    finishing: '正在收尾…',
+    transcribing: '正在转为文字…',
+    error: state.error || '语音输入失败，请重试。'
+  }[state.phase];
+  const label = recording ? '完成录音' : '语音输入';
+
+  return <>
+    <span title={recording ? '完成录音并转为文字' : '录音将发送到已配置的语音服务，转为草稿'}>
+      <IconButton ref={trigger} className="composer-icon voice-button" variant="ghost" label={label}
+        icon={<Icon name={recording ? 'check' : 'mic'} />} isDisabled={disabled}
+        aria-disabled={disabled || waiting || undefined} aria-controls={active ? 'composer-voice-panel' : undefined}
+        onClick={() => {
+          if (recording) voice.current?.stop();
+          else if (!waiting) void voice.current?.start();
+        }} />
+    </span>
+    {active && feedbackRef.current && createPortal(
+      <section id="composer-voice-panel" className={'voice-panel composer-voice-panel is-' + state.phase} aria-label="语音输入状态">
+        <div className="composer-voice-body">
+          <div className="voice-head">
+            {waiting && <Spinner size="sm" shade="subtle" aria-hidden="true" />}
+            {recording && <StatusDot variant="error" label="正在录音" aria-hidden="true" />}
+            {failed && <Icon name="info" />}
+            <span className="voice-status" role={failed ? 'alert' : 'status'}>{status}</span>
+            {recording && <span className="voice-timer" aria-hidden="true">{clock(elapsed)}</span>}
+          </div>
+          {recording && <p className="voice-hint">最长 {VOICE_MAX_MS / 60000} 分钟 · 转写后可编辑再发送</p>}
+        </div>
+        <div className="voice-panel-actions">
+          {recording && <Button size="sm" label="完成并转写" onClick={() => {
+            trigger.current?.focus({ preventScroll: true });
+            voice.current?.stop();
+          }} />}
+          {state.retry && <Button size="sm" label="重试转写" onClick={() => {
+            trigger.current?.focus({ preventScroll: true });
+            voice.current?.retry();
+          }} />}
+          <Button size="sm" variant="ghost" label={failed ? '关闭' : '取消'} onClick={dismiss} />
+        </div>
+      </section>,
+      feedbackRef.current
+    )}
+  </>;
 }

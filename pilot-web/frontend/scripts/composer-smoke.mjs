@@ -1,3 +1,4 @@
+import { once } from 'node:events';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
 import { createServer } from 'vite';
 import { chromium, _electron } from 'playwright-core';
@@ -8,13 +9,14 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const temp = await mkdtemp(join(tmpdir(), 'pilot-composer-'));
-const server = await createServer({ root, publicDir: '../src/main/resources/static', server: { host: '127.0.0.1', port: 0, proxy: {} }, plugins: [{ name: 'composer-fixture', configureServer(server) {
+const server = await createServer({ configFile: false, root, publicDir: '../src/main/resources/static', server: { host: '127.0.0.1', port: 0, hmr: false, proxy: {} }, plugins: [{ name: 'composer-fixture', configureServer(server) {
   server.middlewares.use('/__composer', async (_req, res) => {
     res.setHeader('Content-Type', 'text/html');
     res.end(await server.transformIndexHtml('/__composer', `<html><head><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
       import React from 'react';
       import {createRoot} from 'react-dom/client';
       import {Composer} from '/src/components/Composer.jsx';
+      import {UiProvider} from '/src/components/UiProvider.js';
       import {useStore} from '/src/store.js';
       import {api} from '/src/api.js';
       import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
@@ -22,7 +24,8 @@ const server = await createServer({ root, publicDir: '../src/main/resources/stat
       for(const name of Object.keys(api)) if(typeof api[name]==='function') api[name]=async()=>({});
       api.sendMessage=async (id, body)=>{window.sent.push({id, body}); if(window.failSend) throw Error('test failure');};
       useStore.setState({sessionId:'test-a'});
-      createRoot(document.getElementById('root')).render(React.createElement(Composer));
+      useStore.getState().setUi({themeMode:'dark'});
+      createRoot(document.getElementById('root')).render(React.createElement(UiProvider, null, React.createElement(Composer)));
     </script></body></html>`));
   });
 } }] });
@@ -130,7 +133,9 @@ async function run(page, name) {
 }
 let url;
 try {
-  await server.listen(); url=`http://127.0.0.1:${server.httpServer.address().port}/__composer`;
+  const listening = once(server.httpServer, 'listening');
+  server.httpServer.listen(0, '127.0.0.1');
+  await listening; url=`http://127.0.0.1:${server.httpServer.address().port}/__composer`;
   browser=await chromium.launch({channel:'chrome',headless:true}); await run(await browser.newPage(),'chromium'); await browser.close(); browser=null;
   const main=join(temp,'main.cjs');
   await writeFile(main,`const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
