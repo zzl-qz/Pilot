@@ -1,0 +1,6 @@
+/* 复用随 Pilot 分发的字体；主题和浮层不依赖外部字体服务。 */
+[data-astryx-theme="neutral"] {
+  --font-family-body: var(--sans, system-ui, sans-serif);
+  --font-family-heading: var(--sans, system-ui, sans-serif);
+  --font-family-mono: var(--mono, ui-monospace, monospace);
+}

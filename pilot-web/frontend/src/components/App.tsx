@@ -23,9 +23,14 @@ import { api } from '../api.js';
 import { watchWorkbench } from '../lib/workbench-sync.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { dragWidth, readLayout, writeLayout } from '../lib/layout.js';
+import { UiProvider } from './UiProvider.js';
 
 /** 应用外壳：左栏 + 主区（topbar / 通知 / 对话 / 输入） + 右侧工作区 + 弹层。 */
 export default function App() {
+  return <UiProvider><Workbench /></UiProvider>;
+}
+
+function Workbench() {
   const init = useStore((state) => state.init);
   const notice = useStore((state) => state.ui.notice);
   useEffect(() => window.pilotDesktop?.onMobileConnection?.(() => useStore.getState().setUi({ mobileConnectionOpen: true })), []);
@@ -93,15 +98,6 @@ export default function App() {
 
   useEffect(() => {
     useStore.getState().init(embedded);
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = () => {
-      const mode = useStore.getState().ui.themeMode;
-      if (mode === 'system') {
-        useStore.getState().setTheme('system');
-      }
-    };
-    media.addEventListener?.('change', onChange);
-    return () => media.removeEventListener?.('change', onChange);
   }, [embedded]);
 
   useEffect(() => {

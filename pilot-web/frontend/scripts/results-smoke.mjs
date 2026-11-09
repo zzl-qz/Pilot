@@ -10,9 +10,10 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'pilot-results-ui-'));
 const fixture = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
-import React from 'react'; import {createRoot} from 'react-dom/client'; import App from '/src/components/App.jsx'; import {useStore} from '/src/store.js'; import {api} from '/src/api.js';
+import React from 'react'; import {createRoot} from 'react-dom/client'; import App from '/src/components/App.jsx'; import {useStore} from '/src/store.js'; import {api} from '/src/api.js'; window.api=api;
 import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
-document.documentElement.dataset.theme='dark'; window.store=useStore; window.calls=[]; window.fail=false; window.previewFail=false; window.handoffFail=false; window.pendingDetail=null; window.verificationPhase='VERIFIED';
+document.documentElement.dataset.theme='dark'; window.store=useStore; window.calls=[]; window.fail=new URL(location.href).searchParams.has('failure'); window.previewFail=false; window.handoffFail=false; window.pendingDetail=null; window.verificationPhase='VERIFIED';
+if(new URL(location.href).searchParams.has('no-anchor')){const supports=CSS.supports.bind(CSS);CSS.supports=(...args)=>args[0]==='anchor-name'?false:supports(...args);}
 for(const name of Object.keys(api)) if(typeof api[name]==='function') api[name]=async()=>({});
 const at='2026-11-03T03:00:00Z';
 window.rows=[{id:'schedule-1',revision:'v1',sessionId:'scheduled-session',title:'修复调度恢复并完成验证',source:'SCHEDULE',state:'COMPLETED',summary:'复用现有投递链路，修复任务重启后的恢复逻辑。相关测试通过，改动保存在独立工作区。',at,runId:'run-1',scheduleId:'schedule-1',read:false,handled:false,changedFiles:['src/schedule/dispatch.java','src/schedule/recovery.java'],checks:['恢复流程与重复投递测试通过'],openSteps:[],workspace:{mode:'ISOLATED',path:'/workspace/pilot-worktrees/任务 01',base:'/workspace/pilot',commit:'a46f98117f',handedOffAt:null}},
@@ -46,9 +47,23 @@ if(process.argv.includes('--production')) {
 let browser, electron;
 async function run(page, name, url) {
   page.setDefaultTimeout(8000); const errors=[]; page.on('pageerror',e=>errors.push(e.message));
+  async function refreshResults() {
+    await page.getByRole('button',{name:'结果操作',exact:true}).click();
+    await page.getByRole('menuitem',{name:'刷新结果',exact:true}).click();
+  }
   await page.setViewportSize({width:1440,height:900}); await page.goto(url);
   await page.getByRole('button',{name:/任务收件箱/}).click();
   await page.locator('.result-row').first().waitFor(); assert.equal(await page.locator('.result-row').count(),2);
+  const menu = page.getByRole('button',{name:'结果操作',exact:true});
+  await menu.focus(); await page.keyboard.press('ArrowDown');
+  await page.getByRole('menuitem',{name:'刷新结果',exact:true}).waitFor();
+  assert.equal(await page.getByRole('menuitem',{name:'刷新结果',exact:true}).evaluate(el=>el===document.activeElement),true);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='结果操作' || document.activeElement?.textContent.includes('结果操作'));
+  assert.equal(await page.locator('dialog[open]').count(),1,'菜单 Escape 不关闭外层收件箱');
+  await page.getByRole('radio',{name:'待处理',exact:true}).focus(); await page.keyboard.press('ArrowRight');
+  assert.equal(await page.getByRole('radio',{name:'未读',exact:true}).getAttribute('aria-checked'),'true');
+  await page.keyboard.press('ArrowLeft');
   await page.locator('.result-row').first().click();
   await page.getByRole('heading',{name:'修复调度恢复并完成验证',exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>rows[0].read),true); assert.equal(await page.evaluate(()=>rows[0].handled),false);
@@ -58,7 +73,7 @@ async function run(page, name, url) {
   await page.getByRole('button',{name:'标记已读',exact:true}).waitFor(); assert.equal(await page.evaluate(()=>rows[0].read),false);
   await page.getByRole('button',{name:'标记已处理',exact:true}).click();
   await page.getByRole('button',{name:'重新打开',exact:true}).waitFor(); assert.equal(await page.evaluate(()=>rows[0].handled),true);
-  await page.getByRole('button',{name:'已处理',exact:true}).click(); assert.equal(await page.locator('.result-row').count(),1);
+  await page.getByRole('radio',{name:'已处理',exact:true}).click(); assert.equal(await page.locator('.result-row').count(),1);
   await page.locator('.result-row').first().click(); await page.getByRole('button',{name:'重新打开',exact:true}).click();
   await page.getByRole('button',{name:'标记已处理',exact:true}).waitFor();
   await page.getByRole('button',{name:'预览交回改动',exact:true}).click(); await page.getByLabel('交回差异',{exact:true}).waitFor();
@@ -73,11 +88,12 @@ async function run(page, name, url) {
   assert.equal(await page.evaluate(()=>calls.filter(c=>c.type==='handoff').at(-1).revision),'patch-v1');
   await page.getByRole('button',{name:'查看本次运行差异'}).click(); await page.getByLabel('运行差异',{exact:true}).waitFor();
   await page.getByRole('button',{name:'打开执行对话',exact:true}).click(); assert.equal(await page.evaluate(()=>window.activated),'scheduled-session');
+  await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')?.includes('任务收件箱'));
   await page.getByRole('button',{name:/任务收件箱/}).click();
-  await page.evaluate(()=>{window.fail=true;}); await page.getByRole('button',{name:'刷新',exact:true}).click();
+  await page.evaluate(()=>{window.fail=true;}); await refreshResults();
   await page.getByRole('alert').filter({hasText:'模拟连接断开'}).waitFor();
-  await page.evaluate(()=>{window.fail=false;}); await page.getByRole('button',{name:'刷新',exact:true}).click();
-  await page.waitForFunction(()=>!document.querySelector('.schedule-error'));
+  await page.evaluate(()=>{window.fail=false;}); await page.getByRole('button',{name:'重新加载结果',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('.results-error'));
   // A slow result must not replace the newer selection.
   await page.evaluate(()=>{window.pendingDetail=new Promise(resolve=>window.resolveDetail=resolve);});
   await page.locator('.result-row').first().click(); await page.locator('.result-row').last().click();
@@ -96,17 +112,102 @@ async function run(page, name, url) {
   await page.keyboard.press('Escape');
   await page.evaluate(()=>store.getState().setUi({inspectorOpen:true,inspectorTab:'research'}));
   await page.getByText('当前任务的调研依据',{exact:true}).waitFor();
+  // 首次读取失败不能与真正的空列表混为一谈，重试成功后清除错误。
+  await page.goto(url+'?preview=1&failure=1');
+  await page.getByRole('alert').filter({hasText:'模拟连接断开'}).waitFor();
+  assert.equal(await page.getByRole('heading',{name:/暂无.*结果/}).count(),0);
+  assert.equal(await page.getByText('0 条结果',{exact:true}).count(),0);
+  await page.evaluate(()=>{window.fail=false;});
+  await page.getByRole('button',{name:'重新加载结果',exact:true}).click();
+  await page.locator('.result-row').first().waitFor();
+  assert.equal(await page.locator('.results-error').count(),0);
+  await page.getByRole('radio',{name:'已处理',exact:true}).click();
+  await page.getByRole('heading',{name:'暂无已处理结果',exact:true}).waitFor();
+  await page.getByRole('radio',{name:'待处理',exact:true}).click();
+
+  // 迟到的列表响应不能覆盖一次更新的读取。
+  await page.evaluate(()=>{
+    const original=api.results; let first=true;
+    api.results=()=>{if(!first)return original();first=false;return new Promise(resolve=>window.resolveList=()=>resolve({items:[],truncated:false}));};
+  });
+  await refreshResults();
+  await page.locator('.result-row').first().click();
+  await page.locator('.result-detail h2').waitFor();
+  await page.waitForFunction(()=>document.querySelector('.results-count')?.textContent==='2 条结果');
+  await page.evaluate(()=>window.resolveList());
+  assert.equal(await page.locator('.result-row').count(),2,'迟到的空结果被忽略');
+
+  // 请求超过轮询周期仍能完成；后台轮询不能反复使正在读取的响应失效。
+  await page.evaluate(()=>{
+    const original=api.results; window.slowListCalls=0;
+    api.results=()=>{window.slowListCalls++;return new Promise(resolve=>{
+      window.finishSlowList=()=>{api.results=original;resolve(original());};
+    });};
+  });
+  await refreshResults();
+  await page.waitForTimeout(15500);
+  assert.equal(await page.evaluate(()=>window.slowListCalls),1,'慢请求期间不追加后台读取');
+  await page.evaluate(()=>window.finishSlowList());
+  await page.waitForFunction(()=>document.querySelector('.results-count')?.textContent==='2 条结果');
+
+  // 显式模式、系统变化以及多次开关弹窗共用同一个颜色状态。
+  for (const mode of ['light','dark','system']) {
+    await page.emulateMedia({colorScheme:'dark'});
+    await page.evaluate(mode=>store.getState().setTheme(mode),mode);
+    const expected=mode==='light'?'light':'dark';
+    await page.waitForFunction(expected=>document.documentElement.dataset.theme===expected,expected);
+    await page.waitForFunction(expected=>getComputedStyle(document.querySelector('.results-dialog')).backgroundColor===(expected==='light'?'rgb(255, 255, 255)':'rgb(38, 38, 38)'),expected);
+    if(mode==='system'){
+      await page.emulateMedia({colorScheme:'light'});
+      await page.waitForFunction(()=>document.documentElement.dataset.theme==='light');
+      assert.equal(await page.evaluate(()=>document.documentElement.dataset.themeMode),'system');
+    }
+  }
+  await page.evaluate(()=>store.getState().setTheme('dark'));
+
+  // 锚点定位不支持时，同一业务动作仍然可直接调用。
+  await page.goto(url+'?preview=1&no-anchor=1');
+  await page.locator('.result-row').first().waitFor();
+  assert.equal(await page.getByRole('button',{name:'结果操作',exact:true}).count(),0);
+  await page.evaluate(()=>{window.fail=true;});
+  await page.getByRole('button',{name:'刷新结果',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'模拟连接断开'}).waitFor();
+  await page.getByRole('button',{name:'通知与投递',exact:true}).click();
+  await page.getByRole('heading',{name:'通知与投递',exact:true}).waitFor();
+  console.log(`${name}: PASS Astryx keyboard/filter/focus/theme, first-load failure, empty state, late list and capability fallback`);
   for(const width of [1440,768,390]) {
     await page.setViewportSize({width,height:900}); await page.goto(url+'?preview=1');
     await page.locator('.result-row').first().waitFor();
     assert.ok(await page.locator('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1));
-    await checkDialogLayout(page);
-    await page.screenshot({path:join(output,`${name}-${width}-list.png`)});
+    await checkDialogLayout(page, {close:'.results-close',header:'.results-header',body:'.results-body'});
+    const listBounds=await page.locator('.results-dialog').boundingBox();
+    await page.screenshot({path:join(output,`${name}-${width}-list.png`),animations:'disabled'});
     await page.locator('.result-row').first().click(); await page.locator('.result-detail h2').waitFor();
     assert.ok(await page.locator('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1));
-    await page.screenshot({path:join(output,`${name}-${width}-detail.png`)});
+    const detailBounds=await page.locator('.results-dialog').boundingBox();
+    assert.ok(Math.abs(detailBounds.y-listBounds.y)<1,'详情不改变弹窗位置');
+    await page.screenshot({path:join(output,`${name}-${width}-detail.png`),animations:'disabled'});
+    if(width<=900){
+      await page.getByRole('button',{name:'返回结果列表',exact:true}).click();
+      assert.equal(await page.locator('.result-row').first().evaluate(el=>el===document.activeElement),true,'返回后聚焦原结果');
+    }
   }
-  await page.evaluate(()=>document.documentElement.dataset.theme='light'); await page.screenshot({path:join(output,`${name}-390-light.png`)});
+  // 未读结果在打开后会自动移出筛选列表；返回时仍须有可见的键盘焦点。
+  await page.getByRole('radio',{name:'未读',exact:true}).click();
+  await page.locator('.result-row').first().click();
+  await page.waitForFunction(()=>document.querySelectorAll('.result-row').length===0);
+  await page.getByRole('button',{name:'返回结果列表',exact:true}).click();
+  assert.equal(await page.getByRole('radio',{name:'未读',exact:true}).evaluate(el=>el===document.activeElement),true);
+  await page.getByRole('radio',{name:'待处理',exact:true}).click();
+  await page.evaluate(()=>store.getState().setTheme('light'));
+  // 主题背景与分段控件的选中动画独立完成；确认最终文字和底色都可读再留图。
+  await page.waitForFunction(()=>{
+    const selected=document.querySelector('.results-dialog [role="radio"][aria-checked="true"]');
+    const style=getComputedStyle(selected);
+    return getComputedStyle(document.querySelector('.results-dialog')).backgroundColor==='rgb(255, 255, 255)'
+      && style.backgroundColor==='rgb(255, 255, 255)' && style.color==='rgb(0, 0, 0)';
+  });
+  await page.screenshot({path:join(output,`${name}-390-light.png`),animations:'disabled'});
   assert.deepEqual(errors,[]); console.log(`${name}: PASS verification-states/receipts/filter/research/handoff/conflict/stale-preview/stale-response/error/responsive`);
 }
 

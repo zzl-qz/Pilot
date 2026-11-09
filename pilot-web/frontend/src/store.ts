@@ -6,6 +6,7 @@ import type { SideChatTab } from './types/content.js';
 import type { PlanRow, ResultRow } from './types/thread.js';
 import type * as S from './types/server.js';
 import { errorInfo } from './lib/errors.js';
+import { resolveTheme } from './lib/theme.js';
 type StoreGet = () => StoreState;
 type StoreSet = (change: (draft: Draft<StoreState>) => void) => void;
 /**
@@ -2216,9 +2217,7 @@ async function describeError(response: Response) {
 }
 
 function applyTheme(mode: string, accent: string) {
-  const prefersDark = Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const resolved = mode === 'system' ? (prefersDark ? 'dark' : 'light') : (mode === 'dark' ? 'dark' : 'light');
-  document.documentElement.dataset.theme = resolved;
+  document.documentElement.dataset.theme = resolveTheme(mode);
   document.documentElement.dataset.themeMode = mode;
   if (accent) {
     document.documentElement.dataset.accent = accent;

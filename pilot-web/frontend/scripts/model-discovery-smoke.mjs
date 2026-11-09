@@ -1,3 +1,4 @@
+import { openGlobalFunction } from './global-navigation.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium, _electron } from 'playwright-core';
@@ -79,7 +80,7 @@ async function run(page, name) {
   reset(); page.setDefaultTimeout(10000); const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({ width: 1440, height: 900 }); await page.goto(url);
-  await page.locator('#settings-open').click();
+  await openGlobalFunction(page, /^设置/);
   await page.locator('.settings-nav').getByRole('button', { name: '模型', exact: true }).click();
   const settings = page.locator('#settings'), fetch = settings.locator('#settings-model-fetch');
   await fetch.click(); await settings.getByRole('option', { name: models[0], exact: true }).waitFor();
@@ -178,7 +179,7 @@ async function run(page, name) {
   saveMode = 'slow'; await settings.locator('#settings-model-name').fill('reopened-model');
   await settings.locator('#settings-model-save').click(); await feedback.getByText(/正在保存/).waitFor();
   await until(() => heldSaves.length === 1);
-  await page.keyboard.press('Escape'); await page.locator('#settings-open').click();
+  await page.keyboard.press('Escape'); await openGlobalFunction(page, /^设置/);
   await feedback.getByText(/正在保存/).waitFor();
   assert.equal(await settings.locator('#settings-model-save').isDisabled(), true);
   heldSaves.splice(0).forEach(resolve => resolve()); saveMode = 'success';

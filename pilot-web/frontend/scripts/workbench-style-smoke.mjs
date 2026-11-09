@@ -93,11 +93,17 @@ async function run(page,name){
   }
  }
  await page.setViewportSize({width:1440,height:900});
+ // 窄屏切回桌面会更新 React 布局并播放宽度过渡，先等面板稳定再记录拖拽起点。
+ await page.waitForFunction(()=>{
+  const panel=document.querySelector('.activity.inspector');
+  return panel?.getBoundingClientRect().width>=450 && !panel.getAnimations().some(animation=>animation.playState==='running');
+ });
  const previewGutter=await page.locator('#gutter-right').boundingBox();
  const previewWidthBefore=await page.locator('.activity.inspector').evaluate(el=>el.getBoundingClientRect().width);
  await page.mouse.move(previewGutter.x+5,300);await page.mouse.down();await page.mouse.move(previewGutter.x-35,300);await page.mouse.up();
+ await page.waitForFunction(before=>document.querySelector('.activity.inspector').getBoundingClientRect().width>=before+35,previewWidthBefore);
  const previewWidthAfter=await page.locator('.activity.inspector').evaluate(el=>el.getBoundingClientRect().width);
- assert.ok(previewWidthAfter>=previewWidthBefore+35,'预览拖拽从当前自适应宽度连续调整');
+ assert.ok(previewWidthAfter>=previewWidthBefore+35,`预览拖拽从当前自适应宽度连续调整：${previewWidthBefore} → ${previewWidthAfter}，手柄 ${JSON.stringify(previewGutter)}`);
  await page.locator('.preview-wrap').click();
  assert.equal(await page.locator('#preview-body').evaluate(el=>getComputedStyle(el).whiteSpace),'pre-wrap','用户可切换源码自动换行');
  await page.reload();await page.locator('#run-state').waitFor();

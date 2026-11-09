@@ -63,6 +63,8 @@ async function run(page, name) {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(url); await settled(page);
   await page.evaluate(() => store.getState().activate('two'));
+  await page.getByRole('button', { name: '工作区文件', exact: true }).click();
+  await page.getByRole('treeitem', { name: 'file-0.txt' }).waitFor();
   const input = page.locator('#input-flow');
   await input.fill('保留中文草稿和附件');
   await input.evaluate(el => { const data = new DataTransfer(); data.items.add(new File(['content'], '边界测试.txt', { type: 'text/plain' })); el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true })); });

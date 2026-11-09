@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const temp = await mkdtemp(join(tmpdir(), 'pilot-composer-'));
-const server = await createServer({ root, server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'composer-fixture', configureServer(server) {
+const server = await createServer({ root, publicDir: '../src/main/resources/static', server: { host: '127.0.0.1', port: 0, proxy: {} }, plugins: [{ name: 'composer-fixture', configureServer(server) {
   server.middlewares.use('/__composer', async (_req, res) => {
     res.setHeader('Content-Type', 'text/html');
     res.end(await server.transformIndexHtml('/__composer', `<html><head><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
@@ -19,6 +19,7 @@ const server = await createServer({ root, server: { host: '127.0.0.1', port: 0 }
       import {api} from '/src/api.js';
       import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
       document.documentElement.dataset.theme='dark'; window.store=useStore; window.api=api; window.sent=[];
+      for(const name of Object.keys(api)) if(typeof api[name]==='function') api[name]=async()=>({});
       api.sendMessage=async (id, body)=>{window.sent.push({id, body}); if(window.failSend) throw Error('test failure');};
       useStore.setState({sessionId:'test-a'});
       createRoot(document.getElementById('root')).render(React.createElement(Composer));

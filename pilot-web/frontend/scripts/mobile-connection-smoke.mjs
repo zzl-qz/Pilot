@@ -1,3 +1,4 @@
+import { openGlobalFunction } from './global-navigation.mjs';
 import assert from 'node:assert/strict';
 import { build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
@@ -60,7 +61,7 @@ try {
   await page.bringToFront();
   await page.waitForFunction(()=>!document.hidden);
   environmentState = 'preparing';
-  await page.getByRole('button',{name:'连接手机',exact:true}).click();
+  await openGlobalFunction(page, '连接手机');
   await page.getByText('正在下载并校验连接组件',{exact:true}).waitFor();
   assert.equal(generation,0,'准备依赖期间不能提前生成二维码');
   assert.equal(await page.getByRole('button',{name:'正在准备环境…',exact:true}).isDisabled(),true);
@@ -75,7 +76,7 @@ try {
   await page.keyboard.press('Escape');
   invite = null; generation = 0; pairingState = 'none';
   failPair = true;
-  await page.getByRole('button',{name:'连接手机',exact:true}).click();
+  await openGlobalFunction(page, '连接手机');
   await page.getByRole('alert').filter({hasText:'测试中继连接超时'}).waitFor();
   await page.waitForTimeout(3500);
   assert.equal(await page.getByRole('alert').filter({hasText:'测试中继连接超时'}).count(),1,'状态轮询成功不能清除配对失败原因');
@@ -85,7 +86,7 @@ try {
   await page.keyboard.press('Escape');
   invite = null; generation = 0; pairingState = 'none';
   fail = true;
-  await page.getByRole('button',{name:'连接手机',exact:true}).click();
+  await openGlobalFunction(page, '连接手机');
   await page.getByRole('alert').filter({hasText:'Microsoft Visual C++ x64 运行库'}).waitFor();
   await page.getByText('配对码暂不可用',{exact:true}).waitFor();
   assert.equal(await page.getByText('正在生成本机配对码…',{exact:true}).count(),0,'首次启动失败不能一直显示准备中');
@@ -94,7 +95,7 @@ try {
   await page.getByAltText('用 Pilot 手机 App 扫描此配对二维码').waitFor();
   await page.keyboard.press('Escape');
   invite = null; generation = 0; pairingState = 'none'; pairDelay = 1000;
-  await page.getByRole('button',{name:'连接手机',exact:true}).click();
+  await openGlobalFunction(page, '连接手机');
   await page.getByText('正在生成本机配对码…',{exact:true}).waitFor();
   assert.equal(await page.getByRole('button',{name:'复制配对码',exact:true}).count(),0,'未生成二维码时不展示复制入口');
   assert.equal(await page.getByRole('button',{name:'手动复制配对码',exact:true}).count(),0);
@@ -103,13 +104,13 @@ try {
   assert.equal(await page.getByText('已自动配置公共连接服务',{exact:false}).count(),0);
   await page.keyboard.press('Escape');
   connectionMode = 'relay-enabled'; invite = null;
-  await page.getByRole('button',{name:'连接手机',exact:true}).click();
+  await openGlobalFunction(page, '连接手机');
   await page.getByText('正在生成本机配对码…',{exact:true}).waitFor();
   await page.getByAltText('用 Pilot 手机 App 扫描此配对二维码').waitFor();
   await page.getByText('后端已配置中继。连接将尝试直连，必要时使用已配置的中继。',{exact:true}).waitFor();
   await page.keyboard.press('Escape');
   connectionMode = 'automatic'; networkState = 'preparing'; networkMessage = '正在后台准备跨网服务'; invite = null;
-  await page.getByRole('button',{name:'连接手机',exact:true}).click();
+  await openGlobalFunction(page, '连接手机');
   await page.getByAltText('用 Pilot 手机 App 扫描此配对二维码').waitFor();
   await page.getByText('正在后台准备跨网服务',{exact:true}).waitFor();
   networkEnvironment = {availability:'available',proxyTypes:['http'],explicitProxySupported:false,message:'已检测代理配置，仅代理出网的网络当前不支持'};
@@ -135,7 +136,8 @@ try {
     await page.setViewportSize({width, height:900});
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     if (await page.locator('#sidebar-toggle').getAttribute('aria-expanded') !== 'true') await page.locator('#sidebar-toggle').click();
-    const button = page.getByRole('button', {name:'连接手机', exact:true});
+    await page.getByRole('button',{name:'更多功能',exact:true}).click();
+    const button = page.getByRole('menuitem', {name:'连接手机', exact:true});
     await button.waitFor(); assert.ok((await button.boundingBox()).height >= 44);
     assert.equal(await page.locator('.sidebar #mobile-connect').count(), 0);
     await button.click();
@@ -151,11 +153,11 @@ try {
     await page.screenshot({path:join(output, `browser-${width}.png`), animations:'disabled'});
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('#mobile-connection').count(), 0);
-    assert.equal(await page.evaluate(() => document.activeElement.id), 'mobile-connect');
+    assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), '更多功能', '关闭后回到可见的导航入口');
   }
   assert.equal(generation, 1, '关闭窗口再打开复用未过期配对码');
   await page.setViewportSize({width:1440,height:900});
-  await page.locator('#mobile-connect').click();
+  await openGlobalFunction(page, '连接手机');
   devices.push({id:'a'.repeat(64),name:'已配对的手机',pairedAt:Date.now(),online:false});
   await page.getByRole('tab', {name:'已配对设备 · 1'}).click();
   await page.getByRole('button', {name:'撤销授权'}).click();
@@ -192,7 +194,7 @@ try {
   assert.equal(await page.locator('#mobile-connection').count(),0,'完成必须关闭弹窗');
   const beforeReopen = generation;
   await page.setViewportSize({width:1440,height:900});
-  await page.locator('#mobile-connect').click();
+  await openGlobalFunction(page, '连接手机');
   await page.getByRole('tab',{name:'已配对设备 · 2',selected:true}).waitFor();
   assert.equal(generation,beforeReopen,'再次打开优先设备管理，不能自动创建新二维码');
   assert.equal(devices.length,2,'完成和重新打开不能断开或撤销设备');
@@ -207,7 +209,7 @@ try {
   invite = null; pairingState = 'none'; pairedDevice = null;
   while (devices.length < 16) devices.push({id:String(devices.length).padStart(64,'0'),name:`设备 ${devices.length+1}`,pairedAt:Date.now(),online:false});
   await page.keyboard.press('Escape');
-  await page.locator('#mobile-connect').click();
+  await openGlobalFunction(page, '连接手机');
   await page.getByRole('tab',{name:'已配对设备 · 16',selected:true}).waitFor();
   const beforeFull = generation;
   await page.getByRole('tab',{name:'添加设备',exact:true}).click();
@@ -222,7 +224,11 @@ try {
   delete env.ELECTRON_RUN_AS_NODE; delete env.PILOT_DESKTOP_SMOKE;
   desktop = await _electron.launch({executablePath:prepareDevelopmentHost(),args:[desktopRoot,`--user-data-dir=${join(output,'profile')}`],env});
   const shell = await desktop.firstWindow(); await routes(shell);
-  await shell.getByRole('button',{name:'连接手机',exact:true}).click();
+  await desktop.evaluate(async ({clipboard, ClipboardItem}) => {
+    globalThis.savedClipboard = await Promise.all((await clipboard.read()).map(async item =>
+      new ClipboardItem(Object.fromEntries(await Promise.all(item.types.map(async type => [type, await item.getType(type)]))))));
+  });
+  await openGlobalFunction(shell, '连接手机');
   await shell.getByAltText('用 Pilot 手机 App 扫描此配对二维码').waitFor();
   await shell.getByRole('button',{name:'复制配对码',exact:true}).click();
   await shell.getByText('已复制到这台电脑的剪贴板',{exact:true}).waitFor();
@@ -246,4 +252,11 @@ try {
   const current=desktop?.windows()[0]||browser?.contexts()[0]?.pages()[0];
   console.log('Fixture failure state:',JSON.stringify({recentRequests,page:await current?.evaluate(()=>({hidden:document.hidden,visibility:document.visibilityState,text:document.querySelector('#mobile-connection')?.innerText})).catch(()=>null)}));
   throw error;
-} finally { await browser?.close(); await desktop?.close(); await new Promise(resolve=>server.httpServer.close(resolve)); }
+} finally {
+  if (desktop) await desktop.evaluate(async ({clipboard}) => {
+    if (!globalThis.savedClipboard) return;
+    if (globalThis.savedClipboard.length) await clipboard.write(globalThis.savedClipboard);
+    else clipboard.clear();
+  });
+  await browser?.close(); await desktop?.close(); await new Promise(resolve=>server.httpServer.close(resolve));
+}

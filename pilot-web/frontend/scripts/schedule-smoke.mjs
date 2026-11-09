@@ -1,3 +1,4 @@
+import { openGlobalFunction } from './global-navigation.mjs';
 import { checkDialogLayout } from './dialog-layout.mjs';
 import { createServer, build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
@@ -42,7 +43,7 @@ let browser, electron;
 async function run(page, name, url) {
   page.setDefaultTimeout(8000); const errors=[]; page.on('pageerror',e=>errors.push(e.message));
   await page.setViewportSize({width:1440,height:900}); await page.goto(url);
-  await page.getByRole('button',{name:'定时任务',exact:true}).click();
+  await openGlobalFunction(page, '定时任务');
   await page.getByRole('heading',{name:'安排下一件事'}).waitFor();
   await page.getByRole('button',{name:'创建第一个定时任务'}).click();
   await page.getByLabel('任务名称',{exact:true}).fill('升级依赖并验证');
@@ -70,7 +71,7 @@ async function run(page, name, url) {
   assert.equal(await page.getByLabel('任务目标',{exact:true}).inputValue(),'稍后检查项目');
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#input-flow').innerText(),'稍后检查项目');
-  await page.getByRole('button',{name:'定时任务',exact:true}).click();
+  await openGlobalFunction(page, '定时任务');
   await page.evaluate(()=>{window.fail=true;}); await page.getByRole('button',{name:'刷新',exact:true}).click();
   await page.getByRole('alert').filter({hasText:'模拟连接断开'}).waitFor();
   await page.evaluate(()=>{window.fail=false;}); await page.getByRole('button',{name:'重新加载'}).click();

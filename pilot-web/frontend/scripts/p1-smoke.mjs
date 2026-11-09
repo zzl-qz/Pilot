@@ -1,3 +1,4 @@
+import { openGlobalFunction } from './global-navigation.mjs';
 import { checkDialogLayout } from './dialog-layout.mjs';
 import { createServer, build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
@@ -68,7 +69,7 @@ async function run(page,name,url) {
   await page.waitForFunction(()=>calls.some(c=>c.kind==='migration'));await page.locator('.thread-nav-tick.is-saved').waitFor();
   assert.equal(await page.evaluate(()=>localStorage.getItem('pilot.message-bookmarks:source')),null);
   assert.ok(await page.evaluate(()=>localStorage.getItem('pilot.message-bookmarks:source:migration-backup')));
-  await page.getByRole('button',{name:'定时任务',exact:true}).click();await page.getByRole('button',{name:'新建任务',exact:true}).click();
+  await openGlobalFunction(page, '定时任务');await page.getByRole('button',{name:'新建任务',exact:true}).click();
   await page.getByLabel('任务名称',{exact:true}).fill('工作日维护');await page.getByLabel('任务目标',{exact:true}).fill('参考开源实现检查依赖并修复测试');await page.getByLabel('验收条件',{exact:true}).fill('相关测试通过');
   await page.getByText(/^任务模板/).click();await page.getByLabel('模板名称',{exact:true}).fill('维护模板');await page.getByRole('button',{name:'另存为模板',exact:true}).click();
   await page.waitForFunction(()=>templates.length===1);assert.equal(await page.evaluate(()=>templates[0].version),1);
@@ -89,7 +90,7 @@ async function run(page,name,url) {
   await page.getByRole('button',{name:'搜索消息与书签',exact:true}).click();await page.getByLabel('搜索消息内容').fill('无匹配');await page.getByRole('button',{name:'搜索',exact:true}).click();await page.getByText('没有匹配的消息，请更换关键词或搜索范围。').waitFor();
   await page.getByLabel('搜索消息内容').fill('中文');await page.evaluate(()=>{window.searchFail=true;});await page.getByRole('button',{name:'搜索',exact:true}).click();await page.getByRole('alert').filter({hasText:'搜索连接断开'}).waitFor();await page.evaluate(()=>{window.searchFail=false;});
   await page.evaluate(()=>{window.searchWait=new Promise(r=>window.resolveSearch=r);});await page.getByRole('button',{name:'搜索',exact:true}).click();await page.getByLabel('搜索消息内容').fill('新条件');await page.evaluate(()=>{window.resolveSearch();window.searchWait=null;});assert.equal(await page.locator('.search-hit').count(),0);await page.keyboard.press('Escape');
-  await page.getByRole('button',{name:/任务收件箱/}).click();await page.getByRole('button',{name:'通知与投递',exact:true}).click();await page.getByRole('heading',{name:'通知与投递',exact:true}).waitFor();
+  await page.getByRole('button',{name:/任务收件箱/}).click();await page.getByRole('button',{name:'结果操作',exact:true}).click();await page.getByRole('menuitem',{name:'通知与投递',exact:true}).click();await page.getByRole('heading',{name:'通知与投递',exact:true}).waitFor();
   await page.getByLabel(/桌面通知/).check();await page.getByRole('button',{name:'保存通知设置'}).click();await page.getByRole('alert').filter({hasText:'系统通知未获授权'}).waitFor();assert.equal(await page.evaluate(()=>config.desktop),false);
   await page.evaluate(()=>{Notification.permission='granted';window.pendingNotice={id:'notice-1',lease:'lease-1',resultId:'result-1',title:'维护完成',summary:'相关测试通过'};});
   await page.getByLabel('Webhook 地址').fill('https://example.invalid/pilot-notify');await page.getByRole('button',{name:'保存通知设置'}).click();await page.waitForFunction(()=>calls.some(c=>c.kind==='receipt'&&c.success));
