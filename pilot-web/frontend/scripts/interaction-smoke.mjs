@@ -354,11 +354,11 @@ async function run(page,name,url) {
   assert.equal(await chips.count(),1);assert.match(await input.innerText(),/处理空输入边界/);
   assert.match(await input.innerText(),/原文件:2 → 现文件:2/);
   assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='sendMessage').length),sentBefore);
-  await page.getByRole('radio',{name:'最近任务',exact:true}).click();await page.waitForTimeout(80);
+  await page.getByLabel('审阅范围').selectOption('run');await page.waitForTimeout(80);
   assert.match(await page.locator('.review-scope-note').innerText(),/差异仍相对 HEAD/);
   await page.locator('.change-row-name').getByText('App.jsx',{exact:true}).click();
   assert.equal(await page.locator('.change-view-undo').count(),0,'最近任务范围仅供审阅');
-  await page.getByRole('radio',{name:'工作区',exact:true}).click();
+  await page.getByLabel('审阅范围').selectOption('workspace');
   // 关闭尚在读取的检查点，旧响应到达时不能重新打开弹窗。
   await page.evaluate(()=>{
     api.checkpoints=()=>new Promise(resolve=>{window.finishCheckpoint=resolve;});

@@ -1,20 +1,4 @@
-.side-chat-scope button { flex: none; }
-.side-chat-scope button svg, .side-chat-entry button svg { width: 16px; height: 16px; }
-.side-chat-tablist { flex: none; min-width: 0; margin-inline: 8px; }
-.side-chat-panel .side-chat-empty { margin: 12px; border: 1px solid var(--line-soft); border-radius: 8px; }
-.side-chat-panel .side-chat-banner { margin: 4px 12px; overflow-wrap: anywhere; }
-.side-chat-panel .side-chat-entry {
-  display: flex;
-  flex: none;
-  align-items: end;
-  gap: 8px;
-  padding: 8px 12px 12px;
-  border-top: 1px solid var(--line-soft);
-}
-.side-chat-panel .side-chat-input { flex: 1 1 0; min-width: 0; }
-.side-chat-entry button { flex: none; }
 .side-quote-actions { max-width: calc(100vw - 16px); }
 @media (max-width: 600px), (pointer: coarse) {
-  .side-chat-scope button, .side-chat-tablist button, .side-chat-entry button, .side-quote-actions button { min-height: 44px; }
-  .side-chat-scope button[aria-label], .side-chat-entry button { min-width: 44px; }
+  .side-quote-actions button { min-height: 44px; }
 }

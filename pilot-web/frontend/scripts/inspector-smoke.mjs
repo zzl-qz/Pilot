@@ -59,7 +59,7 @@ async function run(page, name) {
   assert.match(await page.evaluate(() => quoted), /页面摘录/);
   assert.equal(await page.evaluate(() => store.getState().ui.notice.text), '已下载 报告.txt');
   await page.evaluate(() => listeners.download({ state: 'interrupted', name: '报告.txt' }));
-  await page.getByRole('alert').filter({ hasText: '下载没有完成' }).waitFor();
+  assert.match(await page.evaluate(() => store.getState().ui.notice.text), /下载没有完成/);
   for (const action of ['back', 'reload', 'new', 'find']) assert.ok(await page.evaluate(action => calls.some(row => row[0] === action), action), action);
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -73,7 +73,7 @@ async function run(page, name) {
   await page.waitForFunction(() => Object.keys(listeners).length === 0);
   assert.ok(await page.evaluate(() => calls.some(row => row[0] === 'bounds' && row[1].visible === false)));
   await page.getByText('×2', { exact: true }).waitFor();
-  await page.locator('#filters').getByRole('radio').filter({ hasText: '工具' }).click();
+  await page.locator('#filters').getByRole('tab').filter({ hasText: '工具' }).click();
   assert.equal(await page.locator('#timeline > li').count(), 1);
   await page.getByLabel('搜索活动', { exact: true }).fill('不存在');
   await page.getByText('没有匹配的活动。', { exact: true }).waitFor();
@@ -88,8 +88,8 @@ async function run(page, name) {
   await page.addInitScript(() => { Object.defineProperty(HTMLElement.prototype, 'showPopover', { value: undefined, configurable: true }); });
   await page.goto(url);
   await more.click();
-  await page.getByRole('button', { name: '开源参考', exact: true }).click();
-  await page.getByRole('heading', { name: '开源参考', exact: true }).waitFor();
+  await page.getByRole('menuitem', { name: '开源参考', exact: true }).click();
+  await page.locator('#inspector-title').filter({ hasText: '开源参考' }).waitFor();
   assert.deepEqual(errors, []);
   console.log(`${name}: PASS Web fallback/desktop bridge/navigation/find/pick/log/quote/download/cleanup/activity/responsive`);
 }

@@ -1,8 +1,0 @@
-.research-panel .research-toolbar { margin-bottom: 12px; }
-.research-panel [role="alert"] { overflow-wrap: anywhere; }
-.research-records pre { max-height: 240px; overflow: auto; }
-.research-records article:last-child { padding-bottom: 0; }
-.research-empty { border: 1px solid var(--line-soft); border-radius: 8px; }
-@media (max-width: 600px), (pointer: coarse) {
-  .research-panel button, .research-records button { min-height: 44px; }
-}

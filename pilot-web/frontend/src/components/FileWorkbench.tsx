@@ -1,112 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertDialog } from '@astryxdesign/core/AlertDialog';
-import { Badge } from '@astryxdesign/core/Badge';
-import { Banner } from '@astryxdesign/core/Banner';
-import { Button } from '@astryxdesign/core/Button';
-import { CheckboxInput } from '@astryxdesign/core/CheckboxInput';
-import { Collapsible } from '@astryxdesign/core/Collapsible';
-import { EmptyState } from '@astryxdesign/core/EmptyState';
-import { TextArea } from '@astryxdesign/core/TextArea';
-import { TextInput } from '@astryxdesign/core/TextInput';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { errorInfo } from '../lib/errors.js';
-import type { WorkbenchAnnotation, WorkbenchFile, WorkbenchPreview, WorkbenchVersion } from '../types/api.js';
+import type {
+  WorkbenchAnnotation, WorkbenchFile, WorkbenchPreview, WorkbenchVersion
+} from '../types/api.js';
 import {
   changeHint, emptyPdfForm, formatBytes, formatLabel, formatMoment, pdfOperations, type PdfForm
 } from '../lib/file-workbench.js';
 import './file-workbench.css';
 
-const failureText = (failure: unknown) => errorInfo(failure).message || '操作失败，请重试。';
-
+/**
+ * 文件工作台：对标 Codex 的审阅模式。工作区里的真实文件是唯一源，
+ * 这里只负责预览、批注、用本机应用打开、感知外部改动、版本回退与交付。
+ */
 export default function FileWorkbench() {
   const session = useStore(state => state.sessionId);
   const focusId = useStore(state => state.ui.workbenchFileId);
-  return session ? <SessionFiles key={session} session={session} focusId={focusId || null} />
-    : <div className="fw"><EmptyState title="请先打开一个会话" description="会话工作区中的 Office 文件和 PDF 会列在这里。" isCompact /></div>;
-}
-
-function SessionFiles({ session, focusId }: { session: string; focusId: string | null }) {
   const [files, setFiles] = useState<WorkbenchFile[]>([]);
-  const [activeId, setActiveId] = useState(focusId);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [loaded, setLoaded] = useState(false);
-  const request = useRef<AbortController | null>(null);
-  const panel = useRef<HTMLElement>(null);
-  const previousRow = useRef<string | null>(null);
-  const active = files.find(file => file.id === activeId);
-
-  const refresh = useCallback(async (preferId?: string, background = false) => {
-    if (background && request.current) return;
-    request.current?.abort();
-    const controller = new AbortController();
-    request.current = controller;
-    if (!background) setLoading(true);
-    try {
-      const next = await api.workbenchFiles(session, controller.signal);
-      if (!Array.isArray(next)) throw new Error('服务端未返回文件列表。');
-      if (controller.signal.aborted) return;
-      setFiles(next); setLoaded(true); setError('');
-      setActiveId(current => {
-        const wanted = preferId || current;
-        return next.some(file => file.id === wanted) ? wanted : null;
-      });
-    } catch (failure) {
-      if (!controller.signal.aborted) setError(failureText(failure));
-    } finally {
-      if (request.current === controller) {
-        request.current = null;
-        setLoading(false);
-      }
-    }
-  }, [session]);
-
-  useEffect(() => {
-    void refresh(focusId || undefined);
-    const timer = window.setInterval(() => void refresh(undefined, true), 6000);
-    return () => { window.clearInterval(timer); request.current?.abort(); request.current = null; };
-  }, [focusId, refresh]);
-
-  useEffect(() => {
-    if (activeId) panel.current?.querySelector<HTMLElement>('.fw-detail h3')?.focus({ preventScroll: true });
-    else if (previousRow.current) {
-      const rows = panel.current?.querySelectorAll<HTMLButtonElement>('[data-file-id]');
-      const row = [...(rows || [])].find(button => button.dataset.fileId === previousRow.current);
-      (row || panel.current?.querySelector<HTMLButtonElement>('.fw-refresh'))?.focus({ preventScroll: true });
-      previousRow.current = null;
-    }
-  }, [active?.id, activeId]);
-
-  return <section className="fw" ref={panel} aria-label="文件工作台">
-    <div className="fw-toolbar fw-list-toolbar">
-      {active ? <Button label="返回文件列表" variant="ghost" onClick={() => setActiveId(null)} /> : <span role="status">
-        {loading && !loaded ? '正在读取文件…' : loaded ? `${files.length} 个文档` : '文件列表尚未读到'}
-      </span>}
-      <Button label="刷新文件" className="fw-refresh" variant="ghost" isLoading={loading} onClick={() => void refresh()} />
-    </div>
-    {error && <Banner status="error" role="alert" title="无法读取文件列表" description={error} />}
-    {active ? <FileDetail key={active.id} session={session} file={active} refresh={refresh} />
-      : loaded && !files.length && !error ? <EmptyState title="工作区还没有可审阅的文档"
-        description="生成或将 Office 文件、PDF 放入工作区后，可以在这里预览和批注。" isCompact />
-        : <ul className="fw-files" aria-label="工作区文档">
-          {files.map(file => <li key={file.id}>
-            <button type="button" className="fw-file" data-file-id={file.id} onClick={() => { previousRow.current = file.id; setActiveId(file.id); }}>
-              <strong>{file.filename}</strong>
-              {file.changedExternally && <Badge label="外部已修改" variant="warning" />}
-              <span>{formatLabel(file.format)} · {formatBytes(file.bytes)} · {formatMoment(file.modifiedAt)}</span>
-            </button>
-          </li>)}
-        </ul>}
-  </section>;
-}
-
-function FileDetail({ session, file, refresh }: { session: string; file: WorkbenchFile; refresh: (preferId?: string) => Promise<void> }) {
-  const { id, sha256, filename } = file;
-  const running = useStore(state => state.running);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [preview, setPreview] = useState<WorkbenchPreview | null>(null);
-  const [previewError, setPreviewError] = useState('');
-  const [previewAttempt, retryPreview] = useState(0);
   const [page, setPage] = useState(1);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageError, setImageError] = useState('');
@@ -114,243 +27,274 @@ function FileDetail({ session, file, refresh }: { session: string; file: Workben
   const [annotations, setAnnotations] = useState<WorkbenchAnnotation[]>([]);
   const [versions, setVersions] = useState<WorkbenchVersion[]>([]);
   const [text, setText] = useState('');
-  const [detailError, setDetailError] = useState('');
-  const [detailLoading, setDetailLoading] = useState(true);
-  const [revision, setRevision] = useState(0);
   const [annotationText, setAnnotationText] = useState('');
   const [annotationAnchor, setAnnotationAnchor] = useState('');
   const [form, setForm] = useState<PdfForm>(emptyPdfForm);
   const [busy, setBusy] = useState('');
-  const [actionError, setActionError] = useState('');
+  const [error, setError] = useState('');
+  const [listError, setListError] = useState('');
   const [notice, setNotice] = useState('');
-  const [revertVersion, setRevertVersion] = useState<number | null>(null);
-  const pending = useRef(false);
-  const downloadRequest = useRef<AbortController | null>(null);
+  const [showText, setShowText] = useState(false);
+  const hashes = useRef<Record<string, string>>({});
   const alive = useRef(true);
-  const seenHash = useRef(sha256);
+  const detailRequest = useRef(0);
+  const listRequest = useRef(0);
+
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const message = (failure: unknown) => errorInfo(failure).message || '操作失败';
+
+  const active = files.find(file => file.id === activeId) || null;
+
+  const refresh = useCallback(async (preferId?: string) => {
+    if (!session) { setFiles([]); return; }
+    const request = ++listRequest.current;
+    const isCurrent = () => alive.current && listRequest.current === request && useStore.getState().sessionId === session;
+    try {
+      const next = await api.workbenchFiles(session);
+      if (!isCurrent()) return;
+      if (!Array.isArray(next)) throw new Error('服务端未返回文件列表');
+      setListError('');
+      const changed = next.some(file => hashes.current[file.id] && hashes.current[file.id] !== file.sha256);
+      for (const file of next) hashes.current[file.id] = file.sha256;
+      if (changed) setNotice('检测到文件在外部被修改，已按最新内容刷新预览');
+      setFiles(next);
+      setActiveId(current => (next.find(file => file.id === (preferId || current)) || next[0])?.id || null);
+    } catch (failure) { if (isCurrent()) setListError(message(failure)); }
+  }, [session]);
 
   useEffect(() => {
-    alive.current = true;
-    return () => { alive.current = false; downloadRequest.current?.abort(); };
-  }, []);
-  useEffect(() => {
-    if (seenHash.current === sha256) return;
-    seenHash.current = sha256;
-    setNotice('文件内容已更新，正在刷新预览。');
-  }, [sha256]);
+    if (!session) return;
+    void refresh(focusId || undefined);
+    const timer = window.setInterval(() => void refresh(), 6000);
+    return () => window.clearInterval(timer);
+  }, [session, focusId, refresh]);
+
+  const loadDetail = useCallback(async (id: string, force = false) => {
+    if (!session) return;
+    const request = ++detailRequest.current;
+    const isCurrent = () => alive.current && detailRequest.current === request && useStore.getState().sessionId === session;
+    try {
+      const [loadedPreview, loadedAnnotations, loadedVersions, loadedText] = await Promise.all([
+        api.workbenchPreview(session, id), api.workbenchAnnotations(session, id),
+        api.workbenchVersions(session, id), api.workbenchText(session, id)
+      ]);
+      if (!isCurrent()) return;
+      setPreview(loadedPreview);
+      setAnnotations(loadedAnnotations || []);
+      setVersions(loadedVersions || []);
+      setText(loadedText?.text || '');
+      setPage(previous => force || !loadedPreview ? 1 : Math.min(previous, Math.max(1, loadedPreview.pages)));
+    } catch (failure) { if (isCurrent()) setError(message(failure)); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    setPreview(null); setPreviewError(''); setImageUrl(null); setImageError('');
-    api.workbenchPreview(session, id, controller.signal).then(next => {
-      if (!next) throw new Error('服务端未返回预览。');
-      if (controller.signal.aborted) return;
-      setPage(current => Math.min(current, Math.max(1, next.pages)));
-      setPreview(next);
-    }).catch(failure => { if (!controller.signal.aborted) setPreviewError(failureText(failure)); });
-    return () => controller.abort();
-  }, [session, id, sha256, previewAttempt]);
+    setPreview(null);
+    setImageError('');
+    setAnnotations([]);
+    setVersions([]);
+    setText('');
+    if (session && activeId) void loadDetail(activeId, true);
+    return () => { detailRequest.current++; };
+  }, [session, activeId, active?.sha256, loadDetail]);
 
   useEffect(() => {
-    if (!preview || preview.pages < 1) return;
-    const controller = new AbortController();
+    if (!session || !activeId || preview?.fileId !== activeId || preview.pages < 1) return;
+    setImageError('');
     let objectUrl: string | null = null;
-    setImageUrl(null); setImageError('');
-    api.workbenchPreviewImage(session, id, page, controller.signal).then(url => {
-      if (controller.signal.aborted) { URL.revokeObjectURL(url); return; }
+    let cancelled = false;
+    void api.workbenchPreviewImage(session, activeId, page).then(url => {
+      if (cancelled) { URL.revokeObjectURL(url); return; }
       objectUrl = url;
       setImageUrl(url);
-    }).catch(failure => { if (!controller.signal.aborted) setImageError(failureText(failure)); });
-    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [session, id, page, preview, imageAttempt]);
+    }).catch(failure => { if (!cancelled) setImageError(message(failure)); });
+    return () => {
+      cancelled = true;
+      setImageUrl(null);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, activeId, page, preview?.fileId, preview?.notice, imageAttempt]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const signal = controller.signal;
-    setDetailLoading(true);
-    Promise.allSettled([
-      api.workbenchAnnotations(session, id, signal),
-      api.workbenchVersions(session, id, signal),
-      api.workbenchText(session, id, signal)
-    ]).then(([notes, snapshots, readback]) => {
-      if (signal.aborted) return;
-      if (notes.status === 'fulfilled' && notes.value) setAnnotations(notes.value);
-      if (snapshots.status === 'fulfilled' && snapshots.value) setVersions(snapshots.value);
-      if (readback.status === 'fulfilled') setText(readback.value?.text || '');
-      const failed = [notes, snapshots, readback].filter(result => result.status === 'rejected');
-      setDetailError(failed.map(result => failureText(result.reason)).join('；'));
-      setDetailLoading(false);
-    });
-    return () => controller.abort();
-  }, [session, id, sha256, revision]);
+  const run = async (label: string, action: () => Promise<void>) => {
+    setBusy(label); setError('');
+    try { await action(); } catch (failure) { if (alive.current) setError(message(failure)); }
+    finally { if (alive.current) setBusy(''); }
+  };
 
-  async function run(label: string, action: () => Promise<void>) {
-    if (pending.current) return;
-    pending.current = true;
-    setBusy(label); setActionError(''); setNotice('');
-    try { await action(); }
-    catch (failure) { if (alive.current) setActionError(failureText(failure)); }
-    finally {
-      pending.current = false;
-      if (alive.current) setBusy('');
-    }
-  }
-
-  const download = () => run('下载', async () => {
-    const controller = new AbortController();
-    downloadRequest.current = controller;
-    const blob = await api.workbenchDownload(session, id, controller.signal);
-    if (controller.signal.aborted) return;
+  const download = () => void run('下载', async () => {
+    if (!session || !active) return;
+    const blob = await api.workbenchDownload(session, active.id);
     const url = URL.createObjectURL(blob);
-    const anchor = Object.assign(document.createElement('a'), { href: url, download: filename });
+    const anchor = document.createElement('a');
+    anchor.href = url; anchor.download = active.filename;
     document.body.append(anchor); anchor.click(); anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 60000);
   });
 
-  const openNative = () => run('打开', async () => {
-    const result = await api.workbenchOpen(session, id);
-    if (!result?.ok) throw new Error([result?.reason, result?.alternative || '请下载文件后用本机应用打开。'].filter(Boolean).join(' '));
-    setNotice(result.reason || '已交给本机应用打开。');
+  const openNative = () => void run('打开', async () => {
+    if (!session || !active) return;
+    const result = await api.workbenchOpen(session, active.id);
+    if (!result) { setError('打开请求没有返回结果，请点「下载文件」后用本机应用打开'); return; }
+    if (result.ok) setNotice(result.reason);
+    else setError(`${result.reason} ${result.alternative}`.trim());
   });
 
-  const publish = () => run('发布', async () => {
-    const result = await api.workbenchPublish(session, id, { title: filename.replace(/\.[^.]+$/, '') });
-    if (!result) throw new Error('服务端未返回登记结果，请到成果页核对。');
-    setNotice('已登记为成果，可在「成果」页查看。');
+  const publish = () => void run('发布', async () => {
+    if (!session || !active) return;
+    await api.workbenchPublish(session, active.id, { title: active.filename.replace(/\.[^.]+$/, '') });
+    setNotice('已登记为成果，可在「成果」页看到');
   });
 
-  const snapshot = () => run('快照', async () => {
-    const saved = await api.workbenchSnapshot(session, id, '手动快照');
-    if (!saved) throw new Error('服务端未返回快照，请刷新核对。');
-    setRevision(value => value + 1);
-    setNotice('已保存快照，可用于核对或回退文件。');
+  const snapshot = () => void run('快照', async () => {
+    if (!session || !active) return;
+    await api.workbenchSnapshot(session, active.id, '手动快照');
+    setVersions((await api.workbenchVersions(session, active.id)) || []);
+    setNotice('已保存一个快照，之后可对比外部改动或回退');
   });
 
-  const revert = (version: number) => run('回退', async () => {
-    if (useStore.getState().running) throw new Error('请等待当前任务结束后再回退。');
-    const restored = await api.workbenchRevert(session, id, version);
-    if (!restored) throw new Error('服务端未返回回退结果，请刷新核对。');
-    if (!alive.current) return;
-    await refresh();
-    setRevision(value => value + 1); retryPreview(value => value + 1);
-    setNotice(`已回退到 v${version}，回退前的文件已保存为快照。`);
-  });
+  const revert = (version: number) => {
+    if (!session || !active) return;
+    useStore.getState().askConfirm({
+      title: '回退文件版本？',
+      message: `将「${active.filename}」回退到 v${version}。回退前的状态会保存为新快照。`,
+      confirmText: '确认回退',
+      onConfirm: () => run('回退', async () => {
+        await api.workbenchRevert(session, active.id, version);
+        await refresh(active.id);
+        await loadDetail(active.id, true);
+        setNotice(`已回退到 v${version}，回退前的状态另存为新快照`);
+      })
+    });
+  };
 
-  const annotate = () => run('批注', async () => {
-    const annotation = await api.workbenchAnnotate(session, id, { page, anchor: annotationAnchor.trim(), text: annotationText.trim() });
-    if (!annotation) throw new Error('服务端未返回批注，请刷新核对。');
+  const annotate = () => void run('批注', async () => {
+    if (!session || !active) return;
+    await api.workbenchAnnotate(session, active.id, { page, anchor: annotationAnchor, text: annotationText });
     setAnnotationText(''); setAnnotationAnchor('');
-    setRevision(value => value + 1);
-    setNotice('批注已保存。');
+    setAnnotations((await api.workbenchAnnotations(session, active.id)) || []);
+    setVersions((await api.workbenchVersions(session, active.id)) || []);
+    setNotice('批注已保存，点「发给模型修改」即可按最小范围改动');
   });
 
-  const sendChange = (annotation: WorkbenchAnnotation) => run('发送', async () => {
-    if (useStore.getState().running) throw new Error('请等待当前任务结束后再发送批注。');
-    const result = await api.workbenchChangeRequest(session, id, annotation.id);
-    if (!result?.prompt) throw new Error('没有生成修改请求，请重新读取批注。');
-    if (!alive.current) return;
+  const sendChange = (annotation: WorkbenchAnnotation) => void run('发送', async () => {
+    if (!session || !active) return;
+    const result = await api.workbenchChangeRequest(session, active.id, annotation.id);
+    if (!result?.prompt) { setError('没有生成修改请求，请重新保存批注'); return; }
     await api.sendMessage(session, { content: result.prompt });
-    setNotice('已把批注发给模型修改。');
+    setNotice('已把批注作为审阅指导发给模型，改完会自动刷新这里的文件');
   });
 
-  const applyPdf = () => run('页面操作', async () => {
+  const applyPdf = () => void run('页面操作', async () => {
+    if (!session || !active) return;
     const operations = pdfOperations(form);
-    if (!operations) throw new Error('请至少填写一个页面操作。');
-    const created = await api.workbenchPdfOperations(session, id, operations);
-    if (!created) throw new Error('页面操作未返回新文件，请刷新文件列表核对。');
-    if (!alive.current) return;
+    if (!operations) { setError('请至少填写一个页面操作'); return; }
+    const created = await api.workbenchPdfOperations(session, active.id, operations);
+    if (!created) { setError('页面操作没有返回结果，请检查原文件是否仍然存在'); return; }
     setForm(emptyPdfForm());
-    useStore.getState().showNotice(`已另存为 ${created.filename}`);
     await refresh(created.id);
+    setNotice(`已另存为 ${created.filename}，原文件未被覆盖`);
   });
 
-  const disabled = !!busy;
-  const previewFailed = previewError || imageError;
-  const retry = previewError ? retryPreview : retryImage;
-  const setPdfField = (key: keyof PdfForm, value: string | boolean) => setForm(current => ({ ...current, [key]: value }));
+  const select = (id: string) => {
+    if (id === activeId) return;
+    setActiveId(id); setPage(1); setError(''); setNotice(''); setShowText(false);
+    setAnnotationText(''); setAnnotationAnchor(''); setForm(emptyPdfForm());
+  };
 
-  return <section className="fw-detail" aria-label={filename}>
-    <div><h3 tabIndex={-1}>{filename}</h3><p className="fw-hint">{file.path} · {changeHint(file.changedExternally)}</p></div>
-    <div className="fw-toolbar">
-      <Button label="用本机应用打开" isDisabled={disabled} onClick={openNative} />
-      <Button label="下载文件" isDisabled={disabled} isLoading={busy === '下载'} onClick={download} />
-      <Button label="发布为成果" variant="ghost" isDisabled={disabled} onClick={publish} />
-      <Button label="保存快照" variant="ghost" isDisabled={disabled} onClick={snapshot} />
-      <Button label="查看工作区改动" variant="ghost" onClick={() => useStore.getState().setUi({ inspectorOpen: true, inspectorTab: 'changes' })} />
-    </div>
-    {busy && <p role="status" className="fw-hint">{busy}中…</p>}
-    {actionError && <Banner status="error" role="alert" title={actionError} />}
-    {notice && <p role="status" className="fw-hint">{notice}</p>}
+  return <section className="fw" aria-label="文件工作台">
+    {error && <div role="alert" className="fw-alert">{error}</div>}
+    {listError && <div role="alert" className="fw-alert">{listError}</div>}
+    {notice && <div role="status" className="fw-notice">{notice}</div>}
+    {!session && <p role="status">请先打开一个会话。</p>}
+    <div className="fw-layout">
+      <ul className="fw-files" aria-label="工作区文件">
+        {files.map(file => <li key={file.id}>
+          <button type="button" className={`fw-file${file.id === activeId ? ' is-active' : ''}`} onClick={() => select(file.id)}>
+            <span className="fw-file-name">{file.filename}</span>
+            <span className="fw-file-meta">{formatLabel(file.format)} · {formatBytes(file.bytes)} · {formatMoment(file.modifiedAt)}</span>
+            {file.changedExternally && <span className="fw-file-flag">外部已修改</span>}
+          </button>
+        </li>)}
+        {!files.length && !listError && <li className="fw-empty">当前工作区还没有 Office 文件。让模型生成一份，或把文件放进工作区就会自动出现在这里。</li>}
+      </ul>
+      {active && <section className="fw-detail" aria-label={active.filename}>
+        <h3>{active.filename}</h3>
+        <p className="fw-hint">{active.path} · {changeHint(active.changedExternally)}</p>
+        <div className="fw-toolbar">
+          <button type="button" className="btn" disabled={!!busy} onClick={openNative}>用本机应用打开</button>
+          <button type="button" className="btn" disabled={!!busy} onClick={download}>下载文件</button>
+          <button type="button" className="btn" disabled={!!busy} onClick={publish}>发布为成果</button>
+          <button type="button" className="btn" disabled={!!busy} onClick={snapshot}>保存快照</button>
+          <button type="button" className="btn" onClick={() => useStore.getState().setUi({ inspectorOpen: true, inspectorTab: 'changes' })}>查看工作区改动</button>
+          {busy && <small>{busy}中…</small>}
+        </div>
 
-    <div className="fw-preview">
-      <div className="fw-preview-head">
-        <span>{preview?.pages ? `第 ${page} / ${preview.pages} 页` : '文件预览'}</span>
-        {!!preview?.pages && <div>
-          <Button label="上一页" size="sm" variant="ghost" isDisabled={page <= 1} onClick={() => { setImageUrl(null); setImageError(''); setPage(page - 1); }} />
-          <Button label="下一页" size="sm" variant="ghost" isDisabled={page >= preview.pages} onClick={() => { setImageUrl(null); setImageError(''); setPage(page + 1); }} />
+        {preview && <div className="fw-preview">
+          <div className="fw-preview-head">
+            <span>第 {page} / {preview.pages} 页</span>
+            <div>
+              <button type="button" className="btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
+              <button type="button" className="btn" disabled={page >= preview.pages} onClick={() => setPage(page + 1)}>下一页</button>
+            </div>
+          </div>
+          {imageError ? <p role="alert" className="fw-alert">{imageError}{' '}
+            <button type="button" className="btn" onClick={() => retryImage(value => value + 1)}>重试预览</button>
+          </p> : imageUrl ? <img className="fw-preview-image" src={imageUrl} alt={`${active.filename} 第 ${page} 页预览`} />
+            : <p role="status">{preview.pages ? '正在生成预览…' : '此文件没有可预览的页面。'}</p>}
+          <p className="fw-hint">{preview.notice}</p>
         </div>}
-      </div>
-      {previewFailed ? <Banner status="error" role="alert" title="无法显示预览" description={previewFailed}
-        endContent={<Button label="重试预览" variant="ghost" onClick={() => retry(value => value + 1)} />} />
-        : imageUrl && preview ? <img className="fw-preview-image" src={imageUrl} alt={`${filename} 第 ${page} 页预览`}
-          onError={() => setImageError('预览图片无法显示，可重试或下载文件。')} />
-          : preview?.pages === 0 ? <p className="fw-hint">此文件没有可预览的页面。</p>
-            : <p className="fw-hint" role="status">正在生成预览…</p>}
-      {preview?.notice && <p className="fw-hint">{preview.notice}</p>}
-    </div>
 
-    {detailError && <Banner status="error" role="alert" title="有审阅记录未读到" description={detailError}
-      endContent={<Button label="重试读取记录" variant="ghost" onClick={() => setRevision(value => value + 1)} />} />}
-    <div className="fw-section">
-      <h4>第 {page} 页的批注</h4>
-      <TextInput label="批注锚点" placeholder="例如第二段或表格第 3 行" value={annotationAnchor} onChange={setAnnotationAnchor} isOptional />
-      <TextArea label="批注内容" placeholder="描述要修改的内容" value={annotationText} onChange={setAnnotationText} rows={2} />
-      <Button label="保存批注" isDisabled={disabled || !annotationText.trim()} onClick={annotate} />
-      <ul className="fw-records">
-        {annotations.map(item => <li key={item.id}>
-          <span>第 {item.page} 页{item.anchor ? ` · ${item.anchor}` : ''}：{item.text}</span>
-          <Button label="发给模型修改" size="sm" variant="ghost" isDisabled={disabled || running} onClick={() => sendChange(item)} />
-        </li>)}
-      </ul>
-      {!annotations.length && !detailError && <p className="fw-hint">{detailLoading ? '正在读取批注…' : '还没有批注。'}</p>}
-    </div>
+        <div className="fw-annotation">
+          <h4>在第 {page} 页留下批注</h4>
+          <input aria-label="批注锚点" placeholder="锚点（可选，例如「第二段」「表格第 3 行」）" value={annotationAnchor}
+            onChange={event => setAnnotationAnchor(event.target.value)} />
+          <textarea aria-label="批注内容" placeholder="想改什么？例如：把标题改成季度报告，其它不动" value={annotationText}
+            onChange={event => setAnnotationText(event.target.value)} />
+          <button type="button" className="btn" disabled={!!busy || !annotationText.trim()} onClick={annotate}>保存批注</button>
+          <ul className="fw-annotations">
+            {annotations.map(item => <li key={item.id}>
+              <span>第 {item.page} 页{item.anchor ? ` · ${item.anchor}` : ''}：{item.text}</span>
+              <button type="button" className="btn" disabled={!!busy} onClick={() => sendChange(item)}>发给模型修改</button>
+            </li>)}
+            {!annotations.length && <li className="fw-empty">还没有批注。预览时指出要改的地方，模型会只改那一处。</li>}
+          </ul>
+        </div>
 
-    <div className="fw-section">
-      <h4>版本快照</h4>
-      <Collapsible trigger="查看内容读回"><pre className="fw-text" tabIndex={0}>{detailLoading ? '正在读取内容…' : text || '（无文本内容）'}</pre></Collapsible>
-      <ul className="fw-records">
-        {versions.map(item => <li key={item.version}>
-          <span>v{item.version} · {item.label} · {formatMoment(item.createdAt)}</span>
-          <Button label="回退" size="sm" variant="ghost" isDisabled={disabled || running} onClick={() => setRevertVersion(item.version)} />
-        </li>)}
-      </ul>
-      {!versions.length && !detailError && <p className="fw-hint">{detailLoading ? '正在读取快照…' : '还没有快照。'}</p>}
-      {running && <p className="fw-hint">任务结束后可回退快照或发送批注。</p>}
-    </div>
+        <div className="fw-versions">
+          <h4>版本快照</h4>
+          <button type="button" className="btn" onClick={() => setShowText(!showText)}>{showText ? '收起内容读回' : '查看内容读回'}</button>
+          {showText && <pre className="fw-text">{text || '（无文本内容）'}</pre>}
+          <ul>
+            {versions.map(item => <li key={item.version}>
+              <span>v{item.version} · {item.label} · {formatMoment(item.createdAt)}</span>
+              <button type="button" className="btn" disabled={!!busy} onClick={() => revert(item.version)}>回退</button>
+            </li>)}
+            {!versions.length && <li className="fw-empty">还没有快照。保存一次后即可感知外部改动并回退。</li>}
+          </ul>
+        </div>
 
-    {file.format === 'pdf' && <div className="fw-section">
-      <h4>PDF 页面操作</h4>
-      <p className="fw-hint">操作结果另存为新文件。页码可用逗号或范围填写。</p>
-      <div className="fw-pdf-fields">
-        <TextInput label="保留页" placeholder="1,3,5-8" value={form.keep} onChange={value => setPdfField('keep', value)} />
-        <TextInput label="删除页" placeholder="2,9" value={form.drop} onChange={value => setPdfField('drop', value)} />
-        <label className="fw-angle">旋转角度
-          <select value={form.rotateDegrees} onChange={event => setPdfField('rotateDegrees', event.target.value)}>
+        {active.format === 'pdf' && <div className="fw-pdf">
+          <h4>页面级操作（结果另存为新文件）</h4>
+          <label>保留页 <input aria-label="保留页" placeholder="1,3,5-8" value={form.keep}
+            onChange={event => setForm({ ...form, keep: event.target.value })} /></label>
+          <label>删除页 <input aria-label="删除页" placeholder="2,9" value={form.drop}
+            onChange={event => setForm({ ...form, drop: event.target.value })} /></label>
+          <label>旋转角度 <select aria-label="旋转角度" value={form.rotateDegrees}
+            onChange={event => setForm({ ...form, rotateDegrees: event.target.value })}>
             {['90', '-90', '180', '-180', '270', '-270', '0'].map(value => <option key={value} value={value}>{value}°</option>)}
-          </select>
-        </label>
-        <TextInput label="旋转页" placeholder="1,4" value={form.rotatePages} onChange={value => setPdfField('rotatePages', value)} />
-        <TextInput label="水印" description="仅支持 ASCII" placeholder="DRAFT" value={form.watermark} onChange={value => setPdfField('watermark', value)} />
-        <TextInput label="合并同目录 PDF" placeholder="a.pdf, b.pdf" value={form.merge} onChange={value => setPdfField('merge', value)} />
-      </div>
-      <CheckboxInput label="添加页码" value={form.pageNumbers} onChange={value => setPdfField('pageNumbers', value)} />
-      <Button label="应用并另存" isDisabled={disabled} onClick={applyPdf} />
-    </div>}
-
-    {revertVersion !== null && <AlertDialog title="回退文件版本？" isOpen
-      description={`${filename} 将恢复到 v${revertVersion}。当前文件会另存为快照。`}
-      cancelLabel="取消" actionLabel="确认回退"
-      onOpenChange={open => { if (!open && !pending.current) setRevertVersion(null); }}
-      onAction={() => { const version = revertVersion; setRevertVersion(null); void revert(version); }} />}
+          </select></label>
+          <label>旋转页 <input aria-label="旋转页" placeholder="1,4" value={form.rotatePages}
+            onChange={event => setForm({ ...form, rotatePages: event.target.value })} /></label>
+          <label>水印（仅 ASCII） <input aria-label="水印" placeholder="DRAFT" value={form.watermark}
+            onChange={event => setForm({ ...form, watermark: event.target.value })} /></label>
+          <label>合并同目录 PDF <input aria-label="合并文件" placeholder="a.pdf, b.pdf" value={form.merge}
+            onChange={event => setForm({ ...form, merge: event.target.value })} /></label>
+          <label className="fw-check"><input type="checkbox" checked={form.pageNumbers}
+            onChange={event => setForm({ ...form, pageNumbers: event.target.checked })} />添加页码</label>
+          <button type="button" className="btn" disabled={!!busy} onClick={applyPdf}>应用并另存</button>
+        </div>}
+      </section>}
+    </div>
   </section>;
 }

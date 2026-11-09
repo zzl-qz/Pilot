@@ -1,21 +1,15 @@
 import type { SideTranscript } from '../types/content.js';
 import type { EventEnvelope } from '../types/events.js';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Banner } from '@astryxdesign/core/Banner';
-import { Button } from '@astryxdesign/core/Button';
-import { EmptyState } from '@astryxdesign/core/EmptyState';
-import { IconButton } from '@astryxdesign/core/IconButton';
-import { Tab, TabList } from '@astryxdesign/core/TabList';
-import { TextArea } from '@astryxdesign/core/TextArea';
 import { errorInfo } from '../lib/errors.js';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import {
   appendQuote, lastEventSequence, quoteMarkdown, reduceSideChat, sideChatsFor, simplifyTranscript
 } from '../lib/side-chat.js';
-import { MarkdownBody } from './MarkdownBody.jsx';
-import { Icon } from './Icon.jsx';
+import { Button } from '@astryxdesign/core/Button';
 import './side-chat.css';
+import { MarkdownBody } from './MarkdownBody.jsx';
 
 /**
  * 侧边对话：从当前任务分叉出来的临时对话（对齐 Codex 的 /side）。
@@ -30,21 +24,14 @@ export function SideChatPanel() {
   const parentTitle = useStore((state) => state.sessionTitle);
   const embedded = useStore((state) => state.embeddedSessionId);
   const [creating, setCreating] = useState(false);
-  const [closing, setClosing] = useState(false);
-  const [error, setError] = useState('');
   const openedFor = useRef('');
 
   const { items, activeId } = sideChatsFor(sideChats, { sessionId, workspace });
 
   const create = useCallback(async ({ force = false } = {}) => {
-    setCreating(true); setError('');
-    const owner = useStore.getState();
+    setCreating(true);
     try {
-      const chat = await owner.createSideChat({ force });
-      const current = useStore.getState();
-      if (!chat && owner.sessionId === current.sessionId && owner.sessionEpoch === current.sessionEpoch && owner.workspace === current.workspace) {
-        setError('无法打开侧边对话，请重试。');
-      }
+      return await useStore.getState().createSideChat({ force });
     } finally {
       setCreating(false);
     }
@@ -68,40 +55,68 @@ export function SideChatPanel() {
     }
   }, [sessionId, workspace, embedded, items.length, create]);
 
-  async function discard() {
-    if (!activeId || closing) return;
-    setClosing(true); setError('');
-    try {
-      if (!await useStore.getState().closeSideChat(activeId)) setError('无法丢弃侧边对话。对话已保留，可重试。');
-    } finally { setClosing(false); }
-  }
-
   return (
     <div id="panel-side-chat" className="panel side-chat-panel">
       <div className="side-chat-scope">
         <span className="side-chat-scope-text" title={workspace || ''}>
           {sessionId ? `从「${parentTitle || '当前任务'}」分叉` : '还没有可以分叉的任务'}
         </span>
-        <Button label="新开侧聊" size="sm" variant="ghost" isLoading={creating} isDisabled={!sessionId || closing}
-          onClick={() => create({ force: true })} />
-        {activeId && <IconButton label="关闭并丢弃这条侧边对话" icon={<Icon name="close" />}
-          variant="ghost" size="sm" isLoading={closing} onClick={discard} />}
+        <button
+          type="button"
+          className="side-chat-new"
+          title="在当前任务旁再开一条侧边对话"
+          disabled={creating || !sessionId}
+          onClick={() => create({ force: true })}
+        >＋ 新开</button>
+        <button
+          type="button"
+          className="side-chat-discard"
+          title="关闭并丢弃这条侧边对话（主任务不受影响）"
+          aria-label="关闭并丢弃这条侧边对话"
+          disabled={!activeId}
+          onClick={() => useStore.getState().closeSideChat(activeId!)}
+        >×</button>
       </div>
       {items.length > 1 && (
-        <TabList className="side-chat-tablist" role="tablist" aria-label="侧边对话" size="sm" value={activeId || ''}
-          onChange={id => useStore.getState().selectSideChat(id)}>
-          {items.map(item => <Tab key={item.id} id={`side-chat-tab-${item.id}`} value={item.id}
-            panelId="side-chat-content" label={item.title || '侧边对话'} />)}
-        </TabList>
+        <div className="side-chat-tabs" role="tablist" aria-label="侧边对话">
+          {items.map((item) => (
+            <div key={item.id} className={`side-chat-tab${item.id === activeId ? ' is-on' : ''}`} role="presentation">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={item.id === activeId}
+                className="side-chat-select"
+                title={item.workspace ? `${item.title}\n${item.workspace}` : item.title}
+                onClick={() => useStore.getState().selectSideChat(item.id)}
+              >{item.title || '侧边对话'}</button>
+              <button
+                type="button"
+                className="side-chat-close"
+                aria-label={`关闭 ${item.title}`}
+                title="关闭并丢弃这条侧边对话"
+                onClick={() => useStore.getState().closeSideChat(item.id)}
+              >×</button>
+            </div>
+          ))}
+        </div>
       )}
-      {error && <Banner className="side-chat-banner" status="error" role="alert" title={error} />}
-      <div id="side-chat-content" className="side-chat-content"
-        role={items.length > 1 ? 'tabpanel' : undefined} aria-labelledby={items.length > 1 ? `side-chat-tab-${activeId}` : undefined}>
-        {activeId ? <SimpleSideChat key={activeId} sessionId={activeId} />
-          : creating ? <p className="side-chat-hint" role="status">正在打开侧边对话…</p>
-            : <EmptyState className="side-chat-empty" title="还没有侧边对话"
-              description={sessionId ? '侧聊继承当前任务的上下文。' : '开始一个任务后，即可从该任务开一条侧聊。'}
-              actions={sessionId ? <Button label="开一条侧边对话" onClick={() => create()} /> : undefined} isCompact />}
+      <div className="side-chat-content">
+        {activeId
+          ? <SimpleSideChat key={activeId} sessionId={activeId} />
+          : (
+            <div className="side-chat-empty">
+              <p>
+                {sessionId
+                  ? '这条任务还没有侧边对话。在旁边问一句，主线照常跑。'
+                  : '先发一条消息开始任务，再开侧边对话。'}
+              </p>
+              {sessionId && (
+                <button type="button" className="btn" disabled={creating} onClick={() => create()}>
+                  {creating ? '正在打开…' : '开一条侧边对话'}
+                </button>
+              )}
+            </div>
+          )}
       </div>
     </div>
   );
@@ -118,9 +133,6 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
   const [sending, setSending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [historyError, setHistoryError] = useState('');
-  const [attempt, setAttempt] = useState(0);
-  const formRef = useRef<HTMLFormElement>(null);
   const runRef = useRef('');
   const stopRequested = useRef(false);
   const stopping = useRef(false);
@@ -132,12 +144,11 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
     let cancelled = false;
     let source: EventSource | null = null;
     setThread({ messages: [], live: '' });
-    setError(''); setHistoryError(''); setLoading(true);
+    setError('');
     stickRef.current = true;
     Promise.all([api.history(sessionId, { limit: 80 }), api.activeRun(sessionId)]).then(([data, active]) => {
       if (cancelled) return;
-      if (!data) throw new Error('服务端未返回侧聊历史。');
-      const events = data.events || [];
+      const events = data?.events || [];
       let sequence = lastEventSequence(events);
       runRef.current = active?.runId || '';
       setBusy(!!runRef.current);
@@ -161,7 +172,7 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
           if (stopRequested.current) stop();
         }
         if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
-          setBusy(false); runRef.current = ''; stopRequested.current = false;
+          setBusy(false); runRef.current = '';
           if (event.type === 'run.failed') setError(event.payload?.message || event.payload?.reason || '侧边任务失败，请重试。');
         }
       };
@@ -171,13 +182,13 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
       source.onerror = () => { if (!cancelled) setError('侧边对话连接中断，正在重连…'); };
       source.onopen = () => { if (!cancelled) setError(current => current === '侧边对话连接中断，正在重连…' ? '' : current); };
     }).catch((failure) => {
-      if (!cancelled) { setLoading(false); setHistoryError(errorInfo(failure).message || '读不到这条侧边对话'); }
+      if (!cancelled) { setLoading(false); setError(errorInfo(failure).message || '读不到这条侧边对话'); }
     });
     return () => {
       cancelled = true;
       source?.close();
     };
-  }, [sessionId, attempt]);
+  }, [sessionId]);
 
   useEffect(() => {
     if (!quote || quote.id !== sessionId) return;
@@ -195,7 +206,7 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
   async function send(event: React.FormEvent) {
     event.preventDefault();
     const text = draft.trim();
-    if (!text || pending.current || busy || loading || historyError) return;
+    if (!text || pending.current || busy || loading) return;
     pending.current = true;
     runRef.current = '';
     stopRequested.current = false;
@@ -250,29 +261,38 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
               </div>
             )
         ))}
-        {loading && <p className="side-chat-hint" role="status">正在读取侧聊历史…</p>}
-        {!rows.length && !loading && !historyError && (
+        {!rows.length && (
           <p className="side-chat-hint">
             直接问。它继承了当前任务的上下文，这里不显示主线的工具记录，也不会打断主任务。
           </p>
         )}
       </div>
-      {historyError && <Banner className="side-chat-banner" status="error" role="alert" title="无法读取侧聊历史" description={historyError}
-        endContent={<Button label="重试连接" variant="ghost" onClick={() => setAttempt(value => value + 1)} />} />}
-      {error && <Banner className="side-chat-banner" status="error" role="alert" title={error} />}
-      <form className="side-chat-entry" onSubmit={send} ref={formRef}>
-        <TextArea rows={2} placeholder="问一句，Enter 发送" value={draft} label="侧边对话输入" isLabelHidden
-          containerClassName="side-chat-input" onChange={setDraft}
-          onKeyDown={event => {
-            if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
-            event.preventDefault();
-            if (!busy && !loading && !historyError) formRef.current?.requestSubmit();
+      {error && <p className="side-chat-error" role="alert">{error}</p>}
+      <form className="side-chat-compose" onSubmit={send}>
+        <textarea
+          rows={2}
+          placeholder="问一句，Enter 发送"
+          value={draft}
+          aria-label="侧边对话输入"
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+              event.preventDefault();
+              if (!busy) event.currentTarget.form?.requestSubmit();
+            }
           }}
         />
-        {busy ? <IconButton label="停止" icon={<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor" /></svg>}
-          onClick={stop} />
-          : <IconButton type="submit" label="发送" variant="primary" isDisabled={loading || sending || !!historyError || !draft.trim()}
-            icon={<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.5M4.8 6.4 8 3.2l3.2 3.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>} />}
+        {busy
+          ? (
+            <button type="button" className="side-chat-stop" aria-label="停止" title="停止" onClick={stop}>
+              <span />
+            </button>
+          )
+          : (
+            <button type="submit" className="side-chat-send" aria-label="发送" title="发送" disabled={loading || sending || !draft.trim()}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.5M4.8 6.4 8 3.2l3.2 3.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </button>
+          )}
       </form>
     </div>
   );

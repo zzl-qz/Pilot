@@ -1,85 +1,91 @@
-import { Badge } from '@astryxdesign/core/Badge';
-import { Button } from '@astryxdesign/core/Button';
+import React, { useRef, useState } from 'react';
 import type { UiState } from '../types/store.js';
 import { useStore } from '../store.js';
 import { shortcut } from '../lib/interaction.js';
 import { Icon } from './Icon.jsx';
-import { NavigationMenu, NavigationMoreIcon } from './NavigationMenu.jsx';
-import './navigation.css';
 
 /** 全局入口独立于项目列表，桌面收起项目栏后仍可使用。 */
 export function NavigationRail() {
-  const sidebarOpen = useStore(state => state.ui.sidebarOpen);
-  const unread = useStore(state => state.ui.resultUnread || 0);
-  const resultsOpen = useStore(state => Boolean(state.ui.resultsOpen));
-  const searchOpen = useStore(state => Boolean(state.ui.searchOpen));
-  const theme = useStore(state => state.ui.themeMode);
+  const ui = useStore(state => state.ui);
+  const unread = ui.resultUnread || 0;
+  const moreRef = useRef<HTMLDetailsElement>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
   const open = (patch: Partial<UiState>) => useStore.getState().setUi(patch);
-
-  return (
-    <nav className="navigation-rail" aria-label="全局功能">
-      <div className="navigation-rail-group">
-        {!sidebarOpen && <div className="navigation-shortcut">
-          <NewTaskButton compact />
-          <span className="navigation-tooltip" aria-hidden="true">{`新任务 (${shortcut('N')})`}</span>
-        </div>}
-        <RailButton icon="inbox" label="任务收件箱" active={resultsOpen} count={unread}
-          onClick={() => open({ resultsOpen: true, resultTarget: null })} />
-        <RailButton id="nav-message-search" icon="search" label="搜索消息与书签" active={searchOpen}
-          onClick={() => open({ searchOpen: true })} />
-      </div>
-      <div className="navigation-rail-bottom navigation-shortcut">
-        <NavigationMenu
-          button={{ label: '更多功能', icon: <NavigationMoreIcon />, isIconOnly: true, variant: 'ghost', className: 'navigation-action' }}
-          side="end"
-          entries={[
-            { id: 'nav-schedules', icon: <Icon name="clock" />, label: '定时任务', onClick: () => open({ schedulesOpen: true, scheduleDraft: null }) },
-            { id: 'mobile-connect', icon: <Icon name="phone" />, label: '连接手机', onClick: () => open({ mobileConnectionOpen: true }) },
-            'divider',
-            { icon: <Icon name="code" />, label: `命令面板 (${shortcut('K')})`, onClick: () => open({ paletteOpen: true }) },
-            { id: 'settings-open', icon: <Icon name="settings" />, label: `设置 (${shortcut(',')})`, onClick: () => open({ settingsOpen: true }) },
-            { id: 'theme-toggle', icon: <Icon name={theme === 'light' ? 'moon' : 'sun'} />, label: '切换明暗主题', onClick: () => {
-              useStore.getState().setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
-            } },
-          ]}
-        />
-        <span className="navigation-tooltip" aria-hidden="true">更多功能</span>
-      </div>
-    </nav>
-  );
-}
-
-export function NewTaskButton({ compact = false }: { compact?: boolean }) {
-  return <Button id={compact ? undefined : 'new-session'} label="新任务" variant={compact ? 'ghost' : 'secondary'}
-    className={compact ? 'navigation-action' : 'navigation-new-task'} isIconOnly={compact}
-    icon={<NewTaskIcon />} aria-keyshortcuts="Control+N Meta+N"
-    endContent={compact ? undefined : <kbd className="navigation-key" aria-hidden="true">{shortcut('N')}</kbd>}
-    onClick={() => {
-      useStore.getState().startNewSession();
-      requestAnimationFrame(() => useStore.getState().composerApi?.focus());
-    }} />;
-}
-
-export function NewTaskIcon() {
-  return <svg className="ui-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
-    <path d="M8 3v10M3 8h10" />
-  </svg>;
-}
-
-function RailButton({ id, icon, label, active, count = 0, onClick }: {
-  id?: string; icon: string; label: string; active: boolean; count?: number; onClick: () => void;
-}) {
-  const unreadLabel = count > 0 ? `${count} 条未读` : '';
-  return (
-    <div className="navigation-shortcut">
-      <Button id={id} label={label} icon={<Icon name={icon} />} isIconOnly variant="ghost" className="navigation-action"
-        aria-haspopup="dialog" aria-expanded={active} aria-describedby={unreadLabel ? 'navigation-unread' : undefined}
-        onClick={event => {
-          event.currentTarget.focus({ preventScroll: true });
-          onClick();
-        }} />
-      {unreadLabel && <Badge id="navigation-unread" className="navigation-unread" aria-label={unreadLabel} label={count > 99 ? '99+' : count} />}
-      <span className="navigation-tooltip" aria-hidden="true">{label}{unreadLabel && ` · ${unreadLabel}`}</span>
+  const invoke = (action: () => void) => {
+    if (moreRef.current) moreRef.current.open = false;
+    setMoreOpen(false);
+    moreRef.current?.querySelector('summary')?.focus();
+    action();
+  };
+  return <nav className="navigation-rail" aria-label="全局功能">
+    <div className="navigation-rail-group">
+      <RailButton id="nav-projects" icon="home" label="项目与对话" active={ui.sidebarOpen}
+        onClick={() => open({ sidebarOpen: !ui.sidebarOpen })} />
+      <RailButton id="nav-message-search" icon="search" label="搜索消息与书签" active={ui.searchOpen}
+        onClick={() => open({ searchOpen: true })} />
+      <RailButton icon="inbox" label="任务收件箱" active={ui.resultsOpen} count={unread}
+        onClick={() => open({ resultsOpen: true, resultTarget: null })} />
     </div>
-  );
+    <div className="navigation-rail-group navigation-rail-bottom">
+      <details className="navigation-rail-more" ref={moreRef} onToggle={event => setMoreOpen(event.currentTarget.open)}
+        onKeyDown={event => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+          const details = event.currentTarget;
+          const summary = details.querySelector('summary');
+          if (event.key === 'Escape') {
+            if (!details.open) return;
+            event.preventDefault();
+            details.open = false;
+            setMoreOpen(false);
+            summary?.focus();
+            return;
+          }
+          if (event.target === summary && !details.open && ['Enter', ' ', 'ArrowDown'].includes(event.key)) {
+            event.preventDefault();
+            details.open = true;
+            setMoreOpen(true);
+            details.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+            return;
+          }
+          if (!details.open || !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+          const items = Array.from(details.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+          if (!items.length) return;
+          event.preventDefault();
+          const index = items.indexOf(document.activeElement as HTMLButtonElement);
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+            : index < 0 ? 0 : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length;
+          items[next]?.focus();
+        }}>
+        <summary className="rail-button" role="button" aria-label="更多功能" aria-haspopup="menu" aria-expanded={moreOpen}
+          aria-controls="navigation-more-menu" title="更多功能">
+          <Icon name="more" />
+          <span className="rail-tooltip" aria-hidden="true">更多功能</span>
+        </summary>
+        <div id="navigation-more-menu" className="navigation-more-menu" role="menu" aria-label="更多功能">
+          <MenuButton id="nav-schedules" icon="clock" label="定时任务" onClick={() => invoke(() => open({ schedulesOpen: true, scheduleDraft: null }))} />
+          <MenuButton id="mobile-connect" icon="phone" label="连接手机" onClick={() => invoke(() => open({ mobileConnectionOpen: true }))} />
+          <MenuButton icon="code" label={`命令面板 (${shortcut('K')})`} onClick={() => invoke(() => open({ paletteOpen: true }))} />
+          <MenuButton id="theme-toggle" icon={ui.themeMode === 'light' ? 'moon' : 'sun'} label="切换明暗主题"
+            onClick={() => invoke(() => useStore.getState().setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'))} />
+          <MenuButton id="settings-open" icon="settings" label={`设置 (${shortcut(',')})`} onClick={() => invoke(() => open({ settingsOpen: true }))} />
+        </div>
+      </details>
+    </div>
+  </nav>;
+}
+
+function MenuButton({ id, icon, label, onClick }: { id?: string; icon: string; label: string; onClick: () => void }) {
+  return <button id={id} className="navigation-more-item" type="button" role="menuitem" onClick={onClick}>
+    <Icon name={icon} /><span>{label}</span>
+  </button>;
+}
+
+function RailButton({ id, icon, label, hint, active, count = 0, onClick }: { id?: string; icon: string; label: string; hint?: string; active?: boolean; count?: number; onClick: () => void }) {
+  const description = `${label}${count > 0 ? ` · ${count} 条未读` : ''}${hint ? ` (${hint})` : ''}`;
+  return <button id={id} className={`rail-button${active ? ' is-active' : ''}`} type="button"
+    aria-label={label} aria-pressed={active} title={description} onClick={onClick}>
+    <Icon name={icon} />
+    {count > 0 && <span className="rail-unread" aria-label={`${count} 条未读`}>{count > 99 ? '99+' : count}</span>}
+    <span className="rail-tooltip" aria-hidden="true">{description}</span>
+  </button>;
 }

@@ -93,7 +93,7 @@ async function run(page,name){
   store.setState({_previewData:{path:'pilot-core/src/main/java/Example.java',content:'public class Example {\n  public static void main(String[] args) { System.out.println("a long line that should remain horizontally scrollable in code preview"); }\n}',size:140}});
  });
  await page.locator('#preview-body').waitFor();
- assert.equal(await page.locator('.inspector-tabs [role="tab"]').count(),5,'常用面板保持精简');
+ assert.equal(await page.locator('.inspector-rail [role="tab"]').count(),5,'常用面板保持精简');
  assert.equal(await page.getByRole('tab',{name:'文件工作台'}).count(),0,'文件专项能力不与预览、变更并列');
  assert.equal(await page.getByRole('menuitem',{name:'活动',exact:true}).count(),0,'低频工具默认收起');
  await page.getByRole('button',{name:'更多工具',exact:true}).click();
@@ -101,11 +101,11 @@ async function run(page,name){
  await page.keyboard.press('Escape');
  await page.getByRole('menu',{name:'更多工具'}).waitFor({state:'hidden'});
  assert.equal(await page.getByRole('button',{name:'更多工具',exact:true}).getAttribute('aria-expanded'),'false','Escape 收起更多工具菜单');
- assert.deepEqual(await page.locator('.inspector-tabs [role="tab"]').evaluateAll(items=>items.map(el=>el.getAttribute('aria-label'))), ['变更', '预览', '命令', '成果', '侧聊']);
+ assert.deepEqual(await page.locator('.inspector-rail [role="tab"]').evaluateAll(items=>items.map(el=>el.getAttribute('aria-label'))), ['成果', '对话', '变更', '预览', '命令']);
  await page.getByRole('tab',{name:'预览',exact:true}).focus();
- await page.keyboard.press('ArrowRight');
- assert.equal(await page.evaluate(()=>document.activeElement.id),'inspector-tab-commands','右方向键移动标签焦点');
- await page.keyboard.press('ArrowLeft');
+ await page.keyboard.press('ArrowDown');
+ assert.equal(await page.evaluate(()=>document.activeElement.id),'inspector-tab-commands','向下方向键移动标签焦点');
+ await page.keyboard.press('ArrowUp');
  assert.equal(await page.locator('.preview-wrap').getAttribute('aria-pressed'),'false','代码预览默认保持源码行结构');
  assert.equal(await page.locator('#preview-body').evaluate(el=>getComputedStyle(el).whiteSpace),'pre','代码预览默认横向滚动，不把源码挤成窄列');
  await page.screenshot({path:join(output,`${name}-preview-desktop.png`),timeout:20000,animations:'disabled'});

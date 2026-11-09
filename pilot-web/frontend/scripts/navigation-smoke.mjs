@@ -49,7 +49,7 @@ async function run(page,name) {
   await menu.waitFor();
   await page.waitForFunction(() => document.activeElement.id === 'nav-schedules');
   await page.keyboard.press('End');
-  await page.waitForFunction(() => document.activeElement.id === 'theme-toggle');
+  await page.waitForFunction(() => document.activeElement.id === 'settings-open');
   await page.evaluate(() => store.setState({running:true}));
   await page.keyboard.press('Escape');
   await menu.waitFor({state:'hidden'});
@@ -59,7 +59,7 @@ async function run(page,name) {
   await page.evaluate(() => store.setState({running:false}));
   await more.focus();await page.keyboard.press('Enter');await menu.waitFor();
   await page.setViewportSize({width:390,height:900});
-  await page.waitForFunction(() => document.querySelector('button[aria-label="更多功能"]').getAttribute('aria-expanded')==='false');
+  await page.waitForFunction(() => document.querySelector('summary[aria-label="更多功能"]').getAttribute('aria-expanded')==='false');
   await menu.waitFor({state:'hidden'});
   await page.waitForFunction(()=>document.activeElement?.id==='sidebar-toggle');
   await page.setViewportSize({width:1440,height:900});
@@ -126,6 +126,7 @@ async function run(page,name) {
 
 async function checkMenuFallback(browser, capability) {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  page.setDefaultTimeout(8000);
   try {
     await page.addInitScript(missing => {
       if (missing === 'popover') Object.defineProperty(HTMLElement.prototype,'showPopover',{value:undefined,configurable:true});
@@ -136,12 +137,13 @@ async function checkMenuFallback(browser, capability) {
     }, capability);
     await page.goto(url);
     await page.locator('#sidebar-toggle').click();
+    await page.waitForFunction(() => document.activeElement.id === 'new-session');
     const more = page.getByRole('button',{name:'更多功能',exact:true});
     await more.focus(); await page.keyboard.press('Enter');
-    const fallback = page.getByRole('dialog',{name:'更多功能',exact:true});
+    const fallback = page.getByRole('menu',{name:'更多功能',exact:true});
     await fallback.waitFor();
     await page.keyboard.press('End');
-    await page.waitForFunction(() => document.activeElement.id === 'theme-toggle');
+    await page.waitForFunction(() => document.activeElement.id === 'settings-open');
     await page.screenshot({path:join(output,`chromium-390-fallback-${capability}.png`),animations:'disabled'});
     await fallback.getByRole('menuitem',{name:/^设置/}).click();
     await page.locator('#settings').waitFor();
@@ -150,8 +152,8 @@ async function checkMenuFallback(browser, capability) {
     await page.getByRole('button',{name:'搜索消息与书签',exact:true}).click();
     await page.waitForFunction(() => document.activeElement.id === 'message-search-query');
     await page.keyboard.press('Escape');
-    await page.waitForFunction(() => document.activeElement.id === 'nav-message-search');
-    await page.getByRole('button',{name:'返回对话',exact:true}).click();
+    await page.waitForFunction(() => document.activeElement.getAttribute('aria-label') === '搜索消息与书签');
+    await page.locator('#sidebar-toggle').click();
     assert.equal(await page.locator('#sidebar-toggle').evaluate(el => el === document.activeElement),true);
     assert.equal(await page.locator('.main').getAttribute('inert'),null);
     console.log(`chromium: PASS ${capability} fallback / keyboard / focus / drawer close`);

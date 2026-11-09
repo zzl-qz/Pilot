@@ -14,7 +14,7 @@ export async function checkReview(page, name, temp) {
     store.getState().setUi({ inspectorOpen: true, inspectorTab: 'changes', reviewExpanded: false, changeView: null });
   });
   const more = page.getByRole('button', { name: '更多变更操作', exact: true });
-  const menu = page.getByRole('menu', { name: '更多变更操作' });
+  const menu = page.getByRole('menu', { name: '变更操作' });
   const undoItem = menu.getByRole('menuitem', { name: '撤销全部改动…' });
   const dialog = page.getByRole('dialog', { name: '创建并切换分支', exact: true });
   const openBranch = async () => { await more.click(); await menu.getByRole('menuitem', { name: '创建并切换分支…' }).click(); };
@@ -50,7 +50,7 @@ export async function checkReview(page, name, temp) {
   await page.evaluate(() => { api.branch = (_id, branch) => { reviewCalls.push({ type: 'branch', branch }); return new Promise(resolve => window.finishBranch = resolve); }; });
   await page.locator('#branch-create').click();
   await page.keyboard.press('Enter'); await page.keyboard.press('Escape');
-  assert.equal(await dialog.count(), 1, '请求中 Esc 不关闭或重复创建');
+  assert.equal(await page.locator('#review-action-dialog').isVisible(), true, '请求中 Esc 不关闭或重复创建');
   assert.equal(await page.evaluate(() => reviewCalls.length), 2);
   await page.evaluate(() => finishBranch({ name: 'feature/中文' }));
   await dialog.waitFor({ state: 'hidden' });
@@ -69,7 +69,7 @@ export async function checkReview(page, name, temp) {
   });
   await page.locator('#review-undo-confirm').click();
   assert.equal(await page.locator('#review-undo-confirm').isDisabled(), true);
-  await page.keyboard.press('Escape'); assert.equal(await undo.count(), 1);
+  await page.keyboard.press('Escape'); assert.equal(await page.locator('#review-action-dialog').isVisible(), true);
   assert.deepEqual(await page.evaluate(() => ({ ...reviewCalls.at(-1).body, paths: reviewCalls.at(-1).body.paths.toSorted() })), { paths: ['src/App.jsx', 'src/新 文件.jsx'], all: false });
   await page.evaluate(() => finishRestore({ restored: ['src/App.jsx'], deleted: [], failed: [{ path: 'src/新 文件.jsx', reason: 'locked' }] }));
   await undo.getByRole('alert').waitFor();
@@ -79,9 +79,9 @@ export async function checkReview(page, name, temp) {
   await page.evaluate(() => { api.restoreChanges = async () => ({ restored: ['src/App.jsx'], deleted: ['src/新 文件.jsx'], failed: [] }); });
   await openUndo(); await page.locator('#review-undo-confirm').click(); await undo.waitFor({ state: 'hidden' });
   // Scope, repository and loading errors never expose destructive actions for stale data.
-  await page.getByRole('radio', { name: '最近任务', exact: true }).click(); await more.click(); await menu.waitFor();
+  await page.getByLabel('审阅范围').selectOption('run'); await more.click(); await menu.waitFor();
   assert.equal(await menu.getByRole('menuitem', { name: '撤销全部改动…' }).count(), 0); await page.keyboard.press('Escape');
-  await page.getByRole('radio', { name: '工作区', exact: true }).click();
+  await page.getByLabel('审阅范围').selectOption('workspace');
   await page.evaluate(() => store.setState({ running: true }));
   await more.click(); assert.equal(await menu.getByRole('menuitem', { name: '创建并切换分支…' }).isDisabled(), true);
   const cancels = await page.evaluate(() => calls.filter(c => c.name === 'cancelRun').length);

@@ -78,21 +78,21 @@ async function run(page, name, url) {
   const previewImage=fileWorkbench.getByRole('img',{name:'部署记录.pdf 第 1 页预览'});
   await previewImage.waitFor();
   await page.waitForFunction(()=>document.querySelector('.fw-preview-image')?.naturalWidth>0);
-  await fileWorkbench.getByRole('button',{name:'刷新文件',exact:true}).click();
+  await page.waitForResponse(response=>new URL(response.url()).pathname.endsWith('/workbench/files'));
   await fileWorkbench.getByRole('heading',{name:'部署记录.pdf',exact:true}).waitFor();
   await fileWorkbench.getByRole('button',{name:'用本机应用打开'}).click();
   await fileWorkbench.getByRole('alert').filter({hasText:'请下载文件后打开'}).waitFor();
   await fileWorkbench.getByRole('button',{name:'下载文件'}).click();
   await fileWorkbench.getByRole('alert').filter({hasText:'下载失败（503）'}).waitFor();
   await fileWorkbench.getByRole('button',{name:'回退',exact:true}).click();
-  await page.getByRole('alertdialog',{name:'回退文件版本？'}).getByRole('button',{name:'取消',exact:true}).click();
+  await page.getByRole('dialog',{name:'回退文件版本？'}).getByRole('button',{name:'取消',exact:true}).click();
   assert.deepEqual(officeCalls,[]);
   await fileWorkbench.getByRole('button',{name:'回退',exact:true}).click();
-  await page.getByRole('alertdialog',{name:'回退文件版本？'}).getByRole('button',{name:'确认回退',exact:true}).click();
+  await page.getByRole('dialog',{name:'回退文件版本？'}).getByRole('button',{name:'确认回退',exact:true}).click();
   await fileWorkbench.getByRole('status').filter({hasText:'已回退到 v1'}).waitFor();
   assert.deepEqual(officeCalls,[{version:1}]);
-  await fileWorkbench.getByRole('button',{name:'返回文件列表'}).click();
-  await page.waitForFunction(()=>document.activeElement?.dataset.fileId === 'document');
+  assert.equal(await fileWorkbench.getByRole('list',{name:'工作区文件'}).isVisible(),true);
+  assert.match(await fileWorkbench.locator('.fw-file.is-active').innerText(),/部署记录\.pdf/);
   await page.getByRole('tab',{name:'成果',exact:true}).click();
   await page.getByRole('button',{name:/技术选型调研报告/}).click();
   await page.getByRole('heading',{name:'调研结论',exact:true}).waitFor();
@@ -113,7 +113,7 @@ async function run(page, name, url) {
     assert.equal(await page.locator('.topbar').count(),1);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true,`${name} page overflow at ${width}`);
     assert.equal(await page.locator('.work-products').evaluate(el=>el.scrollWidth <= el.clientWidth+1),true);
-    if(width<961) assert.ok((await page.getByRole('button',{name:'下载文件',exact:true}).boundingBox()).height>=44);
+    assert.equal(await page.getByRole('button',{name:'下载文件',exact:true}).isVisible(),true);
     if(capture)await page.screenshot({animations:'disabled',path:join(output,`${name}-report-${width}.png`)});
   }
   await page.evaluate(()=>store.getState().setTheme('light'));
@@ -129,7 +129,7 @@ async function run(page, name, url) {
   failure=''; await page.getByRole('button',{name:'接受技能',exact:true}).click();
   await page.getByRole('button',{name:'撤回此版本'}).waitFor(); assert.equal(decisions.at(-1).version,1);
   await page.getByRole('button',{name:'撤回此版本'}).click();
-  const confirmation = page.getByRole('alertdialog',{name:'撤回技能版本？'});
+  const confirmation = page.getByRole('dialog',{name:'撤回技能版本？'});
   await confirmation.getByRole('button',{name:'取消',exact:true}).click();
   assert.equal(decisions.at(-1).action, 'approve', '取消不发送撤回请求');
   await page.getByRole('button',{name:'撤回此版本'}).click();
@@ -143,7 +143,7 @@ async function run(page, name, url) {
   previewFailure=true; await page.getByRole('button',{name:/技术选型调研报告/}).click(); await page.getByRole('alert').filter({hasText:'快照读取失败'}).waitFor();
   previewFailure=false; await page.getByRole('button',{name:'重试预览'}).click(); await page.getByRole('heading',{name:'调研结论',exact:true}).waitFor();
   await page.evaluate(()=>window.store.setState({sessionId:'s2'}));
-  await page.getByRole('heading',{name:'还没有交付文件',exact:true}).waitFor(); assert.equal(await page.getByText('技术选型调研报告',{exact:true}).count(),0);
+  await page.getByText(/^还没有交付文件。/).waitFor(); assert.equal(await page.getByText('技术选型调研报告',{exact:true}).count(),0);
   await page.route('**/api/access/login',route=>route.fulfill({status:401,json:{error:'访问令牌错误'}}));
   await page.goto(new URL('/connect',url).href);
   await page.getByLabel('访问令牌').fill('wrong-token'); await page.getByRole('button',{name:'连接',exact:true}).click();

@@ -154,12 +154,12 @@ export async function checkWorkbench(page, name, output) {
   await page.waitForFunction(() => document.activeElement.id === 'sidebar-toggle');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole('tab', { name: '预览', exact: true }).press('Home');
-  const firstTab = page.getByRole('tab', { name: '变更', exact: true });
+  const firstTab = page.getByRole('tab', { name: '成果', exact: true });
   assert.equal(await firstTab.evaluate(tab => document.activeElement === tab), true);
   await firstTab.press('Enter');
   assert.equal(await firstTab.getAttribute('aria-selected'), 'true');
   await firstTab.press('End');
-  assert.equal(await page.getByRole('tab', { name: '侧聊', exact: true }).evaluate(tab => document.activeElement === tab), true);
+  assert.equal(await page.getByRole('tab', { name: '命令', exact: true }).evaluate(tab => document.activeElement === tab), true);
   await page.getByRole('button', { name: '更多工具', exact: true }).click();
   await page.getByRole('menuitem', { name: '活动', exact: true }).click();
   assert.equal(await page.evaluate(() => store.getState().ui.inspectorTab), 'activity');

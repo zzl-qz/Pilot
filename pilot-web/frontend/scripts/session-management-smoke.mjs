@@ -61,19 +61,12 @@ async function run(page,name) {
   await page.evaluate(()=>window.failSend=false);assert.equal(await page.evaluate(()=>store.getState().submitInput('继续完善旧会话',[])),true);
   await page.waitForFunction(()=>document.querySelector('.session-row').dataset.sessionId==='older');await page.reload();await row('older').waitFor();assert.equal((await order())[0],'older');
   await open('recent');await action('重命名');await input.fill('当前对话的新名称');await save.click();await page.waitForFunction(()=>store.getState().sessionTitle==='当前对话的新名称');
-  const archive = page.getByRole('dialog',{name:'归档对话'});
-  await open('third');await action('归档');await archive.waitFor();
-  assert.equal(await page.evaluate(()=>archiveAttempts),0,'确认前不能调用归档接口');
-  await archive.getByRole('button',{name:'取消',exact:true}).click();
-  await page.waitForFunction(()=>document.activeElement.closest('[data-session-id]')?.dataset.sessionId==='third');
-  assert.equal(await page.evaluate(()=>archiveAttempts),0);
   await page.evaluate(()=>window.failArchive=true);
-  await open('third');await action('归档');await archive.getByRole('button',{name:'归档',exact:true}).click();
-  await archive.getByRole('alert').waitFor();
+  await open('third');await action('归档');
+  await page.getByRole('menu').getByRole('alert').waitFor();
   assert.equal(await page.evaluate(()=>store.getState().sessions.find(s=>s.id==='third').archived),false);
   await page.evaluate(()=>window.failArchive=false);
-  await archive.getByRole('button',{name:'归档',exact:true}).click();
-  await archive.waitFor({state:'hidden'});
+  await action('归档');await page.waitForFunction(()=>store.getState().sessions.find(s=>s.id==='third').archived);
   await page.getByRole('button',{name:'收起「Pilot」',exact:true}).click();
   await page.getByRole('searchbox',{name:'搜索对话',exact:true}).fill('跨平台');
   await row('third').waitFor();
@@ -94,15 +87,13 @@ async function run(page,name) {
   await row('older').locator('.session-item').focus();await page.keyboard.press('Shift+F10');await page.getByRole('menu').waitFor();await page.keyboard.press('Escape');
   assert.equal(await row('older').locator('.session-item').evaluate(el=>el===document.activeElement),true);
 
-  const projectMenu = page.getByRole('button',{name:'项目操作：Pilot',exact:true});
-  await projectMenu.click();await action('项目设置');
+  await page.getByRole('button',{name:'项目设置',exact:true}).click();
   await page.getByRole('dialog',{name:'编辑项目'}).waitFor();
   await page.keyboard.press('Escape');
-  await page.waitForFunction(()=>document.activeElement.getAttribute('aria-label')==='项目操作：Pilot');
+  await page.waitForFunction(()=>document.activeElement.getAttribute('aria-label')==='项目设置');
   await page.getByRole('button',{name:'新建项目',exact:true}).click();
   await page.getByRole('dialog',{name:'新建项目',exact:true}).waitFor();await page.keyboard.press('Escape');
-  await projectMenu.click();await action('在此项目新建对话');
-  await page.waitForFunction(()=>document.activeElement.id==='input-flow');
+  await page.getByRole('button',{name:'在此项目新建对话',exact:true}).click();
   assert.deepEqual(await page.evaluate(()=>store.getState().draftSession),{projectId:'pilot',workspace:projectFolders[0]});
   await page.reload();await row('older').waitFor();
   for(const width of [1440,768,390]) {
@@ -119,11 +110,11 @@ async function run(page,name) {
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     await page.screenshot({path:join(output,name+'-'+width+'-menu.png'),animations:'disabled'});await page.keyboard.press('Escape');
     if (width <= 960) {
-      await page.getByRole('button',{name:'返回对话',exact:true}).click();
+      await page.locator('#sidebar-toggle').click();
       assert.equal(await page.locator('#sidebar-toggle').evaluate(el=>el===document.activeElement),true);
     }
   }
-  assert.deepEqual(errors,[]);console.log(name+': PASS rename/error/limits/pin/unread/archive-confirmation/delete/activity/reload/keyboard/clipboard/project-actions/responsive');
+  assert.deepEqual(errors,[]);console.log(name+': PASS rename/error/limits/pin/unread/archive/error/delete/activity/reload/keyboard/clipboard/project-actions/responsive');
 }
 try {
   if(process.argv.includes('--serve')) {console.log(url+'?menu');await new Promise(()=>{});}

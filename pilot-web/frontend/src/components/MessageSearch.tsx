@@ -11,7 +11,6 @@ import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { migrateLocalBookmarks, bookmarksChanged } from '../lib/bookmark-sync.js';
 import { Icon } from './Icon.jsx';
-import { navigationDialogKeys } from './NavigationMenu.jsx';
 import './message-search.css';
 
 const emptyPage: MessageLibraryPage = { items: [], hasMore: false, nextOffset: 0 };
@@ -164,7 +163,14 @@ function MessageSearchDialog() {
     <Dialog isOpen onOpenChange={open => { if (!open) close(); }} width={640}
       maxHeight="calc(100dvh - 32px)" padding={0} purpose="form"
       className="search-dialog pilot-message-search" aria-labelledby="message-search-title"
-      onKeyDown={event => navigationDialogKeys(event, close)}>
+      onKeyDown={event => {
+        if (event.key === 'Tab') return;
+        event.stopPropagation();
+        if (event.key === 'Escape' && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+          event.preventDefault();
+          close();
+        }
+      }}>
       <header className="message-search-head">
         <h2 id="message-search-title">搜索消息与书签</h2>
         <Button label="关闭消息搜索" icon={<Icon name="close" />} isIconOnly variant="ghost" onClick={close} />
