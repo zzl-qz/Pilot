@@ -2,6 +2,7 @@ import type { StoreState } from '../types/store.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { buildModelUpdate } from '../lib/model-settings.js';
+import { Icon } from './Icon.jsx';
 
 /** 两个模型入口共用保存反馈；输入在请求期间锁定，失败保留，成功清空明文密钥。 */
 export function useModelForm({ model = '', endpoint: savedEndpoint = '' }: { model?: string; endpoint?: string }) {
@@ -47,7 +48,7 @@ export function ModelSaveFeedback({ feedback, id }: { feedback: StoreState['mode
   useEffect(() => { node.current?.scrollIntoView({ block: 'nearest' }); }, [feedback.message]);
   if (!feedback.message) return null;
   return <p ref={node} id={id} className={`model-save-feedback${feedback.error ? ' is-error' : ''}`} role={feedback.error ? 'alert' : 'status'}>
-    <span aria-hidden="true">{feedback.busy ? '…' : feedback.error ? '!' : '✓'}</span>
+    <span className="model-save-indicator" aria-hidden="true">{feedback.busy ? '…' : <Icon name={feedback.error ? 'info' : 'check'} />}</span>
     <span>{feedback.message}</span>
   </p>;
 }

@@ -63,6 +63,7 @@ createRoot(document.getElementById('root')).render(React.createElement(App));
 </script></body></html>`;
 const server = await createServer({ configFile:false, root, optimizeDeps:{include:['react/jsx-dev-runtime','pdfjs-dist']}, server:{host:'127.0.0.1',port:0,hmr:false,proxy:{}},plugins:[{name:'interaction-fixture',configureServer(server){
   server.middlewares.use('/__interaction',async(_req,res)=>{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__interaction',fixture));});
+  server.middlewares.use('/api/sessions/ui-audit/commands',(_req,res)=>{res.setHeader('Content-Type','application/json');res.end('{"tasks":[]}');});
 }}]});
 let browser, electron;
 async function run(page,name,url) {
@@ -358,12 +359,25 @@ async function run(page,name,url) {
   await page.locator('.change-row-name').getByText('App.jsx',{exact:true}).click();
   assert.equal(await page.locator('.change-view-undo').count(),0,'最近任务范围仅供审阅');
   await page.getByRole('radio',{name:'工作区',exact:true}).click();
-  // Recovery has correct zero-file impact; only inspect, never restore.
-  await page.evaluate(()=>store.getState().setUi({checkpointDialog:{sequence:1,info:{input:'原输入',runs:1,conversationAvailable:true,code:{available:true,files:[]}}}}));
-  if(await page.locator('#checkpoint-dialog').count()) {
-    assert.equal((await page.locator('#checkpoint-dialog').innerText()).includes('新建的文件会被删除'),false);
-    await page.keyboard.press('Escape');
-  }
+  // 关闭尚在读取的检查点，旧响应到达时不能重新打开弹窗。
+  await page.evaluate(()=>{
+    api.checkpoints=()=>new Promise(resolve=>{window.finishCheckpoint=resolve;});
+    window.pendingCheckpoint=store.getState().openCheckpoint(1);
+  });
+  const checkpoint=page.locator('#checkpoint-dialog');
+  await checkpoint.getByRole('status').filter({hasText:'正在检查后续改动…'}).waitFor();
+  await page.keyboard.press('Escape');
+  await page.evaluate(async ()=>{
+    const info={input:'原输入',runs:1,conversationAvailable:true,code:{ready:true,files:[]}};
+    finishCheckpoint(info);
+    await pendingCheckpoint;
+    window.checkpointFixture=info;
+  });
+  assert.equal(await checkpoint.count(),0);
+  await page.evaluate(()=>store.getState().setUi({checkpointDialog:{sequence:1,info:checkpointFixture}}));
+  await checkpoint.getByText('没有文件需要还原。',{exact:false}).waitFor();
+  assert.equal(await checkpoint.getByRole('radio',{name:/只撤代码/}).isDisabled(),true);
+  await page.keyboard.press('Escape');
   await checkReview(page, name, temp);
   await checkSideChat(page, name, temp);
   await checkVoice(page, name, temp);

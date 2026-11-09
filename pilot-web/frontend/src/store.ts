@@ -1374,10 +1374,13 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     const { sessionId } = get();
     if (!sessionId) return;
     set((draft) => { draft.ui.checkpointDialog = { sequence, loading: true }; });
+    const pending = get().ui.checkpointDialog;
     try {
       const info = await api.checkpoints(sessionId, sequence);
+      if (get().ui.checkpointDialog !== pending || get().sessionId !== sessionId) return;
       set((draft) => { draft.ui.checkpointDialog = { sequence, loading: false, info }; });
     } catch (error) {
+      if (get().ui.checkpointDialog !== pending || get().sessionId !== sessionId) return;
       set((draft) => { draft.ui.checkpointDialog = null; });
       get().showNotice('读取检查点失败：' + errorInfo(error).message);
     }
