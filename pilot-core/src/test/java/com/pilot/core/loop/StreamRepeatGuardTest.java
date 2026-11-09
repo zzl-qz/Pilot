@@ -61,7 +61,8 @@ class StreamRepeatGuardTest {
     @Test
     void flagsScreenshotLikeRepeatedNumberedItemsAtLineBoundaries() {
         String prefix = "3. 按产品方向建立 PO 真实任务评测。这比继续堆局部功能更能决定后续该优化什么：覆盖调研、Excel";
-        String[] lines = {prefix.substring(0, 30), prefix.substring(0, 35), prefix.substring(0, 40), prefix.substring(0, 45), prefix};
+        String[] lines = {prefix.substring(0, 30), prefix.substring(0, 35), prefix.substring(0, 40),
+            prefix.substring(0, 45), prefix};
         StreamRepeatGuard guard = new StreamRepeatGuard();
         int hits = 0;
         for (String line : lines) {

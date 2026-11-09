@@ -27,6 +27,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.core.approval.ApprovalBroker;
+import com.pilot.core.event.AssistantDelta;
+import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunStarted;
@@ -315,10 +317,16 @@ class AgentRunServiceTest {
 
             RunMetrics.Snapshot metrics = fixture.metrics.snapshot();
             assertEquals(1L, metrics.runs());
-            for (String event : List.of("event.tool.started", "event.tool.completed", "event.run.completed")) {
+            for (String event : List.of("event.tool.started", "event.tool.completed", "event.assistant.delta",
+                "event.run.completed")) {
                 assertEquals(1L, metrics.counters().getOrDefault(event, 0L).longValue(), event);
             }
-            assertEquals(2L, metrics.counters().getOrDefault("event.assistant.delta", 0L).longValue());
+            List<EventEnvelope> history = fixture.sessions.events(fixture.sessionId);
+            assertFalse(history.stream().anyMatch(event -> event.payload() instanceof AssistantPreview));
+            assertEquals(List.of("完成"),
+                history.stream().map(EventEnvelope::payload).filter(AssistantDelta.class::isInstance)
+                    .map(AssistantDelta.class::cast).map(AssistantDelta::text).toList(),
+                "工具调用前的临时预览不应作为正文落库");
         }
     }
 

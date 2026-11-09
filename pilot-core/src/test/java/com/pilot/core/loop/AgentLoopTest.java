@@ -89,9 +89,10 @@ class AgentLoopTest {
         AgentLoop.Result result = loop.run("列出目录", List.of(), events::add);
 
         assertEquals("最终答复", result.finalText());
-        assertEquals(List.of("tool.started", "tool.completed", "assistant.delta", "run.completed"), eventTypesWithoutUsage());
-        assertEquals("最终答复", events.stream().filter(AssistantDelta.class::isInstance)
-            .map(AssistantDelta.class::cast).map(AssistantDelta::text).findFirst().orElseThrow());
+        assertEquals(List.of("tool.started", "tool.completed", "assistant.delta", "run.completed"),
+            eventTypesWithoutUsage());
+        assertEquals("最终答复", events.stream().filter(AssistantDelta.class::isInstance).map(AssistantDelta.class::cast)
+            .map(AssistantDelta::text).findFirst().orElseThrow());
     }
 
     @Test
@@ -727,20 +728,23 @@ class AgentLoopTest {
             public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
                 Consumer<String> reasoningDelta) {
                 if (calls.getAndIncrement() == 0) {
-                    for (String line : repeated.split("\\n")) reasoningDelta.accept(line + "\n");
+                    for (String line : repeated.split("\\n")) {
+                        reasoningDelta.accept(line + "\n");
+                    }
                 }
                 return new ModelResponse(calls.get() == 1 ? "" : "已重新检查并给出结论。", List.of());
             }
         };
         AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(),
-            new AgentLoop.Config(8, 0, 3, "你是测试代理", List::of, 0, 120_000, false))
-                .withLiveReasoning(ignored -> { });
+            new AgentLoop.Config(8, 0, 3, "你是测试代理", List::of, 0, 120_000, false)).withLiveReasoning(ignored -> {
+            });
 
         AgentLoop.Result result = loop.run("检查方案", List.of(), events::add);
 
         assertNull(result.failureCode());
         assertEquals("已重新检查并给出结论。", result.finalText());
-        assertTrue(events.stream().anyMatch(event -> event instanceof AssistantReasoning reasoning && reasoning.reset()),
+        assertTrue(
+            events.stream().anyMatch(event -> event instanceof AssistantReasoning reasoning && reasoning.reset()),
             "推理复读中止后必须清空已经显示的旧思考");
     }
 
@@ -753,8 +757,9 @@ class AgentLoopTest {
             new ModelResponse("我会按产品方向评估当前工作。", List.of()));
         StringBuilder preview = new StringBuilder();
         AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(),
-            new AgentLoop.Config(8, 0, 3, "你是测试代理", List::of, 0, 120_000, false), Cancellation.none(),
-            () -> null, (call, result, latencyMs) -> { }, preview::append);
+            new AgentLoop.Config(8, 0, 3, "你是测试代理", List::of, 0, 120_000, false), Cancellation.none(), () -> null,
+            (call, result, latencyMs) -> {
+            }, preview::append);
 
         AgentLoop.Result result = loop.run("你看一下接下来要怎么优化", List.of(), events::add);
 
