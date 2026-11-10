@@ -1,6 +1,6 @@
 import type * as S from '../types/server.js';
 import { errorInfo } from '../lib/errors.js';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
 import './results.css';

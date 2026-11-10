@@ -87,3 +87,83 @@ test('同名命令在离开会话后返回旧日志时不会覆盖当前内容',
     await operation; assert.equal(useStore.getState().commandLog.text, '新日志');
   } finally { fetchHandler = saved; }
 });
+
+
+test('任务契约保存的迟到响应不会覆盖新会话，也不会解除新会话的保存状态', async () => {
+  for (const fail of [false, true]) {
+    reset();
+    const pending = deferred(); const saved = fetchHandler;
+    fetchHandler = () => pending.promise;
+    try {
+      useStore.setState({ task: { goal: '原任务' }, taskDirty: true });
+      const operation = useStore.getState().saveTask(['原约束'], []);
+      useStore.getState().startNewSession();
+      assert.equal(useStore.getState().taskBusy, false);
+      useStore.setState({ sessionId: 'new', task: { goal: '新任务' }, taskDirty: true, taskBusy: true });
+      pending.resolve(fail ? Promise.reject(new Error('旧请求失败')) : new Response(JSON.stringify({ goal: '原任务已保存' })));
+      await operation;
+      assert.equal(useStore.getState().task.goal, '新任务');
+      assert.equal(useStore.getState().taskDirty, true);
+      assert.equal(useStore.getState().taskBusy, true);
+    } finally { fetchHandler = saved; }
+  }
+});
+
+test('任务保存期间继续编辑会保留新草稿，重复保存不会并发发送', async () => {
+  reset(); const pending = deferred(); const saved = fetchHandler; let calls = 0;
+  fetchHandler = () => { calls++; return pending.promise; };
+  try {
+    useStore.setState({ task: { goal: '草稿' }, taskDirty: true });
+    const operation = useStore.getState().saveTask(['提交内容'], []);
+    await useStore.getState().saveTask(['重复提交'], []);
+    assert.equal(calls, 1);
+    useStore.setState(draft => { draft.taskDraftRevision++; });
+    pending.resolve(new Response(JSON.stringify({ goal: '服务端旧内容' })));
+    await operation;
+    assert.equal(useStore.getState().task.goal, '草稿');
+    assert.equal(useStore.getState().taskDirty, true);
+    assert.equal(useStore.getState().taskBusy, false);
+  } finally { fetchHandler = saved; }
+});
+
+test('同一会话保存成功会更新契约并清除未保存标记', async () => {
+  reset(); const saved = fetchHandler;
+  fetchHandler = async () => new Response(JSON.stringify({ goal: '已保存' }));
+  try {
+    useStore.setState({ taskDirty: true });
+    await useStore.getState().saveTask([], []);
+    assert.equal(useStore.getState().task.goal, '已保存');
+    assert.equal(useStore.getState().taskDirty, false);
+    assert.equal(useStore.getState().taskBusy, false);
+  } finally { fetchHandler = saved; }
+});
+
+test('浏览器状态流识别服务端 state 事件，切换会话后忽略迟到帧和关闭事件', () => {
+  const saved = globalThis.EventSource;
+  const streams = [];
+  globalThis.EventSource = class {
+    readyState = 1;
+    listeners = new Map();
+    constructor(url) { this.url = url; streams.push(this); }
+    addEventListener(kind, callback) { this.listeners.set(kind, callback); }
+    emit(kind, payload) { this.listeners.get(kind)?.({ data: JSON.stringify(payload) }); }
+    close() { this.readyState = 2; }
+  };
+  try {
+    reset(); useStore.getState().ensureMirror();
+    const first = streams[0];
+    first.emit('state', { headless: false });
+    first.emit('nav', { url: 'https://first.test' });
+    assert.deepEqual(useStore.getState().ui.mirror, { mode: 'live', url: 'https://first.test', headless: false });
+    first.listeners.get('state')({ data: '{invalid' });
+    assert.equal(useStore.getState().ui.mirror.headless, false);
+    useStore.getState().startNewSession();
+    useStore.setState({ sessionId: 'new' }); useStore.getState().ensureMirror();
+    const second = streams[1];
+    second.emit('state', { headless: false });
+    second.emit('frame', { url: 'https://second.test', frame: 'not retained' });
+    first.emit('frame', { url: 'https://stale.test' }); first.emit('closed'); first.emit('state', { headless: true });
+    assert.deepEqual(useStore.getState().ui.mirror, { mode: 'live', url: 'https://second.test', headless: false });
+    second.emit('closed'); assert.equal(useStore.getState().ui.mirror.mode, 'closed');
+  } finally { closeStreams(); globalThis.EventSource = saved; }
+});

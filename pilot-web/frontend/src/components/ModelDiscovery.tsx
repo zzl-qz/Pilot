@@ -1,5 +1,5 @@
 import { errorInfo } from '../lib/errors.js';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { TextInput } from '@astryxdesign/core/TextInput';
 import { useStore } from '../store.js';
 import { buildModelProbe, describeModelsFetched, normalizeModelNames } from '../lib/model-settings.js';

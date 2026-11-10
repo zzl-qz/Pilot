@@ -173,12 +173,36 @@ class SandboxToolsTest {
     }
 
     @Test
-    void windowsSeparatorAndCaseDoNotCreateDuplicates() {
+    void windowsSeparatorsDoNotCreateDuplicates() {
         DiffSandbox sandbox = new DiffSandbox("sbx", "agent", "task", "");
         sandbox.add("src/A.java", "class A {}\n", "class A { int x; }\n", true, RiskLevel.LOW);
-        sandbox.add("src\\a.java", "class A { int x; }\n", "class A { int y; }\n", true, RiskLevel.LOW);
+        sandbox.add("src\\A.java", "class A { int x; }\n", "class A { int y; }\n", true, RiskLevel.LOW);
 
-        assertEquals(1, sandbox.fileCount(), "大小写与分隔符差异必须落到同一条改动上");
+        assertEquals(1, sandbox.fileCount(), "路径分隔符差异必须落到同一条改动上");
+    }
+
+    @Test
+    void caseIdentityFollowsTheActualFilesystem(@TempDir Path dir) throws IOException {
+        Path root = workspace(dir);
+        Path upper = root.resolve("src/A.java");
+        Path lower = root.resolve("src/a.java");
+        boolean sameFile = Files.exists(lower) && Files.isSameFile(upper, lower);
+        if (!sameFile) {
+            Files.writeString(lower, "class Lower { int x = 4; }\n");
+        }
+        DiffSandbox sandbox = new DiffSandbox("sbx", "agent", "task", "");
+        ReadTracker reads = new ReadTracker();
+        observe(root, reads, "src/A.java");
+        observe(root, reads, "src/a.java");
+        SandboxEditFileTool tool = new SandboxEditFileTool(new PathValidator(root), sandboxSink(sandbox), reads);
+        String first =
+            tool.execute(Map.of("path", "src/A.java", "old_string", "int x = 1;", "new_string", "int x = 2;"));
+        String second = tool.execute(Map.of("path", "src/a.java", "old_string", sameFile ? "int x = 2;" : "int x = 4;",
+            "new_string", "int x = 3;"));
+        assertFalse(first.startsWith("ERROR"), first);
+        assertFalse(second.startsWith("ERROR"), second);
+        assertEquals(sameFile ? 1 : 2, sandbox.fileCount());
+        assertEquals(DiffSandbox.fingerprint(Files.readString(upper)), sandbox.changes().get(0).baseHash());
     }
 
     /** 走真正的读取工具观察文件，路径形态与编辑工具保持一致，避免绕开「先读后改」。 */

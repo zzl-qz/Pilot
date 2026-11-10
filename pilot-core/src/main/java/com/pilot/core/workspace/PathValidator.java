@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Objects;
 
@@ -83,13 +84,11 @@ public final class PathValidator {
         } catch (InvalidPathException e) {
             throw new WorkspaceViolationException("非法路径: " + value);
         }
-        if (!candidate.startsWith(root)) {
-            throw new WorkspaceViolationException("路径超出工作区: " + value);
-        }
+        // 先解析真实祖先，再比较边界：绝对路径可能经过工作区别名（如 macOS 的 /var）。
         // 校验从候选路径向上最近的现存祖先的真实路径，避免通过“工作区内符号链接/新建子路径”越界。
         // 例如 workspace/link 指向外部目录时，workspace/link/new.txt 本身尚不存在，仍须拒绝。
         Path existing = candidate;
-        while (existing != null && !Files.exists(existing)) {
+        while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
             existing = existing.getParent();
         }
         if (existing == null) {
@@ -112,7 +111,8 @@ public final class PathValidator {
             }
             return resolved;
         } catch (IOException e) {
-            throw new UncheckedIOException("cannot resolve path: " + value, e);
+            // 悬空链接也属于现存节点；无法解析时必须拒绝，不能退回父目录后继续写入。
+            throw new WorkspaceViolationException("无法验证工作区路径: " + value + "（" + e.getMessage() + "）");
         }
     }
 

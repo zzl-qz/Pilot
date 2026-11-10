@@ -3,7 +3,7 @@ import type * as S from './types/server.js';
 import { errorInfo } from './lib/errors.js';
 import { voiceFilename } from './lib/voice-input.js';
 /**
- * 统一请求入口：带超时与取消（与旧版 apiFetch 行为一致）。
+ * 非流式请求入口：超时与取消覆盖响应头和完整正文（包括下载）。
  * 后端卡住或网络断开时抛可读错误，界面据此提示。
  */
 const NATIVE_FETCH = window.fetch.bind(window);
@@ -16,7 +16,18 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {},
   init.signal?.addEventListener('abort', abort, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await NATIVE_FETCH(input, { ...init, signal: controller.signal });
+    controller.signal.throwIfAborted();
+    const response = await NATIVE_FETCH(input, { ...init, signal: controller.signal });
+    if (!response.body) return response;
+    // fetch 收到响应头就会返回；在清理信号前读取正文，避免慢正文永久挂起。
+    // Blob 可供后续 json/text/blob 调用读取；SSE 使用独立的流式连接。
+    const body = await response.blob();
+    controller.signal.throwIfAborted();
+    const buffered = new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+    Object.defineProperties(buffered, {
+      url: { value: response.url }, redirected: { value: response.redirected }, type: { value: response.type }
+    });
+    return buffered;
   } catch (error) {
     if (init.signal?.aborted) throw new DOMException('请求已取消', 'AbortError');
     if (errorInfo(error).name === 'AbortError') {
@@ -63,21 +74,6 @@ const jsonBody = (method: string, body: unknown) => ({ method, headers: { 'Conte
 const workbenchBase = (session: string) => `/api/sessions/${encodeURIComponent(session)}/workbench/files`;
 
 export const api = {
-  /* 旧版产物工作台保留为只读兼容，新的文件工作台不再产生这类数据。 */
-  studioDocuments: (session: string, signal?: AbortSignal) => apiJson<ApiResults['studioDocuments']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents`, { signal }),
-  studioDocument: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['studioDocument']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}`, { signal }),
-  studioCreate: (session: string, body: Record<string, unknown>) => apiJson<ApiResults['studioCreate']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents`, jsonBody('POST', body)),
-  studioImport: (session: string, body: Record<string, unknown>) => apiJson<ApiResults['studioImport']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/import`, jsonBody('POST', body)),
-  studioSave: (session: string, id: string, body: Record<string, unknown>) => apiJson<ApiResults['studioSave']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}`, jsonBody('PUT', body)),
-  studioVersions: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['studioVersions']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}/versions`, { signal }),
-  studioRollback: (session: string, id: string, body: Record<string, unknown>) => apiJson<ApiResults['studioRollback']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}/rollback`, jsonBody('POST', body)),
-  studioRender: (session: string, id: string, body: Record<string, unknown>) => apiJson<ApiResults['studioRender']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}/render`, jsonBody('POST', body)),
-  studioArtifacts: (session: string, id: string, signal?: AbortSignal) => apiJson<ApiResults['studioArtifacts']>(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}/artifacts`, { signal }),
-  studioDownload: async (session: string, id: string, artifactId: string, signal?: AbortSignal) => {
-    const response = await apiFetch(`/api/sessions/${encodeURIComponent(session)}/studio/documents/${encodeURIComponent(id)}/artifacts/${encodeURIComponent(artifactId)}/download`, { signal });
-    if (!response.ok) throw new ApiError(`下载失败（HTTP ${response.status}）`, response.status);
-    return response.blob();
-  },
   /* 文件工作台：所有端点都指向会话工作区里的真实文件，没有第二套可编辑源。 */
   workbenchFiles: (session: string, signal?: AbortSignal) => apiJson<ApiResults['workbenchFiles']>(`${workbenchBase(session)}`, { signal }),
   attachmentPreviewText: (session: string, file: string, signal?: AbortSignal) =>

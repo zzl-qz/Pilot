@@ -1,10 +1,9 @@
 import type { TimelineItem } from '../types/thread.js';
 import type { ChangeFile, ChangeReport, DiffFile } from '../types/core.js';
 import type { CommandTask } from '../types/store.js';
-import type { DesktopBrowserState, BrowserRecent } from '../types/desktop.js';
+import type { DesktopBridge, DesktopBrowserState, BrowserRecent } from '../types/desktop.js';
 import { errorInfo } from '../lib/errors.js';
 interface ReviewReport extends ChangeReport { diff?: string }
-interface BrowserReply { ok?: boolean; error?: string; message?: string; text?: string; url?: string }
 import { reviewQuote } from '../lib/interaction.js';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu';
@@ -17,8 +16,7 @@ import { normalizePath, parseDiff } from '../lib/diff.js';
 import { sortChangeFiles, splitPath, statusKind } from '../lib/changes.js';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { isCommandActive, commandStatusLabel, stripAnsi } from '../lib/command-tasks.js';
-import { embeddablePageUrl, frameSrc, keyCommand, pauseToggleLabel, pointFromEvent, shouldEmbedPage, userPageUrl } from '../lib/browser-mirror.js';
-import { setMirrorPainter } from '../store.js';
+import { userPageUrl } from '../lib/browser-mirror.js';
 import { formatTime } from '../thread-utils.js';
 import { supportsAnchoredLayers } from '../lib/theme.js';
 import { SideChatPanel } from './SideChat.jsx';
@@ -1354,110 +1352,115 @@ function cleanLaunchNote(text?: string) {
 }
 
 function BrowserPanel({ toolsMenuOpen }: { toolsMenuOpen: boolean }) {
-  const sessionId = useStore((state) => state.sessionId);
-  const mirror = useStore((state) => state.ui.mirror);
-  const status = useStore((state) => state.ui.browserStatus);
+  const bridge = window.pilotDesktop;
+  return bridge ? <DesktopBrowserPanel desktopBridge={bridge} toolsMenuOpen={toolsMenuOpen} /> : <WebBrowserLauncher />;
+}
+
+function WebBrowserLauncher() {
+  const sessionId = useStore(state => state.sessionId);
+  const mirror = useStore(state => state.ui.mirror);
+  const [launching, setLaunching] = useState(false);
+  const [launchNote, setLaunchNote] = useState('');
+  const [launchFailed, setLaunchFailed] = useState(false);
+  useEffect(() => {
+    if (sessionId) useStore.getState().ensureMirror();
+  }, [sessionId]);
+  async function openDesktopWindow() {
+    setLaunching(true);
+    setLaunchNote('');
+    setLaunchFailed(false);
+    try {
+      const data = await api.openBrowserWindow();
+      const message = cleanLaunchNote(data?.message);
+      if (data?.ok === false) {
+        setLaunchFailed(true);
+        setLaunchNote(message || '没能打开浏览器窗口');
+      } else {
+        setLaunchNote(message || '窗口已打开。');
+      }
+    } catch (failure) {
+      setLaunchFailed(true);
+      const message = errorInfo(failure).message || '';
+      setLaunchNote(/404|Not Found/.test(message)
+        ? '服务还是刚才那一版。重新从 IDEA 启动一次后再点。'
+        : (message || '没能打开浏览器窗口'));
+    } finally {
+      setLaunching(false);
+    }
+  }
+  const externalUrl = /^https?:\/\//i.test(mirror.url || '') ? mirror.url : null;
+  return (
+    <div id="panel-browser" className="panel browser-panel">
+      <div className="mirror-stage">
+        <div className="browser-web-launch">
+          <p>画面在单独的窗口里，点一下才打开。</p>
+          <button type="button" className="btn btn-primary" disabled={launching} onClick={openDesktopWindow}>
+            {launching ? '正在打开…' : (/已打开|窗口已/.test(launchNote) ? '显示窗口' : '打开内置浏览器')}
+          </button>
+          {launchNote && <p className="browser-web-note" role={launchFailed ? 'alert' : 'status'}>{launchNote}</p>}
+          {externalUrl && <a className="btn" href={externalUrl} target="_blank" rel="noreferrer">在新标签页打开当前网址</a>}
+          {!launchNote && mirror.headless && (
+            <p className="browser-web-note">
+              智能体的浏览器在后台无窗口运行；需要真实窗口共看时把 pilot.browser.headless 设为 false 重启。
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DesktopBrowserPanel({ desktopBridge, toolsMenuOpen }: { desktopBridge: DesktopBridge; toolsMenuOpen: boolean }) {
+  const sessionId = useStore(state => state.sessionId);
+  const workspace = useStore(state => state.workspace);
   const stageRef = useRef<HTMLDivElement>(null);
-  const imageRef = useRef<HTMLImageElement | null>(null);
-  const pendingSrc = useRef('');
-  const sawFrame = useRef(false);
-  const [sawFrameTick, setSawFrameTick] = useState(false);
   const addressRef = useRef<HTMLInputElement>(null);
+  const freshTabRef = useRef(false);
   const [address, setAddress] = useState('');
   const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  /** 导航进行中：刷新按钮变成「停止」，地址栏下方走一条进度。 */
-  const [loading, setLoading] = useState(false);
-  /** 选择元素模式：下一次点击不转发，而是把元素描述成引用。 */
-  const [picking, setPicking] = useState(false);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleText, setConsoleText] = useState('');
   const [networkLog, setNetworkLog] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [findText, setFindText] = useState('');
-  const menuRef = useRef<HTMLDivElement>(null);
-  const freshTabRef = useRef(false);
-  const desktopBridge = typeof window !== 'undefined' ? window.pilotDesktop : undefined;
-  const desktopOn = !!desktopBridge;
   const [desktopState, setDesktopState] = useState<DesktopBrowserState | null>(null);
-  /** 已经同步给页面的视口尺寸：避免重复下发 setViewportSize。 */
-  const viewportSize = useRef({ width: 0, height: 0 });
-  // 连续敲字符合并成一次 insertText；回车/退格这类整键立刻发
-  const typing = useRef<{ tokens: string[]; timer: ReturnType<typeof setTimeout> | undefined }>({ tokens: [], timer: undefined });
-  const wheel = useRef<{ deltaY: number; x: number; y: number; timer: ReturnType<typeof setTimeout> | undefined }>({ deltaY: 0, x: 0, y: 0, timer: undefined });
+  const freshTab = !desktopState?.url || desktopState.url.includes('/marker/');
+  freshTabRef.current = freshTab;
+  const pageLoading = Boolean(desktopState?.loading);
 
   useEffect(() => {
-    if (desktopOn) {
-      desktopBridge.setWorkspace(useStore.getState().workspace || '');
-      if (sessionId) desktopBridge.ensureTab(sessionId);
-      const stopState = desktopBridge.onState(setDesktopState);
-      const stopFocus = desktopBridge.focusAddress(() => addressRef.current?.focus());
-      const stopDownload = desktopBridge.onDownload?.((info) => {
-        const done = info?.state === 'completed';
-        useStore.getState().showNotice(done ? `已下载 ${info.name}` : `下载没有完成：${info?.name || ''}`);
-      });
-      const stopQuote = desktopBridge.onQuote?.((text) => {
-        const api = useStore.getState().composerApi;
-        if (!text || !api) return;
-        const quoted = String(text).split('\n').map((line) => `> ${line}`).join('\n');
-        api.appendText(`\n> 页面摘录\n${quoted}\n\n`);
-        api.focus();
-      });
-      return () => {
-        stopState();
-        stopFocus();
-        stopDownload?.();
-        stopQuote?.();
-        desktopBridge.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
-      };
-    }
-    if (sessionId) {
-      useStore.getState().loadBrowserStatus();
-      // 打开页签就确保镜像流连着：运行时可能比页面晚就绪，第一次订阅会被回 204
-      useStore.getState().ensureMirror();
-    }
-    sawFrame.current = false;
-    pendingSrc.current = '';
-    setSawFrameTick(false);
-    return undefined;
-  }, [sessionId, desktopOn]);
-
-  // 截图不进 React 状态：直接写到 img 上，否则每帧一份 base64 会把整个界面拖卡
-  useEffect(() => {
-    setMirrorPainter((payload) => {
-      const src = frameSrc(payload);
-      if (!src) {
-        return;
-      }
-      pendingSrc.current = src;
-      if (imageRef.current) {
-        imageRef.current.src = src;
-      }
-      if (!sawFrame.current) {
-        sawFrame.current = true;
-        setSawFrameTick(true);
-      }
-      setLoading(false);
+    desktopBridge.setWorkspace(workspace || '');
+    if (sessionId) desktopBridge.ensureTab(sessionId);
+    const stopState = desktopBridge.onState(setDesktopState);
+    const stopFocus = desktopBridge.focusAddress(() => addressRef.current?.focus());
+    const stopDownload = desktopBridge.onDownload?.((info) => {
+      const done = info?.state === 'completed';
+      useStore.getState().showNotice(done ? `已下载 ${info.name}` : `下载没有完成：${info?.name || ''}`);
     });
-    return () => setMirrorPainter(null);
-  }, []);
+    const stopQuote = desktopBridge.onQuote?.((text) => {
+      const api = useStore.getState().composerApi;
+      if (!text || !api) return;
+      const quoted = String(text).split('\n').map((line) => `> ${line}`).join('\n');
+      api.appendText(`\n> 页面摘录\n${quoted}\n\n`);
+      api.focus();
+    });
+    return () => {
+      stopState();
+      stopFocus();
+      stopDownload?.();
+      stopQuote?.();
+      desktopBridge.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
+    };
+  }, [desktopBridge, sessionId, workspace]);
 
-  // 地址栏跟随真实页面，用户正在编辑时不要被推回覆盖
   useEffect(() => {
     if (editing) return;
-    if (desktopOn) {
-      const url = desktopState?.url || '';
-      if (!url || url.includes('/marker/')) setAddress('');
-      else setAddress(url);
-      return;
-    }
-    setAddress(mirror.url || '');
-  }, [mirror.url, editing, desktopOn, desktopState]);
+    const url = desktopState?.url || '';
+    setAddress(!url || url.includes('/marker/') ? '' : url);
+  }, [desktopState?.url, editing]);
 
   useEffect(() => {
-    if (!desktopOn) return undefined;
     const stage = stageRef.current;
     if (!stage) return undefined;
     const push = () => {
@@ -1485,221 +1488,36 @@ function BrowserPanel({ toolsMenuOpen }: { toolsMenuOpen: boolean }) {
       clearInterval(timer);
       desktopBridge.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
     };
-  }, [desktopOn, menuOpen, toolsMenuOpen, desktopState?.url]);
-
-  useEffect(() => {
-    if (!menuOpen) return undefined;
-    const close = (event: MouseEvent) => {
-      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) setMenuOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', close);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', close);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [menuOpen]);
-
-  useEffect(() => () => {
-    if (typing.current.timer) clearTimeout(typing.current.timer);
-    if (wheel.current.timer) clearTimeout(wheel.current.timer);
-  }, []);
-
-  // 来了新帧就说明页面确实在动，导航的等待可以收；再兜底 12 秒，别让「停止」一直挂着
-  useEffect(() => {
-    if (loading) {
-      setLoading(false);
-    }
-  }, [mirror.frame]);
-  useEffect(() => {
-    if (!loading) {
-      return undefined;
-    }
-    const timer = setTimeout(() => setLoading(false), 12000);
-    return () => clearTimeout(timer);
-  }, [loading]);
-
-  const blocked = Boolean(status && status.capable === false);
-  const reason = status?.reason || '';
-  const live = mirror.mode === 'live';
-  const pageUrl = shouldEmbedPage(mirror.url, mirror.embed, mirror.frameOptions)
-    ? embeddablePageUrl(mirror.url)
-    : null;
-
-  useEffect(() => {
-    if (!sessionId || desktopOn) {
-      return undefined;
-    }
-    fetch(`/api/sessions/${encodeURIComponent(sessionId)}/browser/capture`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ capture: !pageUrl })
-    }).catch(() => {});
-    return undefined;
-  }, [sessionId, pageUrl]);
-
-  /**
-   * 把动作转给服务端。
-   *
-   * @param quiet 点击/滚轮/键盘这类高频动作传 true：不显示地址栏的「执行中」，
-   *              否则每点一下画面地址栏就会闪一下省略号。
-   */
-  async function command(action: string, body?: Record<string, string | number | boolean | undefined>, quiet = false) {
-    if (!sessionId) {
-      return null;
-    }
-    if (!quiet) {
-      setBusy(true);
-    }
-    setError('');
-    try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/browser/${action}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body || {})
-      });
-      const data = await response.json().catch(() => ({})) as BrowserReply;
-      if (!response.ok) {
-        const detail = data.message || data.error;
-        setError(detail ? `${detail}（HTTP ${response.status}）` : `浏览器接口不可用（HTTP ${response.status}）`);
-        return null;
-      }
-      if (data.ok === false) {
-        setError(data.error || '浏览器操作失败');
-        return null;
-      }
-      return data;
-    } catch (failure) {
-      setError(errorInfo(failure).message || '无法连接浏览器运行时');
-      return null;
-    } finally {
-      if (!quiet) {
-        setBusy(false);
-      }
-    }
-  }
+  }, [desktopBridge, toolsMenuOpen, desktopState?.url]);
 
   function submitAddress(event: React.FormEvent) {
     event.preventDefault();
     const value = address.trim();
-    if (!value) {
-      addressRef.current?.focus();
-      return;
-    }
-    if (desktopOn) {
-      const page = userPageUrl(value);
-      setEditing(false);
-      if (!page) {
-        setError('地址无效');
-        return;
-      }
-      setError('');
-      desktopBridge.navigate(page);
-      return;
-    }
+    if (!value) { addressRef.current?.focus(); return; }
+    const page = userPageUrl(value);
     setEditing(false);
-    setLoading(true);
-    useStore.getState().ensureMirror();
-    const page = embeddablePageUrl(value);
-    if (page && mirror.embed !== false) {
-      // 先把真页面嵌出来，不等截图。智能体用的浏览器同时打开同一地址。
-      useStore.getState().setUi({ mirror: { ...useStore.getState().ui.mirror, url: page, mode: 'live' } });
-    } else {
-      syncViewport();
-    }
-    command('navigate', { url: value });
-  }
-
-  /** 导航类动作统一置一次 loading，收到新帧就复位。 */
-  function navigate(action: string) {
-    if (desktopOn) {
-      if (action === 'back') desktopBridge.back();
-      else if (action === 'forward') desktopBridge.forward();
-      else if (action === 'stop') desktopBridge.stop();
-      else desktopBridge.reload();
-      return;
-    }
-    setLoading(true);
-    useStore.getState().ensureMirror();
-    if (!pageUrl) {
-      syncViewport();
-    }
-    command(action);
-  }
-
-  /**
-   * 把面板尺寸发给页面视口，失败静默。
-   *
-   * <p>导航前先发一次：新页面直接按面板宽度加载，少一次「先按 1280 排版再重排」的闪动；
-   * 浏览器还没起来时这次会失败，忽略即可，等第一帧到达后 ResizeObserver 会补上。
-   */
-  function syncViewport(width?: number, height?: number) {
-    const rect = stageRef.current?.getBoundingClientRect();
-    const nextWidth = Math.round(Number(width) || rect?.width || 0);
-    const nextHeight = Math.round(Number(height) || rect?.height || 0);
-    if (!sessionId || nextWidth < 240 || nextHeight < 160) {
-      return;
-    }
-    fetch(`/api/sessions/${encodeURIComponent(sessionId)}/browser/resize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ width: nextWidth, height: nextHeight })
-    }).then(async (response) => {
-      const data = await response.json().catch(() => ({})) as BrowserReply;
-      // 只有真的生效才记住：浏览器还没起来时这次会失败，要留给后面的重试
-      if (response.ok && data?.ok) {
-        viewportSize.current = { width: nextWidth, height: nextHeight };
-      }
-    }).catch(() => { /* 浏览器没起来，等首帧后补 */ });
-  }
-
-  /** 选择元素：把点到的元素描述成引用，塞进主输入框待发送。 */
-  async function pickAt(point: { x: number; y: number }) {
-    setPicking(false);
-    const data = await command('pick', { x: point.x, y: point.y }, true);
-    if (!data?.text) {
-      return;
-    }
-    const api = useStore.getState().composerApi;
-    const quoted = data.text.split('\n').map((line) => `> ${line}`).join('\n');
-    if (api) {
-      api.appendText(`\n> 页面元素引用（${mirror.url || '当前页面'}）\n${quoted}\n\n`);
-      api.focus();
-      useStore.getState().showNotice('已把页面元素加入输入框');
-    }
+    if (!page) { setError('地址无效'); return; }
+    setError('');
+    desktopBridge.navigate(page);
   }
 
   async function toggleConsole(network = false) {
-    if (consoleOpen && networkLog === network) {
-      setConsoleOpen(false);
-      return;
-    }
-    if (desktopOn) {
-      const data = await desktopBridge.logs(network);
-      setNetworkLog(network);
-      setConsoleText(data?.text || (network ? '没有网络记录' : '没有控制台记录'));
-      setConsoleOpen(true);
-      return;
-    }
-    const data = await command('logs', network ? { network: true } : {}, true);
+    if (consoleOpen && networkLog === network) { setConsoleOpen(false); return; }
+    const data = await desktopBridge.logs(network);
     setNetworkLog(network);
     setConsoleText(data?.text || (network ? '没有网络记录' : '没有控制台记录'));
     setConsoleOpen(true);
   }
 
   useEffect(() => {
-    if (!desktopOn || !consoleOpen || !desktopBridge.onLog) return undefined;
+    if (!consoleOpen || !desktopBridge.onLog) return undefined;
     return desktopBridge.onLog((entry) => {
       if (Boolean(entry?.network) !== networkLog || !entry?.line) return;
       setConsoleText((text) => (text && !text.startsWith('没有') ? `${text}\n${entry.line}` : entry.line));
     });
-  }, [desktopOn, consoleOpen, networkLog]);
+  }, [desktopBridge, consoleOpen, networkLog]);
 
   useEffect(() => {
-    if (!desktopOn) return undefined;
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'l') return;
       event.preventDefault();
@@ -1708,10 +1526,9 @@ function BrowserPanel({ toolsMenuOpen }: { toolsMenuOpen: boolean }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [desktopOn]);
+  }, [desktopBridge]);
 
   async function openDesktopMenu() {
-    if (!desktopBridge) return;
     const action = await desktopBridge.openMenu();
     if (action === 'find') setFindOpen(true);
     if (action === 'console') toggleConsole(false);
@@ -1728,253 +1545,51 @@ function BrowserPanel({ toolsMenuOpen }: { toolsMenuOpen: boolean }) {
     }
   }
 
-  /**
-   * 面板里的指针坐标 → 页面坐标。
-   *
-   * <p>视口跟着面板走（见下面的 ResizeObserver），所以用帧自带的 w/h 换算就与页面 1:1；
-   * 还没收到帧时回退到 sidecar 的默认视口。
-   */
-  function bindMirrorImage(node: HTMLImageElement | null) {
-    imageRef.current = node;
-    if (node && pendingSrc.current) {
-      node.src = pendingSrc.current;
-    }
-  }
-
-  function pointOf(event: { clientX: number; clientY: number }) {
-    const rect = imageRef.current?.getBoundingClientRect();
-    return pointFromEvent(event.clientX, event.clientY, rect, mirror.frameW, mirror.frameH);
-  }
-
-  function flushTyping() {
-    const buffer = typing.current;
-    if (buffer.timer) {
-      clearTimeout(buffer.timer);
-      buffer.timer = undefined;
-    }
-    const text = buffer.tokens.join('');
-    buffer.tokens = [];
-    if (text) {
-      command('keys', { text }, true);
-    }
-  }
-
-  function onStageKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    // 新标签地址框属于本地表单，输入按键不能被画布转发逻辑截走。
-    if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]')) return;
-    const cmd = keyCommand(event.nativeEvent);
-    if (!cmd) {
-      return;
-    }
-    event.preventDefault();
-    if (cmd.text) {
-      typing.current.tokens.push(cmd.text);
-      if (!typing.current.timer) {
-        typing.current.timer = setTimeout(() => {
-          typing.current.timer = undefined;
-          flushTyping();
-        }, 60);
-      }
-      return;
-    }
-    flushTyping();
-    command('keys', { key: cmd.key }, true);
-  }
-
-  function onClick(event: React.MouseEvent<HTMLDivElement>) {
-    if (!live) {
-      return;
-    }
-    stageRef.current?.focus();
-    const point = pointOf(event);
-    if (!point) {
-      return;
-    }
-    // 选择元素模式下这一击只用来取样，不真的点到页面上
-    if (picking) {
-      pickAt(point);
-      return;
-    }
-    command('pointer', { action: 'click', x: point.x, y: point.y }, true);
-  }
-
-  /*
-   * 面板尺寸 → 页面视口。
-   *
-   * 内嵌浏览器必须这么做：视口跟着面板走，页面按真实宽度做响应式排版，镜像帧的比例
-   * 就等于面板比例，画面铺满而不留大片空白，点击坐标也能 1:1 对上。
-   * 拖拽分栏时尺寸会连续变化，这里防抖 260ms 再下发，避免每帧一次 setViewportSize。
-   */
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage || !live || pageUrl) {
-      return undefined;
-    }
-    // 新画面/新会话：之前记下的尺寸可能属于已经失效的页面，先作废再对齐
-    viewportSize.current = { width: 0, height: 0 };
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const push = () => {
-      const rect = stage.getBoundingClientRect();
-      const width = Math.round(rect.width);
-      const height = Math.round(rect.height);
-      if (width < 240 || height < 160) {
-        return;
-      }
-      const last = viewportSize.current;
-      if (last.width === width && last.height === height) {
-        return;
-      }
-      syncViewport(width, height);
-    };
-    const schedule = () => {
-      clearTimeout(timer);
-      timer = setTimeout(push, 260);
-    };
-    const observer = new ResizeObserver(schedule);
-    observer.observe(stage);
-    schedule();
-    return () => {
-      observer.disconnect();
-      clearTimeout(timer);
-    };
-  }, [live, sessionId, pageUrl]);
-
-  /*
-   * 滚轮要能 preventDefault 才不会把面板自己滚走，而 React 的 onWheel 是 passive 的，
-   * 只能在原生监听里挂 non-passive；deltaY 攒 80ms 再发一次，避免一帧一个请求。
-   */
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage || !live || pageUrl) {
-      return undefined;
-    }
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      const point = pointOf(event);
-      if (!point) {
-        return;
-      }
-      const acc = wheel.current;
-      acc.deltaY += event.deltaY;
-      acc.x = point.x;
-      acc.y = point.y;
-      if (acc.timer) {
-        return;
-      }
-      acc.timer = setTimeout(() => {
-        const deltaY = Math.round(acc.deltaY);
-        acc.deltaY = 0;
-        acc.timer = undefined;
-        if (deltaY) {
-          command('pointer', { action: 'wheel', x: acc.x, y: acc.y, deltaY }, true);
-        }
-      }, 80);
-    };
-    stage.addEventListener('wheel', onWheel, { passive: false });
-    return () => stage.removeEventListener('wheel', onWheel);
-    // 会话切换后命令要发给新会话，所以 sessionId 参与依赖
-  }, [live, sessionId, pageUrl]);
-
-  const [launching, setLaunching] = useState(false);
-  const [launchNote, setLaunchNote] = useState('');
-  const [launchFailed, setLaunchFailed] = useState(false);
-  const freshTab = desktopOn && (!desktopState?.url || desktopState.url.includes('/marker/'));
-  freshTabRef.current = freshTab;
-  const pageLoading = desktopOn ? Boolean(desktopState?.loading) : loading;
-
-  async function openDesktopWindow() {
-    setLaunching(true);
-    setLaunchNote('');
-    setLaunchFailed(false);
-    try {
-      const data = await api.openBrowserWindow();
-      const message = cleanLaunchNote(data?.message);
-      if (data?.ok === false) {
-        setLaunchFailed(true);
-        setLaunchNote(message || '没能打开浏览器窗口');
-      } else {
-        setLaunchNote(message || '窗口已打开。');
-      }
-    } catch (failure) {
-      setLaunchFailed(true);
-      const message = errorInfo(failure).message || '';
-      setLaunchNote(/404|Not Found/.test(message)
-        ? '服务还是刚才那一版。重新从 IDEA 启动一次后再点。'
-        : (message || '没能打开浏览器窗口'));
-    } finally {
-      setLaunching(false);
-    }
-  }
-  const shownUrl = desktopOn && !editing ? (desktopState?.url || '') : address;
+  const shownUrl = !editing ? (desktopState?.url || '') : address;
   let localPage = false;
   try {
     const host = new URL(shownUrl).hostname.replace(/^\[|\]$/g, '');
     localPage = host === 'localhost' || host === '127.0.0.1' || host === '::1';
   } catch { /* 还不是完整地址 */ }
 
-  if (!desktopOn) {
-    const externalUrl = /^https?:\/\//i.test(mirror.url || '') ? mirror.url : null;
-    return (
-      <div id="panel-browser" className="panel browser-panel">
-        <div className="mirror-stage">
-          <div className="browser-web-launch">
-            <p>画面在单独的窗口里，点一下才打开。</p>
-            <button type="button" className="btn btn-primary" disabled={launching} onClick={openDesktopWindow}>
-              {launching ? '正在打开…' : (/已打开|窗口已/.test(launchNote) ? '显示窗口' : '打开内置浏览器')}
-            </button>
-            {launchNote && <p className="browser-web-note" role={launchFailed ? 'alert' : 'status'}>{launchNote}</p>}
-            {externalUrl && <a className="btn" href={externalUrl} target="_blank" rel="noreferrer">在新标签页打开当前网址</a>}
-            {!launchNote && mirror.headless && (
-              <p className="browser-web-note">
-                智能体的浏览器在后台无窗口运行；需要真实窗口共看时把 pilot.browser.headless 设为 false 重启。
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div id="panel-browser" className={`panel browser-panel${desktopOn ? ' is-desktop' : ''}`}>
-      {desktopOn && (
-        <div className="browser-tabs" role="tablist" aria-label="浏览器标签">
-          {(desktopState?.tabs || []).map((tab) => (
-            <div key={tab.id} className={`browser-tab${tab.id === desktopState?.activeId ? ' is-on' : ''}`}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab.id === desktopState?.activeId}
-                className="browser-tab-label"
-                title={!tab.url || tab.url.includes('/marker/') ? (tab.title || '新标签') : tab.url}
-                onClick={() => desktopBridge.selectTab(tab.id)}
-              >
-                {tab.loading
-                  ? <span className="browser-tab-spin" aria-hidden="true" />
-                  : (tab.favicon ? <img className="browser-tab-icon" src={tab.favicon} alt="" /> : null)}
-                <span className="browser-tab-label-text">{tab.title || '新标签'}</span>
-              </button>
-              <button
-                type="button"
-                className="browser-tab-close"
-                aria-label={`关闭 ${tab.title || '标签'}`}
-                title="关闭标签"
-                onClick={() => desktopBridge.closeTab(tab.id)}
-              >×</button>
-            </div>
-          ))}
-          <button type="button" className="browser-tab-add" title="新标签" aria-label="新标签" onClick={() => desktopBridge.newTab()}>+</button>
-        </div>
-      )}
-      <div className="browser-chrome" ref={menuRef}>
+    <div id="panel-browser" className="panel browser-panel is-desktop">
+      <div className="browser-tabs" role="tablist" aria-label="浏览器标签">
+        {(desktopState?.tabs || []).map((tab) => (
+          <div key={tab.id} className={`browser-tab${tab.id === desktopState?.activeId ? ' is-on' : ''}`}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab.id === desktopState?.activeId}
+              className="browser-tab-label"
+              title={!tab.url || tab.url.includes('/marker/') ? (tab.title || '新标签') : tab.url}
+              onClick={() => desktopBridge.selectTab(tab.id)}
+            >
+              {tab.loading
+                ? <span className="browser-tab-spin" aria-hidden="true" />
+                : (tab.favicon ? <img className="browser-tab-icon" src={tab.favicon} alt="" /> : null)}
+              <span className="browser-tab-label-text">{tab.title || '新标签'}</span>
+            </button>
+            <button
+              type="button"
+              className="browser-tab-close"
+              aria-label={`关闭 ${tab.title || '标签'}`}
+              title="关闭标签"
+              onClick={() => desktopBridge.closeTab(tab.id)}
+            >×</button>
+          </div>
+        ))}
+        <button type="button" className="browser-tab-add" title="新标签" aria-label="新标签" onClick={() => desktopBridge.newTab()}>+</button>
+      </div>
+      <div className="browser-chrome">
       <div className="browser-bar">
         <button
           type="button"
           className="icon-btn"
           aria-label="后退"
-          title={mirror.canGoBack ? '后退' : '没有可后退的页面'}
-          disabled={desktopOn ? !desktopState?.canGoBack : (blocked || busy || !mirror.canGoBack)}
-          onClick={() => navigate('back')}
+          title={desktopState?.canGoBack ? '后退' : '没有可后退的页面'}
+          disabled={!desktopState?.canGoBack}
+          onClick={() => desktopBridge.back()}
         >
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
@@ -1982,9 +1597,9 @@ function BrowserPanel({ toolsMenuOpen }: { toolsMenuOpen: boolean }) {
           type="button"
           className="icon-btn"
           aria-label="前进"
-          title={mirror.canGoForward ? '前进' : '没有可前进的页面'}
-          disabled={desktopOn ? !desktopState?.canGoForward : (blocked || busy || !mirror.canGoForward)}
-          onClick={() => navigate('forward')}
+          title={desktopState?.canGoForward ? '前进' : '没有可前进的页面'}
+          disabled={!desktopState?.canGoForward}
+          onClick={() => desktopBridge.forward()}
         >
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
@@ -1993,8 +1608,8 @@ function BrowserPanel({ toolsMenuOpen }: { toolsMenuOpen: boolean }) {
           className="icon-btn"
           aria-label={pageLoading ? '停止加载' : '刷新页面'}
           title={pageLoading ? '停止加载' : '刷新当前页面'}
-          disabled={desktopOn ? !desktopState?.activeId : (blocked || busy || (!loading && !mirror.url))}
-          onClick={() => (pageLoading ? navigate('stop') : navigate('reload'))}
+          disabled={!desktopState?.activeId}
+          onClick={() => (pageLoading ? desktopBridge.stop() : desktopBridge.reload())}
         >
           {pageLoading
             ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.4 4.4l7.2 7.2M11.6 4.4l-7.2 7.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
@@ -2014,22 +1629,20 @@ function BrowserPanel({ toolsMenuOpen }: { toolsMenuOpen: boolean }) {
             onFocus={(event) => { setEditing(true); event.target.select(); }}
             onBlur={() => setEditing(false)}
           />
-          {busy && <span className="browser-address-busy" aria-label="正在执行">…</span>}
         </form>
         <div className="browser-menu">
           <button
             type="button"
-            className={`icon-btn${menuOpen ? ' is-on' : ''}`}
+            className="icon-btn"
             aria-label="浏览器菜单"
-            aria-expanded={menuOpen}
             title="更多"
-            onClick={() => (desktopOn ? openDesktopMenu() : setMenuOpen((open) => !open))}
+            onClick={openDesktopMenu}
           >
             <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.15" fill="currentColor" /><circle cx="8" cy="8" r="1.15" fill="currentColor" /><circle cx="12.5" cy="8" r="1.15" fill="currentColor" /></svg>
           </button>
         </div>
       </div>
-      {desktopOn && findOpen && (
+      {findOpen && (
         <form className="browser-find" onSubmit={(event) => { event.preventDefault(); desktopBridge.find(findText); }} onKeyDown={event => {
           if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
           event.preventDefault();
@@ -2049,77 +1662,14 @@ function BrowserPanel({ toolsMenuOpen }: { toolsMenuOpen: boolean }) {
           <button type="button" onClick={() => { setFindOpen(false); setFindText(''); desktopBridge.find(''); }}>关闭</button>
         </form>
       )}
-      {menuOpen && (
-        <div className="browser-menu-row" role="menu">
-          <button
-            type="button"
-            role="menuitem"
-            disabled={blocked || (!desktopOn && !live) || freshTab}
-            onClick={() => {
-              setMenuOpen(false);
-              if (desktopOn) {
-                desktopBridge.pick().then((result) => {
-                  if (!result?.text) return;
-                  const quoted = result.text.split('\n').map((line) => `> ${line}`).join('\n');
-                  const api = useStore.getState().composerApi;
-                  if (api) {
-                    api.appendText(`\n> 页面元素引用\n${quoted}\n\n`);
-                    api.focus();
-                  }
-                });
-                return;
-              }
-              setPicking(true);
-            }}
-          >选择页面元素</button>
-          {desktopOn && (
-            <button type="button" role="menuitem" disabled={!desktopState?.activeId || freshTab} onClick={() => { setMenuOpen(false); desktopBridge.detach(); }}>
-              在独立窗口打开
-            </button>
-          )}
-          {desktopOn && (
-            <button type="button" role="menuitem" disabled={!desktopState?.activeId || freshTab} onClick={() => { setMenuOpen(false); desktopBridge.devtools(); }}>
-              开发工具
-            </button>
-          )}
-          <button type="button" role="menuitem" disabled={blocked || (!desktopOn && !live) || freshTab} onClick={() => { setMenuOpen(false); toggleConsole(false); }}>
-            页面控制台
-          </button>
-          <button type="button" role="menuitem" disabled={blocked || (!desktopOn && !live) || freshTab} onClick={() => { setMenuOpen(false); toggleConsole(true); }}>
-            网络记录
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className={mirror.paused ? 'is-on' : ''}
-            disabled={blocked || !sessionId}
-            onClick={async () => {
-              setMenuOpen(false);
-              if (!sessionId) return;
-              const next = !mirror.paused;
-              useStore.getState().setUi({ mirror: { ...mirror, paused: next } });
-              const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/browser/${next ? 'pause' : 'resume'}`, { method: 'POST' });
-              if (!response.ok) {
-                useStore.getState().setUi({ mirror: { ...mirror, paused: !next } });
-              }
-            }}
-          >{pauseToggleLabel(mirror.paused)}</button>
-        </div>
-      )}
       </div>
-      {blocked && reason && <p className="browser-reason">{reason}</p>}
-      {!desktopOn && mirror.mode === 'closed' && <p className="browser-reason">浏览器已回收，重新导航即可再次打开。</p>}
       {(desktopState?.error || error) && <p className="browser-reason is-error">{desktopState?.error || error}</p>}
-      {picking && !desktopOn && <p className="browser-reason is-pick">选择元素：点画面里要引用的元素，描述会加进输入框。</p>}
       <div
         id="mirror-stage"
-        className={`mirror-stage is-${mirror.mode}${pageUrl ? ' is-page' : ''}${picking ? ' is-picking' : ''}${freshTab ? ' is-fresh' : ''}`}
+        className={`mirror-stage${freshTab ? ' is-fresh' : ''}`}
         ref={stageRef}
-        tabIndex={pageUrl ? undefined : 0}
         role="application"
         aria-label="内置浏览器画面"
-        onClick={pageUrl ? undefined : onClick}
-        onKeyDown={pageUrl ? undefined : onStageKeyDown}
       >
         {freshTab
           ? (
@@ -2157,16 +1707,9 @@ function BrowserPanel({ toolsMenuOpen }: { toolsMenuOpen: boolean }) {
               )}
             </div>
           )
-          : desktopOn
-          ? (
-            <div className="mirror-empty">
-              {desktopState?.cover && <img className="browser-cover" src={desktopState.cover} alt="" />}
-            </div>
-          )
           : (
             <div className="mirror-empty">
-              <p>完整浏览器在桌面壳里。</p>
-              <p className="mirror-empty-hint">在仓库里执行 npm --prefix pilot-desktop start。用普通浏览器打开本页时，这里不再用截图或内嵌页代替。</p>
+              {desktopState?.cover && <img className="browser-cover" src={desktopState.cover} alt="" />}
             </div>
           )}
       </div>
@@ -2181,15 +1724,11 @@ function BrowserPanel({ toolsMenuOpen }: { toolsMenuOpen: boolean }) {
           <pre className="browser-console-body">{consoleText}</pre>
         </div>
       )}
-      {(desktopState?.emulated || (!desktopOn && !pageLoading)) && (
+      {desktopState?.emulated && (
         <div className="browser-status">
           <p id="mirror-hint" className="mirror-hint">
-            {desktopState?.emulated
-              ? `设备模拟 ${desktopState.emulated.width}×${desktopState.emulated.height}`
-              : '完整浏览器需要桌面壳。'}
-            {desktopState?.emulated && (
-              <button type="button" className="browser-reset" onClick={() => desktopBridge.resetEmulation()}>还原</button>
-            )}
+            {`设备模拟 ${desktopState.emulated.width}×${desktopState.emulated.height}`}
+            <button type="button" className="browser-reset" onClick={() => desktopBridge.resetEmulation()}>还原</button>
           </p>
         </div>
       )}

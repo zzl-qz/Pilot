@@ -1,4 +1,3 @@
-import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './components/App.jsx';
 import { setMarkdownNotifier, setMarkdownContext } from './lib/markdown-render.js';

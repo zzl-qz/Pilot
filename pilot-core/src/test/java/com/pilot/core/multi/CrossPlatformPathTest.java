@@ -24,12 +24,16 @@ class CrossPlatformPathTest {
     Path workspace;
 
     @Test
-    void sandboxPathsAreSeparatorAndCaseInsensitive() {
+    void sandboxPathsNormalizeSeparatorsButPreserveCase() {
         DiffSandbox sandbox = new DiffSandbox("sbx_1", "agent_1", "T1", "");
         sandbox.add("src\\Feature\\A.java", "", "class A {}", false, RiskLevel.LOW);
 
-        assertTrue(sandbox.hasChange("src/feature/a.java"), "Windows 与 POSIX 的路径分隔符、大小写差异不应产生两份改动");
+        assertTrue(sandbox.hasChange("src/Feature/A.java"));
         assertEquals(1, sandbox.fileCount());
+        sandbox.add("src/feature/a.java", "original", "changed", true, RiskLevel.LOW);
+        assertEquals(2, sandbox.fileCount());
+        assertEquals("class A {}", sandbox.proposedText("src/Feature/A.java"));
+        assertEquals(DiffSandbox.fingerprint("original"), sandbox.changes().get(1).baseHash());
     }
 
     @Test

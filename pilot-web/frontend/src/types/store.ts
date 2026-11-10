@@ -1,20 +1,15 @@
 import type { ApiClient } from '../api.js';
-import type { ApiResults, InputMessage, BrowserStatus } from './api.js';
+import type { ApiResults, BrowserStatus } from './api.js';
 import type * as S from './server.js';
 import type { ProjectSummary, SessionSummary, ChangeFile } from './core.js';
-import type { ReducerState, PlanItem, ResultRow, RunUsage } from './thread.js';
+import type { ReducerState, PlanItem, RunUsage } from './thread.js';
 import type { CommandLog, QueueEntry, RequestReport, ContextStatus } from './runtime.js';
 import type { DraftAttachment, BuiltinCommand, SkillCommand } from './input.js';
 import type { SideChatTab, SideChatsState } from './content.js';
 import type { DraftSession, RefreshOptions } from './sync.js';
 import type { EventEnvelope } from './events.js';
 
-export interface MirrorFrame { frame?: string | null; url?: string; w?: number; h?: number; jpeg?: string; data?: string }
-export interface MirrorState {
-  mode: string; frame: MirrorFrame | null; url: string; embed: boolean; frameOptions: string;
-  latency: number; paused: boolean; headless: boolean; frameW: number; frameH: number;
-  canGoBack: boolean; canGoForward: boolean;
-}
+export interface MirrorState { mode: 'idle' | 'live' | 'closed'; url: string; headless: boolean }
 export interface ComposerBridge {
   setText(text: string): void; getText(): string; getDraft?(): { text: string; imagePositions: number[] }; attachmentIds?(): string[]; insertAttachments?: ReturnType<typeof import('../lib/composer-input.js').createComposerInput>['insertAttachments']; appendText(text: string): void; focus(): void;
   prepareReload?(): { ok: boolean; reason?: string };
@@ -54,7 +49,7 @@ export interface StoreData extends Omit<ReducerState, 'ui'> {
   runUsage: RunUsage | null; requestReports: RequestReport[]; latestContextReport: RequestReport | null; liveOutputTokens: number;
   lastOutcome: string; queueHeld: boolean; turnRuns: string[]; changedFiles: ChangeFile[];
   contextStatus: ContextStatus | null; compactingContext: boolean; queueEntries: QueueEntry[];
-  taskDirty: boolean; taskBusy: boolean; planItems: PlanItem[];
+  taskDirty: boolean; taskBusy: boolean; taskDraftRevision: number; planItems: PlanItem[];
   skills: (S.SkillsControllerSkillPayload & { id?: string })[]; skillsMeta: { projectRoot: string; userRoot: string; invalid: S.SkillProblem[] };
   quickCommands: (BuiltinCommand | SkillCommand)[]; modelOptions: string[]; remoteModels: string[];
   settingsData: S.SettingsControllerSettingsResponse | null; modelSave: { busy: boolean; message: string; error: boolean };

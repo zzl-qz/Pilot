@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -268,12 +269,12 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
     }
 
     private List<Planned> plan(List<Operation> operations) throws IOException {
-        Map<String, Operation> seen = new LinkedHashMap<>();
+        Map<Path, Operation> seen = new LinkedHashMap<>();
         List<Planned> plan = new ArrayList<>();
         for (Operation op : operations) {
             Path file = paths.resolve(op.path());
             String shown = paths.display(file);
-            if (seen.put(shown, op) != null) {
+            if (seen.put(file, op) != null) {
                 throw new PatchException("同一文件在补丁中出现多次：" + shown);
             }
             switch (op.kind()) {
@@ -290,7 +291,13 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
                     requireObserved(file, shown);
                     plan.add(new Planned(Kind.DELETE, file, null, null, shown, "删除 " + shown, List.of(shown)));
                 }
-                case UPDATE -> plan.add(planUpdate(op, file, shown));
+                case UPDATE -> {
+                    Planned update = planUpdate(op, file, shown);
+                    if (update.target() != null && seen.put(update.target(), op) != null) {
+                        throw new PatchException("同一文件在补丁中出现多次：" + paths.display(update.target()));
+                    }
+                    plan.add(update);
+                }
             }
         }
         return plan;
@@ -450,7 +457,8 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
             case ADD -> {
                 Files.createDirectories(step.file().getParent());
                 snapshots.beforeWrite(step.file());
-                Files.writeString(step.file(), step.content(), StandardCharsets.UTF_8);
+                Files.writeString(step.file(), step.content(), StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.WRITE);
                 snapshots.afterWrite(step.file());
                 reads.observed(step.file());
             }
@@ -468,7 +476,8 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
                     Files.createDirectories(step.target().getParent());
                     snapshots.beforeWrite(step.file());
                     snapshots.beforeWrite(step.target());
-                    Files.writeString(step.target(), step.content(), StandardCharsets.UTF_8);
+                    Files.writeString(step.target(), step.content(), StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
                     Files.delete(step.file());
                     snapshots.afterWrite(step.target());
                     reads.observed(step.target());

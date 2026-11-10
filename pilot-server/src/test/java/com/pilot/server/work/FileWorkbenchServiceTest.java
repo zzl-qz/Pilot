@@ -3,7 +3,9 @@ package com.pilot.server.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -12,15 +14,25 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.HexFormat;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mockito;
 
 import com.pilot.core.session.SessionService;
 import com.pilot.server.config.PilotDataDir;
@@ -42,6 +54,7 @@ class FileWorkbenchServiceTest {
     private String session;
     private WorkProductService products;
     private FileWorkbenchService service;
+    private AutomationStore store;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -61,8 +74,87 @@ class FileWorkbenchServiceTest {
         products = mock(WorkProductService.class);
         SessionService sessions = new SessionService();
         session = sessions.createSession("文件工作台测试", workspace.toString()).id();
-        service = new FileWorkbenchService(new AutomationStore((SqliteStore)null), JSON, workspaces, sessions,
+        store = Mockito.spy(new AutomationStore((SqliteStore)null));
+        service = new FileWorkbenchService(store, JSON, workspaces, sessions,
             new PilotDataDir(temp.resolve("data").toString()), products);
+    }
+
+    @Test
+    void excludesExternalSymlinksAndRejectsReplacementOfPreviouslyListedFile() throws Exception {
+        String id = service.list(session).get(0).id();
+        Path outside = Files.writeString(temp.resolve("outside.pdf"), "private content");
+        Path link = workspace.resolve("external.pdf");
+        try {
+            Files.createSymbolicLink(link, outside);
+        } catch (UnsupportedOperationException | IOException | SecurityException e) {
+            assumeTrue(false, "当前账户无法创建符号链接：" + e.getMessage());
+        }
+        assertEquals(1, service.list(session).size());
+        Files.delete(pdf);
+        Files.createSymbolicLink(pdf, outside);
+        assertTrue(service.list(session).isEmpty());
+        assertThrows(IllegalArgumentException.class, () -> service.download(session, id));
+        assertThrows(IllegalArgumentException.class, () -> service.snapshot(session, id, "unsafe"));
+        assertEquals("private content", Files.readString(outside));
+    }
+
+    @Test
+    void concurrentSnapshotsKeepUniqueVersionsAndMatchingBytes() throws Exception {
+        String id = service.list(session).get(0).id();
+        CountDownLatch start = new CountDownLatch(1);
+        var futures = new ArrayList<Future<FileWorkbenchService.Version>>();
+        try (var executor = Executors.newFixedThreadPool(8)) {
+            for (int i = 0; i < 16; i++) {
+                String label = "snapshot " + i;
+                futures.add(executor.submit(() -> {
+                    start.await();
+                    return service.snapshot(session, id, label);
+                }));
+            }
+            start.countDown();
+            var versions = new HashSet<Long>();
+            for (var future : futures) {
+                var version = future.get(10, TimeUnit.SECONDS);
+                assertTrue(versions.add(version.version()), "并发快照必须有独立版本号");
+                Path saved = temp.resolve("data/file-versions").resolve(session).resolve(id)
+                    .resolve("v" + version.version() + ".pdf");
+                String hash =
+                    HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(saved)));
+                assertEquals(hash, version.sha256());
+            }
+        }
+        assertEquals(16, service.versions(session, id).size());
+    }
+
+    @Test
+    void metadataConflictIsReportedAndDoesNotLeaveAnUnregisteredSnapshot() throws Exception {
+        String id = service.list(session).get(0).id();
+        Mockito.doReturn(false).when(store).put(eq("file-version"), anyString(), eq(0L), anyString());
+        assertThrows(IOException.class, () -> service.snapshot(session, id, "conflict"));
+        assertFalse(Files.exists(temp.resolve("data/file-versions").resolve(session).resolve(id).resolve("v1.pdf")));
+        assertTrue(service.versions(session, id).isEmpty());
+    }
+
+    @Test
+    void existingSnapshotBytesAreNeverOverwritten() throws Exception {
+        String id = service.list(session).get(0).id();
+        Path saved = temp.resolve("data/file-versions").resolve(session).resolve(id).resolve("v1.pdf");
+        Files.createDirectories(saved.getParent());
+        Files.writeString(saved, "unregistered history");
+        assertThrows(IOException.class, () -> service.snapshot(session, id, "new"));
+        assertEquals("unregistered history", Files.readString(saved));
+    }
+
+    @Test
+    void resolvesFilesWithoutLoadingVersionsAndLoadsMetadataOncePerList() throws Exception {
+        Files.writeString(workspace.resolve("other.docx"), "document");
+        String id = service.list(session).stream().filter(file -> file.filename().equals("report.pdf")).findFirst()
+            .orElseThrow().id();
+        Mockito.clearInvocations(store);
+        service.download(session, id);
+        Mockito.verifyNoInteractions(store);
+        service.list(session);
+        verify(store, Mockito.times(1)).list("file-version", session + ":");
     }
 
     @Test
@@ -110,10 +202,31 @@ class FileWorkbenchServiceTest {
         assertTrue(service.asset(session, id).changedExternally(), "本机应用保存后应能感知");
         assertNotEquals(service.asset(session, id).sha256(), service.versions(session, id).get(0).sha256());
 
+        Mockito.clearInvocations(store);
         service.revert(session, id, 1);
+        verify(store, Mockito.times(1)).list("file-version", session + ":" + id + ":");
         assertFalse(service.asset(session, id).changedExternally());
         assertEquals(original.length, Files.size(pdf));
         assertEquals(3, service.versions(session, id).size(), "回退前的状态也要另存为快照");
+    }
+
+    @Test
+    void metadataQueriesSkipMalformedRowsAndKeepOtherSessionsIsolated() throws Exception {
+        var asset = service.list(session).getFirst();
+        String prefix = session + ":" + asset.id() + ":";
+        store.put("file-version", prefix + "1", 0,
+            JSON.writeValueAsString(new FileWorkbenchService.Version(1, asset.sha256(), "2026-01-01", "initial")));
+        store.put("file-version", prefix + "bad", 0, "[]");
+        store.put("file-version", prefix + "null", 0, "null");
+        String neighbor = session + "-other:" + asset.id() + ":2";
+        store.put("file-version", neighbor, 0,
+            JSON.writeValueAsString(new FileWorkbenchService.Version(2, "unrelated", "2026-01-02", "other")));
+
+        assertEquals(1, service.versions(session, asset.id()).size());
+        assertFalse(service.list(session).getFirst().changedExternally());
+        service.deleteBySession(session);
+        assertTrue(service.versions(session, asset.id()).isEmpty());
+        assertTrue(store.get("file-version", neighbor).isPresent());
     }
 
     @Test

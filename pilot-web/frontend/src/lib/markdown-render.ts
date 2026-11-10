@@ -552,7 +552,7 @@ function buildTable(lines: string[], start: number) {
   while (i < lines.length && lines[i].trim() && lines[i].includes('|')) {
     const cells = splitRow(lines[i]);
     const row = document.createElement('tr');
-    header.forEach((ignored, index) => {
+    header.forEach((_ignored, index) => {
       const td = document.createElement('td');
       if (aligns[index]) {
         td.style.textAlign = aligns[index];

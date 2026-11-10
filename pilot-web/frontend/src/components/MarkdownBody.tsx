@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import { createBlockStreamRenderer } from '../lib/markdown-stream.js';
 import { markdownBlockRecords } from '../lib/markdown-render.js';
 

@@ -9,7 +9,7 @@ let handler = async () => new Response(null, { status: 204 });
 const previousWindow = globalThis.window;
 globalThis.window = { fetch: (...args) => handler(...args) };
 
-const { apiJson, api } = await import('../../../frontend/src/api.js');
+const { apiJson, apiFetch, api } = await import('../../../frontend/src/api.js');
 
 // 同一个进程里还跑着别的测试文件：import 完立刻还原全局 window，
 // 模块内部已经拿到了绑定好的函数引用，不影响这里发请求。
@@ -87,4 +87,40 @@ test('搜索和历史查询保留布尔值、零游标及中文空格路径的�
   assert.equal(requests[1].searchParams.get('before'), '0');
   assert.equal(requests[1].searchParams.get('after'), '9');
   assert.equal(requests[1].searchParams.get('limit'), '80');
+});
+
+
+function stalledBody(signal, status = 200) {
+  return new Response(new ReadableStream({ start(controller) {
+    signal.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')), { once: true });
+  } }), { status });
+}
+
+test('收到响应头后正文停滞仍会超时，包括 HTTP 错误正文和文件下载', async () => {
+  for (const status of [200, 502]) {
+    handler = async (_, { signal }) => stalledBody(signal, status);
+    await assert.rejects(apiJson('/api/slow-body', {}, 10), /请求超时/);
+  }
+  await assert.rejects(apiFetch('/api/slow-download', {}, 10), /请求超时/);
+});
+
+test('收到响应头后仍可取消正文读取，且不会误报为超时', async () => {
+  let headersReady;
+  const headers = new Promise(resolve => { headersReady = resolve; });
+  handler = async (_, { signal }) => { headersReady(); return stalledBody(signal); };
+  const controller = new AbortController();
+  const operation = apiJson('/api/slow-body', { signal: controller.signal }, 1000);
+  await headers; controller.abort();
+  await assert.rejects(operation, error => error.name === 'AbortError' && !error.message.includes('超时'));
+});
+
+test('正文完整接收后会清理超时和取消监听，下载字节保持一致', async () => {
+  let requestSignal;
+  handler = async (_, { signal }) => { requestSignal = signal; return new Response(new Uint8Array([0, 128, 255])); };
+  const controller = new AbortController();
+  const response = await apiFetch('/api/download', { signal: controller.signal }, 10);
+  controller.abort();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(requestSignal.aborted, false);
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), new Uint8Array([0, 128, 255]));
 });

@@ -1,5 +1,5 @@
 import type { Draft } from 'immer';
-import type { StoreState, UiState, MirrorState, MirrorFrame, CommandTask } from './types/store.js';
+import type { StoreState, UiState, MirrorState, CommandTask } from './types/store.js';
 import type { EventEnvelope } from './types/events.js';
 import type { ApiResults, InputMessage } from './types/api.js';
 import type { SideChatTab } from './types/content.js';
@@ -19,7 +19,7 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { api, apiJson, apiFetch } from './api.js';
 import {
-  applyEvent, initialThread, appendUserRow, prependHistoryPage, appendHistoryPage, isUserMessageType
+  applyEvent, initialThread, appendUserRow, prependHistoryPage, appendHistoryPage
 } from './thread-reducer.js';
 import { EVENT_TYPES } from './event-types.js';
 import { canLoadEarlier, isValidEarlierHistoryPage } from './lib/history.js';
@@ -28,11 +28,11 @@ import { readDraft, writeDraft, dropDraft } from './lib/drafts.js';
 import { faviconHref, shouldNotify, tabTitle } from './lib/attention.js';
 import { mergeCommands, resolveSkillCommand, toSkillCommands } from './lib/skills.js';
 import { normalizePermission, permissionLabel } from './lib/permission.js';
-import { QUICK_COMMANDS, filterQuickCommands, expandQuickCommand } from './lib/commands.js';
-import { groupSessionsByProject, samePath, sortSessions } from './lib/projects.js';
-import { mergeRunReports, sortChangeFiles } from './lib/changes.js';
-import { isCommandActive, commandStatusLabel, mergeCommandLog } from './lib/command-tasks.js';
-import { nextMirrorMode } from './lib/browser-mirror.js';
+import { QUICK_COMMANDS } from './lib/commands.js';
+import { samePath, sortSessions } from './lib/projects.js';
+import { sortChangeFiles } from './lib/changes.js';
+import { mergeCommandLog } from './lib/command-tasks.js';
+import { browserStateUpdate } from './lib/browser-mirror.js';
 import { classifyModelError, describeModelSaved } from './lib/model-settings.js';
 import { sameUserInput } from './thread-utils.js';
 import {
@@ -52,19 +52,9 @@ const sideChatClosing = new Map<string, Promise<boolean>>();
 const RECONNECT_BASE_MS = 800;
 const RECONNECT_MAX_MS = 15000;
 
-/**
- * 内置浏览器面板的初始镜像状态。
- *
- * <p>每次会话切换都造一份新的：地址栏、前进/后退可用性都跟着上一轮页面走，
- * 复用同一个对象会让新会话的地址栏还挂着上一个会话的地址。
- */
+/** 会话切换时重置浏览器状态，默认按无窗口模式提供替代操作。 */
 function emptyMirror(): MirrorState {
-  return {
-    mode: 'idle', frame: null, url: '', embed: true, frameOptions: '', latency: 0, paused: false,
-    // 实际生效的 headless（含无桌面降级）：后台模式没有窗口可置前，提示文案也跟着换
-    headless: true,
-    frameW: 1280, frameH: 800, canGoBack: false, canGoForward: false
-  };
+  return { mode: 'idle', url: '', headless: true };
 }
 /** 桌面通知开关（与旧版同名键）。 */
 const NOTIFY_KEY = 'pilot.notify';
@@ -72,19 +62,8 @@ const NOTIFY_KEY = 'pilot.notify';
 let eventSource: EventSource | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let mirrorSource: EventSource | null = null;
-/** 截图帧直接画到面板上，不进 store。JPEG 进 React 状态会把整页拖卡。 */
-let paintMirrorFrame: ((frame: MirrorFrame) => void) | null = null;
-let lastMirrorPayload: MirrorFrame | null = null;
-
-export function setMirrorPainter(painter: typeof paintMirrorFrame) {
-  paintMirrorFrame = painter;
-  if (painter && lastMirrorPayload) {
-    painter(lastMirrorPayload);
-  }
-}
 let commandTimer: ReturnType<typeof setTimeout> | undefined;
 let runClockTimer: ReturnType<typeof setTimeout> | undefined;
-let usageRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
 /*
@@ -190,6 +169,8 @@ function resetSessionState(draft: StoreState) {
   draft.contextStatus = null;
   draft.task = null;
   draft.taskDirty = false;
+  draft.taskBusy = false;
+  draft.taskDraftRevision = 0;
   draft.planItems = [];
   draft.ui.bottomSignal = 0;
   draft.ui.attentionKind = 'idle';
@@ -331,6 +312,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   task: null,
   taskDirty: false,
   taskBusy: false,
+  taskDraftRevision: 0,
   planItems: [],
   skills: [],
   /** 技能安装位置与无效项（设置页用来告诉用户「装到哪」以及哪些没通过校验）。 */
@@ -969,7 +951,6 @@ export const useStore = create<StoreState>()(immer((set, get) => {
 
   /** 单条事件落地后的联动（标题转正、任务契约、上下文、变更报告）。 */
   settleEvent(event, after) {
-    const sessionId = get().sessionId;
     if (['run.started', 'run.steered', 'run.completed', 'run.failed', 'run.cancelled'].includes(event.type)) {
       set(draft => { draft.promoteBlank = null; });
       get().loadSessions();
@@ -1309,20 +1290,25 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   },
 
   async saveTask(constraints, acceptance) {
-    const { sessionId } = get();
-    if (!sessionId) return;
+    const { sessionId, sessionEpoch, taskDraftRevision, taskBusy } = get();
+    if (!sessionId || taskBusy) return;
+    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
     set((draft) => { draft.taskBusy = true; });
     try {
       const task = await api.saveTask(sessionId, { constraints, acceptance });
+      if (!current()) return;
       set((draft) => {
-        draft.task = task;
-        draft.taskDirty = false;
-        draft.taskBusy = false;
+        // 保存期间用户仍可继续输入，旧请求不能覆盖新草稿或清掉未保存标记。
+        if (draft.taskDraftRevision === taskDraftRevision) {
+          draft.task = task;
+          draft.taskDirty = false;
+        }
       });
-      get().showNotice('任务契约已保存');
+      get().showNotice(get().taskDirty ? '已保存提交时的任务契约，后续修改尚未保存' : '任务契约已保存');
     } catch (error) {
-      set((draft) => { draft.taskBusy = false; });
-      get().showNotice('保存失败：' + errorInfo(error).message);
+      if (current()) get().showNotice('保存失败：' + errorInfo(error).message);
+    } finally {
+      if (current()) set((draft) => { draft.taskBusy = false; });
     }
   },
 
@@ -2269,7 +2255,6 @@ function closeStreams() {
     mirrorSource.close();
     mirrorSource = null;
   }
-  lastMirrorPayload = null;
   clearInterval(commandTimer);
   commandTimer = undefined;
   clearTimeout(reconnectTimer);
@@ -2279,88 +2264,22 @@ function closeStreams() {
 }
 
 function connectMirror(get: StoreGet, set: StoreSet) {
-  const { sessionId, ui } = get();
-  if (!sessionId || !ui.mirror) {
-    return;
-  }
-  if (mirrorSource) {
-    mirrorSource.close();
-  }
+  const { sessionId, sessionEpoch } = get();
+  if (!sessionId) return;
+  mirrorSource?.close();
   const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/browser/stream`);
   mirrorSource = source;
-  source.addEventListener('frame', (message) => {
-    let payload: MirrorFrame;
-    try {
-      payload = JSON.parse(message.data) as MirrorFrame;
-    } catch {
-      return;
-    }
-    lastMirrorPayload = payload;
-    if (paintMirrorFrame) {
-      paintMirrorFrame(payload);
-    }
-    const mirror = get().ui.mirror;
-    const mode = nextMirrorMode(mirror.mode, 'frame');
-    const url = payload.url || mirror.url;
-    const frameW = Number(payload.w) > 0 ? Number(payload.w) : mirror.frameW;
-    const frameH = Number(payload.h) > 0 ? Number(payload.h) : mirror.frameH;
-    if (mirror.mode === mode && mirror.url === url && mirror.frameW === frameW && mirror.frameH === frameH) {
-      return;
-    }
-    set((draft) => {
-      draft.ui.mirror.mode = mode;
-      draft.ui.mirror.url = url;
-      draft.ui.mirror.frameW = frameW;
-      draft.ui.mirror.frameH = frameH;
-      draft.ui.mirror.frame = null;
+  const current = () => mirrorSource === source && get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
+  for (const kind of ['frame', 'nav', 'state', 'status', 'closed']) {
+    source.addEventListener(kind, (message) => {
+      if (!current()) return;
+      let payload: unknown;
+      try { payload = kind === 'closed' ? null : JSON.parse(message.data); }
+      catch { return; }
+      const update = browserStateUpdate(kind, payload);
+      set(draft => { Object.assign(draft.ui.mirror, update); });
     });
-  });
-  source.addEventListener('status', (message) => {
-    try {
-      const payload = JSON.parse(message.data) as { paused?: boolean; headless?: boolean; url?: string };
-      set((draft) => {
-        draft.ui.mirror.paused = Boolean(payload.paused);
-        if (typeof payload.headless === 'boolean') {
-          draft.ui.mirror.headless = payload.headless;
-        }
-        if (payload.url) {
-          draft.ui.mirror.url = payload.url;
-        }
-      });
-    } catch { /* 忽略 */ }
-  });
-  // 页面跳转（用户点链接 / 地址栏 / 智能体导航）：地址栏跟着变，前进后退按钮跟着亮灭
-  source.addEventListener('nav', (message) => {
-    try {
-      const payload = JSON.parse(message.data) as { url?: string; canGoBack?: boolean; canGoForward?: boolean; embed?: boolean; frameOptions?: string };
-      set((draft) => {
-        if (payload.url) {
-          draft.ui.mirror.url = payload.url;
-        }
-        draft.ui.mirror.canGoBack = Boolean(payload.canGoBack);
-        draft.ui.mirror.canGoForward = Boolean(payload.canGoForward);
-        if (payload.embed === false) {
-          draft.ui.mirror.embed = false;
-        } else if (payload.embed === true) {
-          draft.ui.mirror.embed = true;
-        }
-        if (typeof payload.frameOptions === 'string') {
-          draft.ui.mirror.frameOptions = payload.frameOptions;
-        }
-        if (draft.ui.mirror.mode === 'closed' && payload.url !== 'about:blank') {
-          draft.ui.mirror.mode = 'live';
-        }
-      });
-    } catch { /* 忽略 */ }
-  });
-  // 浏览器被回收（空闲回收 / 崩溃）：保留最后一张画面，但按钮不能再用
-  source.addEventListener('closed', () => {
-    set((draft) => {
-      draft.ui.mirror.mode = 'closed';
-      draft.ui.mirror.canGoBack = false;
-      draft.ui.mirror.canGoForward = false;
-    });
-  });
+  }
   source.onerror = () => {
     source.close();
     if (mirrorSource === source) {

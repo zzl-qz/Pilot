@@ -1,6 +1,6 @@
 import type { RequestReport, ContextStatus } from '../types/runtime.js';
 import type { RunUsage } from '../types/thread.js';
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { IconButton } from '@astryxdesign/core/IconButton';
 import { Badge } from '@astryxdesign/core/Badge';

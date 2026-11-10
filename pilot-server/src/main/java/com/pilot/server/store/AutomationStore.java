@@ -2,10 +2,12 @@ package com.pilot.server.store;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import org.springframework.beans.factory.ObjectProvider;
@@ -36,6 +38,23 @@ public class AutomationStore {
         return JdbcSupport.query(store, "SELECT * FROM automation_documents WHERE kind=? ORDER BY id",
             q -> q.setString(1, kind),
             r -> new Document(r.getString("id"), r.getLong("version"), r.getString("payload")), "读取自动化记录失败");
+    }
+
+    /** 按字面前缀读取；会话/文件查询不必把其他会话的全部历史加载到内存。 */
+    public synchronized List<Document> list(String kind, String prefix) {
+        Objects.requireNonNull(prefix, "prefix");
+        if (store == null) {
+            return memory.getOrDefault(kind, Map.of()).values().stream()
+                .filter(document -> document.id().startsWith(prefix)).sorted(Comparator.comparing(Document::id))
+                .toList();
+        }
+        // GLOB 区分大小写；转义元字符，让它与 String.startsWith 的字面匹配一致。
+        String pattern = prefix.replace("[", "[[]").replace("*", "[*]").replace("?", "[?]") + "*";
+        return JdbcSupport.query(store, "SELECT * FROM automation_documents WHERE kind=? AND id GLOB ? ORDER BY id",
+            q -> {
+                q.setString(1, kind);
+                q.setString(2, pattern);
+            }, r -> new Document(r.getString("id"), r.getLong("version"), r.getString("payload")), "读取自动化记录失败");
     }
 
     public synchronized List<Document> deliveryCandidates() {

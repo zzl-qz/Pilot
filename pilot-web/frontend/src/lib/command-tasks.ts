@@ -47,7 +47,9 @@ function validOffset(value: unknown): value is number {
 
 function codePointLength(text: string) {
   let count = 0;
-  for (const character of text) count++;
+  for (let index = 0; index < text.length; count++) {
+    index += (text.codePointAt(index) ?? 0) > 0xffff ? 2 : 1;
+  }
   return count;
 }
 

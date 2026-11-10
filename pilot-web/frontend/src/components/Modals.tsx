@@ -3,7 +3,7 @@ import type { ApiResults } from '../types/api.js';
 import type { SessionSummary } from '../types/core.js';
 type PaletteItem = { label: string; hint: string; run: () => unknown };
 import { errorInfo } from '../lib/errors.js';
-import React, { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { TextArea } from '@astryxdesign/core/TextArea';
 import { TextInput } from '@astryxdesign/core/TextInput';
@@ -34,6 +34,7 @@ const EXECUTION_MODES: Record<string, string> = { DIRECT: '普通执行', GOAL: 
 export function TaskContract() {
   const task = useStore((state) => state.task);
   const dirty = useStore(state => state.taskDirty);
+  const busy = useStore(state => state.taskBusy);
   const [constraints, setConstraints] = useState('');
   const [criteria, setCriteria] = useState('');
   const [open, setOpen] = useState(false);
@@ -101,9 +102,9 @@ export function TaskContract() {
         )}
         <div className="task-contract-fields">
           <TextArea id="task-constraints" label="约束（每行一条）" width="100%" value={constraints}
-            onChange={value => { setConstraints(value); useStore.setState(draft => { draft.taskDirty = true; }); }} rows={3} />
+            onChange={value => { setConstraints(value); useStore.setState(draft => { draft.taskDirty = true; draft.taskDraftRevision++; }); }} rows={3} />
           <TextArea id="task-acceptance" label="验收记录" description="每行一条，用 [x] 标记完成，可接「—— 证据」。"
-            width="100%" value={criteria} onChange={value => { setCriteria(value); useStore.setState(draft => { draft.taskDirty = true; }); }} rows={4} />
+            width="100%" value={criteria} onChange={value => { setCriteria(value); useStore.setState(draft => { draft.taskDirty = true; draft.taskDraftRevision++; }); }} rows={4} />
         </div>
         <div className="task-contract-actions">
           <TextInput id="task-add-criterion" label="追加验收标准" isLabelHidden placeholder="追加验收标准…"
@@ -111,10 +112,10 @@ export function TaskContract() {
               if (newCriterion.trim()) {
                 setCriteria(current => `${current}\n[ ] ${newCriterion.trim()}`.trim());
                 setNewCriterion('');
-                useStore.setState(draft => { draft.taskDirty = true; });
+                useStore.setState(draft => { draft.taskDirty = true; draft.taskDraftRevision++; });
               }
             }} />
-          <Button id="task-contract-save" label="保存要求与验收记录" variant="primary" isDisabled={!dirty}
+          <Button id="task-contract-save" label={busy ? '保存中…' : '保存要求与验收记录'} variant="primary" isDisabled={!dirty || busy}
             onClick={() => useStore.getState().saveTask(
               constraints.split('\n').map((line) => line.trim()).filter(Boolean),
               parseAcceptanceLines(criteria, items)

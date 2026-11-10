@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.Map;
 
@@ -80,7 +81,8 @@ public final class CreateFileTool implements Tool, WritesFiles {
         try {
             Files.createDirectories(file.getParent());
             snapshots.beforeWrite(file);
-            Files.writeString(file, content, StandardCharsets.UTF_8);
+            Files.writeString(file, content, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW,
+                StandardOpenOption.WRITE);
             snapshots.afterWrite(file);
             // 刚创建的文件视为已读：后续 edit_file 不会被「先读后改」拦截
             reads.observed(file);

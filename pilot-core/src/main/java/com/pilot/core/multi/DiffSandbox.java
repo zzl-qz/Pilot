@@ -3,12 +3,12 @@ package com.pilot.core.multi;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -24,7 +24,7 @@ public final class DiffSandbox {
     private final String agentId;
     private final String taskId;
     private final String baseCommit;
-    private final List<SandboxChange> changes = new ArrayList<>();
+    private final Map<String, SandboxChange> changes = new LinkedHashMap<>();
     /**
      * 每个路径首次进入沙箱时的原文（新文件为 {@code null}）。
      *
@@ -58,7 +58,7 @@ public final class DiffSandbox {
     }
 
     public synchronized List<SandboxChange> changes() {
-        return List.copyOf(changes);
+        return List.copyOf(changes.values());
     }
 
     public synchronized boolean isEmpty() {
@@ -66,21 +66,16 @@ public final class DiffSandbox {
     }
 
     public synchronized boolean hasChange(String path) {
-        return changes.stream().anyMatch(change -> samePath(change.path(), path));
+        return changes.containsKey(normalize(path));
     }
 
     public synchronized String currentText(String path, String baselineText) {
-        return changes.stream().filter(change -> samePath(change.path(), path)).findFirst()
-            .map(SandboxChange::newContent).orElse(baselineText);
+        SandboxChange change = changes.get(normalize(path));
+        return change == null ? baselineText : change.newContent();
     }
 
     public synchronized String proposedText(String path) {
-        return changes.stream().filter(change -> samePath(change.path(), path)).findFirst()
-            .map(SandboxChange::newContent).orElse(null);
-    }
-
-    private static boolean samePath(String left, String right) {
-        return left != null && right != null && left.replace('\\', '/').equalsIgnoreCase(right.replace('\\', '/'));
+        return currentText(path, null);
     }
 
     /**
@@ -93,13 +88,7 @@ public final class DiffSandbox {
     public synchronized SandboxChange add(String path, String oldText, String newText, boolean existed,
         RiskLevel risk) {
         String key = normalize(path);
-        SandboxChange superseded = null;
-        for (SandboxChange existing : changes) {
-            if (samePath(existing.path(), path)) {
-                superseded = existing;
-                break;
-            }
-        }
+        SandboxChange superseded = changes.get(key);
         if (superseded == null) {
             baselines.put(key, existed ? oldText : null);
         }
@@ -108,24 +97,23 @@ public final class DiffSandbox {
         String diff = UnifiedDiff.create(path, baselineExisted ? baseline : null, newText);
         if (UnifiedDiff.isEmpty(diff)) {
             // 改回原文：不留一条空改动，也不留下过期条目
-            if (superseded != null) {
-                changes.remove(superseded);
-                baselines.remove(key);
-            }
+            changes.remove(key);
+            baselines.remove(key);
             return null;
         }
         String baseHash = superseded != null ? superseded.baseHash() : fingerprint(baseline);
         SandboxChange change = new SandboxChange(path, diff, newText, baselineExisted, baseHash, agentId, taskId, risk,
             ChangeStatus.PENDING);
-        if (superseded != null) {
-            changes.remove(superseded);
-        }
-        changes.add(change);
+        // 保持原来的展示顺序：最近一次编辑的文件移到末尾。
+        changes.remove(key);
+        changes.put(key, change);
         return change;
     }
 
     private static String normalize(String path) {
-        return path == null ? "" : path.replace('\\', '/').toLowerCase(Locale.ROOT);
+        // 工具入口已通过 PathValidator 解析实际文件系统中的路径；虚拟新文件保留大小写，
+        // 不能把 Linux/区分大小写卷上的两个文件合并为同一条变更。
+        return path == null ? "" : path.replace('\\', '/');
     }
 
     public synchronized int fileCount() {
@@ -134,7 +122,7 @@ public final class DiffSandbox {
 
     public synchronized String candidateHash() {
         String canonical = changes
-            .stream().sorted(Comparator.comparing(SandboxChange::path)).map(change -> change.path() + "\0"
+            .values().stream().sorted(Comparator.comparing(SandboxChange::path)).map(change -> change.path() + "\0"
                 + change.baseHash() + "\0" + change.newContent() + "\0" + change.status().wireName())
             .collect(Collectors.joining("\n"));
         return fingerprint(canonical);
@@ -142,10 +130,17 @@ public final class DiffSandbox {
 
     /** 审阅后回写状态用；保持顺序不变。 */
     public synchronized void replaceAll(Collection<SandboxChange> updated) {
-        changes.clear();
+        Map<String, SandboxChange> next = new LinkedHashMap<>();
         if (updated != null) {
-            changes.addAll(updated);
+            for (SandboxChange change : updated) {
+                if (next.put(normalize(change.path()), change) != null) {
+                    throw new IllegalArgumentException("沙箱中存在重复路径：" + change.path());
+                }
+            }
         }
+        changes.clear();
+        changes.putAll(next);
+        baselines.keySet().retainAll(changes.keySet());
     }
 
     /** 内容指纹：接受变更前用它确认文件没被其他人改过，避免覆盖用户手上的修改。 */
@@ -155,11 +150,7 @@ public final class DiffSandbox {
         }
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hex = new StringBuilder(digest.length * 2);
-            for (byte value : digest) {
-                hex.append(String.format("%02x", value));
-            }
-            return hex.toString();
+            return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 不可用", e);
         }

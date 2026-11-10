@@ -1,4 +1,3 @@
-import React from 'react';
 
 const paths: Record<string, string> = {
   pin: 'm6 2 6 3-2 3v3l-3-1-3 2-1-3 3-2Z M5 11l-3 3',

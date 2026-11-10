@@ -2,6 +2,7 @@ package com.pilot.core.workspace;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -58,12 +59,49 @@ class PathValidatorTest {
         try {
             Files.createSymbolicLink(link, outside);
         } catch (UnsupportedOperationException | IOException | SecurityException e) {
-            // 当前系统/权限不支持符号链接时不阻断其余路径测试。
+            assumeTrue(false, "当前账户无法创建符号链接：" + e.getMessage());
             return;
         }
 
         PathValidator validator = new PathValidator(workspace);
         assertThrows(WorkspaceViolationException.class, () -> validator.resolve("external-link/new-file.txt"));
+    }
+
+    @Test
+    void rejectsDanglingSymlinksIncludingMissingChildren() throws IOException {
+        Path link = workspace.resolve("dangling");
+        symlink(link, workspace.getParent().resolve("missing-outside"));
+        PathValidator validator = new PathValidator(workspace);
+        assertThrows(WorkspaceViolationException.class, () -> validator.resolve("dangling"));
+        assertThrows(WorkspaceViolationException.class, () -> validator.resolve("dangling/new.txt"));
+    }
+
+    @Test
+    void acceptsAbsolutePathsThroughWorkspaceAlias() throws IOException {
+        Path real = Files.createDirectory(workspace.resolve("real"));
+        Path alias = workspace.resolve("alias");
+        symlink(alias, real);
+        Files.writeString(real.resolve("existing.txt"), "content");
+        PathValidator validator = new PathValidator(alias);
+        assertEquals(real.resolve("existing.txt").toRealPath(),
+            validator.resolve(alias.resolve("existing.txt").toString()));
+        assertEquals(real.toRealPath().resolve("new/child.txt"),
+            validator.resolve(alias.resolve("new/child.txt").toString()));
+    }
+
+    @Test
+    void resolvesInternalSymlinkToCanonicalFile() throws IOException {
+        Path target = Files.writeString(workspace.resolve("target.txt"), "content");
+        symlink(workspace.resolve("link.txt"), target);
+        assertEquals(target.toRealPath(), new PathValidator(workspace).resolve("link.txt"));
+    }
+
+    private static void symlink(Path link, Path target) throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (UnsupportedOperationException | IOException | SecurityException e) {
+            assumeTrue(false, "当前账户无法创建符号链接：" + e.getMessage());
+        }
     }
 
     @Test

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -59,6 +60,60 @@ class ApplyPatchToolTest {
 
     private ToolResult apply(String patch) {
         return tool.executeResult(Map.of("patch", patch));
+    }
+
+    @Test
+    void rejectsMultipleMovesToTheSameTargetBeforeWriting() throws IOException {
+        write("a.txt", "a\n");
+        write("c.txt", "c\n");
+        ToolResult result = apply("""
+            *** Begin Patch
+            *** Update File: a.txt
+            *** Move to: b.txt
+            -a
+            +A
+            *** Update File: c.txt
+            *** Move to: b.txt
+            -c
+            +C
+            *** End Patch
+            """);
+        assertTrue(result.text().contains("出现多次"), result.text());
+        assertEquals("a\n", Files.readString(workspace.resolve("a.txt")));
+        assertEquals("c\n", Files.readString(workspace.resolve("c.txt")));
+        assertFalse(Files.exists(workspace.resolve("b.txt")));
+        assertTrue(snapshots.isEmpty());
+    }
+
+    @Test
+    void rejectsAddAndMoveTargetCollisionInEitherOrder() throws IOException {
+        write("a.txt", "a\n");
+        String move = "*** Update File: a.txt\n*** Move to: b.txt\n-a\n+A\n";
+        String add = "*** Add File: b.txt\n+B\n";
+        for (String operations : List.of(move + add, add + move)) {
+            ToolResult result = apply("*** Begin Patch\n" + operations + "*** End Patch");
+            assertTrue(result.text().contains("出现多次"), result.text());
+            assertEquals("a\n", Files.readString(workspace.resolve("a.txt")));
+            assertFalse(Files.exists(workspace.resolve("b.txt")));
+        }
+    }
+
+    @Test
+    void moveDoesNotOverwriteTargetCreatedAfterPlanning() throws IOException {
+        write("a.txt", "a\n");
+        tool = new ApplyPatchTool(new PathValidator(workspace), file -> {
+            if (file.getFileName().toString().equals("b.txt")) {
+                try {
+                    Files.writeString(file, "concurrent content");
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            }
+        }, ReadGuard.allowAll());
+        ToolResult result = apply("*** Begin Patch\n*** Update File: a.txt\n*** Move to: b.txt\n-a\n+A\n*** End Patch");
+        assertTrue(result.text().startsWith("ERROR"), result.text());
+        assertEquals("concurrent content", Files.readString(workspace.resolve("b.txt")));
+        assertEquals("a\n", Files.readString(workspace.resolve("a.txt")));
     }
 
     @Test

@@ -1,7 +1,7 @@
 import type { SessionSummary } from '../types/core.js';
 import { TextInput } from '@astryxdesign/core/TextInput';
 import { shortcut } from '../lib/interaction.js';
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '../store.js';
 import { WorkspaceTree } from './WorkspaceTree.jsx';
 import { groupSessionsByProject } from '../lib/projects.js';

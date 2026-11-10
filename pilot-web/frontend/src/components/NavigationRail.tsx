@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { UiState } from '../types/store.js';
 import { useStore } from '../store.js';
 import { shortcut } from '../lib/interaction.js';

@@ -4,20 +4,29 @@ import java.awt.Desktop;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import org.springframework.stereotype.Service;
@@ -71,6 +80,8 @@ public class FileWorkbenchService {
     public record Download(String filename, String contentType, byte[] content) {
     }
 
+    // 有界分段锁，避免每个历史文件留下一个永久锁对象；回退和快照共用同一把锁。
+    private final Object[] versionLocks = IntStream.range(0, 64).mapToObj(i -> new Object()).toArray();
     private final AutomationStore store;
     private final ObjectMapper mapper;
     private final WorkspaceToolFactory workspaces;
@@ -95,22 +106,10 @@ public class FileWorkbenchService {
             return List.of();
         }
         List<FileAsset> assets = new ArrayList<>();
-        try (Stream<Path> paths = Files.walk(root, MAX_DEPTH)) {
-            for (Path file : (Iterable<Path>)paths.filter(Files::isRegularFile)::iterator) {
-                if (assets.size() >= MAX_FILES) {
-                    break;
-                }
-                String relative = root.relativize(file).toString().replace('\\', '/');
-                if (hidden(root, file) || !format(relative).isPresent() || Files.size(file) > MAX_FILE_BYTES
-                    || Files.size(file) == 0) {
-                    continue;
-                }
-                String sha = sha256(file);
-                String id = assetId(relative);
-                assets.add(new FileAsset(id, sessionId, relative, file.getFileName().toString(),
-                    format(relative).orElseThrow(), Files.size(file), sha,
-                    Files.getLastModifiedTime(file).toInstant().toString(), changedExternally(sessionId, id, sha)));
-            }
+        Map<String, Version> latest = latestVersions(sessionId);
+        for (Path file : scan(root)) {
+            String relative = root.relativize(file).toString().replace('\\', '/');
+            assets.add(describe(sessionId, file, relative, latest.get(assetId(relative))));
         }
         assets.sort(Comparator.comparing(FileAsset::path));
         return assets;
@@ -119,21 +118,17 @@ public class FileWorkbenchService {
     public FileAsset asset(String sessionId, String id) throws IOException {
         Path file = resolve(sessionId, id);
         String relative = root(sessionId).relativize(file).toString().replace('\\', '/');
-        String sha = sha256(file);
-        return new FileAsset(id, sessionId, relative, file.getFileName().toString(), format(relative).orElseThrow(),
-            Files.size(file), sha, Files.getLastModifiedTime(file).toInstant().toString(),
-            changedExternally(sessionId, id, sha));
+        List<Version> versions = versions(sessionId, id);
+        return describe(sessionId, file, relative, versions.isEmpty() ? null : versions.getLast());
     }
 
     public Path resolve(String sessionId, String id) throws IOException {
         Path root = root(sessionId);
-        for (FileAsset asset : list(sessionId)) {
-            if (asset.id().equals(id)) {
-                Path file = root.resolve(asset.path()).normalize();
-                if (!file.startsWith(root) || !Files.isRegularFile(file)) {
-                    throw new IllegalArgumentException("文件已不在工作区中：" + asset.path());
-                }
-                return file;
+        // 只扫描路径，不为一次下载/预览计算整个工作区的哈希或读取所有版本。
+        for (Path file : scan(root)) {
+            String relative = root.relativize(file).toString().replace('\\', '/');
+            if (assetId(relative).equals(id)) {
+                return new PathValidator(root).resolve(relative);
             }
         }
         throw new IllegalArgumentException("找不到文件：" + id + "。文件可能已被移动、改名或删除，请刷新列表。");
@@ -197,61 +192,72 @@ public class FileWorkbenchService {
     }
 
     public List<Version> versions(String sessionId, String id) {
-        List<Version> versions = new ArrayList<>();
-        for (AutomationStore.Document document : store.list(VERSION_KIND)) {
-            if (!document.id().startsWith(sessionId + ":" + id + ":")) {
-                continue;
-            }
-            try {
-                versions.add(mapper.readValue(document.payload(), Version.class));
-            } catch (Exception ignored) {
-                // 损坏的元数据不应影响文件本身
-            }
-        }
-        versions.sort(Comparator.comparingLong(Version::version));
-        return versions;
+        return readMetadata(VERSION_KIND, key(sessionId, id, ""), Version.class).values().stream()
+            .sorted(Comparator.comparingLong(Version::version)).toList();
     }
 
     /** 快照是 copy-on-write：只复制一份到运行期目录，工作区文件始终原地可编辑。 */
     public Version snapshot(String sessionId, String id, String label) throws IOException {
-        Path file = resolve(sessionId, id);
-        List<Version> existing = versions(sessionId, id);
-        long next = existing.isEmpty() ? 1L : existing.get(existing.size() - 1).version() + 1;
-        Version version = new Version(next, sha256(file), Instant.now().toString(),
-            label == null || label.isBlank() ? "快照 " + next : label.trim());
+        synchronized (versionLock(sessionId, id)) {
+            Path file = resolve(sessionId, id);
+            List<Version> existing = versions(sessionId, id);
+            return snapshotFile(sessionId, id, file, label, nextVersion(existing));
+        }
+    }
+
+    private Version snapshotFile(String sessionId, String id, Path file, String label, long next) throws IOException {
         Path directory = dataDir.file("file-versions", sessionId, id);
         Files.createDirectories(directory);
-        Files.copy(file, directory.resolve("v" + next + extension(file)), StandardCopyOption.REPLACE_EXISTING);
-        store.put(VERSION_KIND, key(sessionId, id, String.valueOf(next)), 0, write(version));
-        return version;
+        Path saved = directory.resolve("v" + next + extension(file));
+        // CREATE_NEW 同时保护磁盘上未登记的旧快照，任何冲突都明确失败。
+        var output = Files.newOutputStream(saved, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+        boolean committed = false;
+        try {
+            try (output; InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
+                input.transferTo(output);
+            }
+            Version version = new Version(next, sha256(saved), Instant.now().toString(),
+                label == null || label.isBlank() ? "快照 " + next : label.trim());
+            if (!store.put(VERSION_KIND, key(sessionId, id, String.valueOf(next)), 0, write(version))) {
+                throw new IOException("快照版本冲突，请刷新后重试：v" + next);
+            }
+            committed = true;
+            return version;
+        } finally {
+            if (!committed) {
+                Files.deleteIfExists(saved);
+            }
+        }
+    }
+
+    private static long nextVersion(List<Version> versions) {
+        return versions.isEmpty() ? 1L : versions.getLast().version() + 1;
     }
 
     /** 回退先把当前状态另存为新快照，再覆盖工作区文件，不丢失任何历史。 */
     public Version revert(String sessionId, String id, long version) throws IOException {
-        Path file = resolve(sessionId, id);
-        Path saved = dataDir.file("file-versions", sessionId, id).resolve("v" + version + extension(file));
-        if (!Files.isRegularFile(saved)) {
-            throw new IllegalArgumentException("快照 v" + version + " 不存在，无法回退");
+        synchronized (versionLock(sessionId, id)) {
+            Path file = resolve(sessionId, id);
+            Path saved = dataDir.file("file-versions", sessionId, id).resolve("v" + version + extension(file));
+            List<Version> existing = versions(sessionId, id);
+            if (!Files.isRegularFile(saved, LinkOption.NOFOLLOW_LINKS)
+                || existing.stream().noneMatch(item -> item.version() == version)) {
+                throw new IllegalArgumentException("快照 v" + version + " 不存在，无法回退");
+            }
+            long next = nextVersion(existing);
+            snapshotFile(sessionId, id, file, "回退前的当前版本", next);
+            Files.copy(saved, file, StandardCopyOption.REPLACE_EXISTING);
+            return snapshotFile(sessionId, id, file, "回退到 v" + version, next + 1);
         }
-        snapshot(sessionId, id, "回退前的当前版本");
-        Files.copy(saved, file, StandardCopyOption.REPLACE_EXISTING);
-        return snapshot(sessionId, id, "回退到 v" + version);
+    }
+
+    private Object versionLock(String sessionId, String id) {
+        return versionLocks[Math.floorMod(key(sessionId, id, "").hashCode(), versionLocks.length)];
     }
 
     public List<Annotation> annotations(String sessionId, String id) {
-        List<Annotation> result = new ArrayList<>();
-        for (AutomationStore.Document document : store.list(ANNOTATION_KIND)) {
-            if (!document.id().startsWith(sessionId + ":" + id + ":")) {
-                continue;
-            }
-            try {
-                result.add(mapper.readValue(document.payload(), Annotation.class));
-            } catch (Exception ignored) {
-                // 损坏的批注不应影响文件本身
-            }
-        }
-        result.sort(Comparator.comparing(Annotation::createdAt));
-        return result;
+        return readMetadata(ANNOTATION_KIND, key(sessionId, id, ""), Annotation.class).values().stream()
+            .sorted(Comparator.comparing(Annotation::createdAt)).toList();
     }
 
     public Annotation annotate(String sessionId, String id, int page, String anchor, String text) throws IOException {
@@ -315,10 +321,8 @@ public class FileWorkbenchService {
     /** 会话结束时只清理运行期元数据与预览缓存，工作区文件由用户保留。 */
     public void deleteBySession(String sessionId) {
         for (String kind : List.of(ANNOTATION_KIND, VERSION_KIND)) {
-            for (AutomationStore.Document document : store.list(kind)) {
-                if (document.id().startsWith(sessionId + ":")) {
-                    store.delete(kind, document.id(), document.version());
-                }
+            for (AutomationStore.Document document : store.list(kind, sessionId + ":")) {
+                store.delete(kind, document.id(), document.version());
             }
         }
         for (String folder : List.of("file-workbench", "file-versions")) {
@@ -328,21 +332,23 @@ public class FileWorkbenchService {
 
     private FileAsset assetByPath(String sessionId, Path root, Path file) throws IOException {
         String relative = root.relativize(file).toString().replace('\\', '/');
+        return describe(sessionId, file, relative, null);
+    }
+
+    private static FileAsset describe(String sessionId, Path file, String relative, Version latest) throws IOException {
         String sha = sha256(file);
+        BasicFileAttributes attributes =
+            Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         return new FileAsset(assetId(relative), sessionId, relative, file.getFileName().toString(),
-            format(relative).orElseThrow(), Files.size(file), sha,
-            Files.getLastModifiedTime(file).toInstant().toString(), false);
+            format(relative).orElseThrow(), attributes.size(), sha,
+            attributes.lastModifiedTime().toInstant().toString(), latest != null && !latest.sha256().equals(sha));
     }
 
-    private boolean changedExternally(String sessionId, String id, String currentSha) {
-        List<Version> versions = versions(sessionId, id);
-        return !versions.isEmpty() && !versions.get(versions.size() - 1).sha256().equals(currentSha);
-    }
-
-    private Path root(String sessionId) {
+    private Path root(String sessionId) throws IOException {
         String workspace =
             sessions.find(sessionId).orElseThrow(() -> new IllegalArgumentException("会话不存在")).workspace();
-        return workspaces.resolve(workspace);
+        Path root = workspaces.resolve(workspace);
+        return Files.isDirectory(root) ? root.toRealPath() : root.toAbsolutePath().normalize();
     }
 
     private static String key(String sessionId, String id, String suffix) {
@@ -369,20 +375,74 @@ public class FileWorkbenchService {
         return dot < 0 ? name : name.substring(0, dot);
     }
 
-    private static boolean hidden(Path root, Path file) {
-        for (Path part : root.relativize(file)) {
-            String name = part.toString();
-            if (name.startsWith(".") || SKIP_DIRECTORIES.contains(name)) {
-                return true;
+    private static boolean hidden(Path file) {
+        String name = file.getFileName().toString();
+        return name.startsWith(".") || SKIP_DIRECTORIES.contains(name);
+    }
+
+    private static List<Path> scan(Path root) throws IOException {
+        if (!Files.isDirectory(root)) {
+            return List.of();
+        }
+        PathValidator validator = new PathValidator(root);
+        List<Path> files = new ArrayList<>();
+        Files.walkFileTree(root, Set.of(), MAX_DEPTH, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attrs) {
+                return !directory.equals(root) && hidden(directory) ? FileVisitResult.SKIP_SUBTREE
+                    : FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                // 不跟随文件或目录链接；每次操作重新校验，旧列表不能授予文件读取权限。
+                if (attrs.isRegularFile() && !hidden(file) && format(file.toString()).isPresent() && attrs.size() > 0
+                    && attrs.size() <= MAX_FILE_BYTES) {
+                    try {
+                        files.add(validator.resolve(file.toString()));
+                    } catch (RuntimeException ignored) {
+                        // 扫描期间被移动/替换成工作区外链接的文件不可访问。
+                    }
+                }
+                return files.size() >= MAX_FILES ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
+            }
+        });
+        return files;
+    }
+
+    /** 列表一次读取版本元数据，避免每个文件都扫描全部历史。 */
+    private Map<String, Version> latestVersions(String sessionId) {
+        Map<String, Version> latest = new HashMap<>();
+        String prefix = sessionId + ":";
+        readMetadata(VERSION_KIND, prefix, Version.class).forEach((key, version) -> {
+            int end = key.lastIndexOf(':');
+            if (end >= prefix.length()) {
+                String id = key.substring(prefix.length(), end);
+                latest.merge(id, version, (left, right) -> left.version() > right.version() ? left : right);
+            }
+        });
+        return latest;
+    }
+
+    private <T> Map<String, T> readMetadata(String kind, String prefix, Class<T> type) {
+        Map<String, T> result = new LinkedHashMap<>();
+        for (AutomationStore.Document document : store.list(kind, prefix)) {
+            try {
+                T value = mapper.readValue(document.payload(), type);
+                if (value != null) {
+                    result.put(document.id(), value);
+                }
+            } catch (RuntimeException ignored) {
+                // 单条损坏的元数据不影响其他记录及工作区文件。
             }
         }
-        return false;
+        return result;
     }
 
     private static String sha256(Path file) throws IOException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream in = Files.newInputStream(file)) {
+            try (InputStream in = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
                 byte[] buffer = new byte[8192];
                 int read;
                 while ((read = in.read(buffer)) > 0) {
