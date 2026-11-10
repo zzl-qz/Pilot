@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
@@ -12,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.maintenance.StorageHealth;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -75,5 +78,21 @@ class ValidationLedgerTest {
 
         assertEquals(1, ledger.deleteBySession("ses_1"));
         assertTrue(ledger.recent("ses_1").isEmpty());
+    }
+
+    @Test
+    void failedPersistenceCannotBeReportedAsReliableEvidence() throws IOException {
+        StorageHealth.reset();
+        Path blockedRoot = dataDir.resolve("not-a-directory");
+        Files.writeString(blockedRoot, "file");
+        ValidationLedger ledger = new ValidationLedger(new PilotDataDir(blockedRoot.toString()),
+            JsonMapper.builder().build());
+        ledger.record(evidence("hash-a", "passed"));
+
+        ValidationLedger.Report report = ledger.report("ses_1", "hash-a");
+        assertFalse(report.current());
+        assertTrue(report.reason().contains("内存中"), report.reason());
+        assertFalse(StorageHealth.snapshot().healthy());
+        StorageHealth.reset();
     }
 }

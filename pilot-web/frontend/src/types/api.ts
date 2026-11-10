@@ -131,6 +131,7 @@ export interface ApiResults {
   recovery: S.RecoveryReportServiceSnapshot;
   maintenanceStatus: S.MaintenanceControllerStatus;
   backupNow: S.BackupServiceBackupReport;
+  verifyBackup: S.BackupServiceVerificationReport;
   purgeNow: S.RetentionServicePurgeReport;
   results: S.ResultInboxServicePage;
   result: S.ResultInboxServiceDetail;

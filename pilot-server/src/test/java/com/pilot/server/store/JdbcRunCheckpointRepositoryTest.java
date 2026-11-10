@@ -60,6 +60,16 @@ class JdbcRunCheckpointRepositoryTest {
     }
 
     @Test
+    void leaseExpiryHandlesMixedFractionalPrecision() {
+        JdbcRunCheckpointRepository repository = repository();
+        Instant start = Instant.parse("2026-01-01T00:00:00.500Z");
+        repository.save(checkpoint("run_fraction", "ses_1", "a", start, Duration.ofMillis(500)));
+
+        assertTrue(repository.claimLease("run_fraction", "b", Instant.parse("2026-01-01T00:00:01.100Z"),
+            Duration.ofSeconds(30)));
+    }
+
+    @Test
     void renewOnlyWorksForTheHolder() {
         JdbcRunCheckpointRepository repository = repository();
         Instant now = Instant.now();

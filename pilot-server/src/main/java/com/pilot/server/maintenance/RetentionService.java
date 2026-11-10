@@ -82,22 +82,26 @@ public class RetentionService {
         SqliteStore sqlite = store.getIfAvailable();
         if (retentionDays > 0) {
             Instant cutoff = now.minus(retentionDays, ChronoUnit.DAYS);
+            java.util.Set<String> activeRuns = sqlite == null ? java.util.Set.of() : sqlite.activeRunIds();
+            java.util.Set<String> activeSessions = sqlite == null ? java.util.Set.of() : sqlite.activeSessionIds();
             events = sqlite == null ? 0 : sqlite.deleteEventsBefore(cutoff);
-            snapshotRuns = snapshots.purgeOlderThan(cutoff);
-            traces = deleteFilesBefore(dataDir.file("traces"), cutoff);
+            snapshotRuns = snapshots.purgeOlderThan(cutoff, activeRuns);
+            traces = deleteFilesBefore(dataDir.file("traces"), cutoff, activeSessions, true);
             if (sqlite != null && events > 0) {
                 sqlite.checkpoint();
             }
         }
         int backupCount = backupDays > 0 ? backups.purgeOlderThan(now.minus(backupDays, ChronoUnit.DAYS)) : 0;
         int validationFiles = validationDays > 0
-            ? deleteFilesBefore(dataDir.file("validation"), now.minus(validationDays, ChronoUnit.DAYS)) : 0;
-        // 附件按独立保留期清理：孤儿目录整删，在册会话按 mtime 清早于 cutoff 的文件（含图片）
+            ? deleteFilesBefore(dataDir.file("validation"), now.minus(validationDays, ChronoUnit.DAYS),
+                sqlite == null ? java.util.Set.of() : sqlite.activeSessionIds(), false)
+            : 0;
+        // 附件只清理已删除会话留下的孤儿目录；在册会话附件可能仍被历史消息引用。
         int attachmentFiles = 0;
         int attachmentDirs = 0;
         if (attachmentsDays > 0) {
-            AttachmentService.PurgeStats stats = attachments.purge(now.minus(attachmentsDays, ChronoUnit.DAYS),
-                sessions.list().stream().map(Session::id).toList());
+            AttachmentService.PurgeStats stats =
+                attachments.purge(sessions.list().stream().map(Session::id).toList());
             attachmentFiles = stats.files();
             attachmentDirs = stats.dirs();
         }
@@ -106,7 +110,8 @@ public class RetentionService {
     }
 
     /** 删除某个数据目录下早于 cutoff 的普通文件；目录不存在时返回 0。 */
-    private int deleteFilesBefore(Path directory, Instant cutoff) {
+    private int deleteFilesBefore(Path directory, Instant cutoff, java.util.Set<String> protectedSessions,
+        boolean sessionPrefix) {
         if (!Files.isDirectory(directory)) {
             return 0;
         }
@@ -114,7 +119,11 @@ public class RetentionService {
         try (Stream<Path> entries = Files.list(directory)) {
             for (Path file : entries.filter(Files::isRegularFile).toList()) {
                 try {
-                    if (Files.getLastModifiedTime(file).toInstant().isBefore(cutoff)) {
+                    String name = file.getFileName().toString();
+                    boolean protectedFile = protectedSessions.stream().anyMatch(session -> sessionPrefix
+                        ? name.equals(session + ".jsonl") || name.startsWith(session + "-")
+                        : name.equals(session + ".json"));
+                    if (!protectedFile && Files.getLastModifiedTime(file).toInstant().isBefore(cutoff)) {
                         Files.deleteIfExists(file);
                         removed++;
                     }

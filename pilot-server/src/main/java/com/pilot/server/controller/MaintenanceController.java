@@ -41,6 +41,11 @@ public class MaintenanceController {
         return backups.backup();
     }
 
+    @PostMapping("/backup/verify")
+    public BackupService.VerificationReport verifyBackup() {
+        return backups.verifyLatestBackup();
+    }
+
     @PostMapping("/purge")
     public RetentionService.PurgeReport purge() {
         return retention.purgeNow();

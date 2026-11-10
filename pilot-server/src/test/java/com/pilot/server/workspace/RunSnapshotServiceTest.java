@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.time.Instant;
 import java.util.List;
 
 import org.junit.jupiter.api.Assumptions;
@@ -61,6 +63,23 @@ class RunSnapshotServiceTest {
         assertEquals(List.of("a.txt"), report.restored());
         assertEquals(List.of("dir/b.txt"), report.deleted());
         assertTrue(report.failed().isEmpty());
+    }
+
+    @Test
+    void retentionKeepsSnapshotsForResumableRuns() throws IOException {
+        Path file = workspace.resolve("a.txt");
+        Files.writeString(file, "original");
+        snapshots.bind("run_active", workspace);
+        snapshots.beforeWrite(file);
+        snapshots.finish();
+        snapshots.clear();
+        Path snapshot = storage.resolve("run_active");
+        Files.setLastModifiedTime(snapshot, FileTime.from(Instant.EPOCH));
+
+        assertEquals(0, snapshots.purgeOlderThan(Instant.now(), java.util.Set.of("run_active")));
+        assertTrue(Files.exists(snapshot));
+        assertEquals(1, snapshots.purgeOlderThan(Instant.now()));
+        assertFalse(Files.exists(snapshot));
     }
 
     @Test

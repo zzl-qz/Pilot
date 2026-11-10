@@ -53,8 +53,9 @@ public final class JdbcProjectRepository implements ProjectRepository {
 
     @Override
     public List<Project> list() {
+        String updatedAt = SqliteStore.normalizedInstantSql("updated_at");
         List<Project> heads = JdbcSupport.query(store,
-            "SELECT id, name, created_at, updated_at, base_commit FROM projects ORDER BY updated_at DESC",
+            "SELECT id, name, created_at, updated_at, base_commit FROM projects ORDER BY " + updatedAt + " DESC",
             statement -> {
             }, JdbcProjectRepository::mapHead, "读取项目列表失败");
         if (heads.isEmpty()) {

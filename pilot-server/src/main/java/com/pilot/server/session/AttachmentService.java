@@ -235,6 +235,10 @@ public class AttachmentService {
         return root.resolve(safeName(sessionId, 80));
     }
 
+    public Path root() {
+        return root;
+    }
+
     /** 附件清理结果：删除的文件数与目录数。 */
     public record PurgeStats(int files, int dirs) {
     }
@@ -245,10 +249,10 @@ public class AttachmentService {
     }
 
     /**
-     * 按保留策略清理附件：目录名不在在册会话里的整目录删除（孤儿，含图片）；
-     * 在册会话只删早于 cutoff 的文件（图片与非图片都参与），目录清空后删除。
+     * 按保留策略清理附件：只删除不再属于在册会话的孤儿目录。
+     * 在册会话的历史消息可能仍引用旧附件，因此不能仅凭修改时间删除。
      */
-    public PurgeStats purge(Instant cutoff, Collection<String> liveSessionIds) {
+    public PurgeStats purge(Collection<String> liveSessionIds) {
         Set<String> live = liveSessionIds == null ? Set.of()
             : liveSessionIds.stream().map(id -> safeName(id, 80)).collect(Collectors.toSet());
         if (!Files.isDirectory(root)) {
@@ -265,11 +269,7 @@ public class AttachmentService {
                     dirs += removed.dirs();
                     continue;
                 }
-                files += deleteFilesBefore(sessionDir, cutoff);
-                if (isEmptyDirectory(sessionDir)) {
-                    deleteTree(sessionDir);
-                    dirs++;
-                }
+                // Keep files referenced by retained conversation history.
             }
         } catch (IOException e) {
             log.warn("遍历附件目录失败: {}", root, e);
@@ -319,34 +319,6 @@ public class AttachmentService {
             log.warn("遍历附件目录失败: {}", dir, e);
         }
         return new PurgeStats(files, dirs);
-    }
-
-    private static int deleteFilesBefore(Path directory, Instant cutoff) {
-        int removed = 0;
-        try (Stream<Path> entries = Files.list(directory)) {
-            for (Path file : entries.filter(Files::isRegularFile).toList()) {
-                try {
-                    if (Files.getLastModifiedTime(file).toInstant().isBefore(cutoff)) {
-                        if (Files.deleteIfExists(file)) {
-                            removed++;
-                        }
-                    }
-                } catch (IOException e) {
-                    log.warn("清理附件 {} 失败", file, e);
-                }
-            }
-        } catch (IOException e) {
-            log.warn("遍历附件目录失败: {}", directory, e);
-        }
-        return removed;
-    }
-
-    private static boolean isEmptyDirectory(Path dir) {
-        try (Stream<Path> entries = Files.list(dir)) {
-            return entries.findFirst().isEmpty();
-        } catch (IOException e) {
-            return false;
-        }
     }
 
     private Attachment save(String sessionId, String name, String mime, byte[] bytes) {

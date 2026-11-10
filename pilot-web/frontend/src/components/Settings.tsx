@@ -580,7 +580,7 @@ function DiagnosticsSettings() {
     return () => { sequence.current++; };
   }, [load]);
 
-  const run = async (kind: 'backup' | 'purge') => {
+  const run = async (kind: 'backup' | 'verify' | 'purge') => {
     if (busy) return;
     setBusy(kind);
     setNotice(null);
@@ -588,8 +588,13 @@ function DiagnosticsSettings() {
       if (kind === 'backup') {
         const report = await api.backupNow();
         setNotice(report?.ok
-          ? { message: `已备份 ${report.files} 个文件到 ${report.directory}` }
+          ? { message: `已备份 ${report.files} 个文件到 ${report.directory}。${report.message}` }
           : { message: report?.message || '备份未完成。', error: true });
+      } else if (kind === 'verify') {
+        const report = await api.verifyBackup();
+        setNotice(report?.valid
+          ? { message: `${report.message}（${report.checkedFiles} 个文件）` }
+          : { message: `${report?.message || '备份校验失败'}：${report?.failures?.join('；') || '没有可校验的备份'}`, error: true });
       } else {
         const report = await api.purgeNow();
         if (!report) throw new Error('服务端未确认清理结果，请刷新诊断信息。');
@@ -640,6 +645,7 @@ function DiagnosticsSettings() {
               )}
               <div className="settings-inline-actions">
                 <Button label={busy === 'backup' ? '备份中…' : '立即备份'} isDisabled={Boolean(busy)} onClick={() => void run('backup')} />
+                <Button label={busy === 'verify' ? '校验中…' : '校验最近备份'} variant="ghost" isDisabled={Boolean(busy)} onClick={() => void run('verify')} />
                 <Button label={busy === 'purge' ? '清理中…' : '清理过期数据'} variant="ghost" className="settings-danger"
                   isDisabled={Boolean(busy)} onClick={() => useStore.getState().askConfirm({
                     title: '清理过期数据',

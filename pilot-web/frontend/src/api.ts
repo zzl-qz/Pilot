@@ -232,6 +232,7 @@ export const api = {
   recovery: () => apiJson<ApiResults['recovery']>('/api/recovery'),
   maintenanceStatus: () => apiJson<ApiResults['maintenanceStatus']>('/api/maintenance/status'),
   backupNow: () => apiJson<ApiResults['backupNow']>('/api/maintenance/backup', { method: 'POST' }, 120000),
+  verifyBackup: () => apiJson<ApiResults['verifyBackup']>('/api/maintenance/backup/verify', { method: 'POST' }, 120000),
   purgeNow: () => apiJson<ApiResults['purgeNow']>('/api/maintenance/purge', { method: 'POST' }, 120000),
   results: () => apiJson<ApiResults['results']>('/api/results'),
   result: (id: string) => apiJson<ApiResults['result']>(`/api/results/${encodeURIComponent(id)}`),

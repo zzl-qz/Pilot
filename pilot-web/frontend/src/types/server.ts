@@ -98,6 +98,15 @@ export interface BackupServiceBackupReport {
   createdAt: string;
 }
 
+/** BackupService.java / VerificationReport */
+export interface BackupServiceVerificationReport {
+  valid: boolean;
+  directory: string;
+  checkedFiles: number;
+  failures: (string)[];
+  message: string;
+}
+
 /** BackupService.java / Status */
 export interface BackupServiceStatus {
   dataDir: string;

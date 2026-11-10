@@ -20,6 +20,7 @@ import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.session.NoSuchSessionException;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionStatus;
+import com.pilot.core.session.RunCheckpoint;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -150,6 +151,26 @@ class JdbcSessionRepositoryTest {
         assertEquals(0, repo.eventCount("ses_1"));
         // 会话本身不能被清理掉，否则界面上的记录会凭空消失
         assertTrue(repo.find("ses_1").isPresent());
+    }
+
+    @Test
+    void eventRetentionComparesFractionalInstantsAndProtectsResumableRuns() {
+        SqliteStore store = new SqliteStore(database);
+        JdbcSessionRepository repo = new JdbcSessionRepository(store, new EventCodec(JsonMapper.builder().build()));
+        repo.create("ses_time", "时间边界", null, Instant.parse("2020-01-01T00:00:00Z"));
+        repo.append("ses_time", "run_time", Instant.parse("2020-01-01T00:00:00.1Z"), new RunStarted("保留"),
+            SessionStatus.COMPLETED);
+        repo.append("ses_time", "run_time", Instant.parse("2020-01-01T00:00:00Z"), new RunStarted("删除"),
+            SessionStatus.COMPLETED);
+
+        assertEquals(1, store.deleteEventsBefore(Instant.parse("2020-01-01T00:00:00.05Z")));
+        assertEquals(1, repo.eventCount("ses_time"));
+
+        repo.append("ses_time", "run_active", Instant.parse("2020-01-01T00:00:00Z"), new RunStarted("活动"),
+            SessionStatus.RUNNING);
+        new JdbcRunCheckpointRepository(store).save(RunCheckpoint.start("run_active", "ses_time", "/work", "owner",
+            Instant.parse("2020-01-01T00:00:00Z"), java.time.Duration.ofSeconds(30)));
+        assertEquals(0, store.deleteEventsBefore(Instant.parse("2021-01-01T00:00:00Z")));
     }
 
     @Test

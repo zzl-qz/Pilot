@@ -42,7 +42,7 @@ class RetentionServiceTest {
     }
 
     @Test
-    void purgesOrphanDirectoriesAndExpiredFilesForLiveSessions() throws IOException {
+    void purgesOrphanDirectoriesAndKeepsLiveSessionAttachments() throws IOException {
         AttachmentService attachments = attachments();
         SessionService sessions = new SessionService(Clock.systemUTC(), new InMemorySessionRepository());
         String liveId = sessions.createSession("标题", null).id();
@@ -53,10 +53,10 @@ class RetentionServiceTest {
 
         RetentionService.PurgeReport report = retention(attachments, sessions, 1).purgeNow();
 
-        assertEquals(2, report.attachments(), "孤儿文件 + 过期文件");
+        assertEquals(1, report.attachments(), "只清除孤儿文件");
         assertEquals(1, report.attachmentDirs(), "孤儿目录");
         assertFalse(Files.exists(orphan), "孤儿整目录回收");
-        assertFalse(Files.exists(liveOld), "过期图片也参与清理");
+        assertTrue(Files.exists(liveOld), "在册会话的历史消息可能仍引用旧附件");
         assertTrue(Files.exists(liveNew), "未过期文件保留");
     }
 

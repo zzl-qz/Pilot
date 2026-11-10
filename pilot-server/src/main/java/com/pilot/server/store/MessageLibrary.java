@@ -197,6 +197,7 @@ public class MessageLibrary {
         } else {
             // MATCH 仅处理转义后的字面短语，避免用户的引号、星号或布尔词变成查询语法。
             boolean fts = term.codePointCount(0, term.length()) >= 3;
+            String createdAt = SqliteStore.normalizedInstantSql("e.created_at");
             String sql = "SELECT m.session_id,m.sequence,m.text,s.title,e.type,b.sequence AS saved, "
                 + "COALESCE((SELECT MAX(u.sequence) FROM events u WHERE u.session_id=m.session_id AND u.sequence<=m.sequence AND u.type IN ('run.started','run.steered')),m.sequence) AS anchor "
                 + "FROM message_search m JOIN sessions s ON s.id=m.session_id JOIN events e ON e.session_id=m.session_id AND e.sequence=m.sequence LEFT JOIN message_bookmarks b ON b.session_id=m.session_id AND b.sequence=m.sequence "
@@ -204,7 +205,7 @@ public class MessageLibrary {
                 + (fts ? "AND message_search MATCH ? " : "AND instr(lower(m.text),lower(?))>0 ")
                 + ((session != null && !session.isBlank()) ? "AND m.session_id=? " : "")
                 + (saved ? "AND b.sequence IS NOT NULL " : "")
-                + "ORDER BY e.created_at DESC,m.session_id,m.sequence DESC LIMIT 51 OFFSET ?";
+                + "ORDER BY " + createdAt + " DESC,m.session_id,m.sequence DESC LIMIT 51 OFFSET ?";
             rows = JdbcSupport.query(store, sql, q -> {
                 int i = 1;
                 q.setString(i++, fts ? '"' + term.replace("\"", "\"\"") + '"' : term);

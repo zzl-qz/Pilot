@@ -666,6 +666,10 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
 
     /** 删除最后修改时间早于 {@code cutoff} 的运行快照，返回删掉的运行数。 */
     public int purgeOlderThan(java.time.Instant cutoff) {
+        return purgeOlderThan(cutoff, Set.of());
+    }
+
+    public int purgeOlderThan(java.time.Instant cutoff, Set<String> protectedRunIds) {
         if (!Files.isDirectory(root)) {
             return 0;
         }
@@ -673,11 +677,16 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         try (Stream<Path> entries = Files.list(root)) {
             for (Path directory : entries.filter(Files::isDirectory).toList()) {
                 try {
-                    if (Files.getLastModifiedTime(directory).toInstant().isBefore(cutoff)) {
+                    Path metaFile = directory.resolve(META_FILE);
+                    String runId = Files.isRegularFile(metaFile)
+                        ? mapper.readValue(Files.readString(metaFile), SnapshotMeta.class).runId()
+                        : directory.getFileName().toString();
+                    if (!protectedRunIds.contains(runId)
+                        && Files.getLastModifiedTime(directory).toInstant().isBefore(cutoff)) {
                         deleteRecursively(directory);
                         removed++;
                     }
-                } catch (IOException e) {
+                } catch (IOException | RuntimeException e) {
                     log.warn("清理快照 {} 失败", directory, e);
                 }
             }

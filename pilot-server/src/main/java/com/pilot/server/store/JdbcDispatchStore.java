@@ -349,10 +349,11 @@ public final class JdbcDispatchStore {
         if (!available()) {
             return List.of();
         }
+        String createdAt = SqliteStore.normalizedInstantSql("created_at");
         return JdbcSupport.query(store, """
             SELECT dispatch_id, session_id, run_id, workspace, status, created_at, updated_at
-            FROM dispatches WHERE session_id = ? ORDER BY created_at
-            """, statement -> statement.setString(1, sessionId),
+            FROM dispatches WHERE session_id = ? ORDER BY %s
+            """.formatted(createdAt), statement -> statement.setString(1, sessionId),
             rows -> new DispatchRow(rows.getString("dispatch_id"), rows.getString("session_id"),
                 rows.getString("run_id"), rows.getString("workspace"), rows.getString("status"),
                 rows.getString("created_at"), rows.getString("updated_at")),

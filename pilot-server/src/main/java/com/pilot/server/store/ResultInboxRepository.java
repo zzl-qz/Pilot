@@ -60,20 +60,22 @@ public class ResultInboxRepository {
                     && !(e.payload() instanceof RunFailed f && Set.of("WAITING", "PAUSED").contains(f.code())))
                 .sorted(Comparator.comparing(EventEnvelope::timestamp).reversed()).limit(limit).toList();
         }
+        String createdAt = SqliteStore.normalizedInstantSql("created_at");
+        String sessionCreatedAt = SqliteStore.normalizedInstantSql("s.created_at");
         return JdbcSupport.query(store, """
             WITH candidates AS (
                 SELECT e.*, ROW_NUMBER() OVER (PARTITION BY e.run_id
-                    ORDER BY s.created_at, s.id, e.sequence DESC) AS result_rank
+                    ORDER BY %s, s.id, e.sequence DESC) AS result_rank
                 FROM events e JOIN sessions s ON s.id = e.session_id
                 WHERE (s.parent_session_id IS NULL OR s.parent_session_id = '')
                 AND e.type IN ('run.completed','run.failed','run.cancelled')
             )
             SELECT * FROM candidates WHERE result_rank=1 AND type != 'run.cancelled'
             AND (type != 'run.failed' OR COALESCE(json_extract(payload, '$.code'), '') NOT IN ('WAITING','PAUSED'))
-            AND julianday(created_at)>=julianday(?)
-            ORDER BY created_at DESC, session_id, sequence DESC LIMIT ?
-            """, q -> {
-            q.setString(1, since.toString());
+            AND %s >= ?
+            ORDER BY %s DESC, session_id, sequence DESC LIMIT ?
+            """.formatted(sessionCreatedAt, createdAt, createdAt), q -> {
+            q.setString(1, new java.time.format.DateTimeFormatterBuilder().appendInstant(9).toFormatter().format(since));
             q.setInt(2, limit);
         }, row -> new EventEnvelope(row.getLong("sequence"), Instant.parse(row.getString("created_at")),
             row.getString("type"), row.getString("session_id"), row.getString("run_id"),

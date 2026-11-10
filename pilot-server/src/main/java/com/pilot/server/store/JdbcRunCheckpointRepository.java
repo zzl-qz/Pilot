@@ -15,7 +15,6 @@ import com.pilot.core.session.RunCheckpointRepository;
  *
  * <p>租约抢占用一条带条件的 UPDATE 完成：条件里同时接受「没有持有者」「自己续租」
  * 「上一个租约已经过期」，因此不需要额外的分布式锁，也不会出现两个实例同时接管。
- * 时间统一用 {@link Instant#toString()} 存储，字典序等价于时间序。
  */
 public final class JdbcRunCheckpointRepository implements RunCheckpointRepository {
     private final SqliteStore store;
@@ -64,20 +63,22 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
 
     @Override
     public Optional<RunCheckpoint> activeForSession(String sessionId) {
+        String updatedAt = SqliteStore.normalizedInstantSql("updated_at");
         return JdbcSupport.queryOne(store, """
             SELECT * FROM run_checkpoints WHERE session_id = ?
               AND status IN ('RUNNING', 'INTERRUPTED', 'PAUSED')
-            ORDER BY updated_at DESC LIMIT 1
-            """, statement -> statement.setString(1, sessionId), JdbcRunCheckpointRepository::map,
+            ORDER BY %s DESC LIMIT 1
+            """.formatted(updatedAt), statement -> statement.setString(1, sessionId), JdbcRunCheckpointRepository::map,
             "读取会话检查点失败: " + sessionId);
     }
 
     @Override
     public List<RunCheckpoint> resumable() {
+        String updatedAt = SqliteStore.normalizedInstantSql("updated_at");
         return JdbcSupport.query(store, """
             SELECT * FROM run_checkpoints WHERE status IN ('RUNNING', 'INTERRUPTED', 'PAUSED')
-            ORDER BY updated_at ASC
-            """, statement -> {
+            ORDER BY %s ASC
+            """.formatted(updatedAt), statement -> {
         }, JdbcRunCheckpointRepository::map, "读取可恢复检查点失败");
     }
 
@@ -85,12 +86,13 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
     public boolean claimLease(String runId, String owner, Instant now, Duration lease) {
         Instant at = now == null ? Instant.now() : now;
         Duration span = lease == null ? Duration.ofSeconds(30) : lease;
+        String leaseExpiry = SqliteStore.normalizedInstantSql("lease_expires_at");
         int updated = JdbcSupport.update(store, """
             UPDATE run_checkpoints
                SET owner = ?, lease_expires_at = ?, heartbeat_at = ?, updated_at = ?
              WHERE run_id = ?
-               AND (owner IS NULL OR owner = ? OR lease_expires_at IS NULL OR lease_expires_at < ?)
-            """, statement -> {
+               AND (owner IS NULL OR owner = ? OR lease_expires_at IS NULL OR %s < ?)
+            """.formatted(leaseExpiry), statement -> {
             statement.setString(1, owner);
             statement.setString(2, at.plus(span).toString());
             statement.setString(3, at.toString());

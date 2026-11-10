@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.maintenance.StorageHealth;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -56,6 +57,7 @@ public class ValidationLedger {
     private final ObjectMapper mapper;
     private final ConcurrentMap<String, List<ValidationEvidence>> cache = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Boolean> loaded = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, String> persistenceFailures = new ConcurrentHashMap<>();
 
     public ValidationLedger(PilotDataDir dataDir, ObjectMapper mapper) {
         this.dataDir = dataDir;
@@ -83,6 +85,11 @@ public class ValidationLedger {
     /** 当前产物是否有可用的通过证据。 */
     public Report report(String sessionId, String currentCandidateHash) {
         List<ValidationEvidence> entries = recent(sessionId);
+        String persistenceFailure = persistenceFailures.get(sessionId);
+        if (persistenceFailure != null) {
+            return new Report(false, "校验证据仅保存在内存中，未能可靠落盘：" + persistenceFailure,
+                currentCandidateHash, entries.isEmpty() ? null : entries.getLast(), entries);
+        }
         if (entries.isEmpty()) {
             return new Report(false, "还没有任何校验证据", currentCandidateHash, null, List.of());
         }
@@ -104,9 +111,15 @@ public class ValidationLedger {
         loaded.remove(sessionId);
         Path file = file(sessionId);
         try {
-            return Files.deleteIfExists(file) ? 1 : 0;
+            int removed = Files.deleteIfExists(file) ? 1 : 0;
+            persistenceFailures.remove(sessionId);
+            if (persistenceFailures.isEmpty()) {
+                StorageHealth.recovered("validation");
+            }
+            return removed;
         } catch (IOException e) {
             log.warn("删除校验证据失败: {}", file, e);
+            StorageHealth.markDegraded("validation", "删除校验证据失败: " + file + " (" + e.getMessage() + ")");
             return 0;
         }
     }
@@ -126,6 +139,8 @@ public class ValidationLedger {
             }
         } catch (Exception e) {
             log.warn("忽略损坏的校验证据文件: {}", file, e);
+            persistenceFailures.put(sessionId, "证据文件损坏或不可读");
+            StorageHealth.markDegraded("validation", "校验证据文件损坏或不可读: " + file);
         }
     }
 
@@ -143,8 +158,14 @@ public class ValidationLedger {
             } finally {
                 Files.deleteIfExists(temporary);
             }
-        } catch (IOException e) {
+            persistenceFailures.remove(sessionId);
+            if (persistenceFailures.isEmpty()) {
+                StorageHealth.recovered("validation");
+            }
+        } catch (IOException | RuntimeException e) {
             log.warn("写入校验证据失败: {}", file, e);
+            persistenceFailures.put(sessionId, e.getMessage() == null ? "写入失败" : e.getMessage());
+            StorageHealth.markDegraded("validation", "写入校验证据失败: " + file + " (" + e.getMessage() + ")");
         }
     }
 

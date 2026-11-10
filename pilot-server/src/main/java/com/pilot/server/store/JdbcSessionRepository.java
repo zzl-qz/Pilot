@@ -240,11 +240,13 @@ public final class JdbcSessionRepository implements SessionRepository {
     /** 跨会话查询（type 上没有索引，量级靠时间窗口控制；usage 聚合单次最多几千行）。 */
     @Override
     public List<EventEnvelope> eventsOfType(String type, Instant since) {
+        String createdAt = SqliteStore.normalizedInstantSql("created_at");
         String sql = "SELECT session_id, sequence, run_id, type, payload, created_at FROM events "
-            + "WHERE type = ? AND created_at >= ? ORDER BY created_at, session_id, sequence";
+            + "WHERE type = ? AND " + createdAt + " >= ? ORDER BY " + createdAt + ", session_id, sequence";
         try (Connection connection = store.open(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, type);
-            statement.setString(2, since.toString());
+            statement.setString(2, new java.time.format.DateTimeFormatterBuilder().appendInstant(9).toFormatter()
+                .format(since));
             ArrayList<EventEnvelope> result = new ArrayList<EventEnvelope>();
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {

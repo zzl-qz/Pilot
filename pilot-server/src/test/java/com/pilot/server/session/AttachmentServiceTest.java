@@ -211,19 +211,19 @@ class AttachmentServiceTest {
     }
 
     @Test
-    void purgeRemovesOrphansAndExpiredFilesForLiveSessions() throws IOException {
+    void purgeRemovesOrphansAndKeepsLiveSessionAttachments() throws IOException {
         AttachmentService service = new AttachmentService(root);
         Path liveOld = attachment(root.resolve("ses_1"), "old.png");
         Path liveNew = attachment(root.resolve("ses_1"), "new.txt");
         Path orphan = attachment(root.resolve("ses_gone"), "gone.pdf");
         Files.setLastModifiedTime(liveOld, FileTime.from(Instant.now().minus(3, ChronoUnit.DAYS)));
 
-        AttachmentService.PurgeStats stats = service.purge(Instant.now().minus(1, ChronoUnit.DAYS), List.of("ses_1"));
+        AttachmentService.PurgeStats stats = service.purge(List.of("ses_1"));
 
-        assertEquals(2, stats.files(), "孤儿文件 + 过期文件");
+        assertEquals(1, stats.files(), "只清除孤儿文件");
         assertEquals(1, stats.dirs(), "孤儿目录");
         assertFalse(Files.exists(orphan), "孤儿整目录回收");
-        assertFalse(Files.exists(liveOld), "过期图片也参与清理");
+        assertTrue(Files.exists(liveOld), "在册会话的历史消息可能仍引用旧附件");
         assertTrue(Files.exists(liveNew), "未过期文件保留");
     }
 

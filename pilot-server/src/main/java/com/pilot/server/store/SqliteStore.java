@@ -169,17 +169,60 @@ public final class SqliteStore {
     /**
      * 删除早于 {@code cutoff} 的事件，返回删除条数。
      *
-     * <p>{@code created_at} 是 {@link java.time.Instant#toString()} 的固定格式，
-     * 字典序等价于时间序，可以直接比较。
+     * <p>旧数据的 {@link java.time.Instant#toString()} 小数精度不固定，比较前统一补齐到纳秒精度。
      */
     public int deleteEventsBefore(Instant cutoff) {
+        String timestamp = canonicalInstant(cutoff);
+        String createdAt = normalizedInstantSql("created_at");
         try (Connection connection = open();
-            PreparedStatement statement = connection.prepareStatement("DELETE FROM events WHERE created_at < ?")) {
-            statement.setString(1, cutoff.toString());
+            PreparedStatement statement = connection.prepareStatement("DELETE FROM events WHERE " + createdAt + " < ? "
+                + "AND NOT EXISTS (SELECT 1 FROM run_checkpoints c WHERE c.session_id = events.session_id "
+                + "AND c.status IN ('RUNNING','INTERRUPTED','PAUSED'))")) {
+            statement.setString(1, timestamp);
             return statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("清理历史事件失败", e);
         }
+    }
+
+    public java.util.Set<String> activeRunIds() {
+        try (Connection connection = open(); Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery(
+                "SELECT run_id FROM run_checkpoints WHERE status IN ('RUNNING','INTERRUPTED','PAUSED')")) {
+            java.util.Set<String> ids = new java.util.HashSet<>();
+            while (rows.next()) {
+                ids.add(rows.getString(1));
+            }
+            return java.util.Set.copyOf(ids);
+        } catch (SQLException e) {
+            throw new IllegalStateException("读取可恢复运行失败", e);
+        }
+    }
+
+    public java.util.Set<String> activeSessionIds() {
+        try (Connection connection = open(); Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery(
+                "SELECT DISTINCT session_id FROM run_checkpoints WHERE status IN ('RUNNING','INTERRUPTED','PAUSED')")) {
+            java.util.Set<String> ids = new java.util.HashSet<>();
+            while (rows.next()) {
+                ids.add(rows.getString(1));
+            }
+            return java.util.Set.copyOf(ids);
+        } catch (SQLException e) {
+            throw new IllegalStateException("读取可恢复会话失败", e);
+        }
+    }
+
+    /** Normalize legacy Instant text with variable fractional precision for lexical SQL comparison. */
+    public static String normalizedInstantSql(String column) {
+        String fraction = "CASE WHEN instr(" + column + ",'.') = 0 THEN '' ELSE substr(" + column
+            + ",instr(" + column + ",'.') + 1,instr(" + column + ",'Z') - instr(" + column + ",'.') - 1) END";
+        return "(substr(" + column + ",1,19) || '.' || substr((" + fraction
+            + ") || '000000000',1,9) || 'Z')";
+    }
+
+    private static String canonicalInstant(Instant instant) {
+        return new java.time.format.DateTimeFormatterBuilder().appendInstant(9).toFormatter().format(instant);
     }
 
     /** 收缩 WAL：删除大量行之后，把日志文件截回去，避免磁盘只涨不落。 */
