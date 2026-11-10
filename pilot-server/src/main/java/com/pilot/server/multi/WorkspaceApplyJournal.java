@@ -29,6 +29,7 @@ import java.util.stream.Collectors;
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.SandboxChange;
 import com.pilot.core.workspace.PathValidator;
+import com.pilot.core.workspace.WorkspacePathIdentity;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -159,11 +160,21 @@ public final class WorkspaceApplyJournal {
             throw new IllegalStateException("有未完成的变更应用，请先恢复");
         }
         List<Entry> entries = new ArrayList<>();
-        Set<Path> seen = new HashSet<>();
+        Set<String> seen = new HashSet<>();
+        Set<String> parents = new HashSet<>();
+        WorkspacePathIdentity identity = new WorkspacePathIdentity(root);
         for (SandboxChange change : changes) {
             Path file = target(root, change.path());
-            if (!seen.add(file)) {
+            String key = identity.key(change.path());
+            if (!seen.add(key) || parents.contains(key)) {
                 throw new IOException("重复的目标路径：" + change.path());
+            }
+            for (int slash = key.indexOf('/'); slash >= 0; slash = key.indexOf('/', slash + 1)) {
+                String parent = key.substring(0, slash);
+                if (seen.contains(parent)) {
+                    throw new IOException("文件与子路径冲突：" + change.path());
+                }
+                parents.add(parent);
             }
             String before = content(file);
             if (!Objects.equals(before, change.newContent()) && (change.existed()

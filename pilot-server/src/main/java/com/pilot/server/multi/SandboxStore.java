@@ -113,7 +113,7 @@ public class SandboxStore {
     private final Set<String> restoredSessions = ConcurrentHashMap.newKeySet();
 
     private record SandboxPayload(String sandboxId, String agentId, String taskId, String baseCommit,
-        List<SandboxChange> changes) {
+        List<SandboxChange> changes, String workspace) {
     }
 
     private record TaskPayload(String taskId, String title, String agentId, String status, String detail, int files) {
@@ -432,8 +432,10 @@ public class SandboxStore {
         Path file = sessionDir(sessionId).resolve("checkpoints").resolve(sanitize(sandbox.id()) + ".json");
         try {
             Files.createDirectories(file.getParent());
-            atomicWrite(file, mapper.writeValueAsString(new SandboxPayload(sandbox.id(), sandbox.agentId(),
-                sandbox.taskId(), sandbox.baseCommit(), sandbox.changes())));
+            atomicWrite(file,
+                mapper.writeValueAsString(
+                    new SandboxPayload(sandbox.id(), sandbox.agentId(), sandbox.taskId(), sandbox.baseCommit(),
+                        sandbox.changes(), sandbox.workspace() == null ? null : sandbox.workspace().toString())));
         } catch (IOException e) {
             throw new UncheckedIOException("保存执行检查点失败", e);
         }
@@ -723,6 +725,7 @@ public class SandboxStore {
             payload.put("taskId", sandbox.taskId());
             payload.put("baseCommit", sandbox.baseCommit());
             payload.put("changes", sandbox.changes());
+            payload.put("workspace", sandbox.workspace() == null ? null : sandbox.workspace().toString());
             atomicWrite(dir.resolve(sanitize(sandbox.id()) + ".json"), mapper.writeValueAsString(payload));
         } catch (IOException e) {
             restoredSessions.remove(sessionId);
@@ -920,8 +923,9 @@ public class SandboxStore {
                 throw new IllegalArgumentException("沙箱内容无效");
             }
             sanitize(payload.sandboxId());
-            DiffSandbox sandbox =
-                new DiffSandbox(payload.sandboxId(), payload.agentId(), payload.taskId(), payload.baseCommit());
+            Path workspace = payload.workspace() == null ? null : Path.of(payload.workspace());
+            DiffSandbox sandbox = new DiffSandbox(payload.sandboxId(), payload.agentId(), payload.taskId(),
+                payload.baseCommit(), workspace != null && Files.isDirectory(workspace) ? workspace : null);
             if (payload.changes() != null) {
                 sandbox.replaceAll(payload.changes());
             }

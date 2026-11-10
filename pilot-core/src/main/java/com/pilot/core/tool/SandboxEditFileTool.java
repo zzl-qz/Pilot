@@ -68,6 +68,7 @@ public final class SandboxEditFileTool implements Tool {
         Path file;
         try {
             file = paths.resolve(rawPath);
+            file = paths.resolve(sandbox.canonicalPath(paths.display(file)));
         } catch (RuntimeException e) {
             return "ERROR: " + e.getMessage();
         }

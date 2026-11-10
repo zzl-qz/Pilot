@@ -15,9 +15,9 @@ test('地址栏：本机用 http，外网用 https，保留显式协议和中文
   ]) assert.equal(userPageUrl(input), expected, String(input));
 });
 
-test('帧和导航只更新活跃状态及网址，不保存截图和过期的镜像字段', () => {
+test('状态流通过导航更新网址，并忽略截图帧', () => {
   assert.deepEqual(browserStateUpdate('frame', { url: 'https://example.test/', frame: 'QUJD', w: 1000, h: 800 }),
-    { mode: 'live', url: 'https://example.test/' });
+    {});
   assert.deepEqual(browserStateUpdate('nav', { url: 'https://example.test/', canGoBack: true, embed: false }),
     { mode: 'live', url: 'https://example.test/' });
   assert.deepEqual(browserStateUpdate('nav', { url: 'about:blank' }), { url: 'about:blank' });

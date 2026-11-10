@@ -218,6 +218,7 @@ function pushLimited(list, entry) {
 }
 
 function attachPage(session, page) {
+  if (session.page === page) return;
   session.page = page;
   page.on('framenavigated', (frame) => {
     if (frame !== page.mainFrame()) return;
@@ -498,12 +499,30 @@ async function createLocalSession(id, browser) {
 
 // ---- 镜像（CDP screencast 事件通道）----------------------------------------------------
 // 页面变化才产帧，静态页面零流量；ack 背压限速，帧到达后立刻 ack 以免 Chromium 停发。
-async function ensureScreencast(session) {
+// 页面事件与控制请求可能并发到达；每个会话串行启动/停止，避免遗留第二个 CDP 录屏会话。
+function queueScreencast(session, action) {
+  const pending = (session.screencastQueue || Promise.resolve()).catch(() => {}).then(action);
+  session.screencastQueue = pending;
+  return pending;
+}
+
+function ensureScreencast(session) {
+  return queueScreencast(session, () => startScreencast(session));
+}
+
+async function startScreencast(session) {
   const page = session.page;
-  if (!page || page.isClosed() || session.cdpPage === page) return;
-  await stopScreencast(session);
+  const wanted = () => session.mirror && session.capture !== false && !session.dead
+    && session.page === page && page && !page.isClosed();
+  if (!wanted() || session.cdpPage === page) return;
+  await closeScreencast(session);
+  if (!wanted()) return;
   try {
     const cdp = await session.context.newCDPSession(page);
+    if (!wanted()) {
+      await cdp.detach();
+      return;
+    }
     session.cdp = cdp;
     session.cdpPage = page;
     cdp.on('Page.screencastFrame', async (frame) => {
@@ -512,7 +531,7 @@ async function ensureScreencast(session) {
       } catch {
         // 会话已关
       }
-      if (!session.mirror || session.dead || session.page !== page) return;
+      if (!wanted() || session.cdp !== cdp) return;
       const now = Date.now();
       if (now - session.lastFrameAt < MIRROR_MIN_FRAME_MS) return; // 限流：新帧稍后自然到来
       session.lastFrameAt = now;
@@ -536,8 +555,7 @@ async function ensureScreencast(session) {
       everyNthFrame: 1
     });
   } catch (error) {
-    session.cdp = null;
-    session.cdpPage = null;
+    await closeScreencast(session);
     process.stderr.write('screencast 启动失败: ' + String(error && error.message || error) + '\n');
   }
 }
@@ -549,13 +567,13 @@ async function ensureScreencast(session) {
  * 旧尺寸的帧上（看着像「画面没变」）。这里补一帧，让尺寸立刻跟上。
  */
 async function publishSnapshot(session) {
-  if (!session.mirror || session.dead) return;
+  if (!session.mirror || session.capture === false || session.dead) return;
   const page = session.page;
   if (!page || page.isClosed()) return;
   try {
     const viewport = page.viewportSize() || { width: 1280, height: 800 };
     const shot = await page.screenshot({ type: 'jpeg', quality: session.mirrorQuality });
-    if (!session.mirror || session.dead || session.page !== page) return;
+    if (!session.mirror || session.capture === false || session.dead || session.page !== page) return;
     session.lastFrameAt = Date.now();
     send({
       event: 'mirror-frame',
@@ -571,16 +589,21 @@ async function publishSnapshot(session) {
   }
 }
 
-async function stopScreencast(session) {
+function stopScreencast(session) {
+  return queueScreencast(session, () => closeScreencast(session));
+}
+
+async function closeScreencast(session) {
   const cdp = session.cdp;
   session.cdp = null;
   session.cdpPage = null;
   if (!cdp) return;
   try {
     await cdp.send('Page.stopScreencast');
-    await cdp.detach();
   } catch {
     // 已断开
+  } finally {
+    await cdp.detach().catch(() => {});
   }
 }
 
@@ -1343,6 +1366,7 @@ const handlers = {
     current.capture = args.capture !== false;
     if (current.capture) await ensureScreencast(current);
     else await stopScreencast(current);
+    if (current.page && !current.page.isClosed()) await reportNavigation(current, current.page.url());
     return { text: current.capture ? '镜像已开启' : '截图已暂停' };
   },
 

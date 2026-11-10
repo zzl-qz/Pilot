@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -64,6 +65,59 @@ class BrowserControlServiceTest {
         // 连接即补发 state（帧尚未到达时不强推）
         verify(emitter).send(any(SseEmitter.SseEventBuilder.class));
         verify(runtime, never()).mirrorControl(any(), eq(false), anyInt(), anyInt());
+    }
+
+    @Test
+    void stateSubscribersNeverEnableOrReceiveScreenshotsAndReplayNavigation() throws IOException {
+        SseEmitter stateOnly = mock(SseEmitter.class);
+        service.subscribeState("s1", stateOnly);
+        verify(runtime, timeout(2000)).mirrorCapture("s1", false, 960, 55);
+        verify(runtime, never()).mirrorControl("s1", true, 960, 55);
+        service.onEvent("s1", "mirror-frame", event("mirror-frame"));
+        verify(stateOnly).send(any(SseEmitter.SseEventBuilder.class));
+
+        service.onEvent("s1", "nav", MAPPER.readTree("{\"url\":\"http://localhost:1234/\"}"));
+        SseEmitter late = mock(SseEmitter.class);
+        service.subscribeState("s1", late);
+        verify(late, timeout(2000).times(2)).send(any(SseEmitter.SseEventBuilder.class));
+        service.setCapture("s1", true);
+        verify(runtime, never()).mirrorControl("s1", true, 960, 55);
+    }
+
+    @Test
+    void mixedSubscribersOnlyCaptureWhileAFrameConsumerRemains() throws IOException {
+        SseEmitter status = mock(SseEmitter.class);
+        SseEmitter frames = mock(SseEmitter.class);
+        service.subscribeState("s1", status);
+        verify(runtime, timeout(2000)).mirrorCapture("s1", false, 960, 55);
+        service.subscribe("s1", frames);
+        verify(runtime, timeout(2000)).mirrorControl("s1", true, 960, 55);
+        clearInvocations(status, frames);
+        service.onEvent("s1", "mirror-frame", event("mirror-frame"));
+        verify(frames).send(any(SseEmitter.SseEventBuilder.class));
+        verify(status, never()).send(any(SseEmitter.SseEventBuilder.class));
+
+        service.unsubscribe("s1", frames);
+        verify(runtime, timeout(2000).times(2)).mirrorCapture("s1", false, 960, 55);
+        service.onEvent("s1", "mirror-frame", event("mirror-frame"));
+        verify(status, never()).send(any(SseEmitter.SseEventBuilder.class));
+        service.onEvent("s1", "nav", event("nav"));
+        verify(status).send(any(SseEmitter.SseEventBuilder.class));
+        service.unsubscribe("s1", status);
+        verify(runtime, timeout(2000)).mirrorControl("s1", false, 960, 55);
+    }
+
+    @Test
+    void brokenFrameConsumerStopsCaptureWhileStatusConnectionStaysAlive() throws IOException {
+        SseEmitter status = mock(SseEmitter.class);
+        service.subscribeState("s1", status);
+        SseEmitter broken = mock(SseEmitter.class);
+        doThrow(new IOException("连接断开")).when(broken).send(any(SseEmitter.SseEventBuilder.class));
+        service.subscribe("s1", broken);
+        verify(runtime, timeout(2000).times(2)).mirrorCapture("s1", false, 960, 55);
+        verify(runtime, never()).mirrorControl("s1", false, 960, 55);
+        service.onEvent("s1", "nav", event("nav"));
+        verify(status, timeout(2000).times(2)).send(any(SseEmitter.SseEventBuilder.class));
     }
 
     @Test

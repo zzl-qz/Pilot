@@ -17,7 +17,7 @@ class DiffSandboxTest {
         sandbox.add("src/B.txt", null, "new", false, RiskLevel.LOW);
         sandbox.add("src\\A.txt", "first", "second", true, RiskLevel.LOW);
 
-        assertEquals(List.of("src/B.txt", "src\\A.txt"), sandbox.changes().stream().map(SandboxChange::path).toList());
+        assertEquals(List.of("src/B.txt", "src/A.txt"), sandbox.changes().stream().map(SandboxChange::path).toList());
         assertEquals("second", sandbox.currentText("src/A.txt", "disk"));
         assertEquals(DiffSandbox.fingerprint("original"), sandbox.changes().getLast().baseHash());
         assertEquals("disk", sandbox.currentText("missing.txt", "disk"));

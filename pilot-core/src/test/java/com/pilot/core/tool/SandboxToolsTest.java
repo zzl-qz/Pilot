@@ -261,10 +261,39 @@ class SandboxToolsTest {
             }
 
             @Override
+            public String canonicalPath(String path) {
+                return sandbox.canonicalPath(path);
+            }
+
+            @Override
             public String proposedText(String path) {
                 return sandbox.proposedText(path);
             }
         };
+    }
+
+    @Test
+    void newFileAliasesFollowTheFilesystemAndPreserveTheReadGuard(@TempDir Path dir) throws IOException {
+        Path root = workspace(dir);
+        boolean insensitive = Files.exists(root.resolve("src/a.java"));
+        DiffSandbox box = new DiffSandbox("box", "agent", "task", "", root);
+        SandboxSink sink = sandboxSink(box);
+        ReadTracker reads = new ReadTracker();
+        var paths = new PathValidator(root);
+        var create = new SandboxCreateFileTool(paths, sink, reads);
+        var edit = new SandboxEditFileTool(paths, sink, reads);
+        assertFalse(create.execute(Map.of("path", "Note.txt", "content", "first")).startsWith("ERROR"));
+        String edited = edit.execute(Map.of("path", "note.txt", "old_string", "first", "new_string", "updated"));
+        assertEquals(!insensitive, edited.startsWith("ERROR"), edited);
+        String duplicate = create.execute(Map.of("path", "note.txt", "content", "second"));
+        assertEquals(insensitive, duplicate.startsWith("ERROR"), duplicate);
+        assertEquals(insensitive ? 1 : 2, box.fileCount());
+        assertEquals(insensitive ? "updated" : "first", box.proposedText("Note.txt"));
+        assertFalse(Files.exists(root.resolve("Note.txt")), "提案不能提前写入业务文件");
+        assertFalse(box.changes().getFirst().existed());
+        assertEquals("", box.changes().getFirst().baseHash());
+        String text = new ReadFileTool(paths, reads, sink).execute(Map.of("path", "note.txt"));
+        assertTrue(text.contains(insensitive ? "updated" : "second"), text);
     }
 
     @Test

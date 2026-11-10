@@ -114,6 +114,9 @@ public final class ReadFileTool implements Tool {
         Path file;
         try {
             file = paths.resolve(rawPath);
+            if (sandbox != null) {
+                file = paths.resolve(sandbox.canonicalPath(paths.display(file)));
+            }
         } catch (RuntimeException e) {
             return "ERROR: " + e.getMessage();
         }

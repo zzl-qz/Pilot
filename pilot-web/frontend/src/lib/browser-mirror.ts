@@ -24,12 +24,12 @@ export function userPageUrl(input: unknown) {
 /** 浏览器 SSE 只保留界面使用的状态；截图和输入转发已交给桌面浏览器。 */
 export function browserStateUpdate(kind: string, payload: unknown): Partial<MirrorState> {
   if (kind === 'closed') return { mode: 'closed' };
-  if (!['frame', 'nav', 'state', 'status'].includes(kind)
+  if (!['nav', 'state', 'status'].includes(kind)
     || !payload || typeof payload !== 'object' || Array.isArray(payload)) return {};
   const data = payload as Record<string, unknown>;
   const update: Partial<MirrorState> = {};
   if (typeof data.url === 'string' && data.url) update.url = data.url;
-  if (kind === 'frame' || (kind === 'nav' && update.url && update.url !== 'about:blank')) update.mode = 'live';
+  if (kind === 'nav' && update.url && update.url !== 'about:blank') update.mode = 'live';
   if ((kind === 'state' || kind === 'status') && typeof data.headless === 'boolean') update.headless = data.headless;
   return update;
 }

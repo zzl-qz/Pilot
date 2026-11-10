@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -31,6 +32,8 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.pilot.core.permission.PermissionDecision;
 import com.pilot.core.permission.PermissionMode;
@@ -272,6 +275,39 @@ class BrowserIntegrationTest {
             args.put(String.valueOf(pairs[i]), pairs[i + 1]);
         }
         return tool.execute(args);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void subscriptionsBeforePageCreationRespectCaptureAndStopWithoutLeaking(boolean captureInitially) throws Exception {
+        AtomicInteger frames = new AtomicInteger();
+        CountDownLatch firstFrame = new CountDownLatch(1);
+        ConcurrentLinkedQueue<String> urls = new ConcurrentLinkedQueue<>();
+        backend.setEventListener((sessionId, kind, payload) -> {
+            if ("mirror-frame".equals(kind)) {
+                frames.incrementAndGet();
+                firstFrame.countDown();
+            }
+            if ("nav".equals(kind)) {
+                urls.add(payload.path("url").asString(""));
+            }
+        });
+        backend.mirrorControl("it-session", true, 960, 55, captureInitially);
+        assertTrue(run("navigate", "url", base).startsWith("已打开"));
+        run("evaluate", "expression",
+            "document.body.animate([{background:'#06f'},{background:'#f60'}],{duration:200,iterations:Infinity}); 'animated'");
+        Thread.sleep(1000);
+        assertTrue(urls.contains(base), "只订阅状态也必须获得当前网址");
+        if (!captureInitially) {
+            assertEquals(0, frames.get(), "只订阅状态时不能提前启动截图");
+        }
+        backend.mirrorControl("it-session", true, 960, 55, true);
+        assertTrue(firstFrame.await(10, TimeUnit.SECONDS), "显式画面订阅应启动截图");
+        backend.mirrorControl("it-session", true, 960, 55, false);
+        Thread.sleep(300); // 排空已经传输的帧，再验证停帧后的稳定窗口。
+        frames.set(0);
+        Thread.sleep(1200);
+        assertEquals(0, frames.get(), "停止后不得残留第二个 CDP 录屏会话");
     }
 
     /** 在快照里找 `kind ... [ref=eN]` 且该行包含 needle 的元素。 */

@@ -2267,10 +2267,10 @@ function connectMirror(get: StoreGet, set: StoreSet) {
   const { sessionId, sessionEpoch } = get();
   if (!sessionId) return;
   mirrorSource?.close();
-  const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/browser/stream`);
+  const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/browser/state-stream`);
   mirrorSource = source;
   const current = () => mirrorSource === source && get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
-  for (const kind of ['frame', 'nav', 'state', 'status', 'closed']) {
+  for (const kind of ['nav', 'state', 'status', 'closed']) {
     source.addEventListener(kind, (message) => {
       if (!current()) return;
       let payload: unknown;

@@ -28,7 +28,7 @@ const server = await createServer({ root, server: { host: '127.0.0.1', port: 0, 
     server.middlewares.use('/api', (req, res) => {
       const path = new URL('/api' + req.url, 'http://localhost').pathname;
       calls.push({ path, method: req.method });
-      if (path.endsWith('/events') || path.endsWith('/browser/stream')) {
+      if (path.endsWith('/events') || /\/browser\/(?:state-)?stream$/.test(path)) {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
         res.write(': connected\n\n'); streams.add(res); res.on('close', () => streams.delete(res)); return;
       }

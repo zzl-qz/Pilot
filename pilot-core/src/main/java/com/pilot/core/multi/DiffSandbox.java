@@ -1,6 +1,7 @@
 package com.pilot.core.multi;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Collection;
@@ -13,10 +14,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import com.pilot.core.workspace.WorkspacePathIdentity;
+
 /**
  * 单个子 Agent 的变更沙箱。
  *
- * <p>所有写操作只进这里，{@link #add} 负责生成 diff；真实工作区始终只读。
+ * <p>文件内容修改只进这里，{@link #add} 负责生成 diff；接受提案前不修改真实业务文件。
  * 一个沙箱对应一个任务（或一个并行方案），可以单独丢弃、单独回滚，不影响其他沙箱。
  */
 public final class DiffSandbox {
@@ -24,6 +27,7 @@ public final class DiffSandbox {
     private final String agentId;
     private final String taskId;
     private final String baseCommit;
+    private final WorkspacePathIdentity paths;
     private final Map<String, SandboxChange> changes = new LinkedHashMap<>();
     /**
      * 每个路径首次进入沙箱时的原文（新文件为 {@code null}）。
@@ -35,10 +39,19 @@ public final class DiffSandbox {
     private final Map<String, String> baselines = new HashMap<>();
 
     public DiffSandbox(String id, String agentId, String taskId, String baseCommit) {
+        this(id, agentId, taskId, baseCommit, null);
+    }
+
+    public DiffSandbox(String id, String agentId, String taskId, String baseCommit, Path workspace) {
         this.id = requireText(id, "sandboxId");
         this.agentId = requireText(agentId, "agentId");
         this.taskId = requireText(taskId, "taskId");
         this.baseCommit = baseCommit == null ? "" : baseCommit.strip();
+        this.paths = workspace == null ? null : new WorkspacePathIdentity(workspace);
+    }
+
+    public Path workspace() {
+        return paths == null ? null : paths.root();
     }
 
     public String id() {
@@ -66,12 +79,18 @@ public final class DiffSandbox {
     }
 
     public synchronized boolean hasChange(String path) {
-        return changes.containsKey(normalize(path));
+        return !changes.isEmpty() && changes.containsKey(key(path));
     }
 
     public synchronized String currentText(String path, String baselineText) {
-        SandboxChange change = changes.get(normalize(path));
+        SandboxChange change = changes.isEmpty() ? null : changes.get(key(path));
         return change == null ? baselineText : change.newContent();
+    }
+
+    /** 沿用首次提案的拼写，让虚拟文件的读取记录与后续编辑指向同一路径。 */
+    public synchronized String canonicalPath(String path) {
+        SandboxChange change = changes.isEmpty() ? null : changes.get(key(path));
+        return change == null ? path : change.path();
     }
 
     public synchronized String proposedText(String path) {
@@ -87,8 +106,9 @@ public final class DiffSandbox {
      */
     public synchronized SandboxChange add(String path, String oldText, String newText, boolean existed,
         RiskLevel risk) {
-        String key = normalize(path);
+        String key = key(path);
         SandboxChange superseded = changes.get(key);
+        path = superseded == null ? path : superseded.path();
         if (superseded == null) {
             baselines.put(key, existed ? oldText : null);
         }
@@ -110,10 +130,9 @@ public final class DiffSandbox {
         return change;
     }
 
-    private static String normalize(String path) {
-        // 工具入口已通过 PathValidator 解析实际文件系统中的路径；虚拟新文件保留大小写，
-        // 不能把 Linux/区分大小写卷上的两个文件合并为同一条变更。
-        return path == null ? "" : path.replace('\\', '/');
+    private String key(String path) {
+        String normalized = path == null ? "" : path.replace('\\', '/');
+        return paths == null || normalized.isEmpty() ? normalized : paths.key(normalized);
     }
 
     public synchronized int fileCount() {
@@ -133,7 +152,7 @@ public final class DiffSandbox {
         Map<String, SandboxChange> next = new LinkedHashMap<>();
         if (updated != null) {
             for (SandboxChange change : updated) {
-                if (next.put(normalize(change.path()), change) != null) {
+                if (next.put(key(change.path()), change) != null) {
                     throw new IllegalArgumentException("沙箱中存在重复路径：" + change.path());
                 }
             }

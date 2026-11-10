@@ -60,11 +60,21 @@ public class BrowserControlController {
     /** 实时镜像帧流（只下行）；连接建立即补发最新一帧。 */
     @GetMapping(value = "/{id}/browser/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<SseEmitter> stream(@PathVariable String id) {
+        return stream(id, true);
+    }
+
+    /** 仅订阅导航、运行状态与关闭事件，不生产或传输截图。 */
+    @GetMapping(value = "/{id}/browser/state-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<SseEmitter> stateStream(@PathVariable String id) {
+        return stream(id, false);
+    }
+
+    private ResponseEntity<SseEmitter> stream(String id, boolean capture) {
         requireSession(id);
         if (!browser.mirrorEnabled()) {
             return ResponseEntity.noContent().build();
         }
-        SseEmitter emitter = browser.subscribe(id);
+        SseEmitter emitter = capture ? browser.subscribe(id) : browser.subscribeState(id);
         AtomicBoolean closed = new AtomicBoolean(false);
         AtomicReference<ScheduledFuture<?>> heartbeat = new AtomicReference<>();
 

@@ -29,6 +29,10 @@ public interface SandboxSink {
         return null;
     }
 
+    default String canonicalPath(String path) {
+        return path;
+    }
+
     /** 物化校验副本时必须能枚举新建提案，不能只覆盖磁盘上已有的文件。 */
     default Map<String, String> proposedFiles() {
         return Map.of();
@@ -66,6 +70,11 @@ public interface SandboxSink {
             @Override
             public boolean proposed(String path) {
                 return self.proposed(path) || upstream.proposed(path);
+            }
+
+            @Override
+            public String canonicalPath(String path) {
+                return self.proposed(path) ? self.canonicalPath(path) : upstream.canonicalPath(path);
             }
 
             @Override

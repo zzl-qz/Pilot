@@ -138,7 +138,7 @@ test('同一会话保存成功会更新契约并清除未保存标记', async ()
   } finally { fetchHandler = saved; }
 });
 
-test('浏览器状态流识别服务端 state 事件，切换会话后忽略迟到帧和关闭事件', () => {
+test('浏览器订阅轻量状态流，忽略截图及旧会话的迟到事件', () => {
   const saved = globalThis.EventSource;
   const streams = [];
   globalThis.EventSource = class {
@@ -152,6 +152,8 @@ test('浏览器状态流识别服务端 state 事件，切换会话后忽略迟�
   try {
     reset(); useStore.getState().ensureMirror();
     const first = streams[0];
+    assert.equal(first.url, '/api/sessions/s/browser/state-stream');
+    assert.equal(first.listeners.has('frame'), false);
     first.emit('state', { headless: false });
     first.emit('nav', { url: 'https://first.test' });
     assert.deepEqual(useStore.getState().ui.mirror, { mode: 'live', url: 'https://first.test', headless: false });
@@ -161,8 +163,9 @@ test('浏览器状态流识别服务端 state 事件，切换会话后忽略迟�
     useStore.setState({ sessionId: 'new' }); useStore.getState().ensureMirror();
     const second = streams[1];
     second.emit('state', { headless: false });
-    second.emit('frame', { url: 'https://second.test', frame: 'not retained' });
-    first.emit('frame', { url: 'https://stale.test' }); first.emit('closed'); first.emit('state', { headless: true });
+    second.emit('nav', { url: 'https://second.test' });
+    second.emit('frame', { url: 'https://ignored.test', frame: 'not retained' });
+    first.emit('nav', { url: 'https://stale.test' }); first.emit('closed'); first.emit('state', { headless: true });
     assert.deepEqual(useStore.getState().ui.mirror, { mode: 'live', url: 'https://second.test', headless: false });
     second.emit('closed'); assert.equal(useStore.getState().ui.mirror.mode, 'closed');
   } finally { closeStreams(); globalThis.EventSource = saved; }

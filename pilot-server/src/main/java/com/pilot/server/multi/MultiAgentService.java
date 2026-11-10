@@ -537,7 +537,8 @@ public class MultiAgentService {
         MultiAgentBudgetLedger budget) {
         String agentId = "agent_" + randomSuffix();
         String sandboxId = "sbx_" + randomSuffix();
-        DiffSandbox sandbox = new DiffSandbox(sandboxId, agentId, spec.id(), "");
+        DiffSandbox sandbox =
+            new DiffSandbox(sandboxId, agentId, spec.id(), "", toolFactory.resolve(dispatch.workspace()));
         // 本任务自己的改动出口
         SandboxSink own = new SandboxSink() {
             @Override
@@ -565,6 +566,11 @@ public class MultiAgentService {
             @Override
             public boolean proposed(String path) {
                 return sandbox.hasChange(path);
+            }
+
+            @Override
+            public String canonicalPath(String path) {
+                return sandbox.canonicalPath(path);
             }
 
             @Override
@@ -908,6 +914,16 @@ public class MultiAgentService {
                     }
                 }
                 return false;
+            }
+
+            @Override
+            public String canonicalPath(String path) {
+                for (int i = boxes.size() - 1; i >= 0; i--) {
+                    if (boxes.get(i).hasChange(path)) {
+                        return boxes.get(i).canonicalPath(path);
+                    }
+                }
+                return path;
             }
 
             @Override

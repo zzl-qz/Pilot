@@ -79,7 +79,7 @@ public final class PathValidator {
         String value = rawPath.strip();
         Path candidate;
         try {
-            Path given = Path.of(value);
+            Path given = root.getFileSystem().getPath(value);
             candidate = (given.isAbsolute() ? given : root.resolve(given)).normalize();
         } catch (InvalidPathException e) {
             throw new WorkspaceViolationException("非法路径: " + value);

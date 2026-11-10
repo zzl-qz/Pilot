@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -34,8 +33,8 @@ import tools.jackson.databind.ObjectMapper;
  * 无需游标。若把它塞进 {@code /sessions/{id}/events}（带 sequence、落 pilot.db），
  * 会把库撑爆并污染历史回放，因此这里是独立的 SSE 端点。
  *
- * <p>订阅联动：某会话的第一个订阅者出现时向 sidecar 开 screencast，最后一个断开时
- * 停止——侧栏折叠（EventSource 关闭）即停止产帧，展开重连自动恢复。
+ * <p>状态订阅只收导航与生命周期；存在画面订阅者时才开启 screencast，最后一个画面
+ * 订阅者离开即停帧。全部订阅断开后释放会话的镜像状态。
  *
  * <p>线程模型：sidecar 事件在 PlaywrightBackend 的单线程事件流里进入 {@link #onEvent}；
  * SSE 写入以 per-state 锁串行化（HTTP 线程的补发与事件线程的广播互斥），
@@ -96,22 +95,41 @@ public class BrowserControlService implements BrowserEventListener {
 
     /** 同上，但允许调用方（控制器/测试）自带 emitter。 */
     public SseEmitter subscribe(String sessionId, SseEmitter emitter) {
-        State state = states.computeIfAbsent(sessionId, key -> new State(key));
-        boolean first;
-        synchronized (state) {
-            first = state.subscribers.isEmpty();
-            state.subscribers.add(emitter);
-        }
-        if (first) {
-            controls.execute(() -> runtime.mirrorControl(sessionId, true, maxWidth, quality));
-        }
-        synchronized (state) {
-            push(state, emitter, "state", statePayload(sessionId));
-            if (state.frame != null) {
-                push(state, emitter, "frame", state.frame.toString());
+        return subscribe(sessionId, emitter, true);
+    }
+
+    public SseEmitter subscribeState(String sessionId) {
+        return subscribeState(sessionId, new SseEmitter(0L));
+    }
+
+    public SseEmitter subscribeState(String sessionId, SseEmitter emitter) {
+        return subscribe(sessionId, emitter, false);
+    }
+
+    private SseEmitter subscribe(String sessionId, SseEmitter emitter, boolean capture) {
+        while (true) {
+            State state = states.computeIfAbsent(sessionId, State::new);
+            synchronized (state) {
+                // 最后一个订阅者可能刚移除了旧 state，不能把新连接挂在失效对象上。
+                if (states.get(sessionId) != state) {
+                    continue;
+                }
+                boolean first = state.subscribers.isEmpty();
+                boolean wasCapturing = state.capturing();
+                state.subscribers.put(emitter, capture);
+                if (first || wasCapturing != state.capturing()) {
+                    controlCapture(state);
+                }
+                push(state, emitter, "state", statePayload(sessionId));
+                if (state.subscribers.containsKey(emitter) && state.navigation != null) {
+                    push(state, emitter, "nav", state.navigation.toString());
+                }
+                if (state.subscribers.containsKey(emitter) && capture && state.frame != null) {
+                    push(state, emitter, "frame", state.frame.toString());
+                }
+                return emitter;
             }
         }
-        return emitter;
     }
 
     /** 订阅者断开（页面关闭/折叠/出错）；最后一个断开时停止该会话的 screencast。幂等。 */
@@ -130,7 +148,16 @@ public class BrowserControlService implements BrowserEventListener {
      * 仍然保持订阅，浏览器不会因为没人看截图就被空闲回收。
      */
     public void setCapture(String sessionId, boolean capture) {
-        controls.execute(() -> runtime.mirrorCapture(sessionId, capture, maxWidth, quality));
+        State state = states.get(sessionId);
+        if (state != null) {
+            synchronized (state) {
+                boolean before = state.capturing();
+                state.captureEnabled = capture;
+                if (before != state.capturing()) {
+                    controlCapture(state);
+                }
+            }
+        }
     }
 
     /** 把某个会话的浏览器窗口置前（不置顶循环）。 */
@@ -191,16 +218,31 @@ public class BrowserControlService implements BrowserEventListener {
                 if (state == null) {
                     return;
                 }
-                state.frame = payload; // latest-wins：新帧直接覆盖，旧帧即弃
-                broadcast(state, "frame", payload.toString());
+                synchronized (state) {
+                    if (state.capturing()) {
+                        state.frame = payload; // latest-wins；无画面消费者时不保留帧。
+                        broadcast(state, "frame", payload.toString());
+                    }
+                }
             }
             case "agent-action" -> broadcastTo(sessionId, "action", payload);
-            case "nav" -> broadcastTo(sessionId, "nav", payload);
+            case "nav" -> {
+                State state = states.get(sessionId);
+                if (state != null) {
+                    synchronized (state) {
+                        state.navigation = payload;
+                        broadcast(state, "nav", payload.toString());
+                    }
+                }
+            }
             case "browser-closed" -> {
                 // 进程级事件：浏览器断了（空闲回收/崩溃/用户手关），提示所有会话并清掉缓存帧。
                 for (State state : states.values()) {
-                    state.frame = null;
-                    broadcast(state, "closed", payload.toString());
+                    synchronized (state) {
+                        state.frame = null;
+                        state.navigation = null;
+                        broadcast(state, "closed", payload.toString());
+                    }
                 }
             }
             default -> {
@@ -227,8 +269,10 @@ public class BrowserControlService implements BrowserEventListener {
 
     private void broadcast(State state, String name, String data) {
         synchronized (state) {
-            for (SseEmitter emitter : List.copyOf(state.subscribers)) {
-                push(state, emitter, name, data);
+            for (SseEmitter emitter : List.copyOf(state.subscribers.keySet())) {
+                if (!name.equals("frame") || Boolean.TRUE.equals(state.subscribers.get(emitter))) {
+                    push(state, emitter, name, data);
+                }
             }
         }
     }
@@ -245,17 +289,37 @@ public class BrowserControlService implements BrowserEventListener {
 
     /** 必须持有 state 锁。 */
     private void drop(State state, SseEmitter emitter) {
-        if (!state.subscribers.remove(emitter) && state.subscribers.contains(emitter)) {
-            // CopyOnWriteArrayList 语义下 remove 已足够；此分支只为可读性
+        boolean wasCapturing = state.capturing();
+        if (state.subscribers.remove(emitter) == null) {
+            return;
         }
         if (!state.subscribers.isEmpty()) {
+            if (wasCapturing != state.capturing()) {
+                controlCapture(state);
+            }
             return;
         }
         // 订阅清空：停帧、清缓存帧，接管开关一并复位（没人看着页面就不算接管中）
         runtime.setInteractionsPaused(state.id, false);
         state.frame = null;
-        states.remove(state.id, state);
         controls.execute(() -> runtime.mirrorControl(state.id, false, maxWidth, quality));
+        // 先排入旧连接的停止命令，再允许新 state 被创建，避免旧停止命令覆盖新订阅。
+        states.remove(state.id, state);
+    }
+
+    /** 必须持有 state 锁，保证订阅切换和控制命令的顺序一致。 */
+    private void controlCapture(State state) {
+        boolean capture = state.capturing();
+        if (!capture) {
+            state.frame = null;
+        }
+        controls.execute(() -> {
+            if (capture) {
+                runtime.mirrorControl(state.id, true, maxWidth, quality);
+            } else {
+                runtime.mirrorCapture(state.id, false, maxWidth, quality);
+            }
+        });
     }
 
     private String statePayload(String sessionId) {
@@ -270,8 +334,14 @@ public class BrowserControlService implements BrowserEventListener {
     /** 每个会话的镜像状态：最新一帧 + 订阅者表。 */
     private static final class State {
         final String id;
-        final List<SseEmitter> subscribers = new CopyOnWriteArrayList<>();
-        volatile JsonNode frame;
+        final Map<SseEmitter, Boolean> subscribers = new LinkedHashMap<>();
+        JsonNode frame;
+        JsonNode navigation;
+        boolean captureEnabled = true;
+
+        boolean capturing() {
+            return captureEnabled && subscribers.containsValue(true);
+        }
 
         State(String id) {
             this.id = id;

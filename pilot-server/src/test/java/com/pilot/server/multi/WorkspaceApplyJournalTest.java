@@ -24,6 +24,8 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.RiskLevel;
@@ -50,6 +52,67 @@ class WorkspaceApplyJournalTest {
         box.add("a", "before", "after", true, RiskLevel.LOW);
         box.add("new", null, "created", false, RiskLevel.LOW);
         return box;
+    }
+
+    @ParameterizedTest
+    @CsvSource({"Note.txt, note.txt", "ß.txt, SS.txt", "Σ.txt, ς.txt", "Café.txt, Cafe\u0301.txt"})
+    void legacyCaseAliasesAreRejectedBeforeAnyBusinessFileOrJournalIsWritten(String first, String second)
+        throws Exception {
+        Files.writeString(root.resolve(first), "probe");
+        boolean insensitive = Files.exists(root.resolve(second));
+        Files.delete(root.resolve(first));
+        // 旧版本持久化记录可能已经包含冲突，应用入口仍须独立保护。
+        var box = new DiffSandbox("sbx", "agent", "task", "");
+        box.add(first, null, "first", false, RiskLevel.LOW);
+        box.add(second, null, "second", false, RiskLevel.LOW);
+        var store = store((p, i) -> {
+        });
+        store.add("s", box);
+        var result = store.accept("s", "sbx", root);
+        assertEquals(!insensitive, result.ok(), result.toString());
+        assertNull(store.applyState(root));
+        if (insensitive) {
+            assertFalse(Files.exists(root.resolve(first)));
+            assertEquals(0, store.workspaceRevision("s"));
+        } else {
+            assertEquals("first", Files.readString(root.resolve(first)));
+            assertEquals("second", Files.readString(root.resolve(second)));
+        }
+    }
+
+    @Test
+    void parentAndChildTargetsAreRejectedInEitherOrder() throws Exception {
+        for (var paths : List.of(List.of("folder", "folder/child.txt"), List.of("folder/child.txt", "folder"))) {
+            var box = new DiffSandbox("sbx", "agent", "task", "");
+            paths.forEach(path -> box.add(path, null, "proposal", false, RiskLevel.LOW));
+            var store = store((p, i) -> {
+            });
+            store.add("s", box);
+            assertFalse(store.accept("s", "sbx", root).ok());
+            assertFalse(Files.exists(root.resolve("folder")));
+            assertNull(store.applyState(root));
+        }
+    }
+
+    @Test
+    void restoredSandboxRetainsItsFilesystemPathIdentity() throws Exception {
+        Files.writeString(root.resolve("CaseProbe"), "probe");
+        boolean insensitive = Files.exists(root.resolve("caseprobe"));
+        Files.delete(root.resolve("CaseProbe"));
+        var box = new DiffSandbox("sbx", "agent", "task", "", root);
+        box.add("Note.txt", null, "proposal", false, RiskLevel.LOW);
+        store((p, i) -> {
+        }).add("s", box);
+        var restarted = store((p, i) -> {
+        });
+        var restored = restarted.find("s", "sbx").orElseThrow();
+        assertEquals(box.workspace(), restored.workspace());
+        assertEquals(insensitive, restored.hasChange("note.txt"));
+        assertTrue(restored.hasChange("Note.txt"));
+        assertEquals(box.candidateHash(), restored.candidateHash());
+        assertTrue(restarted.accept("s", "sbx", root).ok());
+        assertEquals("proposal", Files.readString(root.resolve("Note.txt")));
+        assertNull(restarted.applyState(root));
     }
 
     @Test
