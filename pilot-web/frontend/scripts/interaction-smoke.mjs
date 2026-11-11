@@ -35,11 +35,12 @@ function makePdfFixture() {
 }
 const fixture = `<html><head><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react'; import {createRoot} from 'react-dom/client';
-import App from '/src/components/App.jsx'; import {useStore} from '/src/store.js'; import {api} from '/src/api.js';
+import App from '/src/components/App.jsx'; import {useStore} from '/src/store.js'; import {api} from '/src/api.js'; import {installSubmissionFixture} from '/scripts/submission-fixture.mjs';
 import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
 document.documentElement.dataset.theme='dark'; window.store=useStore; window.api=api; window.realTranscribe=api.transcribeVoice; window.calls=[];
 for(const name of Object.keys(api)) if(typeof api[name]==='function') api[name]=async (...args)=>{calls.push({name,args});return {};};
 api.workProducts=api.skillDrafts=async()=>[];
+api.settings=async()=>({attachmentLimits:{maxFiles:64,maxFileBytes:2097152,maxTotalBytes:26214400,maxRequestBytes:37000000}});
 api.worktreeInfo=async()=>({branch:'feature/ui',worktree:false});
 api.filesFlat=api.workspaceFiles=async()=>({files:['src/组件.jsx','src/App.jsx','src/space file.js']});
 api.context=async()=>({usedTokens:10,limitTokens:100}); api.queue=async()=>({items:[]});
@@ -47,6 +48,7 @@ window.diff='diff --git a/src/App.jsx b/src/App.jsx\\n--- a/src/App.jsx\\n+++ b/
 window.report={gitRepository:true,files:[{path:'src/App.jsx',status:'M',added:1,removed:1}],diff:window.diff};
 api.diff=async()=>window.report; api.runChanges=async()=>({...window.report,files:[{...window.report.files[0],diff:window.diff}]});
 useStore.setState({init:async()=>{},sessionId:'test-a',workspace:'/workspace/demo',currentProjectId:'p',sessionTitle:'审阅输入与交互',projects:[{id:'p',name:'Pilot',folders:['/workspace/demo']}],lastRunId:'run-a',sessionEpoch:1});
+installSubmissionFixture(api); api.sendMessage=async(id,body)=>{calls.push({name:'sendMessage',args:[id,body]});return {sessionId:id,runId:'r'};};
 if (new URL(location.href).searchParams.has('queue')) {
   let entries=[{content:'按照参考图精简按钮，把操作放到消息队列里'},{content:'完成后检查粘贴附件、语音和窄屏布局'}];
   const snapshot=()=>({entries:entries.map(e=>({...e})),revision:String(entries.length)});
@@ -55,7 +57,8 @@ if (new URL(location.href).searchParams.has('queue')) {
   api.deleteQueueItem=api.steerQueueItem;
   api.updateQueueItem=async(_id,index,body)=>{entries[index]={content:body.content};return snapshot();};
   api.moveQueueItem=async(_id,from,to)=>{entries.splice(to,0,entries.splice(from,1)[0]);return snapshot();};
-  api.sendMessage=async(_id,body)=>{entries.push({content:body.content});return {};};
+  installSubmissionFixture(api);
+api.sendMessage=async(_id,body)=>{entries.push({content:body.content});return {sessionId:_id,runId:'r'};};
   api.cancelRun=async()=>{useStore.setState({running:false,queueHeld:true});};
   useStore.setState({running:true,runId:'run-a',sessionTitle:'精简输入与队列交互',settingsData:{model:'gpt-6-sol'},queueEntries:entries.map(e=>({...e})),queueRevision:'2',thread:{...useStore.getState().thread,rows:[{key:'u',type:'user',text:'按参考图优化输入区，加入语音输入'},{key:'t',type:'turn',runIds:['run-a'],tools:[],reply:{text:'正在整理输入区的操作与队列交互。'},stats:{}}],cursor:1}});
 }

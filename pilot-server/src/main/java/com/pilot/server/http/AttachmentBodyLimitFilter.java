@@ -40,13 +40,17 @@ public class AttachmentBodyLimitFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
+        return !isMessageRequest(request);
+    }
+
+    public static boolean isMessageRequest(HttpServletRequest request) {
         // 容器映射后的路径已解码，不能让 %6dessages 等等价 URL 绕过入口限流。
         String path = request.getServletPath();
         if (path == null || path.isEmpty()) {
             path = request.getRequestURI().substring(request.getContextPath().length());
         }
-        return !"POST".equalsIgnoreCase(request.getMethod())
-            || !path.matches("^/api/sessions/[^/]+/messages(?:;[^/]*)?/?$");
+        return "POST".equalsIgnoreCase(request.getMethod())
+            && path.matches("^/api/sessions/[^/]+/messages(?:;[^/]*)?/?$");
     }
 
     @Override

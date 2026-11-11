@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
+import { submissions } from '../lib/submissions.js';
 import { errorInfo } from '../lib/errors.js';
 import type {
   WorkbenchAnnotation, WorkbenchFile, WorkbenchPreview, WorkbenchVersion
@@ -181,7 +182,8 @@ export default function FileWorkbench() {
     if (!session || !active) return;
     const result = await api.workbenchChangeRequest(session, active.id, annotation.id);
     if (!result?.prompt) { setError('没有生成修改请求，请重新保存批注'); return; }
-    await api.sendMessage(session, { content: result.prompt });
+    const outcome = await submissions.submit(session, { content: result.prompt }, () => useStore.getState().sessionId === session);
+    if (outcome.state !== 'accepted') { setError(outcome.message || '发送已取消'); return; }
     setNotice('已把批注作为审阅指导发给模型，改完会自动刷新这里的文件');
   });
 

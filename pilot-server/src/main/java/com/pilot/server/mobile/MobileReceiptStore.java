@@ -133,9 +133,20 @@ public class MobileReceiptStore {
     }
 
     long validateNew(String id) throws IOException {
+        verifySignature(id);
+        checkpoint();
+        long expiry = Long.parseLong(id.split(":", 2)[1].split("\\.")[1]);
+        if (expiry <= now()) {
+            throw new Rejected(410, "REQUEST_EXPIRED", "请求已过期，请查看任务记录核对结果；不会重新执行", true);
+        }
+        checkCapacity();
+        return expiry;
+    }
+
+    private void verifySignature(String id) throws IOException {
         initialize();
-        String[] parts = id.split(":", 2);
-        if (parts.length != 2 || !parts[1].matches(TOKEN_PATTERN)) {
+        String[] parts = id == null ? new String[0] : id.split(":", 2);
+        if (parts.length != 2 || !parts[0].matches("[a-f0-9]{64}") || !parts[1].matches(TOKEN_PATTERN)) {
             throw new Rejected(426, "RECEIPT_UPGRADE_REQUIRED", "请更新手机和电脑连接组件；旧请求只能核对已有回执", true);
         }
         String token = parts[1];
@@ -145,13 +156,18 @@ public class MobileReceiptStore {
             token.substring(separator + 1).getBytes(StandardCharsets.US_ASCII))) {
             throw new Rejected(400, "INVALID_REQUEST_TOKEN", "请求标识签名无效，请核对原请求", true);
         }
-        checkpoint();
-        long expiry = Long.parseLong(token.split("\\.")[1]);
-        if (expiry <= now()) {
-            throw new Rejected(410, "REQUEST_EXPIRED", "请求已过期，请查看任务记录核对结果；不会重新执行", true);
-        }
-        checkCapacity();
-        return expiry;
+    }
+
+    /** 查询只验证签名，不执行原操作；过期、容量耗尽时仍可核对结果。 */
+    public synchronized Receipt lookup(String id) throws IOException {
+        verifySignature(id);
+        return get(id);
+    }
+
+    public synchronized void acknowledgeRequest(String id) throws IOException {
+        verifySignature(id);
+        String[] parts = id.split(":", 2);
+        acknowledge(parts[0], parts[1]);
     }
 
     private String sign(String peer, String unsigned) {

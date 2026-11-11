@@ -11,7 +11,7 @@ const output = await mkdtemp(join(tmpdir(), 'pilot-sessions-ui-'));
 const entry = `.sessions-fixture-${process.pid}.html`, file = join(root, entry);
 const projectFolders = ['C:\\工作区\\Pilot', '/workspace/pilot'];
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pilot 会话管理</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
-import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js';
+import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js'; import {installSubmissionFixture} from '/scripts/submission-fixture.mjs';
 import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
 document.documentElement.dataset.theme='dark';window.store=useStore;window.api=api;window.cancelled=0;window.archiveAttempts=0;
 const seed=[{id:'recent',title:'完善模型选择与请求同步',createdAt:'2026-11-04T00:00:00Z'}, {id:'older',title:'检查历史会话的恢复行为',createdAt:'2026-10-01T00:00:00Z'}, {id:'third',title:'补充跨平台验证记录',createdAt:'2026-09-01T00:00:00Z'}].map(s=>({...s,sessionId:s.id,projectId:'pilot',status:'COMPLETED',updatedAt:s.createdAt,pinned:false,unread:false,isBlank:false,archived:false}));
@@ -21,6 +21,7 @@ for(const key of Object.keys(api))if(typeof api[key]==='function')api[key]=async
 api.sessions=async()=>structuredClone(db);api.session=async id=>({...db.find(s=>s.id===id)});api.schedules=async()=>[];api.queue=async()=>({items:[]});api.bookmarks=async()=>[];api.filesFlat=async()=>({files:[]});
 api.renameSession=async(id,title)=>{if(window.failRename)throw Error('模拟连接失败');return update(id,{title,titleManual:true});};
 api.sessionPreferences=async(id,values)=>update(id,values);api.archiveSession=async(id,archived)=>{archiveAttempts++;if(window.failArchive)throw Error('模拟归档失败');return update(id,{archived});};api.deleteSession=async id=>{if(window.holdDelete)await new Promise(resolve=>window.finishDelete=resolve);if(window.failDelete)throw Error('模拟删除失败');db=db.filter(s=>s.id!==id);save();};
+installSubmissionFixture(api);
 api.sendMessage=async id=>{if(window.failSend)throw Error('模拟发送失败');return update(id,{updatedAt:new Date().toISOString()});};
 useStore.setState({init:async()=>{},connectSse:()=>{},loadHistory:async()=>{},loadPlan:async()=>{},loadQueue:async()=>{},loadTask:async()=>{},refreshContext:async()=>{},refreshActiveRun:async()=>{},loadSkills:async()=>{},sessionId:'recent',sessionTitle:db.find(s=>s.id==='recent')?.title||'',sessions:db,workspace:'',cancelRun:()=>window.cancelled++,projects:[{id:'pilot',name:'Pilot',folders:${JSON.stringify(projectFolders)}}],ready:true});
 useStore.getState().loadSessions().then(()=>createRoot(document.getElementById('root')).render(React.createElement(App)));

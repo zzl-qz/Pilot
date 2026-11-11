@@ -18,14 +18,15 @@ const server = await createServer({ configFile: false, root, publicDir: '../src/
       import {Composer} from '/src/components/Composer.jsx';
       import {UiProvider} from '/src/components/UiProvider.js';
       import {useStore} from '/src/store.js';
-      import {api} from '/src/api.js';
+      import {api} from '/src/api.js'; import {installSubmissionFixture} from '/scripts/submission-fixture.mjs';
       import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
       document.documentElement.dataset.theme='dark'; window.store=useStore; window.api=api; window.sent=[];
       for(const name of Object.keys(api)) if(typeof api[name]==='function') api[name]=async()=>({});
       const attachmentLimits={maxFiles:64,maxFileBytes:2097152,maxTotalBytes:26214400,maxRequestBytes:37000000};
       api.settings=async()=>({attachmentLimits});
-      api.sendMessage=async (id, body)=>{window.sent.push({id, body}); if(window.failSend) throw Error('test failure');};
-      useStore.setState({sessionId:'test-a',settingsData:{attachmentLimits}});
+      installSubmissionFixture(api);
+api.sendMessage=async (id, body)=>{window.sent.push({id, body}); if(window.failSend) throw Error('test failure');return {sessionId:id,runId:'r'};};
+      window.notices=[];const notice=useStore.getState().showNotice;useStore.setState({sessionId:'test-a',settingsData:{attachmentLimits},showNotice:m=>{notices.push(m);notice(m);}});
       useStore.getState().setUi({themeMode:'dark'});
       createRoot(document.getElementById('root')).render(React.createElement(UiProvider, null, React.createElement(Composer)));
     </script></body></html>`));
@@ -115,7 +116,7 @@ async function run(page, name) {
   await page.locator('#send').click(); await page.waitForFunction(()=>!document.querySelector('#send').disabled);
   assert.equal(await chips.count(),3,'失败保留附件');
   await page.evaluate(()=>window.failSend=false);
-  await page.locator('#send').click(); await page.waitForFunction(()=>document.querySelectorAll('[data-chip="attachment"]').length===0);
+  await page.locator('#send').click(); await page.waitForFunction(()=>document.querySelectorAll('[data-chip="attachment"]').length===0).catch(async e=>{throw Error(e.message+': '+JSON.stringify(await page.evaluate(()=>({sent,notices,epoch:store.getState().sessionEpoch,sessionId:store.getState().sessionId,notice:store.getState().ui.notice,pending:store.getState().pendingInputs,button:document.querySelector('#send').outerHTML,pendingReceipts:Object.keys(localStorage).filter(k=>k.startsWith("pilot.pending-submission:")).length}))));});
   const body=await page.evaluate(()=>sent.at(-1).body); assert.equal(body.attachments.length,3); assert.match(body.attachments[0].dataBase64,/^data:text\/plain;base64,/);
   assert.equal(await page.locator('#send').isDisabled(),true);
   await transfer('paste','only.txt'); await page.locator('#send').click();
@@ -141,10 +142,31 @@ async function run(page, name) {
   await input.evaluate(el=>el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true})));
   assert.equal(await page.evaluate(()=>sent.length),before,'输入法不发送');
   await input.press('Shift+Enter'); await input.press('a'); assert.equal(await page.evaluate(()=>sent.length),before);
+  // 已接受但响应丢失：原草稿与凭据跨刷新保留，重复点击只提醒，核对只查询。
+  await input.fill('断线后只执行一次');
+  await page.evaluate(() => {
+    api.sendMessage = async (id, body, requestId) => { sent.push({id,body,requestId}); throw TypeError('响应丢失'); };
+    api.submissionResult = async () => ({state:'unknown'});
+  });
+  await page.locator('#send').click();
+  await page.waitForFunction(() => !document.querySelector('#send').disabled && document.querySelector('.submission-notice'));
+  const accepted = await page.evaluate(() => sent.length);
+  await page.locator('#send').click();
+  await page.waitForFunction(() => !document.querySelector('#send').disabled);
+  assert.equal(await page.evaluate(() => sent.length), accepted, '未知结果不得重复提交');
+  assert.match(await input.innerText(), /断线后只执行一次/);
+  await page.reload();
+  await page.getByRole('button', {name:'查询提交结果', exact:true}).waitFor();
+  assert.equal(await page.evaluate(() => sent.length), 0, '重开窗口不能自动重发');
+  await page.evaluate(() => { api.submissionResult=async()=>({state:'accepted',response:{sessionId:'test-a',runId:'r'}}); });
+  await page.getByRole('button', {name:'查询提交结果', exact:true}).click();
+  await page.waitForFunction(() => !document.querySelector('.submission-notice'));
+  assert.equal(await page.evaluate(() => sent.length), 0, '核对结果不能执行消息');
+  assert.match(await input.innerText(), /断线后只执行一次/, '核对不能擦掉用户草稿');
   await checkToolbarLayout(page, name);
   await page.setViewportSize({width:390,height:844}); await page.screenshot({path:join(temp,`${name}-mobile.png`)});
   await page.setViewportSize({width:1440,height:900}); await page.screenshot({path:join(temp,`${name}-desktop.png`)});
-  assert.deepEqual(errors,[]); console.log(`${name}: PASS (paste/drop/picker/limits/dedup/drafts/failure/attachment-only/thumbnail/IME/newline)`);
+  assert.deepEqual(errors,[]); console.log(`${name}: PASS (paste/drop/picker/limits/dedup/drafts/failure/attachment-only/thumbnail/IME/newline/receipt/reload/no-retry)`);
 }
 let url;
 try {

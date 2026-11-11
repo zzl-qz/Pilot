@@ -350,3 +350,14 @@ html[data-theme] .conversation-composer .voice-timer { font-family: var(--sans);
   .conversation-composer .queue-item { flex-wrap: wrap; }
   .conversation-composer .queue-actions { margin-inline-start: auto; }
 }
+.submission-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}

@@ -1,4 +1,4 @@
-import type { ApiResults, InputMessage, Update, ScheduleDraft, ScheduleInput } from './types/api.js';
+import type { ApiResults, InputMessage, SubmissionResult, Update, ScheduleDraft, ScheduleInput } from './types/api.js';
 import type * as S from './types/server.js';
 import { errorInfo } from './lib/errors.js';
 import { voiceFilename } from './lib/voice-input.js';
@@ -44,15 +44,17 @@ export async function apiJson<T = unknown>(url: RequestInfo | URL, init?: Reques
   const response = await apiFetch(url, init, timeoutMs);
   if (!response.ok) {
     let message = `HTTP ${response.status}`;
+    let uncertain = false;
     try {
-      const body = await response.json() as { message?: unknown; error?: unknown } | null;
+      const body = await response.json() as { message?: unknown; error?: unknown; uncertain?: boolean } | null;
+      uncertain = body?.uncertain === true;
       // Spring 的错误响应体固定带 error（HTTP 状态短语，如「Bad Gateway」），
       // 真正的原因在 message 里。优先 message，否则界面只会显示 "Bad Gateway" 这类英文短语。
       const detail = typeof body?.message === 'string' ? body.message.trim() : '';
       const fallback = typeof body?.error === 'string' ? body.error.trim() : '';
       message = detail && detail !== 'No message available' ? detail : fallback || message;
     } catch { /* 保持 HTTP 状态码文案 */ }
-    const error = new ApiError(message, response.status);
+    const error = new ApiError(message, response.status, uncertain);
     throw error;
   }
   // 204 / 空响应没有 JSON 正文：直接 return response.json() 会抛「Unexpected end of JSON input」，
@@ -67,7 +69,10 @@ export async function apiJson<T = unknown>(url: RequestInfo | URL, init?: Reques
   return response.json() as Promise<T>;
 }
 
-export class ApiError extends Error { readonly status: number; constructor(message: string, status: number) { super(message); this.status = status; } }
+export class ApiError extends Error {
+  readonly status: number; readonly uncertain: boolean;
+  constructor(message: string, status: number, uncertain = false) { super(message); this.status = status; this.uncertain = uncertain; }
+}
 
 const jsonBody = (method: string, body: unknown) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 /** 文件工作台的根路径；会话 id 必须转义，避免路径注入。 */
@@ -155,7 +160,10 @@ export const api = {
   sessionPreferences: (id: string, body: { pinned?: boolean; unread?: boolean }) => apiJson<ApiResults['sessionPreferences']>(`/api/sessions/${encodeURIComponent(id)}/preferences`, jsonBody('PATCH', body)),
   archiveSession: (id: string, archived: boolean = true) => apiJson<ApiResults['archiveSession']>(`/api/sessions/${encodeURIComponent(id)}/archive`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archived }) }),
   switchWorkspace: (id: string, workspace: string) => apiJson<ApiResults['switchWorkspace']>(`/api/sessions/${encodeURIComponent(id)}/workspace`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspace }) }),
-  sendMessage: (id: string, body: InputMessage) => apiFetch(`/api/sessions/${encodeURIComponent(id)}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 120000).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() as Promise<S.SessionControllerMessageResponse>; }),
+  submissionToken: () => apiJson<{ requestId: string }>('/api/submissions/token', { cache: 'no-store' }),
+  submissionResult: (requestId: string) => apiJson<SubmissionResult>('/api/submissions/result', { headers: { 'X-Pilot-Request-Id': requestId }, cache: 'no-store' }),
+  acknowledgeSubmission: (requestId: string) => apiJson('/api/submissions/ack', jsonBody('POST', { requestId })),
+  sendMessage: (id: string, body: InputMessage, requestId: string) => apiJson<S.SessionControllerMessageResponse>(`/api/sessions/${encodeURIComponent(id)}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Pilot-Request-Id': requestId }, body: JSON.stringify(body) }, 120000),
   resend: (id: string, body: { sequence: number; content: string }) => apiJson<ApiResults['resend']>(`/api/sessions/${encodeURIComponent(id)}/resend`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   steer: (id: string, body: { content: string; runId?: string | null }) => apiJson<ApiResults['steer']>(`/api/sessions/${encodeURIComponent(id)}/steer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   continueRun: (id: string) => apiJson<ApiResults['continueRun']>(`/api/sessions/${encodeURIComponent(id)}/continue`, { method: 'POST' }),

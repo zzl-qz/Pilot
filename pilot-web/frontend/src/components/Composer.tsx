@@ -13,6 +13,7 @@ import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
 import { VoiceInput } from './VoiceInput.jsx';
+import { SubmissionNotice } from './SubmissionNotice.jsx';
 import { createComposerInput } from '../lib/composer-input.js';
 import { resolveComposerAction } from '../lib/composer-state.js';
 import { rankFileMatches } from '../lib/mention.js';
@@ -486,6 +487,7 @@ export function Composer() {
   return (
     <div className="composer-wrap conversation-composer">
       <div className="composer-docks">
+        <SubmissionNotice key={sessionId || 'draft'} sessionId={sessionId} />
         {editTarget != null && <div className="send-mode-label">
           <span>正在编辑历史消息 · 发送将重新执行</span>
           <Button size="sm" variant="ghost" label="作为新消息发送" onClick={() => {

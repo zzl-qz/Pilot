@@ -15,14 +15,18 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
+import com.pilot.server.config.AttachmentLimits;
+import com.pilot.server.http.AttachmentBodyLimitFilter;
+
 /**
- * 手机写操作的持久回执。先落盘占位再执行；断电时宁可返回待核实，也不自动重做一次命令。
+ * 手机与 Web 写操作的持久回执。先落盘占位再执行；断电时宁可返回待核实，也不自动重做一次命令。
  * 相同标识必须对应相同方法、路径和请求体。回执不保存附件或指令正文。
  */
 @Component
@@ -31,9 +35,16 @@ public class MobileRequestFilter extends OncePerRequestFilter {
     private static final int MAX_RESPONSE = 16 * 1024 * 1024;
     private static final int MAX_BODY = 12 * 1024 * 1024;
     private final MobileReceiptStore receipts;
+    private final AttachmentLimits limits;
 
     public MobileRequestFilter(MobileReceiptStore receipts) {
+        this(receipts, AttachmentLimits.defaults());
+    }
+
+    @Autowired
+    public MobileRequestFilter(MobileReceiptStore receipts, AttachmentLimits limits) {
         this.receipts = receipts;
+        this.limits = limits;
     }
 
     @Override
@@ -53,8 +64,11 @@ public class MobileRequestFilter extends OncePerRequestFilter {
             failure(response, 400, "无效的请求标识", true);
             return;
         }
-        byte[] body = request.getInputStream().readNBytes(MAX_BODY + 1);
-        if (body.length > MAX_BODY) {
+        long budget =
+            AttachmentBodyLimitFilter.isMessageRequest(request) && request.getHeader("X-Pilot-Device-Id") == null
+                ? limits.maxRequestBytes() : MAX_BODY;
+        byte[] body = request.getInputStream().readNBytes((int)Math.min(budget + 1, Integer.MAX_VALUE));
+        if (body.length > budget) {
             failure(response, 413, "附件或消息过大", false);
             return;
         }

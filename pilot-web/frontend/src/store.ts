@@ -7,6 +7,7 @@ import type { SideChatTab } from './types/content.js';
 import type { PlanRow, ResultRow } from './types/thread.js';
 import type * as S from './types/server.js';
 import { errorInfo } from './lib/errors.js';
+import { submissions } from './lib/submissions.js';
 import { resolveTheme } from './lib/theme.js';
 type StoreGet = () => StoreState;
 type StoreSet = (change: (draft: Draft<StoreState>) => void) => void;
@@ -1257,46 +1258,51 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       get().showNotice('消息正文和附件合计超过请求预算，请减少内容后重试。');
       return false;
     }
-    const remembered = rememberInput(localStorage, sessionId, text);
-    const queueInstead = get().running;
-    if (!queueInstead) {
-      set((draft) => {
-        draft.pendingInputs.push(payloadContent);
-        appendUserRow(draft, payloadContent, null, { attachments, imagePositions, pendingKey: `pending:${Date.now()}` });
-        draft.ui.bottomSignal += 1;
-        if (remembered) {
-          draft.inputHistory = remembered;
-          draft.inputHistoryIndex = -1;
-          draft.inputHistoryDraft = '';
-        }
-      });
-    } else if (remembered) {
-      set((draft) => {
-        draft.inputHistory = remembered;
-        draft.inputHistoryIndex = -1;
-        draft.inputHistoryDraft = '';
-      });
-    }
-    try {
-      await api.sendMessage(sessionId, body);
-      get().loadSessions();
-      if (queueInstead && get().sessionId === sessionId) {
-        await get().loadQueue();
+    const pendingKey = `pending:${Date.now()}:${Math.random()}`;
+    let queueInstead = get().running;
+    const result = await submissions.submit(sessionId, body, () => {
+      if (get().sessionEpoch !== ownerEpoch || get().sessionId !== sessionId || !get().modelReady()) return false;
+      queueInstead = get().running;
+      const remembered = rememberInput(localStorage, sessionId, text);
+      if (!queueInstead) {
+        set((draft) => {
+            draft.pendingInputs.push(payloadContent);
+            appendUserRow(draft, payloadContent, null, { attachments, imagePositions, pendingKey });
+            draft.ui.bottomSignal += 1;
+            if (remembered) {
+              draft.inputHistory = remembered;
+              draft.inputHistoryIndex = -1;
+              draft.inputHistoryDraft = '';
+            }
+        });
+      } else if (remembered) {
+        set((draft) => {
+            draft.inputHistory = remembered;
+            draft.inputHistoryIndex = -1;
+            draft.inputHistoryDraft = '';
+        });
+      }
+      return true;
+    });
+    if (result.state === 'accepted') {
+      // 接收结果已确定；列表刷新失败不能把已执行的任务重新标成发送失败。
+      void get().loadSessions().catch(() => get().showNotice('消息已接收，会话列表刷新失败，请稍后刷新。'));
+      if (queueInstead && get().sessionId === sessionId && get().sessionEpoch === ownerEpoch) {
+        void get().loadQueue().catch(() => get().showNotice('消息已接收，队列刷新失败，请稍后刷新。'));
       }
       dropDraft(localStorage, sessionId);
       return true;
-    } catch (error) {
-      if (get().sessionId === sessionId) set((draft) => {
-        draft.pendingInputs = draft.pendingInputs.filter((item) => !sameUserInput(item, payloadContent));
-        const rows = draft.thread.rows;
-        const index = rows.map((row) => row.text).lastIndexOf(payloadContent);
-        if (index >= 0 && (!('sequence' in rows[index]) || rows[index].sequence == null)) {
-          rows.splice(index, 1);
-        }
-      });
-      get().showNotice('发送失败：' + errorInfo(error).message);
-      return false;
     }
+    if (result.state === 'rejected' && get().sessionId === sessionId && get().sessionEpoch === ownerEpoch) set((draft) => {
+      const index = draft.thread.rows.findIndex(row => row.key === pendingKey && (!('sequence' in row) || row.sequence == null));
+      if (index >= 0) {
+        draft.thread.rows.splice(index, 1);
+        const pending = draft.pendingInputs.findIndex(item => sameUserInput(item, payloadContent));
+        if (pending >= 0) draft.pendingInputs.splice(pending, 1);
+      }
+    });
+    if (result.message) get().showNotice(result.state === 'rejected' ? '发送失败：' + result.message : result.message);
+    return false;
   },
 
   async steer(text, attachments) {

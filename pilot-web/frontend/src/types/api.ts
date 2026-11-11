@@ -8,6 +8,7 @@ export interface HistoryPage { events: EventEnvelope[]; hasMore: boolean; total?
 export interface ActionResponse { ok?: boolean; message?: string; error?: string }
 export interface BrowserStatus { enabled: boolean; capable: boolean; available: boolean; reason?: string; paused?: boolean; headless?: boolean }
 export interface InputMessage { content: string; attachments?: Pick<DraftAttachment, 'name' | 'mimeType' | 'dataBase64'>[]; imagePositions?: number[]; skill?: string }
+export interface SubmissionResult { state: 'accepted' | 'rejected' | 'unknown'; status?: number; response?: { message?: string; sessionId?: string; runId?: string } }
 export type Update<T> = { [K in keyof T]?: T[K] extends readonly unknown[] ? T[K] : T[K] extends object ? Update<T[K]> : T[K] | null };
 /** 文件工作台：工作区里的真实文件就是唯一源，下面只是它的索引与审阅元数据。 */
 export interface WorkbenchFile {

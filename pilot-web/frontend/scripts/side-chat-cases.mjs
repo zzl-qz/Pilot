@@ -14,7 +14,7 @@ export async function checkSideChat(page, name, temp) {
     api.sessions = async () => [];
     api.createSideChat = async id => { sideEvents.push(['create', id]); return { sessionId: `side-${id}-${sideEvents.length}`, parentSessionId: id }; };
     api.deleteSession = async id => { sideEvents.push(['delete', id]); };
-    api.sendMessage = async (id, body) => { sideEvents.push(['send', id, body.content]); return { runId: `run-${id}` }; };
+    api.sendMessage = async (id, body) => { sideEvents.push(['send', id, body.content]); return { sessionId: id, runId: `run-${id}` }; };
     api.cancelRun = async id => { sideEvents.push(['stop', id]); };
     store.setState({ sessionId: 'parent-a', workspace: '/workspace/a', sideChats: { items: [], activeId: null }, sideDrafts: {}, running: true });
     store.getState().setUi({ inspectorOpen: true, inspectorTab: 'chat', reviewExpanded: false });
@@ -80,7 +80,7 @@ export async function checkSideChat(page, name, temp) {
   await input.fill('马上停止'); await input.press('Enter');
   await page.waitForFunction(() => sideEvents.some(e => e[0] === 'pending-send'));
   await panel.getByRole('button', { name: '停止', exact: true }).click();
-  await page.evaluate(() => resolveSideSend({ runId: 'late-started-run' }));
+  await page.evaluate(() => resolveSideSend({ sessionId: store.getState().sideChats.activeId, runId: 'late-started-run' }));
   await page.waitForFunction(() => sideEvents.some(e => e[0] === 'stop' && e[1] === 'late-started-run')).catch(async failure => {
     throw new Error(`${failure.message}: ${JSON.stringify(await page.evaluate(() => ({ events: sideEvents, text: document.querySelector('#panel-side-chat').innerText })))}`);
   });

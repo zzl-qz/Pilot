@@ -184,6 +184,36 @@ class SessionApiTest {
         assertEquals("修复边界条件", ((RunStarted)events.get(0).payload()).input());
     }
 
+    @Test
+    void webSubmissionCanBeQueriedAndReplayedWithoutDuplicatingQueuedTask() throws Exception {
+        String sessionId = createSession();
+        runStarter.setRunning(true);
+        try {
+            String token = mvc.perform(get("/api/submissions/token")).andExpect(status().isOk()).andReturn()
+                .getResponse().getContentAsString();
+            String id = json.readTree(token).get("requestId").asString();
+            mvc.perform(get("/api/submissions/result").header("X-Pilot-Request-Id", id))
+                .andExpect(jsonPath("$.state").value("unknown"));
+            for (int i = 0; i < 2; i++) {
+                mvc.perform(post("/api/sessions/{id}/messages", sessionId).header("X-Pilot-Request-Id", id)
+                    .contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"只入队一次\"}"))
+                    .andExpect(status().isAccepted());
+            }
+            mvc.perform(get("/api/submissions/result").header("X-Pilot-Request-Id", id)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("accepted"))
+                .andExpect(jsonPath("$.response.sessionId").value(sessionId));
+            assertEquals(List.of("只入队一次"), runStarter.queued(sessionId));
+            mvc.perform(post("/api/sessions/{id}/messages", sessionId).header("X-Pilot-Request-Id", id)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"不允许复用标识\"}"))
+                .andExpect(status().isConflict());
+            mvc.perform(post("/api/submissions/ack").contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("requestId", id)))).andExpect(status().isOk());
+            assertEquals(1, runStarter.queued(sessionId).size());
+        } finally {
+            runStarter.setRunning(false);
+        }
+    }
+
     /** 刷新页面后前端靠这个接口恢复历史会话，不能只返回当前进程内新建的会话。 */
     @Test
     void listsSessionsForHistoryRestore() throws Exception {

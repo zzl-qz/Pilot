@@ -7,6 +7,8 @@ import assert from 'node:assert/strict';
  */
 const storage = new Map();
 globalThis.localStorage = {
+  get length() { return storage.size; },
+  key: index => [...storage.keys()][index] ?? null,
   getItem: (key) => (storage.has(key) ? storage.get(key) : null),
   setItem: (key, value) => storage.set(key, String(value)),
   removeItem: (key) => storage.delete(key)
@@ -28,6 +30,7 @@ globalThis.window = {
     const url = String(input);
     const method = (init.method || 'GET').toUpperCase();
     calls.push({ url, method, body: init.body ? JSON.parse(init.body) : null });
+    if (url === '/api/submissions/token') return json({ requestId: `token-${calls.length}` });
     if (url === '/api/sessions' && method === 'POST') {
       const body = init.body ? JSON.parse(init.body) : {};
       return json({ sessionId: 'ses_new', id: 'ses_new', title: body.title || '新任务', workspace: body.workspace || '' });
@@ -39,7 +42,7 @@ globalThis.window = {
       return json({ events: [], hasMore: false });
     }
     if (url.includes('/messages')) {
-      return json({ ok: true });
+      return json({ sessionId: url.split('/')[3], runId: 'run' });
     }
     return json({});
   }

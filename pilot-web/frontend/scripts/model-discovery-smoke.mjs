@@ -26,14 +26,15 @@ async function until(condition) {
   assert.fail('等待隔离接口收到请求超时');
 }
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>Pilot 模型选择验收</title></head><body><div id="root"></div><script type="module">
-import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js';
+import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js'; import {installSubmissionFixture} from '/scripts/submission-fixture.mjs';
 import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
 document.documentElement.dataset.theme='dark';
 const real={settings:api.settings,saveModel:api.saveModel,clearModelKey:api.clearModelKey,probeModels:api.probeModels};
 for(const name of Object.keys(api))if(typeof api[name]==='function')api[name]=async()=>({});Object.assign(api,real);
 for(const name of ['bookmarks','workProducts','skillDrafts','schedules'])api[name]=async()=>[];
 api.files=async()=>({entries:[]});api.filesFlat=async()=>({files:[]});
-window.submissions=[];api.sendMessage=async(id,body)=>{window.submissions.push({id,body,model:useStore.getState().settingsData.model});return {};};
+window.submissions=[];installSubmissionFixture(api);
+api.sendMessage=async(id,body)=>{window.submissions.push({id,body,model:useStore.getState().settingsData.model});return {sessionId:id,runId:'r'};};
 const settings=await api.settings();useStore.setState({init:async()=>{},sessionId:'model-test',sessionTitle:'模型列表选择验收',settingsData:settings,modelOptions:settings.modelOptions,capabilities:{model:settings.model},projects:[],sessions:[]});
 window.store=useStore;createRoot(document.getElementById('root')).render(React.createElement(App));
 </script></body></html>`;

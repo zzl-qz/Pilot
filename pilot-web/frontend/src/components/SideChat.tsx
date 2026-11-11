@@ -4,6 +4,8 @@ import { errorInfo } from '../lib/errors.js';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
+import { submissions } from '../lib/submissions.js';
+import { SubmissionNotice } from './SubmissionNotice.jsx';
 import {
   appendQuote, lastEventSequence, quoteMarkdown, reduceSideChat, sideChatsFor, simplifyTranscript
 } from '../lib/side-chat.js';
@@ -215,9 +217,10 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
     setDraft('');
     setBusy(true);
     try {
-      const result = await api.sendMessage(sessionId, { content: text, attachments: [], imagePositions: [] });
+      const result = await submissions.submit(sessionId, { content: text, attachments: [], imagePositions: [] }, () => alive.current);
+      if (result.state !== 'accepted') throw Error(result.message || '发送已取消');
       if (alive.current) {
-        runRef.current = result?.runId || runRef.current;
+        runRef.current = result.response?.runId || runRef.current;
         if (stopRequested.current) await stop();
       }
     } catch (failure) {
@@ -268,6 +271,7 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
         )}
       </div>
       {error && <p className="side-chat-error" role="alert">{error}</p>}
+      <SubmissionNotice sessionId={sessionId} />
       <form className="side-chat-compose" onSubmit={send}>
         <textarea
           rows={2}

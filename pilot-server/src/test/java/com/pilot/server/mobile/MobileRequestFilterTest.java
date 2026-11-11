@@ -43,6 +43,7 @@ class MobileRequestFilterTest {
     private MockHttpServletRequest request(String body) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/sessions/ses_1/messages");
         request.addHeader("X-Pilot-Request-Id", requestId);
+        request.addHeader("X-Pilot-Device-Id", "a".repeat(64));
         request.setContent(body.getBytes(StandardCharsets.UTF_8));
         return request;
     }
@@ -92,5 +93,17 @@ class MobileRequestFilterTest {
         response = new MockHttpServletResponse();
         filter().doFilter(request("x".repeat(12 * 1024 * 1024 + 1)), response, (request, result) -> fail("超限不能执行"));
         assertEquals(413, response.getStatus());
+    }
+
+    @Test
+    void webMessagesUseAttachmentBudgetInsteadOfMobileReceiptCap() throws Exception {
+        MockHttpServletRequest request = request("x".repeat(13 * 1024 * 1024));
+        request.removeHeader("X-Pilot-Device-Id");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter().doFilter(request, response, (input, result) -> {
+            assertEquals(13 * 1024 * 1024, input.getInputStream().readAllBytes().length);
+            result.getWriter().write("{}");
+        });
+        assertEquals(200, response.getStatus());
     }
 }
