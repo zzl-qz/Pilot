@@ -3,12 +3,17 @@ package com.pilot.server.controller;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -50,6 +55,7 @@ import com.pilot.server.session.RunSubmissionService;
 import com.pilot.server.session.SessionCleanupService;
 import com.pilot.server.session.SkillService;
 import com.pilot.server.session.TaskControlService;
+import com.pilot.server.stream.AsyncEventStream;
 import com.pilot.server.workspace.WorkspaceService;
 
 import tools.jackson.databind.ObjectMapper;
@@ -706,19 +712,27 @@ public class SessionController {
 
     @GetMapping("/stream-metrics")
     public Map<String, Object> streamMetrics() {
-        return Map.of("delivery", sessions.streamMetrics(), "transport", com.pilot.server.stream.AsyncEventStream.metrics());
+        return Map.of("delivery", sessions.streamMetrics(), "transport", AsyncEventStream.metrics());
     }
 
     @GetMapping("/{id}/events/{sequence}")
     public Map<String, Object> referencedEvent(@PathVariable String id, @PathVariable long sequence,
         @RequestParam long revision) {
         requireSession(id);
-        if (sessions.historyRevision(id) != revision) throw new SessionService.HistoryChangedException();
+        if (sessions.historyRevision(id) != revision) {
+            throw new SessionService.HistoryChangedException();
+        }
         var page = sessions.replayPage(id, sequence - 1, sequence, 1);
-        if (page.isEmpty() || page.getFirst().sequence() != sequence) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "事件已不存在");
+        if (page.isEmpty() || page.getFirst().sequence() != sequence) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "事件已不存在");
+        }
         var event = page.getFirst();
-        if (objectMapper.writeValueAsBytes(event).length > 8 * 1024 * 1024) throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "单条事件超过 8 MiB，请检查事件数据");
-        if (sessions.historyRevision(id) != revision) throw new SessionService.HistoryChangedException();
+        if (objectMapper.writeValueAsBytes(event).length > 8 * 1024 * 1024) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "单条事件超过 8 MiB，请检查事件数据");
+        }
+        if (sessions.historyRevision(id) != revision) {
+            throw new SessionService.HistoryChangedException();
+        }
         return Map.of("event", event, "historyRevision", revision);
     }
 
@@ -726,16 +740,19 @@ public class SessionController {
     public void events(@PathVariable String id, @RequestParam(name = "after", required = false) Long after,
         @RequestHeader(name = "Last-Event-ID", required = false) Long lastEventId,
         @RequestParam(name = "revision", required = false) Long expectedRevision,
-        @RequestParam(name = "protocol", defaultValue = "1") int protocol,
-        jakarta.servlet.http.HttpServletRequest request, jakarta.servlet.http.HttpServletResponse response) throws IOException {
+        @RequestParam(name = "protocol", defaultValue = "1") int protocol, HttpServletRequest request,
+        HttpServletResponse response) throws IOException {
         requireSession(id);
         long cursor = Math.max(0, after != null ? after : lastEventId != null ? lastEventId : 0L);
         long revision = sessions.historyRevision(id);
         AtomicReference<EventSubscription> subscription = new AtomicReference<>();
-        AtomicReference<com.pilot.server.stream.AsyncEventStream> transport = new AtomicReference<>();
+        var registered = new CompletableFuture<Void>();
+        AtomicReference<AsyncEventStream> transport = new AtomicReference<>();
         Runnable finish = () -> {
             var stream = transport.get();
-            if (stream == null || stream.isClosed()) return;
+            if (stream == null || stream.isClosed()) {
+                return;
+            }
             try {
                 if (sessions.find(id).isPresent() && sessions.historyRevision(id) != revision) {
                     sendControl(stream, "stream.reset", id, Map.of("historyRevision", sessions.historyRevision(id)));
@@ -744,46 +761,64 @@ public class SessionController {
                 } else if (subscription.get() != null && "delivery_error".equals(subscription.get().closeReason())) {
                     sendControl(stream, "stream.error", id, Map.of("message", "历史事件交付失败，已停止自动恢复，请刷新或检查服务端记录"));
                 }
-            } finally { stream.finish(); }
+            } finally {
+                stream.finish();
+            }
         };
-        var stream = new com.pilot.server.stream.AsyncEventStream(request, response, streamBytes,
-            java.time.Duration.ofMillis(streamTimeout), () -> {
-                var current = subscription.get(); if (current != null) current.close();
-            }, () -> {
-                if (sessions.historyRevision(id) != revision) finish.run();
-            });
+        var stream = new AsyncEventStream(request, response, streamBytes, Duration.ofMillis(streamTimeout), () -> {
+            var current = subscription.get();
+            if (current != null) {
+                current.close();
+            }
+        }, () -> {
+            if (sessions.historyRevision(id) != revision) {
+                finish.run();
+            }
+        });
         transport.set(stream);
         if (expectedRevision != null && expectedRevision != revision) {
-            sendControl(stream, "stream.reset", id, Map.of("historyRevision", revision)); stream.finish(); return;
+            sendControl(stream, "stream.reset", id, Map.of("historyRevision", revision));
+            stream.finish();
+            return;
         }
         sendControl(stream, "stream.ready", id, Map.of("historyRevision", revision));
         try {
             var handle = sessions.subscribe(id, cursor, revision, envelope -> {
-                if (sessions.historyRevision(id) != revision) { finish.run(); throw new SessionService.HistoryChangedException(); }
-                if (!stream.send(envelope.type(), Long.toString(envelope.sequence()), objectMapper.writeValueAsString(envelope))) {
+                if (!stream.send(envelope.type(), Long.toString(envelope.sequence()),
+                    objectMapper.writeValueAsString(envelope))) {
                     throw new IllegalStateException("事件流已关闭");
                 }
             }, protocol >= 2 ? reference -> {
-                if (!sendControl(stream, "stream.event", id, Map.of("sequence", reference.sequence(), "historyRevision", revision))) {
+                if (!sendControl(stream, "stream.event", id,
+                    Map.of("sequence", reference.sequence(), "historyRevision", revision))) {
                     throw new IllegalStateException("事件流已关闭");
                 }
             } : null, protocol >= 2 ? snapshot -> {
                 if (!sendControl(stream, "stream.preview", id, objectMapper.convertValue(snapshot, Map.class))) {
                     throw new IllegalStateException("事件流已关闭");
                 }
-            } : null, finish);
+            } : null, () -> registered.thenRun(finish));
             subscription.set(handle);
-            if (stream.isClosed()) handle.close();
-            if (handle.isClosed()) finish.run();
-        } catch (SessionService.HistoryChangedException failure) { finish.run(); }
-        catch (RuntimeException failure) {
+            registered.complete(null);
+            if (stream.isClosed()) {
+                handle.close();
+            }
+            if (handle.isClosed()) {
+                finish.run();
+            }
+        } catch (SessionService.HistoryChangedException failure) {
+            finish.run();
+        } catch (RuntimeException failure) {
             sendControl(stream, "stream.error", id, Map.of("message", "无法建立事件订阅，请稍后刷新"));
             stream.finish();
+        } finally {
+            registered.complete(null);
         }
     }
 
-    private boolean sendControl(com.pilot.server.stream.AsyncEventStream stream, String type, String id, Map<String, ?> payload) {
-        return stream.send(type, null, objectMapper.writeValueAsString(Map.of("type", type, "sessionId", id, "payload", payload)));
+    private boolean sendControl(AsyncEventStream stream, String type, String id, Map<String, ?> payload) {
+        return stream.send(type, null,
+            objectMapper.writeValueAsString(Map.of("type", type, "sessionId", id, "payload", payload)));
     }
 
     private Session requireSession(String id) {

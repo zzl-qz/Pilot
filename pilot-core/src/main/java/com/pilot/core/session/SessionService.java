@@ -3,21 +3,31 @@ package com.pilot.core.session;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.pilot.core.event.AssistantPreview;
+import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.EventType;
 import com.pilot.core.event.RunFailed;
@@ -36,26 +46,30 @@ import com.pilot.core.event.SessionEvent;
 public final class SessionService {
     private static final Logger log = LoggerFactory.getLogger(SessionService.class);
     /** 单个订阅者允许积压的事件数。超过即视为客户端跟不上，直接断开。 */
-    private static final java.util.concurrent.ScheduledExecutorService MONITOR =
-        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(task -> {
-            Thread thread = new Thread(task, "pilot-event-monitor"); thread.setDaemon(true); return thread;
-        });
+    private static final ScheduledExecutorService MONITOR = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "pilot-event-monitor");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final Clock clock;
     private final SessionRepository repository;
     private final EventStreamLimits limits;
     private final PreviewLimits previewLimits;
     private final LiveOutputCache liveOutputs;
+    private final Semaphore replaySlots;
+    private final AtomicInteger replayPages = new AtomicInteger();
+    private final AtomicInteger peakReplayPages = new AtomicInteger();
     private final ConcurrentMap<String, PendingPreview> previews = new ConcurrentHashMap<>();
-    private final java.util.concurrent.atomic.AtomicInteger pendingPreviews = new java.util.concurrent.atomic.AtomicInteger();
-    private final java.util.concurrent.atomic.AtomicLong previewInputs = new java.util.concurrent.atomic.AtomicLong();
-    private final java.util.concurrent.atomic.AtomicLong previewOutputs = new java.util.concurrent.atomic.AtomicLong();
-    private final java.util.concurrent.atomic.AtomicInteger workers = new java.util.concurrent.atomic.AtomicInteger();
-    private final java.util.concurrent.atomic.AtomicLong queuedBytes = new java.util.concurrent.atomic.AtomicLong();
-    private final java.util.concurrent.atomic.AtomicLong peakBytes = new java.util.concurrent.atomic.AtomicLong();
-    private final java.util.concurrent.atomic.AtomicLong delivered = new java.util.concurrent.atomic.AtomicLong();
-    private final java.util.concurrent.atomic.AtomicLong replayNanos = new java.util.concurrent.atomic.AtomicLong();
-    private final ConcurrentMap<String, java.util.concurrent.atomic.AtomicLong> closedReasons = new ConcurrentHashMap<>();
+    private final AtomicInteger pendingPreviews = new AtomicInteger();
+    private final AtomicLong previewInputs = new AtomicLong();
+    private final AtomicLong previewOutputs = new AtomicLong();
+    private final AtomicInteger workers = new AtomicInteger();
+    private final AtomicLong queuedBytes = new AtomicLong();
+    private final AtomicLong peakBytes = new AtomicLong();
+    private final AtomicLong delivered = new AtomicLong();
+    private final AtomicLong replayNanos = new AtomicLong();
+    private final ConcurrentMap<String, AtomicLong> closedReasons = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, CopyOnWriteArrayList<EventDelivery>> subscribers = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Object> locks = new ConcurrentHashMap<>();
 
@@ -75,12 +89,15 @@ public final class SessionService {
         this(clock, repository, limits, PreviewLimits.defaults());
     }
 
-    public SessionService(Clock clock, SessionRepository repository, EventStreamLimits limits, PreviewLimits previewLimits) {
+    public SessionService(Clock clock, SessionRepository repository, EventStreamLimits limits,
+        PreviewLimits previewLimits) {
         this.previewLimits = Objects.requireNonNull(previewLimits);
         this.liveOutputs = new LiveOutputCache(previewLimits);
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.limits = Objects.requireNonNull(limits);
+        this.replaySlots =
+            new Semaphore((int)Math.max(1, Math.min(16, limits.totalBytes() / (16L * 1024 * 1024))), true);
     }
 
     public Session createSession(String title) {
@@ -205,71 +222,121 @@ public final class SessionService {
         Objects.requireNonNull(event, "event must not be null");
         String text;
         boolean reset;
-        if (event instanceof com.pilot.core.event.AssistantPreview part) { text = part.text(); reset = part.reset(); }
-        else if (event instanceof com.pilot.core.event.AssistantReasoning part) { text = part.text(); reset = part.reset(); }
-        else throw new IllegalArgumentException("preview 只接收正文或推理增量");
+        if (event instanceof AssistantPreview part) {
+            text = part.text();
+            reset = part.reset();
+        } else if (event instanceof AssistantReasoning part) {
+            text = part.text();
+            reset = part.reset();
+        } else {
+            throw new IllegalArgumentException("preview 只接收正文或推理增量");
+        }
         Object lock = lockFor(sessionId);
         synchronized (lock) {
             PendingPreview pending = previews.get(sessionId);
             if (pending == null) {
                 Session session = repository.find(sessionId).orElse(null);
-                if (session == null) { locks.remove(sessionId, lock); return; }
-                if (session.status().terminal()) return;
+                if (session == null) {
+                    locks.remove(sessionId, lock);
+                    return;
+                }
+                if (session.status().terminal()) {
+                    return;
+                }
                 var latest = repository.eventsPage(sessionId, null, 1);
-                if (latest.isEmpty() || !latest.getLast().runId().equals(runId)) return;
+                if (latest.isEmpty() || !latest.getLast().runId().equals(runId)) {
+                    return;
+                }
             }
             previewInputs.incrementAndGet();
             if (pending != null && (!pending.runId.equals(runId) || pending.type != event.type() || reset)) {
-                flushPreview(sessionId, pending); pending = null;
+                flushPreview(sessionId, pending);
+                pending = null;
             }
             long sequence = pending == null ? repository.latestSequence(sessionId) : pending.sequence;
-            if (sequence < 1) return;
-            if (reset) { deliverPreview(sessionId, runId, sequence, event); return; }
+            if (sequence < 1) {
+                return;
+            }
+            if (reset) {
+                deliverPreview(sessionId, runId, sequence, event);
+                return;
+            }
             for (int i = 0; i < text.length();) {
                 int point = text.codePointAt(i);
                 int size = point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
-                if (pending != null && pending.bytes + size > previewLimits.mergeBytes()) { flushPreview(sessionId, pending); pending = null; }
+                if (pending != null && pending.bytes + size > previewLimits.mergeBytes()) {
+                    flushPreview(sessionId, pending);
+                    pending = null;
+                }
                 if (pending == null) {
                     if (pendingPreviews.incrementAndGet() > previewLimits.sessions()) {
                         pendingPreviews.decrementAndGet();
                         SessionEvent remaining = event.type() == EventType.ASSISTANT_PREVIEW
-                            ? new com.pilot.core.event.AssistantPreview(text.substring(i)) : new com.pilot.core.event.AssistantReasoning(text.substring(i));
-                        deliverPreview(sessionId, runId, sequence, remaining); return;
+                            ? new AssistantPreview(text.substring(i)) : new AssistantReasoning(text.substring(i));
+                        deliverPreview(sessionId, runId, sequence, remaining);
+                        return;
                     }
                     pending = new PendingPreview(runId, event.type(), sequence);
                     previews.put(sessionId, pending);
                     PendingPreview expected = pending;
                     pending.timer = MONITOR.schedule(() -> Thread.ofVirtual().name("pilot-preview-flush").start(() -> {
-                        synchronized (lock) { if (previews.get(sessionId) == expected) flushPreview(sessionId, expected); }
+                        synchronized (lock) {
+                            if (previews.get(sessionId) == expected) {
+                                flushPreview(sessionId, expected);
+                            }
+                        }
                     }), previewLimits.mergeMillis(), TimeUnit.MILLISECONDS);
                 }
-                pending.text.appendCodePoint(point); pending.bytes += size; i += Character.charCount(point);
-                if (pending.bytes >= previewLimits.mergeBytes()) { flushPreview(sessionId, pending); pending = null; }
+                pending.text.appendCodePoint(point);
+                pending.bytes += size;
+                i += Character.charCount(point);
+                if (pending.bytes >= previewLimits.mergeBytes()) {
+                    flushPreview(sessionId, pending);
+                    pending = null;
+                }
             }
         }
     }
 
     private static final class PendingPreview {
-        final String runId; final EventType type; final long sequence;
-        final StringBuilder text = new StringBuilder(); int bytes;
-        java.util.concurrent.ScheduledFuture<?> timer;
-        PendingPreview(String runId, EventType type, long sequence) { this.runId = runId; this.type = type; this.sequence = sequence; }
+        final String runId;
+        final EventType type;
+        final long sequence;
+        final StringBuilder text = new StringBuilder();
+        int bytes;
+        ScheduledFuture<?> timer;
+
+        PendingPreview(String runId, EventType type, long sequence) {
+            this.runId = runId;
+            this.type = type;
+            this.sequence = sequence;
+        }
     }
+
     private void discardPreview(String sessionId) {
         PendingPreview pending = previews.remove(sessionId);
-        if (pending != null) { pendingPreviews.decrementAndGet(); if (pending.timer != null) pending.timer.cancel(false); }
+        if (pending != null) {
+            pendingPreviews.decrementAndGet();
+            if (pending.timer != null) {
+                pending.timer.cancel(false);
+            }
+        }
     }
+
     private void flushPreview(String sessionId, PendingPreview pending) {
-        if (pending == null || previews.get(sessionId) != pending) return;
+        if (pending == null || previews.get(sessionId) != pending) {
+            return;
+        }
         discardPreview(sessionId);
-        SessionEvent event = pending.type == EventType.ASSISTANT_PREVIEW
-            ? new com.pilot.core.event.AssistantPreview(pending.text.toString())
-            : new com.pilot.core.event.AssistantReasoning(pending.text.toString());
+        SessionEvent event = pending.type == EventType.ASSISTANT_PREVIEW ? new AssistantPreview(pending.text.toString())
+            : new AssistantReasoning(pending.text.toString());
         deliverPreview(sessionId, pending.runId, pending.sequence, event);
     }
+
     private void deliverPreview(String sessionId, String runId, long sequence, SessionEvent event) {
         previewOutputs.incrementAndGet();
-        deliver(sessionId, liveOutputs.update(EventEnvelope.of(sequence, clock.instant(), sessionId, runId, event)), EventSize.estimate(event) + 1024);
+        deliver(sessionId, liveOutputs.update(EventEnvelope.of(sequence, clock.instant(), sessionId, runId, event)),
+            EventSize.estimate(event) + 1024);
     }
 
     /** 追加事件并推送给当前订阅者，返回带序号与时间戳的信封。 */
@@ -294,8 +361,12 @@ public final class SessionService {
                 repository.markNotBlank(sessionId);
             }
             EventEnvelope envelope = repository.append(sessionId, runId, clock.instant(), event, status);
-            if (event.type() == EventType.RUN_STARTED || event.type() == EventType.ASSISTANT_DELTA) liveOutputs.begin(sessionId, runId);
-            if (status.terminal()) liveOutputs.clear(sessionId);
+            if (event.type() == EventType.RUN_STARTED || event.type() == EventType.ASSISTANT_DELTA) {
+                liveOutputs.begin(sessionId, runId);
+            }
+            if (status.terminal()) {
+                liveOutputs.clear(sessionId);
+            }
             deliver(sessionId, envelope, size);
             return envelope;
         }
@@ -354,13 +425,18 @@ public final class SessionService {
      * 和 {@link #publish} 共用会话锁，避免删到一半又被追加。
      */
     public int dropEventsFrom(String sessionId, long fromSequence) {
-        return editHistory(sessionId, fromSequence, null, () -> {});
+        return editHistory(sessionId, fromSequence, null, () -> {
+        });
     }
 
-    public long historyRevision(String sessionId) { return repository.historyRevision(sessionId); }
+    public long historyRevision(String sessionId) {
+        return repository.historyRevision(sessionId);
+    }
 
     public static final class HistoryChangedException extends RuntimeException {
-        public HistoryChangedException() { super("会话历史已变化，请重新加载后操作"); }
+        public HistoryChangedException() {
+            super("会话历史已变化，请重新加载后操作");
+        }
     }
 
     /** 其他数据库仓储写入与事件截断在同一事务内完成；提交后使所有旧订阅失效。 */
@@ -378,14 +454,18 @@ public final class SessionService {
                 otherWrites.run();
                 int count = repository.dropEventsFrom(sessionId, fromSequence);
                 SessionStatus status = SessionStatus.CREATED;
-                for (EventEnvelope event : repository.events(sessionId)) status = nextStatus(status, event.payload());
+                for (EventEnvelope event : repository.events(sessionId)) {
+                    status = nextStatus(status, event.payload());
+                }
                 repository.updateStatus(sessionId, status);
                 repository.advanceHistoryRevision(sessionId);
                 return count;
             });
             liveOutputs.clear(sessionId);
             var current = subscribers.get(sessionId);
-            if (current != null) current.forEach(EventDelivery::close);
+            if (current != null) {
+                current.forEach(EventDelivery::close);
+            }
             return removed;
         }
     }
@@ -419,7 +499,8 @@ public final class SessionService {
     }
 
     public EventSubscription subscribe(String sessionId, long afterSequence, Long expectedRevision,
-        Consumer<EventEnvelope> listener, Consumer<EventReference> references, Consumer<LiveOutput> snapshots, Runnable onClosed) {
+        Consumer<EventEnvelope> listener, Consumer<EventReference> references, Consumer<LiveOutput> snapshots,
+        Runnable onClosed) {
         Objects.requireNonNull(listener, "listener must not be null");
         EventDelivery delivery;
         Object lock = lockFor(sessionId);
@@ -430,17 +511,30 @@ public final class SessionService {
             }
             flushPreview(sessionId, previews.get(sessionId));
             long revision = historyRevision(sessionId);
-            if (expectedRevision != null && revision != expectedRevision) throw new HistoryChangedException();
-            if (listeners(sessionId).size() >= limits.subscribersPerSession()) throw new IllegalStateException("会话订阅数量已达上限");
-            if (workers.incrementAndGet() > limits.subscribers()) {
-                workers.decrementAndGet(); throw new IllegalStateException("事件流连接数量已达上限");
+            if (expectedRevision != null && revision != expectedRevision) {
+                throw new HistoryChangedException();
             }
-            try { delivery = new EventDelivery(sessionId, listener, references, onClosed, Math.max(0, afterSequence),
-                repository.latestSequence(sessionId), revision, snapshots, snapshots == null ? null : liveOutputs.snapshot(sessionId,
-                    repository.eventsPage(sessionId, null, 1).stream().map(EventEnvelope::runId).findFirst().orElse(""),
-                    repository.latestSequence(sessionId), revision, !repository.find(sessionId).orElseThrow().status().terminal()
-                        && repository.latestSequence(sessionId) > 0));
-            } catch (RuntimeException failure) { workers.decrementAndGet(); throw failure; }
+            if (listeners(sessionId).size() >= limits.subscribersPerSession()) {
+                throw new IllegalStateException("会话订阅数量已达上限");
+            }
+            if (workers.incrementAndGet() > limits.subscribers()) {
+                workers.decrementAndGet();
+                throw new IllegalStateException("事件流连接数量已达上限");
+            }
+            try {
+                delivery = new EventDelivery(sessionId, listener, references, onClosed, Math.max(0, afterSequence),
+                    repository.latestSequence(sessionId), revision, snapshots,
+                    snapshots == null ? null
+                        : liveOutputs.snapshot(sessionId,
+                            repository.eventsPage(sessionId, null, 1).stream().map(EventEnvelope::runId).findFirst()
+                                .orElse(""),
+                            repository.latestSequence(sessionId), revision,
+                            !repository.find(sessionId).orElseThrow().status().terminal()
+                                && repository.latestSequence(sessionId) > 0));
+            } catch (RuntimeException failure) {
+                workers.decrementAndGet();
+                throw failure;
+            }
             listeners(sessionId).add(delivery);
         }
         // 注册与高水位捕获是短临界区；查询及所有回放发送均由锁外 worker 完成。
@@ -454,19 +548,27 @@ public final class SessionService {
     }
 
     public record StreamMetrics(int subscriptions, int workers, long queuedBytes, long peakQueuedBytes,
-        long deliveredEvents, long replayNanos, long previewInputs, long previewOutputs, int pendingPreviews, long livePreviewBytes, int livePreviewSessions,
-        java.util.Map<String, Long> closeReasons) {}
+        long deliveredEvents, long replayNanos, long previewInputs, long previewOutputs, int pendingPreviews,
+        long livePreviewBytes, int livePreviewSessions, int replayPages, int peakReplayPages,
+        Map<String, Long> closeReasons) {
+    }
+
     public StreamMetrics streamMetrics() {
-        java.util.Map<String, Long> reasons = new java.util.TreeMap<>();
+        Map<String, Long> reasons = new TreeMap<>();
         closedReasons.forEach((key, value) -> reasons.put(key, value.get()));
-        return new StreamMetrics(subscriberCount(), workers.get(), queuedBytes.get(), peakBytes.get(),
-            delivered.get(), replayNanos.get(), previewInputs.get(), previewOutputs.get(), pendingPreviews.get(), liveOutputs.bytes(), liveOutputs.size(), java.util.Map.copyOf(reasons));
+        return new StreamMetrics(subscriberCount(), workers.get(), queuedBytes.get(), peakBytes.get(), delivered.get(),
+            replayNanos.get(), previewInputs.get(), previewOutputs.get(), pendingPreviews.get(), liveOutputs.bytes(),
+            liveOutputs.size(), replayPages.get(), peakReplayPages.get(), Map.copyOf(reasons));
     }
 
     private boolean reserve(long size) {
         long current;
-        do { current = queuedBytes.get(); if (size > limits.totalBytes() - current) return false; }
-        while (!queuedBytes.compareAndSet(current, current + size));
+        do {
+            current = queuedBytes.get();
+            if (size > limits.totalBytes() - current) {
+                return false;
+            }
+        } while (!queuedBytes.compareAndSet(current, current + size));
         peakBytes.accumulateAndGet(current + size, Math::max);
         return true;
     }
@@ -522,7 +624,8 @@ public final class SessionService {
      * <p>队列满、下游抛异常或显式 close 都会让这个订阅者停止工作并回调 {@code onClosed}，
      * 从而把「客户端跟不上」与「会话发布」彻底解耦。
      */
-    private record PendingEvent(EventEnvelope event, EventReference reference, long bytes, long enqueued) {}
+    private record PendingEvent(EventEnvelope event, EventReference reference, long bytes, long enqueued) {
+    }
 
     private final class EventDelivery implements EventSubscription {
         private final String sessionId;
@@ -536,125 +639,256 @@ public final class SessionService {
         private final AtomicBoolean closed = new AtomicBoolean();
         private final Object budget = new Object();
         private final Thread worker;
-        private final long afterSequence, highWater, revision;
+        private final long afterSequence;
+        private final long highWater;
+        private final long revision;
+
         private volatile long sendingAt;
+        private long revisionCheckedAt;
         private volatile boolean replaying = true;
         private volatile String reason = "closed";
         private volatile java.util.concurrent.ScheduledFuture<?> monitor;
         private long bytes;
 
         EventDelivery(String sessionId, Consumer<EventEnvelope> downstream, Consumer<EventReference> references,
-            Runnable onClosed, long afterSequence, long highWater, long revision, Consumer<LiveOutput> snapshots, LiveOutput snapshot) {
-            this.snapshots = snapshots; this.snapshot = snapshot;
+            Runnable onClosed, long afterSequence, long highWater, long revision, Consumer<LiveOutput> snapshots,
+            LiveOutput snapshot) {
+            this.snapshots = snapshots;
+            this.snapshot = snapshot;
             if (snapshot != null) {
                 snapshotBytes = 1024 + 6L * (snapshot.text().length() + snapshot.reasoning().length());
-                if (snapshotBytes > limits.queueBytes() || !reserve(snapshotBytes)) throw new IllegalStateException("临时输出交付预算不足");
+                if (snapshotBytes > limits.queueBytes() || !reserve(snapshotBytes)) {
+                    throw new IllegalStateException("临时输出交付预算不足");
+                }
                 bytes = snapshotBytes;
             }
-            this.afterSequence = afterSequence; this.highWater = highWater; this.revision = revision;
-            this.sessionId = sessionId; this.downstream = downstream; this.references = references; this.onClosed = onClosed;
+            this.afterSequence = afterSequence;
+            this.highWater = highWater;
+            this.revision = revision;
+            this.sessionId = sessionId;
+            this.downstream = downstream;
+            this.references = references;
+            this.onClosed = onClosed;
             this.worker = Thread.ofVirtual().name("pilot-event-delivery").unstarted(this::drain);
         }
+
         void start() {
             long started = System.nanoTime();
             monitor = MONITOR.scheduleAtFixedRate(() -> {
                 long now = System.nanoTime();
                 PendingEvent oldest = queue.peek();
-                if (sendingAt != 0 && now - sendingAt > TimeUnit.MILLISECONDS.toNanos(limits.sendMillis())) close("send_timeout");
-                else if (oldest != null && now - oldest.enqueued() > TimeUnit.MILLISECONDS.toNanos(limits.queueWaitMillis())) close("queue_timeout");
-                else if (replaying && now - started > TimeUnit.MILLISECONDS.toNanos(limits.replayMillis())) close("replay_timeout");
+                long sending = sendingAt;
+                if (sending != 0 && now - sending > TimeUnit.MILLISECONDS.toNanos(limits.sendMillis())) {
+                    close("send_timeout");
+                } else if (oldest != null
+                    && now - oldest.enqueued() > TimeUnit.MILLISECONDS.toNanos(limits.queueWaitMillis())) {
+                    close("queue_timeout");
+                } else if (replaying && now - started > TimeUnit.MILLISECONDS.toNanos(limits.replayMillis())) {
+                    close("replay_timeout");
+                }
             }, 50, 50, TimeUnit.MILLISECONDS);
-            if (closed.get()) monitor.cancel(false);
+            if (closed.get()) {
+                monitor.cancel(false);
+            }
             worker.start();
         }
+
         private PendingEvent pending(EventEnvelope event, long size) {
-            boolean ephemeral = event.payload().type() == EventType.ASSISTANT_PREVIEW || event.payload().type() == EventType.ASSISTANT_REASONING;
+            boolean ephemeral = event.payload().type() == EventType.ASSISTANT_PREVIEW
+                || event.payload().type() == EventType.ASSISTANT_REASONING;
             if (!ephemeral && references != null && size > limits.referenceBytes()) {
-                return new PendingEvent(null, new EventReference(event.sequence(), event.sessionId(), event.runId(), event.type()), 512, System.nanoTime());
+                return new PendingEvent(null,
+                    new EventReference(event.sequence(), event.sessionId(), event.runId(), event.type()), 512,
+                    System.nanoTime());
             }
             return new PendingEvent(event, null, size, System.nanoTime());
         }
+
         void offer(EventEnvelope event, long size) {
             PendingEvent pending = pending(event, size);
             boolean accepted = false;
             synchronized (budget) {
-                if (closed.get()) return;
-                if (bytes + pending.bytes() <= limits.queueBytes() && queue.remainingCapacity() > 0 && reserve(pending.bytes())) {
-                    bytes += pending.bytes(); queue.add(pending); accepted = true;
+                if (closed.get()) {
+                    return;
+                }
+                if (bytes + pending.bytes() <= limits.queueBytes() && queue.remainingCapacity() > 0
+                    && reserve(pending.bytes())) {
+                    bytes += pending.bytes();
+                    queue.add(pending);
+                    accepted = true;
                 }
             }
-            if (!accepted) close("queue_budget");
+            if (!accepted) {
+                close("queue_budget");
+            }
         }
+
         private void release(PendingEvent pending) {
-            synchronized (budget) { bytes -= pending.bytes(); queuedBytes.addAndGet(-pending.bytes()); }
+            synchronized (budget) {
+                bytes -= pending.bytes();
+                queuedBytes.addAndGet(-pending.bytes());
+            }
         }
+
+        private boolean checkRevision(boolean force) {
+            long now = System.nanoTime();
+            if (force || now - revisionCheckedAt >= TimeUnit.MILLISECONDS.toNanos(100)) {
+                revisionCheckedAt = now;
+                if (historyRevision(sessionId) != revision) {
+                    close("history_changed");
+                    return false;
+                }
+            }
+            return !closed.get();
+        }
+
         private void send(PendingEvent pending) {
-            if (closed.get()) return;
+            if (!checkRevision(false)) {
+                return;
+            }
             sendingAt = System.nanoTime();
             try {
-                if (pending.reference() != null) references.accept(pending.reference()); else downstream.accept(pending.event());
+                if (pending.reference() != null) {
+                    references.accept(pending.reference());
+                } else {
+                    downstream.accept(pending.event());
+                }
                 delivered.incrementAndGet();
-            } finally { sendingAt = 0; }
+            } finally {
+                sendingAt = 0;
+            }
         }
+
         private void drain() {
             long began = System.nanoTime();
             try {
                 long cursor = afterSequence;
                 while (!closed.get() && cursor < highWater) {
-                    if (historyRevision(sessionId) != revision) { close("history_changed"); return; }
-                    List<EventEnvelope> page = repository.replayPage(sessionId, cursor, highWater, limits.pageSize());
-                    if (page.isEmpty()) break;
-                    for (EventEnvelope event : page) {
-                        if (closed.get() || historyRevision(sessionId) != revision) return;
-                        PendingEvent pending = pending(event, EventSize.estimate(event.payload()) + 1024);
-                        synchronized (budget) {
-                            if (pending.bytes() + bytes > limits.queueBytes() || !reserve(pending.bytes())) { close("queue_budget"); return; }
-                            bytes += pending.bytes();
+                    if (!checkRevision(true)) {
+                        return;
+                    }
+                    replaySlots.acquire();
+                    peakReplayPages.accumulateAndGet(replayPages.incrementAndGet(), Math::max);
+                    try {
+                        List<EventEnvelope> page =
+                            repository.replayPage(sessionId, cursor, highWater, limits.pageSize());
+                        if (page.isEmpty()) {
+                            break;
                         }
-                        try { send(pending); } finally { release(pending); }
-                        cursor = event.sequence();
+                        for (EventEnvelope event : page) {
+                            if (closed.get()) {
+                                return;
+                            }
+                            PendingEvent pending = pending(event, EventSize.estimate(event.payload()) + 1024);
+                            synchronized (budget) {
+                                if (pending.bytes() + bytes > limits.queueBytes() || !reserve(pending.bytes())) {
+                                    close("queue_budget");
+                                    return;
+                                }
+                                bytes += pending.bytes();
+                            }
+                            try {
+                                send(pending);
+                            } finally {
+                                release(pending);
+                            }
+                            cursor = event.sequence();
+                        }
+                    } finally {
+                        replayPages.decrementAndGet();
+                        replaySlots.release();
                     }
                 }
-                replaying = false; replayNanos.addAndGet(System.nanoTime() - began);
-                if (historyRevision(sessionId) != revision) { close("history_changed"); return; }
+                replaying = false;
+                replayNanos.addAndGet(System.nanoTime() - began);
+                if (!checkRevision(true)) {
+                    return;
+                }
                 if (snapshots != null && !closed.get()) {
                     sendingAt = System.nanoTime();
-                    try { snapshots.accept(snapshot); } finally { releaseSnapshot(); sendingAt = 0; }
+                    try {
+                        snapshots.accept(snapshot);
+                    } finally {
+                        releaseSnapshot();
+                        sendingAt = 0;
+                    }
                 }
-                while (!closed.get()) {
+                while (checkRevision(false)) {
                     PendingEvent pending = queue.poll(1, TimeUnit.SECONDS);
-                    if (pending != null) { try { send(pending); } finally { release(pending); } }
+                    if (pending != null) {
+                        try {
+                            send(pending);
+                        } finally {
+                            release(pending);
+                        }
+                    }
                 }
             } catch (InterruptedException failure) {
                 Thread.currentThread().interrupt();
             } catch (RuntimeException failure) {
                 log.debug("订阅交付失败：{}", failure.getClass().getSimpleName());
                 close(failure instanceof EventTooLargeException ? "event_too_large" : "delivery_error");
-            } finally { releaseSnapshot(); close(); workers.decrementAndGet(); }
+            } finally {
+                releaseSnapshot();
+                close();
+                workers.decrementAndGet();
+            }
         }
+
         private void releaseSnapshot() {
             if (snapshotBytes != 0) {
-                synchronized (budget) { bytes -= snapshotBytes; queuedBytes.addAndGet(-snapshotBytes); snapshotBytes = 0; }
+                synchronized (budget) {
+                    bytes -= snapshotBytes;
+                    queuedBytes.addAndGet(-snapshotBytes);
+                    snapshotBytes = 0;
+                }
             }
             snapshot = null;
         }
-        @Override public boolean isClosed() { return closed.get(); }
-        @Override public String closeReason() { return reason; }
-        @Override public void close() { close("closed"); }
+
+        @Override
+        public boolean isClosed() {
+            return closed.get();
+        }
+
+        @Override
+        public String closeReason() {
+            return reason;
+        }
+
+        @Override
+        public void close() {
+            close("closed");
+        }
+
         private void close(String why) {
-            if (!closed.compareAndSet(false, true)) return;
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
             reason = why;
             unsubscribe(sessionId, this);
             synchronized (budget) {
                 PendingEvent pending;
-                while ((pending = queue.poll()) != null) release(pending);
+                while ((pending = queue.poll()) != null) {
+                    release(pending);
+                }
             }
-            var timer = monitor; if (timer != null) timer.cancel(false);
+            var timer = monitor;
+            if (timer != null) {
+                timer.cancel(false);
+            }
             worker.interrupt();
-            closedReasons.computeIfAbsent(why, ignored -> new java.util.concurrent.atomic.AtomicLong()).incrementAndGet();
-            if (onClosed != null) Thread.ofVirtual().name("pilot-event-close").start(() -> {
-                try { onClosed.run(); } catch (RuntimeException failure) { log.debug("订阅关闭回调失败", failure); }
-            });
+            closedReasons.computeIfAbsent(why, ignored -> new java.util.concurrent.atomic.AtomicLong())
+                .incrementAndGet();
+            if (onClosed != null) {
+                Thread.ofVirtual().name("pilot-event-close").start(() -> {
+                    try {
+                        onClosed.run();
+                    } catch (RuntimeException failure) {
+                        log.debug("订阅关闭回调失败", failure);
+                    }
+                });
+            }
         }
     }
 }
