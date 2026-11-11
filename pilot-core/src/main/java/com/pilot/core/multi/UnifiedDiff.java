@@ -5,6 +5,11 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.github.difflib.DiffUtils;
+import com.github.difflib.algorithm.DiffAlgorithmListener;
+import com.github.difflib.algorithm.myers.MyersDiff;
+import com.github.difflib.patch.DeltaType;
+
 /**
  * 最小 unified diff 生成器：子 Agent 只提 diff，不落地真实文件。
  *
@@ -14,8 +19,10 @@ import java.util.regex.Pattern;
 public final class UnifiedDiff {
     /** 上下文行数，与 git 默认一致。 */
     private static final int CONTEXT = 3;
-    /** LCS 动态规划的最大格子数；超过就退化成「整段替换」，避免大文件把内存打满。 */
+    /** LCS 动态规划的最大格子数；大文件改用 Myers 搜索。 */
     private static final long MAX_CELLS = 4_000_000L;
+    /** 限制 Myers 搜索的路径数量，避免大面积改写时消耗过多内存。 */
+    private static final int MAX_EDIT_DISTANCE = 512;
     private static final Pattern HUNK_HEADER = Pattern.compile("^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@.*");
 
     private UnifiedDiff() {
@@ -215,7 +222,7 @@ public final class UnifiedDiff {
 
     /**
      * 行级编辑脚本：公共前后缀先剥掉，中间用 LCS 求最短编辑序列。
-     * 中间段过大时退化成「整段删除 + 整段新增」，代价是 diff 更粗，但不会拖垮内存。
+     * 中间段过大时先尝试 Myers，超过搜索上限再退化成整段替换。
      */
     static List<Op> script(List<String> before, List<String> after) {
         List<Op> ops = new ArrayList<>();
@@ -236,8 +243,7 @@ public final class UnifiedDiff {
         List<String> left = before.subList(prefix, before.size() - suffix);
         List<String> right = after.subList(prefix, after.size() - suffix);
         if ((long)left.size() * right.size() > MAX_CELLS) {
-            left.forEach(line -> ops.add(new Op('-', line)));
-            right.forEach(line -> ops.add(new Op('+', line)));
+            appendLargeDiff(ops, left, right);
         } else {
             ops.addAll(lcsOps(left, right));
         }
@@ -246,6 +252,48 @@ public final class UnifiedDiff {
         }
         return ops;
     }
+
+    private static void appendLargeDiff(List<Op> ops, List<String> left, List<String> right) {
+        // Myers 的搜索成本随总行数和编辑距离增长，按输入大小缩小搜索深度。
+        int limit = (int)Math.min(MAX_EDIT_DISTANCE, MAX_CELLS / ((long)left.size() + right.size()));
+        if (limit >= 2 && Math.abs(left.size() - right.size()) <= limit) {
+            try {
+                var patch = DiffUtils.diff(left, right, new MyersDiff<>(), new EditDistanceLimit(limit), true);
+                for (var delta : patch.getDeltas()) {
+                    if (delta.getType() == DeltaType.EQUAL) {
+                        delta.getSource().getLines().forEach(line -> ops.add(new Op(' ', line)));
+                    } else {
+                        delta.getSource().getLines().forEach(line -> ops.add(new Op('-', line)));
+                        delta.getTarget().getLines().forEach(line -> ops.add(new Op('+', line)));
+                    }
+                }
+                return;
+            } catch (EditDistanceExceeded ignored) {
+                // 大面积改写超过搜索上限，保留整段替换的展示方式。
+            }
+        }
+        left.forEach(line -> ops.add(new Op('-', line)));
+        right.forEach(line -> ops.add(new Op('+', line)));
+    }
+
+    private record EditDistanceLimit(int limit) implements DiffAlgorithmListener {
+        @Override
+        public void diffStart() {
+        }
+
+        @Override
+        public void diffStep(int distance, int max) {
+            if (distance > limit) {
+                throw new EditDistanceExceeded();
+            }
+        }
+
+        @Override
+        public void diffEnd() {
+        }
+    }
+
+    private static final class EditDistanceExceeded extends RuntimeException {}
 
     private static List<Op> lcsOps(List<String> left, List<String> right) {
         int n = left.size();

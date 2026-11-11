@@ -250,6 +250,9 @@ class ChangeServiceTest {
         assertTrue(report.truncated());
         assertTrue(change.diff().contains("… 已省略 600 行 …"), change.diff().substring(0, 200));
         assertFalse(change.diff().contains("+line 400\n"), "超出上限的行不应出现在 diff 里");
+        ChangeService.FilePatch patch = changes.fileDiff(workspace, "big-new.txt");
+        assertTrue(patch.truncated());
+        assertEquals(total, patch.added());
     }
 
     /** 单个文件的补丁超过上限时截断展示，统计仍按完整补丁算。 */
@@ -264,7 +267,7 @@ class ChangeServiceTest {
         commit();
 
         StringBuilder content = new StringBuilder();
-        for (int i = 0; i < 2500; i++) {
+        for (int i = 0; i < 9000; i++) {
             content.append("line ").append(i).append(" with some padding text\n");
         }
         Files.writeString(file, content);
@@ -272,11 +275,50 @@ class ChangeServiceTest {
         ChangeService.RunChangeReport report = changes.inspectRun("run_1", workspace, List.of("big.txt"));
         ChangeService.RunFileChange change = file(report, "big.txt");
 
-        assertEquals(2500, change.added());
+        assertEquals(9000, change.added());
         assertEquals(1, change.removed());
         assertTrue(report.truncated());
         assertTrue(change.diff().length() <= 60_000 + 40, "单文件 diff 应被截断，实际 " + change.diff().length());
         assertTrue(change.diff().contains("… 该文件 diff 已截断 …"));
+
+        ChangeService.ChangeReport summary = changes.inspect(workspace);
+        ChangeService.FilePatch patch = changes.fileDiff(workspace, "big.txt");
+        assertTrue(summary.truncated());
+        assertTrue(patch.truncated());
+        assertEquals(9000, patch.added());
+        for (String diff : List.of(change.diff(), summary.diff(), patch.diff())) {
+            assertTrue(diff.lines().filter(line -> line.startsWith("+") && !line.startsWith("+++"))
+                .allMatch(line -> line.endsWith(" with some padding text")), "截断只能落在完整行的末尾");
+        }
+    }
+
+    @Test
+    void marksFilesOmittedByRunDiffBudget() throws IOException {
+        assumeTrue(git("--version"), "需要本机可用的 git");
+        git("init", "-q");
+        git("config", "core.autocrlf", "false");
+        List<String> paths = List.of("first.txt", "second.txt", "third.txt", "fourth.txt", "fifth.txt");
+        for (String path : paths) {
+            Files.writeString(workspace.resolve(path), "old\n");
+        }
+        git("add", ".");
+        commit();
+        String line = "new line " + "改".repeat(32);
+        String content = (line + "\n").repeat(2100);
+        for (String path : paths) {
+            Files.writeString(workspace.resolve(path), content);
+        }
+
+        ChangeService.RunChangeReport report = changes.inspectRun("run_1", workspace, paths);
+
+        assertTrue(report.truncated());
+        String partial = file(report, "fourth.txt").diff();
+        assertTrue(partial.endsWith("… diff 已截断 …"));
+        assertTrue(partial.lines().filter(text -> text.startsWith("+") && !text.startsWith("+++"))
+            .allMatch(text -> text.equals("+" + line)));
+        ChangeService.RunFileChange omitted = file(report, "fifth.txt");
+        assertEquals("… diff 已截断 …", omitted.diff());
+        assertEquals(2100, omitted.added());
     }
 
     /** 空的新文件不应该被当成二进制或直接丢掉。 */

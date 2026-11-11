@@ -50,11 +50,12 @@ export function parseDiff(text: unknown): DiffFile[] {
     }
     if (line.startsWith('@@')) {
       const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-      if (hunk) {
-        oldLine = Number(hunk[1]);
-        newLine = Number(hunk[2]);
+      inHunk = hunk !== null;
+      if (!hunk) {
+        continue;
       }
-      inHunk = true;
+      oldLine = Number(hunk[1]);
+      newLine = Number(hunk[2]);
       current.lines.push({ kind: 'hunk', text: line, old: '', next: '' });
       continue;
     }
@@ -69,8 +70,7 @@ export function parseDiff(text: unknown): DiffFile[] {
       current.lines.push({ kind: 'meta', text: line, old: '', next: '' });
       continue;
     }
-    if (line === '') {
-      // 补丁末尾的换行符，不是内容
+    if (!inHunk) {
       continue;
     }
     if (line.startsWith('+')) {
@@ -79,11 +79,16 @@ export function parseDiff(text: unknown): DiffFile[] {
     } else if (line.startsWith('-')) {
       current.removed++;
       current.lines.push({ kind: 'del', text: line.slice(1), old: oldLine++, next: '' });
-    } else if (inHunk) {
+    } else if (line.startsWith(' ')) {
       current.lines.push({ kind: 'ctx', text: line.slice(1), old: oldLine++, next: newLine++ });
     }
   }
   return files;
+}
+
+/** 后端把截断提示加在补丁末尾，真实源码行总带统一补丁前缀。 */
+export function hasDiffTruncation(diff: string | undefined) {
+  return /(?:^|\n)… (?:diff 已截断|该文件 diff 已截断|已省略 \d+ 行) …(?:\r?\n)*$/.test(diff ?? '');
 }
 
 /** 合计增删行，用于摘要行（+12 −3）。 */

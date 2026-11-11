@@ -1,6 +1,64 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 
+async function checkDiffTruncation(page) {
+  await page.evaluate(() => {
+    const patch = path => [
+      `diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`,
+      '@@ -1 +1 @@', '-old', '+new',
+    ].join('\n');
+    const complete = { path: 'complete.txt', status: 'M', added: 1, removed: 1, diff: patch('complete.txt') };
+    const partial = { path: 'partial.txt', status: 'M', added: 215, removed: 68, diff: patch('partial.txt') };
+    const omitted = { path: 'omitted.txt', status: 'M', added: 1, removed: 1, diff: '… diff 已截断 …' };
+    const unavailable = { path: 'unavailable.txt', status: 'M', added: 1, removed: 1 };
+    const report = {
+      gitRepository: true, truncated: true,
+      files: [complete, partial, omitted, unavailable].map(({ diff, ...file }) => file),
+      diff: [complete.diff, partial.diff, '… diff 已截断 …'].join('\n'),
+    };
+    window.diffTruncationSaved = { diff: api.diff, fileDiff: api.fileDiff, runChanges: api.runChanges };
+    api.diff = async () => report;
+    api.fileDiff = async (_id, path) => {
+      if (path === omitted.path) return { diff: patch(path), truncated: true };
+      throw Error('读取失败');
+    };
+    api.runChanges = async () => ({ gitRepository: true, truncated: true, files: [complete, omitted] });
+    store.setState({ changeReport: report });
+    store.getState().setUi({ changeView: complete.path });
+  });
+
+  const diff = page.locator('#change-diff');
+  const select = path => page.evaluate(path => store.getState().setUi({ changeView: path }), path);
+  await diff.locator('.diff-line.is-add').waitFor();
+  assert.equal(await diff.getByRole('status').count(), 0);
+  await select('partial.txt');
+  await diff.getByRole('status').filter({ hasText: '当前文件可能未显示完整' }).waitFor();
+  assert.equal(await diff.locator('.diff-line.is-ctx').count(), 0);
+  assert.equal(await diff.locator('button.n').count(), 2);
+  assert.equal(await page.locator('.change-view-stat .add').innerText(), '+215');
+
+  await select('omitted.txt');
+  await diff.getByRole('status').filter({ hasText: '只显示了前一部分' }).waitFor();
+  await diff.locator('.diff-line.is-add').waitFor();
+  await select('unavailable.txt');
+  await diff.getByText('读取差异失败，点右上角的刷新再试一次。').waitFor();
+
+  await page.getByLabel('审阅范围').selectOption('run');
+  await page.locator('#change-files').getByText('complete.txt', { exact: true }).waitFor();
+  await select('complete.txt');
+  await diff.locator('.diff-line.is-add').waitFor();
+  assert.equal(await diff.getByRole('status').count(), 0);
+  await select('omitted.txt');
+  await diff.getByRole('status').filter({ hasText: '暂无可预览的片段' }).waitFor();
+  assert.equal(await diff.locator('button.n').count(), 0);
+
+  await page.getByLabel('审阅范围').selectOption('workspace');
+  await page.evaluate(() => {
+    Object.assign(api, window.diffTruncationSaved);
+    store.setState({ changeReport: window.reviewReport });
+  });
+}
+
 export async function checkReview(page, name, temp) {
   await page.evaluate(() => {
     window.reviewSaved = { diff: api.diff, branch: api.branch, restore: api.restoreChanges, state: store.getState() };
@@ -21,6 +79,7 @@ export async function checkReview(page, name, temp) {
   const openUndo = async () => { await more.click(); await menu.getByRole('menuitem', { name: '撤销全部改动…' }).click(); };
   assert.match(await page.locator('#changes-totals').innerText(), /2 个文件/);
   assert.match(await page.locator('#changes-totals').innerText(), /\+215/);
+  await checkDiffTruncation(page);
   assert.equal(await page.getByLabel('新 Git 分支名').count(), 0);
   assert.equal(await undoItem.count(), 0);
   await more.focus();
@@ -137,5 +196,5 @@ export async function checkReview(page, name, temp) {
     store.getState().setUi({ reviewExpanded: false });
   });
   await page.setViewportSize({ width: 1440, height: 900 });
-  console.log(`${name}: PASS review toolbar, keyboard/IME, errors/retry, confirmation snapshot, stale responses and 3 widths`);
+  console.log(`${name}: PASS review diff truncation, toolbar, keyboard/IME, errors/retry, confirmation snapshot, stale responses and 3 widths`);
 }

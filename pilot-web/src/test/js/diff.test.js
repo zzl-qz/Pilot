@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { normalizePath, parseDiff, totalDiffLines } from '../../../frontend/src/lib/diff.js';
+import { hasDiffTruncation, normalizePath, parseDiff, totalDiffLines } from '../../../frontend/src/lib/diff.js';
 
 test('把补丁拆成文件与行，并统计增删', () => {
   const diff = [
@@ -75,6 +75,29 @@ test('\\ No newline 是元信息，不占用行号', () => {
   assert.equal(file.lines.find((line) => line.kind === 'del').old, 1);
   assert.equal(file.lines.find((line) => line.kind === 'add').next, 1);
   assert.equal(file.lines.filter((line) => line.kind === 'ctx').length, 0);
+});
+
+test('截断提示不占用行号，源码中相同的文本仍正常显示', () => {
+  for (const notice of ['… diff 已截断 …', '… 该文件 diff 已截断 …', '… 已省略 600 行 …']) {
+    const diff = [
+      'diff --git a/a.txt b/a.txt',
+      '@@ -4,3 +4,3 @@',
+      ` ${notice}`,
+      `-${notice}`,
+      `+${notice}`,
+      notice,
+    ].join('\n');
+    const [file] = parseDiff(diff);
+
+    assert.deepEqual(file.lines.slice(1), [
+      { kind: 'ctx', text: notice, old: 4, next: 4 },
+      { kind: 'del', text: notice, old: 5, next: '' },
+      { kind: 'add', text: notice, old: '', next: 5 },
+    ]);
+    assert.equal(hasDiffTruncation(diff), true);
+    assert.equal(hasDiffTruncation(`${notice}\r\n`), true);
+    assert.equal(hasDiffTruncation(diff.slice(0, -(notice.length + 1))), false);
+  }
 });
 
 test('多个文件各自计数，末尾换行不会多出一行上下文', () => {

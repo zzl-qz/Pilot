@@ -27,6 +27,8 @@ import org.springframework.stereotype.Component;
 public class ChangeService {
     private static final int MAX_DIFF_CHARS = 200_000;
     private static final int MAX_FILE_DIFF_CHARS = 60_000;
+    private static final String DIFF_TRUNCATED = "… diff 已截断 …";
+    private static final String FILE_DIFF_TRUNCATED = "… 该文件 diff 已截断 …";
     private static final int MAX_UNTRACKED_LINES = 400;
     private static final long MAX_UNTRACKED_BYTES = 512 * 1024;
     private static final int MAX_FILES = 500;
@@ -135,7 +137,7 @@ public class ChangeService {
         }
 
         boolean diffTruncated = diff.length() > MAX_DIFF_CHARS;
-        String body = diffTruncated ? diff.substring(0, MAX_DIFF_CHARS) + "\n… diff 已截断 …" : diff;
+        String body = diffTruncated ? completeDiffLines(diff, MAX_DIFF_CHARS) + DIFF_TRUNCATED : diff;
         return new ChangeReport(root, true, List.copyOf(files), body, truncated || diffTruncated, null);
     }
 
@@ -216,12 +218,12 @@ public class ChangeService {
             removedTotal += stat[1];
 
             if (text.length() > MAX_FILE_DIFF_CHARS) {
-                text = text.substring(0, MAX_FILE_DIFF_CHARS) + "\n… 该文件 diff 已截断 …";
+                text = completeDiffLines(text, MAX_FILE_DIFF_CHARS) + FILE_DIFF_TRUNCATED;
                 truncated = true;
             }
             String diff = text;
             if (diff.length() > budget) {
-                diff = diff.substring(0, Math.max(0, budget)) + "\n… diff 已截断 …";
+                diff = completeDiffLines(diff, budget) + DIFF_TRUNCATED;
                 truncated = true;
                 budget = 0;
             } else {
@@ -266,6 +268,7 @@ public class ChangeService {
         if (chunk != null && isBinaryPatch(chunk)) {
             chunk = "";
         }
+        boolean truncated = false;
         int[] stat;
         if (chunk != null) {
             stat = countLines(chunk);
@@ -274,14 +277,20 @@ public class ChangeService {
             SyntheticDiff synthetic = untrackedDiff(root.resolve(relative), relative);
             chunk = synthetic.text();
             stat = new int[] {synthetic.added(), 0};
+            truncated = synthetic.truncated();
         } else {
             chunk = "";
             stat = new int[] {0, 0};
         }
 
-        boolean truncated = chunk.length() > MAX_FILE_DIFF_CHARS;
-        String body = truncated ? chunk.substring(0, MAX_FILE_DIFF_CHARS) : chunk;
+        truncated = truncated || chunk.length() > MAX_FILE_DIFF_CHARS;
+        String body = completeDiffLines(chunk, MAX_FILE_DIFF_CHARS);
         return new FilePatch(relative, status == null ? "M" : status, stat[0], stat[1], body, truncated);
+    }
+
+    /** 截断时只保留完整的补丁行，避免半行源码被当成可引用的改动。 */
+    private static String completeDiffLines(String diff, int limit) {
+        return diff.length() <= limit ? diff : diff.substring(0, diff.lastIndexOf('\n', limit - 1) + 1);
     }
 
     /**
@@ -646,7 +655,7 @@ public class ChangeService {
         String text;
         try {
             if (Files.size(absolute) > MAX_UNTRACKED_BYTES) {
-                return new SyntheticDiff("", 0, true);
+                return new SyntheticDiff(FILE_DIFF_TRUNCATED, 0, true);
             }
             byte[] bytes = Files.readAllBytes(absolute);
             if (new String(bytes, StandardCharsets.ISO_8859_1).indexOf('\0') >= 0) {

@@ -1,10 +1,13 @@
 package com.pilot.core.multi;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 
@@ -72,17 +75,33 @@ class UnifiedDiffTest {
     }
 
     @Test
+    void largeFileWithTwoDistantChangesKeepsBothHunksSmall() {
+        String middle = IntStream.range(2, 3000).mapToObj(i -> "line " + i).collect(Collectors.joining("\n"));
+        String before = "old first\n" + middle + "\nold last\n";
+        String after = "new first\n" + middle + "\nnew last\n";
+
+        String diff = UnifiedDiff.create("big.txt", before, after);
+
+        assertArrayEquals(new int[] {2, 2}, UnifiedDiff.countChanges(diff));
+        List<int[]> ranges = UnifiedDiff.oldRanges(diff);
+        assertEquals(2, ranges.size());
+        assertArrayEquals(new int[] {1, 1}, ranges.get(0));
+        assertArrayEquals(new int[] {3000, 3000}, ranges.get(1));
+    }
+
+    @Test
     void largeEditFallsBackToReplaceInsteadOfFailing() {
         StringBuilder before = new StringBuilder();
         StringBuilder after = new StringBuilder();
         for (int i = 0; i < 3000; i++) {
-            before.append("old-").append(i).append('\n');
-            after.append("new-").append(i).append('\n');
+            before.append(i == 1500 ? "common" : "old-" + i).append('\n');
+            after.append(i == 1500 ? "common" : "new-" + i).append('\n');
         }
 
         String diff = UnifiedDiff.create("big.txt", before.toString(), after.toString());
 
-        assertEquals(3000, UnifiedDiff.countChanges(diff)[1]);
-        assertEquals(3000, UnifiedDiff.countChanges(diff)[0]);
+        assertArrayEquals(new int[] {3000, 3000}, UnifiedDiff.countChanges(diff));
+        assertTrue(diff.contains("-common\n"));
+        assertTrue(diff.contains("+common\n"));
     }
 }

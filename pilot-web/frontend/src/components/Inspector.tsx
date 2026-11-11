@@ -12,7 +12,7 @@ import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
 import { ReviewActions } from './ReviewActions.jsx';
 import { writeClipboard } from '../lib/clipboard.js';
-import { normalizePath, parseDiff } from '../lib/diff.js';
+import { hasDiffTruncation, normalizePath, parseDiff } from '../lib/diff.js';
 import { sortChangeFiles, splitPath, statusKind } from '../lib/changes.js';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { isCommandActive, commandStatusLabel, stripAnsi } from '../lib/command-tasks.js';
@@ -413,7 +413,7 @@ function ChangesPanel() {
     api.runChanges(lastRunId).then(data => {
       if (!data) throw new Error('任务改动返回空响应');
       if (alive && data.error) setRunError(data.error);
-      if (alive) setRunReport({ ...data, diff: (data.files || []).map(file => file.diff || '').join('\n') });
+      if (alive) setRunReport(data);
     }).catch(() => { if (alive) setRunError('读取任务改动失败，请刷新重试'); });
     return () => { alive = false; };
   }, [scope, lastRunId, sessionId, refresh]);
@@ -598,7 +598,7 @@ function ChangesPanel() {
               report={report}
               scoped={scope === 'run'}
               path={view}
-              status={files.find((file) => file.path === view)?.status}
+              change={files.find((file) => file.path === view)}
               prevPath={viewIndex > 0 ? trackedPaths[viewIndex - 1] : null}
               nextPath={viewIndex >= 0 && viewIndex < trackedPaths.length - 1 ? trackedPaths[viewIndex + 1] : null}
               index={viewIndex >= 0 ? viewIndex + 1 : 0}
@@ -678,16 +678,22 @@ function statusLetter(status?: string) {
   return raw.slice(0, 1).toUpperCase();
 }
 
-function DiffView({ report, scoped, path, status, prevPath, nextPath, index, total, canUndo, busy, onUndo }: { report: ReviewReport | null; scoped: boolean; path: string; status?: string; prevPath: string | null; nextPath: string | null; index: number; total: number; canUndo: boolean; busy: boolean; onUndo: () => void }) {
+function DiffView({ report, scoped, path, change, prevPath, nextPath, index, total, canUndo, busy, onUndo }: { report: ReviewReport | null; scoped: boolean; path: string; change?: ChangeFile; prevPath: string | null; nextPath: string | null; index: number; total: number; canUndo: boolean; busy: boolean; onUndo: () => void }) {
   const sessionId = useStore((state) => state.sessionId);
-  const untracked = status === '??';
+  const untracked = change?.status === '??';
   /*
    * 后端把整份补丁放在 report.diff 里，files 每项只有状态与增删行。
    * 整份补丁有 200k 字符上限：改动一多，后面的文件在补丁里根本没有内容，
    * 这时按需再取一次单文件补丁，既不把正文当 diff 展示，也不用一次拉全仓库。
    */
-  const parsed = useMemo(() => parseDiff(report?.diff || ''), [report]);
-  const summaryFile = parsed.find((item) => normalizePath(item.path) === normalizePath(path));
+  const summary = scoped ? change?.diff : report?.diff;
+  const { summaryFile, summaryTruncated } = useMemo(() => {
+    const parsed = parseDiff(summary);
+    const file = scoped ? parsed[0] : parsed.find((item) => normalizePath(item.path) === normalizePath(path));
+    // 运行报告逐文件返回补丁，只有工作区的整份补丁需要把末尾提示归到最后一个文件。
+    const truncated = hasDiffTruncation(summary) && (scoped || (file !== undefined && file === parsed.at(-1)));
+    return { summaryFile: file, summaryTruncated: truncated };
+  }, [summary, scoped, path]);
   const [confirming, setConfirming] = useState(false);
   /** 按需取回的单文件补丁：{ file, truncated }。 */
   const [patch, setPatch] = useState<{ file: DiffFile | null; truncated: boolean } | null>(null);
@@ -719,7 +725,7 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
           return;
         }
         const files = parseDiff(data?.diff || '');
-        setPatch({ file: files[0] || null, truncated: Boolean(data?.truncated) });
+        setPatch({ file: files[0] || null, truncated: Boolean(data?.truncated) || hasDiffTruncation(data?.diff) });
         setPatchState('');
       })
       .catch(() => {
@@ -732,7 +738,9 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
   }, [summaryFile, path, sessionId, untracked, scoped, report]);
 
   const file = summaryFile || patch?.file || null;
-  const lines = (file?.lines || []).filter(line => line.kind !== 'meta').slice(0, DIFF_LINE_LIMIT);
+  const truncated = summaryTruncated || Boolean(patch?.truncated);
+  const displayableLines = (file?.lines || []).filter(line => line.kind !== 'meta');
+  const lines = displayableLines.slice(0, DIFF_LINE_LIMIT);
   useEffect(() => { setSelection(null); setFeedback(''); }, [path, report]);
   const selected = selection ? lines.slice(Math.min(selection.anchor, selection.end), Math.max(selection.anchor, selection.end) + 1) : [];
   const addFeedback = () => {
@@ -755,8 +763,8 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
         <span className="change-view-path" title={path}>{path}</span>
         {file ? (
           <span className="change-view-stat">
-            <span className="add">+{file.added}</span>
-            <span className="del">−{file.removed}</span>
+            <span className="add">+{change?.added ?? file.added}</span>
+            <span className="del">−{change?.removed ?? file.removed}</span>
           </span>
         ) : (untracked ? <span className="change-view-tag">未跟踪</span> : null)}
         {total > 0 && index > 0 && <span className="change-view-index">{index} / {total}</span>}
@@ -800,6 +808,11 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
         <button type="button" className="btn" onClick={() => { setSelection(null); setFeedback(''); }}>取消选择</button>
       </div>}
       <div id="change-diff" className="change-diff">
+        {truncated && <p className="diff-truncated" role="status">
+          {summaryTruncated && !scoped
+            ? '工作区补丁超过展示上限，当前文件可能未显示完整。'
+            : lines.length ? '补丁超过展示上限，只显示了前一部分。' : '补丁超过展示上限，暂无可预览的片段。'}
+        </p>}
         {file
           ? (
             <>
@@ -817,17 +830,14 @@ function DiffView({ report, scoped, path, status, prevPath, nextPath, index, tot
                 </div>
               ))}
               {/* 生成出来的大文件动辄上万行，全铺出来会卡住滚动；先给一个明确的截断提示 */}
-              {file.lines.length > DIFF_LINE_LIMIT && (
+              {displayableLines.length > DIFF_LINE_LIMIT && (
                 <p className="diff-truncated">
-                  只显示前 {DIFF_LINE_LIMIT} 行，还有 {file.lines.length - DIFF_LINE_LIMIT} 行未渲染。
+                  只显示前 {DIFF_LINE_LIMIT} 行，还有 {displayableLines.length - DIFF_LINE_LIMIT} 行未渲染。
                 </p>
-              )}
-              {patch?.truncated && (
-                <p className="diff-truncated">这个文件的补丁超过 6 万字符，只显示了前一部分。</p>
               )}
             </>
           )
-          : untracked
+          : truncated ? null : untracked && !scoped
             ? <pre className="diff-raw">{content ?? '读取中…'}</pre>
             : (patchState === 'loading'
               ? <p className="diff-empty">读取差异中…</p>

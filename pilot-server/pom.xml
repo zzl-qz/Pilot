@@ -16,6 +16,11 @@
         <frontendDir>${project.basedir}/../pilot-web/frontend</frontendDir>
     </properties>
     <dependencies>
+        <!-- 单模块构建也直接编译 core 的沙箱 diff 源码。 -->
+        <dependency>
+            <groupId>io.github.java-diff-utils</groupId>
+            <artifactId>java-diff-utils</artifactId>
+        </dependency>
         <!-- 本模块通过 build-helper 直接编译 core 源码；单模块启动时本地 core POM
              可能仍是旧版，因此新增 Office 运行依赖必须直接声明，不能只靠其传递依赖。
              版本由父 POM 统一管理，无需先 install core，也无需嵌套启动 Maven。 -->
