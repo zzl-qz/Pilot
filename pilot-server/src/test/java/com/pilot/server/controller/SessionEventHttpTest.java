@@ -18,9 +18,13 @@ import java.time.Duration;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
 
+import org.apache.coyote.AbstractProtocol;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.tomcat.TomcatWebServer;
+import org.springframework.boot.web.server.servlet.context.ServletWebServerApplicationContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -39,6 +43,17 @@ class SessionEventHttpTest {
     int port;
     @Autowired
     SessionService sessions;
+    @Autowired
+    ServletWebServerApplicationContext application;
+
+    @AfterEach
+    void releasesSubscriptionsAndServletStreamsBeforeNextTest() throws Exception {
+        await(() -> sessions.subscriberCount() == 0);
+        await(() -> AsyncEventStream.metrics().connections() == 0);
+        var tomcat = (TomcatWebServer)application.getWebServer();
+        var protocol = (AbstractProtocol<?>)tomcat.getTomcat().getConnector().getProtocolHandler();
+        await(() -> protocol.getWaitingProcessorCount() == 0);
+    }
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
