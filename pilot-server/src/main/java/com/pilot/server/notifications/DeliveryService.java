@@ -66,7 +66,11 @@ public class DeliveryService {
 
     @org.springframework.beans.factory.annotation.Autowired
     public DeliveryService(AutomationStore store, ObjectMapper mapper, ResultInboxService results) {
-        this(store, mapper, results, Clock.systemUTC(), httpSender());
+        this(store, mapper, results, Clock.systemUTC());
+    }
+
+    public DeliveryService(AutomationStore store, ObjectMapper mapper, ResultInboxService results, Clock clock) {
+        this(store, mapper, results, clock, httpSender());
     }
 
     public DeliveryService(AutomationStore store, ObjectMapper mapper, ResultInboxService results, Clock clock,

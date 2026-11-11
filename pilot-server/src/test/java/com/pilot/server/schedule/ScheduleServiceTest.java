@@ -483,6 +483,36 @@ class ScheduleServiceTest {
         assertEquals(0, runner.starts);
     }
 
+    @Test
+    void transientSeriesWriteFailureRecoversPersistedOccurrenceWithoutManualResume() {
+        var mapper = JsonMapper.builder().build();
+        var store = new AutomationStore(new SqliteStore(root.resolve("recurring.db"))) {
+            boolean failed;
+
+            @Override
+            public synchronized boolean put(String kind, String id, long version, String payload) {
+                if ("series".equals(kind) && version == 1 && !failed) {
+                    failed = true;
+                    throw new IllegalStateException("模拟轮次创建后 SQLite 暂时不可写");
+                }
+                return super.put(kind, id, version, payload);
+            }
+        };
+        var recurring = new RecurringScheduleService(store, mapper, service, sessions, clock);
+        var plan = series(recurring, "ONCE");
+        clock.at = plan.nextAt();
+        recurring.tick();
+        assertEquals(1, service.list().size());
+        assertEquals("ACTIVE", recurring.get(plan.id()).state(), "暂时写入失败不能永久停止周期");
+        recurring = recurring();
+        recurring.tick();
+        assertEquals(1, recurring.get(plan.id()).occurrences());
+        assertEquals(1, service.list().size());
+        clock.at = service.list().getFirst().runAt();
+        service.tick();
+        assertEquals(1, runner.starts);
+    }
+
     class FakeRunner implements RunStarter {
         final Map<String, String> active = new HashMap<>();
         int starts;
