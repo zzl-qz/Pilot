@@ -10,6 +10,9 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 
@@ -141,5 +144,73 @@ class SessionServiceTest {
     void rejectsUnknownSession() {
         assertThrows(NoSuchSessionException.class, () -> sessions.sendMessage("ses_missing", "hi"));
         assertThrows(NoSuchSessionException.class, () -> sessions.events("ses_missing"));
+    }
+
+    @Test
+    void failedReplayNeverRegistersClosedSubscription() throws Exception {
+        Session session = sessions.createSession("回放失败");
+        sessions.sendMessage(session.id(), "第一条");
+        sessions.sendMessage(session.id(), "第二条");
+        AtomicInteger sent = new AtomicInteger();
+        AtomicInteger closed = new AtomicInteger();
+        CountDownLatch notified = new CountDownLatch(1);
+        EventSubscription subscription = sessions.subscribe(session.id(), 0, event -> {
+            sent.incrementAndGet();
+            throw new IllegalStateException("断线");
+        }, () -> { closed.incrementAndGet(); notified.countDown(); });
+        subscription.close();
+        assertTrue(notified.await(2, TimeUnit.SECONDS));
+        assertEquals(0, sessions.subscriberCount());
+        assertEquals(1, sent.get());
+        assertEquals(1, closed.get());
+    }
+
+    @Test
+    void failedHistoryQueryReleasesSubscription() {
+        SessionRepository backing = new InMemorySessionRepository();
+        SessionRepository failing = (SessionRepository) java.lang.reflect.Proxy.newProxyInstance(
+            SessionRepository.class.getClassLoader(), new Class<?>[] {SessionRepository.class},
+            (proxy, method, args) -> {
+                if (method.getName().equals("eventsAfter")) throw new IllegalStateException("查询失败");
+                return method.invoke(backing, args);
+            });
+        SessionService service = new SessionService(Clock.systemUTC(), failing);
+        Session session = service.createSession("查询失败");
+        assertThrows(IllegalStateException.class, () -> service.subscribe(session.id(), 0, event -> {}));
+        assertEquals(0, service.subscriberCount());
+    }
+
+    @Test
+    void blockingCloseCallbackDoesNotHoldSessionLock() throws Exception {
+        Session session = sessions.createSession("关闭回调");
+        Run run = sessions.sendMessage(session.id(), "第一条");
+        CountDownLatch closing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            sessions.subscribe(session.id(), 0, event -> { throw new IllegalStateException("断线"); }, () -> {
+                closing.countDown();
+                try { release.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            });
+            assertTrue(closing.await(2, TimeUnit.SECONDS));
+            org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(Duration.ofSeconds(2),
+                () -> sessions.publish(session.id(), run.runId(), new AssistantDelta("继续")));
+            assertEquals(0, sessions.subscriberCount());
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void deletionClosesAllSubscribersAndRepeatedCloseIsSafe() {
+        Session session = sessions.createSession("删除");
+        EventSubscription first = sessions.subscribe(session.id(), 0, event -> {});
+        EventSubscription second = sessions.subscribe(session.id(), 0, event -> {});
+        assertEquals(2, sessions.subscriberCount());
+        assertTrue(sessions.delete(session.id()));
+        first.close();
+        second.close();
+        assertEquals(0, sessions.subscriberCount());
+        assertThrows(NoSuchSessionException.class, () -> sessions.subscribe(session.id(), 0, event -> {}));
+        assertEquals(0, sessions.subscriberCount());
     }
 }

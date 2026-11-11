@@ -8,10 +8,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -67,13 +63,8 @@ public class SessionController {
     private static final String DEFAULT_TITLE = "未命名会话";
     /**
      * SSE 心跳：空闲连接也要定期写一点东西，否则对端早已断开时服务端感知不到，
-     * 订阅者会一直挂在内存里。单线程足够，任务本身只是写一个注释帧。
+     * 订阅者会一直挂在内存里。每条连接独立发送，慢连接不阻塞其他连接的心跳。
      */
-    private static final ScheduledExecutorService HEARTBEAT = Executors.newSingleThreadScheduledExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "pilot-sse-heartbeat");
-        thread.setDaemon(true);
-        return thread;
-    });
     private static final long HEARTBEAT_SECONDS = 20L;
 
     private final SessionService sessions;
@@ -720,7 +711,7 @@ public class SessionController {
         SseEmitter emitter = new SseEmitter(0L);
         AtomicBoolean closed = new AtomicBoolean(false);
         AtomicReference<EventSubscription> subscription = new AtomicReference<EventSubscription>();
-        AtomicReference<ScheduledFuture<?>> heartbeat = new AtomicReference<ScheduledFuture<?>>();
+        AtomicReference<Thread> heartbeat = new AtomicReference<>();
 
         // 浏览器刷新、切换会话或关页面都会让连接失效；这属于正常生命周期，
         // 不能把写入失败当成异常抛给上层，否则每个事件都会刷一份堆栈。
@@ -733,6 +724,9 @@ public class SessionController {
             }
         };
 
+        emitter.onCompletion(() -> closeQuietly(closed, subscription, heartbeat, null));
+        emitter.onTimeout(() -> closeQuietly(closed, subscription, heartbeat, null));
+        emitter.onError(error -> closeQuietly(closed, subscription, heartbeat, null));
         try {
             emitter.send(SseEmitter.event().comment("stream open: session=" + id + ", after=" + cursor));
             // 第四个参数：订阅被服务端摘掉（客户端积压太多）时，把底层连接一起关掉
@@ -741,21 +735,24 @@ public class SessionController {
             if (closed.get()) {
                 subscription.get().close();
             }
-            emitter.onCompletion(() -> closeQuietly(closed, subscription, heartbeat, null));
-            emitter.onTimeout(() -> closeQuietly(closed, subscription, heartbeat, null));
-            emitter.onError(error -> closeQuietly(closed, subscription, heartbeat, null));
             // 空闲连接也定期写注释帧：对端早已断开时，下一次写失败就能把订阅清掉
-            heartbeat.set(HEARTBEAT.scheduleAtFixedRate(() -> {
-                if (closed.get()) {
-                    return;
-                }
+            Thread beat = Thread.ofVirtual().name("pilot-sse-heartbeat").unstarted(() -> {
                 try {
-                    emitter.send(SseEmitter.event().comment("ping"));
+                    while (!closed.get()) {
+                        Thread.sleep(java.time.Duration.ofSeconds(HEARTBEAT_SECONDS));
+                        if (!closed.get()) emitter.send(SseEmitter.event().comment("ping"));
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 } catch (Exception e) {
                     closeQuietly(closed, subscription, heartbeat, emitter);
                 }
-            }, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS));
+            });
+            heartbeat.set(beat);
+            if (!closed.get()) beat.start();
+            if (closed.get()) beat.interrupt();
         } catch (IOException | RuntimeException e) {
+            closeQuietly(closed, subscription, heartbeat, null);
             emitter.completeWithError(e);
         }
         return ResponseEntity.ok().header("Cache-Control", "no-cache").header("X-Accel-Buffering", "no").body(emitter);
@@ -774,13 +771,13 @@ public class SessionController {
     }
 
     private static void closeQuietly(AtomicBoolean closed, AtomicReference<EventSubscription> subscription,
-        AtomicReference<ScheduledFuture<?>> heartbeat, SseEmitter emitter) {
+        AtomicReference<Thread> heartbeat, SseEmitter emitter) {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
-        ScheduledFuture<?> beat = heartbeat.get();
+        Thread beat = heartbeat.get();
         if (beat != null) {
-            beat.cancel(false);
+            beat.interrupt();
         }
         EventSubscription current = subscription.get();
         if (current != null) {

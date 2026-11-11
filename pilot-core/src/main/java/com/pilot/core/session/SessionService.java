@@ -13,7 +13,6 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import org.slf4j.Logger;
@@ -145,13 +144,16 @@ public final class SessionService {
 
     /** 删除会话：先摘掉订阅者再删数据，避免删除后仍有推送。 */
     public boolean delete(String sessionId) {
-        CopyOnWriteArrayList<EventDelivery> existing = subscribers.remove(sessionId);
-        if (existing != null) {
-            // 不关掉投递线程的话，它们会一直空转等事件
-            existing.forEach(EventDelivery::close);
+        Object lock = lockFor(sessionId);
+        synchronized (lock) {
+            CopyOnWriteArrayList<EventDelivery> existing = subscribers.remove(sessionId);
+            if (existing != null) {
+                existing.forEach(EventDelivery::close);
+            }
+            boolean deleted = repository.delete(sessionId);
+            locks.remove(sessionId, lock);
+            return deleted;
         }
-        locks.remove(sessionId);
-        return repository.delete(sessionId);
     }
 
     /** 记录一次用户消息并开启新运行：立即写入 {@code run.started} 事件。 */
@@ -292,32 +294,36 @@ public final class SessionService {
     public EventSubscription subscribe(String sessionId, long afterSequence, Consumer<EventEnvelope> listener,
         Runnable onClosed) {
         Objects.requireNonNull(listener, "listener must not be null");
-        AtomicReference<EventDelivery> self = new AtomicReference<EventDelivery>();
-        EventDelivery delivery = new EventDelivery(envelope -> listener.accept(envelope), () -> {
-            EventDelivery current = self.get();
-            if (current != null) {
-                unsubscribe(sessionId, current);
-            }
-            if (onClosed != null) {
-                onClosed.run();
-            }
-        });
-        self.set(delivery);
+        EventDelivery delivery = new EventDelivery(sessionId, listener, onClosed);
         Object lock = lockFor(sessionId);
-        synchronized (lock) {
-            if (repository.find(sessionId).isEmpty()) {
-                locks.remove(sessionId, lock);
-                delivery.close();
-                throw new NoSuchSessionException(sessionId);
+        try {
+            synchronized (lock) {
+                if (repository.find(sessionId).isEmpty()) {
+                    locks.remove(sessionId, lock);
+                    throw new NoSuchSessionException(sessionId);
+                }
+                // 先注册再回放：回放失败时 close 必须能摘掉已注册对象，不能重新挂回已关闭订阅。
+                listeners(sessionId).add(delivery);
+                for (EventEnvelope envelope : repository.eventsAfter(sessionId, afterSequence)) {
+                    if (delivery.closed.get()) {
+                        break;
+                    }
+                    delivery.deliverNow(envelope);
+                }
+                if (!delivery.closed.get()) {
+                    delivery.worker.start();
+                }
             }
-            // 回放同步执行：连接刚建立时先把历史写完，客户端连上即可看到全量进度。
-            // 之后的实时事件才走队列，慢客户端不会因此拖住会话发布线程。
-            for (EventEnvelope envelope : repository.eventsAfter(sessionId, afterSequence)) {
-                delivery.deliverNow(envelope);
-            }
-            listeners(sessionId).add(delivery);
+        } catch (RuntimeException | Error failure) {
+            delivery.close();
+            throw failure;
         }
         return delivery;
+    }
+
+    /** 当前活跃订阅数，用于连接诊断与资源回归验证。 */
+    public int subscriberCount() {
+        return subscribers.values().stream().mapToInt(List::size).sum();
     }
 
     private Object lockFor(String sessionId) {
@@ -372,17 +378,18 @@ public final class SessionService {
      * 从而把「客户端跟不上」与「会话发布」彻底解耦。
      */
     private final class EventDelivery implements EventSubscription {
+        private final String sessionId;
         private final Consumer<EventEnvelope> downstream;
         private final Runnable onClosed;
         private final BlockingQueue<EventEnvelope> queue = new ArrayBlockingQueue<>(SUBSCRIBER_QUEUE_CAPACITY);
         private final AtomicBoolean closed = new AtomicBoolean();
         private final Thread worker;
 
-        EventDelivery(Consumer<EventEnvelope> downstream, Runnable onClosed) {
+        EventDelivery(String sessionId, Consumer<EventEnvelope> downstream, Runnable onClosed) {
+            this.sessionId = sessionId;
             this.downstream = downstream;
             this.onClosed = onClosed;
             this.worker = Thread.ofVirtual().name("pilot-event-delivery").unstarted(this::drain);
-            this.worker.start();
         }
 
         /** 非阻塞投递：满了就断开这个订阅者。 */
@@ -393,6 +400,9 @@ public final class SessionService {
             if (!queue.offer(envelope)) {
                 log.debug("订阅者积压超过 {} 条，断开连接", SUBSCRIBER_QUEUE_CAPACITY);
                 close();
+            }
+            if (closed.get()) {
+                queue.clear();
             }
         }
 
@@ -422,17 +432,26 @@ public final class SessionService {
             } catch (RuntimeException e) {
                 log.debug("订阅者投递失败，按断开处理：{}", e.toString());
             } finally {
-                if (closed.compareAndSet(false, true)) {
-                    onClosed.run();
-                }
+                close();
             }
         }
 
         @Override
         public void close() {
             if (closed.compareAndSet(false, true)) {
+                unsubscribe(sessionId, this);
+                queue.clear();
                 worker.interrupt();
-                onClosed.run();
+                // 底层连接关闭可能等待发送锁，不能占用发布线程或会话锁。
+                if (onClosed != null) {
+                    Thread.ofVirtual().name("pilot-event-close").start(() -> {
+                        try {
+                            onClosed.run();
+                        } catch (RuntimeException failure) {
+                            log.debug("订阅关闭回调失败", failure);
+                        }
+                    });
+                }
             }
         }
     }
