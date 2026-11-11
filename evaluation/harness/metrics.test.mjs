@@ -217,3 +217,39 @@ test('基线预检单独验证完整性，不伪装成A/B通过；旧记录仍�
   const duplicate = baseline.map(r => ({ ...r, sessionId: 'same-session' }));
   assert.equal(validateBaseline(duplicate).verdict, 'reject');
 });
+
+test('故障注入聚合：覆盖、存活、注入次数与缺失观测的口径', () => {
+  const rows = [
+    record({ faultScenario: 'mid-eof', faultEvery: 3, faultRequestCount: 5, faultInjectedCount: 2, faultProxyStopped: false }),
+    record({ success: false, acceptancePassed: false, faultScenario: 'mid-eof', faultEvery: 3, faultRequestCount: 4, faultInjectedCount: 0, faultProxyStopped: false }),
+    record({ faultScenario: 'stall', faultEvery: 3, faultRequestCount: null, faultInjectedCount: null })
+  ];
+  const summary = summarize(rows);
+  assert.equal(summary.faultScenarioRuns, 3);
+  assert.equal(summary.faultInjectionCoverage, 0.5, '注入覆盖只统计有注入观测的样本');
+  assert.equal(summary.injectedFaultCount, 2);
+  assert.equal(summary.faultSurvivalRate, 2 / 3, '注入观测缺失的样本不计入分母存活外的口径');
+  const clean = summarize([record(), record()]);
+  assert.equal(clean.faultScenarioRuns, 0);
+  assert.equal(clean.faultInjectionCoverage, null, '无故障样本不能给出假覆盖');
+});
+
+test('干净基线与故障组不可比、故障方案不一致不可比、混杂方案与缺观测都拦下', () => {
+  const faultRows = tasks(20, { faultScenario: 'mid-eof', faultEvery: 3, faultRequestCount: 5, faultInjectedCount: 1, faultProxyStopped: false });
+  const clean = tasks(20);
+  const cleanFault = gate(clean, faultRows);
+  assert.equal(cleanFault.verdict, 'insufficient');
+  assert.ok(cleanFault.reasons.some(r => r.includes('候选带故障注入而基线没有')));
+  const otherProfile = tasks(20, { faultScenario: 'stall', faultEvery: 3, faultRequestCount: 5, faultInjectedCount: 1, faultProxyStopped: false });
+  const inconsistent = gate(faultRows, otherProfile);
+  assert.equal(inconsistent.verdict, 'insufficient');
+  assert.ok(inconsistent.reasons.some(r => r.includes('两组故障注入方案不一致')));
+  const mixed = [...faultRows, ...otherProfile];
+  assert.ok(gate(mixed, mixed).reasons.some(r => r.includes('混合了不同故障注入方案')));
+  assert.ok(gate(clean, clean).reasons.some(r => r.includes('基线带故障注入而候选没有')) === false);
+  const reverse = gate(faultRows, clean);
+  assert.ok(reverse.reasons.some(r => r.includes('基线带故障注入而候选没有')));
+  const missing = faultRows.map(r => ({ ...r, faultRequestCount: null }));
+  assert.ok(gate(missing, missing).reasons.some(r => r.includes('缺少请求数观测')));
+  assert.equal(validateBaseline(faultRows).verdict, 'pass', '同方案故障组自身预检可通过');
+});

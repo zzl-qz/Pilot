@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { resumePlan, createRunContext, dryRunRecords, expandRuns, hashSources, parseArgs, prepareWorkspace, recordMetadata, runCommand, runTask, selectTasks, serverIdentity, traceMetrics, waitForTerminal } from './runner.mjs';
+import { resumePlan, createRunContext, dryRunRecords, expandRuns, faultScenarioAt, hashSources, parseArgs, prepareWorkspace, recordMetadata, runCommand, runTask, selectTasks, serverIdentity, traceMetrics, waitForTerminal } from './runner.mjs';
 import { cacheHitRate, gate } from './metrics.mjs';
 
 async function fixture(t) {
@@ -306,6 +306,85 @@ function resumeFixture() {
   const metadata = new Map(tasks.map(t => [t.id, data]));
   return { tasks, data, metadata };
 }
+
+test('故障注入参数校验与轮换方案可由 seed/位置/attempt 复算', () => {
+  assert.throws(() => parseArgs(['--fault-proxy', 'http://127.0.0.1:18086', '--fault-profile', 'boom']), /未知故障模式/);
+  assert.throws(() => parseArgs(['--fault-proxy', 'http://127.0.0.1:18086']), /需要 --fault-profile/);
+  assert.throws(() => parseArgs(['--fault-proxy', 'http://127.0.0.1:18086', '--fault-profile', 'stall', '--dry-run']), /dry-run/);
+  assert.throws(() => parseArgs(['--fault-profile', 'stall']), /配合 --fault-proxy/);
+  assert.throws(() => parseArgs(['--fault-proxy', 'http://127.0.0.1:18086', '--fault-profile', 'stall', '--fault-every', '0']), /fault-every/);
+  assert.throws(() => parseArgs(['--fault-proxy', 'http://127.0.0.1:18086', '--fault-profile', 'stall', '--fault-stall-ms', '0']), /fault-stall-ms/);
+  assert.throws(() => parseArgs(['--fault-proxy', 'http://127.0.0.1:18086', '--fault-profile', 'stall', '--fault-max-requests', '-1']), /fault-max-requests/);
+  const args = parseArgs(['--fault-proxy', 'http://127.0.0.1:18086', '--fault-profile', 'mid-eof,stall', '--seed', '1']);
+  assert.equal(args.faultProfile, 'mid-eof,stall');
+  assert.equal(faultScenarioAt(args, 0, 1).scenario, 'stall');
+  assert.equal(faultScenarioAt(args, 0, 2).scenario, 'mid-eof');
+  assert.equal(faultScenarioAt(args, 1, 1).scenario, 'mid-eof');
+  const repeat3 = parseArgs(['--fault-proxy', 'http://127.0.0.1:18086', '--fault-profile', 'mid-eof,stall,reset', '--seed', '2', '--repeat', '3']);
+  // 同一任务的连续 attempt 索引 +1，轮遍不同 profile，不会三次都撞同一个故障。
+  const first = faultScenarioAt(repeat3, 0, 1), second = faultScenarioAt(repeat3, 0, 2), third = faultScenarioAt(repeat3, 0, 3);
+  assert.equal(second.rotationIndex - first.rotationIndex, 1);
+  assert.equal(third.rotationIndex - second.rotationIndex, 1);
+  assert.equal(new Set([first.scenario, second.scenario, third.scenario]).size, 3);
+  // 8 任务 × 3 尝试 × 2 profile：全计划索引连续且无重复，每个 profile 恰好 12 次。
+  const stats = new Map();
+  const indexes = new Set();
+  for (let position = 0; position < 8; position++) for (let attempt = 1; attempt <= 3; attempt++) {
+    const rotation = faultScenarioAt(repeat3, position, attempt);
+    indexes.add(rotation.rotationIndex);
+    stats.set(rotation.scenario, (stats.get(rotation.scenario) ?? 0) + 1);
+  }
+  assert.equal(indexes.size, 24);
+  assert.deepEqual([...stats.entries()].sort(), [['mid-eof', 8], ['reset', 8], ['stall', 8]]);
+});
+
+test('续跑拒绝故障方案不一致的记录；未启用代理时带故障字段的记录同样拒绝', () => {
+  const { tasks, data, metadata } = resumeFixture();
+  const fault = { faultProfiles: ['mid-eof', 'stall'], faultSeed: 1, repeat: 2, faultProfile: 'mid-eof,stall', faultEvery: 3 };
+  const a1 = { ...data, taskId: 'a', attempt: 1, success: false, evaluationError: true,
+    faultScenario: 'stall', faultProfile: 'mid-eof,stall', faultEvery: 3 }; // (1+0*2+0)%2=1 → stall
+  const b1 = { ...data, taskId: 'b', attempt: 1, success: true, sessionId: 's1',
+    faultScenario: 'stall', faultProfile: 'mid-eof,stall', faultEvery: 3 }; // (1+1*2+0)%2=1 → stall
+  assert.deepEqual(resumePlan([a1, b1], tasks, 2, metadata, fault).map(r => [r.task.id, r.attempt]), [['a', 2], ['b', 2]]);
+  assert.throws(() => resumePlan([{ ...a1, faultScenario: 'mid-eof' }], tasks, 2, metadata, fault), /故障注入方案/);
+  assert.throws(() => resumePlan([{ ...a1, faultEvery: 9 }], tasks, 2, metadata, fault), /故障注入方案/);
+  assert.throws(() => resumePlan([a1], tasks, 2, metadata), /故障注入信息/);
+});
+
+test('故障注入：记录代理观测；未注入则场景未覆盖不算成功', async t => {
+  const { args, task } = await fixture(t);
+  let workspace;
+  const mock = await server(t, async (path, body) => {
+    if (path === '/api/sessions') { workspace = body.workspace; return { sessionId: 'own' }; }
+    if (path.endsWith('/messages')) await writeFile(join(workspace, 'src.cjs'), 'module.exports = 2;');
+    return { sessionStatus: 'COMPLETED', usageExact: true, inputTokens: 10 };
+  });
+  let injected = 0;
+  const fault = await server(t, path => {
+    if (path === '/fault/state') return { requests: 5, injectedRequests: injected,
+      faultsByMode: injected ? { 'mid-eof': injected } : {}, stopped: false,
+      usage: { observedRequests: 4, requestsWithoutUsage: 1, inputTokens: 100, outputTokens: 20 }, spendEstimate: 123.4 };
+    throw new Error('fault proxy: unexpected path ' + path);
+  });
+  const run = () => runTask({ ...args, base: mock.base, faultProxyUrl: fault.base, faultScenario: 'mid-eof',
+    faultProfile: 'mid-eof', faultEvery: 3, faultRotationIndex: 2, faultWindowStart: Date.now() - 5 }, task);
+  injected = 1;
+  const covered = await run();
+  assert.equal(covered.success, true);
+  assert.equal(covered.scenarioCovered, true);
+  assert.equal(covered.faultScenario, 'mid-eof');
+  assert.equal(covered.faultRequestCount, 5);
+  assert.equal(covered.faultInjectedCount, 1);
+  assert.deepEqual(covered.faultInjectionModes, { 'mid-eof': 1 });
+  assert.equal(covered.faultProxyStopped, false);
+  assert.equal(covered.faultSpendEstimateUnits, 123.4);
+  assert.ok(covered.faultRunDurationSeconds >= 0.005, '记录故障窗口耗时');
+  injected = 0;
+  const uncovered = await run();
+  assert.equal(uncovered.scenarioCovered, false);
+  assert.equal(uncovered.success, false);
+  assert.match(uncovered.notes, /没有任何故障实际注入/);
+});
 
 test('续跑只补缺失轮次，已记录的失败和基础设施异常不被覆盖', () => {
   const { tasks, data, metadata } = resumeFixture();
