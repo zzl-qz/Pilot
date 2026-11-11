@@ -8,7 +8,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
@@ -204,7 +203,7 @@ public class AttachmentService {
         }
         return attachments.stream().filter(Attachment::image)
             .map(item -> new DisplayAttachment(item.name(), item.mimeType(),
-                "/api/sessions/" + safeName(sessionId, 80) + "/attachments/" + Path.of(item.path()).getFileName()))
+                "/api/sessions/" + storageDirectory(sessionId) + "/attachments/" + storedFilename(item.path())))
             .toList();
     }
 
@@ -232,7 +231,15 @@ public class AttachmentService {
 
     /** 会话的附件目录；可能尚不存在（该会话还没有上传过附件）。 */
     public Path sessionDir(String sessionId) {
-        return root.resolve(safeName(sessionId, 80));
+        return root.resolve(storageDirectory(sessionId));
+    }
+
+    public static String storageDirectory(String sessionId) {
+        return safeName(sessionId, 80);
+    }
+
+    public static String storedFilename(String path) {
+        return path.substring(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
     }
 
     public Path root() {

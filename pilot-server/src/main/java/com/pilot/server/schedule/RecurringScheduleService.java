@@ -16,6 +16,8 @@ import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 
 import com.pilot.core.session.SessionService;
+import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.maintenance.DataMaintenance;
 import com.pilot.server.store.AutomationStore;
 
 import tools.jackson.databind.ObjectMapper;
@@ -42,6 +44,12 @@ public class RecurringScheduleService {
     private final ScheduleService schedules;
     private final SessionService sessions;
     private final Clock clock;
+    private DataMaintenance maintenance = new DataMaintenance();
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void useMaintenance(PilotDataDir dataDir) {
+        this.maintenance = dataDir.maintenance();
+    }
 
     @org.springframework.beans.factory.annotation.Autowired
     public RecurringScheduleService(AutomationStore store, ObjectMapper mapper, ScheduleService schedules,
@@ -183,6 +191,10 @@ public class RecurringScheduleService {
     }
 
     @Scheduled(fixedDelayString = "${pilot.schedules.poll-ms:2000}")
+    public void poll() {
+        maintenance.whenAvailable(this::tick);
+    }
+
     public synchronized void tick() {
         for (var row : list()) {
             try {

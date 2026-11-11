@@ -1,14 +1,18 @@
 package com.pilot.server.maintenance;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -23,8 +27,10 @@ import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.tool.CommandTaskManager;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.session.AttachmentService;
 import com.pilot.server.store.SqliteStore;
@@ -49,6 +55,7 @@ public class BackupService {
         List.of("multi", "validation", "commands", "traces", "snapshots", "work-products", "file-versions", "studio",
             "apply-journal", "agents", "skills", "tasks", "mobile", "artifacts");
     static final String EXTERNAL_ATTACHMENTS = "_external/attachments";
+    private static final Duration QUIESCE_TIMEOUT = Duration.ofSeconds(2);
 
     public record BackupReport(boolean ok, String directory, int files, long bytes, String message, Instant createdAt) {
     }
@@ -72,6 +79,13 @@ public class BackupService {
     private final ObjectMapper mapper;
     private final AttachmentService attachments;
 
+    private ObjectProvider<CommandTaskManager> commandTasks;
+
+    @Autowired
+    void useCommandTasks(ObjectProvider<CommandTaskManager> tasks) {
+        this.commandTasks = tasks;
+    }
+
     public BackupService(ObjectProvider<SqliteStore> store, PilotDataDir dataDir, ObjectMapper mapper,
         AttachmentService attachments) {
         this.store = store;
@@ -80,7 +94,7 @@ public class BackupService {
         this.attachments = attachments;
     }
 
-    public synchronized BackupReport backup() {
+    public BackupReport backup() {
         String id = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS").withZone(ZoneOffset.UTC).format(Instant.now())
             + "-" + UUID.randomUUID();
         Path backups = dataDir.file("backups");
@@ -90,30 +104,20 @@ public class BackupService {
             Files.createDirectories(staging);
             List<Map<String, Object>> manifest = new ArrayList<>();
             SqliteStore sqlite = store.getIfAvailable();
-            if (sqlite != null) {
-                Path database = staging.resolve(BackupManifest.DATABASE);
-                vacuumInto(sqlite, database);
-                manifest.add(entry(BackupManifest.DATABASE, database));
-            }
             Path attachmentRoot = attachments.root().toAbsolutePath().normalize();
             String attachmentEntry = attachmentEntry(attachmentRoot);
-            Map<String, Path> sources = sources(sqlite, attachmentRoot, attachmentEntry);
-            for (var source : sources.entrySet()) {
-                Path destination = staging.resolve(BackupManifest.relative(source.getKey()));
-                Files.createDirectories(destination.getParent());
-                Files.copy(source.getValue(), destination);
-                manifest.add(entry(source.getKey(), destination));
-            }
-            if (!sources.equals(sources(sqlite, attachmentRoot, attachmentEntry))) {
-                throw new IOException("备份期间目录内容发生变化");
-            }
-            for (var item : manifest) {
-                String name = (String)item.get("path");
-                Path source = sources.get(name);
-                if (source != null && (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)
-                    || !item.get("sha256").equals(BackupManifest.sha256(source)))) {
-                    throw new IOException("备份期间文件发生变化: " + source);
+            try (var maintenance = dataDir.maintenance().exclusive(QUIESCE_TIMEOUT)) {
+                CommandTaskManager tasks = commandTasks == null ? null : commandTasks.getIfAvailable();
+                if (tasks != null && tasks.hasRunningTasks()) {
+                    throw new DataMaintenance.Busy("后台命令仍在运行，请等命令结束后备份");
                 }
+                try (Connection reserved = reserveDatabase(sqlite); FileChannel mobile = reservePairing()) {
+                    capture(staging, manifest, sqlite, attachmentRoot, attachmentEntry);
+                }
+            }
+            if (sqlite != null) {
+                BackupDatabase.check(staging.resolve(BackupManifest.DATABASE),
+                    staging.resolve(BackupManifest.relative(attachmentEntry)), mapper, true);
             }
             Map<String, Object> root = new LinkedHashMap<>();
             root.put("createdAt", Instant.now().toString());
@@ -129,7 +133,7 @@ public class BackupService {
             root.put("attachmentEntry", attachmentEntry);
             root.put("externalAttachmentPath",
                 EXTERNAL_ATTACHMENTS.equals(attachmentEntry) ? attachmentRoot.toString() : "");
-            root.put("consistency", "SQLite 使用事务快照；动态文件逐个复制，不保证与数据库处于同一业务时点。备份期间请暂停写入。");
+            root.put("consistency", "维护窗口内导出 SQLite 和 Pilot 受管文件，已核对消息附件引用。外部编辑器写入应在备份前暂停。");
             root.put("restoreHint", "停止服务后，将本备份内容恢复到数据目录，再启动；外部工作区和清单标注未包含的数据需单独恢复。");
             Files.writeString(staging.resolve(BackupManifest.FILE), mapper.writeValueAsString(root),
                 StandardCharsets.UTF_8);
@@ -147,12 +151,12 @@ public class BackupService {
             long bytes = manifest.stream().mapToLong(item -> ((Number)item.get("bytes")).longValue()).sum();
             StorageHealth.recovered("backup");
             log.info("备份完成: {}（{} 个文件，{} 字节）", target, manifest.size(), bytes);
-            String message = "备份完成；备份期间请暂停写入，外部工作区未包含";
+            String message = "备份完成。Pilot 受管数据已核验，外部工作区需单独备份";
             if (EXTERNAL_ATTACHMENTS.equals(attachmentEntry)) {
                 message += "。外置附件已单独收录: " + attachmentRoot;
             }
             return new BackupReport(true, target.toString(), manifest.size(), bytes, message, Instant.now());
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | SQLException | RuntimeException e) {
             try {
                 if (Files.exists(staging)) {
                     BackupManifest.deleteTree(staging);
@@ -163,8 +167,10 @@ public class BackupService {
             } catch (IOException cleanupFailure) {
                 e.addSuppressed(cleanupFailure);
             }
-            StorageHealth.markDegraded("backup", e.getMessage());
-            log.warn("备份失败: {}", target, e);
+            if (!(e instanceof DataMaintenance.Busy)) {
+                StorageHealth.markDegraded("backup", e.getMessage());
+                log.warn("备份失败: {}", target, e);
+            }
             return new BackupReport(false, target.toString(), 0, 0, "备份失败：" + e.getMessage(), Instant.now());
         }
     }
@@ -282,6 +288,9 @@ public class BackupService {
         }
         try (Stream<Path> walk = Files.walk(directory)) {
             for (Path file : walk.filter(path -> !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)).toList()) {
+                if (prefix.equals("mobile") && file.equals(directory.resolve(".pairing.lock"))) {
+                    continue;
+                }
                 addSource(files, file, prefix + "/" + BackupManifest.portable(directory.relativize(file)), sqlite);
             }
         }
@@ -326,10 +335,72 @@ public class BackupService {
         return removed;
     }
 
+    private void capture(Path staging, List<Map<String, Object>> manifest, SqliteStore sqlite, Path attachmentRoot,
+        String attachmentEntry) throws IOException {
+        if (sqlite != null) {
+            Path database = staging.resolve(BackupManifest.DATABASE);
+            vacuumInto(sqlite, database);
+            manifest.add(entry(BackupManifest.DATABASE, database));
+        }
+        Map<String, Path> sources = sources(sqlite, attachmentRoot, attachmentEntry);
+        for (var source : sources.entrySet()) {
+            Path destination = staging.resolve(BackupManifest.relative(source.getKey()));
+            Files.createDirectories(destination.getParent());
+            Files.copy(source.getValue(), destination);
+            manifest.add(entry(source.getKey(), destination));
+        }
+        if (!sources.equals(sources(sqlite, attachmentRoot, attachmentEntry))) {
+            throw new IOException("备份期间目录内容发生变化");
+        }
+        for (var item : manifest) {
+            Path source = sources.get(item.get("path"));
+            if (source != null && (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)
+                || !item.get("sha256").equals(BackupManifest.sha256(source)))) {
+                throw new IOException("备份期间文件发生变化: " + source);
+            }
+        }
+    }
+
+    private static Connection reserveDatabase(SqliteStore sqlite) throws IOException {
+        if (sqlite == null) {
+            return null;
+        }
+        try {
+            Connection connection = sqlite.open();
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("BEGIN IMMEDIATE");
+                return connection;
+            } catch (SQLException e) {
+                connection.close();
+                throw e;
+            }
+        } catch (SQLException e) {
+            throw new IOException("无法暂停数据库写入：" + e.getMessage(), e);
+        }
+    }
+
+    private FileChannel reservePairing() throws IOException {
+        Path directory = dataDir.file("mobile");
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
+            return null;
+        }
+        FileChannel channel = FileChannel.open(directory.resolve(".pairing.lock"), StandardOpenOption.CREATE,
+            StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+        try {
+            if (channel.tryLock() == null) {
+                throw new DataMaintenance.Busy("手机设备授权正在写入，请稍后备份");
+            }
+            return channel;
+        } catch (IOException | RuntimeException e) {
+            channel.close();
+            throw e;
+        }
+    }
+
     private static void vacuumInto(SqliteStore sqlite, Path target) {
-        String path = target.toAbsolutePath().toString().replace('\\', '/').replace("'", "''");
-        try (Connection connection = sqlite.open(); Statement statement = connection.createStatement()) {
-            statement.execute("VACUUM INTO '" + path + "'");
+        try (Connection connection = sqlite.open(); var statement = connection.prepareStatement("VACUUM INTO ?")) {
+            statement.setString(1, target.toAbsolutePath().toString());
+            statement.execute();
         } catch (Exception e) {
             throw new IllegalStateException("导出数据库快照失败：" + e.getMessage(), e);
         }

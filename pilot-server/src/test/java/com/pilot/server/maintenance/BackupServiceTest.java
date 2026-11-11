@@ -10,17 +10,28 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.ObjectProvider;
 
+import com.pilot.core.event.RunStarted;
+import com.pilot.core.loop.Attachment;
 import com.pilot.core.multi.DiffSandbox;
+import com.pilot.core.session.SessionService;
+import com.pilot.server.config.AttachmentLimits;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.session.AttachmentService;
+import com.pilot.server.store.EventCodec;
+import com.pilot.server.store.JdbcSessionRepository;
 import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.json.JsonMapper;
@@ -75,7 +86,7 @@ class BackupServiceTest {
         assertTrue(manifest.contains("sha256"), manifest.substring(0, Math.min(200, manifest.length())));
         assertTrue(manifest.contains("restoreHint"));
         assertTrue(manifest.contains("consistency"));
-        assertTrue(report.message().contains("暂停写入"), report.message());
+        assertTrue(report.message().contains("受管数据已核验"), report.message());
         String expectedHash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(binary));
         assertTrue(manifest.contains(expectedHash), manifest);
         assertTrue(Files.isRegularFile(target.resolve("COMPLETE")));
@@ -237,6 +248,76 @@ class BackupServiceTest {
         BackupService backups = service(null);
         assertFalse(backups.backup().ok());
         assertEquals(0, backups.status().backups());
+    }
+
+    @Test
+    void backupWaitsForTheWholeDatabaseAndAttachmentMutation() throws Exception {
+        PilotDataDir data = new PilotDataDir(dataDir.resolve(".pilot").toString());
+        SqliteStore sqlite = new SqliteStore(data.file("pilot.db"));
+        SessionService sessions = new SessionService(Clock.systemUTC(),
+            new JdbcSessionRepository(sqlite, new EventCodec(JsonMapper.builder().build())));
+        AttachmentService attachments = new AttachmentService("", data, AttachmentLimits.defaults());
+        String session = sessions.createSession("待删除").id();
+        Path directory = Files.createDirectories(attachments.sessionDir(session));
+        Path image = Files.writeString(directory.resolve("00000000-0000-0000-0000-000000000001-image.png"), "image");
+        sessions.publish(session, "run",
+            new RunStarted("带图片", List.of(new Attachment("image.png", "image/png", image.toString()))));
+        BackupService backups = service(sqlite, data, attachments);
+
+        CountDownLatch deletedFromDb = new CountDownLatch(1);
+        CountDownLatch deleteFile = new CountDownLatch(1);
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var deletion = executor.submit(() -> {
+                try (var activity = data.maintenance().activity()) {
+                    sessions.delete(session);
+                    deletedFromDb.countDown();
+                    if (!deleteFile.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("等待删除附件超时");
+                    }
+                    attachments.deleteBySession(session);
+                }
+                return null;
+            });
+            try {
+                assertTrue(deletedFromDb.await(5, TimeUnit.SECONDS));
+                var report = backups.backup();
+                assertFalse(report.ok());
+                assertTrue(report.message().contains("正在进行"), report.message());
+                assertEquals(0, backups.status().backups());
+            } finally {
+                deleteFile.countDown();
+            }
+            deletion.get(5, TimeUnit.SECONDS);
+        }
+        var report = backups.backup();
+        assertTrue(report.ok(), report.message());
+        assertTrue(backups.verifyLatestBackup().valid());
+        assertFalse(Files.exists(Path.of(report.directory()).resolve("attachments").resolve(session)));
+    }
+
+    @Test
+    void refusesToPublishDatabaseWithMissingAttachment() {
+        PilotDataDir data = new PilotDataDir(dataDir.resolve(".pilot").toString());
+        SqliteStore sqlite = new SqliteStore(data.file("pilot.db"));
+        SessionService sessions = new SessionService(Clock.systemUTC(),
+            new JdbcSessionRepository(sqlite, new EventCodec(JsonMapper.builder().build())));
+        String session = sessions.createSession("附件缺失").id();
+        sessions.publish(session, "run", new RunStarted("带图片", List.of(
+            new Attachment("missing.png", "image/png", data.file("attachments", session, "missing.png").toString()))));
+        BackupService backups = service(sqlite);
+
+        var report = backups.backup();
+        assertFalse(report.ok());
+        assertTrue(report.message().contains("缺少消息引用的附件"), report.message());
+        assertEquals(0, backups.status().backups());
+        StorageHealth.reset();
+    }
+
+    @SuppressWarnings("unchecked")
+    private BackupService service(SqliteStore sqlite, PilotDataDir data, AttachmentService attachments) {
+        ObjectProvider<SqliteStore> provider = Mockito.mock(ObjectProvider.class);
+        Mockito.when(provider.getIfAvailable()).thenReturn(sqlite);
+        return new BackupService(provider, data, JsonMapper.builder().build(), attachments);
     }
 
     private static void writeLegacyBackup(Path legacy) throws IOException {

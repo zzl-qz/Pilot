@@ -237,6 +237,10 @@ public final class CommandTaskManager implements AutoCloseable {
             && (Path.of(entry.task.workdir()).startsWith(path) || path.startsWith(Path.of(entry.task.workdir()))));
     }
 
+    public boolean hasRunningTasks() {
+        return entries.values().stream().anyMatch(entry -> running(entry.task));
+    }
+
     private void supervise(Entry entry, long timeoutMillis) {
         long started = System.nanoTime();
         try {

@@ -33,6 +33,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.maintenance.DataMaintenance;
 import com.pilot.server.security.SecurityProperties;
 
 import tools.jackson.databind.JsonNode;
@@ -44,6 +45,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 public class MobileConnectionService {
     private static final Logger log = LoggerFactory.getLogger(MobileConnectionService.class);
     private final Path data;
+    private final DataMaintenance maintenance;
     private final String configuredLibraries;
     private final String relay;
     private final SecurityProperties security;
@@ -80,6 +82,7 @@ public class MobileConnectionService {
     public MobileConnectionService(PilotDataDir data, SecurityProperties security, ObjectMapper mapper,
         @Value("${pilot.mobile.libraries:}") String libraries, @Value("${pilot.mobile.relay:}") String relay) {
         this.data = data.file("mobile");
+        this.maintenance = data.maintenance();
         this.security = security;
         this.mapper = mapper;
         this.configuredLibraries = libraries;
@@ -99,7 +102,7 @@ public class MobileConnectionService {
             return;
         }
         watching = true;
-        supervisor.scheduleWithFixedDelay(this::recover, 0, 5, TimeUnit.SECONDS);
+        supervisor.scheduleWithFixedDelay(() -> maintenance.whenAvailable(this::recover), 0, 5, TimeUnit.SECONDS);
     }
 
     /** 手机在外时也能恢复连接组件；失败后退避，关闭应用后不再启动子进程。 */

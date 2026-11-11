@@ -11,6 +11,8 @@ import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.CommandTaskManager;
+import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.maintenance.DataMaintenance;
 import com.pilot.server.multi.SandboxStore;
 import com.pilot.server.store.ToolCallJournalFactory;
 import com.pilot.server.validation.ValidationLedger;
@@ -42,12 +44,14 @@ public class SessionCleanupService {
     private final SkillDraftService skillDrafts;
     private final FileWorkbenchService fileWorkbench;
     private final AttachmentService attachments;
+    private final DataMaintenance maintenance;
 
     public SessionCleanupService(SessionService sessions, ConversationRepository conversations, PlanRepository plans,
         RunRepository runs, SandboxStore sandboxes, RunStarter runStarter, TaskControlService taskControls,
         CommandTaskManager commandTasks, ObjectProvider<BrowserBackend> browser, ValidationLedger validations,
         ToolCallJournalFactory journals, RunCheckpointRepository checkpoints, WorkProductService products,
-        SkillDraftService skillDrafts, FileWorkbenchService fileWorkbench, AttachmentService attachments) {
+        SkillDraftService skillDrafts, FileWorkbenchService fileWorkbench, AttachmentService attachments,
+        PilotDataDir dataDir) {
         this.fileWorkbench = fileWorkbench;
         this.products = products;
         this.skillDrafts = skillDrafts;
@@ -64,16 +68,23 @@ public class SessionCleanupService {
         this.commandTasks = commandTasks;
         this.browser = browser;
         this.attachments = attachments;
+        this.maintenance = dataDir.maintenance();
     }
 
     /**
      * @return 会话是否存在并已被删除
      */
     public boolean delete(String sessionId) {
+        try (var activity = maintenance.activity()) {
+            return deleteSession(sessionId);
+        }
+    }
+
+    private boolean deleteSession(String sessionId) {
         // 子会话不在主列表里，不能依赖某个浏览器的本地标签替服务器做清理。
         for (Session child : sessions.list()) {
             if (sessionId.equals(child.parentSessionId())) {
-                delete(child.id());
+                deleteSession(child.id());
             }
         }
         commandTasks.stopSession(sessionId);

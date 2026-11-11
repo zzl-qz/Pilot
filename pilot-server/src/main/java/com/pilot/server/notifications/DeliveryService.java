@@ -22,6 +22,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.maintenance.DataMaintenance;
 import com.pilot.server.results.ResultInboxService;
 import com.pilot.server.store.AutomationStore;
 
@@ -30,6 +32,13 @@ import tools.jackson.databind.ObjectMapper;
 /** 持久 outbox；通知失败只重试投递，绝不触发模型执行。对外提供稳定幂等键。 */
 @Service
 public class DeliveryService {
+    private DataMaintenance maintenance = new DataMaintenance();
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void useMaintenance(PilotDataDir dataDir) {
+        this.maintenance = dataDir.maintenance();
+    }
+
     public record Settings(long version, boolean desktop, String webhookUrl, Instant desktopSince,
         Instant webhookSince) {
     }
@@ -252,6 +261,10 @@ public class DeliveryService {
 
     @Scheduled(fixedDelayString = "${pilot.notifications.poll-ms:5000}")
     public void poll() {
+        maintenance.whenAvailable(this::pollDeliveries);
+    }
+
+    private void pollDeliveries() {
         try {
             collect();
             while (slots.tryAcquire()) {
@@ -268,7 +281,7 @@ public class DeliveryService {
                 }
                 try {
                     executor.submit(() -> {
-                        try {
+                        try (var activity = maintenance.activity()) {
                             send(d);
                         } finally {
                             slots.release();

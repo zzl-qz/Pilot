@@ -3,6 +3,7 @@ package com.pilot.mobile.bridge
 import com.pilot.mobile.transport.*
 import computer.iroh.SecretKey
 import kotlinx.serialization.Serializable
+import java.nio.channels.FileChannel
 import java.nio.file.*
 import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
@@ -76,6 +77,13 @@ class PairingStore(private val directory: Path, private val now: () -> Long = Sy
     }
 
     private fun persist(next: SavedState) {
+        FileChannel.open(directory.resolve(".pairing.lock"), StandardOpenOption.CREATE,
+            StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS).use { channel ->
+            channel.lock().use { writeState(next) }
+        }
+    }
+
+    private fun writeState(next: SavedState) {
         val temp = Files.createTempFile(directory, "devices-", ".tmp")
         try {
             privatePermissions(temp, false)

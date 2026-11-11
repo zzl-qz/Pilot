@@ -717,8 +717,11 @@ public class AgentRunService implements RunStarter {
                     taskControls.start(sessionId, original, List.of(), List.of());
                 }
                 runRepository.started(runId, sessionId, java.time.Instant.now());
-                handle.future = executor.submit(
-                    () -> runOnWorker(sessionId, runId, input, attachments, imagePositions, handle, continuation));
+                handle.future = executor.submit(() -> {
+                    try (var activity = dataDir.maintenance().activity()) {
+                        runOnWorker(sessionId, runId, input, attachments, imagePositions, handle, continuation);
+                    }
+                });
             } catch (RuntimeException e) {
                 runs.remove(runId, handle);
                 registry.unregister(runId);

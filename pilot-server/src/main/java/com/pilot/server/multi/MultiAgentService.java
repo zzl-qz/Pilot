@@ -287,7 +287,11 @@ public class MultiAgentService {
             for (TaskSpec spec : ready) {
                 started.add(spec.id());
                 TaskState state = states.get(spec.id());
-                futures.add(workers.submit(() -> execute(spec, state, scoped, states, budget)));
+                futures.add(workers.submit(() -> {
+                    try (var activity = dataDir.maintenance().activity()) {
+                        execute(spec, state, scoped, states, budget);
+                    }
+                }));
             }
             for (Future<?> future : futures) {
                 try {

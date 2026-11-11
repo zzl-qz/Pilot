@@ -27,6 +27,8 @@ import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.event.ToolStarted;
 import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunCheckpointRepository;
+import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.maintenance.DataMaintenance;
 
 /**
  * 把运行推进过程写成可恢复的调度状态，并用租约防止重复接管。
@@ -40,6 +42,13 @@ import com.pilot.core.session.RunCheckpointRepository;
  */
 @Component
 public class RunStateTracker {
+    private DataMaintenance maintenance = new DataMaintenance();
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void useMaintenance(PilotDataDir dataDir) {
+        this.maintenance = dataDir.maintenance();
+    }
+
     private static final Logger log = LoggerFactory.getLogger(RunStateTracker.class);
     public static final long LEASE_SECONDS = 30L;
     private static final Duration LEASE = Duration.ofSeconds(LEASE_SECONDS);
@@ -211,6 +220,10 @@ public class RunStateTracker {
     /** 定期续租；失去租约时记录并停止把它当成独占运行。 */
     @Scheduled(fixedDelay = 10_000L, initialDelay = 15_000L)
     public void heartbeat() {
+        maintenance.whenAvailable(this::renewLeases);
+    }
+
+    private void renewLeases() {
         if (activeRuns.isEmpty()) {
             return;
         }

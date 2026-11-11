@@ -5,6 +5,8 @@ import java.nio.file.Path;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import com.pilot.server.maintenance.DataMaintenance;
+
 /**
  * 运行期数据的根目录：会话库、快照、trace、附件都放在这里。
  *
@@ -17,6 +19,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class PilotDataDir {
     private final Path root;
+    private final DataMaintenance maintenance = new DataMaintenance();
 
     public PilotDataDir(@Value("${pilot.data.dir:}") String configured) {
         Path base = configured == null || configured.isBlank() ? Path.of(System.getProperty("user.dir", "."), ".pilot")
@@ -26,6 +29,10 @@ public class PilotDataDir {
 
     public Path root() {
         return root;
+    }
+
+    public DataMaintenance maintenance() {
+        return maintenance;
     }
 
     /** 拼出子路径，例如 {@code file("traces", sessionId + ".jsonl")}。 */

@@ -29,6 +29,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.maintenance.DataMaintenance;
 
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
@@ -42,6 +43,7 @@ public class MobileReceiptStore {
     public static final String TOKEN_PATTERN = "r3\\.[0-9]{1,16}\\.[a-f0-9-]{36}\\.[a-f0-9]{64}";
     private static final long RESPONSE_RESERVE = 24L * 1024 * 1024;
     private final Path directory;
+    private final DataMaintenance maintenance;
     private final ObjectMapper mapper;
     private final Clock clock;
     private final long lifetime;
@@ -53,7 +55,7 @@ public class MobileReceiptStore {
     private long bytes;
     private long lastCleanup;
     private int lastRemoved;
-    private String maintenanceError = "";
+    private volatile String maintenanceError = "";
 
     @Autowired
     public MobileReceiptStore(PilotDataDir data, ObjectMapper mapper,
@@ -72,6 +74,7 @@ public class MobileReceiptStore {
             throw new IllegalArgumentException("回执有效期、保留期或容量配置无效");
         }
         this.directory = data.file("mobile", "receipts");
+        this.maintenance = data.maintenance();
         this.mapper = mapper;
         this.clock = clock;
         this.lifetime = lifetime.toMillis();
@@ -275,13 +278,15 @@ public class MobileReceiptStore {
     }
 
     @Scheduled(fixedDelayString = "${pilot.mobile.receipts.cleanup-ms:3600000}", initialDelay = 60000)
-    public synchronized void scheduledCleanup() {
-        try {
-            cleanup();
-        } catch (RuntimeException | IOException e) {
-            maintenanceError = "回执清理失败，记录已保留，请检查数据目录与磁盘状态";
-            LoggerFactory.getLogger(MobileReceiptStore.class).warn(maintenanceError);
-        }
+    public void scheduledCleanup() {
+        maintenance.whenAvailable(() -> {
+            try {
+                cleanup();
+            } catch (RuntimeException | IOException e) {
+                maintenanceError = "回执清理失败，记录已保留，请检查数据目录与磁盘状态";
+                LoggerFactory.getLogger(MobileReceiptStore.class).warn(maintenanceError);
+            }
+        });
     }
 
     private List<Path> files() throws IOException {

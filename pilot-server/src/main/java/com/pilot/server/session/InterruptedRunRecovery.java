@@ -34,6 +34,14 @@ import com.pilot.core.session.SessionStatus;
  */
 @Component
 public class InterruptedRunRecovery implements ApplicationRunner {
+    private com.pilot.server.maintenance.DataMaintenance maintenance =
+        new com.pilot.server.maintenance.DataMaintenance();
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void useMaintenance(com.pilot.server.config.PilotDataDir dataDir) {
+        this.maintenance = dataDir.maintenance();
+    }
+
     private static final Logger log = LoggerFactory.getLogger(InterruptedRunRecovery.class);
     private static final String MESSAGE = "服务重启导致本次运行中断，对话记忆已保留，可点「继续执行」接着跑。";
 
@@ -58,6 +66,12 @@ public class InterruptedRunRecovery implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        try (var activity = maintenance.activity()) {
+            recover();
+        }
+    }
+
+    private void recover() {
         Instant now = Instant.now();
         List<InterruptedRun> interrupted = runs.markInterrupted(now);
         Set<String> handled = new HashSet<>();

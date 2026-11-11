@@ -23,6 +23,8 @@ import org.springframework.stereotype.Service;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.Tool;
+import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.maintenance.DataMaintenance;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.session.RunSubmissionService;
 import com.pilot.server.session.SkillService;
@@ -42,6 +44,13 @@ public class ScheduleService {
     private final TaskControlService tasks;
     private final SkillService skills;
     private final Clock clock;
+    private DataMaintenance maintenance = new DataMaintenance();
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void useMaintenance(PilotDataDir dataDir) {
+        this.maintenance = dataDir.maintenance();
+    }
+
     private final GitWorktrees worktrees;
     private final WorkspaceToolFactory toolFactory;
     private volatile boolean ready;
@@ -228,7 +237,7 @@ public class ScheduleService {
     @Scheduled(fixedDelayString = "${pilot.schedules.poll-ms:2000}")
     public void poll() {
         if (ready) {
-            tick();
+            maintenance.whenAvailable(this::tick);
         }
     }
 
