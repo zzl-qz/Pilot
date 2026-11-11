@@ -19,8 +19,8 @@ public class ModelClientConfiguration {
      */
     @Bean
     ModelClient modelClient(ModelSettings settings, ObjectMapper objectMapper, ModelRuntimeSettings runtime,
-        @Value("${pilot.model.timeout-seconds:90}") long timeoutSeconds,
-        @Value("${pilot.model.idle-timeout-seconds:0}") long idleTimeoutSeconds,
+        @Value("${pilot.model.timeout-seconds:600}") long timeoutSeconds,
+        @Value("${pilot.model.idle-timeout-seconds:300}") long idleTimeoutSeconds,
         @Value("${pilot.model.prompt-caching:false}") boolean promptCaching) {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         if (timeoutSeconds <= 0 || idleTimeoutSeconds < 0) {
