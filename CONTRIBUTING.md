@@ -131,6 +131,28 @@ node pilot-web/frontend/scripts/event-stream-smoke.mjs
 
 指定的 1000 次连续 `中🙂` 增量，在默认 50ms / 8KiB 下合成 1 条，约 55.5ms 刷出；这不代表低速逐字输出也有同样比例。完整 Maven 验证 1454 项通过、16 项因环境或配置条件跳过；另行启用的压测、前端 400 项、桌面 41 项、Android 单测与 lint、Linux 容器 86 项重点测试通过。所有检查均不调用外部模型。
 
+### 附件请求、原件与会话读取
+
+附件 JSON 入口 `POST /api/sessions/{id}/messages` 同时检查声明长度和实际输入流字节数，未知长度或分块请求也受限，超限返回 413。限制在移动回执读取和 Jackson 解析之前生效。服务层先检查整批文件数、完整编码长度、Base64 格式及累计原始字节，全部通过才解码和落盘。
+
+Web 与桌面从 `/api/settings` 的 `attachmentLimits` 读取数量、单文件、总字节和请求体预算；默认分别是 64 个、2 MiB、25 MiB。请求体预算包含 Base64 放大、每文件 1 KiB 元数据余量和 2,000,000 字节正文余量。移动端从工作台能力读取配置与传输上限的交集，最多 16 个、单文件 2 MiB、总计 6 MiB；后台对移动请求执行同一限制。客户端在读取文件前和发送草稿前校验，服务器始终保留最终校验。缺少或无效的能力值会明确反馈；旧手机协议的缺失字段采用原有移动上限。
+
+文本、图片和二进制均先保存完整原始字节。长文本默认仅内联 20,000 字符的头尾，省略部分仍可取回；二进制附件可以单独发送。`read_attachment` 在每次调用时验证当前会话上传或仍被历史引用的文件，允许合法的分叉继承；删除原会话不破坏存活引用，移除继承引用后旧工具立即失去读取权限。工具也支持运行中首次追加附件，不依赖运行开始时附件目录是否存在。普通 `read_file` 的工作区边界不变。
+
+可重复验证命令（Java 25；Windows 使用 `mvnw.cmd`；移动测试使用 Java 21 与 Android SDK）：
+
+```sh
+sh mvnw -B -ntp -pl pilot-core,pilot-server -DskipFrontend=true verify
+sh mvnw -B -ntp -pl pilot-core,pilot-server -DskipFrontend=true -Dtest=AttachmentServiceTest,AttachmentBodyLimitFilterTest,AttachmentReferencesTest,ReadAttachmentToolTest,AttachmentHttpTest,CheckpointApiTest,SettingsApiTest,MobileWorkbenchControllerTest,ReadFileToolTest,ReadFileMediaTest -Dsurefire.failIfNoSpecifiedTests=false test
+npm --prefix pilot-web/frontend run test:unit
+npm --prefix pilot-web/frontend run check
+npm --prefix pilot-web/frontend run test:composer
+npm --prefix pilot-desktop test
+node scripts/mobile.mjs test
+```
+
+2026-11-11 验证范围：macOS 后端完整验证 1,469 项通过、16 项按环境或配置跳过，前端 403 项、桌面 41 项及 Chrome/Electron 真实输入流程通过；Android JVM 单测 58 项与 Lint 通过；Linux 容器 Java 25 执行附件、真实 HTTP、SQLite 与文件读取与事件流关闭相关的 86 项测试通过。包括普通/编码路径的固定长度与分块 413、混合空附件拒绝、精确预算边界、较小配置、草稿重新校验、附件单独发送、原件完整性、分叉与引用撤销、数据库重开、中文空格路径、Windows 分隔符模拟和符号链接拒绝。Windows 实机、Linux 桌面和 Android 真机本轮未执行；附件浏览器回归已接入三平台 CI，不能将配置了 CI 表述为这些平台已通过。测试使用本地服务与模拟 API，不调用外部模型。
+
 推送前复核又补齐四个边界：新运行存在待发缓冲时忽略旧运行回调；恢复高水位采用实际保留事件而非分配计数器；等待维护锁的操作获得锁后重新检查存储降级状态；准备日志写入后失败立即进入恢复清理。每项先加入失败复现，再验证修复；清空历史后客户端从零恢复，同时继续接受不复用旧序号的新事件。
 
 分页和合并后，当前负载无需引入持久化完整历史状态快照；该项保留为有测量依据时的后续优化。当前输出的临时快照已经实现。

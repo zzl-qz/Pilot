@@ -252,6 +252,7 @@ jobs:
           xvfb-run -a node pilot-web/frontend/scripts/schedule-smoke.mjs --production
           xvfb-run -a node pilot-web/frontend/scripts/notification-smoke.mjs
           xvfb-run -a node pilot-web/frontend/scripts/event-stream-smoke.mjs
+          xvfb-run -a node pilot-web/frontend/scripts/composer-smoke.mjs
       - name: Scheduling and notification UI regressions (Windows and macOS)
         if: runner.os != 'Linux'
         run: |
@@ -259,6 +260,7 @@ jobs:
           node pilot-web/frontend/scripts/schedule-smoke.mjs --production
           node pilot-web/frontend/scripts/notification-smoke.mjs
           node pilot-web/frontend/scripts/event-stream-smoke.mjs
+          node pilot-web/frontend/scripts/composer-smoke.mjs
       - name: Preserve host verification reports
         if: always()
         uses: actions/upload-artifact@v4
