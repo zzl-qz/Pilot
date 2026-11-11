@@ -157,6 +157,31 @@ node scripts/mobile.mjs test
 
 分页和合并后，当前负载无需引入持久化完整历史状态快照；该项保留为有测量依据时的后续优化。当前输出的临时快照已经实现。
 
+### 提交回执、导航同步与前端模块
+
+Web/桌面的主对话、侧边对话、文件批注，以及引导、继续、历史重发和重新生成，在发送前申请服务端签名请求标识并保存本地凭据。消息正文和附件不存入回执；浏览器仅保存标识、会话、时间与短摘要。服务端复用数据目录下 `mobile/receipts` 的原子持久回执，先保存占位再执行；同一标识、方法、路径和正文只能执行一次，冲突标识拒绝执行。Web 消息使用下发的附件预算，移动端继续使用移动限额。
+
+`GET /api/submissions/result` 只核对结果，不重新执行写请求。网络失败、超时、响应体读取失败、服务端 5xx，以及未找到或执行中断的回执都保留为“结果待确认”，不会自动重发。输入区提供查询与核对历史后的手动解除入口；解除本身不会发送草稿。业务执行与回执完成并非同一事务，进程在两者之间崩溃时保留未知结果，不能宣称自动确认业务完成。已知结果的确认请求失败时，本地保留确认凭据，重开、聚焦或联网后只重试确认。浏览器无法持久保存凭据时拒绝发送并提示原因；切换会话后旧提交的迟到成功不得删除新草稿。
+
+书签使用服务端记录作为事实源。同源窗口通过存储事件通知刷新，后台暂停轮询，恢复可见或联网后刷新；通知会作废在途旧响应并合并补读。存储通知不可用时仍有聚焦和定时刷新兜底。旧书签迁移失败保留原始记录，成功后保存备份；分页定位使用动画帧与定时器共同等待布局，避免后台挂起。前端 `store/` 按输入运行、侧边会话、模型配置和面板动作划分，仍共享同一 Zustand/Immer 状态；`components/inspector/` 的各面板独立维护，主 Inspector 只负责装配。
+
+相关回归命令：
+
+```sh
+npm --prefix pilot-web/frontend run test:unit
+npm --prefix pilot-web/frontend run check
+npm --prefix pilot-web/frontend run test:composer
+npm --prefix pilot-web/frontend run test:navigation
+npm --prefix pilot-web/frontend run test:refresh
+npm --prefix pilot-web/frontend run test:interaction
+npm --prefix pilot-web/frontend run test:models
+npm --prefix pilot-web/frontend run test:sessions
+sh mvnw -B -ntp -pl pilot-core,pilot-server -DskipFrontend=true verify
+sh mvnw -B -ntp -pl pilot-server -DskipFrontend=true -Dtest=SubmissionControllerTest,SessionApiTest,MobileRequestFilterTest,MobileReceiptControllerTest,MobileReceiptStoreTest,AttachmentBodyLimitFilterTest,MessageLibraryTest test
+```
+
+2026-11-11 本轮验证：macOS Java 完整验证 **1,474 项通过、16 项按条件跳过**；前端 **417 项**、桌面 **41 项**通过，TypeScript 与生产构建通过；Android JVM **58 项**与 lint 强制重新执行通过（未使用任务缓存）。Chrome/Electron 实际进程覆盖输入、断线刷新且不重发、侧边对话、模型保存、会话切换、书签双窗口并发、旧数据迁移失败/重试、跨两页定位，以及本地 HTTP/SSE 工作台刷新、原生菜单与 WebContentsView。导航的后台可见性和暂停帧是模拟测试，桌面刷新包含实际窗口和嵌入浏览器；不能据此推断操作系统休眠或物理断网均已验证。Linux Java 25 容器完成 **57 项**回执、附件限额、消息接口及 SQLite 书签重点测试。Windows 实机与 Linux 桌面本轮未运行，相关浏览器回归已补入三平台 CI；配置 CI 不代表远程任务已执行。测试使用本地服务和模拟 API，不调用外部模型。
+
 ## 许可证
 
 当前仓库没有 `LICENSE` 文件，也没有发布贡献者许可或 CLA 条款。公开仓库不等于代码已按开源许可证授权；在维护者确定许可证前，请先联系维护者确认复用与贡献条款。

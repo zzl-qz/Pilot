@@ -36,6 +36,7 @@ const server = await createServer({ root, server: { host: '127.0.0.1', port: 0, 
       if (fail && path === '/api/projects') { res.statusCode = 503; res.end(JSON.stringify({ message: '模拟服务离线' })); return; }
       let data = {};
       if (path === '/api/projects') data = [{ id: 'p', name: `项目版本 ${revision}`, folders: [workspace] }];
+      else if (path === '/api/settings') data = { attachmentLimits: { maxFiles: 64, maxFileBytes: 2097152, maxTotalBytes: 26214400, maxRequestBytes: 37000000 } };
       else if (path === '/api/sessions') data = [session('one'), session('two'), ...(revision ? [session('mobile-new')] : [])];
       else if (/^\/api\/sessions\/[^/]+$/.test(path)) data = session(path.split('/').at(-1));
       else if (path.endsWith('/history')) data = { events: Array.from({ length: 25 }, (_, i) => ({ type: 'user.message', sequence: i + 1, payload: { text: `历史问题 ${i + 1}：` + '保留当前阅读位置与输入内容。'.repeat(8) } })), hasMore: false };

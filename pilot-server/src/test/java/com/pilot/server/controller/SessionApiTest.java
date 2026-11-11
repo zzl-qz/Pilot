@@ -147,6 +147,7 @@ class SessionApiTest {
     @DynamicPropertySource
     static void attachmentProperties(DynamicPropertyRegistry registry) {
         registry.add("pilot.attachments.dir", () -> ATTACHMENT_ROOT.toString());
+        registry.add("pilot.data.dir", () -> ATTACHMENT_ROOT.resolve("data").toString());
     }
 
     @Autowired

@@ -245,7 +245,7 @@ jobs:
       - name: Verify actual Windows or macOS GUI process, native libraries and recovery
         if: runner.os != 'Linux'
         run: node scripts/verify-desktop-host.mjs
-      - name: Scheduling and notification UI regressions (Linux)
+      - name: Web and desktop UI regressions (Linux)
         if: runner.os == 'Linux'
         run: |
           xvfb-run -a node pilot-web/frontend/scripts/p1-smoke.mjs --production
@@ -253,7 +253,12 @@ jobs:
           xvfb-run -a node pilot-web/frontend/scripts/notification-smoke.mjs
           xvfb-run -a node pilot-web/frontend/scripts/event-stream-smoke.mjs
           xvfb-run -a node pilot-web/frontend/scripts/composer-smoke.mjs
-      - name: Scheduling and notification UI regressions (Windows and macOS)
+          xvfb-run -a node pilot-web/frontend/scripts/navigation-smoke.mjs
+          xvfb-run -a node pilot-web/frontend/scripts/workbench-refresh-smoke.mjs
+          xvfb-run -a node pilot-web/frontend/scripts/interaction-smoke.mjs
+          xvfb-run -a node pilot-web/frontend/scripts/model-discovery-smoke.mjs
+          xvfb-run -a node pilot-web/frontend/scripts/session-management-smoke.mjs
+      - name: Web and desktop UI regressions (Windows and macOS)
         if: runner.os != 'Linux'
         run: |
           node pilot-web/frontend/scripts/p1-smoke.mjs --production
@@ -261,6 +266,11 @@ jobs:
           node pilot-web/frontend/scripts/notification-smoke.mjs
           node pilot-web/frontend/scripts/event-stream-smoke.mjs
           node pilot-web/frontend/scripts/composer-smoke.mjs
+          node pilot-web/frontend/scripts/navigation-smoke.mjs
+          node pilot-web/frontend/scripts/workbench-refresh-smoke.mjs
+          node pilot-web/frontend/scripts/interaction-smoke.mjs
+          node pilot-web/frontend/scripts/model-discovery-smoke.mjs
+          node pilot-web/frontend/scripts/session-management-smoke.mjs
       - name: Preserve host verification reports
         if: always()
         uses: actions/upload-artifact@v4
