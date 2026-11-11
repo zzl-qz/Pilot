@@ -251,3 +251,34 @@ test('前端积压达到数量预算时主动消费，切换会话取消定时�
   assert.equal(useStore.getState().thread.rows.length, 0);
   closeStreams();
 });
+
+test('连续打开即断开的连接累积退避，稳定十秒后才重置，旧回调无效', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const fixture = fakeStreams(); const savedRandom = Math.random;
+  Math.random = () => 0;
+  try {
+    reset(); useStore.getState().connectSse('s', 0);
+    for (const delay of [800, 1600, 3200, 6400, 12800]) {
+      const source = fixture.streams.at(-1); const count = fixture.streams.length;
+      source.onopen(); source.onerror();
+      t.mock.timers.tick(delay - 1);
+      assert.equal(fixture.streams.length, count);
+      t.mock.timers.tick(1);
+      assert.equal(fixture.streams.length, count + 1);
+      source.onopen(); source.onerror();
+      assert.equal(useStore.getState()._reconnectAttempt, count);
+    }
+    const source = fixture.streams.at(-1); source.onopen();
+    t.mock.timers.tick(9999);
+    assert.equal(useStore.getState()._reconnectAttempt, 5);
+    t.mock.timers.tick(1);
+    assert.equal(useStore.getState()._reconnectAttempt, 0);
+    source.onerror();
+    t.mock.timers.tick(800);
+    assert.equal(fixture.streams.length, 7);
+    useStore.getState().startNewSession();
+    t.mock.timers.tick(20000);
+    assert.equal(fixture.streams.length, 7);
+    assert.equal(useStore.getState()._reconnectAttempt, 0);
+  } finally { fixture.restore(); Math.random = savedRandom; }
+});

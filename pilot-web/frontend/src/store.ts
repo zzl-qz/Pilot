@@ -51,6 +51,7 @@ const sideChatPending = new Map<string, Promise<SideChatTab | null>>();
 const sideChatClosing = new Map<string, Promise<boolean>>();
 const RECONNECT_BASE_MS = 800;
 const RECONNECT_MAX_MS = 15000;
+const CONNECTION_STABLE_MS = 10000;
 
 /** 会话切换时重置浏览器状态，默认按无窗口模式提供替代操作。 */
 function emptyMirror(): MirrorState {
@@ -61,6 +62,7 @@ const NOTIFY_KEY = 'pilot.notify';
 
 let eventSource: EventSource | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+let stableConnectionTimer: ReturnType<typeof setTimeout> | undefined;
 let streamPaused = false;
 let streamFailures = 0;
 let mirrorSource: EventSource | null = null;
@@ -139,6 +141,8 @@ function recoverEventStream(sessionId: string, reason: string) {
   streamPaused = true;
   eventSource?.close();
   eventSource = null;
+  clearTimeout(stableConnectionTimer);
+  stableConnectionTimer = undefined;
   discardQueuedEvents();
   clearTimeout(reconnectTimer);
   reconnectTimer = undefined;
@@ -168,6 +172,7 @@ function applySettings(draft: StoreState, data: ApiResults['settings'] | null) {
 }
 
 function resetSessionState(draft: StoreState) {
+  draft._reconnectAttempt = 0;
   resetFilePreview(draft);
   draft.sessionEpoch = (draft.sessionEpoch || 0) + 1;
   draft._editTarget = null;
@@ -871,6 +876,9 @@ export const useStore = create<StoreState>()(immer((set, get) => {
 
   /* ---------- SSE ---------- */
   connectSse(sessionId, cursor) {
+    if (get().sessionId !== sessionId) return;
+    clearTimeout(stableConnectionTimer);
+    stableConnectionTimer = undefined;
     if (eventSource) {
       eventSource.close();
       eventSource = null;
@@ -899,11 +907,19 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       if (eventSource !== source || get().sessionId !== sessionId) return;
       set((draft) => {
         draft.ui.connection = { status: 'ok', text: '已连接' };
-        draft._reconnectAttempt = 0;
       });
+      clearTimeout(stableConnectionTimer);
+      stableConnectionTimer = setTimeout(() => {
+        stableConnectionTimer = undefined;
+        if (eventSource === source && get().sessionId === sessionId) {
+          set(draft => { draft._reconnectAttempt = 0; });
+        }
+      }, CONNECTION_STABLE_MS);
     };
     source.onerror = () => {
       if (eventSource !== source || get().sessionId !== sessionId) return;
+      clearTimeout(stableConnectionTimer);
+      stableConnectionTimer = undefined;
       source.close();
       if (eventSource === source) {
         eventSource = null;
@@ -914,7 +930,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   },
 
   scheduleReconnect(sessionId) {
-    if (reconnectTimer || get().sessionId !== sessionId) {
+    if (reconnectTimer != null || get().sessionId !== sessionId) {
       return;
     }
     const attempt = (get()._reconnectAttempt || 0) + 1;
@@ -928,8 +944,11 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       }
       // 续订：带着已渲染的游标，避免从 0 重新回放
       get().connectSse(sessionId, get().thread.cursor);
+      const source = eventSource;
+      const epoch = get().sessionEpoch;
       try {
         const active = await api.activeRun(sessionId);
+        if (eventSource !== source || get().sessionId !== sessionId || get().sessionEpoch !== epoch) return;
         if (active?.runId && !get().running) {
           set((draft) => {
             draft.running = true;
@@ -2311,6 +2330,8 @@ function applyAttention(kind: string, title: string) {
 }
 
 function closeStreams() {
+  clearTimeout(stableConnectionTimer);
+  stableConnectionTimer = undefined;
   streamPaused = false;
   streamFailures = 0;
   discardQueuedEvents();
