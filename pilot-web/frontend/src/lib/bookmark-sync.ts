@@ -9,7 +9,7 @@ export function localBookmarks(session: string | null): LocalBookmark[] {
   catch { return []; }
 }
 export function normalizeBookmarks(values: unknown): BookmarkView[] {
-  if (!Array.isArray(values)) throw new Error('书签服务返回格式无效');
+  if (!Array.isArray(values) || values.some(e => !e || !Number.isSafeInteger(e.sequence) || e.sequence < 0 || typeof e.title !== 'string')) throw new Error('书签服务返回格式无效');
   return values.map((e: MessageLibraryBookmark) => ({ ...e, id: String(e.sequence), key: e.key || '' }));
 }
 const pending = new Map<string, Promise<BookmarkSyncResult>>();
@@ -43,4 +43,12 @@ export async function migrateLocalBookmarks() {
   }
   return { count, failed };
 }
-export function bookmarksChanged(session: string) { window.dispatchEvent(new CustomEvent('pilot:bookmarks-changed', { detail: session })); }
+export const BOOKMARK_SIGNAL = 'pilot.bookmarks-changed';
+export function bookmarksChanged(session: string) {
+  window.dispatchEvent(new CustomEvent('pilot:bookmarks-changed', { detail: session }));
+  try {
+    // storage 事件送达同源的其它窗口；每次值不同，连续编辑也不会丢通知。
+    localStorage.setItem(BOOKMARK_SIGNAL, JSON.stringify({ session, nonce: `${Date.now()}:${Math.random()}` }));
+    return true;
+  } catch { return false; /* 聚焦、恢复联网和定时刷新继续兜底。 */ }
+}

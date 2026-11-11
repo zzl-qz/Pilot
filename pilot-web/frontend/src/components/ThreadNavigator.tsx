@@ -11,7 +11,8 @@ import { useStore } from '../store.js';
 import { splitAttachmentMarkers } from '../lib/attachments.js';
 import './thread-navigator.css';
 import { api } from '../api.js';
-import { localBookmarks, normalizeBookmarks, syncBookmarks } from '../lib/bookmark-sync.js';
+import { bookmarksChanged, localBookmarks, normalizeBookmarks, syncBookmarks } from '../lib/bookmark-sync.js';
+import { watchBookmarks, afterNavigationPaint } from '../lib/bookmark-watch.js';
 
 const plain = (text: string) => String(text || '').replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/^[#>\s]+/gm, '').replace(/[*`_]/g, '').trim();
 function entryFor(row: UserRow): NavEntry {
@@ -98,9 +99,9 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
     catch (e) { if (mounted.current && token === mutation.current) setSyncError(`书签同步失败：${errorInfo(e).message}。本地备份仍保留。`); }
   }
   useEffect(() => {
-    mounted.current = true; refreshBookmarks(); const timer = setInterval(refreshBookmarks, 15000);
-    const focus = () => refreshBookmarks(); const changed = (event: Event) => { if (event instanceof CustomEvent && event.detail === session) refreshBookmarks(); }; window.addEventListener('focus', focus); window.addEventListener('pilot:bookmarks-changed', changed);
-    return () => { mounted.current = false; clearInterval(timer); window.removeEventListener('focus', focus); window.removeEventListener('pilot:bookmarks-changed', changed); };
+    mounted.current = true;
+    const stop = session ? watchBookmarks({ session, refresh: refreshBookmarks, invalidate: () => { mutation.current++; } }) : () => {};
+    return () => { mounted.current = false; stop(); };
   }, [session]);
   useEffect(() => {
     if (!navigationTarget || navigationTarget.sessionId !== session || !Number.isFinite(navigationTarget.sequence)) return;
@@ -155,12 +156,15 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
     if (!session || entry.sequence == null || !Number.isSafeInteger(entry.sequence)) { useStore.getState().showNotice('消息保存后才能添加书签。'); return; }
     const remove = bookmarks.some(e => e.sequence === entry.sequence);
     mutation.current++; setSaving(true);
+    let written = false;
     try {
       // 先同步/迁移，失败时不让旧本地书签覆盖服务端状态。
       await syncBookmarks(session);
       if (remove) await api.deleteBookmark(session, entry.sequence); else await api.saveBookmark(session, entry.sequence);
+      written = true;
+      const token = mutation.current;
       const values = normalizeBookmarks(await api.bookmarks(session));
-      if (mounted.current) {
+      if (mounted.current && token === mutation.current) {
         if (remove && onlySaved && document.activeElement?.closest('.thread-nav-item')) {
           savedFilterRef.current?.focus({ preventScroll: true });
         }
@@ -168,7 +172,11 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
         setSyncError('');
       }
     } catch (e) { if (mounted.current) { setSyncError(errorInfo(e).message || '书签保存失败'); useStore.getState().showNotice(`书签保存失败：${errorInfo(e).message}`); } }
-    finally { mutation.current++; if (mounted.current) setSaving(false); }
+    finally {
+      mutation.current++;
+      if (mounted.current) setSaving(false);
+      if (written && !bookmarksChanged(session) && mounted.current) setSyncError('书签已保存。跨窗口即时通知不可用，切回窗口或稍后会自动刷新。');
+    }
   }
   async function jump(entry: JumpEntry, focusTarget = false) {
     const token = ++operation.current;
@@ -185,7 +193,7 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
         if ((!older && entry.sequence <= last) || !(older ? state.thread.history.hasMore : state.thread.history.hasNewer)) break;
         const before = `${first}:${last}`;
         await (older ? state.requestEarlierHistory({ force: true }) : state.requestLaterHistory({ force: true }));
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined))));
+        await afterNavigationPaint();
         if (useStore.getState().sessionId !== session || token !== operation.current) return;
         el = target(entry);
         const current = useStore.getState().thread;

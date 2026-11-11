@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -92,5 +95,36 @@ class MessageLibraryTest {
             s.executeUpdate();
         }
         assertFalse(library.search("历史关键词", id, false, 0).hasMore());
+    }
+
+    @Test
+    void concurrentClientsPreserveOtherBookmarksAndMigrationDoesNotResurrectDeletion() throws Exception {
+        for (int i = 0; i < 12; i++) {
+            sessions.publish(id, "r" + i, new RunStarted("多窗口书签 " + i));
+        }
+        CountDownLatch ready = new CountDownLatch(1);
+        try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+            var first = workers.submit(() -> {
+                ready.await();
+                library.migrate(id, List.of(1L, 2L));
+                return null;
+            });
+            var second = workers.submit(() -> {
+                ready.await();
+                library.save(id, 3);
+                return null;
+            });
+            ready.countDown();
+            first.get(10, TimeUnit.SECONDS);
+            second.get(10, TimeUnit.SECONDS);
+            assertEquals(List.of(1L, 2L, 3L),
+                library.bookmarks(id).stream().map(MessageLibrary.Bookmark::sequence).toList());
+            library.delete(id, 1);
+            library.migrate(id, List.of(1L, 2L));
+            assertEquals(List.of(2L, 3L),
+                library.bookmarks(id).stream().map(MessageLibrary.Bookmark::sequence).toList());
+        }
+        var reopened = new MessageLibrary(new SqliteStore(root.resolve("library.db")), sessions);
+        assertEquals(List.of(2L, 3L), reopened.bookmarks(id).stream().map(MessageLibrary.Bookmark::sequence).toList());
     }
 }

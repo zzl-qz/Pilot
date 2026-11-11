@@ -38,4 +38,6 @@ test('迁移失败保留旧书签且允许重试，损坏存储和非数组响�
   api.importBookmarks = async () => ({ bookmarks: [{ sequence: 2, title: '保留', preview: '' }], skipped: [] });
   assert.equal((await syncBookmarks('failed')).values.length, 1);
   assert.throws(() => normalizeBookmarks({}), /格式无效/);
+  assert.throws(() => normalizeBookmarks([null]), /格式无效/);
+  assert.throws(() => normalizeBookmarks([{ sequence: '2', title: '无效游标' }]), /格式无效/);
 });

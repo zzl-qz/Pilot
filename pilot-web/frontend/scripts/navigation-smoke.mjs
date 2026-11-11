@@ -16,8 +16,8 @@ import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-add
 document.documentElement.dataset.theme='dark';window.store=useStore;window.api=api;window.cancelled=0;
 for(const name of Object.keys(api))if(typeof api[name]==='function')api[name]=async()=>({});api.schedules=async()=>[];api.worktreeInfo=async()=>({});api.queue=async()=>({items:[]});api.filesFlat=async()=>({files:[]});
 api.bookmarks=async(session)=>JSON.parse(localStorage.getItem('mock-server-bookmarks:'+session)||'[]');
-api.saveBookmark=async(session,sequence)=>{const values=await api.bookmarks(session);const row={sequence,title:'已收藏的消息 '+sequence,preview:'同步书签'};if(!values.some(b=>b.sequence===sequence))values.push(row);localStorage.setItem('mock-server-bookmarks:'+session,JSON.stringify(values));return row;};
-api.deleteBookmark=async(session,sequence)=>localStorage.setItem('mock-server-bookmarks:'+session,JSON.stringify((await api.bookmarks(session)).filter(b=>b.sequence!==sequence)));
+api.saveBookmark=async(session,sequence)=>navigator.locks.request('fixture-bookmarks:'+session,async()=>{const values=await api.bookmarks(session);const row={sequence,title:'已收藏的消息 '+sequence,preview:'同步书签'};if(!values.some(b=>b.sequence===sequence))values.push(row);localStorage.setItem('mock-server-bookmarks:'+session,JSON.stringify(values));return row;});
+api.deleteBookmark=async(session,sequence)=>navigator.locks.request('fixture-bookmarks:'+session,async()=>localStorage.setItem('mock-server-bookmarks:'+session,JSON.stringify((await api.bookmarks(session)).filter(b=>b.sequence!==sequence))));
 api.importBookmarks=async(session,sequences)=>{for(const seq of sequences)await api.saveBookmark(session,seq);return{bookmarks:await api.bookmarks(session),skipped:[]};};
 const topics=['复用现有任务执行链路','加入持久化的到期计划','核对重启后的恢复边界','实现定时任务管理界面','保持人工暂停的状态','验证 Windows 和 Linux 路径','补充开源调研门禁','完成自动核验与结果通知','调整会话导航和消息书签','检查长对话中的滚动行为','验证浅色与窄屏布局','整理最终验证记录'];
 window.makeRows=()=>topics.flatMap((title,i)=>[{type:'user',key:'message:'+i,sequence:i+1,text:title+'\\n请结合现有代码和成熟开源实现，说明复用理由。\\n保留工作区约束，并验证正常、失败及边界情况。'}, {type:'turn',key:'turn:'+i,runIds:['run:'+i],tools:[],reply:{text:'已检查「'+title+'」涉及的现有实现。\\n\\n'+Array(3).fill('执行与验证继续沿用原有链路。对应的测试、错误反馈和恢复路径已记录，可在这轮消息中查看。').join('\\n\\n'),live:false},stats:{}}]);
@@ -29,6 +29,43 @@ await cp(join(root,'../src/main/resources/static/fonts'),join(output,'fonts'),{r
 const server=await preview({root,build:{outDir:output},preview:{host:'127.0.0.1',port:0,proxy:{}}});
 const url=`http://127.0.0.1:${server.httpServer.address().port}/${entry}`;
 let browser,electron;
+async function checkMultipleWindows(page, name) {
+  let peer;
+  if (name === 'electron') {
+    const opened = electron.waitForEvent('window');
+    await electron.evaluate(({BrowserWindow}, url) => { const child=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});child.loadURL(url); }, url);
+    peer = await opened;
+  } else peer = await page.context().newPage();
+  try {
+    await peer.goto(url);
+    for (const tab of [page, peer]) {
+      await tab.evaluate(() => {
+        // 可见性生命周期独立模拟，两扇真实窗口共用源与持久存储。
+        window.testHidden=false;Object.defineProperty(document,'hidden',{configurable:true,get:()=>window.testHidden});
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    }
+    const save = async (tab, index) => {
+      await tab.locator('.thread-nav-tick').nth(index).hover();
+      await tab.getByRole('button',{name:'添加书签',exact:true}).click();
+    };
+    await Promise.all([save(page,1),save(peer,3)]);
+    for(const tab of [page,peer]) await tab.waitForFunction(()=>document.querySelectorAll('.thread-nav-tick.is-saved').length===2);
+    await page.evaluate(()=>{window.testHidden=true;document.dispatchEvent(new Event('visibilitychange'));});
+    await peer.getByRole('button',{name:'取消书签',exact:true}).click();
+    await peer.waitForFunction(()=>document.querySelectorAll('.thread-nav-tick.is-saved').length===1);
+    assert.equal(await page.locator('.thread-nav-tick.is-saved').count(),2,'后台保留上次快照，停止轮询');
+    await page.evaluate(()=>{window.testHidden=false;document.dispatchEvent(new Event('visibilitychange'));});
+    await page.waitForFunction(()=>document.querySelectorAll('.thread-nav-tick.is-saved').length===1);
+    await page.keyboard.press('Escape');
+    await page.locator('.thread-nav-tick.is-saved').hover();
+    await page.getByRole('button',{name:'取消书签',exact:true}).click();
+    for(const tab of [page,peer]) await tab.waitForFunction(()=>document.querySelectorAll('.thread-nav-tick.is-saved').length===0);
+    await page.keyboard.press('Escape');
+    console.log(name+': PASS two windows / concurrent bookmarks / background wake');
+  } finally { await peer.close(); }
+}
+
 async function run(page,name) {
   page.setDefaultTimeout(8000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setViewportSize({width:1440,height:900});await page.goto(url);
@@ -67,7 +104,7 @@ async function run(page,name) {
   await page.locator('.thread-nav-tick').last().waitFor();assert.equal(await page.locator('.thread-nav-tick').count(),12);
   await page.waitForFunction(()=>document.querySelector('.thread-nav-tick:last-child').getAttribute('aria-current')==='location');
   await page.locator('.thread-nav-tick').nth(2).hover();await page.getByRole('dialog',{name:'消息预览'}).waitFor();
-  await page.getByRole('button',{name:'添加书签',exact:true}).click();assert.equal(await page.locator('.thread-nav-tick.is-saved').count(),1);
+  await page.getByRole('button',{name:'添加书签',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.thread-nav-tick.is-saved').length===1);
   await page.screenshot({path:join(output,`${name}-1440-preview.png`),timeout:20000,animations:'disabled'});
   await page.locator('.thread-nav-preview-title').click();
   await page.waitForFunction(()=>{const el=document.querySelector('[data-sequence="3"]'),scroll=document.querySelector('.thread');return Math.abs(el.getBoundingClientRect().top-scroll.getBoundingClientRect().top-24)<3;});
@@ -89,21 +126,32 @@ async function run(page,name) {
   assert.equal(await currentTick.evaluate(el=>el===document.activeElement),true);
   await page.reload();await page.locator('.thread-nav-tick.is-saved').waitFor();
   await page.getByRole('button',{name:'打开对话导航和书签'}).click();await page.getByRole('button',{name:'书签 1',exact:true}).click();assert.equal(await page.locator('.thread-nav-item').count(),1);
-  await page.getByRole('button',{name:'取消书签',exact:true}).click();assert.equal(await page.locator('.thread-nav-item').count(),0);
+  await page.getByRole('button',{name:'取消书签',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.thread-nav-item').length===0);
   // Quota failures are visible and must not report a bookmark as saved.
   await page.keyboard.press('Escape');await page.locator('.thread-nav-tick').nth(1).hover();
   await page.evaluate(()=>{window.realSet=Storage.prototype.setItem;Storage.prototype.setItem=function(){throw Error('quota');};});
   await page.getByRole('button',{name:'添加书签',exact:true}).click();await page.getByText(/书签保存失败/).waitFor();assert.equal(await page.locator('.thread-nav-tick.is-saved').count(),0);
   await page.evaluate(()=>Storage.prototype.setItem=window.realSet);
   await page.keyboard.press('Escape');
+  await checkMultipleWindows(page, name);
   // Session switches discard previews/bookmarks from the old conversation.
   await page.evaluate(()=>store.setState({sessionId:'nav-other'}));assert.equal(await page.locator('.thread-nav-tick.is-saved').count(),0);
-  // Old bookmarks reuse history loading. Simulate one page returning its missing message.
+  // 旧书签迁移失败保留本地数据，显式重试后跨两页定位。
   await page.evaluate(()=>{
+    window.realImport=api.importBookmarks;api.importBookmarks=async()=>{throw Error('迁移网络中断');};window.historyPages=0;
     localStorage.setItem('pilot.message-bookmarks:nav-old',JSON.stringify([{sequence:1,id:'1',key:'message:0',title:'旧消息书签',preview:'分页后定位'}]));
-    store.setState(s=>({sessionId:'nav-old',thread:{...s.thread,rows:makeRows().slice(10),windowEvents:[{sequence:6},{sequence:12}],history:{...s.thread.history,hasMore:true}},requestEarlierHistory:async()=>{store.setState(s=>({thread:{...s.thread,rows:makeRows(),windowEvents:[{sequence:1},{sequence:12}],history:{...s.thread.history,hasMore:false}}}));return true;}}));
+    store.setState(s=>({sessionId:'nav-old',thread:{...s.thread,rows:makeRows().slice(10),windowEvents:[{sequence:6},{sequence:12}],history:{...s.thread.history,hasMore:true}},requestEarlierHistory:async()=>{const last=++window.historyPages===2;store.setState(s=>({thread:{...s.thread,rows:last?makeRows():makeRows().slice(4),windowEvents:[{sequence:last?1:3},{sequence:12}],history:{...s.thread.history,hasMore:!last}}}));return true;}}));
   });
+  await page.getByRole('button',{name:'打开对话导航和书签'}).click();
+  await page.getByText(/书签同步失败/).waitFor();
+  assert.equal(await page.evaluate(()=>!!localStorage.getItem('pilot.message-bookmarks:nav-old')),true);
+  await page.evaluate(()=>api.importBookmarks=window.realImport);
+  await page.getByRole('button',{name:'重试同步',exact:true}).click();
+  await page.waitForFunction(()=>!localStorage.getItem('pilot.message-bookmarks:nav-old'));
+  assert.equal(await page.evaluate(()=>!!localStorage.getItem('pilot.message-bookmarks:nav-old:migration-backup')),true);
+  await page.keyboard.press('Escape');
   await page.locator('.thread-nav-tick').first().click();await page.waitForFunction(()=>document.querySelector('[data-sequence="1"]')?.classList.contains('is-navigation-target'));
+  assert.equal(await page.evaluate(()=>window.historyPages),2);
   // Long conversations keep the active tick visible inside the independently scrolling rail.
   await page.evaluate(()=>store.setState(s=>({sessionId:'nav-long',thread:{...s.thread,rows:Array.from({length:160},(_,i)=>({type:'user',key:'long:'+i,sequence:i+1,text:'历史问题 '+(i+1)+'：检查现有链路与验证记录。'})),history:{...s.thread.history,hasMore:false}}})));
   await page.getByRole('button',{name:'回到底部',exact:true}).click();
@@ -164,7 +212,7 @@ async function checkMenuFallback(browser, capability) {
 
 try {
   if(process.argv.includes('--serve')){console.log(url);await new Promise(()=>{});}
-  browser=await chromium.launch({channel:'chrome',headless:true});await run(await browser.newPage(),'chromium');
+  browser=await chromium.launch({channel:'chrome',headless:true});const context=await browser.newContext();await run(await context.newPage(),'chromium');
   for (const capability of ['anchor','popover']) await checkMenuFallback(browser,capability);
   await browser.close();browser=null;
   const main=join(output,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(output,'profile'))});app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
