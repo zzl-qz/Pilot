@@ -371,3 +371,25 @@ test('重试和恢复只替换当前推理，不清除先前已完成的说明',
   assert.equal(useStore.getState().thread.rows.at(-1).thinking.text, '先检查新思考');
   closeStreams();
 });
+
+test('清空历史后从零游标恢复快照，随后接受不连续但递增的新事件', async () => {
+  const fixture = fakeStreams(); const saved = fetchHandler;
+  try {
+    reset(); useStore.setState({ historyRevision: 0 });
+    useStore.getState().handleEvent({ type: 'run.started', sessionId: 's', runId: 'old', sequence: 10, payload: { input: '被删除' } });
+    useStore.getState().flushEvents();
+    fetchHandler = async () => new Response(JSON.stringify({ historyRevision: 1, hasMore: false, events: [] }));
+    useStore.getState().connectSse('s', 10);
+    fixture.streams.at(-1).emit({ type: 'stream.reset', sessionId: 's', payload: { historyRevision: 1 } });
+    await new Promise(resolve => setImmediate(resolve));
+    const current = fixture.streams.at(-1);
+    assert.match(current.url, /after=0&revision=1/);
+    current.emit({ type: 'stream.preview', sessionId: 's', payload: { historyRevision: 1, baseSequence: 0, runId: '', previewId: '', previewOffset: 0, text: '', reasoning: '', complete: true } });
+    assert.equal(current.closed, false);
+    assert.equal(useStore.getState().thread.rows.length, 0);
+    current.emit({ type: 'run.started', sessionId: 's', runId: 'new', sequence: 11, payload: { input: '新消息' } });
+    useStore.getState().flushEvents();
+    assert.equal(useStore.getState().thread.cursor, 11);
+    assert.equal(useStore.getState().runId, 'new');
+  } finally { fetchHandler = saved; fixture.restore(); }
+});

@@ -5,24 +5,24 @@
     "live": 100,
     "payloadChars": 64,
     "publishMs": {
-      "p50": 0.024042,
-      "p95": 0.101083,
-      "p99": 0.140333
+      "p50": 0.022416,
+      "p95": 0.105166,
+      "p99": 0.194541
     },
     "firstMs": {
-      "p50": 56.207583,
-      "p95": 56.207583,
-      "p99": 56.207583
+      "p50": 57.140875,
+      "p95": 57.140875,
+      "p99": 57.140875
     },
     "replayMs": {
-      "p50": 741.22675,
-      "p95": 741.22675,
-      "p99": 741.22675
+      "p50": 697.407083,
+      "p95": 697.407083,
+      "p99": 697.407083
     },
     "caughtUpMs": {
-      "p50": 749.566292,
-      "p95": 749.566292,
-      "p99": 749.566292
+      "p50": 706.202833,
+      "p95": 706.202833,
+      "p99": 706.202833
     },
     "receivedFrames": 100100,
     "receivedBytes": 31904973,
@@ -32,7 +32,7 @@
       "queuedBytes": 0,
       "peakQueuedBytes": 108444,
       "deliveredEvents": 100100,
-      "replayNanos": 692032458,
+      "replayNanos": 647417542,
       "previewInputs": 0,
       "previewOutputs": 0,
       "pendingPreviews": 0,
@@ -48,11 +48,11 @@
       "peakQueuedBytes": 321,
       "sentBytes": 31904974,
       "sentFrames": 100102,
-      "maxSendNanos": 2842625,
+      "maxSendNanos": 6053375,
       "closed": {}
     },
-    "heapUsed": 139895128,
-    "heapAfterCleanupGc": 29436840
+    "heapUsed": 99486784,
+    "heapAfterCleanupGc": 29524384
   },
   {
     "clients": 10,
@@ -61,23 +61,23 @@
     "payloadChars": 64,
     "publishMs": {
       "p50": 0.024208,
-      "p95": 0.084208,
-      "p99": 0.266208
+      "p95": 0.064875,
+      "p99": 0.190334
     },
     "firstMs": {
-      "p50": 6.005917,
-      "p95": 20.124667,
-      "p99": 20.124667
+      "p50": 4.981584,
+      "p95": 16.994959,
+      "p99": 16.994959
     },
     "replayMs": {
-      "p50": 2881.38325,
-      "p95": 2884.910792,
-      "p99": 2884.910792
+      "p50": 2870.64625,
+      "p95": 2991.472292,
+      "p99": 2991.472292
     },
     "caughtUpMs": {
-      "p50": 2882.045292,
-      "p95": 2885.072084,
-      "p99": 2885.072084
+      "p50": 2871.786917,
+      "p95": 2991.816917,
+      "p99": 2991.816917
     },
     "receivedFrames": 1001000,
     "receivedBytes": 319049730,
@@ -87,7 +87,7 @@
       "queuedBytes": 0,
       "peakQueuedBytes": 1081600,
       "deliveredEvents": 1101100,
-      "replayNanos": 29299746126,
+      "replayNanos": 29596133710,
       "previewInputs": 0,
       "previewOutputs": 0,
       "pendingPreviews": 0,
@@ -102,16 +102,16 @@
     "transport": {
       "connections": 10,
       "queuedBytes": 0,
-      "peakQueuedBytes": 3242954,
+      "peakQueuedBytes": 3231470,
       "sentBytes": 350954714,
       "sentFrames": 1101122,
-      "maxSendNanos": 250183125,
+      "maxSendNanos": 561435375,
       "closed": {
         "complete": 1
       }
     },
-    "heapUsed": 189109904,
-    "heapAfterCleanupGc": 30661768
+    "heapUsed": 1644228528,
+    "heapAfterCleanupGc": 30741304
   },
   {
     "clients": 50,
@@ -119,34 +119,34 @@
     "live": 100,
     "payloadChars": 64,
     "publishMs": {
-      "p50": 0.025,
-      "p95": 0.104417,
-      "p99": 0.142167
+      "p50": 0.027834,
+      "p95": 0.112417,
+      "p99": 0.136667
     },
     "firstMs": {
-      "p50": 20.703,
-      "p95": 42.446208,
-      "p99": 43.087875
+      "p50": 19.909,
+      "p95": 30.972333,
+      "p99": 34.367708
     },
     "replayMs": {
-      "p50": 11982.015417,
-      "p95": 11996.868458,
-      "p99": 11998.777458
+      "p50": 11672.378833,
+      "p95": 11683.689167,
+      "p99": 11684.386333
     },
     "caughtUpMs": {
-      "p50": 11984.291792,
-      "p95": 11997.621458,
-      "p99": 11999.50725
+      "p50": 11674.4305,
+      "p95": 11684.656917,
+      "p99": 11684.855125
     },
     "receivedFrames": 5005000,
-    "receivedBytes": 1595248650,
+    "receivedBytes": 1595248500,
     "core": {
       "subscriptions": 50,
       "workers": 50,
       "queuedBytes": 0,
       "peakQueuedBytes": 5362560,
       "deliveredEvents": 6106100,
-      "replayNanos": 627793792628,
+      "replayNanos": 612767801419,
       "previewInputs": 0,
       "previewOutputs": 0,
       "pendingPreviews": 0,
@@ -161,15 +161,15 @@
     "transport": {
       "connections": 50,
       "queuedBytes": 0,
-      "peakQueuedBytes": 3242954,
-      "sentBytes": 1946203414,
+      "peakQueuedBytes": 3231470,
+      "sentBytes": 1946203264,
       "sentFrames": 6106222,
-      "maxSendNanos": 250183125,
+      "maxSendNanos": 561435375,
       "closed": {
         "complete": 11
       }
     },
-    "heapUsed": 130068376,
-    "heapAfterCleanupGc": 35052800
+    "heapUsed": 83768904,
+    "heapAfterCleanupGc": 35043328
   }
 ]

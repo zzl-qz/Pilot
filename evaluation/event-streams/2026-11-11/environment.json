@@ -3,7 +3,7 @@
   "machine": "arm64",
   "java": "OpenJDK 25.0.5",
   "node": "v22.23.1",
-  "measuredAt": "2026-11-11T13:09:50+08:00",
+  "measuredAt": "2026-11-11T13:22:34+08:00",
   "baselineSqliteReplayMs": 41869.709959,
   "baselineExplanation": "分页后仍逐条查询历史版本的同等 100000 条、64 字符负载；当前实现按分页和时间间隔校验。",
   "httpRepository": "memory，隔离 HTTP 交付成本；真实 SQLite 独立报告，不能当作 SQLite + HTTP 联合吞吐",
@@ -11,16 +11,16 @@
   "memory": "core/transport 字节是各自队列预算，含发送中帧；replayPages 是另行限制的分页并发。heapUsed 包含未回收临时分配；heapAfterCleanupGc 是删除测试会话并触发 GC 后观测值，不是堆峰值。累计峰值和关闭计数跨三个并发档位。",
   "checks": {
     "mavenVerify": {
-      "executed": 1449,
-      "conditionalSkipped": 15,
+      "executed": 1454,
+      "conditionalSkipped": 16,
       "failures": 0,
-      "note": "默认跳过的压力测试已通过单独命令执行；环境条件和模型/项目构建集成测试不计为通过"
+      "note": "默认跳过的三组压力测试已通过单独命令执行；环境条件和模型/项目构建集成测试不计为通过"
     },
-    "frontendUnit": 399,
+    "frontendUnit": 400,
     "desktopUnit": 41,
     "android": "transport + bridge + app unit + lint 通过，未运行本轮模拟器/手机实机",
     "linuxContainer": {
-      "focusedBackendTests": 81,
+      "focusedBackendTests": 86,
       "image": "maven:3.9-eclipse-temurin-25",
       "scope": "事件流、SQLite、文件回退、真实 HTTP、独立 JVM 中断及恢复"
     },
@@ -29,6 +29,12 @@
     "windows": "仅已接入 CI，当前本地会话未执行 Windows 实机",
     "linuxDesktop": "仅已接入 CI，当前未执行 Linux GUI"
   },
-  "implementationCommit": "bdcb46aa93b3214aa3b4b371e2db5de9e6d123fc",
-  "benchmarkSources": "测量入口与原始报告在本次验证提交中一起保存"
+  "implementationCommit": "3b7cec16a49d96eb9c9cd47e14596b54dfb8f95b",
+  "benchmarkSources": "测量入口与原始报告在本次验证提交中一起保存",
+  "prePushReview": {
+    "284acb9": "旧运行回调与新运行合并缓冲隔离",
+    "36fa0f1": "截断与清空历史后以实际保留事件确定恢复游标，不复用序号",
+    "bd2a37e": "排队操作获得维护锁后复查存储降级状态",
+    "3b7cec1": "准备日志写入后持久化失败纳入恢复清理"
+  }
 }

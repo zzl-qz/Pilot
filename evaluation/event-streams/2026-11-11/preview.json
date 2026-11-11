@@ -4,62 +4,62 @@
     "thresholdBytes": 2048,
     "inputs": 1000,
     "outputs": 4,
-    "caughtUpMs": 25.592792
+    "caughtUpMs": 26.771292
   },
   {
     "windowMs": 20,
     "thresholdBytes": 8192,
     "inputs": 1000,
     "outputs": 1,
-    "caughtUpMs": 25.504459
+    "caughtUpMs": 30.651375
   },
   {
     "windowMs": 20,
     "thresholdBytes": 16384,
     "inputs": 1000,
     "outputs": 1,
-    "caughtUpMs": 21.817416
+    "caughtUpMs": 26.7745
   },
   {
     "windowMs": 50,
     "thresholdBytes": 2048,
     "inputs": 1000,
     "outputs": 4,
-    "caughtUpMs": 52.579917
+    "caughtUpMs": 60.135334
   },
   {
     "windowMs": 50,
     "thresholdBytes": 8192,
     "inputs": 1000,
     "outputs": 1,
-    "caughtUpMs": 52.011083
+    "caughtUpMs": 55.473542
   },
   {
     "windowMs": 50,
     "thresholdBytes": 16384,
     "inputs": 1000,
     "outputs": 1,
-    "caughtUpMs": 54.447417
+    "caughtUpMs": 53.622583
   },
   {
     "windowMs": 100,
     "thresholdBytes": 2048,
     "inputs": 1000,
     "outputs": 4,
-    "caughtUpMs": 101.977042
+    "caughtUpMs": 111.169833
   },
   {
     "windowMs": 100,
     "thresholdBytes": 8192,
     "inputs": 1000,
     "outputs": 1,
-    "caughtUpMs": 105.940625
+    "caughtUpMs": 103.150667
   },
   {
     "windowMs": 100,
     "thresholdBytes": 16384,
     "inputs": 1000,
     "outputs": 1,
-    "caughtUpMs": 101.512792
+    "caughtUpMs": 105.817875
   }
 ]
