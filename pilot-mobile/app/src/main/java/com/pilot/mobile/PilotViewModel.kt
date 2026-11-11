@@ -114,13 +114,16 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
 
     private class EventReferenceRequired(val sequence: Long, val revision: Long) : RuntimeException()
     private class StreamStopped(message: String) : RuntimeException(message)
+    private class StreamConsumptionFailed(cause: Throwable) : RuntimeException(cause.message, cause)
 
     private fun restartMonitor() {
         monitor?.cancel()
         if (!foreground || client == null) return
         monitor = viewModelScope.launch {
-            var backoff = 1000L
+            val recovery = StreamRecovery()
             while (isActive) {
+                val connectedAt = System.nanoTime()
+                var referenceApplied = false
                 try {
                     val id = state.value.selected?.text("id")
                     if (id == null || state.value.viewingHistory) { refresh(); delay(5000) }
@@ -135,7 +138,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                                     throw EventReferenceRequired(payload?.text("sequence")?.toLongOrNull() ?: error("事件引用无效"),
                                         payload.text("historyRevision").toLongOrNull() ?: error("历史版本无效"))
                                 }
-                                conversation.accept(event)
+                                try { conversation.accept(event) } catch (failure: RuntimeException) { throw StreamConsumptionFailed(failure) }
                                 if (conversation.needsReplay) {
                                     historyEvents.clear(); historyChars = 0
                                     mutable.update { it.copy(rows = emptyList(), runId = "", phase = "历史已修改，重新加载中") }
@@ -145,27 +148,43 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                                 mutable.update { it.copy(rows = conversation.snapshot(), runId = if (event.text("type") in setOf("run.started", "run.continued", "run.completed", "run.failed", "run.cancelled")) conversation.runId else it.runId, phase = conversation.phase.ifBlank { it.phase }, status = client?.pathLabel() ?: "已断开") }
                             }
                             val revision = conversation.historyRevision?.let { "&revision=$it" } ?: ""
-                            val response = client!!.transfer(Request(path = "/api/sessions/$id/events?after=${conversation.cursor}$revision&protocol=2")) { decoder.feed(it) }
+                            val response = client!!.transfer(Request(path = "/api/sessions/$id/events?after=${conversation.cursor}$revision&protocol=2")) { bytes ->
+                                try { decoder.feed(bytes) }
+                                catch (e: EventReferenceRequired) { throw e }
+                                catch (e: StreamStopped) { throw e }
+                                catch (e: RuntimeException) {
+                                    if (conversation.needsReplay) throw e
+                                    throw StreamConsumptionFailed(e)
+                                }
+                            }
                             if (response.status == 401) error("设备授权已失效，请重新配对")
                             require(response.status in 200..299) { "无法读取任务进度（${response.status}）" }
                         } catch (reference: EventReferenceRequired) {
+                            try {
                             val value = api(Request(path = "/api/sessions/$id/events/${reference.sequence}?revision=${reference.revision}")).jsonObject
                             val event = value["event"]?.jsonObject ?: error("事件引用响应无效")
                             require(event.text("sequence").toLongOrNull() == reference.sequence && value.text("historyRevision").toLongOrNull() == reference.revision) { "事件引用不匹配" }
                             conversation.accept(event); recordEvent(event, false)
                             mutable.update { it.copy(rows = conversation.snapshot(), phase = conversation.phase) }
+                            referenceApplied = true
+                            } catch (e: CancellationException) { throw e }
+                            catch (e: Exception) { throw StreamConsumptionFailed(e) }
                         } finally { metadata.cancelAndJoin() }
                     }
-                    backoff = 1000
+                    if (!referenceApplied) delay(recovery.disconnected((System.nanoTime() - connectedAt) / 1_000_000))
                 } catch (e: CancellationException) { throw e }
                 catch (e: StreamStopped) {
                     mutable.update { it.copy(status = "事件恢复已停止", networkError = e.message ?: "请重新打开会话") }
                     break
                 }
                 catch (e: Exception) {
+                    if (e is StreamConsumptionFailed && !recovery.failedConsumption(conversation.cursor)) {
+                        mutable.update { it.copy(status = "事件恢复已停止", networkError = "同一位置连续恢复失败，请重新打开会话：${e.message}") }
+                        break
+                    }
                     mutable.update { it.copy(status = "连接中断 · 正在重试",
                         networkError = if (!networkAvailable) "手机网络不可用，恢复后将自动连接。" else e.message ?: "连接失败") }
-                    delay(backoff); backoff = (backoff * 2).coerceAtMost(15_000)
+                    delay(recovery.disconnected((System.nanoTime() - connectedAt) / 1_000_000))
                 }
             }
         }
