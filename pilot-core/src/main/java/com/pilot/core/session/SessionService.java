@@ -44,6 +44,11 @@ public final class SessionService {
     private final Clock clock;
     private final SessionRepository repository;
     private final EventStreamLimits limits;
+    private final PreviewLimits previewLimits;
+    private final ConcurrentMap<String, PendingPreview> previews = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicInteger pendingPreviews = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicLong previewInputs = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong previewOutputs = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicInteger workers = new java.util.concurrent.atomic.AtomicInteger();
     private final java.util.concurrent.atomic.AtomicLong queuedBytes = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong peakBytes = new java.util.concurrent.atomic.AtomicLong();
@@ -66,6 +71,11 @@ public final class SessionService {
     }
 
     public SessionService(Clock clock, SessionRepository repository, EventStreamLimits limits) {
+        this(clock, repository, limits, PreviewLimits.defaults());
+    }
+
+    public SessionService(Clock clock, SessionRepository repository, EventStreamLimits limits, PreviewLimits previewLimits) {
+        this.previewLimits = Objects.requireNonNull(previewLimits);
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.limits = Objects.requireNonNull(limits);
@@ -161,6 +171,7 @@ public final class SessionService {
     public boolean delete(String sessionId) {
         Object lock = lockFor(sessionId);
         synchronized (lock) {
+            discardPreview(sessionId);
             CopyOnWriteArrayList<EventDelivery> existing = subscribers.remove(sessionId);
             if (existing != null) {
                 existing.forEach(EventDelivery::close);
@@ -189,20 +200,67 @@ public final class SessionService {
     public void preview(String sessionId, String runId, SessionEvent event) {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(event, "event must not be null");
-        long size = EventSize.estimate(event) + 1024;
+        String text;
+        boolean reset;
+        if (event instanceof com.pilot.core.event.AssistantPreview part) { text = part.text(); reset = part.reset(); }
+        else if (event instanceof com.pilot.core.event.AssistantReasoning part) { text = part.text(); reset = part.reset(); }
+        else throw new IllegalArgumentException("preview 只接收正文或推理增量");
         Object lock = lockFor(sessionId);
         synchronized (lock) {
-            if (repository.find(sessionId).isEmpty()) {
-                locks.remove(sessionId, lock);
-                return;
+            PendingPreview pending = previews.get(sessionId);
+            if (pending == null && repository.find(sessionId).isEmpty()) { locks.remove(sessionId, lock); return; }
+            previewInputs.incrementAndGet();
+            if (pending != null && (!pending.runId.equals(runId) || pending.type != event.type() || reset)) {
+                flushPreview(sessionId, pending); pending = null;
             }
-            long sequence = repository.latestSequence(sessionId);
-            if (sequence < 1) {
-                return;
+            long sequence = pending == null ? repository.latestSequence(sessionId) : pending.sequence;
+            if (sequence < 1) return;
+            if (reset) { deliverPreview(sessionId, runId, sequence, event); return; }
+            for (int i = 0; i < text.length();) {
+                int point = text.codePointAt(i);
+                int size = point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
+                if (pending != null && pending.bytes + size > previewLimits.mergeBytes()) { flushPreview(sessionId, pending); pending = null; }
+                if (pending == null) {
+                    if (pendingPreviews.incrementAndGet() > previewLimits.sessions()) {
+                        pendingPreviews.decrementAndGet();
+                        SessionEvent remaining = event.type() == EventType.ASSISTANT_PREVIEW
+                            ? new com.pilot.core.event.AssistantPreview(text.substring(i)) : new com.pilot.core.event.AssistantReasoning(text.substring(i));
+                        deliverPreview(sessionId, runId, sequence, remaining); return;
+                    }
+                    pending = new PendingPreview(runId, event.type(), sequence);
+                    previews.put(sessionId, pending);
+                    PendingPreview expected = pending;
+                    pending.timer = MONITOR.schedule(() -> Thread.ofVirtual().name("pilot-preview-flush").start(() -> {
+                        synchronized (lock) { if (previews.get(sessionId) == expected) flushPreview(sessionId, expected); }
+                    }), previewLimits.mergeMillis(), TimeUnit.MILLISECONDS);
+                }
+                pending.text.appendCodePoint(point); pending.bytes += size; i += Character.charCount(point);
+                if (pending.bytes >= previewLimits.mergeBytes()) { flushPreview(sessionId, pending); pending = null; }
             }
-            EventEnvelope envelope = EventEnvelope.of(sequence, clock.instant(), sessionId, runId, event);
-            deliver(sessionId, envelope, size);
         }
+    }
+
+    private static final class PendingPreview {
+        final String runId; final EventType type; final long sequence;
+        final StringBuilder text = new StringBuilder(); int bytes;
+        java.util.concurrent.ScheduledFuture<?> timer;
+        PendingPreview(String runId, EventType type, long sequence) { this.runId = runId; this.type = type; this.sequence = sequence; }
+    }
+    private void discardPreview(String sessionId) {
+        PendingPreview pending = previews.remove(sessionId);
+        if (pending != null) { pendingPreviews.decrementAndGet(); if (pending.timer != null) pending.timer.cancel(false); }
+    }
+    private void flushPreview(String sessionId, PendingPreview pending) {
+        if (pending == null || previews.get(sessionId) != pending) return;
+        discardPreview(sessionId);
+        SessionEvent event = pending.type == EventType.ASSISTANT_PREVIEW
+            ? new com.pilot.core.event.AssistantPreview(pending.text.toString())
+            : new com.pilot.core.event.AssistantReasoning(pending.text.toString());
+        deliverPreview(sessionId, pending.runId, pending.sequence, event);
+    }
+    private void deliverPreview(String sessionId, String runId, long sequence, SessionEvent event) {
+        previewOutputs.incrementAndGet();
+        deliver(sessionId, EventEnvelope.of(sequence, clock.instant(), sessionId, runId, event), EventSize.estimate(event) + 1024);
     }
 
     /** 追加事件并推送给当前订阅者，返回带序号与时间戳的信封。 */
@@ -217,6 +275,7 @@ public final class SessionService {
                 locks.remove(sessionId, lock);
                 throw new NoSuchSessionException(sessionId);
             });
+            flushPreview(sessionId, previews.get(sessionId));
             SessionStatus status = nextStatus(current.status(), event);
             // 发过第一条消息就不再是空白对话。放在 publish 里，发送、重新生成、改历史重跑都覆盖
             if (event.type() == EventType.RUN_STARTED) {
@@ -300,6 +359,7 @@ public final class SessionService {
             if (repository.find(sessionId).isEmpty()) {
                 throw new NoSuchSessionException(sessionId);
             }
+            flushPreview(sessionId, previews.get(sessionId));
             int removed = repository.transaction(sessionId, () -> {
                 if (expectedRevision != null && historyRevision(sessionId) != expectedRevision) {
                     throw new HistoryChangedException();
@@ -351,6 +411,7 @@ public final class SessionService {
                 locks.remove(sessionId, lock);
                 throw new NoSuchSessionException(sessionId);
             }
+            flushPreview(sessionId, previews.get(sessionId));
             long revision = historyRevision(sessionId);
             if (expectedRevision != null && revision != expectedRevision) throw new HistoryChangedException();
             if (listeners(sessionId).size() >= limits.subscribersPerSession()) throw new IllegalStateException("会话订阅数量已达上限");
@@ -372,12 +433,13 @@ public final class SessionService {
     }
 
     public record StreamMetrics(int subscriptions, int workers, long queuedBytes, long peakQueuedBytes,
-        long deliveredEvents, long replayNanos, java.util.Map<String, Long> closeReasons) {}
+        long deliveredEvents, long replayNanos, long previewInputs, long previewOutputs, int pendingPreviews,
+        java.util.Map<String, Long> closeReasons) {}
     public StreamMetrics streamMetrics() {
         java.util.Map<String, Long> reasons = new java.util.TreeMap<>();
         closedReasons.forEach((key, value) -> reasons.put(key, value.get()));
         return new StreamMetrics(subscriberCount(), workers.get(), queuedBytes.get(), peakBytes.get(),
-            delivered.get(), replayNanos.get(), java.util.Map.copyOf(reasons));
+            delivered.get(), replayNanos.get(), previewInputs.get(), previewOutputs.get(), pendingPreviews.get(), java.util.Map.copyOf(reasons));
     }
 
     private boolean reserve(long size) {

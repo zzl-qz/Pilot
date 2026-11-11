@@ -21,8 +21,14 @@ public class SessionConfiguration {
         @org.springframework.beans.factory.annotation.Value("${pilot.events.queue-wait-ms:30000}") long wait,
         @org.springframework.beans.factory.annotation.Value("${pilot.events.send-timeout-ms:30000}") long send,
         @org.springframework.beans.factory.annotation.Value("${pilot.events.replay-timeout-ms:300000}") long replay,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.reference-bytes:262144}") long reference) {
+        @org.springframework.beans.factory.annotation.Value("${pilot.events.reference-bytes:262144}") long reference,
+        @org.springframework.beans.factory.annotation.Value("${pilot.events.merge-ms:50}") long merge,
+        @org.springframework.beans.factory.annotation.Value("${pilot.events.merge-bytes:8192}") int mergeBytes,
+        @org.springframework.beans.factory.annotation.Value("${pilot.events.preview-bytes:131072}") int previewBytes,
+        @org.springframework.beans.factory.annotation.Value("${pilot.events.total-preview-bytes:16777216}") long previewTotal,
+        @org.springframework.beans.factory.annotation.Value("${pilot.events.preview-sessions:256}") int previewSessions) {
         return new SessionService(Clock.systemUTC(), repository,
-            new com.pilot.core.session.EventStreamLimits(items, bytes, total, connections, perSession, page, wait, send, replay, reference));
+            new com.pilot.core.session.EventStreamLimits(items, bytes, total, connections, perSession, page, wait, send, replay, reference),
+            new com.pilot.core.session.PreviewLimits(merge, mergeBytes, previewBytes, previewTotal, previewSessions));
     }
 }
