@@ -61,6 +61,8 @@ const NOTIFY_KEY = 'pilot.notify';
 
 let eventSource: EventSource | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+let streamPaused = false;
+let streamFailures = 0;
 let mirrorSource: EventSource | null = null;
 let commandTimer: ReturnType<typeof setTimeout> | undefined;
 let runClockTimer: ReturnType<typeof setTimeout> | undefined;
@@ -94,31 +96,58 @@ let earlierRequest: Promise<boolean> | null = null;   // 同一次边界触发�
 const EPHEMERAL_EVENTS = new Set(['assistant.preview', 'assistant.reasoning']);
 let eventQueue: Array<{ event: EventEnvelope; sessionId: string; sessionEpoch: number }> = [];
 let flushHandle: number | undefined;
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
+let flushGeneration = 0;
+let queuedBytes = 0;
+const MAX_QUEUED_EVENTS = 2048;
+const MAX_QUEUED_BYTES = 8 * 1024 * 1024;
+const wireEncoder = new TextEncoder();
 let flushRunner: (() => void) | null = null;
 
+function cancelFlush() {
+  flushGeneration++;
+  if (flushHandle != null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(flushHandle);
+  clearTimeout(flushTimer);
+  flushHandle = undefined;
+  flushTimer = undefined;
+}
+
 function scheduleFlush() {
-  if (flushHandle != null) {
+  if (flushTimer != null) {
     return;
   }
+  const generation = ++flushGeneration;
   const run = () => {
-    flushHandle = undefined;
+    if (generation !== flushGeneration) return;
+    cancelFlush();
     flushRunner?.();
   };
-  flushHandle = typeof requestAnimationFrame === 'function'
-    ? requestAnimationFrame(run)
-    : setTimeout(run, 16);
+  // 后台标签可能暂停 rAF，必须同时安排定时兜底，而非仅在 API 不存在时使用。
+  flushTimer = setTimeout(run, 50);
+  if (typeof requestAnimationFrame === 'function') flushHandle = requestAnimationFrame(run);
 }
 
 function discardQueuedEvents() {
   eventQueue = [];
-  if (flushHandle != null) {
-    if (typeof cancelAnimationFrame === 'function') {
-      cancelAnimationFrame(flushHandle);
-    } else {
-      clearTimeout(flushHandle);
-    }
-    flushHandle = undefined;
-  }
+  queuedBytes = 0;
+  cancelFlush();
+}
+
+/** 确认游标不动，丢弃未确认缓存并重新获取；永久坏事件最多自动重试三次。 */
+function recoverEventStream(sessionId: string, reason: string) {
+  if (useStore.getState().sessionId !== sessionId || streamPaused) return;
+  streamPaused = true;
+  eventSource?.close();
+  eventSource = null;
+  discardQueuedEvents();
+  clearTimeout(reconnectTimer);
+  reconnectTimer = undefined;
+  const retry = ++streamFailures <= 3;
+  useStore.setState(draft => {
+    draft.ui.connection = { status: 'error', text: retry ? '正在恢复事件' : '事件恢复失败，请刷新' };
+  });
+  if (retry) useStore.getState().scheduleReconnect(sessionId);
+  else useStore.getState().showNotice(reason + '，已停止自动重试。请刷新页面；若仍失败，请检查服务端事件数据。');
 }
 
 /**
@@ -848,14 +877,18 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     }
     clearTimeout(reconnectTimer);
     reconnectTimer = undefined;
+    streamPaused = false;
     const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/events?after=${cursor}`);
     eventSource = source;
     const handle = (message: MessageEvent<string>) => {
       if (eventSource !== source || get().sessionId !== sessionId) return;
       try {
-        get().handleEvent(JSON.parse(message.data) as EventEnvelope);
+        const event = JSON.parse(message.data) as EventEnvelope;
+        if (!event || typeof event !== 'object' || event.sessionId !== sessionId) throw new Error('事件会话无效');
+        get().handleEvent(event);
       } catch (error) {
         console.warn('[sse] 事件解析失败', error);
+        recoverEventStream(sessionId, '事件数据无法解析');
       }
     };
     for (const type of EVENT_TYPES) {
@@ -910,7 +943,12 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   /** SSE 事件统一入口：先入队，帧末合并提交（见 eventQueue 注释）。 */
   handleEvent(event) {
     const { sessionId, sessionEpoch } = get();
-    if (!sessionId || event.sessionId !== sessionId) {
+    if (!sessionId || streamPaused || event?.sessionId !== sessionId) {
+      return;
+    }
+    if (!Number.isSafeInteger(event.sequence) || event.sequence < 0 || typeof event.type !== 'string'
+        || !event.payload || typeof event.payload !== 'object' || Array.isArray(event.payload)) {
+      recoverEventStream(sessionId, '事件格式无效');
       return;
     }
     const thread = get().thread;
@@ -919,20 +957,34 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       // 重连/重放重复推送：同一序号不再应用一次
       return;
     }
+    const bytes = wireEncoder.encode(JSON.stringify(event)).byteLength;
+    if (eventQueue.length >= MAX_QUEUED_EVENTS || queuedBytes + bytes > MAX_QUEUED_BYTES) {
+      // 优先应用已有的有效批次，后台节流也不能无限堆积。
+      get().flushEvents();
+    }
+    if (streamPaused) return;
+    if (bytes > MAX_QUEUED_BYTES) {
+      recoverEventStream(sessionId, '单条事件超过可处理大小');
+      return;
+    }
     eventQueue.push({ event, sessionId, sessionEpoch });
+    queuedBytes += bytes;
     scheduleFlush();
   },
 
   /** 把这一帧攒下的事件一次性折进状态，再统一触发联动刷新。 */
   flushEvents() {
+    cancelFlush();
     if (!eventQueue.length) {
       return;
     }
     const batch = eventQueue;
     eventQueue = [];
+    queuedBytes = 0;
     const applied: EventEnvelope[] = [];
     const beforeKind = get().ui.attentionKind;
-    set((draft) => {
+    const beforeCursor = get().thread.cursor;
+    try { set((draft) => {
       for (const queued of batch) {
         if (draft.sessionId !== queued.sessionId || draft.sessionEpoch !== queued.sessionEpoch) continue;
         const item = queued.event;
@@ -941,13 +993,20 @@ export const useStore = create<StoreState>()(immer((set, get) => {
         applied.push(item);
       }
       draft.lastEventAt = Date.now();
-    });
+    }); } catch (error) {
+      console.warn('[sse] 事件应用失败，保留确认游标并重新回放', error);
+      const sessionId = get().sessionId;
+      if (sessionId) recoverEventStream(sessionId, '事件无法应用');
+      return;
+    }
     const after = get();
+    if (after.thread.cursor > beforeCursor) streamFailures = 0;
     if (after.ui.attentionKind !== beforeKind) {
       applyAttention(after.ui.attentionKind, after.sessionTitle);
     }
     for (const item of applied) {
-      get().settleEvent(item, after);
+      try { get().settleEvent(item, after); }
+      catch (error) { console.warn('[sse] 已应用事件的附属刷新失败', error); }
     }
   },
 
@@ -2252,6 +2311,9 @@ function applyAttention(kind: string, title: string) {
 }
 
 function closeStreams() {
+  streamPaused = false;
+  streamFailures = 0;
+  discardQueuedEvents();
   if (eventSource) {
     eventSource.close();
     eventSource = null;

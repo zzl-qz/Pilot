@@ -170,3 +170,84 @@ test('浏览器订阅轻量状态流，忽略截图及旧会话的迟到事件',
     second.emit('closed'); assert.equal(useStore.getState().ui.mirror.mode, 'closed');
   } finally { closeStreams(); globalThis.EventSource = saved; }
 });
+
+test('后台暂停 rAF 时由定时兜底应用事件，迟到帧不会重复提交', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const saved = globalThis.requestAnimationFrame; let frame;
+  globalThis.requestAnimationFrame = callback => { frame = callback; return 10; };
+  try {
+    reset();
+    useStore.getState().handleEvent({ type: 'run.started', sessionId: 's', sequence: 1, payload: { input: '后台任务' } });
+    t.mock.timers.tick(50);
+    assert.equal(useStore.getState().thread.cursor, 1);
+    const rows = useStore.getState().thread.rows.length;
+    frame();
+    assert.equal(useStore.getState().thread.rows.length, rows);
+  } finally { closeStreams(); globalThis.requestAnimationFrame = saved; }
+});
+
+function fakeStreams() {
+  const saved = globalThis.EventSource; const streams = [];
+  globalThis.EventSource = class {
+    listeners = new Map(); closed = false;
+    constructor(url) { this.url = url; streams.push(this); }
+    addEventListener(kind, callback) { this.listeners.set(kind, callback); }
+    emit(event) { this.listeners.get(event.type)?.({ data: JSON.stringify(event) }); }
+    close() { this.closed = true; }
+  };
+  return { streams, restore() { closeStreams(); globalThis.EventSource = saved; } };
+}
+
+test('异常批次回滚游标并阻止后续越过，重复坏事件有限重试后明确停止', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const fixture = fakeStreams();
+  try {
+    reset(); useStore.setState({ _reconnectAttempt: 0 });
+    useStore.getState().connectSse('s', 0);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const source = fixture.streams.at(-1);
+      assert.match(source.url, /after=0/);
+      source.emit({ type: 'run.started', sessionId: 's', sequence: 1, payload: { input: '不能跳过的正常事件' } });
+      source.emit({ type: 'plan.updated', sessionId: 's', sequence: 2, payload: { plan: [null] } });
+      useStore.getState().flushEvents();
+      assert.equal(useStore.getState().thread.cursor, 0);
+      assert.equal(useStore.getState().thread.rows.length, 0);
+      assert.equal(source.closed, true);
+      useStore.getState().handleEvent({ type: 'run.started', sessionId: 's', sequence: 3, payload: { input: '不能越过' } });
+      useStore.getState().flushEvents();
+      assert.equal(useStore.getState().thread.cursor, 0);
+      t.mock.timers.tick(20000);
+    }
+    assert.equal(fixture.streams.length, 4);
+    assert.equal(useStore.getState().ui.connection.text, '事件恢复失败，请刷新');
+  } finally { fixture.restore(); }
+});
+
+test('解析失败关闭当前连接并从已确认游标恢复', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const fixture = fakeStreams();
+  try {
+    reset(); useStore.setState(draft => { draft.thread.cursor = 7; draft._reconnectAttempt = 0; });
+    useStore.getState().connectSse('s', 7);
+    fixture.streams[0].listeners.get('run.started')({ data: '{broken' });
+    assert.equal(fixture.streams[0].closed, true);
+    t.mock.timers.tick(1000);
+    assert.equal(fixture.streams.length, 2);
+    assert.match(fixture.streams[1].url, /after=7/);
+    assert.equal(useStore.getState().thread.cursor, 7);
+  } finally { fixture.restore(); }
+});
+
+test('前端积压达到数量预算时主动消费，切换会话取消定时兜底', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  reset();
+  for (let sequence = 1; sequence <= 2050; sequence++) {
+    useStore.getState().handleEvent({ type: 'assistant.delta', sessionId: 's', sequence, payload: { text: '字' } });
+  }
+  assert.equal(useStore.getState().thread.cursor, 2048);
+  useStore.getState().startNewSession();
+  t.mock.timers.tick(100);
+  assert.equal(useStore.getState().thread.cursor, 0);
+  assert.equal(useStore.getState().thread.rows.length, 0);
+  closeStreams();
+});
