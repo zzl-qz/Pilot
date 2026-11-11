@@ -1,0 +1,34 @@
+{
+  "platform": "macOS-26.4-arm64-arm-64bit",
+  "machine": "arm64",
+  "java": "OpenJDK 25.0.5",
+  "node": "v22.23.1",
+  "measuredAt": "2026-11-11T13:09:50+08:00",
+  "baselineSqliteReplayMs": 41869.709959,
+  "baselineExplanation": "分页后仍逐条查询历史版本的同等 100000 条、64 字符负载；当前实现按分页和时间间隔校验。",
+  "httpRepository": "memory，隔离 HTTP 交付成本；真实 SQLite 独立报告，不能当作 SQLite + HTTP 联合吞吐",
+  "latencySamples": "每并发档位 100 次发布；首条、回放和追平各每客户端 1 个样本，1 客户端分位数相同",
+  "memory": "core/transport 字节是各自队列预算，含发送中帧；replayPages 是另行限制的分页并发。heapUsed 包含未回收临时分配；heapAfterCleanupGc 是删除测试会话并触发 GC 后观测值，不是堆峰值。累计峰值和关闭计数跨三个并发档位。",
+  "checks": {
+    "mavenVerify": {
+      "executed": 1449,
+      "conditionalSkipped": 15,
+      "failures": 0,
+      "note": "默认跳过的压力测试已通过单独命令执行；环境条件和模型/项目构建集成测试不计为通过"
+    },
+    "frontendUnit": 399,
+    "desktopUnit": 41,
+    "android": "transport + bridge + app unit + lint 通过，未运行本轮模拟器/手机实机",
+    "linuxContainer": {
+      "focusedBackendTests": 81,
+      "image": "maven:3.9-eclipse-temurin-25",
+      "scope": "事件流、SQLite、文件回退、真实 HTTP、独立 JVM 中断及恢复"
+    },
+    "browser": "Chrome 无头标签切换及暂停 rAF 模拟，真实 EventSource 和前端 store",
+    "desktop": "macOS Electron 原生隐藏/显示窗口、真实 EventSource、前端 store；实际 OS 休眠未验证",
+    "windows": "仅已接入 CI，当前本地会话未执行 Windows 实机",
+    "linuxDesktop": "仅已接入 CI，当前未执行 Linux GUI"
+  },
+  "implementationCommit": "bdcb46aa93b3214aa3b4b371e2db5de9e6d123fc",
+  "benchmarkSources": "测量入口与原始报告在本次验证提交中一起保存"
+}

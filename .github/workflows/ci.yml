@@ -45,6 +45,10 @@ jobs:
         shell: bash
         run: sh mvnw -B -ntp verify
 
+      - name: Event stream replay and transport measurements
+        shell: bash
+        run: sh mvnw -B -ntp -pl pilot-core,pilot-server -DskipFrontend=true -Dtest=PreviewBenchmarkTest,EventReplayBenchmarkTest,SessionEventLoadTest -Dpilot.events.benchmark=true -Dsurefire.failIfNoSpecifiedTests=false test
+
       - name: Automatic model capabilities through isolated gateway
         run: node scripts/verify-model-capabilities.mjs
 
@@ -69,6 +73,8 @@ jobs:
             pilot-server/target/surefire-reports/**
             pilot-core/target/checkstyle-result.xml
             pilot-server/target/checkstyle-result.xml
+            pilot-core/target/event-benchmarks/**
+            pilot-server/target/event-benchmarks/**
           if-no-files-found: ignore
 
   isolated-builds:
@@ -106,6 +112,8 @@ jobs:
             pilot-server/target/surefire-reports/**
             pilot-core/target/checkstyle-result.xml
             pilot-server/target/checkstyle-result.xml
+            pilot-core/target/event-benchmarks/**
+            pilot-server/target/event-benchmarks/**
           if-no-files-found: ignore
 
   mobile:
@@ -243,12 +251,14 @@ jobs:
           xvfb-run -a node pilot-web/frontend/scripts/p1-smoke.mjs --production
           xvfb-run -a node pilot-web/frontend/scripts/schedule-smoke.mjs --production
           xvfb-run -a node pilot-web/frontend/scripts/notification-smoke.mjs
+          xvfb-run -a node pilot-web/frontend/scripts/event-stream-smoke.mjs
       - name: Scheduling and notification UI regressions (Windows and macOS)
         if: runner.os != 'Linux'
         run: |
           node pilot-web/frontend/scripts/p1-smoke.mjs --production
           node pilot-web/frontend/scripts/schedule-smoke.mjs --production
           node pilot-web/frontend/scripts/notification-smoke.mjs
+          node pilot-web/frontend/scripts/event-stream-smoke.mjs
       - name: Preserve host verification reports
         if: always()
         uses: actions/upload-artifact@v4

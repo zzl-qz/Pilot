@@ -1,0 +1,6 @@
+{
+  "events": 100000,
+  "payloadChars": 64,
+  "sqliteReplayMs": 651.92275,
+  "peakQueueBytes": 1420
+}
