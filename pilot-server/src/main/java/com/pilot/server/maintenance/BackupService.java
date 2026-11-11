@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.sql.Connection;
@@ -13,11 +14,9 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -46,8 +45,10 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class BackupService {
     private static final Logger log = LoggerFactory.getLogger(BackupService.class);
-    private static final List<String> DIRECTORIES = List.of("multi", "validation", "commands", "traces", "snapshots",
-        "work-products", "file-versions", "studio", "apply-journal", "agents", "skills", "tasks", "mobile");
+    private static final List<String> DIRECTORIES =
+        List.of("multi", "validation", "commands", "traces", "snapshots", "work-products", "file-versions", "studio",
+            "apply-journal", "agents", "skills", "tasks", "mobile", "artifacts");
+    static final String EXTERNAL_ATTACHMENTS = "_external/attachments";
 
     public record BackupReport(boolean ok, String directory, int files, long bytes, String message, Instant createdAt) {
     }
@@ -94,45 +95,24 @@ public class BackupService {
                 vacuumInto(sqlite, database);
                 manifest.add(entry(BackupManifest.DATABASE, database));
             }
-            List<String> included = new ArrayList<>(DIRECTORIES);
             Path attachmentRoot = attachments.root().toAbsolutePath().normalize();
-            Path dataRoot = dataDir.root().toAbsolutePath().normalize();
-            boolean attachmentIncluded = attachmentRoot.startsWith(dataRoot) && !attachmentRoot.equals(dataRoot);
-            String attachmentDirectory = "";
-            if (attachmentIncluded) {
-                attachmentDirectory = dataRoot.relativize(attachmentRoot).toString().replace('\\', '/');
-                if (!attachmentDirectory.isBlank() && !included.contains(attachmentDirectory)) {
-                    included.add(attachmentDirectory);
-                }
+            String attachmentEntry = attachmentEntry(attachmentRoot);
+            Map<String, Path> sources = sources(sqlite, attachmentRoot, attachmentEntry);
+            for (var source : sources.entrySet()) {
+                Path destination = staging.resolve(BackupManifest.relative(source.getKey()));
+                Files.createDirectories(destination.getParent());
+                Files.copy(source.getValue(), destination);
+                manifest.add(entry(source.getKey(), destination));
             }
-            for (String directory : included) {
-                Path source = directory.equals(attachmentDirectory) ? attachmentRoot : dataDir.file(directory);
-                if (!Files.isDirectory(source)) {
-                    continue;
-                }
-                try (Stream<Path> walk = Files.walk(source)) {
-                    List<Path> files = walk.filter(Files::isRegularFile).toList();
-                    Set<Path> before = new HashSet<>();
-                    for (Path file : files) {
-                        Path relative = source.relativize(file);
-                        before.add(relative);
-                        Path destination = staging.resolve(directory).resolve(relative);
-                        Files.createDirectories(destination.getParent());
-                        Files.copy(file, destination, StandardCopyOption.REPLACE_EXISTING);
-                        Map<String, Object> item =
-                            entry(directory + "/" + relative.toString().replace('\\', '/'), destination);
-                        if (!item.get("sha256").equals(BackupManifest.sha256(file))) {
-                            throw new IOException("备份期间文件发生变化: " + file);
-                        }
-                        manifest.add(item);
-                    }
-                    try (Stream<Path> verify = Files.walk(source)) {
-                        Set<Path> after = new HashSet<>();
-                        verify.filter(Files::isRegularFile).forEach(file -> after.add(source.relativize(file)));
-                        if (!before.equals(after)) {
-                            throw new IOException("备份期间目录内容发生变化: " + source);
-                        }
-                    }
+            if (!sources.equals(sources(sqlite, attachmentRoot, attachmentEntry))) {
+                throw new IOException("备份期间目录内容发生变化");
+            }
+            for (var item : manifest) {
+                String name = (String)item.get("path");
+                Path source = sources.get(name);
+                if (source != null && (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)
+                    || !item.get("sha256").equals(BackupManifest.sha256(source)))) {
+                    throw new IOException("备份期间文件发生变化: " + source);
                 }
             }
             Map<String, Object> root = new LinkedHashMap<>();
@@ -142,9 +122,13 @@ public class BackupService {
             root.put("id", id);
             root.put("storage", sqlite == null ? "files" : "sqlite");
             root.put("files", manifest);
-            root.put("includedDirectories", included);
-            root.put("excludedData", List.of("外部工作区、Git worktree 及其工作区内恢复日志", "缓存与可重建数据"));
-            root.put("externalAttachmentPath", attachmentIncluded ? "" : attachmentRoot.toString());
+            root.put("includedDirectories", includedDirectories());
+            root.put("excludedData", List.of("外部工作区、Git worktree 及其工作区内恢复日志", "访问审计、MCP 诊断日志", "缓存与可重建数据"));
+            root.put("databaseSource", sqlite == null ? "" : sqlite.path().toString());
+            root.put("attachmentSource", attachmentRoot.toString());
+            root.put("attachmentEntry", attachmentEntry);
+            root.put("externalAttachmentPath",
+                EXTERNAL_ATTACHMENTS.equals(attachmentEntry) ? attachmentRoot.toString() : "");
             root.put("consistency", "SQLite 使用事务快照；动态文件逐个复制，不保证与数据库处于同一业务时点。备份期间请暂停写入。");
             root.put("restoreHint", "停止服务后，将本备份内容恢复到数据目录，再启动；外部工作区和清单标注未包含的数据需单独恢复。");
             Files.writeString(staging.resolve(BackupManifest.FILE), mapper.writeValueAsString(root),
@@ -164,8 +148,8 @@ public class BackupService {
             StorageHealth.recovered("backup");
             log.info("备份完成: {}（{} 个文件，{} 字节）", target, manifest.size(), bytes);
             String message = "备份完成；备份期间请暂停写入，外部工作区未包含";
-            if (!attachmentIncluded) {
-                message += "；外置附件目录未包含: " + attachmentRoot;
+            if (EXTERNAL_ATTACHMENTS.equals(attachmentEntry)) {
+                message += "。外置附件已单独收录: " + attachmentRoot;
             }
             return new BackupReport(true, target.toString(), manifest.size(), bytes, message, Instant.now());
         } catch (IOException | RuntimeException e) {
@@ -254,16 +238,68 @@ public class BackupService {
 
     private List<String> includedDirectories() {
         Path attachmentRoot = attachments.root().toAbsolutePath().normalize();
-        Path dataRoot = dataDir.root().toAbsolutePath().normalize();
-        if (!attachmentRoot.startsWith(dataRoot) || attachmentRoot.equals(dataRoot)) {
+        try {
+            String entry = attachmentEntry(attachmentRoot);
+            return Stream.concat(DIRECTORIES.stream(), Stream.of(entry)).distinct().toList();
+        } catch (IOException e) {
             return DIRECTORIES;
         }
-        List<String> result = new ArrayList<>(DIRECTORIES);
-        String attachmentDirectory = dataRoot.relativize(attachmentRoot).toString().replace('\\', '/');
-        if (!result.contains(attachmentDirectory)) {
-            result.add(attachmentDirectory);
+    }
+
+    private String attachmentEntry(Path attachmentsPath) throws IOException {
+        Path root = dataDir.root();
+        if (root.startsWith(attachmentsPath) || attachmentsPath.startsWith(root.resolve("backups"))
+            || attachmentsPath.startsWith(root.resolve("_external"))) {
+            throw new IOException("附件目录与数据目录或备份仓库重叠: " + attachmentsPath);
         }
-        return List.copyOf(result);
+        return attachmentsPath.startsWith(root) ? BackupManifest.portable(root.relativize(attachmentsPath))
+            : EXTERNAL_ATTACHMENTS;
+    }
+
+    private Map<String, Path> sources(SqliteStore sqlite, Path attachmentsPath, String attachmentEntry)
+        throws IOException {
+        Map<String, Path> result = new LinkedHashMap<>();
+        for (String directory : DIRECTORIES) {
+            collect(result, dataDir.file(directory), directory, sqlite);
+        }
+        if (!DIRECTORIES.contains(attachmentEntry.split("/", 2)[0])) {
+            collect(result, attachmentsPath, attachmentEntry, sqlite);
+        }
+        Path mcp = dataDir.file("mcp.json");
+        if (Files.exists(mcp, LinkOption.NOFOLLOW_LINKS)) {
+            addSource(result, mcp, "mcp.json", sqlite);
+        }
+        return result;
+    }
+
+    private static void collect(Map<String, Path> files, Path directory, String prefix, SqliteStore sqlite)
+        throws IOException {
+        if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("备份源目录不可读取: " + directory);
+        }
+        try (Stream<Path> walk = Files.walk(directory)) {
+            for (Path file : walk.filter(path -> !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)).toList()) {
+                addSource(files, file, prefix + "/" + BackupManifest.portable(directory.relativize(file)), sqlite);
+            }
+        }
+    }
+
+    private static void addSource(Map<String, Path> files, Path file, String name, SqliteStore sqlite)
+        throws IOException {
+        if (sqlite != null && (file.equals(sqlite.path()) || file.equals(Path.of(sqlite.path() + "-wal"))
+            || file.equals(Path.of(sqlite.path() + "-shm")) || file.equals(Path.of(sqlite.path() + "-journal")))) {
+            return;
+        }
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("备份源包含链接或非常规文件: " + file);
+        }
+        BackupManifest.relative(name);
+        if (files.putIfAbsent(name, file) != null) {
+            throw new IOException("备份路径重复: " + name);
+        }
     }
 
     /** 删除早于 cutoff 的备份目录，避免备份把磁盘吃满。 */

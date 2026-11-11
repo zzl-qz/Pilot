@@ -82,10 +82,12 @@ class BackupServiceTest {
     }
 
     @Test
-    void backupWarnsWhenAttachmentsAreOutsideTheDataDirectory() throws IOException {
+    void backupRecordsAndCapturesConfiguredExternalAttachments() throws IOException {
         ObjectProvider<SqliteStore> provider = Mockito.mock(ObjectProvider.class);
         Mockito.when(provider.getIfAvailable()).thenReturn(new SqliteStore(dataDir.resolve("db.sqlite")));
         Path external = dataDir.resolve("outside-attachments");
+        Files.createDirectories(external.resolve("ses_1"));
+        Files.writeString(external.resolve("ses_1/input.txt"), "输入");
         AttachmentService attachments = Mockito.mock(AttachmentService.class);
         Mockito.when(attachments.root()).thenReturn(external);
         BackupService backups = new BackupService(provider, new PilotDataDir(dataDir.resolve(".pilot").toString()),
@@ -94,8 +96,35 @@ class BackupServiceTest {
         BackupService.BackupReport report = backups.backup();
 
         assertTrue(report.message().contains(external.toString()), report.message());
+        assertTrue(Files.isRegularFile(Path.of(report.directory()).resolve("_external/attachments/ses_1/input.txt")));
         assertTrue(
             Files.readString(Path.of(report.directory()).resolve("manifest.json")).contains("outside-attachments"));
+    }
+
+    @Test
+    void includesMcpConfigAndCopiesNestedAttachmentsOnce() throws IOException {
+        Path root = dataDir.resolve(".pilot");
+        SqliteStore store = new SqliteStore(root.resolve("studio/custom.db"));
+        Path nested = Files.createDirectories(root.resolve("studio/attachments"));
+        Files.writeString(nested.resolve("image.bin"), "fixture");
+        Files.writeString(root.resolve("mcp.json"), "{\"mcpServers\":{}}");
+        @SuppressWarnings("unchecked")
+        ObjectProvider<SqliteStore> provider = Mockito.mock(ObjectProvider.class);
+        Mockito.when(provider.getIfAvailable()).thenReturn(store);
+        AttachmentService attachments = Mockito.mock(AttachmentService.class);
+        Mockito.when(attachments.root()).thenReturn(nested);
+        BackupService backups =
+            new BackupService(provider, new PilotDataDir(root.toString()), JsonMapper.builder().build(), attachments);
+
+        BackupService.BackupReport report = backups.backup();
+
+        assertTrue(report.ok(), report.message());
+        assertEquals(3, report.files());
+        Path target = Path.of(report.directory());
+        assertTrue(Files.isRegularFile(target.resolve("mcp.json")));
+        assertTrue(Files.isRegularFile(target.resolve("studio/attachments/image.bin")));
+        assertFalse(Files.exists(target.resolve("studio/custom.db")));
+        assertTrue(backups.verifyLatestBackup().valid());
     }
 
     @Test
