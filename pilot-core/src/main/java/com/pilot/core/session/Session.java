@@ -15,12 +15,13 @@ import java.util.Objects;
 public record Session(String id, String title, Instant createdAt, SessionStatus status, String workspace,
     String projectId, boolean isBlank, boolean archived, String parentSessionId, Instant updatedAt, boolean pinned,
     boolean unread, boolean titleManual, long historyRevision) {
-    public Session(String id, String title, Instant createdAt, SessionStatus status, String workspace,
-        String projectId, boolean isBlank, boolean archived, String parentSessionId, Instant updatedAt,
-        boolean pinned, boolean unread, boolean titleManual) {
-        this(id, title, createdAt, status, workspace, projectId, isBlank, archived, parentSessionId,
-            updatedAt, pinned, unread, titleManual, 0);
+    public Session(String id, String title, Instant createdAt, SessionStatus status, String workspace, String projectId,
+        boolean isBlank, boolean archived, String parentSessionId, Instant updatedAt, boolean pinned, boolean unread,
+        boolean titleManual) {
+        this(id, title, createdAt, status, workspace, projectId, isBlank, archived, parentSessionId, updatedAt, pinned,
+            unread, titleManual, 0);
     }
+
     /** 兼容历史调用：最近活动默认为创建时间，标题尚未手动编辑。 */
     public Session(String id, String title, Instant createdAt, SessionStatus status, String workspace, String projectId,
         boolean isBlank, boolean archived, String parentSessionId) {

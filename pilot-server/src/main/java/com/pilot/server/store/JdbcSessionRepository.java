@@ -40,8 +40,9 @@ public final class JdbcSessionRepository implements SessionRepository {
 
     @Override
     public long historyRevision(String sessionId) {
-        return JdbcSupport.queryOne(store, "SELECT history_revision FROM sessions WHERE id = ?",
-            statement -> statement.setString(1, sessionId), rows -> rows.getLong(1), "读取历史版本失败")
+        return JdbcSupport
+            .queryOne(store, "SELECT history_revision FROM sessions WHERE id = ?",
+                statement -> statement.setString(1, sessionId), rows -> rows.getLong(1), "读取历史版本失败")
             .orElseThrow(() -> new NoSuchSessionException(sessionId));
     }
 
@@ -257,21 +258,29 @@ public final class JdbcSessionRepository implements SessionRepository {
         String sql = "SELECT sequence, run_id, type, payload, created_at, length(CAST(payload AS BLOB)) AS bytes "
             + "FROM events WHERE session_id = ? AND sequence > ? AND sequence <= ? ORDER BY sequence LIMIT ?";
         try (Connection connection = store.open(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, sessionId); statement.setLong(2, after); statement.setLong(3, through);
+            statement.setString(1, sessionId);
+            statement.setLong(2, after);
+            statement.setLong(3, through);
             statement.setInt(4, Math.max(1, Math.min(limit, 512)));
             List<EventEnvelope> page = new ArrayList<>();
             long bytes = 0;
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
                     long rowBytes = rows.getLong("bytes");
-                    if (rowBytes > 8L * 1024 * 1024) throw new com.pilot.core.session.EventTooLargeException();
+                    if (rowBytes > 8L * 1024 * 1024) {
+                        throw new com.pilot.core.session.EventTooLargeException();
+                    }
                     bytes += rowBytes;
-                    if (!page.isEmpty() && bytes > 1024 * 1024) break;
+                    if (!page.isEmpty() && bytes > 1024 * 1024) {
+                        break;
+                    }
                     page.add(mapEvent(rows, sessionId));
                 }
             }
             return List.copyOf(page);
-        } catch (SQLException failure) { throw new IllegalStateException("读取回放页失败", failure); }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("读取回放页失败", failure);
+        }
     }
 
     /** 跨会话查询（type 上没有索引，量级靠时间窗口控制；usage 聚合单次最多几千行）。 */

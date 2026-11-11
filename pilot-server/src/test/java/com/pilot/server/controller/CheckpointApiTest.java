@@ -91,13 +91,15 @@ class CheckpointApiTest {
     void completedRestoreRequestReturnsOriginalResultWithoutRepeatingEdits() throws Exception {
         Fixture f = fixture();
         String body = "{\"sequence\":1,\"mode\":\"both\",\"operationId\":\"" + UUID.randomUUID() + "\"}";
-        String first = mvc.perform(post("/api/sessions/{id}/checkpoints/restore", f.id)
-            .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk())
-            .andExpect(jsonPath("$.applied").value(true)).andReturn().getResponse().getContentAsString();
+        String first = mvc
+            .perform(post("/api/sessions/{id}/checkpoints/restore", f.id).contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.applied").value(true)).andReturn().getResponse()
+            .getContentAsString();
         Files.writeString(f.file, "操作完成后的手工修改");
-        String repeated = mvc.perform(post("/api/sessions/{id}/checkpoints/restore", f.id)
-            .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk())
-            .andReturn().getResponse().getContentAsString();
+        String repeated = mvc.perform(
+            post("/api/sessions/{id}/checkpoints/restore", f.id).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertEquals(first, repeated);
         assertEquals("操作完成后的手工修改", Files.readString(f.file));
         assertEquals(1, sessions.historyRevision(f.id));

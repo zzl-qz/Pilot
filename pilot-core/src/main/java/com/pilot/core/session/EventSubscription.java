@@ -5,6 +5,12 @@ package com.pilot.core.session;
 public interface EventSubscription extends AutoCloseable {
     @Override
     void close();
-    default String closeReason() { return "closed"; }
-    default boolean isClosed() { return false; }
+
+    default String closeReason() {
+        return "closed";
+    }
+
+    default boolean isClosed() {
+        return false;
+    }
 }

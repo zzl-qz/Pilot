@@ -1,5 +1,7 @@
 package com.pilot.server.store;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -14,7 +16,9 @@ import java.time.format.DateTimeFormatterBuilder;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -162,15 +166,22 @@ public final class SqliteStore {
     private static final class Transaction {
         final Connection connection;
         boolean rollbackOnly;
-        Transaction(Connection connection) { this.connection = connection; }
+
+        Transaction(Connection connection) {
+            this.connection = connection;
+        }
     }
 
     /** 同一线程、同一数据库的 repository 调用共享事务；内层不能提前提交或关闭连接。 */
-    public <T> T transaction(java.util.function.Supplier<T> work) {
+    public <T> T transaction(Supplier<T> work) {
         Transaction current = transaction.get();
         if (current != null) {
-            try { return work.get(); }
-            catch (RuntimeException | Error failure) { current.rollbackOnly = true; throw failure; }
+            try {
+                return work.get();
+            } catch (RuntimeException | Error failure) {
+                current.rollbackOnly = true;
+                throw failure;
+            }
         }
         try (Connection connection = open()) {
             connection.setAutoCommit(false);
@@ -178,11 +189,17 @@ public final class SqliteStore {
             transaction.set(scope);
             try {
                 T result = work.get();
-                if (scope.rollbackOnly) throw new IllegalStateException("事务已标记回滚，不能提交部分历史修改");
+                if (scope.rollbackOnly) {
+                    throw new IllegalStateException("事务已标记回滚，不能提交部分历史修改");
+                }
                 connection.commit();
                 return result;
             } catch (RuntimeException | Error | SQLException failure) {
-                try { connection.rollback(); } catch (SQLException rollback) { failure.addSuppressed(rollback); }
+                try {
+                    connection.rollback();
+                } catch (SQLException rollback) {
+                    failure.addSuppressed(rollback);
+                }
                 throw failure;
             } finally {
                 transaction.remove();
@@ -215,31 +232,40 @@ public final class SqliteStore {
         return path;
     }
 
-    public java.util.Optional<String> historyCommit(String operationId) {
+    public Optional<String> historyCommit(String operationId) {
         return JdbcSupport.queryOne(this, "SELECT result FROM history_commits WHERE operation_id = ?",
             statement -> statement.setString(1, operationId), rows -> rows.getString(1), "读取历史操作提交记录失败");
     }
 
     public void commitHistoryOperation(String operationId, String result) {
         JdbcSupport.update(this, "INSERT INTO history_commits(operation_id, result) VALUES (?, ?)", statement -> {
-            statement.setString(1, operationId); statement.setString(2, result);
+            statement.setString(1, operationId);
+            statement.setString(2, result);
         }, "保存历史操作提交记录失败");
     }
 
     public Connection open() throws SQLException {
         Transaction current = transaction.get();
         if (current != null) {
-            return (Connection) java.lang.reflect.Proxy.newProxyInstance(Connection.class.getClassLoader(),
+            return (Connection)Proxy.newProxyInstance(Connection.class.getClassLoader(),
                 new Class<?>[] {Connection.class}, (proxy, method, args) -> {
                     switch (method.getName()) {
-                        case "close", "commit": return null;
-                        case "setAutoCommit":
-                            if (Boolean.TRUE.equals(args[0])) throw new SQLException("不能在共享事务中开启自动提交");
+                        case "close", "commit":
                             return null;
-                        case "rollback": current.rollbackOnly = true; return null;
+                        case "setAutoCommit":
+                            if (Boolean.TRUE.equals(args[0])) {
+                                throw new SQLException("不能在共享事务中开启自动提交");
+                            }
+                            return null;
+                        case "rollback":
+                            current.rollbackOnly = true;
+                            return null;
                         default:
-                            try { return method.invoke(current.connection, args); }
-                            catch (java.lang.reflect.InvocationTargetException failure) { throw failure.getCause(); }
+                            try {
+                                return method.invoke(current.connection, args);
+                            } catch (InvocationTargetException failure) {
+                                throw failure.getCause();
+                            }
                     }
                 });
         }
@@ -282,19 +308,26 @@ public final class SqliteStore {
             : " AND session_id NOT IN (" + String.join(",", Collections.nCopies(liveSessions.size(), "?")) + ")";
         return transaction(() -> {
             try (Connection connection = open();
-                PreparedStatement statement = connection.prepareStatement("DELETE FROM events WHERE " + createdAt + " < ? "
+                PreparedStatement statement = connection.prepareStatement("DELETE FROM events WHERE " + createdAt
+                    + " < ? "
                     + "AND NOT EXISTS (SELECT 1 FROM run_checkpoints c WHERE c.session_id = events.session_id "
                     + "AND c.status IN ('RUNNING','INTERRUPTED','PAUSED'))" + excludeLive + " RETURNING session_id")) {
                 statement.setString(1, timestamp);
                 int parameter = 2;
-                for (String session : liveSessions) statement.setString(parameter++, session);
+                for (String session : liveSessions) {
+                    statement.setString(parameter++, session);
+                }
                 Set<String> changed = new HashSet<>();
                 int removed = 0;
                 try (ResultSet rows = statement.executeQuery()) {
-                    while (rows.next()) { changed.add(rows.getString(1)); removed++; }
+                    while (rows.next()) {
+                        changed.add(rows.getString(1));
+                        removed++;
+                    }
                 }
                 for (String session : changed) {
-                    JdbcSupport.exec(connection, "UPDATE sessions SET history_revision = history_revision + 1 WHERE id = ?",
+                    JdbcSupport.exec(connection,
+                        "UPDATE sessions SET history_revision = history_revision + 1 WHERE id = ?",
                         update -> update.setString(1, session));
                 }
                 return removed;

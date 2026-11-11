@@ -5,6 +5,8 @@ import java.time.Clock;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import com.pilot.core.session.EventStreamLimits;
+import com.pilot.core.session.PreviewLimits;
 import com.pilot.core.session.SessionRepository;
 import com.pilot.core.session.SessionService;
 
@@ -28,7 +30,7 @@ public class SessionConfiguration {
         @org.springframework.beans.factory.annotation.Value("${pilot.events.total-preview-bytes:16777216}") long previewTotal,
         @org.springframework.beans.factory.annotation.Value("${pilot.events.preview-sessions:256}") int previewSessions) {
         return new SessionService(Clock.systemUTC(), repository,
-            new com.pilot.core.session.EventStreamLimits(items, bytes, total, connections, perSession, page, wait, send, replay, reference),
-            new com.pilot.core.session.PreviewLimits(merge, mergeBytes, previewBytes, previewTotal, previewSessions));
+            new EventStreamLimits(items, bytes, total, connections, perSession, page, wait, send, replay, reference),
+            new PreviewLimits(merge, mergeBytes, previewBytes, previewTotal, previewSessions));
     }
 }

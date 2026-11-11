@@ -485,8 +485,9 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         if (!plan.conflicts.isEmpty() || !plan.unavailable.isEmpty()) {
             throw new IllegalStateException("检查点文件已变化或不可用，请重新预览");
         }
-        return plan.actions.values().stream().map(action ->
-            new HistoryFileChange(action.workspace, action.target, action.previous, action.content)).toList();
+        return plan.actions.values().stream()
+            .map(action -> new HistoryFileChange(action.workspace, action.target, action.previous, action.content))
+            .toList();
     }
 
     public synchronized RollbackReport rollback(String runId) {

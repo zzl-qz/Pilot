@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.workspace.HistoryFileChange;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -423,13 +424,13 @@ public class TaskControlService {
         }
     }
 
-    public synchronized com.pilot.server.workspace.HistoryFileChange historyChange(String sessionId, String runId) {
+    public synchronized HistoryFileChange historyChange(String sessionId, String runId) {
         try {
             Path current = currentFile(sessionId);
             Path snapshot = snapshotFile(runId);
             TaskContract task = Files.isRegularFile(snapshot)
                 ? mapper.readValue(Files.readString(snapshot), TaskSnapshot.class).task() : null;
-            return new com.pilot.server.workspace.HistoryFileChange(current.getParent(), current,
+            return new HistoryFileChange(current.getParent(), current,
                 Files.isRegularFile(current) ? Files.readAllBytes(current) : null,
                 task == null ? null : mapper.writeValueAsBytes(task));
         } catch (IOException failure) {

@@ -1,8 +1,12 @@
 package com.pilot.server.store;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -15,10 +19,12 @@ import com.pilot.core.loop.Message;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
+
 import tools.jackson.databind.json.JsonMapper;
 
 class HistoryTransactionTest {
-    @TempDir Path directory;
+    @TempDir
+    Path directory;
 
     @Test
     void statusFailureRollsBackEventsMemoryPlanAndRevisionAcrossReopen() throws Exception {
@@ -33,12 +39,15 @@ class HistoryTransactionTest {
         sessions.publish(id, run.runId(), new RunCompleted("完成", List.of(), List.of()));
         var original = List.of(Message.user("原始消息"));
         var plan = List.of(new PlanItem("原计划", "pending"));
-        memory.save(id, original); plans.save(id, plan);
+        memory.save(id, original);
+        plans.save(id, plan);
         try (var connection = store.open(); var statement = connection.createStatement()) {
-            statement.execute("CREATE TRIGGER fail_status BEFORE UPDATE OF status ON sessions BEGIN SELECT RAISE(ABORT, 'injected'); END");
+            statement.execute(
+                "CREATE TRIGGER fail_status BEFORE UPDATE OF status ON sessions BEGIN SELECT RAISE(ABORT, 'injected'); END");
         }
         assertThrows(IllegalStateException.class, () -> sessions.editHistory(id, 2, 0L, () -> {
-            memory.save(id, List.of()); plans.save(id, List.of());
+            memory.save(id, List.of());
+            plans.save(id, List.of());
         }));
         var reopened = new SqliteStore(directory.resolve("history.db"));
         assertEquals(2, new JdbcSessionRepository(reopened, new EventCodec(mapper)).events(id).size());
@@ -49,11 +58,15 @@ class HistoryTransactionTest {
         try (var connection = store.open(); var statement = connection.createStatement()) {
             statement.execute("DROP TRIGGER fail_status");
         }
-        assertEquals(1, sessions.editHistory(id, 2, 0L, () -> { memory.save(id, List.of()); plans.delete(id); }));
+        assertEquals(1, sessions.editHistory(id, 2, 0L, () -> {
+            memory.save(id, List.of());
+            plans.delete(id);
+        }));
         assertEquals(1, sessions.historyRevision(id));
         assertEquals(1, sessions.find(id).orElseThrow().historyRevision());
         assertEquals(SessionStatus.RUNNING, sessions.find(id).orElseThrow().status());
-        assertTrue(memory.load(id).isEmpty()); assertTrue(plans.load(id).isEmpty());
+        assertTrue(memory.load(id).isEmpty());
+        assertTrue(plans.load(id).isEmpty());
         sessions.sendMessage(id, "新消息");
         assertEquals(3, sessions.events(id).getLast().sequence());
         AtomicBoolean changed = new AtomicBoolean();
@@ -72,8 +85,11 @@ class HistoryTransactionTest {
         assertThrows(IllegalStateException.class, () -> store.transaction(() -> {
             memory.save("s", List.of(Message.user("新")));
             assertEquals("旧", outside.load("s").getFirst().content());
-            try (var connection = store.open()) { connection.rollback(); }
-            catch (java.sql.SQLException failure) { throw new IllegalStateException(failure); }
+            try (var connection = store.open()) {
+                connection.rollback();
+            } catch (SQLException failure) {
+                throw new IllegalStateException(failure);
+            }
             return true;
         }));
         assertEquals("旧", outside.load("s").getFirst().content());

@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.SessionEvent;
@@ -17,11 +18,16 @@ import com.pilot.core.event.SessionEvent;
 public interface SessionRepository {
 
     /** 同库历史修改共享一个事务；内存实现只保证当前会话的原子替换。 */
-    default <T> T transaction(String sessionId, java.util.function.Supplier<T> work) { return work.get(); }
+    default <T> T transaction(String sessionId, Supplier<T> work) {
+        return work.get();
+    }
 
-    default long historyRevision(String sessionId) { return 0; }
+    default long historyRevision(String sessionId) {
+        return 0;
+    }
 
-    default void advanceHistoryRevision(String sessionId) {}
+    default void advanceHistoryRevision(String sessionId) {
+    }
 
     /**
      * @param parentSessionId 侧边对话的父会话；普通对话传 {@code null}
@@ -119,7 +125,8 @@ public interface SessionRepository {
 
     /** 订阅回放只读捕获的高水位以内，避免后续实时事件重复进入历史页。 */
     default List<EventEnvelope> replayPage(String sessionId, long after, long through, int limit) {
-        return eventsPageAfter(sessionId, after, limit).stream().takeWhile(event -> event.sequence() <= through).toList();
+        return eventsPageAfter(sessionId, after, limit).stream().takeWhile(event -> event.sequence() <= through)
+            .toList();
     }
 
     /** 当前已落库的最大序号。还没有事件时返回 0。 */

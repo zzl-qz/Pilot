@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -13,7 +14,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.LongStream;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import com.pilot.core.event.ApprovalDecision;
@@ -157,7 +160,10 @@ class SessionServiceTest {
         EventSubscription subscription = sessions.subscribe(session.id(), 0, event -> {
             sent.incrementAndGet();
             throw new IllegalStateException("断线");
-        }, () -> { closed.incrementAndGet(); notified.countDown(); });
+        }, () -> {
+            closed.incrementAndGet();
+            notified.countDown();
+        });
         assertTrue(notified.await(2, TimeUnit.SECONDS));
         subscription.close();
         assertEquals(0, sessions.subscriberCount());
@@ -168,17 +174,19 @@ class SessionServiceTest {
     @Test
     void failedHistoryQueryReleasesSubscription() throws Exception {
         SessionRepository backing = new InMemorySessionRepository();
-        SessionRepository failing = (SessionRepository) java.lang.reflect.Proxy.newProxyInstance(
-            SessionRepository.class.getClassLoader(), new Class<?>[] {SessionRepository.class},
-            (proxy, method, args) -> {
-                if (method.getName().equals("replayPage")) throw new IllegalStateException("查询失败");
+        SessionRepository failing = (SessionRepository)Proxy.newProxyInstance(SessionRepository.class.getClassLoader(),
+            new Class<?>[] {SessionRepository.class}, (proxy, method, args) -> {
+                if (method.getName().equals("replayPage")) {
+                    throw new IllegalStateException("查询失败");
+                }
                 return method.invoke(backing, args);
             });
         SessionService service = new SessionService(Clock.systemUTC(), failing);
         Session session = service.createSession("查询失败");
         service.sendMessage(session.id(), "有历史可回放");
         CountDownLatch closed = new CountDownLatch(1);
-        service.subscribe(session.id(), 0, event -> {}, closed::countDown);
+        service.subscribe(session.id(), 0, event -> {
+        }, closed::countDown);
         assertTrue(closed.await(2, TimeUnit.SECONDS));
         assertEquals(0, service.subscriberCount());
     }
@@ -190,12 +198,18 @@ class SessionServiceTest {
         CountDownLatch closing = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         try {
-            sessions.subscribe(session.id(), 0, event -> { throw new IllegalStateException("断线"); }, () -> {
+            sessions.subscribe(session.id(), 0, event -> {
+                throw new IllegalStateException("断线");
+            }, () -> {
                 closing.countDown();
-                try { release.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                try {
+                    release.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             });
             assertTrue(closing.await(2, TimeUnit.SECONDS));
-            org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(Duration.ofSeconds(2),
+            Assertions.assertTimeoutPreemptively(Duration.ofSeconds(2),
                 () -> sessions.publish(session.id(), run.runId(), new AssistantDelta("继续")));
             assertEquals(0, sessions.subscriberCount());
         } finally {
@@ -206,14 +220,17 @@ class SessionServiceTest {
     @Test
     void deletionClosesAllSubscribersAndRepeatedCloseIsSafe() {
         Session session = sessions.createSession("删除");
-        EventSubscription first = sessions.subscribe(session.id(), 0, event -> {});
-        EventSubscription second = sessions.subscribe(session.id(), 0, event -> {});
+        EventSubscription first = sessions.subscribe(session.id(), 0, event -> {
+        });
+        EventSubscription second = sessions.subscribe(session.id(), 0, event -> {
+        });
         assertEquals(2, sessions.subscriberCount());
         assertTrue(sessions.delete(session.id()));
         first.close();
         second.close();
         assertEquals(0, sessions.subscriberCount());
-        assertThrows(NoSuchSessionException.class, () -> sessions.subscribe(session.id(), 0, event -> {}));
+        assertThrows(NoSuchSessionException.class, () -> sessions.subscribe(session.id(), 0, event -> {
+        }));
         assertEquals(0, sessions.subscriberCount());
     }
 
@@ -222,31 +239,45 @@ class SessionServiceTest {
         String id = sessions.createSession("历史版本").id();
         sessions.sendMessage(id, "旧历史");
         CountDownLatch closed = new CountDownLatch(2);
-        sessions.subscribe(id, 0, 0L, event -> {}, closed::countDown);
-        sessions.subscribe(id, 0, 0L, event -> {}, closed::countDown);
-        sessions.editHistory(id, 1, 0L, () -> {});
+        sessions.subscribe(id, 0, 0L, event -> {
+        }, closed::countDown);
+        sessions.subscribe(id, 0, 0L, event -> {
+        }, closed::countDown);
+        sessions.editHistory(id, 1, 0L, () -> {
+        });
         assertTrue(closed.await(2, TimeUnit.SECONDS));
         assertEquals(0, sessions.subscriberCount());
         assertEquals(1, sessions.historyRevision(id));
-        assertThrows(SessionService.HistoryChangedException.class,
-            () -> sessions.subscribe(id, 0, 0L, event -> {}, () -> {}));
+        assertThrows(SessionService.HistoryChangedException.class, () -> sessions.subscribe(id, 0, 0L, event -> {
+        }, () -> {
+        }));
         assertEquals(0, sessions.subscriberCount());
-        sessions.subscribe(id, 0, 1L, event -> {}, () -> {}).close();
+        sessions.subscribe(id, 0, 1L, event -> {
+        }, () -> {
+        }).close();
     }
 
     @Test
     void slowReplayDoesNotBlockPublisherOrAnotherSubscriber() throws Exception {
         String id = sessions.createSession("慢回放").id();
         Run run = sessions.sendMessage(id, "第一条");
-        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
-        List<EventEnvelope> slow = new CopyOnWriteArrayList<>(), fast = new CopyOnWriteArrayList<>();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+
+        List<EventEnvelope> slow = new CopyOnWriteArrayList<>();
+        List<EventEnvelope> fast = new CopyOnWriteArrayList<>();
+
         try (var first = sessions.subscribe(id, 0, event -> {
             entered.countDown();
-            try { release.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
             slow.add(event);
         })) {
             assertTrue(entered.await(2, TimeUnit.SECONDS));
-            org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(Duration.ofSeconds(2),
+            Assertions.assertTimeoutPreemptively(Duration.ofSeconds(2),
                 () -> sessions.publish(id, run.runId(), new AssistantDelta("第二条")));
             try (var second = sessions.subscribe(id, 0, fast::add)) {
                 awaitSize(fast, 2);
@@ -255,37 +286,55 @@ class SessionServiceTest {
                 awaitSize(slow, 2);
                 assertEquals(List.of(1L, 2L), slow.stream().map(EventEnvelope::sequence).toList());
             }
-        } finally { release.countDown(); }
+        } finally {
+            release.countDown();
+        }
     }
 
     @Test
     void pagedReplayUsesCapturedHighWaterAndJoinsConcurrentLiveEventsExactlyOnce() throws Exception {
-        CountDownLatch reading = new CountDownLatch(1), release = new CountDownLatch(1);
+        CountDownLatch reading = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+
         AtomicInteger pages = new AtomicInteger();
         var repository = new InMemorySessionRepository() {
-            @Override public List<EventEnvelope> eventsAfter(String id, long after) {
+            @Override
+            public List<EventEnvelope> eventsAfter(String id, long after) {
                 throw new AssertionError("不能全量读取回放");
             }
-            @Override public List<EventEnvelope> replayPage(String id, long after, long through, int limit) {
+
+            @Override
+            public List<EventEnvelope> replayPage(String id, long after, long through, int limit) {
                 assertEquals(800, through);
                 if (pages.incrementAndGet() == 1) {
                     reading.countDown();
-                    try { release.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                    try {
+                        release.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
                 }
                 return super.replayPage(id, after, through, limit);
             }
         };
         var service = new SessionService(Clock.systemUTC(), repository);
         String id = service.createSession("分页").id();
-        for (int i = 0; i < 800; i++) service.publish(id, "run", new AssistantDelta("字"));
+        for (int i = 0; i < 800; i++) {
+            service.publish(id, "run", new AssistantDelta("字"));
+        }
         List<EventEnvelope> received = new CopyOnWriteArrayList<>();
         try (var subscription = service.subscribe(id, 0, received::add)) {
             assertTrue(reading.await(2, TimeUnit.SECONDS));
-            for (int i = 0; i < 100; i++) service.publish(id, "run", new AssistantDelta("新"));
-            release.countDown(); awaitSize(received, 900);
-            assertEquals(java.util.stream.LongStream.rangeClosed(1, 900).boxed().toList(),
+            for (int i = 0; i < 100; i++) {
+                service.publish(id, "run", new AssistantDelta("新"));
+            }
+            release.countDown();
+            awaitSize(received, 900);
+            assertEquals(LongStream.rangeClosed(1, 900).boxed().toList(),
                 received.stream().map(EventEnvelope::sequence).toList());
             assertEquals(4, pages.get());
-        } finally { release.countDown(); }
+        } finally {
+            release.countDown();
+        }
     }
 }

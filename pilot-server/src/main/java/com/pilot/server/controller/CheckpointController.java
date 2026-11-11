@@ -23,9 +23,9 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.AttachmentReferences;
+import com.pilot.server.session.HistoryEditCoordinator;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.session.TaskControlService;
-import com.pilot.server.session.HistoryEditCoordinator;
 import com.pilot.server.workspace.HistoryFileChange;
 import com.pilot.server.workspace.RunSnapshotService;
 
@@ -76,7 +76,9 @@ public class CheckpointController {
             String operationId = HistoryEditCoordinator.operationId(request.operationId());
             String operationKey = id + ":" + request.sequence() + ":" + request.mode() + ":" + request.revision();
             var completed = historyEdits.completed(operationId, operationKey, RestoreResponse.class);
-            if (completed.isPresent()) return completed.get();
+            if (completed.isPresent()) {
+                return completed.get();
+            }
             Selection selection = select(id, request.sequence());
             long historyRevision = sessions.historyRevision(id);
             checkRevision(selection, request.revision());
@@ -104,12 +106,17 @@ public class CheckpointController {
                 }
                 List<HistoryFileChange> code = snapshots.historyChanges(selection.runIds());
                 changes.addAll(code);
-                report = new RunSnapshotService.RollbackReport(selection.event().runId(), workspace(selection.session()),
-                    code.stream().filter(change -> change.after() != null).map(change -> change.root().relativize(change.target()).toString()).toList(),
-                    code.stream().filter(change -> change.after() == null).map(change -> change.root().relativize(change.target()).toString()).toList(),
-                    List.of(), List.of());
+                report =
+                    new RunSnapshotService.RollbackReport(selection.event().runId(), workspace(selection.session()),
+                        code.stream().filter(change -> change.after() != null)
+                            .map(change -> change.root().relativize(change.target()).toString()).toList(),
+                        code.stream().filter(change -> change.after() == null)
+                            .map(change -> change.root().relativize(change.target()).toString()).toList(),
+                        List.of(), List.of());
             }
-            if (withConversation) changes.add(tasks.historyChange(id, selection.event().runId()));
+            if (withConversation) {
+                changes.add(tasks.historyChange(id, selection.event().runId()));
+            }
             RestoreResponse result = new RestoreResponse(true, selection.input(), report);
             historyEdits.execute(operationId, operationKey, changes, result, mark -> {
                 if (withConversation) {
@@ -118,9 +125,13 @@ public class CheckpointController {
                         plans.save(id, checkpoint.plan());
                         mark.run();
                     });
-                } else historyEdits.commitCodeOnly(mark);
+                } else {
+                    historyEdits.commitCodeOnly(mark);
+                }
             });
-            if (withConversation) runs.discardSteering(id);
+            if (withConversation) {
+                runs.discardSteering(id);
+            }
             return result;
         } finally {
             runs.abandon(slot);
@@ -238,7 +249,9 @@ public class CheckpointController {
     }
 
     public record Request(Long sequence, String mode, Long revision, String operationId) {
-        public Request(Long sequence, String mode, Long revision) { this(sequence, mode, revision, null); }
+        public Request(Long sequence, String mode, Long revision) {
+            this(sequence, mode, revision, null);
+        }
     }
 
     public record Preview(long sequence, long revision, String input, int runs, boolean conversationAvailable,

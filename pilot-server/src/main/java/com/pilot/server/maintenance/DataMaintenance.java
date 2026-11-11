@@ -10,9 +10,15 @@ public final class DataMaintenance {
     private volatile String blocked;
 
     /** 文件恢复冲突时停止后续存储活动，保留现场等待重启恢复。 */
-    public void block(String reason) { blocked = reason; }
+    public void block(String reason) {
+        blocked = reason;
+    }
 
-    public void requireHealthy() { if (blocked != null) throw new Busy(blocked); }
+    public void requireHealthy() {
+        if (blocked != null) {
+            throw new Busy(blocked);
+        }
+    }
 
     public interface Scope extends AutoCloseable {
         @Override
@@ -32,7 +38,9 @@ public final class DataMaintenance {
     }
 
     public Scope tryActivity() {
-        if (blocked != null) return null;
+        if (blocked != null) {
+            return null;
+        }
         try {
             return lock.readLock().tryLock(0, TimeUnit.NANOSECONDS) ? lock.readLock()::unlock : null;
         } catch (InterruptedException e) {

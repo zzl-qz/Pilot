@@ -22,10 +22,13 @@ public class InMemorySessionRepository implements SessionRepository {
             List<EventEnvelope> before = List.copyOf(state.events);
             SessionStatus status = state.status;
             long revision = state.historyRevision;
-            try { return work.get(); }
-            catch (RuntimeException | Error failure) {
-                state.events.clear(); state.events.addAll(before);
-                state.status = status; state.historyRevision = revision;
+            try {
+                return work.get();
+            } catch (RuntimeException | Error failure) {
+                state.events.clear();
+                state.events.addAll(before);
+                state.status = status;
+                state.historyRevision = revision;
                 throw failure;
             }
         }
@@ -34,13 +37,17 @@ public class InMemorySessionRepository implements SessionRepository {
     @Override
     public long historyRevision(String sessionId) {
         State state = require(sessionId);
-        synchronized (state) { return state.historyRevision; }
+        synchronized (state) {
+            return state.historyRevision;
+        }
     }
 
     @Override
     public void advanceHistoryRevision(String sessionId) {
         State state = require(sessionId);
-        synchronized (state) { state.historyRevision++; }
+        synchronized (state) {
+            state.historyRevision++;
+        }
     }
 
     @Override
@@ -203,15 +210,23 @@ public class InMemorySessionRepository implements SessionRepository {
     public List<EventEnvelope> replayPage(String sessionId, long after, long through, int limit) {
         State state = require(sessionId);
         synchronized (state) {
-            int lo = 0, hi = state.events.size();
+            int lo = 0;
+            int hi = state.events.size();
+
             while (lo < hi) {
                 int mid = (lo + hi) >>> 1;
-                if (state.events.get(mid).sequence() <= after) lo = mid + 1; else hi = mid;
+                if (state.events.get(mid).sequence() <= after) {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
             }
             List<EventEnvelope> page = new ArrayList<>();
             for (int i = lo; i < state.events.size() && page.size() < Math.max(1, limit); i++) {
                 EventEnvelope event = state.events.get(i);
-                if (event.sequence() > through) break;
+                if (event.sequence() > through) {
+                    break;
+                }
                 page.add(event);
             }
             return List.copyOf(page);
