@@ -393,7 +393,7 @@ function ScheduleDialog({ seed }: { seed?: string | null }) {
               </ol>}</div>
             </div>
             {feedback('time')}
-            <p className="automation-meta">Pilot 服务在线时执行。一次性任务离线后补执行。夏令时重复时刻的首次执行采用较早偏移。</p>
+            <p className="automation-meta">Pilot 服务在线时执行。一次性任务离线后补执行。夏令时重复时刻只执行第一次；周期中不存在的本地时刻跳过。</p>
           </section>
           <section className="schedule-editor-fields schedule-editor-policy" aria-labelledby="schedule-policy-title">
             <h2 id="schedule-policy-title">工作区与权限</h2>

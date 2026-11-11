@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -84,6 +85,9 @@ public class RecurringScheduleService {
             throw new IllegalArgumentException("首次时间必须在未来");
         }
         ZoneId zone = ZoneId.of(input.task().timezone() == null ? "UTC" : input.task().timezone());
+        if (repeatedTime(input.task().runAt().atZone(zone))) {
+            throw new IllegalArgumentException("夏令时重复时刻只执行第一次，请重新预览首次时间");
+        }
         String cron = validateCron(input.cron(), input.task().runAt(), zone);
         if (!Set.of("ONCE", "SKIP").contains(input.misfire())) {
             throw new IllegalArgumentException("请选择错过执行策略");
@@ -117,8 +121,8 @@ public class RecurringScheduleService {
             throw new IllegalArgumentException("请填写六段 cron 表达式");
         }
         var expression = CronExpression.parse(cron);
-        var first = expression.next(start.atZone(zone));
-        var second = first == null ? null : expression.next(first);
+        var first = nextTime(expression, start.atZone(zone));
+        var second = first == null ? null : nextTime(expression, first);
         if (first == null || second == null) {
             throw new IllegalArgumentException("表达式没有后续执行时间");
         }
@@ -130,6 +134,19 @@ public class RecurringScheduleService {
             throw new IllegalArgumentException("秒字段须为一个固定值（0–59）");
         }
         return cron.trim();
+    }
+
+    /** 同一个本地时刻只取较早偏移；预览、在线调度和离线恢复共用此规则。 */
+    private static ZonedDateTime nextTime(CronExpression expression, ZonedDateTime after) {
+        var next = expression.next(after);
+        while (next != null && repeatedTime(next)) {
+            next = expression.next(next);
+        }
+        return next;
+    }
+
+    private static boolean repeatedTime(ZonedDateTime time) {
+        return !time.getOffset().equals(time.withEarlierOffsetAtOverlap().getOffset());
     }
 
     public Times times(String localTime, String timezone, String cron) {
@@ -149,7 +166,7 @@ public class RecurringScheduleService {
             var expr = CronExpression.parse(validateCron(cron, first, zone));
             var at = first.atZone(zone);
             for (int i = 0; i < 4; i++) {
-                at = expr.next(at);
+                at = nextTime(expr, at);
                 if (at == null) {
                     break;
                 }
@@ -223,7 +240,8 @@ public class RecurringScheduleService {
         if (row.activeId() != null && !schedules.occurrenceFinished(row.activeId())) {
             return;
         }
-        var next = CronExpression.parse(row.cron()).next(now.atZone(ZoneId.of(row.timezone())));
+        ZoneId zone = ZoneId.of(row.timezone());
+        var next = nextTime(CronExpression.parse(row.cron()), now.atZone(zone));
         if (next == null) {
             replace(row, "ERROR", row.nextAt(), row.activeId(), row.occurrences(), "没有后续执行时间");
             return;
@@ -232,6 +250,10 @@ public class RecurringScheduleService {
         var existing = schedules.findOccurrence(key);
         if (existing.isPresent()) {
             replace(row, "ACTIVE", next.toInstant(), key, row.occurrences() + 1, "已恢复已创建的轮次，未重复投递");
+            return;
+        }
+        if (repeatedTime(row.nextAt().atZone(zone))) {
+            replace(row, "ACTIVE", next.toInstant(), row.activeId(), row.occurrences(), "已跳过夏令时重复时刻");
             return;
         }
         if ("SKIP".equals(row.misfire()) && Duration.between(row.nextAt(), now).getSeconds() > 60) {
