@@ -19,7 +19,8 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { api, apiJson, apiFetch } from './api.js';
 import {
-  applyEvent, initialThread, appendUserRow, prependHistoryPage, appendHistoryPage
+  applyEvent,
+  restoreLiveOutput, initialThread, appendUserRow, prependHistoryPage, appendHistoryPage
 } from './thread-reducer.js';
 import { EVENT_TYPES } from './event-types.js';
 import { canLoadEarlier, isValidEarlierHistoryPage } from './lib/history.js';
@@ -965,6 +966,22 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       try { reason = JSON.parse(message.data).payload?.message || reason; } catch { /* 使用明确的默认提示 */ }
       set(draft => { draft.ui.connection = { status: 'error', text: reason }; });
       get().showNotice(reason);
+    });
+    source.addEventListener('stream.preview', (message: MessageEvent<string>) => {
+      if (eventSource !== source || get().sessionId !== sessionId) return;
+      try {
+        const control = JSON.parse(message.data), snapshot = control.payload;
+        if (control.sessionId !== sessionId || !snapshot || snapshot.historyRevision !== get().historyRevision
+            || !Number.isSafeInteger(snapshot.baseSequence) || !Number.isSafeInteger(snapshot.previewOffset)
+            || snapshot.previewOffset < 0 || typeof snapshot.previewId !== 'string' || typeof snapshot.runId !== 'string'
+            || typeof snapshot.text !== 'string' || typeof snapshot.reasoning !== 'string' || typeof snapshot.complete !== 'boolean') {
+          throw new Error('临时输出状态无效');
+        }
+        get().flushEvents();
+        if (streamPaused) return;
+        set(draft => { restoreLiveOutput(draft, snapshot); });
+        if (!snapshot.complete) get().showNotice('当前临时输出未完整保留，完整内容将在正式结果到达后更新。');
+      } catch { recoverEventStream(sessionId, '临时输出恢复失败'); }
     });
     source.addEventListener('stream.event', async (message: MessageEvent<string>) => {
       if (eventSource !== source || get().sessionId !== sessionId) return;

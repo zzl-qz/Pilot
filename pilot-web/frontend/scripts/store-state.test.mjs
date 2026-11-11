@@ -336,3 +336,38 @@ test('不可恢复事件明确停止，不依靠反复重连跳过', t => {
     assert.equal(useStore.getState().ui.connection.text, '单条事件过大');
   } finally { fixture.restore(); }
 });
+
+test('断线快照在正式历史后替换预览，边界后的增量去重且不保存在历史窗口', () => {
+  const fixture = fakeStreams();
+  try {
+    reset(); useStore.getState().connectSse('s', 0); const source = fixture.streams.at(-1);
+    source.emit({ type: 'stream.ready', sessionId: 's', payload: { historyRevision: 0 } });
+    source.emit({ type: 'run.started', sessionId: 's', runId: 'r', sequence: 1, payload: { input: '任务' } });
+    source.emit({ type: 'assistant.preview', sessionId: 's', runId: 'r', sequence: 1, payload: { text: '过时' } });
+    const snapshot = { type: 'stream.preview', sessionId: 's', payload: { runId: 'r', previewId: 'p', previewOffset: 2, baseSequence: 1, historyRevision: 0, text: '头', reasoning: '想法', complete: true } };
+    source.emit(snapshot);
+    const event = { type: 'assistant.preview', sessionId: 's', runId: 'r', sequence: 1, previewId: 'p', previewOffset: 3, payload: { text: '尾' } };
+    source.emit(event); source.emit(event); useStore.getState().flushEvents();
+    const state = useStore.getState();
+    assert.equal(state.thread.rows.at(-1).reply.preview, '头尾');
+    assert.equal(state.thread.rows.at(-1).thinking.text, '想法');
+    assert.equal(state.thread.windowEvents.length, 1); assert.equal(state.thread.cursor, 1);
+    source.emit({ type: 'assistant.delta', sessionId: 's', runId: 'r', sequence: 2, payload: { text: '头尾' } });
+    useStore.getState().flushEvents();
+    assert.equal(useStore.getState().thread.rows.at(-1).reply.text, '头尾');
+    assert.equal(useStore.getState().thread.rows.at(-1).reply.preview, '');
+    useStore.getState().connectSse('s', 2);
+    source.emit(snapshot); // 已关闭连接的迟到快照不能覆盖新状态
+    assert.equal(useStore.getState().thread.rows.at(-1).reply.preview, '');
+  } finally { fixture.restore(); }
+});
+
+test('重试和恢复只替换当前推理，不清除先前已完成的说明', () => {
+  reset(); const state = useStore.getState();
+  for (const [sequence, type, payload] of [[1, 'run.started', { input: '任务' }], [2, 'assistant.delta', { text: '先检查' }], [3, 'tool.started', { callId: 'c', name: 'read_file', summary: '读文件' }], [3, 'assistant.reasoning', { text: '旧思考' }], [3, 'assistant.reasoning', { reset: true }], [3, 'assistant.reasoning', { text: '新思考' }]]) {
+    state.handleEvent({ sequence, type, payload, sessionId: 's', runId: 'r' });
+  }
+  state.flushEvents();
+  assert.equal(useStore.getState().thread.rows.at(-1).thinking.text, '先检查新思考');
+  closeStreams();
+});

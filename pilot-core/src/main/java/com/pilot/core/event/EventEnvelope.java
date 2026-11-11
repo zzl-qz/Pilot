@@ -15,7 +15,12 @@ import java.util.Objects;
  * @param version   事件信封协议版本，当前为 1
  */
 public record EventEnvelope(long sequence, Instant timestamp, String type, String sessionId, String runId,
-    SessionEvent payload, int version) {
+    SessionEvent payload, int version, String previewId, Long previewOffset) {
+
+    public EventEnvelope(long sequence, Instant timestamp, String type, String sessionId, String runId,
+        SessionEvent payload, int version) {
+        this(sequence, timestamp, type, sessionId, runId, payload, version, null, null);
+    }
 
     public EventEnvelope(long sequence, Instant timestamp, String type, String sessionId, String runId,
         SessionEvent payload) {

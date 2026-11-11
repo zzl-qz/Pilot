@@ -49,7 +49,9 @@ for (const [type, payload, before, verify] of cases) {
       const event = { type: name, payload: data, sequence: ++sequence, runId: 'r', timestamp: '2026-11-06T00:00:00Z' };
       state = produce(state, draft => applyEvent(draft, event, { live }));
     }
-    verify(state); assert.equal(state.thread.windowEvents.at(-1).type, type);
+    verify(state);
+    if (['assistant.preview', 'assistant.reasoning'].includes(type)) assert.ok(state.thread.windowEvents.every(event => event.type !== type));
+    else assert.equal(state.thread.windowEvents.at(-1).type, type);
   });
 }
 test('未知历史事件保留游标和原记录而不新增可见行', () => {

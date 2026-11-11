@@ -111,6 +111,16 @@ class SessionEventHttpTest {
             assertEquals(0, AsyncEventStream.metrics().queuedBytes());
         } finally { sessions.delete(id); }
     }
+    @Test void reconnectRestoresCurrentOutputAfterHistoryOverHttp() throws Exception {
+        String id = sessions.createSession("正在生成").id(); var run = sessions.sendMessage(id, "开始").runId();
+        sessions.preview(id, run, new com.pilot.core.event.AssistantPreview("当前中文🙂"));
+        try (Socket socket = open("/api/sessions/" + id + "/events?after=0&revision=0&protocol=2")) {
+            String text = readUntil(socket, "当前中文🙂");
+            assertTrue(text.indexOf("event:run.started") < text.indexOf("event:stream.preview"), text);
+            assertTrue(text.contains("\"baseSequence\":1")); assertTrue(text.contains("\"complete\":true"));
+            assertFalse(text.substring(text.indexOf("event:stream.preview")).contains("id:1"));
+        } finally { sessions.delete(id); }
+    }
     private static void await(java.util.function.BooleanSupplier condition) throws Exception {
         long deadline = System.nanoTime() + Duration.ofSeconds(6).toNanos();
         while (!condition.getAsBoolean() && System.nanoTime() < deadline) Thread.sleep(20);

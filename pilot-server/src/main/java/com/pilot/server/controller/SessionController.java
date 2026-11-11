@@ -767,6 +767,10 @@ public class SessionController {
                 if (!sendControl(stream, "stream.event", id, Map.of("sequence", reference.sequence(), "historyRevision", revision))) {
                     throw new IllegalStateException("事件流已关闭");
                 }
+            } : null, protocol >= 2 ? snapshot -> {
+                if (!sendControl(stream, "stream.preview", id, objectMapper.convertValue(snapshot, Map.class))) {
+                    throw new IllegalStateException("事件流已关闭");
+                }
             } : null, finish);
             subscription.set(handle);
             if (stream.isClosed()) handle.close();

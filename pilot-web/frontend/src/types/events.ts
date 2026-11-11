@@ -31,5 +31,6 @@ export interface EventPayloads {
   'tool.started': S.ToolStarted;
   'user.message': { input?: string; text?: string; attachments?: MessageAttachment[]; imagePositions?: number[] };
 }
-export interface EventMetadata { sequence: number; timestamp?: string | number; sessionId?: string; runId?: string | null }
+export interface LiveOutput { runId: string; previewId: string; previewOffset: number; baseSequence: number; historyRevision: number; text: string; reasoning: string; complete: boolean }
+export interface EventMetadata { previewId?: string | null; previewOffset?: number | null; sequence: number; timestamp?: string | number; sessionId?: string; runId?: string | null }
 export type EventEnvelope = { [K in keyof EventPayloads]: EventMetadata & { type: K; payload: EventPayloads[K] } }[keyof EventPayloads];

@@ -45,6 +45,7 @@ public final class SessionService {
     private final SessionRepository repository;
     private final EventStreamLimits limits;
     private final PreviewLimits previewLimits;
+    private final LiveOutputCache liveOutputs;
     private final ConcurrentMap<String, PendingPreview> previews = new ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicInteger pendingPreviews = new java.util.concurrent.atomic.AtomicInteger();
     private final java.util.concurrent.atomic.AtomicLong previewInputs = new java.util.concurrent.atomic.AtomicLong();
@@ -76,6 +77,7 @@ public final class SessionService {
 
     public SessionService(Clock clock, SessionRepository repository, EventStreamLimits limits, PreviewLimits previewLimits) {
         this.previewLimits = Objects.requireNonNull(previewLimits);
+        this.liveOutputs = new LiveOutputCache(previewLimits);
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.limits = Objects.requireNonNull(limits);
@@ -172,6 +174,7 @@ public final class SessionService {
         Object lock = lockFor(sessionId);
         synchronized (lock) {
             discardPreview(sessionId);
+            liveOutputs.clear(sessionId);
             CopyOnWriteArrayList<EventDelivery> existing = subscribers.remove(sessionId);
             if (existing != null) {
                 existing.forEach(EventDelivery::close);
@@ -208,7 +211,13 @@ public final class SessionService {
         Object lock = lockFor(sessionId);
         synchronized (lock) {
             PendingPreview pending = previews.get(sessionId);
-            if (pending == null && repository.find(sessionId).isEmpty()) { locks.remove(sessionId, lock); return; }
+            if (pending == null) {
+                Session session = repository.find(sessionId).orElse(null);
+                if (session == null) { locks.remove(sessionId, lock); return; }
+                if (session.status().terminal()) return;
+                var latest = repository.eventsPage(sessionId, null, 1);
+                if (latest.isEmpty() || !latest.getLast().runId().equals(runId)) return;
+            }
             previewInputs.incrementAndGet();
             if (pending != null && (!pending.runId.equals(runId) || pending.type != event.type() || reset)) {
                 flushPreview(sessionId, pending); pending = null;
@@ -260,7 +269,7 @@ public final class SessionService {
     }
     private void deliverPreview(String sessionId, String runId, long sequence, SessionEvent event) {
         previewOutputs.incrementAndGet();
-        deliver(sessionId, EventEnvelope.of(sequence, clock.instant(), sessionId, runId, event), EventSize.estimate(event) + 1024);
+        deliver(sessionId, liveOutputs.update(EventEnvelope.of(sequence, clock.instant(), sessionId, runId, event)), EventSize.estimate(event) + 1024);
     }
 
     /** 追加事件并推送给当前订阅者，返回带序号与时间戳的信封。 */
@@ -285,6 +294,8 @@ public final class SessionService {
                 repository.markNotBlank(sessionId);
             }
             EventEnvelope envelope = repository.append(sessionId, runId, clock.instant(), event, status);
+            if (event.type() == EventType.RUN_STARTED || event.type() == EventType.ASSISTANT_DELTA) liveOutputs.begin(sessionId, runId);
+            if (status.terminal()) liveOutputs.clear(sessionId);
             deliver(sessionId, envelope, size);
             return envelope;
         }
@@ -372,6 +383,7 @@ public final class SessionService {
                 repository.advanceHistoryRevision(sessionId);
                 return count;
             });
+            liveOutputs.clear(sessionId);
             var current = subscribers.get(sessionId);
             if (current != null) current.forEach(EventDelivery::close);
             return removed;
@@ -403,6 +415,11 @@ public final class SessionService {
 
     public EventSubscription subscribe(String sessionId, long afterSequence, Long expectedRevision,
         Consumer<EventEnvelope> listener, Consumer<EventReference> references, Runnable onClosed) {
+        return subscribe(sessionId, afterSequence, expectedRevision, listener, references, null, onClosed);
+    }
+
+    public EventSubscription subscribe(String sessionId, long afterSequence, Long expectedRevision,
+        Consumer<EventEnvelope> listener, Consumer<EventReference> references, Consumer<LiveOutput> snapshots, Runnable onClosed) {
         Objects.requireNonNull(listener, "listener must not be null");
         EventDelivery delivery;
         Object lock = lockFor(sessionId);
@@ -418,8 +435,12 @@ public final class SessionService {
             if (workers.incrementAndGet() > limits.subscribers()) {
                 workers.decrementAndGet(); throw new IllegalStateException("事件流连接数量已达上限");
             }
-            delivery = new EventDelivery(sessionId, listener, references, onClosed, Math.max(0, afterSequence),
-                repository.latestSequence(sessionId), revision);
+            try { delivery = new EventDelivery(sessionId, listener, references, onClosed, Math.max(0, afterSequence),
+                repository.latestSequence(sessionId), revision, snapshots, snapshots == null ? null : liveOutputs.snapshot(sessionId,
+                    repository.eventsPage(sessionId, null, 1).stream().map(EventEnvelope::runId).findFirst().orElse(""),
+                    repository.latestSequence(sessionId), revision, !repository.find(sessionId).orElseThrow().status().terminal()
+                        && repository.latestSequence(sessionId) > 0));
+            } catch (RuntimeException failure) { workers.decrementAndGet(); throw failure; }
             listeners(sessionId).add(delivery);
         }
         // 注册与高水位捕获是短临界区；查询及所有回放发送均由锁外 worker 完成。
@@ -433,13 +454,13 @@ public final class SessionService {
     }
 
     public record StreamMetrics(int subscriptions, int workers, long queuedBytes, long peakQueuedBytes,
-        long deliveredEvents, long replayNanos, long previewInputs, long previewOutputs, int pendingPreviews,
+        long deliveredEvents, long replayNanos, long previewInputs, long previewOutputs, int pendingPreviews, long livePreviewBytes, int livePreviewSessions,
         java.util.Map<String, Long> closeReasons) {}
     public StreamMetrics streamMetrics() {
         java.util.Map<String, Long> reasons = new java.util.TreeMap<>();
         closedReasons.forEach((key, value) -> reasons.put(key, value.get()));
         return new StreamMetrics(subscriberCount(), workers.get(), queuedBytes.get(), peakBytes.get(),
-            delivered.get(), replayNanos.get(), previewInputs.get(), previewOutputs.get(), pendingPreviews.get(), java.util.Map.copyOf(reasons));
+            delivered.get(), replayNanos.get(), previewInputs.get(), previewOutputs.get(), pendingPreviews.get(), liveOutputs.bytes(), liveOutputs.size(), java.util.Map.copyOf(reasons));
     }
 
     private boolean reserve(long size) {
@@ -507,6 +528,9 @@ public final class SessionService {
         private final String sessionId;
         private final Consumer<EventEnvelope> downstream;
         private final Consumer<EventReference> references;
+        private final Consumer<LiveOutput> snapshots;
+        private LiveOutput snapshot;
+        private long snapshotBytes;
         private final Runnable onClosed;
         private final BlockingQueue<PendingEvent> queue = new ArrayBlockingQueue<>(limits.queueItems());
         private final AtomicBoolean closed = new AtomicBoolean();
@@ -520,7 +544,13 @@ public final class SessionService {
         private long bytes;
 
         EventDelivery(String sessionId, Consumer<EventEnvelope> downstream, Consumer<EventReference> references,
-            Runnable onClosed, long afterSequence, long highWater, long revision) {
+            Runnable onClosed, long afterSequence, long highWater, long revision, Consumer<LiveOutput> snapshots, LiveOutput snapshot) {
+            this.snapshots = snapshots; this.snapshot = snapshot;
+            if (snapshot != null) {
+                snapshotBytes = 1024 + 6L * (snapshot.text().length() + snapshot.reasoning().length());
+                if (snapshotBytes > limits.queueBytes() || !reserve(snapshotBytes)) throw new IllegalStateException("临时输出交付预算不足");
+                bytes = snapshotBytes;
+            }
             this.afterSequence = afterSequence; this.highWater = highWater; this.revision = revision;
             this.sessionId = sessionId; this.downstream = downstream; this.references = references; this.onClosed = onClosed;
             this.worker = Thread.ofVirtual().name("pilot-event-delivery").unstarted(this::drain);
@@ -587,6 +617,10 @@ public final class SessionService {
                 }
                 replaying = false; replayNanos.addAndGet(System.nanoTime() - began);
                 if (historyRevision(sessionId) != revision) { close("history_changed"); return; }
+                if (snapshots != null && !closed.get()) {
+                    sendingAt = System.nanoTime();
+                    try { snapshots.accept(snapshot); } finally { releaseSnapshot(); sendingAt = 0; }
+                }
                 while (!closed.get()) {
                     PendingEvent pending = queue.poll(1, TimeUnit.SECONDS);
                     if (pending != null) { try { send(pending); } finally { release(pending); } }
@@ -596,7 +630,13 @@ public final class SessionService {
             } catch (RuntimeException failure) {
                 log.debug("订阅交付失败：{}", failure.getClass().getSimpleName());
                 close(failure instanceof EventTooLargeException ? "event_too_large" : "delivery_error");
-            } finally { close(); workers.decrementAndGet(); }
+            } finally { releaseSnapshot(); close(); workers.decrementAndGet(); }
+        }
+        private void releaseSnapshot() {
+            if (snapshotBytes != 0) {
+                synchronized (budget) { bytes -= snapshotBytes; queuedBytes.addAndGet(-snapshotBytes); snapshotBytes = 0; }
+            }
+            snapshot = null;
         }
         @Override public boolean isClosed() { return closed.get(); }
         @Override public String closeReason() { return reason; }

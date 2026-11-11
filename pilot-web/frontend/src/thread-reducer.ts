@@ -1,5 +1,5 @@
 import type { ReducerState, ThreadState, ThreadRow, TurnRow, PlanRow, UserRow, ToolRow, TimelineInput, TimelineItem, ArbitrationRow } from './types/thread.js';
-import type { EventEnvelope, EventMetadata } from './types/events.js';
+import type { EventEnvelope, EventMetadata, LiveOutput } from './types/events.js';
 import type { MessageAttachment } from './types/runtime.js';
 /**
  * SSE 事件 → 线程行模型的纯 reducer。
@@ -312,8 +312,35 @@ function stampLastUserRow(draft: ReducerState, sequence: number, text: string, a
   }
 }
 
+function replaceReasoning(turn: TurnRow, text: string) {
+  if (!turn.thinking && text) turn.thinking = { text: '', live: true, action: '', startedAt: Date.now() };
+  if (!turn.thinking) return;
+  const previous = turn.thinking.preview || '';
+  if (previous && turn.thinking.text.endsWith(previous)) turn.thinking.text = turn.thinking.text.slice(0, -previous.length);
+  turn.thinking.text += text;
+  turn.thinking.preview = text;
+}
+
+export function restoreLiveOutput(draft: ReducerState, snapshot: LiveOutput) {
+  if (snapshot.baseSequence !== draft.thread.cursor) throw new Error('临时输出与正式历史不匹配');
+  if (snapshot.runId && draft.runId && snapshot.runId !== draft.runId) throw new Error('临时输出运行不匹配');
+  const turn = openTurn(draft) || (snapshot.text || snapshot.reasoning ? ensureTurn(draft) : null);
+  if (turn) {
+    turn.reply.preview = snapshot.text;
+    if (snapshot.text) turn.reply.live = true;
+    replaceReasoning(turn, snapshot.reasoning);
+    draft.liveOutputTokens = estimateTokens(turn.reply.text + snapshot.text);
+  }
+  draft.thread.previewId = snapshot.previewId;
+  draft.thread.previewOffset = snapshot.previewOffset;
+}
+
 export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: { live: boolean }) {
   const thread = draft.thread;
+  if (isEphemeral(event.type) && event.previewId && event.previewOffset != null) {
+    if (thread.previewId === event.previewId && event.previewOffset <= (thread.previewOffset || 0)) return;
+    thread.previewId = event.previewId; thread.previewOffset = event.previewOffset;
+  }
   // 流式增量只用于界面，不推进游标（否则重连后正式事件会被判成重复而丢掉）
   if (!isEphemeral(event.type)) {
     thread.cursor = Math.max(thread.cursor, Number(event.sequence) || thread.cursor);
@@ -467,6 +494,8 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     case 'assistant.delta': {
       const turn = ensureTurn(draft);
       turn.reply.text += event.payload?.text || '';
+      if (turn.thinking) turn.thinking.preview = '';
+      thread.previewId = ''; thread.previewOffset = 0;
       turn.reply.preview = '';
       turn.reply.live = true;
       draft.liveOutputTokens = estimateTokens(turn.reply.text);
@@ -478,7 +507,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     case 'assistant.reasoning': {
       const turn = openTurn(draft);
       if (event.payload?.reset) {
-        if (turn?.thinking) turn.thinking.text = '';
+        if (turn) replaceReasoning(turn, '');
         break;
       }
       const activeTurn = turn || ensureTurn(draft);
@@ -487,6 +516,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         activeTurn.thinking = { text: '', live: true, action: '', startedAt: eventTimestamp(event), finishedAt: null };
       }
       activeTurn.thinking.text += text;
+      activeTurn.thinking.preview = (activeTurn.thinking.preview || '') + text;
       break;
     }
 
@@ -899,8 +929,8 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     }
   }
 
-  // 每个事件都进窗口；事件戳边界由行自身维护（start/end 已在上面维护）。
-  thread.windowEvents.push(event);
+  // 历史窗口只保留持久事件，临时增量已折入当前输出，避免长时间生成时重复保存。
+  if (!isEphemeral(event.type)) thread.windowEvents.push(event);
   if (!thread.replaying && thread.windowEvents.length > HISTORY_WINDOW_LIMIT + thread.history.pageSize
     && !draft.running && ['run.completed', 'run.failed', 'run.cancelled', 'user.message'].includes(event.type)) {
     trimThreadWindow(draft);

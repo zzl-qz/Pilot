@@ -14,6 +14,8 @@ class Conversation(private val maxRows: Int = 300) {
     var needsReplay = false; private set
     private val rows = mutableListOf<TranscriptRow>()
     private var preview = ""
+    private var previewId = ""
+    private var previewOffset = 0L
     private var rowChars = 0
     var runId = ""; private set
     var phase = ""; private set
@@ -34,10 +36,24 @@ class Conversation(private val maxRows: Int = 300) {
             historyRevision = revision
             return
         }
-        if (needsReplay || type.startsWith("stream.")) return
+        if (needsReplay) return
+        if (type == "stream.preview") {
+            require(payload.text("historyRevision").toLongOrNull() == historyRevision && payload.text("baseSequence").toLongOrNull() == cursor) { "临时输出历史边界不匹配" }
+            require(payload.text("runId").isBlank() || runId.isBlank() || payload.text("runId") == runId) { "临时输出运行不匹配" }
+            preview = payload.text("text").take(128_000)
+            previewId = payload.text("previewId"); previewOffset = payload.text("previewOffset").toLongOrNull() ?: error("临时输出偏移无效")
+            if (payload["complete"]?.jsonPrimitive?.booleanOrNull != true) phase = "临时输出未完整保留，等待正式结果"
+            return
+        }
+        if (type.startsWith("stream.")) return
         val ephemeral = type in setOf("assistant.preview", "assistant.reasoning")
         val sequence = event.text("sequence").toLongOrNull() ?: return
         if (!ephemeral && sequence <= cursor) return
+        if (ephemeral && event.text("previewId").isNotBlank()) {
+            val offset = event.text("previewOffset").toLongOrNull() ?: error("临时增量偏移无效")
+            if (previewId == event.text("previewId") && offset <= previewOffset) return
+            previewId = event.text("previewId"); previewOffset = offset
+        }
         val id = event.text("runId")
         when (type) {
             "run.started" -> {

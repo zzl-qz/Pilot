@@ -84,4 +84,18 @@ class ProtocolTest {
         assertEquals(0, transcript.cursor)
     }
 
+    @Test fun `临时输出快照替换旧预览且偏移防止重复`() {
+        val transcript = Conversation(); transcript.historyVersion(0)
+        fun accept(value: String) = transcript.accept(Protocol.json.parseToJsonElement(value).jsonObject)
+        accept("""{"sequence":1,"type":"run.started","runId":"r","payload":{"input":"任务"}}""")
+        accept("""{"sequence":1,"type":"assistant.preview","runId":"r","payload":{"text":"旧"}}""")
+        accept("""{"type":"stream.preview","payload":{"historyRevision":0,"baseSequence":1,"runId":"r","previewId":"p","previewOffset":2,"text":"头","reasoning":"思考","complete":true}}""")
+        val live = """{"sequence":1,"type":"assistant.preview","runId":"r","previewId":"p","previewOffset":3,"payload":{"text":"尾"}}"""
+        accept(live); accept(live)
+        assertEquals("头尾", transcript.snapshot().last().text); assertEquals(1, transcript.cursor)
+        accept("""{"sequence":2,"type":"assistant.delta","runId":"r","payload":{"text":"头尾"}}""")
+        assertEquals(2, transcript.snapshot().size)
+        assertFailsWith<IllegalArgumentException> { accept("""{"type":"stream.preview","payload":{"historyRevision":0,"baseSequence":1}}""") }
+    }
+
 }

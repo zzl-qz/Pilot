@@ -21,7 +21,7 @@ export interface RunUsage {
   details?: S.RequestTotalsSummary | null;
 }
 export interface Reply { text: string; preview?: string; live: boolean; needsBreak?: boolean; breakReason?: string; committed?: string }
-export interface Thinking { text: string; live: boolean; action: string; startedAt: number; finishedAt?: number | null }
+export interface Thinking { preview?: string; text: string; live: boolean; action: string; startedAt: number; finishedAt?: number | null }
 interface RowBase { key: string; start: number; end: number; text?: string; detail?: string | null }
 export interface UserRow extends RowBase { type: 'user'; sequence: number | null; text: string; attachments: MessageAttachment[]; imagePositions: number[]; steered?: boolean }
 export interface TurnRow extends RowBase { type: 'turn'; runIds: string[]; tools: ToolRow[]; toolIndex: Record<string, ToolRow>; thinking: Thinking | null; reply: Reply; stats: RunUsage | null; agents: Record<string, AgentView>; requests?: RequestReport[] }
@@ -32,7 +32,7 @@ export interface SandboxRow extends RowBase { type: 'sandbox'; sandboxId: string
 export interface ArbitrationRow extends RowBase { type: 'arb'; arbitrationId: string; title: string; detail: string; options: (string | { id: string; label: string })[]; resolved: boolean; resolution?: string | null }
 export type ThreadRow = UserRow | TurnRow | ResultRow | CompactionRow | PlanRow | SandboxRow | ArbitrationRow;
 export interface ThreadHistory { hasMore: boolean; hasNewer: boolean; loading: boolean; forwardError: boolean; error: boolean; pageSize: number; loadId: number }
-export interface ThreadState { rows: ThreadRow[]; windowEvents: EventEnvelope[]; cursor: number; replaying: boolean; history: ThreadHistory; activityCount: number }
+export interface ThreadState { previewId?: string; previewOffset?: number; rows: ThreadRow[]; windowEvents: EventEnvelope[]; cursor: number; replaying: boolean; history: ThreadHistory; activityCount: number }
 export interface TimelineInput { kind: string; tone: string; status: string; title?: string | null; detail?: string | null; foot?: string | null; actions?: boolean; callId?: string | null; dispatchId?: string | null }
 export interface TimelineItem extends TimelineInput { key: string; sequence: number; type: string; timestamp?: string | number; _stream?: string }
 export interface PendingApproval { callId: string; agent: string | null; name: string; args: string; busy?: boolean }
