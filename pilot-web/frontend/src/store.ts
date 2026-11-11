@@ -1,14 +1,35 @@
-import { attachmentBatchError, requireAttachmentLimits } from './lib/attachments.js';
+import { createModelSettingsActions } from './store/model-settings.js';
+import { createPanelActions } from './store/panels.js';
+import { createSideChatActions } from './store/side-chats.js';
+import { createInputActions } from './store/input.js';
+import { requireData } from './store/shared.js';
 import type { Draft } from 'immer';
 import type { StoreState, UiState, MirrorState, CommandTask } from './types/store.js';
 import type { EventEnvelope } from './types/events.js';
-import type { ApiResults, InputMessage } from './types/api.js';
-import type { SideChatTab } from './types/content.js';
 import type { PlanRow, ResultRow } from './types/thread.js';
 import type * as S from './types/server.js';
 import { errorInfo } from './lib/errors.js';
-import { submissions } from './lib/submissions.js';
 import { resolveTheme } from './lib/theme.js';
+import { create } from 'zustand';
+import { immer } from 'zustand/middleware/immer';
+import { api, apiJson, apiFetch } from './api.js';
+import { applyEvent, restoreLiveOutput, initialThread, prependHistoryPage, appendHistoryPage } from './thread-reducer.js';
+import { EVENT_TYPES } from './event-types.js';
+import { canLoadEarlier, isValidEarlierHistoryPage } from './lib/history.js';
+import { loadInputHistory } from './lib/input-history.js';
+import { readDraft, writeDraft, dropDraft } from './lib/drafts.js';
+import { faviconHref, shouldNotify, tabTitle } from './lib/attention.js';
+import { mergeCommands, toSkillCommands } from './lib/skills.js';
+import { normalizePermission } from './lib/permission.js';
+import { QUICK_COMMANDS } from './lib/commands.js';
+import { sortSessions } from './lib/projects.js';
+import { sortChangeFiles } from './lib/changes.js';
+import { browserStateUpdate } from './lib/browser-mirror.js';
+import { classifyModelError } from './lib/model-settings.js';
+import { readSideChats, writeSideChats, readEmbeddedSession, sideChatsFor } from './lib/side-chat.js';
+import { normalizeQueue } from './lib/queue.js';
+import { createWorkbenchRefresher, saveWorkbenchView, takeWorkbenchView } from './lib/workbench-sync.js';
+
 type StoreGet = () => StoreState;
 type StoreSet = (change: (draft: Draft<StoreState>) => void) => void;
 /**
@@ -17,41 +38,11 @@ type StoreSet = (change: (draft: Draft<StoreState>) => void) => void;
  * <p>字段与旧版 state 对象一一对应；动作函数替代旧版的直接 DOM 操纵。
  * SSE 的连接与重连退避也在这里（旧版 connect/scheduleReconnect 的移植）。
  */
-import { create } from 'zustand';
-import { immer } from 'zustand/middleware/immer';
-import { api, apiJson, apiFetch } from './api.js';
-import {
-  applyEvent,
-  restoreLiveOutput, initialThread, appendUserRow, prependHistoryPage, appendHistoryPage
-} from './thread-reducer.js';
-import { EVENT_TYPES } from './event-types.js';
-import { canLoadEarlier, isValidEarlierHistoryPage } from './lib/history.js';
-import { loadInputHistory, rememberInput } from './lib/input-history.js';
-import { readDraft, writeDraft, dropDraft } from './lib/drafts.js';
-import { faviconHref, shouldNotify, tabTitle } from './lib/attention.js';
-import { mergeCommands, resolveSkillCommand, toSkillCommands } from './lib/skills.js';
-import { normalizePermission, permissionLabel } from './lib/permission.js';
-import { QUICK_COMMANDS } from './lib/commands.js';
-import { samePath, sortSessions } from './lib/projects.js';
-import { sortChangeFiles } from './lib/changes.js';
-import { mergeCommandLog } from './lib/command-tasks.js';
-import { browserStateUpdate } from './lib/browser-mirror.js';
-import { classifyModelError, describeModelSaved } from './lib/model-settings.js';
-import { sameUserInput } from './thread-utils.js';
-import {
-  readSideChats, writeSideChats, readEmbeddedSession, sideChatsFor, sideChatTitle
-} from './lib/side-chat.js';
-import { normalizeQueue } from './lib/queue.js';
-import { createWorkbenchRefresher, saveWorkbenchView, takeWorkbenchView } from './lib/workbench-sync.js';
 
 let queueLoadSequence = 0;
 let activationSequence = 0;
 let projectLoadSequence = 0;
 let sessionLoadSequence = 0;
-let settingsLoadSequence = 0;
-/** 侧边对话正在创建：打开面板的同时又点「新开」时共用一个请求，别建出两条。 */
-const sideChatPending = new Map<string, Promise<SideChatTab | null>>();
-const sideChatClosing = new Map<string, Promise<boolean>>();
 const RECONNECT_BASE_MS = 800;
 const RECONNECT_MAX_MS = 15000;
 const CONNECTION_STABLE_MS = 10000;
@@ -200,12 +191,6 @@ function resetFilePreview(draft: StoreState) {
   draft._previewData = null;
   draft._previewLoading = false;
   draft.ui.previewPath = '';
-}
-
-function applySettings(draft: StoreState, data: ApiResults['settings'] | null) {
-  draft.settingsData = data;
-  if (data?.permissionMode) draft.permissionMode = normalizePermission(data.permissionMode);
-  draft.modelOptions = Array.isArray(data?.modelOptions) ? data.modelOptions : [];
 }
 
 function resetSessionState(draft: StoreState) {
@@ -1197,190 +1182,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     }
   },
 
-  /* ---------- 输入 / 运行控制 ---------- */
-  registerComposer(apiBridge) {
-    // state 被 immer 冻结，必须走 set 更新，不能直接赋值
-    set((draft) => { draft.composerApi = apiBridge; });
-  },
-  composerApi: null,
-
-  modelReady() {
-    if (!get().modelSave.busy) return true;
-    get().showNotice('模型配置保存中，请稍候再发送；当前草稿已保留。');
-    return false;
-  },
-
-  async submitInput(text, attachments, imagePositions) {
-    if (!text?.trim() && !attachments?.length) {
-      return false;
-    }
-    if (!get().modelReady()) return false;
-    const ownerEpoch = get().sessionEpoch;
-    let attachmentBudget = get().settingsData?.attachmentLimits;
-    if (attachments?.length) {
-      try {
-        const settings = get().settingsData || await api.settings();
-        attachmentBudget = requireAttachmentLimits(settings?.attachmentLimits);
-        const error = attachmentBatchError(attachments, attachmentBudget);
-        if (error) throw new Error(error);
-      } catch (error) {
-        get().showNotice('无法发送附件：' + errorInfo(error).message);
-        return false;
-      }
-    }
-    if (get().sessionEpoch !== ownerEpoch) return false;
-    // 草稿态：第一条消息触发创建会话，标题由服务端统一生成。
-    let sessionId = get().sessionId;
-    if (!sessionId) {
-      try {
-        sessionId = await get().ensureSession();
-      } catch (error) {
-        get().showNotice('创建对话失败：' + errorInfo(error).message);
-        return false;
-      }
-      if (!sessionId || get().sessionEpoch !== ownerEpoch) {
-        return false;
-      }
-    }
-    // 创建会话是异步的，期间可能开始切换模型；发送前再次确认配置已保存。
-    if (!get().modelReady()) return false;
-    // /技能名 参数 → 服务端期望 content=参数 + skill=技能名（旧版 resolveSkillCommand 同语义）
-    const skillCall = resolveSkillCommand(text, toSkillCommands(get().skills || []));
-    const payloadContent = skillCall
-      ? (skillCall.args || '（用户未提供额外要求，按技能指引执行）')
-      : text;
-    const body: InputMessage = { content: payloadContent, attachments: attachments || [], imagePositions: imagePositions || [] };
-    if (skillCall) {
-      body.skill = skillCall.skill;
-    }
-    const requestBudget = attachmentBudget?.maxRequestBytes;
-    if (requestBudget && new TextEncoder().encode(JSON.stringify(body)).length > requestBudget) {
-      get().showNotice('消息正文和附件合计超过请求预算，请减少内容后重试。');
-      return false;
-    }
-    const pendingKey = `pending:${Date.now()}:${Math.random()}`;
-    let queueInstead = get().running;
-    const result = await submissions.submit(sessionId, body, () => {
-      if (get().sessionEpoch !== ownerEpoch || get().sessionId !== sessionId || !get().modelReady()) return false;
-      queueInstead = get().running;
-      const remembered = rememberInput(localStorage, sessionId, text);
-      if (!queueInstead) {
-        set((draft) => {
-            draft.pendingInputs.push(payloadContent);
-            appendUserRow(draft, payloadContent, null, { attachments, imagePositions, pendingKey });
-            draft.ui.bottomSignal += 1;
-            if (remembered) {
-              draft.inputHistory = remembered;
-              draft.inputHistoryIndex = -1;
-              draft.inputHistoryDraft = '';
-            }
-        });
-      } else if (remembered) {
-        set((draft) => {
-            draft.inputHistory = remembered;
-            draft.inputHistoryIndex = -1;
-            draft.inputHistoryDraft = '';
-        });
-      }
-      return true;
-    });
-    if (result.state === 'accepted') {
-      // 接收结果已确定；列表刷新失败不能把已执行的任务重新标成发送失败。
-      void get().loadSessions().catch(() => get().showNotice('消息已接收，会话列表刷新失败，请稍后刷新。'));
-      if (queueInstead && get().sessionId === sessionId && get().sessionEpoch === ownerEpoch) {
-        void get().loadQueue().catch(() => get().showNotice('消息已接收，队列刷新失败，请稍后刷新。'));
-      }
-      dropDraft(localStorage, sessionId);
-      return true;
-    }
-    if (result.state === 'rejected' && get().sessionId === sessionId && get().sessionEpoch === ownerEpoch) set((draft) => {
-      const index = draft.thread.rows.findIndex(row => row.key === pendingKey && (!('sequence' in row) || row.sequence == null));
-      if (index >= 0) {
-        draft.thread.rows.splice(index, 1);
-        const pending = draft.pendingInputs.findIndex(item => sameUserInput(item, payloadContent));
-        if (pending >= 0) draft.pendingInputs.splice(pending, 1);
-      }
-    });
-    if (result.message) get().showNotice(result.state === 'rejected' ? '发送失败：' + result.message : result.message);
-    return false;
-  },
-
-  async steer(text, attachments) {
-    if (attachments?.length) {
-      get().showNotice('请将带附件的消息加入队列，再点击该消息的‘引导’。');
-      return false;
-    }
-    const { sessionId, runId } = get();
-    if (!sessionId) return false;
-    set((draft) => { draft.steering = true; });
-    try {
-      await api.steer(sessionId, { content: text, runId });
-      set((draft) => { draft.steering = false; });
-      return true;
-    } catch (error) {
-      set((draft) => { draft.steering = false; });
-      get().showNotice('引导失败：' + errorInfo(error).message);
-      return false;
-    }
-  },
-
-  async pauseRun() {
-    const { runId } = get();
-    if (!runId) {
-      return;
-    }
-    set((draft) => { draft.pausing = true; });
-    try {
-      await api.pauseRun(runId);
-    } catch (error) {
-      get().showNotice('暂停失败：' + errorInfo(error).message);
-    } finally {
-      set((draft) => { draft.pausing = false; });
-    }
-  },
-
-  async cancelRun() {
-    const { runId } = get();
-    if (!runId) {
-      return;
-    }
-    set((draft) => { draft.cancelling = true; });
-    try {
-      await api.cancelRun(runId);
-    } catch (error) {
-      get().showNotice('取消失败：' + errorInfo(error).message);
-    } finally {
-      set((draft) => { draft.cancelling = false; });
-    }
-  },
-
-  async continueRun() {
-    if (!get().modelReady()) return false;
-    const { sessionId } = get();
-    if (!sessionId) return false;
-    try {
-      await api.continueRun(sessionId);
-    } catch (error) {
-      get().showNotice('继续失败：' + errorInfo(error).message);
-    }
-  },
-
-  async resendMessage(sequence, text, attachments) {
-    if (!get().modelReady()) return false;
-    if (attachments?.length) {
-      get().showNotice('编辑历史消息暂不支持新增附件。附件已保留，可取消编辑后作为新消息发送。');
-      return false;
-    }
-    const { sessionId } = get();
-    if (!sessionId) return false;
-    try {
-      await api.resend(sessionId, { sequence, content: text });
-      return true;
-    } catch (error) {
-      get().showNotice('重新发送失败：' + errorInfo(error).message);
-      return false;
-    }
-  },
+  ...createInputActions({ set, get }),
 
   /* ---------- 审批 / 仲裁 ---------- */
   async resolveApproval(callId, approved) {
@@ -1669,155 +1471,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     }
   },
 
-  /* ---------- 侧边对话（Side chat） ---------- */
-  /** 当前对话所属项目（旧版 currentProject 的等价物）。 */
-  currentProject() {
-    const state = get();
-    const listed = (state.sessions || []).find((session) => session.id === state.sessionId);
-    const projectId = state.currentProjectId || listed?.projectId || null;
-    return (state.projects || []).find((project) => project.id === projectId) || null;
-  },
-
-  /**
-   * 开一条侧边对话：对齐 Codex 的 /side——从**当前任务**分叉，而不是凭空建一条全局会话。
-   *
-   * <p>后端负责继承父会话的工作区与模型记忆；前端只记住「它属于哪条主任务」。
-   * 同一条主任务已经有侧边对话时直接切过去，只有显式 `force` 才再开一条。
-   */
-  async createSideChat({ force = false } = {}) {
-    const state = get();
-    const { sessionId, sessionEpoch, workspace } = state;
-    if (state.embeddedSessionId) return null;
-    if (!sessionId) {
-      state.showNotice('先发一条消息开始任务，再开侧边对话');
-      return null;
-    }
-    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().workspace === workspace;
-    const owned = sideChatsFor(state.sideChats, { sessionId, workspace });
-    const existing = owned.items.find(item => item.id === owned.activeId);
-    if (existing && !force) {
-      set(draft => { draft.sideChats.activeId = existing.id; draft.ui.inspectorOpen = true; draft.ui.inspectorTab = 'chat'; });
-      persistSideChats();
-      return existing;
-    }
-    const key = JSON.stringify([sessionId, sessionEpoch, workspace]);
-    const pending = sideChatPending.get(key);
-    if (pending) return pending;
-    const request = (async () => {
-      try {
-        const session = await api.createSideChat(sessionId);
-        const id = session?.sessionId || session?.id;
-        if (!id) throw new Error('后端没有返回会话 ID');
-        const item: SideChatTab = {
-          id,
-          parentId: session?.parentSessionId || sessionId,
-          title: sideChatTitle(get().sideChats.items, sessionId),
-          workspace: session?.workspace || workspace || null,
-          projectId: session?.projectId || null
-        };
-        if (!item.id) throw new Error('后端没有返回会话 ID');
-        set(draft => {
-          if (!draft.sideChats.items.some(existing => existing.id === item.id)) draft.sideChats.items.push(item);
-          if (current()) {
-            draft.sideChats.activeId = item.id;
-            draft.ui.inspectorOpen = true;
-            draft.ui.inspectorTab = 'chat';
-          }
-        });
-        persistSideChats();
-        get().loadSessions();
-        return current() ? item : null;
-      } catch (error) {
-        if (current()) get().showNotice('创建侧边对话失败：' + errorInfo(error).message);
-        return null;
-      } finally {
-        sideChatPending.delete(key);
-      }
-    })();
-    sideChatPending.set(key, request);
-    return request;
-  },
-
-  selectSideChat(id) {
-    set((draft) => {
-      if (!draft.sideChats.items.some((item) => item.id === id)) {
-        return;
-      }
-      draft.sideChats.activeId = id;
-      draft.ui.inspectorOpen = true;
-      draft.ui.inspectorTab = 'chat';
-    });
-    persistSideChats();
-  },
-
-  /**
-   * 关闭侧边对话 = 丢弃（Codex 的侧边对话本来就不进历史）。
-   * 后端会话连同事件与记忆一起删掉，主对话不受影响。
-   */
-  async closeSideChat(id) {
-    const closing = sideChatClosing.get(id);
-    if (closing) return closing;
-    if (!get().sideChats.items.some(item => item.id === id)) return false;
-    const request = (async () => {
-      try {
-        try { await api.deleteSession(id); } catch (error) { if (errorInfo(error).status !== 404) throw error; }
-        set(draft => {
-          draft.sideChats.items = draft.sideChats.items.filter(item => item.id !== id);
-          draft.sideChats.activeId = sideChatsFor(draft.sideChats, { sessionId: draft.sessionId, workspace: draft.workspace }).activeId;
-          if (draft.sideDrafts) delete draft.sideDrafts[id];
-          if (draft.sideQuote?.id === id) draft.sideQuote = null;
-        });
-        persistSideChats();
-        return true;
-      } catch (error) {
-        get().showNotice('侧边对话未能关闭，已保留，请重试：' + errorInfo(error).message);
-        return false;
-      } finally { sideChatClosing.delete(id); }
-    })();
-    sideChatClosing.set(id, request);
-    return request;
-  },
-
-  setSideDraft(id, value) {
-    set(draft => {
-      draft.sideDrafts ||= {};
-      draft.sideDrafts[id] = typeof value === 'function' ? value(draft.sideDrafts[id] || '') : value;
-    });
-  },
-
-  /** Ctrl+Alt+S：已经停在对话页就收起，否则开/切到当前任务的侧边对话。 */
-  toggleSideChatPane() {
-    const state = get();
-    if (state.embeddedSessionId) {
-      return;
-    }
-    if (state.ui.inspectorOpen && state.ui.inspectorTab === 'chat') {
-      state.setUi({ inspectorOpen: false });
-      return;
-    }
-    state.createSideChat();
-  },
-
-  /** 把选中的文本带进当前任务的侧边对话（没有就现开一条）。 */
-  async askSideChat(text) {
-    if (!String(text || '').trim() || get().embeddedSessionId) {
-      return;
-    }
-    const item = await get().createSideChat();
-    if (!item) {
-      return;
-    }
-    set((draft) => { draft.sideQuote = { id: item.id, text, nonce: Date.now() }; });
-  },
-
-  takeSideQuote(id) {
-    const quote = get().sideQuote;
-    if (!quote || quote.id !== id) {
-      return null;
-    }
-    set((draft) => { draft.sideQuote = null; });
-    return quote.text;
-  },
+  ...createSideChatActions({ set, get }),
 
   /* ---------- 工作区 / worktree ---------- */
   async switchWorkspace(workspace, { throwOnError = false } = {}) {
@@ -1937,200 +1591,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     }
   },
 
-  /* ---------- 变更 / 预览 ---------- */
-  async loadChanges({ strict = false } = {}) {
-    const { sessionId, sessionEpoch, workspace } = get();
-    if (!sessionId || get().changesState === 'restoring') {
-      return;
-    }
-    const request = (get()._changesRequest || 0) + 1;
-    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().workspace === workspace && get()._changesRequest === request;
-    set((draft) => { draft.changesState = 'loading'; draft._changesRequest = request; });
-    try {
-      const report = requireData(await api.diff(sessionId));
-      if (!current()) return;
-      set((draft) => {
-        draft.changeReport = report;
-        draft.changesState = '';
-        draft.ui.changeCount = (report.files || []).length;
-      });
-    } catch (error) {
-      if (!current()) return;
-      set((draft) => { draft.changesState = 'error'; });
-      if (strict) throw error;
-      get().showNotice('读取变更失败：' + errorInfo(error).message);
-    }
-  },
-  /**
-   * 撤销改动：已跟踪文件回退到 HEAD，未跟踪文件删除；成功后刷新变更列表。
-   * 失败文件逐条回报，别把「撤销没成」显示成成功。
-   */
-  async restoreChanges(paths, all = false) {
-    const { sessionId, sessionEpoch, workspace } = get();
-    if (!sessionId || get().changesState === 'restoring') {
-      return null;
-    }
-    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().workspace === workspace;
-    set((draft) => { draft.changesState = 'restoring'; draft._changesRequest = (draft._changesRequest || 0) + 1; });
-    try {
-      const report = await api.restoreChanges(sessionId, { paths: paths || [], all });
-      if (!current()) return report;
-      const failed = Array.isArray(report?.failed) ? report.failed : [];
-      const done = (report?.restored?.length || 0) + (report?.deleted?.length || 0);
-      if (report?.error) {
-        get().showNotice('撤销失败：' + report.error);
-      } else if (failed.length) {
-        get().showNotice(`已撤销 ${done} 个文件，${failed.length} 个失败：${failed[0].path}（${failed[0].reason}）`);
-      } else if (done) {
-        get().showNotice(`已撤销 ${done} 个文件的改动`);
-      } else {
-        get().showNotice('没有需要撤销的改动');
-      }
-      set((draft) => {
-        draft.changesState = '';
-        // 撤销之后原来打开的差异已经没有意义，直接收起来
-        if (all || (paths || []).some((path) => samePath(path, draft.ui.changeView))) {
-          draft.ui.changeView = null;
-        }
-      });
-      // 预览里正开着的文件被撤销了：只刷新内容，别把用户从变更面板拽到预览页
-      const previewTarget = get().ui.previewPath;
-      if (previewTarget && (all || (paths || []).some((path) => samePath(path, previewTarget)))) {
-        try {
-          const fresh = await api.file(sessionId, previewTarget);
-          if (!current()) return report;
-          set((draft) => { draft._previewData = fresh; });
-        } catch {
-          if (!current()) return report;
-          set((draft) => { draft._previewData = null; });
-        }
-      }
-      await get().loadChanges();
-      return report;
-    } catch (error) {
-      if (!current()) return null;
-      set((draft) => { draft.changesState = ''; });
-      get().showNotice('撤销失败：' + errorInfo(error).message);
-      return null;
-    }
-  },
-  async rollbackRun(runId) {
-    try {
-      await api.rollbackRun(runId);
-      get().showNotice('已回滚本次运行改动');
-      await get().loadChanges();
-    } catch (error) {
-      get().showNotice('回滚失败：' + errorInfo(error).message);
-    }
-  },
-  async createBranch(name) {
-    const { sessionId, sessionEpoch, workspace } = get();
-    if (!sessionId) return { ok: false, error: '请先打开一个会话。' };
-    try {
-      await api.branch(sessionId, name);
-      if (get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().workspace === workspace) {
-        get().showNotice(`已创建并切换分支 ${name}`);
-        await get().loadChanges();
-      }
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, error: '创建分支失败：' + errorInfo(error).message };
-    }
-  },
-  async openPreview(path) {
-    const { sessionId, workspace, sessionEpoch } = get();
-    const target = String(path || '').trim();
-    if ((!sessionId && !workspace) || !target) return;
-    const request = (get()._previewRequest || 0) + 1;
-    set((draft) => {
-      draft._previewRequest = request;
-      draft.ui.previewPath = target;
-      draft.ui.inspectorTab = 'preview';
-      draft.ui.inspectorOpen = true;
-      draft.ui.reviewExpanded = false;
-      draft._previewData = null;
-      draft._previewLoading = true;
-    });
-    const current = () => get()._previewRequest === request && get().sessionId === sessionId
-      && get().workspace === workspace && get().sessionEpoch === sessionEpoch;
-    try {
-      const data = sessionId ? await api.file(sessionId, target) : await api.workspaceFile(workspace, target);
-      if (current()) set((draft) => { draft._previewData = data; draft._previewLoading = false; });
-    } catch (error) {
-      if (current()) {
-        set((draft) => { draft._previewLoading = false; });
-        get().showNotice('读取文件失败：' + errorInfo(error).message);
-      }
-    }
-  },
-
-  /* ---------- 命令任务 ---------- */
-  async loadCommandTasks() {
-    const { sessionId, sessionEpoch } = get();
-    if (!sessionId) {
-      return;
-    }
-    try {
-      const data = await apiJson<{ tasks: CommandTask[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/commands`);
-      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
-      // 任务列表是数组，日志才是增量片段：早先这里把 mergeCommandLog 用在任务上，
-      // 结果 commandTasks 变成 {text, offset...} 对象，面板里 .filter 直接 TypeError
-      set((draft) => {
-        draft.commandTasks = Array.isArray(data?.tasks) ? data.tasks : [];
-        // 切了会话还留着上一条命令的详情，会对着已经不存在的任务轮询日志
-        const detail = draft.commandDetail;
-        if (detail && detail.sessionId && detail.sessionId !== sessionId) {
-          draft.commandDetail = null;
-          draft.commandLog = null;
-          draft.commandLogTaskId = null;
-        }
-      });
-    } catch { /* 命令面板不可用不阻塞 */ }
-  },
-
-  /** 选中某个命令任务并把它的日志拉到最新（offset 用上次的 nextOffset 续读）。 */
-  async loadCommandLog(task) {
-    const { sessionId, sessionEpoch } = get();
-    const taskId = task?.taskId || task?.id;
-    if (!sessionId || !taskId) {
-      return;
-    }
-    const sameTask = get().commandLogTaskId === taskId;
-    const offset = sameTask ? (get().commandLog?.offset || 0) : 0;
-    set((draft) => {
-      draft.commandDetail = { ...(task || {}) };
-      if (!sameTask) {
-        draft.commandLogTaskId = taskId;
-        draft.commandLog = { text: '', offset: 0, trimmed: 0, truncated: false, eof: false };
-      }
-    });
-    try {
-      const chunk = await apiJson<S.CommandTaskManagerLogChunk>(`/api/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(taskId)}/logs?offset=${offset}&limit=200000`);
-      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
-      set((draft) => {
-        if (draft.commandLogTaskId !== taskId) {
-          return;
-        }
-        draft.commandLog = mergeCommandLog(draft.commandLog, chunk);
-      });
-    } catch { /* 日志拉取失败不阻塞面板 */ }
-  },
-
-  /** 停止一个还在跑的命令任务：后端收到后返回最新任务状态，界面随即刷新。 */
-  async stopCommand(task) {
-    const { sessionId } = get();
-    const taskId = task?.taskId || task?.id;
-    if (!sessionId || !taskId) {
-      return;
-    }
-    try {
-      await api.stopCommand(sessionId, taskId);
-      get().showNotice('已请求停止：' + (task.command || taskId));
-      await get().loadCommandTasks();
-    } catch (error) {
-      get().showNotice('停止失败：' + errorInfo(error).message);
-    }
-  },
+  ...createPanelActions({ set, get }),
 
   /* ---------- 会话操作 ---------- */
   async renameSession(title, id = get().sessionId) {
@@ -2243,77 +1704,8 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     set((draft) => { draft.ui.confirm = options; });
   },
 
-  /* ---------- 设置 ---------- */
-  async loadSettings() {
-    const sequence = ++settingsLoadSequence;
-    try {
-      const data = await api.settings();
-      if (sequence !== settingsLoadSequence || get().modelSave.busy) return;
-      set((draft) => {
-        applySettings(draft, data);
-      });
-    } catch { /* 设置读取失败不阻塞 */ }
-  },
-  async savePermissionMode(mode) {
-    const next = normalizePermission(mode);
-    try {
-      const data = await api.savePermissionMode(next);
-      set((draft) => {
-        draft.permissionMode = normalizePermission(data?.permissionMode || next);
-        // 「能力」页签里的权限档位跟着变，别让面板显示旧值
-        if (draft.capabilities) {
-          draft.capabilities.permissionMode = draft.permissionMode;
-        }
-        // 配置页里当前选中的卡片也要跟着变（原来只改了 store，卡片仍高亮旧值）
-        if (draft.settingsData) {
-          draft.settingsData.permissionMode = draft.permissionMode;
-        }
-      });
-      get().showNotice('权限模式已切换为「' + permissionLabel(next) + '」');
-    } catch (error) {
-      get().showNotice('保存权限模式失败：' + errorInfo(error).message);
-    }
-  },
-  /** 清除已保存的 API Key（后端独立接口，和「留空表示不改」区分开）。 */
-  async clearModelKey() {
-    return get().saveModel({}, { clearKey: true });
-  },
-  resetModelFeedback() {
-    if (!get().modelSave.busy) set((draft) => { draft.modelSave = { busy: false, message: '', error: false }; });
-  },
-  async saveModel(body, { clearKey = false } = {}) {
-    // 两个入口共用写入锁：慢请求期间关闭、重开表单也不能重复提交。
-    if (get().modelSave.busy) return false;
-    settingsLoadSequence++;
-    set((draft) => { draft.modelSave = { busy: true, message: clearKey ? '正在清除 API Key…' : '正在保存模型配置…', error: false }; });
-    try {
-      const result = clearKey ? await api.clearModelKey() : await api.saveModel(body);
-      if (typeof result?.model !== 'string' || typeof result?.modelEndpoint !== 'string') {
-        throw new Error('无法确认保存结果，请重新加载工作台核对配置');
-      }
-      const message = describeModelSaved(result, {
-        clearKey: clearKey || Boolean(body?.clearApiKey),
-        keyChanged: Boolean(String(body?.apiKey || '').trim())
-      });
-      // PUT / DELETE 已返回完整设置，无需等额外 GET 才显示新配置。
-      settingsLoadSequence++;
-      set((draft) => {
-        applySettings(draft, result);
-        if (draft.capabilities) draft.capabilities.model = result.model;
-        draft.modelSave = { busy: false, message, error: false };
-      });
-      get().showNotice(message);
-      return true;
-    } catch (error) {
-      const message = (clearKey ? '清除失败：' : '保存失败：') + (errorInfo(error).message || '无法连接服务，请检查网络后重试');
-      set((draft) => { draft.modelSave = { busy: false, message, error: true }; });
-      get().showNotice(message);
-      return false;
-    }
-  },
-  async probeModels(body) {
-    return api.probeModels(body);
-  },
+  ...createModelSettingsActions({ set, get }),
+
   /**
    * 技能清单。
    *
@@ -2567,9 +1959,4 @@ export { closeStreams };
 /** 浏览器计时器是数字，Node 测试计时器可主动释放事件循环。 */
 function unrefTimer(timer: number | { unref?: () => void }) {
   if (typeof timer === 'object') timer.unref?.();
-}
-
-function requireData<T>(value: T | null): T {
-  if (value === null) throw new Error('服务端返回空响应，请刷新后重试');
-  return value;
 }
