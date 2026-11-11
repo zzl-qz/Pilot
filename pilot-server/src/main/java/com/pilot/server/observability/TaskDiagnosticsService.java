@@ -9,11 +9,17 @@ import java.util.stream.Collectors;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.EventEnvelope;
+import com.pilot.core.event.RunCancelled;
+import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunRetrying;
+import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.ToolCompleted;
+import com.pilot.core.event.ToolStarted;
 import com.pilot.core.model.RequestTotals.Summary;
 import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.Session;
@@ -36,8 +42,9 @@ public class TaskDiagnosticsService {
 
     /**
      * @param retryReason   正在重试的原因；没有重试时为空串
-     * @param leaseState    租约状态；没有活跃检查点时为「无」
-     * @param validationHint 完成声明的证据是否覆盖当前产物
+     * @param leaseState    租约状态；没有检查点时为「无」
+     * @param activeRunId   最近一次运行的标识，保留终态便于诊断
+     * @param elapsedSeconds 距离最近检查点心跳的秒数，不是模型生成耗时
      */
     public record Diagnostics(String sessionId, String sessionStatus, String activeRunId, String instanceId,
         String phase, int step, String lastSuccessfulStep, String nextAction, String leaseState, Long retryAttempt,
@@ -75,16 +82,28 @@ public class TaskDiagnosticsService {
     public Diagnostics diagnose(String sessionId) {
         Session session = sessions.find(sessionId).orElse(null);
         List<EventEnvelope> events = sessions.events(sessionId);
-        RunCheckpoint checkpoint = runStates.current(sessionId).orElse(null);
-        RunUsageUpdated usage = last(events, RunUsageUpdated.class);
-        RunRetrying retrying = last(events, RunRetrying.class);
-        ToolCompleted lastTool = last(events, ToolCompleted.class);
+        String latestRunId = latestRunId(events);
+        RunCheckpoint checkpoint = latestRunId == null ? runStates.current(sessionId).orElse(null)
+            : runStates.checkpoint(latestRunId).orElse(null);
+        String runId = latestRunId != null ? latestRunId : checkpoint == null ? null : checkpoint.runId();
+        List<EventEnvelope> currentEvents =
+            runId == null ? List.of() : events.stream().filter(event -> runId.equals(event.runId())).toList();
+        RunUsageUpdated usage = last(currentEvents, RunUsageUpdated.class);
+        RunRetrying retrying = currentRetry(currentEvents);
+        ToolCompleted lastTool = last(currentEvents, ToolCompleted.class);
         RecoveryReportService.Snapshot recovered = recovery.latest();
 
-        List<CommandView> commands = commandTasks.getIfAvailable() == null ? List.of() : commandTasks.getIfAvailable()
-            .list(sessionId).stream()
-            .map(task -> new CommandView(task.taskId(), Redaction.text(task.command()), task.status(), task.exitCode(),
-                task.startedAt() == null ? null : Duration.between(task.startedAt(), Instant.now()).toSeconds()))
+        List<CommandView> commands = commandTasks.getIfAvailable() == null ? List.of() : commandTasks
+            .getIfAvailable().list(
+                sessionId)
+            .stream()
+            .map(
+                task -> new CommandView(task.taskId(), Redaction.text(task.command()), task.status(), task.exitCode(),
+                    task.startedAt() == null ? null
+                        : Math
+                            .max(0,
+                                Duration.between(task.startedAt(),
+                                    task.finishedAt() == null ? Instant.now() : task.finishedAt()).toSeconds())))
             .toList();
 
         // 账本按写入顺序保留旧到新的证据，与 ValidationLedger.report 的选取保持一致。
@@ -95,7 +114,7 @@ public class TaskDiagnosticsService {
         ValidationLedger.Report report = validations.report(sessionId, currentCandidate);
 
         return new Diagnostics(sessionId, session == null ? "MISSING" : session.status().name(),
-            checkpoint == null ? null : Redaction.text(checkpoint.runId()), runStates.instanceId(),
+            runId == null ? null : Redaction.text(runId), runStates.instanceId(),
             checkpoint == null ? "" : checkpoint.phase(), checkpoint == null ? 0 : checkpoint.step(),
             Redaction.text(checkpoint == null ? "" : nullToEmpty(checkpoint.lastSuccessfulStep())),
             Redaction.text(checkpoint == null ? "" : nullToEmpty(checkpoint.nextAction())), leaseState(checkpoint),
@@ -151,6 +170,30 @@ public class TaskDiagnosticsService {
         for (int index = events.size() - 1; index >= 0; index--) {
             if (type.isInstance(events.get(index).payload())) {
                 return type.cast(events.get(index).payload());
+            }
+        }
+        return null;
+    }
+
+    private static String latestRunId(List<EventEnvelope> events) {
+        for (int index = events.size() - 1; index >= 0; index--) {
+            EventEnvelope event = events.get(index);
+            if (event.payload() instanceof RunStarted && event.runId() != null && !event.runId().isBlank()) {
+                return event.runId();
+            }
+        }
+        return null;
+    }
+
+    private static RunRetrying currentRetry(List<EventEnvelope> events) {
+        for (int index = events.size() - 1; index >= 0; index--) {
+            SessionEvent event = events.get(index).payload();
+            if (event instanceof RunRetrying retrying) {
+                return retrying;
+            }
+            if (event instanceof ToolStarted || event instanceof ToolCompleted || event instanceof AssistantDelta
+                || event instanceof RunCompleted || event instanceof RunFailed || event instanceof RunCancelled) {
+                return null;
             }
         }
         return null;
