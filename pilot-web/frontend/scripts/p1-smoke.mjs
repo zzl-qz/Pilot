@@ -78,12 +78,12 @@ if(process.argv.includes('--production')) {
   await cp(join(root,'../src/main/resources/static/fonts'),join(output,'fonts'),{recursive:true});
   const production = await preview({root,build:{outDir:output},preview:{host:'127.0.0.1',port:0,proxy:{}}});
   server = {httpServer:production.httpServer,listen:async()=>{},close:()=>new Promise(resolve=>production.httpServer.close(resolve))};
-} else server = await createServer({root,server:{host:'127.0.0.1',port:0,proxy:{}},plugins:[{name:'p1-fixture',configureServer(server){server.middlewares.use('/__p1',async(req,res)=>{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__p1',fixture));});}}]});
+} else server = await createServer({root,cacheDir:join(output,'vite-cache'),server:{host:'127.0.0.1',port:0,proxy:{}},plugins:[{name:'p1-fixture',configureServer(server){server.middlewares.use('/__p1',async(req,res)=>{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__p1',fixture));});}}]});
 let browser, electron;
 async function run(page,name,url) {
   page.setDefaultTimeout(10000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setViewportSize({width:1440,height:900});await page.goto(url);
-  await page.waitForFunction(()=>calls.some(c=>c.kind==='migration'));await page.locator('.thread-nav-tick.is-saved').waitFor();
+  await page.waitForFunction(()=>window.calls?.some(c=>c.kind==='migration'));await page.locator('.thread-nav-tick.is-saved').waitFor();
   assert.equal(await page.evaluate(()=>localStorage.getItem('pilot.message-bookmarks:source')),null);
   assert.ok(await page.evaluate(()=>localStorage.getItem('pilot.message-bookmarks:source:migration-backup')));
   await openGlobalFunction(page, '定时任务');await page.getByRole('button',{name:'新建任务',exact:true}).click();

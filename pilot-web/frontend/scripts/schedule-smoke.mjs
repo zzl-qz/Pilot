@@ -44,7 +44,7 @@ if(process.argv.includes('--production')) {
   await cp(join(root,'../src/main/resources/static/fonts'),join(output,'fonts'),{recursive:true});
   const production = await preview({root,build:{outDir:output},preview:{host:'127.0.0.1',port:0,proxy:{}}});
   server = {httpServer:production.httpServer,listen:async()=>{},close:()=>new Promise(resolve=>production.httpServer.close(resolve))};
-} else server = await createServer({root,server:{host:'127.0.0.1',port:0,proxy:{}},plugins:[{name:'schedule-fixture',configureServer(server){server.middlewares.use('/__schedules',async(req,res)=>{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__schedules',fixture));});}}]});
+} else server = await createServer({root,cacheDir:join(output,'vite-cache'),server:{host:'127.0.0.1',port:0,proxy:{}},plugins:[{name:'schedule-fixture',configureServer(server){server.middlewares.use('/__schedules',async(req,res)=>{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__schedules',fixture));});}}]});
 let browser, electron;
 async function run(page, name, url) {
   page.setDefaultTimeout(8000); const errors=[]; page.on('pageerror',e=>errors.push(e.message));
