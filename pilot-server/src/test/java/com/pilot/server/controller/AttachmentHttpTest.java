@@ -41,14 +41,18 @@ class AttachmentHttpTest {
         byte[] body =
             ("{\"content\":\"" + "x".repeat((int)limits.maxRequestBytes()) + "\"}").getBytes(StandardCharsets.UTF_8);
         try (HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build()) {
-            for (boolean chunked : new boolean[] {false, true}) {
-                var publisher = chunked ? HttpRequest.BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(body))
-                    : HttpRequest.BodyPublishers.ofByteArray(body);
-                HttpRequest request = HttpRequest
-                    .newBuilder(URI.create("http://127.0.0.1:" + port + "/api/sessions/test/messages"))
-                    .timeout(Duration.ofSeconds(10)).header("Content-Type", "application/json").POST(publisher).build();
-                assertEquals(413, client.send(request, HttpResponse.BodyHandlers.ofString()).statusCode(),
-                    "chunked=" + chunked);
+            for (String route : new String[] {"messages", "%6dessages"}) {
+                for (boolean chunked : new boolean[] {false, true}) {
+                    var publisher =
+                        chunked ? HttpRequest.BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(body))
+                            : HttpRequest.BodyPublishers.ofByteArray(body);
+                    HttpRequest request =
+                        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/sessions/test/" + route))
+                            .timeout(Duration.ofSeconds(10)).header("Content-Type", "application/json").POST(publisher)
+                            .build();
+                    assertEquals(413, client.send(request, HttpResponse.BodyHandlers.ofString()).statusCode(),
+                        "route=" + route + ", chunked=" + chunked);
+                }
             }
         }
     }

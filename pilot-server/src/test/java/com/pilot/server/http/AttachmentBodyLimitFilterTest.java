@@ -145,4 +145,14 @@ class AttachmentBodyLimitFilterTest {
         request.setContent(new byte[contentLength]);
         return request;
     }
+
+    @Test
+    void limitsDecodedServletPathEvenWhenRequestUriIsEncoded() throws Exception {
+        MockHttpServletRequest request = post("/api/sessions/s/%6dessages", 50_000_000);
+        request.setServletPath("/api/sessions/s/messages");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        new AttachmentBodyLimitFilter(limits).doFilter(request, response, (req, res) -> {
+        });
+        assertEquals(413, response.getStatus());
+    }
 }
