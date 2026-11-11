@@ -110,6 +110,12 @@ public class ScheduleService {
         return repository.find(id).orElseThrow(() -> new IllegalArgumentException("定时任务不存在"));
     }
 
+    /** 取消和超时先写终态，再请求异步停止；旧运行退出前不能启动下一轮。 */
+    synchronized boolean occurrenceFinished(String id) {
+        var job = get(id);
+        return TERMINAL.contains(job.state()) && runs.activeRun(job.sessionId()).isEmpty();
+    }
+
     public synchronized ScheduledTask create(Create request) {
         return createOccurrence(request, "schedule_" + UUID.randomUUID());
     }

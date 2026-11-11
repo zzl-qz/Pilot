@@ -220,11 +220,8 @@ public class RecurringScheduleService {
         if (row.nextAt().isAfter(now)) {
             return;
         }
-        if (row.activeId() != null) {
-            var current = schedules.get(row.activeId());
-            if (!Set.of("COMPLETED", "CANCELLED", "NEEDS_ATTENTION").contains(current.state())) {
-                return;
-            }
+        if (row.activeId() != null && !schedules.occurrenceFinished(row.activeId())) {
+            return;
         }
         var next = CronExpression.parse(row.cron()).next(now.atZone(ZoneId.of(row.timezone())));
         if (next == null) {

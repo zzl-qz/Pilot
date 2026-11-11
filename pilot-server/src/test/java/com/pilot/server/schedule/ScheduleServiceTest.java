@@ -28,6 +28,8 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mockito;
 
 import com.pilot.core.event.RunStarted;
@@ -400,6 +402,51 @@ class ScheduleServiceTest {
         assertEquals(job, service.get(key));
     }
 
+    @ParameterizedTest
+    @CsvSource({"cancel,ONCE", "cancel,SKIP", "deadline,ONCE", "deadline,SKIP"})
+    void recurringWaitsForWorkerExitAfterCancellationOrDeadline(String stop, String misfire) {
+        runner.delayStop = true;
+        var recurring = recurring();
+        var plan = series(recurring, misfire);
+        clock.at = plan.nextAt();
+        recurring.tick();
+        var first = service.get(recurring.get(plan.id()).activeId());
+        clock.at = first.runAt();
+        service.tick();
+        assertEquals(1, runner.starts);
+        if ("cancel".equals(stop)) {
+            service.control(first.id(), "cancel", null);
+            clock.at = recurring.get(plan.id()).nextAt();
+            assertEquals(1, runner.cancels);
+        } else {
+            clock.at = service.get(first.id()).deadline();
+            service.tick();
+            assertEquals("NEEDS_ATTENTION", service.get(first.id()).state());
+            assertEquals(1, runner.pauses);
+        }
+        assertTrue(runner.activeRun(first.sessionId()).isPresent());
+        var paused = recurring.control(plan.id(), recurring.get(plan.id()).version(), "pause");
+        recurring.control(plan.id(), paused.version(), "resume");
+        for (int i = 0; i < 3; i++) {
+            recurring.tick();
+            service.tick();
+        }
+        assertEquals(1, recurring.get(plan.id()).occurrences(), "请求停止不等于旧任务已经退出");
+        assertEquals(1, runner.starts);
+        runner.active.clear();
+        recurring.tick();
+        if ("SKIP".equals(misfire) && "deadline".equals(stop)) {
+            assertEquals(1, recurring.get(plan.id()).occurrences());
+            clock.at = recurring.get(plan.id()).nextAt();
+            recurring.tick();
+        }
+        assertEquals(2, recurring.get(plan.id()).occurrences());
+        clock.at = service.get(recurring.get(plan.id()).activeId()).runAt();
+        service.tick();
+        assertEquals(2, runner.starts);
+        assertEquals(1, runner.active.size(), "旧运行退出后才能启动下一轮");
+    }
+
     @Test
     void cronPreviewUsesNamedTimezoneRejectsDstGapAndTemplatesUseVersionedSnapshots() {
         var r = recurring();
@@ -442,6 +489,7 @@ class ScheduleServiceTest {
         int resumes;
         int pauses;
         int cancels;
+        boolean delayStop;
 
         public Optional<String> activeRun(String session) {
             return Optional.ofNullable(active.get(session));
@@ -485,13 +533,17 @@ class ScheduleServiceTest {
             String id =
                 active.entrySet().stream().filter(e -> e.getValue().equals(run)).findFirst().orElseThrow().getKey();
             tasks.status(id, "PAUSED");
-            abandon(run);
+            if (!delayStop) {
+                abandon(run);
+            }
             return true;
         }
 
         public boolean cancel(String run) {
             cancels++;
-            abandon(run);
+            if (!delayStop) {
+                abandon(run);
+            }
             return true;
         }
     }
