@@ -1,5 +1,7 @@
 /** 对照 pilot-desktop/preload.cjs 和 main.mjs 的隔离桌面桥。 */
 export interface DesktopAction { ok: boolean; error?: string; text?: string; url?: string }
+/** 本机目录多选结果：取消时 canceled=true、paths 为空；远程服务或弹框失败时返回 code/message。 */
+export interface SelectDirectoriesResult { ok: boolean; canceled?: boolean; paths?: string[]; code?: string; message?: string }
 export interface BrowserRecent { url: string; title?: string; favicon?: string }
 export interface BrowserEmulation { width: number; height: number }
 export interface DesktopBrowserTab extends BrowserRecent { id: string; loading?: boolean; sessionId?: string | null; detached?: boolean; emulated?: BrowserEmulation | null }
@@ -13,6 +15,8 @@ export interface DesktopBridge {
   reloadWorkbench(): Promise<DesktopAction>;
   onWorkbenchCommand(callback: (command: string) => void): () => void;
   copyPairingCode(code: string): Promise<DesktopAction>;
+  /** 旧版桌面桥没有此方法，调用前需可选判断；远程服务下返回 code=REMOTE_WORKBENCH。 */
+  selectDirectories?(): Promise<SelectDirectoriesResult>;
   onMobileConnection(callback: () => void): () => void;
   openMobileConnection(): Promise<DesktopAction>;
   ensureTab(sessionId: string | null): Promise<DesktopBrowserState>;

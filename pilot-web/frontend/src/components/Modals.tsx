@@ -8,6 +8,7 @@ import { Button } from '@astryxdesign/core/Button';
 import { TextArea } from '@astryxdesign/core/TextArea';
 import { TextInput } from '@astryxdesign/core/TextInput';
 import { Modal } from './Modal.jsx';
+import { ProjectEditor } from './ProjectEditor.jsx';
 import { SettingsModal } from './Settings.jsx';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
@@ -301,66 +302,6 @@ function WorkspacePicker() {
       </li>)}
       {!busy && !error && !entries.length && directory && <li className="panel-empty">这个文件夹没有子目录，可以直接选择。</li>}
     </ul>
-  </Modal>;
-}
-
-/* ---------- 项目编辑 ---------- */
-
-function ProjectEditor() {
-  const editor = useStore(state => state.ui.projectEditor);
-  const project = useStore(state => state.projects.find(item => item.id === state.ui.projectEditor?.id));
-  const [name, setName] = useState(editor?.name ?? project?.name ?? '');
-  const [folders, setFolders] = useState((editor?.folders ?? project?.folders ?? []).join('\n'));
-  const [busy, setBusy] = useState('');
-  const [error, setError] = useState('');
-  const close = () => useStore.getState().setUi({ projectEditor: null });
-
-  async function update(kind: 'save' | 'delete') {
-    if (busy) return;
-    setBusy(kind);
-    setError('');
-    const list = folders.split('\n').map(line => line.trim()).filter(Boolean);
-    try {
-      if (kind === 'delete' && editor?.id) {
-        await api.deleteProject(editor.id);
-      } else if (editor?.id) {
-        await api.renameProject(editor.id, { name });
-        await api.saveProjectFolders(editor.id, list);
-      } else {
-        await api.createProject({ name, folders: list });
-      }
-      await useStore.getState().loadProjects();
-      if (useStore.getState().ui.projectEditor === editor) close();
-    } catch (failure) {
-      setError(errorInfo(failure).message || '无法更新项目，请重试。');
-    } finally {
-      setBusy('');
-    }
-  }
-
-  return <Modal id="project-modal" title={editor?.id ? '编辑项目' : '新建项目'} onClose={close} dismissible={!busy}>
-    <form className="pilot-form" onSubmit={event => {
-      event.preventDefault();
-      if (name.trim()) void update('save');
-    }} onKeyDown={event => {
-      if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault();
-    }}>
-      <TextInput id="project-name" label="项目名称" width="100%" size="lg" value={name} isDisabled={Boolean(busy)} onChange={setName} />
-      <TextArea id="project-folders" label="绑定文件夹" description="每行一个绝对路径。对话按工作区路径归组到项目。"
-        value={folders} onChange={setFolders} rows={3} width="100%" isDisabled={Boolean(busy)} hasSpellCheck={false} />
-      {error && <p className="pilot-inline-status" role="alert">{error}</p>}
-      <footer className="modal-foot">
-        {editor?.id && <Button id="project-delete" variant="ghost" className="pilot-danger" label={busy === 'delete' ? '删除中…' : '删除项目'}
-          isDisabled={Boolean(busy)} onClick={() => useStore.getState().askConfirm({
-            title: '删除项目',
-            message: `确定删除项目「${project?.name || name}」吗？`,
-            confirmText: '删除',
-            danger: true,
-            onConfirm: () => update('delete')
-          })} />}
-        <Button id="project-save" type="submit" variant="primary" label={busy === 'save' ? '保存中…' : '保存'} isDisabled={Boolean(busy) || !name.trim()} />
-      </footer>
-    </form>
   </Modal>;
 }
 

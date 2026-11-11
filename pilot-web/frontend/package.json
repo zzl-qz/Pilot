@@ -21,6 +21,7 @@
     "test:navigation": "node scripts/navigation-smoke.mjs",
     "test:scroll": "node scripts/thread-scroll-smoke.mjs",
     "test:sessions": "node scripts/session-management-smoke.mjs",
+    "test:project-folders": "node --import ./scripts/register-typescript.mjs --test scripts/project-folders.test.mjs && node scripts/project-folders-smoke.mjs",
     "test:style": "node scripts/workbench-style-smoke.mjs",
     "test:products": "node scripts/work-products-smoke.mjs",
     "test:recovery": "node scripts/sandbox-recovery-smoke.mjs",

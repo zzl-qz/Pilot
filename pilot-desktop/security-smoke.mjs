@@ -36,6 +36,7 @@ const invokeCases=[
   ['pilot-browser-close','fixture'],['pilot-browser-select','fixture'],['pilot-browser-detach'],['pilot-browser-menu'],
   ['pilot-browser-find','fixture'],['pilot-browser-logs',false],['pilot-browser-devtools'],['pilot-browser-pick'],
   ['pilot-browser-reset-emulation'],['pilot-workbench-reload'],['pilot-mobile-open'],['pilot-mobile-copy','invalid'],
+  ['pilot:select-directories'],
 ];
 const probe=join(temp,'probe.cjs');
 await writeFile(probe,`const {contextBridge,ipcRenderer}=require('electron');const events=[];for(const channel of ['pilot-browser-log','pilot-browser-state','pilot-browser-download'])ipcRenderer.on(channel,()=>events.push(channel));contextBridge.exposeInMainWorld('ipcProbe',{invoke:(channel,...args)=>ipcRenderer.invoke(channel,...args),send:(channel,value)=>ipcRenderer.send(channel,value),events:()=>events});`);
@@ -45,7 +46,7 @@ async function denies(target,label){
   const results=await target.evaluate(async cases=>{const result=[];for(const [name,...args] of cases)result.push(await ipcProbe.invoke(name,...args));return result;},invokeCases);
   for(const result of results)assert.equal(result.code,'UNTRUSTED_WORKBENCH',label);
   await target.evaluate(()=>{ipcProbe.send('pilot-browser-workspace','forbidden-workspace');ipcProbe.send('pilot-browser-bounds',{visible:true,x:0,y:0,width:900,height:700});ipcProbe.send('pilot-workbench-ready');});
-  passed.push(label+': all 16 invoke channels denied');
+  passed.push(label + ': all 17 invoke channels denied');
 }
 try{
   desktop=await _electron.launch({chromiumSandbox:true,executablePath:prepareDevelopmentHost(),args:[root,`--user-data-dir=${join(temp,'profile')}`],env,timeout:20000});
@@ -56,6 +57,23 @@ try{
   assert.equal(await page.evaluate(()=>typeof pilotDesktop.logs),'function');
   await page.evaluate(async()=>{pilotDesktop.setWorkspace('security-workspace');await pilotDesktop.ensureTab('security');});
   passed.push('trusted main frame: bridge and browser controls available');
+
+  // 真实 preload/IPC 往返；只替换系统弹框，避免自动化弹出阻塞式原生窗口。
+  await desktop.evaluate(({dialog})=>{
+    process._pilotDirectoryCalls=[];
+    dialog.showOpenDialog=async(parent,options)=>{
+      process._pilotDirectoryCalls.push({parentId:parent.id,properties:options.properties});
+      if(process._pilotDirectoryMode==='error')throw Error('fixture dialog failure');
+      return {canceled:process._pilotDirectoryMode==='cancel',filePaths:['/fixture/中文 空间','/fixture/second']};
+    };
+  });
+  assert.deepEqual(await page.evaluate(()=>pilotDesktop.selectDirectories()),{ok:true,canceled:false,paths:['/fixture/中文 空间','/fixture/second']});
+  assert.deepEqual(await desktop.evaluate(()=>process._pilotDirectoryCalls[0].properties),['openDirectory','multiSelections']);
+  await desktop.evaluate(()=>process._pilotDirectoryMode='cancel');
+  assert.deepEqual(await page.evaluate(()=>pilotDesktop.selectDirectories()),{ok:true,canceled:true,paths:[]});
+  await desktop.evaluate(()=>process._pilotDirectoryMode='error');
+  assert.equal((await page.evaluate(()=>pilotDesktop.selectDirectories())).code,'DIALOG_FAILED');
+  passed.push('trusted directory picker: multiple paths, cancellation and visible dialog failure');
 
   for(const name of ['child','opaque']){
     const frame=page.frame({name});assert.ok(frame,name);
@@ -103,7 +121,8 @@ try{
   await desktop.evaluate(async({webContents},{id,filePath,url})=>{const c=webContents.fromId(id);c.session.registerPreloadScript({type:'frame',filePath});await c.loadURL(url);},{id:contentsId,filePath:probe,url:other+'/tab'});
   const guestResults=await desktop.evaluate(async({webContents},{id,cases})=>webContents.fromId(id).executeJavaScript(`Promise.all(${JSON.stringify(cases)}.map(([name,...args])=>ipcProbe.invoke(name,...args)))`),{id:contentsId,cases:invokeCases});
   for(const value of guestResults)assert.equal(value.code,'UNTRUSTED_WORKBENCH');
-  passed.push('ordinary browser view: all 16 invoke channels denied');
+  passed.push('ordinary browser view: all 17 invoke channels denied');
+  assert.equal(await desktop.evaluate(()=>process._pilotDirectoryCalls.length),3,'不可信 IPC 不得触发目录弹框');
   const isolated=await desktop.evaluate(({webContents,session},{id,partition})=>webContents.fromId(id).session===session.fromPartition(partition),{id:contentsId,partition:partitionName('security-workspace')});
   assert.equal(isolated,true,'不可信单向消息不能更改工作区分区');
 

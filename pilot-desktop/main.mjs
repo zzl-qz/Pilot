@@ -1,3 +1,4 @@
+import { selectProjectDirectories } from './directory-picker.mjs';
 import { installMicrophonePermissions } from './media-permission.mjs';
 import { workbenchOrigin, workbenchIpc, installWorkbenchNavigation } from './workbench-security.mjs';
 import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, nativeImage, systemPreferences, dialog, clipboard } from 'electron';
@@ -740,6 +741,9 @@ workbench.handle('pilot-mobile-copy', async (event, code) => {
     return { ok: true };
   } catch { return { ok: false }; }
 });
+
+// workbench.handle 在打开弹框前和返回后都检查主窗口、主框架与 origin。
+workbench.handle('pilot:select-directories', () => selectProjectDirectories({ origin, parent: shell, dialog }));
 
 function installMenu() {
   if (smoke) return;
