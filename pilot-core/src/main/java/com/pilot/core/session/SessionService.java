@@ -247,8 +247,8 @@ public final class SessionService {
                 if (session.status().terminal()) {
                     return;
                 }
-                var latest = repository.eventsPage(sessionId, null, 1);
-                if (latest.isEmpty() || !latest.getLast().runId().equals(runId)) {
+                var latest = repository.latestEvent(sessionId);
+                if (latest.isEmpty() || !latest.get().runId().equals(runId)) {
                     return;
                 }
             }
@@ -526,15 +526,14 @@ public final class SessionService {
                 throw new IllegalStateException("事件流连接数量已达上限");
             }
             try {
+                var latest = repository.latestEvent(sessionId);
+                long highWater = latest.map(SessionRepository.EventPosition::sequence).orElse(0L);
                 delivery = new EventDelivery(sessionId, listener, references, onClosed, Math.max(0, afterSequence),
-                    repository.latestSequence(sessionId), revision, snapshots,
+                    highWater, revision, snapshots,
                     snapshots == null ? null
-                        : liveOutputs.snapshot(sessionId,
-                            repository.eventsPage(sessionId, null, 1).stream().map(EventEnvelope::runId).findFirst()
-                                .orElse(""),
-                            repository.latestSequence(sessionId), revision,
-                            !repository.find(sessionId).orElseThrow().status().terminal()
-                                && repository.latestSequence(sessionId) > 0));
+                        : liveOutputs.snapshot(sessionId, latest.map(SessionRepository.EventPosition::runId).orElse(""),
+                            highWater, revision,
+                            highWater > 0 && !repository.find(sessionId).orElseThrow().status().terminal()));
             } catch (RuntimeException failure) {
                 workers.decrementAndGet();
                 throw failure;

@@ -62,6 +62,7 @@ class HistoryTransactionTest {
             memory.save(id, List.of());
             plans.delete(id);
         }));
+        assertEquals(1, sessions.latestSequence(id));
         assertEquals(1, sessions.historyRevision(id));
         assertEquals(1, sessions.find(id).orElseThrow().historyRevision());
         assertEquals(SessionStatus.RUNNING, sessions.find(id).orElseThrow().status());
@@ -73,6 +74,29 @@ class HistoryTransactionTest {
         assertThrows(SessionService.HistoryChangedException.class,
             () -> sessions.editHistory(id, 1, 0L, () -> changed.set(true)));
         assertFalse(changed.get());
+        sessions.dropEventsFrom(id, 1);
+        assertEquals(0, sessions.latestSequence(id));
+        assertTrue(repository.latestEvent(id).isEmpty());
+        sessions.sendMessage(id, "清空后再发");
+        assertEquals(4, sessions.events(id).getLast().sequence());
+    }
+
+    @Test
+    void replayBoundaryDoesNotDecodeTheLastPayload() throws Exception {
+        var store = new SqliteStore(directory.resolve("metadata.db"));
+        var repository = new JdbcSessionRepository(store, new EventCodec(JsonMapper.builder().build()));
+        var service = new SessionService(Clock.systemUTC(), repository);
+        String id = service.createSession("元数据").id();
+        String run = service.sendMessage(id, "开始").runId();
+        try (var connection = store.open();
+            var statement = connection.prepareStatement("UPDATE events SET payload = ? WHERE session_id = ?")) {
+            statement.setString(1, "{\"input\":{}}");
+            statement.setString(2, id);
+            statement.executeUpdate();
+        }
+        assertEquals(1, service.latestSequence(id));
+        assertEquals(run, repository.latestEvent(id).orElseThrow().runId());
+        assertThrows(RuntimeException.class, () -> repository.replayPage(id, 0, 1, 1));
     }
 
     @Test

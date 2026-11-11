@@ -247,10 +247,11 @@ public final class JdbcSessionRepository implements SessionRepository {
     }
 
     @Override
-    public long latestSequence(String sessionId) {
-        return JdbcSupport.query(store, "SELECT sequence FROM sessions WHERE id = ?",
-            statement -> statement.setString(1, sessionId), rows -> rows.getLong(1), "读取会话序号失败: " + sessionId).stream()
-            .findFirst().orElse(0L);
+    public Optional<EventPosition> latestEvent(String sessionId) {
+        return JdbcSupport.queryOne(store,
+            "SELECT sequence, run_id FROM events WHERE session_id = ? ORDER BY sequence DESC LIMIT 1",
+            statement -> statement.setString(1, sessionId),
+            rows -> new EventPosition(rows.getLong(1), rows.getString(2)), "读取会话事件边界失败: " + sessionId);
     }
 
     @Override

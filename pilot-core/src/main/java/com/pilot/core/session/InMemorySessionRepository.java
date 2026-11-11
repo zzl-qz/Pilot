@@ -234,13 +234,17 @@ public class InMemorySessionRepository implements SessionRepository {
     }
 
     @Override
-    public long latestSequence(String sessionId) {
+    public Optional<EventPosition> latestEvent(String sessionId) {
         State state = sessionId == null ? null : sessions.get(sessionId);
         if (state == null) {
-            return 0;
+            return Optional.empty();
         }
         synchronized (state) {
-            return state.sequence;
+            if (state.events.isEmpty()) {
+                return Optional.empty();
+            }
+            EventEnvelope event = state.events.getLast();
+            return Optional.of(new EventPosition(event.sequence(), event.runId()));
         }
     }
 

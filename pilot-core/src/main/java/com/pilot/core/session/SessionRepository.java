@@ -130,7 +130,18 @@ public interface SessionRepository {
     }
 
     /** 当前已落库的最大序号。还没有事件时返回 0。 */
-    long latestSequence(String sessionId);
+    default long latestSequence(String sessionId) {
+        return latestEvent(sessionId).map(EventPosition::sequence).orElse(0L);
+    }
+
+    /** 捕获回放边界时只读尾部元数据；与分配新事件的递增计数器分开。 */
+    record EventPosition(long sequence, String runId) {
+    }
+
+    default Optional<EventPosition> latestEvent(String sessionId) {
+        return eventsPage(sessionId, null, 1).stream().findFirst()
+            .map(event -> new EventPosition(event.sequence(), event.runId()));
+    }
 
     /**
      * 跨会话取某类型的事件（用量聚合等全库视角用），按时间升序。

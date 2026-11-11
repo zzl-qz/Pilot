@@ -134,6 +134,35 @@ class LiveOutputTest {
     }
 
     @Test
+    void truncatedHistorySnapshotUsesRemainingCursorAndNeverReusesSequence() throws Exception {
+        var service = service(4096, 8);
+        var id = service.createSession("截断恢复").id();
+        var run = service.sendMessage(id, "开始").runId();
+        service.publish(id, run, new AssistantDelta("删除的尾部"));
+        service.editHistory(id, 2, 0L, () -> {
+        });
+        var first = new CompletableFuture<LiveOutput>();
+        try (var sub = service.subscribe(id, 0, 1L, event -> {
+        }, null, first::complete, () -> {
+        })) {
+            assertEquals(1, first.get(3, TimeUnit.SECONDS).baseSequence());
+        }
+        service.editHistory(id, 1, 1L, () -> {
+        });
+        var empty = new CompletableFuture<LiveOutput>();
+        try (var sub = service.subscribe(id, 0, 2L, event -> {
+        }, null, empty::complete, () -> {
+        })) {
+            var state = empty.get(3, TimeUnit.SECONDS);
+            assertEquals(0, state.baseSequence());
+            assertTrue(state.complete());
+        }
+        service.sendMessage(id, "重新开始");
+        assertEquals(3, service.events(id).getLast().sequence());
+        service.delete(id);
+    }
+
+    @Test
     void globalCacheExhaustionIsExplicitAndDeletionReleasesIt() throws Exception {
         var service = service(24, 1);
         var a = service.createSession("A").id();
