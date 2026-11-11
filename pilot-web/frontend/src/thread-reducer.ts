@@ -604,6 +604,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
 
     case 'run.completed': {
       const turn = turnToClose(draft, event.runId);
+      draft.lastRunId = event.runId || draft.lastRunId;
       draft.running = false;
       draft.cancelling = false;
       draft.runStartedAt = 0;
@@ -633,6 +634,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
 
     case 'run.failed': {
       const turn = turnToClose(draft, event.runId);
+      draft.lastRunId = event.runId || draft.lastRunId;
       draft.running = false;
       draft.cancelling = false;
       draft.runStartedAt = 0;
@@ -674,6 +676,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       });
       if (live) {
         draft.ui.attentionKind = failure.resumable ? 'attention' : 'idle';
+        draft.runChangesFetch = event.runId;
       }
       record(draft, event, {
         kind: 'run', tone, status, title,
@@ -684,6 +687,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
 
     case 'run.cancelled': {
       const turn = turnToClose(draft, event.runId);
+      draft.lastRunId = event.runId || draft.lastRunId;
       draft.running = false;
       draft.cancelling = false;
       draft.runStartedAt = 0;
@@ -705,6 +709,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       draft.queueHeld = true;
       if (live) {
         draft.ui.attentionKind = 'idle';
+        draft.runChangesFetch = event.runId;
       }
       record(draft, event, { kind: 'run', tone: 'warn', status: '取消', title: '运行已取消', detail: event.payload?.reason || null });
       break;

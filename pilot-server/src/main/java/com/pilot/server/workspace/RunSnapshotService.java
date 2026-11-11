@@ -3,6 +3,8 @@ package com.pilot.server.workspace;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -32,6 +34,7 @@ import com.pilot.core.plan.PlanItem;
 import com.pilot.core.tool.CommandChangeTracker;
 import com.pilot.core.tool.SnapshotSink;
 import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.workspace.ChangeService.RunChangeReport;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -45,6 +48,7 @@ import tools.jackson.databind.ObjectMapper;
 public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     private static final Logger log = LoggerFactory.getLogger(RunSnapshotService.class);
     private static final String META_FILE = "meta.json";
+    private static final String CHANGES_FILE = "changes.json";
     /**
      * 超过这个大小的文件不做备份。整文件复制的代价是「每次运行 × 文件大小」，
      * 十几 GB 的日志/产物备份一遍就能把磁盘吃满；跳过时仍记录条目，
@@ -128,10 +132,10 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
 
     public void finish() {
         Context context = current.get();
-        if (context == null) {
+        if (context == null || context.finished) {
             return;
         }
-        boolean completed = true;
+        Set<String> unavailable = new LinkedHashSet<>();
         for (int i = 0; i < context.entries.size(); i++) {
             SnapshotEntry entry = context.entries.get(i);
             try {
@@ -142,12 +146,19 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                 context.entries.set(i,
                     new SnapshotEntry(entry.path(), entry.existed(), entry.originalHash(), completedHash));
             } catch (IOException e) {
-                completed = false;
+                unavailable.add(entry.path());
                 log.warn("读取 {} 的完成态指纹失败", entry.path(), e);
             }
         }
-        context.completed = completed;
-        persist(context);
+        context.completed = unavailable.isEmpty();
+        SnapshotMeta meta = persist(context);
+        context.finished = true;
+        try {
+            RunChangeReport changes = RunSnapshotDiff.capture(meta, context.directory().resolve("files"), unavailable);
+            writeContent(context.directory().resolve(CHANGES_FILE), mapper.writeValueAsBytes(changes));
+        } catch (IOException | RuntimeException e) {
+            log.warn("保存本轮差异失败 {}", context.runId, e);
+        }
     }
 
     public void clear() {
@@ -441,6 +452,20 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         }
     }
 
+    /** 按完成时的内容读取审阅补丁，旧快照没有这份记录。 */
+    public RunChangeReport changes(String runId) {
+        Path file = root.resolve(sanitize(runId)).resolve(CHANGES_FILE);
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+            return null;
+        }
+        try {
+            RunChangeReport report = mapper.readValue(Files.readString(file), RunChangeReport.class);
+            return runId.equals(report.runId()) ? report : null;
+        } catch (IOException e) {
+            throw new UncheckedIOException("读取本轮差异失败", e);
+        }
+    }
+
     public record RestorePreview(List<String> files, List<String> conflicts, List<String> unavailable, boolean ready) {
         public RestorePreview(List<String> files, List<String> conflicts, List<String> unavailable) {
             this(files, conflicts, unavailable, conflicts.isEmpty() && unavailable.isEmpty());
@@ -571,7 +596,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         return plan;
     }
 
-    private static boolean safePath(Path workspace, Path target) throws IOException {
+    static boolean safePath(Path workspace, Path target) throws IOException {
         if (!target.startsWith(workspace) || target.equals(workspace)) {
             return false;
         }
@@ -616,7 +641,11 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                 } catch (UnsupportedOperationException ignored) {
                 }
             }
-            Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            try {
+                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException | FileAlreadyExistsException e) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
         } finally {
             Files.deleteIfExists(temporary);
         }
@@ -652,7 +681,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         }
     }
 
-    private static String hash(byte[] content) {
+    static String hash(byte[] content) {
         if (content == null) {
             return null;
         }
@@ -704,13 +733,13 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         }
     }
 
-    private void persist(Context context) {
+    private SnapshotMeta persist(Context context) {
         Path directory = context.directory();
         try {
-            Files.createDirectories(directory);
             SnapshotMeta meta = new SnapshotMeta(context.runId, context.workspace.toString(),
                 List.copyOf(context.entries), context.completed, List.copyOf(context.conflicts));
-            Files.writeString(directory.resolve(META_FILE), mapper.writeValueAsString(meta));
+            writeContent(directory.resolve(META_FILE), mapper.writeValueAsBytes(meta));
+            return meta;
         } catch (IOException e) {
             throw new UncheckedIOException("写入快照元数据失败", e);
         }
@@ -727,6 +756,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         private final Set<String> recorded = new LinkedHashSet<>();
         private final List<SnapshotEntry> entries = new ArrayList<>();
         private boolean completed;
+        private boolean finished;
         private final Map<String, String> writtenHashes = new LinkedHashMap<>();
         private final Set<String> conflicts = new LinkedHashSet<>();
 

@@ -826,7 +826,12 @@ function ResultCard({ row, duplicate }: { row: ResultRow; duplicate: boolean }) 
               key={file.path}
               type="button"
               className={`change-file is-${statusKind(file.status)}`}
-              onClick={() => useStore.getState().openPreview(file.path)}
+              onClick={() => {
+                const state = useStore.getState();
+                const runId = row.runIds.at(-1);
+                if (runId) state.setUi({ inspectorOpen: true, inspectorTab: 'changes', reviewRunId: runId, changeView: file.path });
+                else state.openPreview(file.path);
+              }}
               title={changeFileTitle(file)}
             >
               <span className="change-file-path">{splitPath(file.path).name}</span>

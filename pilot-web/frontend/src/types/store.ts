@@ -29,7 +29,7 @@ export interface UiState {
   checkpointDialog: CheckpointDialog | null; confirm: ConfirmDialog | null;
   agentsDockOpen: boolean; queueCollapsed: boolean; queueEdit: number | null; draftFiles: DraftAttachment[];
   connection: { status: string; text: string }; bottomSignal: number; attentionKind: string; browserDot: boolean;
-  mirror: MirrorState; changeView: string | null; previewPath: string; browserStatus: BrowserStatus | null; usageDays: number;
+  mirror: MirrorState; changeView: string | null; reviewRunId: string | null; previewPath: string; browserStatus: BrowserStatus | null; usageDays: number;
   mobileConnectionOpen?: boolean; notificationsOpen?: boolean; recurringOpen?: boolean; resultsOpen?: boolean;
   schedulesOpen?: boolean; searchOpen?: boolean; composerEnabled?: boolean; resultUnread?: number;
   resultTarget?: string | null; scheduleTarget?: string | null; scheduleDraft?: string | null; scheduleRepeat?: boolean;

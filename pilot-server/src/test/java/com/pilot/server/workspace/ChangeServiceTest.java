@@ -358,6 +358,23 @@ class ChangeServiceTest {
         assertEquals(0, staged.removed());
     }
 
+    @Test
+    void supportsWorkspaceDiffInLinkedGitWorktree() throws IOException {
+        assumeTrue(git("--version"), "需要本机可用的 git");
+        git("init", "-q");
+        git("config", "core.autocrlf", "false");
+        Files.writeString(workspace.resolve("a.txt"), "old\n");
+        git("add", ".");
+        commit();
+        Path worktree = workspace.resolve("linked worktree");
+        assertTrue(git("worktree", "add", "--detach", worktree.toString(), "HEAD"));
+        assertTrue(Files.isRegularFile(worktree.resolve(".git")));
+        Files.writeString(worktree.resolve("a.txt"), "new\n");
+
+        assertTrue(changes.inspect(worktree).gitRepository());
+        assertTrue(changes.fileDiff(worktree, "a.txt").diff().contains("-old\n+new\n"));
+    }
+
     /** 变更面板的 +N −M 跟 git numstat 同一口径：暂存的新文件、未暂存的修改、未跟踪文件都要有行数。 */
     @Test
     void sessionReportCountsLineStatsLikeNumstat() throws IOException {

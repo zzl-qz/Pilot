@@ -3,7 +3,7 @@ import type { ChangeFile, ChangeReport, DiffFile } from '../types/core.js';
 import type { CommandTask } from '../types/store.js';
 import type { DesktopBridge, DesktopBrowserState, BrowserRecent } from '../types/desktop.js';
 import { errorInfo } from '../lib/errors.js';
-interface ReviewReport extends ChangeReport { diff?: string }
+interface ReviewReport extends ChangeReport { diff?: string; snapshot?: boolean }
 import { reviewQuote } from '../lib/interaction.js';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu';
@@ -353,17 +353,27 @@ function ApprovalInline({ callId }: { callId: string }) {
 function ChangesPanel() {
   const workspaceReport = useStore((state) => state.changeReport);
   const expanded = useStore(state => state.ui.reviewExpanded);
-  const lastRunId = useStore(state => state.lastRunId || state.runId);
-  const [scope, setScope] = useState('workspace');
-  const [runReport, setRunReport] = useState<ReviewReport | null>(null);
-  const [runError, setRunError] = useState('');
+  const lastRunId = useStore(state => state.running ? state.runId || state.lastRunId : state.lastRunId || state.runId);
+  const reviewRunId = useStore(state => state.ui.reviewRunId);
+  const activeRunId = useStore(state => state.running ? state.runId || state.lastRunId : null);
+  const [preferredScope, setPreferredScope] = useState('workspace');
+  const isGit = workspaceReport?.gitRepository !== false;
+  const runId = reviewRunId || lastRunId;
+  const scope = reviewRunId && reviewRunId !== lastRunId ? 'selected' : reviewRunId || !isGit ? 'run' : preferredScope;
+  const scoped = scope !== 'workspace';
+  const runActive = Boolean(runId && activeRunId === runId);
+  const [runReview, setRunReview] = useState<{ runId: string; epoch: number; report?: ReviewReport; error?: string } | null>(null);
   const [refresh, setRefresh] = useState(0);
-  const report = scope === 'run' ? runReport : workspaceReport;
   const state = useStore((state) => state.changesState);
   const sessionId = useStore((state) => state.sessionId);
   const view = useStore((state) => state.ui.changeView);
   const sessionEpoch = useStore(state => state.sessionEpoch);
   const workspace = useStore(state => state.workspace);
+  const currentReview = runReview?.runId === runId && runReview?.epoch === sessionEpoch && !runActive ? runReview : null;
+  const runReport = currentReview?.report;
+  const runError = currentReview?.error;
+  const report = scoped ? runReport ?? null : workspaceReport;
+  const loading = scoped ? Boolean(runId && !runActive && !currentReview) : state === 'loading';
   const [showUntracked, setShowUntracked] = useState(false);
   const [query, setQuery] = useState('');
   /** 单文件撤销的行内确认。 */
@@ -383,10 +393,15 @@ function ChangesPanel() {
     (sum, file) => ({ added: sum.added + Number(file.added || 0), removed: sum.removed + Number(file.removed || 0) }),
     { added: 0, removed: 0 }
   ), [tracked]);
-  const isGit = report?.gitRepository !== false;
   const empty = !files.length;
   const restoring = state === 'restoring';
-  const canUndo = scope === 'workspace' && isGit && !empty && state !== 'error';
+  const canUndo = !scoped && isGit && !empty && state !== 'error';
+
+  let emptyMessage = scoped && runReport?.snapshot ? '本轮没有改动' : '没有改动记录';
+  if (scoped && !runId) emptyMessage = '还没有运行记录';
+  if (scoped && runActive) emptyMessage = '本轮结束后显示逐行差异';
+  if (loading) emptyMessage = '读取中…';
+  if (scoped ? runError : state === 'error') emptyMessage = '变更读取失败';
 
   const keyword = query.trim().toLowerCase();
   const visibleTracked = keyword
@@ -405,18 +420,20 @@ function ChangesPanel() {
   }, [sessionId]);
 
   useEffect(() => {
-    setScope('workspace'); setRunReport(null); setRunError(''); setQuery(''); setConfirm(null);
+    setPreferredScope('workspace'); setRunReview(null); setQuery(''); setConfirm(null);
   }, [sessionId]);
   useEffect(() => {
-    if (scope !== 'run' || !lastRunId) return;
-    let alive = true; setRunReport(null); setRunError('');
-    api.runChanges(lastRunId).then(data => {
+    if (!scoped || !runId || runActive) return;
+    let alive = true;
+    setRunReview(null);
+    api.runChanges(runId).then(data => {
       if (!data) throw new Error('任务改动返回空响应');
-      if (alive && data.error) setRunError(data.error);
-      if (alive) setRunReport(data);
-    }).catch(() => { if (alive) setRunError('读取任务改动失败，请刷新重试'); });
+      if (alive) setRunReview({ runId, epoch: sessionEpoch, report: data, error: data.error || undefined });
+    }).catch(() => {
+      if (alive) setRunReview({ runId, epoch: sessionEpoch, error: '读取本轮改动失败，请刷新重试。' });
+    });
     return () => { alive = false; };
-  }, [scope, lastRunId, sessionId, refresh]);
+  }, [scoped, runId, runActive, sessionEpoch, refresh]);
 
   // 换了文件就把上一行的「确认撤销」收起来，免得确认框停在一个已经不显示的文件上
   useEffect(() => {
@@ -478,21 +495,26 @@ function ChangesPanel() {
     <div id="panel-changes" className={`panel${expanded ? ' is-expanded' : ''}`}>
       <div className="review-toolbar">
         <label>审阅范围 <select aria-label="审阅范围" value={scope} onChange={event => {
-          setScope(event.target.value); setConfirm(null); useStore.getState().setUi({ changeView: null });
+          setPreferredScope(event.target.value); setConfirm(null);
+          useStore.getState().setUi({ changeView: null, reviewRunId: null });
         }}>
-          <option value="workspace">工作区全部改动</option>
-          <option value="run" disabled={!lastRunId}>最近任务涉及的文件</option>
+          <option value="workspace" disabled={!isGit}>工作区全部改动</option>
+          <option value="run" disabled={isGit && !lastRunId}>最近一轮改动</option>
+          {scope === 'selected' && <option value="selected">所选轮次改动</option>}
         </select></label>
         <button type="button" className="btn" aria-pressed={expanded} onClick={() => useStore.getState().setUi({ reviewExpanded: !expanded })}>{expanded ? '退出全屏审阅' : '全屏审阅'}</button>
       </div>
-      <p className="review-scope-note">{scope === 'run' ? '仅筛选最近任务涉及的文件；差异仍相对 HEAD，可能包含你或其他任务的修改。' : '包含你和其他任务的未提交改动。'}</p>
-      {runError && scope === 'run' && <p role="alert">{runError}</p>}
-      {scope === 'run' && !runReport && !runError && <p role="status">正在读取任务改动…</p>}
+      {!scoped && <p className="review-scope-note">包含你和其他任务的未提交改动。</p>}
+      {scoped && runReport && !runReport.snapshot && files.length > 0 && <p className="review-scope-note">
+        {runReport.gitRepository ? '这轮没有保存逐行快照，差异仍相对 HEAD，可能包含本轮之外的修改。' : '这轮只有文件记录，无法查看逐行差异。'}
+      </p>}
+      {scoped && runError && <p role="alert">{runError}</p>}
+      {scoped && runReport?.truncated && <p className="changes-progress" role="status">本轮改动超过展示上限，部分文件或补丁已截断。</p>}
       <div className="changes-bar">
         <div className="changes-meta">
           {empty ? (
             <span id="changes-totals" className="changes-totals">
-              <span className="changes-count">{scope === 'workspace' && state === 'error' ? '变更读取失败' : scope === 'workspace' && state === 'loading' ? '读取中…' : isGit ? '没有改动' : '不是 git 仓库'}</span>
+              <span className="changes-count" role={loading ? 'status' : undefined}>{emptyMessage}</span>
             </span>
           ) : (
             <>
@@ -517,7 +539,7 @@ function ChangesPanel() {
         <ReviewActions
           key={`${sessionId}:${sessionEpoch}:${workspace}:${scope}`}
           files={files} isGit={isGit} canUndo={canUndo}
-          loading={state === 'loading'} restoring={restoring}
+          loading={loading} restoring={restoring}
           onRefresh={() => { useStore.getState().loadChanges(); setRefresh(value => value + 1); }}
         />
       </div>
@@ -538,7 +560,7 @@ function ChangesPanel() {
         </div>
       )}
       <div className="changes-body">
-        {state === 'loading' && empty && <p className="panel-empty change-empty">读取变更中…</p>}
+        {!scoped && state === 'loading' && empty && <p className="panel-empty change-empty">读取变更中…</p>}
         {!empty && (
           <div id="change-files" className="change-files">
             {visibleTracked.map((file) => (
@@ -594,9 +616,9 @@ function ChangesPanel() {
         {view
           ? (
             <DiffView
-              key={`${sessionId}:${scope}:${view}`}
+              key={`${sessionId}:${scope}:${runId}:${view}`}
               report={report}
-              scoped={scope === 'run'}
+              scoped={scoped}
               path={view}
               change={files.find((file) => file.path === view)}
               prevPath={viewIndex > 0 ? trackedPaths[viewIndex - 1] : null}
@@ -808,6 +830,7 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
         <button type="button" className="btn" onClick={() => { setSelection(null); setFeedback(''); }}>取消选择</button>
       </div>}
       <div id="change-diff" className="change-diff">
+        {change?.note && <p className="diff-empty">{change.note}</p>}
         {truncated && <p className="diff-truncated" role="status">
           {summaryTruncated && !scoped
             ? '工作区补丁超过展示上限，当前文件可能未显示完整。'
@@ -837,7 +860,7 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
               )}
             </>
           )
-          : truncated ? null : untracked && !scoped
+          : truncated || change?.note ? null : untracked && !scoped
             ? <pre className="diff-raw">{content ?? '读取中…'}</pre>
             : (patchState === 'loading'
               ? <p className="diff-empty">读取差异中…</p>

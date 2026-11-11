@@ -58,6 +58,26 @@ public final class UnifiedDiff {
         return out.toString();
     }
 
+    /** 生成删除整个文件的补丁，区别于把已有文件清空。 */
+    public static String deleteFile(String path, String oldText) {
+        String target = normalize(path);
+        List<String> lines = split(oldText);
+        StringBuilder out = new StringBuilder();
+        out.append("diff --git a/").append(target).append(" b/").append(target).append('\n');
+        out.append("deleted file mode 100644\n");
+        out.append("--- a/").append(target).append("\n+++ /dev/null\n");
+        if (!lines.isEmpty()) {
+            out.append("@@ -1,").append(lines.size()).append(" +0,0 @@\n");
+            for (String line : lines) {
+                out.append('-').append(line).append('\n');
+            }
+            if (!oldText.endsWith("\n") && !oldText.endsWith("\r")) {
+                out.append("\\ No newline at end of file\n");
+            }
+        }
+        return out.toString();
+    }
+
     /** 改动是否为空（新增文件也算改动）。 */
     public static boolean isEmpty(String diff) {
         return diff == null || diff.isBlank();

@@ -1400,11 +1400,12 @@ public class AgentRunService implements RunStarter {
             log.error("Agent run {} failed unexpectedly", runId, e);
             String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             taskControls.status(sessionId, "FAILED");
+            finishSnapshots(runId);
             publish(sessionId, runId, new RunFailed("INTERNAL_ERROR", "执行失败：" + reason, false));
             return "FAILED";
         } finally {
             try {
-                snapshots.finish();
+                finishSnapshots(runId);
             } finally {
                 snapshots.clear();
             }
@@ -1412,6 +1413,14 @@ public class AgentRunService implements RunStarter {
             if (reset != null) {
                 reset.clear();
             }
+        }
+    }
+
+    private void finishSnapshots(String runId) {
+        try {
+            snapshots.finish();
+        } catch (RuntimeException e) {
+            log.warn("完成运行快照失败 {}", runId, e);
         }
     }
 
@@ -1476,6 +1485,11 @@ public class AgentRunService implements RunStarter {
                 delivered = completedEvent(sessionId, planSink, completed);
             }
             metrics.count("event." + delivered.type().wireName());
+            if (delivered instanceof RunCompleted || delivered instanceof RunFailed
+                || delivered instanceof RunCancelled) {
+                // 收到终止事件的客户端会立即请求本轮补丁，先保存完成态。
+                finishSnapshots(runId);
+            }
             // 事件落库同时推进可恢复检查点，重启后能说清「停在哪、下一步做什么」
             if (runStates != null) {
                 runStates.onEvent(sessionId, runId, delivered);

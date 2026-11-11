@@ -46,6 +46,7 @@ export interface ReducerState {
   cancelling?: boolean;
   runStartedAt?: number;
   runId?: string | null;
+  lastRunId?: string | null;
   turnRuns?: string[];
   runUsage?: RunUsage | null;
   requestReports?: RequestReport[];

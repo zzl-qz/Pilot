@@ -27,6 +27,7 @@ export interface ChangeFile {
   added?: number;
   removed?: number;
   diff?: string;
+  note?: string | null;
 }
 
 export interface ChangeReport {

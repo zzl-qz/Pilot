@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
@@ -76,7 +77,7 @@ class RunSnapshotServiceTest {
         Path snapshot = storage.resolve("run_active");
         Files.setLastModifiedTime(snapshot, FileTime.from(Instant.EPOCH));
 
-        assertEquals(0, snapshots.purgeOlderThan(Instant.now(), java.util.Set.of("run_active")));
+        assertEquals(0, snapshots.purgeOlderThan(Instant.now(), Set.of("run_active")));
         assertTrue(Files.exists(snapshot));
         assertEquals(1, snapshots.purgeOlderThan(Instant.now()));
         assertFalse(Files.exists(snapshot));
@@ -270,6 +271,39 @@ class RunSnapshotServiceTest {
         snapshots.clear();
         assertEquals(List.of("a.txt"), snapshots.rollback("mid_run_manual").conflicts());
         assertEquals("manual while model thinks", Files.readString(file));
+        ChangeService.RunFileChange change = snapshots.changes("mid_run_manual").files().getFirst();
+        assertEquals("", change.diff());
+        assertTrue(change.note().contains("外部修改"));
+    }
+
+    @Test
+    void explainsWhySomeChangedFilesHaveNoTextPreview() throws IOException {
+        Path binary = workspace.resolve("image.bin");
+        Path large = workspace.resolve("large.txt");
+        Path noBackup = workspace.resolve("missing.txt");
+        Files.writeString(noBackup, "old\n");
+
+        snapshots.bind("preview_limits", workspace);
+        snapshots.beforeWrite(binary);
+        Files.write(binary, new byte[] {1, 0, 2});
+        snapshots.afterWrite(binary);
+        snapshots.beforeWrite(large);
+        Files.writeString(large, "a".repeat(ChangeService.MAX_TEXT_PREVIEW_BYTES + 1));
+        snapshots.afterWrite(large);
+        snapshots.beforeWrite(noBackup);
+        Files.writeString(noBackup, "new\n");
+        snapshots.afterWrite(noBackup);
+        Files.delete(storage.resolve("preview_limits/files/missing.txt"));
+        snapshots.finish();
+        snapshots.clear();
+
+        List<ChangeService.RunFileChange> files = snapshots.changes("preview_limits").files();
+        assertEquals(List.of("image.bin", "large.txt", "missing.txt"),
+            files.stream().map(ChangeService.RunFileChange::path).toList());
+        assertTrue(files.stream().allMatch(file -> file.diff().isEmpty()));
+        assertTrue(files.get(0).note().contains("二进制"));
+        assertTrue(files.get(1).note().contains("预览上限"));
+        assertTrue(files.get(2).note().contains("改前快照"));
     }
 
     @Test
@@ -306,6 +340,10 @@ class RunSnapshotServiceTest {
         assertTrue(changes.complete(), changes.warning());
         assertEquals(List.of("generated/B.java", "src/A.java", "src/Delete.java"), changes.changedPaths());
         assertFalse(changes.changedPaths().contains("target/generated.bin"));
+        ChangeService.RunChangeReport diff = snapshots.changes("command_run");
+        assertEquals(List.of("A", "M", "D"), diff.files().stream().map(ChangeService.RunFileChange::status).toList());
+        assertEquals(2, diff.added());
+        assertEquals(2, diff.removed());
         RunSnapshotService.RollbackReport rollback = snapshots.rollback("command_run");
         assertTrue(rollback.failed().isEmpty(), rollback.failed().toString());
         assertEquals("class A { }\n", Files.readString(changed));

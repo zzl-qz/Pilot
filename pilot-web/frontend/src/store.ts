@@ -182,6 +182,7 @@ function resetSessionState(draft: StoreState) {
   draft.ui.draftFiles = [];
   draft.ui.checkpointDialog = null;
   draft.ui.changeView = null;
+  draft.ui.reviewRunId = null;
   draft.changeReport = null;
   draft.changesState = '';
   draft.runChanges = null;
@@ -226,6 +227,7 @@ export const initialUi = (): UiState => ({
   browserDot: false,
   mirror: emptyMirror(),
   changeView: null,
+  reviewRunId: null,
   previewPath: '',
   /** 浏览器状态：{ enabled, capable, available, reason, paused }；没有它就是还没查过。 */
   browserStatus: null,
@@ -963,18 +965,21 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       get().loadQueue();
     }
     // 一轮结束后拉取本次 run 的变更
-    if (after.runChangesFetch) {
+    if (after.runChangesFetch && get().runChangesFetch === after.runChangesFetch && event.runId === after.runChangesFetch
+        && ['run.completed', 'run.failed', 'run.cancelled'].includes(event.type)) {
       const runId = after.runChangesFetch;
+      const sessionEpoch = after.sessionEpoch;
       set((draft) => { draft.runChangesFetch = null; });
       api.runChanges(runId).then((report) => {
-        if (!report) return;
+        if (!report || get().sessionEpoch !== sessionEpoch) return;
+        const files = sortChangeFiles(report.files || []);
         set((draft) => {
-          const row = [...draft.thread.rows].reverse().find((item): item is Draft<ResultRow> => item.type === 'result' && item.runIds.includes(runId));
+          const row = draft.thread.rows.find((item): item is Draft<ResultRow> => item.type === 'result' && item.key === `result:${runId}`);
           if (row) {
-            row.changedFiles = sortChangeFiles(report.files || []);
+            row.changedFiles = files;
             row.changedSummary = report.summary || null;
           }
-          draft.changedFiles = sortChangeFiles(report.files || []);
+          if ((draft.lastRunId || draft.runId) === runId) draft.changedFiles = files.slice();
         });
         // 审阅面板开着就别让它停在旧状态：这一轮改过的文件要立刻出现在列表里
         if (get().ui.inspectorOpen && ['changes', 'preview'].includes(get().ui.inspectorTab)) {

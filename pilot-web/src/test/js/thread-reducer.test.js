@@ -110,7 +110,17 @@ test('长回复收尾保留完整最新问答和翻页游标，不能只剩结�
     assert.equal(state.thread.windowEvents[0].sequence, start, ending);
     assert.equal(state.thread.windowEvents.at(-1).sequence, sequence, ending);
     assert.equal(state.thread.history.hasMore, true, ending);
+    assert.equal(state.lastRunId, 'latest', ending);
+    assert.equal(state.runChangesFetch, 'latest', ending);
   }
+});
+
+test('只重放终止事件时仍能定位最近一轮的审阅记录', () => {
+  const state = draft();
+  applyEvent(state, { type: 'run.completed', sequence: 190, runId: 'saved-run', payload: { summary: '已完成' } },
+    { live: false });
+  assert.equal(state.lastRunId, 'saved-run');
+  assert.equal(state.runChangesFetch, null);
 });
 
 test('单个超长回合按完整问答保留，后续短回合仍能正常回收旧窗口', () => {

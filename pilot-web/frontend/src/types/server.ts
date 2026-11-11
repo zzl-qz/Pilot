@@ -213,6 +213,7 @@ export interface ChangeServiceRunChangeReport {
   removed: number;
   truncated: boolean;
   error: string;
+  snapshot?: boolean;
 }
 
 /** ChangeService.java / RunFileChange */
@@ -222,6 +223,7 @@ export interface ChangeServiceRunFileChange {
   added: number;
   removed: number;
   diff: string;
+  note?: string | null;
 }
 
 /** CheckpointController.java / ForkResponse */

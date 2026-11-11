@@ -59,6 +59,64 @@ async function checkDiffTruncation(page) {
   });
 }
 
+async function checkSnapshotReview(page) {
+  await page.evaluate(async () => {
+    const state = store.getState();
+    window.snapshotReviewSaved = {
+      diff: api.diff, runChanges: api.runChanges, changeReport: state.changeReport, thread: state.thread,
+      running: state.running, runId: state.runId, lastRunId: state.lastRunId,
+    };
+    const file = (path, revised) => ({
+      path, status: 'M', added: 1, removed: 1,
+      diff: [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`,
+        '@@ -1 +1 @@', '-旧行', `+${revised}`].join('\n'),
+    });
+    const previous = file('上一轮.txt', '上一轮的文件版本');
+    const latest = file('本轮.txt', '本轮的文件版本');
+    api.diff = async () => ({ gitRepository: false, files: [], diff: '' });
+    api.runChanges = async id => ({
+      gitRepository: false, snapshot: true, files: id === 'previous-run' ? [previous] : [latest, {
+        path: '图片.bin', status: 'A', added: 0, removed: 0, diff: '', note: '二进制文件无法显示逐行差异。',
+      }],
+    });
+    store.setState({
+      changeReport: { gitRepository: false, files: [], diff: '' }, running: true, runId: 'latest-run', lastRunId: null,
+      thread: { ...state.thread, rows: [...state.thread.rows, {
+        key: 'result:previous-run', type: 'result', title: '上一轮结束', tone: 'text', detail: null,
+        changedFiles: [previous], runIds: ['previous-run'], start: 900, end: 900,
+      }] },
+    });
+    await store.getState().loadChanges();
+  });
+  const scope = page.getByLabel('审阅范围');
+  const diff = page.locator('#change-diff');
+  await scope.locator('option[value="workspace"][disabled]').waitFor({ state: 'attached' });
+  assert.equal(await scope.inputValue(), 'run');
+  await page.getByText('本轮结束后显示逐行差异', { exact: true }).waitFor();
+
+  await page.evaluate(() => store.setState({ running: false }));
+  await page.locator('#change-files').getByText('本轮.txt', { exact: true }).click();
+  await diff.locator('.is-add > code').filter({ hasText: '本轮的文件版本' }).waitFor();
+  await diff.getByRole('button', { name: '选择现文件第 1 行' }).click();
+  await page.getByRole('textbox', { name: '审阅意见' }).waitFor();
+  await page.locator('#change-files').getByText('图片.bin', { exact: true }).click();
+  await diff.getByText('二进制文件无法显示逐行差异。', { exact: true }).waitFor();
+
+  await page.locator('.turn-card-files').getByText('上一轮.txt', { exact: true }).click();
+  assert.equal(await scope.inputValue(), 'selected');
+  await diff.locator('.is-add > code').filter({ hasText: '上一轮的文件版本' }).waitFor();
+  await scope.selectOption('run');
+  await page.locator('#change-files').getByText('本轮.txt', { exact: true }).waitFor();
+
+  await page.evaluate(() => {
+    const { diff, runChanges, ...state } = window.snapshotReviewSaved;
+    Object.assign(api, { diff, runChanges });
+    store.setState(state);
+    store.getState().setUi({ reviewRunId: null, changeView: null });
+  });
+  await scope.selectOption('workspace');
+}
+
 export async function checkReview(page, name, temp) {
   await page.evaluate(() => {
     window.reviewSaved = { diff: api.diff, branch: api.branch, restore: api.restoreChanges, state: store.getState() };
@@ -190,11 +248,13 @@ export async function checkReview(page, name, temp) {
     await page.keyboard.press('Escape');
     await dialog.waitFor({ state: 'hidden' });
   }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await checkSnapshotReview(page);
   await page.evaluate(() => {
     api.diff = reviewSaved.diff; api.branch = reviewSaved.branch; api.restoreChanges = reviewSaved.restore;
     store.setState({ changeReport: reviewSaved.state.changeReport, changesState: '', running: reviewSaved.state.running });
     store.getState().setUi({ reviewExpanded: false });
   });
   await page.setViewportSize({ width: 1440, height: 900 });
-  console.log(`${name}: PASS review diff truncation, toolbar, keyboard/IME, errors/retry, confirmation snapshot, stale responses and 3 widths`);
+  console.log(`${name}: PASS run snapshot review, diff truncation, toolbar, keyboard/IME, errors/retry, confirmation snapshot, stale responses and 3 widths`);
 }

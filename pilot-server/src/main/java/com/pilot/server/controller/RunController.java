@@ -47,18 +47,19 @@ public class RunController {
     }
 
     /**
-     * 本轮运行改了哪些文件：只统计该次运行写过的路径，带增删行数与逐文件 diff。
-     *
-     * <p>没有快照（本轮没写过文件，或运行早于快照功能）时返回空清单，而不是 404，
-     * 客户端可以统一按「本次没有改动」渲染。
+     * 优先读取运行结束时保存的逐行差异。旧运行沿用原先的工作区查询方式。
      */
     @GetMapping("/{runId}/changes")
     public ChangeService.RunChangeReport changes(@PathVariable String runId) {
-        RunSnapshotService.SnapshotMeta meta = snapshots.meta(runId);
-        if (meta == null) {
-            return new ChangeService.RunChangeReport(runId, null, false, List.of(), 0, 0, false, null);
-        }
         try {
+            ChangeService.RunChangeReport report = snapshots.changes(runId);
+            if (report != null) {
+                return report;
+            }
+            RunSnapshotService.SnapshotMeta meta = snapshots.meta(runId);
+            if (meta == null || !runId.equals(meta.runId())) {
+                return new ChangeService.RunChangeReport(runId, null, false, List.of(), 0, 0, false, null);
+            }
             return changes.inspectRun(runId, Path.of(meta.workspace()),
                 meta.files().stream().map(RunSnapshotService.SnapshotEntry::path).toList());
         } catch (RuntimeException e) {

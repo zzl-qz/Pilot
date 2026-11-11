@@ -30,8 +30,8 @@ public class ChangeService {
     private static final String DIFF_TRUNCATED = "… diff 已截断 …";
     private static final String FILE_DIFF_TRUNCATED = "… 该文件 diff 已截断 …";
     private static final int MAX_UNTRACKED_LINES = 400;
-    private static final long MAX_UNTRACKED_BYTES = 512 * 1024;
-    private static final int MAX_FILES = 500;
+    static final int MAX_TEXT_PREVIEW_BYTES = 512 * 1024;
+    static final int MAX_FILES = 500;
     private static final long TIMEOUT_SECONDS = 15;
     /** 单个 git 命令最多收集这么多字节；超出部分读掉但不保留，避免堆被打爆。 */
     private static final int MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -56,15 +56,23 @@ public class ChangeService {
      * 单个文件在本轮运行里的改动。
      *
      * @param status 单字符状态：{@code M}/{@code A}/{@code D}/{@code R}/{@code U}/{@code ??}
-     * @param added  新增行数；非 git 仓库或二进制文件为 0，不能据此判断「没改动」
+     * @param added  新增行数；不可预览的文件可能为 0
      * @param diff   该文件的 unified diff；无内容可展示时为空字符串
+     * @param note   无法显示文本差异时给审阅者的说明
      */
-    public record RunFileChange(String path, String status, int added, int removed, String diff) {
+    public record RunFileChange(String path, String status, int added, int removed, String diff, String note) {
+        public RunFileChange(String path, String status, int added, int removed, String diff) {
+            this(path, status, added, removed, diff, null);
+        }
     }
 
     /** 按运行汇总的改动清单，供对话区像 Codex 那样列出「本轮改了哪些文件」。 */
     public record RunChangeReport(String runId, String workspace, boolean gitRepository, List<RunFileChange> files,
-        int added, int removed, boolean truncated, String error) {
+        int added, int removed, boolean truncated, String error, boolean snapshot) {
+        public RunChangeReport(String runId, String workspace, boolean gitRepository, List<RunFileChange> files,
+            int added, int removed, boolean truncated, String error) {
+            this(runId, workspace, gitRepository, files, added, removed, truncated, error, false);
+        }
     }
 
     /**
@@ -89,12 +97,12 @@ public class ChangeService {
 
     public ChangeReport inspect(Path workspace) {
         String root = workspace.toString();
-        if (!Files.isDirectory(workspace.resolve(".git"))) {
+        if (!hasGitMetadata(workspace)) {
             return new ChangeReport(root, false, List.of(), "", false, null);
         }
 
         String status = exec(workspace, List.of("git", "status", "--porcelain=v1", "-uall"));
-        // 与运行级保持一致：相对 HEAD 取补丁，已暂存的改动才不会在审阅面板里消失
+        // 相对 HEAD 取补丁，已暂存的改动才不会在工作区审阅面板里消失。
         boolean head = hasHead(workspace);
         ArrayList<String> diffCommand =
             new ArrayList<>(List.of("git", "-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff"));
@@ -142,14 +150,14 @@ public class ChangeService {
     }
 
     /**
-     * 只复查「本轮运行写过的文件」：给出逐文件状态、增删行数与 diff。
+     * 旧运行没有保存逐行快照时，复查本轮写过的路径相对当前 HEAD 的改动。
      *
      * <p>路径过滤重新做一遍安全校验：清单来自工具参数，不能直接拼进 git pathspec 或文件系统读取。
      * 工作区不是 git 仓库时仍能列出文件，但拿不到行级统计与 diff。
      */
     public RunChangeReport inspectRun(String runId, Path workspace, List<String> paths) {
         Path root = workspace.toAbsolutePath().normalize();
-        boolean gitRepository = Files.isDirectory(root.resolve(".git"));
+        boolean gitRepository = hasGitMetadata(root);
 
         List<String> wanted = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
@@ -182,7 +190,7 @@ public class ChangeService {
         ArrayList<RunFileChange> files = new ArrayList<RunFileChange>();
         int addedTotal = 0;
         int removedTotal = 0;
-        int budget = MAX_DIFF_CHARS;
+        RunDiffBudget budget = new RunDiffBudget();
         boolean truncated = false;
 
         for (String path : wanted) {
@@ -217,23 +225,51 @@ public class ChangeService {
             addedTotal += stat[0];
             removedTotal += stat[1];
 
+            files.add(new RunFileChange(path, status == null ? "M" : status, stat[0], stat[1], budget.limit(text)));
+        }
+
+        return new RunChangeReport(runId, root.toString(), true, List.copyOf(files), addedTotal, removedTotal,
+            truncated || budget.truncated(), null);
+    }
+
+    /** Git worktree 和分离的 Git 目录使用 .git 文件。 */
+    static boolean hasGitMetadata(Path workspace) {
+        Path marker = workspace.resolve(".git");
+        if (Files.isDirectory(marker)) {
+            return true;
+        }
+        if (!Files.isRegularFile(marker)) {
+            return false;
+        }
+        try (InputStream input = Files.newInputStream(marker)) {
+            return "gitdir: ".equals(new String(input.readNBytes(8), StandardCharsets.US_ASCII));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    static final class RunDiffBudget {
+        private int remaining = MAX_DIFF_CHARS;
+        private boolean truncated;
+
+        String limit(String text) {
             if (text.length() > MAX_FILE_DIFF_CHARS) {
                 text = completeDiffLines(text, MAX_FILE_DIFF_CHARS) + FILE_DIFF_TRUNCATED;
                 truncated = true;
             }
-            String diff = text;
-            if (diff.length() > budget) {
-                diff = completeDiffLines(diff, budget) + DIFF_TRUNCATED;
+            if (text.length() > remaining) {
+                String diff = completeDiffLines(text, remaining) + DIFF_TRUNCATED;
+                remaining = 0;
                 truncated = true;
-                budget = 0;
-            } else {
-                budget -= diff.length();
+                return diff;
             }
-            files.add(new RunFileChange(path, status == null ? "M" : status, stat[0], stat[1], diff));
+            remaining -= text.length();
+            return text;
         }
 
-        return new RunChangeReport(runId, root.toString(), true, List.copyOf(files), addedTotal, removedTotal,
-            truncated, null);
+        boolean truncated() {
+            return truncated;
+        }
     }
 
     /**
@@ -250,7 +286,7 @@ public class ChangeService {
         if (relative == null) {
             throw new IllegalArgumentException("路径不在工作区内：" + path);
         }
-        if (!Files.isDirectory(root.resolve(".git"))) {
+        if (!hasGitMetadata(root)) {
             return new FilePatch(relative, "M", 0, 0, "", false);
         }
 
@@ -312,7 +348,7 @@ public class ChangeService {
      */
     public RestoreReport restore(Path workspace, List<String> paths, boolean all) {
         Path root = workspace.toAbsolutePath().normalize();
-        if (!Files.isDirectory(root.resolve(".git"))) {
+        if (!hasGitMetadata(root)) {
             return new RestoreReport(List.of(), List.of(), List.of(), "工作区不是 git 仓库，无法撤销改动");
         }
 
@@ -599,7 +635,7 @@ public class ChangeService {
     /** 未跟踪文件的行数。过大或二进制不硬读，避免审阅面板被一个大文件拖住。 */
     private static int countTextLines(Path absolute) {
         try {
-            if (!Files.isRegularFile(absolute) || Files.size(absolute) > MAX_UNTRACKED_BYTES || isBinary(absolute)) {
+            if (!Files.isRegularFile(absolute) || Files.size(absolute) > MAX_TEXT_PREVIEW_BYTES || isBinary(absolute)) {
                 return 0;
             }
             try (Stream<String> stream = Files.lines(absolute, StandardCharsets.UTF_8)) {
@@ -654,7 +690,7 @@ public class ChangeService {
         }
         String text;
         try {
-            if (Files.size(absolute) > MAX_UNTRACKED_BYTES) {
+            if (Files.size(absolute) > MAX_TEXT_PREVIEW_BYTES) {
                 return new SyntheticDiff(FILE_DIFF_TRUNCATED, 0, true);
             }
             byte[] bytes = Files.readAllBytes(absolute);
