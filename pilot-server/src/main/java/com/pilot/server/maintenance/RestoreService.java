@@ -64,7 +64,7 @@ final class RestoreService {
         checkTargets(data, database, attachments, source);
         new RestoreSwap(data, mapper).requireReady();
         BackupDatabase.check(source.resolve(BackupManifest.DATABASE),
-            keepExternal ? attachments : source.resolve(attachmentEntry), mapper, true);
+            keepExternal ? attachments : source.resolve(attachmentEntry), oldAttachments, mapper);
 
         List<String> notices = new ArrayList<>();
         if (!BackupManifest.VERSION.equals(BackupManifest.version(manifest))) {
@@ -144,7 +144,7 @@ final class RestoreService {
                 RestoreSwap.Check workspaceCheck =
                     plan.workspaces().stage(stagedBundles, plan.data(), stagedData, plan.paths(), id, steps, staging);
                 swap.apply(steps, () -> {
-                    BackupDatabase.check(plan.database(), plan.attachments(), mapper, true);
+                    BackupDatabase.check(plan.database(), plan.attachments(), plan.attachments().toString(), mapper);
                     workspaceCheck.run();
                 });
                 return new Result(plan, previous);
@@ -175,7 +175,7 @@ final class RestoreService {
         }
         sqlite.checkpoint();
         plan.paths().files(data);
-        BackupDatabase.check(database, attachments, mapper, true);
+        BackupDatabase.check(database, attachments, plan.attachments().toString(), mapper);
     }
 
     private static Path target(Path explicit, Path data, String originalRoot, String original, String fallback,

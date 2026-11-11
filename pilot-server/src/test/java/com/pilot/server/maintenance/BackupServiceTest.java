@@ -25,12 +25,14 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.loop.Attachment;
+import com.pilot.core.loop.Message;
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.config.AttachmentLimits;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.session.AttachmentService;
 import com.pilot.server.store.EventCodec;
+import com.pilot.server.store.JdbcConversationRepository;
 import com.pilot.server.store.JdbcSessionRepository;
 import com.pilot.server.store.SqliteStore;
 
@@ -302,14 +304,38 @@ class BackupServiceTest {
         SessionService sessions = new SessionService(Clock.systemUTC(),
             new JdbcSessionRepository(sqlite, new EventCodec(JsonMapper.builder().build())));
         String session = sessions.createSession("附件缺失").id();
-        sessions.publish(session, "run", new RunStarted("带图片", List.of(
-            new Attachment("missing.png", "image/png", data.file("attachments", session, "missing.png").toString()))));
+        sessions.publish(session, "run", new RunStarted("带图片", List.of(new Attachment("missing.png", "image/png",
+            data.file("attachments", session, "00000000-0000-0000-0000-000000000001-missing.png").toString()))));
         BackupService backups = service(sqlite);
 
         var report = backups.backup();
         assertFalse(report.ok());
         assertTrue(report.message().contains("缺少消息引用的附件"), report.message());
         assertEquals(0, backups.status().backups());
+        StorageHealth.reset();
+    }
+
+    @Test
+    void verifiesSharedUploadsWithoutTreatingToolImagesAsUploads() throws IOException {
+        PilotDataDir data = new PilotDataDir(dataDir.resolve(".pilot").toString());
+        SqliteStore sqlite = new SqliteStore(data.file("pilot.db"));
+        var mapper = JsonMapper.builder().build();
+        SessionService sessions =
+            new SessionService(Clock.systemUTC(), new JdbcSessionRepository(sqlite, new EventCodec(mapper)));
+        String owner = sessions.createSession("原会话").id();
+        String fork = sessions.createSession("分支").id();
+        Path dir = Files.createDirectories(data.file("attachments", owner));
+        Path upload = Files.writeString(dir.resolve("00000000-0000-0000-0000-000000000001-file.png"), "image");
+        var conversations = new JdbcConversationRepository(sqlite, mapper);
+        conversations.save(fork,
+            List.of(Message.user("共享", List.of(new Attachment("file.png", "image/png", upload.toString()),
+                new Attachment("tool.png", "image/png", dataDir.resolve("workspace/tool.png").toString())))));
+        BackupService backup = service(sqlite);
+
+        assertTrue(backup.backup().ok());
+        assertTrue(backup.verifyLatestBackup().valid());
+        Files.delete(upload);
+        assertFalse(backup.backup().ok());
         StorageHealth.reset();
     }
 

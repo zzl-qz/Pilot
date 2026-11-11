@@ -13,6 +13,7 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.CommandTaskManager;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.DataMaintenance;
+import com.pilot.server.maintenance.StorageHealth;
 import com.pilot.server.multi.SandboxStore;
 import com.pilot.server.store.ToolCallJournalFactory;
 import com.pilot.server.validation.ValidationLedger;
@@ -44,6 +45,7 @@ public class SessionCleanupService {
     private final SkillDraftService skillDrafts;
     private final FileWorkbenchService fileWorkbench;
     private final AttachmentService attachments;
+    private final AttachmentReferences attachmentReferences;
     private final DataMaintenance maintenance;
 
     public SessionCleanupService(SessionService sessions, ConversationRepository conversations, PlanRepository plans,
@@ -51,7 +53,7 @@ public class SessionCleanupService {
         CommandTaskManager commandTasks, ObjectProvider<BrowserBackend> browser, ValidationLedger validations,
         ToolCallJournalFactory journals, RunCheckpointRepository checkpoints, WorkProductService products,
         SkillDraftService skillDrafts, FileWorkbenchService fileWorkbench, AttachmentService attachments,
-        PilotDataDir dataDir) {
+        PilotDataDir dataDir, AttachmentReferences attachmentReferences) {
         this.fileWorkbench = fileWorkbench;
         this.products = products;
         this.skillDrafts = skillDrafts;
@@ -68,6 +70,7 @@ public class SessionCleanupService {
         this.commandTasks = commandTasks;
         this.browser = browser;
         this.attachments = attachments;
+        this.attachmentReferences = attachmentReferences;
         this.maintenance = dataDir.maintenance();
     }
 
@@ -76,7 +79,9 @@ public class SessionCleanupService {
      */
     public boolean delete(String sessionId) {
         try (var activity = maintenance.activity()) {
-            return deleteSession(sessionId);
+            synchronized (attachmentReferences) {
+                return deleteSession(sessionId);
+            }
         }
     }
 
@@ -98,8 +103,6 @@ public class SessionCleanupService {
         skillDrafts.deleteBySession(sessionId);
         // 文件工作台的批注、快照索引与预览缓存都属于会话；工作区里的真实文件保留给用户。
         fileWorkbench.deleteBySession(sessionId);
-        // 聊天附件随会话一起回收，不留孤儿目录
-        attachments.deleteBySession(sessionId);
         conversations.delete(sessionId);
         plans.delete(sessionId);
         runs.deleteBySession(sessionId);
@@ -112,6 +115,13 @@ public class SessionCleanupService {
         validations.deleteBySession(sessionId);
         journals.deleteSession(sessionId);
         checkpoints.deleteBySession(sessionId);
+        try {
+            if (!attachmentReferences.retainedOwners().contains(AttachmentService.storageDirectory(sessionId))) {
+                attachments.deleteBySession(sessionId);
+            }
+        } catch (RuntimeException e) {
+            StorageHealth.markDegraded("attachment-purge", "读取附件引用失败，已保留附件：" + e.getMessage());
+        }
         return removed;
     }
 }

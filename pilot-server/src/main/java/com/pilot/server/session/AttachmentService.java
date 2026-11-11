@@ -77,7 +77,7 @@ public class AttachmentService {
     }
 
     AttachmentService(Path root, AttachmentLimits limits) {
-        this.root = root;
+        this.root = root.toAbsolutePath().normalize();
         this.maxFiles = limits.maxFiles();
         this.maxFileBytes = limits.maxFileBytes();
         this.maxTotalBytes = limits.maxTotalBytes();
@@ -224,7 +224,8 @@ public class AttachmentService {
         }
         Path sessionDir = root.resolve(safeName(sessionId, 80)).normalize();
         Path file = sessionDir.resolve(fileName).normalize();
-        if (!file.getParent().equals(sessionDir) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+        if (!file.getParent().equals(sessionDir) || !Files.isDirectory(sessionDir, LinkOption.NOFOLLOW_LINKS)
+            || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalArgumentException("attachment not found");
         }
         return file;

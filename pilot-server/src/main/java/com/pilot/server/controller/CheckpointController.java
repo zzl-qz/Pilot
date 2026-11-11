@@ -22,6 +22,7 @@ import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.config.AgentProperties;
+import com.pilot.server.session.AttachmentReferences;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.session.TaskControlService;
 import com.pilot.server.workspace.RunSnapshotService;
@@ -37,10 +38,11 @@ public class CheckpointController {
     private final PlanRepository plans;
     private final AgentProperties properties;
     private final TaskControlService tasks;
+    private final AttachmentReferences attachmentReferences;
 
     public CheckpointController(SessionService sessions, RunStarter runs, RunSnapshotService snapshots,
         ConversationRepository conversations, PlanRepository plans, AgentProperties properties,
-        TaskControlService tasks) {
+        TaskControlService tasks, AttachmentReferences attachmentReferences) {
         this.sessions = sessions;
         this.runs = runs;
         this.snapshots = snapshots;
@@ -48,6 +50,7 @@ public class CheckpointController {
         this.plans = plans;
         this.properties = properties;
         this.tasks = tasks;
+        this.attachmentReferences = attachmentReferences;
     }
 
     @GetMapping
@@ -114,36 +117,41 @@ public class CheckpointController {
         }
         String slot = claim(id);
         try {
-            Selection selection = select(id, request.sequence());
-            checkRevision(selection, request.revision());
-            RunSnapshotService.ConversationCheckpoint checkpoint = snapshots.conversation(selection.event().runId());
-            if (checkpoint == null) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "对话检查点不存在或已过期，无法创建分支");
+            synchronized (attachmentReferences) {
+                return createFork(id, request);
             }
-            Session source = selection.session();
-            Session fork =
-                sessions.createSession(source.title() + " · 分支", source.workspace(), source.projectId(), false);
-            try {
-                for (EventEnvelope event : selection.events()) {
-                    if (event.sequence() >= request.sequence()) {
-                        break;
-                    }
-                    sessions.publish(fork.id(), event.runId(), event.payload());
-                }
-                tasks.restoreTo(fork.id(), selection.event().runId());
-                conversations.save(fork.id(), checkpoint.messages());
-                plans.save(fork.id(), checkpoint.plan());
-            } catch (RuntimeException e) {
-                tasks.delete(fork.id());
-                conversations.delete(fork.id());
-                plans.delete(fork.id());
-                sessions.delete(fork.id());
-                throw e;
-            }
-            return new ForkResponse(fork.id(), fork.title(), fork.workspace(), selection.input());
         } finally {
             runs.abandon(slot);
         }
+    }
+
+    private ForkResponse createFork(String id, Request request) {
+        Selection selection = select(id, request.sequence());
+        checkRevision(selection, request.revision());
+        RunSnapshotService.ConversationCheckpoint checkpoint = snapshots.conversation(selection.event().runId());
+        if (checkpoint == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "对话检查点不存在或已过期，无法创建分支");
+        }
+        Session source = selection.session();
+        Session fork = sessions.createSession(source.title() + " · 分支", source.workspace(), source.projectId(), false);
+        try {
+            for (EventEnvelope event : selection.events()) {
+                if (event.sequence() >= request.sequence()) {
+                    break;
+                }
+                sessions.publish(fork.id(), event.runId(), event.payload());
+            }
+            tasks.restoreTo(fork.id(), selection.event().runId());
+            conversations.save(fork.id(), checkpoint.messages());
+            plans.save(fork.id(), checkpoint.plan());
+        } catch (RuntimeException e) {
+            tasks.delete(fork.id());
+            conversations.delete(fork.id());
+            plans.delete(fork.id());
+            sessions.delete(fork.id());
+            throw e;
+        }
+        return new ForkResponse(fork.id(), fork.title(), fork.workspace(), selection.input());
     }
 
     private void checkRevision(Selection selection, Long revision) {

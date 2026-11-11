@@ -50,6 +50,7 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
 import com.pilot.core.tool.DocumentRenderer;
 import com.pilot.server.config.AgentProperties;
+import com.pilot.server.session.AttachmentReferences;
 import com.pilot.server.session.AttachmentService;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.session.RunSubmissionService;
@@ -82,6 +83,7 @@ public class SessionController {
     private final AgentProperties agentProperties;
     private final PlanRepository plans;
     private final AttachmentService attachments;
+    private final AttachmentReferences attachmentReferences;
     private final ProjectRepository projects;
     private final SessionCleanupService cleanup;
     private final SkillService skills;
@@ -90,7 +92,7 @@ public class SessionController {
     public SessionController(SessionService sessions, RunStarter runStarter, ObjectMapper objectMapper,
         WorkspaceService workspaces, AgentProperties agentProperties, PlanRepository plans,
         AttachmentService attachments, ProjectRepository projects, SessionCleanupService cleanup, SkillService skills,
-        ConversationRepository conversations) {
+        ConversationRepository conversations, AttachmentReferences attachmentReferences) {
         this.sessions = sessions;
         this.runStarter = runStarter;
         this.attachments = attachments;
@@ -102,6 +104,7 @@ public class SessionController {
         this.cleanup = cleanup;
         this.skills = skills;
         this.conversations = conversations;
+        this.attachmentReferences = attachmentReferences;
     }
 
     /**
@@ -425,7 +428,7 @@ public class SessionController {
         requireSession(id);
         Path path;
         try {
-            path = attachments.resolveAttachment(id, file);
+            path = attachmentReferences.resolve(id, file);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在");
         }
@@ -451,7 +454,7 @@ public class SessionController {
         requireSession(id);
         Path path;
         try {
-            path = attachments.resolveAttachment(id, file);
+            path = attachmentReferences.resolve(id, file);
             if (!DocumentRenderer.isRenderable(path.getFileName().toString())) {
                 throw new IllegalArgumentException("不支持此附件的内容预览");
             }

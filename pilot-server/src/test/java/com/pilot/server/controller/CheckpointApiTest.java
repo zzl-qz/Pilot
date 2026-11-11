@@ -3,6 +3,7 @@ package com.pilot.server.controller;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -29,12 +30,14 @@ import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunStarted;
+import com.pilot.core.loop.Attachment;
 import com.pilot.core.loop.Message;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
+import com.pilot.server.session.AttachmentService;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.workspace.RunSnapshotService;
 
@@ -65,6 +68,8 @@ class CheckpointApiTest {
     RunStarter runs;
     @Autowired
     ObjectMapper mapper;
+    @Autowired
+    AttachmentService attachments;
     @TempDir
     Path workspace;
 
@@ -128,6 +133,29 @@ class CheckpointApiTest {
         assertEquals(workspace.toString(), sessions.find(fork).orElseThrow().workspace());
         mvc.perform(get("/api/sessions/{id}/checkpoints", fork).param("sequence", "1")).andExpect(status().isOk())
             .andExpect(jsonPath("$.conversationAvailable").value(true));
+    }
+
+    @Test
+    void forkKeepsItsAttachmentAfterDeletingTheOriginalSession() throws Exception {
+        String source = sessions.createSession("原会话", workspace.toString()).id();
+        Path directory = Files.createDirectories(attachments.sessionDir(source));
+        String filename = "00000000-0000-0000-0000-000000000001-image.png";
+        Path image = Files.writeString(directory.resolve(filename), "fixture");
+        List<Attachment> shared = List.of(new Attachment("image.png", "image/png", image.toString()));
+        sessions.publish(source, "run-a", new RunStarted("有附件", shared));
+        var second = sessions.publish(source, "run-b", new RunStarted("创建分支前"));
+        snapshots.saveConversation("run-b", List.of(Message.user("有附件", shared)), List.of());
+        String json = mvc
+            .perform(post("/api/sessions/{id}/checkpoints/fork", source).contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("sequence", second.sequence()))))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String fork = mapper.readTree(json).path("sessionId").asString();
+        String unrelated = sessions.createSession("无关会话", workspace.toString()).id();
+
+        mvc.perform(delete("/api/sessions/{id}", source)).andExpect(status().isNoContent());
+        assertTrue(Files.isRegularFile(image));
+        mvc.perform(get("/api/sessions/{id}/attachments/{name}", fork, filename)).andExpect(status().isOk());
+        mvc.perform(get("/api/sessions/{id}/attachments/{name}", unrelated, filename)).andExpect(status().isNotFound());
     }
 
     @Test

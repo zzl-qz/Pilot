@@ -21,6 +21,7 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.session.AttachmentReferences;
 import com.pilot.server.session.AttachmentService;
 import com.pilot.server.session.RunRegistry;
 import com.pilot.server.store.SqliteStore;
@@ -49,13 +50,15 @@ public class RetentionService {
     private final AttachmentService attachments;
     private final ValidationLedger validations;
     private final RunRegistry registry;
+    private final AttachmentReferences attachmentReferences;
 
     public RetentionService(@Value("${pilot.retention.days:0}") int retentionDays,
         @Value("${pilot.retention.backups-days:0}") int backupDays,
         @Value("${pilot.retention.validation-days:0}") int validationDays,
         @Value("${pilot.retention.attachments-days:0}") int attachmentsDays, ObjectProvider<SqliteStore> store,
         RunSnapshotService snapshots, BackupService backups, PilotDataDir dataDir, SessionService sessions,
-        AttachmentService attachments, ValidationLedger validations, RunRegistry registry) {
+        AttachmentService attachments, ValidationLedger validations, RunRegistry registry,
+        AttachmentReferences attachmentReferences) {
         this.retentionDays = retentionDays;
         this.backupDays = backupDays;
         this.validationDays = validationDays;
@@ -68,6 +71,7 @@ public class RetentionService {
         this.attachments = attachments;
         this.validations = validations;
         this.registry = registry;
+        this.attachmentReferences = attachmentReferences;
     }
 
     @Scheduled(cron = "${pilot.retention.cron:0 30 3 * * *}")
@@ -134,8 +138,10 @@ public class RetentionService {
         int attachmentFiles = 0;
         int attachmentDirs = 0;
         if (attachmentsDays > 0) {
-            AttachmentService.PurgeStats stats = attachments.purge(now.minus(attachmentsDays, ChronoUnit.DAYS),
-                sessions.list().stream().map(Session::id).toList());
+            Set<String> retained = new HashSet<>(sessions.list().stream().map(Session::id).toList());
+            retained.addAll(attachmentReferences.retainedOwners());
+            AttachmentService.PurgeStats stats =
+                attachments.purge(now.minus(attachmentsDays, ChronoUnit.DAYS), retained);
             attachmentFiles = stats.files();
             attachmentDirs = stats.dirs();
         }

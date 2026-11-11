@@ -22,14 +22,17 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.ObjectProvider;
 
 import com.pilot.core.event.RunStarted;
+import com.pilot.core.loop.Attachment;
 import com.pilot.core.loop.Message;
 import com.pilot.core.session.InMemorySessionRepository;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.config.AttachmentLimits;
 import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.session.AttachmentReferences;
 import com.pilot.server.session.AttachmentService;
 import com.pilot.server.session.RunRegistry;
 import com.pilot.server.store.EventCodec;
+import com.pilot.server.store.JdbcConversationRepository;
 import com.pilot.server.store.JdbcSessionRepository;
 import com.pilot.server.store.SqliteStore;
 import com.pilot.server.validation.ValidationEvidence;
@@ -108,8 +111,15 @@ class RetentionServiceTest {
         @SuppressWarnings("unchecked")
         ObjectProvider<SqliteStore> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(sqlite);
-        var service = new RetentionService(1, 0, 1, 0, provider, snapshots, mock(BackupService.class), data, current,
-            attachments(), ledger, new RunRegistry());
+        AttachmentService files = attachments();
+        Path shared = attachment(files.sessionDir("deleted_owner"), "shared.png");
+        Files.setLastModifiedTime(shared.getParent(), FileTime.from(old));
+        var conversations = new JdbcConversationRepository(sqlite, mapper);
+        conversations.save(referenced,
+            List.of(Message.user("共享", List.of(new Attachment("shared.png", "image/png", shared.toString())))));
+        var service = new RetentionService(1, 0, 1, 1, provider, snapshots, mock(BackupService.class), data, current,
+            files, ledger, new RunRegistry(),
+            new AttachmentReferences(provider, mapper, current, conversations, snapshots, files));
         var report = service.purgeNow();
 
         assertEquals(1, report.events());
@@ -119,6 +129,7 @@ class RetentionServiceTest {
         assertTrue(snapshots.conversation("run_kept") != null);
         assertTrue(Files.exists(data.file("traces", referenced + ".jsonl")));
         assertFalse(ledger.report(referenced, "hash").current());
+        assertTrue(Files.exists(shared));
     }
 
     private AttachmentService attachments() {
@@ -137,7 +148,8 @@ class RetentionServiceTest {
         PilotDataDir dataDir = new PilotDataDir(temp.resolve("data").toString());
         return new RetentionService(0, 0, 0, attachmentsDays, store, mock(RunSnapshotService.class),
             mock(BackupService.class), dataDir, sessions, attachments,
-            new ValidationLedger(dataDir, JsonMapper.builder().build()), new RunRegistry());
+            new ValidationLedger(dataDir, JsonMapper.builder().build()), new RunRegistry(),
+            mock(AttachmentReferences.class));
     }
 
     private static Path attachment(Path dir, String name) throws IOException {
