@@ -145,8 +145,8 @@ public class HistoryEditCoordinator {
                     change.after(), hash(change.before()), hash(change.after()), permissions));
             }
             Pending pending = new Pending(1, id, key, List.copyOf(entries));
-            write(pendingFile, mapper.writeValueAsBytes(pending));
             try {
+                write(pendingFile, mapper.writeValueAsBytes(pending));
                 faults.accept("prepared");
                 apply(pending, true);
                 faults.accept("files-applied");
@@ -299,9 +299,10 @@ public class HistoryEditCoordinator {
         }
     }
 
-    private static void write(Path file, byte[] bytes) {
+    private void write(Path file, byte[] bytes) {
         try {
             RunSnapshotService.writeContent(file, bytes);
+            faults.accept("journal-written");
             forceDirectory(file.getParent());
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);

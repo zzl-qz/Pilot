@@ -109,6 +109,30 @@ class HistoryEditCoordinatorTest {
     }
 
     @Test
+    void preparedJournalFailureIsRecoveredBeforeAnotherOperationCanStart() throws Exception {
+        Path target = directory.resolve("workspace/code.txt");
+        Files.createDirectories(target.getParent());
+        Files.writeString(target, "before");
+        var data = new PilotDataDir(directory.toString());
+        var store = new SqliteStore(directory.resolve("pilot.db"));
+        var coordinator = new HistoryEditCoordinator(data, JsonMapper.builder().build(), store, point -> {
+            if (point.equals("journal-written")) {
+                throw new IllegalStateException("记录写入后持久化失败");
+            }
+        });
+        assertThrows(IllegalStateException.class,
+            () -> coordinator.execute(ID, "s:both",
+                List.of(new HistoryFileChange(target.getParent(), target, "before".getBytes(), "after".getBytes())),
+                "done", coordinator::commitCodeOnly));
+        assertEquals("before", Files.readString(target));
+        assertFalse(Files.exists(directory.resolve("history-edits/" + ID + ".pending.json")));
+        assertTrue(store.historyCommit(ID).isEmpty());
+        try (var scope = data.maintenance().tryActivity()) {
+            assertNotNull(scope);
+        }
+    }
+
+    @Test
     void externalEditIsPreservedAndIncompleteRecoveryBlocksStorage() throws Exception {
         Path target = directory.resolve("workspace/code.txt");
         Files.createDirectories(target.getParent());
