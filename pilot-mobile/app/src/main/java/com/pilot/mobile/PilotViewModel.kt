@@ -126,11 +126,17 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                         val metadata = launch { while (isActive) { refreshTask(id); delay(5000) } }
                         try {
                             val decoder = SseDecoder { event ->
-                                if (event.text("type") !in setOf("assistant.preview", "assistant.reasoning")) recordEvent(event, false)
                                 conversation.accept(event)
+                                if (conversation.needsReplay) {
+                                    historyEvents.clear(); historyChars = 0
+                                    mutable.update { it.copy(rows = emptyList(), runId = "", phase = "历史已修改，重新加载中") }
+                                    error("历史版本已变化，正在重新连接")
+                                }
+                                if (event.text("type") !in setOf("assistant.preview", "assistant.reasoning") && !event.text("type").startsWith("stream.")) recordEvent(event, false)
                                 mutable.update { it.copy(rows = conversation.snapshot(), runId = if (event.text("type") in setOf("run.started", "run.continued", "run.completed", "run.failed", "run.cancelled")) conversation.runId else it.runId, phase = conversation.phase.ifBlank { it.phase }, status = client?.pathLabel() ?: "已断开") }
                             }
-                            val response = client!!.transfer(Request(path = "/api/sessions/$id/events?after=${conversation.cursor}")) { decoder.feed(it) }
+                            val revision = conversation.historyRevision?.let { "&revision=$it" } ?: ""
+                            val response = client!!.transfer(Request(path = "/api/sessions/$id/events?after=${conversation.cursor}$revision")) { decoder.feed(it) }
                             if (response.status == 401) error("设备授权已失效，请重新配对")
                             require(response.status in 200..299) { "无法读取任务进度（${response.status}）" }
                         } finally { metadata.cancelAndJoin() }
@@ -189,8 +195,14 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         val before = if (older && historyEvents.isNotEmpty()) "&before=${historyEvents.firstKey()}" else ""
         val page = api(Request(path = "/api/sessions/$id/history?limit=${if (older) 100 else 60}$before")).jsonObject
         val events = page.objects("events")
+        val revision = page.text("historyRevision").toLongOrNull() ?: 0
+        if (!older || conversation.historyRevision != null && conversation.historyRevision != revision) {
+            historyEvents.clear(); historyChars = 0
+            if (older) { loadHistory(false); return }
+        }
         events.forEach { recordEvent(it, older) }
         conversation = Conversation(6000)
+        conversation.historyVersion(revision)
         historyEvents.values.forEach(conversation::accept)
         mutable.update { it.copy(rows = conversation.snapshot(), phase = conversation.phase, limitedHistory = page.bool("hasMore")) }
     }

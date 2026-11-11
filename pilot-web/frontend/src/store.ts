@@ -65,6 +65,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let stableConnectionTimer: ReturnType<typeof setTimeout> | undefined;
 let streamPaused = false;
 let streamFailures = 0;
+let historyGeneration = 0;
 let mirrorSource: EventSource | null = null;
 let commandTimer: ReturnType<typeof setTimeout> | undefined;
 let runClockTimer: ReturnType<typeof setTimeout> | undefined;
@@ -154,6 +155,36 @@ function recoverEventStream(sessionId: string, reason: string) {
   else useStore.getState().showNotice(reason + '，已停止自动重试。请刷新页面；若仍失败，请检查服务端事件数据。');
 }
 
+/** 历史编辑后重建显示；不重置输入组件或附件草稿。 */
+async function rebuildStreamHistory(sessionId: string) {
+  const epoch = useStore.getState().sessionEpoch;
+  streamPaused = true;
+  eventSource?.close(); eventSource = null;
+  clearTimeout(reconnectTimer); reconnectTimer = undefined;
+  clearTimeout(stableConnectionTimer); stableConnectionTimer = undefined;
+  discardQueuedEvents();
+  const loaded = await useStore.getState().loadHistory();
+  const state = useStore.getState();
+  if (state.sessionId !== sessionId || state.sessionEpoch !== epoch) return;
+  if (loaded) {
+    state.connectSse(sessionId, state.thread.cursor);
+    state.loadPlan(); state.loadTask(); state.refreshContext();
+  } else {
+    streamPaused = false;
+    recoverEventStream(sessionId, '历史版本更新后无法重新加载');
+  }
+}
+
+function currentHistoryPage(sessionId: string, generation: number, revision?: number) {
+  const state = useStore.getState();
+  if (state.sessionId !== sessionId || historyGeneration !== generation) return false;
+  if (state.historyRevision != null && (revision ?? 0) !== state.historyRevision) {
+    void rebuildStreamHistory(sessionId);
+    return false;
+  }
+  return true;
+}
+
 /**
  * 清空当前会话的全部界面状态：切换会话与「开新对话」共用同一套重置。
  * 放在模块级是为了让 startNewSession / activate 不会各写一份、漏字段。
@@ -172,6 +203,7 @@ function applySettings(draft: StoreState, data: ApiResults['settings'] | null) {
 }
 
 function resetSessionState(draft: StoreState) {
+  draft.historyRevision = null;
   draft._reconnectAttempt = 0;
   resetFilePreview(draft);
   draft.sessionEpoch = (draft.sessionEpoch || 0) + 1;
@@ -274,6 +306,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   /* ---------- 会话 / 项目 ---------- */
   sessionId: null,
   sessionEpoch: 0,
+  historyRevision: null,
   ready: false,
   refreshWorkbench: createWorkbenchRefresher({ get, set, api }),
   async reloadWorkbench() {
@@ -612,7 +645,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
         sessionId, workspace: draft.workspace
       }).activeId;
     });
-    await get().loadHistory();
+    if (!await get().loadHistory()) return false;
     if (!current()) return false;
     // 历史窗口就绪后再按当前游标续订，避免事件落在重建窗口之前被覆盖
     get().connectSse(sessionId, get().thread.cursor);
@@ -641,18 +674,27 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   async loadHistory() {
     const { sessionId, thread } = get();
     if (!sessionId) {
-      return;
+      return false;
     }
+    const generation = ++historyGeneration;
     // 换会话 / 重建窗口：旧的预取页对不上新窗口的游标，直接丢弃
     earlierPage = null;
     earlierInflight = null;
     earlierRequest = null;
     try {
       const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize }));
-      if (get().sessionId !== sessionId) {
-        return;
+      if (get().sessionId !== sessionId || historyGeneration !== generation) {
+        return false;
       }
       set((draft) => {
+        draft.historyRevision = data.historyRevision ?? 0;
+        draft.thread = initialThread();
+        draft.running = false;
+        draft.runId = null;
+        draft.lastRunId = null;
+        draft.pendingApprovals = {};
+        draft.pendingArbitrations = {};
+        draft.agents = {};
         draft.thread.replaying = true;
         draft.thread.rows = [];
         draft.thread.windowEvents = [];
@@ -669,8 +711,10 @@ export const useStore = create<StoreState>()(immer((set, get) => {
         // 窗口整体重建（切会话 / 重连）后落在最新一条，而不是停在上次的滚动位置。
         draft.ui.bottomSignal += 1;
       });
+      return true;
     } catch (error) {
-      get().showNotice('读取历史失败：' + errorInfo(error).message);
+      if (get().sessionId === sessionId && historyGeneration === generation) get().showNotice('读取历史失败：' + errorInfo(error).message);
+      return false;
     }
   },
 
@@ -680,6 +724,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
    */
   prefetchEarlier() {
     const { sessionId, thread } = get();
+    const generation = historyGeneration;
     if (!sessionId || !thread.history.hasMore || thread.history.error) {
       return Promise.resolve(false);
     }
@@ -696,7 +741,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     const promise = api.history(sessionId, { limit: thread.history.pageSize, before })
       .then((result) => {
         const data = requireData(result);
-        if (get().sessionId !== sessionId) {
+        if (!currentHistoryPage(sessionId, generation, data.historyRevision)) {
           return false;
         }
         const events = Array.isArray(data.events) ? data.events : [];
@@ -744,6 +789,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
 
   async loadEarlier() {
     const { sessionId, thread } = get();
+    const generation = historyGeneration;
     if (!sessionId || !thread.windowEvents.length) {
       return false;
     }
@@ -759,7 +805,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     });
     try {
       const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, before }));
-      if (get().sessionId !== sessionId) {
+      if (!currentHistoryPage(sessionId, generation, data.historyRevision)) {
         return false;
       }
       const older = Array.isArray(data.events) ? data.events : [];
@@ -780,6 +826,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       });
       return true;
     } catch (error) {
+      if (historyGeneration !== generation || get().sessionId !== sessionId) return false;
       set((draft) => {
         draft.thread.history.loading = false;
         draft.thread.history.error = true;
@@ -829,6 +876,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
 
   async loadLater() {
     const { sessionId, thread } = get();
+    const generation = historyGeneration;
     if (!sessionId || !thread.windowEvents.length) {
       return false;
     }
@@ -838,7 +886,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     }
     try {
       const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, after }));
-      if (get().sessionId !== sessionId) {
+      if (!currentHistoryPage(sessionId, generation, data.historyRevision)) {
         return false;
       }
       const newer = Array.isArray(data.events) ? data.events : [];
@@ -853,6 +901,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       });
       return true;
     } catch (error) {
+      if (historyGeneration !== generation || get().sessionId !== sessionId) return false;
       set((draft) => { draft.thread.history.forwardError = true; });
       get().showNotice('加载更新的消息失败：' + errorInfo(error).message);
       return false;
@@ -886,7 +935,8 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     clearTimeout(reconnectTimer);
     reconnectTimer = undefined;
     streamPaused = false;
-    const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/events?after=${cursor}`);
+    const revision = get().historyRevision;
+    const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/events?after=${cursor}${revision == null ? '' : `&revision=${revision}`}`);
     eventSource = source;
     const handle = (message: MessageEvent<string>) => {
       if (eventSource !== source || get().sessionId !== sessionId) return;
@@ -903,6 +953,19 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       source.addEventListener(type, handle);
     }
     source.addEventListener('user.message', handle);
+    for (const kind of ['stream.ready', 'stream.reset']) {
+      source.addEventListener(kind, (message: MessageEvent<string>) => {
+        if (eventSource !== source || get().sessionId !== sessionId) return;
+        try {
+          const control = JSON.parse(message.data);
+          const revision = control.payload?.historyRevision;
+          if (control.sessionId !== sessionId || !Number.isSafeInteger(revision) || revision < 0) throw new Error('历史版本无效');
+          if (kind === 'stream.reset' || get().historyRevision != null && get().historyRevision !== revision) {
+            void rebuildStreamHistory(sessionId);
+          } else set(draft => { draft.historyRevision = revision; });
+        } catch { recoverEventStream(sessionId, '历史版本信息无效'); }
+      });
+    }
     source.onopen = () => {
       if (eventSource !== source || get().sessionId !== sessionId) return;
       set((draft) => {
@@ -2330,6 +2393,9 @@ function applyAttention(kind: string, title: string) {
 }
 
 function closeStreams() {
+  historyGeneration++;
+  earlierPage = null;
+  earlierInflight = null;
   clearTimeout(stableConnectionTimer);
   stableConnectionTimer = undefined;
   streamPaused = false;

@@ -4,7 +4,7 @@ import type { DraftAttachment } from './input.js';
 
 import type { EventEnvelope } from './events.js';
 export type { EventEnvelope } from './events.js';
-export interface HistoryPage { events: EventEnvelope[]; hasMore: boolean; total?: number }
+export interface HistoryPage { events: EventEnvelope[]; hasMore: boolean; total?: number; historyRevision?: number }
 export interface ActionResponse { ok?: boolean; message?: string; error?: string }
 export interface BrowserStatus { enabled: boolean; capable: boolean; available: boolean; reason?: string; paused?: boolean; headless?: boolean }
 export interface InputMessage { content: string; attachments?: Pick<DraftAttachment, 'name' | 'mimeType' | 'dataBase64'>[]; imagePositions?: number[]; skill?: string }

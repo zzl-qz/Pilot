@@ -69,4 +69,19 @@ class ProtocolTest {
         assertEquals(600, transcript.cursor)
     }
 
+    @Test fun `历史版本变化清空旧状态并要求重放且控制消息不占游标`() {
+        val transcript = Conversation()
+        transcript.historyVersion(0)
+        transcript.accept(Protocol.json.parseToJsonElement("""{"sequence":5,"type":"run.started","payload":{"input":"旧历史"}}""").jsonObject)
+        transcript.accept(Protocol.json.parseToJsonElement("""{"type":"stream.reset","payload":{"historyRevision":1}}""").jsonObject)
+        assertTrue(transcript.needsReplay)
+        assertEquals(0, transcript.cursor)
+        assertTrue(transcript.snapshot().isEmpty())
+        assertEquals(1, transcript.historyRevision)
+        transcript.reconnect()
+        transcript.accept(Protocol.json.parseToJsonElement("""{"type":"stream.ready","payload":{"historyRevision":1}}""").jsonObject)
+        assertFalse(transcript.needsReplay)
+        assertEquals(0, transcript.cursor)
+    }
+
 }

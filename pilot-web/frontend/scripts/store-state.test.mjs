@@ -282,3 +282,27 @@ test('连续打开即断开的连接累积退避，稳定十秒后才重置，�
     assert.equal(useStore.getState()._reconnectAttempt, 0);
   } finally { fixture.restore(); Math.random = savedRandom; }
 });
+
+test('历史版本失效会重建显示和续订，保留输入附件草稿并拒绝旧分页响应', async () => {
+  const fixture = fakeStreams(); const saved = fetchHandler; const oldPage = deferred();
+  try {
+    reset(); useStore.setState({ historyRevision: 0 });
+    useStore.getState().handleEvent({ type: 'run.started', sessionId: 's', sequence: 5, payload: { input: '已删消息' } });
+    useStore.getState().flushEvents();
+    useStore.setState(draft => { draft.ui.draftFiles = [{ id: 'draft', name: '草稿附件' }]; });
+    fetchHandler = url => String(url).includes('before=') ? oldPage.promise : Promise.resolve(new Response(JSON.stringify({
+      historyRevision: 1, hasMore: false, events: [{ type: 'run.started', sessionId: 's', sequence: 6, payload: { input: '新历史' } }]
+    })));
+    const earlier = useStore.getState().loadEarlier();
+    useStore.getState().connectSse('s', 5);
+    fixture.streams[0].listeners.get('stream.reset')({ data: JSON.stringify({ sessionId: 's', payload: { historyRevision: 1 } }) });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(useStore.getState().historyRevision, 1);
+    assert.equal(useStore.getState().thread.cursor, 6);
+    assert.match(fixture.streams.at(-1).url, /after=6&revision=1/);
+    assert.equal(useStore.getState().ui.draftFiles[0].name, '草稿附件');
+    oldPage.resolve(new Response(JSON.stringify({ historyRevision: 0, hasMore: false, events: [{ type: 'run.started', sessionId: 's', sequence: 2, payload: { input: '旧分页' } }] })));
+    assert.equal(await earlier, false);
+    assert.equal(useStore.getState().thread.rows.some(row => row.text === '旧分页' || row.text === '已删消息'), false);
+  } finally { fetchHandler = saved; fixture.restore(); }
+});

@@ -156,6 +156,40 @@ public final class SqliteStore {
 
     private final String url;
     private final Path path;
+    private final ThreadLocal<Transaction> transaction = new ThreadLocal<>();
+
+    private static final class Transaction {
+        final Connection connection;
+        boolean rollbackOnly;
+        Transaction(Connection connection) { this.connection = connection; }
+    }
+
+    /** 同一线程、同一数据库的 repository 调用共享事务；内层不能提前提交或关闭连接。 */
+    public <T> T transaction(java.util.function.Supplier<T> work) {
+        Transaction current = transaction.get();
+        if (current != null) {
+            try { return work.get(); }
+            catch (RuntimeException | Error failure) { current.rollbackOnly = true; throw failure; }
+        }
+        try (Connection connection = open()) {
+            connection.setAutoCommit(false);
+            Transaction scope = new Transaction(connection);
+            transaction.set(scope);
+            try {
+                T result = work.get();
+                if (scope.rollbackOnly) throw new IllegalStateException("事务已标记回滚，不能提交部分历史修改");
+                connection.commit();
+                return result;
+            } catch (RuntimeException | Error | SQLException failure) {
+                try { connection.rollback(); } catch (SQLException rollback) { failure.addSuppressed(rollback); }
+                throw failure;
+            } finally {
+                transaction.remove();
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("历史事务失败", failure);
+        }
+    }
 
     public SqliteStore(Path path) {
         this(path, true);
@@ -181,6 +215,22 @@ public final class SqliteStore {
     }
 
     public Connection open() throws SQLException {
+        Transaction current = transaction.get();
+        if (current != null) {
+            return (Connection) java.lang.reflect.Proxy.newProxyInstance(Connection.class.getClassLoader(),
+                new Class<?>[] {Connection.class}, (proxy, method, args) -> {
+                    switch (method.getName()) {
+                        case "close", "commit": return null;
+                        case "setAutoCommit":
+                            if (Boolean.TRUE.equals(args[0])) throw new SQLException("不能在共享事务中开启自动提交");
+                            return null;
+                        case "rollback": current.rollbackOnly = true; return null;
+                        default:
+                            try { return method.invoke(current.connection, args); }
+                            catch (java.lang.reflect.InvocationTargetException failure) { throw failure.getCause(); }
+                    }
+                });
+        }
         Connection connection = DriverManager.getConnection(url);
         try (Statement statement = connection.createStatement()) {
             statement.execute("PRAGMA busy_timeout = 4000");
@@ -218,19 +268,28 @@ public final class SqliteStore {
         String createdAt = normalizedInstantSql("created_at");
         String excludeLive = liveSessions.isEmpty() ? ""
             : " AND session_id NOT IN (" + String.join(",", Collections.nCopies(liveSessions.size(), "?")) + ")";
-        try (Connection connection = open();
-            PreparedStatement statement = connection.prepareStatement("DELETE FROM events WHERE " + createdAt + " < ? "
-                + "AND NOT EXISTS (SELECT 1 FROM run_checkpoints c WHERE c.session_id = events.session_id "
-                + "AND c.status IN ('RUNNING','INTERRUPTED','PAUSED'))" + excludeLive)) {
-            statement.setString(1, timestamp);
-            int parameter = 2;
-            for (String session : liveSessions) {
-                statement.setString(parameter++, session);
+        return transaction(() -> {
+            try (Connection connection = open();
+                PreparedStatement statement = connection.prepareStatement("DELETE FROM events WHERE " + createdAt + " < ? "
+                    + "AND NOT EXISTS (SELECT 1 FROM run_checkpoints c WHERE c.session_id = events.session_id "
+                    + "AND c.status IN ('RUNNING','INTERRUPTED','PAUSED'))" + excludeLive + " RETURNING session_id")) {
+                statement.setString(1, timestamp);
+                int parameter = 2;
+                for (String session : liveSessions) statement.setString(parameter++, session);
+                Set<String> changed = new HashSet<>();
+                int removed = 0;
+                try (ResultSet rows = statement.executeQuery()) {
+                    while (rows.next()) { changed.add(rows.getString(1)); removed++; }
+                }
+                for (String session : changed) {
+                    JdbcSupport.exec(connection, "UPDATE sessions SET history_revision = history_revision + 1 WHERE id = ?",
+                        update -> update.setString(1, session));
+                }
+                return removed;
+            } catch (SQLException e) {
+                throw new IllegalStateException("清理历史事件失败", e);
             }
-            return statement.executeUpdate();
-        } catch (SQLException e) {
-            throw new IllegalStateException("清理历史事件失败", e);
-        }
+        });
     }
 
     public Set<String> activeRunIds() {
@@ -308,6 +367,7 @@ public final class SqliteStore {
      * 老会话一律视为「非空白、未归档」，保持原样。
      */
     private static void migrate(Statement statement) throws SQLException {
+        addColumnIfMissing(statement, "sessions", "history_revision", "INTEGER NOT NULL DEFAULT 0");
         addColumnIfMissing(statement, "sessions", "project_id", "TEXT");
         addColumnIfMissing(statement, "sessions", "is_blank", "INTEGER NOT NULL DEFAULT 0");
         addColumnIfMissing(statement, "sessions", "archived", "INTEGER NOT NULL DEFAULT 0");

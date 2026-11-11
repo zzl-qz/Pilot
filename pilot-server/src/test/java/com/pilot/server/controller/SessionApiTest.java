@@ -55,6 +55,20 @@ import tools.jackson.databind.ObjectMapper;
 @SpringBootTest(properties = "pilot.store=memory")
 @AutoConfigureMockMvc
 class SessionApiTest {
+    @Test
+    void historyVersionAppearsInPagesAndStaleStreamReceivesResetWithoutOldEvents() throws Exception {
+        String id = sessions.createSession("版本同步").id();
+        sessions.sendMessage(id, "已删除历史");
+        sessions.dropEventsFrom(id, 1);
+        mvc.perform(get("/api/sessions/{id}", id)).andExpect(jsonPath("$.historyRevision").value(1));
+        mvc.perform(get("/api/sessions/{id}/history", id)).andExpect(jsonPath("$.historyRevision").value(1))
+            .andExpect(jsonPath("$.events.length()").value(0));
+        var result = mvc.perform(get("/api/sessions/{id}/events", id).param("after", "1").param("revision", "0"))
+            .andExpect(status().isOk()).andReturn();
+        String body = result.getResponse().getContentAsString();
+        assertTrue(body.contains("event:stream.reset"));
+        assertFalse(body.contains("已删除历史"));
+    }
     private static final Path ATTACHMENT_ROOT =
         Path.of(System.getProperty("java.io.tmpdir"), "pilot-session-api-" + UUID.randomUUID());
 

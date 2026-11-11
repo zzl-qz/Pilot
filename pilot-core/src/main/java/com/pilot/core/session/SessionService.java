@@ -263,17 +263,36 @@ public final class SessionService {
      * 和 {@link #publish} 共用会话锁，避免删到一半又被追加。
      */
     public int dropEventsFrom(String sessionId, long fromSequence) {
+        return editHistory(sessionId, fromSequence, null, () -> {});
+    }
+
+    public long historyRevision(String sessionId) { return repository.historyRevision(sessionId); }
+
+    public static final class HistoryChangedException extends RuntimeException {
+        public HistoryChangedException() { super("会话历史已变化，请重新加载后操作"); }
+    }
+
+    /** 其他数据库仓储写入与事件截断在同一事务内完成；提交后使所有旧订阅失效。 */
+    public int editHistory(String sessionId, long fromSequence, Long expectedRevision, Runnable otherWrites) {
         Object lock = lockFor(sessionId);
         synchronized (lock) {
             if (repository.find(sessionId).isEmpty()) {
                 throw new NoSuchSessionException(sessionId);
             }
-            int removed = repository.dropEventsFrom(sessionId, fromSequence);
-            SessionStatus status = SessionStatus.CREATED;
-            for (EventEnvelope event : repository.events(sessionId)) {
-                status = nextStatus(status, event.payload());
-            }
-            repository.updateStatus(sessionId, status);
+            int removed = repository.transaction(sessionId, () -> {
+                if (expectedRevision != null && historyRevision(sessionId) != expectedRevision) {
+                    throw new HistoryChangedException();
+                }
+                otherWrites.run();
+                int count = repository.dropEventsFrom(sessionId, fromSequence);
+                SessionStatus status = SessionStatus.CREATED;
+                for (EventEnvelope event : repository.events(sessionId)) status = nextStatus(status, event.payload());
+                repository.updateStatus(sessionId, status);
+                repository.advanceHistoryRevision(sessionId);
+                return count;
+            });
+            var current = subscribers.get(sessionId);
+            if (current != null) current.forEach(EventDelivery::close);
             return removed;
         }
     }
@@ -293,6 +312,11 @@ public final class SessionService {
      */
     public EventSubscription subscribe(String sessionId, long afterSequence, Consumer<EventEnvelope> listener,
         Runnable onClosed) {
+        return subscribe(sessionId, afterSequence, null, listener, onClosed);
+    }
+
+    public EventSubscription subscribe(String sessionId, long afterSequence, Long expectedRevision,
+        Consumer<EventEnvelope> listener, Runnable onClosed) {
         Objects.requireNonNull(listener, "listener must not be null");
         EventDelivery delivery = new EventDelivery(sessionId, listener, onClosed);
         Object lock = lockFor(sessionId);
@@ -301,6 +325,9 @@ public final class SessionService {
                 if (repository.find(sessionId).isEmpty()) {
                     locks.remove(sessionId, lock);
                     throw new NoSuchSessionException(sessionId);
+                }
+                if (expectedRevision != null && historyRevision(sessionId) != expectedRevision) {
+                    throw new HistoryChangedException();
                 }
                 // 先注册再回放：回放失败时 close 必须能摘掉已注册对象，不能重新挂回已关闭订阅。
                 listeners(sessionId).add(delivery);

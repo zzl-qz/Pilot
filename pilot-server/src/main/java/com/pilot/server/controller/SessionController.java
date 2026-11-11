@@ -565,10 +565,11 @@ public class SessionController {
         String content = request.content().strip();
         String originalInput = original;
         int originalOccurrence = occurrence;
+        long historyRevision = sessions.historyRevision(id);
         String runId = claimRun(id);
         launch(runId, () -> {
-            runStarter.rewindBeforeUserInput(id, originalOccurrence, originalInput);
-            sessions.dropEventsFrom(id, request.sequence());
+            sessions.editHistory(id, request.sequence(), historyRevision,
+                () -> runStarter.rewindBeforeUserInput(id, originalOccurrence, originalInput));
             sessions.publish(id, runId, new RunStarted(content));
             runStarter.start(id, runId, content);
         });
@@ -687,36 +688,58 @@ public class SessionController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "before 和 after 不能同时使用");
         }
         int capped = Math.max(1, Math.min(limit, 500));
+        long revision = sessions.historyRevision(id);
         List<EventEnvelope> page =
             after != null ? sessions.eventsPageAfter(id, after, capped) : sessions.eventsPage(id, before, capped);
         boolean hasMore =
             after != null ? !page.isEmpty() && page.get(page.size() - 1).sequence() < sessions.latestSequence(id)
                 : !page.isEmpty() && page.get(0).sequence() > 1;
-        return new HistoryResponse(page, hasMore, countOf(id));
+        int total = countOf(id);
+        if (revision != sessions.historyRevision(id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "会话历史已变化，请重新加载");
+        }
+        return new HistoryResponse(page, hasMore, total, revision);
     }
 
     /**
      * @param hasMore 是否还有更早的事件
      * @param total   该会话的事件总数
      */
-    public record HistoryResponse(List<EventEnvelope> events, boolean hasMore, int total) {
+    public record HistoryResponse(List<EventEnvelope> events, boolean hasMore, int total, long historyRevision) {
     }
 
     @GetMapping(value = "/{id}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<SseEmitter> events(@PathVariable String id,
         @RequestParam(name = "after", required = false) Long after,
-        @RequestHeader(name = "Last-Event-ID", required = false) Long lastEventId) {
+        @RequestHeader(name = "Last-Event-ID", required = false) Long lastEventId,
+        @RequestParam(name = "revision", required = false) Long expectedRevision) {
         requireSession(id);
         long cursor = after != null ? after : lastEventId != null ? lastEventId : 0L;
+        long revision = sessions.historyRevision(id);
         SseEmitter emitter = new SseEmitter(0L);
         AtomicBoolean closed = new AtomicBoolean(false);
         AtomicReference<EventSubscription> subscription = new AtomicReference<EventSubscription>();
         AtomicReference<Thread> heartbeat = new AtomicReference<>();
+        Runnable finish = () -> {
+            try {
+                if (!closed.get() && sessions.find(id).isPresent() && sessions.historyRevision(id) != revision) {
+                    sendControl(emitter, "stream.reset", id, sessions.historyRevision(id));
+                }
+            } catch (IOException | RuntimeException ignored) {
+                // 下次握手仍能发现版本变化，不依赖失效通知恰好送达。
+            } finally {
+                closeQuietly(closed, subscription, heartbeat, emitter);
+            }
+        };
 
         // 浏览器刷新、切换会话或关页面都会让连接失效；这属于正常生命周期，
         // 不能把写入失败当成异常抛给上层，否则每个事件都会刷一份堆栈。
         Consumer<EventEnvelope> listener = envelope -> {
             if (closed.get()) {
+                return;
+            }
+            if (sessions.historyRevision(id) != revision) {
+                finish.run();
                 return;
             }
             if (!send(emitter, envelope)) {
@@ -728,10 +751,16 @@ public class SessionController {
         emitter.onTimeout(() -> closeQuietly(closed, subscription, heartbeat, null));
         emitter.onError(error -> closeQuietly(closed, subscription, heartbeat, null));
         try {
+            if (expectedRevision != null && expectedRevision != revision) {
+                sendControl(emitter, "stream.reset", id, revision);
+                closeQuietly(closed, subscription, heartbeat, emitter);
+                return ResponseEntity.ok().header("Cache-Control", "no-cache").body(emitter);
+            }
+            sendControl(emitter, "stream.ready", id, revision);
             emitter.send(SseEmitter.event().comment("stream open: session=" + id + ", after=" + cursor));
             // 第四个参数：订阅被服务端摘掉（客户端积压太多）时，把底层连接一起关掉
             subscription.set(
-                sessions.subscribe(id, cursor, listener, () -> closeQuietly(closed, subscription, heartbeat, emitter)));
+                sessions.subscribe(id, cursor, revision, listener, finish));
             if (closed.get()) {
                 subscription.get().close();
             }
@@ -740,6 +769,7 @@ public class SessionController {
                 try {
                     while (!closed.get()) {
                         Thread.sleep(java.time.Duration.ofSeconds(HEARTBEAT_SECONDS));
+                        if (sessions.historyRevision(id) != revision) { finish.run(); break; }
                         if (!closed.get()) emitter.send(SseEmitter.event().comment("ping"));
                     }
                 } catch (InterruptedException e) {
@@ -751,11 +781,18 @@ public class SessionController {
             heartbeat.set(beat);
             if (!closed.get()) beat.start();
             if (closed.get()) beat.interrupt();
+        } catch (SessionService.HistoryChangedException e) {
+            finish.run();
         } catch (IOException | RuntimeException e) {
             closeQuietly(closed, subscription, heartbeat, null);
             emitter.completeWithError(e);
         }
         return ResponseEntity.ok().header("Cache-Control", "no-cache").header("X-Accel-Buffering", "no").body(emitter);
+    }
+
+    private void sendControl(SseEmitter emitter, String type, String sessionId, long revision) throws IOException {
+        emitter.send(SseEmitter.event().name(type).data(objectMapper.writeValueAsString(
+            Map.of("type", type, "sessionId", sessionId, "payload", Map.of("historyRevision", revision)))));
     }
 
     /** @return {@code false} 表示客户端已经断开，调用方应停止推送并注销订阅 */
@@ -836,14 +873,14 @@ public class SessionController {
 
     public record SessionResponse(String id, String sessionId, String title, Instant createdAt, SessionStatus status,
         String workspace, String projectId, boolean isBlank, boolean archived, int eventCount, String parentSessionId,
-        Instant updatedAt, boolean pinned, boolean unread, boolean titleManual) {
+        Instant updatedAt, boolean pinned, boolean unread, boolean titleManual, long historyRevision) {
         static SessionResponse of(Session session, int eventCount) {
             // 同时保留 id 与 sessionId：前端界面（含 React 版）统一按 id 读取会话标识，
             // 旧版 app.js 仍按 sessionId 读取，二者并存避免任一侧取到 undefined。
             return new SessionResponse(session.id(), session.id(), session.title(), session.createdAt(),
                 session.status(), session.workspace(), session.projectId(), session.isBlank(), session.archived(),
                 eventCount, session.parentSessionId(), session.updatedAt(), session.pinned(), session.unread(),
-                session.titleManual());
+                session.titleManual(), session.historyRevision());
         }
     }
 }

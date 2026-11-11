@@ -213,4 +213,21 @@ class SessionServiceTest {
         assertThrows(NoSuchSessionException.class, () -> sessions.subscribe(session.id(), 0, event -> {}));
         assertEquals(0, sessions.subscriberCount());
     }
+
+    @Test
+    void historyEditInvalidatesAllSubscribersAndRejectsOldRevision() throws Exception {
+        String id = sessions.createSession("历史版本").id();
+        sessions.sendMessage(id, "旧历史");
+        CountDownLatch closed = new CountDownLatch(2);
+        sessions.subscribe(id, 0, 0L, event -> {}, closed::countDown);
+        sessions.subscribe(id, 0, 0L, event -> {}, closed::countDown);
+        sessions.editHistory(id, 1, 0L, () -> {});
+        assertTrue(closed.await(2, TimeUnit.SECONDS));
+        assertEquals(0, sessions.subscriberCount());
+        assertEquals(1, sessions.historyRevision(id));
+        assertThrows(SessionService.HistoryChangedException.class,
+            () -> sessions.subscribe(id, 0, 0L, event -> {}, () -> {}));
+        assertEquals(0, sessions.subscriberCount());
+        sessions.subscribe(id, 0, 1L, event -> {}, () -> {}).close();
+    }
 }

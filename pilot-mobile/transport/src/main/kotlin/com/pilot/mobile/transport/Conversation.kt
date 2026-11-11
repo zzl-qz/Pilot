@@ -10,21 +10,34 @@ data class TranscriptRow(val key: String, val role: String, val text: String)
 /** 持久事件去重；预览与最终正文分开，续接不会把一次回复重复拼接。 */
 class Conversation(private val maxRows: Int = 300) {
     var cursor: Long = 0; private set
+    var historyRevision: Long? = null; private set
+    var needsReplay = false; private set
     private val rows = mutableListOf<TranscriptRow>()
     private var preview = ""
     private var rowChars = 0
     var runId = ""; private set
     var phase = ""; private set
     fun snapshot(): List<TranscriptRow> = rows.toList() + if (preview.isNotEmpty()) listOf(TranscriptRow("preview", "assistant", preview)) else emptyList()
-    fun reconnect() { preview = "" }
+    fun reconnect() { preview = ""; needsReplay = false }
+
+    fun historyVersion(revision: Long) { historyRevision = revision }
 
     fun accept(event: JsonObject) {
         val type = event.text("type")
+        val payload = event["payload"] as? JsonObject ?: return
+        if (type == "stream.ready" || type == "stream.reset") {
+            val revision = payload.text("historyRevision").toLongOrNull() ?: error("历史版本无效")
+            if (type == "stream.reset" || historyRevision != null && historyRevision != revision) {
+                rows.clear(); rowChars = 0; preview = ""; cursor = 0; runId = ""; phase = "重新加载历史"
+                needsReplay = true
+            }
+            historyRevision = revision
+            return
+        }
+        if (needsReplay || type.startsWith("stream.")) return
         val ephemeral = type in setOf("assistant.preview", "assistant.reasoning")
         val sequence = event.text("sequence").toLongOrNull() ?: return
         if (!ephemeral && sequence <= cursor) return
-        if (!ephemeral) cursor = sequence
-        val payload = event["payload"] as? JsonObject ?: return
         val id = event.text("runId")
         when (type) {
             "run.started" -> {
@@ -49,6 +62,7 @@ class Conversation(private val maxRows: Int = 300) {
             "run.completed" -> { preview = ""; runId = ""; phase = "已完成" }
             "run.cancelled" -> { preview = ""; runId = ""; phase = if (payload.text("reason") == "paused") "已暂停" else "已停止" }
         }
+        if (!ephemeral) cursor = sequence
     }
 
     private fun add(sequence: Long, role: String, text: String) {

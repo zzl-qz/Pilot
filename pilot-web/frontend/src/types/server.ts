@@ -920,6 +920,7 @@ export interface SessionControllerPlanResponse {
 
 /** SessionController.java / SessionResponse */
 export interface SessionControllerSessionResponse {
+  historyRevision?: number;
   id: string;
   sessionId: string;
   title: string;

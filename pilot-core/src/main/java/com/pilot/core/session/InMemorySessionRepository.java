@@ -16,6 +16,34 @@ public class InMemorySessionRepository implements SessionRepository {
     private final ConcurrentMap<String, State> sessions = new ConcurrentHashMap<>();
 
     @Override
+    public <T> T transaction(String sessionId, java.util.function.Supplier<T> work) {
+        State state = require(sessionId);
+        synchronized (state) {
+            List<EventEnvelope> before = List.copyOf(state.events);
+            SessionStatus status = state.status;
+            long revision = state.historyRevision;
+            try { return work.get(); }
+            catch (RuntimeException | Error failure) {
+                state.events.clear(); state.events.addAll(before);
+                state.status = status; state.historyRevision = revision;
+                throw failure;
+            }
+        }
+    }
+
+    @Override
+    public long historyRevision(String sessionId) {
+        State state = require(sessionId);
+        synchronized (state) { return state.historyRevision; }
+    }
+
+    @Override
+    public void advanceHistoryRevision(String sessionId) {
+        State state = require(sessionId);
+        synchronized (state) { state.historyRevision++; }
+    }
+
+    @Override
     public Session create(String sessionId, String title, String workspace, Instant createdAt, String projectId,
         boolean isBlank, String parentSessionId) {
         State state = new State(sessionId, title, workspace, createdAt, projectId, isBlank, parentSessionId);
@@ -215,6 +243,7 @@ public class InMemorySessionRepository implements SessionRepository {
         private String workspace;
         private SessionStatus status = SessionStatus.CREATED;
         private long sequence;
+        private long historyRevision;
         private boolean isBlank;
         private boolean archived;
         private Instant updatedAt;
@@ -237,7 +266,7 @@ public class InMemorySessionRepository implements SessionRepository {
         private Session snapshot() {
             synchronized (this) {
                 return new Session(id, title, createdAt, status, workspace, projectId, isBlank, archived,
-                    parentSessionId, updatedAt, pinned, unread, titleManual);
+                    parentSessionId, updatedAt, pinned, unread, titleManual, historyRevision);
             }
         }
     }

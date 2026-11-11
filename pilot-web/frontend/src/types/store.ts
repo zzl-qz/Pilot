@@ -41,6 +41,7 @@ export interface UiState {
 export type CommandTask = Partial<S.CommandTaskManagerTask> & { id?: string };
 export interface StoreData extends Omit<ReducerState, 'ui'> {
   sessionId: string | null; sessionEpoch: number; ready: boolean; draftSession: DraftSession | null;
+  historyRevision: number | null;
   embeddedSessionId: string | null; sessionTitle: string; workspace: string; sessions: SessionSummary[];
   projects: ProjectSummary[]; currentProjectId: string | null; inputHistory: string[]; inputHistoryIndex: number; inputHistoryDraft: string;
   sideChats: SideChatsState; sideQuote: { id: string; text: string; nonce: number } | null; sideDrafts?: Record<string, string>;
@@ -72,7 +73,7 @@ export interface StoreActions {
   init(embeddedSessionId?: string | null): Promise<void>;
   loadProjects(options?: StrictOptions): Promise<void>; loadSessions(options?: StrictOptions): Promise<SessionSummary[]>;
   startNewSession(options?: Partial<DraftSession>): null; ensureSession(): Promise<string | null>; activate(id: string): Promise<boolean>;
-  loadHistory(): Promise<void>; prefetchEarlier(): Promise<boolean>; applyEarlierPage(): boolean; loadEarlier(): Promise<boolean>;
+  loadHistory(): Promise<boolean>; prefetchEarlier(): Promise<boolean>; applyEarlierPage(): boolean; loadEarlier(): Promise<boolean>;
   requestEarlierHistory(options?: ForceOptions): Promise<boolean>; loadLater(): Promise<boolean>; requestLaterHistory(options?: ForceOptions): Promise<boolean>;
   connectSse(id: string, cursor: number): void; scheduleReconnect(id: string): void; handleEvent(event: EventEnvelope): void;
   flushEvents(): void; settleEvent(event: EventEnvelope, after: StoreState): void;

@@ -14,7 +14,13 @@ import java.util.Objects;
  */
 public record Session(String id, String title, Instant createdAt, SessionStatus status, String workspace,
     String projectId, boolean isBlank, boolean archived, String parentSessionId, Instant updatedAt, boolean pinned,
-    boolean unread, boolean titleManual) {
+    boolean unread, boolean titleManual, long historyRevision) {
+    public Session(String id, String title, Instant createdAt, SessionStatus status, String workspace,
+        String projectId, boolean isBlank, boolean archived, String parentSessionId, Instant updatedAt,
+        boolean pinned, boolean unread, boolean titleManual) {
+        this(id, title, createdAt, status, workspace, projectId, isBlank, archived, parentSessionId,
+            updatedAt, pinned, unread, titleManual, 0);
+    }
     /** 兼容历史调用：最近活动默认为创建时间，标题尚未手动编辑。 */
     public Session(String id, String title, Instant createdAt, SessionStatus status, String workspace, String projectId,
         boolean isBlank, boolean archived, String parentSessionId) {
@@ -78,21 +84,21 @@ public record Session(String id, String title, Instant createdAt, SessionStatus 
     /** 发过消息之后就不能再变回空白对话。 */
     public Session withBlank(boolean blank) {
         return new Session(id, title, createdAt, status, workspace, projectId, blank, archived, parentSessionId,
-            updatedAt, pinned, unread, titleManual);
+            updatedAt, pinned, unread, titleManual, historyRevision);
     }
 
     public Session withArchived(boolean value) {
         return new Session(id, title, createdAt, status, workspace, projectId, isBlank, value, parentSessionId,
-            updatedAt, pinned, unread, titleManual);
+            updatedAt, pinned, unread, titleManual, historyRevision);
     }
 
     public Session withTitle(String newTitle) {
         return new Session(id, newTitle, createdAt, status, workspace, projectId, isBlank, archived, parentSessionId,
-            updatedAt, pinned, unread, true);
+            updatedAt, pinned, unread, true, historyRevision);
     }
 
     public Session withWorkspace(String newWorkspace) {
         return new Session(id, title, createdAt, status, newWorkspace, projectId, isBlank, archived, parentSessionId,
-            updatedAt, pinned, unread, titleManual);
+            updatedAt, pinned, unread, titleManual, historyRevision);
     }
 }

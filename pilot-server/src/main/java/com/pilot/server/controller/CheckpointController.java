@@ -70,6 +70,7 @@ public class CheckpointController {
         String slot = claim(id);
         try {
             Selection selection = select(id, request.sequence());
+            long historyRevision = sessions.historyRevision(id);
             checkRevision(selection, request.revision());
             boolean withConversation = !"code".equals(request.mode());
             RunSnapshotService.ConversationCheckpoint checkpoint =
@@ -99,10 +100,11 @@ public class CheckpointController {
             }
             if (withConversation) {
                 tasks.restoreTo(id, selection.event().runId());
+                sessions.editHistory(id, request.sequence(), historyRevision, () -> {
+                    conversations.save(id, checkpoint.messages());
+                    plans.save(id, checkpoint.plan());
+                });
                 runs.discardSteering(id);
-                conversations.save(id, checkpoint.messages());
-                plans.save(id, checkpoint.plan());
-                sessions.dropEventsFrom(id, request.sequence());
             }
             return new RestoreResponse(true, selection.input(), report);
         } finally {

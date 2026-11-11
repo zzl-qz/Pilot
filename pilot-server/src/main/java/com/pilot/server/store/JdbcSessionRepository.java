@@ -21,7 +21,7 @@ import com.pilot.core.session.SessionStatus;
 public final class JdbcSessionRepository implements SessionRepository {
     private static final int WRITE_ATTEMPTS = 3;
     private static final String COLUMNS =
-        "id, title, workspace, created_at, status, project_id, is_blank, archived, parent_session_id, updated_at, pinned, unread, title_manual";
+        "id, title, workspace, created_at, status, project_id, is_blank, archived, parent_session_id, updated_at, pinned, unread, title_manual, history_revision";
     private static final String UPDATED_AT = SqliteStore.normalizedInstantSql("updated_at");
     private static final String ACTIVITY_ORDER = " ORDER BY pinned DESC, " + UPDATED_AT + " DESC, id";
 
@@ -31,6 +31,24 @@ public final class JdbcSessionRepository implements SessionRepository {
     public JdbcSessionRepository(SqliteStore store, EventCodec codec) {
         this.store = store;
         this.codec = codec;
+    }
+
+    @Override
+    public <T> T transaction(String sessionId, java.util.function.Supplier<T> work) {
+        return store.transaction(work);
+    }
+
+    @Override
+    public long historyRevision(String sessionId) {
+        return JdbcSupport.queryOne(store, "SELECT history_revision FROM sessions WHERE id = ?",
+            statement -> statement.setString(1, sessionId), rows -> rows.getLong(1), "读取历史版本失败")
+            .orElseThrow(() -> new NoSuchSessionException(sessionId));
+    }
+
+    @Override
+    public void advanceHistoryRevision(String sessionId) {
+        JdbcSupport.update(store, "UPDATE sessions SET history_revision = history_revision + 1 WHERE id = ?",
+            statement -> statement.setString(1, sessionId), "更新历史版本失败");
     }
 
     @Override
@@ -373,7 +391,7 @@ public final class JdbcSessionRepository implements SessionRepository {
             SessionStatus.valueOf(rows.getString("status")), rows.getString("workspace"), rows.getString("project_id"),
             rows.getInt("is_blank") == 1, rows.getInt("archived") == 1, rows.getString("parent_session_id"),
             Instant.parse(rows.getString("updated_at")), rows.getInt("pinned") == 1, rows.getInt("unread") == 1,
-            rows.getInt("title_manual") == 1);
+            rows.getInt("title_manual") == 1, rows.getLong("history_revision"));
     }
 
     private static boolean isBusy(SQLException e) {

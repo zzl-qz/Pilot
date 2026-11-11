@@ -16,6 +16,13 @@ import com.pilot.core.event.SessionEvent;
  */
 public interface SessionRepository {
 
+    /** 同库历史修改共享一个事务；内存实现只保证当前会话的原子替换。 */
+    default <T> T transaction(String sessionId, java.util.function.Supplier<T> work) { return work.get(); }
+
+    default long historyRevision(String sessionId) { return 0; }
+
+    default void advanceHistoryRevision(String sessionId) {}
+
     /**
      * @param parentSessionId 侧边对话的父会话；普通对话传 {@code null}
      */
