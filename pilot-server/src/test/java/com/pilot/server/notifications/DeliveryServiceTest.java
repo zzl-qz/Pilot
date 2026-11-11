@@ -118,6 +118,52 @@ class DeliveryServiceTest {
     }
 
     @Test
+    void receiptAtExactLeaseExpiryIsRejectedBeforeAnotherClientClaims() {
+        service.configure(0, true, "");
+        when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant())));
+        service.collect();
+        var first = service.claim("DESKTOP");
+        clock.at = first.nextAt();
+        assertThrows(IllegalStateException.class,
+            () -> service.receipt(first.id(), new DeliveryService.Receipt(first.lease(), true, "")));
+        var second = service.claim("DESKTOP");
+        assertNotEquals(first.lease(), second.lease());
+        service.receipt(second.id(), new DeliveryService.Receipt(second.lease(), true, ""));
+        assertEquals("DELIVERED", service.get(second.id()).state());
+    }
+
+    @Test
+    void delayedWorkerCannotSendUsingExpiredOrReplacedLease() {
+        service.configure(0, false, "https://example.test/hook");
+        when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant())));
+        service.collect();
+        var first = service.claim("WEBHOOK");
+        clock.at = first.nextAt();
+        service.send(first);
+        assertTrue(keys.isEmpty(), "在备份或停顿后恢复的 worker 必须先核对租约");
+        var second = service.claim("WEBHOOK");
+        service.send(first);
+        assertTrue(keys.isEmpty(), "旧 worker 不能使用已被接管的租约发送");
+        status.set(204);
+        service.send(second);
+        service.send(second);
+        assertEquals(List.of(first.id()), keys);
+        assertEquals("DELIVERED", service.get(first.id()).state());
+    }
+
+    @Test
+    void disablingChannelAfterClaimPreventsWorkerFromSendingToOldTarget() {
+        var settings = service.configure(0, false, "https://example.test/hook");
+        when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant())));
+        service.collect();
+        var claimed = service.claim("WEBHOOK");
+        service.configure(settings.version(), false, "https://example.test/new");
+        service.send(claimed);
+        assertTrue(keys.isEmpty());
+        assertEquals("CANCELLED", service.get(claimed.id()).state());
+    }
+
+    @Test
     void enablingDoesNotFloodOldResultsAndDisabledOrChangedChannelsDoNotSend() {
         when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant().minusSeconds(1))));
         var settings = service.configure(0, false, "https://example.test/hook");

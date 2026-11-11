@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.Attributes;
@@ -36,6 +37,7 @@ class ScheduleRestartTest {
     final List<String> keys = new CopyOnWriteArrayList<>();
     final List<String> bodies = new CopyOnWriteArrayList<>();
     final AtomicInteger status = new AtomicInteger(204);
+    final CountDownLatch responseRelease = new CountDownLatch(1);
     HttpServer receiver;
     String target;
 
@@ -45,7 +47,17 @@ class ScheduleRestartTest {
         receiver.createContext("/hook", exchange -> {
             keys.add(exchange.getRequestHeaders().getFirst("Idempotency-Key"));
             bodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-            exchange.sendResponseHeaders(status.get(), -1);
+            int response = status.get();
+            if (response == -2) {
+                try {
+                    responseRelease.await(25, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            if (response != -1) {
+                exchange.sendResponseHeaders(response < 0 ? 204 : response, -1);
+            }
             exchange.close();
         });
         receiver.start();
@@ -54,6 +66,7 @@ class ScheduleRestartTest {
 
     @AfterEach
     void close() {
+        responseRelease.countDown();
         receiver.stop(0);
     }
 
@@ -101,14 +114,16 @@ class ScheduleRestartTest {
         assertEquals(1, keys.size());
     }
 
-    @Test
-    void failedHttpDeliveryRetriesAfterRestartWithoutExecutingTaskAgain() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = {503, -1, -2})
+    void failedHttpDeliveryRetriesAfterRestartWithoutExecutingTaskAgain(int failure) throws Exception {
         run("seed", "2026-11-01T05:00:00Z", "ONCE", 0);
-        status.set(503);
+        status.set(failure);
         run("recover", "2026-11-01T06:10:00Z", "ONCE", 0);
         assertCompletedOnce(report());
         assertEquals("RETRY", report().path("deliveries").get(0).path("state").asText());
         status.set(204);
+        responseRelease.countDown();
         run("recover", "2026-11-01T06:11:00Z", "ONCE", 0);
         assertCompletedOnce(report());
         assertEquals("DELIVERED", report().path("deliveries").get(0).path("state").asText());

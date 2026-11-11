@@ -217,8 +217,7 @@ public class DeliveryService {
 
     public synchronized void receipt(String id, Receipt receipt) {
         var row = get(id);
-        if (receipt == null || !"SENDING".equals(row.state) || !row.lease.equals(receipt.lease())
-            || row.nextAt.isBefore(clock.instant())) {
+        if (receipt == null || !validLease(row, receipt.lease())) {
             throw new IllegalStateException("投递租约已过期，请刷新");
         }
         boolean ok = receipt.success();
@@ -250,6 +249,9 @@ public class DeliveryService {
 
     public void send(Delivery d) {
         try {
+            if (!prepareSend(d)) {
+                return;
+            }
             int status =
                 sender.send(d.target, d.id, mapper.writeValueAsString(Map.of("id", d.id, "resultId", d.resultId,
                     "title", d.title, "summary", d.summary, "state", d.outcome, "createdAt", d.createdAt.toString())));
@@ -261,6 +263,23 @@ public class DeliveryService {
             } catch (RuntimeException ignored) {
             }
         }
+    }
+
+    private boolean validLease(Delivery row, String lease) {
+        return "SENDING".equals(row.state) && row.lease.equals(lease) && row.nextAt.isAfter(clock.instant());
+    }
+
+    /** 领取后可能等待维护锁；实际发送前重新核对租约和渠道，不能使用过期的排队快照。 */
+    private synchronized boolean prepareSend(Delivery claimed) {
+        var row = get(claimed.id);
+        if (!"WEBHOOK".equals(row.channel) || !validLease(row, claimed.lease)) {
+            return false;
+        }
+        if (!enabled(row, settings())) {
+            save(row, "CANCELLED", row.attempts, clock.instant(), "", "通知渠道已关闭或地址已改变");
+            return false;
+        }
+        return true;
     }
 
     @Scheduled(fixedDelayString = "${pilot.notifications.poll-ms:5000}")
