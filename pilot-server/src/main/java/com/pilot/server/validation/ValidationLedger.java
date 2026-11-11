@@ -241,7 +241,7 @@ public class ValidationLedger {
             Files.createDirectories(marker.getParent());
             Files.writeString(marker, "pending", StandardOpenOption.CREATE, StandardOpenOption.WRITE,
                 StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.SYNC, LinkOption.NOFOLLOW_LINKS);
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             if (sqlite != null) {
                 sqlite.setValidationPending(sessionId, true);
             }

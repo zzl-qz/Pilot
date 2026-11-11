@@ -16,9 +16,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.StorageHealth;
+import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -143,5 +145,33 @@ class ValidationLedgerTest {
         writer.record(evidence("hash-a", "passed"));
         assertTrue(ledger().report("ses_1", "hash-a").current());
         StorageHealth.reset();
+    }
+
+    @Test
+    void recordsIncompleteEvidenceInSqliteWhenTheMarkerCannotBeWritten() throws IOException {
+        SqliteStore sqlite = new SqliteStore(dataDir.resolve("pilot.db"));
+        var beans = new DefaultListableBeanFactory();
+        beans.registerSingleton("sqlite", sqlite);
+        var provider = beans.getBeanProvider(SqliteStore.class);
+        JsonMapper mapper = JsonMapper.builder().build();
+        PilotDataDir normal = new PilotDataDir(dataDir.toString());
+        new ValidationLedger(normal, mapper, provider).record(evidence("hash", "passed"));
+        Path blocked = Files.writeString(dataDir.resolve("not-directory"), "file");
+        PilotDataDir blockedMarker = new PilotDataDir(dataDir.toString()) {
+            @Override
+            public Path file(String... parts) {
+                if (parts.length == 2 && parts[1].endsWith(".pending")) {
+                    return blocked.resolve(parts[1]);
+                }
+                return super.file(parts);
+            }
+        };
+        try {
+            new ValidationLedger(blockedMarker, mapper, provider).record(evidence("hash", "failed"));
+            assertTrue(sqlite.validationPending("ses_1"));
+            assertFalse(new ValidationLedger(normal, mapper, provider).report("ses_1", "hash").current());
+        } finally {
+            StorageHealth.reset();
+        }
     }
 }
