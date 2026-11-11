@@ -158,9 +158,22 @@ public final class SqliteStore {
     private final Path path;
 
     public SqliteStore(Path path) {
+        this(path, true);
+    }
+
+    private SqliteStore(Path path, boolean initialize) {
         this.path = path.toAbsolutePath().normalize();
         this.url = "jdbc:sqlite:" + this.path;
-        initialize();
+        if (initialize) {
+            initialize();
+        }
+    }
+
+    public static SqliteStore existing(Path path) {
+        if (!Files.isRegularFile(path)) {
+            throw new IllegalArgumentException("数据库文件不存在：" + path);
+        }
+        return new SqliteStore(path, false);
     }
 
     public Path path() {

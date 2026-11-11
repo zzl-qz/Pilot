@@ -56,6 +56,19 @@ MCP 目前使用本机 `stdio` 启动配置中的服务器进程；添加 MCP �
 
 设置是否读取特定环境变量、支持值和覆盖优先级，请以 [application.yaml](../pilot-server/src/main/resources/application.yaml) 为准。提示词位于 `pilot-core/src/main/resources/prompts/`，可用 `PILOT_PROMPTS_DIR` 指向本机覆盖目录。
 
+## 数据备份与恢复
+
+在「设置 → 诊断 → 存储与备份」中可以立即备份和校验。备份会短暂暂停受管数据写入。运行中的任务或后台命令超过等待时间时，结束相关操作后重试。备份包含 SQLite、附件、任务、快照和用户 MCP 配置等受管数据。外部编辑器正在修改的文件需在备份前暂停写入。
+
+退出 Pilot 后，用 JDK 25 执行离线恢复。命令中的 jar 路径和数据路径按实际安装位置填写。引号可保留路径中的空格。
+
+```text
+java --enable-native-access=ALL-UNNAMED -jar pilot-server.jar maintenance restore "--data-dir=目标数据目录" "--backup=备份目录"
+java --enable-native-access=ALL-UNNAMED -jar pilot-server.jar maintenance restore "--data-dir=目标数据目录" "--backup=备份目录" --apply
+```
+
+第一条命令只预检。第二条将核验后的备份写入干净目录并切换，原数据和旧数据库的 WAL 文件保存在输出所示的维护目录。恢复外置数据库或附件时，显式填写 `--database=目标数据库文件`、`--attachments=目标附件目录`，并用对应配置重新启动 Pilot。切换中途退出后，可保持停服并运行 `maintenance rollback --data-dir=目标数据目录`。恢复时使用过外置路径，也将相同参数传给回滚命令。
+
 ## 当前边界
 
 - 模型输出受模型、端点、网络和提示词影响；自动化测试不能证明真实模型任务成功率。

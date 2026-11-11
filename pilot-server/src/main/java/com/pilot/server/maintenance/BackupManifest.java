@@ -169,6 +169,11 @@ final class BackupManifest {
         return sha256(file, false);
     }
 
+    static boolean matches(Path file, JsonNode entry, String version) throws IOException {
+        return Files.size(file) == entry.path("bytes").asLong(-1)
+            && entry.path("sha256").asText("").equals(sha256(file, "2".equals(version)));
+    }
+
     private static String sha256(Path file, boolean legacy) throws IOException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
