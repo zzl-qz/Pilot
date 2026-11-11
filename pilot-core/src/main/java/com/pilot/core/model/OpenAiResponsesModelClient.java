@@ -3,7 +3,6 @@ package com.pilot.core.model;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -27,6 +26,7 @@ public final class OpenAiResponsesModelClient implements ModelClient {
     private final String apiKey;
     private final String model;
     private final Duration timeout;
+    private Duration idleTimeout;
     private ModelProfile profile;
     private final Set<NativeCapability> capabilities;
 
@@ -44,6 +44,7 @@ public final class OpenAiResponsesModelClient implements ModelClient {
         this.apiKey = apiKey;
         this.model = model;
         this.timeout = timeout;
+        this.idleTimeout = timeout;
         this.profile = profile == null ? ModelProfile.generic() : profile;
     }
 
@@ -70,6 +71,11 @@ public final class OpenAiResponsesModelClient implements ModelClient {
         return URI.create(base + query);
     }
 
+    public OpenAiResponsesModelClient withIdleTimeout(Duration value) {
+        this.idleTimeout = java.util.Objects.requireNonNull(value);
+        return this;
+    }
+
     @Override
     public ModelProfile profile() {
         return profile;
@@ -87,7 +93,7 @@ public final class OpenAiResponsesModelClient implements ModelClient {
             .header("Content-Type", "application/json").timeout(timeout).POST(HttpRequest.BodyPublishers
                 .ofString(mapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
             .build();
-        HttpResponse<String> response = NativeModelHttp.send(httpClient, request);
+        var response = NativeModelHttp.send(httpClient, request, idleTimeout);
         JsonNode root;
         try {
             root = mapper.readTree(response.body());

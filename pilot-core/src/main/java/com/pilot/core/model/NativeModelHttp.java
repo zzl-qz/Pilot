@@ -3,23 +3,27 @@ package com.pilot.core.model;
 import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+
+import com.pilot.core.http.BoundedHttp;
 
 /** 原生协议共用的 HTTP 发送与错误分类；请求和响应结构由各协议客户端处理。 */
 final class NativeModelHttp {
     private NativeModelHttp() {
     }
 
-    static HttpResponse<String> send(HttpClient httpClient, HttpRequest request) {
-        HttpResponse<String> response;
+    static BoundedHttp.TextResponse send(HttpClient httpClient, HttpRequest request, Duration idleTimeout) {
+        BoundedHttp.TextResponse response;
         try {
-            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            response = BoundedHttp.text(httpClient, request, idleTimeout, BoundedHttp.JSON_BYTES);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ModelClientException(ModelFailureKind.INTERRUPTED, "模型请求被中断", e);
         } catch (IOException e) {
-            throw new ModelClientException(ModelFailureKind.NETWORK, "模型请求失败：" + e.getMessage(), e);
+            ModelFailureKind kind = Thread.currentThread().isInterrupted() ? ModelFailureKind.INTERRUPTED
+                : e instanceof BoundedHttp.ResponseLimitException ? ModelFailureKind.PERMANENT
+                    : ModelFailureKind.NETWORK;
+            throw new ModelClientException(kind, "模型请求失败：" + e.getMessage(), e);
         }
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             String detail = snippet(response.body());

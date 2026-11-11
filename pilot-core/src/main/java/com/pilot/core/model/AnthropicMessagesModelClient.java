@@ -3,7 +3,6 @@ package com.pilot.core.model;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -27,6 +26,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
     private final String apiKey;
     private final String model;
     private final Duration timeout;
+    private Duration idleTimeout;
     private final Set<NativeCapability> nativeCapabilities;
     private final ModelProfile profile;
 
@@ -38,6 +38,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         this.apiKey = apiKey;
         this.model = model;
         this.timeout = timeout;
+        this.idleTimeout = timeout;
         this.profile = profile == null ? ModelProfile.generic() : profile;
         this.nativeCapabilities = nativeCapabilities == null ? Set.of() : Set.copyOf(nativeCapabilities);
     }
@@ -65,6 +66,11 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         return URI.create((base.endsWith("/v1") ? base : base + "/v1") + "/messages" + query);
     }
 
+    public AnthropicMessagesModelClient withIdleTimeout(Duration value) {
+        this.idleTimeout = java.util.Objects.requireNonNull(value);
+        return this;
+    }
+
     @Override
     public ModelProfile profile() {
         return profile;
@@ -83,7 +89,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
                 .header("Content-Type", "application/json").timeout(timeout).POST(HttpRequest.BodyPublishers
                     .ofString(mapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
                 .build();
-        HttpResponse<String> response = NativeModelHttp.send(httpClient, request);
+        var response = NativeModelHttp.send(httpClient, request, idleTimeout);
         JsonNode root;
         try {
             root = mapper.readTree(response.body());

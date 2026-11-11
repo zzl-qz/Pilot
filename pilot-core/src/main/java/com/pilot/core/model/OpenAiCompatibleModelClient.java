@@ -6,7 +6,6 @@ import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import com.pilot.core.http.BoundedHttp;
 import com.pilot.core.loop.Attachment;
 import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.loop.Message;
@@ -43,6 +43,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     private final String apiKey;
     private final String model;
     private final Duration requestTimeout;
+    private Duration idleTimeout;
     /** 是否给 system 提示词打显式缓存标记；默认关闭，只在端点支持 cache_control 时启用。 */
     private volatile boolean promptCaching;
     private ModelProfile profile;
@@ -62,6 +63,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         this.apiKey = apiKey;
         this.model = model;
         this.requestTimeout = requestTimeout;
+        this.idleTimeout = requestTimeout;
         this.profile = ModelProfile.resolve(this.endpoint, model, "auto", "auto", "", null, null, "short", null);
     }
 
@@ -76,6 +78,11 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
 
     public OpenAiCompatibleModelClient withProfile(ModelProfile value) {
         this.profile = java.util.Objects.requireNonNull(value);
+        return this;
+    }
+
+    public OpenAiCompatibleModelClient withIdleTimeout(Duration timeout) {
+        this.idleTimeout = java.util.Objects.requireNonNull(timeout);
         return this;
     }
 
@@ -246,14 +253,14 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             .build();
 
         long startedAt = System.nanoTime();
-        HttpResponse<String> response;
+        BoundedHttp.TextResponse response;
         try {
-            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            response = BoundedHttp.text(httpClient, request, idleTimeout, BoundedHttp.JSON_BYTES);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ModelClientException(ModelFailureKind.INTERRUPTED, "模型请求被中断", e);
         } catch (IOException e) {
-            throw new ModelClientException(ModelFailureKind.NETWORK,
+            throw new ModelClientException(httpFailure(e),
                 "模型请求失败（" + elapsedMs(startedAt) + " ms, model=" + model + "）：" + e.getMessage(), e);
         }
 
@@ -308,12 +315,11 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                 .ofString(objectMapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
             .build();
         long startedAt = System.nanoTime();
-        try {
-            HttpResponse<java.io.InputStream> response =
-                httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        try (var response = BoundedHttp.open(httpClient, request, idleTimeout, BoundedHttp.STREAM_BYTES)) {
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 try (InputStream stream = response.body()) {
-                    String errorBody = snippet(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
+                    String errorBody =
+                        snippet(new String(stream.readNBytes(BoundedHttp.ERROR_BYTES), StandardCharsets.UTF_8));
                     if ((response.statusCode() == 404 || response.statusCode() == 405)
                         && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {
                         throw new NativeToolRejectedException("端点未提供当前聊天协议路由", true);
@@ -330,11 +336,14 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             try (BufferedReader reader =
                 new java.io.BufferedReader(new java.io.InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
                 String line;
-                while ((line = reader.readLine()) != null) {
+                while ((line = BoundedHttp.readLine(reader, BoundedHttp.SSE_LINE_CHARS)) != null) {
                     if (!line.startsWith("data:")) {
                         continue;
                     }
                     String data = line.substring(5).strip();
+                    if (data.isEmpty()) {
+                        continue;
+                    }
                     if (data.equals("[DONE]")) {
                         break;
                     }
@@ -413,7 +422,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         } catch (IOException e) {
             // 流式响应读到一半断开（服务端重启、代理断连、本地网络抖动）也归网络类：
             // 上层会退避重连，而不是把这个任务判死。
-            throw new ModelClientException(ModelFailureKind.NETWORK,
+            throw new ModelClientException(httpFailure(e),
                 "流式模型请求失败（" + elapsedMs(startedAt) + " ms）：" + e.getMessage(), e);
         }
     }
@@ -548,6 +557,14 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         } catch (RuntimeException e) {
             throw new ModelClientException(ModelFailureKind.PERMANENT, "工具调用参数不是合法 JSON：" + snippet(raw), e);
         }
+    }
+
+    private static ModelFailureKind httpFailure(IOException error) {
+        if (Thread.currentThread().isInterrupted()) {
+            return ModelFailureKind.INTERRUPTED;
+        }
+        return error instanceof BoundedHttp.ResponseLimitException ? ModelFailureKind.PERMANENT
+            : ModelFailureKind.NETWORK;
     }
 
     private static long elapsedMs(long startedAt) {

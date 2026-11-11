@@ -4,12 +4,13 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
+import com.pilot.core.http.BoundedHttp;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -73,8 +74,7 @@ public final class WebSearchTool implements Tool {
                 base + "/search?q=" + URLEncoder.encode(query.strip(), StandardCharsets.UTF_8) + "&format=json");
             HttpRequest request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(20))
                 .header("Accept", "application/json").GET().build();
-            HttpResponse<String> response =
-                client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            var response = BoundedHttp.text(client, request, Duration.ofSeconds(20), 4 * 1024 * 1024);
             if (response.statusCode() != 200) {
                 return "ERROR: 搜索服务返回 HTTP " + response.statusCode();
             }

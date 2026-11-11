@@ -96,8 +96,10 @@ pilot:
     model: ${PILOT_MODEL_MODEL:gpt-4o-mini}
     # 不要把密钥写进会提交的文件。用 application-local.yaml，或环境变量 PILOT_MODEL_API_KEY
     api-key: ${PILOT_MODEL_API_KEY:}
-    # 单次模型请求超时（秒）。中转站可能更早返回 504
-    timeout-seconds: 90
+    # 单次模型请求总超时（秒），包含响应头及完整响应体；慢速本地模型可调高。
+    timeout-seconds: ${PILOT_MODEL_TIMEOUT_SECONDS:90}
+    # 连续无数据时限（秒）；0 表示沿用总超时，不能用心跳延长总时限。
+    idle-timeout-seconds: ${PILOT_MODEL_IDLE_TIMEOUT_SECONDS:0}
     # 给 system 提示词打 cache_control 显式缓存标记：只对支持该字段的端点（Anthropic 兼容网关）开启。
     # OpenAI 官方端点按前缀自动缓存，保持 false 即可，避免第三方端点拒绝未知字段。
     prompt-caching: ${PILOT_MODEL_PROMPT_CACHING:false}

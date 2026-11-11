@@ -25,6 +25,7 @@ final class DiscoveredModelClient implements ModelClient {
     private final HttpClient http;
     private final tools.jackson.databind.ObjectMapper mapper;
     private final Duration timeout;
+    private final Duration idleTimeout;
     private final boolean promptCaching;
     private final ModelProfile profile;
     private volatile boolean rejected;
@@ -36,6 +37,12 @@ final class DiscoveredModelClient implements ModelClient {
 
     DiscoveredModelClient(ModelSettings.Snapshot target, ModelRuntimeSettings runtime, HttpClient http,
         tools.jackson.databind.ObjectMapper mapper, Duration timeout, boolean promptCaching) {
+        this(target, runtime, http, mapper, timeout, timeout, promptCaching);
+    }
+
+    DiscoveredModelClient(ModelSettings.Snapshot target, ModelRuntimeSettings runtime, HttpClient http,
+        tools.jackson.databind.ObjectMapper mapper, Duration timeout, Duration idleTimeout, boolean promptCaching) {
+        this.idleTimeout = idleTimeout;
         this.target = target;
         this.runtime = runtime;
         this.http = http;
@@ -128,18 +135,18 @@ final class DiscoveredModelClient implements ModelClient {
         if (messages) {
             endpoint = ModelCapabilityDiscovery.endpoint(target.endpoint(), "anthropic-messages");
             applied = new AnthropicMessagesModelClient(http, mapper, endpoint, target.apiKey(), target.model(), timeout,
-                profile, capabilities);
+                profile, capabilities).withIdleTimeout(idleTimeout);
         } else if (capabilities.contains(NativeCapability.WEB_SEARCH) || "openai-responses".equals(protocol)) {
             endpoint = ModelCapabilityDiscovery.endpoint(target.endpoint(), "openai-responses");
             applied = new OpenAiResponsesModelClient(http, mapper, endpoint, target.apiKey(), target.model(), timeout,
-                profile, capabilities);
+                profile, capabilities).withIdleTimeout(idleTimeout);
         } else {
             // 原有自定义聊天完整路径必须原样保留；只替换明确的其他协议后缀。
             if (endpoint.getPath().endsWith("/messages") || endpoint.getPath().endsWith("/responses")) {
                 endpoint = ModelCapabilityDiscovery.endpoint(target.endpoint(), "chat-completions");
             }
             applied = new OpenAiCompatibleModelClient(http, mapper, endpoint, target.apiKey(), target.model(), timeout)
-                .withProfile(profile).withPromptCaching(promptCaching);
+                .withProfile(profile).withPromptCaching(promptCaching).withIdleTimeout(idleTimeout);
         }
         appliedPlan = plan;
         return applied;

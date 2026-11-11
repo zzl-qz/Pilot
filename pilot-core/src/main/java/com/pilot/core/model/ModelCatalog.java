@@ -4,12 +4,12 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.SortedSet;
 import java.util.TreeSet;
+
+import com.pilot.core.http.BoundedHttp;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -73,9 +73,9 @@ public final class ModelCatalog {
             request.header("Authorization", "Bearer " + apiKey.strip());
         }
 
-        HttpResponse<String> response;
+        BoundedHttp.TextResponse response;
         try {
-            response = httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            response = BoundedHttp.text(httpClient, request.build(), REQUEST_TIMEOUT, 4 * 1024 * 1024);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ModelClientException("模型列表请求被中断", e);
