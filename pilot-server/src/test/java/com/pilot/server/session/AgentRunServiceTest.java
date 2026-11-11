@@ -21,6 +21,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.AssistantPreview;
+import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunStarted;
@@ -70,6 +72,75 @@ class AgentRunServiceTest {
     Path workspace;
     @TempDir
     Path dataRoot;
+
+    @Test
+    void reasoningResetOnRetryStaysLiveAndNeverEntersHistory() throws Exception {
+        AtomicInteger attempts = new AtomicInteger();
+        ModelClient model = new ModelClient() {
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                throw new AssertionError("必须使用流式模型入口");
+            }
+
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> text,
+                Consumer<String> reasoning) {
+                reasoning.accept("推理片段");
+                text.accept("临时正文");
+                if (attempts.getAndIncrement() == 0) {
+                    throw new IllegalStateException("HTTP 503 Service Unavailable");
+                }
+                return done();
+            }
+        };
+        try (Fixture fixture = new Fixture(model, 8)) {
+            var resetDelivered = new CountDownLatch(1);
+            try (var subscription = fixture.sessions.subscribe(fixture.sessionId, 0, event -> {
+                if (event.payload() instanceof AssistantReasoning reasoning && reasoning.reset()) {
+                    resetDelivered.countDown();
+                }
+            })) {
+                fixture.start();
+                fixture.awaitFinished("COMPLETED");
+                await(resetDelivered);
+                assertEquals(2, attempts.get());
+                List<EventEnvelope> history = fixture.sessions.events(fixture.sessionId);
+                assertTrue(history.stream().anyMatch(event -> event.type().equals("run.retrying")));
+                assertFalse(history.stream().anyMatch(event -> event.payload() instanceof AssistantReasoning
+                    || event.payload() instanceof AssistantPreview), "重试时的临时片段和重置都不能落库");
+                assertFalse(subscription.isClosed(), subscription.closeReason());
+            }
+        }
+    }
+
+    @Test
+    void runsTwoSessionsInTheSameWorkspaceConcurrently() throws Exception {
+        CountDownLatch bothEntered = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        ModelClient model = (messages, tools) -> {
+            bothEntered.countDown();
+            await(release);
+            return done();
+        };
+        try (Fixture fixture = new Fixture(model, 8, false, 2)) {
+            String second = fixture.sessions.createSession("第二个任务", workspace.toString()).id();
+            fixture.start();
+            String secondRun = fixture.service.claimRun(second).orElseThrow();
+            fixture.sessions.publish(second, secondRun, new RunStarted("第二个任务"));
+            fixture.service.start(second, secondRun, "第二个任务");
+            await(bothEntered);
+            assertEquals(fixture.runId, fixture.service.activeRun(fixture.sessionId).orElseThrow());
+            assertEquals(secondRun, fixture.service.activeRun(second).orElseThrow());
+            assertTrue(fixture.service.claimRun(fixture.sessionId).isEmpty(), "同会话仍只能有一个活动运行");
+            release.countDown();
+            fixture.awaitFinished("COMPLETED", "COMPLETED");
+            assertTrue(fixture.sessions.events(fixture.sessionId).stream()
+                .allMatch(event -> event.runId().equals(fixture.runId)));
+            assertTrue(fixture.sessions.events(second).stream().allMatch(event -> event.runId().equals(secondRun)));
+        } finally {
+            release.countDown();
+        }
+    }
 
     @Test
     void aggregatesChildUsageWithoutReplacingMainRunSnapshot() {
@@ -700,8 +771,12 @@ class AgentRunServiceTest {
         }
 
         Fixture(ModelClient model, int maxSteps, boolean goals) {
+            this(model, maxSteps, goals, 1);
+        }
+
+        Fixture(ModelClient model, int maxSteps, boolean goals, int runThreads) {
             AgentProperties properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY, maxSteps,
-                3, 5, 300, 1, 0, 60_000, false, goals, null, null, null, null, null, null, null, null);
+                3, 5, 300, runThreads, 0, 60_000, false, goals, null, null, null, null, null, null, null, null);
             JsonMapper mapper = JsonMapper.builder().build();
             PilotDataDir dataDir = new PilotDataDir(dataRoot.toString());
             commandTasks = new com.pilot.core.tool.CommandTaskManager(dataDir.file("commands"), mapper);

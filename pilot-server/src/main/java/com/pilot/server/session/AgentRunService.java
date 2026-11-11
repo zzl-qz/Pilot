@@ -34,6 +34,7 @@ import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.ApprovalRequired;
 import com.pilot.core.event.ApprovalResolved;
 import com.pilot.core.event.AssistantPreview;
+import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.ContextCompacted;
 import com.pilot.core.event.ModelRequestCompleted;
 import com.pilot.core.event.PlanUpdated;
@@ -1453,8 +1454,8 @@ public class AgentRunService implements RunStarter {
         RunUsageAccumulator runUsage, AtomicReference<RunCompleted> lastCompleted) {
         return event -> {
             // 预览只给当前界面，不写会话历史：正文以 assistant.delta 为准，重连后也不该回放临时片段。
-            if (event instanceof AssistantPreview preview) {
-                sessions.preview(sessionId, runId, preview);
+            if (event instanceof AssistantPreview || event instanceof AssistantReasoning) {
+                sessions.preview(sessionId, runId, event);
                 return;
             }
             if (event instanceof RunCompleted completed) {

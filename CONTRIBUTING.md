@@ -131,6 +131,18 @@ node pilot-web/frontend/scripts/event-stream-smoke.mjs
 
 指定的 1000 次连续 `中🙂` 增量，在默认 50ms / 8KiB 下合成 1 条，约 55.5ms 刷出；这不代表低速逐字输出也有同样比例。完整 Maven 验证 1454 项通过、16 项因环境或配置条件跳过；另行启用的压测、前端 400 项、桌面 41 项、Android 单测与 lint、Linux 容器 86 项重点测试通过。所有检查均不调用外部模型。
 
+### 推理重置与旧历史回放
+
+模型重试和重新采样时的 `assistant.reasoning` 重置与正文预览统一进入临时通道，不写入历史。旧版本已落库的推理片段和重置由 `EventCodec` 兼容读取，保留原有记录与序号，无需删库或重建会话。不同会话可以并行运行（`pilot.agent.run-threads` 默认 4），同一会话仍只允许一个活动运行。
+
+2026-11-11 回归：修改前复现推理重置误入库及旧记录解码失败；修复后 macOS Java 25 完整验证 **1,478 项通过、16 项按条件跳过**，格式与静态检查通过。macOS 与 Linux Java 25 容器分别通过 **57 项**重点测试，覆盖模型先输出推理再返回 503、重试成功、临时重置实时交付且不落库、SQLite 重开及分页/订阅回放、历史与实时衔接、真实 HTTP/SSE，以及同工作区双会话并发和单会话互斥。实际数据库的临时副本中 **14,523 条**事件均可解码，两个受影响会话的 **240 / 153 条**事件完整有序回放，原库字节未改动。测试不调用外部模型。本次改动仅使用平台无关 Java 接口；Windows 实机、Linux 桌面及修复后实际桌面界面未验证。已经运行的旧服务需要重启后再刷新会话，代码提交本身不会替换进程中的类。
+
+重点测试命令（Java 25；Windows 使用 `mvnw.cmd`）：
+
+```sh
+sh mvnw -B -ntp -pl pilot-server -DskipFrontend=true -Dtest=EventCodecNewEventsTest,JdbcSessionRepositoryTest,AgentRunServiceTest,RunRegistryTest,SessionEventHttpTest test
+```
+
 ### 附件请求、原件与会话读取
 
 附件 JSON 入口 `POST /api/sessions/{id}/messages` 同时检查声明长度和实际输入流字节数，未知长度或分块请求也受限，超限返回 413。限制在移动回执读取和 Jackson 解析之前生效。服务层先检查整批文件数、完整编码长度、Base64 格式及累计原始字节，全部通过才解码和落盘。

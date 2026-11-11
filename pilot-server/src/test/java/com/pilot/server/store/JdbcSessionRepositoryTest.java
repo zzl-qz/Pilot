@@ -6,14 +6,18 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunStarted;
@@ -21,6 +25,7 @@ import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.session.NoSuchSessionException;
 import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.Session;
+import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
 
 import tools.jackson.databind.json.JsonMapper;
@@ -65,6 +70,34 @@ class JdbcSessionRepositoryTest {
         assertEquals("第一个会话", session.title());
         assertEquals("E:\\work", session.workspace());
         assertEquals(SessionStatus.COMPLETED, session.status());
+    }
+
+    @Test
+    void replaysLegacyReasoningResetAcrossReopenAndContinuesLiveDelivery() throws Exception {
+        Instant now = Instant.now();
+        repository.create("ses_legacy", "旧推理重置", null, now);
+        repository.append("ses_legacy", "run_1", now, new RunStarted("任务"), SessionStatus.RUNNING);
+        // 模拟旧版本误入库的临时事件，不能通过删除记录或跳过游标来恢复。
+        repository.append("ses_legacy", "run_1", now, AssistantReasoning.discarded(), SessionStatus.RUNNING);
+        JdbcSessionRepository reopened =
+            new JdbcSessionRepository(new SqliteStore(database), new EventCodec(JsonMapper.builder().build()));
+        assertEquals(AssistantReasoning.discarded(), reopened.events("ses_legacy").get(1).payload());
+        assertEquals(List.of(1L, 2L),
+            reopened.eventsPageAfter("ses_legacy", 0, 80).stream().map(EventEnvelope::sequence).toList());
+        assertEquals(AssistantReasoning.discarded(), reopened.eventsPage("ses_legacy", null, 80).get(1).payload());
+        SessionService sessions = new SessionService(Clock.systemUTC(), reopened);
+        var delivered = new LinkedBlockingQueue<EventEnvelope>();
+        try (var subscription = sessions.subscribe("ses_legacy", 0, delivered::add)) {
+            assertEquals(1L, delivered.poll(5, TimeUnit.SECONDS).sequence());
+            EventEnvelope reset = delivered.poll(5, TimeUnit.SECONDS);
+            assertEquals(2L, reset.sequence());
+            assertEquals(AssistantReasoning.discarded(), reset.payload());
+            sessions.publish("ses_legacy", "run_1", new RunCompleted("完成", List.of(), List.of()));
+            assertEquals(3L, delivered.poll(5, TimeUnit.SECONDS).sequence());
+            assertFalse(subscription.isClosed(), subscription.closeReason());
+        }
+        assertEquals(0, sessions.subscriberCount());
+        assertEquals(3, reopened.eventCount("ses_legacy"));
     }
 
     /** 侧边对话的父会话要落盘：重启后前端靠它把标签归回原来的任务。 */

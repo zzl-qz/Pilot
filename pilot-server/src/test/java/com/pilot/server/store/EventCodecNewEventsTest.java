@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import com.pilot.core.event.ArbitrationRequired;
 import com.pilot.core.event.ArbitrationResolved;
 import com.pilot.core.event.AssistantPreview;
+import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.ContextCompacted;
 import com.pilot.core.event.ExecutionUpdated;
 import com.pilot.core.event.MultiAgentBudgetUpdated;
@@ -177,6 +178,13 @@ class EventCodecNewEventsTest {
         AssistantPreview preview = assertInstanceOf(AssistantPreview.class, decoded);
         assertTrue(preview.reset());
         assertEquals("", preview.text());
+    }
+
+    @Test
+    void decodesPersistedReasoningResetAndLegacyText() {
+        assertEquals(AssistantReasoning.discarded(),
+            codec.decode("assistant.reasoning", "{\"text\":\"\",\"reset\":true}"));
+        assertEquals(new AssistantReasoning("旧推理片段"), codec.decode("assistant.reasoning", "{\"text\":\"旧推理片段\"}"));
     }
 
     private SessionEvent roundTrip(String type, SessionEvent event) {

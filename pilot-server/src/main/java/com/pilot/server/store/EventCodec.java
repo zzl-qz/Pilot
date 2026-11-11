@@ -8,6 +8,7 @@ import com.pilot.core.event.ArbitrationRequired;
 import com.pilot.core.event.ArbitrationResolved;
 import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.AssistantPreview;
+import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.ContextCompacted;
 import com.pilot.core.event.ExecutionUpdated;
 import com.pilot.core.event.ModelRequestCompleted;
@@ -59,6 +60,7 @@ public class EventCodec {
             case "assistant.delta" -> AssistantDelta.class;
             // 预览正常不落库；旧版本曾把「作废预览」写进事件表，这里保证历史回放不至于整条会话读不出来
             case "assistant.preview" -> AssistantPreview.class;
+            case "assistant.reasoning" -> AssistantReasoning.class;
             case "context.compacted" -> ContextCompacted.class;
             case "plan.updated" -> PlanUpdated.class;
             case "run.steered" -> RunSteered.class;
