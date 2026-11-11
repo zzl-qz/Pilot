@@ -117,4 +117,8 @@ public class RunRegistry {
     public Optional<String> activeRun(String sessionId) {
         return sessionId == null ? Optional.empty() : Optional.ofNullable(sessionToRun.get(sessionId));
     }
+
+    public synchronized Map<String, String> activeRuns() {
+        return Map.copyOf(runToSession);
+    }
 }

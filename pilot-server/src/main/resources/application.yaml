@@ -183,6 +183,5 @@ pilot:
     # 备份与校验证据通常不需要长期保留，可以单独设置更短的期限
     backups-days: ${PILOT_RETENTION_BACKUPS_DAYS:0}
     validation-days: ${PILOT_RETENTION_VALIDATION_DAYS:0}
-    # 附件保留天数：孤儿目录（会话已删）整目录回收；在册会话按 mtime 清早于 N 天的文件（含图片）。
-    # 被清理的图片在历史回放时显示为文字占位
+    # 仅清理已超过 N 天且没有所属会话的附件目录；在册会话的附件保留。
     attachments-days: ${PILOT_RETENTION_ATTACHMENTS_DAYS:0}

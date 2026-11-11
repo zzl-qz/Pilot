@@ -2,9 +2,13 @@ package com.pilot.server.maintenance;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.slf4j.Logger;
@@ -18,7 +22,9 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.session.AttachmentService;
+import com.pilot.server.session.RunRegistry;
 import com.pilot.server.store.SqliteStore;
+import com.pilot.server.validation.ValidationLedger;
 import com.pilot.server.workspace.RunSnapshotService;
 
 /**
@@ -41,13 +47,15 @@ public class RetentionService {
     private final PilotDataDir dataDir;
     private final SessionService sessions;
     private final AttachmentService attachments;
+    private final ValidationLedger validations;
+    private final RunRegistry registry;
 
     public RetentionService(@Value("${pilot.retention.days:0}") int retentionDays,
         @Value("${pilot.retention.backups-days:0}") int backupDays,
         @Value("${pilot.retention.validation-days:0}") int validationDays,
         @Value("${pilot.retention.attachments-days:0}") int attachmentsDays, ObjectProvider<SqliteStore> store,
         RunSnapshotService snapshots, BackupService backups, PilotDataDir dataDir, SessionService sessions,
-        AttachmentService attachments) {
+        AttachmentService attachments, ValidationLedger validations, RunRegistry registry) {
         this.retentionDays = retentionDays;
         this.backupDays = backupDays;
         this.validationDays = validationDays;
@@ -58,6 +66,8 @@ public class RetentionService {
         this.dataDir = dataDir;
         this.sessions = sessions;
         this.attachments = attachments;
+        this.validations = validations;
+        this.registry = registry;
     }
 
     @Scheduled(cron = "${pilot.retention.cron:0 30 3 * * *}")
@@ -67,6 +77,8 @@ public class RetentionService {
         }
         try {
             log.info("保留策略已执行：{}", purgeNow());
+        } catch (DataMaintenance.Busy e) {
+            log.info("暂缓清理：{}", e.getMessage());
         } catch (RuntimeException e) {
             log.warn("保留策略执行失败", e);
         }
@@ -74,34 +86,56 @@ public class RetentionService {
 
     /** 立即按配置的保留期清理一次；未开启时什么都不做。 */
     public PurgeReport purgeNow() {
+        try (var maintenance = dataDir.maintenance().exclusive(Duration.ofSeconds(2))) {
+            return purge();
+        }
+    }
+
+    private PurgeReport purge() {
         // 三类数据可以有不同的保留期：事件/快照要留够复盘时间，备份和校验证据通常更短
         Instant now = Instant.now();
         int events = 0;
         int snapshotRuns = 0;
         int traces = 0;
         SqliteStore sqlite = store.getIfAvailable();
+        var running = registry.activeRuns();
+        Set<String> activeSessions = new HashSet<>(running.values());
+        if (sqlite != null && (retentionDays > 0 || validationDays > 0)) {
+            activeSessions.addAll(sqlite.activeSessionIds());
+        }
         if (retentionDays > 0) {
             Instant cutoff = now.minus(retentionDays, ChronoUnit.DAYS);
-            java.util.Set<String> activeRuns = sqlite == null ? java.util.Set.of() : sqlite.activeRunIds();
-            java.util.Set<String> activeSessions = sqlite == null ? java.util.Set.of() : sqlite.activeSessionIds();
-            events = sqlite == null ? 0 : sqlite.deleteEventsBefore(cutoff);
-            snapshotRuns = snapshots.purgeOlderThan(cutoff, activeRuns);
-            traces = deleteFilesBefore(dataDir.file("traces"), cutoff, activeSessions, true);
-            if (sqlite != null && events > 0) {
-                sqlite.checkpoint();
+            Set<String> protectedRuns = new HashSet<>(running.keySet());
+            Set<String> protectedTraces = new HashSet<>(activeSessions);
+            if (sqlite != null) {
+                protectedRuns.addAll(sqlite.activeRunIds());
+                events = sqlite.deleteEventsBefore(cutoff, Set.copyOf(running.values()));
+                var retained = sqlite.retainedEventReferences();
+                protectedRuns.addAll(retained.runs());
+                protectedTraces.addAll(retained.sessions());
+                if (events > 0) {
+                    sqlite.checkpoint();
+                }
+            } else {
+                for (Session session : sessions.list()) {
+                    var history = sessions.events(session.id());
+                    history.forEach(event -> protectedRuns.add(event.runId()));
+                    if (!history.isEmpty()) {
+                        protectedTraces.add(session.id());
+                    }
+                }
             }
+            snapshotRuns = snapshots.purgeOlderThan(cutoff, protectedRuns);
+            traces = deleteTracesBefore(dataDir.file("traces"), cutoff, protectedTraces);
         }
         int backupCount = backupDays > 0 ? backups.purgeOlderThan(now.minus(backupDays, ChronoUnit.DAYS)) : 0;
         int validationFiles = validationDays > 0
-            ? deleteFilesBefore(dataDir.file("validation"), now.minus(validationDays, ChronoUnit.DAYS),
-                sqlite == null ? java.util.Set.of() : sqlite.activeSessionIds(), false)
-            : 0;
-        // 附件只清理已删除会话留下的孤儿目录；在册会话附件可能仍被历史消息引用。
+            ? validations.purgeOlderThan(now.minus(validationDays, ChronoUnit.DAYS), activeSessions) : 0;
         int attachmentFiles = 0;
         int attachmentDirs = 0;
         if (attachmentsDays > 0) {
-            AttachmentService.PurgeStats stats =
-                attachments.purge(sessions.list().stream().map(Session::id).toList());
+            AttachmentService.PurgeStats stats = attachments.purge(now.minus(attachmentsDays, ChronoUnit.DAYS),
+                sessions.list().stream().map(Session::id).toList());
             attachmentFiles = stats.files();
             attachmentDirs = stats.dirs();
         }
@@ -110,22 +144,21 @@ public class RetentionService {
     }
 
     /** 删除某个数据目录下早于 cutoff 的普通文件；目录不存在时返回 0。 */
-    private int deleteFilesBefore(Path directory, Instant cutoff, java.util.Set<String> protectedSessions,
-        boolean sessionPrefix) {
+    private int deleteTracesBefore(Path directory, Instant cutoff, Set<String> protectedSessions) {
         if (!Files.isDirectory(directory)) {
             return 0;
         }
         int removed = 0;
         try (Stream<Path> entries = Files.list(directory)) {
-            for (Path file : entries.filter(Files::isRegularFile).toList()) {
+            for (Path file : entries.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)).toList()) {
                 try {
                     String name = file.getFileName().toString();
-                    boolean protectedFile = protectedSessions.stream().anyMatch(session -> sessionPrefix
-                        ? name.equals(session + ".jsonl") || name.startsWith(session + "-")
-                        : name.equals(session + ".json"));
+                    boolean protectedFile = protectedSessions.stream()
+                        .anyMatch(session -> name.equals(session + ".jsonl") || name.startsWith(session + "-"));
                     if (!protectedFile && Files.getLastModifiedTime(file).toInstant().isBefore(cutoff)) {
-                        Files.deleteIfExists(file);
-                        removed++;
+                        if (Files.deleteIfExists(file)) {
+                            removed++;
+                        }
                     }
                 } catch (IOException e) {
                     log.warn("清理 {} 失败", file, e);

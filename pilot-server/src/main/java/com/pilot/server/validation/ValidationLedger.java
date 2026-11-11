@@ -8,8 +8,10 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -174,6 +176,29 @@ public class ValidationLedger {
             states.put(sessionId, failed(sessionId, previous, "删除校验证据失败：" + e.getMessage()));
             return 0;
         }
+    }
+
+    public synchronized int purgeOlderThan(Instant cutoff, Set<String> activeSessions) {
+        Path directory = dataDir.file("validation");
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
+            return 0;
+        }
+        int removed = 0;
+        try (var files = Files.list(directory)) {
+            for (Path file : files.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)).toList()) {
+                String name = file.getFileName().toString();
+                if (name.endsWith(".json")) {
+                    String id = name.substring(0, name.length() - ".json".length());
+                    if (!activeSessions.contains(id) && Files.getLastModifiedTime(file).toInstant().isBefore(cutoff)) {
+                        removed += deleteBySession(id);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            StorageHealth.markDegraded("validation", "清理过期证据失败：" + e.getMessage());
+            log.warn("清理过期证据失败", e);
+        }
+        return removed;
     }
 
     private State load(String sessionId) {

@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
@@ -260,6 +261,10 @@ public class AttachmentService {
      * 在册会话的历史消息可能仍引用旧附件，因此不能仅凭修改时间删除。
      */
     public PurgeStats purge(Collection<String> liveSessionIds) {
+        return purge(Instant.MAX, liveSessionIds);
+    }
+
+    public PurgeStats purge(Instant cutoff, Collection<String> liveSessionIds) {
         Set<String> live = liveSessionIds == null ? Set.of()
             : liveSessionIds.stream().map(id -> safeName(id, 80)).collect(Collectors.toSet());
         if (!Files.isDirectory(root)) {
@@ -268,15 +273,14 @@ public class AttachmentService {
         int files = 0;
         int dirs = 0;
         try (Stream<Path> entries = Files.list(root)) {
-            for (Path sessionDir : entries.filter(Files::isDirectory).toList()) {
+            for (Path sessionDir : entries.filter(path -> Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
+                .toList()) {
                 String dirName = sessionDir.getFileName().toString();
-                if (!live.contains(dirName)) {
+                if (!live.contains(dirName) && Files.getLastModifiedTime(sessionDir).toInstant().isBefore(cutoff)) {
                     PurgeStats removed = deleteTreeCounting(sessionDir);
                     files += removed.files();
                     dirs += removed.dirs();
-                    continue;
                 }
-                // Keep files referenced by retained conversation history.
             }
         } catch (IOException e) {
             log.warn("遍历附件目录失败: {}", root, e);

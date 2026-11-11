@@ -1,12 +1,15 @@
 package com.pilot.server.controller;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.exec.ExecutionBackends;
 import com.pilot.server.maintenance.BackupService;
+import com.pilot.server.maintenance.DataMaintenance;
 import com.pilot.server.maintenance.RetentionService;
 import com.pilot.server.maintenance.StorageHealth;
 
@@ -48,7 +51,11 @@ public class MaintenanceController {
 
     @PostMapping("/purge")
     public RetentionService.PurgeReport purge() {
-        return retention.purgeNow();
+        try {
+            return retention.purgeNow();
+        } catch (DataMaintenance.Busy e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
     }
 
     public record Status(BackupService.Status backup, int retentionDays, int attachmentsDays,

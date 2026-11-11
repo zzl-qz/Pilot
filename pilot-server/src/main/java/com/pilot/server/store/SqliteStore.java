@@ -11,6 +11,7 @@ import java.sql.Statement;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -196,13 +197,23 @@ public final class SqliteStore {
      * <p>旧数据的 {@link java.time.Instant#toString()} 小数精度不固定，比较前统一补齐到纳秒精度。
      */
     public int deleteEventsBefore(Instant cutoff) {
+        return deleteEventsBefore(cutoff, Set.of());
+    }
+
+    public int deleteEventsBefore(Instant cutoff, Set<String> liveSessions) {
         String timestamp = canonicalInstant(cutoff);
         String createdAt = normalizedInstantSql("created_at");
+        String excludeLive = liveSessions.isEmpty() ? ""
+            : " AND session_id NOT IN (" + String.join(",", Collections.nCopies(liveSessions.size(), "?")) + ")";
         try (Connection connection = open();
             PreparedStatement statement = connection.prepareStatement("DELETE FROM events WHERE " + createdAt + " < ? "
                 + "AND NOT EXISTS (SELECT 1 FROM run_checkpoints c WHERE c.session_id = events.session_id "
-                + "AND c.status IN ('RUNNING','INTERRUPTED','PAUSED'))")) {
+                + "AND c.status IN ('RUNNING','INTERRUPTED','PAUSED'))" + excludeLive)) {
             statement.setString(1, timestamp);
+            int parameter = 2;
+            for (String session : liveSessions) {
+                statement.setString(parameter++, session);
+            }
             return statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("清理历史事件失败", e);
@@ -235,6 +246,24 @@ public final class SqliteStore {
         } catch (SQLException e) {
             throw new IllegalStateException("读取可恢复会话失败", e);
         }
+    }
+
+    public record EventReferences(Set<String> runs, Set<String> sessions) {
+    }
+
+    public EventReferences retainedEventReferences() {
+        Set<String> runs = new HashSet<>();
+        Set<String> sessions = new HashSet<>();
+        try (Connection connection = open(); Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery("SELECT DISTINCT session_id, run_id FROM events")) {
+            while (rows.next()) {
+                sessions.add(rows.getString(1));
+                runs.add(rows.getString(2));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("读取保留事件引用失败", e);
+        }
+        return new EventReferences(Set.copyOf(runs), Set.copyOf(sessions));
     }
 
     /** Normalize legacy Instant text with variable fractional precision for lexical SQL comparison. */
