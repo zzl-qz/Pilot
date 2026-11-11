@@ -2,6 +2,7 @@ package com.pilot.server.maintenance;
 
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /** 跨数据库和文件的操作在同一维护窗口内排空。 */
@@ -34,7 +35,7 @@ public final class DataMaintenance {
     public Scope activity() {
         requireHealthy();
         lock.readLock().lock();
-        return lock.readLock()::unlock;
+        return checkedScope(lock.readLock());
     }
 
     public Scope tryActivity() {
@@ -42,10 +43,27 @@ public final class DataMaintenance {
             return null;
         }
         try {
-            return lock.readLock().tryLock(0, TimeUnit.NANOSECONDS) ? lock.readLock()::unlock : null;
+            if (!lock.readLock().tryLock(0, TimeUnit.NANOSECONDS)) {
+                return null;
+            }
+            try {
+                return checkedScope(lock.readLock());
+            } catch (Busy unavailable) {
+                return null;
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return null;
+        }
+    }
+
+    private Scope checkedScope(Lock acquired) {
+        try {
+            requireHealthy();
+            return acquired::unlock;
+        } catch (Busy unavailable) {
+            acquired.unlock();
+            throw unavailable;
         }
     }
 
@@ -64,7 +82,7 @@ public final class DataMaintenance {
         }
         try {
             if (lock.writeLock().tryLock(timeout.toNanos(), TimeUnit.NANOSECONDS)) {
-                return lock.writeLock()::unlock;
+                return checkedScope(lock.writeLock());
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
