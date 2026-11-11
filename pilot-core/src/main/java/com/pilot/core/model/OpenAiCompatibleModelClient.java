@@ -1,8 +1,8 @@
 package com.pilot.core.model;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Reader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -16,6 +16,8 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import com.pilot.core.loop.Attachment;
@@ -36,6 +38,10 @@ import tools.jackson.databind.ObjectMapper;
  */
 public final class OpenAiCompatibleModelClient implements ModelClient {
     private static final int ERROR_SNIPPET_CHARS = 300;
+    /** 非 2xx 响应体最多读取的字节数：异常端点可能给很长的错误体，不能整段读进内存。 */
+    private static final int MAX_ERROR_BODY_BYTES = 16 * 1024;
+    /** 单条 SSE 分片（一行）的最大字符数，超过即视为异常流并停止读取，防止长行把内存打爆。 */
+    static final int MAX_SSE_LINE_CHARS = 1_000_000;
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -308,12 +314,15 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                 .ofString(objectMapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
             .build();
         long startedAt = System.nanoTime();
+        // 看门狗与卡死标记要在 catch 里可见：send() 可能在创建看门狗之前就抛 IOException。
+        AtomicBoolean stalled = new AtomicBoolean();
+        Thread watchdog = null;
         try {
             HttpResponse<java.io.InputStream> response =
                 httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 try (InputStream stream = response.body()) {
-                    String errorBody = snippet(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
+                    String errorBody = snippet(readBounded(stream, MAX_ERROR_BODY_BYTES));
                     if ((response.statusCode() == 404 || response.statusCode() == 405)
                         && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {
                         throw new NativeToolRejectedException("端点未提供当前聊天协议路由", true);
@@ -327,15 +336,25 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             LinkedHashMap<Integer, Map<String, Object>> toolParts = new LinkedHashMap<Integer, Map<String, Object>>();
             ModelUsage reportedUsage = null;
             ModelResponse.FinishReason finishReason = ModelResponse.FinishReason.UNKNOWN;
-            try (BufferedReader reader =
-                new java.io.BufferedReader(new java.io.InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+            // 只有收到 [DONE] 或非空 finish_reason 才算流正常结束；否则直接把 EOF 当完成会
+            // 把截断回复当成完整答复返回。提前断流必须抛可重试错误，而不是静默补成 STOP。
+            boolean streamComplete = false;
+            // HttpRequest 的 timeout 只覆盖到「收到响应头」；body 逐行读取没有超时，后端可能
+            // 长期卡在半空连接上。用看门狗盯住空闲与总时限，超时关闭流逼退阻塞的读取。
+            InputStream streamBody = response.body();
+            AtomicLong lastProgressNanos = new AtomicLong(System.nanoTime());
+            watchdog = startStreamWatchdog(streamBody, lastProgressNanos, stalled, startedAt);
+            try (BoundedLineReader reader =
+                new BoundedLineReader(new java.io.InputStreamReader(streamBody, StandardCharsets.UTF_8), MAX_SSE_LINE_CHARS)) {
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    lastProgressNanos.set(System.nanoTime());
                     if (!line.startsWith("data:")) {
                         continue;
                     }
                     String data = line.substring(5).strip();
                     if (data.equals("[DONE]")) {
+                        streamComplete = true;
                         break;
                     }
                     JsonNode root = objectMapper.readTree(data);
@@ -349,6 +368,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     }
                     String finish = text(choices.get(0).get("finish_reason"));
                     if (!finish.isBlank()) {
+                        streamComplete = true;
                         finishReason = ModelResponse.FinishReason.fromWire(finish);
                     }
                     JsonNode delta = choices.get(0).path("delta");
@@ -386,10 +406,20 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     }
                 }
             }
+            watchdog.interrupt();
             thoughts.finish(piece -> {
                 content.append(piece);
                 emit(textDelta, piece);
             }, piece -> emit(reasoningDelta, piece));
+            if (!streamComplete) {
+                // 流在未收到 [DONE] 或非空 finish_reason 时直接 EOF：服务端/代理提前断流。
+                // 不把截断回复当成完整答复，也不解析可能只收到一半的工具调用（避免被当
+                // 成合法参数去执行）。抛可重试的网络类错误，上层按退避策略安全重试；
+                // 已生成内容只在界面预览里，重试前会被作废重来，不会回填进对话历史。
+                throw new ModelClientException(ModelFailureKind.NETWORK,
+                    "流式模型流提前结束：未收到 [DONE] 或 finish_reason 流就断开（" + elapsedMs(startedAt) + " ms, model="
+                        + model + "），已生成内容作废，任务可安全重试。");
+            }
             List<ToolCall> calls = toolParts.values().stream().map(part -> {
                 try {
                     String args = (String)part.getOrDefault("arguments", "{}");
@@ -408,13 +438,21 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             }
             return new ModelResponse(content.toString(), calls, finalUsage, finishReason);
         } catch (InterruptedException e) {
+            if (watchdog != null) {
+                watchdog.interrupt();
+            }
             Thread.currentThread().interrupt();
             throw new ModelClientException(ModelFailureKind.INTERRUPTED, "模型请求被中断", e);
         } catch (IOException e) {
-            // 流式响应读到一半断开（服务端重启、代理断连、本地网络抖动）也归网络类：
-            // 上层会退避重连，而不是把这个任务判死。
-            throw new ModelClientException(ModelFailureKind.NETWORK,
-                "流式模型请求失败（" + elapsedMs(startedAt) + " ms）：" + e.getMessage(), e);
+            if (watchdog != null) {
+                watchdog.interrupt();
+            }
+            // 流式响应读到一半断开（后端重启、代理断连、网络抖动）也归网络类：
+            // 上层会退避重试，而不是把这个任务判死。看门狗超时（stalled）也归此类。
+            String detail = stalled.get()
+                ? "流式响应超时（空闲/总时限），已关闭连接；可安全重试。"
+                : "流式模型请求失败（" + elapsedMs(startedAt) + " ms）：" + e.getMessage();
+            throw new ModelClientException(ModelFailureKind.NETWORK, detail, e);
         }
     }
 
@@ -634,5 +672,127 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         }
         String single = text.replaceAll("\\s+", " ").strip();
         return single.length() <= ERROR_SNIPPET_CHARS ? single : single.substring(0, ERROR_SNIPPET_CHARS) + "…";
+    }
+
+    /** 流式空闲时限（两帧之间多久没新数据视为卡死），毫秒，可经系统属性/环境变量覆盖。 */
+    private static long streamIdleTimeoutMs() {
+        return timeoutMs("stream-idle-timeout-ms", 60_000L);
+    }
+
+    /** 流式响应总时限（自请求发出起算），毫秒，可经系统属性/环境变量覆盖。 */
+    private static long streamTotalTimeoutMs() {
+        return timeoutMs("stream-total-timeout-ms", 300_000L);
+    }
+
+    /** 读 `pilot.model.*` 系统属性或 `PILOT_MODEL_*` 环境变量的毫秒数；非法或非正数回退默认值。 */
+    private static long timeoutMs(String key, long fallback) {
+        String value = System.getProperty("pilot.model." + key,
+            System.getenv("PILOT_MODEL_" + key.toUpperCase(java.util.Locale.ROOT).replace('-', '_')));
+        if (value == null) {
+            return fallback;
+        }
+        try {
+            long parsed = Long.parseLong(value.strip());
+            return parsed > 0 ? parsed : fallback;
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    /** 只读响应体里前 maxBytes 字节，避免异常端点把巨大的错误正文整段读进内存。 */
+    private static String readBounded(InputStream stream, int maxBytes) throws IOException {
+        byte[] buffer = new byte[maxBytes];
+        int total = 0;
+        int count;
+        while (total < buffer.length && (count = stream.read(buffer, total, buffer.length - total)) != -1) {
+            total += count;
+        }
+        return new String(buffer, 0, total, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * 流式读取看门狗。HttpRequest 的 timeout 只覆盖到收到响应头，body 读取没有内置超时；
+     * 后台线程盯住空闲超时与总时限，超时就关闭响应流，令阻塞中的行读取抛 IOException（归为可重试
+     * 网络错误），避免后端长期卡在半开的连接上。正常结束或异常退出后由调用方 interrupt 停掉它。
+     */
+    private static Thread startStreamWatchdog(InputStream stream, AtomicLong lastProgressNanos,
+        AtomicBoolean stalled, long startedAtNanos) {
+        Thread watchdog = new Thread(() -> {
+            long idleNs = streamIdleTimeoutMs() * 1_000_000L;
+            long totalNs = streamTotalTimeoutMs() * 1_000_000L;
+            try {
+                while (true) {
+                    long now = System.nanoTime();
+                    long idle = now - lastProgressNanos.get();
+                    long total = now - startedAtNanos;
+                    if (idle >= idleNs || total >= totalNs) {
+                        stalled.set(true);
+                        try {
+                            stream.close();
+                        } catch (IOException ignored) {
+                            // 读取线程可能已关闭了流
+                        }
+                        return;
+                    }
+                    long remainingNs = Math.min(idleNs - idle, totalNs - total);
+                    Thread.sleep(Math.min(remainingNs, 1_000_000_000L) / 1_000_000L);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, "pilot-stream-watchdog");
+        watchdog.setDaemon(true);
+        watchdog.start();
+        return watchdog;
+    }
+
+    /**
+     * 带单行长度上限的行读取器。SSE 事件是单行，直接整行读入可能被异常/恶意无限长的行撑爆内存；
+     * 超过上限立即抛可重试网络错误并终止读取。
+     */
+    private static final class BoundedLineReader implements AutoCloseable {
+        private final Reader reader;
+        private final int maxChars;
+        private final char[] buffer = new char[8192];
+        private int bufferPos;
+        private int bufferLen;
+        private boolean eof;
+
+        BoundedLineReader(Reader reader, int maxChars) {
+            this.reader = reader;
+            this.maxChars = maxChars;
+        }
+
+        /** @return 去掉换行符的一行；到达流结尾时返回 null */
+        String readLine() throws IOException {
+            StringBuilder line = new StringBuilder();
+            while (true) {
+                if (bufferPos >= bufferLen) {
+                    bufferLen = reader.read(buffer);
+                    bufferPos = 0;
+                    if (bufferLen < 0) {
+                        eof = true;
+                        break;
+                    }
+                }
+                char ch = buffer[bufferPos++];
+                if (ch == '\n') {
+                    break;
+                }
+                if (ch != '\r') {
+                    line.append(ch);
+                    if (line.length() > maxChars) {
+                        throw new ModelClientException(ModelFailureKind.NETWORK,
+                            "流式响应单条分片超过 " + maxChars + " 字符，已停止读取（避免内存被打爆）");
+                    }
+                }
+            }
+            return eof && line.length() == 0 ? null : line.toString();
+        }
+
+        @Override
+        public void close() throws IOException {
+            reader.close();
+        }
     }
 }
