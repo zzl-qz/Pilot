@@ -237,6 +237,18 @@ jobs:
       - name: Verify actual Windows or macOS GUI process, native libraries and recovery
         if: runner.os != 'Linux'
         run: node scripts/verify-desktop-host.mjs
+      - name: Scheduling and notification UI regressions (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run -a node pilot-web/frontend/scripts/p1-smoke.mjs
+          xvfb-run -a node pilot-web/frontend/scripts/schedule-smoke.mjs
+          xvfb-run -a node pilot-web/frontend/scripts/notification-smoke.mjs
+      - name: Scheduling and notification UI regressions (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: |
+          node pilot-web/frontend/scripts/p1-smoke.mjs
+          node pilot-web/frontend/scripts/schedule-smoke.mjs
+          node pilot-web/frontend/scripts/notification-smoke.mjs
       - name: Preserve host verification reports
         if: always()
         uses: actions/upload-artifact@v4

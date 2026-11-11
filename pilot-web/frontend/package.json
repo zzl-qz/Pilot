@@ -10,6 +10,7 @@
     "test:usage": "node --import ./scripts/register-typescript.mjs --test scripts/request-usage.test.mjs && node scripts/request-usage-smoke.mjs",
     "test:agents": "node --import ./scripts/register-typescript.mjs --test scripts/agent-events.test.mjs && node scripts/agent-usage-smoke.mjs",
     "test:automation": "node scripts/p1-smoke.mjs",
+    "test:notifications": "node scripts/notification-smoke.mjs",
     "test:results": "node scripts/results-smoke.mjs",
     "test:schedules": "node scripts/schedule-smoke.mjs",
     "test:composer": "node scripts/composer-smoke.mjs",
