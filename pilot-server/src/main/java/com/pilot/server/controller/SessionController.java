@@ -610,7 +610,8 @@ public class SessionController {
     }
 
     @PostMapping("/{id}/messages")
-    public ResponseEntity<MessageResponse> sendMessage(@PathVariable String id, @RequestBody MessageRequest request) {
+    public ResponseEntity<MessageResponse> sendMessage(@PathVariable String id, @RequestBody MessageRequest request,
+        HttpServletRequest httpRequest) {
         requireSession(id);
         boolean hasAttachments = request != null && request.attachments() != null && !request.attachments().isEmpty();
         if (request == null || ((request.content() == null || request.content().isBlank()) && !hasAttachments)) {
@@ -634,7 +635,8 @@ public class SessionController {
         }
         AttachmentService.Prepared prepared;
         try {
-            prepared = attachments.prepare(id, request.content(), request.attachments(), request.imagePositions());
+            prepared = attachments.prepare(id, request.content(), request.attachments(), request.imagePositions(),
+                httpRequest.getHeader("X-Pilot-Device-Id") != null);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }

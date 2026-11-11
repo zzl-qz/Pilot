@@ -304,8 +304,10 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
     fun attach(uris: List<Uri>) = action {
         val selected = state.value.selected?.text("id") ?: return@action
         val existing = state.value.attachments
+        val budget = AttachmentBudget.from(state.value.capabilities)
+        budget.validate(existing)
         // 先拒绝过多文件，再按剩余额度读取；不能等整批 Base64 都进内存才校验。
-        require(uris.size <= 16 - existing.size) { "一次最多 16 个附件" }
+        require(uris.size <= budget.maxFiles - existing.size) { "一次最多 ${budget.maxFiles} 个附件" }
         val attachments = withContext(Dispatchers.IO) {
             val resolver = getApplication<Application>().contentResolver
             var totalBytes = existing.sumOf { it.bytes }
@@ -313,11 +315,11 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                 val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
                     if (cursor.moveToFirst()) cursor.getString(0) else null
                 }?.take(200) ?: "附件"
-                val remaining = (6 * 1024 * 1024 - totalBytes).coerceAtLeast(0)
-                val bytes = resolver.openInputStream(uri)?.use { it.readBounded(minOf(2 * 1024 * 1024, remaining) + 1) } ?: error("无法读取 $name")
-                require(bytes.isNotEmpty() && bytes.size <= 2 * 1024 * 1024) { "$name 需大于 0 且不超过 2 MB" }
+                val remaining = (budget.maxTotalBytes - totalBytes).coerceAtLeast(0)
+                val bytes = resolver.openInputStream(uri)?.use { it.readBounded(minOf(budget.maxFileBytes, remaining) + 1) } ?: error("无法读取 $name")
+                require(bytes.isNotEmpty() && bytes.size <= budget.maxFileBytes) { "$name 需大于 0 且不超过 ${budget.maxFileBytes} 字节" }
                 totalBytes += bytes.size
-                require(totalBytes <= 6 * 1024 * 1024) { "一次附件总量最多 6 MB" }
+                require(totalBytes <= budget.maxTotalBytes) { "一次附件总量最多 ${budget.maxTotalBytes} 字节" }
                 MobileAttachment(name, resolver.getType(uri) ?: "application/octet-stream", Base64.getEncoder().encodeToString(bytes), bytes.size)
             }
         }
@@ -353,11 +355,15 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         val current = state.value
         val id = current.selected?.text("id") ?: return@action
         val text = current.draft.trim()
+        val budget = AttachmentBudget.from(current.capabilities)
+        budget.validate(current.attachments)
         require(text.isNotEmpty() || current.attachments.isNotEmpty()) { "请输入任务内容" }
         val body = buildJsonObject { put("content", text); put("attachments", buildJsonArray { current.attachments.forEach { attachment -> add(buildJsonObject {
             put("name", attachment.name); put("mimeType", attachment.mimeType); put("dataBase64", attachment.dataBase64)
         }) } }) }
-        api(Request("POST", "/api/sessions/$id/messages", body.toString()))
+        val payload = body.toString()
+        require(payload.toByteArray(Charsets.UTF_8).size <= budget.maxRequestBytes) { "正文和附件合计超过请求预算，请减少内容" }
+        api(Request("POST", "/api/sessions/$id/messages", payload))
         mutable.update { it.copy(draft = if (it.draft == current.draft) "" else it.draft, attachments = it.attachments.filterNot { a -> a in current.attachments }) }
         saveDraft(); refreshRun(id)
     }

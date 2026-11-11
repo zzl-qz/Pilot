@@ -9,6 +9,42 @@ globalThis.cancelAnimationFrame = () => {};
 const { useStore, closeStreams } = await import('../src/store.js');
 const { initialThread } = await import('../src/thread-reducer.js');
 const deferred = () => { let resolve; const promise = new Promise(accept => { resolve = accept; }); return { promise, resolve }; };
+
+test('附件草稿发送前重新校验服务端预算，拒绝时不发布消息或丢失草稿', async () => {
+  reset();
+  const saved = useStore.getState();
+  const previousFetch = fetchHandler;
+  let requests = 0;
+  const notices = [];
+  const attachmentLimits = { maxFiles: 1, maxFileBytes: 2, maxTotalBytes: 2, maxRequestBytes: 300 };
+  useStore.setState({ modelReady: () => true, settingsData: { attachmentLimits }, showNotice: message => notices.push(message) });
+  fetchHandler = async () => { requests++; throw Error('不应提交'); };
+  try {
+    const state = useStore.getState();
+    assert.equal(await state.submitInput('', [{ name: 'a.txt', size: 3, dataBase64: 'YWJj' }]), false);
+    assert.equal(await state.submitInput('x'.repeat(400), [{ name: 'a.txt', size: 1, dataBase64: 'YQ==' }]), false);
+    assert.equal(requests, 0);
+    assert.equal(useStore.getState().thread.rows.length, 0);
+    assert.match(notices.join(' '), /单个.*请求预算/);
+  } finally { fetchHandler = previousFetch; useStore.setState(saved); }
+});
+
+test('读取附件预算期间切换会话，不向新会话发送旧附件', async () => {
+  reset();
+  const saved = useStore.getState();
+  const previousFetch = fetchHandler;
+  const pending = deferred();
+  const urls = [];
+  useStore.setState({ modelReady: () => true, settingsData: null });
+  fetchHandler = url => { urls.push(url); return pending.promise; };
+  try {
+    const operation = useStore.getState().submitInput('', [{ name: 'a.txt', size: 1, dataBase64: 'YQ==' }]);
+    useStore.setState({ sessionId: 'other', sessionEpoch: 2 });
+    pending.resolve(new Response(JSON.stringify({ attachmentLimits: { maxFiles: 1, maxFileBytes: 2, maxTotalBytes: 2, maxRequestBytes: 300 } })));
+    assert.equal(await operation, false);
+    assert.deepEqual(urls, ['/api/settings']);
+  } finally { fetchHandler = previousFetch; useStore.setState(saved); }
+});
 function reset() {
   useStore.getState().startNewSession();
   useStore.setState({ sessionId: 's', sessionEpoch: 1, thread: initialThread(),

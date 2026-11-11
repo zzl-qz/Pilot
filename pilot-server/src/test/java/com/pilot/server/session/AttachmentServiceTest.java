@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,19 @@ import com.pilot.server.config.AttachmentLimits;
 class AttachmentServiceTest {
     @TempDir
     Path root;
+
+    @Test
+    void enforcesMobileFileCountAndSmallerConfiguredBudgets() {
+        AttachmentService service = new AttachmentService(root);
+        var item = new AttachmentService.Inbound("a.txt", "text/plain", base64("a"));
+        var batch = Collections.nCopies(17, item);
+        assertThrows(IllegalArgumentException.class, () -> service.prepare("mobile", "", batch, List.of(), true));
+        service.prepare("web", "", batch, List.of(), false);
+        AttachmentService smaller = new AttachmentService(root, new AttachmentLimits(3, 1, 1, 100));
+        assertThrows(IllegalArgumentException.class,
+            () -> smaller.prepare("small", "", List.of(item, item), List.of(), true));
+        assertFalse(Files.exists(service.sessionDir("mobile")));
+    }
 
     @Test
     void inlinesTextAttachmentIntoContent() {

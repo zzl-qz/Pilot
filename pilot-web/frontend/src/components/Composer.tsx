@@ -20,7 +20,7 @@ import { filterQuickCommands, expandQuickCommand } from '../lib/commands.js';
 import { stepHistory } from '../lib/input-history.js';
 import { readTransferFiles, hasFileTransferHint } from '../lib/clipboard.js';
 import { readAttachmentFile } from '../lib/attachment-input.js';
-import { checkIncomingFile } from '../lib/attachments.js';
+import { checkIncomingFile, requireAttachmentLimits } from '../lib/attachments.js';
 import { writeDraft, readDraft, dropDraft } from '../lib/drafts.js';
 import { splitAttachmentMarkers, joinAttachmentMarkers } from '../lib/attachments.js';
 import { queueHeader, resumeBar } from '../lib/queue.js';
@@ -204,7 +204,10 @@ export function Composer() {
           if ((useStore.getState().sessionId !== owner || useStore.getState().sessionEpoch !== epoch)) continue;
           const existing = (inputRef.current?.attachmentIds() || [])
             .map((id) => draftFilesRef.current.get(id)).filter((item): item is DraftAttachment => Boolean(item));
-          const result = checkIncomingFile(existing, file);
+          const settings = useStore.getState().settingsData || await api.settings();
+          const limits = requireAttachmentLimits(settings?.attachmentLimits);
+          if (useStore.getState().sessionId !== owner || useStore.getState().sessionEpoch !== epoch) continue;
+          const result = checkIncomingFile(existing, file, limits);
           if (!result.ok) {
             if (!result.silent) useStore.getState().showNotice(result.reason);
             continue;

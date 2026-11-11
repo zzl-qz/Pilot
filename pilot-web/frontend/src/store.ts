@@ -1,3 +1,4 @@
+import { attachmentBatchError, requireAttachmentLimits } from './lib/attachments.js';
 import type { Draft } from 'immer';
 import type { StoreState, UiState, MirrorState, CommandTask } from './types/store.js';
 import type { EventEnvelope } from './types/events.js';
@@ -1213,8 +1214,21 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       return false;
     }
     if (!get().modelReady()) return false;
-    // 草稿态：第一条消息触发创建会话，标题由服务端统一生成。
     const ownerEpoch = get().sessionEpoch;
+    let attachmentBudget = get().settingsData?.attachmentLimits;
+    if (attachments?.length) {
+      try {
+        const settings = get().settingsData || await api.settings();
+        attachmentBudget = requireAttachmentLimits(settings?.attachmentLimits);
+        const error = attachmentBatchError(attachments, attachmentBudget);
+        if (error) throw new Error(error);
+      } catch (error) {
+        get().showNotice('无法发送附件：' + errorInfo(error).message);
+        return false;
+      }
+    }
+    if (get().sessionEpoch !== ownerEpoch) return false;
+    // 草稿态：第一条消息触发创建会话，标题由服务端统一生成。
     let sessionId = get().sessionId;
     if (!sessionId) {
       try {
@@ -1237,6 +1251,11 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     const body: InputMessage = { content: payloadContent, attachments: attachments || [], imagePositions: imagePositions || [] };
     if (skillCall) {
       body.skill = skillCall.skill;
+    }
+    const requestBudget = attachmentBudget?.maxRequestBytes;
+    if (requestBudget && new TextEncoder().encode(JSON.stringify(body)).length > requestBudget) {
+      get().showNotice('消息正文和附件合计超过请求预算，请减少内容后重试。');
+      return false;
     }
     const remembered = rememberInput(localStorage, sessionId, text);
     const queueInstead = get().running;

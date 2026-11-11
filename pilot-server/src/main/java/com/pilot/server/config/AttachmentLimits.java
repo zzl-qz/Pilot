@@ -57,6 +57,18 @@ public class AttachmentLimits {
         return ((maxTotalBytes + 2L) / 3L) * 4L + maxFiles * 1024L + 2_000_000L;
     }
 
+    public record Budget(int maxFiles, int maxFileBytes, int maxTotalBytes, long maxRequestBytes) {
+    }
+
+    public Budget budget() {
+        return new Budget(maxFiles, maxFileBytes, maxTotalBytes, maxRequestBytes());
+    }
+
+    public AttachmentLimits mobile() {
+        return new AttachmentLimits(Math.min(maxFiles, 16), Math.min(maxFileBytes, 2 * 1024 * 1024),
+            Math.min(maxTotalBytes, 6 * 1024 * 1024), inlineMaxChars);
+    }
+
     public static AttachmentLimits defaults() {
         return new AttachmentLimits(64, 2 * 1024 * 1024, 25 * 1024 * 1024, 20_000);
     }

@@ -59,11 +59,12 @@ public class MobileWorkbenchController {
         snapshot.put("projects", projects.list());
         snapshot.put("approvals", pending());
         snapshot.put("results", new MobileResultPage(summaries, page.truncated()));
-        long mobileMaxBytes = Math.min(limits.maxTotalBytes(), 8L * 1024 * 1024);
+        AttachmentLimits mobile = limits.mobile();
         snapshot.put("capabilities",
-            Map.of("applicationScope", true, "idempotency", true, "attachmentsMaxBytes", mobileMaxBytes,
-                "attachmentsMaxFileBytes", (long)limits.maxFileBytes(), "attachmentsMaxFiles", limits.maxFiles(),
-                "backgroundPush", false, "conditionalSnapshot", true));
+            Map.of("applicationScope", true, "idempotency", true, "attachmentsMaxBytes", (long)mobile.maxTotalBytes(),
+                "attachmentsMaxFileBytes", (long)mobile.maxFileBytes(), "attachmentsMaxFiles", mobile.maxFiles(),
+                "attachmentsMaxRequestBytes", mobile.maxRequestBytes(), "backgroundPush", false, "conditionalSnapshot",
+                true));
         String current = revision(snapshot);
         if (current.equals(revision)) {
             return Map.of("version", 1, "revision", current, "unchanged", true);

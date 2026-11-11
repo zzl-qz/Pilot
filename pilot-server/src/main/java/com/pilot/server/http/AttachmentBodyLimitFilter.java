@@ -47,7 +47,7 @@ public class AttachmentBodyLimitFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
         throws ServletException, IOException {
-        long budget = limits.maxRequestBytes();
+        long budget = (request.getHeader("X-Pilot-Device-Id") == null ? limits : limits.mobile()).maxRequestBytes();
         if (request.getContentLengthLong() > budget) {
             reject(response);
             return;

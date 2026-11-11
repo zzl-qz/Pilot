@@ -15,6 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.model.ModelClientException;
 import com.pilot.core.permission.PermissionMode;
+import com.pilot.server.config.AttachmentLimits;
 import com.pilot.server.config.ModelCatalogService;
 import com.pilot.server.config.ModelSettings;
 import com.pilot.server.config.PermissionSettings;
@@ -31,11 +32,14 @@ public class SettingsController {
     private final PermissionSettings permissions;
     private final ModelSettings models;
     private final ModelCatalogService catalog;
+    private final AttachmentLimits attachmentLimits;
 
-    public SettingsController(PermissionSettings permissions, ModelSettings models, ModelCatalogService catalog) {
+    public SettingsController(PermissionSettings permissions, ModelSettings models, ModelCatalogService catalog,
+        AttachmentLimits attachmentLimits) {
         this.permissions = permissions;
         this.models = models;
         this.catalog = catalog;
+        this.attachmentLimits = attachmentLimits;
     }
 
     @GetMapping
@@ -112,11 +116,12 @@ public class SettingsController {
         ModelSettings.Snapshot snapshot = models.snapshot();
         return new SettingsResponse(permissions.mode().name(),
             Arrays.stream(PermissionMode.values()).map(Enum::name).toList(), snapshot.model(), snapshot.endpoint(),
-            snapshot.hasApiKey(), snapshot.maskedApiKey(), models.options());
+            snapshot.hasApiKey(), snapshot.maskedApiKey(), models.options(), attachmentLimits.budget());
     }
 
     public record SettingsResponse(String permissionMode, List<String> permissionModes, String model,
-        String modelEndpoint, boolean modelApiKeySet, String modelApiKeyMasked, List<String> modelOptions) {
+        String modelEndpoint, boolean modelApiKeySet, String modelApiKeyMasked, List<String> modelOptions,
+        AttachmentLimits.Budget attachmentLimits) {
     }
 
     public record PermissionRequest(String mode) {

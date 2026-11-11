@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
+  attachmentBatchError,
+  requireAttachmentLimits,
   attachmentUrl,
   checkIncomingFile,
   fileBadge,
@@ -65,6 +67,20 @@ test('附件总量预算：累计超限给出原因', () => {
   assert.equal(result.ok, false);
   assert.match(result.reason, /预算/);
   assert.equal(checkIncomingFile(existing.slice(0, 11), incoming).ok, true, '11×2MB + 2MB 未超 25MB 预算');
+});
+
+test('服务端自定义预算同时约束新增文件和恢复的草稿', () => {
+  const limits = requireAttachmentLimits({ maxFiles: 2, maxFileBytes: 3, maxTotalBytes: 4, maxRequestBytes: 200 });
+  const a = { name: 'a.txt', size: 2 };
+  const b = { name: 'b.txt', size: 2 };
+  assert.equal(checkIncomingFile([a], b, limits).ok, true);
+  assert.match(checkIncomingFile([a], { ...b, size: 3 }, limits).reason, /总量/);
+  assert.match(attachmentBatchError([{ ...a, size: 4 }], limits), /单个/);
+  assert.match(attachmentBatchError([a, b, a], limits), /最多/);
+  assert.match(attachmentBatchError([{ ...a, size: NaN }], limits), /无效/);
+  for (const invalid of [null, {}, { ...limits, maxTotalBytes: -1 }, { ...limits, maxFileBytes: 1.5 }]) {
+    assert.throws(() => requireAttachmentLimits(invalid), /附件限制/);
+  }
 });
 
 const INLINE = '[附件 A.java (text/plain)]\nclass A {}\nclass B {}\n[附件结束 A.java]';

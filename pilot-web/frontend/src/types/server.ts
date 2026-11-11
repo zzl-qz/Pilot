@@ -989,7 +989,15 @@ export interface SettingsControllerModelsResponse {
 }
 
 /** SettingsController.java / SettingsResponse */
+export interface AttachmentLimitsBudget {
+  maxFiles: number;
+  maxFileBytes: number;
+  maxTotalBytes: number;
+  maxRequestBytes: number;
+}
+
 export interface SettingsControllerSettingsResponse {
+  attachmentLimits?: AttachmentLimitsBudget;
   permissionMode: string;
   permissionModes: (string)[];
   model: string;

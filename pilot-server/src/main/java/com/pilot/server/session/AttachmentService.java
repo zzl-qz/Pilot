@@ -60,6 +60,7 @@ public class AttachmentService {
         ".vue", ".svelte", ".py", ".go", ".rs", ".c", ".h", ".cpp", ".hpp", ".cs", ".rb", ".php", ".sh", ".bat", ".ps1",
         ".toml", ".ini", ".cfg", ".conf", ".log", ".diff", ".patch", ".pom");
 
+    private final AttachmentLimits limits;
     private final int maxFiles;
     private final int maxFileBytes;
     private final int maxTotalBytes;
@@ -79,6 +80,7 @@ public class AttachmentService {
 
     AttachmentService(Path root, AttachmentLimits limits) {
         this.root = root.toAbsolutePath().normalize();
+        this.limits = limits;
         this.maxFiles = limits.maxFiles();
         this.maxFileBytes = limits.maxFileBytes();
         this.maxTotalBytes = limits.maxTotalBytes();
@@ -98,6 +100,12 @@ public class AttachmentService {
         public Prepared(String content, List<Attachment> attachments) {
             this(content, attachments, List.of());
         }
+    }
+
+    public Prepared prepare(String sessionId, String content, List<Inbound> inbound, List<Integer> positions,
+        boolean mobile) {
+        return mobile ? new AttachmentService(root, limits.mobile()).prepare(sessionId, content, inbound, positions)
+            : prepare(sessionId, content, inbound, positions);
     }
 
     public Prepared prepare(String sessionId, String content, List<Inbound> inbound) {

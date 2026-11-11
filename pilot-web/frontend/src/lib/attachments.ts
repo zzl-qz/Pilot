@@ -1,3 +1,4 @@
+import type { AttachmentLimitsBudget } from '../types/server.js';
 import type { MessageAttachment } from '../types/runtime.js';
 import type { AttachmentMarker, MessagePart } from '../types/input.js';
 /**
@@ -12,8 +13,32 @@ import type { AttachmentMarker, MessagePart } from '../types/input.js';
 // 单条消息允许批量附加图片或文件，避免截图类任务被过早截断。
 export const MAX_ATTACHMENTS = 64;
 export const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
-// 服务端 pilot.attachments.max-total-bytes 的前端镜像；漂移时以服务端拒绝为准
+// 默认值仅供纯函数与旧数据测试；实际上传使用服务端下发的预算。
 export const MAX_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024;
+
+const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimitsBudget = {
+  maxFiles: MAX_ATTACHMENTS, maxFileBytes: MAX_ATTACHMENT_BYTES, maxTotalBytes: MAX_ATTACHMENT_TOTAL_BYTES,
+  maxRequestBytes: Math.ceil(MAX_ATTACHMENT_TOTAL_BYTES / 3) * 4 + MAX_ATTACHMENTS * 1024 + 2_000_000
+};
+
+export function requireAttachmentLimits(value: AttachmentLimitsBudget | null | undefined): AttachmentLimitsBudget {
+  if (!value || !['maxFiles', 'maxFileBytes', 'maxTotalBytes', 'maxRequestBytes']
+    .every(key => Number.isSafeInteger(value[key as keyof AttachmentLimitsBudget]) && value[key as keyof AttachmentLimitsBudget] > 0)) {
+    throw new Error('未取得附件限制，请刷新重试或更新电脑端。');
+  }
+  return value;
+}
+
+export function attachmentBatchError(files: readonly { name?: string; size?: number }[], limits: AttachmentLimitsBudget): string {
+  if (files.length > limits.maxFiles) return `一次最多附加 ${limits.maxFiles} 个文件。`;
+  let total = 0;
+  for (const file of files) {
+    if (!Number.isSafeInteger(file.size) || Number(file.size) <= 0) return `「${file.name || '附件'}」是空文件或大小无效。`;
+    if (Number(file.size) > limits.maxFileBytes) return `「${file.name || '附件'}」超过单个 ${formatBytes(limits.maxFileBytes)} 的上限。`;
+    total += Number(file.size);
+  }
+  return total > limits.maxTotalBytes ? `附件总量超过单条 ${formatBytes(limits.maxTotalBytes)} 的预算。` : '';
+}
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp', 'ico']);
 const CODE_EXTENSIONS = new Set([
@@ -77,7 +102,7 @@ export function formatBytes(bytes: unknown) {
  * 判断一个新文件能不能加入当前草稿。
  * 重复（同名同大小）直接静默忽略，其余情况返回一句能直接展示给用户的原因。
  */
-export function checkIncomingFile(existing: readonly MessageAttachment[] | null | undefined, file: { name?: string; size: number; mimeType?: string; type?: string }): { ok: boolean; silent?: boolean; reason: string } {
+export function checkIncomingFile(existing: readonly MessageAttachment[] | null | undefined, file: { name?: string; size: number; mimeType?: string; type?: string }, limits: AttachmentLimitsBudget = DEFAULT_ATTACHMENT_LIMITS): { ok: boolean; silent?: boolean; reason: string } {
   const name = (file && file.name) || '未命名文件';
   const list = Array.isArray(existing) ? existing : [];
   const mime = String((file && (file.mimeType || file.type)) || '').toLowerCase();
@@ -85,25 +110,8 @@ export function checkIncomingFile(existing: readonly MessageAttachment[] | null 
   if (!image && list.some((item) => item.name === name && item.size === file.size)) {
     return { ok: false, silent: true, reason: '' };
   }
-  if (list.length >= MAX_ATTACHMENTS) {
-    return { ok: false, reason: `一次最多附加 ${MAX_ATTACHMENTS} 个文件，「${name}」没有加入。` };
-  }
-  if (!file.size) {
-    return { ok: false, reason: `「${name}」是空文件，已跳过。` };
-  }
-  if (file.size > MAX_ATTACHMENT_BYTES) {
-    return {
-      ok: false,
-      reason: `「${name}」${formatBytes(file.size)}，超过单个 ${formatBytes(MAX_ATTACHMENT_BYTES)} 的上限，已跳过。`
-    };
-  }
-  const existingBytes = list.reduce((total, item) => total + (Number(item.size) || 0), 0);
-  if (existingBytes + file.size > MAX_ATTACHMENT_TOTAL_BYTES) {
-    return {
-      ok: false,
-      reason: `「${name}」加入后附件总量 ${formatBytes(existingBytes + file.size)}，超过单条 ${formatBytes(MAX_ATTACHMENT_TOTAL_BYTES)} 的预算，已跳过。`
-    };
-  }
+  const reason = attachmentBatchError([...list, file], limits);
+  if (reason) return { ok: false, reason };
   return { ok: true, reason: '' };
 }
 

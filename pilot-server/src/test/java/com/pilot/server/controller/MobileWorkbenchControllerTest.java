@@ -130,8 +130,21 @@ class MobileWorkbenchControllerTest {
         var controller = controller(results, new AttachmentLimits(64, 2 * 1024 * 1024, 25 * 1024 * 1024, 20_000));
         @SuppressWarnings("unchecked")
         var capabilities = (Map<String, Object>)controller.snapshot(null).get("capabilities");
-        assertEquals(8L * 1024 * 1024, capabilities.get("attachmentsMaxBytes"));
+        assertEquals(6L * 1024 * 1024, capabilities.get("attachmentsMaxBytes"));
         assertEquals(2L * 1024 * 1024, capabilities.get("attachmentsMaxFileBytes"));
-        assertEquals(64, capabilities.get("attachmentsMaxFiles"));
+        assertEquals(16, capabilities.get("attachmentsMaxFiles"));
+        assertEquals(AttachmentLimits.defaults().mobile().maxRequestBytes(),
+            capabilities.get("attachmentsMaxRequestBytes"));
+    }
+
+    @Test
+    void smallerConfiguredLimitsAlsoApplyToMobile() {
+        var results = mock(ResultInboxService.class);
+        when(results.list()).thenReturn(new ResultInboxService.Page(List.of(), false));
+        var controller = controller(results, new AttachmentLimits(3, 100, 200, 100));
+        var capabilities = (Map<?, ?>)controller.snapshot(null).get("capabilities");
+        assertEquals(3, capabilities.get("attachmentsMaxFiles"));
+        assertEquals(100L, capabilities.get("attachmentsMaxFileBytes"));
+        assertEquals(200L, capabilities.get("attachmentsMaxBytes"));
     }
 }
