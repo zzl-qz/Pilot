@@ -5,17 +5,20 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.HexFormat;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.ObjectProvider;
 
+import com.pilot.core.multi.DiffSandbox;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.session.AttachmentService;
 import com.pilot.server.store.SqliteStore;
@@ -73,7 +76,7 @@ class BackupServiceTest {
         assertTrue(manifest.contains("restoreHint"));
         assertTrue(manifest.contains("consistency"));
         assertTrue(report.message().contains("暂停写入"), report.message());
-        String expectedHash = java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(binary));
+        String expectedHash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(binary));
         assertTrue(manifest.contains(expectedHash), manifest);
         assertTrue(Files.isRegularFile(target.resolve("COMPLETE")));
     }
@@ -81,7 +84,7 @@ class BackupServiceTest {
     @Test
     void backupWarnsWhenAttachmentsAreOutsideTheDataDirectory() throws IOException {
         ObjectProvider<SqliteStore> provider = Mockito.mock(ObjectProvider.class);
-        Mockito.when(provider.getIfAvailable()).thenReturn(null);
+        Mockito.when(provider.getIfAvailable()).thenReturn(new SqliteStore(dataDir.resolve("db.sqlite")));
         Path external = dataDir.resolve("outside-attachments");
         AttachmentService attachments = Mockito.mock(AttachmentService.class);
         Mockito.when(attachments.root()).thenReturn(external);
@@ -91,12 +94,13 @@ class BackupServiceTest {
         BackupService.BackupReport report = backups.backup();
 
         assertTrue(report.message().contains(external.toString()), report.message());
-        assertTrue(Files.readString(Path.of(report.directory()).resolve("manifest.json")).contains("outside-attachments"));
+        assertTrue(
+            Files.readString(Path.of(report.directory()).resolve("manifest.json")).contains("outside-attachments"));
     }
 
     @Test
     void repeatedBackupsUseUniquePublishedDirectoriesAndIgnoreIncompleteOnes() throws IOException {
-        BackupService backups = service(null);
+        BackupService backups = service(new SqliteStore(dataDir.resolve("db.sqlite")));
         BackupService.BackupReport first = backups.backup();
         BackupService.BackupReport second = backups.backup();
         Path incomplete = dataDir.resolve(".pilot/backups/incomplete");
@@ -142,8 +146,10 @@ class BackupServiceTest {
         Files.writeString(Path.of(report.directory()).resolve("tasks/session/state.bin"), "tampered");
         BackupService.VerificationReport invalid = backups.verifyLatestBackup();
         assertFalse(invalid.valid());
-        assertTrue(invalid.failures().stream().anyMatch(failure -> failure.contains("大小不匹配")
-            || failure.contains("SHA-256 不匹配")), invalid.failures().toString());
+        assertTrue(
+            invalid.failures().stream()
+                .anyMatch(failure -> failure.contains("大小不匹配") || failure.contains("SHA-256 不匹配")),
+            invalid.failures().toString());
 
         Files.writeString(Path.of(report.directory()).resolve("unlisted.txt"), "extra");
         BackupService.VerificationReport extra = backups.verifyLatestBackup();
@@ -157,11 +163,59 @@ class BackupServiceTest {
         Path root = dataDir.resolve(".pilot");
         Files.createDirectories(root);
         Files.createDirectories(root.resolve("backups/20200101-000000"));
-        Files.writeString(root.resolve("backups/20200101-000000/manifest.json"), "{}");
+        Path legacy = root.resolve("backups/20200101-000000");
+        writeLegacyBackup(legacy);
         Files.setLastModifiedTime(root.resolve("backups/20200101-000000"), FileTime.fromMillis(0));
 
         BackupService backups = service(null);
         assertEquals(1, backups.purgeOlderThan(Instant.now().minusSeconds(60)));
         assertFalse(Files.exists(root.resolve("backups/20200101-000000")));
+    }
+
+    @Test
+    void excludesV3WithoutMarkerAndStagingEvenWithMarker() throws IOException {
+        BackupService backups = service(new SqliteStore(dataDir.resolve("db.sqlite")));
+        Path published = Path.of(backups.backup().directory());
+        Path marker = published.resolve("COMPLETE");
+        String created = Files.readString(marker);
+        Files.delete(marker);
+        Path manifest = published.resolve("manifest.json");
+        Files.writeString(manifest,
+            Files.readString(manifest).replace("\"schemaVersion\":\"4\"", "\"schemaVersion\":\"3\""));
+
+        assertEquals(0, backups.status().backups());
+        assertFalse(backups.verifyLatestBackup().valid());
+
+        Files.writeString(marker, created);
+        assertTrue(backups.verifyLatestBackup().valid());
+        Files.move(published, published.resolveSibling(".interrupted.tmp"));
+        assertEquals(0, backups.status().backups());
+        assertFalse(backups.verifyLatestBackup().valid());
+    }
+
+    @Test
+    void verifiesV2BinaryPayloadWithItsOriginalAlgorithm() throws IOException {
+        BackupService backups = service(null);
+        Path legacy = Files.createDirectories(dataDir.resolve(".pilot/backups/20200101-000000"));
+        writeLegacyBackup(legacy);
+        BackupService.VerificationReport result = backups.verifyLatestBackup();
+        assertTrue(result.valid(), result.failures().toString());
+        assertTrue(result.message().contains("V2"));
+    }
+
+    @Test
+    void cannotPublishAnEmptyFileBackup() {
+        BackupService backups = service(null);
+        assertFalse(backups.backup().ok());
+        assertEquals(0, backups.status().backups());
+    }
+
+    private static void writeLegacyBackup(Path legacy) throws IOException {
+        byte[] payload = {0, (byte)0xff};
+        Files.write(legacy.resolve("bytes.bin"), payload);
+        String hash = DiffSandbox.fingerprint(new String(payload, StandardCharsets.ISO_8859_1));
+        Files.writeString(legacy.resolve("manifest.json"), """
+            {"schemaVersion":"2","files":[{"path":"bytes.bin","bytes":2,"sha256":"%s"}]}
+            """.formatted(hash));
     }
 }

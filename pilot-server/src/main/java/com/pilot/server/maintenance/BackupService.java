@@ -6,8 +6,6 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.Statement;
 import java.time.Instant;
@@ -50,7 +48,6 @@ public class BackupService {
     private static final Logger log = LoggerFactory.getLogger(BackupService.class);
     private static final List<String> DIRECTORIES = List.of("multi", "validation", "commands", "traces", "snapshots",
         "work-products", "file-versions", "studio", "apply-journal", "agents", "skills", "tasks", "mobile");
-    private static final String COMPLETE = "COMPLETE";
 
     public record BackupReport(boolean ok, String directory, int files, long bytes, String message, Instant createdAt) {
     }
@@ -93,9 +90,9 @@ public class BackupService {
             List<Map<String, Object>> manifest = new ArrayList<>();
             SqliteStore sqlite = store.getIfAvailable();
             if (sqlite != null) {
-                Path database = staging.resolve("pilot.db");
+                Path database = staging.resolve(BackupManifest.DATABASE);
                 vacuumInto(sqlite, database);
-                manifest.add(entry("pilot.db", database));
+                manifest.add(entry(BackupManifest.DATABASE, database));
             }
             List<String> included = new ArrayList<>(DIRECTORIES);
             Path attachmentRoot = attachments.root().toAbsolutePath().normalize();
@@ -122,9 +119,9 @@ public class BackupService {
                         Path destination = staging.resolve(directory).resolve(relative);
                         Files.createDirectories(destination.getParent());
                         Files.copy(file, destination, StandardCopyOption.REPLACE_EXISTING);
-                        Map<String, Object> item = entry(directory + "/" + relative.toString().replace('\\', '/'),
-                            destination);
-                        if (!item.get("sha256").equals(sha256(file))) {
+                        Map<String, Object> item =
+                            entry(directory + "/" + relative.toString().replace('\\', '/'), destination);
+                        if (!item.get("sha256").equals(BackupManifest.sha256(file))) {
                             throw new IOException("备份期间文件发生变化: " + file);
                         }
                         manifest.add(item);
@@ -141,20 +138,28 @@ public class BackupService {
             Map<String, Object> root = new LinkedHashMap<>();
             root.put("createdAt", Instant.now().toString());
             root.put("dataDir", dataDir.root().toString());
-            root.put("schemaVersion", "3");
+            root.put("schemaVersion", BackupManifest.VERSION);
+            root.put("id", id);
+            root.put("storage", sqlite == null ? "files" : "sqlite");
             root.put("files", manifest);
             root.put("includedDirectories", included);
             root.put("excludedData", List.of("外部工作区、Git worktree 及其工作区内恢复日志", "缓存与可重建数据"));
             root.put("externalAttachmentPath", attachmentIncluded ? "" : attachmentRoot.toString());
             root.put("consistency", "SQLite 使用事务快照；动态文件逐个复制，不保证与数据库处于同一业务时点。备份期间请暂停写入。");
             root.put("restoreHint", "停止服务后，将本备份内容恢复到数据目录，再启动；外部工作区和清单标注未包含的数据需单独恢复。");
-            Files.writeString(staging.resolve("manifest.json"), mapper.writeValueAsString(root), StandardCharsets.UTF_8);
-            Files.writeString(staging.resolve(COMPLETE), Instant.now().toString(), StandardCharsets.UTF_8);
+            Files.writeString(staging.resolve(BackupManifest.FILE), mapper.writeValueAsString(root),
+                StandardCharsets.UTF_8);
+            BackupManifest.Check check = BackupManifest.verify(staging, BackupManifest.read(staging, mapper));
+            if (!check.valid()) {
+                throw new IOException(String.join("；", check.failures()));
+            }
             try {
                 Files.move(staging, target, StandardCopyOption.ATOMIC_MOVE);
             } catch (AtomicMoveNotSupportedException e) {
                 Files.move(staging, target);
             }
+            Files.writeString(target.resolve(BackupManifest.COMPLETE), Instant.now().toString(),
+                StandardCharsets.UTF_8);
             long bytes = manifest.stream().mapToLong(item -> ((Number)item.get("bytes")).longValue()).sum();
             StorageHealth.recovered("backup");
             log.info("备份完成: {}（{} 个文件，{} 字节）", target, manifest.size(), bytes);
@@ -166,7 +171,10 @@ public class BackupService {
         } catch (IOException | RuntimeException e) {
             try {
                 if (Files.exists(staging)) {
-                    deleteRecursively(staging);
+                    BackupManifest.deleteTree(staging);
+                }
+                if (Files.exists(target) && !BackupManifest.published(target, mapper)) {
+                    BackupManifest.deleteTree(target);
                 }
             } catch (IOException cleanupFailure) {
                 e.addSuppressed(cleanupFailure);
@@ -191,7 +199,7 @@ public class BackupService {
         List<Path> directories = new ArrayList<>();
         if (Files.isDirectory(backups)) {
             try (Stream<Path> list = Files.list(backups)) {
-                directories.addAll(list.filter(Files::isDirectory).filter(BackupService::isComplete).toList());
+                directories.addAll(list.filter(Files::isDirectory).filter(this::isComplete).toList());
             } catch (IOException e) {
                 log.debug("读取备份目录失败", e);
             }
@@ -203,59 +211,24 @@ public class BackupService {
     }
 
     /** 校验最近一份完整备份的清单、文件大小和原始字节 SHA-256。 */
-    public VerificationReport verifyLatestBackup() {
+    public synchronized VerificationReport verifyLatestBackup() {
         Path latest = latestCompleteBackup();
         if (latest == null) {
             return new VerificationReport(false, "", 0, List.of("没有可校验的完整备份"), "没有可校验的完整备份");
         }
-        List<String> failures = new ArrayList<>();
+        List<String> failures;
         int checked = 0;
+        String verified = "最近备份文件校验通过";
         try {
-            JsonNode manifest = mapper.readTree(Files.readString(latest.resolve("manifest.json"), StandardCharsets.UTF_8));
-            JsonNode files = manifest.path("files");
-            if (!files.isArray()) {
-                throw new IOException("清单缺少 files 数组");
-            }
-            Path root = latest.toAbsolutePath().normalize();
-            Set<Path> listed = new HashSet<>();
-            for (JsonNode item : files) {
-                String name = item.path("path").asText("");
-                Path relative = Path.of(name).normalize();
-                Path file = root.resolve(relative).normalize();
-                if (name.isBlank() || relative.isAbsolute() || relative.startsWith("..") || !file.startsWith(root)) {
-                    failures.add("清单路径无效: " + name);
-                    continue;
-                }
-                if (!listed.add(relative)) {
-                    failures.add("清单路径重复: " + name);
-                    continue;
-                }
-                checked++;
-                if (!Files.isRegularFile(file)) {
-                    failures.add("文件缺失: " + name);
-                    continue;
-                }
-                long expectedBytes = item.path("bytes").asLong(-1);
-                if (expectedBytes < 0 || Files.size(file) != expectedBytes) {
-                    failures.add("文件大小不匹配: " + name);
-                    continue;
-                }
-                String expectedHash = item.path("sha256").asText("");
-                if (expectedHash.isBlank() || !expectedHash.equals(sha256(file))) {
-                    failures.add("SHA-256 不匹配: " + name);
-                }
-            }
-            try (Stream<Path> walk = Files.walk(root)) {
-                walk.filter(Files::isRegularFile).map(root::relativize)
-                    .filter(path -> !path.equals(Path.of("manifest.json")) && !path.equals(Path.of(COMPLETE)))
-                    .filter(path -> !listed.contains(path))
-                    .forEach(path -> failures.add("文件未列入清单: " + path.toString().replace('\\', '/')));
-            }
-            if (checked == 0 && failures.isEmpty()) {
-                failures.add("清单中没有可校验文件");
+            JsonNode manifest = BackupManifest.readPublished(latest, mapper);
+            BackupManifest.Check check = BackupManifest.verify(latest, manifest);
+            failures = check.failures();
+            checked = check.files();
+            if ("2".equals(BackupManifest.version(manifest))) {
+                verified += "（V2 旧版校验算法与备份范围）";
             }
         } catch (IOException | RuntimeException e) {
-            failures.add("读取备份清单失败: " + e.getMessage());
+            failures = List.of("读取备份清单失败: " + e.getMessage());
         }
         boolean valid = failures.isEmpty();
         if (valid) {
@@ -263,8 +236,7 @@ public class BackupService {
         } else {
             StorageHealth.markDegraded("backup", String.join("；", failures));
         }
-        return new VerificationReport(valid, latest.toString(), checked, failures,
-            valid ? "最近备份校验通过" : "最近备份校验失败");
+        return new VerificationReport(valid, latest.toString(), checked, failures, valid ? verified : "最近备份校验失败");
     }
 
     private Path latestCompleteBackup() {
@@ -273,7 +245,7 @@ public class BackupService {
             return null;
         }
         try (Stream<Path> list = Files.list(backups)) {
-            return list.filter(Files::isDirectory).filter(BackupService::isComplete)
+            return list.filter(Files::isDirectory).filter(this::isComplete)
                 .max(Comparator.comparing(path -> path.getFileName().toString())).orElse(null);
         } catch (IOException e) {
             return null;
@@ -295,7 +267,7 @@ public class BackupService {
     }
 
     /** 删除早于 cutoff 的备份目录，避免备份把磁盘吃满。 */
-    public int purgeOlderThan(Instant cutoff) {
+    public synchronized int purgeOlderThan(Instant cutoff) {
         Path backups = dataDir.file("backups");
         if (!Files.isDirectory(backups)) {
             return 0;
@@ -305,7 +277,7 @@ public class BackupService {
             for (Path directory : list.filter(Files::isDirectory).toList()) {
                 try {
                     if (isComplete(directory) && Files.getLastModifiedTime(directory).toInstant().isBefore(cutoff)) {
-                        deleteRecursively(directory);
+                        BackupManifest.deleteTree(directory);
                         removed++;
                     }
                 } catch (IOException e) {
@@ -331,36 +303,11 @@ public class BackupService {
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("path", name);
         item.put("bytes", Files.size(file));
-        item.put("sha256", sha256(file));
+        item.put("sha256", BackupManifest.sha256(file));
         return item;
     }
 
-    private static String sha256(Path file) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (var input = Files.newInputStream(file)) {
-                byte[] buffer = new byte[8192];
-                for (int read; (read = input.read(buffer)) >= 0;) {
-                    digest.update(buffer, 0, read);
-                }
-            }
-            return java.util.HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 不可用", e);
-        }
-    }
-
-    private static boolean isComplete(Path directory) {
-        return Files.isRegularFile(directory.resolve(COMPLETE))
-            || (!directory.getFileName().toString().startsWith(".")
-                && Files.isRegularFile(directory.resolve("manifest.json")));
-    }
-
-    private static void deleteRecursively(Path path) throws IOException {
-        try (Stream<Path> walk = Files.walk(path)) {
-            for (Path file : walk.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(file);
-            }
-        }
+    private boolean isComplete(Path directory) {
+        return BackupManifest.published(directory, mapper);
     }
 }
