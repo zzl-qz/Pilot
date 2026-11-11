@@ -172,7 +172,7 @@ export const api = {
   },
   checkpoints: (id: string, sequence: number) => apiJson<ApiResults['checkpoints']>(`/api/sessions/${encodeURIComponent(id)}/checkpoints?sequence=${sequence}`),
   // 回退必须带 mode（code / conversation / both），分支带上 revision 做乐观锁
-  restoreCheckpoint: (id: string, body: { sequence: number; mode: string; revision?: number }) => apiJson<ApiResults['restoreCheckpoint']>(`/api/sessions/${encodeURIComponent(id)}/checkpoints/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }),
+  restoreCheckpoint: (id: string, body: { sequence: number; mode: string; revision?: number; operationId?: string }) => apiJson<ApiResults['restoreCheckpoint']>(`/api/sessions/${encodeURIComponent(id)}/checkpoints/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }),
   forkCheckpoint: (id: string, body: { sequence: number; revision?: number }) => apiJson<ApiResults['forkCheckpoint']>(`/api/sessions/${encodeURIComponent(id)}/checkpoints/fork`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }),
   task: (id: string) => apiJson<ApiResults['task']>(`/api/sessions/${encodeURIComponent(id)}/task`),
   saveTask: (id: string, body: Update<S.TaskControlServiceRequirements>) => apiJson<ApiResults['saveTask']>(`/api/sessions/${encodeURIComponent(id)}/task`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),

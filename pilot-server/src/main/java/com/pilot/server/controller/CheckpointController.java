@@ -25,6 +25,8 @@ import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.AttachmentReferences;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.session.TaskControlService;
+import com.pilot.server.session.HistoryEditCoordinator;
+import com.pilot.server.workspace.HistoryFileChange;
 import com.pilot.server.workspace.RunSnapshotService;
 
 /** 按用户消息回到发送前；分支保留原对话，使用当前工作区文件。 */
@@ -39,10 +41,11 @@ public class CheckpointController {
     private final AgentProperties properties;
     private final TaskControlService tasks;
     private final AttachmentReferences attachmentReferences;
+    private final HistoryEditCoordinator historyEdits;
 
     public CheckpointController(SessionService sessions, RunStarter runs, RunSnapshotService snapshots,
         ConversationRepository conversations, PlanRepository plans, AgentProperties properties,
-        TaskControlService tasks, AttachmentReferences attachmentReferences) {
+        TaskControlService tasks, AttachmentReferences attachmentReferences, HistoryEditCoordinator historyEdits) {
         this.sessions = sessions;
         this.runs = runs;
         this.snapshots = snapshots;
@@ -51,6 +54,7 @@ public class CheckpointController {
         this.properties = properties;
         this.tasks = tasks;
         this.attachmentReferences = attachmentReferences;
+        this.historyEdits = historyEdits;
     }
 
     @GetMapping
@@ -69,6 +73,10 @@ public class CheckpointController {
         }
         String slot = claim(id);
         try {
+            String operationId = HistoryEditCoordinator.operationId(request.operationId());
+            String operationKey = id + ":" + request.sequence() + ":" + request.mode() + ":" + request.revision();
+            var completed = historyEdits.completed(operationId, operationKey, RestoreResponse.class);
+            if (completed.isPresent()) return completed.get();
             Selection selection = select(id, request.sequence());
             long historyRevision = sessions.historyRevision(id);
             checkRevision(selection, request.revision());
@@ -82,6 +90,7 @@ public class CheckpointController {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "请先处理等待发送的消息，再回退对话");
             }
             RunSnapshotService.RollbackReport report = null;
+            List<HistoryFileChange> changes = new ArrayList<>();
             if (!"conversation".equals(request.mode())) {
                 requireIdleWorkspace(selection.session(), slot);
                 if (!runs.lockWorkspace(slot, Path.of(workspace(selection.session())))) {
@@ -93,20 +102,26 @@ public class CheckpointController {
                         new RunSnapshotService.RollbackReport(selection.event().runId(), workspace(selection.session()),
                             List.of(), List.of(), preview.unavailable(), preview.conflicts()));
                 }
-                report = snapshots.rollback(selection.runIds());
-                if (!report.conflicts().isEmpty() || !report.failed().isEmpty()) {
-                    return new RestoreResponse(false, selection.input(), report);
-                }
+                List<HistoryFileChange> code = snapshots.historyChanges(selection.runIds());
+                changes.addAll(code);
+                report = new RunSnapshotService.RollbackReport(selection.event().runId(), workspace(selection.session()),
+                    code.stream().filter(change -> change.after() != null).map(change -> change.root().relativize(change.target()).toString()).toList(),
+                    code.stream().filter(change -> change.after() == null).map(change -> change.root().relativize(change.target()).toString()).toList(),
+                    List.of(), List.of());
             }
-            if (withConversation) {
-                tasks.restoreTo(id, selection.event().runId());
-                sessions.editHistory(id, request.sequence(), historyRevision, () -> {
-                    conversations.save(id, checkpoint.messages());
-                    plans.save(id, checkpoint.plan());
-                });
-                runs.discardSteering(id);
-            }
-            return new RestoreResponse(true, selection.input(), report);
+            if (withConversation) changes.add(tasks.historyChange(id, selection.event().runId()));
+            RestoreResponse result = new RestoreResponse(true, selection.input(), report);
+            historyEdits.execute(operationId, operationKey, changes, result, mark -> {
+                if (withConversation) {
+                    sessions.editHistory(id, request.sequence(), historyRevision, () -> {
+                        conversations.save(id, checkpoint.messages());
+                        plans.save(id, checkpoint.plan());
+                        mark.run();
+                    });
+                } else historyEdits.commitCodeOnly(mark);
+            });
+            if (withConversation) runs.discardSteering(id);
+            return result;
         } finally {
             runs.abandon(slot);
         }
@@ -222,7 +237,8 @@ public class CheckpointController {
         String input) {
     }
 
-    public record Request(Long sequence, String mode, Long revision) {
+    public record Request(Long sequence, String mode, Long revision, String operationId) {
+        public Request(Long sequence, String mode, Long revision) { this(sequence, mode, revision, null); }
     }
 
     public record Preview(long sequence, long revision, String input, int runs, boolean conversationAvailable,

@@ -152,7 +152,8 @@ public final class SqliteStore {
         "CREATE INDEX IF NOT EXISTS idx_events_result_time ON events(type, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_events_run_sequence ON events(run_id, sequence DESC)",
         "CREATE TABLE IF NOT EXISTS validation_pending (session_id TEXT PRIMARY KEY)",
-        "CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"};
+        "CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS history_commits (operation_id TEXT PRIMARY KEY, result TEXT NOT NULL)"};
 
     private final String url;
     private final Path path;
@@ -212,6 +213,17 @@ public final class SqliteStore {
 
     public Path path() {
         return path;
+    }
+
+    public java.util.Optional<String> historyCommit(String operationId) {
+        return JdbcSupport.queryOne(this, "SELECT result FROM history_commits WHERE operation_id = ?",
+            statement -> statement.setString(1, operationId), rows -> rows.getString(1), "读取历史操作提交记录失败");
+    }
+
+    public void commitHistoryOperation(String operationId, String result) {
+        JdbcSupport.update(this, "INSERT INTO history_commits(operation_id, result) VALUES (?, ?)", statement -> {
+            statement.setString(1, operationId); statement.setString(2, result);
+        }, "保存历史操作提交记录失败");
     }
 
     public Connection open() throws SQLException {

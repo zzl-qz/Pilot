@@ -92,6 +92,7 @@ import tools.jackson.databind.ObjectMapper;
  * 并在每次运行时重新注入 system，保证压缩之后计划仍然可见。
  */
 @Component
+@org.springframework.context.annotation.DependsOn("historyEditCoordinator")
 public class AgentRunService implements RunStarter {
     private static final Logger log = LoggerFactory.getLogger(AgentRunService.class);
     private static final int MAX_AUTO_CONTINUE = 3;

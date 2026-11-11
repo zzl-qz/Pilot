@@ -479,6 +479,16 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             List.copyOf(plan.unavailable));
     }
 
+    /** 仅准备文件前后像，由历史操作日志统一应用和恢复。 */
+    public synchronized List<HistoryFileChange> historyChanges(List<String> runIds) {
+        RestorePlan plan = prepare(runIds);
+        if (!plan.conflicts.isEmpty() || !plan.unavailable.isEmpty()) {
+            throw new IllegalStateException("检查点文件已变化或不可用，请重新预览");
+        }
+        return plan.actions.values().stream().map(action ->
+            new HistoryFileChange(action.workspace, action.target, action.previous, action.content)).toList();
+    }
+
     public synchronized RollbackReport rollback(String runId) {
         if (meta(runId) == null) {
             throw new IllegalArgumentException("没有该运行的回滚快照: " + runId);
@@ -596,7 +606,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         return plan;
     }
 
-    static boolean safePath(Path workspace, Path target) throws IOException {
+    public static boolean safePath(Path workspace, Path target) throws IOException {
         if (!target.startsWith(workspace) || target.equals(workspace)) {
             return false;
         }
@@ -626,7 +636,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         return true;
     }
 
-    private static void writeContent(Path target, byte[] content) throws IOException {
+    public static void writeContent(Path target, byte[] content) throws IOException {
         if (content == null) {
             Files.deleteIfExists(target);
             return;
@@ -635,6 +645,9 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         Path temporary = Files.createTempFile(target.getParent(), ".pilot-restore-", ".tmp");
         try {
             Files.write(temporary, content);
+            try (var channel = java.nio.channels.FileChannel.open(temporary, java.nio.file.StandardOpenOption.WRITE)) {
+                channel.force(true);
+            }
             if (Files.exists(target)) {
                 try {
                     Files.setPosixFilePermissions(temporary, Files.getPosixFilePermissions(target));

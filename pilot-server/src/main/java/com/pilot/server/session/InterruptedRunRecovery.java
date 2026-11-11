@@ -33,6 +33,7 @@ import com.pilot.core.session.SessionStatus;
  * 下一步是什么」。这一步只做安全接管准备，不自动重放工具调用——真正的继续仍由用户触发。
  */
 @Component
+@org.springframework.context.annotation.DependsOn("historyEditCoordinator")
 public class InterruptedRunRecovery implements ApplicationRunner {
     private com.pilot.server.maintenance.DataMaintenance maintenance =
         new com.pilot.server.maintenance.DataMaintenance();

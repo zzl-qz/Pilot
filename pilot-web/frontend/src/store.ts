@@ -1528,7 +1528,9 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       draft.ui.checkpointDialog = { ...(draft.ui.checkpointDialog || {}), sequence, applying: true, error: '' };
     });
     try {
-      const result = await api.restoreCheckpoint(sessionId, { sequence, mode, revision });
+      const operationId = typeof globalThis.crypto?.getRandomValues === 'function'
+        ? Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('') : undefined;
+      const result = await api.restoreCheckpoint(sessionId, { sequence, mode, revision, operationId });
       if (!result?.applied) {
         const code: Partial<S.RunSnapshotServiceRollbackReport> & { unavailable?: string[] } = result?.code || {};
         const reason = [

@@ -7,6 +7,12 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 /** 跨数据库和文件的操作在同一维护窗口内排空。 */
 public final class DataMaintenance {
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock(true);
+    private volatile String blocked;
+
+    /** 文件恢复冲突时停止后续存储活动，保留现场等待重启恢复。 */
+    public void block(String reason) { blocked = reason; }
+
+    public void requireHealthy() { if (blocked != null) throw new Busy(blocked); }
 
     public interface Scope extends AutoCloseable {
         @Override
@@ -20,11 +26,13 @@ public final class DataMaintenance {
     }
 
     public Scope activity() {
+        requireHealthy();
         lock.readLock().lock();
         return lock.readLock()::unlock;
     }
 
     public Scope tryActivity() {
+        if (blocked != null) return null;
         try {
             return lock.readLock().tryLock(0, TimeUnit.NANOSECONDS) ? lock.readLock()::unlock : null;
         } catch (InterruptedException e) {
@@ -42,6 +50,7 @@ public final class DataMaintenance {
     }
 
     public Scope exclusive(Duration timeout) {
+        requireHealthy();
         if (lock.getReadHoldCount() > 0 && !lock.isWriteLockedByCurrentThread()) {
             throw new Busy("当前操作尚未结束，请稍后进入维护");
         }
