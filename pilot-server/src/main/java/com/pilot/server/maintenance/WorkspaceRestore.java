@@ -70,6 +70,19 @@ final class WorkspaceRestore {
         return List.copyOf(notices);
     }
 
+    void retainExistingLocations(Map<String, Path> mappings) throws IOException {
+        for (var workspace : workspaces) {
+            for (String original : List.of(workspace.path(), workspace.base())) {
+                if (!original.isBlank() && !requested.containsKey(original) && directoryExists(original)) {
+                    Path existing = Path.of(original);
+                    if (existing.isAbsolute()) {
+                        mappings.putIfAbsent(original, DataDirectoryLock.canonical(existing));
+                    }
+                }
+            }
+        }
+    }
+
     private static void requireArchive(Path archive, WorkspaceArchive.Workspace workspace) throws IOException {
         List<String> files =
             workspace.git() ? List.of("tree.json", "history.bundle", "index.patch", "status") : List.of("tree.json");

@@ -82,8 +82,9 @@ final class RestoreService {
             requested.put(entry.getKey(), DataDirectoryLock.canonical(entry.getValue()));
         }
         mappings.putAll(requested);
-        RestorePaths paths = new RestorePaths(mappings, mapper);
         WorkspaceRestore workspaces = new WorkspaceRestore(manifest, requested, mapper);
+        workspaces.retainExistingLocations(mappings);
+        RestorePaths paths = new RestorePaths(mappings, mapper);
         notices.addAll(workspaces.inspect(source, data, database, attachments, paths));
         Plan plan = new Plan(source, data, database, attachments, attachmentEntry, keepExternal, manifest, paths,
             workspaces, List.copyOf(notices));
@@ -116,9 +117,9 @@ final class RestoreService {
             RestoreSwap swap = new RestoreSwap(plan.data(), mapper);
             try {
                 checkSpace(plan, stagedData, stagedDatabase, stagedAttachments);
-                Files.createDirectories(stagedData);
+                BackupManifest.privateDirectories(stagedData);
                 if (!plan.keepExternalAttachments()) {
-                    Files.createDirectories(stagedAttachments);
+                    BackupManifest.privateDirectories(stagedAttachments);
                 }
                 Path stagedBundles = stage.resolve("bundles");
                 copyPayload(plan, stagedData, stagedDatabase, stagedAttachments, stagedBundles);

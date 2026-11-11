@@ -114,6 +114,12 @@ class WorkspaceBackupTest {
         assertTrue(Files.isRegularFile(backup.resolve("worktrees").resolve(created.id() + ".properties")));
         assertFalse(Files.isDirectory(backup.resolve("worktrees").resolve(created.id())));
 
+        Path movedData = temp.resolve("metadata-only");
+        new RestoreService(mapper).restore(backup, new RestoreService.Options(movedData, null, null, Map.of()));
+        var rebound = new GitWorktrees(new PilotDataDir(movedData.toString()));
+        assertTrue(rebound.findByPath(tree.toRealPath()).isPresent());
+        assertTrue(rebound.preview(tree.toRealPath()).conflict().isEmpty());
+
         new RestoreService(mapper).restore(backup, new RestoreService.Options(data, null, null, Map.of()));
 
         assertEquals("keep current worktree\n", Files.readString(tree.resolve("tracked.txt")));

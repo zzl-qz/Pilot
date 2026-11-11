@@ -118,7 +118,7 @@ public class BackupService {
         Path target = backups.resolve(id);
         Path staging = backups.resolve("." + id + ".tmp");
         try {
-            Files.createDirectories(staging);
+            BackupManifest.privateDirectories(staging);
             List<Map<String, Object>> manifest = new ArrayList<>();
             SqliteStore sqlite = store.getIfAvailable();
             Path attachmentRoot = attachments.root().toAbsolutePath().normalize();
@@ -310,13 +310,13 @@ public class BackupService {
     }
 
     private String attachmentEntry(Path attachmentsPath) throws IOException {
-        Path root = dataDir.root();
-        if (root.startsWith(attachmentsPath) || attachmentsPath.startsWith(root.resolve("backups"))
-            || attachmentsPath.startsWith(root.resolve("_external"))) {
+        Path root = DataDirectoryLock.canonical(dataDir.root());
+        Path physical = DataDirectoryLock.canonical(attachmentsPath);
+        if (root.startsWith(physical) || physical.startsWith(root.resolve("backups"))
+            || physical.startsWith(root.resolve("_external")) || physical.startsWith(root.resolve("worktrees"))) {
             throw new IOException("附件目录与数据目录或备份仓库重叠: " + attachmentsPath);
         }
-        return attachmentsPath.startsWith(root) ? BackupManifest.portable(root.relativize(attachmentsPath))
-            : EXTERNAL_ATTACHMENTS;
+        return physical.startsWith(root) ? BackupManifest.portable(root.relativize(physical)) : EXTERNAL_ATTACHMENTS;
     }
 
     private Map<String, Path> sources(SqliteStore sqlite, Path attachmentsPath, String attachmentEntry)
@@ -407,7 +407,10 @@ public class BackupService {
         for (var source : sources.entrySet()) {
             Path destination = staging.resolve(BackupManifest.relative(source.getKey()));
             Files.createDirectories(destination.getParent());
-            Files.copy(source.getValue(), destination);
+            Files.copy(source.getValue(), destination, LinkOption.NOFOLLOW_LINKS);
+            if (!Files.isRegularFile(destination, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException("备份源在复制时变为链接或非常规文件：" + source.getValue());
+            }
             manifest.add(entry(source.getKey(), destination));
         }
         if (!sources.equals(sources(sqlite, attachmentRoot, attachmentEntry))) {

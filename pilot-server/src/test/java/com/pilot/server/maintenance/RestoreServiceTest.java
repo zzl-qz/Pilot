@@ -36,6 +36,17 @@ class RestoreServiceTest {
     private final JsonMapper mapper = JsonMapper.builder().build();
 
     @Test
+    void validatesPortablePathsAndRemapsAnOriginalWindowsLocation() throws IOException {
+        for (String name : List.of("../pilot.db", "dir/../pilot.db", "C:/pilot.db", "dir\\file", "NUL.txt", "file.")) {
+            assertThrows(IOException.class, () -> BackupManifest.relative(name));
+        }
+        String original = "C:\\用户\\Pilot 数据";
+        var paths = new RestorePaths(Map.of(original, temp), mapper);
+        assertEquals(temp.resolve("附件").resolve("图像.png").toString(), paths.relocate(original + "\\附件\\图像.png"));
+        assertEquals("C:\\用户\\Pilot 数据旧\\文件", paths.relocate("C:\\用户\\Pilot 数据旧\\文件"));
+    }
+
+    @Test
     void restoresIntoACleanRootAndKeepsOldDataAndRepository() throws IOException {
         Path data = temp.resolve("源数据");
         Fixture fixture = fixture(data, data.resolve("pilot.db"), data.resolve("attachments"));

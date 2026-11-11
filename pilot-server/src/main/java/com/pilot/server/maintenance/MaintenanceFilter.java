@@ -27,7 +27,11 @@ public class MaintenanceFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI().substring(request.getContextPath().length());
-        return !path.startsWith("/api/") || path.startsWith("/api/maintenance/");
+        return switch (path) {
+            case "/api/maintenance/status", "/api/maintenance/backup", "/api/maintenance/backup/verify",
+                "/api/maintenance/purge" -> true;
+            default -> false;
+        };
     }
 
     @Override

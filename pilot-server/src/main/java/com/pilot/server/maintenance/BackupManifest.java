@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.DigestInputStream;
 import java.security.DigestOutputStream;
 import java.security.MessageDigest;
@@ -19,6 +20,7 @@ import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -32,6 +34,8 @@ final class BackupManifest {
     static final String COMPLETE = "COMPLETE";
     static final String DATABASE = "pilot.db";
     static final String VERSION = "4";
+    private static final Pattern NONPORTABLE = Pattern.compile("[<>:\"\\\\|?*\\p{Cntrl}]");
+    private static final Pattern WINDOWS_DEVICE = Pattern.compile("(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\..*)?");
 
     record Check(int files, List<String> failures) {
         boolean valid() {
@@ -139,8 +143,8 @@ final class BackupManifest {
 
     static Path relative(String name) throws IOException {
         List<String> parts = List.of(name.split("/", -1));
-        if (name.indexOf('\\') >= 0 || name.indexOf(':') >= 0
-            || parts.stream().anyMatch(part -> part.isEmpty() || part.equals(".") || part.equals(".."))) {
+        if (parts.stream().anyMatch(part -> part.isEmpty() || part.endsWith(".") || part.endsWith(" ")
+            || NONPORTABLE.matcher(part).find() || WINDOWS_DEVICE.matcher(part).matches())) {
             throw new IOException("无效的备份相对路径: " + name);
         }
         Path path = Path.of(name);
@@ -148,6 +152,15 @@ final class BackupManifest {
             throw new IOException("无效的备份相对路径: " + name);
         }
         return path;
+    }
+
+    static Path privateDirectories(Path directory) throws IOException {
+        try {
+            return Files.createDirectories(directory,
+                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+        } catch (UnsupportedOperationException e) {
+            return Files.createDirectories(directory);
+        }
     }
 
     static boolean regularFile(Path root, Path relative) {

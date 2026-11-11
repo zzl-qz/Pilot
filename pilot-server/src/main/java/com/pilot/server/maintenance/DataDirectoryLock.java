@@ -34,7 +34,7 @@ public final class DataDirectoryLock implements AutoCloseable {
         DataDirectoryLock lock = new DataDirectoryLock();
         try {
             for (Path target : targets.stream().distinct().sorted().toList()) {
-                Path directory = Files.createDirectories(control(target));
+                Path directory = BackupManifest.privateDirectories(control(target));
                 FileChannel channel =
                     FileChannel.open(directory.resolve("lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
                 lock.channels.add(channel);
