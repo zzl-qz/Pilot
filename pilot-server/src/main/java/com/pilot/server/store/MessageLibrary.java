@@ -204,8 +204,8 @@ public class MessageLibrary {
                 + "WHERE (s.parent_session_id IS NULL OR s.parent_session_id='') "
                 + (fts ? "AND message_search MATCH ? " : "AND instr(lower(m.text),lower(?))>0 ")
                 + ((session != null && !session.isBlank()) ? "AND m.session_id=? " : "")
-                + (saved ? "AND b.sequence IS NOT NULL " : "")
-                + "ORDER BY " + createdAt + " DESC,m.session_id,m.sequence DESC LIMIT 51 OFFSET ?";
+                + (saved ? "AND b.sequence IS NOT NULL " : "") + "ORDER BY " + createdAt
+                + " DESC,m.session_id,m.sequence DESC LIMIT 51 OFFSET ?";
             rows = JdbcSupport.query(store, sql, q -> {
                 int i = 1;
                 q.setString(i++, fts ? '"' + term.replace("\"", "\"\"") + '"' : term);
