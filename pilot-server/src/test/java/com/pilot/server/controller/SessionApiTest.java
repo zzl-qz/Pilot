@@ -264,7 +264,7 @@ class SessionApiTest {
             assertFalse(Files.exists(attachmentRoot), "冲突响应前不应创建附件目录或文件");
 
             // 二进制文件落盘后以路径形式进入排队正文，不再因为带附件被拒绝
-            String attachment = json.writeValueAsString(Map.of("content", "检查这个文件", "attachments", List
+            String attachment = json.writeValueAsString(Map.of("content", "", "attachments", List
                 .of(Map.of("name", "payload.bin", "mimeType", "application/octet-stream", "dataBase64", "AQIDBA=="))));
             mvc.perform(post("/api/sessions/{id}/messages", sessionId).contentType(MediaType.APPLICATION_JSON)
                 .content(attachment)).andExpect(status().isAccepted());

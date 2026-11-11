@@ -1,8 +1,10 @@
 package com.pilot.server.session;
 
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import com.pilot.core.tool.ReadFileTool;
 import com.pilot.core.tool.Tool;
@@ -12,15 +14,19 @@ import com.pilot.core.workspace.PathValidator;
 /**
  * 会话附件的只读读取入口：模型用消息里「已保存到」提示的路径读取本会话上传的附件原文。
  *
- * <p>路径校验锚定当前会话的附件目录（{@link PathValidator}），其它会话与工作区内外的
- * 其它路径一律拒绝——附件因此可用，而工作区边界不被放宽。文本分页、PDF 页码、
+ * <p>每次调用先验证当前会话的附件引用，再锚定授权文件所在目录（{@link PathValidator}）。
+ * 无关会话与工作区内外的其它路径均拒绝。文本分页、PDF 页码、
  * Office 抽取与图片分支全部委托 {@link ReadFileTool}，不重复实现解析逻辑。
  */
 public final class ReadAttachmentTool implements Tool {
-    private final ReadFileTool delegate;
+    private final Function<String, Path> resolve;
 
     public ReadAttachmentTool(Path attachmentDir) {
-        this.delegate = new ReadFileTool(new PathValidator(attachmentDir));
+        this(new PathValidator(attachmentDir)::resolve);
+    }
+
+    public ReadAttachmentTool(Function<String, Path> resolve) {
+        this.resolve = resolve;
     }
 
     @Override
@@ -30,8 +36,8 @@ public final class ReadAttachmentTool implements Tool {
 
     @Override
     public String description() {
-        return "读取本会话上传的附件（只读）。path 用消息里「已保存到」提示的绝对路径；" + "支持文本分页（start_line/line_count）、PDF 页码（pages）、Office 文本抽取与图片。"
-            + "只能读当前会话的附件，其它路径会被拒绝。";
+        return "读取本会话上传或继承的附件（只读）。path 用消息里「已保存到」提示的绝对路径；"
+            + "支持文本分页（start_line/line_count）、PDF 页码（pages）、Office 文本抽取与图片。" + "只能读当前会话的附件，其它路径会被拒绝。";
     }
 
     @Override
@@ -56,11 +62,18 @@ public final class ReadAttachmentTool implements Tool {
 
     @Override
     public ToolResult executeResult(Map<String, Object> args) {
-        return delegate.executeResult(args);
+        try {
+            Path file = resolve.apply(args.get("path") instanceof String value ? value : null);
+            Map<String, Object> resolved = new HashMap<>(args);
+            resolved.put("path", file.toString());
+            return new ReadFileTool(new PathValidator(file.getParent())).executeResult(resolved);
+        } catch (RuntimeException e) {
+            return ToolResult.text("ERROR: " + e.getMessage());
+        }
     }
 
     @Override
     public String execute(Map<String, Object> args) {
-        return delegate.execute(args);
+        return executeResult(args).text();
     }
 }

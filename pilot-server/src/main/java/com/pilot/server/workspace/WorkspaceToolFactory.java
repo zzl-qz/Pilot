@@ -1,7 +1,6 @@
 package com.pilot.server.workspace;
 
 import java.net.http.HttpClient;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -10,6 +9,7 @@ import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -48,7 +48,7 @@ import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.capability.LocalResourcesTool;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.WebSearchProperties;
-import com.pilot.server.session.AttachmentService;
+import com.pilot.server.session.AttachmentReferences;
 import com.pilot.server.session.ReadAttachmentTool;
 
 import tools.jackson.databind.ObjectMapper;
@@ -72,7 +72,7 @@ public class WorkspaceToolFactory {
     private BrowserBackend browser;
     private McpManager mcp;
     private Selection execution;
-    private AttachmentService attachments;
+    private ObjectProvider<AttachmentReferences> attachmentReferences;
 
     @Autowired(required = false)
     public void setExecution(Selection execution) {
@@ -102,8 +102,8 @@ public class WorkspaceToolFactory {
     }
 
     @Autowired(required = false)
-    public void setAttachments(AttachmentService attachments) {
-        this.attachments = attachments;
+    public void setAttachmentReferences(ObjectProvider<AttachmentReferences> attachmentReferences) {
+        this.attachmentReferences = attachmentReferences;
     }
 
     /**
@@ -121,9 +121,9 @@ public class WorkspaceToolFactory {
             extras.add(new McpToolsTool(mcp, root));
             extras.add(new McpCallTool(mcp, root));
         }
-        // 会话上传过附件才暴露 read_attachment：目录不存在时模型也没有可读的附件
-        if (attachments != null && Files.isDirectory(attachments.sessionDir(sessionId))) {
-            extras.add(new ReadAttachmentTool(attachments.sessionDir(sessionId)));
+        // 运行中可能首次追加附件，分叉会话也可能仅引用父会话文件；授权在每次读取时检查。
+        if (attachmentReferences != null) {
+            extras.add(new ReadAttachmentTool(path -> attachmentReferences.getObject().resolvePath(sessionId, path)));
         }
         return extras;
     }

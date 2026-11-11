@@ -9,8 +9,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -40,6 +42,7 @@ import com.pilot.core.session.SessionStatus;
 import com.pilot.server.session.AttachmentService;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.workspace.RunSnapshotService;
+import com.pilot.server.workspace.WorkspaceToolFactory;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -70,6 +73,8 @@ class CheckpointApiTest {
     ObjectMapper mapper;
     @Autowired
     AttachmentService attachments;
+    @Autowired
+    WorkspaceToolFactory tools;
     @TempDir
     Path workspace;
 
@@ -174,6 +179,53 @@ class CheckpointApiTest {
         assertTrue(Files.isRegularFile(image));
         mvc.perform(get("/api/sessions/{id}/attachments/{name}", fork, filename)).andExpect(status().isOk());
         mvc.perform(get("/api/sessions/{id}/attachments/{name}", unrelated, filename)).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void forkReadsInheritedTextAfterSourceDeletionAndRevokesItAfterHistoryRemoval() throws Exception {
+        String source = sessions.createSession("文本原会话", workspace.toString()).id();
+        String text = "开始\n" + "保留中段\n".repeat(5000) + "结束";
+        var prepared = attachments.prepare(source, "", List.of(new AttachmentService.Inbound("notes.txt", "text/plain",
+            Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8)))));
+        Path saved;
+        try (var files = Files.list(attachments.sessionDir(source))) {
+            saved = files.findFirst().orElseThrow();
+        }
+        String run = "text-" + UUID.randomUUID();
+        sessions.publish(source, run, new RunStarted(prepared.content()));
+        var second = sessions.publish(source, run + "-next", new RunStarted("分叉"));
+        snapshots.saveConversation(second.runId(), List.of(Message.user(prepared.content())), List.of());
+        String json = mvc
+            .perform(post("/api/sessions/{id}/checkpoints/fork", source).contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("sequence", second.sequence()))))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String fork = mapper.readTree(json).path("sessionId").asString();
+        assertTrue(!Files.exists(attachments.sessionDir(fork)));
+        var tool = tools.sessionExtras(fork, workspace.toString()).stream()
+            .filter(item -> item.name().equals("read_attachment")).findFirst().orElseThrow();
+        mvc.perform(delete("/api/sessions/{id}", source)).andExpect(status().isNoContent());
+        assertTrue(Files.readString(saved).equals(text));
+        assertTrue(
+            tool.execute(Map.of("path", saved.toString(), "start_line", 2500, "line_count", 1)).contains("保留中段"));
+        String unrelated = sessions.createSession("无关", workspace.toString()).id();
+        var other = tools.sessionExtras(unrelated, workspace.toString()).stream()
+            .filter(item -> item.name().equals("read_attachment")).findFirst().orElseThrow();
+        assertTrue(other.execute(Map.of("path", saved.toString())).startsWith("ERROR"));
+        sessions.dropEventsFrom(fork, 1);
+        conversations.save(fork, List.of());
+        assertTrue(tool.execute(Map.of("path", saved.toString())).startsWith("ERROR"));
+    }
+
+    @Test
+    void existingToolCanReadTheFirstAttachmentAddedDuringARun() throws Exception {
+        String session = sessions.createSession("运行中首次上传", workspace.toString()).id();
+        var tool = tools.sessionExtras(session, workspace.toString()).stream()
+            .filter(item -> item.name().equals("read_attachment")).findFirst().orElseThrow();
+        attachments.prepare(session, "", List.of(new AttachmentService.Inbound("late.txt", "text/plain", "bGF0ZQ==")));
+        try (var files = Files.list(attachments.sessionDir(session))) {
+            Path file = files.findFirst().orElseThrow();
+            assertTrue(tool.execute(Map.of("path", file.toString())).contains("late"));
+        }
     }
 
     @Test

@@ -112,6 +112,16 @@ public class AttachmentReferences {
         }
     }
 
+    /** 工具传入的是完整路径：必须匹配本会话上传或历史中仍保留的同一个文件。 */
+    public Path resolvePath(String session, String path) {
+        Reference reference = reference(path, root()).orElseThrow(() -> new IllegalArgumentException("无效的附件路径"));
+        if (!reference.owner().equals(AttachmentService.storageDirectory(session))
+            && !retained(session).contains(reference)) {
+            throw new IllegalArgumentException("附件不属于当前会话或已不再被引用");
+        }
+        return attachments.resolveAttachment(reference.owner(), reference.filename());
+    }
+
     private Set<Reference> retained(String sessionId) {
         if (sqlite != null) {
             try (Connection connection = sqlite.open()) {
