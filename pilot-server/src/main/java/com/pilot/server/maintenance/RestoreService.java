@@ -26,7 +26,8 @@ final class RestoreService {
     }
 
     record Plan(Path backup, Path data, Path database, Path attachments, Path attachmentEntry,
-        boolean keepExternalAttachments, JsonNode manifest, RestorePaths paths, List<String> notices) {
+        boolean keepExternalAttachments, JsonNode manifest, RestorePaths paths, WorkspaceRestore workspaces,
+        List<String> notices) {
     }
 
     record Result(Plan plan, Path previous) {
@@ -76,11 +77,16 @@ final class RestoreService {
         Map<String, Path> mappings = new LinkedHashMap<>();
         mappings.put(originalRoot, data);
         mappings.put(oldAttachments, attachments);
+        Map<String, Path> requested = new LinkedHashMap<>();
         for (var entry : options.workspaces().entrySet()) {
-            mappings.put(entry.getKey(), DataDirectoryLock.canonical(entry.getValue()));
+            requested.put(entry.getKey(), DataDirectoryLock.canonical(entry.getValue()));
         }
-        Plan plan = new Plan(source, data, database, attachments, attachmentEntry, keepExternal, manifest,
-            new RestorePaths(mappings, mapper), List.copyOf(notices));
+        mappings.putAll(requested);
+        RestorePaths paths = new RestorePaths(mappings, mapper);
+        WorkspaceRestore workspaces = new WorkspaceRestore(manifest, requested, mapper);
+        notices.addAll(workspaces.inspect(source, data, database, attachments, paths));
+        Plan plan = new Plan(source, data, database, attachments, attachmentEntry, keepExternal, manifest, paths,
+            workspaces, List.copyOf(notices));
         checkSpace(plan, data, database, attachments);
         return plan;
     }
@@ -114,8 +120,9 @@ final class RestoreService {
                 if (!plan.keepExternalAttachments()) {
                     Files.createDirectories(stagedAttachments);
                 }
-                copyPayload(plan, stagedData, stagedDatabase, stagedAttachments);
-                copyRepository(plan.data().resolve("backups"), stagedData.resolve("backups"));
+                Path stagedBundles = stage.resolve("bundles");
+                copyPayload(plan, stagedData, stagedDatabase, stagedAttachments, stagedBundles);
+                copyTree(plan.data().resolve("backups"), stagedData.resolve("backups"));
                 migrate(plan, stagedData, stagedDatabase, stagedAttachments);
                 List<RestoreSwap.Step> steps = new ArrayList<>();
                 Files.createDirectories(previous);
@@ -134,7 +141,12 @@ final class RestoreService {
                     Files.createDirectories(oldAttachments.getParent());
                     steps.add(new RestoreSwap.Step(plan.attachments(), stagedAttachments, oldAttachments));
                 }
-                swap.apply(steps, () -> BackupDatabase.check(plan.database(), plan.attachments(), mapper, true));
+                RestoreSwap.Check workspaceCheck =
+                    plan.workspaces().stage(stagedBundles, plan.data(), stagedData, plan.paths(), id, steps, staging);
+                swap.apply(steps, () -> {
+                    BackupDatabase.check(plan.database(), plan.attachments(), mapper, true);
+                    workspaceCheck.run();
+                });
                 return new Result(plan, previous);
             } finally {
                 // 切换日志尚在时保留所有暂存文件，供下次回滚定位。
@@ -156,7 +168,7 @@ final class RestoreService {
         SqliteStore sqlite = new SqliteStore(database);
         try (var connection = sqlite.open()) {
             connection.setAutoCommit(false);
-            plan.paths().database(connection);
+            plan.paths().database(connection, plan.manifest().path("defaultWorkspace").asText(""));
             connection.commit();
         } catch (SQLException e) {
             throw new IOException("无法迁移恢复副本：" + e.getMessage(), e);
@@ -218,10 +230,12 @@ final class RestoreService {
         return data.resolve(relative);
     }
 
-    private static void copyPayload(Plan plan, Path data, Path database, Path attachments) throws IOException {
+    private static void copyPayload(Plan plan, Path data, Path database, Path attachments, Path bundles)
+        throws IOException {
         for (JsonNode item : plan.manifest().path("files")) {
             Path relative = BackupManifest.relative(item.path("path").asText());
-            Path target = payloadTarget(plan, data, database, attachments, relative);
+            Path target = relative.startsWith(WorkspaceArchive.DIRECTORY) ? bundles.resolve(relative)
+                : payloadTarget(plan, data, database, attachments, relative);
             Files.createDirectories(target.getParent());
             if (!BackupManifest.regularFile(plan.backup(), relative)) {
                 throw new IOException("备份文件已变化：" + relative);
@@ -264,7 +278,7 @@ final class RestoreService {
         return Files.getFileStore(ancestor);
     }
 
-    private static void copyRepository(Path from, Path to) throws IOException {
+    static void copyTree(Path from, Path to) throws IOException {
         if (!Files.isDirectory(from, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }

@@ -21,6 +21,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -28,12 +29,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.tool.CommandTaskManager;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.session.AttachmentService;
 import com.pilot.server.store.SqliteStore;
+import com.pilot.server.workspace.GitWorktrees;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -57,7 +60,11 @@ public class BackupService {
     static final String EXTERNAL_ATTACHMENTS = "_external/attachments";
     private static final Duration QUIESCE_TIMEOUT = Duration.ofSeconds(2);
 
-    public record BackupReport(boolean ok, String directory, int files, long bytes, String message, Instant createdAt) {
+    public record WorkspaceStatus(String path, String kind, boolean included) {
+    }
+
+    public record BackupReport(boolean ok, String directory, int files, long bytes, String message, Instant createdAt,
+        List<WorkspaceStatus> workspaces) {
     }
 
     public record VerificationReport(boolean valid, String directory, int checkedFiles, List<String> failures,
@@ -68,7 +75,7 @@ public class BackupService {
     }
 
     public record Status(String dataDir, long databaseBytes, int backups, String lastBackupAt,
-        StorageHealth.Snapshot storage, List<String> includedDirectories) {
+        StorageHealth.Snapshot storage, List<String> includedDirectories, List<WorkspaceStatus> workspaces) {
         public Status {
             includedDirectories = includedDirectories == null ? List.of() : List.copyOf(includedDirectories);
         }
@@ -80,6 +87,12 @@ public class BackupService {
     private final AttachmentService attachments;
 
     private ObjectProvider<CommandTaskManager> commandTasks;
+    private String defaultWorkspace = System.getProperty("user.dir");
+
+    @Value("${pilot.agent.workspace:${user.dir}}")
+    void useDefaultWorkspace(String workspace) {
+        this.defaultWorkspace = workspace;
+    }
 
     @Autowired
     void useCommandTasks(ObjectProvider<CommandTaskManager> tasks) {
@@ -95,6 +108,10 @@ public class BackupService {
     }
 
     public BackupReport backup() {
+        return backup(List.of());
+    }
+
+    BackupReport backup(List<Path> workspaceSelection) {
         String id = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS").withZone(ZoneOffset.UTC).format(Instant.now())
             + "-" + UUID.randomUUID();
         Path backups = dataDir.file("backups");
@@ -106,6 +123,7 @@ public class BackupService {
             SqliteStore sqlite = store.getIfAvailable();
             Path attachmentRoot = attachments.root().toAbsolutePath().normalize();
             String attachmentEntry = attachmentEntry(attachmentRoot);
+            List<WorkspaceArchive.Workspace> workspaces;
             try (var maintenance = dataDir.maintenance().exclusive(QUIESCE_TIMEOUT)) {
                 CommandTaskManager tasks = commandTasks == null ? null : commandTasks.getIfAvailable();
                 if (tasks != null && tasks.hasRunningTasks()) {
@@ -113,6 +131,17 @@ public class BackupService {
                 }
                 try (Connection reserved = reserveDatabase(sqlite); FileChannel mobile = reservePairing()) {
                     capture(staging, manifest, sqlite, attachmentRoot, attachmentEntry);
+                    Set<String> known = sqlite == null ? Set.of()
+                        : BackupDatabase.workspaces(staging.resolve(BackupManifest.DATABASE), defaultWorkspace);
+                    workspaces = WorkspaceArchive.capture(dataDir, staging, known, workspaceSelection, mapper);
+                    Path archived = staging.resolve(WorkspaceArchive.DIRECTORY);
+                    if (Files.isDirectory(archived)) {
+                        try (var walk = Files.walk(archived)) {
+                            for (Path file : walk.filter(Files::isRegularFile).toList()) {
+                                manifest.add(entry(BackupManifest.portable(staging.relativize(file)), file));
+                            }
+                        }
+                    }
                 }
             }
             if (sqlite != null) {
@@ -127,7 +156,9 @@ public class BackupService {
             root.put("storage", sqlite == null ? "files" : "sqlite");
             root.put("files", manifest);
             root.put("includedDirectories", includedDirectories());
-            root.put("excludedData", List.of("外部工作区、Git worktree 及其工作区内恢复日志", "访问审计、MCP 诊断日志", "缓存与可重建数据"));
+            root.put("defaultWorkspace", defaultWorkspace);
+            root.put("workspaces", workspaces);
+            root.put("excludedData", List.of("未选择的工作区文件、Git 忽略文件", "访问审计、MCP 诊断日志", "缓存与可重建数据"));
             root.put("databaseSource", sqlite == null ? "" : sqlite.path().toString());
             root.put("attachmentSource", attachmentRoot.toString());
             root.put("attachmentEntry", attachmentEntry);
@@ -151,11 +182,18 @@ public class BackupService {
             long bytes = manifest.stream().mapToLong(item -> ((Number)item.get("bytes")).longValue()).sum();
             StorageHealth.recovered("backup");
             log.info("备份完成: {}（{} 个文件，{} 字节）", target, manifest.size(), bytes);
-            String message = "备份完成。Pilot 受管数据已核验，外部工作区需单独备份";
+            String message = "备份完成。Pilot 受管数据已核验";
+            if (workspaces.stream().anyMatch(workspace -> !workspace.included())) {
+                message += "。清单中的外部工作区需单独恢复";
+            }
+            List<WorkspaceStatus> workspaceStatus = workspaces.stream()
+                .map(workspace -> new WorkspaceStatus(workspace.path(), workspace.kind(), workspace.included()))
+                .toList();
             if (EXTERNAL_ATTACHMENTS.equals(attachmentEntry)) {
                 message += "。外置附件已单独收录: " + attachmentRoot;
             }
-            return new BackupReport(true, target.toString(), manifest.size(), bytes, message, Instant.now());
+            return new BackupReport(true, target.toString(), manifest.size(), bytes, message, Instant.now(),
+                workspaceStatus);
         } catch (IOException | SQLException | RuntimeException e) {
             try {
                 if (Files.exists(staging)) {
@@ -171,7 +209,7 @@ public class BackupService {
                 StorageHealth.markDegraded("backup", e.getMessage());
                 log.warn("备份失败: {}", target, e);
             }
-            return new BackupReport(false, target.toString(), 0, 0, "备份失败：" + e.getMessage(), Instant.now());
+            return new BackupReport(false, target.toString(), 0, 0, "备份失败：" + e.getMessage(), Instant.now(), List.of());
         }
     }
 
@@ -197,7 +235,20 @@ public class BackupService {
         directories.sort(Comparator.comparing(path -> path.getFileName().toString()));
         String last = directories.isEmpty() ? "" : directories.getLast().getFileName().toString();
         return new Status(dataDir.root().toString(), databaseBytes, directories.size(), last, StorageHealth.snapshot(),
-            includedDirectories());
+            includedDirectories(), directories.isEmpty() ? List.of() : workspaceStatus(directories.getLast()));
+    }
+
+    private List<WorkspaceStatus> workspaceStatus(Path directory) {
+        try {
+            List<WorkspaceStatus> result = new ArrayList<>();
+            for (JsonNode workspace : BackupManifest.readPublished(directory, mapper).path("workspaces")) {
+                result.add(new WorkspaceStatus(workspace.path("path").asText(), workspace.path("kind").asText(),
+                    workspace.path("included").asBoolean()));
+            }
+            return List.copyOf(result);
+        } catch (IOException | RuntimeException e) {
+            return List.of();
+        }
     }
 
     /** 校验最近一份完整备份的清单、文件大小和原始字节 SHA-256。 */
@@ -270,6 +321,10 @@ public class BackupService {
         }
         if (!DIRECTORIES.contains(attachmentEntry.split("/", 2)[0])) {
             collect(result, attachmentsPath, attachmentEntry, sqlite);
+        }
+        for (var worktree : new GitWorktrees(dataDir).registrations()) {
+            String name = "worktrees/" + worktree.id() + ".properties";
+            addSource(result, dataDir.file(name), name, sqlite);
         }
         Path mcp = dataDir.file("mcp.json");
         if (Files.exists(mcp, LinkOption.NOFOLLOW_LINKS)) {

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,16 +35,20 @@ public final class MaintenanceCli {
             if (args.length == 0 || List.of("help", "--help").contains(args[0])) {
                 out.println("maintenance backup|verify|restore|rollback --data-dir=目录 [--backup=备份目录或ID]");
                 out.println("restore 默认预检，使用 --apply 执行。外置路径用 --database=文件、--attachments=目录。");
-                out.println("迁移工作区时使用 --workspace-map=JSON文件。");
+                out.println("备份可重复指定 --workspace=目录，恢复时使用 --workspace-map=JSON文件。");
                 return 0;
             }
-            Map<String, String> flags = parse(Arrays.copyOfRange(args, 1, args.length));
+            List<Path> workspaces = new ArrayList<>();
+            Map<String, String> flags = parse(Arrays.copyOfRange(args, 1, args.length), workspaces);
+            if (!workspaces.isEmpty() && !args[0].equals("backup")) {
+                throw new IllegalArgumentException("--workspace 只用于备份");
+            }
             Path data = new PilotDataDir(flags.getOrDefault("data-dir", System.getenv("PILOT_DATA_DIR"))).root();
             Path database = path(flags.get("database"));
             Path attachments = path(flags.getOrDefault("attachments", System.getenv("PILOT_ATTACHMENTS_DIR")));
             ObjectMapper mapper = JsonMapper.builder().build();
             switch (args[0]) {
-                case "backup" -> backup(data, database, attachments, mapper, out);
+                case "backup" -> backup(data, database, attachments, workspaces, mapper, out);
                 case "verify", "restore" -> {
                     Path source = backupPath(data, flags.get("backup"));
                     RestoreService restore = new RestoreService(mapper);
@@ -73,8 +78,8 @@ public final class MaintenanceCli {
         }
     }
 
-    private static void backup(Path data, Path database, Path attachments, ObjectMapper mapper, PrintStream out)
-        throws IOException {
+    private static void backup(Path data, Path database, Path attachments, List<Path> workspaces, ObjectMapper mapper,
+        PrintStream out) throws IOException {
         Path db = database == null ? data.resolve(BackupManifest.DATABASE) : database;
         Path input = attachments == null ? data.resolve("attachments") : attachments;
         try (var lock = DataDirectoryLock.acquire(data, db, input)) {
@@ -84,12 +89,18 @@ public final class MaintenanceCli {
             beans.registerSingleton("store", SqliteStore.existing(db));
             var service = new BackupService(beans.getBeanProvider(SqliteStore.class), directory, mapper,
                 new AttachmentService(input.toString(), directory, AttachmentLimits.defaults()));
-            var result = service.backup();
+            String defaultWorkspace = System.getenv("PILOT_WORKSPACE");
+            if (defaultWorkspace != null && !defaultWorkspace.isBlank()) {
+                service.useDefaultWorkspace(defaultWorkspace);
+            }
+            var result = service.backup(workspaces);
             if (!result.ok()) {
                 throw new IOException(result.message());
             }
             out.println(result.message());
             out.println(result.directory());
+            result.workspaces()
+                .forEach(workspace -> out.println((workspace.included() ? "已打包 " : "外部依赖 ") + workspace.path()));
         }
     }
 
@@ -131,9 +142,17 @@ public final class MaintenanceCli {
         return value == null || value.isBlank() ? null : Path.of(value).toAbsolutePath().normalize();
     }
 
-    private static Map<String, String> parse(String[] args) {
+    private static Map<String, String> parse(String[] args, List<Path> workspaces) {
         Map<String, String> values = new LinkedHashMap<>();
         for (String argument : args) {
+            if (argument.startsWith("--workspace=")) {
+                Path workspace = path(argument.substring("--workspace=".length()));
+                if (workspace == null) {
+                    throw new IllegalArgumentException("--workspace 需要一个目录");
+                }
+                workspaces.add(workspace);
+                continue;
+            }
             if (argument.equals("--apply")) {
                 values.put("apply", "true");
                 continue;

@@ -96,6 +96,7 @@ export interface BackupServiceBackupReport {
   bytes: number;
   message: string;
   createdAt: string;
+  workspaces?: BackupServiceWorkspaceStatus[];
 }
 
 /** BackupService.java / VerificationReport */
@@ -115,6 +116,13 @@ export interface BackupServiceStatus {
   lastBackupAt: string;
   storage: StorageHealthSnapshot;
   includedDirectories: (string)[];
+  workspaces?: BackupServiceWorkspaceStatus[];
+}
+
+export interface BackupServiceWorkspaceStatus {
+  path: string;
+  kind: string;
+  included: boolean;
 }
 
 /** BranchController.java / BranchResponse */

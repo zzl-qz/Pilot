@@ -635,6 +635,16 @@ function DiagnosticsSettings() {
                 <div><dt>保留策略</dt><dd>{maintenance.retentionDays > 0 ? `${maintenance.retentionDays} 天` : '不自动清理'}</dd></div>
                 <div><dt>执行隔离</dt><dd>{maintenance.isolated ? '已启用' : (maintenance.degraded ? '降级运行' : '未启用')}</dd></div>
               </dl>
+              {Boolean(maintenance.backup?.workspaces?.length) && (
+                <dl className="diag-grid">
+                  {maintenance.backup?.workspaces?.map(workspace => (
+                    <div key={workspace.path}>
+                      <dt>{workspace.kind === 'worktree' ? 'Git worktree' : '工作区'} · {workspace.included ? '已打包' : '需单独恢复文件'}</dt>
+                      <dd className="diag-path" title={workspace.path}>{workspace.path}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
               {!maintenance.storage?.healthy && (
                 <p className="chip-hint is-error">
                   存储告警：{(maintenance.storage?.issues || []).map((issue) => issue.reason || issue.area || String(issue)).join('；') || '未知问题'}

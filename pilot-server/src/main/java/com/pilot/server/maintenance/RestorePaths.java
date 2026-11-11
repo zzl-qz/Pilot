@@ -95,7 +95,15 @@ final class RestorePaths {
         return node != null && rewriteJson(node) ? mapper.writeValueAsString(node) : text;
     }
 
-    void database(Connection connection) throws IOException, SQLException {
+    void database(Connection connection, String defaultWorkspace) throws IOException, SQLException {
+        String relocated = relocate(defaultWorkspace);
+        if (!defaultWorkspace.equals(relocated)) {
+            try (var update = connection
+                .prepareStatement("UPDATE sessions SET workspace = ? WHERE workspace IS NULL OR workspace = ''")) {
+                update.setString(1, relocated);
+                update.executeUpdate();
+            }
+        }
         for (String table : List.of("sessions", "run_checkpoints", "dispatches")) {
             rewriteColumn(connection, table, "workspace", this::relocate);
         }

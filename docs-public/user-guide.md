@@ -69,6 +69,10 @@ java --enable-native-access=ALL-UNNAMED -jar pilot-server.jar maintenance restor
 
 第一条命令只预检。第二条将核验后的备份写入干净目录并切换，原数据和旧数据库的 WAL 文件保存在输出所示的维护目录。恢复外置数据库或附件时，显式填写 `--database=目标数据库文件`、`--attachments=目标附件目录`，并用对应配置重新启动 Pilot。切换中途退出后，可保持停服并运行 `maintenance rollback --data-dir=目标数据目录`。恢复时使用过外置路径，也将相同参数传给回滚命令。
 
+常规备份保存 Pilot 的 worktree 登记，并在设置页列出工作区文件的收录情况。需要迁移工作区内容时，在退出 Pilot 后运行 `maintenance backup`，为每个要打包的目录添加一个 `"--workspace=目录"`。普通工作区按所选目录复制。Git 工作区保存当前提交、暂存区和工作树内容，其中未跟踪文件按 Git 忽略规则筛选。Git 子模块和冲突中的索引会提示先处理再导出。
+
+在恢复命令中加上 `"--workspace-map=映射.json"`，映射文件是原路径到目标绝对路径的 JSON 对象。工作区导入使用新目录。Git worktree 还需给出基础仓库的新目录，用于重新建立 Git 关联和 Pilot 登记。仅迁移登记时也可把原路径映射到已有工作区。
+
 ## 当前边界
 
 - 模型输出受模型、端点、网络和提示词影响；自动化测试不能证明真实模型任务成功率。

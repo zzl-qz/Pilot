@@ -102,7 +102,13 @@ export async function checkWorkbench(page, name, output) {
   // 每个设置页必须留在视口内；Tab/Shift-Tab 被约束在弹窗，Escape 返回触发按钮。
   await page.evaluate(() => {
     api.validation = async () => ({ report: { current: true, reason: '当前检查已通过' } });
-    api.maintenanceStatus = async () => ({ storage: { healthy: false, issues: [{ area: '数据目录', reason: '权限不足，无法写入', at: '2026-11-06T00:00:00Z' }] } });
+    api.maintenanceStatus = async () => ({
+      backup: { workspaces: [
+        { path: '/workspace/demo', kind: 'directory', included: true },
+        { path: '/workspace/isolated', kind: 'worktree', included: false }
+      ] },
+      storage: { healthy: false, issues: [{ area: '数据目录', reason: '权限不足，无法写入', at: '2026-11-06T00:00:00Z' }] }
+    });
   });
   await page.getByRole('button', { name: '更多功能', exact: true }).click();
   await page.locator('#settings-open').click();
@@ -118,6 +124,8 @@ export async function checkWorkbench(page, name, output) {
   assert.equal(await page.locator('#settings-model-name').inputValue(), 'probe-second');
   await page.locator('.settings-nav').getByRole('button', { name: '诊断', exact: true }).click();
   await page.getByText('存储告警：权限不足，无法写入', { exact: true }).waitFor();
+  await page.getByText('工作区 · 已打包', { exact: true }).waitFor();
+  await page.getByText('Git worktree · 需单独恢复文件', { exact: true }).waitFor();
   await page.evaluate(() => { api.purgeNow = async () => ({ events: 2, snapshotRuns: 1, traces: 3, backups: 4, validationFiles: 5 }); });
   await page.getByRole('button', { name: '清理过期数据', exact: true }).click();
   await page.locator('#confirm-dialog').getByRole('button', { name: '确认清理' }).click();

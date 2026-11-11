@@ -5,6 +5,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -129,6 +130,36 @@ public class GitWorktrees {
             return Optional.empty();
         }
         return Optional.empty();
+    }
+
+    /** 仅读取 Pilot 登记文件，工作树内容由备份范围决定。 */
+    public List<Meta> registrations() throws IOException {
+        Path directory = dataDir.file("worktrees");
+        if (!Files.isDirectory(directory)) {
+            return List.of();
+        }
+        try (var files = Files.list(directory)) {
+            List<Meta> result = new ArrayList<>();
+            for (Path file : files.filter(item -> item.getFileName().toString().matches("wt_[a-f0-9]{8}\\.properties"))
+                .sorted().toList()) {
+                if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new IOException("worktree 登记不可读取：" + file);
+                }
+                Meta meta = load(file);
+                if (meta == null || !file.getFileName().toString().equals(meta.id() + ".properties")) {
+                    throw new IOException("worktree 登记无效：" + file);
+                }
+                result.add(meta);
+            }
+            return List.copyOf(result);
+        }
+    }
+
+    public void restoreRegistration(Meta meta) {
+        if (!meta.id().matches("wt_[a-f0-9]{8}")) {
+            throw new IllegalArgumentException("worktree 登记标识无效");
+        }
+        store(meta);
     }
 
     /** 完整交回包：临时 Git index 捕获相对创建基线的提交、工作区修改和新增文件。 */

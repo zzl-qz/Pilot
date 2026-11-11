@@ -6,6 +6,8 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 import com.pilot.server.session.AttachmentService;
 
@@ -18,6 +20,23 @@ final class BackupDatabase {
 
     static Connection readOnly(Path database) throws SQLException {
         return DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath().toUri() + "?mode=ro&immutable=1");
+    }
+
+    static Set<String> workspaces(Path database, String defaultWorkspace) throws IOException {
+        Set<String> paths = new LinkedHashSet<>();
+        try (var connection = readOnly(database); var statement = connection.createStatement();
+            var rows = statement.executeQuery("""
+                SELECT DISTINCT workspace FROM sessions
+                UNION SELECT path FROM project_folders WHERE path <> ''
+                """)) {
+            while (rows.next()) {
+                String path = rows.getString(1);
+                paths.add(path == null || path.isBlank() ? defaultWorkspace : path);
+            }
+        } catch (SQLException e) {
+            throw new IOException("无法读取备份中的工作区：" + e.getMessage(), e);
+        }
+        return paths;
     }
 
     static void check(Path database, Path attachments, ObjectMapper mapper, boolean checkAttachments)
