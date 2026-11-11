@@ -125,7 +125,7 @@ class AttachmentServiceTest {
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> service.prepare("ses_1",
             "hi",
             List.of(new AttachmentService.Inbound("big.bin", "image/png", Base64.getEncoder().encodeToString(big)))));
-        assertTrue(error.getMessage().contains("MB"), error.getMessage());
+        assertTrue(error.getMessage().contains("超过"), error.getMessage());
     }
 
     @Test
@@ -195,6 +195,35 @@ class AttachmentServiceTest {
         assertTrue(prepared.attachments().isEmpty(), "二进制不该走多模态附件通道");
         Path saved = Path.of(prepared.content().split("已保存到 ")[1].split("，")[0].trim());
         assertTrue(Files.exists(saved), "二进制应落盘");
+    }
+
+    @Test
+    void acceptsBinaryOnlyAndRejectsInvalidOrEmptyInput() {
+        AttachmentService service = new AttachmentService(root);
+        var prepared = service.prepare("ses_1", "", List.of(new AttachmentService.Inbound("doc.pdf", "application/pdf",
+            Base64.getEncoder().encodeToString(new byte[] {'%', 'P', 'D', 'F', 0}))));
+        assertTrue(prepared.content().contains("read_attachment"));
+        for (String invalid : List.of(" ", "====", "A", "a===", "YW!Jj", "data:text/plain,abc")) {
+            assertThrows(IllegalArgumentException.class, () -> service.prepare("bad", "",
+                List.of(new AttachmentService.Inbound("bad.txt", "text/plain", invalid))));
+        }
+        assertFalse(Files.exists(service.sessionDir("bad")));
+    }
+
+    @Test
+    void acceptsExactBudgetAndRejectsWholeBatchBeforeSaving() throws Exception {
+        AttachmentService service = new AttachmentService(root, new AttachmentLimits(2, 3, 4, 100));
+        service.prepare("exact", "", List.of(new AttachmentService.Inbound("a.txt", "text/plain", "YWI="),
+            new AttachmentService.Inbound("b.txt", "text/plain", "Y2Q")));
+        try (var files = Files.list(service.sessionDir("exact"))) {
+            assertEquals(2, files.count());
+        }
+        assertThrows(IllegalArgumentException.class,
+            () -> service.prepare("over", "", List.of(new AttachmentService.Inbound("a.txt", "text/plain", "YWJj"),
+                new AttachmentService.Inbound("b.txt", "text/plain", "Y2Q="))));
+        assertFalse(Files.exists(service.sessionDir("over")));
+        assertThrows(IllegalArgumentException.class, () -> service.prepare("prefix", "", List
+            .of(new AttachmentService.Inbound("a.txt", "text/plain", "data:" + "x".repeat(2000) + ";base64,YQ=="))));
     }
 
     @Test

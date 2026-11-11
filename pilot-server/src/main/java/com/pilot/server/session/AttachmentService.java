@@ -64,6 +64,7 @@ public class AttachmentService {
     private final int maxFileBytes;
     private final int maxTotalBytes;
     private final int inlineMaxChars;
+    private final long maxEncodedFileChars;
     private final Path root;
 
     @Autowired
@@ -82,6 +83,7 @@ public class AttachmentService {
         this.maxFileBytes = limits.maxFileBytes();
         this.maxTotalBytes = limits.maxTotalBytes();
         this.inlineMaxChars = limits.inlineMaxChars();
+        this.maxEncodedFileChars = limits.maxEncodedFileChars();
     }
 
     private record PendingAttachment(String name, String mime, byte[] bytes, boolean inlineText) {
@@ -120,17 +122,10 @@ public class AttachmentService {
         StringBuilder text = new StringBuilder(body);
         ArrayList<Attachment> attachments = new ArrayList<Attachment>();
         ArrayList<PendingAttachment> pending = new ArrayList<PendingAttachment>();
-        long totalBytes = 0L;
-        for (Inbound item : inbound) {
-            if (item == null || item.dataBase64() == null || item.dataBase64().isBlank()) {
-                continue;
-            }
-            byte[] bytes = decode(item);
-            totalBytes += bytes.length;
-            if (totalBytes > maxTotalBytes) {
-                throw new IllegalArgumentException(
-                    "附件总大小超过 " + maxTotalBytes / 1024 / 1024 + " MB（当前约 " + totalBytes / 1024 / 1024 + " MB）");
-            }
+        List<EncodedAttachment> encoded = preflight(inbound);
+        for (EncodedAttachment encodedItem : encoded) {
+            Inbound item = encodedItem.item();
+            byte[] bytes = Base64.getDecoder().decode(encodedItem.raw());
             String mime = resolveMime(item.mimeType(), item.name());
             pending.add(new PendingAttachment(item.name(), mime, bytes, isInlineText(bytes, mime, item.name())));
         }
@@ -170,29 +165,56 @@ public class AttachmentService {
         return new Prepared(text.toString(), List.copyOf(attachments), imagePositions);
     }
 
-    private byte[] decode(Inbound item) {
-        String raw = item.dataBase64().strip();
-        int comma = raw.indexOf(',');
-        if (raw.startsWith("data:") && comma > 0) {
-            raw = raw.substring(comma + 1);
+    private record EncodedAttachment(Inbound item, String raw) {
+    }
+
+    /** 整批预检通过后才分配解码字节；长度包括 data URL 和空白，不能靠前缀绕过。 */
+    private List<EncodedAttachment> preflight(List<Inbound> inbound) {
+        List<EncodedAttachment> encoded = new ArrayList<>();
+        long total = 0;
+        for (Inbound item : inbound) {
+            if (item == null || item.dataBase64() == null) {
+                continue;
+            }
+            String raw = item.dataBase64();
+            if (raw.length() > maxEncodedFileChars) {
+                throw new IllegalArgumentException("附件「" + item.name() + "」超过单文件编码长度预算");
+            }
+            raw = raw.strip();
+            if (raw.isEmpty()) {
+                continue;
+            }
+            if (raw.startsWith("data:")) {
+                int comma = raw.indexOf(',');
+                if (comma < 0 || !raw.substring(0, comma).endsWith(";base64")) {
+                    throw new IllegalArgumentException("附件「" + item.name() + "」不是合法的 base64 data URL");
+                }
+                raw = raw.substring(comma + 1);
+            }
+            raw = raw.replaceAll("[ \t\r\n]", "");
+            int padding = raw.endsWith("==") ? 2 : raw.endsWith("=") ? 1 : 0;
+            int symbols = raw.length() - padding;
+            if (symbols % 4 == 1 || (padding > 0 && raw.length() % 4 != 0)) {
+                throw new IllegalArgumentException("附件「" + item.name() + "」不是合法的 base64");
+            }
+            for (int index = 0; index < symbols; index++) {
+                char ch = raw.charAt(index);
+                if (!(ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '+'
+                    || ch == '/')) {
+                    throw new IllegalArgumentException("附件「" + item.name() + "」不是合法的 base64");
+                }
+            }
+            long bytes = symbols * 6L / 8L;
+            if (bytes == 0 || bytes > maxFileBytes) {
+                throw new IllegalArgumentException("附件「" + item.name() + "」需大于 0 且不超过 " + maxFileBytes + " 字节");
+            }
+            total += bytes;
+            if (total > maxTotalBytes) {
+                throw new IllegalArgumentException("附件总大小超过 " + maxTotalBytes + " 字节");
+            }
+            encoded.add(new EncodedAttachment(item, raw));
         }
-        // 解码前先按编码长度预检，避免对超大 base64 先分配整块内存再拒绝
-        if (raw.length() > maxFileBytes / 3 * 4 + 1024) {
-            throw new IllegalArgumentException("附件「" + item.name() + "」超过 " + maxFileBytes / 1024 / 1024 + " MB");
-        }
-        byte[] bytes;
-        try {
-            bytes = Base64.getMimeDecoder().decode(raw);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("附件「" + item.name() + "」不是合法的 base64");
-        }
-        if (bytes.length == 0) {
-            throw new IllegalArgumentException("附件「" + item.name() + "」内容为空");
-        }
-        if (bytes.length > maxFileBytes) {
-            throw new IllegalArgumentException("附件「" + item.name() + "」超过 " + maxFileBytes / 1024 / 1024 + " MB");
-        }
-        return bytes;
+        return encoded;
     }
 
     public record DisplayAttachment(String name, String mimeType, String url) {

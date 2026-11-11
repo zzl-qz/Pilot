@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
  *
  * <p>默认：单条消息最多 64 个文件、单文件 2MB、解码后总量 25MB；
  * 文本附件内联超过 20000 字符时降采样压缩（保留头尾）。
- * 移动端受 12MB 请求体回执上限约束，能力值另行取 min(总量, 8MB)。
+ * 移动端受传输与请求回执上限约束，最多 16 个文件、总量 6MB。
  */
 @Component
 public class AttachmentLimits {
@@ -22,6 +22,9 @@ public class AttachmentLimits {
         @Value("${pilot.attachments.max-file-bytes:2097152}") int maxFileBytes,
         @Value("${pilot.attachments.max-total-bytes:26214400}") int maxTotalBytes,
         @Value("${pilot.attachments.inline-max-chars:20000}") int inlineMaxChars) {
+        if (maxFiles < 1 || maxFileBytes < 1 || maxTotalBytes < 1 || inlineMaxChars < 1) {
+            throw new IllegalArgumentException("附件数量、字节和内联预算必须大于 0");
+        }
         this.maxFiles = maxFiles;
         this.maxFileBytes = maxFileBytes;
         this.maxTotalBytes = maxTotalBytes;
@@ -46,8 +49,12 @@ public class AttachmentLimits {
     }
 
     /** base64 会放大原始字节约 4/3；此值用于解码前的长度预检（另留 1KB 容 data URL 前缀）。 */
-    public int maxEncodedFileChars() {
-        return (maxFileBytes / 3) * 4 + 1024;
+    public long maxEncodedFileChars() {
+        return ((maxFileBytes + 2L) / 3L) * 4L + 1024L;
+    }
+
+    public long maxRequestBytes() {
+        return ((maxTotalBytes + 2L) / 3L) * 4L + maxFiles * 1024L + 2_000_000L;
     }
 
     public static AttachmentLimits defaults() {
