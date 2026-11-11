@@ -104,6 +104,13 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         if ("pause_turn".equals(root.path("stop_reason").asString())) {
             throw new NativeToolRejectedException("原生工具需要分段续传，当前自动切回 Pilot 工具");
         }
+        ModelResponse.FinishReason reason = switch (string(root.get("stop_reason"))) {
+            case "max_tokens", "model_context_window_exceeded" -> ModelResponse.FinishReason.LENGTH;
+            case "tool_use" -> ModelResponse.FinishReason.TOOL_CALLS;
+            case "end_turn", "stop_sequence" -> ModelResponse.FinishReason.STOP;
+            case "refusal" -> ModelResponse.FinishReason.CONTENT_FILTER;
+            default -> throw new ModelClientException(ModelFailureKind.INCOMPLETE, "模型响应缺少有效 stop_reason，未提交本次输出或执行工具");
+        };
         StringBuilder text = new StringBuilder();
         List<ToolCall> calls = new ArrayList<>();
         LinkedHashMap<String, String> citations = new LinkedHashMap<>();
@@ -112,7 +119,8 @@ public final class AnthropicMessagesModelClient implements ModelClient {
             if ("text".equals(type)) {
                 text.append(string(block.get("text")));
                 collectCitations(block.get("citations"), citations);
-            } else if ("tool_use".equals(type)) {
+            } else if ("tool_use".equals(type)
+                && (reason == ModelResponse.FinishReason.STOP || reason == ModelResponse.FinishReason.TOOL_CALLS)) {
                 String id = string(block.get("id"));
                 String name = string(block.get("name"));
                 if (id.isBlank() || name.isBlank()) {
@@ -132,12 +140,6 @@ public final class AnthropicMessagesModelClient implements ModelClient {
             }
         }
         appendCitations(text, citations);
-        ModelResponse.FinishReason reason = switch (string(root.get("stop_reason"))) {
-            case "max_tokens" -> ModelResponse.FinishReason.LENGTH;
-            case "tool_use" -> ModelResponse.FinishReason.TOOL_CALLS;
-            case "end_turn", "stop_sequence" -> ModelResponse.FinishReason.STOP;
-            default -> calls.isEmpty() ? ModelResponse.FinishReason.STOP : ModelResponse.FinishReason.TOOL_CALLS;
-        };
         return new ModelResponse(text.toString(), calls, ModelUsageParser.parse(root.get("usage")), reason);
     }
 

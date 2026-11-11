@@ -114,6 +114,16 @@ public final class OpenAiResponsesModelClient implements ModelClient {
             throw new ModelClientException(ModelFailureKind.PERMANENT,
                 "模型响应缺少 output：" + NativeModelHttp.snippet(response.body()));
         }
+        ModelResponse.FinishReason reason = switch (string(root.get("status"))) {
+            case "completed" -> ModelResponse.FinishReason.STOP;
+            case "incomplete" -> switch (string(root.path("incomplete_details").get("reason"))) {
+                case "max_output_tokens" -> ModelResponse.FinishReason.LENGTH;
+                case "content_filter" -> ModelResponse.FinishReason.CONTENT_FILTER;
+                default -> ModelResponse.FinishReason.ERROR;
+            };
+            case "failed", "cancelled" -> ModelResponse.FinishReason.ERROR;
+            default -> throw new ModelClientException(ModelFailureKind.INCOMPLETE, "模型响应尚未完成或缺少有效 status，未提交本次输出或执行工具");
+        };
         StringBuilder text = new StringBuilder();
         List<ToolCall> calls = new ArrayList<>();
         LinkedHashMap<String, String> citations = new LinkedHashMap<>();
@@ -126,7 +136,7 @@ public final class OpenAiResponsesModelClient implements ModelClient {
                         collectCitations(part.path("annotations"), citations);
                     }
                 }
-            } else if ("function_call".equals(type)) {
+            } else if ("function_call".equals(type) && reason == ModelResponse.FinishReason.STOP) {
                 String id = string(item.get("call_id"));
                 String name = string(item.get("name"));
                 if (id.isBlank() || name.isBlank()) {
@@ -136,11 +146,10 @@ public final class OpenAiResponsesModelClient implements ModelClient {
             }
         }
         appendCitations(text, citations);
-        ModelResponse.FinishReason reason =
-            "incomplete".equals(string(root.get("status"))) ? ModelResponse.FinishReason.LENGTH
-                : calls.isEmpty() ? ModelResponse.FinishReason.STOP : ModelResponse.FinishReason.TOOL_CALLS;
         ModelUsage usage = ModelUsageParser.parse(root.get("usage"));
-        return new ModelResponse(text.toString(), calls, usage, reason);
+        return new ModelResponse(text.toString(), calls, usage,
+            reason == ModelResponse.FinishReason.STOP && !calls.isEmpty() ? ModelResponse.FinishReason.TOOL_CALLS
+                : reason);
     }
 
     @Override

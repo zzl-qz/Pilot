@@ -459,6 +459,12 @@ public final class AgentLoop {
                     return stopForCancellation(messages, events);
                 }
 
+                if (response.finishReason() == ModelResponse.FinishReason.CONTENT_FILTER
+                    || response.finishReason() == ModelResponse.FinishReason.ERROR
+                    || response.finishReason() == ModelResponse.FinishReason.UNKNOWN) {
+                    throw new ExecutionPolicy.Stop("MODEL_INCOMPLETE",
+                        "模型未正常结束（" + response.finishReason() + "），现有进度已保留。");
+                }
                 String content = response.content() == null ? "" : response.content();
                 List<ToolCall> calls = response.toolCalls() == null ? List.of() : response.toolCalls();
                 Message correction = pendingInput.get();
@@ -488,11 +494,6 @@ public final class AgentLoop {
                     continue;
                 }
                 outputLimitStreak = 0;
-                if (response.finishReason() == ModelResponse.FinishReason.CONTENT_FILTER
-                    || response.finishReason() == ModelResponse.FinishReason.ERROR) {
-                    throw new ExecutionPolicy.Stop("MODEL_INCOMPLETE",
-                        "模型未正常结束（" + response.finishReason() + "），现有进度已保留。");
-                }
                 // 带工具调用的正文属于中间轮次，不是给用户的答复；只提交最终轮正文。
                 if (calls.isEmpty()) {
                     Result completed = completeTurn(content, context);
@@ -772,13 +773,13 @@ public final class AgentLoop {
         return new ParallelBatch(stepOutcomes, correctionDuringBatch.get());
     }
 
-    /** 非取消停止先做一次禁用工具的收尾，避免界面只剩失败状态。 */
+    /** 非模型故障可请求一次禁用工具的收尾；端点失败或预算耗尽时直接保留本地说明。 */
     private Result finalizeFailure(List<Message> messages, Consumer<SessionEvent> events, UsageTracker usage,
         String code, String reason, boolean emitFailure) {
         String fallback = "本轮未能完整结束（" + code + "）：" + ToolSupport.oneLine(reason, 500) + ("NO_PROGRESS".equals(code)
             ? "\n\n已有进度已保存。可以先继续一次推进未完成步骤，或直接补充要执行的命令与资料后重新发送。" : "\n\n已有进度已保存。请根据上面的原因补充条件或选择继续执行。");
         String finalText = fallback;
-        if (!cancellation.cancelled() && !"NO_PROGRESS".equals(code)) {
+        if (!cancellation.cancelled() && !Set.of("NO_PROGRESS", "MODEL_ERROR", "MODEL_INCOMPLETE").contains(code)) {
             try {
                 if (executionPolicy != null) {
                     executionPolicy.beginFinalization();
@@ -794,7 +795,9 @@ public final class AgentLoop {
                 usage.start(request, contextLimit());
                 ModelResponse response = client.chat(List.copyOf(request), List.of());
                 usage.finish(response);
-                if (response.content() != null && !response.content().isBlank()) {
+                if (response.finishReason() == ModelResponse.FinishReason.STOP
+                    && (response.toolCalls() == null || response.toolCalls().isEmpty()) && response.content() != null
+                    && !response.content().isBlank()) {
                     finalText = response.content();
                 }
             } catch (RuntimeException ignored) {

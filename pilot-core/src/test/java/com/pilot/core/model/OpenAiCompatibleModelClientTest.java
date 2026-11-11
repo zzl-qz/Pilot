@@ -170,7 +170,7 @@ class OpenAiCompatibleModelClientTest {
     void serializesAssistantToolCallsAndToolResults() throws IOException {
         AtomicReference<String> captured = new AtomicReference<String>();
         HttpServer server = startServer(captured, 200, """
-            {"choices":[{"message":{"role":"assistant","content":"已完成"}}]}
+            {"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"已完成"}}]}
             """);
         server.start();
         try {
@@ -194,7 +194,7 @@ class OpenAiCompatibleModelClientTest {
     @Test
     void keepsExactTokenUsageWhenEndpointReportsIt() throws IOException {
         HttpServer server = startServer(new AtomicReference<>(), 200, """
-            {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+            {"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"完成"}}],
              "usage":{"prompt_tokens":321,"completion_tokens":17,
                "completion_tokens_details":{"reasoning_tokens":9}}}
             """);
@@ -211,7 +211,7 @@ class OpenAiCompatibleModelClientTest {
     void readsCachedTokensFromOpenAiStyleUsage() throws IOException {
         // OpenAI 风格：prompt_tokens 已包含缓存部分，缓存是分子，不能重复加进总输入
         HttpServer server = startServer(new AtomicReference<>(), 200, """
-            {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+            {"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"完成"}}],
              "usage":{"prompt_tokens":1000,"completion_tokens":17,
                "prompt_tokens_details":{"cached_tokens":800}}}
             """);
@@ -231,7 +231,7 @@ class OpenAiCompatibleModelClientTest {
     void addsAnthropicCacheTokensBackIntoTotalInput() throws IOException {
         // Anthropic 风格：input_tokens 不含缓存，缓存量是加数
         HttpServer server = startServer(new AtomicReference<>(), 200, """
-            {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+            {"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"完成"}}],
              "usage":{"input_tokens":100,"completion_tokens":17,
                "cache_read_input_tokens":700,"cache_creation_input_tokens":200}}
             """);
@@ -250,7 +250,7 @@ class OpenAiCompatibleModelClientTest {
     void countsAnthropicCacheWriteWithoutRead() throws IOException {
         // 首次写入缓存：只有 creation 没有 read，仍按 Anthropic 口径处理
         HttpServer server = startServer(new AtomicReference<>(), 200, """
-            {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+            {"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"完成"}}],
              "usage":{"input_tokens":50,"completion_tokens":17,
                "cache_creation_input_tokens":250}}
             """);
@@ -268,7 +268,7 @@ class OpenAiCompatibleModelClientTest {
     @Test
     void fallsBackToFlatCachedTokens() throws IOException {
         HttpServer server = startServer(new AtomicReference<>(), 200, """
-            {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+            {"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"完成"}}],
              "usage":{"prompt_tokens":600,"completion_tokens":17,"cached_tokens":300}}
             """);
         server.start();
@@ -284,7 +284,7 @@ class OpenAiCompatibleModelClientTest {
     @Test
     void reportsZeroCacheWhenEndpointOmitsIt() throws IOException {
         HttpServer server = startServer(new AtomicReference<>(), 200, """
-            {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+            {"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"完成"}}],
              "usage":{"prompt_tokens":321,"completion_tokens":17}}
             """);
         server.start();
@@ -301,7 +301,7 @@ class OpenAiCompatibleModelClientTest {
     @Test
     void clampsCacheAboveReportedInput() throws IOException {
         HttpServer server = startServer(new AtomicReference<>(), 200, """
-            {"choices":[{"message":{"role":"assistant","content":"完成"}}],
+            {"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"完成"}}],
              "usage":{"prompt_tokens":100,"completion_tokens":17,
                "prompt_tokens_details":{"cached_tokens":400}}}
             """);
@@ -321,7 +321,7 @@ class OpenAiCompatibleModelClientTest {
         Files.write(image, new byte[] {(byte)0x89, 'P', 'N', 'G'});
         AtomicReference<String> captured = new AtomicReference<String>();
         HttpServer server = startServer(captured, 200, """
-            {"choices":[{"message":{"role":"assistant","content":"看到了"}}]}
+            {"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"看到了"}}]}
             """);
         server.start();
         try {
@@ -390,7 +390,7 @@ class OpenAiCompatibleModelClientTest {
     @Test
     void rejectsMalformedToolArguments() throws IOException {
         HttpServer server = startServer(new AtomicReference<>(), 200, """
-            {"choices":[{"message":{"role":"assistant","content":"","tool_calls":[
+            {"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
               {"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{not json"}}]}}]}
             """);
         server.start();
@@ -411,6 +411,56 @@ class OpenAiCompatibleModelClientTest {
             ModelClientException exception = assertThrows(ModelClientException.class,
                 () -> client(server).chat(List.of(Message.user("hi")), List.of()));
             assertTrue(exception.getMessage().contains("choices"), exception.getMessage());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** 非流式响应缺有效 finish_reason 属于未完成，不能当成正常结束提交。 */
+    @Test
+    void rejectsNonStreamResponseWithoutFinishReason() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200, """
+            {"choices":[{"message":{"role":"assistant","content":"半截"}}]}
+            """);
+        server.start();
+        try {
+            ModelClientException exception = assertThrows(ModelClientException.class,
+                () -> client(server).chat(List.of(Message.user("hi")), List.of()));
+            assertEquals(ModelFailureKind.INCOMPLETE, exception.kind());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** 流在有效 finish_reason 到达前 EOF：半截工具调用不得返回给调用方执行。 */
+    @Test
+    void rejectsStreamEndedBeforeFinishReason() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200,
+            """
+                data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_file","arguments":"{}"}}]}}]}
+
+                """);
+        server.start();
+        try {
+            ModelClientException exception = assertThrows(ModelClientException.class,
+                () -> client(server).chat(List.of(Message.user("hi")), List.of(), frame -> {
+                }));
+            assertEquals(ModelFailureKind.INCOMPLETE, exception.kind());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** 只有 DONE、没有任何 finish_reason 不是有效终止信息。 */
+    @Test
+    void rejectsStreamWithOnlyDoneMarker() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200, "data: [DONE]\n\n");
+        server.start();
+        try {
+            ModelClientException exception = assertThrows(ModelClientException.class,
+                () -> client(server).chat(List.of(Message.user("hi")), List.of(), frame -> {
+                }));
+            assertEquals(ModelFailureKind.INCOMPLETE, exception.kind());
         } finally {
             server.stop(0);
         }

@@ -33,7 +33,7 @@ class CacheWireTest {
             bodies.add(request);
             boolean rejected = request.contains("cache_control");
             String response = rejected ? "{\"error\":{\"message\":\"unsupported cache_control\"}}"
-                : "{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"usage\":{\"prompt_tokens\":1000,\"completion_tokens\":10,\"prompt_cache_hit_tokens\":700,\"cache_creation_input_tokens\":0}}";
+                : "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"ok\"}}],\"usage\":{\"prompt_tokens\":1000,\"completion_tokens\":10,\"prompt_cache_hit_tokens\":700,\"cache_creation_input_tokens\":0}}";
             byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(rejected ? 400 : 200, bytes.length);
             exchange.getResponseBody().write(bytes);

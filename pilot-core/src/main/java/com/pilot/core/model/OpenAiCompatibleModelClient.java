@@ -291,12 +291,12 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             throw new ModelClientException(ModelFailureKind.PERMANENT, "模型响应缺少 message：" + snippet(response.body()));
         }
         String content = text(message.get("content"));
-        List<ToolCall> calls = toolCalls(message.get("tool_calls"));
         ModelResponse.FinishReason finishReason =
             ModelResponse.FinishReason.fromWire(text(choices.get(0).get("finish_reason")));
         if (finishReason == ModelResponse.FinishReason.UNKNOWN) {
-            finishReason = calls.isEmpty() ? ModelResponse.FinishReason.STOP : ModelResponse.FinishReason.TOOL_CALLS;
+            throw new ModelClientException(ModelFailureKind.INCOMPLETE, "模型响应缺少有效 finish_reason，未提交本次输出");
         }
+        List<ToolCall> calls = usable(finishReason) ? toolCalls(message.get("tool_calls")) : List.of();
         return new ModelResponse(content, calls, usage(root.get("usage"), messages, content, calls), finishReason);
     }
 
@@ -395,26 +395,33 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     }
                 }
             }
+            if (finishReason == ModelResponse.FinishReason.UNKNOWN) {
+                throw new ModelClientException(ModelFailureKind.INCOMPLETE, "模型流在有效 finish_reason 到达前结束，未提交本次输出或执行工具");
+            }
             thoughts.finish(piece -> {
                 content.append(piece);
                 emit(textDelta, piece);
             }, piece -> emit(reasoningDelta, piece));
-            List<ToolCall> calls = toolParts.values().stream().map(part -> {
+            List<ToolCall> calls = !usable(finishReason) ? List.of() : toolParts.values().stream().map(part -> {
                 try {
+                    String id = (String)part.getOrDefault("id", "");
+                    String name = (String)part.getOrDefault("name", "");
+                    if (id.isBlank() || name.isBlank()) {
+                        throw new ModelClientException(ModelFailureKind.PERMANENT,
+                            "流式 tool_call 缺少 id 或 function.name");
+                    }
                     String args = (String)part.getOrDefault("arguments", "{}");
                     JsonNode parsed = objectMapper.readTree(args);
-                    return new ToolCall((String)part.get("id"), (String)part.get("name"),
-                        objectMapper.convertValue(parsed, Map.class));
+                    if (parsed == null || !parsed.isObject()) {
+                        throw new ModelClientException(ModelFailureKind.PERMANENT, "流式工具参数必须为 JSON 对象");
+                    }
+                    return new ToolCall(id, name, objectMapper.convertValue(parsed, Map.class));
                 } catch (Exception e) {
                     throw new ModelClientException(ModelFailureKind.PERMANENT, "流式工具参数不是合法 JSON", e);
                 }
             }).toList();
             ModelUsage finalUsage =
                 reportedUsage != null ? reportedUsage : estimatedUsage(messages, content.toString(), calls);
-            if (finishReason == ModelResponse.FinishReason.UNKNOWN) {
-                finishReason =
-                    calls.isEmpty() ? ModelResponse.FinishReason.STOP : ModelResponse.FinishReason.TOOL_CALLS;
-            }
             return new ModelResponse(content.toString(), calls, finalUsage, finishReason);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -425,6 +432,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             throw new ModelClientException(httpFailure(e),
                 "流式模型请求失败（" + elapsedMs(startedAt) + " ms）：" + e.getMessage(), e);
         }
+    }
+
+    private static boolean usable(ModelResponse.FinishReason reason) {
+        return reason == ModelResponse.FinishReason.STOP || reason == ModelResponse.FinishReason.TOOL_CALLS;
     }
 
     private Map<String, Object> messagePayload(Message message) {

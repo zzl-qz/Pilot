@@ -645,7 +645,7 @@ class AgentLoopTest {
 
         assertEquals("MODEL_ERROR", result.failureCode());
         assertEquals(List.of("assistant.delta", "run.failed"), eventTypesWithoutUsage());
-        assertEquals(4, events.stream().filter(RunUsageUpdated.class::isInstance).count());
+        assertEquals(2, events.stream().filter(RunUsageUpdated.class::isInstance).count(), "永久模型故障后不能为生成收尾说明再次请求同一端点");
         assertTrue(result.finalText().contains("已有进度已保存"));
         RunFailed failed =
             events.stream().filter(RunFailed.class::isInstance).map(RunFailed.class::cast).findFirst().orElseThrow();
@@ -991,6 +991,89 @@ class AgentLoopTest {
             .anyMatch(message -> "user".equals(message.role()) && message.content().contains("输出长度上限")));
         assertFalse(events.stream()
             .anyMatch(event -> event instanceof RunCompleted completed && completed.summary().equals("第一段")));
+    }
+
+    @Test
+    void unknownFinishNeverExecutesToolsOrCommitsPartialAnswer() {
+        CountingTool tool = new CountingTool("list_dir", "a.txt");
+        ScriptedModelClient client =
+            new ScriptedModelClient(new ModelResponse("半截回复", List.of(new ToolCall("partial", "list_dir", Map.of())),
+                ModelUsage.unknown(), ModelResponse.FinishReason.UNKNOWN));
+        AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
+
+        AgentLoop.Result result = loop.run("列出目录", List.of(), events::add);
+
+        assertEquals("MODEL_INCOMPLETE", result.failureCode());
+        assertEquals(0, tool.executions.get());
+        assertFalse(result.conversation().stream()
+            .anyMatch(message -> message.content().contains("半截回复") || message.hasToolCalls()));
+        assertFalse(eventTypes().contains("run.completed"));
+    }
+
+    @Test
+    void incompleteResponseRetriesWithoutRepeatingCompletedTools() {
+        CountingTool tool = new CountingTool("list_dir", "a.txt");
+        AtomicInteger requests = new AtomicInteger();
+        List<List<Message>> snapshots = new ArrayList<>();
+        ModelClient client = (messages, tools) -> {
+            snapshots.add(List.copyOf(messages));
+            return switch (requests.incrementAndGet()) {
+                case 1 -> new ModelResponse("", List.of(new ToolCall("done", "list_dir", Map.of())));
+                case 2 -> throw new ModelClientException(ModelFailureKind.INCOMPLETE, "缺少 finish_reason");
+                default -> new ModelResponse("已完成", List.of());
+            };
+        };
+        AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(), ApprovalBroker.denyAll(), config(8, 3),
+            Cancellation.none(), () -> null, (call, result, latencyMs) -> {
+            }, millis -> {
+            }, null);
+
+        AgentLoop.Result result = loop.run("列出目录", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals("已完成", result.finalText());
+        assertEquals(1, tool.executions.get());
+        assertEquals(3, requests.get());
+        assertEquals(snapshots.get(1), snapshots.get(2), "未完成的响应不能污染重试上下文");
+        assertEquals(1, events.stream().filter(RunRetrying.class::isInstance).count());
+    }
+
+    @Test
+    void incompleteResponseStopsAtRetryBudgetAndKeepsPriorProgress() {
+        AtomicInteger requests = new AtomicInteger();
+        ModelClient client = (messages, tools) -> {
+            requests.incrementAndGet();
+            throw new ModelClientException(ModelFailureKind.INCOMPLETE, "缺少 finish_reason");
+        };
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(), config(8, 3),
+            Cancellation.none(), () -> null, (call, result, latencyMs) -> {
+            }, millis -> {
+            }, null).withRetryBudget(new RetryBudget(new RetryBudget.Settings(2, 60_000, 1, 1, 0)));
+        Message prior = Message.assistant("上一步已保存", List.of());
+
+        AgentLoop.Result result = loop.run("继续", List.of(prior), events::add);
+
+        assertEquals("MODEL_ERROR", result.failureCode());
+        assertEquals(3, requests.get());
+        assertTrue(result.conversation().contains(prior));
+        assertEquals(2, events.stream().filter(RunRetrying.class::isInstance).count());
+        assertFalse(eventTypes().contains("run.completed"));
+    }
+
+    @Test
+    void failureFinalizationDoesNotPublishTruncatedSummary() {
+        CountingTool tool = new CountingTool("list_dir", "a.txt");
+        ScriptedModelClient client =
+            new ScriptedModelClient(new ModelResponse("", List.of(new ToolCall("done", "list_dir", Map.of()))),
+                new ModelResponse("不完整收尾", List.of(), ModelUsage.unknown(), ModelResponse.FinishReason.LENGTH));
+        AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(1, 3));
+
+        AgentLoop.Result result = loop.run("列出目录", List.of(), events::add);
+
+        assertEquals("MAX_STEPS", result.failureCode());
+        assertFalse(result.finalText().contains("不完整收尾"));
+        assertTrue(result.finalText().contains("已有进度已保存"));
+        assertEquals(1, tool.executions.get());
     }
 
     /** 运行中追加的指令应在下一轮采样前进入历史，并且不新开 run。 */

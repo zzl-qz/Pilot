@@ -747,8 +747,7 @@ class AgentRunServiceTest {
             release.countDown();
             fixture.awaitFinished(status);
             assertEquals(List.of("下一条"), fixture.queue());
-            assertEquals(List.of("COMPLETED", "AWAITING_REVIEW").contains(status) ? 1 : 2, calls.get(),
-                "正常完成不追加收尾请求；真正停止时才额外执行一次禁用工具的收尾请求");
+            assertEquals("MAX_STEPS".equals(status) ? 2 : 1, calls.get(), "步数耗尽可生成一次阶段说明；模型端点失败后不得追加收尾请求");
             assertTrue(fixture.service.activeRun(fixture.sessionId).isEmpty());
         } finally {
             release.countDown();
