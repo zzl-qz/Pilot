@@ -252,6 +252,26 @@ public final class JdbcSessionRepository implements SessionRepository {
             .findFirst().orElse(0L);
     }
 
+    @Override
+    public List<EventEnvelope> replayPage(String sessionId, long after, long through, int limit) {
+        String sql = "SELECT sequence, run_id, type, payload, created_at, length(CAST(payload AS BLOB)) AS bytes "
+            + "FROM events WHERE session_id = ? AND sequence > ? AND sequence <= ? ORDER BY sequence LIMIT ?";
+        try (Connection connection = store.open(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sessionId); statement.setLong(2, after); statement.setLong(3, through);
+            statement.setInt(4, Math.max(1, Math.min(limit, 512)));
+            List<EventEnvelope> page = new ArrayList<>();
+            long bytes = 0;
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    bytes += rows.getLong("bytes");
+                    if (!page.isEmpty() && bytes > 1024 * 1024) break;
+                    page.add(mapEvent(rows, sessionId));
+                }
+            }
+            return List.copyOf(page);
+        } catch (SQLException failure) { throw new IllegalStateException("读取回放页失败", failure); }
+    }
+
     /** 跨会话查询（type 上没有索引，量级靠时间窗口控制；usage 聚合单次最多几千行）。 */
     @Override
     public List<EventEnvelope> eventsOfType(String type, Instant since) {

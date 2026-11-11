@@ -200,6 +200,25 @@ public class InMemorySessionRepository implements SessionRepository {
     }
 
     @Override
+    public List<EventEnvelope> replayPage(String sessionId, long after, long through, int limit) {
+        State state = require(sessionId);
+        synchronized (state) {
+            int lo = 0, hi = state.events.size();
+            while (lo < hi) {
+                int mid = (lo + hi) >>> 1;
+                if (state.events.get(mid).sequence() <= after) lo = mid + 1; else hi = mid;
+            }
+            List<EventEnvelope> page = new ArrayList<>();
+            for (int i = lo; i < state.events.size() && page.size() < Math.max(1, limit); i++) {
+                EventEnvelope event = state.events.get(i);
+                if (event.sequence() > through) break;
+                page.add(event);
+            }
+            return List.copyOf(page);
+        }
+    }
+
+    @Override
     public long latestSequence(String sessionId) {
         State state = sessionId == null ? null : sessions.get(sessionId);
         if (state == null) {

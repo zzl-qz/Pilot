@@ -117,6 +117,11 @@ public interface SessionRepository {
         return eventsAfter(sessionId, after).stream().limit(Math.max(1, limit)).toList();
     }
 
+    /** 订阅回放只读捕获的高水位以内，避免后续实时事件重复进入历史页。 */
+    default List<EventEnvelope> replayPage(String sessionId, long after, long through, int limit) {
+        return eventsPageAfter(sessionId, after, limit).stream().takeWhile(event -> event.sequence() <= through).toList();
+    }
+
     /** 当前已落库的最大序号。还没有事件时返回 0。 */
     long latestSequence(String sessionId);
 

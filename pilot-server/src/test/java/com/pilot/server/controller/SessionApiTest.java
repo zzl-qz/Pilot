@@ -542,11 +542,12 @@ class SessionApiTest {
         MvcResult result =
             mvc.perform(get("/api/sessions/{id}/events", sessionId)).andExpect(request().asyncStarted()).andReturn();
 
-        String body = result.getResponse().getContentAsString();
+        String body = awaitStream(result, "\"sequence\":2");
         assertTrue(body.contains("event:run.started"), body);
         assertTrue(body.contains("event:assistant.delta"), body);
         assertTrue(body.contains("id:1"), body);
         assertTrue(body.contains("\"sequence\":2"), body);
+        sessions.delete(sessionId);
     }
 
     @Test
@@ -558,9 +559,21 @@ class SessionApiTest {
         MvcResult result = mvc.perform(get("/api/sessions/{id}/events", sessionId).param("after", "1"))
             .andExpect(request().asyncStarted()).andReturn();
 
-        String body = result.getResponse().getContentAsString();
+        String body = awaitStream(result, "\"sequence\":2");
         assertFalse(body.contains("event:run.started"), body);
         assertTrue(body.contains("event:assistant.delta"), body);
+        sessions.delete(sessionId);
+    }
+
+    private static String awaitStream(MvcResult result, String content) throws Exception {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(3).toNanos();
+        String body;
+        do {
+            body = result.getResponse().getContentAsString();
+            if (body.contains(content)) return body;
+            Thread.sleep(10);
+        } while (System.nanoTime() < deadline);
+        return body;
     }
 
     /** 计划清单刷新后要能恢复，空计划返回空数组而不是 404。 */

@@ -158,25 +158,28 @@ class SessionServiceTest {
             sent.incrementAndGet();
             throw new IllegalStateException("断线");
         }, () -> { closed.incrementAndGet(); notified.countDown(); });
-        subscription.close();
         assertTrue(notified.await(2, TimeUnit.SECONDS));
+        subscription.close();
         assertEquals(0, sessions.subscriberCount());
         assertEquals(1, sent.get());
         assertEquals(1, closed.get());
     }
 
     @Test
-    void failedHistoryQueryReleasesSubscription() {
+    void failedHistoryQueryReleasesSubscription() throws Exception {
         SessionRepository backing = new InMemorySessionRepository();
         SessionRepository failing = (SessionRepository) java.lang.reflect.Proxy.newProxyInstance(
             SessionRepository.class.getClassLoader(), new Class<?>[] {SessionRepository.class},
             (proxy, method, args) -> {
-                if (method.getName().equals("eventsAfter")) throw new IllegalStateException("查询失败");
+                if (method.getName().equals("replayPage")) throw new IllegalStateException("查询失败");
                 return method.invoke(backing, args);
             });
         SessionService service = new SessionService(Clock.systemUTC(), failing);
         Session session = service.createSession("查询失败");
-        assertThrows(IllegalStateException.class, () -> service.subscribe(session.id(), 0, event -> {}));
+        service.sendMessage(session.id(), "有历史可回放");
+        CountDownLatch closed = new CountDownLatch(1);
+        service.subscribe(session.id(), 0, event -> {}, closed::countDown);
+        assertTrue(closed.await(2, TimeUnit.SECONDS));
         assertEquals(0, service.subscriberCount());
     }
 
@@ -229,5 +232,60 @@ class SessionServiceTest {
             () -> sessions.subscribe(id, 0, 0L, event -> {}, () -> {}));
         assertEquals(0, sessions.subscriberCount());
         sessions.subscribe(id, 0, 1L, event -> {}, () -> {}).close();
+    }
+
+    @Test
+    void slowReplayDoesNotBlockPublisherOrAnotherSubscriber() throws Exception {
+        String id = sessions.createSession("慢回放").id();
+        Run run = sessions.sendMessage(id, "第一条");
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        List<EventEnvelope> slow = new CopyOnWriteArrayList<>(), fast = new CopyOnWriteArrayList<>();
+        try (var first = sessions.subscribe(id, 0, event -> {
+            entered.countDown();
+            try { release.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            slow.add(event);
+        })) {
+            assertTrue(entered.await(2, TimeUnit.SECONDS));
+            org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(Duration.ofSeconds(2),
+                () -> sessions.publish(id, run.runId(), new AssistantDelta("第二条")));
+            try (var second = sessions.subscribe(id, 0, fast::add)) {
+                awaitSize(fast, 2);
+                assertEquals(List.of(1L, 2L), fast.stream().map(EventEnvelope::sequence).toList());
+                release.countDown();
+                awaitSize(slow, 2);
+                assertEquals(List.of(1L, 2L), slow.stream().map(EventEnvelope::sequence).toList());
+            }
+        } finally { release.countDown(); }
+    }
+
+    @Test
+    void pagedReplayUsesCapturedHighWaterAndJoinsConcurrentLiveEventsExactlyOnce() throws Exception {
+        CountDownLatch reading = new CountDownLatch(1), release = new CountDownLatch(1);
+        AtomicInteger pages = new AtomicInteger();
+        var repository = new InMemorySessionRepository() {
+            @Override public List<EventEnvelope> eventsAfter(String id, long after) {
+                throw new AssertionError("不能全量读取回放");
+            }
+            @Override public List<EventEnvelope> replayPage(String id, long after, long through, int limit) {
+                assertEquals(800, through);
+                if (pages.incrementAndGet() == 1) {
+                    reading.countDown();
+                    try { release.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                }
+                return super.replayPage(id, after, through, limit);
+            }
+        };
+        var service = new SessionService(Clock.systemUTC(), repository);
+        String id = service.createSession("分页").id();
+        for (int i = 0; i < 800; i++) service.publish(id, "run", new AssistantDelta("字"));
+        List<EventEnvelope> received = new CopyOnWriteArrayList<>();
+        try (var subscription = service.subscribe(id, 0, received::add)) {
+            assertTrue(reading.await(2, TimeUnit.SECONDS));
+            for (int i = 0; i < 100; i++) service.publish(id, "run", new AssistantDelta("新"));
+            release.countDown(); awaitSize(received, 900);
+            assertEquals(java.util.stream.LongStream.rangeClosed(1, 900).boxed().toList(),
+                received.stream().map(EventEnvelope::sequence).toList());
+            assertEquals(4, pages.get());
+        } finally { release.countDown(); }
     }
 }

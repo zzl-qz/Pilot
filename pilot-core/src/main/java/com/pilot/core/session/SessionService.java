@@ -28,7 +28,7 @@ import com.pilot.core.event.SessionEvent;
  * 会话服务：负责 id 生成、状态推进与事件订阅，数据读写委托给 {@link SessionRepository}。
  *
  * <p>同一会话的「追加事件 + 推送订阅者」在同一把会话锁内完成，因此订阅者收到的事件顺序与
- * {@code sequence} 一致；订阅时先回放游标之后的历史事件，再注册监听，保证不丢不重。
+ * {@code sequence} 一致；订阅时捕获高水位并注册监听，锁外分页回放后衔接实时队列。
  *
  * <p>推送不在锁内直接写连接：每个订阅者有一个有界队列和独立投递线程。慢客户端只会把自己
  * 的队列填满并被断开（断线后按游标重连即可补齐），不会拖住会话的发布线程和 Agent 循环。
@@ -318,33 +318,21 @@ public final class SessionService {
     public EventSubscription subscribe(String sessionId, long afterSequence, Long expectedRevision,
         Consumer<EventEnvelope> listener, Runnable onClosed) {
         Objects.requireNonNull(listener, "listener must not be null");
-        EventDelivery delivery = new EventDelivery(sessionId, listener, onClosed);
+        EventDelivery delivery;
         Object lock = lockFor(sessionId);
-        try {
-            synchronized (lock) {
-                if (repository.find(sessionId).isEmpty()) {
-                    locks.remove(sessionId, lock);
-                    throw new NoSuchSessionException(sessionId);
-                }
-                if (expectedRevision != null && historyRevision(sessionId) != expectedRevision) {
-                    throw new HistoryChangedException();
-                }
-                // 先注册再回放：回放失败时 close 必须能摘掉已注册对象，不能重新挂回已关闭订阅。
-                listeners(sessionId).add(delivery);
-                for (EventEnvelope envelope : repository.eventsAfter(sessionId, afterSequence)) {
-                    if (delivery.closed.get()) {
-                        break;
-                    }
-                    delivery.deliverNow(envelope);
-                }
-                if (!delivery.closed.get()) {
-                    delivery.worker.start();
-                }
+        synchronized (lock) {
+            if (repository.find(sessionId).isEmpty()) {
+                locks.remove(sessionId, lock);
+                throw new NoSuchSessionException(sessionId);
             }
-        } catch (RuntimeException | Error failure) {
-            delivery.close();
-            throw failure;
+            long revision = historyRevision(sessionId);
+            if (expectedRevision != null && revision != expectedRevision) throw new HistoryChangedException();
+            delivery = new EventDelivery(sessionId, listener, onClosed, Math.max(0, afterSequence),
+                repository.latestSequence(sessionId), revision);
+            listeners(sessionId).add(delivery);
         }
+        // 注册与高水位捕获是短临界区；查询及所有回放发送均由锁外 worker 完成。
+        delivery.worker.start();
         return delivery;
     }
 
@@ -411,8 +399,15 @@ public final class SessionService {
         private final BlockingQueue<EventEnvelope> queue = new ArrayBlockingQueue<>(SUBSCRIBER_QUEUE_CAPACITY);
         private final AtomicBoolean closed = new AtomicBoolean();
         private final Thread worker;
+        private final long afterSequence;
+        private final long highWater;
+        private final long revision;
 
-        EventDelivery(String sessionId, Consumer<EventEnvelope> downstream, Runnable onClosed) {
+        EventDelivery(String sessionId, Consumer<EventEnvelope> downstream, Runnable onClosed,
+            long afterSequence, long highWater, long revision) {
+            this.afterSequence = afterSequence;
+            this.highWater = highWater;
+            this.revision = revision;
             this.sessionId = sessionId;
             this.downstream = downstream;
             this.onClosed = onClosed;
@@ -433,21 +428,20 @@ public final class SessionService {
             }
         }
 
-        /** 回放用：订阅瞬间同步写一次，保证「连上就能看到历史」。 */
-        void deliverNow(EventEnvelope envelope) {
-            if (closed.get()) {
-                return;
-            }
-            try {
-                downstream.accept(envelope);
-            } catch (RuntimeException e) {
-                log.debug("订阅者回放失败，按断开处理：{}", e.toString());
-                close();
-            }
-        }
-
         private void drain() {
             try {
+                long cursor = afterSequence;
+                while (!closed.get() && cursor < highWater) {
+                    if (historyRevision(sessionId) != revision) break;
+                    List<EventEnvelope> page = repository.replayPage(sessionId, cursor, highWater, 256);
+                    if (page.isEmpty()) break;
+                    for (EventEnvelope envelope : page) {
+                        if (closed.get() || historyRevision(sessionId) != revision) return;
+                        downstream.accept(envelope);
+                        cursor = envelope.sequence();
+                    }
+                }
+                if (historyRevision(sessionId) != revision) return;
                 while (!closed.get()) {
                     EventEnvelope envelope = queue.poll(1, TimeUnit.SECONDS);
                     if (envelope != null) {
