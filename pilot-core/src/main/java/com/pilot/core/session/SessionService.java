@@ -36,10 +36,20 @@ import com.pilot.core.event.SessionEvent;
 public final class SessionService {
     private static final Logger log = LoggerFactory.getLogger(SessionService.class);
     /** 单个订阅者允许积压的事件数。超过即视为客户端跟不上，直接断开。 */
-    private static final int SUBSCRIBER_QUEUE_CAPACITY = 4096;
+    private static final java.util.concurrent.ScheduledExecutorService MONITOR =
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(task -> {
+            Thread thread = new Thread(task, "pilot-event-monitor"); thread.setDaemon(true); return thread;
+        });
 
     private final Clock clock;
     private final SessionRepository repository;
+    private final EventStreamLimits limits;
+    private final java.util.concurrent.atomic.AtomicInteger workers = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicLong queuedBytes = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong peakBytes = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong delivered = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong replayNanos = new java.util.concurrent.atomic.AtomicLong();
+    private final ConcurrentMap<String, java.util.concurrent.atomic.AtomicLong> closedReasons = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, CopyOnWriteArrayList<EventDelivery>> subscribers = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Object> locks = new ConcurrentHashMap<>();
 
@@ -52,8 +62,13 @@ public final class SessionService {
     }
 
     public SessionService(Clock clock, SessionRepository repository) {
+        this(clock, repository, EventStreamLimits.defaults());
+    }
+
+    public SessionService(Clock clock, SessionRepository repository, EventStreamLimits limits) {
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.limits = Objects.requireNonNull(limits);
     }
 
     public Session createSession(String title) {
@@ -174,6 +189,7 @@ public final class SessionService {
     public void preview(String sessionId, String runId, SessionEvent event) {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(event, "event must not be null");
+        long size = EventSize.estimate(event) + 1024;
         Object lock = lockFor(sessionId);
         synchronized (lock) {
             if (repository.find(sessionId).isEmpty()) {
@@ -185,7 +201,7 @@ public final class SessionService {
                 return;
             }
             EventEnvelope envelope = EventEnvelope.of(sequence, clock.instant(), sessionId, runId, event);
-            deliver(sessionId, envelope);
+            deliver(sessionId, envelope, size);
         }
     }
 
@@ -193,6 +209,7 @@ public final class SessionService {
     public EventEnvelope publish(String sessionId, String runId, SessionEvent event) {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(event, "event must not be null");
+        long size = EventSize.estimate(event) + 1024;
         Object lock = lockFor(sessionId);
         synchronized (lock) {
             Session current = repository.find(sessionId).orElseGet(() -> {
@@ -209,19 +226,19 @@ public final class SessionService {
                 repository.markNotBlank(sessionId);
             }
             EventEnvelope envelope = repository.append(sessionId, runId, clock.instant(), event, status);
-            deliver(sessionId, envelope);
+            deliver(sessionId, envelope, size);
             return envelope;
         }
     }
 
     /** 投递不阻塞：队列满说明客户端已经跟不上，摘掉它即可，历史事件还能按游标补。 */
-    private void deliver(String sessionId, EventEnvelope envelope) {
+    private void deliver(String sessionId, EventEnvelope envelope, long size) {
         CopyOnWriteArrayList<EventDelivery> current = subscribers.get(sessionId);
         if (current == null) {
             return;
         }
         for (EventDelivery delivery : current) {
-            delivery.offer(envelope);
+            delivery.offer(envelope, size);
         }
     }
 
@@ -238,6 +255,10 @@ public final class SessionService {
     /** 会话的事件总数，用于列表/详情展示，不必把事件全读进内存。 */
     public long eventCount(String sessionId) {
         return repository.eventCount(sessionId);
+    }
+
+    public List<EventEnvelope> replayPage(String sessionId, long after, long through, int limit) {
+        return repository.replayPage(sessionId, after, through, limit);
     }
 
     public long latestSequence(String sessionId) {
@@ -317,6 +338,11 @@ public final class SessionService {
 
     public EventSubscription subscribe(String sessionId, long afterSequence, Long expectedRevision,
         Consumer<EventEnvelope> listener, Runnable onClosed) {
+        return subscribe(sessionId, afterSequence, expectedRevision, listener, null, onClosed);
+    }
+
+    public EventSubscription subscribe(String sessionId, long afterSequence, Long expectedRevision,
+        Consumer<EventEnvelope> listener, Consumer<EventReference> references, Runnable onClosed) {
         Objects.requireNonNull(listener, "listener must not be null");
         EventDelivery delivery;
         Object lock = lockFor(sessionId);
@@ -327,18 +353,39 @@ public final class SessionService {
             }
             long revision = historyRevision(sessionId);
             if (expectedRevision != null && revision != expectedRevision) throw new HistoryChangedException();
-            delivery = new EventDelivery(sessionId, listener, onClosed, Math.max(0, afterSequence),
+            if (listeners(sessionId).size() >= limits.subscribersPerSession()) throw new IllegalStateException("会话订阅数量已达上限");
+            if (workers.incrementAndGet() > limits.subscribers()) {
+                workers.decrementAndGet(); throw new IllegalStateException("事件流连接数量已达上限");
+            }
+            delivery = new EventDelivery(sessionId, listener, references, onClosed, Math.max(0, afterSequence),
                 repository.latestSequence(sessionId), revision);
             listeners(sessionId).add(delivery);
         }
         // 注册与高水位捕获是短临界区；查询及所有回放发送均由锁外 worker 完成。
-        delivery.worker.start();
+        delivery.start();
         return delivery;
     }
 
     /** 当前活跃订阅数，用于连接诊断与资源回归验证。 */
     public int subscriberCount() {
         return subscribers.values().stream().mapToInt(List::size).sum();
+    }
+
+    public record StreamMetrics(int subscriptions, int workers, long queuedBytes, long peakQueuedBytes,
+        long deliveredEvents, long replayNanos, java.util.Map<String, Long> closeReasons) {}
+    public StreamMetrics streamMetrics() {
+        java.util.Map<String, Long> reasons = new java.util.TreeMap<>();
+        closedReasons.forEach((key, value) -> reasons.put(key, value.get()));
+        return new StreamMetrics(subscriberCount(), workers.get(), queuedBytes.get(), peakBytes.get(),
+            delivered.get(), replayNanos.get(), java.util.Map.copyOf(reasons));
+    }
+
+    private boolean reserve(long size) {
+        long current;
+        do { current = queuedBytes.get(); if (size > limits.totalBytes() - current) return false; }
+        while (!queuedBytes.compareAndSet(current, current + size));
+        peakBytes.accumulateAndGet(current + size, Math::max);
+        return true;
     }
 
     private Object lockFor(String sessionId) {
@@ -392,88 +439,120 @@ public final class SessionService {
      * <p>队列满、下游抛异常或显式 close 都会让这个订阅者停止工作并回调 {@code onClosed}，
      * 从而把「客户端跟不上」与「会话发布」彻底解耦。
      */
+    private record PendingEvent(EventEnvelope event, EventReference reference, long bytes, long enqueued) {}
+
     private final class EventDelivery implements EventSubscription {
         private final String sessionId;
         private final Consumer<EventEnvelope> downstream;
+        private final Consumer<EventReference> references;
         private final Runnable onClosed;
-        private final BlockingQueue<EventEnvelope> queue = new ArrayBlockingQueue<>(SUBSCRIBER_QUEUE_CAPACITY);
+        private final BlockingQueue<PendingEvent> queue = new ArrayBlockingQueue<>(limits.queueItems());
         private final AtomicBoolean closed = new AtomicBoolean();
+        private final Object budget = new Object();
         private final Thread worker;
-        private final long afterSequence;
-        private final long highWater;
-        private final long revision;
+        private final long afterSequence, highWater, revision;
+        private volatile long sendingAt;
+        private volatile boolean replaying = true;
+        private volatile String reason = "closed";
+        private volatile java.util.concurrent.ScheduledFuture<?> monitor;
+        private long bytes;
 
-        EventDelivery(String sessionId, Consumer<EventEnvelope> downstream, Runnable onClosed,
-            long afterSequence, long highWater, long revision) {
-            this.afterSequence = afterSequence;
-            this.highWater = highWater;
-            this.revision = revision;
-            this.sessionId = sessionId;
-            this.downstream = downstream;
-            this.onClosed = onClosed;
+        EventDelivery(String sessionId, Consumer<EventEnvelope> downstream, Consumer<EventReference> references,
+            Runnable onClosed, long afterSequence, long highWater, long revision) {
+            this.afterSequence = afterSequence; this.highWater = highWater; this.revision = revision;
+            this.sessionId = sessionId; this.downstream = downstream; this.references = references; this.onClosed = onClosed;
             this.worker = Thread.ofVirtual().name("pilot-event-delivery").unstarted(this::drain);
         }
-
-        /** 非阻塞投递：满了就断开这个订阅者。 */
-        void offer(EventEnvelope envelope) {
-            if (closed.get()) {
-                return;
-            }
-            if (!queue.offer(envelope)) {
-                log.debug("订阅者积压超过 {} 条，断开连接", SUBSCRIBER_QUEUE_CAPACITY);
-                close();
-            }
-            if (closed.get()) {
-                queue.clear();
-            }
+        void start() {
+            long started = System.nanoTime();
+            monitor = MONITOR.scheduleAtFixedRate(() -> {
+                long now = System.nanoTime();
+                PendingEvent oldest = queue.peek();
+                if (sendingAt != 0 && now - sendingAt > TimeUnit.MILLISECONDS.toNanos(limits.sendMillis())) close("send_timeout");
+                else if (oldest != null && now - oldest.enqueued() > TimeUnit.MILLISECONDS.toNanos(limits.queueWaitMillis())) close("queue_timeout");
+                else if (replaying && now - started > TimeUnit.MILLISECONDS.toNanos(limits.replayMillis())) close("replay_timeout");
+            }, 50, 50, TimeUnit.MILLISECONDS);
+            if (closed.get()) monitor.cancel(false);
+            worker.start();
         }
-
+        private PendingEvent pending(EventEnvelope event, long size) {
+            boolean ephemeral = event.payload().type() == EventType.ASSISTANT_PREVIEW || event.payload().type() == EventType.ASSISTANT_REASONING;
+            if (!ephemeral && references != null && size > limits.referenceBytes()) {
+                return new PendingEvent(null, new EventReference(event.sequence(), event.sessionId(), event.runId(), event.type()), 512, System.nanoTime());
+            }
+            return new PendingEvent(event, null, size, System.nanoTime());
+        }
+        void offer(EventEnvelope event, long size) {
+            PendingEvent pending = pending(event, size);
+            boolean accepted = false;
+            synchronized (budget) {
+                if (closed.get()) return;
+                if (bytes + pending.bytes() <= limits.queueBytes() && queue.remainingCapacity() > 0 && reserve(pending.bytes())) {
+                    bytes += pending.bytes(); queue.add(pending); accepted = true;
+                }
+            }
+            if (!accepted) close("queue_budget");
+        }
+        private void release(PendingEvent pending) {
+            synchronized (budget) { bytes -= pending.bytes(); queuedBytes.addAndGet(-pending.bytes()); }
+        }
+        private void send(PendingEvent pending) {
+            if (closed.get()) return;
+            sendingAt = System.nanoTime();
+            try {
+                if (pending.reference() != null) references.accept(pending.reference()); else downstream.accept(pending.event());
+                delivered.incrementAndGet();
+            } finally { sendingAt = 0; }
+        }
         private void drain() {
+            long began = System.nanoTime();
             try {
                 long cursor = afterSequence;
                 while (!closed.get() && cursor < highWater) {
-                    if (historyRevision(sessionId) != revision) break;
-                    List<EventEnvelope> page = repository.replayPage(sessionId, cursor, highWater, 256);
+                    if (historyRevision(sessionId) != revision) { close("history_changed"); return; }
+                    List<EventEnvelope> page = repository.replayPage(sessionId, cursor, highWater, limits.pageSize());
                     if (page.isEmpty()) break;
-                    for (EventEnvelope envelope : page) {
+                    for (EventEnvelope event : page) {
                         if (closed.get() || historyRevision(sessionId) != revision) return;
-                        downstream.accept(envelope);
-                        cursor = envelope.sequence();
-                    }
-                }
-                if (historyRevision(sessionId) != revision) return;
-                while (!closed.get()) {
-                    EventEnvelope envelope = queue.poll(1, TimeUnit.SECONDS);
-                    if (envelope != null) {
-                        downstream.accept(envelope);
-                    }
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            } catch (RuntimeException e) {
-                log.debug("订阅者投递失败，按断开处理：{}", e.toString());
-            } finally {
-                close();
-            }
-        }
-
-        @Override
-        public void close() {
-            if (closed.compareAndSet(false, true)) {
-                unsubscribe(sessionId, this);
-                queue.clear();
-                worker.interrupt();
-                // 底层连接关闭可能等待发送锁，不能占用发布线程或会话锁。
-                if (onClosed != null) {
-                    Thread.ofVirtual().name("pilot-event-close").start(() -> {
-                        try {
-                            onClosed.run();
-                        } catch (RuntimeException failure) {
-                            log.debug("订阅关闭回调失败", failure);
+                        PendingEvent pending = pending(event, EventSize.estimate(event.payload()) + 1024);
+                        synchronized (budget) {
+                            if (pending.bytes() + bytes > limits.queueBytes() || !reserve(pending.bytes())) { close("queue_budget"); return; }
+                            bytes += pending.bytes();
                         }
-                    });
+                        try { send(pending); } finally { release(pending); }
+                        cursor = event.sequence();
+                    }
                 }
+                replaying = false; replayNanos.addAndGet(System.nanoTime() - began);
+                if (historyRevision(sessionId) != revision) { close("history_changed"); return; }
+                while (!closed.get()) {
+                    PendingEvent pending = queue.poll(1, TimeUnit.SECONDS);
+                    if (pending != null) { try { send(pending); } finally { release(pending); } }
+                }
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+            } catch (RuntimeException failure) {
+                log.debug("订阅交付失败：{}", failure.getClass().getSimpleName());
+                close(failure instanceof EventTooLargeException ? "event_too_large" : "delivery_error");
+            } finally { close(); workers.decrementAndGet(); }
+        }
+        @Override public boolean isClosed() { return closed.get(); }
+        @Override public String closeReason() { return reason; }
+        @Override public void close() { close("closed"); }
+        private void close(String why) {
+            if (!closed.compareAndSet(false, true)) return;
+            reason = why;
+            unsubscribe(sessionId, this);
+            synchronized (budget) {
+                PendingEvent pending;
+                while ((pending = queue.poll()) != null) release(pending);
             }
+            var timer = monitor; if (timer != null) timer.cancel(false);
+            worker.interrupt();
+            closedReasons.computeIfAbsent(why, ignored -> new java.util.concurrent.atomic.AtomicLong()).incrementAndGet();
+            if (onClosed != null) Thread.ofVirtual().name("pilot-event-close").start(() -> {
+                try { onClosed.run(); } catch (RuntimeException failure) { log.debug("订阅关闭回调失败", failure); }
+            });
         }
     }
 }

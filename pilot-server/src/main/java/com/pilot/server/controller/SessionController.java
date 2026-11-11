@@ -8,9 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -31,7 +29,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunStarted;
@@ -61,12 +58,6 @@ import tools.jackson.databind.ObjectMapper;
 @RequestMapping("/api/sessions")
 public class SessionController {
     private static final String DEFAULT_TITLE = "未命名会话";
-    /**
-     * SSE 心跳：空闲连接也要定期写一点东西，否则对端早已断开时服务端感知不到，
-     * 订阅者会一直挂在内存里。每条连接独立发送，慢连接不阻塞其他连接的心跳。
-     */
-    private static final long HEARTBEAT_SECONDS = 20L;
-
     private final SessionService sessions;
     private final RunStarter runStarter;
     private final ObjectMapper objectMapper;
@@ -708,125 +699,87 @@ public class SessionController {
     public record HistoryResponse(List<EventEnvelope> events, boolean hasMore, int total, long historyRevision) {
     }
 
-    @GetMapping(value = "/{id}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public ResponseEntity<SseEmitter> events(@PathVariable String id,
-        @RequestParam(name = "after", required = false) Long after,
-        @RequestHeader(name = "Last-Event-ID", required = false) Long lastEventId,
-        @RequestParam(name = "revision", required = false) Long expectedRevision) {
+    @org.springframework.beans.factory.annotation.Value("${pilot.events.queue-bytes:8388608}")
+    private long streamBytes = 8L * 1024 * 1024;
+    @org.springframework.beans.factory.annotation.Value("${pilot.events.send-timeout-ms:30000}")
+    private long streamTimeout = 30_000;
+
+    @GetMapping("/stream-metrics")
+    public Map<String, Object> streamMetrics() {
+        return Map.of("delivery", sessions.streamMetrics(), "transport", com.pilot.server.stream.AsyncEventStream.metrics());
+    }
+
+    @GetMapping("/{id}/events/{sequence}")
+    public Map<String, Object> referencedEvent(@PathVariable String id, @PathVariable long sequence,
+        @RequestParam long revision) {
         requireSession(id);
-        long cursor = after != null ? after : lastEventId != null ? lastEventId : 0L;
+        if (sessions.historyRevision(id) != revision) throw new SessionService.HistoryChangedException();
+        var page = sessions.replayPage(id, sequence - 1, sequence, 1);
+        if (page.isEmpty() || page.getFirst().sequence() != sequence) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "事件已不存在");
+        var event = page.getFirst();
+        if (objectMapper.writeValueAsBytes(event).length > 8 * 1024 * 1024) throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "单条事件超过 8 MiB，请检查事件数据");
+        if (sessions.historyRevision(id) != revision) throw new SessionService.HistoryChangedException();
+        return Map.of("event", event, "historyRevision", revision);
+    }
+
+    @GetMapping(value = "/{id}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public void events(@PathVariable String id, @RequestParam(name = "after", required = false) Long after,
+        @RequestHeader(name = "Last-Event-ID", required = false) Long lastEventId,
+        @RequestParam(name = "revision", required = false) Long expectedRevision,
+        @RequestParam(name = "protocol", defaultValue = "1") int protocol,
+        jakarta.servlet.http.HttpServletRequest request, jakarta.servlet.http.HttpServletResponse response) throws IOException {
+        requireSession(id);
+        long cursor = Math.max(0, after != null ? after : lastEventId != null ? lastEventId : 0L);
         long revision = sessions.historyRevision(id);
-        SseEmitter emitter = new SseEmitter(0L);
-        AtomicBoolean closed = new AtomicBoolean(false);
-        AtomicReference<EventSubscription> subscription = new AtomicReference<EventSubscription>();
-        AtomicReference<Thread> heartbeat = new AtomicReference<>();
+        AtomicReference<EventSubscription> subscription = new AtomicReference<>();
+        AtomicReference<com.pilot.server.stream.AsyncEventStream> transport = new AtomicReference<>();
         Runnable finish = () -> {
+            var stream = transport.get();
+            if (stream == null || stream.isClosed()) return;
             try {
-                if (!closed.get() && sessions.find(id).isPresent() && sessions.historyRevision(id) != revision) {
-                    sendControl(emitter, "stream.reset", id, sessions.historyRevision(id));
+                if (sessions.find(id).isPresent() && sessions.historyRevision(id) != revision) {
+                    sendControl(stream, "stream.reset", id, Map.of("historyRevision", sessions.historyRevision(id)));
+                } else if (subscription.get() != null && "event_too_large".equals(subscription.get().closeReason())) {
+                    sendControl(stream, "stream.error", id, Map.of("message", "单条历史事件超过 8 MiB，已停止自动恢复，请检查事件数据"));
+                } else if (subscription.get() != null && "delivery_error".equals(subscription.get().closeReason())) {
+                    sendControl(stream, "stream.error", id, Map.of("message", "历史事件交付失败，已停止自动恢复，请刷新或检查服务端记录"));
                 }
-            } catch (IOException | RuntimeException ignored) {
-                // 下次握手仍能发现版本变化，不依赖失效通知恰好送达。
-            } finally {
-                closeQuietly(closed, subscription, heartbeat, emitter);
-            }
+            } finally { stream.finish(); }
         };
-
-        // 浏览器刷新、切换会话或关页面都会让连接失效；这属于正常生命周期，
-        // 不能把写入失败当成异常抛给上层，否则每个事件都会刷一份堆栈。
-        Consumer<EventEnvelope> listener = envelope -> {
-            if (closed.get()) {
-                return;
-            }
-            if (sessions.historyRevision(id) != revision) {
-                finish.run();
-                return;
-            }
-            if (!send(emitter, envelope)) {
-                closeQuietly(closed, subscription, heartbeat, emitter);
-            }
-        };
-
-        emitter.onCompletion(() -> closeQuietly(closed, subscription, heartbeat, null));
-        emitter.onTimeout(() -> closeQuietly(closed, subscription, heartbeat, null));
-        emitter.onError(error -> closeQuietly(closed, subscription, heartbeat, null));
-        try {
-            if (expectedRevision != null && expectedRevision != revision) {
-                sendControl(emitter, "stream.reset", id, revision);
-                closeQuietly(closed, subscription, heartbeat, emitter);
-                return ResponseEntity.ok().header("Cache-Control", "no-cache").body(emitter);
-            }
-            sendControl(emitter, "stream.ready", id, revision);
-            emitter.send(SseEmitter.event().comment("stream open: session=" + id + ", after=" + cursor));
-            // 第四个参数：订阅被服务端摘掉（客户端积压太多）时，把底层连接一起关掉
-            subscription.set(
-                sessions.subscribe(id, cursor, revision, listener, finish));
-            if (closed.get()) {
-                subscription.get().close();
-            }
-            // 空闲连接也定期写注释帧：对端早已断开时，下一次写失败就能把订阅清掉
-            Thread beat = Thread.ofVirtual().name("pilot-sse-heartbeat").unstarted(() -> {
-                try {
-                    while (!closed.get()) {
-                        Thread.sleep(java.time.Duration.ofSeconds(HEARTBEAT_SECONDS));
-                        if (sessions.historyRevision(id) != revision) { finish.run(); break; }
-                        if (!closed.get()) emitter.send(SseEmitter.event().comment("ping"));
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                } catch (Exception e) {
-                    closeQuietly(closed, subscription, heartbeat, emitter);
-                }
+        var stream = new com.pilot.server.stream.AsyncEventStream(request, response, streamBytes,
+            java.time.Duration.ofMillis(streamTimeout), () -> {
+                var current = subscription.get(); if (current != null) current.close();
+            }, () -> {
+                if (sessions.historyRevision(id) != revision) finish.run();
             });
-            heartbeat.set(beat);
-            if (!closed.get()) beat.start();
-            if (closed.get()) beat.interrupt();
-        } catch (SessionService.HistoryChangedException e) {
-            finish.run();
-        } catch (IOException | RuntimeException e) {
-            closeQuietly(closed, subscription, heartbeat, null);
-            emitter.completeWithError(e);
+        transport.set(stream);
+        if (expectedRevision != null && expectedRevision != revision) {
+            sendControl(stream, "stream.reset", id, Map.of("historyRevision", revision)); stream.finish(); return;
         }
-        return ResponseEntity.ok().header("Cache-Control", "no-cache").header("X-Accel-Buffering", "no").body(emitter);
-    }
-
-    private void sendControl(SseEmitter emitter, String type, String sessionId, long revision) throws IOException {
-        emitter.send(SseEmitter.event().name(type).data(objectMapper.writeValueAsString(
-            Map.of("type", type, "sessionId", sessionId, "payload", Map.of("historyRevision", revision)))));
-    }
-
-    /** @return {@code false} 表示客户端已经断开，调用方应停止推送并注销订阅 */
-    private boolean send(SseEmitter emitter, EventEnvelope envelope) {
+        sendControl(stream, "stream.ready", id, Map.of("historyRevision", revision));
         try {
-            emitter.send(SseEmitter.event().id(Long.toString(envelope.sequence())).name(envelope.type())
-                .data(objectMapper.writeValueAsString(envelope)));
-            return true;
-        } catch (IOException | IllegalStateException e) {
-            // ClientAbortException / AsyncRequestNotUsableException：对端已关闭，静默收尾
-            return false;
+            var handle = sessions.subscribe(id, cursor, revision, envelope -> {
+                if (sessions.historyRevision(id) != revision) { finish.run(); throw new SessionService.HistoryChangedException(); }
+                if (!stream.send(envelope.type(), Long.toString(envelope.sequence()), objectMapper.writeValueAsString(envelope))) {
+                    throw new IllegalStateException("事件流已关闭");
+                }
+            }, protocol >= 2 ? reference -> {
+                if (!sendControl(stream, "stream.event", id, Map.of("sequence", reference.sequence(), "historyRevision", revision))) {
+                    throw new IllegalStateException("事件流已关闭");
+                }
+            } : null, finish);
+            subscription.set(handle);
+            if (stream.isClosed()) handle.close();
+            if (handle.isClosed()) finish.run();
+        } catch (SessionService.HistoryChangedException failure) { finish.run(); }
+        catch (RuntimeException failure) {
+            sendControl(stream, "stream.error", id, Map.of("message", "无法建立事件订阅，请稍后刷新"));
+            stream.finish();
         }
     }
 
-    private static void closeQuietly(AtomicBoolean closed, AtomicReference<EventSubscription> subscription,
-        AtomicReference<Thread> heartbeat, SseEmitter emitter) {
-        if (!closed.compareAndSet(false, true)) {
-            return;
-        }
-        Thread beat = heartbeat.get();
-        if (beat != null) {
-            beat.interrupt();
-        }
-        EventSubscription current = subscription.get();
-        if (current != null) {
-            current.close();
-        }
-        if (emitter != null) {
-            try {
-                emitter.complete();
-            } catch (RuntimeException ignored) {
-                // 连接已经不可用，complete 失败无需处理
-            }
-        }
+    private boolean sendControl(com.pilot.server.stream.AsyncEventStream stream, String type, String id, Map<String, ?> payload) {
+        return stream.send(type, null, objectMapper.writeValueAsString(Map.of("type", type, "sessionId", id, "payload", payload)));
     }
 
     private Session requireSession(String id) {

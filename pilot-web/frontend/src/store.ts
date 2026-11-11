@@ -66,6 +66,7 @@ let stableConnectionTimer: ReturnType<typeof setTimeout> | undefined;
 let streamPaused = false;
 let streamFailures = 0;
 let historyGeneration = 0;
+let streamGeneration = 0;
 let mirrorSource: EventSource | null = null;
 let commandTimer: ReturnType<typeof setTimeout> | undefined;
 let runClockTimer: ReturnType<typeof setTimeout> | undefined;
@@ -140,6 +141,7 @@ function discardQueuedEvents() {
 function recoverEventStream(sessionId: string, reason: string) {
   if (useStore.getState().sessionId !== sessionId || streamPaused) return;
   streamPaused = true;
+  streamGeneration++;
   eventSource?.close();
   eventSource = null;
   clearTimeout(stableConnectionTimer);
@@ -157,6 +159,7 @@ function recoverEventStream(sessionId: string, reason: string) {
 
 /** 历史编辑后重建显示；不重置输入组件或附件草稿。 */
 async function rebuildStreamHistory(sessionId: string) {
+  streamGeneration++;
   const epoch = useStore.getState().sessionEpoch;
   streamPaused = true;
   eventSource?.close(); eventSource = null;
@@ -926,6 +929,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   /* ---------- SSE ---------- */
   connectSse(sessionId, cursor) {
     if (get().sessionId !== sessionId) return;
+    const generation = ++streamGeneration;
     clearTimeout(stableConnectionTimer);
     stableConnectionTimer = undefined;
     if (eventSource) {
@@ -936,7 +940,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     reconnectTimer = undefined;
     streamPaused = false;
     const revision = get().historyRevision;
-    const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/events?after=${cursor}${revision == null ? '' : `&revision=${revision}`}`);
+    const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/events?after=${cursor}${revision == null ? '' : `&revision=${revision}`}&protocol=2`);
     eventSource = source;
     const handle = (message: MessageEvent<string>) => {
       if (eventSource !== source || get().sessionId !== sessionId) return;
@@ -953,6 +957,39 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       source.addEventListener(type, handle);
     }
     source.addEventListener('user.message', handle);
+    source.addEventListener('stream.error', (message: MessageEvent<string>) => {
+      if (eventSource !== source || get().sessionId !== sessionId) return;
+      source.close(); eventSource = null; streamPaused = true;
+      discardQueuedEvents(); clearTimeout(stableConnectionTimer); stableConnectionTimer = undefined;
+      let reason = '事件恢复失败，请刷新后重试';
+      try { reason = JSON.parse(message.data).payload?.message || reason; } catch { /* 使用明确的默认提示 */ }
+      set(draft => { draft.ui.connection = { status: 'error', text: reason }; });
+      get().showNotice(reason);
+    });
+    source.addEventListener('stream.event', async (message: MessageEvent<string>) => {
+      if (eventSource !== source || get().sessionId !== sessionId) return;
+      const epoch = get().sessionEpoch;
+      try {
+        const control = JSON.parse(message.data);
+        const sequence = control.payload?.sequence, revision = control.payload?.historyRevision;
+        if (control.sessionId !== sessionId || !Number.isSafeInteger(sequence) || sequence < 1 || !Number.isSafeInteger(revision)) throw new Error('事件引用无效');
+        get().flushEvents();
+        if (streamPaused) return;
+        source.close(); eventSource = null; streamPaused = true;
+        clearTimeout(stableConnectionTimer); stableConnectionTimer = undefined;
+        const result = requireData(await apiJson<{ event: EventEnvelope; historyRevision: number }>(
+          `/api/sessions/${encodeURIComponent(sessionId)}/events/${sequence}?revision=${revision}`));
+        if (get().sessionId !== sessionId || get().sessionEpoch !== epoch || generation !== streamGeneration) return;
+        if (result.historyRevision !== revision || result.event.sequence !== sequence || result.event.sessionId !== sessionId) throw new Error('事件引用与响应不匹配');
+        streamPaused = false;
+        get().handleEvent(result.event); get().flushEvents();
+        if (!streamPaused) get().connectSse(sessionId, get().thread.cursor);
+      } catch (error) {
+        if (get().sessionId !== sessionId || get().sessionEpoch !== epoch || generation !== streamGeneration) return;
+        streamPaused = false;
+        recoverEventStream(sessionId, '长消息读取失败：' + errorInfo(error).message);
+      }
+    });
     for (const kind of ['stream.ready', 'stream.reset']) {
       source.addEventListener(kind, (message: MessageEvent<string>) => {
         if (eventSource !== source || get().sessionId !== sessionId) return;
@@ -2395,6 +2432,7 @@ function applyAttention(kind: string, title: string) {
 }
 
 function closeStreams() {
+  streamGeneration++;
   historyGeneration++;
   earlierPage = null;
   earlierInflight = null;

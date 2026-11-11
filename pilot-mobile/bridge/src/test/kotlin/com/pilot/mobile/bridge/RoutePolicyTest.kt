@@ -4,6 +4,13 @@ import com.pilot.mobile.transport.Request
 import kotlin.test.*
 
 class RoutePolicyTest {
+    @Test fun `事件版本与长消息引用只开放固定路由和数字参数`() {
+        assertTrue(RoutePolicy.allowed(Request(path = "/api/sessions/s/events?after=2&revision=1&protocol=2")))
+        assertTrue(RoutePolicy.allowed(Request(path = "/api/sessions/s/events/3?revision=1")))
+        for (path in listOf("/api/sessions/s/events/3?revision=bad", "/api/sessions/s/events/../../settings", "/api/sessions/s/events?revision=1&revision=2")) {
+            assertFalse(RoutePolicy.allowed(Request(path = path)))
+        }
+    }
     @Test fun `回执协议只开放设备令牌和确认不开放维护清理`() {
         assertTrue(RoutePolicy.allowed(Request(path = "/api/mobile/receipts/token")))
         assertTrue(RoutePolicy.allowed(Request("POST", "/api/mobile/receipts/ack", "{}")))

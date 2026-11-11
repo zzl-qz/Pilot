@@ -306,3 +306,33 @@ test('历史版本失效会重建显示和续订，保留输入附件草稿并�
     assert.equal(useStore.getState().thread.rows.some(row => row.text === '旧分页' || row.text === '已删消息'), false);
   } finally { fetchHandler = saved; fixture.restore(); }
 });
+
+test('大事件引用获取并应用成功后才推进游标，期间关闭连接避免积压', async () => {
+  const fixture = fakeStreams(); const saved = fetchHandler; const pending = deferred();
+  try {
+    reset(); useStore.setState({ historyRevision: 0 });
+    fetchHandler = url => { assert.match(String(url), /events\/2\?revision=0/); return pending.promise; };
+    useStore.getState().connectSse('s', 0);
+    const source = fixture.streams[0];
+    source.emit({ type: 'run.started', sessionId: 's', sequence: 1, payload: { input: '先应用' } });
+    const operation = source.listeners.get('stream.event')({ data: JSON.stringify({ sessionId: 's', payload: { sequence: 2, historyRevision: 0 } }) });
+    assert.equal(source.closed, true); assert.equal(useStore.getState().thread.cursor, 1);
+    pending.resolve(new Response(JSON.stringify({ historyRevision: 0, event: { type: 'assistant.delta', sequence: 2, sessionId: 's', payload: { text: '长正文' } } })));
+    await operation;
+    assert.equal(useStore.getState().thread.cursor, 2);
+    assert.equal(useStore.getState().thread.rows.at(-1).reply.text, '长正文');
+    assert.match(fixture.streams.at(-1).url, /after=2&revision=0/);
+  } finally { fetchHandler = saved; fixture.restore(); }
+});
+
+test('不可恢复事件明确停止，不依靠反复重连跳过', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] }); const fixture = fakeStreams();
+  try {
+    reset(); useStore.getState().connectSse('s', 0);
+    fixture.streams[0].listeners.get('stream.error')({ data: JSON.stringify({ sessionId: 's', payload: { message: '单条事件过大' } }) });
+    t.mock.timers.tick(60000);
+    assert.equal(fixture.streams.length, 1); assert.equal(fixture.streams[0].closed, true);
+    assert.equal(useStore.getState().thread.cursor, 0);
+    assert.equal(useStore.getState().ui.connection.text, '单条事件过大');
+  } finally { fixture.restore(); }
+});

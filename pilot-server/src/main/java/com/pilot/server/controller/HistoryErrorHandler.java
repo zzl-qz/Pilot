@@ -8,6 +8,10 @@ import com.pilot.core.session.SessionService;
 
 @RestControllerAdvice
 public class HistoryErrorHandler {
+    @ExceptionHandler(com.pilot.core.session.EventTooLargeException.class)
+    public ResponseEntity<Map<String, String>> tooLarge(com.pilot.core.session.EventTooLargeException failure) {
+        return ResponseEntity.status(413).body(Map.of("message", failure.getMessage()));
+    }
     @ExceptionHandler(SessionService.HistoryChangedException.class)
     public ResponseEntity<Map<String, String>> changed(SessionService.HistoryChangedException failure) {
         return ResponseEntity.status(409).body(Map.of("message", failure.getMessage()));

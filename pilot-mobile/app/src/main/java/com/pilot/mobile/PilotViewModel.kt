@@ -112,6 +112,9 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         if (active) restartMonitor() else { monitor?.cancel(); monitor = null; persistDraftSoon(0) }
     }
 
+    private class EventReferenceRequired(val sequence: Long, val revision: Long) : RuntimeException()
+    private class StreamStopped(message: String) : RuntimeException(message)
+
     private fun restartMonitor() {
         monitor?.cancel()
         if (!foreground || client == null) return
@@ -126,6 +129,12 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                         val metadata = launch { while (isActive) { refreshTask(id); delay(5000) } }
                         try {
                             val decoder = SseDecoder { event ->
+                                val payload = event["payload"] as? JsonObject
+                                if (event.text("type") == "stream.error") throw StreamStopped(payload?.text("message") ?: "事件恢复失败，请重新打开会话")
+                                if (event.text("type") == "stream.event") {
+                                    throw EventReferenceRequired(payload?.text("sequence")?.toLongOrNull() ?: error("事件引用无效"),
+                                        payload.text("historyRevision").toLongOrNull() ?: error("历史版本无效"))
+                                }
                                 conversation.accept(event)
                                 if (conversation.needsReplay) {
                                     historyEvents.clear(); historyChars = 0
@@ -136,13 +145,23 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                                 mutable.update { it.copy(rows = conversation.snapshot(), runId = if (event.text("type") in setOf("run.started", "run.continued", "run.completed", "run.failed", "run.cancelled")) conversation.runId else it.runId, phase = conversation.phase.ifBlank { it.phase }, status = client?.pathLabel() ?: "已断开") }
                             }
                             val revision = conversation.historyRevision?.let { "&revision=$it" } ?: ""
-                            val response = client!!.transfer(Request(path = "/api/sessions/$id/events?after=${conversation.cursor}$revision")) { decoder.feed(it) }
+                            val response = client!!.transfer(Request(path = "/api/sessions/$id/events?after=${conversation.cursor}$revision&protocol=2")) { decoder.feed(it) }
                             if (response.status == 401) error("设备授权已失效，请重新配对")
                             require(response.status in 200..299) { "无法读取任务进度（${response.status}）" }
+                        } catch (reference: EventReferenceRequired) {
+                            val value = api(Request(path = "/api/sessions/$id/events/${reference.sequence}?revision=${reference.revision}")).jsonObject
+                            val event = value["event"]?.jsonObject ?: error("事件引用响应无效")
+                            require(event.text("sequence").toLongOrNull() == reference.sequence && value.text("historyRevision").toLongOrNull() == reference.revision) { "事件引用不匹配" }
+                            conversation.accept(event); recordEvent(event, false)
+                            mutable.update { it.copy(rows = conversation.snapshot(), phase = conversation.phase) }
                         } finally { metadata.cancelAndJoin() }
                     }
                     backoff = 1000
                 } catch (e: CancellationException) { throw e }
+                catch (e: StreamStopped) {
+                    mutable.update { it.copy(status = "事件恢复已停止", networkError = e.message ?: "请重新打开会话") }
+                    break
+                }
                 catch (e: Exception) {
                     mutable.update { it.copy(status = "连接中断 · 正在重试",
                         networkError = if (!networkAvailable) "手机网络不可用，恢复后将自动连接。" else e.message ?: "连接失败") }

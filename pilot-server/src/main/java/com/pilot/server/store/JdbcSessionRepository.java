@@ -263,7 +263,9 @@ public final class JdbcSessionRepository implements SessionRepository {
             long bytes = 0;
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    bytes += rows.getLong("bytes");
+                    long rowBytes = rows.getLong("bytes");
+                    if (rowBytes > 8L * 1024 * 1024) throw new com.pilot.core.session.EventTooLargeException();
+                    bytes += rowBytes;
                     if (!page.isEmpty() && bytes > 1024 * 1024) break;
                     page.add(mapEvent(rows, sessionId));
                 }

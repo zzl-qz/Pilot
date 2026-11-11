@@ -13,7 +13,7 @@ object RoutePolicy {
         "GET" to listOf("/api/mobile/receipts/token", "/api/health", "/api/mobile/workbench", "/api/projects", "/api/projects/$ID", "/api/sessions", "/api/approvals",
             "/api/results", "/api/results/$ID", "/api/workspaces/(roots|browse)",
             "/api/sessions/$ID", "/api/sessions/$ID/(history|events|queue|plan|runs/active|products|context|diff)",
-            "/api/sessions/$ID/diff/file", "/api/sessions/$ID/products/$ID/(preview|download)"),
+            "/api/sessions/$ID/events/[0-9]{1,18}", "/api/sessions/$ID/diff/file", "/api/sessions/$ID/products/$ID/(preview|download)"),
         "POST" to listOf("/api/mobile/receipts/ack", "/api/projects", "/api/sessions", "/api/sessions/$ID/(messages|steer|continue)",
             "/api/runs/$ID/(pause|cancel)", "/api/approvals/$ID", "/api/results/$ID/receipt",
             "/api/sessions/$ID/queue/[0-9]{1,4}/(steer|move)"),
@@ -34,7 +34,8 @@ object RoutePolicy {
         val allowedKeys = when {
             uri.path == "/api/mobile/workbench" -> setOf("revision")
             uri.path.endsWith("/history") -> setOf("after", "before", "limit")
-            uri.path.endsWith("/events") -> setOf("after")
+            uri.path.endsWith("/events") -> setOf("after", "revision", "protocol")
+            uri.path.matches(Regex("/api/sessions/$ID/events/[0-9]{1,18}")) -> setOf("revision")
             uri.path.endsWith("/diff/file") || uri.path == "/api/workspaces/browse" -> setOf("path")
             uri.path.matches(Regex("/api/sessions/$ID/queue/[0-9]{1,4}(/move)?")) -> setOf("to", "revision")
             else -> return false
@@ -43,7 +44,8 @@ object RoutePolicy {
         return query.split('&').all { part ->
             val pair = part.split('=', limit = 2)
             if (pair.size != 2 || pair[0] !in allowedKeys || !keys.add(pair[0])) false
-            else if (pair[0] in setOf("after", "before", "limit", "to")) pair[1].matches(Regex("[0-9]{1,18}"))
+            else if (pair[0] in setOf("after", "before", "limit", "to", "protocol")) pair[1].matches(Regex("[0-9]{1,18}"))
+            else if (pair[0] == "revision" && uri.path.contains("/events")) pair[1].matches(Regex("[0-9]{1,18}"))
             else if (uri.path == "/api/mobile/workbench") pair[1].matches(Regex("[a-f0-9]{64}"))
             else runCatching { URLDecoder.decode(pair[1], StandardCharsets.UTF_8).none { it.isISOControl() } }.getOrDefault(false)
         }

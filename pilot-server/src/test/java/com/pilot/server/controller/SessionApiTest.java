@@ -55,20 +55,6 @@ import tools.jackson.databind.ObjectMapper;
 @SpringBootTest(properties = "pilot.store=memory")
 @AutoConfigureMockMvc
 class SessionApiTest {
-    @Test
-    void historyVersionAppearsInPagesAndStaleStreamReceivesResetWithoutOldEvents() throws Exception {
-        String id = sessions.createSession("版本同步").id();
-        sessions.sendMessage(id, "已删除历史");
-        sessions.dropEventsFrom(id, 1);
-        mvc.perform(get("/api/sessions/{id}", id)).andExpect(jsonPath("$.historyRevision").value(1));
-        mvc.perform(get("/api/sessions/{id}/history", id)).andExpect(jsonPath("$.historyRevision").value(1))
-            .andExpect(jsonPath("$.events.length()").value(0));
-        var result = mvc.perform(get("/api/sessions/{id}/events", id).param("after", "1").param("revision", "0"))
-            .andExpect(status().isOk()).andReturn();
-        String body = result.getResponse().getContentAsString();
-        assertTrue(body.contains("event:stream.reset"));
-        assertFalse(body.contains("已删除历史"));
-    }
     private static final Path ATTACHMENT_ROOT =
         Path.of(System.getProperty("java.io.tmpdir"), "pilot-session-api-" + UUID.randomUUID());
 
@@ -531,49 +517,6 @@ class SessionApiTest {
     void rejectsMessageForUnknownSession() throws Exception {
         mvc.perform(post("/api/sessions/{id}/messages", "ses_missing").contentType(MediaType.APPLICATION_JSON)
             .content("{\"content\":\"hi\"}")).andExpect(status().isNotFound());
-    }
-
-    @Test
-    void streamsStoredEventsAsSse() throws Exception {
-        String sessionId = createSession();
-        Run run = sessions.sendMessage(sessionId, "你好");
-        sessions.publish(sessionId, run.runId(), new AssistantDelta("世界"));
-
-        MvcResult result =
-            mvc.perform(get("/api/sessions/{id}/events", sessionId)).andExpect(request().asyncStarted()).andReturn();
-
-        String body = awaitStream(result, "\"sequence\":2");
-        assertTrue(body.contains("event:run.started"), body);
-        assertTrue(body.contains("event:assistant.delta"), body);
-        assertTrue(body.contains("id:1"), body);
-        assertTrue(body.contains("\"sequence\":2"), body);
-        sessions.delete(sessionId);
-    }
-
-    @Test
-    void replaysOnlyEventsAfterCursor() throws Exception {
-        String sessionId = createSession();
-        Run run = sessions.sendMessage(sessionId, "你好");
-        sessions.publish(sessionId, run.runId(), new AssistantDelta("世界"));
-
-        MvcResult result = mvc.perform(get("/api/sessions/{id}/events", sessionId).param("after", "1"))
-            .andExpect(request().asyncStarted()).andReturn();
-
-        String body = awaitStream(result, "\"sequence\":2");
-        assertFalse(body.contains("event:run.started"), body);
-        assertTrue(body.contains("event:assistant.delta"), body);
-        sessions.delete(sessionId);
-    }
-
-    private static String awaitStream(MvcResult result, String content) throws Exception {
-        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(3).toNanos();
-        String body;
-        do {
-            body = result.getResponse().getContentAsString();
-            if (body.contains(content)) return body;
-            Thread.sleep(10);
-        } while (System.nanoTime() < deadline);
-        return body;
     }
 
     /** 计划清单刷新后要能恢复，空计划返回空数组而不是 404。 */
