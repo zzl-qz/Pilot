@@ -234,6 +234,10 @@ public final class SessionService {
         Object lock = lockFor(sessionId);
         synchronized (lock) {
             PendingPreview pending = previews.get(sessionId);
+            // 当前缓冲已经确认过所属运行；旧运行的迟到回调不能刷掉或替换它。
+            if (pending != null && !pending.runId.equals(runId)) {
+                return;
+            }
             if (pending == null) {
                 Session session = repository.find(sessionId).orElse(null);
                 if (session == null) {
@@ -249,7 +253,7 @@ public final class SessionService {
                 }
             }
             previewInputs.incrementAndGet();
-            if (pending != null && (!pending.runId.equals(runId) || pending.type != event.type() || reset)) {
+            if (pending != null && (pending.type != event.type() || reset)) {
                 flushPreview(sessionId, pending);
                 pending = null;
             }

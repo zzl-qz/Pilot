@@ -108,6 +108,32 @@ class LiveOutputTest {
     }
 
     @Test
+    void staleCallbacksCannotReplaceCurrentPendingOutput() throws Exception {
+        var service = service(4096, 8);
+        var id = service.createSession("迟到回调").id();
+        var old = service.sendMessage(id, "旧任务").runId();
+        var current = service.sendMessage(id, "新任务").runId();
+        var events = new CopyOnWriteArrayList<EventEnvelope>();
+        try (var sub = service.subscribe(id, service.latestSequence(id), events::add)) {
+            service.preview(id, current, new AssistantPreview("新"));
+            service.preview(id, old, new AssistantPreview("旧"));
+            service.preview(id, old, AssistantPreview.discarded());
+            service.preview(id, old, new AssistantReasoning("旧推理"));
+            service.preview(id, current, new AssistantPreview("文"));
+            service.publish(id, current, new AssistantDelta("新文"));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (events.stream().noneMatch(e -> e.type().equals("assistant.delta")) && System.nanoTime() < deadline) {
+                Thread.sleep(5);
+            }
+            assertEquals(2, events.size());
+            assertTrue(events.stream().allMatch(e -> e.runId().equals(current)));
+            assertEquals("新文", ((AssistantPreview)events.getFirst().payload()).text());
+        } finally {
+            service.delete(id);
+        }
+    }
+
+    @Test
     void globalCacheExhaustionIsExplicitAndDeletionReleasesIt() throws Exception {
         var service = service(24, 1);
         var a = service.createSession("A").id();
