@@ -9,6 +9,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -85,14 +89,59 @@ class ValidationLedgerTest {
         StorageHealth.reset();
         Path blockedRoot = dataDir.resolve("not-a-directory");
         Files.writeString(blockedRoot, "file");
-        ValidationLedger ledger = new ValidationLedger(new PilotDataDir(blockedRoot.toString()),
-            JsonMapper.builder().build());
+        ValidationLedger ledger =
+            new ValidationLedger(new PilotDataDir(blockedRoot.toString()), JsonMapper.builder().build());
         ledger.record(evidence("hash-a", "passed"));
 
         ValidationLedger.Report report = ledger.report("ses_1", "hash-a");
         assertFalse(report.current());
-        assertTrue(report.reason().contains("内存中"), report.reason());
+        assertTrue(report.reason().contains("未能可靠落盘"), report.reason());
         assertFalse(StorageHealth.snapshot().healthy());
+        StorageHealth.reset();
+    }
+
+    @Test
+    void pendingEvidenceIsUnavailableDuringWriteAndAfterFailure() throws Exception {
+        ValidationLedger previous = ledger();
+        previous.record(evidence("hash-a", "passed"));
+        CountDownLatch serializing = new CountDownLatch(1);
+        CountDownLatch proceed = new CountDownLatch(1);
+        AtomicBoolean fail = new AtomicBoolean(true);
+        JsonMapper controlled = new JsonMapper() {
+            @Override
+            public String writeValueAsString(Object value) {
+                if (fail.get()) {
+                    serializing.countDown();
+                    try {
+                        if (!proceed.await(5, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("等待写入超时");
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(e);
+                    }
+                    throw new IllegalStateException("模拟证据序列化失败");
+                }
+                return super.writeValueAsString(value);
+            }
+        };
+        ValidationLedger writer = new ValidationLedger(new PilotDataDir(dataDir.toString()), controlled);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var recording = executor.submit(() -> writer.record(evidence("hash-a", "failed")));
+            try {
+                assertTrue(serializing.await(5, TimeUnit.SECONDS));
+                assertFalse(writer.report("ses_1", "hash-a").current());
+                assertFalse(ledger().report("ses_1", "hash-a").current());
+            } finally {
+                proceed.countDown();
+            }
+            recording.get(5, TimeUnit.SECONDS);
+        }
+
+        assertFalse(ledger().report("ses_1", "hash-a").current());
+        fail.set(false);
+        writer.record(evidence("hash-a", "passed"));
+        assertTrue(ledger().report("ses_1", "hash-a").current());
         StorageHealth.reset();
     }
 }

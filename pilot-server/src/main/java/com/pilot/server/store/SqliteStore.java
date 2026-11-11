@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import org.slf4j.Logger;
@@ -149,6 +150,7 @@ public final class SqliteStore {
         "CREATE INDEX IF NOT EXISTS idx_tool_observations_session ON tool_observations(session_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_events_result_time ON events(type, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_events_run_sequence ON events(run_id, sequence DESC)",
+        "CREATE TABLE IF NOT EXISTS validation_pending (session_id TEXT PRIMARY KEY)",
         "CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"};
 
     private final String url;
@@ -170,6 +172,22 @@ public final class SqliteStore {
             statement.execute("PRAGMA busy_timeout = 4000");
         }
         return connection;
+    }
+
+    public boolean validationPending(String sessionId) {
+        return JdbcSupport.queryOne(this, "SELECT 1 FROM validation_pending WHERE session_id = ?",
+            statement -> statement.setString(1, sessionId), rows -> true, "读取校验证据待写入状态失败").isPresent();
+    }
+
+    public List<String> pendingValidationSessions() {
+        return JdbcSupport.query(this, "SELECT session_id FROM validation_pending", statement -> {
+        }, rows -> rows.getString(1), "读取校验证据待写入状态失败");
+    }
+
+    public void setValidationPending(String sessionId, boolean pending) {
+        String sql = pending ? "INSERT OR IGNORE INTO validation_pending(session_id) VALUES (?)"
+            : "DELETE FROM validation_pending WHERE session_id = ?";
+        JdbcSupport.update(this, sql, statement -> statement.setString(1, sessionId), "更新校验证据待写入状态失败");
     }
 
     /**
