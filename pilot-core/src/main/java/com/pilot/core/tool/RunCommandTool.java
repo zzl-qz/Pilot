@@ -15,7 +15,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import com.pilot.core.exec.EnvironmentSanitizer;
 import com.pilot.core.exec.OsSandbox;
@@ -333,8 +332,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
                 out.append(' ').append(operators.get(i - 1)).append(' ');
             }
             List<String> tokens = resolved.get(i);
-            out.append(WINDOWS ? "& " + psQuote(tokens.get(0))
-                : tokens.stream().map(CommandChain::quote).collect(Collectors.joining(" ")));
+            out.append(WINDOWS ? "& " + psQuote(tokens.get(0)) : CommandChain.quote(tokens.get(0)));
             for (int j = 1; j < tokens.size(); j++) {
                 out.append(' ').append(WINDOWS ? psQuote(tokens.get(j)) : CommandChain.quote(tokens.get(j)));
             }

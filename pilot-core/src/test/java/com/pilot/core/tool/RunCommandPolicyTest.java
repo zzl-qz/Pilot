@@ -175,6 +175,17 @@ class RunCommandPolicyTest {
     }
 
     @Test
+    void chainedArgumentsAppearExactlyOnceIncludingTailAndQuotedWords() throws Exception {
+        Assumptions.assumeFalse(WINDOWS);
+        Files.writeString(workspace.resolve("a.txt"), "one\ntwo\nthree\n");
+        String piped = tool.execute(Map.of("command", "cat a.txt | tail -n 2"));
+        assertTrue(piped.contains("退出码: 0"), piped);
+        assertEquals("two\nthree", piped.substring(piped.indexOf("输出:\n") + "输出:\n".length()));
+        String sequence = tool.execute(Map.of("command", "echo 'a b' && echo 'c;d'"));
+        assertEquals("a b\nc;d", sequence.substring(sequence.indexOf("输出:\n") + "输出:\n".length()));
+    }
+
+    @Test
     void chainedWordsAreNeverExpandedByTheShell() throws Exception {
         Assumptions.assumeFalse(WINDOWS);
         Files.writeString(workspace.resolve("a.txt"), "x");
