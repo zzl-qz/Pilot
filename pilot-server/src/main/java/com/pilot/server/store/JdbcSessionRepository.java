@@ -22,6 +22,8 @@ public final class JdbcSessionRepository implements SessionRepository {
     private static final int WRITE_ATTEMPTS = 3;
     private static final String COLUMNS =
         "id, title, workspace, created_at, status, project_id, is_blank, archived, parent_session_id, updated_at, pinned, unread, title_manual";
+    private static final String UPDATED_AT = SqliteStore.normalizedInstantSql("updated_at");
+    private static final String ACTIVITY_ORDER = " ORDER BY pinned DESC, " + UPDATED_AT + " DESC, id";
 
     private final SqliteStore store;
     private final EventCodec codec;
@@ -77,9 +79,8 @@ public final class JdbcSessionRepository implements SessionRepository {
 
     @Override
     public List<Session> list() {
-        return JdbcSupport.query(store,
-            "SELECT " + COLUMNS + " FROM sessions ORDER BY pinned DESC, julianday(updated_at) DESC, id", statement -> {
-            }, JdbcSessionRepository::map, "读取会话列表失败");
+        return JdbcSupport.query(store, "SELECT " + COLUMNS + " FROM sessions" + ACTIVITY_ORDER, statement -> {
+        }, JdbcSessionRepository::map, "读取会话列表失败");
     }
 
     @Override
@@ -87,14 +88,10 @@ public final class JdbcSessionRepository implements SessionRepository {
         if (projectId == null) {
             // 未分组的历史会话：project_id 为空
             return JdbcSupport.query(store,
-                "SELECT " + COLUMNS
-                    + " FROM sessions WHERE project_id IS NULL ORDER BY pinned DESC, julianday(updated_at) DESC, id",
-                statement -> {
+                "SELECT " + COLUMNS + " FROM sessions WHERE project_id IS NULL" + ACTIVITY_ORDER, statement -> {
                 }, JdbcSessionRepository::map, "读取未分组会话失败");
         }
-        return JdbcSupport.query(store,
-            "SELECT " + COLUMNS
-                + " FROM sessions WHERE project_id = ? ORDER BY pinned DESC, julianday(updated_at) DESC, id",
+        return JdbcSupport.query(store, "SELECT " + COLUMNS + " FROM sessions WHERE project_id = ?" + ACTIVITY_ORDER,
             statement -> statement.setString(1, projectId), JdbcSessionRepository::map, "读取项目会话失败: " + projectId);
     }
 
@@ -144,11 +141,11 @@ public final class JdbcSessionRepository implements SessionRepository {
 
     @Override
     public boolean touch(String sessionId, Instant timestamp) {
-        return JdbcSupport.update(store,
-            "UPDATE sessions SET updated_at = ? WHERE id = ? AND julianday(updated_at) <= julianday(?)", statement -> {
+        return JdbcSupport.update(store, "UPDATE sessions SET updated_at = ? WHERE id = ? AND " + UPDATED_AT + " <= ?",
+            statement -> {
                 statement.setString(1, timestamp.toString());
                 statement.setString(2, sessionId);
-                statement.setString(3, timestamp.toString());
+                statement.setString(3, SqliteStore.canonicalInstant(timestamp));
             }, "更新会话活动时间失败: " + sessionId) > 0;
     }
 
@@ -245,8 +242,8 @@ public final class JdbcSessionRepository implements SessionRepository {
             + "WHERE type = ? AND " + createdAt + " >= ? ORDER BY " + createdAt + ", session_id, sequence";
         try (Connection connection = store.open(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, type);
-            statement.setString(2, new java.time.format.DateTimeFormatterBuilder().appendInstant(9).toFormatter()
-                .format(since));
+            statement.setString(2,
+                new java.time.format.DateTimeFormatterBuilder().appendInstant(9).toFormatter().format(since));
             ArrayList<EventEnvelope> result = new ArrayList<EventEnvelope>();
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
@@ -296,11 +293,11 @@ public final class JdbcSessionRepository implements SessionRepository {
                 // 一条 UPDATE ... RETURNING 同时完成「序号自增」和「读回新序号」，
                 // 比 UPDATE + SELECT 少一次往返，也少一次 BUSY 窗口。
                 long sequence;
-                try (PreparedStatement bump =
-                    connection.prepareStatement("UPDATE sessions SET sequence = sequence + 1, status = ?, updated_at = "
-                        + "CASE WHEN julianday(updated_at) > julianday(?) THEN updated_at ELSE ? END WHERE id = ? RETURNING sequence")) {
+                try (PreparedStatement bump = connection.prepareStatement(
+                    "UPDATE sessions SET sequence = sequence + 1, status = ?, updated_at = " + "CASE WHEN " + UPDATED_AT
+                        + " > ? THEN updated_at ELSE ? END WHERE id = ? RETURNING sequence")) {
                     bump.setString(1, status.name());
-                    bump.setString(2, timestamp.toString());
+                    bump.setString(2, SqliteStore.canonicalInstant(timestamp));
                     bump.setString(3, timestamp.toString());
                     bump.setString(4, sessionId);
                     try (ResultSet rows = bump.executeQuery()) {

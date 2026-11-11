@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
@@ -18,9 +19,9 @@ import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.session.NoSuchSessionException;
+import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionStatus;
-import com.pilot.core.session.RunCheckpoint;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -111,6 +112,21 @@ class JdbcSessionRepositoryTest {
     }
 
     @Test
+    void sessionActivityDoesNotRoundAwayFractionalTime() {
+        Instant earlier = Instant.parse("2026-01-01T00:00:00.500Z");
+        Instant later = earlier.plusNanos(1_000);
+        repository.create("ses_a", "旧", null, earlier);
+        repository.create("ses_b", "新", null, later);
+
+        assertEquals(List.of("ses_b", "ses_a"), repository.list().stream().map(Session::id).toList());
+        assertEquals(List.of("ses_b", "ses_a"), repository.listByProject(null).stream().map(Session::id).toList());
+        assertFalse(repository.touch("ses_b", earlier));
+        repository.append("ses_b", "run", earlier, new RunStarted("迟到事件"), SessionStatus.RUNNING);
+        assertEquals(later, repository.find("ses_b").orElseThrow().updatedAt());
+        assertTrue(repository.touch("ses_b", later.plusNanos(1)));
+    }
+
+    @Test
     void pagesEventsFromTheTailWithoutLoadingEverything() {
         repository.create("ses_1", "分页", null, Instant.now());
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
@@ -169,7 +185,7 @@ class JdbcSessionRepositoryTest {
         repo.append("ses_time", "run_active", Instant.parse("2020-01-01T00:00:00Z"), new RunStarted("活动"),
             SessionStatus.RUNNING);
         new JdbcRunCheckpointRepository(store).save(RunCheckpoint.start("run_active", "ses_time", "/work", "owner",
-            Instant.parse("2020-01-01T00:00:00Z"), java.time.Duration.ofSeconds(30)));
+            Instant.parse("2020-01-01T00:00:00Z"), Duration.ofSeconds(30)));
         assertEquals(0, store.deleteEventsBefore(Instant.parse("2021-01-01T00:00:00Z")));
     }
 

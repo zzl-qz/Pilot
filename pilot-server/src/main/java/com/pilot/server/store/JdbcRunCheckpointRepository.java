@@ -91,7 +91,7 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
             UPDATE run_checkpoints
                SET owner = ?, lease_expires_at = ?, heartbeat_at = ?, updated_at = ?
              WHERE run_id = ?
-               AND (owner IS NULL OR owner = ? OR lease_expires_at IS NULL OR %s < ?)
+               AND (owner IS NULL OR owner = ? OR lease_expires_at IS NULL OR %s <= ?)
             """.formatted(leaseExpiry), statement -> {
             statement.setString(1, owner);
             statement.setString(2, at.plus(span).toString());
@@ -99,7 +99,7 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
             statement.setString(4, at.toString());
             statement.setString(5, runId);
             statement.setString(6, owner);
-            statement.setString(7, at.toString());
+            statement.setString(7, SqliteStore.canonicalInstant(at));
         }, "抢占运行租约失败: " + runId);
         return updated > 0;
     }

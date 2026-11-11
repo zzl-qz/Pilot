@@ -75,7 +75,7 @@ public class ResultInboxRepository {
             AND %s >= ?
             ORDER BY %s DESC, session_id, sequence DESC LIMIT ?
             """.formatted(sessionCreatedAt, createdAt, createdAt), q -> {
-            q.setString(1, new java.time.format.DateTimeFormatterBuilder().appendInstant(9).toFormatter().format(since));
+            q.setString(1, SqliteStore.canonicalInstant(since));
             q.setInt(2, limit);
         }, row -> new EventEnvelope(row.getLong("sequence"), Instant.parse(row.getString("created_at")),
             row.getString("type"), row.getString("session_id"), row.getString("run_id"),

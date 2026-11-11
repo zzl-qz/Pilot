@@ -70,6 +70,19 @@ class JdbcRunCheckpointRepositoryTest {
     }
 
     @Test
+    void leaseCanBeClaimedAtExpiryButNeverBefore() {
+        JdbcRunCheckpointRepository repository = repository();
+        Instant now = Instant.parse("2026-01-01T00:00:00.500Z");
+        for (long nanos : List.of(1L, 1_000L, 500_000_000L)) {
+            repository.save(checkpoint("run", "session", "a", now, Duration.ofNanos(nanos)));
+            Instant expires = now.plusNanos(nanos);
+            assertFalse(repository.claimLease("run", "b", now, Duration.ofSeconds(30)));
+            assertFalse(repository.claimLease("run", "b", expires.minusNanos(1), Duration.ofSeconds(30)));
+            assertTrue(repository.claimLease("run", "b", expires, Duration.ofSeconds(30)));
+        }
+    }
+
+    @Test
     void renewOnlyWorksForTheHolder() {
         JdbcRunCheckpointRepository repository = repository();
         Instant now = Instant.now();

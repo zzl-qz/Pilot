@@ -9,6 +9,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.util.HashSet;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +25,8 @@ import org.slf4j.LoggerFactory;
  */
 public final class SqliteStore {
     private static final Logger log = LoggerFactory.getLogger(SqliteStore.class);
+    private static final DateTimeFormatter INSTANT_FORMAT =
+        new DateTimeFormatterBuilder().appendInstant(9).toFormatter();
 
     private static final String[] SCHEMA = {
         "CREATE TABLE IF NOT EXISTS automation_documents (kind TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(kind,id))",
@@ -185,29 +191,29 @@ public final class SqliteStore {
         }
     }
 
-    public java.util.Set<String> activeRunIds() {
+    public Set<String> activeRunIds() {
         try (Connection connection = open(); Statement statement = connection.createStatement();
             ResultSet rows = statement.executeQuery(
                 "SELECT run_id FROM run_checkpoints WHERE status IN ('RUNNING','INTERRUPTED','PAUSED')")) {
-            java.util.Set<String> ids = new java.util.HashSet<>();
+            Set<String> ids = new HashSet<>();
             while (rows.next()) {
                 ids.add(rows.getString(1));
             }
-            return java.util.Set.copyOf(ids);
+            return Set.copyOf(ids);
         } catch (SQLException e) {
             throw new IllegalStateException("读取可恢复运行失败", e);
         }
     }
 
-    public java.util.Set<String> activeSessionIds() {
+    public Set<String> activeSessionIds() {
         try (Connection connection = open(); Statement statement = connection.createStatement();
             ResultSet rows = statement.executeQuery(
                 "SELECT DISTINCT session_id FROM run_checkpoints WHERE status IN ('RUNNING','INTERRUPTED','PAUSED')")) {
-            java.util.Set<String> ids = new java.util.HashSet<>();
+            Set<String> ids = new HashSet<>();
             while (rows.next()) {
                 ids.add(rows.getString(1));
             }
-            return java.util.Set.copyOf(ids);
+            return Set.copyOf(ids);
         } catch (SQLException e) {
             throw new IllegalStateException("读取可恢复会话失败", e);
         }
@@ -215,14 +221,13 @@ public final class SqliteStore {
 
     /** Normalize legacy Instant text with variable fractional precision for lexical SQL comparison. */
     public static String normalizedInstantSql(String column) {
-        String fraction = "CASE WHEN instr(" + column + ",'.') = 0 THEN '' ELSE substr(" + column
-            + ",instr(" + column + ",'.') + 1,instr(" + column + ",'Z') - instr(" + column + ",'.') - 1) END";
-        return "(substr(" + column + ",1,19) || '.' || substr((" + fraction
-            + ") || '000000000',1,9) || 'Z')";
+        String fraction = "CASE WHEN instr(" + column + ",'.') = 0 THEN '' ELSE substr(" + column + ",instr(" + column
+            + ",'.') + 1,instr(" + column + ",'Z') - instr(" + column + ",'.') - 1) END";
+        return "(substr(" + column + ",1,19) || '.' || substr((" + fraction + ") || '000000000',1,9) || 'Z')";
     }
 
-    private static String canonicalInstant(Instant instant) {
-        return new java.time.format.DateTimeFormatterBuilder().appendInstant(9).toFormatter().format(instant);
+    static String canonicalInstant(Instant instant) {
+        return INSTANT_FORMAT.format(instant);
     }
 
     /** 收缩 WAL：删除大量行之后，把日志文件截回去，避免磁盘只涨不落。 */
@@ -264,10 +269,13 @@ public final class SqliteStore {
         statement.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, created_at)");
         // 按父会话找侧边对话（关闭父对话时一并清理）走这条索引
         statement.execute("CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)");
-        statement.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(pinned DESC, julianday(updated_at) DESC, id)");
-        statement.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sessions_project_activity ON sessions(project_id, pinned DESC, julianday(updated_at) DESC, id)");
+        statement.execute("DROP INDEX IF EXISTS idx_sessions_activity");
+        statement.execute("DROP INDEX IF EXISTS idx_sessions_project_activity");
+        String activityOrder = "pinned DESC, " + normalizedInstantSql("updated_at") + " DESC, id";
+        statement
+            .execute("CREATE INDEX IF NOT EXISTS idx_sessions_activity_instant ON sessions(" + activityOrder + ")");
+        statement.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project_activity_instant ON sessions(project_id, "
+            + activityOrder + ")");
         initializeSearch(statement);
         // 记录结构版本，供数据迁移与备份恢复核对；写不进去不影响运行
         statement.execute("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '5')");
