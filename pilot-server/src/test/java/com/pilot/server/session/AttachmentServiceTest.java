@@ -28,6 +28,18 @@ class AttachmentServiceTest {
     Path root;
 
     @Test
+    void rejectsMissingImageBytesBeforeSavingOtherFilesOrReturningInvalidPositions() {
+        AttachmentService service = new AttachmentService(root);
+        for (String missing : new String[] {null, "", "  "}) {
+            var image = new AttachmentService.Inbound("empty.png", "image/png", missing);
+            var text = new AttachmentService.Inbound("valid.txt", "text/plain", base64("valid"));
+            assertThrows(IllegalArgumentException.class,
+                () -> service.prepare("invalid", "说明", List.of(image, text), List.of(0)));
+            assertFalse(Files.exists(service.sessionDir("invalid")));
+        }
+    }
+
+    @Test
     void enforcesMobileFileCountAndSmallerConfiguredBudgets() {
         AttachmentService service = new AttachmentService(root);
         var item = new AttachmentService.Inbound("a.txt", "text/plain", base64("a"));

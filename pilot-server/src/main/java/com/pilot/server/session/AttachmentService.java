@@ -182,7 +182,7 @@ public class AttachmentService {
         long total = 0;
         for (Inbound item : inbound) {
             if (item == null || item.dataBase64() == null) {
-                continue;
+                throw new IllegalArgumentException("附件缺少文件内容");
             }
             String raw = item.dataBase64();
             if (raw.length() > maxEncodedFileChars) {
@@ -190,7 +190,7 @@ public class AttachmentService {
             }
             raw = raw.strip();
             if (raw.isEmpty()) {
-                continue;
+                throw new IllegalArgumentException("附件「" + item.name() + "」内容为空");
             }
             if (raw.startsWith("data:")) {
                 int comma = raw.indexOf(',');
