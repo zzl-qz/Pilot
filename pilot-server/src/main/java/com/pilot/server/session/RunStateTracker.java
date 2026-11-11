@@ -29,6 +29,7 @@ import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunCheckpointRepository;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.DataMaintenance;
+import com.pilot.server.maintenance.StorageHealth;
 
 /**
  * 把运行推进过程写成可恢复的调度状态，并用租约防止重复接管。
@@ -80,12 +81,13 @@ public class RunStateTracker {
         try {
             repository.save(RunCheckpoint.start(runId, sessionId, workspace, instanceId, now, LEASE));
             if (!repository.claimLease(runId, instanceId, now, LEASE)) {
+                lostLeases.put(runId, "运行租约已由其他实例持有");
                 log.warn("运行 {} 的租约被其他实例持有，本实例不会把它当成独占运行", runId);
+                return;
             }
             activeRuns.put(runId, sessionId);
         } catch (RuntimeException e) {
-            // 检查点写不进去不能拦住任务本身，但必须留下痕迹，诊断信息会显示存储降级
-            log.warn("写入运行检查点失败：session={}, run={}", sessionId, runId, e);
+            persistenceFailure(runId, "写入运行检查点失败", e);
         }
     }
 
@@ -130,7 +132,7 @@ public class RunStateTracker {
                 repository.save(updated);
             }
         } catch (RuntimeException e) {
-            log.debug("更新运行检查点失败：session={}, run={}", sessionId, runId, e);
+            persistenceFailure(runId, "更新运行检查点失败", e);
         }
     }
 
@@ -140,7 +142,7 @@ public class RunStateTracker {
         try {
             repository.releaseLease(runId, terminalStatus(status), Instant.now());
         } catch (RuntimeException e) {
-            log.warn("释放运行租约失败：session={}, run={}", sessionId, runId, e);
+            persistenceFailure(runId, "释放运行租约失败", e);
         }
     }
 
@@ -148,6 +150,7 @@ public class RunStateTracker {
         try {
             return repository.activeForSession(sessionId);
         } catch (RuntimeException e) {
+            persistenceFailure(null, "读取会话检查点失败", e);
             return Optional.empty();
         }
     }
@@ -161,6 +164,7 @@ public class RunStateTracker {
         try {
             return repository.find(runId);
         } catch (RuntimeException e) {
+            persistenceFailure(runId, "读取运行检查点失败", e);
             return Optional.empty();
         }
     }
@@ -169,7 +173,7 @@ public class RunStateTracker {
         try {
             return repository.resumable();
         } catch (RuntimeException e) {
-            log.warn("读取可恢复检查点失败", e);
+            persistenceFailure(null, "读取可恢复检查点失败", e);
             return List.of();
         }
     }
@@ -204,6 +208,7 @@ public class RunStateTracker {
                 leaseState = leasedByOther ? "上一个租约属于其他实例（" + checkpoint.owner() + "），已收敛为中断" : "已释放本机遗留租约";
             } catch (RuntimeException e) {
                 leaseState = "租约收敛失败：" + e.getMessage();
+                persistenceFailure(checkpoint.runId(), "收敛运行租约失败", e);
             }
             if (alreadyConverged) {
                 continue;
@@ -236,10 +241,17 @@ public class RunStateTracker {
                     log.error("运行 {} 的租约已丢失，停止把本实例状态当成权威", runId);
                 }
             } catch (RuntimeException e) {
-                lostLeases.put(runId, "续租失败：" + e.getMessage());
-                log.warn("运行 {} 续租失败", runId, e);
+                persistenceFailure(runId, "续租失败", e);
             }
         }
+    }
+
+    private void persistenceFailure(String runId, String action, RuntimeException cause) {
+        if (runId != null) {
+            lostLeases.put(runId, action);
+        }
+        StorageHealth.markDegraded("run-checkpoint", runId == null ? action : action + "：" + runId);
+        log.warn("{}，运行 {}", action, runId, cause);
     }
 
     private static boolean affectsCheckpoint(SessionEvent event) {

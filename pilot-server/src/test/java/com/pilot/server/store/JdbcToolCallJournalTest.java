@@ -1,6 +1,7 @@
 package com.pilot.server.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.pilot.core.tool.ReadToolOutputTool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolCallJournal;
+import com.pilot.server.maintenance.StorageHealth;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -48,6 +50,27 @@ class JdbcToolCallJournalTest {
         assertTrue(recorded.replayable());
         assertEquals("已写入 a.txt", recorded.result());
         assertEquals(List.of("a.txt"), recorded.changedPaths());
+    }
+
+    @Test
+    void verifiesBinaryWritesAndReportsCorruptJournalMetadata() throws Exception {
+        Path file = Files.write(dir.resolve("a.txt"), new byte[] {(byte)0xff, 0});
+        JdbcToolCallJournal journal = journal(dir);
+        ToolCall call = call("binary");
+        journal.record("run_1", call, "已写入", List.of("a.txt"), List.of(), true);
+        assertTrue(journal.replay("run_1", call).isPresent());
+        Files.write(file, new byte[] {(byte)0xfe, 0});
+        assertTrue(journal.replay("run_1", call).isEmpty());
+        try (var connection = new SqliteStore(dir.resolve("pilot.db")).open(); var sql = connection.createStatement()) {
+            sql.executeUpdate("UPDATE tool_call_journal SET changed_paths = 'invalid json'");
+        }
+        try {
+            assertThrows(IllegalStateException.class, () -> journal.replay("run_1", call));
+            assertTrue(
+                StorageHealth.snapshot().issues().stream().anyMatch(issue -> issue.area().equals("tool-journal")));
+        } finally {
+            StorageHealth.reset();
+        }
     }
 
     @Test

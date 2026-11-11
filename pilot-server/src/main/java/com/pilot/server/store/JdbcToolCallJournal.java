@@ -1,18 +1,25 @@
 package com.pilot.server.store;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.io.OutputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolCallJournal;
+import com.pilot.server.maintenance.StorageHealth;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -41,18 +48,27 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
     @Override
     public Optional<Recorded> replay(String runId, ToolCall call) {
         String fingerprint = ToolCallJournal.fingerprint(call);
-        Optional<Row> row = JdbcSupport.queryOne(store,
-            "SELECT * FROM tool_call_journal WHERE run_id = ? AND fingerprint = ?", statement -> {
+        Optional<Row> row = queryOne(
+            "SELECT * FROM tool_call_journal WHERE run_id = ? AND fingerprint = ? AND session_id = ?", statement -> {
                 statement.setString(1, runId);
                 statement.setString(2, fingerprint);
+                statement.setString(3, sessionId);
             }, rows -> new Row(rows.getString("result"), rows.getString("changed_paths"), rows.getString("checks"),
                 rows.getString("post_hash")),
             "读取工具调用账本失败");
-        if (row.isEmpty() || !row.get().postHash().equals(postHash(paths(row.get())))) {
+        if (row.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(new Recorded(row.get().result(), paths(row.get()), checks(row.get()), fingerprint,
-            row.get().postHash(), true));
+        Row saved = row.get();
+        List<String> paths = read(saved.changedPaths());
+        if (paths.isEmpty() || saved.postHash() == null) {
+            throw unavailable("工具调用账本缺少文件核对依据", null);
+        }
+        if (!Objects.equals(saved.postHash(), postHash(paths))) {
+            return Optional.empty();
+        }
+        return Optional
+            .of(new Recorded(saved.result(), paths, read(saved.checks()), fingerprint, saved.postHash(), true));
     }
 
     @Override
@@ -62,13 +78,14 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
             return;
         }
         String fingerprint = ToolCallJournal.fingerprint(call);
-        JdbcSupport.update(store, """
+        update("""
             INSERT INTO tool_call_journal
                 (run_id, session_id, fingerprint, tool, result, changed_paths, checks, post_hash, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id, fingerprint) DO UPDATE SET
                 result = excluded.result, changed_paths = excluded.changed_paths,
                 checks = excluded.checks, post_hash = excluded.post_hash
+            WHERE tool_call_journal.session_id = excluded.session_id
             """, statement -> {
             statement.setString(1, runId);
             statement.setString(2, sessionId);
@@ -88,7 +105,7 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
             || result.length() > MAX_OBSERVATION_CHARS) {
             return;
         }
-        JdbcSupport.update(store, """
+        update("""
             INSERT INTO tool_observations(run_id, session_id, call_id, fingerprint, tool, result, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id, call_id) DO NOTHING
@@ -105,8 +122,8 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
 
     @Override
     public Optional<String> observation(String runId, String callId) {
-        return JdbcSupport.queryOne(store,
-            "SELECT result FROM tool_observations WHERE run_id = ? AND call_id = ? AND session_id = ?", statement -> {
+        return queryOne("SELECT result FROM tool_observations WHERE run_id = ? AND call_id = ? AND session_id = ?",
+            statement -> {
                 statement.setString(1, runId);
                 statement.setString(2, callId);
                 statement.setString(3, sessionId);
@@ -115,9 +132,9 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
 
     @Override
     public int deleteBySession(String sessionId) {
-        int observations = JdbcSupport.update(store, "DELETE FROM tool_observations WHERE session_id = ?",
+        int observations = update("DELETE FROM tool_observations WHERE session_id = ?",
             statement -> statement.setString(1, sessionId), "删除工具观察记录失败: " + sessionId);
-        return observations + JdbcSupport.update(store, "DELETE FROM tool_call_journal WHERE session_id = ?",
+        return observations + update("DELETE FROM tool_call_journal WHERE session_id = ?",
             statement -> statement.setString(1, sessionId), "删除工具调用账本失败: " + sessionId);
     }
 
@@ -133,41 +150,32 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
 
     private String currentHash(String relative) {
         if (workspace == null) {
-            return "UNKNOWN";
-        }
-        Path file;
-        try {
-            file = workspace.resolve(relative).normalize();
-        } catch (RuntimeException e) {
-            return "INVALID";
-        }
-        if (!file.startsWith(workspace)) {
-            return "OUTSIDE";
-        }
-        if (!Files.isRegularFile(file)) {
-            return "DELETED";
+            throw unavailable("工具调用账本缺少工作区", null);
         }
         try {
-            return DiffSandbox.fingerprint(Files.readString(file, StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            return "UNREADABLE";
+            Path file = workspace.resolve(relative).normalize();
+            if (!file.startsWith(workspace)) {
+                throw new IOException("文件路径越出工作区");
+            }
+            if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) {
+                return "DELETED";
+            }
+            if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+                || !file.toRealPath().startsWith(workspace.toRealPath())) {
+                throw new IOException("文件无法可靠读取");
+            }
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (var input = new DigestInputStream(Files.newInputStream(file), digest)) {
+                input.transferTo(OutputStream.nullOutputStream());
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (IOException | NoSuchAlgorithmException | RuntimeException e) {
+            throw unavailable("无法核对工具调用涉及的文件", e);
         }
     }
 
     private String write(List<String> values) {
-        try {
-            return mapper.writeValueAsString(values == null ? List.of() : values);
-        } catch (RuntimeException e) {
-            return "[]";
-        }
-    }
-
-    private List<String> paths(Row row) {
-        return read(row.changedPaths());
-    }
-
-    private List<String> checks(Row row) {
-        return read(row.checks());
+        return mapper.writeValueAsString(values == null ? List.of() : values);
     }
 
     private List<String> read(String json) {
@@ -179,8 +187,30 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
             return values == null ? List.of()
                 : Arrays.stream(values).filter(value -> value != null && !value.isBlank()).toList();
         } catch (RuntimeException e) {
-            return List.of();
+            throw unavailable("工具调用账本内容损坏", e);
         }
+    }
+
+    private int update(String sql, JdbcSupport.Binder binder, String failure) {
+        try {
+            return JdbcSupport.update(store, sql, binder, failure);
+        } catch (RuntimeException e) {
+            throw unavailable(failure, e);
+        }
+    }
+
+    private <T> Optional<T> queryOne(String sql, JdbcSupport.Binder binder, JdbcSupport.RowMapper<T> mapper,
+        String failure) {
+        try {
+            return JdbcSupport.queryOne(store, sql, binder, mapper, failure);
+        } catch (RuntimeException e) {
+            throw unavailable(failure, e);
+        }
+    }
+
+    private IllegalStateException unavailable(String message, Exception cause) {
+        StorageHealth.markDegraded("tool-journal", message + "（" + sessionId + "）");
+        return new IllegalStateException(message, cause);
     }
 
     private record Row(String result, String changedPaths, String checks, String postHash) {

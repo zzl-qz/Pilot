@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -18,8 +21,24 @@ import com.pilot.core.event.ToolStarted;
 import com.pilot.core.session.InMemoryRunCheckpointRepository;
 import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunCheckpointRepository;
+import com.pilot.server.maintenance.StorageHealth;
 
 class RunStateTrackerTest {
+
+    @Test
+    void failedCheckpointWriteMarksTheRunUnreliableAndReportsDegradation() {
+        RunCheckpointRepository repository = mock(RunCheckpointRepository.class);
+        doThrow(new IllegalStateException("模拟数据库写入失败")).when(repository).save(any());
+        RunStateTracker tracker = new RunStateTracker(repository, "instance");
+        try {
+            tracker.begin("session", "run", "/work");
+            assertTrue(tracker.leaseLost("run"));
+            assertTrue(StorageHealth.snapshot().issues().stream()
+                .anyMatch(issue -> issue.area().equals("run-checkpoint") && issue.reason().contains("run")));
+        } finally {
+            StorageHealth.reset();
+        }
+    }
 
     private static ToolCompleted completed(String callId) {
         return new ToolCompleted(callId, "工具 write_file 成功：已写入 src/A.java", 12);

@@ -744,7 +744,7 @@ public class AgentRunService implements RunStarter {
             status = execute(sessionId, runId, input, attachments, imagePositions, handle, continuation);
             captureResult(sessionId, runId);
             resultCaptured = true;
-            continued = maybeAutoContinue(sessionId, status, handle);
+            continued = maybeAutoContinue(sessionId, runId, status, handle);
         } catch (RuntimeException e) {
             log.error("Run {} 收尾失败", runId, e);
             taskControls.status(sessionId, "FAILED");
@@ -889,8 +889,9 @@ public class AgentRunService implements RunStarter {
      *
      * <p>两道刹车：最多连续 {@value #MAX_AUTO_CONTINUE} 次；计划状态连续两轮没有变化即视为卡住，停下等人工介入。
      */
-    private boolean maybeAutoContinue(String sessionId, String status, RunHandle handle) {
-        if (!"MAX_STEPS".equals(status) || handle.cancelled.get()) {
+    private boolean maybeAutoContinue(String sessionId, String finishedRunId, String status, RunHandle handle) {
+        if (!"MAX_STEPS".equals(status) || handle.cancelled.get()
+            || runStates != null && runStates.leaseLost(finishedRunId)) {
             autoContinueAttempts.remove(sessionId);
             autoContinueSignature.remove(sessionId);
             return false;
