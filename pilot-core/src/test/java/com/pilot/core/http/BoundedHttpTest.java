@@ -22,6 +22,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
 import com.sun.net.httpserver.HttpHandler;
@@ -74,6 +75,18 @@ class BoundedHttpTest {
         })) {
             assertThrows(HttpTimeoutException.class,
                 () -> server.text(Duration.ofMillis(200), Duration.ofSeconds(2), 1024));
+        }
+    }
+
+    @RepeatedTest(5)
+    void idleTimeoutBeforeHeadersKeepsItsClassificationWhenTheRequestIsCancelled() throws Exception {
+        try (Endpoint server = new Endpoint(exchange -> {
+            sleep(1500);
+            exchange.close();
+        })) {
+            var failure = assertThrows(HttpTimeoutException.class,
+                () -> server.text(Duration.ofSeconds(3), Duration.ofMillis(50), 1024));
+            assertTrue(failure.getMessage().contains("空闲超时"));
         }
     }
 

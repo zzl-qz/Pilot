@@ -136,6 +136,9 @@ public final class BoundedHttp {
             try {
                 value = pending.get();
             } catch (ExecutionException e) {
+                // JDK 取消可能直接抛 CancellationException，也可能包在 ExecutionException 中。
+                // 自己触发的超时优先，不能因线程竞态被改写成普通网络错误。
+                checkFailure();
                 if (e.getCause() instanceof IOException io) {
                     throw io;
                 }
@@ -219,7 +222,7 @@ public final class BoundedHttp {
 
         private void expire(String message) {
             synchronized (this) {
-                if (closed) {
+                if (closed || failure != null) {
                     return;
                 }
                 failure = new HttpTimeoutException(message);
