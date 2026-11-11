@@ -41,7 +41,20 @@ test('未知结果跨刷新保留，连续点击不会重新申请凭据或重�
   assert.equal(f.calls.length,1);
   f.client.submissionResult = async () => ({state:'accepted'});
   assert.equal((await reopened.check(reopened.pending('s')[0])).state,'accepted');
-  assert.equal(f.calls.length,1); assert.equal(f.data.size,0);
+  assert.equal(f.calls.length,1); assert.equal(f.manager.pending('s').length,0);
+});
+test('回执确认失败跨刷新保留确认凭据，重新联网只重试确认而不执行消息', async () => {
+  const f=fixture();let acknowledgments=0;
+  f.client.acknowledgeSubmission=async()=>{acknowledgments++;throw Error('确认丢包');};
+  assert.equal((await f.manager.submit('s',{content:'任务'},()=>true)).state,'accepted');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.data.size,1);assert.equal(f.manager.pending('s').length,0);
+  await new Promise(resolve=>setImmediate(resolve));
+  f.client.acknowledgeSubmission=async()=>{acknowledgments++;};
+  const reopened=createSubmissions(f.client,()=>f.storage);
+  assert.equal(reopened.pending('another-session').length,0);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.data.size,0);assert.equal(f.calls.length,1);assert.ok(acknowledgments>=2);
 });
 test('明确 4xx 拒绝允许修改后新提交；未知 409 与 5xx 保留凭据', async () => {
   for (const [error, expected] of [[new ApiError('校验失败',400),'rejected'],[new ApiError('执行中',409,true),'unknown'],[new ApiError('磁盘失败',507),'unknown']]) {
@@ -79,5 +92,5 @@ test('查询失败、空响应和确认回执失败均不会自动重做任务',
   f.client.submissionResult=async()=>({state:'rejected',response:{message:'无效消息'}});
   f.client.acknowledgeSubmission=async()=>{throw Error('offline');};
   assert.deepEqual(await f.manager.check(record),{state:'rejected',message:'无效消息',response:{message:'无效消息'}});
-  assert.equal(f.calls.length,1); assert.equal(f.data.size,0);
+  assert.equal(f.calls.length,1); assert.equal(f.data.size,1); assert.equal(f.manager.pending('s').length,0);
 });

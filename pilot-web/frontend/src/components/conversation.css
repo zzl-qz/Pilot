@@ -358,6 +358,6 @@ html[data-theme] .conversation-composer .voice-timer { font-family: var(--sans);
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 8px;
 }

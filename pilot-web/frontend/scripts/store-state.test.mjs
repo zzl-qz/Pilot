@@ -50,6 +50,57 @@ function reset() {
   useStore.setState({ sessionId: 's', sessionEpoch: 1, thread: initialThread(),
     loadSessions: async () => [], loadTask: async () => {}, loadQueue: async () => {}, refreshContext: async () => {} });
 }
+test('旧提交的迟到成功不能清除同一会话后来保存的新草稿', async () => {
+  reset();
+  const saved=useStore.getState(), originalStorage=globalThis.localStorage;
+  const {api}=await import('../src/api.js');const original={...api};const pending=deferred();const data=new Map();
+  globalThis.localStorage={get length(){return data.size;},key:i=>[...data.keys()][i],getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
+  api.submissionToken=async()=>({requestId:'draft-race'});api.acknowledgeSubmission=async()=>({});api.sendMessage=()=>pending.promise;
+  useStore.setState({running:true,modelReady:()=>true});
+  try {
+    const send=useStore.getState().submitInput('旧草稿');
+    await new Promise(resolve=>setImmediate(resolve));
+    useStore.setState({sessionEpoch:2});localStorage.setItem('pilot.draft.s','重新打开会话后写的新草稿');
+    pending.resolve({sessionId:'s',runId:'r'});assert.equal(await send,true);
+    assert.equal(localStorage.getItem('pilot.draft.s'),'重新打开会话后写的新草稿');
+  } finally {Object.assign(api,original);globalThis.localStorage=originalStorage;useStore.setState(saved);}
+});
+test('引导、继续、历史重发与重新生成也携带凭据，未知结果不会再次执行', async () => {
+  reset();const saved=useStore.getState(), originalStorage=globalThis.localStorage;
+  const {api}=await import('../src/api.js');const original={...api};const data=new Map();let nonce=0;
+  globalThis.localStorage={get length(){return data.size;},key:i=>[...data.keys()][i],getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
+  api.submissionToken=async()=>({requestId:'action-'+(++nonce)});api.submissionResult=async()=>({state:'unknown'});
+  try {
+    for(const [name,action] of [['steer',s=>s.steer('引导')],['continueRun',s=>s.continueRun()],['resend',s=>s.resendMessage(1,'修改后的任务')],['regenerate',s=>s.regenerate()]]) {
+      data.clear();const calls=[];api[name]=async(...args)=>{calls.push(args);throw TypeError('执行后断线');};
+      useStore.setState({running:false,modelReady:()=>true,showNotice:()=>{}});
+      await action(useStore.getState());await action(useStore.getState());
+      assert.equal(calls.length,1,name);assert.match(calls[0].at(-1),/^action-/);
+      assert.equal(useStore.getState().steering,false);
+    }
+  } finally {Object.assign(api,original);globalThis.localStorage=originalStorage;useStore.setState(saved);}
+});
+test('各运行入口通过真实 API 封装发送独立凭据并正确处理成功回执', async () => {
+  reset();const saved=useStore.getState(), originalStorage=globalThis.localStorage, originalFetch=fetchHandler;
+  const data=new Map(), writes=[];let nonce=0;
+  globalThis.localStorage={get length(){return data.size;},key:i=>[...data.keys()][i],getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
+  fetchHandler=async(url,init)=>{
+    if(url==='/api/submissions/token')return Response.json({requestId:'accepted-'+(++nonce)});
+    if(url==='/api/submissions/ack')return Response.json({acknowledged:true});
+    writes.push({url,requestId:init.headers['X-Pilot-Request-Id']});
+    return Response.json(url.endsWith('/steer')?{ok:true}:{sessionId:'s',runId:'accepted-run'});
+  };
+  useStore.setState({running:false,modelReady:()=>true,showNotice:()=>{}});
+  try {
+    assert.equal(await useStore.getState().steer('新的引导'),true);
+    await useStore.getState().continueRun();
+    assert.equal(await useStore.getState().resendMessage(1,'新的内容'),true);
+    await useStore.getState().regenerate();
+    assert.deepEqual(writes.map(r=>r.url.split('/').at(-1)),['steer','continue','resend','regenerate']);
+    assert.equal(new Set(writes.map(r=>r.requestId)).size,4);assert.ok(writes.every(r=>r.requestId?.startsWith('accepted-')));
+    assert.equal(useStore.getState().running,true);
+  } finally {fetchHandler=originalFetch;globalThis.localStorage=originalStorage;useStore.setState(saved);}
+});
 test('SSE 同帧批处理保留顺序，临时预览不占正式游标', () => {
   reset(); const state = useStore.getState();
   state.handleEvent({ type: 'run.started', sessionId: 's', sequence: 1, runId: 'r', payload: { input: '任务' } });

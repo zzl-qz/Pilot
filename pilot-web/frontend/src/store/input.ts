@@ -2,15 +2,21 @@ import type { StoreContext, StoreSlice } from './context.js';
 import { attachmentBatchError, requireAttachmentLimits } from '../lib/attachments.js';
 import type { InputMessage } from '../types/api.js';
 import { errorInfo } from '../lib/errors.js';
-import { submissions } from '../lib/submissions.js';
+import { submissions, type SubmissionOperation } from '../lib/submissions.js';
 import { api } from '../api.js';
 import { appendUserRow } from '../thread-reducer.js';
 import { rememberInput } from '../lib/input-history.js';
-import { dropDraft } from '../lib/drafts.js';
+import { dropDraft, readDraft } from '../lib/drafts.js';
 import { resolveSkillCommand, toSkillCommands } from '../lib/skills.js';
 import { sameUserInput } from '../thread-utils.js';
 
-export function createInputActions({ set, get }: StoreContext): StoreSlice<'registerComposer' | 'modelReady' | 'submitInput' | 'steer' | 'pauseRun' | 'cancelRun' | 'continueRun' | 'resendMessage' | 'composerApi'> {
+export function createInputActions({ set, get }: StoreContext): StoreSlice<'registerComposer' | 'modelReady' | 'submitInput' | 'steer' | 'pauseRun' | 'cancelRun' | 'continueRun' | 'resendMessage' | 'composerApi' | 'regenerate'> {
+  const action = async (sessionId: string, content: string, operation: SubmissionOperation) => {
+    const epoch = get().sessionEpoch;
+    const result = await submissions.submit(sessionId, { content }, () => get().sessionId === sessionId && get().sessionEpoch === epoch && get().modelReady(), operation);
+    if (result.state !== 'accepted') get().showNotice(result.message || '提交已取消，当前内容已保留。');
+    return result.state === 'accepted';
+  };
   return {
     /* ---------- 输入 / 运行控制 ---------- */
     registerComposer(apiBridge) {
@@ -105,7 +111,9 @@ export function createInputActions({ set, get }: StoreContext): StoreSlice<'regi
         if (queueInstead && get().sessionId === sessionId && get().sessionEpoch === ownerEpoch) {
           void get().loadQueue().catch(() => get().showNotice('消息已接收，队列刷新失败，请稍后刷新。'));
         }
-        dropDraft(localStorage, sessionId);
+        if (get().sessionId === sessionId && get().sessionEpoch === ownerEpoch && readDraft(localStorage, sessionId) === text) {
+          dropDraft(localStorage, sessionId);
+        }
         return true;
       }
       if (result.state === 'rejected' && get().sessionId === sessionId && get().sessionEpoch === ownerEpoch) set((draft) => {
@@ -125,17 +133,16 @@ export function createInputActions({ set, get }: StoreContext): StoreSlice<'regi
         get().showNotice('请将带附件的消息加入队列，再点击该消息的‘引导’。');
         return false;
       }
-      const { sessionId, runId } = get();
+      const { sessionId, runId, sessionEpoch } = get();
       if (!sessionId) return false;
-      set((draft) => { draft.steering = true; });
+      set(draft => { draft.steering = true; });
       try {
-        await api.steer(sessionId, { content: text, runId });
-        set((draft) => { draft.steering = false; });
-        return true;
-      } catch (error) {
-        set((draft) => { draft.steering = false; });
-        get().showNotice('引导失败：' + errorInfo(error).message);
-        return false;
+        return await action(sessionId, text, async requestId => {
+          const response = await api.steer(sessionId, { content: text, runId }, requestId);
+          return response ? { sessionId, runId: runId || '' } : null;
+        });
+      } finally {
+        if (get().sessionId === sessionId && get().sessionEpoch === sessionEpoch) set(draft => { draft.steering = false; });
       }
     },
 
@@ -173,11 +180,7 @@ export function createInputActions({ set, get }: StoreContext): StoreSlice<'regi
       if (!get().modelReady()) return false;
       const { sessionId } = get();
       if (!sessionId) return false;
-      try {
-        await api.continueRun(sessionId);
-      } catch (error) {
-        get().showNotice('继续失败：' + errorInfo(error).message);
-      }
+      if (!await action(sessionId, '继续运行当前任务', requestId => api.continueRun(sessionId, requestId))) return false;
     },
 
     async resendMessage(sequence, text, attachments) {
@@ -188,12 +191,14 @@ export function createInputActions({ set, get }: StoreContext): StoreSlice<'regi
       }
       const { sessionId } = get();
       if (!sessionId) return false;
-      try {
-        await api.resend(sessionId, { sequence, content: text });
-        return true;
-      } catch (error) {
-        get().showNotice('重新发送失败：' + errorInfo(error).message);
-        return false;
+      return action(sessionId, text, requestId => api.resend(sessionId, { sequence, content: text }, requestId));
+    },
+
+    async regenerate() {
+      const { sessionId, running, sessionEpoch } = get();
+      if (!sessionId || running || !get().modelReady()) return;
+      if (await action(sessionId, '重新生成上一轮回复', requestId => api.regenerate(sessionId, requestId)) && get().sessionId === sessionId && get().sessionEpoch === sessionEpoch) {
+        set(draft => { draft.running = true; draft.runStartedAt = Date.now(); draft.lastOutcome = ''; });
       }
     },
 

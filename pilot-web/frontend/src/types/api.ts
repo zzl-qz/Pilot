@@ -144,7 +144,7 @@ export interface ApiResults {
   createSchedule: S.ScheduledTask;
   controlSchedule: S.ScheduledTask;
   metrics: S.MetricsControllerMetricsResponse;
-  regenerate: S.SessionControllerSessionResponse;
+  regenerate: S.SessionControllerMessageResponse;
   deleteSession: null;
 }
 

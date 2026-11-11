@@ -1682,23 +1682,6 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       return false;
     }
   },
-  /** 用上一条用户输入重跑一轮，历史里不会多一条重复的用户消息。 */
-  async regenerate() {
-    const { sessionId, running } = get();
-    if (!sessionId || running) {
-      return;
-    }
-    try {
-      await api.regenerate(sessionId);
-      set((draft) => {
-        draft.running = true;
-        draft.runStartedAt = Date.now();
-        draft.lastOutcome = '';
-      });
-    } catch (error) {
-      get().showNotice('重新生成失败：' + errorInfo(error).message);
-    }
-  },
   /** 通用二次确认：危险操作统一走这里，避免各处 window.confirm 风格不一。 */
   askConfirm(options) {
     set((draft) => { draft.ui.confirm = options; });
