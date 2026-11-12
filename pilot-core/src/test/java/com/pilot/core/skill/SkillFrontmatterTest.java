@@ -60,9 +60,33 @@ class SkillFrontmatterTest {
     }
 
     @Test
-    void unknownKeyIsRejected() {
+    void standardYamlAndExtensionMetadataAreAcceptedWithoutExecutingTags() {
+        var parsed = SkillFrontmatter.parse("""
+            ---
+            name: "portable-skill"
+            description: >-
+              Read the source
+              and verify the result.
+            license: MIT
+            compatibility: Requires Python
+            metadata:
+              author: example
+              version: "1.0"
+            allowed-tools:
+              - read_file
+              - run_command
+            ---
+            正文
+            """);
+        assertEquals("portable-skill", parsed.name());
+        assertEquals("Read the source and verify the result.", parsed.description());
+        assertEquals(List.of("read_file", "run_command"), parsed.allowedTools());
+        assertThrows(IllegalArgumentException.class, () -> SkillFrontmatter
+            .parse("---\ndescription: x\nmetadata: !!java.net.URL [https://example.com]\n---\n正文"));
         assertThrows(IllegalArgumentException.class,
-            () -> SkillFrontmatter.parse("---\nversion: 1.0\ndescription: x\n---\n正文"));
+            () -> SkillFrontmatter.parse("---\ndescription: [not, text]\n---\n正文"));
+        assertThrows(IllegalArgumentException.class,
+            () -> SkillFrontmatter.parse("---\ndescription: x\nmetadata: {version: a, version: b}\n---\n正文"));
     }
 
     @Test
@@ -81,7 +105,9 @@ class SkillFrontmatterTest {
     void emptyOrOversizedDescriptionIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> SkillFrontmatter.parse("---\ndescription:\n---\n正文"));
         assertThrows(IllegalArgumentException.class,
-            () -> SkillFrontmatter.parse("---\ndescription: " + "长".repeat(501) + "\n---\n正文"));
+            () -> SkillFrontmatter.parse("---\ndescription: " + "长".repeat(2049) + "\n---\n正文"));
+        assertEquals(2048,
+            SkillFrontmatter.parse("---\ndescription: " + "长".repeat(2048) + "\n---\n正文").description().length());
     }
 
     @Test

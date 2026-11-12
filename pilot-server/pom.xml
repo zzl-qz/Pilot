@@ -16,6 +16,10 @@
         <frontendDir>${project.basedir}/../pilot-web/frontend</frontendDir>
     </properties>
     <dependencies>
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+        </dependency>
         <!-- 单模块构建也直接编译 core 的沙箱 diff 源码。 -->
         <dependency>
             <groupId>io.github.java-diff-utils</groupId>

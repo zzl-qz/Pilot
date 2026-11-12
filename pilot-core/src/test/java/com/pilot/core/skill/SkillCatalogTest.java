@@ -79,9 +79,9 @@ class SkillCatalogTest {
     void bodyLimitsAreEnforced() throws IOException {
         Path root = Files.createDirectories(dir.resolve("skills"));
         write(root, "too-many-lines", "---\ndescription: x\n",
-            String.join("\n", IntStream.range(0, 501).mapToObj(i -> "行" + i).toList()));
+            String.join("\n", IntStream.range(0, SkillCatalog.MAX_BODY_LINES + 1).mapToObj(i -> "行" + i).toList()));
         write(root, "within-limits", "---\ndescription: x\n",
-            String.join("\n", IntStream.range(0, 500).mapToObj(i -> "行" + i).toList()));
+            String.join("\n", IntStream.range(0, SkillCatalog.MAX_BODY_LINES).mapToObj(i -> "行" + i).toList()));
 
         var catalog = SkillCatalog.scan(roots(noProject(), root));
 

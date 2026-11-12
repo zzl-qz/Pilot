@@ -30,8 +30,8 @@ public final class SkillCatalog {
     /** 目录段的 token 上限保护：超过后其余技能跳过并亮牌。 */
     public static final int MAX_SKILLS = 32;
     /** SKILL.md 正文上限：激活一次最多注入这么多行。 */
-    public static final int MAX_BODY_LINES = 500;
-    public static final long MAX_BODY_BYTES = 48L * 1024;
+    public static final int MAX_BODY_LINES = 2000;
+    public static final long MAX_BODY_BYTES = 128L * 1024;
     /** 技能目录内文件清单与单文件读取上限，对齐 read_file 的单次行数。 */
     public static final int MAX_FILES = 200;
     public static final int MAX_FILE_LINES = 2000;
@@ -62,6 +62,29 @@ public final class SkillCatalog {
      * @param roots 按优先级降序的扫描来源（项目级在前）；不存在的目录跳过
      */
     public static SkillCatalog scan(List<Root> roots) {
+        return scan(roots, MAX_SKILLS);
+    }
+
+    /** 安装候选不受模型常驻目录的数量上限影响；下载器负责候选数量和体积预算。 */
+    public static SkillCatalog installationCandidates(Path root) {
+        return scan(List.of(new Root(root, SkillSource.PROJECT)), Integer.MAX_VALUE);
+    }
+
+    /** 单技能仓库的名称来自声明，不要求仓库名与技能名相同。 */
+    public static String installationName(Path directory) {
+        try {
+            Path file = directory.resolve("SKILL.md");
+            if (Files.size(file) > MAX_BODY_BYTES + 64 * 1024) {
+                throw new IllegalArgumentException("SKILL.md 过大");
+            }
+            String declared = SkillFrontmatter.parse(Files.readString(file, StandardCharsets.UTF_8)).name();
+            return declared == null ? directory.getFileName().toString() : declared;
+        } catch (IOException | IllegalArgumentException failure) {
+            return directory.getFileName().toString();
+        }
+    }
+
+    private static SkillCatalog scan(List<Root> roots, int maxSkills) {
         Map<String, Skill> byName = new LinkedHashMap<>();
         List<SkillProblem> problems = new ArrayList<>();
         Set<String> commands = new LinkedHashSet<>();
@@ -79,7 +102,7 @@ public final class SkillCatalog {
                 continue;
             }
             for (Path dir : dirs) {
-                load(dir, root.source(), byName, commands, problems);
+                load(dir, root.source(), byName, commands, problems, maxSkills);
             }
         }
         return new SkillCatalog(ordered(byName), List.copyOf(problems));
@@ -94,7 +117,7 @@ public final class SkillCatalog {
     }
 
     private static void load(Path dir, SkillSource source, Map<String, Skill> byName, Set<String> commands,
-        List<SkillProblem> problems) {
+        List<SkillProblem> problems, int maxSkills) {
         String dirName = dir.getFileName().toString();
         Path skillMd = dir.resolve("SKILL.md");
         if (!Files.isRegularFile(skillMd)) {
@@ -104,7 +127,7 @@ public final class SkillCatalog {
         if (byName.containsKey(dirName)) {
             return;
         }
-        if (byName.size() >= MAX_SKILLS) {
+        if (byName.size() >= maxSkills) {
             problems.add(new SkillProblem(dirName, dir.toString(), "有效技能数已达上限 " + MAX_SKILLS + "，本技能被跳过"));
             return;
         }
@@ -114,6 +137,10 @@ public final class SkillCatalog {
         }
         String text;
         try {
+            if (Files.size(skillMd) > MAX_BODY_BYTES + 64 * 1024) {
+                problems.add(new SkillProblem(dirName, dir.toString(), "SKILL.md 文件超过读取上限 192KB"));
+                return;
+            }
             text = Files.readString(skillMd, StandardCharsets.UTF_8);
         } catch (IOException e) {
             problems.add(new SkillProblem(dirName, dir.toString(), "读取 SKILL.md 失败：" + e.getClass().getSimpleName()));

@@ -7,7 +7,7 @@ import java.util.List;
  * SKILL.md frontmatter 的解析结果。
  *
  * <p>目录名是技能的真源名：{@code name} 键可选，填写时必须与目录名一致；
- * {@code description} 必填（≤500 字符），它是系统提示词「技能」目录段里模型唯一的判断依据，
+ * {@code description} 必填（≤2048 字符），它是系统提示词「技能」目录段里模型唯一的判断依据，
  * 要写「何时用」而不只是「是什么」。{@code command} 可选，声明后技能可暴露为输入框快捷指令；
  * {@code allowed-tools} v1 仅作展示（供用户评估该技能的破坏面），没有运行时强制语义。
  *
