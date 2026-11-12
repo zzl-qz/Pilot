@@ -12,7 +12,6 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
-import com.pilot.core.skill.SkillProblem;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -47,6 +46,7 @@ import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
+import com.pilot.core.skill.SkillProblem;
 import com.pilot.core.tool.DocumentRenderer;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.AttachmentReferences;
