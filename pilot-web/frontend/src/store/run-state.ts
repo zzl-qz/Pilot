@@ -7,6 +7,7 @@ import { normalizeQueue } from '../lib/queue.js';
 /** 运行面板的数据同步：计划、队列、任务契约和上下文各自保留现有响应归属检查。 */
 export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'resolveApproval' | 'resolveArbitration' | 'loadPlan' | 'loadQueue' | 'mutateQueue' | 'steerQueueItem' | 'saveQueueItem' | 'removeQueueItem' | 'moveQueueItem' | 'loadTask' | 'saveTask' | 'refreshContext' | 'refreshActiveRun'> {
   let queueLoadSequence = 0;
+  let activeRunSequence = 0;
   return {
     /* ---------- 审批 / 仲裁 ---------- */
     async resolveApproval(callId, approved) {
@@ -176,13 +177,18 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
     },
 
     async refreshActiveRun() {
-      const { sessionId, sessionEpoch } = get();
+      const { sessionId, sessionEpoch, thread, running, runId } = get();
       if (!sessionId) {
         return;
       }
+      const request = ++activeRunSequence;
+      const cursor = thread.cursor;
       try {
         const active = await api.activeRun(sessionId);
-        if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
+        const current = get();
+        // 查询开始后的正式事件或新操作拥有更新的状态，旧快照不能复活已结束的运行。
+        if (request !== activeRunSequence || current.sessionId !== sessionId || current.sessionEpoch !== sessionEpoch
+            || current.thread.cursor !== cursor || current.running !== running || current.runId !== runId) return;
         if (active?.runId) {
           set((draft) => {
             draft.running = true;

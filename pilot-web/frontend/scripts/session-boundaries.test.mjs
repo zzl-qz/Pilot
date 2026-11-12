@@ -130,3 +130,45 @@ test('A→B→A 快速切换只应用最后一次会话详情和历史', async (
   assert.equal(useStore.getState().thread.rows.filter(row => row.type === 'user').length, 1);
   assert.equal(useStore.getState().thread.rows.find(row => row.type === 'user').text, '最新消息-a');
 });
+
+test('活跃运行查询的迟到响应不能把已经完成的运行重新标为执行中', async () => {
+  const gate = deferred();
+  api.activeRun = () => gate.promise;
+  const pending = originalState.refreshActiveRun();
+  for (const [sequence, type] of [[1, 'run.started'], [2, 'run.completed']]) {
+    useStore.getState().handleEvent({ sessionId: 'a', runId: 'finished', sequence, type, payload: { input: '任务', summary: '完成' } });
+  }
+  useStore.getState().flushEvents();
+  assert.equal(useStore.getState().running, false);
+  const completedRunId = useStore.getState().runId;
+  gate.resolve({ runId: 'finished' });
+  await pending;
+  assert.equal(useStore.getState().running, false);
+  assert.equal(useStore.getState().runId, completedRunId);
+});
+
+test('活跃运行查询正常恢复状态，并只接受最后发出的查询', async () => {
+  const old = deferred(), next = deferred();
+  let calls = 0;
+  api.activeRun = () => ++calls === 1 ? old.promise : next.promise;
+  const first = originalState.refreshActiveRun(), second = originalState.refreshActiveRun();
+  next.resolve({ runId: 'newest' }); await second;
+  old.resolve({ runId: 'older' }); await first;
+  assert.equal(useStore.getState().runId, 'newest');
+  assert.equal(useStore.getState().running, true);
+});
+
+test('断线重连也不能用迟到的活跃查询覆盖结束事件', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const gate = deferred();
+  let calls = 0;
+  api.activeRun = () => { calls++; return gate.promise; };
+  useStore.setState({ refreshActiveRun: originalState.refreshActiveRun });
+  useStore.getState().scheduleReconnect('a');
+  t.mock.timers.tick(1000);
+  assert.equal(calls, 1);
+  useStore.getState().handleEvent({ sessionId: 'a', runId: 'finished', sequence: 2, type: 'run.completed', payload: { summary: '完成' } });
+  useStore.getState().flushEvents();
+  gate.resolve({ runId: 'finished' }); await tick();
+  assert.equal(useStore.getState().running, false);
+});

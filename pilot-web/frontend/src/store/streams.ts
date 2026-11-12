@@ -340,18 +340,7 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
         }
         // 续订：带着已渲染的游标，避免从 0 重新回放
         get().connectSse(sessionId, get().thread.cursor);
-        const source = eventSource;
-        const epoch = get().sessionEpoch;
-        try {
-          const active = await api.activeRun(sessionId);
-          if (eventSource !== source || get().sessionId !== sessionId || get().sessionEpoch !== epoch) return;
-          if (active?.runId && !get().running) {
-            set((draft) => {
-              draft.running = true;
-              draft.runId = active.runId;
-            });
-          }
-        } catch { /* 下次事件会对齐 */ }
+        await get().refreshActiveRun();
       }, delay);
     },
 
