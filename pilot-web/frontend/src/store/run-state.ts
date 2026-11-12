@@ -11,10 +11,14 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
   return {
     /* ---------- 审批 / 仲裁 ---------- */
     async resolveApproval(callId, approved) {
+      const { sessionId, sessionEpoch, pendingApprovals } = get();
+      if (!pendingApprovals[callId] || pendingApprovals[callId].busy) return;
+      const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
       set((draft) => { draft.pendingApprovals[callId].busy = true; });
       try {
         await api.approval(callId, approved);
       } catch (error) {
+        if (!current()) return;
         get().showNotice('提交审批失败：' + errorInfo(error).message);
         set((draft) => { if (draft.pendingApprovals[callId]) draft.pendingApprovals[callId].busy = false; });
       }

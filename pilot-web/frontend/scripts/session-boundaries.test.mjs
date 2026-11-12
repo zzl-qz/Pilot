@@ -172,3 +172,71 @@ test('断线重连也不能用迟到的活跃查询覆盖结束事件', async t 
   gate.resolve({ runId: 'finished' }); await tick();
   assert.equal(useStore.getState().running, false);
 });
+
+for (const [name, args, reply] of [
+  ['compactContext', [], {}],
+  ['restoreCheckpoint', [4, 'both', 0], { applied: true, input: '旧任务' }],
+  ['forkCheckpoint', [4, 0], { sessionId: 'fork', input: '旧任务' }],
+  ['switchWorkspace', ['old-target'], {}],
+  ['openWorktree', [], { sessionId: 'worktree', branch: 'test' }],
+  ['handoffWorktree', [], { workspace: 'old-target' }]
+]) for (const fails of [false, true]) test(`${name} 的迟到${fails ? '失败' : '成功'}不切回旧会话或改动新面板`, async () => {
+  const gate = deferred(), activations = [], refreshed = [];
+  const apiName = { openWorktree: 'worktrees', handoffWorktree: 'worktreeHandoff' }[name] || name;
+  api[apiName] = () => gate.promise;
+  useStore.setState({ workspace: 'old', activate: async id => { activations.push(id); return true; },
+    refreshContext: async () => { refreshed.push(useStore.getState().sessionId); } });
+  const pending = useStore.getState()[name](...args);
+  useStore.setState(draft => {
+    draft.sessionId = 'b'; draft.sessionEpoch = 2; draft.workspace = 'new'; draft.compactingContext = true;
+    draft.ui.checkpointDialog = { sequence: 99, applying: true };
+  });
+  if (fails) gate.reject(Error('旧任务失败')); else gate.resolve(reply);
+  await pending;
+  assert.deepEqual(activations, []);
+  assert.deepEqual(refreshed, []);
+  assert.deepEqual(notices, []);
+  assert.equal(useStore.getState().workspace, 'new');
+  assert.equal(useStore.getState().compactingContext, true);
+  assert.deepEqual(useStore.getState().ui.checkpointDialog, { sequence: 99, applying: true });
+});
+
+test('旧审批失败不能解除新会话的同名审批状态；切换会话清除旧压缩状态', async () => {
+  const gate = deferred();
+  api.approval = () => gate.promise;
+  useStore.setState({ compactingContext: true, pendingApprovals: { call: { busy: false } } });
+  const pending = useStore.getState().resolveApproval('call', true);
+  useStore.getState().startNewSession();
+  assert.equal(useStore.getState().compactingContext, false);
+  useStore.setState({ sessionId: 'b', pendingApprovals: { call: { busy: true } } });
+  gate.reject(Error('旧审批失败')); await pending;
+  assert.equal(useStore.getState().pendingApprovals.call.busy, true);
+  assert.deepEqual(notices, []);
+});
+
+test('仍在原会话时压缩、检查点和工作区操作正常刷新及回填', async () => {
+  const activated = [], texts = [];
+  let refreshed = 0;
+  useStore.setState({ workspace: 'source', activate: async id => { activated.push(id); return true; },
+    refreshContext: async () => { refreshed++; }, composerApi: {
+      getText: () => '', setText: text => texts.push(text), appendText: text => texts.push(text), focus() {}
+    } });
+  api.compactContext = async () => ({});
+  api.restoreCheckpoint = async () => ({ applied: true, input: '恢复内容' });
+  api.forkCheckpoint = async () => ({ sessionId: 'fork', input: '分支内容' });
+  api.switchWorkspace = async () => ({});
+  api.worktrees = async () => ({ sessionId: 'worktree', branch: 'test' });
+  api.worktreeHandoff = async () => ({ workspace: 'parent' });
+  await useStore.getState().compactContext();
+  assert.equal(refreshed, 1);
+  assert.equal(useStore.getState().compactingContext, false);
+  await useStore.getState().restoreCheckpoint(4, 'both', 0);
+  await useStore.getState().forkCheckpoint(4, 0);
+  await useStore.getState().switchWorkspace('target');
+  await useStore.getState().openWorktree();
+  await useStore.getState().handoffWorktree();
+  assert.deepEqual(activated, ['a', 'fork', 'a', 'worktree']);
+  assert.deepEqual(texts, ['恢复内容', '分支内容']);
+  assert.equal(useStore.getState().workspace, 'parent');
+  assert.equal(useStore.getState().ui.checkpointDialog, null);
+});

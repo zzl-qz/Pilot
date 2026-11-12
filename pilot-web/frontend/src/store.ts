@@ -294,16 +294,17 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   ...createRunStateActions({ set, get }),
 
   async compactContext() {
-    const { sessionId } = get();
-    if (!sessionId) return;
+    const { sessionId, sessionEpoch } = get();
+    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
+    if (!sessionId || get().compactingContext) return;
     set((draft) => { draft.compactingContext = true; });
     try {
       await api.compactContext(sessionId);
-      await get().refreshContext();
+      if (current()) await get().refreshContext();
     } catch (error) {
-      get().showNotice('压缩失败：' + errorInfo(error).message);
+      if (current()) get().showNotice('压缩失败：' + errorInfo(error).message);
     } finally {
-      set((draft) => { draft.compactingContext = false; });
+      if (current()) set((draft) => { draft.compactingContext = false; });
     }
   },
 
@@ -324,7 +325,8 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     }
   },
   async restoreCheckpoint(sequence, mode, revision) {
-    const { sessionId } = get();
+    const { sessionId, sessionEpoch } = get();
+    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
     if (!sessionId) return;
     if (!['code', 'conversation', 'both'].includes(mode)) {
       get().showNotice('请选择回退范围');
@@ -333,10 +335,13 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     set((draft) => {
       draft.ui.checkpointDialog = { ...(draft.ui.checkpointDialog || {}), sequence, applying: true, error: '' };
     });
+    const pending = get().ui.checkpointDialog;
+    const ownsDialog = () => current() && get().ui.checkpointDialog === pending;
     try {
       const operationId = typeof globalThis.crypto?.getRandomValues === 'function'
         ? Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('') : undefined;
       const result = await api.restoreCheckpoint(sessionId, { sequence, mode, revision, operationId });
+      if (!ownsDialog()) return;
       if (!result?.applied) {
         const code: Partial<S.RunSnapshotServiceRollbackReport> & { unavailable?: string[] } = result?.code || {};
         const reason = [
@@ -353,7 +358,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       get().showNotice(mode === 'code'
         ? '代码已回退，对话保留'
         : mode === 'conversation' ? '对话已回退，原消息已回填' : '代码与对话都已回退，原消息已回填');
-      await get().activate(sessionId);
+      if (!await get().activate(sessionId)) return;
       // 回退后把这条消息放回输入框，用户改一改就能重发（只撤代码时不动草稿）
       if (mode !== 'code' && result.input) {
         const composer = get().composerApi;
@@ -368,28 +373,34 @@ export const useStore = create<StoreState>()(immer((set, get) => {
         }
       }
     } catch (error) {
+      if (!ownsDialog()) return;
       set((draft) => {
         draft.ui.checkpointDialog = { ...(draft.ui.checkpointDialog || {}), applying: false, error: errorInfo(error).message };
       });
     }
   },
   async forkCheckpoint(sequence, revision) {
-    const { sessionId } = get();
+    const { sessionId, sessionEpoch } = get();
+    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
     if (!sessionId) return;
     set((draft) => {
       draft.ui.checkpointDialog = { ...(draft.ui.checkpointDialog || {}), sequence, applying: true, error: '' };
     });
+    const pending = get().ui.checkpointDialog;
+    const ownsDialog = () => current() && get().ui.checkpointDialog === pending;
     try {
       const session = requireData(await api.forkCheckpoint(sessionId, { sequence, revision }));
-      set((draft) => { draft.ui.checkpointDialog = null; });
       await get().loadSessions();
-      await get().activate(session.sessionId);
+      if (!ownsDialog()) return;
+      set((draft) => { draft.ui.checkpointDialog = null; });
+      if (!await get().activate(session.sessionId)) return;
       if (session.input) {
         get().composerApi?.setText?.(session.input);
         get().composerApi?.focus?.();
       }
       get().showNotice('已创建对话分支，原聊天保留');
     } catch (error) {
+      if (!ownsDialog()) return;
       set((draft) => {
         draft.ui.checkpointDialog = { ...(draft.ui.checkpointDialog || {}), applying: false, error: errorInfo(error).message };
       });
@@ -400,7 +411,8 @@ export const useStore = create<StoreState>()(immer((set, get) => {
 
   /* ---------- 工作区 / worktree ---------- */
   async switchWorkspace(workspace, { throwOnError = false } = {}) {
-    const { sessionId } = get();
+    const { sessionId, sessionEpoch } = get();
+    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
     if (!sessionId) {
       set((draft) => {
         draft.workspace = workspace;
@@ -412,9 +424,9 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     }
     try {
       await api.switchWorkspace(sessionId, workspace);
-      await get().activate(sessionId);
+      if (current()) await get().activate(sessionId);
     } catch (error) {
-      get().showNotice('切换文件夹失败：' + errorInfo(error).message);
+      if (current()) get().showNotice('切换文件夹失败：' + errorInfo(error).message);
       if (throwOnError) throw error;
     }
   },
@@ -434,26 +446,30 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       state.showNotice('先选定一个 git 仓库目录');
       return;
     }
+    const current = () => get().sessionId === state.sessionId && get().sessionEpoch === state.sessionEpoch && get().workspace === state.workspace;
     try {
       const opened = await api.worktrees({ workspace: state.workspace, branch, projectId: state.currentProjectId });
       await get().loadSessions();
+      if (!current()) return;
       if (opened?.sessionId) {
-        await get().activate(opened.sessionId);
+        if (!await get().activate(opened.sessionId)) return;
       }
       get().showNotice(`已从 ${opened?.branch || branch || '当前分支'} 建立 worktree，对话在这份检出里进行`);
     } catch (error) {
-      get().showNotice('建立 worktree 失败：' + errorInfo(error).message);
+      if (current()) get().showNotice('建立 worktree 失败：' + errorInfo(error).message);
     }
   },
 
   /** 把 worktree 里的改动交回本地（旧版 handoffWorktree）。 */
   async handoffWorktree() {
-    const { sessionId } = get();
+    const { sessionId, sessionEpoch } = get();
+    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
     if (!sessionId || get().embeddedSessionId) {
       return;
     }
     try {
       const handed = await api.worktreeHandoff(sessionId);
+      if (!current()) { await get().loadSessions(); return; }
       set((draft) => {
         draft.workspace = handed?.workspace || draft.workspace;
         const listed = draft.sessions.find((item) => item.id === sessionId);
@@ -462,9 +478,9 @@ export const useStore = create<StoreState>()(immer((set, get) => {
         }
       });
       await get().loadSessions();
-      get().showNotice(handed?.note || 'worktree 改动已交回本地');
+      if (current()) get().showNotice(handed?.note || 'worktree 改动已交回本地');
     } catch (error) {
-      get().showNotice('交回失败：' + errorInfo(error).message);
+      if (current()) get().showNotice('交回失败：' + errorInfo(error).message);
     }
   },
 
