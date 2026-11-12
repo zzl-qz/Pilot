@@ -1,0 +1,170 @@
+{
+  "date": "2026-11-12",
+  "baseCommit": "ac908c1",
+  "verifiedSourceCommit": "70969d1bfe5d08b1339593e4267e9132303e242f",
+  "scope": "前端状态职责拆分、异步归属保护及跨平台状态同步回归；未重新宣称所有 Agent 能力均通过。",
+  "changes": [
+    {
+      "kind": "职责拆分",
+      "storeLinesBefore": 1954,
+      "storeLinesAfter": 688,
+      "modules": [
+        "sessions.ts",
+        "history.ts",
+        "streams.ts",
+        "run-controls.ts",
+        "run-state.ts"
+      ],
+      "boundary": "沿用 Zustand/Immer 状态与公共动作接口，通过 StoreContext 注入，模块不反向导入全局 store。"
+    },
+    {
+      "kind": "迟到结果保护",
+      "coverage": [
+        "暂停/取消绑定会话代次与运行，同一请求去重",
+        "同一草稿首次建会话去重，失败只清理自身请求",
+        "旧历史预取不读取新会话，也不清除较新的在途请求",
+        "A→B→A 切换仍作废旧代次",
+        "活跃运行查询核对请求序号、正式事件游标及运行快照，不能复活已结束运行",
+        "压缩、审批、检查点恢复/分叉、工作区切换、worktree 和交接返回时不覆盖新会话面板、草稿及忙碌状态"
+      ]
+    },
+    {
+      "kind": "剪贴板兼容",
+      "coverage": [
+        "Linux Chromium 声明 text/uri-list 但隐藏内容时原来静默失败；现在提示使用文件选择器或拖放",
+        "不把文件路径文本当作已上传附件",
+        "保留普通文本、HTTP URL 及可读取原生文件的行为"
+      ]
+    },
+    {
+      "kind": "回归入口",
+      "command": "npm --prefix pilot-web/frontend run test:state-sync",
+      "checks": [
+        "frontend-units",
+        "typecheck-and-build",
+        "desktop-units",
+        "navigation-smoke",
+        "composer-smoke",
+        "event-stream-smoke",
+        "workbench-refresh-smoke",
+        "session-management-smoke",
+        "thread-scroll-smoke"
+      ],
+      "ci": "已配置 macOS、Windows、Linux；未将配置视作远程执行成功。"
+    }
+  ],
+  "regressionEvidence": {
+    "newSessionBoundaryCases": 27,
+    "newClipboardCases": 1,
+    "preFixFailures": [
+      "首次会话归属回归中 7 项失败，修复后通过",
+      "迟到活跃查询导致完成运行重返执行态的用例修复前失败",
+      "耗时动作归属回归中 13 项修复前失败",
+      "空 URI 文件剪贴板提示用例修复前失败"
+    ],
+    "iterationNotes": [
+      "Linux 双窗口测试显式重新悬停目标，避免依赖旧焦点状态",
+      "Linux Electron 测试窗口在虚拟显示上实际显示；隐藏/恢复由事件流测试显式覆盖",
+      "跳过空 ClipboardItem 备份并同步捕获 paste 事件中的原生文件信息",
+      "统一解析绝对产物目录，避免临时 Electron 页面路径失效"
+    ]
+  },
+  "platforms": {
+    "macos": {
+      "report": "macos.json",
+      "success": true,
+      "checks": 9,
+      "unitCounts": {
+        "frontend": {
+          "tests": 456,
+          "pass": 456,
+          "fail": 0,
+          "skipped": 0
+        },
+        "desktop": {
+          "tests": 46,
+          "pass": 46,
+          "fail": 0,
+          "skipped": 0
+        }
+      },
+      "environment": "macOS ARM64 实机 Chrome 与 Electron"
+    },
+    "linux-container": {
+      "report": "linux-container.json",
+      "success": true,
+      "checks": 9,
+      "unitCounts": {
+        "frontend": {
+          "tests": 456,
+          "pass": 456,
+          "fail": 0,
+          "skipped": 0
+        },
+        "desktop": {
+          "tests": 46,
+          "pass": 45,
+          "fail": 0,
+          "skipped": 1
+        }
+      },
+      "environment": "Linux ARM64 Debian 12 容器，Xvfb 虚拟显示"
+    }
+  },
+  "linuxDetails": {
+    "node": "v22.23.5",
+    "chromium": "156.0.8078.79 (Debian 12)",
+    "electron": "45.2.1",
+    "sandbox": "容器 SYS_ADMIN 与 1 GiB shared memory，node 非 root 用户及 root:4755 chrome-sandbox；未关闭浏览器沙箱",
+    "nativeFilePaste": "Electron Control+v 直接添加文件通过；Chromium 隐藏 URI 内容，明确提示并通过文件选择器添加通过，不能表述为 Chromium 直接文件粘贴成功。",
+    "sourceConsistency": "最终 Linux 独立副本与当前提交的 20 个改动前端/测试文件逐字节一致。",
+    "desktopSkip": "macOS 开发壳独立身份及签名测试在 Linux 按平台跳过。"
+  },
+  "integratedJava": {
+    "command": "JAVA_HOME=<JDK 25> mvn -B -pl pilot-core,pilot-server verify",
+    "result": "BUILD SUCCESS",
+    "core": {
+      "tests": 735,
+      "pass": 726,
+      "fail": 0,
+      "errors": 0,
+      "skipped": 9
+    },
+    "server": {
+      "tests": 843,
+      "pass": 836,
+      "fail": 0,
+      "errors": 0,
+      "skipped": 7
+    },
+    "formatChecks": "Spotless 与 Checkstyle 通过",
+    "preservedConcurrentCommit": "da062ea",
+    "scopeNote": "包含并行任务已有的 Java 工具声明抽取提交；本任务没有修改这些 Java 文件。最终剪贴板前端调整由随后两个平台完整套件覆盖。"
+  },
+  "limits": [
+    "Windows 实机未执行；Windows 路径/平台分支模拟和 CI 配置不替代实机结果。",
+    "Linux 为真实 Linux 容器进程与 Xvfb，非物理桌面；未验证硬件剪贴板、系统休眠或所有发行版。",
+    "导航后台可见性/动画帧部分采用模拟；Electron SSE 另有实际 hide/show 测试。",
+    "使用本地 HTTP/SSE、合成会话及模拟模型 API，未调用外部模型。",
+    "本轮未重启用户运行中的服务；更新界面需加载新构建。"
+  ],
+  "screenshots": [
+    {
+      "file": "macos-electron-1440.png",
+      "sha256": "60aa4dba9bb36a7b2332d5f4c5034b3c1bdd8e4c659722a7a35580d54adeaec5",
+      "reviewed": true,
+      "data": "本地合成测试会话"
+    },
+    {
+      "file": "linux-electron-390.png",
+      "sha256": "a017233e4eb8aa550b49d5382040d7cfd69af07edb11c1568f4d9ffd3dbc85f6",
+      "reviewed": true,
+      "data": "本地合成测试会话"
+    }
+  ],
+  "reproduction": {
+    "linuxImage": "docker build -t pilot-state-ui-linux -f Dockerfile.linux-ui .",
+    "linuxSuite": "在独立源码副本分别 npm ci 后，以 node 用户、Xvfb 和可用沙箱运行；PILOT_TEST_CHROMIUM_EXECUTABLE=/usr/bin/chromium xvfb-run -a npm --prefix pilot-web/frontend run test:state-sync",
+    "artifactStorage": "原始报告与日志保留在本机 .tmp-check/migration 和 Linux 独立验证副本，CI 上传相同结构；本目录只保存脱敏摘要及代表截图。"
+  }
+}

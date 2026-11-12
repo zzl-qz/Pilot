@@ -199,6 +199,8 @@ sh mvnw -B -ntp -pl pilot-server -DskipFrontend=true -Dtest=SubmissionController
 
 `test:state-sync` 串行执行前端单测、类型及构建检查、桌面单测，以及导航、输入、SSE、工作台刷新、会话管理和历史滚动六组 Chrome/Electron 回归。报告、日志和界面产物统一保存在 `pilot-web/frontend/.tmp-check/migration/`，三平台 CI 会保留失败结果。默认使用已安装的 Chrome；ARM Linux 等环境可通过 `PILOT_TEST_CHROMIUM_EXECUTABLE` 指定 Chromium 可执行文件，路径直接传给浏览器启动接口。Linux 虚拟显示测试使用 `xvfb-run -a`，需要正常的桌面运行库及 Chromium 沙箱支持，不代表物理桌面或系统休眠已验证。
 
+2026-11-12 追加验证：前端状态同步套件在 macOS 实机 Chrome/Electron 和 Linux ARM64 容器 Chromium/Electron 均通过，包括前端 456 项、macOS 桌面 46 项及 Linux 桌面 45 项（1 项 macOS 专属测试跳过），以及六组界面回归。整合 Java 验证 1,562 项通过、16 项跳过。Linux Chromium 原生文件剪贴板内容不可读时，已验证明确提示及文件选择器替代操作；Electron 直接文件粘贴通过。Windows 实机仍未执行，Linux 使用 Xvfb，不等于物理桌面验证。详见[状态同步验证记录](evaluation/results/frontend-state-boundaries-2026-11-12/validation.json)。
+
 2026-11-11 本轮验证：macOS Java 完整验证 **1,474 项通过、16 项按条件跳过**；前端 **417 项**、桌面 **41 项**通过，TypeScript 与生产构建通过；Android JVM **58 项**与 lint 强制重新执行通过（未使用任务缓存）。Chrome/Electron 实际进程覆盖输入、断线刷新且不重发、侧边对话、模型保存、会话切换、书签双窗口并发、旧数据迁移失败/重试、跨两页定位，以及本地 HTTP/SSE 工作台刷新、原生菜单与 WebContentsView。导航的后台可见性和暂停帧是模拟测试，桌面刷新包含实际窗口和嵌入浏览器；不能据此推断操作系统休眠或物理断网均已验证。Linux Java 25 容器完成 **57 项**回执、附件限额、消息接口及 SQLite 书签重点测试。Windows 实机与 Linux 桌面本轮未运行，相关浏览器回归已补入三平台 CI；配置 CI 不代表远程任务已执行。测试使用本地服务和模拟 API，不调用外部模型。
 
 ## 许可证

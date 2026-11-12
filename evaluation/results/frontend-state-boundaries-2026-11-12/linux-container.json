@@ -1,0 +1,121 @@
+{
+  "platform": "linux",
+  "arch": "arm64",
+  "node": "v22.23.5",
+  "suite": "state-sync",
+  "browser": "/usr/bin/chromium",
+  "startedAt": "2026-11-12T08:56:51.840Z",
+  "checks": [
+    {
+      "name": "frontend-units",
+      "code": 0,
+      "seconds": 4.55,
+      "artifacts": "frontend-units-artifacts"
+    },
+    {
+      "name": "typecheck-and-build",
+      "code": 0,
+      "seconds": 6.183,
+      "artifacts": "typecheck-and-build-artifacts"
+    },
+    {
+      "name": "desktop-units",
+      "code": 0,
+      "seconds": 0.07,
+      "artifacts": "desktop-units-artifacts"
+    },
+    {
+      "name": "navigation-smoke",
+      "code": 0,
+      "seconds": 25.039,
+      "artifacts": "navigation-smoke-artifacts"
+    },
+    {
+      "name": "composer-smoke",
+      "code": 0,
+      "seconds": 5.9,
+      "artifacts": "composer-smoke-artifacts"
+    },
+    {
+      "name": "event-stream-smoke",
+      "code": 0,
+      "seconds": 5.373,
+      "artifacts": "event-stream-smoke-artifacts"
+    },
+    {
+      "name": "workbench-refresh-smoke",
+      "code": 0,
+      "seconds": 38.943,
+      "artifacts": "workbench-refresh-smoke-artifacts"
+    },
+    {
+      "name": "session-management-smoke",
+      "code": 0,
+      "seconds": 29.228,
+      "artifacts": "session-management-smoke-artifacts"
+    },
+    {
+      "name": "thread-scroll-smoke",
+      "code": 0,
+      "seconds": 13.652,
+      "artifacts": "thread-scroll-smoke-artifacts"
+    }
+  ],
+  "success": true,
+  "finishedAt": "2026-11-12T08:59:00.791Z",
+  "verificationEnvironment": "Linux ARM64 Debian 12 容器，Xvfb 虚拟显示",
+  "unitCounts": {
+    "frontend": {
+      "tests": 456,
+      "pass": 456,
+      "fail": 0,
+      "skipped": 0
+    },
+    "desktop": {
+      "tests": 46,
+      "pass": 45,
+      "fail": 0,
+      "skipped": 1
+    }
+  },
+  "smokeResults": {
+    "composer-smoke": [
+      "chromium: PASS toolbar bounds and non-overlap (desktop narrow pane/tablet/mobile/long model/cache usage/150% CSS zoom)",
+      "chromium: PASS (paste/drop/picker/limits/dedup/drafts/failure/attachment-only/thumbnail/IME/newline/receipt/reload/no-retry)",
+      "electron: PASS toolbar bounds and non-overlap (desktop narrow pane/tablet/mobile/long model/cache usage/150% CSS zoom)",
+      "electron: PASS (paste/drop/picker/limits/dedup/drafts/failure/attachment-only/thumbnail/IME/newline/receipt/reload/no-retry)",
+      "electron: PASS native linux file clipboard + Control+v",
+      "chromium: PASS native linux URI-only clipboard feedback / file picker fallback; direct file paste unavailable"
+    ],
+    "event-stream-smoke": [
+      "chrome: PASS real SSE, snapshot clock, reload, resumed thinking, background fallback, duplicate, reconnect cursor",
+      "electron: PASS real SSE, snapshot clock, reload, resumed thinking, background fallback, duplicate, reconnect cursor"
+    ],
+    "navigation-smoke": [
+      "chromium: PASS two windows / concurrent bookmarks / background wake",
+      "chromium: PASS shell navigation, dialogs/errors, project collapse/search, shortcuts/IME, resize, themes, drawer/focus and embedded view",
+      "chromium: PASS preview/jump/bookmarks/persistence/history/streaming/keyboard/errors/session/responsive",
+      "chromium: PASS anchor fallback / keyboard / focus / drawer close",
+      "chromium: PASS popover fallback / keyboard / focus / drawer close",
+      "electron: PASS two windows / concurrent bookmarks / background wake",
+      "electron: PASS shell navigation, dialogs/errors, project collapse/search, shortcuts/IME, resize, themes, drawer/focus and embedded view",
+      "electron: PASS preview/jump/bookmarks/persistence/history/streaming/keyboard/errors/session/responsive"
+    ],
+    "session-management-smoke": [
+      "chromium: PASS rename/error/limits/pin/unread/archive/error/delete/activity/reload/keyboard/clipboard/project-actions/responsive",
+      "chromium: PASS touch tap/long-press/rename (anchored)",
+      "chromium: PASS touch tap/long-press/rename (no CSS anchor)",
+      "electron: PASS rename/error/limits/pin/unread/archive/error/delete/activity/reload/keyboard/clipboard/project-actions/responsive"
+    ],
+    "thread-scroll-smoke": [
+      "chromium: PASS 长回复收尾 / 滚轮上下翻页 / 阅读中增量 / 回到底部 / 跨不可见页和空行窗口 / 失败重试 / 键盘入口 / 三种宽度",
+      "electron: PASS 长回复收尾 / 滚轮上下翻页 / 阅读中增量 / 回到底部 / 跨不可见页和空行窗口 / 失败重试 / 键盘入口 / 三种宽度"
+    ],
+    "workbench-refresh-smoke": [
+      "chromium: PASS HTTP/SSE 同步、附件/草稿/滚动保留、失败重试、快捷键、重载恢复、存储/输入法边界、真实轮询、三种宽度",
+      "electron: PASS HTTP/SSE 同步、附件/草稿/滚动保留、失败重试、快捷键、重载恢复、存储/输入法边界、真实轮询、三种宽度",
+      "electron: PASS 真实 WebContentsView 在更多工具菜单打开时隐藏，关闭后恢复"
+    ]
+  },
+  "rawArtifactsNote": "checks.artifacts 是原始运行目录下的相对路径；本报告只归档结果摘要及下列代表截图，不包含临时浏览器配置和完整构建产物。CI 配置上传原始运行目录。"
+}
