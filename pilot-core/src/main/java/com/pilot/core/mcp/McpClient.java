@@ -13,11 +13,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
@@ -43,7 +48,15 @@ final class McpClient implements AutoCloseable {
     private final String extraPath;
     private final AtomicLong ids = new AtomicLong(1);
     private final Map<Long, CompletableFuture<JsonNode>> pending = new ConcurrentHashMap<>();
-    private final Object writeLock = new Object();
+    private final Semaphore slots = new Semaphore(64);
+    private final Map<CompletableFuture<Void>, Boolean> writes = new ConcurrentHashMap<>();
+    private final AtomicBoolean closed = new AtomicBoolean();
+    private final ThreadPoolExecutor writer =
+        new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(64), task -> {
+            Thread thread = new Thread(task, "pilot-mcp-writer");
+            thread.setDaemon(true);
+            return thread;
+        });
 
     private volatile Process process;
     private volatile OutputStream stdin;
@@ -60,10 +73,14 @@ final class McpClient implements AutoCloseable {
 
     boolean running() {
         Process current = process;
-        return current != null && current.isAlive();
+        return !closed.get() && current != null && current.isAlive();
     }
 
     void start(Duration timeout) {
+        if (closed.get() || process != null) {
+            throw new McpException("MCP 客户端不能重复启动");
+        }
+        long deadline = deadline(timeout);
         List<String> command = new ArrayList<>();
         command.add(resolveCommand(config.command()));
         command.addAll(config.args());
@@ -94,8 +111,8 @@ final class McpClient implements AutoCloseable {
             params.put("protocolVersion", PROTOCOL_VERSION);
             params.put("capabilities", Map.of());
             params.put("clientInfo", Map.of("name", "pilot", "version", "0.1"));
-            request("initialize", params, timeout);
-            notify("notifications/initialized");
+            request("initialize", params, remainingDuration(deadline));
+            awaitWrite(Map.of("jsonrpc", "2.0", "method", "notifications/initialized"), deadline);
         } catch (McpException e) {
             close();
             throw e;
@@ -142,8 +159,13 @@ final class McpClient implements AutoCloseable {
     }
 
     private JsonNode request(String method, Map<String, Object> params, Duration timeout) {
+        long deadline = deadline(timeout);
+        if (!slots.tryAcquire()) {
+            throw new McpException("MCP 并发请求已达上限，尚未发送本次请求");
+        }
         long id = ids.getAndIncrement();
         CompletableFuture<JsonNode> future = new CompletableFuture<>();
+        AtomicBoolean dispatched = new AtomicBoolean();
         pending.put(id, future);
         try {
             Map<String, Object> message = new LinkedHashMap<>();
@@ -151,8 +173,8 @@ final class McpClient implements AutoCloseable {
             message.put("id", id);
             message.put("method", method);
             message.put("params", params);
-            write(message);
-            JsonNode reply = future.get(Math.max(1, timeout.toMillis()), TimeUnit.MILLISECONDS);
+            write(message, deadline, dispatched).get(remaining(deadline), TimeUnit.NANOSECONDS);
+            JsonNode reply = future.get(remaining(deadline), TimeUnit.NANOSECONDS);
             JsonNode error = reply.path("error");
             if (!error.isMissingNode() && !error.isNull()) {
                 throw new McpException(error.path("message").asString("MCP 服务器返回错误")
@@ -160,36 +182,94 @@ final class McpClient implements AutoCloseable {
             }
             return reply.path("result");
         } catch (TimeoutException e) {
-            throw new McpException("MCP 服务器 " + name + " 在 " + timeout.toSeconds() + " 秒内没有响应（" + method + "）");
+            McpException failure = new McpException("MCP 服务器 " + name + " 调用超时（包含发送与等待响应：" + method + "）");
+            terminate(failure);
+            throw outcome(failure, method, dispatched.get());
         } catch (InterruptedException e) {
+            McpException failure = new McpException("MCP 调用被中断");
+            terminate(failure);
             Thread.currentThread().interrupt();
-            throw new McpException("MCP 调用被中断");
+            throw outcome(failure, method, dispatched.get());
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
-            throw cause instanceof McpException me ? me : new McpException(String.valueOf(cause));
+            McpException failure = cause instanceof McpException me ? me
+                : new McpException(cause instanceof TimeoutException ? "MCP 发送超时" : String.valueOf(cause));
+            terminate(failure);
+            throw outcome(failure, method, dispatched.get());
         } finally {
             pending.remove(id);
+            slots.release();
         }
     }
 
-    private void notify(String method) {
-        write(Map.of("jsonrpc", "2.0", "method", method));
+    private static McpException outcome(McpException failure, String method, boolean dispatched) {
+        return dispatched && "tools/call".equals(method)
+            ? new McpException("结果未确认：" + failure.getMessage() + "。外部操作可能已经执行；停止等待或关闭连接不代表操作已撤销，请先核对外部结果，不要自动重试。", true)
+            : failure;
     }
 
-    private void write(Map<String, Object> message) {
-        OutputStream out = stdin;
-        if (out == null) {
-            throw new McpException("MCP 服务器 " + name + " 未运行");
-        }
+    private void awaitWrite(Map<String, Object> message, long deadline) {
         try {
-            String line = mapper.writeValueAsString(message);
-            synchronized (writeLock) {
-                out.write((line + "\n").getBytes(StandardCharsets.UTF_8));
-                out.flush();
-            }
-        } catch (IOException e) {
-            throw new McpException("与 MCP 服务器 " + name + " 通信失败：" + e.getMessage());
+            write(message, deadline, new AtomicBoolean()).get(remaining(deadline), TimeUnit.NANOSECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new McpException("MCP 发送被中断");
+        } catch (ExecutionException | TimeoutException e) {
+            throw new McpException("MCP 发送失败或超时：" + e.getMessage());
         }
+    }
+
+    /** 序列化、排队、管道写入及 flush 均受同一绝对时限约束；读取线程不等待写入。 */
+    private CompletableFuture<Void> write(Map<String, Object> message, long deadline, AtomicBoolean dispatched) {
+        CompletableFuture<Void> written = new CompletableFuture<>();
+        writes.put(written, Boolean.TRUE);
+        written.orTimeout(remaining(deadline), TimeUnit.NANOSECONDS).whenComplete((ignored, error) -> {
+            writes.remove(written);
+            if (error instanceof TimeoutException) {
+                terminate(new McpException("MCP 发送超时，连接已关闭"));
+            }
+        });
+        try {
+            if (!running()) {
+                throw new McpException("MCP 服务器 " + name + " 未运行");
+            }
+            writer.execute(() -> {
+                if (written.isDone() || closed.get()) {
+                    return;
+                }
+                try {
+                    byte[] line = (mapper.writeValueAsString(message) + "\n").getBytes(StandardCharsets.UTF_8);
+                    if (written.isDone() || closed.get() || System.nanoTime() >= deadline) {
+                        return;
+                    }
+                    dispatched.set(true);
+                    stdin.write(line);
+                    stdin.flush();
+                    written.complete(null);
+                } catch (IOException e) {
+                    McpException failure = new McpException("与 MCP 服务器 " + name + " 通信失败：" + e.getMessage());
+                    written.completeExceptionally(failure);
+                    terminate(failure);
+                } catch (RuntimeException e) {
+                    written.completeExceptionally(new McpException("MCP 请求无法发送：" + e.getMessage()));
+                }
+            });
+        } catch (RejectedExecutionException | McpException e) {
+            written.completeExceptionally(new McpException("MCP 写入队列不可用：" + e.getMessage()));
+        }
+        return written;
+    }
+
+    private static long deadline(Duration timeout) {
+        return System.nanoTime() + Math.max(1, Math.min(Duration.ofHours(1).toNanos(), timeout.toNanos()));
+    }
+
+    private static long remaining(long deadline) {
+        return Math.max(1, deadline - System.nanoTime());
+    }
+
+    private static Duration remainingDuration(long deadline) {
+        return Duration.ofNanos(remaining(deadline));
     }
 
     private void read(Process owner) {
@@ -220,11 +300,7 @@ final class McpClient implements AutoCloseable {
         } catch (IOException ignored) {
             // 进程退出
         } finally {
-            McpException gone = new McpException("MCP 服务器 " + name + " 已退出");
-            pending.values().forEach(future -> future.completeExceptionally(gone));
-            if (process == owner) {
-                process = null;
-            }
+            terminate(new McpException("MCP 服务器 " + name + " 已退出或关闭输出"));
         }
     }
 
@@ -237,39 +313,39 @@ final class McpClient implements AutoCloseable {
         } else {
             reply.put("error", Map.of("code", -32601, "message", "Pilot 不支持该方法"));
         }
-        try {
-            write(reply);
-        } catch (McpException ignored) {
-            // 服务器已经走了
-        }
+        write(reply, deadline(Duration.ofSeconds(20)), new AtomicBoolean());
     }
 
     @Override
     public void close() {
+        terminate(new McpException("MCP 服务器 " + name + " 已关闭"));
+    }
+
+    private void terminate(McpException failure) {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
         Process current = process;
         process = null;
         tools = null;
-        if (current == null) {
-            return;
-        }
-        McpException gone = new McpException("MCP 服务器 " + name + " 已关闭");
-        pending.values().forEach(future -> future.completeExceptionally(gone));
-        try {
-            OutputStream out = stdin;
-            if (out != null) {
-                out.close();
-            }
-        } catch (IOException ignored) {
-            // 已关闭
-        }
-        try {
-            if (!current.waitFor(2, TimeUnit.SECONDS)) {
-                current.descendants().forEach(ProcessHandle::destroyForcibly);
-                current.destroyForcibly();
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            current.destroyForcibly();
+        pending.values().forEach(future -> future.completeExceptionally(failure));
+        writes.keySet().forEach(future -> future.completeExceptionally(failure));
+        writer.shutdownNow();
+        if (current != null) {
+            // Process.destroy/OutputStream.close 可能等待正在阻塞写入的流锁，先通过进程句柄终止。
+            current.descendants().forEach(ProcessHandle::destroyForcibly);
+            current.toHandle().destroyForcibly();
+            Thread cleanup = new Thread(() -> {
+                try {
+                    current.getOutputStream().close();
+                    current.getInputStream().close();
+                    current.getErrorStream().close();
+                } catch (IOException ignored) {
+                    // 已终止的管道。
+                }
+            }, "pilot-mcp-cleanup-" + name);
+            cleanup.setDaemon(true);
+            cleanup.start();
         }
     }
 
