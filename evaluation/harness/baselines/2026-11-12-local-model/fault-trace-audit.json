@@ -1,0 +1,154 @@
+[
+  {
+    "sessionId": "ses_fb691b32-1b1f-4189-b9e6-41188fe540ff",
+    "faultScenario": "mid-eof",
+    "faultInjectedCount": 2,
+    "retryEvents": [
+      {
+        "sequence": 33,
+        "timestamp": "2026-11-12T02:43:48.046391Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 823,
+          "reason": "模型流在有效 finish_reason 到达前结束，未提交本次输出或执行工具",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 67,
+        "timestamp": "2026-11-12T02:44:57.172314Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 811,
+          "reason": "模型流在有效 finish_reason 到达前结束，未提交本次输出或执行工具",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "terminalEvents": [
+      {
+        "sequence": 94,
+        "type": "run.completed",
+        "timestamp": "2026-11-12T02:47:08.485187Z"
+      }
+    ]
+  },
+  {
+    "sessionId": "ses_032cd44b-83b2-41a5-9a47-bfbad56bad3f",
+    "faultScenario": "stall",
+    "faultInjectedCount": 2,
+    "retryEvents": [
+      {
+        "sequence": 40,
+        "timestamp": "2026-11-12T02:49:58.612010Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 887,
+          "reason": "流式模型请求失败（120055 ms）：HTTP 响应空闲超时",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 67,
+        "timestamp": "2026-11-12T02:53:11.037814Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 623,
+          "reason": "流式模型请求失败（120055 ms）：HTTP 响应空闲超时",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "terminalEvents": [
+      {
+        "sequence": 94,
+        "type": "run.completed",
+        "timestamp": "2026-11-12T02:55:25.120724Z"
+      }
+    ]
+  },
+  {
+    "sessionId": "ses_0a6a1359-c285-4f85-aa00-af9c226a7245",
+    "faultScenario": "http-503",
+    "faultInjectedCount": 2,
+    "retryEvents": [
+      {
+        "sequence": 33,
+        "timestamp": "2026-11-12T02:56:29.580730Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 807,
+          "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"fault_guard\",\"code\":\"injected_transient_error\",\"message\":\"injected_transient_error\"}}",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 67,
+        "timestamp": "2026-11-12T02:57:21.802069Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 721,
+          "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"fault_guard\",\"code\":\"injected_transient_error\",\"message\":\"injected_transient_error\"}}",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "terminalEvents": [
+      {
+        "sequence": 81,
+        "type": "run.completed",
+        "timestamp": "2026-11-12T02:59:28.806732Z"
+      }
+    ]
+  },
+  {
+    "sessionId": "ses_a8845642-b536-4233-bbbd-db92a477ea2c",
+    "faultScenario": "reset",
+    "faultInjectedCount": 2,
+    "retryEvents": [
+      {
+        "sequence": 42,
+        "timestamp": "2026-11-12T03:00:20.725843Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 792,
+          "reason": "流式模型请求失败（1 ms）：HTTP/1.1 header parser received no bytes",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 69,
+        "timestamp": "2026-11-12T03:01:16.414060Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 897,
+          "reason": "流式模型请求失败（0 ms）：HTTP/1.1 header parser received no bytes",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "terminalEvents": [
+      {
+        "sequence": 83,
+        "type": "run.completed",
+        "timestamp": "2026-11-12T03:02:24.326431Z"
+      }
+    ]
+  }
+]

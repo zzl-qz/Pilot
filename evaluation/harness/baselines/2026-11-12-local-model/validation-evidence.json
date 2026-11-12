@@ -1,0 +1,275 @@
+{
+  "scope": "同一测试在不同阶段重跑，不能把以下次数相加当成独立用例数。主测试完整通过后，仅对后续合并与配置修改运行受影响回归。",
+  "productionBuild": {
+    "commit": "ef3394f51a61ae19551130fdded27a33f1c90263",
+    "jarSha256": "34bde06c311ba830f639a32cbff2a0d33cd8745b61b6eb1ca5a3c1599aff635d"
+  },
+  "logs": [
+    {
+      "log": "pilot-final-macos-full.log",
+      "sha256": "6a19c53eea99fb48c63782e0778841ac0d2805687dce8fc3b507a6d4fb3a0a70",
+      "summary": [
+        "[INFO] Tests run: 719, Failures: 0, Errors: 0, Skipped: 9",
+        "[INFO] Tests run: 817, Failures: 0, Errors: 0, Skipped: 7",
+        "[INFO] BUILD SUCCESS"
+      ]
+    },
+    {
+      "log": "pilot-final-linux-repaired.log",
+      "sha256": "3fa1c1adb8d21a6da9f70f3c8e2c13ea5785e251c07168474703e947574dc4d6",
+      "summary": [
+        "[INFO] Tests run: 719, Failures: 0, Errors: 0, Skipped: 17",
+        "[INFO] Tests run: 817, Failures: 0, Errors: 0, Skipped: 10",
+        "[INFO] BUILD SUCCESS"
+      ]
+    },
+    {
+      "log": "pilot-merged-model-tests.log",
+      "sha256": "aecba12a3541a2b8ad029f65275d7f656e91b83664de7c8b170b4ce404bb8683",
+      "summary": [
+        "[INFO] Tests run: 119, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] BUILD SUCCESS"
+      ]
+    },
+    {
+      "log": "pilot-scenario-contract-tests.log",
+      "sha256": "86289e37b6cb0873d92138b0fae2fcb49b02cd3042f1aab00ac3220ff2057e67",
+      "summary": [
+        "# tests 101",
+        "# pass 101",
+        "# fail 0",
+        "# skipped 0"
+      ]
+    },
+    {
+      "log": "pilot-model-timeout-final.log",
+      "sha256": "cc26c33dd0be4870c74590e4a4158174591e9886090c1b3563fa32b1e0bfa23d",
+      "summary": [
+        "[INFO] Tests run: 34, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] BUILD SUCCESS"
+      ]
+    },
+    {
+      "log": "pilot-awake-final-package.log",
+      "sha256": "266e6341ea7f603e56694380ea6d2fba1d94fdabe2129a7764808a763a93795f",
+      "summary": [
+        "[INFO] BUILD SUCCESS"
+      ]
+    },
+    {
+      "log": "pilot-project-desktop-unit-final.log",
+      "sha256": "f1e6ed2f5ce3c5c584abc542cbd1375429e4dcfa3ea09081c64b4c529fbe1b17",
+      "summary": [
+        "# tests 46",
+        "# pass 46",
+        "# fail 0",
+        "# skipped 0"
+      ]
+    },
+    {
+      "log": "pilot-project-desktop-security-final.log",
+      "sha256": "8d92f5c1134c805fac449f6cbc2c8b2896abf2ac04b9b3fd5e6d95e9c72e87f3",
+      "summary": [
+        "PASS: 15 real Electron security checks (darwin/arm64)"
+      ]
+    },
+    {
+      "log": "pilot-project-ui-final.log",
+      "sha256": "1ad5f1b2c2b50239d5d619f4911ebd9c9806b9c5e3f95f787fedc554cfa9f204",
+      "summary": [
+        "# tests 4",
+        "# pass 4",
+        "# fail 0",
+        "# skipped 0",
+        "目录多选、去重、取消、失败重试、远程降级、手动路径与三种屏宽通过。Screenshots: /var/folders/v3/fbb0zyg91pd0qyt0gp6fnqcc0000gn/T/pilot-project-folders-W2ekLo"
+      ]
+    },
+    {
+      "log": "pilot-project-ui-check-final.log",
+      "sha256": "90ebce0c91cbde7ff61bde6fd8706f805a4b2c5c0ab89a5649812d942baa0ace",
+      "summary": []
+    },
+    {
+      "log": "pilot-project-linux-frontend.log",
+      "sha256": "7533b3e9b80ac7699c50bcbbfad529e1bd31b12dcecfffaefe5feca1d2508290",
+      "summary": []
+    },
+    {
+      "log": "pilot-project-linux-picker.log",
+      "sha256": "9ddfdaf920624a98efdce429aadb6141404de14536ed6b1499654ad20023ba4a",
+      "summary": [
+        "# tests 5",
+        "# pass 5",
+        "# fail 0",
+        "# skipped 0"
+      ]
+    },
+    {
+      "log": "pilot-recovery-smoke-final.log",
+      "sha256": "6605180cbe107663a89d5a0011e1b2e657df1cc937fb47b81b94cf189cb4e1cf",
+      "summary": [
+        "Recovery smoke passed: /var/folders/v3/fbb0zyg91pd0qyt0gp6fnqcc0000gn/T/pilot-recovery-smoke-ILu569/report.json"
+      ]
+    },
+    {
+      "log": "pilot-recovery-linux-final.log",
+      "sha256": "51ca4aebdfd334953e70a8b00a6011efc381ccdccb063454c41024215a6d65ac",
+      "summary": [
+        "Recovery smoke passed: /qa/pilot-recovery-smoke-CfJnS2/report.json"
+      ]
+    },
+    {
+      "log": "pilot-scenario-reference.log",
+      "sha256": "ab53f632fb5092a6265778c4a94153b40b145a0230ac89c3b65888668feed3f3",
+      "summary": [
+        "3/3 个任务同时满足初始失败与参考解成功（非模型能力评测）"
+      ]
+    },
+    {
+      "log": "pilot-merged-linux.log",
+      "sha256": "e2cb7ce7c0f00db1872dc46b36bc5adacaab83ee490ccbfb44262159300492e6",
+      "summary": [
+        "# tests 101",
+        "# pass 101",
+        "# fail 0",
+        "# skipped 0",
+        "[INFO] Tests run: 119, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] BUILD SUCCESS"
+      ]
+    },
+    {
+      "log": "pilot-fault-final-tests.log",
+      "sha256": "16fdb5c69fed361817cbf3950a5f588eced98b99bccf5e375b45691b43ffd308",
+      "summary": [
+        "# tests 106",
+        "# pass 106",
+        "# fail 0",
+        "# skipped 0"
+      ]
+    },
+    {
+      "log": "pilot-fault-linux-frozen-tests.log",
+      "sha256": "ede52d96ecc5e8d01bb773b8ba682e1cd3e2747a0c8db1aa1adb21d6199de7e6",
+      "summary": [
+        "# tests 106",
+        "# pass 106",
+        "# fail 0",
+        "# skipped 0"
+      ]
+    },
+    {
+      "log": "pilot-fault-budget-before.log",
+      "sha256": "fa890d284a867ebe8c5aae22868f083408491c5992ddcb315e4b4c6eae13befb",
+      "summary": [
+        "not ok 14 - 在触顶前 reset 不能洗掉跨轮请求计数",
+        "not ok 15 - 在触顶前 reset 不能洗掉跨轮已观测费用",
+        "# tests 15",
+        "# pass 13",
+        "# fail 2",
+        "# skipped 0"
+      ]
+    },
+    {
+      "log": "pilot-fault-metrics-tests.log",
+      "sha256": "f72cb1b74641ea086083df134a51eef162249656e29ff107970de50438f40b4a",
+      "summary": [
+        "# tests 108",
+        "# pass 108",
+        "# fail 0",
+        "# skipped 0"
+      ]
+    },
+    {
+      "log": "pilot-fault-metrics-linux-tests.log",
+      "sha256": "9c5801d4c3c3e6edfd474f99235107c30dc4569595997eadb675b0ad446a88dd",
+      "summary": [
+        "# tests 108",
+        "# pass 108",
+        "# fail 0",
+        "# skipped 0"
+      ]
+    },
+    {
+      "log": "pilot-verification-guidance-after.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": []
+    },
+    {
+      "log": "pilot-verification-guidance-linux-with-node.log",
+      "sha256": "6784625494a094f613f33922d2ed12415df19588129941db5aac84e9734718de",
+      "summary": [
+        "[INFO] Tests run: 107, Failures: 0, Errors: 0, Skipped: 1",
+        "[INFO] BUILD SUCCESS"
+      ]
+    },
+    {
+      "log": "pilot-verification-guidance-style.log",
+      "sha256": "2d36f5d063a3e7854e1ed260889a678d7f98ce868c8fa652988303123094e2be",
+      "summary": [
+        "[INFO] You have 0 Checkstyle violations.",
+        "[INFO] You have 0 Checkstyle violations.",
+        "[INFO] BUILD SUCCESS"
+      ]
+    },
+    {
+      "log": "pilot-guidance-core-package.log",
+      "sha256": "895e64da3e15cfe58757e23d67448bff8b5c71b7f081a49acfa416305c6a4cf2",
+      "summary": [
+        "[INFO] BUILD SUCCESS"
+      ]
+    },
+    {
+      "log": "pilot-trajectory-tests.log",
+      "sha256": "5e1bdd7490b01bd1f2896b8dcebaec33bdb2951ab48c8bd4f05250840a785e0e",
+      "summary": [
+        "# tests 111",
+        "# pass 111",
+        "# fail 0",
+        "# skipped 0"
+      ]
+    },
+    {
+      "log": "pilot-trajectory-linux-final.log",
+      "sha256": "30a157905d47e7f93c3b38ff9186643fb6b4942c240de8c6094730fbef0727c8",
+      "summary": [
+        "# tests 111",
+        "# pass 111",
+        "# fail 0",
+        "# skipped 0"
+      ]
+    }
+  ],
+  "platforms": {
+    "macOS": "Java 25 ARM64；Chrome/Electron 实际运行。原生选择弹框使用模拟返回，IPC、界面与三种宽度实际执行。",
+    "Linux": "Docker --init：Java 25、Node 测试实际运行；未验证图形桌面或原生目录弹框。",
+    "Windows": "路径与功能降级单元模拟；本轮最终合并版本未进行 Windows 实机验证。"
+  },
+  "limits": [
+    "恢复烟测为确定性本地 HTTP 模型，不能计入真实模型成功率。",
+    "原基线只有三个任务各一次，不构成 20+ 任务各三次的严格 A/B 对照。",
+    "夜间睡眠中断记录保留；重跑另开输出，不覆盖旧失败。",
+    "P1 三次复测的最终产物均通过，但一例中途创建并删除范围外临时文件；事后过程审计按 2/3 合规保留，不能用删除动作撤销违规。"
+  ],
+  "finalHarnessCommit": "3d7b093d92460384536276ba2571e50838d43583",
+  "productionSourceEquivalence": "主矩阵与场景使用 ef3394f 冻结构建；后续合并后的生产 Java、前端和桌面源码与该构建一致。02edcb0 另行调整两段校验指引，P1 复测通过独立服务加载该提交的完整外部提示词目录；其余主评测保持原提示词。",
+  "guidanceCommit": "02edcb0",
+  "guidanceRegression": {
+    "macOS": {
+      "tests": 107,
+      "passed": 106,
+      "skipped": 1,
+      "failures": 0
+    },
+    "Linux": {
+      "tests": 107,
+      "passed": 106,
+      "skipped": 1,
+      "failures": 0
+    },
+    "environmentNotes": "首次本机 shell 默认 JDK 低于25、首次Linux测试容器缺少Node；纠正执行环境后通过，未修改产品绕过失败。"
+  },
+  "guidancePackage": {
+    "coreJarSha256": "5fda1229b0c24412ce1a91cc6932966b07b2f485c09eca9b46d410b2d60f57c1",
+    "promptResourcesMatchSource": true
+  }
+}

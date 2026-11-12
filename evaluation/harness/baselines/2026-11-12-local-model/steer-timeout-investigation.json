@@ -1,0 +1,312 @@
+{
+  "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+  "terminalStatusAfterCancellation": "CANCELLED",
+  "leaseState": "已释放（INTERRUPTED）",
+  "storageHealth": "正常",
+  "modelRequests": 18,
+  "postCancellationArtifactCheck": {
+    "exitCode": 0,
+    "stdout": "TAP version 13\n# Subtest: 基本解析\nok 1 - 基本解析\n  ---\n  duration_ms: 0.973709\n  type: 'test'\n  ...\n# Subtest: 引号内的逗号不切分\nok 2 - 引号内的逗号不切分\n  ---\n  duration_ms: 0.117917\n  type: 'test'\n  ...\n# Subtest: 引号内的换行属于同一个字段\nok 3 - 引号内的换行属于同一个字段\n  ---\n  duration_ms: 0.04075\n  type: 'test'\n  ...\n# Subtest: 没有引入任何第三方依赖\nok 4 - 没有引入任何第三方依赖\n  ---\n  duration_ms: 0.152708\n  type: 'test'\n  ...\n# Subtest: 源码没有散落到 src 之外\nok 5 - 源码没有散落到 src 之外\n  ---\n  duration_ms: 0.190875\n  type: 'test'\n  ...\n1..5\n# tests 5\n# suites 0\n# pass 5\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 66.9535\n",
+    "scope": "仅用于分析取消后已保存产物，不把超时尝试改记成功"
+  },
+  "events": [
+    {
+      "sequence": 14,
+      "timestamp": "2026-11-12T02:16:42.098825Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_336f59e6",
+        "name": "read_file",
+        "summary": "path=package.json"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 15,
+      "timestamp": "2026-11-12T02:16:42.105248Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_3019a19c",
+        "name": "list_dir",
+        "summary": "path=src"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 16,
+      "timestamp": "2026-11-12T02:16:42.111671Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_abafbf81",
+        "name": "list_dir",
+        "summary": "path=test"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 25,
+      "timestamp": "2026-11-12T02:16:50.418070Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_e6fdd0e5",
+        "name": "read_file",
+        "summary": "path=src/csv.js"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 26,
+      "timestamp": "2026-11-12T02:16:50.421798Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_7e831e48",
+        "name": "read_file",
+        "summary": "path=test/csv.test.js"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 34,
+      "timestamp": "2026-11-12T02:17:40.811481Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_06b7d135",
+        "name": "apply_patch",
+        "summary": "{patch=*** Update File: src/csv.js @@ 'use strict'; -// CSV 解析。当前只做了最朴素的逗号切分，引号里的逗号会切错。 -function parse(text) { - return…"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 41,
+      "timestamp": "2026-11-12T02:18:45.632351Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_5ed58eb8",
+        "name": "apply_patch",
+        "summary": "{patch=*** Begin Patch *** Update File: src/csv.js @@ 'use strict'; -// CSV 解析。当前只做了最朴素的逗号切分，引号里的逗号会切错。 -function parse(…"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 48,
+      "timestamp": "2026-11-12T02:19:07.274054Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_72bf7399",
+        "name": "run_command",
+        "summary": "{command=node --test test/ 2>&1 | tail -30}"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 55,
+      "timestamp": "2026-11-12T02:19:35.657055Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_ad092a41",
+        "name": "command_logs",
+        "summary": "{limit=3000,offset=0,taskId=cmd_61337927-d8fc-4340-a772-7b05ed9436ee}"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 62,
+      "timestamp": "2026-11-12T02:19:48.313323Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_a6da5876",
+        "name": "run_command",
+        "summary": "{command=node --test test/csv.test.js 2>&1 | tail -40}"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 69,
+      "timestamp": "2026-11-12T02:20:38.995295Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_8af7db52",
+        "name": "run_command",
+        "summary": "{command=node -e 'const {parse}=require(\"./src/csv.js\");const a=require(\"assert/strict\");a.deepEqual(parse(\"a,b\\r\\n1,2\\r…"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 76,
+      "timestamp": "2026-11-12T02:21:53.733510Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_f51bc90b",
+        "name": "edit_file",
+        "summary": "path=src/csv.js"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 83,
+      "timestamp": "2026-11-12T02:23:43.482558Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_0e6cea4e",
+        "name": "edit_file",
+        "summary": "path=src/csv.js"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 90,
+      "timestamp": "2026-11-12T02:24:15.740428Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_fb8b24c2",
+        "name": "read_file",
+        "summary": "path=src/csv.js"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 97,
+      "timestamp": "2026-11-12T02:25:31.440088Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_4056a0ee",
+        "name": "run_command",
+        "summary": "{command=node --test test/csv.test.js 2>&1 | tail -12 && node -e 'const {parse}=require(\"./src/csv.js\");const a=require(…"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 104,
+      "timestamp": "2026-11-12T02:26:22.876591Z",
+      "type": "run.continued",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "attempt": 1,
+        "maxAttempts": 2,
+        "reason": "改动未验证，已要求先跑构建或测试"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 110,
+      "timestamp": "2026-11-12T02:28:14.624986Z",
+      "type": "tool.started",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "callId": "call_fe73a6e0",
+        "name": "run_command",
+        "summary": "{command=node --test 2>&1 | tail -12}"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 117,
+      "timestamp": "2026-11-12T02:28:46.439314Z",
+      "type": "run.continued",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "attempt": 2,
+        "maxAttempts": 2,
+        "reason": "改动未验证，已要求先跑构建或测试"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 123,
+      "timestamp": "2026-11-12T02:30:29.240049Z",
+      "type": "run.continued",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "attempt": 1,
+        "maxAttempts": 1,
+        "reason": "收尾前自审：核对目标与结论是否真的覆盖完整"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    },
+    {
+      "sequence": 129,
+      "timestamp": "2026-11-12T02:31:04.181814Z",
+      "type": "run.cancelled",
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "runId": "run_ed9fa010-9f1d-4fe7-94f8-1891dde5d878",
+      "payload": {
+        "reason": "运行已被用户取消。"
+      },
+      "version": 1,
+      "previewId": null,
+      "previewOffset": null
+    }
+  ]
+}

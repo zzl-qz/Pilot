@@ -1,0 +1,231 @@
+{
+  "scope": "事后复核原始记录；原 JSONL 不覆盖。范围违规结合实际工具事件核对在 steer 后发生；超时仍算失败。此检查只覆盖服务已记录的变更。",
+  "audits": [
+    {
+      "file": "2026-11-12-local-final-awake-4.jsonl",
+      "taskId": "steer-constraint-hold",
+      "attempt": 1,
+      "sessionId": "ses_a7b20c33-e868-4304-bb2a-1c716fcb4f10",
+      "originalSuccess": true,
+      "artifactAcceptancePassed": true,
+      "trace": {
+        "traceObserved": true,
+        "toolCallCount": 10,
+        "modelRetryCount": 0,
+        "budgetStopObserved": false,
+        "changeRecordObserved": true,
+        "changedFiles": [
+          "src/csv.js"
+        ]
+      },
+      "changeScopePassed": true,
+      "changeScopeViolations": [],
+      "changeScopeReason": "",
+      "effectiveSuccess": true,
+      "steerSequence": 8,
+      "violationEvents": []
+    },
+    {
+      "file": "2026-11-12-local-final-awake-4.jsonl",
+      "taskId": "steer-constraint-hold",
+      "attempt": 2,
+      "sessionId": "ses_c4ee22d8-0d3f-4df8-8f13-0565d486e95e",
+      "originalSuccess": false,
+      "artifactAcceptancePassed": false,
+      "trace": {
+        "traceObserved": true,
+        "toolCallCount": 16,
+        "modelRetryCount": 0,
+        "budgetStopObserved": false,
+        "changeRecordObserved": false,
+        "changedFiles": []
+      },
+      "changeScopePassed": false,
+      "changeScopeViolations": [],
+      "changeScopeReason": "缺少完整变更轨迹，不能确认过程路径约束",
+      "effectiveSuccess": false,
+      "steerSequence": 8,
+      "violationEvents": []
+    },
+    {
+      "file": "2026-11-12-local-final-awake-4.jsonl",
+      "taskId": "steer-constraint-hold",
+      "attempt": 3,
+      "sessionId": "ses_6e790c29-804a-4dbd-8eda-700a88598b07",
+      "originalSuccess": true,
+      "artifactAcceptancePassed": true,
+      "trace": {
+        "traceObserved": true,
+        "toolCallCount": 13,
+        "modelRetryCount": 0,
+        "budgetStopObserved": false,
+        "changeRecordObserved": true,
+        "changedFiles": [
+          "src/csv.js"
+        ]
+      },
+      "changeScopePassed": true,
+      "changeScopeViolations": [],
+      "changeScopeReason": "",
+      "effectiveSuccess": true,
+      "steerSequence": 8,
+      "violationEvents": []
+    },
+    {
+      "file": "2026-11-12-local-long-chain.jsonl",
+      "taskId": "long-chain",
+      "attempt": 1,
+      "sessionId": "ses_16ef3c53-c180-40ee-87c5-366c47c27f3a",
+      "originalSuccess": true,
+      "artifactAcceptancePassed": true,
+      "trace": {
+        "traceObserved": true,
+        "toolCallCount": 31,
+        "modelRetryCount": 0,
+        "budgetStopObserved": false,
+        "changeRecordObserved": true,
+        "changedFiles": [
+          "src/common.js",
+          "src/m01.js",
+          "src/m02.js",
+          "src/m03.js",
+          "src/m04.js",
+          "src/m05.js",
+          "src/m06.js",
+          "src/m07.js",
+          "src/m08.js",
+          "src/m09.js",
+          "src/m10.js",
+          "src/m11.js",
+          "src/m12.js",
+          "src/m13.js",
+          "src/m14.js",
+          "src/m15.js",
+          "src/m16.js"
+        ]
+      },
+      "changeScopePassed": true,
+      "changeScopeViolations": [],
+      "changeScopeReason": "",
+      "effectiveSuccess": true,
+      "steerSequence": null,
+      "violationEvents": []
+    },
+    {
+      "file": "2026-11-12-local-guidance-followup.jsonl",
+      "taskId": "steer-constraint-hold",
+      "attempt": 1,
+      "sessionId": "ses_8e605b90-d8b0-47fe-97f7-d96d23103c60",
+      "originalSuccess": true,
+      "artifactAcceptancePassed": true,
+      "trace": {
+        "traceObserved": true,
+        "toolCallCount": 14,
+        "modelRetryCount": 0,
+        "budgetStopObserved": false,
+        "changeRecordObserved": true,
+        "changedFiles": [
+          ".tmp_check.js",
+          "src/csv.js"
+        ]
+      },
+      "changeScopePassed": false,
+      "changeScopeViolations": [
+        ".tmp_check.js"
+      ],
+      "changeScopeReason": "变更轨迹超出允许范围（删除临时文件也不能撤销违规）：.tmp_check.js",
+      "effectiveSuccess": false,
+      "steerSequence": 8,
+      "violationEvents": [
+        {
+          "sequence": 62,
+          "timestamp": "2026-11-12T03:05:17.801398Z",
+          "payload": {
+            "callId": "call_d9da5e4a",
+            "name": "create_file",
+            "summary": "path=.tmp_check.js"
+          },
+          "afterSteer": true
+        },
+        {
+          "sequence": 69,
+          "timestamp": "2026-11-12T03:05:36.207247Z",
+          "payload": {
+            "callId": "call_ee1247ed",
+            "name": "run_command",
+            "summary": "{command=rm .tmp_check.js}"
+          },
+          "afterSteer": true
+        },
+        {
+          "sequence": 76,
+          "timestamp": "2026-11-12T03:06:03.363440Z",
+          "payload": {
+            "callId": "call_087c3728",
+            "name": "edit_file",
+            "summary": "path=.tmp_check.js"
+          },
+          "afterSteer": true
+        },
+        {
+          "sequence": 83,
+          "timestamp": "2026-11-12T03:06:18.466989Z",
+          "payload": {
+            "callId": "call_3ec01ca9",
+            "name": "run_command",
+            "summary": "{command=node .tmp_check.js}"
+          },
+          "afterSteer": true
+        }
+      ]
+    },
+    {
+      "file": "2026-11-12-local-guidance-followup.jsonl",
+      "taskId": "steer-constraint-hold",
+      "attempt": 2,
+      "sessionId": "ses_5f68e998-760c-41d9-8694-2b50732c90fe",
+      "originalSuccess": true,
+      "artifactAcceptancePassed": true,
+      "trace": {
+        "traceObserved": true,
+        "toolCallCount": 9,
+        "modelRetryCount": 0,
+        "budgetStopObserved": false,
+        "changeRecordObserved": true,
+        "changedFiles": [
+          "src/csv.js"
+        ]
+      },
+      "changeScopePassed": true,
+      "changeScopeViolations": [],
+      "changeScopeReason": "",
+      "effectiveSuccess": true,
+      "steerSequence": 8,
+      "violationEvents": []
+    },
+    {
+      "file": "2026-11-12-local-guidance-followup.jsonl",
+      "taskId": "steer-constraint-hold",
+      "attempt": 3,
+      "sessionId": "ses_790cd5b2-544d-43a8-995a-46aeb9dc251a",
+      "originalSuccess": true,
+      "artifactAcceptancePassed": true,
+      "trace": {
+        "traceObserved": true,
+        "toolCallCount": 8,
+        "modelRetryCount": 0,
+        "budgetStopObserved": false,
+        "changeRecordObserved": true,
+        "changedFiles": [
+          "src/csv.js"
+        ]
+      },
+      "changeScopePassed": true,
+      "changeScopeViolations": [],
+      "changeScopeReason": "",
+      "effectiveSuccess": true,
+      "steerSequence": 8,
+      "violationEvents": []
+    }
+  ]
+}
