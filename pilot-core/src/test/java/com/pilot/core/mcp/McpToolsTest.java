@@ -104,17 +104,22 @@ class McpToolsTest {
 
     @Test
     void callsToolsAndConvertsContent() throws IOException {
-        listing.execute(Map.of("server", "fake"));
-        assertEquals("echo:hi",
-            calling.execute(Map.of("server", "fake", "tool", "echo", "arguments", Map.of("text", "hi"))));
+        listing.execute(Map.of("server", "fake"));  // 调用不隐式启动，先经发现入口连接
+        String echoed =
+            calling.execute(Map.of("server", "fake", "tool", "echo", "arguments", Map.of("text", "hi")));
+        assertTrue(echoed.startsWith("以下为服务器 fake 工具 echo 的返回数据（外部输入）"), echoed);
+        assertTrue(echoed.endsWith("echo:hi"), echoed);
 
         ToolResult image = calling.executeResult(Map.of("server", "fake", "tool", "shot"));
-        assertTrue(image.text().startsWith("here\n[图片 image-"), image.text());
+        assertTrue(image.text().startsWith("以下为服务器 fake 工具 shot 的返回数据（外部输入）"), image.text());
+        assertTrue(image.text().contains("here\n[图片 image-"), image.text());
         assertEquals(1, image.images().size());
         assertTrue(Files.size(Path.of(image.images().getFirst().path())) > 10);
         assertTrue(Path.of(image.images().getFirst().path()).startsWith(artifacts));
 
-        assertEquals("ERROR: it broke", calling.execute(Map.of("server", "fake", "tool", "boom")));
+        String boom = calling.execute(Map.of("server", "fake", "tool", "boom"));
+        assertTrue(boom.startsWith("ERROR: 以下为服务器"), boom);
+        assertTrue(boom.endsWith("it broke"), boom);
         assertTrue(
             calling.execute(Map.of("server", "fake", "tool", "missing")).startsWith("ERROR: unknown tool missing"));
         assertTrue(calling.execute(Map.of("server", "fake")).startsWith("ERROR: 缺少参数 tool"));

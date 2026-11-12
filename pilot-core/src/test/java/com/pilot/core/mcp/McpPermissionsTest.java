@@ -73,7 +73,8 @@ class McpPermissionsTest {
                 var args = Map.<String, Object>of("server", "fake", "tool", name);
                 assertEquals(PermissionDecision.ALLOW,
                     gate.check(new ToolCall(name, "mcp_call", args), tool).decision());
-                assertEquals("ok", tool.execute(args));
+                // 工具返回头部有外部数据定界行，正文以实际内容结尾
+                assertTrue(tool.execute(args).endsWith("ok"), name);
             }
             assertFalse(tool.readOnly(Map.of("server", "fake", "tool", "unknown")));
             assertTrue(new McpToolsTool(manager, root).execute(Map.of("server", "fake")).contains("[本地策略只读]"));
@@ -197,7 +198,8 @@ class McpPermissionsTest {
                 (id, name, summary) -> CompletableFuture.completedFuture(true));
             var result = executor.execute(new ToolCall("approved", "mcp_call", args), event -> {
             });
-            assertEquals("ok", result.result());
+            // 工具返回头部有外部数据定界行，正文以实际内容结尾
+            assertTrue(result.result().endsWith("ok"));
             assertTrue(result.usableEvidence());
         }
     }
