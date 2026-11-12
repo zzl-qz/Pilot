@@ -237,6 +237,37 @@
         "# fail 0",
         "# skipped 0"
       ]
+    },
+    {
+      "log": "pilot-readonly-guard-before.log",
+      "sha256": "c8e3757d79415e7a8a2394dda1919c7f9c5c076af7b5a80437bbc478e072b9d6",
+      "summary": [
+        "[ERROR] Tests run: 24, Failures: 2, Errors: 0, Skipped: 0, Time elapsed: 0.063 s <<< FAILURE! -- in com.pilot.core.loop.CompletionGateTest",
+        "[ERROR] Tests run: 24, Failures: 2, Errors: 0, Skipped: 0",
+        "[INFO] BUILD FAILURE"
+      ]
+    },
+    {
+      "log": "pilot-readonly-guard-final.log",
+      "sha256": "6230f4d587066a97918e1e41fce343f11059482bd9ab7bd8ce1f8a49156fe89d",
+      "summary": [
+        "[INFO] You have 0 Checkstyle violations.",
+        "[INFO] Tests run: 24, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in com.pilot.core.loop.CompletionGateTest",
+        "[INFO] Tests run: 84, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] You have 0 Checkstyle violations.",
+        "[INFO] BUILD SUCCESS"
+      ]
+    },
+    {
+      "log": "pilot-readonly-guard-linux.log",
+      "sha256": "d85e28ff2550ca77747b941829ec39a5f581307d85f1d66a8b876bf424545131",
+      "summary": [
+        "[INFO] You have 0 Checkstyle violations.",
+        "[INFO] Tests run: 24, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.019 s -- in com.pilot.core.loop.CompletionGateTest",
+        "[INFO] Tests run: 84, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] You have 0 Checkstyle violations.",
+        "[INFO] BUILD SUCCESS"
+      ]
     }
   ],
   "platforms": {
@@ -251,7 +282,7 @@
     "P1 三次复测的最终产物均通过，但一例中途创建并删除范围外临时文件；事后过程审计按 2/3 合规保留，不能用删除动作撤销违规。"
   ],
   "finalHarnessCommit": "3d7b093d92460384536276ba2571e50838d43583",
-  "productionSourceEquivalence": "主矩阵与场景使用 ef3394f 冻结构建；后续合并后的生产 Java、前端和桌面源码与该构建一致。02edcb0 另行调整两段校验指引，P1 复测通过独立服务加载该提交的完整外部提示词目录；其余主评测保持原提示词。",
+  "productionSourceEquivalence": "主矩阵与场景使用 ef3394f 冻结构建，覆盖当时的生产 Java、前端和桌面实现。02edcb0 另调两段校验指引，P1 复测通过独立服务加载该提交外部提示词目录。最终原会话收尾再发现只读完成门误催办，追加 Java 修复并在 macOS/Linux 各跑84项相关回归；不把早先72次宣称为最终新增只读分支的全矩阵重跑。",
   "guidanceCommit": "02edcb0",
   "guidanceRegression": {
     "macOS": {
@@ -271,5 +302,24 @@
   "guidancePackage": {
     "coreJarSha256": "5fda1229b0c24412ce1a91cc6932966b07b2f485c09eca9b46d410b2d60f57c1",
     "promptResourcesMatchSource": true
+  },
+  "readOnlyGuardRegression": {
+    "before": {
+      "tests": 24,
+      "failed": 2
+    },
+    "macOS": {
+      "tests": 84,
+      "passed": 84,
+      "failed": 0,
+      "skipped": 0
+    },
+    "Linux": {
+      "tests": 84,
+      "passed": 84,
+      "failed": 0,
+      "skipped": 0
+    },
+    "scope": "本轮只读、旧实现计划、已发生代码变更仍需验证、实现只读功能和限制特定文件的反例；包含AgentLoop已有回归。"
   }
 }

@@ -51,6 +51,10 @@ final class CompletionGate {
         List.of("建议", "看看", "评估", "分析", "意见", "思路", "方案", "对比", "解释", "为什么", "是否", "值不值", "有什么", "怎么看", "判断一下", "调研");
     private static final List<String> CONSULT_HINTS_EN =
         List.of("suggest", "advice", "opinion", "evaluate", "compare", "explain", "review");
+    /** 本轮只读或全局禁止改文件是范围约束；不能因提到已实现的功能而催办写入。 */
+    private static final List<String> READ_ONLY_TASK_HINTS =
+        List.of("本轮只读", "本次只读", "本任务只读", "仅做只读", "只分析不修改", "不要修改任何仓库文件", "不得修改任何仓库文件", "不要修改任何文件", "不得修改任何文件",
+            "do not modify any files", "do not change any files", "do not edit any files", "this task is read-only");
     /** 只改这些后缀的文档不算「改了代码」，不强制跑构建。 */
     private static final Set<String> DOC_SUFFIXES = Set.of(".md", ".txt", ".rst", ".adoc");
     /** 目标像「调研 / 解释 / 定位」时，只读任务也要核对覆盖范围，不能读两个文件就下结论。 */
@@ -146,7 +150,9 @@ final class CompletionGate {
         if (!enabled) {
             return null;
         }
-        if (!openSteps.isEmpty() && planPrompts < 2) {
+        boolean readOnlyTask =
+            goal != null && READ_ONLY_TASK_HINTS.stream().anyMatch(goal.toLowerCase(Locale.ROOT)::contains);
+        if (!readOnlyTask && !openSteps.isEmpty() && planPrompts < 2) {
             planPrompts++;
             return new Nudge(
                 "原始用户目标：" + (goal == null ? "见持久任务上下文" : goal) + "\n计划进度："
@@ -156,9 +162,9 @@ final class CompletionGate {
         }
         boolean changed = !changedFiles.isEmpty();
         // 只读任务没有改动，但「目标像调研、工具却只用了两三次」同样要核对覆盖范围
-        boolean researching = !changed && toolCalls >= 2 && looksLikeResearch(goal);
+        boolean researching = !changed && toolCalls >= 2 && (readOnlyTask || looksLikeResearch(goal));
         // 实现类目标却一个文件都没改就想收尾，多半是只给了方案或反问了一句，而不是真的做完
-        if (!changed && !researching && actionPrompts < MAX_ACTION_PROMPTS && looksLikeAction(goal)
+        if (!readOnlyTask && !changed && !researching && actionPrompts < MAX_ACTION_PROMPTS && looksLikeAction(goal)
             && !looksLikeResearch(goal)) {
             actionPrompts++;
             String prompt = prompts.render("completion/act", Map.of("goal", ToolSupport.oneLine(goal, 500))).strip();

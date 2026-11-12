@@ -1,0 +1,39 @@
+{
+  "scope": "用户原服务未重启的只读收尾；两会话正常结束。额外发现完成门误催只读任务动手，已另补针对性修复与回归。",
+  "sessions": [
+    {
+      "sessionId": "ses_7c981c5d-ff6a-4166-837c-a7d0e3738c4a",
+      "runId": "run_5f331d9d-a3ef-48d2-9b18-84a28425a03e",
+      "terminalType": "run.completed",
+      "planDone": 7,
+      "planTotal": 7,
+      "changedFiles": [],
+      "toolNames": [
+        "read_file",
+        "update_plan"
+      ],
+      "completionNudges": [
+        {
+          "attempt": 1,
+          "maxAttempts": 1,
+          "reason": "实现类目标尚无任何改动，已要求直接动手"
+        }
+      ],
+      "summary": "\n\n收尾完成：交付小结已按报告逐项给出（71/72 主矩阵保留 1 次超时、P1 产物 3/3 与过程约束 2/3、网络故障 4/4、预算两次停止后续跑 40/40 独立验收通过、macOS/Linux 已验证而 Windows 未实机），原计划 7 项全部标记完成，并已提醒重启后端与桌面加载新实现。本轮为只读收尾：未改仓库文件、未跑测试、无 Git 写操作、未重启服务。任务到此结束。"
+    },
+    {
+      "sessionId": "ses_9fd592fb-104a-44f9-89ad-fded77ba650f",
+      "runId": "run_0fa3ddb4-065b-40dc-bd36-ed73f79b1ad5",
+      "terminalType": "run.completed",
+      "planDone": 4,
+      "planTotal": 4,
+      "changedFiles": [],
+      "toolNames": [
+        "read_file",
+        "update_plan"
+      ],
+      "completionNudges": [],
+      "summary": "\n\n收尾完成。本轮是只读交付总结：按要求仅用 read_file 阅读了 [MODEL_IO_PROJECT_FOLDERS_2026-11-12.md](/evaluation/MODEL_IO_PROJECT_FOLDERS_2026-11-12.md)，未修改任何仓库文件、未运行测试或评测、未执行 Git 写操作、未重启服务——上一条回复中的小结即最终交付说明，原计划的 4 个实现/验证步骤均已按集成结果（7ef8142，含真实 Electron 15 项 IPC/安全检查）如实勾选为完成。\n\n要点重申（均直接来自报告，保留失败证据）：\n\n- **实现与评测已完成**：目录选择、协议终态、有界读取、恢复与预算续跑、管道参数缺陷修复均已集成推送 master/dev/S01。\n- **主矩阵** P0 24×3：71/72 通过（98.6%），1 次 CSV 任务超时取消，保留为失败，**不是全绿**。\n- **P1 补测**：产物 3/3 通过，过程约束仅 2/3（一次根目录临时脚本违规，审计单独纠正）。\n- **网络故障**：EOF/停顿/503/连接重置 4 类均通过。\n- **预算**：5 次边界组两次 BUDGET_LIMITED 停止、两次续跑后 40/40 并独立验收通过；20 次预算组未触发停止，场景覆盖记为失败。\n- **平台边界**：macOS/Linux 为真实验证（Linux 容器、未覆盖图形弹框）；Windows 仅模拟测试，合并版本**未实机验证**；原生弹框为模拟返回。\n\n> [!IMPORTANT]\n> 正在运行的 IDE 后端仍持有启动时的旧 Java 类，桌面主进程也需重新启动才能加载新的目录选择 IPC。请择机重启 Pilot 后端与桌面应用，仅刷新网页不会替换已加载的类。"
+    }
+  ]
+}

@@ -49,6 +49,36 @@ class CompletionGateTest {
     }
 
     @Test
+    void explicitReadOnlyDeliveryDoesNotRequestRepositoryChanges() {
+        for (String goal : List.of("实现与验证已完成，本轮只读收尾，请阅读报告并总结", "总结已经实现的代码，不要修改任何仓库文件",
+            "Summarize the implemented changes. Do not edit any files.")) {
+            CompletionGate gate = new CompletionGate(PROMPTS, true, goal);
+            assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of()), goal);
+        }
+    }
+
+    @Test
+    void readOnlyHandoffDoesNotResumeOldImplementationPlanOrWaiveVerification() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "本轮只读收尾，不要修改任何仓库文件");
+        assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of("实现登录接口")));
+
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(), List.of(), List.of());
+        assertNotNull(nudge);
+        assertTrue(nudge.reason().contains("未验证"));
+    }
+
+    @Test
+    void implementingReadOnlyFeaturesAndProtectingSpecificFilesStillRequiresAction() {
+        for (String goal : List.of("实现只读接口，不要修改测试文件", "修复读取问题，不要修改 package.json", "修复只读收尾误触发写代码的 bug",
+            "Implement a read-only API. Do not edit the tests.")) {
+            CompletionGate gate = new CompletionGate(PROMPTS, true, goal);
+            CompletionGate.Nudge nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
+            assertNotNull(nudge, goal);
+            assertTrue(nudge.reason().contains("动手"), goal);
+        }
+    }
+
+    @Test
     void codeGoalWithActionWordStillRequiresAction() {
         for (String goal : List.of("优化首页加载性能", "修复登录接口的空指针")) {
             CompletionGate gate = new CompletionGate(PROMPTS, true, goal);
