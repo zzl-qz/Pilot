@@ -285,10 +285,11 @@ final class McpClient implements AutoCloseable {
                     if (line.length > McpJson.MAX_FRAME_BYTES) {
                         throw new McpException("MCP 请求超过大小上限，尚未发送");
                     }
+                    // 先标为可能发送，再检查关闭；否则关闭方可能误判未发送，而写线程随后继续写入。
+                    dispatched.set(true);
                     if (written.isDone() || closed.get() || System.nanoTime() >= deadline) {
                         return;
                     }
-                    dispatched.set(true);
                     stdin.write(line);
                     stdin.flush();
                     written.complete(null);
@@ -337,6 +338,11 @@ final class McpClient implements AutoCloseable {
                 } else if (!hasMethod && node.has("id")) {
                     CompletableFuture<JsonNode> future = pending.get(node.path("id").asLong(-1));
                     if (future != null) {
+                        if (!"2.0".equals(node.path("jsonrpc").asString("")) || node.has("result") == node.has("error")
+                            || node.has("result") && !node.path("result").isObject()
+                            || node.has("error") && !node.path("error").isObject()) {
+                            throw new McpException("MCP 响应结构无效，不能确认调用结果");
+                        }
                         future.complete(node);
                     }
                 }

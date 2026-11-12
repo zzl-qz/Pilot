@@ -29,6 +29,7 @@ public final class McpProcessFixture {
         watchdog.start();
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
         boolean changed = false;
+        JsonNode waiting = null;
         String line;
         while ((line = reader.readLine()) != null) {
             JsonNode message = mapper.readTree(line);
@@ -60,6 +61,17 @@ public final class McpProcessFixture {
                     System.out.println("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}");
                     System.out.flush();
                 }
+                if (mode.equals("malformed")) {
+                    System.out.println("{\"jsonrpc\":\"2.0\",\"id\":" + message.path("id").asLong() + "}");
+                    System.out.flush();
+                    continue;
+                }
+                if (mode.equals("ping")) {
+                    waiting = message;
+                    System.out.println("{\"jsonrpc\":\"2.0\",\"id\":\"server-ping\",\"method\":\"ping\"}");
+                    System.out.flush();
+                    continue;
+                }
                 if (mode.equals("oversize")) {
                     System.out.print("x".repeat(8 * 1024 * 1024 + 1));
                     System.out.flush();
@@ -78,6 +90,10 @@ public final class McpProcessFixture {
                 }
                 reply(mapper, message, Map.of("content",
                     List.of(Map.of("type", "text", "text", System.getenv().getOrDefault("MCP_VALUE", "ok")))));
+            } else if (waiting != null && message.path("id").asString("").equals("server-ping")
+                && message.has("result")) {
+                reply(mapper, waiting, Map.of("content", List.of(Map.of("type", "text", "text", "pong"))));
+                waiting = null;
             }
         }
     }

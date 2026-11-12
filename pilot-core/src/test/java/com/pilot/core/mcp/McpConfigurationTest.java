@@ -79,12 +79,15 @@ class McpConfigurationTest {
             try (McpManager manager = new McpManager(mapper, null, null, runtime::get)) {
                 manager.tools(workspace, "fake");
                 var next = new HashMap<>(config("one"));
-                if (field.equals("command"))
+                if (field.equals("command")) {
                     next.put("command", "a-different-command");
-                if (field.equals("args"))
+                }
+                if (field.equals("args")) {
                     next.put("args", List.of("--version"));
-                if (field.equals("runtimePath"))
+                }
+                if (field.equals("runtimePath")) {
                     runtime.set(workspace.toString());
+                }
                 Files.writeString(workspace.resolve(".mcp.json"),
                     mapper.writeValueAsString(Map.of("mcpServers", Map.of("fake", next))));
                 assertTrue(manager.configurationChanged(workspace, "fake"), field);

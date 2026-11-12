@@ -42,6 +42,24 @@ class McpClientTransportTest {
     }
 
     @Test
+    void malformedReplyCannotTurnAnUnknownExternalResultIntoSuccess() {
+        try (McpClient client = client("malformed")) {
+            McpException error =
+                assertThrows(McpException.class, () -> client.call("write", Map.of(), Duration.ofSeconds(2)));
+            assertTrue(error.outcomeUnknown());
+            assertTrue(error.getMessage().contains("响应结构无效"));
+        }
+    }
+
+    @Test
+    void serverPingCanBeAnsweredWhileACallWaitsForItsReply() {
+        try (McpClient client = client("ping")) {
+            assertEquals("pong",
+                client.call("write", Map.of(), Duration.ofSeconds(2)).path("content").get(0).path("text").asString());
+        }
+    }
+
+    @Test
     void listChangedNotificationInvalidatesCachedAnnotationsAndSchemas() {
         try (McpClient client = client("change")) {
             assertEquals("first", client.tools(Duration.ofSeconds(2)).getFirst().name());
