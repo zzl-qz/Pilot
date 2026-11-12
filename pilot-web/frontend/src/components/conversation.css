@@ -1,4 +1,4 @@
-/* 消息与输入共用 760px 内容列。左侧至少 48px 留给消息导航和回底。 */
+/* 消息与输入共用 760px 内容列。左侧至少 48px 留给消息导航。 */
 :is(.conversation-thread, .conversation-composer) {
   --conversation-gutter: max(16px, calc((100% - 760px) / 2));
   --conversation-control: 32px;
@@ -13,10 +13,14 @@ html[data-theme] .conversation-thread > .thread.is-empty {
 }
 html[data-theme] .conversation-thread .thread-column { gap: 18px; }
 .conversation-thread > .thread:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+.conversation-thread:has(.conversation-latest) { padding-block-end: calc(var(--conversation-control) + 20px); }
 .conversation-thread .conversation-latest {
   position: absolute;
   z-index: 5;
-  inset-inline-start: 4px;
+  /* 以实际消息列居中，侧栏、审阅面板和窄屏留白变化时自动跟随。 */
+  inset-inline-start: max(48px, var(--conversation-gutter));
+  inset-inline-end: var(--conversation-gutter);
+  margin-inline: auto;
   inset-block-end: 10px;
   width: var(--conversation-control);
   min-height: var(--conversation-control);

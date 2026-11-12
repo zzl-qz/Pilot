@@ -49,6 +49,26 @@ await cp(join(root,'../src/main/resources/static/fonts'),join(output,'fonts'),{r
 const server = await preview({root,build:{outDir:output},preview:{host:'127.0.0.1',port:0,proxy:{}}});
 const url = `http://127.0.0.1:${server.httpServer.address().port}/${entry}`;
 let browser, electron;
+async function assertLatestPosition(page, label) {
+  const button = page.getByRole('button', { name: '回到底部', exact: true });
+  await button.waitFor();
+  const bounds = await page.evaluate(() => {
+    const rect = selector => {
+      const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect();
+      return { x, y, width, height };
+    };
+    const thread = document.querySelector('.thread');
+    return { button: rect('.conversation-latest'), column: rect('.thread-column'), region: rect('.thread-scroll-region'), scroll: rect('.thread'), composer: rect('.conversation-composer'), scrollbar: thread.offsetWidth - thread.clientWidth };
+  });
+  const { button: b, column: c, region: r, composer } = bounds;
+  // 部分平台的常驻滚动条会占据消息列右侧空间；按钮与输入列共用对称留白。
+  assert.ok(Math.abs(b.x + b.width / 2 - c.x - c.width / 2) <= bounds.scrollbar / 2 + 2,
+    label + ': 回底按钮对齐消息列中心 ' + JSON.stringify(bounds));
+  assert.ok(b.y >= r.y && b.y + b.height <= r.y + r.height && b.y + b.height <= composer.y,
+    label + ': 回底按钮位于消息区内，不遮挡输入框');
+  assert.ok(b.y >= bounds.scroll.y + bounds.scroll.height - 1, label + ': 回底按钮不遮挡正在阅读的文字 ' + JSON.stringify(bounds));
+  assert.ok(b.width >= 32 && b.height >= 32, label + ': 保留按钮点击区域');
+}
 async function run(page, name) {
   page.setDefaultTimeout(10000);
   const errors = [];page.on('pageerror', error => errors.push(error.message));
@@ -68,6 +88,7 @@ async function run(page, name) {
   await page.waitForTimeout(200);
   const after=await page.locator('.thread').evaluate(el=>el.scrollTop);
   assert.ok(Math.abs(after-reading)<3,'向上阅读不被新增内容拉回底部: '+reading+' → '+after);
+  await assertLatestPosition(page, name + '-1280');
   await page.mouse.wheel(0,-100000);
   await page.waitForFunction(()=>store.getState().thread.rows.some(row=>row.text==='之前的第一个问题'));
   await page.mouse.wheel(0,-100000);
@@ -104,8 +125,23 @@ async function run(page, name) {
     // 显式入口也能通过键盘操作，适用于没有滚轮的设备。
     const more=page.getByRole('button',{name:'加载更早消息',exact:true});await more.focus();await page.keyboard.press('Enter');
     await page.waitForFunction(()=>store.getState().thread.rows.some(row=>row.text==='之前的第一个问题'));
+    await page.locator('.thread').hover();await page.mouse.wheel(0,-500);
+    await assertLatestPosition(page, name + '-' + width);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'无页面横向溢出');
     await page.screenshot({path:join(output,name+'-'+width+'.png'),animations:'disabled'});
+  }
+  // 窗口不变，侧栏和审阅面板改变消息列宽度时也要重新定位。
+  await page.setViewportSize({width:1440,height:840});await page.goto(url);
+  await page.waitForFunction(()=>document.querySelector('.thread')?.scrollTop>500);
+  await page.locator('.thread').hover();await page.mouse.wheel(0,-500);
+  for(const ui of [
+    {sidebarOpen:false,inspectorOpen:false},
+    {sidebarOpen:true,inspectorOpen:true,inspectorTab:'changes'},
+    {sidebarOpen:false,inspectorOpen:true,inspectorTab:'changes'}
+  ]) {
+    await page.evaluate(ui=>store.getState().setUi(ui),ui);
+    await page.waitForTimeout(250);
+    await assertLatestPosition(page, name + '-' + JSON.stringify(ui));
   }
   assert.deepEqual(errors,[]);
   console.log(name+': PASS 长回复收尾 / 滚轮上下翻页 / 阅读中增量 / 回到底部 / 跨不可见页和空行窗口 / 失败重试 / 键盘入口 / 三种宽度');
