@@ -1,0 +1,140 @@
+{
+  "date": "2026-11-12",
+  "baseCommit": "87fd02b",
+  "verifiedSourceCommit": "86c028f869f628a67d83a8fc764ea5262633582f",
+  "scope": "MCP stdio 超时、配置生效、原始响应限额、本地只读信任与调用结果未确认；不宣称所有平台和 Agent 能力均已验证。",
+  "implemented": [
+    {
+      "item": "发送与等待统一时限",
+      "details": [
+        "有界串行写入队列；序列化、发送、flush 和响应共用绝对时限",
+        "中断和关闭先通过 ProcessHandle 终止子进程，避免流锁阻塞",
+        "外部调用可能已发送但无完整结果时记录 RESULT_UNKNOWN；不自动重试或隐式重启连接",
+        "发送与关闭竞态下保守标记可能已执行；服务器 ping 不阻塞读线程"
+      ]
+    },
+    {
+      "item": "配置生效与发现",
+      "details": [
+        "启动配置及真实工作目录变化后旧进程不再接受新调用，明确要求重启 Pilot 服务",
+        "发现审批绑定配置版本，等待批准时变化或只读检查后进程退出则拒绝隐式启动",
+        "工作区禁用覆盖用户级服务器；损坏配置拒绝执行",
+        "工具变更通知作废缓存；分页共用时限并拒绝重复或不完整发现"
+      ]
+    },
+    {
+      "item": "接收与解析限额",
+      "limits": {
+        "frameBytes": 8388608,
+        "configBytes": 1048576,
+        "jsonDepth": 64,
+        "jsonTokens": 100000,
+        "jsonFieldNameChars": 4096,
+        "jsonNumberChars": 128,
+        "discoveryPages": 20,
+        "discoveryTools": 1000,
+        "discoveryBytes": 8388608,
+        "imageDecodedBytesEachAndTotal": 5242880,
+        "imageCount": 8
+      },
+      "details": [
+        "读取时按字节限额，不等 readLine 返回",
+        "JSON 构树前检查约束；图片解码前检查估算字节和累计额度",
+        "超量、不完整和无效结构响应明确失败，可能已执行的调用保留未确认状态"
+      ]
+    },
+    {
+      "item": "只读信任边界",
+      "details": [
+        "默认不信任服务器 readOnlyHint 或工作区自授权限",
+        "用户级 pilotPermissions 绑定启动配置及明确授权的工作区绝对路径",
+        "readOnlyTools 与 trustReadOnlyHints 可授予只读；requireApprovalTools 优先并要求明确批准",
+        "执行前复查策略、进程和工具目录版本，撤销后旧只读判定失效",
+        "明确批准替代旧只读快照；AUTO 保持用户选择的放行模式；不提供操作系统沙箱"
+      ]
+    }
+  ],
+  "reproducedBeforeFix": [
+    {
+      "group": "阻塞管道、关闭、中断、响应超时",
+      "failingCases": 4,
+      "evidence": "200ms 调用约 3.6s 才返回，关闭约 3.3s 等待流锁"
+    },
+    {
+      "group": "超长无换行响应与 JSON 深层结构",
+      "failingCases": 2
+    },
+    {
+      "group": "env 变更、死连接隐式重启、禁用后的旧能力",
+      "failingCases": 3
+    },
+    {
+      "group": "未信任服务器自报只读绕过 ASK/READ_ONLY",
+      "failingCases": 1
+    },
+    {
+      "group": "结果未确认被分类为可重试超时",
+      "failingCases": 1
+    },
+    {
+      "group": "缺少 result/error 的响应被当作成功",
+      "failingCases": 1
+    },
+    {
+      "group": "明确批准后仍被旧只读快照拒绝",
+      "failingCases": 1
+    }
+  ],
+  "iterationNotes": [
+    "最初完整 verify 发现 3 处测试代码 NeedBraces，补齐后在两个隔离平台重跑成功。",
+    "定向格式化参数首次误用 glob，已改为插件要求的正则；最终隔离构建使用完整 Spotless/Checkstyle 检查。"
+  ],
+  "validation": {
+    "macos": {
+      "report": "macos.json",
+      "build": "SUCCESS",
+      "totals": {
+        "tests": 1614,
+        "passed": 1589,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 25
+      },
+      "mcpAndPermissionCases": 43,
+      "mcpAndPermissionSkips": 0
+    },
+    "linux": {
+      "report": "linux.json",
+      "build": "SUCCESS",
+      "totals": {
+        "tests": 43,
+        "passed": 43,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "mcpAndPermissionCases": 43,
+      "mcpAndPermissionSkips": 0
+    }
+  },
+  "commands": {
+    "macos": "JAVA_HOME=<JDK 25> mvn -B -pl pilot-core,pilot-server -DskipFrontend=true clean verify",
+    "linux": "在 pilot-audit-java-node 镜像内执行 mvn -B -pl pilot-core -Dtest=McpPermissionsTest,McpConfigurationTest,McpToolsTest,McpClientTransportTest,McpContentLimitsTest,ToolOutcomeUncertaintyTest,ExplicitApprovalTest clean verify"
+  },
+  "boundaries": [
+    "Windows 实机未执行；新测试使用标准 ProcessBuilder/ProcessHandle、当前 JDK 路径及 Java 路径 API，现有三平台 CI 将执行它们，但本轮没有远程 CI 成功证据。",
+    "Linux 为真实 Linux 容器进程，未验证物理桌面或所有发行版。",
+    "Mac 在隔离源码副本执行全部 core/server 测试；按环境开关跳过的条目详见 macos.json，不包含在通过数内。",
+    "本轮无前端代码改动，使用 skipFrontend，不重复宣称界面测试通过。",
+    "仅使用本地 JDK/Node 假 MCP 服务器及本地测试 API，没有调用真实 MCP 服务或模型接口。",
+    "没有修改用户真实 MCP 配置，也没有重启运行中的 Pilot 服务。",
+    "未实现热重启、HTTP/SSE MCP、远端结果查询或副作用撤销；配置更新须重启服务，未确认结果须先核对外部状态。"
+  ],
+  "sources": [
+    {
+      "title": "MCP 2025-06-18 Tools：未信任服务器注解不可信",
+      "url": "https://modelcontextprotocol.io/specification/2025-06-18/server/tools"
+    }
+  ],
+  "documentation": "../../../CONTRIBUTING.md#MCP-接入调用边界与本地信任"
+}

@@ -1,0 +1,2212 @@
+{
+  "sourceCommit": "86c028f869f628a67d83a8fc764ea5262633582f",
+  "environment": "macOS ARM64 实机，隔离源码副本，Temurin 25.0.5",
+  "build": "SUCCESS",
+  "spotless": "PASS",
+  "checkstyle": "PASS",
+  "sourceConsistency": "20 个已改动源码/测试/提示文件与被验证提交逐字节一致",
+  "modules": {
+    "pilot-core": {
+      "tests": 771,
+      "passed": 755,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 16,
+      "suites": [
+        {
+          "name": "com.pilot.core.browser.BrowserIntegrationTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 7,
+          "passed": 0,
+          "seconds": 0.013
+        },
+        {
+          "name": "com.pilot.core.browser.BrowserToolTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 12,
+          "seconds": 0.023
+        },
+        {
+          "name": "com.pilot.core.event.EventEnvelopeTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.016
+        },
+        {
+          "name": "com.pilot.core.event.RunCancelledTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.002
+        },
+        {
+          "name": "com.pilot.core.event.SessionEventsTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 10,
+          "seconds": 0.017
+        },
+        {
+          "name": "com.pilot.core.exec.ContainerExecutionBackendTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.142
+        },
+        {
+          "name": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 7,
+          "passed": 0,
+          "seconds": 0.001
+        },
+        {
+          "name": "com.pilot.core.exec.DependencyCacheTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.01
+        },
+        {
+          "name": "com.pilot.core.exec.EnvironmentSanitizerTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.0
+        },
+        {
+          "name": "com.pilot.core.exec.IsolatedWorkspaceTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.027
+        },
+        {
+          "name": "com.pilot.core.exec.OsSandboxTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.164
+        },
+        {
+          "name": "com.pilot.core.hook.HooksTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.078
+        },
+        {
+          "name": "com.pilot.core.http.BoundedHttpTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 13,
+          "seconds": 2.179
+        },
+        {
+          "name": "com.pilot.core.loop.AgentLoopControlTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 10,
+          "seconds": 0.02
+        },
+        {
+          "name": "com.pilot.core.loop.AgentLoopTest",
+          "tests": 61,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 61,
+          "seconds": 0.073
+        },
+        {
+          "name": "com.pilot.core.loop.CacheContextTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.021
+        },
+        {
+          "name": "com.pilot.core.loop.CompletionGateTest",
+          "tests": 24,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 24,
+          "seconds": 0.005
+        },
+        {
+          "name": "com.pilot.core.loop.ContextBudgetTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 9,
+          "seconds": 0.006
+        },
+        {
+          "name": "com.pilot.core.loop.ContextCompactorTest",
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17,
+          "seconds": 0.02
+        },
+        {
+          "name": "com.pilot.core.loop.ContextIntegrityTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.007
+        },
+        {
+          "name": "com.pilot.core.loop.ModelContractTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.004
+        },
+        {
+          "name": "com.pilot.core.loop.ModelRetryPolicyTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 10,
+          "seconds": 0.003
+        },
+        {
+          "name": "com.pilot.core.loop.RetryBudgetTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.005
+        },
+        {
+          "name": "com.pilot.core.loop.StreamRepeatGuardTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 9,
+          "seconds": 0.005
+        },
+        {
+          "name": "com.pilot.core.loop.StructuredToolResultTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.001
+        },
+        {
+          "name": "com.pilot.core.loop.ToolImageLoopTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.004
+        },
+        {
+          "name": "com.pilot.core.mcp.McpClientTransportTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 12,
+          "seconds": 3.871,
+          "cases": [
+            "closeDoesNotWaitForBlockedPipeMonitor",
+            "malformedReplyCannotTurnAnUnknownExternalResultIntoSuccess",
+            "interruptionStopsBlockedWriterAndPreservesInterruptStatus",
+            "repeatingPaginationIsRejectedInsteadOfCachingAnIncompleteList",
+            "serverPingCanBeAnsweredWhileACallWaitsForItsReply",
+            "listChangedNotificationInvalidatesCachedAnnotationsAndSchemas",
+            "responseTimeoutDoesNotRetryASideEffect",
+            "queuedRequestHasItsOwnDeadlineAndDoesNotGetSentAfterItExpires",
+            "rejectsExcessiveJsonNestingBeforeBuildingTheTree",
+            "blockedPipeUsesTheSameDeadlineAsResponseWait",
+            "paginatedDiscoveryReturnsTheCompleteList",
+            "rejectsAnOversizedLineBeforeWaitingForItsNewline"
+          ]
+        },
+        {
+          "name": "com.pilot.core.mcp.McpConfigurationTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 1.808,
+          "cases": [
+            "callNeverSilentlyRestartsADeadConnection",
+            "commandArgumentsAndRuntimePathChangesAreDetected",
+            "changedEnvironmentCannotReuseTheOldProcessAndRestartLoadsNewValue",
+            "deadProcessBetweenReadOnlyCheckAndDiscoveryCannotBeRestarted",
+            "disabledConfigurationImmediatelyRemovesKnownReadOnlyCapabilities",
+            "configChangedWhileAwaitingApprovalCannotReplaceTheApprovedCommand",
+            "disabledWorkspaceServerOverridesUserConfigAndBrokenConfigFailsClosed"
+          ]
+        },
+        {
+          "name": "com.pilot.core.mcp.McpContentLimitsTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.062,
+          "cases": [
+            "frameBoundaryCountsBytesAndDoesNotConsumeNextFrame",
+            "imageCountAndTotalDecodedBytesAreBounded",
+            "configurationIsBoundedBeforeJsonParsing",
+            "tokenAndNumberLimitsRejectSmallButExpensiveJson",
+            "decodedSizeMatchesPaddedAndUnpaddedBoundaries",
+            "oversizedImageIsRejectedBeforeInvalidBase64IsDecoded"
+          ]
+        },
+        {
+          "name": "com.pilot.core.mcp.McpPermissionsTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 9,
+          "seconds": 1.582,
+          "cases": [
+            "sameCommandInAnotherWorkspaceCannotInheritLocalTrust",
+            "userPolicyCanTrustHintsAndOverrideIndividualTools",
+            "explicitApprovalOverrideWinsEvenInAutoMode",
+            "invalidUserPolicyCannotRetainAnEarlierGrant",
+            "serverSelfReportedReadOnlyCannotBypassLocalPermissionMode",
+            "revocationBetweenPermissionCheckAndExecutionPreventsTheCall",
+            "trustDoesNotFollowTheSameServerNameToDifferentWorkspaceCommand",
+            "actualExecutorRechecksTheGrantAfterItsPreExecutionGuard",
+            "explicitApprovalReplacesAnEarlierReadOnlyDecisionForTheSameCall"
+          ]
+        },
+        {
+          "name": "com.pilot.core.mcp.McpToolsTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.236,
+          "cases": [
+            "discoversServersThenToolsThenSchemaOnDemand",
+            "startupFailureIsReportedAndRemembered",
+            "capabilityIsOnlyDeclaredWhenServersAreConfigured",
+            "unreadableConfigSurfacesAsAnUnusableServerInsteadOfThrowing",
+            "callsToolsAndConvertsContent",
+            "startingAServerAndUntrustedHintsRequireApproval"
+          ]
+        },
+        {
+          "name": "com.pilot.core.model.AnthropicMessagesModelClientTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.01
+        },
+        {
+          "name": "com.pilot.core.model.CacheAccountingTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 10,
+          "seconds": 0.01
+        },
+        {
+          "name": "com.pilot.core.model.CacheWireTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.011
+        },
+        {
+          "name": "com.pilot.core.model.ModelCapacityTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.008
+        },
+        {
+          "name": "com.pilot.core.model.ModelCatalogTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 10,
+          "seconds": 0.026
+        },
+        {
+          "name": "com.pilot.core.model.ModelTransportAcceptanceTest",
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17,
+          "seconds": 0.882
+        },
+        {
+          "name": "com.pilot.core.model.ModelUsageTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 9,
+          "seconds": 0.002
+        },
+        {
+          "name": "com.pilot.core.model.OpenAiCompatibleModelClientTest",
+          "tests": 29,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 29,
+          "seconds": 0.396
+        },
+        {
+          "name": "com.pilot.core.model.OpenAiResponsesModelClientTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.024
+        },
+        {
+          "name": "com.pilot.core.model.RequestBudgetTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.001
+        },
+        {
+          "name": "com.pilot.core.multi.AgentProfileCatalogTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.012
+        },
+        {
+          "name": "com.pilot.core.multi.AgentReportTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.007
+        },
+        {
+          "name": "com.pilot.core.multi.AgentScopeTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 11,
+          "seconds": 0.01
+        },
+        {
+          "name": "com.pilot.core.multi.ArtifactManifestTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.009
+        },
+        {
+          "name": "com.pilot.core.multi.CrossPlatformPathTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.007
+        },
+        {
+          "name": "com.pilot.core.multi.DiffSandboxTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.007
+        },
+        {
+          "name": "com.pilot.core.multi.MergePrecheckTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.006
+        },
+        {
+          "name": "com.pilot.core.multi.TaskGraphTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.005
+        },
+        {
+          "name": "com.pilot.core.multi.UnifiedDiffTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 8,
+          "seconds": 0.026
+        },
+        {
+          "name": "com.pilot.core.permission.PermissionRulesTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.009
+        },
+        {
+          "name": "com.pilot.core.permission.PolicyPermissionGateTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.001
+        },
+        {
+          "name": "com.pilot.core.prompt.PromptLibraryTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 14,
+          "seconds": 0.025
+        },
+        {
+          "name": "com.pilot.core.runtime.bootstrap.BootstrapHttpTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.087
+        },
+        {
+          "name": "com.pilot.core.runtime.bootstrap.BootstrapLockTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.109
+        },
+        {
+          "name": "com.pilot.core.runtime.bootstrap.BootstrapPlatformTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.002
+        },
+        {
+          "name": "com.pilot.core.runtime.bootstrap.BootstrapProcessTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.184
+        },
+        {
+          "name": "com.pilot.core.runtime.bootstrap.DependencyCachesTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.003
+        },
+        {
+          "name": "com.pilot.core.runtime.bootstrap.DesktopBootstrapScopeTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.01
+        },
+        {
+          "name": "com.pilot.core.runtime.bootstrap.RuntimeAssetsTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.355
+        },
+        {
+          "name": "com.pilot.core.session.EventStreamBoundsTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 1.066
+        },
+        {
+          "name": "com.pilot.core.session.LiveOutputClockTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.001
+        },
+        {
+          "name": "com.pilot.core.session.LiveOutputTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.018
+        },
+        {
+          "name": "com.pilot.core.session.PreviewBenchmarkTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "passed": 0,
+          "seconds": 0.0
+        },
+        {
+          "name": "com.pilot.core.session.PreviewMergeTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.03
+        },
+        {
+          "name": "com.pilot.core.session.RunCheckpointTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.001
+        },
+        {
+          "name": "com.pilot.core.session.SessionAndRunTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.0
+        },
+        {
+          "name": "com.pilot.core.session.SessionServiceTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 15,
+          "seconds": 0.077
+        },
+        {
+          "name": "com.pilot.core.skill.SkillCatalogTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 11,
+          "seconds": 0.09
+        },
+        {
+          "name": "com.pilot.core.skill.SkillFrontmatterTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 12,
+          "seconds": 0.043
+        },
+        {
+          "name": "com.pilot.core.tool.ApplyPatchToolTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 13,
+          "seconds": 0.014
+        },
+        {
+          "name": "com.pilot.core.tool.CommandChainTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.001
+        },
+        {
+          "name": "com.pilot.core.tool.CommandTaskManagerTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 13,
+          "seconds": 2.936
+        },
+        {
+          "name": "com.pilot.core.tool.CreateFileToolTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.002
+        },
+        {
+          "name": "com.pilot.core.tool.EditFileToolTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 8,
+          "seconds": 0.01
+        },
+        {
+          "name": "com.pilot.core.tool.ExplicitApprovalTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.001,
+          "cases": [
+            "broadAllowCannotBypassFinalActionApprovalAndFullContentIsShown"
+          ]
+        },
+        {
+          "name": "com.pilot.core.tool.GlobFilesToolTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.01
+        },
+        {
+          "name": "com.pilot.core.tool.HookPermissionsTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.044
+        },
+        {
+          "name": "com.pilot.core.tool.ListDirToolTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.003
+        },
+        {
+          "name": "com.pilot.core.tool.ManagedCommandToolsTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 9,
+          "seconds": 3.453
+        },
+        {
+          "name": "com.pilot.core.tool.OfficeToolTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 11,
+          "seconds": 1.525
+        },
+        {
+          "name": "com.pilot.core.tool.PrepareRuntimeToolTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.01
+        },
+        {
+          "name": "com.pilot.core.tool.ReadFileMediaTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.384
+        },
+        {
+          "name": "com.pilot.core.tool.ReadFileToolTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 15,
+          "seconds": 0.114
+        },
+        {
+          "name": "com.pilot.core.tool.RememberToolTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.004
+        },
+        {
+          "name": "com.pilot.core.tool.RunCommandPolicyTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 14,
+          "seconds": 0.295
+        },
+        {
+          "name": "com.pilot.core.tool.RunCommandToolTest",
+          "tests": 21,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "passed": 20,
+          "seconds": 0.549
+        },
+        {
+          "name": "com.pilot.core.tool.SandboxCommandToolTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.011
+        },
+        {
+          "name": "com.pilot.core.tool.SandboxToolsTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 14,
+          "seconds": 0.013
+        },
+        {
+          "name": "com.pilot.core.tool.SearchToolTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 9,
+          "seconds": 0.106
+        },
+        {
+          "name": "com.pilot.core.tool.ToolExecutorHooksTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.028
+        },
+        {
+          "name": "com.pilot.core.tool.ToolExecutorJournalTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.005
+        },
+        {
+          "name": "com.pilot.core.tool.ToolOutcomeUncertaintyTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.001,
+          "cases": [
+            "ordinaryTimeoutKeepsItsExistingClassification",
+            "unknownExternalResultIsNotClassifiedAsRetryableTimeoutOrSuccessfulEvidence"
+          ]
+        },
+        {
+          "name": "com.pilot.core.tool.ToolRegistryTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.002
+        },
+        {
+          "name": "com.pilot.core.tool.UseSkillToolTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.012
+        },
+        {
+          "name": "com.pilot.core.tool.VerificationCheckTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.001
+        },
+        {
+          "name": "com.pilot.core.tool.WebToolsTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.007
+        },
+        {
+          "name": "com.pilot.core.trace.JsonlTraceRecorderTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.149
+        },
+        {
+          "name": "com.pilot.core.workspace.PathValidatorTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 9,
+          "seconds": 0.025
+        },
+        {
+          "name": "com.pilot.core.workspace.WorkspacePathIdentityTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 10,
+          "seconds": 0.079
+        }
+      ],
+      "skipReasons": [
+        {
+          "suite": "com.pilot.core.browser.BrowserIntegrationTest",
+          "test": "sessionsAreIsolatedAndNonLoopbackNavigationIsRefused",
+          "reason": "org.opentest4j.TestAbortedException: Assumption failed: 没有安装 playwright-core（.pilot/browser）"
+        },
+        {
+          "suite": "com.pilot.core.browser.BrowserIntegrationTest",
+          "test": "verifiesAPageEndToEndWithEvidence",
+          "reason": "org.opentest4j.TestAbortedException: Assumption failed: 没有安装 playwright-core（.pilot/browser）"
+        },
+        {
+          "suite": "com.pilot.core.browser.BrowserIntegrationTest",
+          "test": "mirrorStreamDeliversFramesActionsAndStopsCleanly",
+          "reason": "org.opentest4j.TestAbortedException: Assumption failed: 没有安装 playwright-core（.pilot/browser）"
+        },
+        {
+          "suite": "com.pilot.core.browser.BrowserIntegrationTest",
+          "test": "subscriptionsBeforePageCreationRespectCaptureAndStopWithoutLeaking(boolean)[1]",
+          "reason": "org.opentest4j.TestAbortedException: Assumption failed: 没有安装 playwright-core（.pilot/browser）"
+        },
+        {
+          "suite": "com.pilot.core.browser.BrowserIntegrationTest",
+          "test": "subscriptionsBeforePageCreationRespectCaptureAndStopWithoutLeaking(boolean)[2]",
+          "reason": "org.opentest4j.TestAbortedException: Assumption failed: 没有安装 playwright-core（.pilot/browser）"
+        },
+        {
+          "suite": "com.pilot.core.browser.BrowserIntegrationTest",
+          "test": "readsLayoutAndVerifiesThreeViewportsWithoutArbitraryScripts",
+          "reason": "org.opentest4j.TestAbortedException: Assumption failed: 没有安装 playwright-core（.pilot/browser）"
+        },
+        {
+          "suite": "com.pilot.core.browser.BrowserIntegrationTest",
+          "test": "permissionsDifferentiateObservationFromInteraction",
+          "reason": "org.opentest4j.TestAbortedException: Assumption failed: 没有安装 playwright-core（.pilot/browser）"
+        },
+        {
+          "suite": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+          "test": "bindMountHandlesSpacesCommasAndUnicodeWithoutShellExpansion",
+          "reason": "System property [pilot.test.container.image] does not exist"
+        },
+        {
+          "suite": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+          "test": "timeoutRemovesTheContainerRatherThanOnlyKillingItsClient",
+          "reason": "System property [pilot.test.container.image] does not exist"
+        },
+        {
+          "suite": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+          "test": "cancellationRemovesContainerAndPreservesInterruption",
+          "reason": "System property [pilot.test.container.image] does not exist"
+        },
+        {
+          "suite": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+          "test": "rejectsSymlinkWorkdirOutsideTheMountAndMissingImagesWithoutFallback",
+          "reason": "System property [pilot.test.container.image] does not exist"
+        },
+        {
+          "suite": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+          "test": "scopedCommandRunsPosixWrapperAgainstTheProposalWithoutExecutableBit",
+          "reason": "System property [pilot.test.container.image] does not exist"
+        },
+        {
+          "suite": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+          "test": "argvRetainsEmptyArgumentsWhitespaceAndLiteralShellCharacters",
+          "reason": "System property [pilot.test.container.image] does not exist"
+        },
+        {
+          "suite": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+          "test": "enforcesFilesystemNetworkEnvironmentAndTemporaryProposalBoundary",
+          "reason": "System property [pilot.test.container.image] does not exist"
+        },
+        {
+          "suite": "com.pilot.core.session.PreviewBenchmarkTest",
+          "test": "compareMergeWindowsAndByteThresholds",
+          "reason": "System property [pilot.events.benchmark] does not exist"
+        },
+        {
+          "suite": "com.pilot.core.tool.RunCommandToolTest",
+          "test": "mapsMvnwToWorkspaceWrapper",
+          "reason": "org.opentest4j.TestAbortedException: Assumption failed: assumption is not true"
+        }
+      ]
+    },
+    "pilot-server": {
+      "tests": 843,
+      "passed": 834,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 9,
+      "suites": [
+        {
+          "name": "com.pilot.server.browser.BrowserControlServiceTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 13,
+          "seconds": 0.161
+        },
+        {
+          "name": "com.pilot.server.browser.BrowserRuntimeTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "passed": 3,
+          "seconds": 0.006
+        },
+        {
+          "name": "com.pilot.server.capability.LocalCapabilityServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.002
+        },
+        {
+          "name": "com.pilot.server.config.AgentPropertiesTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.002
+        },
+        {
+          "name": "com.pilot.server.config.LiveStaticEnvironmentTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 1.557
+        },
+        {
+          "name": "com.pilot.server.config.ModelCapabilityDiscoveryTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 14,
+          "seconds": 0.948
+        },
+        {
+          "name": "com.pilot.server.config.ModelClientProviderTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.004
+        },
+        {
+          "name": "com.pilot.server.config.ModelRequestTimeoutTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 12.672
+        },
+        {
+          "name": "com.pilot.server.config.ModelRuntimeSettingsTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.038
+        },
+        {
+          "name": "com.pilot.server.config.ModelSettingsTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 9,
+          "seconds": 0.004
+        },
+        {
+          "name": "com.pilot.server.config.PermissionSettingsTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.001
+        },
+        {
+          "name": "com.pilot.server.controller.AttachmentHttpTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.43
+        },
+        {
+          "name": "com.pilot.server.controller.CheckpointApiTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 10,
+          "seconds": 0.532
+        },
+        {
+          "name": "com.pilot.server.controller.CommandTaskApiTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.776
+        },
+        {
+          "name": "com.pilot.server.controller.MobileConnectionControllerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.029
+        },
+        {
+          "name": "com.pilot.server.controller.MobileWorkbenchControllerTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.205
+        },
+        {
+          "name": "com.pilot.server.controller.ModelSelectionIntegrationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.505
+        },
+        {
+          "name": "com.pilot.server.controller.MultiAgentControllerTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.262
+        },
+        {
+          "name": "com.pilot.server.controller.ReviewApiTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.492
+        },
+        {
+          "name": "com.pilot.server.controller.RunChangesApiTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.273
+        },
+        {
+          "name": "com.pilot.server.controller.ScheduleApiTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.172
+        },
+        {
+          "name": "com.pilot.server.controller.SessionApiTest",
+          "tests": 27,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 27,
+          "seconds": 0.362
+        },
+        {
+          "name": "com.pilot.server.controller.SessionEventHttpTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 1.307
+        },
+        {
+          "name": "com.pilot.server.controller.SessionEventLoadTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "passed": 0,
+          "seconds": 0.0
+        },
+        {
+          "name": "com.pilot.server.controller.SessionFilesApiTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 10,
+          "seconds": 0.262
+        },
+        {
+          "name": "com.pilot.server.controller.SettingsApiTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 11,
+          "seconds": 0.201
+        },
+        {
+          "name": "com.pilot.server.controller.SkillsApiTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.157
+        },
+        {
+          "name": "com.pilot.server.controller.SkillsInstallApiTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.189
+        },
+        {
+          "name": "com.pilot.server.controller.TaskControlApiTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.122
+        },
+        {
+          "name": "com.pilot.server.controller.TaskControlWakeTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.009
+        },
+        {
+          "name": "com.pilot.server.controller.WorkProductsApiTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.163
+        },
+        {
+          "name": "com.pilot.server.desktop.DesktopShellInstallerTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 10,
+          "seconds": 0.043
+        },
+        {
+          "name": "com.pilot.server.desktop.DesktopViewportResetTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.005
+        },
+        {
+          "name": "com.pilot.server.desktop.DesktopWindowLauncherTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "passed": 9,
+          "seconds": 0.136
+        },
+        {
+          "name": "com.pilot.server.frontend.FrontendDepsPromptTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.003
+        },
+        {
+          "name": "com.pilot.server.http.AttachmentBodyLimitFilterTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.066
+        },
+        {
+          "name": "com.pilot.server.maintenance.BackupServiceTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 13,
+          "seconds": 2.214
+        },
+        {
+          "name": "com.pilot.server.maintenance.DataMaintenanceTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.003
+        },
+        {
+          "name": "com.pilot.server.maintenance.RestoreServiceTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.113
+        },
+        {
+          "name": "com.pilot.server.maintenance.RetentionServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.143
+        },
+        {
+          "name": "com.pilot.server.maintenance.WorkspaceBackupTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 1.259
+        },
+        {
+          "name": "com.pilot.server.mobile.BridgeStartupDiagnosticsTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.0
+        },
+        {
+          "name": "com.pilot.server.mobile.MobileConnectionServiceTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.112
+        },
+        {
+          "name": "com.pilot.server.mobile.MobileEnvironmentTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.043
+        },
+        {
+          "name": "com.pilot.server.mobile.MobileReceiptControllerTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.025
+        },
+        {
+          "name": "com.pilot.server.mobile.MobileReceiptStoreTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 12,
+          "seconds": 0.235
+        },
+        {
+          "name": "com.pilot.server.mobile.MobileRequestFilterTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.23
+        },
+        {
+          "name": "com.pilot.server.mobile.SubmissionControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.045
+        },
+        {
+          "name": "com.pilot.server.multi.CommandVerificationGateTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 11,
+          "seconds": 0.08
+        },
+        {
+          "name": "com.pilot.server.multi.DispatchAgentsToolTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.005
+        },
+        {
+          "name": "com.pilot.server.multi.MultiAgentBudgetLedgerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.003
+        },
+        {
+          "name": "com.pilot.server.multi.MultiAgentServiceTest",
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17,
+          "seconds": 0.412
+        },
+        {
+          "name": "com.pilot.server.multi.ProjectBuildIntegrationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 3,
+          "passed": 0,
+          "seconds": 0.0
+        },
+        {
+          "name": "com.pilot.server.multi.SandboxArtifactTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.121
+        },
+        {
+          "name": "com.pilot.server.multi.SandboxStoreTest",
+          "tests": 16,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 16,
+          "seconds": 0.264
+        },
+        {
+          "name": "com.pilot.server.multi.WorkspaceApplyJournalTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 15,
+          "seconds": 1.897
+        },
+        {
+          "name": "com.pilot.server.notifications.DeliveryServiceTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.156
+        },
+        {
+          "name": "com.pilot.server.observability.RedactionTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.003
+        },
+        {
+          "name": "com.pilot.server.observability.TaskDiagnosticsRunTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.005
+        },
+        {
+          "name": "com.pilot.server.observability.TaskDiagnosticsServiceTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.02
+        },
+        {
+          "name": "com.pilot.server.results.ResultInboxTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.406
+        },
+        {
+          "name": "com.pilot.server.schedule.RecurringTimeTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 12,
+          "seconds": 0.84
+        },
+        {
+          "name": "com.pilot.server.schedule.ScheduleRestartTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 10,
+          "seconds": 48.168
+        },
+        {
+          "name": "com.pilot.server.schedule.ScheduleServiceTest",
+          "tests": 23,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 23,
+          "seconds": 1.365
+        },
+        {
+          "name": "com.pilot.server.search.LocalSearchRuntimeTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.0
+        },
+        {
+          "name": "com.pilot.server.security.AccessControlTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 11,
+          "seconds": 0.007
+        },
+        {
+          "name": "com.pilot.server.security.RemoteAccessFilterTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.015
+        },
+        {
+          "name": "com.pilot.server.security.SlidingWindowRateLimiterTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.003
+        },
+        {
+          "name": "com.pilot.server.session.AgentRunServiceTest",
+          "tests": 24,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 24,
+          "seconds": 1.434
+        },
+        {
+          "name": "com.pilot.server.session.AgentRunTaskControlTest",
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17,
+          "seconds": 0.546
+        },
+        {
+          "name": "com.pilot.server.session.AttachmentReferencesTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.038
+        },
+        {
+          "name": "com.pilot.server.session.AttachmentServiceTest",
+          "tests": 23,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 23,
+          "seconds": 0.051
+        },
+        {
+          "name": "com.pilot.server.session.BackgroundCommandRunTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.941
+        },
+        {
+          "name": "com.pilot.server.session.GoalExecutionPolicyTest",
+          "tests": 39,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 39,
+          "seconds": 3.122
+        },
+        {
+          "name": "com.pilot.server.session.GoalModelEvaluationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 2,
+          "passed": 0,
+          "seconds": 0.0
+        },
+        {
+          "name": "com.pilot.server.session.HistoryEditCoordinatorTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 6.892
+        },
+        {
+          "name": "com.pilot.server.session.InstallSkillToolTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.034
+        },
+        {
+          "name": "com.pilot.server.session.InterruptedRunRecoveryTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.002
+        },
+        {
+          "name": "com.pilot.server.session.ProjectRuleLoaderTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.018
+        },
+        {
+          "name": "com.pilot.server.session.QueuedMessageCodecTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.002
+        },
+        {
+          "name": "com.pilot.server.session.ReadAttachmentToolTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.003
+        },
+        {
+          "name": "com.pilot.server.session.ReadTaskHistoryToolTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.001
+        },
+        {
+          "name": "com.pilot.server.session.RequestTotalsIntegrationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.001
+        },
+        {
+          "name": "com.pilot.server.session.ReviewModeTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.001
+        },
+        {
+          "name": "com.pilot.server.session.RunRegistryTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.002
+        },
+        {
+          "name": "com.pilot.server.session.RunStateTrackerTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 0.049
+        },
+        {
+          "name": "com.pilot.server.session.RunSubmissionServiceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.003
+        },
+        {
+          "name": "com.pilot.server.session.SkillDownloaderTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 5,
+          "seconds": 0.158
+        },
+        {
+          "name": "com.pilot.server.session.SkillGitClonerTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.344
+        },
+        {
+          "name": "com.pilot.server.session.SkillInstallServiceTest",
+          "tests": 27,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 27,
+          "seconds": 0.203
+        },
+        {
+          "name": "com.pilot.server.session.SkillInstallSourceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.002
+        },
+        {
+          "name": "com.pilot.server.session.SpawnAgentToolTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 14,
+          "seconds": 0.013
+        },
+        {
+          "name": "com.pilot.server.session.TaskControlRecoveryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.007
+        },
+        {
+          "name": "com.pilot.server.session.TaskControlServiceTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 14,
+          "seconds": 0.048
+        },
+        {
+          "name": "com.pilot.server.session.UsageServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.001
+        },
+        {
+          "name": "com.pilot.server.store.AutomationStoreTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.02
+        },
+        {
+          "name": "com.pilot.server.store.EventCodecNewEventsTest",
+          "tests": 16,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 16,
+          "seconds": 0.015
+        },
+        {
+          "name": "com.pilot.server.store.EventReplayBenchmarkTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "passed": 0,
+          "seconds": 0.0
+        },
+        {
+          "name": "com.pilot.server.store.HistoryTransactionTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.054
+        },
+        {
+          "name": "com.pilot.server.store.JdbcConversationRepositoryTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.029
+        },
+        {
+          "name": "com.pilot.server.store.JdbcDispatchStoreTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 8,
+          "seconds": 0.162
+        },
+        {
+          "name": "com.pilot.server.store.JdbcProjectRepositoryTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.037
+        },
+        {
+          "name": "com.pilot.server.store.JdbcRunCheckpointRepositoryTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 8,
+          "seconds": 0.058
+        },
+        {
+          "name": "com.pilot.server.store.JdbcSessionRepositoryTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 10,
+          "seconds": 0.122
+        },
+        {
+          "name": "com.pilot.server.store.JdbcSettingsStoreTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.024
+        },
+        {
+          "name": "com.pilot.server.store.JdbcToolCallJournalTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 8,
+          "seconds": 0.063
+        },
+        {
+          "name": "com.pilot.server.store.MessageLibraryTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.41
+        },
+        {
+          "name": "com.pilot.server.store.QueuedMessageRepositoryTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3,
+          "seconds": 0.078
+        },
+        {
+          "name": "com.pilot.server.store.RequestReportCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.012
+        },
+        {
+          "name": "com.pilot.server.store.SessionOrganizationTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.051
+        },
+        {
+          "name": "com.pilot.server.store.SqliteStoreMigrationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.013
+        },
+        {
+          "name": "com.pilot.server.validation.ValidationLedgerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 8,
+          "seconds": 0.026
+        },
+        {
+          "name": "com.pilot.server.voice.VoiceServiceTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 8,
+          "seconds": 0.054
+        },
+        {
+          "name": "com.pilot.server.work.DocumentServiceTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.4
+        },
+        {
+          "name": "com.pilot.server.work.FileWorkbenchServiceTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 13,
+          "seconds": 0.288
+        },
+        {
+          "name": "com.pilot.server.work.WorkServicesTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 12,
+          "seconds": 0.288
+        },
+        {
+          "name": "com.pilot.server.workspace.ChangeServiceTest",
+          "tests": 21,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 21,
+          "seconds": 2.739
+        },
+        {
+          "name": "com.pilot.server.workspace.GitWorktreesTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 2.705
+        },
+        {
+          "name": "com.pilot.server.workspace.RegistryForScopeTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 4,
+          "seconds": 0.007
+        },
+        {
+          "name": "com.pilot.server.workspace.RunSnapshotServiceTest",
+          "tests": 19,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 19,
+          "seconds": 0.466
+        },
+        {
+          "name": "com.pilot.server.workspace.WorkspaceServiceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.005
+        }
+      ],
+      "skipReasons": [
+        {
+          "suite": "com.pilot.server.browser.BrowserRuntimeTest",
+          "test": "realRuntimeBecomesAvailableOnlyAfterTheHandshake",
+          "reason": "org.opentest4j.TestAbortedException: Assumption failed: 没有安装 playwright-core"
+        },
+        {
+          "suite": "com.pilot.server.controller.SessionEventLoadTest",
+          "test": "history100000WithOneTenAndFiftyReaders",
+          "reason": "System property [pilot.events.benchmark] does not exist"
+        },
+        {
+          "suite": "com.pilot.server.desktop.DesktopWindowLauncherTest",
+          "test": "preparesPilotUsingElectronNodeWithoutDependingOnIdeaNodePath(Path)",
+          "reason": "org.opentest4j.TestAbortedException: Assumption failed: assumption is not true"
+        },
+        {
+          "suite": "com.pilot.server.multi.ProjectBuildIntegrationTest",
+          "test": "npmColdWarmOfflineAndFailingTests",
+          "reason": "System property [pilot.test.project-builds] does not exist"
+        },
+        {
+          "suite": "com.pilot.server.multi.ProjectBuildIntegrationTest",
+          "test": "missingToolchainAndMissingImageReportActionableFailure",
+          "reason": "System property [pilot.test.project-builds] does not exist"
+        },
+        {
+          "suite": "com.pilot.server.multi.ProjectBuildIntegrationTest",
+          "test": "mavenColdWarmOfflineAndFailingTests",
+          "reason": "System property [pilot.test.project-builds] does not exist"
+        },
+        {
+          "suite": "com.pilot.server.session.GoalModelEvaluationTest",
+          "test": "comparesLegacyAndGoalWithIndependentAcceptance",
+          "reason": "Environment variable [PILOT_EVAL_API_KEY] does not exist"
+        },
+        {
+          "suite": "com.pilot.server.session.GoalModelEvaluationTest",
+          "test": "measuresMainAgentGoalPromotionWithoutASeparateRuntimeClassifier",
+          "reason": "Environment variable [PILOT_EVAL_API_KEY] does not exist"
+        },
+        {
+          "suite": "com.pilot.server.store.EventReplayBenchmarkTest",
+          "test": "replay100000FromSqlite",
+          "reason": "System property [pilot.events.benchmark] does not exist"
+        }
+      ]
+    }
+  },
+  "totals": {
+    "tests": 1614,
+    "passed": 1589,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 25
+  },
+  "mcpAndPermissionCases": 43,
+  "mcpAndPermissionSkips": 0
+}

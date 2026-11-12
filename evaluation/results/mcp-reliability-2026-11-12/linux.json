@@ -1,0 +1,149 @@
+{
+  "sourceCommit": "86c028f869f628a67d83a8fc764ea5262633582f",
+  "environment": "Linux aarch64 容器，Temurin 25.0.4.1，Node 22.23.5",
+  "build": "SUCCESS",
+  "spotless": "PASS",
+  "checkstyle": "PASS",
+  "sourceConsistency": "20 个已改动源码/测试/提示文件与被验证提交逐字节一致",
+  "modules": {
+    "pilot-core": {
+      "tests": 43,
+      "passed": 43,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suites": [
+        {
+          "name": "com.pilot.core.mcp.McpClientTransportTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 12,
+          "seconds": 4.054,
+          "cases": [
+            "closeDoesNotWaitForBlockedPipeMonitor",
+            "malformedReplyCannotTurnAnUnknownExternalResultIntoSuccess",
+            "interruptionStopsBlockedWriterAndPreservesInterruptStatus",
+            "repeatingPaginationIsRejectedInsteadOfCachingAnIncompleteList",
+            "serverPingCanBeAnsweredWhileACallWaitsForItsReply",
+            "listChangedNotificationInvalidatesCachedAnnotationsAndSchemas",
+            "responseTimeoutDoesNotRetryASideEffect",
+            "queuedRequestHasItsOwnDeadlineAndDoesNotGetSentAfterItExpires",
+            "rejectsExcessiveJsonNestingBeforeBuildingTheTree",
+            "blockedPipeUsesTheSameDeadlineAsResponseWait",
+            "paginatedDiscoveryReturnsTheCompleteList",
+            "rejectsAnOversizedLineBeforeWaitingForItsNewline"
+          ]
+        },
+        {
+          "name": "com.pilot.core.mcp.McpConfigurationTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7,
+          "seconds": 1.984,
+          "cases": [
+            "callNeverSilentlyRestartsADeadConnection",
+            "commandArgumentsAndRuntimePathChangesAreDetected",
+            "changedEnvironmentCannotReuseTheOldProcessAndRestartLoadsNewValue",
+            "deadProcessBetweenReadOnlyCheckAndDiscoveryCannotBeRestarted",
+            "disabledConfigurationImmediatelyRemovesKnownReadOnlyCapabilities",
+            "configChangedWhileAwaitingApprovalCannotReplaceTheApprovedCommand",
+            "disabledWorkspaceServerOverridesUserConfigAndBrokenConfigFailsClosed"
+          ]
+        },
+        {
+          "name": "com.pilot.core.mcp.McpContentLimitsTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.228,
+          "cases": [
+            "frameBoundaryCountsBytesAndDoesNotConsumeNextFrame",
+            "imageCountAndTotalDecodedBytesAreBounded",
+            "configurationIsBoundedBeforeJsonParsing",
+            "tokenAndNumberLimitsRejectSmallButExpensiveJson",
+            "decodedSizeMatchesPaddedAndUnpaddedBoundaries",
+            "oversizedImageIsRejectedBeforeInvalidBase64IsDecoded"
+          ]
+        },
+        {
+          "name": "com.pilot.core.mcp.McpPermissionsTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 9,
+          "seconds": 1.896,
+          "cases": [
+            "sameCommandInAnotherWorkspaceCannotInheritLocalTrust",
+            "userPolicyCanTrustHintsAndOverrideIndividualTools",
+            "explicitApprovalOverrideWinsEvenInAutoMode",
+            "invalidUserPolicyCannotRetainAnEarlierGrant",
+            "serverSelfReportedReadOnlyCannotBypassLocalPermissionMode",
+            "revocationBetweenPermissionCheckAndExecutionPreventsTheCall",
+            "trustDoesNotFollowTheSameServerNameToDifferentWorkspaceCommand",
+            "actualExecutorRechecksTheGrantAfterItsPreExecutionGuard",
+            "explicitApprovalReplacesAnEarlierReadOnlyDecisionForTheSameCall"
+          ]
+        },
+        {
+          "name": "com.pilot.core.mcp.McpToolsTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 6,
+          "seconds": 0.512,
+          "cases": [
+            "discoversServersThenToolsThenSchemaOnDemand",
+            "startupFailureIsReportedAndRemembered",
+            "capabilityIsOnlyDeclaredWhenServersAreConfigured",
+            "unreadableConfigSurfacesAsAnUnusableServerInsteadOfThrowing",
+            "callsToolsAndConvertsContent",
+            "startingAServerAndUntrustedHintsRequireApproval"
+          ]
+        },
+        {
+          "name": "com.pilot.core.tool.ExplicitApprovalTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 1,
+          "seconds": 0.002,
+          "cases": [
+            "broadAllowCannotBypassFinalActionApprovalAndFullContentIsShown"
+          ]
+        },
+        {
+          "name": "com.pilot.core.tool.ToolOutcomeUncertaintyTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2,
+          "seconds": 0.005,
+          "cases": [
+            "ordinaryTimeoutKeepsItsExistingClassification",
+            "unknownExternalResultIsNotClassifiedAsRetryableTimeoutOrSuccessfulEvidence"
+          ]
+        }
+      ],
+      "skipReasons": []
+    }
+  },
+  "totals": {
+    "tests": 43,
+    "passed": 43,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "mcpAndPermissionCases": 43,
+  "mcpAndPermissionSkips": 0
+}

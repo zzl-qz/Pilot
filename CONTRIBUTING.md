@@ -203,6 +203,79 @@ sh mvnw -B -ntp -pl pilot-server -DskipFrontend=true -Dtest=SubmissionController
 
 2026-11-11 本轮验证：macOS Java 完整验证 **1,474 项通过、16 项按条件跳过**；前端 **417 项**、桌面 **41 项**通过，TypeScript 与生产构建通过；Android JVM **58 项**与 lint 强制重新执行通过（未使用任务缓存）。Chrome/Electron 实际进程覆盖输入、断线刷新且不重发、侧边对话、模型保存、会话切换、书签双窗口并发、旧数据迁移失败/重试、跨两页定位，以及本地 HTTP/SSE 工作台刷新、原生菜单与 WebContentsView。导航的后台可见性和暂停帧是模拟测试，桌面刷新包含实际窗口和嵌入浏览器；不能据此推断操作系统休眠或物理断网均已验证。Linux Java 25 容器完成 **57 项**回执、附件限额、消息接口及 SQLite 书签重点测试。Windows 实机与 Linux 桌面本轮未运行，相关浏览器回归已补入三平台 CI；配置 CI 不代表远程任务已执行。测试使用本地服务和模拟 API，不调用外部模型。
 
+## MCP 接入、调用边界与本地信任
+
+Pilot 当前支持 MCP stdio：工作区 `.mcp.json` 覆盖数据目录中的用户级 `mcp.json`。`mcp_tools` 按需发现服务器及工具，`mcp_call` 使用已连接的服务器；不支持 HTTP/SSE 服务器配置，也不自动下载资源链接。
+
+### 时限、关闭与结果未确认
+
+启动握手默认 40 秒，工具发现默认 20 秒，调用默认 120 秒。发送序列化、写入队列、管道写入、flush 和响应等待共用绝对时限；分页发现也共用一份时限。最多同时等待 64 个请求，写入队列最多 64 项。
+
+写入由单独的串行线程处理，读取线程不会为了回复服务器 ping 而同步等待写入。超时、中断、异常响应或连接关闭会唤醒等待方，并通过标准 `ProcessHandle` 接口终止子进程及其仍可发现的后代，再异步关闭管道，避免卡在输出流锁上。
+
+已经开始发送的 `tools/call` 若没有完整结果，返回 `ERROR: 结果未确认`，执行证据状态为 `RESULT_UNKNOWN`，不能作为成功证据或可自动重试的普通超时。关闭本地进程不能证明远端副作用已撤销。必须先核对外部状态，不自动重发原操作。连接失效后，调用入口不会隐式重启；需要重新通过工具发现入口及当前权限模式连接。
+
+### 配置更新的生效规则
+
+- 尚未启动的服务器：首次发现时按当前配置启动。
+- 已启动的服务器：比较 command、args、env、附加 PATH 和实际工作目录。变化后显示“配置已变更，重启 Pilot 服务后生效”，不再接受新调用，也不展示旧缓存为新能力。已发出的调用不会因为配置文件改动而被盲目重试。
+- 本轮采用明确提示重启服务的方案，不提供热重启按钮。重启后重新发现工具，缓存来自新进程。
+- 工作区 `disabled: true` 可以禁用同名用户级服务器。配置损坏时拒绝执行，不悄悄退回其他启动配置。
+- 发现审批记录当时的配置快照；等待批准期间配置变化时拒绝启动。只读检查之后进程退出时，也不会凭旧检查启动新进程。
+- `notifications/tools/list_changed` 会作废缓存及旧只读依据；重新发现后再使用新 schema。重复分页游标、过多页数或不完整列表不会缓存为完整发现结果。
+
+### 数据边界
+
+| 对象 | 限制与超限行为 |
+| --- | --- |
+| stdio 单条消息 | 8 MiB 原始字节，读取时计数，不等待整行或换行后才检查；超限关闭连接 |
+| JSON 解析 | 深度 64、令牌 100000、字段名 4096 字符、数字 128 字符；在构建完整树前检查 |
+| 配置文件 | 1 MiB，读取和解析前受限 |
+| 工具发现 | 最多 20 页、1000 个工具、累计序列化数据 8 MiB；超限拒绝不完整结果 |
+| 图片 | 每张及每次调用累计 5 MiB 解码字节，最多 8 张；先检查编码对应的字节数再解码 |
+| 文本预览 | 30000 字符；预览截断不替代传输与解析限制 |
+
+合规图片保存为工具产物后引用。超量原始响应被拒绝，不宣称已经保存完整内容；服务器可以改用小响应或资源链接，链接仅展示，不自动获取。
+
+### 本地信任与权限覆盖
+
+服务器提供的 `readOnlyHint` 默认不可信。工作区 `.mcp.json` 中的权限声明不会授予本地信任。用户可在数据目录的 `mcp.json` 中，为自己管理的服务器配置 `pilotPermissions`：
+
+```json
+{
+  "mcpServers": {
+    "example": {
+      "command": "node",
+      "args": ["./mcp/server.mjs"],
+      "env": {},
+      "pilotPermissions": {
+        "workspaces": ["<替换为本机工作区绝对路径>"],
+        "trustReadOnlyHints": false,
+        "readOnlyTools": ["lookup"],
+        "requireApprovalTools": ["publish"]
+      }
+    }
+  }
+}
+```
+
+`workspaces` 必须显式列出本机工作区绝对路径，按标准路径接口核对实际目录；不支持通配符或默认信任全部工作区。当前生效的 command、args、env 必须与用户级配置相同。仅服务器同名不够，相同的相对命令在其他工作区也不能继承信任。
+
+`trustReadOnlyHints: true` 表示用户信任该服务器的只读声明；默认 false。`readOnlyTools` 是用户明确指定的只读工具，必须已被发现；`requireApprovalTools` 优先于两种只读放行，即使 AUTO 模式也要明确批准。没有这些本地授权时，ASK/AUTO_EDIT 仍需批准，READ_ONLY 拒绝；AUTO 仍按用户选择的模式放行，不把它冒充成服务器已通过只读验证。
+
+本地策略撤销、连接替换、工具列表变化之后，旧只读判定不能继续执行。信任策略只影响 Pilot 的权限判断，**不是操作系统沙箱，也不证明路径指向的程序内容永远不变**。服务器启动后具备操作系统赋予该进程的权限。
+
+依据：[MCP 2025-06-18 工具规范](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)要求客户端将未经信任的服务器工具注解视为不可信输入。
+
+### 回归
+
+```sh
+sh mvnw -B -ntp -pl pilot-core -Dtest=McpClientTransportTest,McpContentLimitsTest,McpConfigurationTest,McpPermissionsTest,McpToolsTest,ToolOutcomeUncertaintyTest,ExplicitApprovalTest test
+sh mvnw -B -ntp -pl pilot-core,pilot-server -DskipFrontend=true verify
+```
+
+阻塞管道、中断、关闭、超量响应、配置更新及权限测试使用当前 JDK 启动真实子进程，不依赖 shell 命令或真实外部服务；原有发现、调用和图片测试使用本地 Node fixture。平台实测范围与结果见[本轮验证记录](evaluation/results/mcp-reliability-2026-11-12/validation.json)，不能将 CI 配置或模拟路径测试当作 Windows 实机通过。
+
 ## 许可证
 
 当前仓库没有 `LICENSE` 文件，也没有发布贡献者许可或 CLA 条款。公开仓库不等于代码已按开源许可证授权；在维护者确定许可证前，请先联系维护者确认复用与贡献条款。
