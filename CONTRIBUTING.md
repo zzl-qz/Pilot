@@ -278,4 +278,4 @@ sh mvnw -B -ntp -pl pilot-core,pilot-server -DskipFrontend=true verify
 
 ## 许可证
 
-当前仓库没有 `LICENSE` 文件，也没有发布贡献者许可或 CLA 条款。公开仓库不等于代码已按开源许可证授权；在维护者确定许可证前，请先联系维护者确认复用与贡献条款。
+Pilot 自有源码和文档采用 [Apache License 2.0](LICENSE)。提交贡献的许可条款见许可证第 5 节。
