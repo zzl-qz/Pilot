@@ -700,7 +700,10 @@ public class AgentRunService implements RunStarter {
         // 完整工具名单要先于 systemPrompt 算出：spawn_agent / dispatch_agents 在下方才注册，
         // 而 SpawnAgentTool 依赖 config，注册顺序无法提前；两处条件必须保持一致。
         Set<String> sessionTools = sessionTools(tools);
-        Consumer<SessionEvent> sink = event -> publish(sessionId, runId, event);
+        Consumer<SessionEvent> sink = event -> {
+            metrics.count("event." + event.type().wireName());
+            publish(sessionId, runId, event);
+        };
         Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
         var config = new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(),
                 properties.repeatAbortAt(),

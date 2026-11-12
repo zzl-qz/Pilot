@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EditFileToolTest {
@@ -74,6 +75,29 @@ class EditFileToolTest {
         String allowed = guarded.execute(Map.of(
                 "path", "sample.txt", "old_string", "target line", "new_string", "replaced"));
         assertTrue(allowed.startsWith("已修改 "), allowed);
+    }
+
+    @Test
+    void outOfRangeReadDoesNotUnlockEditing() throws IOException {
+        Path file = workspace.resolve("sample.txt");
+        Files.writeString(file, "target line\n");
+        var paths = new PathValidator(workspace);
+        var reads = new ReadTracker();
+        var reader = new ReadFileTool(paths, reads);
+        var editor = new EditFileTool(paths, SnapshotSink.none(), reads);
+        var edit = Map.<String, Object>of(
+                "path", "sample.txt", "old_string", "target line", "new_string", "replaced");
+
+        assertTrue(reader.execute(Map.of("path", "sample.txt", "start_line", 9999))
+                .contains("无内容返回"));
+        assertFalse(reads.isObserved(file.toRealPath()), "未返回内容的读取不能解锁编辑");
+        assertTrue(editor.execute(edit).startsWith("ERROR: 本次运行尚未读取过"));
+        assertEquals("target line\n", Files.readString(file));
+
+        assertTrue(reader.execute(Map.of("path", "sample.txt", "start_line", -1))
+                .contains("target line"));
+        assertTrue(editor.execute(edit).startsWith("已修改 "));
+        assertEquals("replaced\n", Files.readString(file));
     }
 
     /** 刚创建或刚编辑过的文件视为已读：连续编辑不被误伤。 */

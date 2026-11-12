@@ -93,10 +93,12 @@ public final class ReadFileTool implements Tool {
             if (looksBinary(file)) {
                 return "ERROR: 二进制文件，无法读取: " + rawPath;
             }
-            String slice = readSlice(file, startLine, lineCount);
-            // 读取成功后登记：这是 edit_file「先读后改」校验的依据
-            reads.observed(file);
-            return slice;
+            ReadResult slice = readSlice(file, startLine, lineCount);
+            // 只有实际返回文件行才解锁编辑，越界读取和空文件提示不算观察过内容。
+            if (slice.hasLines()) {
+                reads.observed(file);
+            }
+            return slice.text();
         } catch (IOException e) {
             return "ERROR: 读取失败: " + e.getMessage();
         }
@@ -108,27 +110,28 @@ public final class ReadFileTool implements Tool {
         }
     }
 
-    private static String readSlice(Path file, int startLine, int lineCount) throws IOException {
+    private static ReadResult readSlice(Path file, int startLine, int lineCount) throws IOException {
         if (startLine < 0) {
             int total = countLines(file);
             if (total == 0) {
-                return "(空文件，共 0 行)";
+                return new ReadResult("(空文件，共 0 行)", false);
             }
             long resolved = (long) total + startLine + 1;
             boolean clamped = resolved < 1;
             int start = clamped ? 1 : (int) resolved;
             List<String> lines = collect(file, start, lineCount);
             String clampNote = clamped ? "（负向起点超出文件开头，已从第 1 行读起）" : "";
-            return render(start, lines, total, "", clampNote);
+            return new ReadResult(render(start, lines, total, "", clampNote), !lines.isEmpty());
         }
         Slice slice = scanSlice(file, startLine, lineCount);
         if (slice.total == 0) {
-            return "(空文件，共 0 行)";
+            return new ReadResult("(空文件，共 0 行)", false);
         }
         if (slice.lines.isEmpty()) {
-            return "请求范围从第 " + startLine + " 行开始，但文件共 " + slice.total + " 行（无内容返回）";
+            return new ReadResult("请求范围从第 " + startLine + " 行开始，但文件共 "
+                    + slice.total + " 行（无内容返回）", false);
         }
-        return render(startLine, slice.lines, slice.total, "", "");
+        return new ReadResult(render(startLine, slice.lines, slice.total, "", ""), true);
     }
 
     private static Slice scanSlice(Path file, int startLine, int lineCount) throws IOException {
@@ -230,6 +233,9 @@ public final class ReadFileTool implements Tool {
     }
 
     private record IntArg(boolean present, Integer value) {
+    }
+
+    private record ReadResult(String text, boolean hasLines) {
     }
 
     private record Slice(List<String> lines, int total) {
