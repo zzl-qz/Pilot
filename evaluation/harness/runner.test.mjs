@@ -260,6 +260,53 @@ test('deadline前1毫秒取得正常终态可以返回，不误伤临界成功',
   assert.equal(result.sessionStatus, 'COMPLETED');
 });
 
+test('宿主长时间停调度后拒绝结果，并保留独立中断标记', async t => {
+  let now = 10_000;
+  t.mock.method(Date, 'now', () => now);
+  const mock = await server(t, () => { now += 90_000; return { sessionStatus: 'COMPLETED' }; });
+  await assert.rejects(waitForTerminal({ base: mock.base, timeoutMinutes: 15 }, 's'), error => {
+    assert.equal(error.evaluationInterrupted, true);
+    assert.match(error.message, /未调度/);
+    return true;
+  });
+});
+
+test('执行异常保留会话身份，取消未确认时也不能丢失关联', async t => {
+  const { args, task } = await fixture(t);
+  const mock = await server(t, path => {
+    if (path === '/api/sessions') return { sessionId: 'own' };
+    if (path.endsWith('/cancel')) throw new Error('connection lost');
+    return { sessionStatus: 'RUNNING', activeRunId: 'own-run' };
+  });
+  await assert.rejects(runTask({ ...args, base: mock.base, timeoutMinutes: 0.001 }, task), error => {
+    assert.equal(error.sessionId, 'own');
+    assert.equal(error.runId, 'own-run');
+    assert.match(error.message, /取消状态未确认/);
+    return true;
+  });
+});
+
+test('一次基础设施异常即停止批量派发，写入失败身份和中断摘要', async t => {
+  const { root, args, task } = await fixture(t);
+  const mock = await server(t, path => {
+    if (path === '/api/settings') return { model: 'fixture-model' };
+    if (path === '/api/sessions') return { sessionId: 'own' };
+    return { sessionStatus: 'RUNNING', activeRunId: 'own-run' };
+  });
+  const tasks = join(root, 'tasks.json'), out = join(root, 'results.jsonl');
+  await writeFile(tasks, JSON.stringify({ tasks: [{ ...task, fixture: 'bug' }, { ...task, id: 'next', fixture: 'bug' }] }));
+  await assert.rejects(promisify(execFile)(process.execPath, ['evaluation/harness/runner.mjs', '--base', mock.base,
+    '--tasks', tasks, '--fixtures', args.fixtures, '--out', out, '--timeout-minutes', '0.001']), { code: 1 });
+  const rows = (await readFile(out, 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].sessionId, 'own');
+  assert.equal(rows[0].runId, 'own-run');
+  assert.equal(rows[0].cancellationRequested, true);
+  assert.equal(rows[0].evaluationError, true);
+  assert.equal(mock.requests.filter(request => request.path === '/api/sessions').length, 1);
+  assert.equal(JSON.parse(await readFile(out.replace('.jsonl', '.summary.json'), 'utf8')).stoppedEarly, true);
+});
+
 test('引导请求同样受deadline约束，过期确认不能算已覆盖场景', async t => {
   let now = 10_000;
   t.mock.method(Date, 'now', () => now);

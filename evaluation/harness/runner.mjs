@@ -186,19 +186,33 @@ export async function acceptanceResult(task, workspace) {
 export async function waitForTerminal(args, sessionId, steer) {
   const started = Date.now();
   const deadline = started + args.timeoutMinutes * 60 * 1000;
+  let observedAt = started;
+  const checkScheduling = () => {
+    const now = Date.now();
+    const gap = now - observedAt;
+    observedAt = now;
+    if (gap > Math.max(60_000, (args.requestTimeoutMs ?? 30_000) + (args.pollMs ?? 3000) + 10_000)) {
+      throw Object.assign(new Error(`评测宿主连续 ${Math.round(gap / 1000)} 秒未调度，可能休眠或严重阻塞；停止整批并保留本次记录`),
+        { evaluationInterrupted: true });
+    }
+  };
   let last = null;
   let steered = false, steerRunId = null, steerAtStep = null, steerDeliveredAtSeconds = null;
   const timeout = () => new Error(`任务超时，未在期限内取得终态（${last?.sessionStatus ?? "未知"}），不能执行验收`);
   async function beforeDeadline(path, init) {
+    checkScheduling();
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw timeout();
     const configuredTimeout = args.requestTimeoutMs ?? 30_000;
     try {
       const result = await api({ ...args, requestTimeoutMs: Math.max(1, Math.ceil(Math.min(configuredTimeout, remaining))) }, path, init);
+      checkScheduling();
       // A poll sent before the deadline can arrive afterwards. Even COMPLETED must be timely.
       if (Date.now() >= deadline) throw timeout();
       return result;
     } catch (error) {
+      if (error.evaluationInterrupted) throw error;
+      checkScheduling();
       if (Date.now() >= deadline || (remaining <= configuredTimeout && error.name === 'TimeoutError')) throw timeout();
       throw error;
     }
@@ -217,6 +231,7 @@ export async function waitForTerminal(args, sessionId, steer) {
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, Math.min(args.pollMs ?? (steer ? 250 : 3000), Math.max(0, deadline - Date.now()))));
   }
+  checkScheduling();
   throw timeout();
 }
 
@@ -357,14 +372,23 @@ export async function runTask(args, task) {
     });
     diagnostics = await waitForTerminal({ ...args, timeoutMinutes: Math.min(args.timeoutMinutes, task.maxMinutes ?? args.timeoutMinutes) }, sessionId, task.steer);
   } catch (error) {
+    error.sessionId = sessionId;
     // 只清理本次执行器创建的会话；超时或网络失败后不让模型继续悄悄运行。
     try {
       const active = await api(args, `/api/sessions/${sessionId}/diagnostics`);
+      error.runId = active.activeRunId ?? null;
+      error.terminalStatus = TERMINAL.has(active.sessionStatus) ? active.sessionStatus : null;
       if (active.activeRunId && !TERMINAL.has(active.sessionStatus)) {
         await api(args, `/api/runs/${encodeURIComponent(active.activeRunId)}/cancel`, { method: "POST" });
+        error.cancellationRequested = true;
+        const settled = await api(args, `/api/sessions/${sessionId}/diagnostics`);
+        error.terminalStatus = TERMINAL.has(settled.sessionStatus) ? settled.sessionStatus : null;
       }
     } catch (cancelError) {
-      throw new Error(`${error.message}；取消失败：${cancelError.message}（会话 ${sessionId}）`);
+      throw Object.assign(new Error(`${error.message}；取消状态未确认：${cancelError.message}（会话 ${sessionId}）`), {
+        sessionId, runId: error.runId, cancellationRequested: error.cancellationRequested === true,
+        evaluationInterrupted: error.evaluationInterrupted === true
+      });
     }
     throw error;
   }
@@ -532,7 +556,7 @@ async function main() {
   await writeFile(lock, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }), { flag: 'wx' })
     .catch(() => { throw new Error(`评估输出已锁定：${lock}；先确认原进程结束及未结算请求，再移除锁`); });
   try {
-    let records = [], planned = expandRuns(tasks, args.repeat);
+    let records = [], planned = expandRuns(tasks, args.repeat), stoppedEarly = false;
     if (args.resume) {
       const contents = await readFile(args.out, 'utf8');
       if (contents && !contents.endsWith('\n')) throw new Error('评估文件末行不完整，请先保留原件并核对，不会自动丢弃');
@@ -559,7 +583,10 @@ async function main() {
           record = { ...await recordMetadata(args, task).catch(() => args.runContext),
             taskId: task.id, attempt, model: args.model, requestedModel: args.model, resolvedModel: null,
             promptVersion: args.promptVersion, toolVersion: args.toolVersion, success: false, acceptanceRan: false,
-            terminalStatus: null, reportedComplete: null, evaluationError: true,
+            sessionId: error.sessionId ?? null, runId: error.runId ?? null,
+            terminalStatus: error.terminalStatus ?? null, reportedComplete: null, evaluationError: true,
+            evaluationInterrupted: error.evaluationInterrupted === true,
+            cancellationRequested: error.cancellationRequested === true,
             durationSeconds: (Date.now() - started) / 1000, rework: null, takeover: null,
             costUsd: null, costKnown: false, inputTokens: null, outputTokens: null, notes: String(error) };
           console.log(`ERROR ${error.message}`);
@@ -567,11 +594,17 @@ async function main() {
         // A disk failure must leave the in-flight marker, not append a second result for the same trial.
         await persist(record);
         await rm(inflight);
+        if (record.evaluationError) {
+          stoppedEarly = true;
+          process.exitCode = 1;
+          console.error('评测中断：已保留失败记录；核对宿主、服务和在途状态后再使用 --resume 补齐空位。');
+          break;
+        }
       }
     }
     const compared = baseline ? compare(baseline, records) : records;
     const decision = baseline ? gate(baseline, compared) : null;
-    const summary = { generatedAt: new Date().toISOString(), dryRun: args.dryRun,
+    const summary = { generatedAt: new Date().toISOString(), dryRun: args.dryRun, stoppedEarly,
       selectedTasks: tasks.map(t => t.id), repeat: args.repeat,
       groups: aggregate(compared), overall: summarize(compared), gate: decision };
     const summaryPath = args.out.endsWith('.jsonl') ? args.out.replace(/\.jsonl$/, '.summary.json') : `${args.out}.summary.json`;

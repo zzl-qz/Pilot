@@ -56,6 +56,8 @@ node evaluation/harness/runner.mjs --dry-run --repeat 3 --task fix-failing-unit-
 
 执行器用 `.lock` 阻止同一输出并发运行，每次付费任务前写 `.inflight.json`。异常退出留下的锁或在途标记必须先核对原进程、服务终态和费用，再人工补齐真实记录；不会自动再次请求。截断尾行、重复 attempt/会话、混合版本都拒绝续跑。汇总文件由完整 JSONL 重建，历史记录不覆盖。
 
+一次基础设施异常、等待超时或取消状态未确认就停止整批派发并返回非零退出码，摘要标记 `stoppedEarly`。异常记录保留已创建的 `sessionId`、已观测的运行 ID 和是否请求取消，未确认的终态仍为 `null`。轮询发现超过正常请求等待范围的长时间停调度时，会标记 `evaluationInterrupted`；这只能提示宿主休眠或严重阻塞，不能直接归因于模型。复核环境与在途会话后可用 `--resume` 补齐尚未执行的空位，原失败尝试保留。长跑时应让宿主持续运行；本工具不会更改系统电源设置。
+
 `node evaluation/harness/budget-plan.mjs <plan-input.json>` 只做离线规划，不调用模型。输入包含原预算保护 `state`（initialUsed/lastUsed/maxQuota/pendingReserved/locked/busy）、最新已观测累计额度 `latestUsed`、真实 `records`、配置全价 `inputQuotaPerMillion`/`outputQuotaPerMillion` 和计划补跑数量 `additionalRuns`；可选 `quotaPerCny` 与 `headroom`（默认 1.5）。未知用量不算零，失败样本也计入；用观测用量的全价 p95 加余量估计下一批规模。它不降低运行时单请求预留，不能用缓存折扣推断费用硬上界。
 
 新账单增量最多结算等额预留。计数不动不代表欠费已结算；不得重置累计额度基线或丢弃未知费用预留。若存在锁定、未结算或预算不足，结果为 `needs_reconciliation`。本轮[历史预算复核](baselines/2026-11-03-reliability/budget-review.json)仍需核对，不追加付费请求；原 18/36 screening 保持证据不足。
@@ -63,6 +65,18 @@ node evaluation/harness/runner.mjs --dry-run --repeat 3 --task fix-failing-unit-
 ## 场景覆盖
 
 只有运行状态 `COMPLETED`、外部验收通过、必需场景实际触发时才记成功。中途引导通过当前 `runId` 的 `/steer` 投递，不排队创建新任务。记录引导是否投递、接收的运行 ID、投递时步数和实际延迟；若模型在投递前已经完成，即使最终代码通过测试，也不能声称测过中途引导。两条内置引导场景在 1 秒后尝试，使用更短轮询；未投递的记录为场景未覆盖，需要重新设计或复测该场景。
+
+### 并发、进程重启与事件补发
+
+构建当前后端 JAR，并让 `JAVA_HOME` 指向 Java 25，再运行：
+
+```bash
+node evaluation/harness/recovery-smoke.mjs pilot-server/target/pilot-server-0.0.1-SNAPSHOT.jar
+```
+
+脚本使用本地确定性 HTTP 模型、临时工作区和独立端口，不读取用户模型密钥，不连接用户正在运行的 Pilot。它让两个会话同时完成第一步文件操作后等待，强制结束自己启动的 JVM，使用原数据重启，再分别恢复两个会话；检查已完成工具不重做、历史工具结果仍进入模型请求、完成诊断正确，以及 SSE 断开后按游标补发无遗漏和重复。它关闭自动完成检查以隔离恢复机制，不能作为真实模型能力或完成门验证。日志与 JSON 报告保留在打印出的临时目录。
+
+使用标准 Node 子进程和路径 API；Linux 容器应带 `--init`，让退出父进程的子进程得到正常回收。macOS 与 Linux 已实际执行此测试；Windows 尚需实机验证。真实模型评测仍使用上面的固定任务、重复与外部验收流程。
 
 ## 指标口径
 
