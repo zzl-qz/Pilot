@@ -74,7 +74,7 @@ export function emptySkillsHint(projectRoot: string | null | undefined) {
   const where = projectRoot && projectRoot !== '-'
     ? `在 ${projectRoot} 下`
     : '在技能目录下';
-  return `还没有可用技能：${where}建一个目录，里面放 SKILL.md（frontmatter 至少要有一句 description），保存后下次运行即生效。`;
+  return `还没有可用技能：${where}建一个目录，里面放 SKILL.md（frontmatter 至少要有一句 description），保存后即可加载。也可以在会话中贴技能链接，让 Agent 安装并检查配置。`;
 }
 
 /**
@@ -97,19 +97,17 @@ export function parseInstallSource(text: unknown): { type: 'git' | 'local'; valu
   return null;
 }
 
-/**
- * git 地址形状预检：把浏览器复制来的 GitHub 网页地址（blob/tree/raw/文件路径）拦在
- * 请求之前，返回可展示的中文错误；形状没问题返回 null。
- *
- * <p>与后端 SkillInstallService.diagnoseGitUrl 同口径——前端拦一次省一个网络往返，
- * 后端仍是权威（API 是公共面，不能只靠前端）。
- */
+/** 支持的技能网页链接交由后端解析；其他站点仍需仓库地址。 */
 export function gitUrlProblem(url: unknown) {
   const value = String(url || '').trim();
   if (!/^https?:\/\//i.test(value)) {
     return null;
   }
   const lower = value.toLowerCase();
+  try {
+    const parsed = new URL(value);
+    if (['github.com', 'gitee.com', 'raw.githubusercontent.com'].includes(parsed.hostname.toLowerCase())) return null;
+  } catch { return '技能链接不合法，请检查地址。'; }
   for (const marker of ['/blob/', '/tree/', '/raw/']) {
     if (lower.includes(marker)) {
       return `这是浏览器里看文件的网页地址（含 ${marker}…），不是 git 仓库地址。请改用仓库根地址，例如 https://github.com/anthropics/skills`;

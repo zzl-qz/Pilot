@@ -43,6 +43,7 @@ let queueLoadSequence = 0;
 let activationSequence = 0;
 let projectLoadSequence = 0;
 let sessionLoadSequence = 0;
+let skillLoadSequence = 0;
 const RECONNECT_BASE_MS = 800;
 const RECONNECT_MAX_MS = 15000;
 const CONNECTION_STABLE_MS = 10000;
@@ -1135,6 +1136,10 @@ export const useStore = create<StoreState>()(immer((set, get) => {
 
   /** 单条事件落地后的联动（标题转正、任务契约、上下文、变更报告）。 */
   settleEvent(event, after) {
+    if (event.type === 'tool.completed' && after.thread.rows.some(row => row.type === 'turn'
+        && row.toolIndex[event.payload.callId]?.name === 'install_skill')) {
+      void get().loadSkills();
+    }
     if (['run.started', 'run.steered', 'run.completed', 'run.failed', 'run.cancelled'].includes(event.type)) {
       set(draft => { draft.promoteBlank = null; });
       get().loadSessions();
@@ -1696,9 +1701,12 @@ export const useStore = create<StoreState>()(immer((set, get) => {
    * {@code data.skills}，于是技能列表永远是空的、斜杠菜单里也一个技能都没有。
    */
   async loadSkills() {
-    const { sessionId } = get();
+    const { sessionId, sessionEpoch } = get();
+    const sequence = ++skillLoadSequence;
+    const current = () => sequence === skillLoadSequence && get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
     try {
       const data = await api.skills(sessionId || undefined);
+      if (!current()) return;
       const list = Array.isArray(data?.available) ? data.available : [];
       set((draft) => {
         draft.skills = list;
@@ -1710,6 +1718,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
         draft.quickCommands = mergeCommands(QUICK_COMMANDS, toSkillCommands(list));
       });
     } catch {
+      if (!current()) return;
       // 技能读取失败不能让斜杠菜单跟着空掉：内置指令始终可用
       set((draft) => {
         draft.quickCommands = mergeCommands(QUICK_COMMANDS, toSkillCommands(draft.skills || []));

@@ -232,7 +232,7 @@ export const api = {
   saveModelRuntime: (body: Update<S.ModelRuntimeControllerUpdate>) => apiJson<ApiResults['saveModelRuntime']>('/api/settings/model/runtime', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   probeModels: (body: Update<S.SettingsControllerModelsRequest>) => apiJson<ApiResults['probeModels']>('/api/settings/model/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   skills: (sessionId?: string) => apiJson<ApiResults['skills']>(`/api/skills${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`),
-  skillsPreview: (body: Update<S.SkillsControllerPreviewRequest>) => apiJson<ApiResults['skillsPreview']>('/api/skills/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  skillsPreview: (body: Update<S.SkillsControllerPreviewRequest>) => apiJson<ApiResults['skillsPreview']>('/api/skills/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 150000),
   skillsInstall: (body: Update<S.SkillsControllerInstallRequest>) => apiJson<ApiResults['skillsInstall']>('/api/skills/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   usage: (days: number) => apiJson<ApiResults['usage']>(`/api/usage?days=${days}`),
   diagnostics: (id: string) => apiJson<ApiResults['diagnostics']>(`/api/sessions/${encodeURIComponent(id)}/diagnostics`),

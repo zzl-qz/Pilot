@@ -1071,6 +1071,8 @@ export interface SkillsControllerOutcomePayload {
 export interface SkillsControllerPreviewRequest {
   source: string;
   sessionId: string;
+  ref?: string;
+  path?: string;
 }
 
 /** SkillsController.java / PreviewResponse */

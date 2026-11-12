@@ -334,7 +334,7 @@ function SkillsInstall({ onDone }: { onDone: () => void }) {
     }
     setBusy('preview');
     setHasError(false);
-    setHint(parsed.type === 'git' ? '正在拉取仓库（浅克隆）…' : '正在读取目录…');
+    setHint(parsed.type === 'git' ? '正在下载并识别技能，最长约两分钟…' : '正在读取目录…');
     try {
       const data = await api.skillsPreview({ source: parsed.value, sessionId: sessionId || undefined });
       const list = Array.isArray(data?.candidates) ? data.candidates : [];
@@ -380,7 +380,7 @@ function SkillsInstall({ onDone }: { onDone: () => void }) {
 
   return <div className="skills-install settings-form" id="skills-install">
     <div className="settings-source-row">
-      <TextInput id="skills-install-source" label="来源（git 地址或本机目录）" size="lg" width="100%" value={source}
+      <TextInput id="skills-install-source" label="来源（技能链接、仓库或本机目录）" size="lg" width="100%" value={source}
         placeholder={'https://github.com/… 或 D:\\skills\\review'} isDisabled={Boolean(busy)} hasSpellCheck={false}
         onChange={changeSource} onEnter={() => void preview()} />
       <Button label="浏览…" isDisabled={Boolean(busy)} onClick={() => useStore.getState().setUi({

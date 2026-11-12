@@ -6,16 +6,15 @@ import {
   summarizeInstallResults
 } from '../src/lib/skills.js';
 
-test('gitUrlProblem 拦下 GitHub 网页地址并给出仓库根写法', () => {
-  const blob = gitUrlProblem('https://github.com/anthropics/skills/blob/main/skills/doc-coauthoring/SKILL.md');
-  assert.match(blob, /网页地址/);
-  assert.match(blob, /仓库根/);
-  assert.match(blob, /anthropics\/skills/);
-  assert.match(gitUrlProblem('https://github.com/u/repo/tree/main'), /网页地址/);
-  assert.match(gitUrlProblem('https://github.com/u/repo/raw/main/x.md'), /网页地址/);
-  assert.match(gitUrlProblem('https://raw.githubusercontent.com/u/repo/main/skills/x/SKILL.md'), /文件/);
-  // 尾斜杠的 md 地址同样拦
+test('gitUrlProblem 允许支持的技能链接，未知站点文件链接明确反馈', () => {
+  for (const url of [
+    'https://github.com/anthropics/skills/blob/main/skills/doc-coauthoring/SKILL.md',
+    'https://github.com/u/repo/tree/main',
+    'https://gitee.com/u/repo/tree/main/skills/pdf',
+    'https://raw.githubusercontent.com/u/repo/main/skills/x/SKILL.md'
+  ]) assert.equal(gitUrlProblem(url), null);
   assert.match(gitUrlProblem('https://example.com/some/SKILL.md/'), /文件/);
+  assert.match(gitUrlProblem('https://'), /不合法/);
 });
 
 test('gitUrlProblem 对仓库地址与非 git 输入不误报', () => {

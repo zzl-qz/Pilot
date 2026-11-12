@@ -480,3 +480,45 @@ test('清空历史后从零游标恢复快照，随后接受不连续但递增�
     assert.equal(useStore.getState().runId, 'new');
   } finally { fetchHandler = saved; fixture.restore(); }
 });
+
+test('Agent 安装技能后立即刷新当前会话的快捷指令', async () => {
+  reset();
+  const saved = useStore.getState();
+  const previousFetch = fetchHandler;
+  const requests = [];
+  fetchHandler = async url => {
+    requests.push(url);
+    return Response.json({ available: [{ name: 'new-skill', description: 'new', command: '/new-skill' }], invalid: [] });
+  };
+  try {
+    useStore.getState().handleEvent({ type: 'tool.started', sessionId: 's', runId: 'r', sequence: 1, payload: { callId: 'install-1', name: 'install_skill', summary: 'download' } });
+    useStore.getState().handleEvent({ type: 'tool.completed', sessionId: 's', runId: 'r', sequence: 2, payload: { callId: 'install-1', resultSummary: 'installed', latencyMs: 10 } });
+    useStore.getState().flushEvents();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(requests, ['/api/skills?sessionId=s']);
+    assert.ok(useStore.getState().quickCommands.some(command => command.name === '/new-skill'));
+  } finally { fetchHandler = previousFetch; useStore.setState(saved); }
+});
+
+test('旧技能列表响应不能覆盖安装后刷新或另一个会话', async () => {
+  reset();
+  const saved = useStore.getState();
+  const previousFetch = fetchHandler;
+  const older = deferred();
+  let calls = 0;
+  fetchHandler = () => ++calls === 1 ? older.promise : Promise.resolve(Response.json({ available: [{ name: 'installed', command: '/installed' }] }));
+  try {
+    const loading = useStore.getState().loadSkills();
+    await useStore.getState().loadSkills();
+    older.resolve(Response.json({ available: [{ name: 'stale' }] }));
+    await loading;
+    assert.equal(useStore.getState().skills[0].name, 'installed');
+    const pending = deferred();
+    fetchHandler = () => pending.promise;
+    const previousSession = useStore.getState().loadSkills();
+    useStore.setState({ sessionId: 'other', sessionEpoch: 2, skills: [] });
+    pending.resolve(Response.json({ available: [{ name: 'wrong-workspace' }] }));
+    await previousSession;
+    assert.deepEqual(useStore.getState().skills, []);
+  } finally { fetchHandler = previousFetch; useStore.setState(saved); }
+});

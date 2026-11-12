@@ -1,0 +1,93 @@
+{
+  "date": "2026-11-12",
+  "baseCommit": "8a2317f4d47aaf4ef4f0647c25d5748ab8babac7",
+  "request": "在会话里提供技能链接，由 Agent 下载、安装并检查配置",
+  "featureCommits": [
+    "f574dfb 让代理按用户链接安装技能并在当前会话立即加载",
+    "e7a3864 支持技能目录链接与指定版本下载并保护覆盖安装",
+    "1d4655f 兼容标准技能元数据与较长指引并分离安装候选限制"
+  ],
+  "macOS": {
+    "kind": "Apple Silicon 实机",
+    "java": "OpenJDK 25",
+    "scope": "核心与服务端全量测试，末次工具结果改动补定向回归",
+    "core": {
+      "tests": 731,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 9,
+      "passed": 722
+    },
+    "server": {
+      "tests": 841,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 7,
+      "passed": 834
+    },
+    "frontend": {
+      "fullUnitSuite": "passed",
+      "typecheckAndViteBuild": "passed",
+      "finalSkillAndStoreTests": 34
+    },
+    "style": "变更范围 Spotless 与 Checkstyle 通过；预先存在的 SessionController 改动未格式化或提交"
+  },
+  "linux": {
+    "kind": "Docker Linux ARM64；不是桌面实机",
+    "javaImage": "maven:3.9-eclipse-temurin-25",
+    "nodeImage": "node:22",
+    "scope": "技能、提示词、UseSkillTool、AgentRunService 定向测试；完整前端单测、类型检查与构建；最后补 34 项技能与状态回归",
+    "core": {
+      "tests": 44,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 44
+    },
+    "server": {
+      "tests": 69,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 69
+    },
+    "frontend": "passed",
+    "spotlessAndCheckstyle": "passed",
+    "note": "更新快照后的首次前端检查遇到绑定目录文件短读；核对宿主与容器文件 SHA-256 相同后重新执行通过"
+  },
+  "windows": {
+    "nativeVerified": false,
+    "simulated": "前端来源分类覆盖 Windows 盘符；既有跨平台路径单测随前端全量测试执行",
+    "compatibility": "后端使用 Java Path、ProcessBuilder 参数列表和 NIO 移动，不调用宿主专有 shell；中文和空格路径在 macOS/Linux Git 实测通过"
+  },
+  "realSources": {
+    "repository": "https://github.com/anthropics/skills",
+    "cachedCandidates": 19,
+    "cachedValid": 19,
+    "publicDefaultBranchCandidates": 19,
+    "publicDefaultBranchValid": 19,
+    "installedSource": "https://github.com/anthropics/skills/blob/main/skills/pdf/SKILL.md",
+    "downloadAndInstallSeconds": 1.311,
+    "loadedInSameRun": true,
+    "resourceFiles": 11,
+    "readReference": "forms.md",
+    "referenceCharacters": 11854,
+    "isolation": "在临时工作区验证，验证结束删除测试文件，未改动用户技能库"
+  },
+  "regressions": [
+    "标准 YAML、多行描述、扩展元数据、重复键与非法标签",
+    "模板不能遮蔽实际 skills 集合，嵌套分类与超过 32 个候选可预览",
+    "完整复制失败不删除已安装旧版本",
+    "归档路径穿越、重复目标、解包大小上限、失败回退与取消",
+    "目录/文件/raw 链接、明确 ref/path、真实分支和提交检出",
+    "空目录起步的 Agent 同轮安装、加载和参考文件读取",
+    "多候选选择、同名冲突、用户技能遮蔽、权限拒绝与空来源",
+    "安装完成刷新技能及快捷指令，迟到响应不能覆盖新目录或其他会话"
+  ],
+  "limits": [
+    "下载/安装成功不代表第三方依赖或脚本执行已经验证；Agent 后续读指引并按现有权限处理，凭据缺失明确说明",
+    "真实 Agent 控制循环使用确定性模型测试；未把本次测试声称为真实模型自主选技能评测",
+    "Windows/macOS/Linux 桌面打包与三平台 GUI 实机未在本轮执行",
+    "正在运行的本机服务未重启；需要使用新构建重启后启用新工具"
+  ]
+}
