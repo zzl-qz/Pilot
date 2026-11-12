@@ -60,7 +60,7 @@
 }
 .chip-menu-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .chip-hint { color: var(--muted); font-size: 12px; }
-.model-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.model-options { flex-wrap: wrap; gap: 6px; }
 .model-options button, .context-facts span {
   padding: 3px 8px;
   border: 1px solid var(--line);
@@ -354,8 +354,7 @@
 }
 .command-item:hover { background: var(--panel-2); }
 .command-item.is-active { background: var(--accent-soft); }
-.command-row-meta { display: flex; flex: none; gap: 8px; align-items: center; color: var(--dim); font-size: 11px; white-space: nowrap; }
-.command-exit.is-bad { color: var(--err); }
+.command-row-meta { display: flex; gap: 8px; white-space: nowrap; }
 .command-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .command-log.is-empty { flex: none; min-height: 0; color: var(--dim); }
 .command-status { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
@@ -914,7 +913,7 @@ body.is-resizing iframe { pointer-events: none; }
 .perm-option-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .perm-option-text strong { color: var(--ink); font-size: 12px; font-weight: 600; }
 .perm-option-hint { color: var(--dim); font-size: 11px; line-height: 1.45; }
-.perm-option-code { margin-top: 2px; color: var(--dim); font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em; }
+.perm-option-code { margin-top: 2px; font-size: 10px; letter-spacing: 0.04em; }
 .perm-menu .perm-option.is-active .perm-option-code { color: var(--accent); }
 
 /* 模型：探测结果是一列可选行，当前模型打勾 */
@@ -991,9 +990,7 @@ html[data-theme] .tool-status.is-interrupted {
   color: var(--dim);
   --st-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E");
 }
-
-.cap-section { padding: 10px 12px; border-bottom: 1px solid var(--line-soft); }
-.cap-section h3 { margin: 0 0 3px; font-size: 12px; }
+.cap-section h3 { margin: 0 0 3px; }
 .cap-section p { color: var(--muted); font-size: 11.5px; line-height: 1.55; }
 
 /* ---------- 弹层 ---------- */
@@ -1020,7 +1017,7 @@ html[data-theme] .tool-status.is-interrupted {
 }
 .option.is-active { border-color: var(--accent-line); background: var(--accent-soft); color: var(--ink); }
 .skills-list { list-style: none; margin: 0; padding: 0; color: var(--ink-2); font-size: 12.5px; }
-.skills-list li { padding: 4px 0; border-bottom: 1px solid var(--line-soft); }
+.skills-list li { padding: 4px 0; }
 
 .checkpoint-info p { color: var(--ink-2); font-size: 13px; }
 .checkpoint-files { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 12px; font-family: var(--mono); }
