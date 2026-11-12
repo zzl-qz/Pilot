@@ -11,7 +11,7 @@ import java.util.Map;
 import com.pilot.core.workspace.PathValidator;
 
 /** 在工作区内创建新文件，父目录自动创建；已存在的文件不覆盖，要求模型改用 edit_file。 */
-public final class CreateFileTool implements Tool, WritesFiles {
+public final class CreateFileTool extends PromptedTool implements WritesFiles {
     private final PathValidator paths;
     private final SnapshotSink snapshots;
     private final ReadGuard reads;
@@ -25,32 +25,18 @@ public final class CreateFileTool implements Tool, WritesFiles {
     }
 
     public CreateFileTool(PathValidator paths, SnapshotSink snapshots, ReadGuard reads) {
+        super("create_file");
         this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
         this.snapshots = java.util.Objects.requireNonNull(snapshots, "snapshots must not be null");
         this.reads = reads == null ? ReadGuard.allowAll() : reads;
     }
 
     @Override
-    public String name() {
-        return "create_file";
-    }
-
-    @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
+        return objectSchema(
             Map.of("path", Map.of("type", "string", "description", "工作区内的相对文件路径；文件不能已存在，改已有文件请用 edit_file"), "content",
                 Map.of("type", "string", "description", "文件的完整内容")),
-            "required", List.of("path", "content"), "additionalProperties", false);
-    }
-
-    @Override
-    public boolean readOnly() {
-        return false;
+            List.of("path", "content"));
     }
 
     @Override
@@ -104,5 +90,40 @@ public final class CreateFileTool implements Tool, WritesFiles {
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    /** 供其他包中的工具复用相同的声明。 */
+    public abstract static class Prompted extends PromptedTool {
+        protected Prompted(String name) {
+            super(name);
+        }
+    }
+}
+
+/** 使用提示词资源描述、默认具有副作用的工具。 */
+abstract class PromptedTool implements Tool {
+    private final String name;
+
+    PromptedTool(String name) {
+        this.name = name;
+    }
+
+    @Override
+    public String name() {
+        return name;
+    }
+
+    @Override
+    public String description() {
+        return promptDescription();
+    }
+
+    @Override
+    public boolean readOnly() {
+        return false;
+    }
+
+    protected static Map<String, Object> objectSchema(Map<String, Object> properties, List<String> required) {
+        return Map.of("type", "object", "properties", properties, "required", required, "additionalProperties", false);
     }
 }

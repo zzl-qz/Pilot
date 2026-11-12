@@ -18,8 +18,8 @@ import java.util.stream.Stream;
 
 import com.pilot.core.loop.Attachment;
 import com.pilot.core.tool.Availability;
+import com.pilot.core.tool.CreateFileTool.Prompted;
 import com.pilot.core.tool.LocalInteraction;
-import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolArtifacts;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolSupport;
@@ -36,7 +36,7 @@ import com.pilot.core.workspace.PathValidator;
  * 点击、输入、选择、上传是本机交互（{@link LocalInteraction}），READ_ONLY 拒绝、ASK 审批、AUTO_EDIT 放行；
  * 在页面里执行任意脚本（evaluate）始终审批。
  */
-public final class BrowserTool implements Tool, LocalInteraction {
+public final class BrowserTool extends Prompted implements LocalInteraction {
     private static final Set<String> OBSERVATIONS = Set.of("navigate", "reload", "back", "forward", "snapshot",
         "screenshot", "console", "network", "wait", "close", "text", "links", "tabs", "inspect", "resize");
     private static final Set<String> INTERACTIONS = Set.of("click", "dblclick", "right_click", "hover", "fill", "type",
@@ -58,19 +58,10 @@ public final class BrowserTool implements Tool, LocalInteraction {
     private final AtomicLong shots = new AtomicLong();
 
     public BrowserTool(BrowserBackend backend, String sessionId, PathValidator paths) {
+        super("browser");
         this.backend = backend;
         this.sessionId = sessionId == null || sessionId.isBlank() ? "default" : sessionId;
         this.paths = paths;
-    }
-
-    @Override
-    public String name() {
-        return "browser";
-    }
-
-    @Override
-    public String description() {
-        return promptDescription();
     }
 
     @Override
@@ -106,13 +97,7 @@ public final class BrowserTool implements Tool, LocalInteraction {
         properties.put("level", Map.of("type", "string", "description", "console 只看某一类：error、warning、log、pageerror 等"));
         properties.put("clear", Map.of("type", "boolean", "description", "console / network 读取后清空记录"));
         properties.put("ms", Map.of("type", "integer", "description", "wait 的最长等待毫秒数（最大 15000）"));
-        return Map.of("type", "object", "properties", properties, "required", List.of("action"), "additionalProperties",
-            false);
-    }
-
-    @Override
-    public boolean readOnly() {
-        return false;
+        return objectSchema(properties, List.of("action"));
     }
 
     @Override

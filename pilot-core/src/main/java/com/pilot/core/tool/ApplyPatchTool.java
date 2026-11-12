@@ -36,7 +36,7 @@ import com.pilot.core.workspace.PathValidator;
  * <p>与 {@link EditFileTool} 同样的硬约束：修改和删除前必须读过该文件；每个 hunk 必须在文件里唯一命中，
  * 不自动选择第一处；整份补丁先在内存中全部校验通过，再统一落盘，校验失败不产生任何改动。
  */
-public final class ApplyPatchTool implements Tool, WritesFiles {
+public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
     private static final long MAX_BYTES = 32L * 1024 * 1024;
     private static final int MAX_OPERATIONS = 64;
 
@@ -45,31 +45,17 @@ public final class ApplyPatchTool implements Tool, WritesFiles {
     private final ReadGuard reads;
 
     public ApplyPatchTool(PathValidator paths, SnapshotSink snapshots, ReadGuard reads) {
+        super("apply_patch");
         this.paths = Objects.requireNonNull(paths, "paths must not be null");
         this.snapshots = Objects.requireNonNull(snapshots, "snapshots must not be null");
         this.reads = reads == null ? ReadGuard.allowAll() : reads;
     }
 
     @Override
-    public String name() {
-        return "apply_patch";
-    }
-
-    @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
+        return objectSchema(
             Map.of("patch", Map.of("type", "string", "description", "完整补丁文本，以 *** Begin Patch 开头、*** End Patch 结尾")),
-            "required", List.of("patch"), "additionalProperties", false);
-    }
-
-    @Override
-    public boolean readOnly() {
-        return false;
+            List.of("patch"));
     }
 
     @Override

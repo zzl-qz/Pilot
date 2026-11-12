@@ -13,7 +13,7 @@ import com.pilot.core.workspace.PathValidator;
  * 精确文本替换。old_string 必须唯一命中，否则返回结构化错误让模型补充上下文后重试。
  * 这是 Coding Agent 与普通文本替换的关键区别：绝不自动选择第一处匹配。
  */
-public final class EditFileTool implements Tool, WritesFiles {
+public final class EditFileTool extends PromptedTool implements WritesFiles {
     private static final long MAX_BYTES = 32L * 1024 * 1024;
 
     private final PathValidator paths;
@@ -29,19 +29,10 @@ public final class EditFileTool implements Tool, WritesFiles {
     }
 
     public EditFileTool(PathValidator paths, SnapshotSink snapshots, ReadGuard reads) {
+        super("edit_file");
         this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
         this.snapshots = java.util.Objects.requireNonNull(snapshots, "snapshots must not be null");
         this.reads = reads == null ? ReadGuard.allowAll() : reads;
-    }
-
-    @Override
-    public String name() {
-        return "edit_file";
-    }
-
-    @Override
-    public String description() {
-        return promptDescription();
     }
 
     @Override
@@ -50,21 +41,13 @@ public final class EditFileTool implements Tool, WritesFiles {
     }
 
     static Map<String, Object> schema() {
-        return Map.of("type", "object", "properties",
-            Map.of("path", Map.of("type", "string", "description", "工作区内的相对文件路径"), "old_string",
-                Map.of("type", "string", "description", "单处替换的原文，必须唯一匹配；与 edits 二选一"), "new_string",
-                Map.of("type", "string", "description", "单处替换的新内容，可为空；与 edits 二选一"), "edits",
-                Map.of("type", "array", "description", "同一文件内多处互不重叠的替换；均匹配原文件，整体成功或整体失败", "items",
-                    Map.of("type", "object", "properties",
-                        Map.of("old_string", Map.of("type", "string", "description", "唯一匹配的原文"), "new_string",
-                            Map.of("type", "string", "description", "替换后的内容，可为空")),
-                        "required", List.of("old_string", "new_string"), "additionalProperties", false))),
-            "required", List.of("path"), "additionalProperties", false);
-    }
-
-    @Override
-    public boolean readOnly() {
-        return false;
+        return objectSchema(Map.of("path", Map.of("type", "string", "description", "工作区内的相对文件路径"), "old_string",
+            Map.of("type", "string", "description", "单处替换的原文，必须唯一匹配；与 edits 二选一"), "new_string",
+            Map.of("type", "string", "description", "单处替换的新内容，可为空；与 edits 二选一"), "edits",
+            Map.of("type", "array", "description", "同一文件内多处互不重叠的替换；均匹配原文件，整体成功或整体失败", "items",
+                objectSchema(Map.of("old_string", Map.of("type", "string", "description", "唯一匹配的原文"), "new_string",
+                    Map.of("type", "string", "description", "替换后的内容，可为空")), List.of("old_string", "new_string")))),
+            List.of("path"));
     }
 
     @Override

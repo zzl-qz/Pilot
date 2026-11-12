@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.pilot.core.loop.Attachment;
 import com.pilot.core.tool.Availability;
-import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.CreateFileTool.Prompted;
 import com.pilot.core.tool.ToolArtifacts;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolSupport;
@@ -26,7 +26,7 @@ import tools.jackson.databind.JsonNode;
  * <p>权限：服务器在工具的 annotations 里声明 {@code readOnlyHint} 才视为只读，其余一律审批——
  * 远程工具的副作用本地无从判断，缺省要保守。
  */
-public final class McpCallTool implements Tool {
+public final class McpCallTool extends Prompted {
     private static final int MAX_TEXT_CHARS = 30_000;
     private static final long MAX_IMAGE_BYTES = 5L * 1024 * 1024;
 
@@ -35,32 +35,18 @@ public final class McpCallTool implements Tool {
     private final AtomicLong images = new AtomicLong();
 
     public McpCallTool(McpManager manager, Path workspace) {
+        super("mcp_call");
         this.manager = manager;
         this.workspace = workspace.toAbsolutePath().normalize();
     }
 
     @Override
-    public String name() {
-        return "mcp_call";
-    }
-
-    @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
+        return objectSchema(
             Map.of("server", Map.of("type", "string", "description", "MCP 服务器名"), "tool",
                 Map.of("type", "string", "description", "工具名（来自 mcp_tools）"), "arguments",
                 Map.of("type", "object", "description", "工具参数，结构以 mcp_tools 返回的 schema 为准")),
-            "required", List.of("server", "tool"), "additionalProperties", false);
-    }
-
-    @Override
-    public boolean readOnly() {
-        return false;
+            List.of("server", "tool"));
     }
 
     @Override
