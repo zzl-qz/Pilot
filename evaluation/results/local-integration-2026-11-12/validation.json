@@ -1,0 +1,293 @@
+{
+  "checkedAt": "2026-11-12T10:24:25.846090+00:00",
+  "sourceCommit": "09fff0220932655755b383699575401b2a6fcc21",
+  "sourceTree": "28d7b869b0328de444a046ebdbaefaeb40eaa3de",
+  "scope": "整合本地未提交修改、重构分支及旧工作区历史，并验证整合后的代码。",
+  "integration": {
+    "localChanges": [
+      "def8408 许可证及授权说明",
+      "fd8b785 扫描基线归档，移除本机绝对根路径",
+      "e6f84e0 补丁解析和修改职责拆分"
+    ],
+    "refactoringBranchTip": "ff9c0be0acef675b6770b0d3c5be5048492a738c",
+    "mergeCommit": "23a5a09",
+    "conflictResolution": "ApplyPatchTool 使用重构分支的独立 PatchParser，移除冲突自动合并留下的同名内嵌解析器；未丢弃补丁解析与文本修改功能。",
+    "oldWorktreeArchive": {
+      "commit": "473cbea9d6c5be2b09535835526d1ab8c0b0d87c",
+      "recordMerge": "09fff0220932655755b383699575401b2a6fcc21",
+      "reason": "旧工作区修改已由 eb06862 及后续提交覆盖。使用 ours 合并保存原始提交历史，避免恢复旧实现或重复统计事件。",
+      "treeUnchanged": true
+    }
+  },
+  "environment": {
+    "os": "macOS",
+    "architecture": "arm64",
+    "java": "Temurin 25.0.5",
+    "node": "v22.23.1",
+    "electron": "45.2.1"
+  },
+  "java": {
+    "command": "mvn -B -pl pilot-core,pilot-server -DskipFrontend=true verify（JAVA_HOME 指向 JDK 25）",
+    "success": true,
+    "modules": {
+      "pilot-core": {
+        "tests": 771,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 9,
+        "passed": 762,
+        "skippedTests": [
+          {
+            "test": "com.pilot.core.exec.ContainerIsolationIntegrationTest.bindMountHandlesSpacesCommasAndUnicodeWithoutShellExpansion",
+            "reason": "System property [pilot.test.container.image] does not exist"
+          },
+          {
+            "test": "com.pilot.core.exec.ContainerIsolationIntegrationTest.timeoutRemovesTheContainerRatherThanOnlyKillingItsClient",
+            "reason": "System property [pilot.test.container.image] does not exist"
+          },
+          {
+            "test": "com.pilot.core.exec.ContainerIsolationIntegrationTest.cancellationRemovesContainerAndPreservesInterruption",
+            "reason": "System property [pilot.test.container.image] does not exist"
+          },
+          {
+            "test": "com.pilot.core.exec.ContainerIsolationIntegrationTest.rejectsSymlinkWorkdirOutsideTheMountAndMissingImagesWithoutFallback",
+            "reason": "System property [pilot.test.container.image] does not exist"
+          },
+          {
+            "test": "com.pilot.core.exec.ContainerIsolationIntegrationTest.scopedCommandRunsPosixWrapperAgainstTheProposalWithoutExecutableBit",
+            "reason": "System property [pilot.test.container.image] does not exist"
+          },
+          {
+            "test": "com.pilot.core.exec.ContainerIsolationIntegrationTest.argvRetainsEmptyArgumentsWhitespaceAndLiteralShellCharacters",
+            "reason": "System property [pilot.test.container.image] does not exist"
+          },
+          {
+            "test": "com.pilot.core.exec.ContainerIsolationIntegrationTest.enforcesFilesystemNetworkEnvironmentAndTemporaryProposalBoundary",
+            "reason": "System property [pilot.test.container.image] does not exist"
+          },
+          {
+            "test": "com.pilot.core.session.PreviewBenchmarkTest.compareMergeWindowsAndByteThresholds",
+            "reason": "System property [pilot.events.benchmark] does not exist"
+          },
+          {
+            "test": "com.pilot.core.tool.RunCommandToolTest.mapsMvnwToWorkspaceWrapper",
+            "reason": ""
+          }
+        ]
+      },
+      "pilot-server": {
+        "tests": 843,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 7,
+        "passed": 836,
+        "skippedTests": [
+          {
+            "test": "com.pilot.server.controller.SessionEventLoadTest.history100000WithOneTenAndFiftyReaders",
+            "reason": "System property [pilot.events.benchmark] does not exist"
+          },
+          {
+            "test": "com.pilot.server.multi.ProjectBuildIntegrationTest.npmColdWarmOfflineAndFailingTests",
+            "reason": "System property [pilot.test.project-builds] does not exist"
+          },
+          {
+            "test": "com.pilot.server.multi.ProjectBuildIntegrationTest.missingToolchainAndMissingImageReportActionableFailure",
+            "reason": "System property [pilot.test.project-builds] does not exist"
+          },
+          {
+            "test": "com.pilot.server.multi.ProjectBuildIntegrationTest.mavenColdWarmOfflineAndFailingTests",
+            "reason": "System property [pilot.test.project-builds] does not exist"
+          },
+          {
+            "test": "com.pilot.server.session.GoalModelEvaluationTest.comparesLegacyAndGoalWithIndependentAcceptance",
+            "reason": "Environment variable [PILOT_EVAL_API_KEY] does not exist"
+          },
+          {
+            "test": "com.pilot.server.session.GoalModelEvaluationTest.measuresMainAgentGoalPromotionWithoutASeparateRuntimeClassifier",
+            "reason": "Environment variable [PILOT_EVAL_API_KEY] does not exist"
+          },
+          {
+            "test": "com.pilot.server.store.EventReplayBenchmarkTest.replay100000FromSqlite",
+            "reason": "System property [pilot.events.benchmark] does not exist"
+          }
+        ]
+      }
+    },
+    "spotless": "通过",
+    "checkstyle": "通过"
+  },
+  "stateSync": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v22.23.1",
+    "suite": "state-sync",
+    "browser": "chrome",
+    "startedAt": "2026-11-12T10:15:20.190Z",
+    "checks": [
+      {
+        "name": "frontend-units",
+        "code": 0,
+        "seconds": 3.849
+      },
+      {
+        "name": "typecheck-and-build",
+        "code": 0,
+        "seconds": 4.996
+      },
+      {
+        "name": "desktop-units",
+        "code": 0,
+        "seconds": 0.653
+      },
+      {
+        "name": "navigation-smoke",
+        "code": 0,
+        "seconds": 24.023
+      },
+      {
+        "name": "composer-smoke",
+        "code": 0,
+        "seconds": 7.113
+      },
+      {
+        "name": "event-stream-smoke",
+        "code": 0,
+        "seconds": 5.238
+      },
+      {
+        "name": "workbench-refresh-smoke",
+        "code": 0,
+        "seconds": 36.153
+      },
+      {
+        "name": "session-management-smoke",
+        "code": 0,
+        "seconds": 22.076
+      },
+      {
+        "name": "thread-scroll-smoke",
+        "code": 0,
+        "seconds": 12.254
+      }
+    ],
+    "success": true,
+    "finishedAt": "2026-11-12T10:17:16.553Z"
+  },
+  "unitCounts": {
+    "frontend": {
+      "passed": 456,
+      "failed": 0
+    },
+    "desktop": {
+      "passed": 46,
+      "failed": 0
+    }
+  },
+  "desktopHost": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "osRelease": "25.4.0",
+    "environment": "local process",
+    "startedAt": "2026-11-12T10:19:39.123Z",
+    "stages": [
+      {
+        "name": "runtime-cache-reuse",
+        "success": true,
+        "seconds": 0.002
+      },
+      {
+        "name": "desktop-units",
+        "success": true,
+        "seconds": 0.595
+      },
+      {
+        "name": "source-launcher",
+        "success": true,
+        "seconds": 0.72
+      },
+      {
+        "name": "desktop-security",
+        "success": true,
+        "seconds": 1.236
+      },
+      {
+        "name": "desktop-reconnect",
+        "success": true,
+        "seconds": 1.189
+      },
+      {
+        "name": "native-bridge",
+        "success": true,
+        "seconds": 2.652
+      },
+      {
+        "name": "component-repair",
+        "success": true,
+        "seconds": 3.558
+      },
+      {
+        "name": "bridge-recovery",
+        "success": true,
+        "seconds": 16.253
+      }
+    ],
+    "success": true,
+    "electronVersion": "45.2.1",
+    "finishedAt": "2026-11-12T10:20:05.330Z"
+  },
+  "browserViewport": {
+    "command": "node pilot-desktop/browser-viewport-smoke.mjs（JAVA_HOME 指向 JDK 25）",
+    "success": true,
+    "coverage": [
+      "首次隐藏截图",
+      "三种视口",
+      "只读布局诊断",
+      "两会话隔离",
+      "同地址多标签",
+      "切换后调整",
+      "控制台监听",
+      "全标签恢复"
+    ]
+  },
+  "workbenchStyle": {
+    "command": "npm --prefix pilot-web/frontend run test:style",
+    "chromium": true,
+    "electron": true,
+    "coverage": [
+      "深浅主题",
+      "1440/768/390 响应式尺寸",
+      "状态",
+      "批准",
+      "失败",
+      "停滞",
+      "焦点",
+      "禁用态",
+      "菜单",
+      "减少动画",
+      "对比度"
+    ],
+    "visuallyInspected": [
+      "desktop-dark-1440.png",
+      "mobile-preview-390.png"
+    ]
+  },
+  "iterations": [
+    {
+      "failure": "合并后独立 PatchParser 与遗留内嵌解析器同时存在，编译发现 Hunk 类型遮蔽。",
+      "resolution": "采用已审查的分支实现，删除重复内嵌解析器；完整 Java verify 随后通过。"
+    },
+    {
+      "failure": "桌面宿主首次原生桥接编译使用环境默认 JDK 17，无法使用 Java 21 字节码及虚拟线程接口。",
+      "resolution": "为测试命令显式设置项目 JDK 25，八阶段宿主验证全部通过。"
+    }
+  ],
+  "platformScope": {
+    "macOS": "本轮在 ARM64 实机验证 Java、Chromium、Electron 及真实桌面桥接恢复。",
+    "Windows": "本轮未进行 Windows 实机或系统级模拟验证，不以 macOS 结果代替。",
+    "Linux": "本轮未进行 Linux 实机或容器验证；此前 MCP 专项验证不计入本次合并后验证。"
+  },
+  "limitations": [
+    "不包含外部真实模型调用；不对模型质量作结论。",
+    "Vite 保留已有的大于 500 kB 分包提示，未导致构建失败。"
+  ]
+}
