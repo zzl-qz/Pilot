@@ -13,6 +13,45 @@ node --test evaluation/harness/reference-verifier.test.mjs
 
 `node evaluation/harness/runner.mjs --verify-fixtures` 保留为仅验证初始失败的轻量入口；完整可解性检查使用上面的 reference-verifier。
 
+## 场景任务集（scenarios/）
+
+等待唤醒、上下文增长与预算收尾三个场景位于 `evaluation/harness/scenarios/`，任务定义与主任务集分开（`--tasks evaluation/harness/scenarios/tasks.json`），带 `scenario` 标记：
+
+- `wait-condition`：后台检查约 8 秒后写出 `src/state.json`；测试用 SHA256 守卫 `scripts/` 与 `data/`，并要求 `state.json` 的 `waitedMs >= 7000` 证明真实等待过（验收环境 `PILOT_EVAL=1` 快进重跑同一检查核对阈值）。跳过等待、手写 state.json 或改脚本都过不了。
+- `long-chain`：16 个模块批量重构，开局约束（不引依赖、不建目录、保留 legacyFormatter、不改断言）由验收测试一直核到结束；执行器按 `scenarioMinModelRequests` 把模型请求数不足标记为场景未覆盖。
+- `budget-wind`：40 项逐个清洗、禁止批处理；验收核对 `data/` 输入 SHA256、progress 台账与输出一致（done 的必须有输出且合规，remaining 的不得有输出）。任务全部做完反而标记场景未覆盖（未经历预算耗尽），应收紧预算复测。
+
+可解性验证同样适用：`node evaluation/harness/reference-verifier.mjs --tasks evaluation/harness/scenarios/tasks.json`。
+
+## 网络错误注入（support/fault-proxy.mjs 与 --fault-*）
+
+故障注入代理夹在 Pilot 服务与真实模型上游之间，**逐分片流式转发**（不像预算代理缓冲整包），因此能在流中途制造真实故障：
+
+- 模式：`mid-eof`（转发首分片后干净结束、不发 `[DONE]`，对准“流提前 EOF 被当成完成”）、`stall`（响应头+首分片后静默 `stallMs` 再结束，对准“收到响应头后 body 卡在半开连接”）、`http-503`（可重试 5xx，不打上游）、`reset`（直接销毁连接）、`none`（干净对照）。
+- 触发：每第 `every` 个请求注入一次，其余干净转发；客户端应把注入当可重试错误处理后继续完成任务。
+- 控制接口：`POST /fault/config`、`POST /fault/reset`（`stopped` 硬停粘滞不被清洗）、`GET /fault/state`（请求/注入/usage/花费估算）。
+- 硬停：`maxRequests`（请求数上限）与 `maxQuota`（按 usage 分片累计的全价估算）任一达到即 402 停机。
+- 启动：`PILOT_FAULT_UPSTREAM`（origin，缺省取 BASE_URL）、`PILOT_FAULT_API_KEY`（缺省取 API_KEY）只用于上游转发，绝不写日志或状态；`PILOT_FAULT_PROXY_PORT`、`PILOT_FAULT_LOCAL_TOKEN` 可选。
+
+执行器侧：
+
+```bash
+# 代理就绪后（把 Pilot 的 BASE_URL 指到 http://127.0.0.1:<port><原路径>）：
+node evaluation/harness/runner.mjs --base http://127.0.0.1:8787 \
+  --tasks evaluation/harness/tasks.json \
+  --fault-proxy http://127.0.0.1:18086 --fault-profile mid-eof,stall,http-503,reset \
+  --fault-every 3 --seed 20261111 --repeat 3 --task <8 个任务逗号分隔> \
+  --out evaluation/harness/runs/network-errors.jsonl
+```
+
+- 每次尝试前执行器 `reset` 代理并下发本次轮换到的故障模式；轮换索引 `seed + 任务位置 × repeat + (attempt-1)` 可复算：同一任务多次尝试轮遍不同 profile，全计划索引恰为 0..N×repeat-1。
+- 记录新增字段：`faultScenario/faultRotationIndex/faultProfile/faultEvery/faultRequestCount/faultInjectedCount/faultInjectionModes/faultProxyStopped/faultUsage/faultSpendEstimateUnits/faultRunDurationSeconds`。
+- **门控**：本次尝试没有任何实际注入 → `scenarioCovered=false`，不算成功；故障组与干净基线互不可比（门禁报 `insufficient`）；两组或组内混合不同 fault-profile/every 亦不可比；故障记录缺请求数观测直接拒绝。
+- `--resume` 会重算轮换方案，与已记录的 `faultScenario/faultProfile/faultEvery` 不一致即拒绝续跑。
+- 代理计数是全局的：跑故障组期间，该 Pilot 服务不得有其他会话（其他会话的模型请求会混入计数，`injectedRequests` 就不再只属于本次尝试）。
+
+指标口径新增：`faultInjectionCoverage`（有注入观测的尝试中实际注入 ≥1 的比例）、`faultSurvivalRate`（带注入的尝试中“正常收尾+外部验收通过+场景覆盖”的比例）、`injectedFaultCount`、`faultProxyStops`；注入观测缺失保持 `null`，不当零。
+
 ## 运行与对照
 
 先在独立数据目录启动接入真实模型的 Pilot。A/B 使用同一模型、供应商端点、权限、工具开关、预算和任务集；只改变本轮计划评估的因素。`--model` **核对**服务模型，不替换全局模型设置。未传时读取服务配置。当前服务尚未暴露上游解析后的模型别名，因此 `requestedModel` 有值、`resolvedModel` 为 `null`。
@@ -109,3 +148,5 @@ node evaluation/harness/recovery-smoke.mjs pilot-server/target/pilot-server-0.0.
 `--strict` 必须指定已满足完整版本与重复条件的基线，不能与 dry-run 同用；门禁非 pass 时进程非零退出。小规模试跑应不加 strict，结果明确为证据不足。
 
 本轮自动化测试在 macOS 运行；路径、命令调用和临时目录使用 Node 跨平台 API，Windows/Linux 尚未实机验证。
+
+> AI生成

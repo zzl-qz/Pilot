@@ -36,6 +36,9 @@ function observations(rows) {
   const checkedCompletions = completed.filter(r => r.acceptanceRan === true);
   const falseCompletions = checkedCompletions.filter(r => typeof r.acceptancePassed === 'boolean' ? !r.acceptancePassed : !succeeded(r));
   const takeoverObserved = rows.filter(r => typeof r.takeover === 'boolean');
+  // 故障注入观测：没有注入次数观测的尝试不算覆盖；注入次数为零也是有效观测。
+  const faultRows = rows.filter(r => typeof r.faultScenario === 'string' && r.faultScenario);
+  const injectedObserved = faultRows.filter(r => Number.isInteger(r.faultInjectedCount));
   return {
     totalCostUsd,
     knownCostUsd: knownCosts.reduce((sum, r) => sum + r.costUsd, 0),
@@ -66,7 +69,14 @@ function observations(rows) {
     inputTokens: rows.reduce((sum, r) => sum + (number(r.inputTokens) ? r.inputTokens : 0), 0),
     outputTokens: rows.reduce((sum, r) => sum + (number(r.outputTokens) ? r.outputTokens : 0), 0),
     cachedInputTokens: rows.reduce((sum, r) => sum + (number(r.cachedInputTokens) ? r.cachedInputTokens : 0), 0),
-    cacheHitRate: cacheHitRate(rows)
+    cacheHitRate: cacheHitRate(rows),
+    faultScenarioRuns: faultRows.length,
+    faultInjectionCoverage: injectedObserved.length
+      ? injectedObserved.filter(r => r.faultInjectedCount >= 1).length / injectedObserved.length : null,
+    injectedFaultCount: injectedObserved.reduce((sum, r) => sum + r.faultInjectedCount, 0),
+    // 故障存活率：带故障注入的尝试里同时满足正常收尾+外部验收通过+场景覆盖的比例。
+    faultSurvivalRate: faultRows.length ? faultRows.filter(succeeded).length / faultRows.length : null,
+    faultProxyStops: faultRows.filter(r => r.faultProxyStopped === true).length
   };
 }
 
@@ -182,6 +192,10 @@ function invalidRecordIssues(baseline, current) {
           || r.success !== expectedSuccess) {
         issues.push(`${label} ${r.taskId} 的 success、终态、外部验收或场景覆盖字段互相矛盾`);
       }
+      // 故障记录必须有请求数观测；注入次数缺失只能说明观测不完整，不能断言注入为零。
+      if (typeof r.faultScenario === 'string' && r.faultScenario && !Number.isInteger(r.faultRequestCount)) {
+        issues.push(`${label} ${r.taskId} 的故障注入记录缺少请求数观测`);
+      }
     }
   }
   return [...new Set(issues)];
@@ -206,6 +220,19 @@ function comparisonIssues(baseline, current) {
         issues.push(`${label} ${key} 缺少独立 attempt，或同次运行重复入账`);
       }
     }
+  }
+  // 故障注入条件必须一致：故障组与干净对照、或不同故障方案之间都不可比。
+  const faultSet = list => new Set(list.filter(r => r.faultScenario).map(r => `${r.faultScenario}@${r.faultEvery ?? '?'}`));
+  for (const [label, records] of [['基线', baseline], ['候选', current]]) {
+    if (faultSet(records).size > 1) issues.push(`${label}混合了不同故障注入方案，应分别评估或分别报告`);
+  }
+  const baselineFaults = faultSet(baseline), currentFaults = faultSet(current);
+  if (baselineFaults.size && currentFaults.size) {
+    if (![...baselineFaults].every(fault => currentFaults.has(fault))) issues.push('两组故障注入方案不一致，不能作为同条件对照');
+  } else if (currentFaults.size && !baselineFaults.size) {
+    issues.push('候选带故障注入而基线没有，两组不可比；应建立同故障方案的基线');
+  } else if (baselineFaults.size && !currentFaults.size) {
+    issues.push('基线带故障注入而候选没有，两组不可比');
   }
   const old = byTask(baseline), next = byTask(current);
   for (const [key, rows] of old) {

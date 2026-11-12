@@ -26,6 +26,7 @@ import { appendFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, wri
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { aggregate, compare, gate, summarize, validateBaseline } from "./metrics.mjs";
+import { FAULT_MODES } from "./support/fault-proxy.mjs";
 
 const TERMINAL = new Set(["COMPLETED", "INTERRUPTED", "FAILED", "CANCELLED", "PAUSED", "ARCHIVED"]);
 
@@ -45,10 +46,13 @@ export function parseArgs(argv) {
     strict: false,
     verifyFixtures: false,
     repeat: 1, taskIds: [], environment: "",
-    promptDir: "pilot-core/src/main/resources/prompts", runtimeSources: []
+    promptDir: "pilot-core/src/main/resources/prompts", runtimeSources: [],
+    faultProxyUrl: "", faultProfiles: null, faultEvery: 3, faultStallMs: 70_000,
+    faultMaxRequests: 0, faultSeed: 0
   };
   const valued = new Set(['--base', '--out', '--tasks', '--model', '--prompt-version', '--tool-version',
-    '--fixtures', '--token', '--baseline', '--timeout-minutes', '--repeat', '--task', '--environment', '--prompt-dir', '--runtime-source']);
+    '--fixtures', '--token', '--baseline', '--timeout-minutes', '--repeat', '--task', '--environment', '--prompt-dir', '--runtime-source',
+    '--fault-proxy', '--fault-profile', '--fault-every', '--fault-stall-ms', '--fault-max-requests', '--seed']);
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -69,6 +73,12 @@ export function parseArgs(argv) {
       case "--environment": args.environment = value; index++; break;
       case "--prompt-dir": args.promptDir = value; index++; break;
       case "--runtime-source": args.runtimeSources.push(value); index++; break;
+      case "--fault-proxy": args.faultProxyUrl = value; index++; break;
+      case "--fault-profile": args.faultProfiles = value.split(",").map(v => v.trim()).filter(Boolean); index++; break;
+      case "--fault-every": args.faultEvery = Number(value); index++; break;
+      case "--fault-stall-ms": args.faultStallMs = Number(value); index++; break;
+      case "--fault-max-requests": args.faultMaxRequests = Number(value); index++; break;
+      case "--seed": args.faultSeed = Number(value); index++; break;
       case "--dry-run": args.dryRun = true; break;
       case "--resume": args.resume = true; break;
       case "--strict": args.strict = true; break;
@@ -86,6 +96,21 @@ export function parseArgs(argv) {
   if (args.resume && args.dryRun) throw new Error("--resume 只用于真实评估记录");
   if (!args.runtimeSources.length) args.runtimeSources = ["pilot-core/src/main/java", "pilot-server/src/main/java"];
   if (args.strict && (!args.baseline || args.dryRun)) throw new Error("--strict 需要真实运行和 --baseline，不能使用 dry-run");
+  if (args.faultProxyUrl) {
+    if (args.dryRun) throw new Error("--fault-proxy 只用于真实评估，不能与 --dry-run 同用");
+    if (!Array.isArray(args.faultProfiles) || !args.faultProfiles.length)
+      throw new Error("--fault-proxy 需要 --fault-profile（如 mid-eof,stall,http-503,reset）");
+    for (const mode of args.faultProfiles) if (!FAULT_MODES.has(mode)) throw new Error(`未知故障模式：${mode}`);
+    args.faultProfile = args.faultProfiles.join(",");
+    if (!Number.isInteger(args.faultEvery) || args.faultEvery < 1 || args.faultEvery > 1000)
+      throw new Error("--fault-every 必须是 1 到 1000 的整数");
+    if (!Number.isFinite(args.faultStallMs) || args.faultStallMs < 1) throw new Error("--fault-stall-ms 必须是正毫秒数");
+    if (!Number.isInteger(args.faultMaxRequests) || args.faultMaxRequests < 0)
+      throw new Error("--fault-max-requests 必须是非负整数");
+    if (!Number.isSafeInteger(args.faultSeed)) throw new Error("--seed 必须是整数");
+  } else if (args.faultProfiles) {
+    throw new Error("--fault-profile 需要配合 --fault-proxy 使用");
+  }
   return args;
 }
 
@@ -95,6 +120,8 @@ function helpText() {
     "           [--tasks tasks.json] [--fixtures dir] [--token T] [--timeout-minutes N]",
     "           [--baseline 上次的 jsonl] [--dry-run] [--strict] [--repeat N] [--task id,id]",
     "           [--resume] [--environment label] [--prompt-dir dir] [--runtime-source dir ...]",
+    "           [--fault-proxy http://127.0.0.1:18086 --fault-profile mid-eof,stall,http-503,reset]",
+    "           [--fault-every N] [--fault-stall-ms N] [--fault-max-requests N] [--seed N]",
     "",
     "  --baseline  与上次记录比较；严格门禁至少 20 个任务，每项两组至少 3 次。",
     "  --resume    在相同版本与任务合同下补齐缺少的轮次；已记录失败不会被重跑替换。",
@@ -102,6 +129,9 @@ function helpText() {
     "  --task      只运行选中任务，可逗号分隔或重复传入；子集结果不能冒充全套。",
     "  --model     核对服务已配置的模型，不修改全局模型；不传时使用服务模型。",
     "  --prompt-dir / --runtime-source  对实际提示词与运行时源码生成版本指纹。",
+    "  --fault-*   网络错误场景：通过 fault-proxy 在每第 N 个请求注入故障。",
+    "              每次尝试的故障模式由 seed 与任务位置/attempt 复现轮换并写入记录；",
+    "              本次尝试没有任何注入则 scenarioCovered=false，不算成功。",
     "  --strict    门禁不是 pass 就以非零退出码结束（用于 CI 拦住会造成能力退化的「优化」）。",
     "  --dry-run   只验证流程与产物格式，不产生能力结论。",
     "  --verify-fixtures  只检查每个 fixture 在「未修复」状态下验收必须失败（有分辨力）。"
@@ -125,6 +155,30 @@ async function api(args, path, init = {}) {
   }
   const type = response.headers.get("content-type") ?? "";
   return type.includes("application/json") ? response.json() : response.text();
+}
+
+/** fault-proxy 控制接口调用（独立于 Pilot 服务的鉴权头）。 */
+export async function faultControl(args, path, init = {}) {
+  const response = await fetch(`${args.faultProxyUrl.replace(/\/$/, "")}${path}`, {
+    ...init,
+    signal: AbortSignal.timeout(10_000),
+    headers: init.body ? { "content-type": "application/json" } : {}
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`故障代理 ${init.method ?? "GET"} ${path} → ${response.status}: ${text.slice(0, 300)}`);
+  }
+  return response.json();
+}
+
+/**
+ * 每次尝试的故障场景：由 seed + 任务在选中集中的位置 + attempt 复现轮换，
+ * 断点续跑时可重算出同一方案，不存在运行间随机漂移。
+ */
+export function faultScenarioAt(args, taskPosition, attempt) {
+  const profiles = args.faultProfiles;
+  const rotationIndex = args.faultSeed + taskPosition * args.repeat + (attempt - 1);
+  return { scenario: profiles[((rotationIndex % profiles.length) + profiles.length) % profiles.length], rotationIndex };
 }
 
 export function runCommand(command, cwd, timeoutMs) {
@@ -400,6 +454,42 @@ export async function runTask(args, task) {
   const failedCommands = Array.isArray(diagnostics?.commands) ? diagnostics.commands.filter(item =>
     (typeof item.exitCode === "number" && item.exitCode !== 0) || item.status === "FAILED") : null;
 
+  // 场景覆盖：必需场景没有实际触发就不算成功（引导 / 故障注入 / 长链路 / 预算耗尽）。
+  const scenarioNotes = [];
+  let scenarioCovered = true;
+  if (task.steer && diagnostics.steerDelivered !== true) {
+    scenarioCovered = false;
+    scenarioNotes.push("任务在中途引导投递前结束，引导场景未覆盖");
+  }
+  let faultState = null;
+  if (args.faultProxyUrl) {
+    faultState = await faultControl(args, "/fault/state");
+    if (!(Number.isInteger(faultState.injectedRequests) && faultState.injectedRequests >= 1)) {
+      scenarioCovered = false;
+      scenarioNotes.push("网络错误场景未覆盖：本次尝试没有任何故障实际注入");
+    }
+  }
+  if (task.scenario === "context-growth") {
+    const minRequests = task.scenarioMinModelRequests ?? 1;
+    if (diagnostics.modelRequestCount == null) {
+      scenarioCovered = false;
+      scenarioNotes.push("无法观测模型请求数，上下文增长场景不能确认覆盖");
+    } else if (diagnostics.modelRequestCount < minRequests) {
+      scenarioCovered = false;
+      scenarioNotes.push(`模型请求数 ${diagnostics.modelRequestCount} 低于场景下限 ${minRequests}，没有形成长链路上下文`);
+    }
+  }
+  if (task.scenario === "budget-wind") {
+    const progress = await readBudgetWindProgress(workspace);
+    if (progress == null) {
+      scenarioCovered = false;
+      scenarioNotes.push("未找到 src/progress.json，预算耗尽收尾场景不能确认");
+    } else if (!(Array.isArray(progress.remaining) && progress.remaining.length > 0)) {
+      scenarioCovered = false;
+      scenarioNotes.push("40 项全部完成，本轮没有实际经历预算耗尽；应收紧步数/时间预算后复测");
+    }
+  }
+
   return {
     ...metadata,
     taskId: task.id,
@@ -417,8 +507,19 @@ export async function runTask(args, task) {
     resolvedModel: null, // 当前服务记录的是请求模型，未暴露提供商解析后的别名。
     promptVersion: args.promptVersion,
     toolVersion: args.toolVersion,
-    success: diagnostics.sessionStatus === "COMPLETED" && acceptance.ok && (!task.steer || diagnostics.steerDelivered === true),
-    scenarioCovered: !task.steer || diagnostics.steerDelivered === true,
+    success: diagnostics.sessionStatus === "COMPLETED" && acceptance.ok && scenarioCovered,
+    scenarioCovered,
+    faultScenario: args.faultScenario ?? null,
+    faultRotationIndex: args.faultRotationIndex ?? null,
+    faultProfile: args.faultProfile ?? null,
+    faultEvery: args.faultProxyUrl ? args.faultEvery : null,
+    faultRequestCount: faultState?.requests ?? null,
+    faultInjectedCount: faultState?.injectedRequests ?? null,
+    faultInjectionModes: faultState?.faultsByMode ?? null,
+    faultProxyStopped: faultState?.stopped ?? null,
+    faultUsage: faultState?.usage ?? null,
+    faultSpendEstimateUnits: faultState?.spendEstimate ?? null,
+    faultRunDurationSeconds: args.faultWindowStart != null ? (Date.now() - args.faultWindowStart) / 1000 : null,
     steerDelivered: diagnostics.steerDelivered,
     steerRunId: diagnostics.steerRunId,
     steerAtStep: diagnostics.steerAtStep,
@@ -443,8 +544,18 @@ export async function runTask(args, task) {
     validationCovered: diagnostics?.validation?.covered ?? false,
     acceptanceDetail: acceptance.detail,
     storageHealth: diagnostics?.storageHealth ?? "",
-    notes: task.steer && !diagnostics.steerDelivered ? "任务在引导投递前结束：验收结果不代表中途引导场景已覆盖" : ""
+    notes: scenarioNotes.join("；")
   };
+}
+
+/** budget-wind 场景：读取台账判断本轮是否真正经历了预算耗尽。 */
+export async function readBudgetWindProgress(workspace) {
+  try {
+    const progress = JSON.parse(await readFile(join(workspace, "src", "progress.json"), "utf8"));
+    return Array.isArray(progress.done) ? progress : null;
+  } catch {
+    return null;
+  }
 }
 
 export function selectTasks(tasks, ids = []) {
@@ -502,8 +613,9 @@ async function verifyFixtures(args, tasks) {
 }
 
 /** 续跑只能补空位：失败也是有效观测，不能挑结果、重复付费或混合版本。 */
-export function resumePlan(records, tasks, repeat, metadata) {
+export function resumePlan(records, tasks, repeat, metadata, fault) {
   const selected = new Map(tasks.map(task => [task.id, task]));
+  const positions = new Map(tasks.map((task, index) => [task.id, index]));
   const seen = new Set(), sessions = new Set();
   const keys = ['schemaVersion', 'model', 'modelConfigHash', 'promptHash', 'runtimeHash',
     'environmentVersion', 'fixtureVersion', 'taskVersion', 'promptVersion', 'toolVersion'];
@@ -513,6 +625,15 @@ export function resumePlan(records, tasks, repeat, metadata) {
       throw new Error('续跑记录包含计划外的任务或轮次');
     if (record.dryRun || !expected || keys.some(key => expected[key] == null || record[key] !== expected[key]))
       throw new Error(`${record.taskId} 的版本、模型或任务合同已变化，不能续跑旧评估`);
+    if (fault) {
+      // 故障注入的轮换方案可由 seed/位置/attempt 复算；不一致即条件已变。
+      const expectedScenario = faultScenarioAt(fault, positions.get(record.taskId), record.attempt).scenario;
+      if (record.faultScenario !== expectedScenario || record.faultProfile !== fault.faultProfile
+          || record.faultEvery !== fault.faultEvery)
+        throw new Error(`${record.taskId} 第 ${record.attempt} 次的故障注入方案与当前计划不一致，不能续跑`);
+    } else if (record.faultScenario != null) {
+      throw new Error(`${record.taskId} 的记录包含故障注入信息，而当前未启用故障代理，条件不一致`);
+    }
     const key = `${record.taskId}:${record.attempt}`;
     if (seen.has(key) || (record.sessionId && sessions.has(record.sessionId))) throw new Error('续跑记录有重复尝试或会话');
     seen.add(key); if (record.sessionId) sessions.add(record.sessionId);
@@ -561,7 +682,7 @@ async function main() {
       const contents = await readFile(args.out, 'utf8');
       if (contents && !contents.endsWith('\n')) throw new Error('评估文件末行不完整，请先保留原件并核对，不会自动丢弃');
       records = contents.split('\n').filter(Boolean).map(line => JSON.parse(line));
-      planned = resumePlan(records, tasks, args.repeat, metadata);
+      planned = resumePlan(records, tasks, args.repeat, metadata, args.faultProxyUrl ? args : null);
     } else await writeFile(args.out, '', { encoding: 'utf8', flag: 'wx' });
     try {
       await readFile(inflight, 'utf8');
@@ -575,9 +696,18 @@ async function main() {
         await writeFile(inflight, JSON.stringify({ taskId: task.id, attempt, ...metadata.get(task.id), startedAt: new Date().toISOString() }), { flag: 'wx' });
         process.stdout.write(`▶ ${task.id} [${attempt}/${args.repeat}] ... `);
         const started = Date.now();
+        // 网络错误组：每次尝试前重置计数并下发本次轮换到的故障方案。
+        const rotation = args.faultProxyUrl ? faultScenarioAt(args, tasks.findIndex(item => item.id === task.id), attempt) : null;
+        if (rotation) {
+          await faultControl(args, '/fault/reset', { method: 'POST' });
+          await faultControl(args, '/fault/config', { method: 'POST',
+            body: JSON.stringify({ mode: rotation.scenario, every: args.faultEvery, stallMs: args.faultStallMs, maxRequests: args.faultMaxRequests }) });
+        }
+        const faultWindowStart = rotation ? Date.now() : null;
         let record;
         try {
-          record = await runTask({ ...args, attempt }, task);
+          record = await runTask({ ...args, attempt, faultScenario: rotation?.scenario ?? null,
+            faultRotationIndex: rotation?.rotationIndex ?? null, faultWindowStart }, task);
           console.log(record.success ? 'PASS' : 'FAIL');
         } catch (error) {
           record = { ...await recordMetadata(args, task).catch(() => args.runContext),
@@ -587,8 +717,25 @@ async function main() {
             terminalStatus: error.terminalStatus ?? null, reportedComplete: null, evaluationError: true,
             evaluationInterrupted: error.evaluationInterrupted === true,
             cancellationRequested: error.cancellationRequested === true,
+            scenarioCovered: false,
+            faultScenario: rotation?.scenario ?? null, faultRotationIndex: rotation?.rotationIndex ?? null,
+            faultProfile: args.faultProxyUrl ? args.faultProfile : null, faultEvery: args.faultProxyUrl ? args.faultEvery : null,
+            faultRequestCount: null, faultInjectedCount: null, faultInjectionModes: null, faultProxyStopped: null,
+            faultUsage: null, faultSpendEstimateUnits: null,
+            faultRunDurationSeconds: faultWindowStart != null ? (Date.now() - faultWindowStart) / 1000 : null,
             durationSeconds: (Date.now() - started) / 1000, rework: null, takeover: null,
             costUsd: null, costKnown: false, inputTokens: null, outputTokens: null, notes: String(error) };
+          if (args.faultProxyUrl) {
+            try {
+              const state = await faultControl(args, '/fault/state');
+              Object.assign(record, { faultRequestCount: state.requests ?? null,
+                faultInjectedCount: state.injectedRequests ?? null, faultInjectionModes: state.faultsByMode ?? null,
+                faultProxyStopped: state.stopped === true, faultUsage: state.usage ?? null,
+                faultSpendEstimateUnits: state.spendEstimate ?? null });
+            } catch (faultError) {
+              record.notes += `；故障代理状态读取失败：${faultError.message}`;
+            }
+          }
           console.log(`ERROR ${error.message}`);
         }
         // A disk failure must leave the in-flight marker, not append a second result for the same trial.

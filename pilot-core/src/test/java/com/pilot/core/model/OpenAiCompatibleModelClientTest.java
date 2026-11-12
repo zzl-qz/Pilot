@@ -12,13 +12,17 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
+import com.pilot.core.http.BoundedHttp;
 import com.pilot.core.loop.Attachment;
 import com.pilot.core.loop.Message;
 import com.pilot.core.tool.ToolCall;
@@ -461,6 +465,109 @@ class OpenAiCompatibleModelClientTest {
                 () -> client(server).chat(List.of(Message.user("hi")), List.of(), frame -> {
                 }));
             assertEquals(ModelFailureKind.INCOMPLETE, exception.kind());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** 流式响应直接 EOF、没给 [DONE] 也没给 finish_reason，不能把截断回复补成 STOP 当成完成。 */
+    @Test
+    void prematureEndWithoutTerminationIsIncompleteNotStop() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200, """
+            data: {"choices":[{"delta":{"content":"只生成了一半的回答"},"finish_reason":null}]}
+
+            """);
+        server.start();
+        try {
+            ModelClientException exception = assertThrows(ModelClientException.class,
+                () -> client(server).chat(List.of(Message.user("开始")), List.of(), ignored -> {
+                }));
+            assertEquals(ModelFailureKind.INCOMPLETE, exception.kind(), "提前断流应判为可重试的网络错误，而不是把部分回复当成完整答复返回");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** 断流时工具参数可能只收到一半：必须抛可重试错误，不能把它当 TOOL_CALLS 去执行。 */
+    @Test
+    void prematureEndWithPartialToolCallIsRetryableNotPermanent() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200,
+            """
+                data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_file","arguments":"{"}}],"finish_reason":null}}]}
+
+                """);
+        server.start();
+        try {
+            ModelClientException exception = assertThrows(ModelClientException.class,
+                () -> client(server).chat(List.of(Message.user("读文件")), List.of(), ignored -> {
+                }));
+            assertEquals(ModelFailureKind.INCOMPLETE, exception.kind(), "断流下的半截工具调用属于网络问题，不应被误判成永久参数错误");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** DONE 只标记传输结束，缺少 finish_reason 时不能确认业务输出完整。 */
+    @Test
+    void rejectsDoneOnlyStreamWithoutConfirmedFinish() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"回答\"}}]}\n\ndata: [DONE]\n\n");
+        server.start();
+        try {
+            ModelClientException exception = assertThrows(ModelClientException.class,
+                () -> client(server).chat(List.of(Message.user("开始")), List.of(), ignored -> {
+                }));
+            assertEquals(ModelFailureKind.INCOMPLETE, exception.kind());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** 响应头到达后后端不再发数据（半开连接）：看门狗应在空闲超时后关闭流，报为可重试网络错误，而不是无限等待。 */
+    @Test
+    void streamTimesOutWhenBackendStallsAfterHeaders() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        server.setExecutor(executor);
+        server.createContext("/v1/chat/completions", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write("data: {\"choices\":[{\"delta\":{\"content\":\"开头\"},\"finish_reason\":null}]}\n\n"
+                    .getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                // 发完第一个分片后保持连接、不再响应，制造半开卡死
+                Thread.sleep(60_000);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        server.start();
+        try {
+            ModelClientException exception = assertThrows(ModelClientException.class, () -> client(server)
+                .withIdleTimeout(Duration.ofMillis(300)).chat(List.of(Message.user("开始")), List.of(), ignored -> {
+                }));
+            assertEquals(ModelFailureKind.NETWORK, exception.kind());
+            assertTrue(exception.getMessage().contains("超时"), exception.getMessage());
+        } finally {
+            server.stop(0);
+            executor.shutdownNow();
+
+        }
+    }
+
+    /** 异常端点给单条超长分片时，应在达到上限后停止读取，而不是整行驻留内存。 */
+    @Test
+    void rejectsOversizedStreamingLine() throws IOException {
+        String oversized = "x".repeat(BoundedHttp.SSE_LINE_CHARS + 1);
+        HttpServer server = startServer(new AtomicReference<>(), 200, "data: " + oversized + "\n\n");
+        server.start();
+        try {
+            ModelClientException exception = assertThrows(ModelClientException.class,
+                () -> client(server).chat(List.of(Message.user("开始")), List.of(), ignored -> {
+                }));
+            assertEquals(ModelFailureKind.PERMANENT, exception.kind());
+            assertTrue(exception.getMessage().contains("SSE"), exception.getMessage());
         } finally {
             server.stop(0);
         }
