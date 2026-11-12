@@ -147,32 +147,36 @@ export function createInputActions({ set, get }: StoreContext): StoreSlice<'regi
     },
 
     async pauseRun() {
-      const { runId } = get();
+      const { runId, sessionId, sessionEpoch } = get();
       if (!runId) {
         return;
       }
+      const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().runId === runId;
+      if (get().pausing) return;
       set((draft) => { draft.pausing = true; });
       try {
         await api.pauseRun(runId);
       } catch (error) {
-        get().showNotice('暂停失败：' + errorInfo(error).message);
+        if (current()) get().showNotice('暂停失败：' + errorInfo(error).message);
       } finally {
-        set((draft) => { draft.pausing = false; });
+        if (current()) set((draft) => { draft.pausing = false; });
       }
     },
 
     async cancelRun() {
-      const { runId } = get();
+      const { runId, sessionId, sessionEpoch } = get();
       if (!runId) {
         return;
       }
+      const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().runId === runId;
+      if (get().cancelling) return;
       set((draft) => { draft.cancelling = true; });
       try {
         await api.cancelRun(runId);
       } catch (error) {
-        get().showNotice('取消失败：' + errorInfo(error).message);
+        if (current()) get().showNotice('取消失败：' + errorInfo(error).message);
       } finally {
-        set((draft) => { draft.cancelling = false; });
+        if (current()) set((draft) => { draft.cancelling = false; });
       }
     },
 

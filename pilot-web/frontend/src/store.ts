@@ -41,6 +41,7 @@ type StoreSet = (change: (draft: Draft<StoreState>) => void) => void;
 
 let queueLoadSequence = 0;
 let activationSequence = 0;
+let sessionCreation: { epoch: number; promise: Promise<string> } | null = null;
 let projectLoadSequence = 0;
 let sessionLoadSequence = 0;
 let skillLoadSequence = 0;
@@ -571,38 +572,44 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     if (!draftSession) {
       return null;
     }
-    const body: Parameters<typeof api.createSession>[0] = { replaceBlank: true };
-    if (draftSession.projectId) {
-      body.projectId = draftSession.projectId;
-    }
-    if (draftSession.workspace) {
-      body.workspace = draftSession.workspace;
-    }
-    // 首条消息由服务端统一命名，Web、桌面及 API 调用保持一致。
-    const created = await api.createSession(body);
-    const id = created?.sessionId || created?.id;
-    if (get().sessionEpoch !== sessionEpoch) throw new Error('会话已切换，原草稿已保留，请回到原会话重试');
-    if (!id) {
-      throw new Error('后端没有返回会话 ID');
-    }
-    set((draft) => {
-      draft.sessionId = id;
-      draft.draftSession = null;
-      draft.workspace = created.workspace || draft.workspace;
-      draft.sessionTitle = created.title || draft.sessionTitle;
-    });
-    writeDraft(localStorage, id, readDraft(localStorage, null));
-    dropDraft(localStorage, null);
-    get().loadSessions();
-    get().connectSse(id, 0);
-    connectMirror(get, set);
-    connectCommandTasks(get, set);
-    get().loadPlan();
-    get().loadQueue();
-    get().loadTask();
-    get().refreshContext();
-    get().refreshActiveRun();
-    return id;
+    if (sessionCreation?.epoch === sessionEpoch) return sessionCreation.promise;
+    const promise = (async () => {
+      const body: Parameters<typeof api.createSession>[0] = { replaceBlank: true };
+      if (draftSession.projectId) {
+        body.projectId = draftSession.projectId;
+      }
+      if (draftSession.workspace) {
+        body.workspace = draftSession.workspace;
+      }
+      // 首条消息由服务端统一命名，Web、桌面及 API 调用保持一致。
+      const created = await api.createSession(body);
+      const id = created?.sessionId || created?.id;
+      if (get().sessionEpoch !== sessionEpoch) throw new Error('会话已切换，原草稿已保留，请回到原会话重试');
+      if (!id) {
+        throw new Error('后端没有返回会话 ID');
+      }
+      set((draft) => {
+        draft.sessionId = id;
+        draft.draftSession = null;
+        draft.workspace = created.workspace || draft.workspace;
+        draft.sessionTitle = created.title || draft.sessionTitle;
+      });
+      writeDraft(localStorage, id, readDraft(localStorage, null));
+      dropDraft(localStorage, null);
+      get().loadSessions();
+      get().connectSse(id, 0);
+      connectMirror(get, set);
+      connectCommandTasks(get, set);
+      get().loadPlan();
+      get().loadQueue();
+      get().loadTask();
+      get().refreshContext();
+      get().refreshActiveRun();
+      return id;
+    })();
+    sessionCreation = { epoch: sessionEpoch, promise };
+    try { return await promise; }
+    finally { if (sessionCreation?.promise === promise) sessionCreation = null; }
   },
 
   async activate(sessionId) {
@@ -836,7 +843,8 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     if (earlierRequest) {
       return earlierRequest;
     }
-    const { thread } = get();
+    const { sessionId, thread } = get();
+    const generation = historyGeneration;
     if (!canLoadEarlier({
       hasMore: thread.history.hasMore,
       loading: thread.history.loading,
@@ -850,19 +858,21 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     if (get().applyEarlierPage()) {
       return true;
     }
-    earlierRequest = (async () => {
+    const request = (async () => {
       if (earlierInflight) {
         const ready = await earlierInflight.promise;
+        if (historyGeneration !== generation || get().sessionId !== sessionId) return false;
         if (ready && get().applyEarlierPage()) {
           return true;
         }
       }
       return get().loadEarlier();
     })();
+    earlierRequest = request;
     try {
-      return await earlierRequest;
+      return await request;
     } finally {
-      earlierRequest = null;
+      if (earlierRequest === request) earlierRequest = null;
     }
   },
 
@@ -1862,6 +1872,7 @@ function closeStreams() {
   historyGeneration++;
   earlierPage = null;
   earlierInflight = null;
+  earlierRequest = null;
   clearTimeout(stableConnectionTimer);
   stableConnectionTimer = undefined;
   streamPaused = false;
