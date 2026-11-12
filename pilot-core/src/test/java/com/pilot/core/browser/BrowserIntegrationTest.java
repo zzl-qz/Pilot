@@ -160,6 +160,8 @@ class BrowserIntegrationTest {
             assertEquals(840, info.path("viewport").path("height").asInt());
             assertTrue(info.path("element").path("rect").path("width").asDouble() > 0);
             assertEquals("input", info.path("element").path("tag").asText());
+            assertTrue(info.path("elements").size() >= 3, "概览包含可见表单控件的布局");
+            assertTrue(info.path("hint").asText().contains("不需要 evaluate"));
             ToolResult shot = tool.executeResult(Map.of("action", "screenshot"));
             BufferedImage png = ImageIO.read(Path.of(shot.images().getFirst().path()).toFile());
             assertEquals(width, png.getWidth());

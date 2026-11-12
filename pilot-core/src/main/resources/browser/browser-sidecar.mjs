@@ -1105,9 +1105,24 @@ const handlers = {
   // 固定的只读诊断，无任意表达式、事件触发、DOM 写入或网络请求。
   async inspect(args, current) {
     const page = pageOf(current);
-    const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight,
-      devicePixelRatio, scrollWidth: document.documentElement.scrollWidth,
-      scrollHeight: document.documentElement.scrollHeight }));
+    const overview = await page.evaluate(() => {
+      const candidates = [...document.querySelectorAll('main,aside,header,footer,nav,[role="main"],[data-pilot-ref],button,input,textarea,select')];
+      const visible = candidates.filter(el => {
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+      });
+      return {
+        viewport: { width: innerWidth, height: innerHeight, devicePixelRatio,
+          scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight },
+        elements: visible.slice(0, 30).map(el => {
+          const rect = el.getBoundingClientRect();
+          return { tag: el.tagName.toLowerCase(), id: el.id, ref: el.getAttribute('data-pilot-ref'),
+            label: (el.getAttribute('aria-label') || el.getAttribute('placeholder') || (el.matches('button,a') ? el.textContent : '') || '').trim().slice(0, 80),
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
+        }),
+        truncated: visible.length > 30
+      };
+    });
     let element = null;
     if (args.ref || args.selector) {
       element = await locatorFor(current, args).evaluate(el => {
@@ -1118,7 +1133,8 @@ const handlers = {
           style: Object.fromEntries(properties.map(key => [key, style.getPropertyValue(key)])) };
       });
     }
-    return { text: JSON.stringify({ url: page.url(), title: await page.title(), viewport, element }) };
+    return { text: JSON.stringify({ url: page.url(), title: await page.title(), ...overview, element,
+      hint: '需要具体元素的计算样式时继续 inspect(ref 或 selector)；位置和尺寸不需要 evaluate。' }) };
   },
 
   async click(args, current) {

@@ -11,7 +11,7 @@
 **动作**
 - `navigate`（url）、`reload`、`back`：切换页面。
 - `snapshot`：DOM 大纲；`screenshot`（可选 ref / selector / fullPage）。
-- `inspect`（可选 ref / selector）：读取真实视口、元素位置、尺寸与计算样式；不执行任意脚本，不需要 evaluate 审批。
+- `inspect`（可选 ref / selector）：默认返回真实视口和前 30 个可见控件/布局区的位置、尺寸、ref；传 ref 或 selector 可继续读取指定元素的计算样式。布局诊断优先用此动作，不需要 evaluate 审批。
 - `resize`（width / height）：设置验证视口，宽 280–1920、高 220–1600；桌面 1440×840、平板 768×840、手机 390×840。设置后重新 snapshot 和截图，用户接管时不可调整。
 - `click`、`fill`（清空后整体写入，可加 submit）、`type`（逐字输入，适合有按键监听的输入框）、`press`（key）、`select`（values）、`upload`（ref 指向 file input，files 为工作区内路径）。
 - `wait`（text / selector / ms）：等待异步内容出现，优先等文本或元素，不要盲目长等。
