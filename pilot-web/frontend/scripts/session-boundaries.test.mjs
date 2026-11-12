@@ -111,3 +111,22 @@ test('切换会话后旧历史预取不触发新会话分页，也不解除新�
   finally { next.resolve({ hasMore: false, events: [] }); await Promise.allSettled([first, second, third]); }
   assert.equal(await first, false);
 });
+
+test('A→B→A 快速切换只应用最后一次会话详情和历史', async () => {
+  const old = deferred();
+  let calls = 0;
+  api.session = id => ++calls === 1 ? old.promise : Promise.resolve({ sessionId: id, title: '最新-' + id });
+  api.history = async id => ({ hasMore: false, historyRevision: 0, events: [
+    { type: 'run.started', sessionId: id, sequence: 5, payload: { input: '最新消息-' + id } }
+  ] });
+  useStore.setState({ loadSkills: async () => {} });
+  const first = useStore.getState().activate('a');
+  await useStore.getState().activate('b');
+  await useStore.getState().activate('a');
+  old.resolve({ sessionId: 'a', title: '过期标题' });
+  assert.equal(await first, false);
+  assert.equal(useStore.getState().sessionTitle, '最新-a');
+  assert.equal(useStore.getState().thread.cursor, 5);
+  assert.equal(useStore.getState().thread.rows.filter(row => row.type === 'user').length, 1);
+  assert.equal(useStore.getState().thread.rows.find(row => row.type === 'user').text, '最新消息-a');
+});
