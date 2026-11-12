@@ -133,8 +133,8 @@ class CompletionGateTest {
     void pipedTestNeedsUnmaskedExitCodeBeforeItCanVerifyChanges() {
         CompletionGate gate = new CompletionGate(PROMPTS, true, "实现 CSV 解析并验证");
         Set<String> changed = Set.of("src/csv.js");
-        CompletionGate.Nudge nudge = gate.evaluate(changed,
-            List.of("node --test | tail -12 → exit 0"), List.of(), List.of());
+        CompletionGate.Nudge nudge =
+            gate.evaluate(changed, List.of("node --test | tail -12 → exit 0"), List.of(), List.of());
 
         assertNotNull(nudge);
         assertTrue(nudge.reason().contains("未验证"));

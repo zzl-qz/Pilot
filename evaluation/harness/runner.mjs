@@ -23,7 +23,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { platform, arch } from "node:os";
 import { appendFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { aggregate, compare, gate, summarize, validateBaseline } from "./metrics.mjs";
 import { FAULT_MODES } from "./support/fault-proxy.mjs";
@@ -349,12 +349,15 @@ export async function recordMetadata(args, task) {
       every: args.faultEvery, stallMs: args.faultStallMs, maxRequests: args.faultMaxRequests, seed: args.faultSeed })) } : {}),
     taskVersion: sha256(JSON.stringify({ prompt: task.prompt, acceptance: task.acceptance, steer: task.steer,
       scenario: task.scenario, scenarioMinModelRequests: task.scenarioMinModelRequests,
+      allowedChangeRoots: task.allowedChangeRoots,
       timeoutMinutes: Math.min(args.timeoutMinutes, task.maxMinutes ?? args.timeoutMinutes) })) };
 }
 
 /** Only count structured events; tool output prose is not a reliable error/repair label. */
 export async function traceMetrics(args, sessionId) {
   let after = 0, toolCallCount = 0, modelRetryCount = 0, budgetStopObserved = false;
+  let changeRecordObserved = false;
+  const changedFiles = new Set();
   const seen = new Set();
   try {
     for (let page = 0; page < 100; page++) {
@@ -366,14 +369,48 @@ export async function traceMetrics(args, sessionId) {
         if (event.type === 'tool.started') toolCallCount++;
         if (event.type === 'run.retrying') modelRetryCount++;
         if (event.type === 'run.failed' && ['BUDGET_LIMITED', 'BUDGET_EXHAUSTED', 'MAX_STEPS'].includes(event.payload?.code)) budgetStopObserved = true;
+        if (event.type === 'run.completed' && Array.isArray(event.payload?.changedFiles)
+          && event.payload.changedFiles.every(path => typeof path === 'string' && path.length > 0)) {
+          changeRecordObserved = true;
+          for (const path of event.payload.changedFiles) changedFiles.add(path);
+        }
       }
       const cursor = Math.max(after, ...history.events.map(e => e.sequence).filter(Number.isSafeInteger));
-      if (!history.hasMore) return { traceObserved: true, toolCallCount, modelRetryCount, budgetStopObserved };
+      if (!history.hasMore) return { traceObserved: true, toolCallCount, modelRetryCount, budgetStopObserved,
+        changeRecordObserved, changedFiles: [...changedFiles].sort() };
       if (cursor <= after) throw new Error('历史游标没有前进');
       after = cursor;
     }
   } catch { /* Optional diagnostics failure must not invent zero tool work. */ }
-  return { traceObserved: false, toolCallCount: null, modelRetryCount: null, budgetStopObserved: null };
+  return { traceObserved: false, toolCallCount: null, modelRetryCount: null, budgetStopObserved: null,
+    changeRecordObserved: false, changedFiles: null };
+}
+
+const normalizedChangePath = path => posix.normalize(path.replaceAll('\\', '/'));
+
+function validateChangeRoots(task) {
+  const roots = task.allowedChangeRoots;
+  if (roots === undefined) return;
+  if (!Array.isArray(roots) || roots.length === 0 || roots.some(root => typeof root !== 'string'
+    || !root || normalizedChangePath(root) !== root || root === '.' || root.startsWith('/') || root.includes(':')
+    || root === '..' || root.startsWith('../'))) throw new Error('allowedChangeRoots 必须是非空的工作区相对路径数组');
+}
+
+/** Audit the server's accumulated change record, including files deleted before final acceptance. */
+export function assessChangeScope(task, trace) {
+  validateChangeRoots(task);
+  const roots = task.allowedChangeRoots;
+  if (roots === undefined) return { changeScopePassed: null, changeScopeViolations: [] };
+  if (trace.traceObserved !== true || trace.changeRecordObserved !== true || !Array.isArray(trace.changedFiles)) {
+    return { changeScopePassed: false, changeScopeViolations: [], changeScopeReason: '缺少完整变更轨迹，不能确认过程路径约束' };
+  }
+  const violations = trace.changedFiles.filter(path => {
+    if (typeof path !== 'string' || !path || path.includes(':')) return true;
+    const value = normalizedChangePath(path);
+    return !roots.some(root => value === root || value.startsWith(`${root}/`));
+  });
+  return { changeScopePassed: violations.length === 0, changeScopeViolations: violations,
+    changeScopeReason: violations.length ? `变更轨迹超出允许范围（删除临时文件也不能撤销违规）：${violations.join('、')}` : '' };
 }
 
 export async function prepareWorkspace(args, task) {
@@ -414,6 +451,7 @@ export async function verifyCandidate(task, workspace, tests) {
 }
 
 export async function runTask(args, task) {
+  validateChangeRoots(task);
   const workspace = await prepareWorkspace(args, task);
   const tests = await snapshotTests(join(workspace, "test"));
   const started = Date.now();
@@ -432,7 +470,8 @@ export async function runTask(args, task) {
   try {
     await api(args, `/api/sessions/${sessionId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content: task.prompt })
+    body: JSON.stringify({ content: task.prompt + (task.allowedChangeRoots === undefined ? ''
+      : `\n全过程文件变更范围：全部改动（包括临时文件）仅允许位于 ${task.allowedChangeRoots.join('、')}；不得在范围外创建文件后再删除来绕过限制。`) })
     });
     diagnostics = await waitForTerminal({ ...args, timeoutMinutes: Math.min(args.timeoutMinutes, task.maxMinutes ?? args.timeoutMinutes) }, sessionId, task.steer);
   } catch (error) {
@@ -459,6 +498,7 @@ export async function runTask(args, task) {
   const executionSeconds = (Date.now() - started) / 1000;
   const acceptance = await verifyCandidate(task, workspace, tests);
   const trace = await traceMetrics(args, sessionId);
+  const changeScope = assessChangeScope(task, trace);
   const after = args.runContext ? await serverIdentity(args).catch(() => null) : null;
   const durationSeconds = (Date.now() - started) / 1000;
   const failedCommands = Array.isArray(diagnostics?.commands) ? diagnostics.commands.filter(item =>
@@ -467,6 +507,10 @@ export async function runTask(args, task) {
   // 场景覆盖：必需场景没有实际触发就不算成功（引导 / 故障注入 / 长链路 / 预算耗尽）。
   const scenarioNotes = [];
   let scenarioCovered = true;
+  if (changeScope.changeScopePassed === false) {
+    scenarioCovered = false;
+    scenarioNotes.push(changeScope.changeScopeReason);
+  }
   if (task.steer && diagnostics.steerDelivered !== true) {
     scenarioCovered = false;
     scenarioNotes.push("任务在中途引导投递前结束，引导场景未覆盖");
@@ -516,6 +560,7 @@ export async function runTask(args, task) {
     executionSeconds,
     configurationChanged: args.runContext ? after?.modelConfigHash !== args.runContext.modelConfigHash : false,
     ...trace,
+    ...changeScope,
     model: args.runContext?.model ?? args.model,
     requestedModel: args.runContext?.model ?? args.model,
     resolvedModel: null, // 当前服务记录的是请求模型，未暴露提供商解析后的别名。

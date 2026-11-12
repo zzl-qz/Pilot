@@ -200,7 +200,8 @@
         "content": "补充约束：不要引入任何第三方依赖，也不要在 src 和 test 之外新建目录或文件。"
       },
       "acceptance": ["node --test"],
-      "maxMinutes": 15
+      "maxMinutes": 15,
+      "allowedChangeRoots": ["src", "test"]
     }
   ]
 }

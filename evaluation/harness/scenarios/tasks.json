@@ -23,7 +23,8 @@
       "acceptance": [
         "node --test"
       ],
-      "maxMinutes": 25
+      "maxMinutes": 25,
+      "allowedChangeRoots": ["src", "test"]
     },
     {
       "id": "budget-wind",

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { resumePlan, createRunContext, dryRunRecords, expandRuns, faultConfigPatch, faultControl, faultScenarioAt, hashSources, parseArgs, prepareWorkspace, recordMetadata, runCommand, runTask, selectTasks, serverIdentity, traceMetrics, waitForTerminal } from './runner.mjs';
+import { assessChangeScope, resumePlan, createRunContext, dryRunRecords, expandRuns, faultConfigPatch, faultControl, faultScenarioAt, hashSources, parseArgs, prepareWorkspace, recordMetadata, runCommand, runTask, selectTasks, serverIdentity, traceMetrics, waitForTerminal } from './runner.mjs';
 import { cacheHitRate, gate } from './metrics.mjs';
 
 async function fixture(t) {
@@ -185,9 +185,9 @@ test('结构化事件分页计数，不把命令失败说成返工；缺历史�
   const mock = await server(t, path => path.includes('after=0') ? { hasMore: true, events: [
     { sequence: 1, type: 'tool.started' }, { sequence: 1, type: 'tool.started' }, { sequence: 2, type: 'run.retrying' }
   ] } : { hasMore: false, events: [{ sequence: 3, type: 'tool.started' }] });
-  assert.deepEqual(await traceMetrics({ base: mock.base }, 's'), { traceObserved: true, toolCallCount: 2, modelRetryCount: 1, budgetStopObserved: false });
+  assert.deepEqual(await traceMetrics({ base: mock.base }, 's'), { traceObserved: true, toolCallCount: 2, modelRetryCount: 1, budgetStopObserved: false, changeRecordObserved: false, changedFiles: [] });
   const missing = await server(t, () => ({}));
-  assert.deepEqual(await traceMetrics({ base: missing.base }, 's'), { traceObserved: false, toolCallCount: null, modelRetryCount: null, budgetStopObserved: null });
+  assert.deepEqual(await traceMetrics({ base: missing.base }, 's'), { traceObserved: false, toolCallCount: null, modelRetryCount: null, budgetStopObserved: null, changeRecordObserved: false, changedFiles: null });
 });
 
 test('argv命令能使用含空格工作区，不依赖系统shell quoting', async t => {
@@ -518,6 +518,55 @@ test('场景覆盖门槛变化必须改变任务指纹，拒绝与旧口径混�
   const changed = await recordMetadata(args, { ...task, scenario: 'context-growth', scenarioMinModelRequests: 9 });
   assert.notEqual(original.taskVersion, growth.taskVersion);
   assert.notEqual(growth.taskVersion, changed.taskVersion);
+  const scope = await recordMetadata(args, { ...task, allowedChangeRoots: ['src', 'test'] });
+  assert.notEqual(original.taskVersion, scope.taskVersion);
+});
+
+test('过程变更轨迹分页合并，删除临时文件不能抹掉越界记录', async t => {
+  const mock = await server(t, path => path.includes('after=0') ? { hasMore: true, events: [
+    { sequence: 1, type: 'run.completed', payload: { changedFiles: ['src/csv.js', '.tmp_check.js'] } }
+  ] } : { hasMore: false, events: [
+    { sequence: 2, type: 'run.completed', payload: { changedFiles: ['src/csv.js'] } }
+  ] });
+  const trace = await traceMetrics({ base: mock.base }, 's');
+  assert.deepEqual(trace.changedFiles, ['.tmp_check.js', 'src/csv.js']);
+  assert.equal(trace.changeRecordObserved, true);
+  const scope = assessChangeScope({ allowedChangeRoots: ['src', 'test'] }, trace);
+  assert.equal(scope.changeScopePassed, false);
+  assert.deepEqual(scope.changeScopeViolations, ['.tmp_check.js']);
+});
+
+test('变更范围按路径边界判断，支持 Windows 分隔符并拒绝穿越和绝对路径', () => {
+  const task = { allowedChangeRoots: ['src', 'test'] };
+  const trace = paths => ({ traceObserved: true, changeRecordObserved: true, changedFiles: paths });
+  assert.equal(assessChangeScope(task, trace(['src/a.js', 'test\\a.test.js'])).changeScopePassed, true);
+  const invalid = ['src-other/a.js', 'src/../../outside', '/src/a.js', 'C:\\src\\a.js'];
+  assert.deepEqual(assessChangeScope(task, trace(invalid)).changeScopeViolations, invalid);
+  for (const observed of [false, true]) assert.equal(assessChangeScope(task,
+    { traceObserved: observed, changeRecordObserved: false, changedFiles: [] }).changeScopePassed, false);
+  for (const roots of [[], ['../outside'], ['.'], ['/src'], ['src/../test'], 'src']) {
+    assert.throws(() => assessChangeScope({ allowedChangeRoots: roots }, trace([])), /allowedChangeRoots/);
+  }
+});
+
+test('最终产物验收通过也不能覆盖已发生的路径约束违规', async t => {
+  const { args, task } = await fixture(t); let workspace;
+  const mock = await server(t, async (path, body) => {
+    if (path === '/api/sessions') { workspace = body.workspace; return { sessionId: 'own' }; }
+    if (path.endsWith('/messages')) {
+      assert.match(body.content, /全过程文件变更范围/);
+      assert.match(body.content, /src.cjs/);
+      await writeFile(join(workspace, 'src.cjs'), 'module.exports = 2;');
+    }
+    if (path.includes('/history')) return { hasMore: false, events: [
+      { sequence: 1, type: 'run.completed', payload: { changedFiles: ['src.cjs', '.tmp_check.js'] } }
+    ] };
+    return { sessionStatus: 'COMPLETED' };
+  });
+  const result = await runTask({ ...args, base: mock.base }, { ...task, allowedChangeRoots: ['src.cjs'] });
+  assert.equal(result.acceptancePassed, true);
+  assert.equal(result.changeScopePassed, false);
+  assert.equal(result.success, false);
 });
 
 
