@@ -145,8 +145,9 @@ public final class McpToolsTool implements Tool {
             out.append("，仅显示前 ").append(MAX_LISTED).append(" 个，请用 query 缩小");
         }
         out.append("）：\n");
+        McpPermissionPolicy policy = manager.permissionPolicy(workspace, server);
         for (McpToolInfo info : matched.stream().limit(MAX_LISTED).toList()) {
-            out.append("- ").append(info.name()).append(info.readOnlyHint() ? " [只读]" : "");
+            out.append("- ").append(info.name()).append(permissionLabel(info, policy));
             if (!info.description().isBlank()) {
                 out.append("：").append(ToolSupport.oneLine(info.description(), 140));
             }
@@ -180,9 +181,20 @@ public final class McpToolsTool implements Tool {
         return "已配置的 MCP 服务器：\n" + String.join("\n", lines);
     }
 
-    private static String describe(String server, McpToolInfo info) {
-        return "工具 " + server + "." + info.name() + (info.readOnlyHint() ? "（声明为只读）" : "") + "\n"
-            + (info.description().isBlank() ? "" : info.description() + "\n") + "参数 schema：\n" + info.inputSchema();
+    private String describe(String server, McpToolInfo info) {
+        return "工具 " + server + "." + info.name() + permissionLabel(info, manager.permissionPolicy(workspace, server))
+            + "\n" + "只读策略仅用于 Pilot 权限判断，不等于操作系统隔离。\n" + (info.description().isBlank() ? "" : info.description() + "\n")
+            + "参数 schema：\n" + info.inputSchema();
+    }
+
+    private static String permissionLabel(McpToolInfo info, McpPermissionPolicy policy) {
+        if (policy.requireApprovalTools().contains(info.name())) {
+            return " [本地策略要求明确批准]";
+        }
+        if (policy.readOnly(info)) {
+            return " [本地策略只读]";
+        }
+        return info.readOnlyHint() ? " [服务器声明只读；未获本地信任]" : "";
     }
 
     private static String names(List<McpToolInfo> tools) {

@@ -167,8 +167,51 @@ public final class McpManager implements AutoCloseable {
         return client(workspace, server, expected, allowStart).tools(LIST_TIMEOUT);
     }
 
+    record ReadOnlyGrant(McpClient client, McpPermissionPolicy policy, List<McpToolInfo> tools, long revision) {
+    }
+
+    McpPermissionPolicy permissionPolicy(Path workspace, String server) {
+        return permissionPolicy(server, selection(workspace, server));
+    }
+
+    private McpPermissionPolicy permissionPolicy(String server, Selection selected) {
+        if (userConfig == null || !current(selected) || !selected.client().running()) {
+            return McpPermissionPolicy.UNTRUSTED;
+        }
+        try {
+            JsonNode root = McpJson.readConfig(userConfig);
+            McpServerConfig trusted = parseServers(root).get(server);
+            if (!Objects.equals(trusted, selected.config())) {
+                return McpPermissionPolicy.UNTRUSTED;
+            }
+            return McpPermissionPolicy.from(root.path("mcpServers").path(server).path("pilotPermissions"));
+        } catch (IOException | RuntimeException e) {
+            return McpPermissionPolicy.UNTRUSTED;
+        }
+    }
+
+    ReadOnlyGrant readOnlyGrant(Path workspace, String server, String tool) {
+        Selection selected = selection(workspace, server);
+        if (!current(selected) || !selected.client().running()) {
+            return null;
+        }
+        McpPermissionPolicy policy = permissionPolicy(server, selected);
+        long revision = selected.client().catalogRevision();
+        List<McpToolInfo> tools = selected.client().cachedTools();
+        return tools.stream().anyMatch(info -> info.name().equals(tool) && policy.readOnly(info))
+            ? new ReadOnlyGrant(selected.client(), policy, tools, revision) : null;
+    }
+
     JsonNode call(Path workspace, String server, String tool, Map<String, Object> arguments) {
-        return client(workspace, server, selection(workspace, server), false).call(tool, arguments, CALL_TIMEOUT);
+        return call(workspace, server, tool, arguments, null);
+    }
+
+    JsonNode call(Path workspace, String server, String tool, Map<String, Object> arguments, ReadOnlyGrant grant) {
+        McpClient client = client(workspace, server, selection(workspace, server), false);
+        if (grant != null && (!grant.equals(readOnlyGrant(workspace, server, tool)) || grant.client() != client)) {
+            throw new McpException("MCP 本地只读策略、连接或工具列表已变化，请重新检查权限；未执行本次调用");
+        }
+        return client.call(tool, arguments, CALL_TIMEOUT);
     }
 
     @Override
@@ -194,6 +237,11 @@ public final class McpManager implements AutoCloseable {
                 List.of(), Map.of(), "配置文件无法解析：" + e.getMessage()));
             return result;
         }
+        return parseServers(root);
+    }
+
+    private Map<String, McpServerConfig> parseServers(JsonNode root) {
+        Map<String, McpServerConfig> result = new LinkedHashMap<>();
         JsonNode servers = root.path("mcpServers");
         for (String name : servers.propertyNames()) {
             JsonNode node = servers.path(name);

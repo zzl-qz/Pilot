@@ -23,8 +23,8 @@ import tools.jackson.databind.JsonNode;
  * 调用某个 MCP 服务器的工具。文本内容原样返回；图片内容落盘后作为图片交给模型；
  * 服务器报告 {@code isError} 时以 ERROR 开头，方便执行层按失败处理。
  *
- * <p>权限：服务器在工具的 annotations 里声明 {@code readOnlyHint} 才视为只读，其余一律审批——
- * 远程工具的副作用本地无从判断，缺省要保守。
+ * <p>只读放行依赖绑定当前进程的用户级本地策略。服务器的 {@code readOnlyHint} 默认不可信；
+ * 该策略影响 Pilot 权限判定，不提供操作系统隔离。
  */
 public final class McpCallTool extends Prompted {
     private static final int MAX_TEXT_CHARS = 30_000;
@@ -34,6 +34,11 @@ public final class McpCallTool extends Prompted {
     private final McpManager manager;
     private final Path workspace;
     private final AtomicLong images = new AtomicLong();
+
+    private record Checked(Map<String, Object> args, McpManager.ReadOnlyGrant grant) {
+    }
+
+    private final ThreadLocal<Checked> checked = new ThreadLocal<>();
 
     public McpCallTool(McpManager manager, Path workspace) {
         super("mcp_call");
@@ -52,13 +57,25 @@ public final class McpCallTool extends Prompted {
 
     @Override
     public boolean readOnly(Map<String, Object> args) {
+        checked.remove();
         String server = ToolSupport.stringArg(args, "server");
         String tool = ToolSupport.stringArg(args, "tool");
         if (server == null || tool == null) {
             return true;
-        } // 参数不全只会返回错误
-        return manager.knownTools(workspace, server).stream()
-            .anyMatch(info -> info.name().equals(tool) && info.readOnlyHint());
+        }
+        McpManager.ReadOnlyGrant grant = manager.readOnlyGrant(workspace, server, tool);
+        if (grant != null) {
+            checked.set(new Checked(args, grant));
+        }
+        return grant != null;
+    }
+
+    @Override
+    public boolean confirm(Map<String, Object> args) {
+        String server = ToolSupport.stringArg(args, "server");
+        String tool = ToolSupport.stringArg(args, "tool");
+        return server != null && tool != null
+            && manager.permissionPolicy(workspace, server).requireApprovalTools().contains(tool);
     }
 
     @Override
@@ -75,6 +92,8 @@ public final class McpCallTool extends Prompted {
     @Override
     @SuppressWarnings("unchecked")
     public ToolResult executeResult(Map<String, Object> args) {
+        Checked inspected = checked.get();
+        checked.remove();
         String server = ToolSupport.stringArg(args, "server");
         String tool = ToolSupport.stringArg(args, "tool");
         if (server == null) {
@@ -90,7 +109,8 @@ public final class McpCallTool extends Prompted {
         Map<String, Object> arguments = raw == null ? Map.of() : (Map<String, Object>)raw;
         JsonNode result;
         try {
-            result = manager.call(workspace, server, tool, arguments);
+            result = manager.call(workspace, server, tool, arguments,
+                inspected != null && inspected.args() == args ? inspected.grant() : null);
         } catch (McpException e) {
             return ToolResult.text("ERROR: " + e.getMessage());
         }

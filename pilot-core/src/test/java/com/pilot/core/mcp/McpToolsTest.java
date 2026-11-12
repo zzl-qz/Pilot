@@ -80,7 +80,7 @@ class McpToolsTest {
         assertTrue(servers.contains("- remote：不可用：只配置了 url"), servers);
 
         String tools = listing.execute(Map.of("server", "fake"));
-        assertTrue(tools.contains("- echo [只读]：Echo the given text back"), tools);
+        assertTrue(tools.contains("- echo [服务器声明只读；未获本地信任]：Echo the given text back"), tools);
         assertTrue(tools.contains("- write_note："), tools);
         assertFalse(tools.contains("- write_note [只读]"), tools);
 
@@ -117,7 +117,7 @@ class McpToolsTest {
     }
 
     @Test
-    void startingAServerNeedsApprovalButKnownReadOnlyToolsDoNot() {
+    void startingAServerAndUntrustedHintsRequireApproval() {
         ToolCall listFake = new ToolCall("1", "mcp_tools", Map.of("server", "fake"));
         ToolCall overview = new ToolCall("2", "mcp_tools", Map.of());
         ToolCall echo = new ToolCall("3", "mcp_call", Map.of("server", "fake", "tool", "echo"));
@@ -134,7 +134,7 @@ class McpToolsTest {
         listing.execute(Map.of("server", "fake"));
 
         assertEquals(PermissionDecision.ALLOW, ask.check(listFake, listing).decision());
-        assertEquals(PermissionDecision.ALLOW, readOnly.check(echo, calling).decision());
+        assertEquals(PermissionDecision.DENY, readOnly.check(echo, calling).decision());
         assertEquals(PermissionDecision.ASK, ask.check(write, calling).decision());
         assertEquals(PermissionDecision.DENY, readOnly.check(write, calling).decision());
     }

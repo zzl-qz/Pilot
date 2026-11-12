@@ -78,6 +78,10 @@ final class McpClient implements AutoCloseable {
         return config.equals(current) && extraPath.equals(path == null ? "" : path);
     }
 
+    long catalogRevision() {
+        return toolsRevision.get();
+    }
+
     List<McpToolInfo> cachedTools() {
         List<McpToolInfo> current = tools;
         return current == null ? List.of() : current;

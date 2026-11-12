@@ -43,6 +43,11 @@ public final class McpProcessFixture {
                 var tool =
                     Map.of("name", changed ? "changed" : message.path("params").has("cursor") ? "second" : "first",
                         "inputSchema", Map.of("type", "object"), "annotations", Map.of("readOnlyHint", true));
+                if (mode.equals("permissions")) {
+                    reply(mapper, message, Map.of("tools",
+                        List.of(tool, Map.of("name", "write", "inputSchema", Map.of("type", "object")))));
+                    continue;
+                }
                 if (mode.equals("cycle") || mode.equals("pages") && !message.path("params").has("cursor")) {
                     reply(mapper, message, Map.of("tools", List.of(tool), "nextCursor", "next"));
                 } else {
