@@ -48,7 +48,7 @@ export function parseArgs(argv) {
     repeat: 1, taskIds: [], environment: "",
     promptDir: "pilot-core/src/main/resources/prompts", runtimeSources: [],
     faultProxyUrl: "", faultProfiles: null, faultEvery: 3, faultStallMs: 70_000,
-    faultMaxRequests: 0, faultSeed: 0
+    faultMaxRequests: null, faultSeed: 0, faultToken: process.env.PILOT_FAULT_LOCAL_TOKEN ?? ""
   };
   const valued = new Set(['--base', '--out', '--tasks', '--model', '--prompt-version', '--tool-version',
     '--fixtures', '--token', '--baseline', '--timeout-minutes', '--repeat', '--task', '--environment', '--prompt-dir', '--runtime-source',
@@ -105,7 +105,7 @@ export function parseArgs(argv) {
     if (!Number.isInteger(args.faultEvery) || args.faultEvery < 1 || args.faultEvery > 1000)
       throw new Error("--fault-every 必须是 1 到 1000 的整数");
     if (!Number.isFinite(args.faultStallMs) || args.faultStallMs < 1) throw new Error("--fault-stall-ms 必须是正毫秒数");
-    if (!Number.isInteger(args.faultMaxRequests) || args.faultMaxRequests < 0)
+    if (args.faultMaxRequests != null && (!Number.isInteger(args.faultMaxRequests) || args.faultMaxRequests < 0))
       throw new Error("--fault-max-requests 必须是非负整数");
     if (!Number.isSafeInteger(args.faultSeed)) throw new Error("--seed 必须是整数");
   } else if (args.faultProfiles) {
@@ -162,13 +162,19 @@ export async function faultControl(args, path, init = {}) {
   const response = await fetch(`${args.faultProxyUrl.replace(/\/$/, "")}${path}`, {
     ...init,
     signal: AbortSignal.timeout(10_000),
-    headers: init.body ? { "content-type": "application/json" } : {}
+    headers: { ...(init.body ? { "content-type": "application/json" } : {}),
+      ...(args.faultToken ? { Authorization: `Bearer ${args.faultToken}` } : {}) }
   });
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`故障代理 ${init.method ?? "GET"} ${path} → ${response.status}: ${text.slice(0, 300)}`);
   }
   return response.json();
+}
+
+export function faultConfigPatch(args, scenario) {
+  return { mode: scenario, every: args.faultEvery, stallMs: args.faultStallMs,
+    ...(args.faultMaxRequests == null ? {} : { maxRequests: args.faultMaxRequests }) };
 }
 
 /**
@@ -339,6 +345,8 @@ export async function createRunContext(args) {
 
 export async function recordMetadata(args, task) {
   return { ...args.runContext, fixtureVersion: await hashSources([fixturePath(args, task)]),
+    ...(args.faultProxyUrl ? { faultPlanVersion: sha256(JSON.stringify({ profile: args.faultProfile,
+      every: args.faultEvery, stallMs: args.faultStallMs, maxRequests: args.faultMaxRequests, seed: args.faultSeed })) } : {}),
     taskVersion: sha256(JSON.stringify({ prompt: task.prompt, acceptance: task.acceptance, steer: task.steer,
       scenario: task.scenario, scenarioMinModelRequests: task.scenarioMinModelRequests,
       timeoutMinutes: Math.min(args.timeoutMinutes, task.maxMinutes ?? args.timeoutMinutes) })) };
@@ -635,7 +643,7 @@ export function resumePlan(records, tasks, repeat, metadata, fault) {
       // 故障注入的轮换方案可由 seed/位置/attempt 复算；不一致即条件已变。
       const expectedScenario = faultScenarioAt(fault, positions.get(record.taskId), record.attempt).scenario;
       if (record.faultScenario !== expectedScenario || record.faultProfile !== fault.faultProfile
-          || record.faultEvery !== fault.faultEvery)
+          || record.faultEvery !== fault.faultEvery || record.faultPlanVersion !== expected.faultPlanVersion)
         throw new Error(`${record.taskId} 第 ${record.attempt} 次的故障注入方案与当前计划不一致，不能续跑`);
     } else if (record.faultScenario != null) {
       throw new Error(`${record.taskId} 的记录包含故障注入信息，而当前未启用故障代理，条件不一致`);
@@ -707,7 +715,7 @@ async function main() {
         if (rotation) {
           await faultControl(args, '/fault/reset', { method: 'POST' });
           await faultControl(args, '/fault/config', { method: 'POST',
-            body: JSON.stringify({ mode: rotation.scenario, every: args.faultEvery, stallMs: args.faultStallMs, maxRequests: args.faultMaxRequests }) });
+            body: JSON.stringify(faultConfigPatch(args, rotation.scenario)) });
         }
         const faultWindowStart = rotation ? Date.now() : null;
         let record;

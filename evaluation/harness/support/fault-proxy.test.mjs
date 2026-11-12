@@ -228,3 +228,27 @@ test('日志与状态不泄漏上游密钥', async t => {
 test('FAULT_MODES 固定五种模式', () => {
   assert.deepEqual([...FAULT_MODES].sort(), ['http-503', 'mid-eof', 'none', 'reset', 'stall']);
 });
+
+test('在触顶前 reset 不能洗掉跨轮请求计数', async t => {
+  const upstream = await mockUpstream(t);
+  const proxy = await startProxy(t, upstream.origin, { maxRequests: 2 });
+  assert.equal((await call(proxy)).status, 200);
+  await control(proxy, '/fault/reset', { method: 'POST' });
+  assert.equal((await call(proxy)).status, 200);
+  await control(proxy, '/fault/reset', { method: 'POST' });
+  assert.equal((await call(proxy)).status, 402);
+  assert.equal((await stateOf(proxy)).lifetimeRequests, 2);
+  assert.equal(upstream.hits(), 2);
+});
+
+test('在触顶前 reset 不能洗掉跨轮已观测费用', async t => {
+  const upstream = await mockUpstream(t);
+  const proxy = await startProxy(t, upstream.origin, { inputQuotaPerMillion: 1_000_000, outputQuotaPerMillion: 0, maxQuota: 20 });
+  assert.equal((await call(proxy)).status, 200);
+  await control(proxy, '/fault/reset', { method: 'POST' });
+  assert.equal((await call(proxy)).status, 200);
+  assert.equal((await call(proxy)).status, 402);
+  const state = await stateOf(proxy);
+  assert.equal(state.spendEstimate, 11);
+  assert.equal(state.lifetimeSpendEstimate, 22);
+});

@@ -96,16 +96,18 @@ export async function startFaultProxy(config) {
       && ['127.0.0.1', '[::1]', 'localhost'].includes(upstream.hostname))) throw new Error('HTTPS required unless local');
   const origin = upstream.origin;
   const authorization = `Bearer ${config.apiKey}`;
-  let requests = 0, stopped = false;
+  let requests = 0, lifetimeRequests = 0, stopped = false;
   let active = { mode: config.mode, every: config.every, stallMs: config.stallMs, maxRequests: config.maxRequests };
   let injected = [], faultsByMode = {};
   let usage = { observedRequests: 0, requestsWithoutUsage: 0, inputTokens: 0, outputTokens: 0 };
+  const lifetimeUsage = { observedRequests: 0, requestsWithoutUsage: 0, inputTokens: 0, outputTokens: 0 };
+  const unknownUsage = () => { usage.requestsWithoutUsage++; lifetimeUsage.requestsWithoutUsage++; };
   const log = (status, details = {}) => config.log?.({ status, ...details });
-  const spendEstimate = () => config.inputQuotaPerMillion > 0 || config.outputQuotaPerMillion > 0
-    ? (usage.inputTokens * config.inputQuotaPerMillion + usage.outputTokens * config.outputQuotaPerMillion) / 1_000_000
+  const spendEstimate = (sample = usage) => config.inputQuotaPerMillion > 0 || config.outputQuotaPerMillion > 0
+    ? (sample.inputTokens * config.inputQuotaPerMillion + sample.outputTokens * config.outputQuotaPerMillion) / 1_000_000
     : null;
   const state = () => ({
-    requests, injectedRequests: injected.length, injected, faultsByMode,
+    requests, lifetimeRequests, lifetimeUsage: { ...lifetimeUsage }, lifetimeSpendEstimate: spendEstimate(lifetimeUsage), injectedRequests: injected.length, injected, faultsByMode,
     usage: { ...usage }, spendEstimate: spendEstimate(),
     maxQuota: config.maxQuota, stopped,
     config: { ...active, maxQuota: config.maxQuota,
@@ -179,11 +181,13 @@ export async function startFaultProxy(config) {
       }
       res.end();
       if (collect.inputTokens > 0 || collect.outputTokens > 0) {
-        usage.observedRequests += 1;
-        usage.inputTokens += collect.inputTokens;
-        usage.outputTokens += collect.outputTokens;
-      } else usage.requestsWithoutUsage += 1;
-      const estimate = spendEstimate();
+        for (const sample of [usage, lifetimeUsage]) {
+          sample.observedRequests++;
+          sample.inputTokens += collect.inputTokens;
+          sample.outputTokens += collect.outputTokens;
+        }
+      } else unknownUsage();
+      const estimate = spendEstimate(lifetimeUsage);
       log('complete', { requestIndex: index, mode: 'none', chunks, bytes,
         inputTokens: collect.inputTokens, outputTokens: collect.outputTokens,
         elapsedMs: Date.now() - started, spendEstimate: estimate });
@@ -194,7 +198,7 @@ export async function startFaultProxy(config) {
     } catch (error) {
       if (!res.headersSent) reply(res, 502, 'upstream_error');
       else res.destroy();
-      usage.requestsWithoutUsage += 1;
+      unknownUsage();
       log('upstream_error', { requestIndex: index, ...diagnostics(error) });
     } finally {
       res.off('close', onClose);
@@ -222,7 +226,7 @@ export async function startFaultProxy(config) {
       }
       injected.push({ index, mode: 'mid-eof', at: new Date().toISOString() });
       faultsByMode['mid-eof'] = (faultsByMode['mid-eof'] ?? 0) + 1;
-      usage.requestsWithoutUsage += 1;
+      unknownUsage();
       log('injected', { requestIndex: index, mode: 'mid-eof', forwardedChunks: 1 });
       res.end();
     } catch (error) {
@@ -252,7 +256,7 @@ export async function startFaultProxy(config) {
       }
       injected.push({ index, mode: 'stall', at: new Date().toISOString() });
       faultsByMode['stall'] = (faultsByMode['stall'] ?? 0) + 1;
-      usage.requestsWithoutUsage += 1;
+      unknownUsage();
       log('injected', { requestIndex: index, mode: 'stall', stallMs: active.stallMs });
       await delay(active.stallMs);
       res.end();
@@ -294,7 +298,7 @@ export async function startFaultProxy(config) {
     }
     if (req.url === '/fault/reset' && req.method === 'POST') {
       if (!authorized(req)) return reply(res, 401, 'local_auth_required');
-      // stopped 是硬停状态，reset 不清除；只能重启代理重新开始。
+      // 只清当前试验窗口；累计用量和硬停状态保留，不能在触顶前重置来洗掉额度。
       requests = 0; injected = []; faultsByMode = {};
       usage = { observedRequests: 0, requestsWithoutUsage: 0, inputTokens: 0, outputTokens: 0 };
       log('reset');
@@ -305,11 +309,12 @@ export async function startFaultProxy(config) {
     if (req.url?.startsWith('/fault/')) return reply(res, 404, 'unsupported_route');
     if (req.method !== 'POST') return reply(res, 404, 'unsupported_route');
     if (stopped) { log('stopped_reject'); return reply(res, 402, 'fault_budget_stop'); }
-    if (active.maxRequests > 0 && requests >= active.maxRequests) {
-      stopped = true; log('budget_stop', { requestIndex: requests, maxRequests: active.maxRequests });
+    if (active.maxRequests > 0 && lifetimeRequests >= active.maxRequests) {
+      stopped = true; log('budget_stop', { requestIndex: requests, lifetimeRequests, maxRequests: active.maxRequests });
       return reply(res, 402, 'fault_budget_stop');
     }
     const index = requests++;
+    lifetimeRequests++;
     const body = await readBody(req, res);
     if (body === null) return;
     if (!shouldInject(index, active.every, active.mode)) {

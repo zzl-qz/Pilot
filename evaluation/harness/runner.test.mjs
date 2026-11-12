@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { resumePlan, createRunContext, dryRunRecords, expandRuns, faultScenarioAt, hashSources, parseArgs, prepareWorkspace, recordMetadata, runCommand, runTask, selectTasks, serverIdentity, traceMetrics, waitForTerminal } from './runner.mjs';
+import { resumePlan, createRunContext, dryRunRecords, expandRuns, faultConfigPatch, faultControl, faultScenarioAt, hashSources, parseArgs, prepareWorkspace, recordMetadata, runCommand, runTask, selectTasks, serverIdentity, traceMetrics, waitForTerminal } from './runner.mjs';
 import { cacheHitRate, gate } from './metrics.mjs';
 
 async function fixture(t) {
@@ -28,7 +28,7 @@ async function server(t, handle) {
     const body = raw ? JSON.parse(raw) : null;
     requests.push({ path: req.url, method: req.method, body });
     try {
-      const result = await handle(req.url, body);
+      const result = await handle(req.url, body, req.headers);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result ?? {}));
     } catch (error) {
@@ -518,4 +518,32 @@ test('场景覆盖门槛变化必须改变任务指纹，拒绝与旧口径混�
   const changed = await recordMetadata(args, { ...task, scenario: 'context-growth', scenarioMinModelRequests: 9 });
   assert.notEqual(original.taskVersion, growth.taskVersion);
   assert.notEqual(growth.taskVersion, changed.taskVersion);
+});
+
+
+test('故障控制请求使用独立凭据，不误用 Pilot 服务令牌', async t => {
+  const mock = await server(t, (_path, _body, headers) => {
+    assert.equal(headers.authorization, 'Bearer fixture-fault-token');
+    return { requests: 0 };
+  });
+  assert.deepEqual(await faultControl({ faultProxyUrl: mock.base, token: 'pilot-token', faultToken: 'fixture-fault-token' }, '/fault/state'), { requests: 0 });
+});
+
+
+test('未提供请求限额时保留代理预设上限，不默认为零解除保护', () => {
+  const args = parseArgs(['--fault-proxy', 'http://localhost', '--fault-profile', 'stall']);
+  assert.equal(args.faultMaxRequests, null);
+  assert.equal('maxRequests' in faultConfigPatch(args, 'stall'), false);
+  assert.equal(faultConfigPatch({ ...args, faultMaxRequests: 12 }, 'stall').maxRequests, 12);
+});
+
+test('故障停顿时间或请求限额变化必须改变方案指纹，凭据不进入指纹', async t => {
+  const { args, task } = await fixture(t);
+  const fault = { ...args, faultProxyUrl: 'http://localhost', faultProfile: 'stall', faultEvery: 3,
+    faultStallMs: 100, faultMaxRequests: 12, faultSeed: 0, faultToken: 'secret-a' };
+  const a = await recordMetadata(fault, task);
+  assert.notEqual(a.faultPlanVersion, (await recordMetadata({ ...fault, faultStallMs: 200 }, task)).faultPlanVersion);
+  assert.notEqual(a.faultPlanVersion, (await recordMetadata({ ...fault, faultMaxRequests: 13 }, task)).faultPlanVersion);
+  assert.equal(a.faultPlanVersion, (await recordMetadata({ ...fault, faultToken: 'secret-b' }, task)).faultPlanVersion);
+  assert.ok(!JSON.stringify(a).includes('secret'));
 });
