@@ -42,7 +42,7 @@ public final class ToolExecutor {
      * @param check       验证类工具产生的一行结果摘要，例如 {@code mvn -q test → exit 0}
      */
     public enum OutcomeStatus {
-        SUCCESS, EMPTY, TRANSIENT_FAILURE, PERMANENT_FAILURE, DENIED, RUNNING, CANCELLED, SKIPPED
+        SUCCESS, EMPTY, TRANSIENT_FAILURE, PERMANENT_FAILURE, RESULT_UNKNOWN, DENIED, RUNNING, CANCELLED, SKIPPED
     }
 
     public record Outcome(String toolName, String result, List<String> changedPaths, List<String> checks,
@@ -259,6 +259,9 @@ public final class ToolExecutor {
             return OutcomeStatus.EMPTY;
         }
         String value = result.strip();
+        if (value.startsWith("ERROR: 结果未确认")) {
+            return OutcomeStatus.RESULT_UNKNOWN;
+        }
         if (value.contains("未找到网页结果") || value.contains("没有找到网页结果") || value.contains("无搜索结果")) {
             return OutcomeStatus.EMPTY;
         }
