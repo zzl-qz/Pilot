@@ -64,6 +64,17 @@ test('损坏的剪贴板条目不阻止其他文件', () => {
 });
 
 import { hasFileTransferHint } from '../../../frontend/src/lib/clipboard.js';
+
+test('浏览器声明文件传输类型但隐藏内容时给出提示，普通网址与路径文本不被拦截', () => {
+  for (const type of ['text/uri-list', 'x-special/gnome-copied-files']) {
+    assert.equal(hasFileTransferHint({ types: [type], getData: () => '' }), true);
+    assert.equal(hasFileTransferHint({ types: [type], getData: () => '   ' }), true);
+    assert.equal(hasFileTransferHint({ types: [type], getData() { throw Error('denied'); } }), true);
+    assert.equal(hasFileTransferHint({ types: [type] }), true);
+  }
+  assert.equal(hasFileTransferHint({ types: ['text/uri-list', 'text/plain'], getData: () => 'https://example.com' }), false);
+  assert.equal(hasFileTransferHint({ types: ['text/plain'], getData: () => '' }), false);
+});
 test('识别各平台文件 URI 和 GNOME 复制格式，普通文字和网页链接不误判', () => {
   for (const uri of ['file:///C:/Users/demo/a.txt', 'file://server/share/a.txt', 'file:///home/demo/a.txt', 'file:///Users/demo/a.txt']) {
     assert.equal(hasFileTransferHint({ getData: type => type === 'text/uri-list' ? uri : '' }), true);

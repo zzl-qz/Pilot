@@ -64,10 +64,13 @@ export function readTransferFiles(data: TransferData | null | undefined): File[]
 
 /** File 不可读时识别传输标记和 URI；部分 Linux 文件管理器只提供这些。普通路径文本仍可粘贴。 */
 export function hasFileTransferHint(data: TransferData | null | undefined) {
-  if (Array.from(data?.types || []).includes('Files')) return true;
-  if (!data?.getData) return false;
-  try {
-    return ['text/uri-list', 'x-special/gnome-copied-files'].some(type =>
-      /(?:^|[\r\n])file:\/\//i.test(data.getData!(type) || ''));
-  } catch { return false; }
+  const types = Array.from(data?.types || []);
+  if (types.includes('Files')) return true;
+  return ['text/uri-list', 'x-special/gnome-copied-files'].some(type => {
+    try {
+      const value = data?.getData?.(type) || '';
+      // 部分浏览器只暴露类型，隐藏 URI 内容；不能把这次粘贴静默吞掉。
+      return /(?:^|[\r\n])file:\/\//i.test(value) || (types.includes(type) && !value.trim());
+    } catch { return types.includes(type); }
+  });
 }
