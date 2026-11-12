@@ -1,12 +1,9 @@
 package com.pilot.core.browser;
 
 import java.io.IOException;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,8 +15,8 @@ import java.util.stream.Stream;
 
 import com.pilot.core.loop.Attachment;
 import com.pilot.core.tool.Availability;
-import com.pilot.core.tool.CreateFileTool.Prompted;
 import com.pilot.core.tool.LocalInteraction;
+import com.pilot.core.tool.PromptedTool;
 import com.pilot.core.tool.ToolArtifacts;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolSupport;
@@ -36,7 +33,7 @@ import com.pilot.core.workspace.PathValidator;
  * 点击、输入、选择、上传是本机交互（{@link LocalInteraction}），READ_ONLY 拒绝、ASK 审批、AUTO_EDIT 放行；
  * 在页面里执行任意脚本（evaluate）始终审批。
  */
-public final class BrowserTool extends Prompted implements LocalInteraction {
+public final class BrowserTool extends PromptedTool implements LocalInteraction {
     private static final Set<String> OBSERVATIONS = Set.of("navigate", "reload", "back", "forward", "snapshot",
         "screenshot", "console", "network", "wait", "close", "text", "links", "tabs", "inspect", "resize");
     private static final Set<String> INTERACTIONS = Set.of("click", "dblclick", "right_click", "hover", "fill", "type",
@@ -50,7 +47,6 @@ public final class BrowserTool extends Prompted implements LocalInteraction {
             "fill", "type", "press", "select", "upload", "download", "screenshot", "console", "network", "text",
             "links", "tabs", "switch_tab", "close_tab", "wait", "evaluate", "close", "inspect", "resize");
     private static final int MAX_SCREENSHOTS_KEPT = 40;
-    private static final int MAX_UPLOAD_FILES = 10;
 
     private final BrowserBackend backend;
     private final String sessionId;
@@ -151,19 +147,19 @@ public final class BrowserTool extends Prompted implements LocalInteraction {
         }
         Map<String, Object> command = new LinkedHashMap<>();
         command.put("op", action);
-        String error = build(action, args, command);
+        String error = BrowserCommand.build(action, args, command, paths);
         if (error != null) {
             return ToolResult.text("ERROR: " + error);
         }
 
-        Path screenshot = null;
         if ("screenshot".equals(action)) {
-            screenshot = nextScreenshot();
-            command.put("path", screenshot.toString());
+            command.put("path", nextScreenshot().toString());
+        } else if ("download".equals(action)) {
+            command.put("path", nextScreenshot().resolveSibling("download-" + shots.get() + ".bin").toString());
         }
         BrowserBackend.Reply reply;
         try {
-            reply = backend.execute(sessionId, command, timeout(action, args));
+            reply = backend.execute(sessionId, command, timeout(action));
         } catch (BrowserBackend.BrowserException e) {
             return ToolResult.text("ERROR: " + e.getMessage());
         }
@@ -178,275 +174,10 @@ public final class BrowserTool extends Prompted implements LocalInteraction {
             List.of(new Attachment(file.getFileName().toString(), mime, file.toString())));
     }
 
-    @Override
-    public boolean parallelSafe() {
-        return false;
-    }
-
-    /** 校验并拼装 sidecar 命令；返回非空表示参数错误。 */
-    private String build(String action, Map<String, Object> args, Map<String, Object> command) {
-        if (Boolean.TRUE.equals(args.get("external"))) {
-            String purpose = ToolSupport.stringArg(args, "purpose");
-            if (purpose == null) {
-                return "外网操作需要 purpose 说明目标、最终内容和影响";
-            }
-            if (!"navigate".equals(action) && ToolSupport.stringArg(args, "expected_url") == null) {
-                return "外网交互需要 expected_url 绑定审批时的页面";
-            }
-            command.put("approvedExternal", true);
-            copy(args, command, "expected_url");
-        }
-        switch (action) {
-            case "navigate" -> {
-                String url = ToolSupport.stringArg(args, "url");
-                if (url == null) {
-                    return "navigate 需要 url";
-                }
-                String problem = Boolean.TRUE.equals(args.get("external")) ? checkExternalUrl(url) : checkUrl(url);
-                if (problem != null) {
-                    return problem;
-                }
-                command.put("url", url);
-            }
-            case "click" -> {
-                return target(args, command);
-            }
-            case "dblclick" -> {
-                command.put("op", "click");
-                command.put("clickCount", 2);
-                return target(args, command);
-            }
-            case "right_click" -> {
-                command.put("op", "click");
-                command.put("button", "right");
-                return target(args, command);
-            }
-            case "hover", "download" -> {
-                String problem = target(args, command);
-                if (problem != null) {
-                    return problem;
-                }
-                if ("download".equals(action)) {
-                    Path file = nextScreenshot().resolveSibling("download-" + shots.get() + ".bin");
-                    command.put("path", file.toString());
-                }
-                return null;
-            }
-            case "switch_tab", "close_tab" -> {
-                String tabId = ToolSupport.stringArg(args, "tabId");
-                if (tabId == null) {
-                    return action + " 需要 tabId";
-                }
-                command.put("tabId", tabId);
-            }
-            case "fill", "type" -> {
-                String problem = target(args, command);
-                if (problem != null) {
-                    return problem;
-                }
-                Object text = args.get("text");
-                if (!(text instanceof String value)) {
-                    return action + " 需要 text";
-                }
-                command.put("text", value);
-                if (Boolean.TRUE.equals(args.get("submit"))) {
-                    command.put("submit", true);
-                }
-            }
-            case "press" -> {
-                String key = ToolSupport.stringArg(args, "key");
-                if (key == null) {
-                    return "press 需要 key";
-                }
-                command.put("key", key);
-            }
-            case "select" -> {
-                String problem = target(args, command);
-                if (problem != null) {
-                    return problem;
-                }
-                List<String> values = strings(args.get("values"));
-                if (values.isEmpty()) {
-                    return "select 需要 values";
-                }
-                command.put("values", values);
-            }
-            case "upload" -> {
-                String problem = target(args, command);
-                if (problem != null) {
-                    return problem;
-                }
-                List<String> files = strings(args.get("files"));
-                if (files.isEmpty()) {
-                    return "upload 需要 files";
-                }
-                if (files.size() > MAX_UPLOAD_FILES) {
-                    return "upload 一次最多 " + MAX_UPLOAD_FILES + " 个文件";
-                }
-                List<String> resolved = new ArrayList<>();
-                for (String file : files) {
-                    try {
-                        Path path = uploadable(file);
-                        if (!Files.isRegularFile(path)) {
-                            return "文件不存在或不是普通文件: " + file;
-                        }
-                        resolved.add(path.toString());
-                    } catch (RuntimeException e) {
-                        return "文件不在工作区内或不可读: " + file;
-                    }
-                }
-                command.put("files", resolved);
-            }
-            case "resize" -> {
-                for (String key : List.of("width", "height")) {
-                    int min = "width".equals(key) ? 280 : 220;
-                    int max = "width".equals(key) ? 1920 : 1600;
-                    if (!(args.get(key) instanceof Number n) || !Double.isFinite(n.doubleValue())
-                        || n.doubleValue() != Math.rint(n.doubleValue()) || n.doubleValue() < min
-                        || n.doubleValue() > max) {
-                        return "resize 的 " + key + " 必须是 " + min + "–" + max + " 的整数";
-                    }
-                    command.put(key, n.intValue());
-                }
-            }
-            case "screenshot", "inspect" -> {
-                if (args.get("ref") != null || args.get("selector") != null) {
-                    String problem = target(args, command);
-                    if (problem != null) {
-                        return problem;
-                    }
-                }
-                if (Boolean.TRUE.equals(args.get("fullPage"))) {
-                    command.put("fullPage", true);
-                }
-            }
-            case "console" -> {
-                copy(args, command, "level");
-                if (Boolean.TRUE.equals(args.get("clear"))) {
-                    command.put("clear", true);
-                }
-            }
-            case "network" -> {
-                copy(args, command, "filter");
-                if (Boolean.TRUE.equals(args.get("failedOnly"))) {
-                    command.put("failedOnly", true);
-                }
-                if (Boolean.TRUE.equals(args.get("clear"))) {
-                    command.put("clear", true);
-                }
-            }
-            case "wait" -> {
-                copy(args, command, "text");
-                copy(args, command, "selector");
-                if (args.get("ms") instanceof Number ms) {
-                    command.put("ms", Math.max(0, Math.min(15_000, ms.longValue())));
-                }
-            }
-            case "evaluate" -> {
-                String expression = ToolSupport.stringArg(args, "expression");
-                if (expression == null) {
-                    return "evaluate 需要 expression";
-                }
-                command.put("expression", expression);
-            }
-            default -> {
-                // reload / back / snapshot / close 没有参数
-            }
-        }
-        return null;
-    }
-
-    private static String target(Map<String, Object> args, Map<String, Object> command) {
-        String ref = ToolSupport.stringArg(args, "ref");
-        String selector = ToolSupport.stringArg(args, "selector");
-        if (ref == null && selector == null) {
-            return "需要 ref（来自 snapshot）或 selector";
-        }
-        if (ref != null) {
-            command.put("ref", ref);
-        } else {
-            command.put("selector", selector);
-        }
-        return null;
-    }
-
-    private static void copy(Map<String, Object> args, Map<String, Object> command, String key) {
-        String value = ToolSupport.stringArg(args, key);
-        if (value != null) {
-            command.put(key, value);
-        }
-    }
-
-    private static List<String> strings(Object value) {
-        List<String> out = new ArrayList<>();
-        if (value instanceof List<?> list) {
-            for (Object item : list) {
-                if (item != null && !String.valueOf(item).isBlank()) {
-                    out.add(String.valueOf(item).strip());
-                }
-            }
-        } else if (value instanceof String single && !single.isBlank()) {
-            out.add(single.strip());
-        }
-        return out;
-    }
-
-    /** 上传来源：工作区内的文件，或本工具自己产出的截图。 */
-    private Path uploadable(String raw) {
-        try {
-            return paths.resolve(raw);
-        } catch (RuntimeException e) {
-            Path artifacts = ToolArtifacts.directory("").toAbsolutePath().normalize();
-            Path candidate = Path.of(raw).toAbsolutePath().normalize();
-            if (candidate.startsWith(artifacts)) {
-                return candidate;
-            }
-            throw e;
-        }
-    }
-
-    static String checkUrl(String url) {
-        URI uri;
-        try {
-            uri = new URI(url);
-        } catch (URISyntaxException e) {
-            return "url 格式不正确: " + url;
-        }
-        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
-        if (!scheme.equals("http") && !scheme.equals("https")) {
-            return "url 只支持 http / https: " + url;
-        }
-        String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
-        boolean loopback = host.equals("localhost") || host.endsWith(".localhost") || host.equals("127.0.0.1")
-            || host.equals("[::1]") || host.equals("::1") || host.matches("127\\.\\d+\\.\\d+\\.\\d+");
-        if (!loopback) {
-            return "browser 只能打开本机地址（localhost / 127.0.0.1 / [::1]）: " + url + "；外部网页内容请用 web_fetch";
-        }
-        return null;
-    }
-
-    static String checkExternalUrl(String value) {
-        try {
-            URI uri = new URI(value);
-            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null) {
-                return "外网仅支持无用户名/密码的 HTTPS 地址";
-            }
-            String host = uri.getHost().toLowerCase(Locale.ROOT);
-            if (host.equals("localhost") || host.endsWith(".localhost") || host.matches("[0-9.]+")
-                || host.contains(":")) {
-                return "外网流程不接受本机或 IP 地址；请使用公开 HTTPS 域名";
-            }
-            return null;
-        } catch (URISyntaxException e) {
-            return "外网 URL 无效";
-        }
-    }
-
-    private static Duration timeout(String action, Map<String, Object> args) {
+    private static Duration timeout(String action) {
         return switch (action) {
             case "navigate", "reload", "back" -> Duration.ofSeconds(45);
-            case "screenshot" -> Duration.ofSeconds(30);
-            case "wait" -> Duration.ofSeconds(30);
+            case "screenshot", "wait" -> Duration.ofSeconds(30);
             default -> Duration.ofSeconds(25);
         };
     }

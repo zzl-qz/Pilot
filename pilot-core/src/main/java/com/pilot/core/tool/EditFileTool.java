@@ -108,15 +108,7 @@ public final class EditFileTool extends PromptedTool implements WritesFiles {
 
     @Override
     public String changedPath(ToolCall call) {
-        String rawPath = ToolSupport.stringArg(call == null ? null : call.args(), "path");
-        if (rawPath == null) {
-            return null;
-        }
-        try {
-            return paths.display(paths.resolve(rawPath));
-        } catch (RuntimeException e) {
-            return null;
-        }
+        return ToolSupport.changedWorkspacePath(paths, call);
     }
 
 }

@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.pilot.core.loop.Attachment;
 import com.pilot.core.tool.Availability;
-import com.pilot.core.tool.CreateFileTool.Prompted;
+import com.pilot.core.tool.PromptedTool;
 import com.pilot.core.tool.ToolArtifacts;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolSupport;
@@ -26,7 +26,7 @@ import tools.jackson.databind.JsonNode;
  * <p>权限：服务器在工具的 annotations 里声明 {@code readOnlyHint} 才视为只读，其余一律审批——
  * 远程工具的副作用本地无从判断，缺省要保守。
  */
-public final class McpCallTool extends Prompted {
+public final class McpCallTool extends PromptedTool {
     private static final int MAX_TEXT_CHARS = 30_000;
     private static final long MAX_IMAGE_BYTES = 5L * 1024 * 1024;
 
