@@ -27,6 +27,7 @@
     "test:recovery": "node scripts/sandbox-recovery-smoke.mjs",
     "typecheck": "node scripts/typecheck.mjs",
     "test:unit": "node scripts/verify-migration.mjs --unit-only",
+    "test:state-sync": "node scripts/verify-migration.mjs --state-sync",
     "test:migration": "node scripts/verify-migration.mjs"
   },
   "dependencies": {

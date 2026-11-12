@@ -1,15 +1,16 @@
+import { browserOptions, artifactDirectory } from './browser-options.mjs';
+// Linux 的截图需映射到虚拟显示；隐藏/恢复行为另由真实 SSE 生命周期测试覆盖。
 import assert from 'node:assert/strict';
 import { build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
 import { mkdtemp, writeFile, rm, cp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // 真实 App / reducer / store，历史接口只返回隔离夹具，不连接模型或用户后台。
 const root = fileURLToPath(new URL('..', import.meta.url));
-const output = await mkdtemp(join(tmpdir(), 'pilot-thread-scroll-'));
+const output = await mkdtemp(join(artifactDirectory(), 'pilot-thread-scroll-'));
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pilot 历史滚动回归</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js';import {applyEvent,initialThread} from '/src/thread-reducer.js';
 import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
@@ -148,9 +149,9 @@ async function run(page, name) {
 }
 try{
   if(process.argv.includes('--serve')){console.log(url);await new Promise(()=>{});}
-  browser=await chromium.launch({channel:'chrome',headless:true});await run(await browser.newPage(),'chromium');await browser.close();browser=null;
+  browser=await chromium.launch(browserOptions({ headless: true }));await run(await browser.newPage(),'chromium');await browser.close();browser=null;
   if(!process.argv.includes('--web-only')){
-    const main=join(output,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(output,'profile'))});app.whenReady().then(()=>new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}}).loadURL(${JSON.stringify(url)}));`);
+    const main=join(output,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(output,'profile'))});app.whenReady().then(()=>new BrowserWindow({show:process.platform==='linux',webPreferences:{contextIsolation:true,nodeIntegration:false}}).loadURL(${JSON.stringify(url)}));`);
     const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
     electron=await _electron.launch({executablePath:electronBinary(),args:[main],env});await run(await electron.firstWindow(),'electron');
   }

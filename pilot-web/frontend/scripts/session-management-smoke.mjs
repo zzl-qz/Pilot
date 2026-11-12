@@ -1,13 +1,14 @@
+import { browserOptions, artifactDirectory } from './browser-options.mjs';
+// Linux 的截图需映射到虚拟显示；隐藏/恢复行为另由真实 SSE 生命周期测试覆盖。
 import { build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm, cp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
-const output = await mkdtemp(join(tmpdir(), 'pilot-sessions-ui-'));
+const output = await mkdtemp(join(artifactDirectory(), 'pilot-sessions-ui-'));
 const entry = `.sessions-fixture-${process.pid}.html`, file = join(root, entry);
 const projectFolders = ['C:\\工作区\\Pilot', '/workspace/pilot'];
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pilot 会话管理</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
@@ -193,10 +194,10 @@ async function checkTouch(browser, missingAnchor) {
 
 try {
   if(process.argv.includes('--serve')) {console.log(url+'?menu');await new Promise(()=>{});}
-  browser=await chromium.launch({channel:'chrome',headless:true});
+  browser=await chromium.launch(browserOptions({ headless: true }));
   await run(await browser.newPage(),'chromium');
   await checkTouch(browser,false);await checkTouch(browser,true);
   await browser.close();browser=null;
-  const main=join(output,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(output,'profile'))});app.whenReady().then(()=>{const w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
+  const main=join(output,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(output,'profile'))});app.whenReady().then(()=>{const w=new BrowserWindow({show:process.platform==='linux',webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;electron=await _electron.launch({executablePath:electronBinary(),args:[main],env});await run(await electron.firstWindow(),'electron');console.log('Screenshots:',output);
 } finally {await browser?.close();await electron?.close();await new Promise(resolve=>server.httpServer.close(resolve));}

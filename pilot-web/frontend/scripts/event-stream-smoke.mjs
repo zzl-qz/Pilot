@@ -1,13 +1,13 @@
+import { browserOptions, artifactDirectory } from './browser-options.mjs';
 import { createServer } from 'vite';
 import { chromium, _electron } from 'playwright-core';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = fileURLToPath(new URL('..', import.meta.url));
-const output = await mkdtemp(join(tmpdir(), 'pilot-event-ui-'));
+const output = await mkdtemp(join(artifactDirectory(), 'pilot-event-ui-'));
 const streams = new Map(), histories = new Map(), connects = new Map();
 const timings = new Map();
 const frame = event => `event:${event.type}\ndata:${JSON.stringify(event)}\n\n`;
@@ -84,7 +84,7 @@ async function verify(page, id, background) {
 }
 try {
   await server.listen();
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+  browser = await chromium.launch(browserOptions({ headless: true }));
   const page = await browser.newPage(), other = await browser.newPage();
   await verify(page, 'chrome', async hidden => { await (hidden ? other : page).bringToFront(); });
   await browser.close(); browser = null;

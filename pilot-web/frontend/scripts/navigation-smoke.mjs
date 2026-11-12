@@ -1,14 +1,15 @@
+import { browserOptions, artifactDirectory } from './browser-options.mjs';
+// Linux 的截图需映射到虚拟显示；隐藏/恢复行为另由真实 SSE 生命周期测试覆盖。
 import { checkShell } from './shell-cases.mjs';
 import { build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm, cp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
-const output = await mkdtemp(join(tmpdir(), 'pilot-navigation-ui-'));
+const output = await mkdtemp(join(artifactDirectory(), 'pilot-navigation-ui-'));
 const entry = `.navigation-fixture-${process.pid}.html`, file = join(root, entry);
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pilot 对话导航</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js';
@@ -33,7 +34,7 @@ async function checkMultipleWindows(page, name) {
   let peer;
   if (name === 'electron') {
     const opened = electron.waitForEvent('window');
-    await electron.evaluate(({BrowserWindow}, url) => { const child=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});child.loadURL(url); }, url);
+    await electron.evaluate(({BrowserWindow}, url) => { const child=new BrowserWindow({show:process.platform==='linux',webPreferences:{contextIsolation:true,nodeIntegration:false}});child.loadURL(url); }, url);
     peer = await opened;
   } else peer = await page.context().newPage();
   try {
@@ -52,6 +53,8 @@ async function checkMultipleWindows(page, name) {
     await Promise.all([save(page,1),save(peer,3)]);
     for(const tab of [page,peer]) await tab.waitForFunction(()=>document.querySelectorAll('.thread-nav-tick.is-saved').length===2);
     await page.evaluate(()=>{window.testHidden=true;document.dispatchEvent(new Event('visibilitychange'));});
+    // 两窗口操作会转移指针/焦点；删除前重新展开目标提示，不依赖上次 hover 仍然保留。
+    await peer.locator('.thread-nav-tick').nth(3).hover();
     await peer.getByRole('button',{name:'取消书签',exact:true}).click();
     await peer.waitForFunction(()=>document.querySelectorAll('.thread-nav-tick.is-saved').length===1);
     assert.equal(await page.locator('.thread-nav-tick.is-saved').count(),2,'后台保留上次快照，停止轮询');
@@ -63,6 +66,10 @@ async function checkMultipleWindows(page, name) {
     for(const tab of [page,peer]) await tab.waitForFunction(()=>document.querySelectorAll('.thread-nav-tick.is-saved').length===0);
     await page.keyboard.press('Escape');
     console.log(name+': PASS two windows / concurrent bookmarks / background wake');
+  } catch (error) {
+    await Promise.allSettled([page.screenshot({path:join(output,`${name}-bookmarks-main-failed.png`)}),
+      peer.screenshot({path:join(output,`${name}-bookmarks-peer-failed.png`)})]);
+    throw error;
   } finally { await peer.close(); }
 }
 
@@ -212,9 +219,9 @@ async function checkMenuFallback(browser, capability) {
 
 try {
   if(process.argv.includes('--serve')){console.log(url);await new Promise(()=>{});}
-  browser=await chromium.launch({channel:'chrome',headless:true});const context=await browser.newContext();await run(await context.newPage(),'chromium');
+  browser=await chromium.launch(browserOptions({ headless: true }));const context=await browser.newContext();await run(await context.newPage(),'chromium');
   for (const capability of ['anchor','popover']) await checkMenuFallback(browser,capability);
   await browser.close();browser=null;
-  const main=join(output,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(output,'profile'))});app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
+  const main=join(output,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(output,'profile'))});app.whenReady().then(()=>{let w=new BrowserWindow({show:process.platform==='linux',webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;electron=await _electron.launch({executablePath:electronBinary(),args:[main],env});await run(await electron.firstWindow(),'electron');console.log('Screenshots:',output);
 } finally {await browser?.close();await electron?.close();await new Promise(resolve=>server.httpServer.close(resolve));}

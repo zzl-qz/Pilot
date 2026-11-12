@@ -1,16 +1,16 @@
+import { browserOptions, artifactDirectory } from './browser-options.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium, _electron } from 'playwright-core';
 import { prepareDevelopmentHost } from '../../../pilot-desktop/brand-host.mjs';
 import { mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // 隔离的只读 HTTP/SSE 后端，使用真实 App、store、api 与桌面主进程，不调用模型。
 const root = fileURLToPath(new URL('..', import.meta.url));
 const desktopRoot = fileURLToPath(new URL('../../../pilot-desktop', import.meta.url));
-const output = await mkdtemp(join(tmpdir(), 'pilot-workbench-refresh-'));
+const output = await mkdtemp(join(artifactDirectory(), 'pilot-workbench-refresh-'));
 const calls = [], streams = new Set();
 let revision = 0, fail = false;
 const workspace = '/workspace/pilot';
@@ -138,7 +138,7 @@ async function run(page, name) {
   console.log(`${name}: PASS HTTP/SSE 同步、附件/草稿/滚动保留、失败重试、快捷键、重载恢复、存储/输入法边界、真实轮询、三种宽度`);
 }
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+  browser = await chromium.launch(browserOptions({ headless: true }));
   await run(await browser.newPage(), 'chromium'); await browser.close(); browser = null;
   const env = { ...process.env, PILOT_URL: url, PILOT_BROWSER_HOME: join(output, 'browser') };
   delete env.ELECTRON_RUN_AS_NODE; delete env.PILOT_DESKTOP_SMOKE;

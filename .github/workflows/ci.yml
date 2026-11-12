@@ -251,26 +251,18 @@ jobs:
           xvfb-run -a node pilot-web/frontend/scripts/p1-smoke.mjs --production
           xvfb-run -a node pilot-web/frontend/scripts/schedule-smoke.mjs --production
           xvfb-run -a node pilot-web/frontend/scripts/notification-smoke.mjs
-          xvfb-run -a node pilot-web/frontend/scripts/event-stream-smoke.mjs
-          xvfb-run -a node pilot-web/frontend/scripts/composer-smoke.mjs
-          xvfb-run -a node pilot-web/frontend/scripts/navigation-smoke.mjs
-          xvfb-run -a node pilot-web/frontend/scripts/workbench-refresh-smoke.mjs
+          xvfb-run -a node pilot-web/frontend/scripts/verify-migration.mjs --state-sync
           xvfb-run -a node pilot-web/frontend/scripts/interaction-smoke.mjs
           xvfb-run -a node pilot-web/frontend/scripts/model-discovery-smoke.mjs
-          xvfb-run -a node pilot-web/frontend/scripts/session-management-smoke.mjs
       - name: Web and desktop UI regressions (Windows and macOS)
         if: runner.os != 'Linux'
         run: |
           node pilot-web/frontend/scripts/p1-smoke.mjs --production
           node pilot-web/frontend/scripts/schedule-smoke.mjs --production
           node pilot-web/frontend/scripts/notification-smoke.mjs
-          node pilot-web/frontend/scripts/event-stream-smoke.mjs
-          node pilot-web/frontend/scripts/composer-smoke.mjs
-          node pilot-web/frontend/scripts/navigation-smoke.mjs
-          node pilot-web/frontend/scripts/workbench-refresh-smoke.mjs
+          node pilot-web/frontend/scripts/verify-migration.mjs --state-sync
           node pilot-web/frontend/scripts/interaction-smoke.mjs
           node pilot-web/frontend/scripts/model-discovery-smoke.mjs
-          node pilot-web/frontend/scripts/session-management-smoke.mjs
       - name: Preserve host verification reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -278,6 +270,7 @@ jobs:
           name: desktop-host-${{ matrix.os }}
           retention-days: 14
           path: |
+            pilot-web/frontend/.tmp-check/migration/**
             pilot-desktop/out/host-report/**
             pilot-mobile/bridge/build/reports/**
             pilot-mobile/transport/build/reports/**

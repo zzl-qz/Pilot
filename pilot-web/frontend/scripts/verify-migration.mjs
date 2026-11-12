@@ -8,23 +8,30 @@ const repo = resolve(root, '../..');
 const args = process.argv.slice(2);
 const unitOnly = args.includes('--unit-only');
 const all = args.includes('--all');
+const stateSync = args.includes('--state-sync');
 const selected = args.filter(arg => !arg.startsWith('--'));
 const output = resolve(root, '.tmp-check', 'migration', new Date().toISOString().replace(/[:.]/g, '-'));
 await mkdir(output, { recursive: true });
-const report = { platform: process.platform, node: process.version, startedAt: new Date().toISOString(), checks: [], success: false };
+const report = { platform: process.platform, arch: process.arch, node: process.version,
+  suite: stateSync ? 'state-sync' : unitOnly ? 'unit' : 'migration',
+  browser: process.env.PILOT_TEST_CHROMIUM_EXECUTABLE || 'chrome',
+  startedAt: new Date().toISOString(), checks: [], success: false };
 async function run(name, argv, cwd = root) {
   const started = Date.now();
   let log = '';
+  const artifacts = join(output, name + '-artifacts');
+  await mkdir(artifacts, { recursive: true });
   console.log(`开始：${name}`);
   const code = await new Promise((accept, reject) => {
-    const child = spawn(process.execPath, argv, { cwd, env: { ...process.env, PILOT_SKIP_DEPS_ASK: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, argv, { cwd, env: { ...process.env,
+      PILOT_SKIP_DEPS_ASK: '1', PILOT_TEST_ARTIFACTS_DIR: artifacts }, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', chunk => { log += chunk; });
     child.stderr.on('data', chunk => { log += chunk; });
     child.once('error', reject);
     child.once('exit', (status, signal) => accept(signal ? 1 : status ?? 1));
   });
   await writeFile(join(output, name + '.log'), log);
-  report.checks.push({ name, code, seconds: (Date.now() - started) / 1000 });
+  report.checks.push({ name, code, seconds: (Date.now() - started) / 1000, artifacts: name + '-artifacts' });
   await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2));
   if (code !== 0) { console.error(log.slice(-16000)); throw new Error(`${name} 未通过，报告：${output}`); }
   console.log(`通过：${name}（${((Date.now() - started) / 1000).toFixed(1)} 秒）`);
@@ -39,7 +46,8 @@ try {
     await run('typecheck-and-build', ['scripts/check.mjs']);
     const desktopTests = (await readdir(resolve(repo, 'pilot-desktop'))).filter(name => name.endsWith('.test.mjs')).sort().map(name => resolve(repo, 'pilot-desktop', name));
     await run('desktop-units', ['--test', ...desktopTests]);
-    const smoke = all ? (await readdir(join(root, 'scripts'))).filter(name => name.endsWith('-smoke.mjs') && !name.includes('-package-')).sort()
+    const smoke = stateSync ? ['navigation', 'composer', 'event-stream', 'workbench-refresh', 'session-management', 'thread-scroll'].map(name => name + '-smoke.mjs')
+      : all ? (await readdir(join(root, 'scripts'))).filter(name => name.endsWith('-smoke.mjs') && !name.includes('-package-')).sort()
       : [...new Set(['navigation-smoke.mjs', 'composer-smoke.mjs', ...selected.map(name => name.endsWith('.mjs') ? name : name + '-smoke.mjs')])];
     for (const script of smoke) {
       if (!/^[a-z0-9-]+\.mjs$/.test(script)) throw new Error('无效的测试脚本名');

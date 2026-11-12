@@ -175,11 +175,16 @@ Web/桌面的主对话、侧边对话、文件批注，以及引导、继续、�
 
 `GET /api/submissions/result` 只核对结果，不重新执行写请求。网络失败、超时、响应体读取失败、服务端 5xx，以及未找到或执行中断的回执都保留为“结果待确认”，不会自动重发。输入区提供查询与核对历史后的手动解除入口；解除本身不会发送草稿。业务执行与回执完成并非同一事务，进程在两者之间崩溃时保留未知结果，不能宣称自动确认业务完成。已知结果的确认请求失败时，本地保留确认凭据，重开、聚焦或联网后只重试确认。浏览器无法持久保存凭据时拒绝发送并提示原因；切换会话后旧提交的迟到成功不得删除新草稿。
 
-书签使用服务端记录作为事实源。同源窗口通过存储事件通知刷新，后台暂停轮询，恢复可见或联网后刷新；通知会作废在途旧响应并合并补读。存储通知不可用时仍有聚焦和定时刷新兜底。旧书签迁移失败保留原始记录，成功后保存备份；分页定位使用动画帧与定时器共同等待布局，避免后台挂起。前端 `store/` 按输入运行、侧边会话、模型配置和面板动作划分，仍共享同一 Zustand/Immer 状态；`components/inspector/` 的各面板独立维护，主 Inspector 只负责装配。
+书签使用服务端记录作为事实源。同源窗口通过存储事件通知刷新，后台暂停轮询，恢复可见或联网后刷新；通知会作废在途旧响应并合并补读。存储通知不可用时仍有聚焦和定时刷新兜底。旧书签迁移失败保留原始记录，成功后保存备份；分页定位使用动画帧与定时器共同等待布局，避免后台挂起。
+
+前端 `store/` 仍共享同一 Zustand/Immer 状态，通过 `StoreContext` 注入访问入口，不反向导入全局 store。`sessions.ts` 管理会话创建、激活和列表；`history.ts` 管理分页、预取及请求失效；`streams.ts` 管理 SSE、帧批处理、重连和面板轮询；`run-controls.ts` 管理带回执的运行入口；`run-state.ts` 管理计划、队列和契约同步。输入草稿、模型配置、侧边会话和面板动作各自独立。`components/inspector/` 的各面板独立维护，主 Inspector 只负责装配。
+
+异步操作返回时核对会话及代次；改变运行状态的查询还须核对正式事件游标和当前运行。切换会话要同时取消订阅、作废历史预取、清理忙碌状态，不能只比较会话 ID。创建请求去重只在同一草稿代次生效；未知消息提交仍沿用持久回执规则。
 
 相关回归命令：
 
 ```sh
+npm --prefix pilot-web/frontend run test:state-sync
 npm --prefix pilot-web/frontend run test:unit
 npm --prefix pilot-web/frontend run check
 npm --prefix pilot-web/frontend run test:composer
@@ -191,6 +196,8 @@ npm --prefix pilot-web/frontend run test:sessions
 sh mvnw -B -ntp -pl pilot-core,pilot-server -DskipFrontend=true verify
 sh mvnw -B -ntp -pl pilot-server -DskipFrontend=true -Dtest=SubmissionControllerTest,SessionApiTest,MobileRequestFilterTest,MobileReceiptControllerTest,MobileReceiptStoreTest,AttachmentBodyLimitFilterTest,MessageLibraryTest test
 ```
+
+`test:state-sync` 串行执行前端单测、类型及构建检查、桌面单测，以及导航、输入、SSE、工作台刷新、会话管理和历史滚动六组 Chrome/Electron 回归。报告、日志和界面产物统一保存在 `pilot-web/frontend/.tmp-check/migration/`，三平台 CI 会保留失败结果。默认使用已安装的 Chrome；ARM Linux 等环境可通过 `PILOT_TEST_CHROMIUM_EXECUTABLE` 指定 Chromium 可执行文件，路径直接传给浏览器启动接口。Linux 虚拟显示测试使用 `xvfb-run -a`，需要正常的桌面运行库及 Chromium 沙箱支持，不代表物理桌面或系统休眠已验证。
 
 2026-11-11 本轮验证：macOS Java 完整验证 **1,474 项通过、16 项按条件跳过**；前端 **417 项**、桌面 **41 项**通过，TypeScript 与生产构建通过；Android JVM **58 项**与 lint 强制重新执行通过（未使用任务缓存）。Chrome/Electron 实际进程覆盖输入、断线刷新且不重发、侧边对话、模型保存、会话切换、书签双窗口并发、旧数据迁移失败/重试、跨两页定位，以及本地 HTTP/SSE 工作台刷新、原生菜单与 WebContentsView。导航的后台可见性和暂停帧是模拟测试，桌面刷新包含实际窗口和嵌入浏览器；不能据此推断操作系统休眠或物理断网均已验证。Linux Java 25 容器完成 **57 项**回执、附件限额、消息接口及 SQLite 书签重点测试。Windows 实机与 Linux 桌面本轮未运行，相关浏览器回归已补入三平台 CI；配置 CI 不代表远程任务已执行。测试使用本地服务和模拟 API，不调用外部模型。
 

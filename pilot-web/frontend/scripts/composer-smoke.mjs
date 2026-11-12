@@ -1,14 +1,15 @@
+import { browserOptions, artifactDirectory } from './browser-options.mjs';
+// Linux 的截图需映射到虚拟显示；隐藏/恢复行为另由真实 SSE 生命周期测试覆盖。
 import { once } from 'node:events';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
 import { createServer } from 'vite';
 import { chromium, _electron } from 'playwright-core';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
-const temp = await mkdtemp(join(tmpdir(), 'pilot-composer-'));
+const temp = await mkdtemp(join(artifactDirectory(), 'pilot-composer-'));
 const server = await createServer({ configFile: false, root, publicDir: '../src/main/resources/static', server: { host: '127.0.0.1', port: 0, hmr: false, proxy: {} }, plugins: [{ name: 'composer-fixture', configureServer(server) {
   server.middlewares.use('/__composer', async (_req, res) => {
     res.setHeader('Content-Type', 'text/html');
@@ -173,9 +174,9 @@ try {
   const listening = once(server.httpServer, 'listening');
   server.httpServer.listen(0, '127.0.0.1');
   await listening; url=`http://127.0.0.1:${server.httpServer.address().port}/__composer`;
-  browser=await chromium.launch({channel:'chrome',headless:true}); await run(await browser.newPage(),'chromium'); await browser.close(); browser=null;
+  browser=await chromium.launch(browserOptions({ headless: true })); await run(await browser.newPage(),'chromium'); await browser.close(); browser=null;
   const main=join(temp,'main.cjs');
-  await writeFile(main,`const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
+  await writeFile(main,`const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>{let w=new BrowserWindow({show:process.platform==='linux',webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
   const env={...process.env}; delete env.ELECTRON_RUN_AS_NODE;
   electron=await _electron.launch({executablePath:electronBinary(),args:[main],env});
   await run(await electron.firstWindow(),'electron');
@@ -184,7 +185,7 @@ try {
     const pasteShortcut = process.platform === 'darwin' ? 'Meta+v' : 'Control+v';
     const file = join(temp, 'native-clipboard.txt'); await writeFile(file, 'native clipboard test');
     await electron.evaluate(async ({clipboard, ClipboardItem}) => {
-      globalThis.savedClipboard = await Promise.all((await clipboard.read()).map(async item =>
+      globalThis.savedClipboard = await Promise.all((await clipboard.read()).filter(item => item.types.length > 0).map(async item =>
         new ClipboardItem(Object.fromEntries(await Promise.all(item.types.map(async type => [type, await item.getType(type)]))))));
     });
     try {
@@ -197,10 +198,33 @@ try {
       await page.locator('#input-flow').focus(); await page.keyboard.press(pasteShortcut);
       await page.waitForFunction(()=>document.querySelector('[data-chip="attachment"]')?.textContent.includes('native-clipboard.txt'));
       console.log(`electron: PASS native ${process.platform} file clipboard + ${pasteShortcut}`);
-      browser=await chromium.launch({channel:'chrome',headless:false});
-      const web=await browser.newPage(); await web.goto(url); await web.locator('#input-flow').focus(); await web.keyboard.press(pasteShortcut);
-      await web.waitForFunction(()=>document.querySelector('[data-chip="attachment"]')?.textContent.includes('native-clipboard.txt'));
-      console.log(`chromium: PASS native ${process.platform} file clipboard + ${pasteShortcut}`);
+      browser=await chromium.launch(browserOptions({ headless: false }));
+      const web=await browser.newPage(); await web.goto(url); await web.bringToFront();
+      await web.evaluate(() => document.addEventListener('paste', event => {
+        const data = event.clipboardData;
+        window.nativePaste = { files: data.files.length, types: [...data.types], uri: data.getData('text/uri-list'),
+          itemFiles: [...data.items].filter(item => item.kind === 'file').map(item => item.getAsFile()?.name).filter(Boolean) };
+      }, { once: true, capture: true }));
+      await web.locator('#input-flow').focus(); await web.keyboard.press(pasteShortcut);
+      await web.waitForFunction(()=>window.nativePaste);
+      const received = await web.evaluate(()=>window.nativePaste);
+      if (received.files > 0 || received.itemFiles.length > 0) {
+        await web.waitForFunction(()=>document.querySelector('[data-chip="attachment"]')?.textContent.includes('native-clipboard.txt'));
+        console.log(`chromium: PASS native ${process.platform} file clipboard + ${pasteShortcut}`);
+      } else {
+        assert(received.types.some(type => ['text/uri-list', 'x-special/gnome-copied-files', 'Files'].includes(type)),
+          '文件剪贴板必须提供真实文件或可识别的文件传输标记');
+        await web.waitForFunction(()=>window.notices.some(text => text.includes('未提供文件内容'))).catch(async error => {
+          throw new Error(error.message + ': ' + JSON.stringify({ received, state: await web.evaluate(() => ({
+            notices, input: document.querySelector('#input-flow').innerText, chips: document.querySelectorAll('[data-chip="attachment"]').length
+          })) }));
+        });
+        assert.equal(await web.locator('[data-chip="attachment"]').count(), 0);
+        assert.equal(await web.locator('#input-flow').innerText(), '');
+        await web.locator('input[type=file]').setInputFiles(file);
+        await web.waitForFunction(()=>document.querySelector('[data-chip="attachment"]')?.textContent.includes('native-clipboard.txt'));
+        console.log(`chromium: PASS native ${process.platform} URI-only clipboard feedback / file picker fallback; direct file paste unavailable`);
+      }
     } finally {
       await electron.evaluate(async ({clipboard}) => {
         if (globalThis.savedClipboard.length) await clipboard.write(globalThis.savedClipboard);
