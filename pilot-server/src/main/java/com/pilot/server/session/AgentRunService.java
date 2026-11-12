@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -521,97 +522,81 @@ public class AgentRunService implements RunStarter {
     public List<QueuedMessage> queuedMessages(String sessionId) {
         Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
-            return queue.stream().map(QueuedMessageCodec::decode)
-                .map(item -> new QueuedMessage(item.content(), item.attachments(), item.imagePositions())).toList();
+            return queueEntries(queue);
         }
+    }
+
+    private static List<QueuedMessage> queueEntries(Deque<String> queue) {
+        return queue.stream().map(QueuedMessageCodec::decode)
+            .map(item -> new QueuedMessage(item.content(), item.attachments(), item.imagePositions())).toList();
     }
 
     @Override
     public boolean editQueued(String sessionId, int index, String text, String revision) {
-        synchronized (inbox(sessionId)) {
-            return (revision == null || RunStarter.queueRevision(queuedMessages(sessionId)).equals(revision))
-                && editQueued(sessionId, index, text);
-        }
+        return updateQueue(sessionId, revision, items -> {
+            if (text == null || text.isBlank() || index < 0 || index >= items.size()) {
+                return false;
+            }
+            // 只改文字，图片附件跟着这条消息走。
+            items.set(index,
+                QueuedMessageCodec.encode(QueuedMessageCodec.decode(items.get(index)).withContent(text.strip())));
+            return true;
+        });
     }
 
     @Override
     public boolean moveQueued(String sessionId, int from, int to, String revision) {
-        synchronized (inbox(sessionId)) {
-            return (revision == null || RunStarter.queueRevision(queuedMessages(sessionId)).equals(revision))
-                && moveQueued(sessionId, from, to);
-        }
+        return updateQueue(sessionId, revision, items -> {
+            if (from < 0 || from >= items.size() || to < 0 || to >= items.size() || from == to) {
+                return false;
+            }
+            items.add(to, items.remove(from));
+            return true;
+        });
     }
 
     @Override
     public boolean removeQueued(String sessionId, int index, String revision) {
-        synchronized (inbox(sessionId)) {
-            return (revision == null || RunStarter.queueRevision(queuedMessages(sessionId)).equals(revision))
-                && removeQueued(sessionId, index);
-        }
+        return updateQueue(sessionId, revision, items -> {
+            if (index < 0 || index >= items.size()) {
+                return false;
+            }
+            items.remove(index);
+            return true;
+        });
     }
 
     @Override
     public boolean editQueued(String sessionId, int index, String text) {
-        if (text == null || text.isBlank()) {
-            return false;
-        }
-        Deque<String> queue = inbox(sessionId);
-        synchronized (queue) {
-            if (index < 0 || index >= queue.size()) {
-                return false;
-            }
-            ArrayList<String> items = new ArrayList<>(queue);
-            // 只改文字，图片附件跟着这条消息走
-            items.set(index,
-                QueuedMessageCodec.encode(QueuedMessageCodec.decode(items.get(index)).withContent(text.strip())));
-            queue.clear();
-            queue.addAll(items);
-            persistQueue(sessionId, queue);
-            return true;
-        }
+        return editQueued(sessionId, index, text, null);
     }
 
     @Override
     public boolean moveQueuedUp(String sessionId, int index) {
-        Deque<String> queue = inbox(sessionId);
-        synchronized (queue) {
-            if (index <= 0 || index >= queue.size()) {
-                return false;
-            }
-            ArrayList<String> items = new ArrayList<>(queue);
-            java.util.Collections.swap(items, index - 1, index);
-            queue.clear();
-            queue.addAll(items);
-            persistQueue(sessionId, queue);
-            return true;
-        }
+        return moveQueued(sessionId, index, index - 1, null);
     }
 
     @Override
     public boolean moveQueued(String sessionId, int from, int to) {
-        Deque<String> queue = inbox(sessionId);
-        synchronized (queue) {
-            if (from < 0 || from >= queue.size() || to < 0 || to >= queue.size() || from == to) {
-                return false;
-            }
-            ArrayList<String> items = new ArrayList<>(queue);
-            items.add(to, items.remove(from));
-            queue.clear();
-            queue.addAll(items);
-            persistQueue(sessionId, queue);
-            return true;
-        }
+        return moveQueued(sessionId, from, to, null);
     }
 
     @Override
     public boolean removeQueued(String sessionId, int index) {
+        return removeQueued(sessionId, index, null);
+    }
+
+    /** 版本核对和持久化在同一把队列锁内完成。 */
+    private boolean updateQueue(String sessionId, String revision, Predicate<ArrayList<String>> edit) {
         Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
-            if (index < 0 || index >= queue.size()) {
+            if (revision != null && !RunStarter.queueRevision(queueEntries(queue)).equals(revision)) {
                 return false;
             }
             ArrayList<String> items = new ArrayList<>(queue);
-            items.remove(index);
+            if (!edit.test(items)) {
+                return false;
+            }
             queue.clear();
             queue.addAll(items);
             persistQueue(sessionId, queue);
@@ -663,19 +648,8 @@ public class AgentRunService implements RunStarter {
     }
 
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
-        boolean continuation, TaskControlService.Requirements requirements) {
-        launch(sessionId, runId, input, attachments, List.of(), continuation, requirements);
-    }
-
-    private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
         List<Integer> imagePositions, boolean continuation, TaskControlService.Requirements requirements) {
         launch(sessionId, runId, input, attachments, imagePositions, continuation, requirements, false, null);
-    }
-
-    private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
-        List<Integer> imagePositions, boolean continuation, TaskControlService.Requirements requirements,
-        boolean regenerate) {
-        launch(sessionId, runId, input, attachments, imagePositions, continuation, requirements, regenerate, null);
     }
 
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
@@ -953,7 +927,7 @@ public class AgentRunService implements RunStarter {
         if (lastUser >= 0) {
             conversations.save(sessionId, history.subList(0, lastUser));
         }
-        launch(sessionId, runId, originalInput, List.of(), List.of(), false, null, task != null);
+        launch(sessionId, runId, originalInput, List.of(), List.of(), false, null, task != null, null);
     }
 
     @Override

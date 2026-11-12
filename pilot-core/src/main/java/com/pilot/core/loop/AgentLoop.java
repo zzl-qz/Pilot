@@ -1,7 +1,6 @@
 package com.pilot.core.loop;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -1223,7 +1222,7 @@ public final class AgentLoop {
     }
 
     private static String signature(List<ToolCall> calls) {
-        return calls.stream().map(call -> call.name() + "(" + canonical(call.args()) + ")")
+        return calls.stream().map(call -> call.name() + "(" + ToolSupport.argumentSignature(call.args(), "null") + ")")
             .collect(Collectors.joining(";"));
     }
 
@@ -1429,18 +1428,5 @@ public final class AgentLoop {
     /** 重试前等待。测试传入立刻返回的实现，避免真的睡几秒。 */
     interface Pause {
         void await(long millis) throws InterruptedException;
-    }
-
-    /** 参数规范化：Map 按 key 排序，保证同样的调用得到同样的签名。 */
-    private static String canonical(Object value) {
-        if (value instanceof Map<?, ?> map) {
-            return map.entrySet().stream().sorted(Comparator.comparing(entry -> String.valueOf(entry.getKey())))
-                .map(entry -> entry.getKey() + "=" + canonical(entry.getValue()))
-                .collect(Collectors.joining(",", "{", "}"));
-        }
-        if (value instanceof List<?> list) {
-            return list.stream().map(AgentLoop::canonical).collect(Collectors.joining(",", "[", "]"));
-        }
-        return String.valueOf(value);
     }
 }
