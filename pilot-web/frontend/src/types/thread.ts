@@ -21,7 +21,7 @@ export interface RunUsage {
   details?: S.RequestTotalsSummary | null;
 }
 export interface Reply { text: string; preview?: string; live: boolean; needsBreak?: boolean; breakReason?: string; committed?: string }
-export interface Thinking { preview?: string; text: string; live: boolean; action: string; startedAt: number; finishedAt?: number | null }
+export interface Thinking { preview?: string; text: string; live: boolean; action: string; startedAt?: number; finishedAt?: number | null }
 interface RowBase { key: string; start: number; end: number; text?: string; detail?: string | null }
 export interface UserRow extends RowBase { type: 'user'; sequence: number | null; text: string; attachments: MessageAttachment[]; imagePositions: number[]; steered?: boolean }
 export interface TurnRow extends RowBase { type: 'turn'; runIds: string[]; tools: ToolRow[]; toolIndex: Record<string, ToolRow>; thinking: Thinking | null; reply: Reply; stats: RunUsage | null; agents: Record<string, AgentView>; requests?: RequestReport[] }

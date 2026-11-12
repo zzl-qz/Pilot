@@ -1,8 +1,12 @@
 /** 工具图标 / 文案 / 状态说明：从旧版原样搬运。 */
 
+export function parseTimestamp(value: string | number | null | undefined): number | undefined {
+  const parsed = typeof value === 'number' ? value : value ? Date.parse(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function eventTimestamp(event: { timestamp?: string | number } | null | undefined) {
-  const parsed = Date.parse(String(event?.timestamp || ''));
-  return Number.isFinite(parsed) ? parsed : Date.now();
+  return parseTimestamp(event?.timestamp) ?? Date.now();
 }
 
 const TOOL_LABELS: Record<string, string> = {

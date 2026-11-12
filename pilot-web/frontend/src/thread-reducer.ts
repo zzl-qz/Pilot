@@ -19,7 +19,7 @@ import {
   trimHistoryWindowAtRows
 } from './lib/history.js';
 import { classifyRunFailure, isEphemeral, planProgressLabel } from './lib/events.js';
-import { eventTimestamp, toolLabel } from './lib/tool-meta.js';
+import { eventTimestamp, parseTimestamp, toolLabel } from './lib/tool-meta.js';
 import { preview, estimateTokens } from './thread-utils.js';
 import { splitAttachmentMarkers } from './lib/attachments.js';
 
@@ -313,7 +313,7 @@ function stampLastUserRow(draft: ReducerState, sequence: number, text: string, a
 }
 
 function replaceReasoning(turn: TurnRow, text: string) {
-  if (!turn.thinking && text) turn.thinking = { text: '', live: true, action: '', startedAt: Date.now() };
+  if (!turn.thinking && text) turn.thinking = { text: '', live: true, action: '' };
   if (!turn.thinking) return;
   const previous = turn.thinking.preview || '';
   if (previous && turn.thinking.text.endsWith(previous)) turn.thinking.text = turn.thinking.text.slice(0, -previous.length);
@@ -324,11 +324,23 @@ function replaceReasoning(turn: TurnRow, text: string) {
 export function restoreLiveOutput(draft: ReducerState, snapshot: LiveOutput) {
   if (snapshot.baseSequence !== draft.thread.cursor) throw new Error('临时输出与正式历史不匹配');
   if (snapshot.runId && draft.runId && snapshot.runId !== draft.runId) throw new Error('临时输出运行不匹配');
-  const turn = openTurn(draft) || (snapshot.text || snapshot.reasoning ? ensureTurn(draft) : null);
+  const startedAt = parseTimestamp(snapshot.reasoningStartedAt);
+  const finishedAt = parseTimestamp(snapshot.reasoningFinishedAt);
+  const turn = openTurn(draft) || (snapshot.text || snapshot.reasoning || startedAt != null ? ensureTurn(draft) : null);
   if (turn) {
     turn.reply.preview = snapshot.text;
     if (snapshot.text) turn.reply.live = true;
     replaceReasoning(turn, snapshot.reasoning);
+    if (startedAt != null) {
+      turn.thinking ??= { text: '', live: true, action: '' };
+      turn.thinking.startedAt = turn.thinking.startedAt == null ? startedAt : Math.min(turn.thinking.startedAt, startedAt);
+      turn.thinking.finishedAt = finishedAt ?? null;
+      turn.thinking.live = finishedAt == null;
+      turn.thinking.action = '';
+    } else if (turn.thinking && snapshot.text) {
+      // 旧服务端没有计时元数据：仍能判断正文已经开始，但不伪造思考时长。
+      turn.thinking.live = false;
+    }
     draft.liveOutputTokens = estimateTokens(turn.reply.text + snapshot.text);
   }
   draft.thread.previewId = snapshot.previewId;
@@ -486,7 +498,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       turn.reply.preview = (turn.reply.preview || '') + (event.payload?.text || '');
       turn.reply.live = true;
       draft.liveOutputTokens = estimateTokens((turn.reply.text || '') + (turn.reply.preview || ''));
-      settleThinking(turn, event);
+      if (event.payload?.text) settleThinking(turn, event);
       record(draft, event, { kind: 'run', tone: 'text', status: '增量', title: null, detail: preview(event.payload?.text || '', 160) });
       break;
     }
@@ -512,9 +524,13 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       }
       const activeTurn = turn || ensureTurn(draft);
       const text = event.payload?.text || '';
+      if (!text) break;
       if (!activeTurn.thinking) {
         activeTurn.thinking = { text: '', live: true, action: '', startedAt: eventTimestamp(event), finishedAt: null };
       }
+      activeTurn.thinking.live = true;
+      activeTurn.thinking.finishedAt = null;
+      activeTurn.thinking.action = '';
       activeTurn.thinking.text += text;
       activeTurn.thinking.preview = (activeTurn.thinking.preview || '') + text;
       break;

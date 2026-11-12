@@ -5,10 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
@@ -19,6 +23,42 @@ import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCancelled;
 
 class LiveOutputTest {
+    @Test
+    void mergedPreviewUsesArrivalTimeRatherThanReconnectFlushTime() throws Exception {
+        var start = Instant.parse("2026-11-12T00:00:00Z");
+        var now = new AtomicReference<>(start);
+        var clock = new Clock() {
+            public ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            public Clock withZone(ZoneId zone) {
+                return Clock.fixed(now.get(), zone);
+            }
+
+            public Instant instant() {
+                return now.get();
+            }
+        };
+        var service = new SessionService(clock, new InMemorySessionRepository(), EventStreamLimits.defaults(),
+            new PreviewLimits(10000, 8192, 131072, 16777216, 8));
+        var id = service.createSession("计时").id();
+        try {
+            var run = service.sendMessage(id, "开始").runId();
+            service.preview(id, run, new AssistantReasoning("起点"));
+            now.set(start.plusSeconds(60));
+            assertEquals(start, snapshot(service, id).reasoningStartedAt());
+            service.preview(id, run, new AssistantPreview("正文"));
+            now.set(start.plusSeconds(120));
+            assertEquals(start.plusSeconds(60), snapshot(service, id).reasoningFinishedAt());
+            service.publish(id, run, new AssistantDelta("正文"));
+            assertEquals(start, snapshot(service, id).reasoningStartedAt());
+            assertEquals(start.plusSeconds(60), snapshot(service, id).reasoningFinishedAt());
+        } finally {
+            service.delete(id);
+        }
+    }
+
     private SessionService service(int bytes, int sessions) {
         return new SessionService(Clock.systemUTC(), new InMemorySessionRepository(), EventStreamLimits.defaults(),
             new PreviewLimits(10000, 8, bytes, bytes * 2L, sessions));

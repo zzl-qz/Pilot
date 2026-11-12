@@ -1,5 +1,6 @@
 package com.pilot.core.session;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -24,6 +25,8 @@ final class LiveOutputCache {
 
         boolean textComplete = true;
         boolean reasoningComplete = true;
+        Instant reasoningStartedAt;
+        Instant reasoningFinishedAt;
 
         State(String runId) {
             this.runId = runId;
@@ -52,6 +55,18 @@ final class LiveOutputCache {
         }
     }
 
+    /** 正文入库只清除临时文字；同一运行的思考起点不能随分段提交丢失。 */
+    synchronized void commit(String sessionId, String runId, Instant timestamp) {
+        State previous = states.get(sessionId);
+        begin(sessionId, runId);
+        State next = states.get(sessionId);
+        if (previous != null && next != null && previous.runId.equals(runId)) {
+            next.reasoningStartedAt = previous.reasoningStartedAt;
+            next.reasoningFinishedAt = previous.reasoningFinishedAt != null ? previous.reasoningFinishedAt
+                : previous.reasoningStartedAt == null ? null : timestamp;
+        }
+    }
+
     synchronized EventEnvelope update(EventEnvelope event) {
         State state = states.get(event.sessionId());
         if (state == null || !state.runId.equals(event.runId())) {
@@ -62,6 +77,16 @@ final class LiveOutputCache {
         boolean reset =
             body ? ((AssistantPreview)event.payload()).reset() : ((AssistantReasoning)event.payload()).reset();
         String part = body ? ((AssistantPreview)event.payload()).text() : ((AssistantReasoning)event.payload()).text();
+        if (!reset && !part.isEmpty()) {
+            if (!body) {
+                if (state.reasoningStartedAt == null) {
+                    state.reasoningStartedAt = event.timestamp();
+                }
+                state.reasoningFinishedAt = null;
+            } else if (state.reasoningStartedAt != null && state.reasoningFinishedAt == null) {
+                state.reasoningFinishedAt = event.timestamp();
+            }
+        }
         StringBuilder target = body ? state.text : state.reasoning;
         if (reset) {
             bytes -= 6L * target.length();
@@ -98,10 +123,11 @@ final class LiveOutputCache {
     synchronized LiveOutput snapshot(String sessionId, String runId, long sequence, long revision, boolean active) {
         State state = states.get(sessionId);
         if (state == null) {
-            return new LiveOutput(runId, "", 0, sequence, revision, "", "", !active);
+            return new LiveOutput(runId, "", 0, sequence, revision, "", "", !active, null, null);
         }
         return new LiveOutput(state.runId, state.id, state.offset, sequence, revision, state.text.toString(),
-            state.reasoning.toString(), state.textComplete && state.reasoningComplete);
+            state.reasoning.toString(), state.textComplete && state.reasoningComplete, state.reasoningStartedAt,
+            state.reasoningFinishedAt);
     }
 
     synchronized long bytes() {

@@ -605,10 +605,11 @@ const ThinkingBlock = memo(function ThinkingBlock({ thinking }: { thinking: Thin
     if (body && live && following.current) body.scrollTop = body.scrollHeight;
   }, [thinking.text, live]);
   const seconds = elapsedSeconds(thinking.startedAt, thinking.finishedAt);
+  const duration = thinking.startedAt == null || (!live && thinking.finishedAt == null) ? '' : ` ${seconds}s`;
   const action = thinking.action ? ` · ${thinking.action}` : '';
   return (
     <details className={`think-block${live ? ' is-live' : ''}`} ref={ref}>
-      <summary>{live ? `思考中 ${seconds}s${action}` : `已思考 ${seconds}s`}</summary>
+      <summary>{live ? `思考中${duration}${action}` : `已思考${duration}`}</summary>
       <div className="think-body" ref={bodyRef} tabIndex={0} onScroll={event => {
         const body = event.currentTarget;
         following.current = body.scrollHeight - body.scrollTop - body.clientHeight < 12;
@@ -630,10 +631,10 @@ function useSecondTick(active: boolean) {
 }
 
 function elapsedSeconds(startedAt?: number, finishedAt?: number | null) {
-  if (!startedAt) {
+  if (startedAt == null || !Number.isFinite(startedAt)) {
     return 0;
   }
-  return Math.max(0, Math.round(((finishedAt || Date.now()) - startedAt) / 1000));
+  return Math.max(0, Math.floor(((finishedAt ?? Date.now()) - startedAt) / 1000));
 }
 
 const AgentGroup = memo(function AgentGroup({ agents }: { agents: Record<string, AgentView> }) {

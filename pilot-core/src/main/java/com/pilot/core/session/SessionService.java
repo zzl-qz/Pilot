@@ -262,7 +262,7 @@ public final class SessionService {
                 return;
             }
             if (reset) {
-                deliverPreview(sessionId, runId, sequence, event);
+                deliverPreview(sessionId, runId, sequence, event, clock.instant());
                 return;
             }
             for (int i = 0; i < text.length();) {
@@ -277,10 +277,10 @@ public final class SessionService {
                         pendingPreviews.decrementAndGet();
                         SessionEvent remaining = event.type() == EventType.ASSISTANT_PREVIEW
                             ? new AssistantPreview(text.substring(i)) : new AssistantReasoning(text.substring(i));
-                        deliverPreview(sessionId, runId, sequence, remaining);
+                        deliverPreview(sessionId, runId, sequence, remaining, clock.instant());
                         return;
                     }
-                    pending = new PendingPreview(runId, event.type(), sequence);
+                    pending = new PendingPreview(runId, event.type(), sequence, clock.instant());
                     previews.put(sessionId, pending);
                     PendingPreview expected = pending;
                     pending.timer = MONITOR.schedule(() -> Thread.ofVirtual().name("pilot-preview-flush").start(() -> {
@@ -306,14 +306,16 @@ public final class SessionService {
         final String runId;
         final EventType type;
         final long sequence;
+        final Instant timestamp;
         final StringBuilder text = new StringBuilder();
         int bytes;
         ScheduledFuture<?> timer;
 
-        PendingPreview(String runId, EventType type, long sequence) {
+        PendingPreview(String runId, EventType type, long sequence, Instant timestamp) {
             this.runId = runId;
             this.type = type;
             this.sequence = sequence;
+            this.timestamp = timestamp;
         }
     }
 
@@ -334,12 +336,12 @@ public final class SessionService {
         discardPreview(sessionId);
         SessionEvent event = pending.type == EventType.ASSISTANT_PREVIEW ? new AssistantPreview(pending.text.toString())
             : new AssistantReasoning(pending.text.toString());
-        deliverPreview(sessionId, pending.runId, pending.sequence, event);
+        deliverPreview(sessionId, pending.runId, pending.sequence, event, pending.timestamp);
     }
 
-    private void deliverPreview(String sessionId, String runId, long sequence, SessionEvent event) {
+    private void deliverPreview(String sessionId, String runId, long sequence, SessionEvent event, Instant timestamp) {
         previewOutputs.incrementAndGet();
-        deliver(sessionId, liveOutputs.update(EventEnvelope.of(sequence, clock.instant(), sessionId, runId, event)),
+        deliver(sessionId, liveOutputs.update(EventEnvelope.of(sequence, timestamp, sessionId, runId, event)),
             EventSize.estimate(event) + 1024);
     }
 
@@ -365,8 +367,10 @@ public final class SessionService {
                 repository.markNotBlank(sessionId);
             }
             EventEnvelope envelope = repository.append(sessionId, runId, clock.instant(), event, status);
-            if (event.type() == EventType.RUN_STARTED || event.type() == EventType.ASSISTANT_DELTA) {
+            if (event.type() == EventType.RUN_STARTED) {
                 liveOutputs.begin(sessionId, runId);
+            } else if (event.type() == EventType.ASSISTANT_DELTA) {
+                liveOutputs.commit(sessionId, runId, envelope.timestamp());
             }
             if (status.terminal()) {
                 liveOutputs.clear(sessionId);
