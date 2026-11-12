@@ -7,7 +7,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
@@ -23,10 +22,9 @@ import com.pilot.core.event.ToolStarted;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.ExecutionPolicy;
 import com.pilot.core.loop.Message;
+import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelClient;
-import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
-import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.multi.AgentProfile;
 import com.pilot.core.multi.AgentProfileCatalog;
 import com.pilot.core.permission.PermissionGate;
@@ -236,50 +234,16 @@ public final class SpawnAgentTool implements Tool {
     private ModelClient boundedClient() {
         int maxRequests = MAX_SUBAGENT_STEPS + 1;
         AtomicInteger requests = new AtomicInteger();
-        return new ModelClient() {
-            @Override
-            public com.pilot.core.model.ModelProfile profile() {
-                return client.profile();
+        return MeteredModelClient.observeUsage(client, () -> {
+            if (requests.incrementAndGet() > maxRequests) {
+                throw new ExecutionPolicy.Stop("MAX_STEPS", "子代理已达到独立模型请求上限 " + maxRequests + "，返回已有证据给父代理收尾。");
             }
-
-            @Override
-            public ModelResponse chat(List<Message> messages, List<ToolDefinition> definitions) {
-                return chat(messages, definitions, null);
+            if (runRequests.incrementAndGet() > MAX_SUBAGENT_REQUESTS_PER_RUN) {
+                throw new ExecutionPolicy.Stop("MAX_STEPS",
+                    "本轮所有子代理累计模型请求已达到 " + MAX_SUBAGENT_REQUESTS_PER_RUN + "，请由父代理合并已有证据并收尾。");
             }
-
-            @Override
-            public ModelResponse chat(List<Message> messages, List<ToolDefinition> definitions,
-                Consumer<String> textDelta) {
-                return chat(messages, definitions, textDelta, null);
-            }
-
-            @Override
-            public ModelResponse chat(List<Message> messages, List<ToolDefinition> definitions,
-                Consumer<String> textDelta, Consumer<String> reasoningDelta) {
-                claimRequest();
-                long started = System.nanoTime();
-                ModelResponse response = null;
-                try {
-                    response = client.chat(messages, definitions, textDelta, reasoningDelta);
-                    return response;
-                } finally {
-                    long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
-                    usageSink.afterRequest(elapsed, response == null ? ModelUsage.unknown() : response.usage());
-                }
-            }
-
-            private void claimRequest() {
-                if (requests.incrementAndGet() > maxRequests) {
-                    throw new ExecutionPolicy.Stop("MAX_STEPS", "子代理已达到独立模型请求上限 " + maxRequests + "，返回已有证据给父代理收尾。");
-                }
-                int total = runRequests.incrementAndGet();
-                if (total > MAX_SUBAGENT_REQUESTS_PER_RUN) {
-                    throw new ExecutionPolicy.Stop("MAX_STEPS",
-                        "本轮所有子代理累计模型请求已达到 " + MAX_SUBAGENT_REQUESTS_PER_RUN + "，请由父代理合并已有证据并收尾。");
-                }
-                usageSink.beforeRequest();
-            }
-        };
+            usageSink.beforeRequest();
+        }, usageSink::afterRequest);
     }
 
     /** 在父工具注册表继续变化前就冻结一份能力快照，并移除所有派生/目标控制工具。 */

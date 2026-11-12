@@ -51,6 +51,7 @@ import com.pilot.core.loop.Cancellation;
 import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.loop.ExecutionPolicy;
 import com.pilot.core.loop.Message;
+import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelRequestScope;
@@ -599,7 +600,8 @@ public class MultiAgentService {
             dataDir.file("traces", dispatch.sessionId() + "-" + agentId + ".jsonl"), objectMapper);
         UsageMeter meter = new UsageMeter();
         ModelClient selected = dispatch.executionClient() == null ? modelClient : dispatch.executionClient();
-        ModelClient metered = usageCounting(selected, dispatch.usageSinkOrNull());
+        UsageSink usage = dispatch.usageSinkOrNull();
+        ModelClient metered = MeteredModelClient.observeUsage(selected, usage::beforeRequest, usage::afterRequest);
         ModelClient budgeted = usageMetering(metered, meter, budget);
         ThreadLocal<String> cancellationReason = new ThreadLocal<>();
         Cancellation cancellation = new Cancellation() {
@@ -734,12 +736,7 @@ public class MultiAgentService {
 
             @Override
             public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
-                return chat(messages, tools, null);
-            }
-
-            @Override
-            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta) {
-                return chat(messages, tools, textDelta, null);
+                return chat(messages, tools, null, null);
             }
 
             @Override
@@ -785,46 +782,6 @@ public class MultiAgentService {
                     throw new ExecutionPolicy.Stop("BUDGET_EXHAUSTED", settlement.stopReason());
                 }
                 return response;
-            }
-        };
-    }
-
-    /**
-     * 把子 Agent 的每次模型请求计入父任务的 usage 归集（与 spawn_agent 同模式）：
-     * 事故熔断拿请求数，run.usage 聚合拿 token 明细。包装只记账不干预响应。
-     */
-    private static ModelClient usageCounting(ModelClient delegate, UsageSink sink) {
-        return new ModelClient() {
-            @Override
-            public ModelProfile profile() {
-                return delegate.profile();
-            }
-
-            @Override
-            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
-                return chat(messages, tools, null);
-            }
-
-            @Override
-            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta) {
-                return chat(messages, tools, textDelta, null);
-            }
-
-            @Override
-            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
-                Consumer<String> reasoningDelta) {
-                sink.beforeRequest();
-                long started = System.nanoTime();
-                ModelResponse response = null;
-                try {
-                    response =
-                        ModelRequestScope.within(ModelRequestScope.current().purpose().isBlank() ? "subagent" : null,
-                            null, false, () -> delegate.chat(messages, tools, textDelta, reasoningDelta));
-                    return response;
-                } finally {
-                    long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
-                    sink.afterRequest(elapsed, response == null ? ModelUsage.unknown() : response.usage());
-                }
             }
         };
     }

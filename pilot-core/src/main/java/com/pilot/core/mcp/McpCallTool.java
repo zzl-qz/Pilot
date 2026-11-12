@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.pilot.core.loop.Attachment;
 import com.pilot.core.tool.Availability;
-import com.pilot.core.tool.CreateFileTool.Prompted;
+import com.pilot.core.tool.PromptedTool;
 import com.pilot.core.tool.ToolArtifacts;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolSupport;
@@ -26,7 +26,7 @@ import tools.jackson.databind.JsonNode;
  * <p>只读放行依赖绑定当前进程的用户级本地策略。服务器的 {@code readOnlyHint} 默认不可信；
  * 该策略影响 Pilot 权限判定，不提供操作系统隔离。
  */
-public final class McpCallTool extends Prompted {
+public final class McpCallTool extends PromptedTool {
     private static final int MAX_TEXT_CHARS = 30_000;
     static final long MAX_IMAGE_BYTES = 5L * 1024 * 1024;
     private static final int MAX_IMAGES = 8;

@@ -81,49 +81,6 @@ public final class CreateFileTool extends PromptedTool implements WritesFiles {
 
     @Override
     public String changedPath(ToolCall call) {
-        String rawPath = ToolSupport.stringArg(call == null ? null : call.args(), "path");
-        if (rawPath == null) {
-            return null;
-        }
-        try {
-            return paths.display(paths.resolve(rawPath));
-        } catch (RuntimeException e) {
-            return null;
-        }
-    }
-
-    /** 供其他包中的工具复用相同的声明。 */
-    public abstract static class Prompted extends PromptedTool {
-        protected Prompted(String name) {
-            super(name);
-        }
-    }
-}
-
-/** 使用提示词资源描述、默认具有副作用的工具。 */
-abstract class PromptedTool implements Tool {
-    private final String name;
-
-    PromptedTool(String name) {
-        this.name = name;
-    }
-
-    @Override
-    public String name() {
-        return name;
-    }
-
-    @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
-    public boolean readOnly() {
-        return false;
-    }
-
-    protected static Map<String, Object> objectSchema(Map<String, Object> properties, List<String> required) {
-        return Map.of("type", "object", "properties", properties, "required", required, "additionalProperties", false);
+        return ToolSupport.changedWorkspacePath(paths, call);
     }
 }

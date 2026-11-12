@@ -1,0 +1,28 @@
+{
+  "commit": "87fd02b8821ba6123d2d94936f04fe3a87766da4",
+  "date": "2026-11-12",
+  "sourceLines": {
+    "scope": "pilot-core/src/main、pilot-server/src/main、pilot-web/frontend/src、pilot-desktop、pilot-mobile 下 Git 跟踪的 Java、TypeScript、JavaScript、CSS 和 Kotlin 文件。排除测试、冒烟脚本、scripts 目录及未跟踪产物。",
+    "pilot-core": 28329,
+    "pilot-server": 35420,
+    "pilot-web": 33258,
+    "pilot-desktop": 1634,
+    "pilot-mobile": 3770,
+    "total": 102411
+  },
+  "verification": {
+    "platform": "macOS arm64",
+    "java": "25.0.5",
+    "node": "22.23.1",
+    "maven": {"command": "sh mvnw -B -ntp verify", "passed": 1561, "skipped": 17, "failed": 0},
+    "frontendUnit": {"command": "npm --prefix pilot-web/frontend run test:unit", "passed": 456, "failed": 0},
+    "desktopUnit": {"command": "npm --prefix pilot-desktop test", "passed": 46, "failed": 0},
+    "style": {"command": "npm --prefix pilot-web/frontend run test:style -- --capture-only", "result": "Chrome 通过深浅主题、三种宽度、弹层及触屏操作"},
+    "stateSync": {
+      "command": "npm --prefix pilot-web/frontend run test:state-sync",
+      "passed": ["前端单测", "类型检查与构建", "桌面单测", "导航", "输入框", "事件流", "工作台刷新"],
+      "interruption": "Electron 会话管理场景首次在 Shift+F10 打开菜单时超时",
+      "followUp": "会话管理单独重跑通过，消息滚动单独执行通过，均在本机 Chrome 和 Electron 验证"
+    }
+  }
+}

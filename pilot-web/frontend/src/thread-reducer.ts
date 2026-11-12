@@ -220,6 +220,32 @@ function finishTurnClock(draft: ReducerState, turn: TurnRow | null, event: Event
   }
 }
 
+function settleRun(draft: ReducerState, event: EventMetadata) {
+  const turn = turnToClose(draft, event.runId);
+  draft.lastRunId = event.runId || draft.lastRunId;
+  draft.running = false;
+  draft.cancelling = false;
+  draft.runStartedAt = 0;
+  finishTurnClock(draft, turn, event);
+  if (turn) {
+    turn.reply.live = false;
+    turn.end = event.sequence;
+    settleUnfinishedTools(turn, event);
+  }
+  return turn;
+}
+
+function runResult(event: EventMetadata) {
+  return {
+    key: `result:${event.runId || event.sequence}`,
+    type: 'result' as const,
+    changedFiles: [],
+    runIds: event.runId ? [event.runId] : [],
+    start: event.sequence,
+    end: event.sequence
+  };
+}
+
 /** 正文或工具出来了，思考块就该收起（旧版 settleReasoning），秒数保留。 */
 function settleThinking(turn: TurnRow, event: EventMetadata) {
   if (turn.thinking && turn.thinking.live) {
@@ -649,26 +675,15 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     }
 
     case 'run.completed': {
-      const turn = turnToClose(draft, event.runId);
-      draft.lastRunId = event.runId || draft.lastRunId;
-      draft.running = false;
-      draft.cancelling = false;
-      draft.runStartedAt = 0;
+      const turn = settleRun(draft, event);
       draft.queueHeld = false;
-      finishTurnClock(draft, turn, event);
-      if (turn) {
-        turn.reply.live = false;
-        turn.end = event.sequence;
-        settleUnfinishedTools(turn, event);
-      }
       draft.lastOutcome = 'completed';
+      const result = runResult(event);
       pushRow(draft, {
-        key: `result:${event.runId || event.sequence}`,
-        type: 'result', tone: 'text', title: '执行结束',
+        ...result,
+        tone: 'text', title: '执行结束',
         detail: event.payload?.summary || null,
-        changedFiles: [],
-        runIds: turn?.runIds?.length ? turn.runIds : (event.runId ? [event.runId] : []),
-        start: event.sequence, end: event.sequence
+        runIds: turn?.runIds?.length ? turn.runIds : result.runIds,
       });
       if (live) {
         draft.ui.attentionKind = 'idle';
@@ -679,11 +694,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     }
 
     case 'run.failed': {
-      const turn = turnToClose(draft, event.runId);
-      draft.lastRunId = event.runId || draft.lastRunId;
-      draft.running = false;
-      draft.cancelling = false;
-      draft.runStartedAt = 0;
+      settleRun(draft, event);
       // 传的是失败码：暂停/中断/阻塞都不是「失败」，界面上要区分开并且可继续
       const code = String(event.payload?.code || '');
       const failure = classifyRunFailure(code);
@@ -703,22 +714,13 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         : failure.paused ? '可继续' : failure.interrupted ? '已中断' : failure.cancelled ? '已取消' : '失败');
       const tone = failure.resumable || failure.cancelled ? 'warn' : 'error';
       draft.lastOutcome = failure.outcome || code;
-      finishTurnClock(draft, turn, event);
-      if (turn) {
-        turn.reply.live = false;
-        turn.end = event.sequence;
-        settleUnfinishedTools(turn, event);
-      }
       pushRow(draft, {
-        key: `result:${event.runId || event.sequence}`,
-        type: 'result', tone, title,
+        ...runResult(event),
+        tone, title,
         detail: event.payload?.message || event.payload?.error || null,
-        changedFiles: [],
-        runIds: event.runId ? [event.runId] : [],
         // NEED_INPUT 要的是新信息而不是原样重跑，不给常驻的「继续执行」
         resumable: failure.resumable && code !== 'NEED_INPUT',
         errorCode: code || null,
-        start: event.sequence, end: event.sequence
       });
       if (live) {
         draft.ui.attentionKind = failure.resumable ? 'attention' : 'idle';
@@ -732,25 +734,12 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     }
 
     case 'run.cancelled': {
-      const turn = turnToClose(draft, event.runId);
-      draft.lastRunId = event.runId || draft.lastRunId;
-      draft.running = false;
-      draft.cancelling = false;
-      draft.runStartedAt = 0;
-      finishTurnClock(draft, turn, event);
-      if (turn) {
-        turn.reply.live = false;
-        turn.end = event.sequence;
-        settleUnfinishedTools(turn, event);
-      }
+      settleRun(draft, event);
       pushRow(draft, {
-        key: `result:${event.runId || event.sequence}`,
-        type: 'result', tone: 'warn', title: '运行已取消',
+        ...runResult(event),
+        tone: 'warn', title: '运行已取消',
         detail: event.payload?.reason || null,
-        changedFiles: [],
-        runIds: event.runId ? [event.runId] : [],
         resumable: true,
-        start: event.sequence, end: event.sequence
       });
       draft.queueHeld = true;
       if (live) {
