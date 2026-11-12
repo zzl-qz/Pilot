@@ -653,8 +653,30 @@ public final class CommandTaskManager implements AutoCloseable {
 
     private record OwnedProcess(ProcessHandle handle, Instant start) {
         private boolean alive() {
-            return handle.isAlive() && (start == null || handle.info().startInstant().map(start::equals).orElse(false));
+            return isProcessRunning(handle)
+                && (start == null || handle.info().startInstant().map(start::equals).orElse(false));
         }
+    }
+
+    /** Linux 容器的 PID 1 可能暂未回收孤儿；僵尸进程已退出，不能让任务一直停在 STOPPING。 */
+    static boolean isProcessRunning(ProcessHandle handle) {
+        if (!handle.isAlive()) {
+            return false;
+        }
+        if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("linux")) {
+            try {
+                // 内核状态定义：https://docs.kernel.org/filesystems/proc.html
+                String status = Files.readString(Path.of("/proc", Long.toString(handle.pid()), "status"));
+                return !isZombieStatus(status);
+            } catch (IOException | SecurityException ignored) {
+                // 无 procfs 或无权限时保留标准 ProcessHandle 判断，不把未知进程当成已退出。
+            }
+        }
+        return handle.isAlive();
+    }
+
+    static boolean isZombieStatus(String status) {
+        return status.lines().anyMatch(line -> line.matches("State:\\s+Z(?:\\s.*)?"));
     }
 
     /**

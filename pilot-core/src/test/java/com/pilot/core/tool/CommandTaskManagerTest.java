@@ -112,7 +112,7 @@ class CommandTaskManagerTest {
             Thread.sleep(100); // allow the descendant tracker to observe the newly-created child
             assertEquals("STOPPING", manager.stop("session_a", tree.taskId()).status());
             assertEquals("CANCELLED", awaitDone(manager, "session_a", tree.taskId()).status());
-            waitUntil(() -> !ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false));
+            waitUntil(() -> !ProcessHandle.of(childPid).map(CommandTaskManager::isProcessRunning).orElse(false));
             assertFalse(ProcessHandle.of(tree.pid()).map(ProcessHandle::isAlive).orElse(false));
         }
     }
@@ -129,8 +129,19 @@ class CommandTaskManagerTest {
             assertEquals("RUNNING", manager.get("session_a", task.taskId()).status());
             manager.stop("session_a", task.taskId());
             assertEquals("CANCELLED", awaitDone(manager, "session_a", task.taskId()).status());
-            waitUntil(() -> !ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false));
+            waitUntil(() -> !ProcessHandle.of(childPid).map(CommandTaskManager::isProcessRunning).orElse(false));
         }
+    }
+
+    @Test
+    void linuxZombieStateIsExitedButStoppedOrUnknownProcessesRemainLive() {
+        assertTrue(CommandTaskManager.isZombieStatus("Name:\tjava\nState:\tZ (zombie)\nPid:\t42\n"));
+        for (String state : List.of("R (running)", "S (sleeping)", "T (stopped)", "D (disk sleep)", "?")) {
+            assertFalse(CommandTaskManager.isZombieStatus("Name:\tZ\nState:\t" + state + "\n"));
+        }
+        assertFalse(CommandTaskManager.isZombieStatus(""));
+        assertFalse(CommandTaskManager.isZombieStatus("Name: State: Z\n"));
+        assertTrue(CommandTaskManager.isProcessRunning(ProcessHandle.current()));
     }
 
     @Test
