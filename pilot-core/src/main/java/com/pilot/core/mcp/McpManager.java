@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
@@ -34,6 +35,7 @@ public final class McpManager implements AutoCloseable {
     private final Supplier<String> extraPath;
     private final Map<String, McpClient> clients = new ConcurrentHashMap<>();
     private final Map<String, String> failures = new ConcurrentHashMap<>();
+    private boolean closed;
 
     /**
      * @param userConfig 用户级配置文件，可为 {@code null}
@@ -48,7 +50,7 @@ public final class McpManager implements AutoCloseable {
         this.extraPath = extraPath == null ? () -> "" : extraPath;
     }
 
-    /** 某个工作区当前配置的全部服务器（按名字排序）。配置文件每次现读，改完立即生效。 */
+    /** 某个工作区当前配置的全部服务器（按名字排序）。配置文件每次现读；已启动进程的启动配置变化须重启服务。 */
     public Map<String, McpServerConfig> servers(Path workspace) {
         Map<String, McpServerConfig> merged = new java.util.TreeMap<>();
         if (userConfig != null) {
@@ -62,9 +64,32 @@ public final class McpManager implements AutoCloseable {
         return !servers(workspace).isEmpty();
     }
 
+    record Selection(McpServerConfig config, String extraPath, McpClient client) {
+    }
+
+    Selection selection(Path workspace, String server) {
+        Map<String, McpServerConfig> configs = servers(workspace);
+        McpServerConfig config = configs.get(server);
+        if (configs.values().stream()
+            .anyMatch(value -> value.unsupported() != null && value.unsupported().startsWith("配置文件无法解析"))) {
+            config = new McpServerConfig(server, null, List.of(), Map.of(), "配置文件无法解析，请先修复后再发现工具");
+        }
+        return new Selection(config, Objects.toString(extraPath.get(), ""), clients.get(key(workspace, server)));
+    }
+
+    private static boolean current(Selection selected) {
+        return selected.client() != null && selected.config() != null && selected.config().usable()
+            && selected.client().matches(selected.config(), selected.extraPath());
+    }
+
+    public boolean configurationChanged(Path workspace, String server) {
+        Selection selected = selection(workspace, server);
+        return selected.client() != null && !current(selected);
+    }
+
     public boolean running(Path workspace, String server) {
-        McpClient client = clients.get(key(workspace, server));
-        return client != null && client.running();
+        Selection selected = selection(workspace, server);
+        return current(selected) && selected.client().running();
     }
 
     /** 上一次启动失败的原因；从未失败或已恢复时为 {@code null}。 */
@@ -72,66 +97,83 @@ public final class McpManager implements AutoCloseable {
         return failures.get(key(workspace, server));
     }
 
-    /** 取得（必要时启动）服务器的客户端。 */
+    /** 只有工具发现入口可以启动进程；实际调用不隐式启动或重新连接。 */
     McpClient client(Path workspace, String server) {
-        McpServerConfig config = servers(workspace).get(server);
+        return client(workspace, server, selection(workspace, server), true);
+    }
+
+    private synchronized McpClient client(Path workspace, String server, Selection expected, boolean allowStart) {
+        if (closed) {
+            throw new McpException("MCP 管理器已关闭");
+        }
+        Selection selected = selection(workspace, server);
+        if (!Objects.equals(selected.config(), expected.config())
+            || !selected.extraPath().equals(expected.extraPath())) {
+            throw new McpException("MCP 配置在权限检查后已变化，请重新发现并确认启动配置");
+        }
+        McpServerConfig config = selected.config();
         if (config == null) {
-            throw new McpException(
-                "没有名为 " + server + " 的 MCP 服务器；已配置：" + String.join(", ", servers(workspace).keySet()));
+            throw new McpException("没有名为 " + server + " 的 MCP 服务器；请先用 mcp_tools 查看配置");
         }
         if (!config.usable()) {
             throw new McpException(
                 "MCP 服务器 " + server + " 无法使用：" + (config.unsupported() == null ? "缺少 command" : config.unsupported()));
         }
         String key = key(workspace, server);
-        synchronized (this) {
-            McpClient existing = clients.get(key);
-            if (existing != null && existing.running()) {
-                return existing;
-            }
-            if (existing != null) {
-                existing.close();
-            }
-            Path log = logDir == null ? null : logDir.resolve(safe(server) + ".log");
-            McpClient fresh = new McpClient(server, config, workspace, log, mapper, extraPath.get());
-            try {
-                fresh.start(START_TIMEOUT);
-                fresh.tools(LIST_TIMEOUT);
-            } catch (McpException e) {
-                fresh.close();
-                clients.remove(key);
-                failures.put(key, e.getMessage());
-                throw e;
-            }
-            failures.remove(key);
-            clients.put(key, fresh);
-            return fresh;
+        McpClient existing = selected.client();
+        if (existing != null && !current(selected)) {
+            throw new McpException("MCP 服务器 " + server + " 配置已变更，旧连接不再接受新调用；请重启 Pilot 服务后生效并重新发现工具");
         }
+        if (!allowStart && (existing == null || existing != expected.client() || !existing.running())) {
+            throw new McpException("MCP 连接状态已变化或尚未启动；请先用 mcp_tools 重新发现并按权限确认，未执行本次调用");
+        }
+        if (existing != null && existing.running()) {
+            return existing;
+        }
+        if (existing != null) {
+            existing.close();
+        }
+        Path log = logDir == null ? null : logDir.resolve(safe(server) + ".log");
+        McpClient fresh = new McpClient(server, config, workspace, log, mapper, selected.extraPath());
+        try {
+            fresh.start(START_TIMEOUT);
+            fresh.tools(LIST_TIMEOUT);
+            Selection after = selection(workspace, server);
+            if (!Objects.equals(after.config(), config) || !after.extraPath().equals(selected.extraPath())) {
+                throw new McpException("MCP 配置在启动期间已变化，已关闭旧进程；请重新发现工具");
+            }
+        } catch (McpException e) {
+            fresh.close();
+            clients.remove(key);
+            failures.put(key, e.getMessage());
+            throw e;
+        }
+        failures.remove(key);
+        clients.put(key, fresh);
+        return fresh;
     }
 
-    /** 已运行服务器声明的工具；没运行时返回空，不会为了列举而启动进程。 */
+    /** 仅返回当前配置对应的缓存；权限检查不能隐式执行远端发现。 */
     public List<McpToolInfo> knownTools(Path workspace, String server) {
-        McpClient client = clients.get(key(workspace, server));
-        if (client == null || !client.running()) {
-            return List.of();
-        }
-        try {
-            return client.tools(LIST_TIMEOUT);
-        } catch (McpException e) {
-            return List.of();
-        }
+        Selection selected = selection(workspace, server);
+        return current(selected) && selected.client().running() ? selected.client().cachedTools() : List.of();
     }
 
     public List<McpToolInfo> tools(Path workspace, String server) {
         return client(workspace, server).tools(LIST_TIMEOUT);
     }
 
+    List<McpToolInfo> tools(Path workspace, String server, Selection expected, boolean allowStart) {
+        return client(workspace, server, expected, allowStart).tools(LIST_TIMEOUT);
+    }
+
     JsonNode call(Path workspace, String server, String tool, Map<String, Object> arguments) {
-        return client(workspace, server).call(tool, arguments, CALL_TIMEOUT);
+        return client(workspace, server, selection(workspace, server), false).call(tool, arguments, CALL_TIMEOUT);
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
+        closed = true;
         clients.values().forEach(McpClient::close);
         clients.clear();
     }
@@ -144,6 +186,9 @@ public final class McpManager implements AutoCloseable {
         JsonNode root;
         try {
             root = McpJson.readConfig(file);
+            if (root == null || !root.isObject() || root.has("mcpServers") && !root.path("mcpServers").isObject()) {
+                throw new McpException("根对象或 mcpServers 结构无效");
+            }
         } catch (IOException | RuntimeException e) {
             result.put("(" + file.getFileName() + ")", new McpServerConfig("(" + file.getFileName() + ")", null,
                 List.of(), Map.of(), "配置文件无法解析：" + e.getMessage()));
@@ -153,6 +198,7 @@ public final class McpManager implements AutoCloseable {
         for (String name : servers.propertyNames()) {
             JsonNode node = servers.path(name);
             if (node.path("disabled").asBoolean(false)) {
+                result.put(name, new McpServerConfig(name, null, List.of(), Map.of(), "已禁用"));
                 continue;
             }
             String command = node.path("command").asString("");

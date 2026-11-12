@@ -28,6 +28,7 @@ public final class McpProcessFixture {
         watchdog.setDaemon(true);
         watchdog.start();
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+        boolean changed = false;
         String line;
         while ((line = reader.readLine()) != null) {
             JsonNode message = mapper.readTree(line);
@@ -39,8 +40,9 @@ public final class McpProcessFixture {
                 Thread.sleep(3500);
                 return;
             } else if (method.equals("tools/list")) {
-                var tool = Map.of("name", message.path("params").has("cursor") ? "second" : "first", "inputSchema",
-                    Map.of("type", "object"), "annotations", Map.of("readOnlyHint", true));
+                var tool =
+                    Map.of("name", changed ? "changed" : message.path("params").has("cursor") ? "second" : "first",
+                        "inputSchema", Map.of("type", "object"), "annotations", Map.of("readOnlyHint", true));
                 if (mode.equals("cycle") || mode.equals("pages") && !message.path("params").has("cursor")) {
                     reply(mapper, message, Map.of("tools", List.of(tool), "nextCursor", "next"));
                 } else {
@@ -48,6 +50,11 @@ public final class McpProcessFixture {
                 }
             } else if (method.equals("tools/call")) {
                 Files.writeString(marker, Long.toString(ProcessHandle.current().pid()));
+                if (mode.equals("change")) {
+                    changed = true;
+                    System.out.println("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}");
+                    System.out.flush();
+                }
                 if (mode.equals("oversize")) {
                     System.out.print("x".repeat(8 * 1024 * 1024 + 1));
                     System.out.flush();
@@ -64,7 +71,8 @@ public final class McpProcessFixture {
                     Thread.sleep(3500);
                     return;
                 }
-                reply(mapper, message, Map.of("content", List.of(Map.of("type", "text", "text", "ok"))));
+                reply(mapper, message, Map.of("content",
+                    List.of(Map.of("type", "text", "text", System.getenv().getOrDefault("MCP_VALUE", "ok")))));
             }
         }
     }

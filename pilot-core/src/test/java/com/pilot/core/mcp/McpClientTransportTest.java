@@ -42,6 +42,16 @@ class McpClientTransportTest {
     }
 
     @Test
+    void listChangedNotificationInvalidatesCachedAnnotationsAndSchemas() {
+        try (McpClient client = client("change")) {
+            assertEquals("first", client.tools(Duration.ofSeconds(2)).getFirst().name());
+            client.call("first", Map.of(), Duration.ofSeconds(2));
+            assertTrue(client.cachedTools().isEmpty());
+            assertEquals("changed", client.tools(Duration.ofSeconds(2)).getFirst().name());
+        }
+    }
+
+    @Test
     void paginatedDiscoveryReturnsTheCompleteList() {
         try (McpClient client = client("pages")) {
             assertEquals(List.of("first", "second"),

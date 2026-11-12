@@ -98,6 +98,7 @@ class McpToolsTest {
 
     @Test
     void callsToolsAndConvertsContent() throws IOException {
+        listing.execute(Map.of("server", "fake"));
         assertEquals("echo:hi",
             calling.execute(Map.of("server", "fake", "tool", "echo", "arguments", Map.of("text", "hi"))));
 

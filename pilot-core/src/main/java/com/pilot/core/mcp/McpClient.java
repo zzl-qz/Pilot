@@ -58,6 +58,7 @@ final class McpClient implements AutoCloseable {
     private volatile Process process;
     private volatile OutputStream stdin;
     private volatile List<McpToolInfo> tools;
+    private final AtomicLong toolsRevision = new AtomicLong();
 
     McpClient(String name, McpServerConfig config, Path workdir, Path logFile, ObjectMapper mapper, String extraPath) {
         this.name = name;
@@ -71,6 +72,15 @@ final class McpClient implements AutoCloseable {
     boolean running() {
         Process current = process;
         return !closed.get() && current != null && current.isAlive();
+    }
+
+    boolean matches(McpServerConfig current, String path) {
+        return config.equals(current) && extraPath.equals(path == null ? "" : path);
+    }
+
+    List<McpToolInfo> cachedTools() {
+        List<McpToolInfo> current = tools;
+        return current == null ? List.of() : current;
     }
 
     void start(Duration timeout) {
@@ -122,6 +132,7 @@ final class McpClient implements AutoCloseable {
         if (cached != null) {
             return cached;
         }
+        long revision = toolsRevision.get();
         List<McpToolInfo> all = new ArrayList<>();
         long deadline = deadline(timeout);
         long bytes = 0;
@@ -151,8 +162,14 @@ final class McpClient implements AutoCloseable {
             }
             cursor = result.path("nextCursor").asString("");
             if (cursor.isBlank()) {
-                tools = List.copyOf(all);
-                return tools;
+                List<McpToolInfo> discovered = List.copyOf(all);
+                synchronized (toolsRevision) {
+                    if (toolsRevision.get() != revision) {
+                        throw new McpException("MCP 工具列表在发现期间已变化，请重新查询");
+                    }
+                    tools = discovered;
+                }
+                return discovered;
             }
             if (!cursors.add(cursor)) {
                 throw new McpException("MCP 工具分页游标重复，未缓存不完整列表");
@@ -294,7 +311,12 @@ final class McpClient implements AutoCloseable {
                     continue;
                 }
                 boolean hasMethod = node.has("method");
-                if (hasMethod && node.has("id")) {
+                if ("notifications/tools/list_changed".equals(node.path("method").asString("")) && !node.has("id")) {
+                    synchronized (toolsRevision) {
+                        toolsRevision.incrementAndGet();
+                        tools = null;
+                    }
+                } else if (hasMethod && node.has("id")) {
                     answerServerRequest(node);
                 } else if (!hasMethod && node.has("id")) {
                     CompletableFuture<JsonNode> future = pending.get(node.path("id").asLong(-1));

@@ -24,6 +24,12 @@ public final class McpToolsTool implements Tool {
     private final McpManager manager;
     private final Path workspace;
 
+    private record Checked(Map<String, Object> args, McpManager.Selection selection, boolean allowStart) {
+    }
+
+    private final ThreadLocal<Checked> checked = new ThreadLocal<>();
+    private final ThreadLocal<Checked> approval = new ThreadLocal<>();
+
     public McpToolsTool(McpManager manager, Path workspace) {
         this.manager = manager;
         this.workspace = workspace.toAbsolutePath().normalize();
@@ -57,7 +63,31 @@ public final class McpToolsTool implements Tool {
     @Override
     public boolean readOnly(Map<String, Object> args) {
         String server = ToolSupport.stringArg(args, "server");
-        return server == null || manager.running(workspace, server) || !manager.servers(workspace).containsKey(server);
+        if (server == null) {
+            checked.remove();
+            return true;
+        }
+        McpManager.Selection selected = manager.selection(workspace, server);
+        boolean readOnly = selected.config() == null || selected.client() != null && selected.client().running()
+            && selected.client().matches(selected.config(), selected.extraPath());
+        checked.set(new Checked(args, selected, !readOnly));
+        return readOnly;
+    }
+
+    @Override
+    public String approvalDescription(Map<String, Object> args) {
+        String server = ToolSupport.stringArg(args, "server");
+        if (server == null) {
+            return null;
+        }
+        Checked current = checked.get();
+        if (current == null || current.args() != args) {
+            current = new Checked(args, manager.selection(workspace, server), true);
+        }
+        approval.set(current);
+        McpServerConfig config = current.selection().config();
+        return config == null ? "MCP 服务器配置不存在" : "发现 MCP 服务器 " + server + "；必要时启动命令：" + config.command() + " "
+            + String.join(" ", config.args()) + "；环境变量名：" + config.env().keySet();
     }
 
     @Override
@@ -84,7 +114,14 @@ public final class McpToolsTool implements Tool {
         }
         List<McpToolInfo> tools;
         try {
-            tools = manager.tools(workspace, server);
+            Checked inspected = checked.get();
+            Checked approved = approval.get();
+            checked.remove();
+            approval.remove();
+            Checked guard = approved != null && approved.args() == args ? approved
+                : inspected != null && inspected.args() == args ? inspected : null;
+            tools = guard == null ? manager.tools(workspace, server)
+                : manager.tools(workspace, server, guard.selection(), guard.allowStart());
         } catch (McpException e) {
             return "ERROR: " + e.getMessage();
         }
@@ -129,6 +166,8 @@ public final class McpToolsTool implements Tool {
             String status;
             if (!config.usable()) {
                 status = "不可用：" + (config.unsupported() == null ? "缺少 command" : config.unsupported());
+            } else if (manager.configurationChanged(workspace, config.name())) {
+                status = "配置已变更，重启 Pilot 服务后生效；旧连接不再接受新调用";
             } else if (manager.running(workspace, config.name())) {
                 status = "已启动，" + manager.knownTools(workspace, config.name()).size() + " 个工具";
             } else if (manager.failure(workspace, config.name()) != null) {
