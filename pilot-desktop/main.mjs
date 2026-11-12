@@ -2,7 +2,7 @@ import { selectProjectDirectories } from './directory-picker.mjs';
 import { installMicrophonePermissions } from './media-permission.mjs';
 import { workbenchOrigin, workbenchIpc, installWorkbenchNavigation } from './workbench-security.mjs';
 import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, nativeImage, systemPreferences, dialog, clipboard } from 'electron';
-import { createServer } from 'node:http';
+import { startBrowserControl } from './browser-control.mjs';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -56,10 +56,6 @@ let endpointFile = '';
 const recents = [];
 const tabsByContentsId = new Map();
 let pageHooksReady = false;
-
-function shellUrl() {
-  return workbenchUrl;
-}
 
 const workbench = workbenchIpc(ipcMain, () => shell, workbenchUrl);
 
@@ -465,95 +461,31 @@ function detachActive() {
 
 let controlPort = 0;
 
-function readBody(request) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    request.on('data', (chunk) => chunks.push(chunk));
-    request.on('end', () => {
-      if (chunks.length === 0) {
-        resolve({});
-        return;
-      }
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-      } catch (error) {
-        reject(error);
-      }
-    });
-    request.on('error', reject);
-  });
-}
-
-function startControl() {
-  const server = createServer(async (request, response) => {
-    const url = new URL(request.url, 'http://127.0.0.1');
-    if (request.method === 'GET' && url.pathname.startsWith('/marker/')) {
-      const id = decodeURIComponent(url.pathname.slice('/marker/'.length));
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      response.end(`<!doctype html><title>新标签</title><body style="margin:0;background:#111"><p id="ready" data-tab="${id}" hidden>pilot-tab-${id}</p></body>`);
-      return;
+async function startControl() {
+  controlPort = await startBrowserControl(token, {
+    state,
+    open(body) {
+      const tab = ensureTab(body.sessionId || null, { fresh: Boolean(body.fresh), url: body.url || null });
+      return { tabId: tab.id, targetId: tab.view.webContents.getOrCreateDevToolsTargetId(), tabs: state().tabs };
+    },
+    select(body) {
+      selectTab(body.tabId);
+      const tab = tabs.get(body.tabId);
+      if (tab?.sessionId) sessionTabs.set(tab.sessionId, tab.id);
+      return state();
+    },
+    close(body) {
+      closeTab(body.tabId);
+      return state();
+    },
+    emulate(body) {
+      const selected = body.tabId ? [tabs.get(body.tabId)]
+        : body.sessionId ? [...tabs.values()].filter(tab => tab.sessionId === body.sessionId) : [activeTab()];
+      const targets = selected.filter(Boolean);
+      if (!targets.length) return null;
+      for (const tab of targets) emulate(tab, Number(body.width) || 0, Number(body.height) || 0);
+      return { ok: true, emulated: targets[0].emulated || null };
     }
-    if (request.headers['x-pilot-token'] !== token) {
-      response.writeHead(401);
-      response.end('unauthorized');
-      return;
-    }
-    try {
-      if (request.method === 'POST' && url.pathname === '/tabs') {
-        const body = await readBody(request);
-        const tab = ensureTab(body.sessionId || null, { fresh: Boolean(body.fresh), url: body.url || null });
-        response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ tabId: tab.id, targetId: tab.view.webContents.getOrCreateDevToolsTargetId(), tabs: state().tabs }));
-        return;
-      }
-      if (request.method === 'POST' && url.pathname === '/tabs/select') {
-        const body = await readBody(request);
-        selectTab(body.tabId);
-        const tab = tabs.get(body.tabId);
-        if (tab?.sessionId) sessionTabs.set(tab.sessionId, tab.id);
-        response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify(state()));
-        return;
-      }
-      if (request.method === 'POST' && url.pathname === '/tabs/close') {
-        const body = await readBody(request);
-        closeTab(body.tabId);
-        response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify(state()));
-        return;
-      }
-      if (request.method === 'POST' && url.pathname === '/emulate') {
-        const body = await readBody(request);
-        const selected = body.tabId ? [tabs.get(body.tabId)]
-          : body.sessionId ? [...tabs.values()].filter(tab => tab.sessionId === body.sessionId) : [activeTab()];
-        const targets = selected.filter(Boolean);
-        if (!targets.length) {
-          response.writeHead(404);
-          response.end('浏览器标签不存在');
-          return;
-        }
-        for (const tab of targets) emulate(tab, Number(body.width) || 0, Number(body.height) || 0);
-        response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ ok: true, emulated: targets[0].emulated || null }));
-        return;
-      }
-      if (request.method === 'GET' && url.pathname === '/tabs') {
-        response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify(state()));
-        return;
-      }
-      response.writeHead(404);
-      response.end('not found');
-    } catch (error) {
-      response.writeHead(500);
-      response.end(String(error.message || error));
-    }
-  });
-  return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      controlPort = server.address().port;
-      resolve(server);
-    });
   });
 }
 
@@ -576,10 +508,20 @@ function clearEndpoint() {
   if (endpointFile) rmSync(endpointFile, { force: true });
 }
 
-workbench.handle('pilot-browser-ensure', (_event, sessionId) => {
-  ensureTab(sessionId || null);
-  return state();
-});
+const tabActions = {
+  ensure: sessionId => ensureTab(sessionId || null),
+  new: () => createTab({ url: null, sessionId: null }),
+  close: closeTab,
+  select: selectTab,
+  detach: detachActive,
+  'reset-emulation': () => emulate(activeTab(), 0, 0)
+};
+for (const [name, action] of Object.entries(tabActions)) {
+  workbench.handle('pilot-browser-' + name, (_event, input) => {
+    action(input);
+    return state();
+  });
+}
 workbench.handle('pilot-browser-navigate', (_event, url) => {
   const tab = activeTab() || createTab({ url: null, sessionId: null });
   const next = userPageUrl(url);
@@ -601,22 +543,6 @@ workbench.handle('pilot-browser-go', (_event, action) => {
   else if (action === 'reload') contents.reload();
   else if (action === 'stop') contents.stop();
   return { ok: true };
-});
-workbench.handle('pilot-browser-new', () => {
-  createTab({ url: null, sessionId: null });
-  return state();
-});
-workbench.handle('pilot-browser-close', (_event, id) => {
-  closeTab(id);
-  return state();
-});
-workbench.handle('pilot-browser-select', (_event, id) => {
-  selectTab(id);
-  return state();
-});
-workbench.handle('pilot-browser-detach', () => {
-  detachActive();
-  return state();
 });
 workbench.handle('pilot-browser-menu', (event) => new Promise((resolve) => {
   let settled = false;
@@ -666,10 +592,6 @@ workbench.handle('pilot-browser-pick', () => {
   if (!tab) return { ok: false, error: '没有打开的页面' };
   return pickElement(tab).then((text) => ({ ok: true, text })).catch((error) => ({ ok: false, error: String(error.message || error) }));
 });
-workbench.handle('pilot-browser-reset-emulation', () => {
-  emulate(activeTab(), 0, 0);
-  return state();
-});
 workbench.on('pilot-browser-bounds', (_event, bounds) => {
   const tab = activeTab();
   if (!tab || !shell || shell.isDestroyed()) return;
@@ -708,7 +630,7 @@ let workbenchReady = false;
 function dispatchWorkbenchCommand(command) {
   if (!shell || shell.isDestroyed()) return;
   if (workbenchReady && workbench.current()) workbench.send('pilot-workbench-command', command);
-  else if (!workbench.current()) shell.loadURL(shellUrl()).catch(() => {});
+  else if (!workbench.current()) shell.loadURL(workbenchUrl).catch(() => {});
   else shell.webContents.reloadIgnoringCache();
 }
 function installWorkbenchKeys(contents) {
@@ -842,12 +764,12 @@ app.whenReady().then(async () => {
   });
   installWorkbenchKeys(shell.webContents);
   shell.webContents.on('did-navigate', () => { workbenchReady = false; });
-  installMicrophonePermissions(shell.webContents, shellUrl(), systemPreferences);
+  installMicrophonePermissions(shell.webContents, workbenchUrl, systemPreferences);
   shell.webContents.on('did-fail-load', (_event, code, _desc, _url, isMainFrame) => {
     if (!isMainFrame || code === -3 || smoke || _url?.startsWith('data:')) return;
-    shell.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(offlinePage(shellUrl()))}`).catch(() => {});
+    shell.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(offlinePage(workbenchUrl))}`).catch(() => {});
   });
-  if (!smoke) shell.loadURL(shellUrl()).catch(() => {});
+  if (!smoke) shell.loadURL(workbenchUrl).catch(() => {});
   else shell.loadURL('about:blank');
   writeEndpoint();
   shell.on('closed', () => {

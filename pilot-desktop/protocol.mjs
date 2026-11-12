@@ -13,10 +13,7 @@ export function userPageUrl(input) {
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
   if (!hasScheme) {
-    const host = url.hostname.replace(/^\[|\]$/g, '');
-    const local = host === 'localhost' || host.endsWith('.localhost')
-      || host === '127.0.0.1' || host === '::1' || /^127\.\d+\.\d+\.\d+$/.test(host);
-    if (!local) url.protocol = 'https:';
+    if (!isLoopback(url.hostname)) url.protocol = 'https:';
   }
   return url.href;
 }
@@ -35,9 +32,7 @@ export function agentMayTouchPage(url, desktop) {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
   if (desktop) return true;
-  const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  return host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1'
-    || host === '::1' || /^127\.\d+\.\d+\.\d+$/.test(host);
+  return isLoopback(parsed.hostname);
 }
 
 /** 智能体只能操作这些源。人自己打开的页面不受这一条限制。 */
@@ -49,7 +44,11 @@ export function agentMayOperate(url) {
     return false;
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-  const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  return isLoopback(parsed.hostname);
+}
+
+function isLoopback(hostname) {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
   return host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1'
     || host === '::1' || /^127\.\d+\.\d+\.\d+$/.test(host);
 }
