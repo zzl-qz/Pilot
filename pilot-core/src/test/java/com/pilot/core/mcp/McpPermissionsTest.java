@@ -54,7 +54,8 @@ class McpPermissionsTest {
                 new PolicyPermissionGate(PermissionMode.ASK).check(call, tool).decision());
             assertEquals(PermissionDecision.DENY,
                 new PolicyPermissionGate(PermissionMode.READ_ONLY).check(call, tool).decision());
-            assertEquals(PermissionDecision.ALLOW,
+            // 未获本地信任的调用即使 AUTO 档也要审批：远程工具副作用无法本地回滚（信任模型决策行 6/8）
+            assertEquals(PermissionDecision.ASK,
                 new PolicyPermissionGate(PermissionMode.AUTO).check(call, tool).decision());
         }
     }
