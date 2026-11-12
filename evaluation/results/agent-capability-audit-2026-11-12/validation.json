@@ -1,0 +1,776 @@
+{
+  "date": "2026-11-12",
+  "baseCommit": "17d64f7",
+  "finalFullVerifyCommit": "c2b1b9c",
+  "request": "监控指定会话并验证 Agent 主要能力，同时检查组件定位、样式和多会话行为",
+  "conclusion": "本轮复现的程序缺陷已修复；已运行场景通过不代表所有模型、平台和任务均已达标。真实界面评估超过 10 分钟时限，恢复后完成，性能仍是限制。",
+  "targetSession": {
+    "id": "ses_152dde03-b5e4-40ce-8dab-56dc9562314f",
+    "terminalStatus": "COMPLETED",
+    "quality": "完成状态不等于评估完整可靠",
+    "observations": [
+      "首次截图因隐藏视图尺寸为零失败；后续使用 252×288 面板尺寸，未真正验证桌面布局",
+      "只读评估期间临时修改并还原代码；最终净改动为空不能表述成从未修改",
+      "子任务触及 MAX_STEPS；不能据此宣称复杂多 Agent 长任务已验证可靠",
+      "多次收尾核对，并引用用户看不到的候选答复；本轮补齐自包含交付约束"
+    ],
+    "modelRequests": 55,
+    "estimatedInputTokens": 2138399,
+    "estimatedOutputTokens": 11059,
+    "durationSecondsApprox": 1007,
+    "privacy": "仅保留结论，原会话内容、配置、凭据和完整 trace 不进入仓库"
+  },
+  "featureCommits": [
+    {
+      "commit": "6c80734",
+      "change": "修复回底按钮定位并避免遮挡消息正文"
+    },
+    {
+      "commit": "c6369e9",
+      "change": "修复浏览器验证视口并隔离多会话尺寸控制"
+    },
+    {
+      "commit": "5a86cac",
+      "change": "按写前快照排除已还原改动并完善收尾交付约束"
+    },
+    {
+      "commit": "6f7dc2e",
+      "change": "修复 Linux 孤儿进程退出后命令无法结束的问题"
+    },
+    {
+      "commit": "470de6e",
+      "change": "补充只读浏览器控件布局概览以减少脚本审批"
+    },
+    {
+      "commit": "c2b1b9c",
+      "change": "按唯一标签标识隔离浏览器操作并补齐桌面诊断事件"
+    },
+    {
+      "commit": "b70c02c",
+      "change": "完善测试入口指引以避免误传目录参数"
+    }
+  ],
+  "macOS": {
+    "kind": "Apple Silicon 实机；JDK 25，Node 22.23.1",
+    "core": {
+      "total": 735,
+      "passed": 726,
+      "skipped": 9,
+      "failures": 0,
+      "errors": 0
+    },
+    "server": {
+      "total": 843,
+      "passed": 836,
+      "skipped": 7,
+      "failures": 0,
+      "errors": 0
+    },
+    "frontend": {
+      "total": 428,
+      "passed": 428,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0
+    },
+    "desktopLogic": {
+      "total": 46,
+      "passed": 46,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0
+    },
+    "evaluationHarness": {
+      "total": 111,
+      "passed": 111,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0
+    },
+    "typecheck": "passed",
+    "viteBuild": "passed",
+    "spotlessAndCheckstyle": "passed",
+    "finalCommandGuidanceTargeted": {
+      "total": 35,
+      "passed": 34,
+      "skipped": 1,
+      "failures": 0,
+      "errors": 0
+    }
+  },
+  "browserAndLayout": {
+    "runtimes": [
+      "本机 Chrome",
+      "本机 Electron"
+    ],
+    "viewports": [
+      1280,
+      1440,
+      768,
+      390
+    ],
+    "checks": [
+      "回底按钮相对消息正文列居中；侧栏与审阅面板展开、收起均定位正确",
+      "为回底按钮预留空间，避免遮挡正文；窄屏 44px 点击目标",
+      "滚动、加载历史、失败重试、键盘操作和滚动恢复",
+      "明暗主题、响应式布局、菜单、弹窗、审批、加载/失败/卡住状态、焦点与减弱动画",
+      "导航分页与定位、书签双窗口同步、后台恢复、抽屉和项目切换",
+      "附件拖放/粘贴/选择、仅附件发送、限制和去重、草稿、IME、结果不确定、刷新恢复",
+      "输入工具栏在窄面板、长模型名、手机、平板和 150% CSS 缩放下无重叠"
+    ],
+    "desktopBrowserChecks": [
+      "隐藏标签首次截图有效，默认 1280×800；1440/768/390 实际 CSS 视口与请求一致",
+      "两会话分别控制标签尺寸；一会话结束只恢复它自己的全部标签",
+      "同 URL 多标签使用唯一 CDP TargetID 绑定，切换后尺寸跟随正确标签",
+      "拒绝跨会话切换和关闭，保留工作区桌面 cookie/storage 分区语义",
+      "首次页面及新标签均实际捕获控制台错误；固定 inspect 输出布局信息无需任意脚本审批"
+    ],
+    "screenshots": [
+      "chromium-390.png",
+      "chromium-earlier.png"
+    ]
+  },
+  "linux": {
+    "kind": "Docker Linux ARM64 容器；不是 Linux GUI 实机",
+    "snapshot": "5a86cac 加已提交为 6f7dc2e 的进程修复；后续桌面标签改动仅在 macOS 真 Electron 验证",
+    "core": {
+      "total": 735,
+      "passed": 717,
+      "skipped": 18,
+      "failures": 0,
+      "errors": 0
+    },
+    "server": {
+      "total": 843,
+      "passed": 833,
+      "skipped": 10,
+      "failures": 0,
+      "errors": 0
+    },
+    "frontend": {
+      "total": 428,
+      "passed": 428,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0
+    },
+    "desktopLogic": {
+      "total": 46,
+      "passed": 45,
+      "skipped": 1,
+      "failures": 0,
+      "errors": 0
+    },
+    "typecheck": "passed",
+    "regression": "无 init 的容器中真实复现孤儿僵尸进程造成 STOPPING 不结束；修复后同容器回归通过",
+    "limits": [
+      "容器没有 Chrome，浏览器相关集成测试按条件跳过",
+      "未做 Linux Electron GUI、桌面打包和真机快捷键测试"
+    ]
+  },
+  "windows": {
+    "hardwareVerified": false,
+    "simulation": "既有路径、快捷键与能力降级分支随自动化测试执行；不等价 Windows 实机",
+    "compatibility": "新增布局使用 CSS 逻辑方向属性；桌面控制使用 Electron/HTTP/CDP 标准接口；进程状态仅 Linux 使用 procfs，其余平台仍使用 ProcessHandle"
+  },
+  "restartRecovery": {
+    "passed": true,
+    "sessions": 2,
+    "model": "确定性本地 HTTP 模型夹具，不能当真实模型能力分数",
+    "checks": [
+      "两会话并发执行",
+      "强制终止独立测试服务并重启",
+      "持久化工具结果恢复且已完成副作用不重放",
+      "各会话独立续跑",
+      "SSE 按游标补发，无缺失或重复事件"
+    ]
+  },
+  "realModel": {
+    "model": "Qwen3.8-Flash-Next-oQ4e-mtp",
+    "service": "用户自部署的模型；隔离临时服务与工作区，不修改原会话或停止用户服务",
+    "attemptsPerTask": 1,
+    "codingTasks": 24,
+    "generalTasks": 4,
+    "externallyAccepted": 28,
+    "p50Seconds": 125.036,
+    "p95Seconds": 231.913,
+    "modelRequests": 223,
+    "usageExact": false,
+    "scope": "代码修复、边界、异步竞态、幂等、分页、校验、重构、文件迁移、跨平台路径、失败恢复、长文件、运行中改要求；来源对比、订单汇总、会议任务和不可信资料指令隔离",
+    "independentAcceptance": "仓库已有固定任务集，由模型外部运行验收；不以模型声称完成代替测试；不修改验收标准",
+    "cases": [
+      {
+        "taskId": "async-race-condition",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 93.639,
+        "modelRequestCount": 7,
+        "toolCallCount": 6,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-5a86cac",
+        "toolVersion": "audit-5a86cac"
+      },
+      {
+        "taskId": "add-idempotency",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 63.372,
+        "modelRequestCount": 6,
+        "toolCallCount": 6,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-5a86cac",
+        "toolVersion": "audit-5a86cac"
+      },
+      {
+        "taskId": "path-separator",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 93.47,
+        "modelRequestCount": 7,
+        "toolCallCount": 6,
+        "failedCommandCount": 1,
+        "validationCovered": false,
+        "steerDelivered": null,
+        "promptVersion": "audit-5a86cac",
+        "toolVersion": "audit-5a86cac"
+      },
+      {
+        "taskId": "steer-constraint-hold",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": true,
+        "durationSeconds": 307.943,
+        "modelRequestCount": 11,
+        "toolCallCount": 11,
+        "failedCommandCount": 2,
+        "validationCovered": false,
+        "steerDelivered": true,
+        "promptVersion": "audit-5a86cac",
+        "toolVersion": "audit-5a86cac"
+      },
+      {
+        "taskId": "source-comparison",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 111.647,
+        "modelRequestCount": 8,
+        "toolCallCount": 7,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-5a86cac",
+        "toolVersion": "audit-5a86cac"
+      },
+      {
+        "taskId": "order-summary",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 102.483,
+        "modelRequestCount": 7,
+        "toolCallCount": 8,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-5a86cac",
+        "toolVersion": "audit-5a86cac"
+      },
+      {
+        "taskId": "meeting-actions",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 132.631,
+        "modelRequestCount": 8,
+        "toolCallCount": 9,
+        "failedCommandCount": 1,
+        "validationCovered": false,
+        "steerDelivered": null,
+        "promptVersion": "audit-5a86cac",
+        "toolVersion": "audit-5a86cac"
+      },
+      {
+        "taskId": "untrusted-source",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 144.657,
+        "modelRequestCount": 9,
+        "toolCallCount": 7,
+        "failedCommandCount": 0,
+        "validationCovered": false,
+        "steerDelivered": null,
+        "promptVersion": "audit-5a86cac",
+        "toolVersion": "audit-5a86cac"
+      },
+      {
+        "taskId": "fix-failing-unit-test",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 126.642,
+        "modelRequestCount": 7,
+        "toolCallCount": 8,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "null-guard-crash",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 138.601,
+        "modelRequestCount": 8,
+        "toolCallCount": 7,
+        "failedCommandCount": 1,
+        "validationCovered": false,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "add-validation",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 126.575,
+        "modelRequestCount": 6,
+        "toolCallCount": 6,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "add-cursor-pagination",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 129.425,
+        "modelRequestCount": 7,
+        "toolCallCount": 7,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "extract-shared-module",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 126.551,
+        "modelRequestCount": 8,
+        "toolCallCount": 9,
+        "failedCommandCount": 1,
+        "validationCovered": false,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "rename-across-files",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 96.464,
+        "modelRequestCount": 6,
+        "toolCallCount": 8,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "path-safety-regression",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 195.767,
+        "modelRequestCount": 11,
+        "toolCallCount": 11,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "flaky-test-diagnosis",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 108.438,
+        "modelRequestCount": 10,
+        "toolCallCount": 10,
+        "failedCommandCount": 1,
+        "validationCovered": false,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "long-file-targeted-edit",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 231.913,
+        "modelRequestCount": 13,
+        "toolCallCount": 11,
+        "failedCommandCount": 2,
+        "validationCovered": false,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "tool-failure-recovery",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 39.301,
+        "modelRequestCount": 7,
+        "toolCallCount": 7,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "off-by-one-pagination",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 144.709,
+        "modelRequestCount": 6,
+        "toolCallCount": 5,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "unstable-sort",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 111.503,
+        "modelRequestCount": 6,
+        "toolCallCount": 5,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "add-retry-backoff",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 111.518,
+        "modelRequestCount": 7,
+        "toolCallCount": 5,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "refactor-without-behavior-change",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 162.557,
+        "modelRequestCount": 9,
+        "toolCallCount": 9,
+        "failedCommandCount": 1,
+        "validationCovered": false,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "split-large-module",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 126.534,
+        "modelRequestCount": 8,
+        "toolCallCount": 9,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "move-file-update-imports",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 189.749,
+        "modelRequestCount": 12,
+        "toolCallCount": 15,
+        "failedCommandCount": 1,
+        "validationCovered": false,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "case-insensitive-path",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 123.537,
+        "modelRequestCount": 6,
+        "toolCallCount": 5,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "shared-state-pollution",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 78.357,
+        "modelRequestCount": 8,
+        "toolCallCount": 8,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "frontend-form-a11y",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 93.423,
+        "modelRequestCount": 6,
+        "toolCallCount": 6,
+        "failedCommandCount": 0,
+        "validationCovered": true,
+        "steerDelivered": null,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      },
+      {
+        "taskId": "steer-mid-run",
+        "success": true,
+        "terminalStatus": "COMPLETED",
+        "acceptancePassed": true,
+        "changeScopePassed": null,
+        "durationSeconds": 112.201,
+        "modelRequestCount": 9,
+        "toolCallCount": 7,
+        "failedCommandCount": 1,
+        "validationCovered": false,
+        "steerDelivered": true,
+        "promptVersion": "audit-470de6e",
+        "toolVersion": "audit-470de6e"
+      }
+    ],
+    "additionalCapabilities": [
+      {
+        "taskId": "image-colors",
+        "passed": true,
+        "status": "COMPLETED",
+        "acceptance": "直接视觉识别四个色块及顺序",
+        "modelRequests": 1,
+        "tools": []
+      },
+      {
+        "taskId": "long-text-original",
+        "passed": true,
+        "status": "COMPLETED",
+        "acceptance": "从超过内联预览的原附件末尾读取唯一校验码",
+        "modelRequests": 2,
+        "tools": [
+          "read_attachment"
+        ]
+      },
+      {
+        "taskId": "pdf-attachment-only",
+        "passed": true,
+        "status": "COMPLETED",
+        "acceptance": "正文为空，仅上传 PDF；调用只读附件工具并返回文件内校验码",
+        "modelRequests": 2,
+        "tools": [
+          "read_attachment"
+        ]
+      },
+      {
+        "taskId": "public-web-fetch",
+        "passed": true,
+        "status": "COMPLETED",
+        "acceptance": "实际调用 web_fetch 获取 example.com 并返回页面标题及来源",
+        "modelRequests": 2,
+        "tools": [
+          "web_fetch"
+        ]
+      }
+    ],
+    "validationCaveat": {
+      "notCoveredTasks": [
+        "path-separator",
+        "steer-constraint-hold",
+        "meeting-actions",
+        "untrusted-source",
+        "null-guard-crash",
+        "extract-shared-module",
+        "flaky-test-diagnosis",
+        "long-file-targeted-edit",
+        "refactor-without-behavior-change",
+        "move-file-update-imports",
+        "steer-mid-run"
+      ],
+      "meaning": "独立验收与内部持久化校验证据分别记录。错误目录参数、未被同一成功检查替代的失败记录，或没有正式校验命令，会令内部校验仍未覆盖；不删除失败历史或把其他成功命令一概当成覆盖。"
+    },
+    "uiAudit": {
+      "firstAttempt": "新增布局概览之前模型仍请求 evaluate，测试停止并保留审批边界",
+      "afterOverview": {
+        "status": "COMPLETED",
+        "filesUnchanged": true,
+        "writeCalls": 0,
+        "evaluateApprovalRequests": 0,
+        "actualScreenshotPixels": [
+          [
+            1440,
+            840
+          ],
+          [
+            390,
+            840
+          ]
+        ],
+        "runs": [
+          {
+            "end": "run.cancelled",
+            "executionSeconds": 600.641
+          },
+          {
+            "end": "run.completed",
+            "executionSeconds": 249.58
+          }
+        ],
+        "activeExecutionSeconds": 850.221,
+        "qualityAccepted": true,
+        "withinTenMinutes": false,
+        "expectedFindings": [
+          "桌面回底按钮脱离正文列；手机按钮覆盖正文",
+          "固定 760px 输入框导致手机横向溢出",
+          "实测正文和输入框没有垂直重叠，不将推测当缺陷"
+        ],
+        "delivery": "完整列出发现、建议与实测/推断边界，不引用未展示的候选答复",
+        "continuation": "首轮到达 600 秒测试时限后取消；同会话、不修改任务要求地恢复后完成，不能计作一次无中断成功"
+      }
+    },
+    "commandGuidanceFollowup": {
+      "tasks": [
+        {
+          "taskId": "null-guard-crash",
+          "success": true,
+          "acceptancePassed": true,
+          "validationCovered": true,
+          "failedCommandCount": 0,
+          "durationSeconds": 45.437,
+          "modelRequestCount": 7
+        },
+        {
+          "taskId": "refactor-without-behavior-change",
+          "success": true,
+          "acceptancePassed": true,
+          "validationCovered": true,
+          "failedCommandCount": 0,
+          "durationSeconds": 48.468,
+          "modelRequestCount": 7
+        },
+        {
+          "taskId": "flaky-test-diagnosis",
+          "success": true,
+          "acceptancePassed": true,
+          "validationCovered": true,
+          "failedCommandCount": 0,
+          "durationSeconds": 42.31,
+          "modelRequestCount": 7
+        }
+      ],
+      "checks": "三个场景均直接运行 node --test，exit 0；保留旧运行失败记录",
+      "method": "使用新测试说明在全新会话和夹具重跑，没有向模型透露修复答案或修改验收",
+      "limitation": "仅三个样本；并发负载不同，不把耗时变化解释成因果性能收益"
+    }
+  },
+  "modelPortability": {
+    "implementation": "所有修复按工具、任务状态、文件字节、浏览器标签和平台能力工作；没有新增按 Qwen 名称或量化等级分支",
+    "limitation": "本轮真实模型仅这一款；其他模型接口的自动化测试通过不等价 OpenAI/Anthropic 等真实端到端验证"
+  },
+  "reproduction": {
+    "java": "JAVA_HOME=<JDK25> mvn -B -pl pilot-core,pilot-server verify",
+    "frontend": "在 pilot-web/frontend 运行既有 migration-check、typecheck 及 UI smoke 脚本",
+    "desktop": "在 pilot-desktop 运行 npm test 与 npm run test:browser",
+    "realModel": "node evaluation/harness/runner.mjs --base <isolated-service> --task <task-id> --out <jsonl> --model <configured-model>；本次固定任务见 cases",
+    "uiFixture": "ui-audit-fixture.html；两个预置缺陷用于检查模型是否真正测量，文件不是产品界面",
+    "sources": [
+      "https://docs.kernel.org/filesystems/proc.html",
+      "https://nodejs.org/api/test.html#running-tests-from-the-command-line"
+    ]
+  },
+  "limits": [
+    "单次固定样本不能证明长期稳定或覆盖所有 Agent 能力",
+    "界面评估真实模型耗时约 14 分钟，尚未达到 10 分钟测试目标；未通过降低权限检查或跳过截图来缩短耗时",
+    "三平台 GUI 实机验证未完成：只有 macOS；Linux 只有容器，Windows 只有既有模拟分支",
+    "联网搜索供应商、所有第三方 MCP、每种技能脚本和长期定时通知没有逐一进行真实外部服务测试",
+    "运行中的用户服务和桌面进程未重启；启用本轮后端和桌面修复需要使用新构建重新启动"
+  ],
+  "testedFinalFeatureCommit": "b70c02c"
+}
