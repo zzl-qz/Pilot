@@ -58,8 +58,8 @@ MCP 目前使用本机 `stdio` 启动配置中的服务器进程；添加 MCP �
 | `PILOT_MODEL_API_KEY` | 模型 API 密钥 | 空；可使用 Mock 模式体验界面 |
 | `PILOT_MODEL_ENDPOINT` | Chat Completions 兼容端点 | OpenAI Chat Completions URL |
 | `PILOT_MODEL_MODEL` | 服务商模型标识 | `gpt-4o-mini` |
-| `PILOT_MODEL_TIMEOUT_SECONDS` | 单次请求总时限，覆盖响应头和完整响应体 | `600` 秒 |
-| `PILOT_MODEL_IDLE_TIMEOUT_SECONDS` | 连续无数据的时限，包含等待首字；`0` 表示沿用总时限 | `300` 秒 |
+| `PILOT_MODEL_TIMEOUT_SECONDS` | 单次请求总时限，覆盖响应头和完整响应体 | `900` 秒 |
+| `PILOT_MODEL_IDLE_TIMEOUT_SECONDS` | 连续无数据的时限，包含等待首字；`0` 表示沿用总时限 | `600` 秒 |
 | `PILOT_WORKSPACE` | 新任务默认工作区 | 启动目录 |
 | `PILOT_PERMISSION_MODE` | 工具权限档位 | `AUTO` |
 | `PILOT_DATA_DIR` | 会话与运行数据目录 | 仓库根目录下 `.pilot/` |
@@ -96,6 +96,6 @@ java --enable-native-access=ALL-UNNAMED -jar pilot-server.jar maintenance restor
 
 ### 慢速本地模型的请求时限
 
-总时限从发出请求开始计时，收到响应头或持续心跳都不会重新计时。空闲时限限制连续没有数据的等待；默认给本地模型留出 300 秒预填充和 600 秒完整生成时间。旧的 90 秒配置现在也会限制正文读取，大上下文或推理模型可能需要调高。可设置 `PILOT_MODEL_TIMEOUT_SECONDS` 和 `PILOT_MODEL_IDLE_TIMEOUT_SECONDS` 后重启服务；数值应根据本机实测耗时调整，超时会走现有的有界重试流程，用户仍可取消。
+总时限从发出请求开始计时，收到响应头或持续心跳都不会重新计时。空闲时限限制连续没有数据的等待；默认给本地模型留出 600 秒预填充和 900 秒完整生成时间。旧的 90 秒配置现在也会限制正文读取，大上下文或推理模型可能需要调高。可设置 `PILOT_MODEL_TIMEOUT_SECONDS` 和 `PILOT_MODEL_IDLE_TIMEOUT_SECONDS` 后重启服务；数值应根据本机实测耗时调整，超时会走现有的有界重试流程，用户仍可取消。
 
 模型普通 JSON 响应上限为 32 MiB，流式累计响应为 64 MiB，单条 SSE 行为 1,048,576 个字符。错误正文只读取前 64 KiB 后关闭连接；超大成功响应明确报错，不当作完整结果使用。模型列表和网页搜索响应上限各为 4 MiB，网页读取仍为 512 KiB。
