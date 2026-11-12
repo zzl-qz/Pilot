@@ -58,7 +58,7 @@ class ToolExecutorHooksTest {
             }
         });
         return new ToolExecutor(registry, new PolicyPermissionGate(PermissionMode.AUTO),
-            (id, name, args) -> CompletableFuture.completedFuture(true), (call, result, latencyMs) -> {
+            (id, name, args, structured) -> CompletableFuture.completedFuture(true), (call, result, latencyMs) -> {
             }, hooks);
     }
 

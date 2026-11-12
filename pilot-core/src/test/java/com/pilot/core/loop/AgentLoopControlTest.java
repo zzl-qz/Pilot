@@ -316,7 +316,7 @@ class AgentLoopControlTest {
     }
 
     private static ApprovalBroker approved() {
-        return (callId, toolName, argsSummary) -> CompletableFuture.completedFuture(true);
+        return (callId, toolName, argsSummary, structured) -> CompletableFuture.completedFuture(true);
     }
 
     private static ToolRegistry registry(Runnable action) {

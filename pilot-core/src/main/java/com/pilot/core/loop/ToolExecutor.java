@@ -2,6 +2,7 @@ package com.pilot.core.loop;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -345,8 +346,9 @@ public final class ToolExecutor {
         if (detail != null && !detail.isBlank()) {
             argsSummary = detail;
         }
-        CompletableFuture<Boolean> decision = approvals.register(call.callId(), tool.name(), argsSummary);
-        events.accept(new ApprovalRequired(call.callId(), tool.name(), argsSummary));
+        Map<String, Object> structured = approvalArgs(call);
+        CompletableFuture<Boolean> decision = approvals.register(call.callId(), tool.name(), argsSummary, structured);
+        events.accept(new ApprovalRequired(call.callId(), tool.name(), argsSummary, structured));
 
         boolean approved;
         try {
@@ -391,6 +393,28 @@ public final class ToolExecutor {
                 (System.nanoTime() - started) / 1_000_000L));
             return tool.result(executed.text());
         });
+    }
+
+    /**
+     * 随审批事件外发的结构化参数：只保留短标量值，供前端做「批准并信任」这类次级决策；
+     * 嵌套对象与超长文本不进事件（写文件的内容之类仍以 argsSummary 为准），避免把大块文本
+     * 重复塞进事件流。
+     */
+    private static Map<String, Object> approvalArgs(ToolCall call) {
+        Map<String, Object> args = call.args() == null ? Map.of() : call.args();
+        if (args.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> safe = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : args.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof Boolean || value instanceof Number) {
+                safe.put(entry.getKey(), value);
+            } else if (value instanceof String text && text.length() <= 500) {
+                safe.put(entry.getKey(), text);
+            }
+        }
+        return safe;
     }
 
     private static ToolResult run(Tool tool, ToolCall call) {

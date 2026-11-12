@@ -54,7 +54,7 @@ class ExplicitApprovalTest {
         var registry = new ToolRegistry();
         registry.register(action);
         var call = new ToolCall("a", action.name(), Map.of());
-        var denied = new ToolExecutor(registry, (c, t) -> PermissionResult.allow(), (id, name, summary) -> {
+        var denied = new ToolExecutor(registry, (c, t) -> PermissionResult.allow(), (id, name, summary, args) -> {
             description.set(summary);
             return CompletableFuture.completedFuture(false);
         }).execute(call, event -> {
@@ -63,7 +63,7 @@ class ExplicitApprovalTest {
         assertEquals(finalContent, description.get());
         assertFalse(denied.usableEvidence());
         var approved = new ToolExecutor(registry, (c, t) -> PermissionResult.allow(),
-            (id, name, summary) -> CompletableFuture.completedFuture(true)).execute(call, event -> {
+            (id, name, summary, args) -> CompletableFuture.completedFuture(true)).execute(call, event -> {
             });
         assertTrue(approved.usableEvidence());
         assertEquals(1, executions.get());
