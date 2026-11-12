@@ -7,7 +7,8 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
@@ -16,11 +17,9 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -33,23 +32,21 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.skill.SkillCatalog;
 import com.pilot.core.skill.SkillManifest;
 import com.pilot.core.skill.SkillProblem;
-import com.pilot.core.skill.SkillSource;
 import com.pilot.server.config.PilotDataDir;
 
 /**
  * 技能安装器：把 git 仓库或本机目录里的技能装进项目级/用户级技能目录。
  *
- * <p>安装是<b>纯复制</b>：读、复制、（覆盖时）删除两个技能根下的同名目录，不执行来源中的
- * 任何文件——没有 postinstall 生命周期钩子，也永远不做。技能目录里的脚本以后被模型经
+ * <p>安装是<b>纯复制</b>：读、复制并替换两个技能根下的同名目录，不执行来源中的
+ * 任何文件，不提供 postinstall 生命周期钩子。技能目录里的脚本以后被模型经
  * run_command 执行时，走的仍是既有白名单与审批链，安装器不新增执行面。
  *
- * <p>一切来源先<b>暂存</b>再解析：git 用 {@code --depth 1 --single-branch} clone，
+ * <p>一切来源先<b>暂存</b>再解析：GitHub 公共仓库优先下载归档，必要时浅克隆并稀疏检出；
  * 本机目录整体复制到 {@code <dataDir>/tmp/skill-install/<token>/<repoName>/}。这既是
- * 「预览什么就装什么」的原子性保证，也是覆盖安装的安全前提——来源在目标根里时，
- * 原地安装会先删掉自己的来源。
+ * 「预览什么就装什么」的保证；完整复制和校验后才切换目标，失败恢复旧版本。
  *
  * <p>复制全程跳过 {@code .git/}：装进技能目录的是纯文件，不是嵌套仓库（代价：不能
- * git pull 更新，更新 = 重新安装）。同名冲突默认拒绝，用户显式覆盖后才删旧装新。
+ * git pull 更新，更新 = 重新安装）。同名冲突默认拒绝，用户显式覆盖后才替换旧版本。
  */
 @Component
 public class SkillInstallService {
@@ -65,9 +62,13 @@ public class SkillInstallService {
         }
     }
 
-    /** clone 策略；生产实现 {@link GitCloner}，测试注入假实现——测试永不依赖网络。 */
+    /** clone 策略；生产实现 {@link SkillDownloader}，测试注入假实现——测试永不依赖网络。 */
     public interface Cloner {
         void clone(String url, Path targetDir) throws Exception;
+
+        default void clone(String url, Path targetDir, String ref, String path) throws Exception {
+            clone(url, targetDir);
+        }
     }
 
     public record Candidate(String name, String description, String command, boolean valid, String reason) {
@@ -82,7 +83,7 @@ public class SkillInstallService {
     public record InstallResult(List<Outcome> results) {
     }
 
-    private record Source(boolean git, String value) {
+    private record Source(boolean git, String value, String ref, String path) {
     }
 
     private record Staged(Path root, Path scanRoot, long createdAt) {
@@ -100,7 +101,8 @@ public class SkillInstallService {
 
     @Autowired
     public SkillInstallService(SkillService skills, PilotDataDir dataDir) {
-        this(skills, dataDir, new GitCloner(), 10L * 60 * 1000, 2000, 64L * 1024 * 1024, 500, 20L * 1024 * 1024);
+        this(skills, dataDir, new SkillDownloader(new GitCloner()), 10L * 60 * 1000, 2000, 64L * 1024 * 1024, 500,
+            20L * 1024 * 1024);
     }
 
     /** 测试构造：可缩小 TTL 与各上限（与 CommandTaskManager 注入 limits 的做法一致）。 */
@@ -117,31 +119,34 @@ public class SkillInstallService {
     }
 
     /**
-     * 取来源到暂存区并解析候选。单技能仓（根目录有 SKILL.md）与一级集合仓（每个一级
-     * 子目录一个技能）两种布局；候选的有效性沿用 {@link SkillCatalog} 全部校验，零新规则。
+     * 取来源到暂存区并解析候选。支持单技能、标准 skills/ 集合及嵌套分类目录；
+     * 候选沿用技能格式校验，独立于运行时目录的数量上限。
      */
     public Preview preview(String source, String workspace) {
+        return preview(source, workspace, null, null);
+    }
+
+    public Preview preview(String source, String workspace, String ref, String path) {
         requireEnabled();
         sweep();
-        Source src = parseSource(source);
+        Source src = parseSource(source, ref, path);
         String token = newToken();
         Path stageRoot = dataDir.file("tmp", "skill-install", token);
         try {
             Files.createDirectories(stageRoot);
-            Path repo = stageRoot.resolve(repoNameOf(src));
+            Path repo = stageRoot.resolve("source").resolve(repoNameOf(src));
+            Files.createDirectories(repo.getParent());
             if (src.git()) {
-                cloner.clone(src.value(), repo);
+                cloner.clone(src.value(), repo, src.ref(), src.path());
             } else {
                 copyTree(Path.of(src.value()), repo, "来源", stageMaxFiles, stageMaxBytes);
             }
-            // 布局判定（依次尝试，先命中先赢）：
-            // 1. repo/SKILL.md → 单技能仓：扫描根 = stageRoot（repo 目录名即技能名）；
-            // 2. 一级子目录有 SKILL.md → 一级集合仓：扫描根 = repo；
-            // 3. skills/ 包裹目录（如 anthropics/skills 的 sources 布局）：扫描根 = repo/skills；
-            // 4. 唯一包裹回退：恰好一个无 SKILL.md 的一级子目录，其子目录含 SKILL.md → 扫描根 = 它。
-            // 全不命中按 repo 扫（空候选走引导文案），不报错。
-            Path scanRoot = resolveScanRoot(stageRoot, repo);
-            SkillCatalog catalog = SkillCatalog.scan(List.of(new SkillCatalog.Root(scanRoot, SkillSource.PROJECT)));
+            Path selected = src.path().isEmpty() ? repo : repo.resolve(src.path()).normalize();
+            if (!selected.startsWith(repo) || !Files.isDirectory(selected, LinkOption.NOFOLLOW_LINKS)) {
+                throw new InstallException("来源中没有找到技能目录：" + src.path());
+            }
+            Path scanRoot = stageCandidates(stageRoot, selected);
+            SkillCatalog catalog = SkillCatalog.installationCandidates(scanRoot);
             List<Candidate> candidates = new ArrayList<>();
             for (SkillManifest manifest : catalog.list()) {
                 candidates.add(new Candidate(manifest.name(), manifest.description(), manifest.command(), true, null));
@@ -156,6 +161,10 @@ public class SkillInstallService {
         } catch (InstallException e) {
             deleteTreeQuietly(stageRoot);
             throw e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            deleteTreeQuietly(stageRoot);
+            throw new InstallException("技能下载已取消");
         } catch (Exception e) {
             deleteTreeQuietly(stageRoot);
             throw new InstallException("读取来源失败：" + e.getMessage());
@@ -166,7 +175,7 @@ public class SkillInstallService {
      * 从暂存区把选中技能复制到目标根。逐技能出结果：installed / conflict / invalid / error，
      * 部分成功是常态（A 装上、B 冲突），conflict 是业务状态不是协议错误。
      */
-    public InstallResult install(String token, List<String> names, boolean project, String workspace,
+    public synchronized InstallResult install(String token, List<String> names, boolean project, String workspace,
         boolean overwrite) {
         requireEnabled();
         sweep();
@@ -177,9 +186,9 @@ public class SkillInstallService {
         if (names == null || names.isEmpty()) {
             throw new InstallException("请选择要安装的技能");
         }
-        SkillCatalog catalog = SkillCatalog.scan(List.of(new SkillCatalog.Root(entry.scanRoot(), SkillSource.PROJECT)));
+        SkillCatalog catalog = SkillCatalog.installationCandidates(entry.scanRoot());
         Set<String> valid = catalog.list().stream().map(SkillManifest::name).collect(Collectors.toSet());
-        Path root = project ? skills.projectRootFor(workspace) : skills.userRootOf();
+        Path root = (project ? skills.projectRootFor(workspace) : skills.userRootOf()).toAbsolutePath().normalize();
         Path rootNormalized = root.toAbsolutePath().normalize();
         try {
             Files.createDirectories(root);
@@ -200,23 +209,20 @@ public class SkillInstallService {
                 results.add(new Outcome(name, "invalid", "非法的技能目录路径"));
                 continue;
             }
+            if (Files.isSymbolicLink(to)) {
+                results.add(new Outcome(name, "error", "目标是符号链接，请先处理目标目录"));
+                continue;
+            }
             if (Files.exists(to)) {
                 if (!overwrite) {
                     results.add(new Outcome(name, "conflict", "目标目录已存在（同名技能或遗留目录）"));
                     continue;
                 }
-                try {
-                    deleteTree(to);
-                } catch (IOException e) {
-                    results.add(new Outcome(name, "error", "删除旧目录失败：" + e.getMessage()));
-                    continue;
-                }
             }
             try {
-                copyTree(from, to, "技能", skillMaxFiles, skillMaxBytes);
+                replaceSkill(from, to, root, name);
                 results.add(new Outcome(name, "installed", null));
             } catch (IOException e) {
-                deleteTreeQuietly(to); // 装一半的目录不留残骸
                 results.add(new Outcome(name, "error", e.getMessage()));
             }
         }
@@ -226,12 +232,47 @@ public class SkillInstallService {
     }
 
     /** 清扫过期暂存目录；preview 与 install 的入口都先跑一遍，不起后台定时任务。 */
-    void sweep() {
+    synchronized void sweep() {
         long now = System.currentTimeMillis();
         for (var entry : staged.entrySet()) {
             if (now - entry.getValue().createdAt() >= tokenTtlMs) {
                 staged.remove(entry.getKey());
                 deleteTreeQuietly(entry.getValue().root());
+            }
+        }
+    }
+
+    /** 完整复制和校验成功后才切换目标；失败时恢复旧技能。 */
+    private void replaceSkill(Path from, Path to, Path root, String name) throws IOException {
+        Path transaction = Files.createTempDirectory(root.getParent(), ".pilot-skill-install-");
+        Path next = transaction.resolve(name);
+        Path previous = transaction.resolve(".previous");
+        boolean retainedBackup = false;
+        try {
+            copyTree(from, next, "技能", skillMaxFiles, skillMaxBytes);
+            if (SkillCatalog.installationCandidates(transaction).find(name).isEmpty()) {
+                throw new IOException("复制后的技能校验失败");
+            }
+            boolean hadPrevious = Files.exists(to, LinkOption.NOFOLLOW_LINKS);
+            if (hadPrevious) {
+                Files.move(to, previous);
+            }
+            try {
+                Files.move(next, to);
+            } catch (IOException failure) {
+                if (hadPrevious) {
+                    try {
+                        Files.move(previous, to);
+                    } catch (IOException recovery) {
+                        retainedBackup = true;
+                        throw new IOException("安装失败；旧版本保留在 " + previous + "，请恢复此目录", recovery);
+                    }
+                }
+                throw failure;
+            }
+        } finally {
+            if (!retainedBackup) {
+                deleteTreeQuietly(transaction);
             }
         }
     }
@@ -242,117 +283,60 @@ public class SkillInstallService {
         }
     }
 
-    /**
-     * 布局判定：确定把哪个目录当「技能目录的父级」交给 {@link SkillCatalog} 扫描。
-     *
-     * <p>真实世界的三种仓库形态都见过：根目录放 SKILL.md（单技能仓）、一级子目录各一个
-     * （集合仓）、以及 {@code skills/<名>/SKILL.md} 的包裹布局（anthropics/skills 等社区
-     * 仓库）。包裹布局优先认 {@code skills/} 这个既成惯例，其次接受「恰好一个包裹目录」
-     * 的仓库；多个候选包裹时报错而不是猜——猜测装错内容比报错更糟。
-     */
-    private static Path resolveScanRoot(Path stageRoot, Path repo) {
-        if (Files.isRegularFile(repo.resolve("SKILL.md"))) {
-            return stageRoot;
-        }
-        if (hasDirectSkillChildren(repo)) {
-            return repo;
-        }
-        Path skillsDir = repo.resolve("skills");
-        if (Files.isDirectory(skillsDir) && hasDirectSkillChildren(skillsDir)) {
-            return skillsDir;
-        }
-        List<Path> wrappers = new ArrayList<>();
-        try (var entries = Files.list(repo)) {
-            for (Path entry : entries.filter(Files::isDirectory).toList()) {
-                if (".git".equals(entry.getFileName().toString())) {
-                    continue;
-                }
-                if (hasDirectSkillChildren(entry)) {
-                    wrappers.add(entry);
+    /** 优先标准技能集合，递归发现分类目录；不让仓库里的模板抢占真实技能。 */
+    private Path stageCandidates(Path stageRoot, Path repo) throws IOException {
+        Path base = repo;
+        if (!Files.isRegularFile(repo.resolve("SKILL.md"), LinkOption.NOFOLLOW_LINKS)) {
+            for (Path known : List.of(repo.resolve("skills"), repo.resolve(".agents/skills"),
+                repo.resolve(".claude/skills"))) {
+                if (Files.isDirectory(known, LinkOption.NOFOLLOW_LINKS)) {
+                    base = known;
+                    break;
                 }
             }
-        } catch (IOException e) {
-            return repo;
         }
-        if (wrappers.size() == 1) {
-            return wrappers.get(0);
-        }
-        if (wrappers.size() > 1) {
-            throw new InstallException("仓库里有多层嵌套的技能目录（"
-                + wrappers.stream().map(path -> path.getFileName().toString()).collect(Collectors.joining("、"))
-                + "），自动判定不可靠；请把要装的技能目录复制到本机后用「本机目录」导入");
-        }
-        return repo;
-    }
-
-    /** 目录的直接子目录里是否至少有一个含 SKILL.md。 */
-    private static boolean hasDirectSkillChildren(Path dir) {
-        try (var entries = Files.list(dir)) {
-            return entries.filter(Files::isDirectory).anyMatch(child -> Files.isRegularFile(child.resolve("SKILL.md")));
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
-    /** 来源解析：http(s) → git；绝对路径 → 本机目录；其余（裸域名、相对路径、~）判非法。 */
-    private static Source parseSource(String source) {
-        String text = source == null ? "" : source.strip();
-        if (text.isEmpty()) {
-            throw new InstallException("来源不能为空：填 git 仓库地址（http(s):// 开头）或本机技能目录的绝对路径");
-        }
-        if (text.startsWith("http://") || text.startsWith("https://")) {
-            try {
-                var url = URI.create(text).toURL();
-                if (url.getHost() == null || url.getHost().isBlank()) {
-                    throw new IllegalArgumentException("no host");
+        List<Path> found = new ArrayList<>();
+        Files.walkFileTree(base, Set.of(), 8, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                if (Set.of(".git", "node_modules").contains(dir.getFileName().toString())) {
+                    return FileVisitResult.SKIP_SUBTREE;
                 }
-            } catch (Exception e) {
-                throw new InstallException("git 地址不合法：" + text);
+                if (Files.isRegularFile(dir.resolve("SKILL.md"), LinkOption.NOFOLLOW_LINKS)) {
+                    found.add(dir);
+                    if (found.size() > 256) {
+                        throw new IOException("来源超过 256 个技能，请使用具体技能目录链接");
+                    }
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
             }
-            diagnoseGitUrl(text);
-            return new Source(true, text);
+        });
+        Path normalized = Files.createDirectories(stageRoot.resolve("candidates"));
+        for (Path source : found.stream().sorted().toList()) {
+            String name = SkillCatalog.installationName(source);
+            if (!REPO_NAME.matcher(name).matches()) {
+                throw new InstallException("技能名称不能作为安装目录：" + name);
+            }
+            Path target = normalized.resolve(name);
+            if (Files.exists(target)) {
+                throw new InstallException("来源包含多个同名技能 " + name + "，请使用具体技能目录链接");
+            }
+            copyTree(source, target, "技能候选", stageMaxFiles, stageMaxBytes);
         }
-        Path path;
-        try {
-            path = Path.of(text);
-        } catch (InvalidPathException e) {
-            throw new InstallException("来源既不是 http(s) 开头的 git 地址，也不是合法路径：" + text);
-        }
-        if (!path.isAbsolute()) {
-            throw new InstallException("本机目录要用绝对路径；git 地址必须以 http:// 或 https:// 开头");
-        }
-        return new Source(false, text);
+        return normalized;
     }
 
-    /**
-     * git 地址形状诊断：把浏览器里复制来的网页地址拦在 clone 之前，给出正确写法。
-     *
-     * <p>最高频的坑：用户在 GitHub 网页里对着某个文件点「复制链接」，拿到
-     * {@code /blob/main/…/SKILL.md} 这种浏览地址——git clone 会报 repository not found，
-     * 但仅凭那行 git 错误很难联想到是地址形式错了。含 {@code /blob/}、{@code /tree/}、
-     * {@code /raw/} 或末段是 .md 文件时，直接告诉用户该用仓库根地址。
-     */
-    private static void diagnoseGitUrl(String url) {
-        String lower = url.toLowerCase(Locale.ROOT);
-        for (String marker : List.of("/blob/", "/tree/", "/raw/")) {
-            if (lower.contains(marker)) {
-                throw new InstallException("这是浏览器里看文件的网页地址（含 " + marker + "），不是 git 仓库地址。" + "请改用仓库根地址：把 " + url
-                    + " 中的 " + marker + "… 部分去掉，" + "例如 https://github.com/anthropics/skills");
-            }
-        }
-        String trimmed = lower.endsWith("/") ? lower.substring(0, lower.length() - 1) : lower;
-        int slash = trimmed.lastIndexOf('/');
-        String last = slash >= 0 ? trimmed.substring(slash + 1) : trimmed;
-        if (last.endsWith(".md") || last.endsWith(".markdown")) {
-            throw new InstallException("地址末段看起来是文件（" + last + "）而不是仓库。" + "git 地址应指向仓库根，例如 https://github.com/用户名/仓库名");
-        }
+    private static Source parseSource(String source, String ref, String path) {
+        var parsed = SkillInstallSource.parse(source, ref, path);
+        return new Source(parsed.git(), parsed.value(), parsed.ref(), parsed.path());
     }
 
     /** 来源名：URL 末段（去 .git 后缀）或来源目录名；只需是安全段，不要求满足技能名规则。 */
     private static String repoNameOf(Source src) {
         String raw;
         if (src.git()) {
-            String trimmed = src.value();
+            String trimmed = URI.create(src.value()).getPath();
             while (trimmed.endsWith("/")) {
                 trimmed = trimmed.substring(0, trimmed.length() - 1);
             }
@@ -365,9 +349,8 @@ public class SkillInstallService {
             Path path = Path.of(src.value()).normalize();
             raw = path.getFileName() == null ? "" : path.getFileName().toString();
         }
-        if (raw.isEmpty() || !REPO_NAME.matcher(raw).matches()) {
-            throw new InstallException(
-                "来源名不合法（只能是字母数字开头的字母/数字/点/横线/下划线，且不超过 64 字符）：" + (raw.isEmpty() ? src.value() : raw));
+        if (raw.isEmpty() || raw.equals(".") || raw.equals("..")) {
+            return "repository";
         }
         return raw;
     }
@@ -393,6 +376,9 @@ public class SkillInstallService {
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 if (".git".equals(file.getFileName().toString())) {
                     return FileVisitResult.CONTINUE;
+                }
+                if (!attrs.isRegularFile() || attrs.isSymbolicLink()) {
+                    throw new IOException(what + "包含符号链接或特殊文件，无法安全导入：" + from.relativize(file));
                 }
                 state.files += 1;
                 state.bytes += attrs.size();
@@ -443,60 +429,114 @@ public class SkillInstallService {
         return text.toString();
     }
 
-    /**
-     * 生产环境的 git clone：浅克隆、只拉默认分支、不带 tags，60 秒看门狗。
-     * 骨架与 {@code ChangeService.exec} 相同（看门狗超时杀进程，主线程限量收输出），
-     * 但那一个绑定工作区语义且吞错，这里要的是完整的失败原因。
-     */
     static final class GitCloner implements Cloner {
-        private static final int TIMEOUT_SECONDS = 60;
-        private static final int MAX_OUTPUT_BYTES = 4096;
+        @Override
+        public void clone(String url, Path target) throws Exception {
+            clone(url, target, null, "");
+        }
 
         @Override
-        public void clone(String url, Path targetDir) throws Exception {
-            ProcessBuilder builder = new ProcessBuilder("git", "clone", "--depth", "1", "--single-branch", "--no-tags",
-                url, targetDir.toString());
-            builder.redirectErrorStream(true);
+        public void clone(String url, Path target, String ref, String path) throws Exception {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
+            Path hooks = Files.createDirectories(target.getParent().resolve(".empty-hooks"));
+            List<String> command = new ArrayList<>(List.of("clone", "--depth", "1", "--single-branch", "--no-tags",
+                "--filter=blob:none", "--no-checkout"));
+            boolean commit = ref != null && ref.matches("[a-fA-F0-9]{40,64}");
+            if (ref != null && !commit) {
+                command.addAll(List.of("--branch", ref));
+            }
+            command.addAll(List.of("--", url, target.toString()));
+            run(command, hooks, target, deadline);
+            if (commit) {
+                run(List.of("-C", target.toString(), "fetch", "--depth", "1", "origin", ref), hooks, target, deadline);
+            }
+            if (!path.isEmpty()) {
+                run(List.of("-C", target.toString(), "sparse-checkout", "set", "--cone", "--", path), hooks, target,
+                    deadline);
+            }
+            run(List.of("-C", target.toString(), "checkout", "--detach", commit ? "FETCH_HEAD" : "HEAD"), hooks, target,
+                deadline);
+        }
+
+        private static void run(List<String> arguments, Path hooks, Path target, long deadline) throws Exception {
+            List<String> command = new ArrayList<>(List.of("git", "-c", "core.hooksPath=" + hooks));
+            command.addAll(arguments);
+            ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
+            builder.environment().put("GIT_TERMINAL_PROMPT", "0");
+            builder.environment().put("GCM_INTERACTIVE", "Never");
             Process process;
             try {
                 process = builder.start();
-            } catch (IOException e) {
-                throw new SkillInstallService.InstallException(
-                    e.getMessage() != null && e.getMessage().contains("Cannot run program") ? "未找到 git，请安装它或改用本机目录导入"
-                        : "git clone 启动失败：" + e.getMessage());
+            } catch (IOException failure) {
+                throw new InstallException("无法启动 Git，请安装 Git 或使用可直接下载的公共 GitHub 技能链接");
             }
             process.getOutputStream().close();
-            var timedOut = new AtomicBoolean(false);
-            Thread watchdog = Thread.ofVirtual().name("pilot-skill-clone-watchdog").start(() -> {
-                try {
-                    if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                        timedOut.set(true);
-                        process.destroyForcibly();
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            Thread reader = Thread.ofVirtual().start(() -> {
+                try (var stream = process.getInputStream()) {
+                    byte[] buffer = new byte[4096];
+                    int count;
+                    while ((count = stream.read(buffer)) != -1) {
+                        synchronized (output) {
+                            if (output.size() < 4096) {
+                                output.write(buffer, 0, Math.min(count, 4096 - output.size()));
+                            }
+                        }
                     }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                } catch (IOException ignored) {
                 }
             });
-            var collected = new ByteArrayOutputStream();
-            byte[] buffer = new byte[4096];
-            try (var stream = process.getInputStream()) {
-                int read;
-                while ((read = stream.read(buffer)) > 0) {
-                    if (collected.size() < MAX_OUTPUT_BYTES) {
-                        collected.write(buffer, 0, Math.min(read, MAX_OUTPUT_BYTES - collected.size()));
+            try {
+                while (!process.waitFor(250, TimeUnit.MILLISECONDS)) {
+                    if (System.nanoTime() >= deadline) {
+                        throw new InstallException("Git 下载超时（60 秒），请检查网络或使用本机目录");
+                    }
+                    checkDiskBudget(target);
+                }
+                reader.join(1000);
+                if (process.exitValue() != 0) {
+                    synchronized (output) {
+                        throw new InstallException("Git 下载失败：" + output.toString(StandardCharsets.UTF_8).strip());
                     }
                 }
+                checkDiskBudget(target);
+            } finally {
+                process.descendants().forEach(handle -> {
+                    if (handle.isAlive()) {
+                        handle.destroyForcibly();
+                    }
+                });
+                if (process.isAlive()) {
+                    process.destroyForcibly();
+                }
+                process.getInputStream().close();
+                reader.interrupt();
             }
-            watchdog.interrupt();
-            process.waitFor(1, TimeUnit.SECONDS);
-            if (timedOut.get()) {
-                throw new SkillInstallService.InstallException("git clone 超时（" + TIMEOUT_SECONDS + " 秒）");
+        }
+
+        private static void checkDiskBudget(Path target) throws IOException {
+            if (!Files.exists(target)) {
+                return;
             }
-            int exit = process.exitValue();
-            if (exit != 0) {
-                String detail = collected.toString(StandardCharsets.UTF_8).strip();
-                throw new SkillInstallService.InstallException(
-                    "git clone 失败（退出码 " + exit + "）：" + (detail.isEmpty() ? url : detail));
+            try (var walk = Files.walk(target)) {
+                long bytes = 0;
+                int files = 0;
+                var iterator = walk.iterator();
+                while (iterator.hasNext()) {
+                    Path file = iterator.next();
+                    BasicFileAttributes attrs;
+                    try {
+                        attrs = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                    } catch (NoSuchFileException vanished) {
+                        continue;
+                    }
+                    if (attrs.isRegularFile()) {
+                        bytes += attrs.size();
+                        if (++files > 10000 || bytes > 128L * 1024 * 1024) {
+                            throw new InstallException("Git 暂存超过 10000 文件 / 128MB 上限，请使用具体技能目录链接");
+                        }
+                    }
+                }
             }
         }
     }

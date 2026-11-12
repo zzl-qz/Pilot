@@ -81,7 +81,8 @@ public class SkillsController {
     @PostMapping("/preview")
     public ResponseEntity<PreviewResponse> preview(@RequestBody(required = false) PreviewRequest request) {
         var preview = installer.preview(request == null ? null : request.source(),
-            resolveWorkspace(request == null ? null : request.sessionId()));
+            resolveWorkspace(request == null ? null : request.sessionId()), request == null ? null : request.ref(),
+            request == null ? null : request.path());
         return ResponseEntity
             .ok(new PreviewResponse(preview.token(), preview.kind(), preview.message(),
                 preview
@@ -129,7 +130,10 @@ public class SkillsController {
             .workspace();
     }
 
-    public record PreviewRequest(String source, String sessionId) {
+    public record PreviewRequest(String source, String sessionId, String ref, String path) {
+        public PreviewRequest(String source, String sessionId) {
+            this(source, sessionId, null, null);
+        }
     }
 
     public record PreviewResponse(String token, String kind, String message, List<CandidatePayload> candidates) {

@@ -54,6 +54,35 @@ class SkillInstallServiceTest {
     }
 
     @Test
+    void templatesCannotHideSkillsAndCuratedSubdirectoriesAreDiscovered() throws IOException {
+        Path repo = Files.createDirectories(source.resolve("upstream"));
+        skillDir(repo, "template", "template");
+        skillDir(repo.resolve("skills/.curated"), "pdf", "body");
+        skillDir(repo.resolve("skills/.experimental"), "review", "body");
+        var preview = installer(skillService(true)).preview(repo.toString(), null);
+        assertEquals(List.of("pdf", "review"),
+            preview.candidates().stream().map(SkillInstallService.Candidate::name).toList());
+        assertTrue(preview.candidates().stream().allMatch(SkillInstallService.Candidate::valid));
+    }
+
+    @Test
+    void singleRepoUsesDeclaredSkillNameAndFailedOverwriteKeepsOldVersion() throws IOException {
+        Path repo = skillDir(source, "different-repo-name", "new");
+        Files.writeString(repo.resolve("SKILL.md"),
+            "---\nname: actual-skill\ndescription: portable\nlicense: MIT\n---\nnew");
+        Files.writeString(repo.resolve("one.txt"), "new");
+        Files.writeString(repo.resolve("two.txt"), "new");
+        Path old = skillDir(workspace.resolve(".pilot/skills"), "actual-skill", "old");
+        var service = new SkillInstallService(skillService(true), dataDir, (url, target) -> {
+        }, 600000, 2000, 67108864, 2, 20971520);
+        var preview = service.preview(repo.toString(), workspace.toString());
+        assertEquals("actual-skill", preview.candidates().getFirst().name());
+        var result = service.install(preview.token(), List.of("actual-skill"), true, workspace.toString(), true);
+        assertEquals("error", result.results().getFirst().status());
+        assertTrue(Files.readString(old.resolve("SKILL.md")).endsWith("old"));
+    }
+
+    @Test
     void previewsSingleSkillRepoLayout() throws IOException {
         Path repo = skillDir(source, "demo", "正文\n");
         Files.createDirectories(repo.resolve("references"));
@@ -109,22 +138,16 @@ class SkillInstallServiceTest {
     }
 
     @Test
-    void rejectsGithubWebPageUrlsWithGuidance() {
-        var service = installer(skillService(true));
-        // GitHub 网页里对着文件点「复制链接」拿到的是 blob 地址，git clone 只会报 repository
-        // not found；诊断要把「这是网页地址、该用仓库根」说清楚
-        var blob = assertThrows(SkillInstallService.InstallException.class, () -> service
-            .preview("https://github.com/anthropics/skills/blob/main/skills/doc-coauthoring/SKILL.md", null));
-        assertTrue(blob.getMessage().contains("网页地址"));
-        assertTrue(blob.getMessage().contains("仓库根"));
-
-        var tree = assertThrows(SkillInstallService.InstallException.class,
-            () -> service.preview("https://github.com/u/repo/tree/main", null));
-        assertTrue(tree.getMessage().contains("网页地址"));
-
-        var raw = assertThrows(SkillInstallService.InstallException.class,
-            () -> service.preview("https://raw.githubusercontent.com/u/repo/main/skills/x/SKILL.md", null));
-        assertTrue(raw.getMessage().contains("文件"));
+    void githubFileLinkSelectsOnlyRequestedSkill() {
+        var service = new SkillInstallService(skillService(true), dataDir, (url, target) -> {
+            assertEquals("https://github.com/anthropics/skills", url);
+            skillDir(target.resolve("skills"), "doc-coauthoring", "body");
+            skillDir(target.resolve("skills"), "pdf", "other");
+        }, 600000, 2000, 67108864, 500, 20971520);
+        var preview =
+            service.preview("https://github.com/anthropics/skills/blob/main/skills/doc-coauthoring/SKILL.md", null);
+        assertEquals(List.of("doc-coauthoring"),
+            preview.candidates().stream().map(SkillInstallService.Candidate::name).toList());
     }
 
     @Test
@@ -158,16 +181,16 @@ class SkillInstallServiceTest {
     }
 
     @Test
-    void ambiguousNestedLayoutsAreRejectedInsteadOfGuessed() throws IOException {
+    void nestedCollectionsAreDiscoveredWithoutRequiringManualCopy() throws IOException {
         // 没有名为 skills 的包裹目录时，多个匿名包裹意味着结构不明确，猜错会装进非预期的
         // 内容——报错引导改用本机目录导入
         Path repo = Files.createDirectories(source.resolve("nested"));
         skillDir(repo.resolve("bundles"), "alpha", "正文");
         skillDir(repo.resolve("more"), "beta", "正文");
 
-        var thrown = assertThrows(SkillInstallService.InstallException.class,
-            () -> installer(skillService(true)).preview(repo.toString(), null));
-        assertTrue(thrown.getMessage().contains("多层嵌套"));
+        var preview = installer(skillService(true)).preview(repo.toString(), null);
+        assertEquals(List.of("alpha", "beta"),
+            preview.candidates().stream().map(SkillInstallService.Candidate::name).toList());
     }
 
     @Test
@@ -211,10 +234,29 @@ class SkillInstallServiceTest {
     }
 
     @Test
-    void rejectsInvalidRepoName() throws IOException {
-        Path chinese = skillDir(source, "我的技能", "正文");
-        assertTrue(assertThrows(SkillInstallService.InstallException.class,
-            () -> installer(skillService(true)).preview(chinese.toString(), null)).getMessage().contains("来源名不合法"));
+    void supportsUnicodeLocalDirectoryWhenSkillHasDeclaredName() throws IOException {
+        Path chinese = skillDir(source, "我的技能 with spaces", "正文");
+        Files.writeString(chinese.resolve("SKILL.md"), "---\nname: portable\ndescription: portable skill\n---\n正文");
+        var preview = installer(skillService(true)).preview(chinese.toString(), null);
+        assertEquals("portable", preview.candidates().getFirst().name());
+        assertTrue(preview.candidates().getFirst().valid());
+    }
+
+    @Test
+    void sourceNamedCandidatesCannotCollideWithNormalizedStaging() throws IOException {
+        Path repo = skillDir(source, "candidates", "正文");
+        var preview = installer(skillService(true)).preview(repo.toString(), null);
+        assertTrue(preview.candidates().getFirst().valid());
+    }
+
+    @Test
+    void previewRetainsCandidatesBeyondRuntimeCatalogLimit() throws IOException {
+        for (int i = 0; i < 40; i++) {
+            skillDir(source, "skill-" + i, "body");
+        }
+        var preview = installer(skillService(true)).preview(source.toString(), null);
+        assertEquals(40, preview.candidates().size());
+        assertTrue(preview.candidates().stream().allMatch(SkillInstallService.Candidate::valid));
     }
 
     @Test
@@ -240,8 +282,8 @@ class SkillInstallServiceTest {
 
         assertEquals("git", preview.kind());
         assertEquals("pilot-skill-review", preview.candidates().get(0).name());
-        assertTrue(Files
-            .isRegularFile(dataDir.file("tmp", "skill-install", preview.token(), "pilot-skill-review", "SKILL.md")));
+        assertTrue(Files.isRegularFile(
+            dataDir.file("tmp", "skill-install", preview.token(), "source", "pilot-skill-review", "SKILL.md")));
     }
 
     @Test
