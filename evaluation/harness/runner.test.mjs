@@ -185,9 +185,9 @@ test('结构化事件分页计数，不把命令失败说成返工；缺历史�
   const mock = await server(t, path => path.includes('after=0') ? { hasMore: true, events: [
     { sequence: 1, type: 'tool.started' }, { sequence: 1, type: 'tool.started' }, { sequence: 2, type: 'run.retrying' }
   ] } : { hasMore: false, events: [{ sequence: 3, type: 'tool.started' }] });
-  assert.deepEqual(await traceMetrics({ base: mock.base }, 's'), { traceObserved: true, toolCallCount: 2, modelRetryCount: 1 });
+  assert.deepEqual(await traceMetrics({ base: mock.base }, 's'), { traceObserved: true, toolCallCount: 2, modelRetryCount: 1, budgetStopObserved: false });
   const missing = await server(t, () => ({}));
-  assert.deepEqual(await traceMetrics({ base: missing.base }, 's'), { traceObserved: false, toolCallCount: null, modelRetryCount: null });
+  assert.deepEqual(await traceMetrics({ base: missing.base }, 's'), { traceObserved: false, toolCallCount: null, modelRetryCount: null, budgetStopObserved: null });
 });
 
 test('argv命令能使用含空格工作区，不依赖系统shell quoting', async t => {
@@ -478,4 +478,44 @@ test('真实执行入口续跑仅补空位，完整结果不重复调用且拒�
   await writeFile(out, contents);
   await writeFile(`${out}.lock`, '{}');
   await assert.rejects(run(['--repeat', '3', '--resume']), /已锁定/); assert.equal(sessions, 2);
+});
+
+for (const requests of [8, 3, null]) test(`长链路按服务真实 modelRequests 字段核验覆盖：${requests}`, async t => {
+  const { args, task } = await fixture(t); let workspace;
+  const mock = await server(t, async (path, body) => {
+    if (path === '/api/sessions') { workspace = body.workspace; return { sessionId: 'own' }; }
+    if (path.endsWith('/messages')) await writeFile(join(workspace, 'src.cjs'), 'module.exports = 2;');
+    return { sessionStatus: 'COMPLETED', modelRequests: requests, modelRequestCount: 999 };
+  });
+  const result = await runTask({ ...args, base: mock.base }, { ...task, scenario: 'context-growth', scenarioMinModelRequests: 8 });
+  assert.equal(result.acceptancePassed, true);
+  assert.equal(result.scenarioCovered, requests === 8);
+  assert.equal(result.success, requests === 8);
+});
+
+for (const code of [null, 'MODEL_ERROR', 'BUDGET_LIMITED']) test(`剩余台账不能代替实际预算停止事件：${code}`, async t => {
+  const { args, task } = await fixture(t); let workspace;
+  const mock = await server(t, async (path, body) => {
+    if (path === '/api/sessions') { workspace = body.workspace; return { sessionId: 'own' }; }
+    if (path.endsWith('/messages')) {
+      await writeFile(join(workspace, 'src.cjs'), 'module.exports = 2;');
+      await mkdir(join(workspace, 'src'));
+      await writeFile(join(workspace, 'src', 'progress.json'), JSON.stringify({ done: ['01'], remaining: ['02'] }));
+    }
+    if (path.includes('/history')) return { hasMore: false, events: code ? [{ sequence: 1, type: 'run.failed', payload: { code } }] : [] };
+    return { sessionStatus: code ? 'FAILED' : 'COMPLETED' };
+  });
+  const result = await runTask({ ...args, base: mock.base }, { ...task, scenario: 'budget-wind' });
+  assert.equal(result.acceptancePassed, true);
+  assert.equal(result.scenarioCovered, code === 'BUDGET_LIMITED');
+  assert.equal(result.success, false, '部分完成与预算保护通过不能冒充整个任务完成');
+});
+
+test('场景覆盖门槛变化必须改变任务指纹，拒绝与旧口径混合', async t => {
+  const { args, task } = await fixture(t);
+  const original = await recordMetadata(args, task);
+  const growth = await recordMetadata(args, { ...task, scenario: 'context-growth', scenarioMinModelRequests: 8 });
+  const changed = await recordMetadata(args, { ...task, scenario: 'context-growth', scenarioMinModelRequests: 9 });
+  assert.notEqual(original.taskVersion, growth.taskVersion);
+  assert.notEqual(growth.taskVersion, changed.taskVersion);
 });

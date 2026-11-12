@@ -340,12 +340,13 @@ export async function createRunContext(args) {
 export async function recordMetadata(args, task) {
   return { ...args.runContext, fixtureVersion: await hashSources([fixturePath(args, task)]),
     taskVersion: sha256(JSON.stringify({ prompt: task.prompt, acceptance: task.acceptance, steer: task.steer,
+      scenario: task.scenario, scenarioMinModelRequests: task.scenarioMinModelRequests,
       timeoutMinutes: Math.min(args.timeoutMinutes, task.maxMinutes ?? args.timeoutMinutes) })) };
 }
 
 /** Only count structured events; tool output prose is not a reliable error/repair label. */
 export async function traceMetrics(args, sessionId) {
-  let after = 0, toolCallCount = 0, modelRetryCount = 0;
+  let after = 0, toolCallCount = 0, modelRetryCount = 0, budgetStopObserved = false;
   const seen = new Set();
   try {
     for (let page = 0; page < 100; page++) {
@@ -356,14 +357,15 @@ export async function traceMetrics(args, sessionId) {
         seen.add(event.sequence);
         if (event.type === 'tool.started') toolCallCount++;
         if (event.type === 'run.retrying') modelRetryCount++;
+        if (event.type === 'run.failed' && ['BUDGET_LIMITED', 'BUDGET_EXHAUSTED', 'MAX_STEPS'].includes(event.payload?.code)) budgetStopObserved = true;
       }
       const cursor = Math.max(after, ...history.events.map(e => e.sequence).filter(Number.isSafeInteger));
-      if (!history.hasMore) return { traceObserved: true, toolCallCount, modelRetryCount };
+      if (!history.hasMore) return { traceObserved: true, toolCallCount, modelRetryCount, budgetStopObserved };
       if (cursor <= after) throw new Error('历史游标没有前进');
       after = cursor;
     }
   } catch { /* Optional diagnostics failure must not invent zero tool work. */ }
-  return { traceObserved: false, toolCallCount: null, modelRetryCount: null };
+  return { traceObserved: false, toolCallCount: null, modelRetryCount: null, budgetStopObserved: null };
 }
 
 export async function prepareWorkspace(args, task) {
@@ -471,15 +473,19 @@ export async function runTask(args, task) {
   }
   if (task.scenario === "context-growth") {
     const minRequests = task.scenarioMinModelRequests ?? 1;
-    if (diagnostics.modelRequestCount == null) {
+    if (!Number.isSafeInteger(diagnostics.modelRequests) || diagnostics.modelRequests < 0) {
       scenarioCovered = false;
       scenarioNotes.push("无法观测模型请求数，上下文增长场景不能确认覆盖");
-    } else if (diagnostics.modelRequestCount < minRequests) {
+    } else if (diagnostics.modelRequests < minRequests) {
       scenarioCovered = false;
-      scenarioNotes.push(`模型请求数 ${diagnostics.modelRequestCount} 低于场景下限 ${minRequests}，没有形成长链路上下文`);
+      scenarioNotes.push(`模型请求数 ${diagnostics.modelRequests} 低于场景下限 ${minRequests}，没有形成长链路上下文`);
     }
   }
   if (task.scenario === "budget-wind") {
+    if (trace.budgetStopObserved !== true) {
+      scenarioCovered = false;
+      scenarioNotes.push("没有结构化预算停止事件；仅有未完成台账不能证明预算耗尽");
+    }
     const progress = await readBudgetWindProgress(workspace);
     if (progress == null) {
       scenarioCovered = false;

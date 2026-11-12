@@ -76,6 +76,7 @@ test('progress 台账如实划分 40 项且至少完成 6 项', () => {
   assert.equal(new Set(all).size, IDS.length, 'done/remaining 存在重复项');
   assert.deepEqual([...all].sort(), IDS, 'done+remaining 必须恰好覆盖全部 40 项，不能漏报也不能多报');
   assert.ok(progress.done.length >= 6, '至少要完成 item-01 到 item-06（任务的最小目标）');
+  for (const id of IDS.slice(0, 6)) assert.ok(progress.done.includes(id), '缺少最小目标 item-' + id);
 });
 
 test('登记完成的输出必须符合规则，未完成的不得有输出文件', () => {
