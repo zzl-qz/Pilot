@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.pilot.core.skill.SkillProblem;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -114,7 +115,7 @@ public class SessionController {
         if (project != null) {
             Optional<Session> existingBlank = sessions.findBlank(projectId);
             if (existingBlank.isPresent()) {
-                if (request == null || request.replaceBlank() == null || !request.replaceBlank()) {
+                if (request.replaceBlank() == null || !request.replaceBlank()) {
                     throw new ResponseStatusException(HttpStatus.CONFLICT,
                         "该项目已有未使用的空白对话（" + existingBlank.get().id() + "），" + "请先归档它再新建，或者直接回到那条对话。");
                 }
@@ -623,7 +624,7 @@ public class SessionController {
             var catalog = skills.catalogFor(workspaceOf(id));
             if (catalog.find(skill).isEmpty()) {
                 String reason = catalog.invalid().stream().filter(problem -> problem.name().equals(skill))
-                    .map(problem -> problem.reason()).findFirst().orElse("未找到");
+                    .map(SkillProblem::reason).findFirst().orElse("未找到");
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "技能 " + skill + " 不可用：" + reason);
             }
         }
