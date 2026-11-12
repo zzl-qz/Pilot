@@ -140,14 +140,7 @@ public class SandboxStore {
 
     public synchronized void reset(String sessionId) {
         applyJournal.assertSessionIdle(sessionId);
-        sandboxes.remove(sessionId);
-        tasks.remove(sessionId);
-        arbitrations.remove(sessionId);
-        decisions.remove(sessionId);
-        verifications.keySet().removeIf(key -> key.startsWith(sessionId + "/"));
-        manifests.keySet().removeIf(key -> key.startsWith(sessionId + "/"));
-        dependencies.keySet().removeIf(key -> key.startsWith(sessionId + "/"));
-        workspaceRevisions.remove(sessionId);
+        clearCached(sessionId);
         restoredSessions.remove(sessionId);
         Path dir = sessionDir(sessionId);
         if (Files.isDirectory(dir)) {

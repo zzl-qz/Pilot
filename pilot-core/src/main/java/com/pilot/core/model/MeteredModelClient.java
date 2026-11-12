@@ -6,7 +6,9 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import com.pilot.core.loop.Message;
@@ -33,6 +35,37 @@ public final class MeteredModelClient implements ModelClient {
         this.purpose = purpose;
         this.sources = sources == null ? List.of() : List.copyOf(sources);
         this.sink = sink;
+    }
+
+    /** 观察一次已获准的请求用量。预算和请求用途由调用方决定。 */
+    public static ModelClient observeUsage(ModelClient delegate, Runnable beforeRequest,
+        BiConsumer<Long, ModelUsage> afterRequest) {
+        return new ModelClient() {
+            @Override
+            public ModelProfile profile() {
+                return delegate.profile();
+            }
+
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                return chat(messages, tools, null, null);
+            }
+
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> text,
+                Consumer<String> reasoning) {
+                beforeRequest.run();
+                long started = System.nanoTime();
+                ModelResponse response = null;
+                try {
+                    response = delegate.chat(messages, tools, text, reasoning);
+                    return response;
+                } finally {
+                    afterRequest.accept(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
+                        response == null ? ModelUsage.unknown() : response.usage());
+                }
+            }
+        };
     }
 
     @Override
