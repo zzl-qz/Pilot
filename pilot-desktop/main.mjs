@@ -98,6 +98,7 @@ function state() {
   return {
     tabs: [...tabs.values()].map((tab) => ({
       id: tab.id,
+      targetId: tab.view.webContents.getOrCreateDevToolsTargetId(),
       title: tabTitle(tab),
       url: tab.view.webContents.getURL(),
       loading: tab.view.webContents.isLoading(),
@@ -502,7 +503,7 @@ function startControl() {
         const body = await readBody(request);
         const tab = ensureTab(body.sessionId || null, { fresh: Boolean(body.fresh), url: body.url || null });
         response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ tabId: tab.id, tabs: state().tabs }));
+        response.end(JSON.stringify({ tabId: tab.id, targetId: tab.view.webContents.getOrCreateDevToolsTargetId(), tabs: state().tabs }));
         return;
       }
       if (request.method === 'POST' && url.pathname === '/tabs/select') {
@@ -523,16 +524,17 @@ function startControl() {
       }
       if (request.method === 'POST' && url.pathname === '/emulate') {
         const body = await readBody(request);
-        const tab = body.tabId ? tabs.get(body.tabId)
-          : body.sessionId ? tabs.get(sessionTabs.get(body.sessionId)) : activeTab();
-        if (!tab) {
+        const selected = body.tabId ? [tabs.get(body.tabId)]
+          : body.sessionId ? [...tabs.values()].filter(tab => tab.sessionId === body.sessionId) : [activeTab()];
+        const targets = selected.filter(Boolean);
+        if (!targets.length) {
           response.writeHead(404);
           response.end('浏览器标签不存在');
           return;
         }
-        emulate(tab, Number(body.width) || 0, Number(body.height) || 0);
+        for (const tab of targets) emulate(tab, Number(body.width) || 0, Number(body.height) || 0);
         response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ ok: true, emulated: tab?.emulated || null }));
+        response.end(JSON.stringify({ ok: true, emulated: targets[0].emulated || null }));
         return;
       }
       if (request.method === 'GET' && url.pathname === '/tabs') {

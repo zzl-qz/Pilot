@@ -19,7 +19,7 @@ const cdpPort = probe.address().port;
 await new Promise(resolve => probe.close(resolve));
 const site = createServer((_req, res) => {
   res.writeHead(200, { 'content-type': 'text/html;charset=utf-8' });
-  res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><h1>视口验证</h1><button id="test">可见按钮</button>');
+  res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><h1>视口验证</h1><button id="test">可见按钮</button><script>console.error("viewport-fixture")</script>');
 });
 await new Promise(resolve => site.listen(0, '127.0.0.1', resolve));
 const env = { ...process.env, PILOT_DESKTOP_SMOKE: '1', PILOT_BROWSER_HOME: temp,
@@ -66,6 +66,7 @@ try {
   const initial = JSON.parse((await command('A', 'inspect')).text);
   assert.equal(initial.viewport.width, 1280, '隐藏标签首次打开即有桌面视口');
   await command('A', 'screenshot', { path: join(temp, 'hidden-first.png') });
+  assert.match((await command('A', 'console')).text, /viewport-fixture/, '首次桌面页面确实监听控制台');
   await command('B', 'navigate', { url });
   const state = await (await control('/tabs')).json();
   const a = state.tabs.find(tab => tab.sessionId === 'A');
@@ -81,13 +82,29 @@ try {
     assert.equal(JSON.parse((await command('B', 'inspect')).text).viewport.width, 1280,
       '非活动会话调整视口不能影响活动会话');
   }
+  await assert.rejects(command('A', 'switch_tab', { tabId: b.id }), /不属于当前会话/);
+  await assert.rejects(command('A', 'close_tab', { tabId: b.id }), /不属于当前会话/);
+  await command('A', 'console', { clear: true });
+  await command('A', 'navigate', { url });
+  assert.match((await command('A', 'console')).text, /viewport-fixture/, '新标签也监听控制台');
+  const opened = await (await control('/tabs')).json();
+  const nextA = opened.tabs.find(tab => tab.sessionId === 'A' && tab.id !== a.id);
+  assert(nextA && nextA.targetId !== a.targetId, '同 URL 使用不同 TargetID');
+  await command('A', 'resize', { width: 1440, height: 840 });
+  await command('A', 'switch_tab', { tabId: a.id });
+  assert.equal(JSON.parse((await command('A', 'inspect')).text).viewport.width, 390, '切回同地址旧标签必须读取旧页面');
+  await command('A', 'resize', { width: 768, height: 840 });
+  const switched = await (await control('/tabs')).json();
+  assert.equal(switched.tabs.find(tab => tab.id === a.id).emulated.width, 768);
+  assert.equal(switched.tabs.find(tab => tab.id === nextA.id).emulated.width, 1440);
   assert.equal((await control('/emulate', { sessionId: 'missing', width: 0, height: 0 })).status, 404);
   assert.equal((await control('/emulate', { sessionId: 'A', width: 0, height: 0 })).status, 200);
   const after = await (await control('/tabs')).json();
   assert.equal(after.tabs.find(tab => tab.id === a.id).emulated, null);
+  assert.equal(after.tabs.find(tab => tab.id === nextA.id).emulated, null, '完成会话收回其全部标签视口');
   assert.deepEqual(after.tabs.find(tab => tab.id === b.id).emulated, { width: 1280, height: 800 },
     '完成 A 只收回 A 的模拟视口');
-  console.log('PASS 首次隐藏截图 / 三种视口 / 只读布局诊断 / 两会话调整与恢复隔离');
+  console.log('PASS 首次隐藏截图 / 三种视口 / 只读布局诊断 / 两会话隔离 / 同地址多标签 / 切换后调整 / 控制台监听 / 全标签恢复');
   console.log('Screenshots:', temp);
 } finally {
   sidecar?.kill();

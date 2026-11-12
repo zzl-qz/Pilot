@@ -6,7 +6,7 @@
 //   事件  {"event": "...", "session": "s1", ...}（无 id；Java 端按 event 字段路由，见事件通道）
 // stdout 只放协议行；任何日志一律走 stderr。
 //
-// 隔离：整个进程共享一个 Chromium，每个 Pilot 会话一个独立 BrowserContext（cookie / storage 互不可见）。
+// 独立浏览器按会话隔离 BrowserContext；桌面标签按会话归属，cookie / storage 沿用工作区分区。
 // 导航只允许回环地址（localhost / 127.0.0.1 / [::1]）：本工具用来验证本机 Web 应用，不是通用上网。
 //
 // 环境变量（由 Java 端注入，未设时保持保守默认）：
@@ -218,10 +218,15 @@ function pushLimited(list, entry) {
 }
 
 function attachPage(session, page) {
-  if (session.page === page) return;
   session.page = page;
+  session.attachedPages ||= new WeakSet();
+  if (session.attachedPages.has(page)) {
+    if (session.mirror && session.capture !== false) ensureScreencast(session).catch(() => {});
+    return;
+  }
+  session.attachedPages.add(page);
   page.on('framenavigated', (frame) => {
-    if (frame !== page.mainFrame()) return;
+    if (frame !== page.mainFrame() || session.page !== page) return;
     reportNavigation(session, frame.url()).catch(() => {});
   });
   page.on('console', (message) => {
@@ -264,7 +269,7 @@ function attachPage(session, page) {
       appendLog(session, `[network] ${entry.method} ${entry.url} → ${response.status()}`);
     }
     const request = response.request();
-    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+    if (session.page === page && request.isNavigationRequest() && request.frame() === page.mainFrame()) {
       const policy = framePolicy(response.headers());
       session.embed = policy.embed;
       session.frameOptions = policy.frameOptions;
@@ -353,14 +358,24 @@ async function connectDesktop(desktop) {
   return browserPromise;
 }
 
-async function waitForDesktopPage(browser, tabId, alsoUrl) {
+async function waitForDesktopPage(browser, tabId, targetId) {
   const marker = `/marker/${tabId}`;
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     for (const context of browser.contexts()) {
       for (const page of context.pages()) {
         const url = page.url();
-        if (url.includes(marker) || (alsoUrl && url.startsWith(alsoUrl))) return page;
+        if (url.includes(marker)) return page;
+        if (targetId) {
+          const cdp = await context.newCDPSession(page).catch(() => null);
+          if (!cdp) continue;
+          try {
+            const info = await cdp.send('Target.getTargetInfo');
+            if (info.targetInfo.targetId === targetId) return page;
+          } finally {
+            await cdp.detach().catch(() => {});
+          }
+        }
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -377,7 +392,7 @@ async function createDesktopSession(id, desktop) {
   if (!response.ok) throw new Error(`桌面浏览器没有接上这个会话（HTTP ${response.status}）`);
   const created = await response.json();
   const browser = await connectDesktop(desktop);
-  const page = await waitForDesktopPage(browser, created.tabId);
+  const page = await waitForDesktopPage(browser, created.tabId, created.targetId);
   const session = {
     id, context: page.context(), page, console: [], network: [], dead: false, desktop: true, desktopTabId: created.tabId,
     mirror: false, capture: false, embed: true, frameOptions: '', mirrorWidth: 960, mirrorQuality: 55,
@@ -954,13 +969,16 @@ const handlers = {
         const opened = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-pilot-token': desktop.token },
-          body: JSON.stringify({ sessionId: current.id, fresh: true, url: String(args.url) })
+          body: JSON.stringify({ sessionId: current.id, fresh: true })
         });
         if (opened.ok) {
           const created = await opened.json();
           const browser = await connectDesktop(desktop);
-          page = await waitForDesktopPage(browser, created.tabId, String(args.url));
-          current.page = page;
+          const viewport = page.viewportSize() || { width: 1280, height: 800 };
+          page = await waitForDesktopPage(browser, created.tabId, created.targetId);
+          current.desktopTabId = created.tabId;
+          attachPage(current, page);
+          await handlers.resize(viewport, current);
         }
       }
     }
@@ -1185,7 +1203,7 @@ const handlers = {
 
   async tabs(args, current) {
     const desktop = readDesktop();
-    if (!desktop) return { text: '当前不是桌面浏览器，没有多标签。' };
+    if (!current.desktop || !desktop) return { text: '当前不是桌面浏览器，没有多标签。' };
     const response = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
       headers: { 'x-pilot-token': desktop.token }
     });
@@ -1197,24 +1215,32 @@ const handlers = {
 
   async switch_tab(args, current) {
     const desktop = readDesktop();
-    if (!desktop) throw new Error('只有桌面浏览器可以切换标签。');
+    if (!current.desktop || !desktop) throw new Error('只有桌面浏览器可以切换标签。');
     if (!args.tabId) throw new Error('switch_tab 需要 tabId。');
     const response = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
       headers: { 'x-pilot-token': desktop.token }
     });
     const body = await response.json();
     const tab = (body.tabs || []).find((item) => item.id === String(args.tabId));
-    if (!tab) throw new Error('没有这个标签。');
+    if (!tab || tab.sessionId !== current.id) throw new Error('标签不属于当前会话。');
     const browser = await connectDesktop(desktop);
-    const page = await waitForDesktopPage(browser, tab.id, tab.url && !String(tab.url).includes('/marker/') ? String(tab.url) : '');
-    current.page = page;
+    const page = await waitForDesktopPage(browser, tab.id, tab.targetId);
+    current.desktopTabId = tab.id;
+    attachPage(current, page);
     return { text: `已在后台使用标签 ${tab.id}。你正在看的页面没有被换掉。` };
   },
 
   async close_tab(args, current) {
     const desktop = readDesktop();
-    if (!desktop) throw new Error('只有桌面浏览器可以关闭标签。');
+    if (!current.desktop || !desktop) throw new Error('只有桌面浏览器可以关闭标签。');
     if (!args.tabId) throw new Error('close_tab 需要 tabId。');
+    const response = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
+      headers: { 'x-pilot-token': desktop.token }
+    });
+    const body = await response.json();
+    if (!(body.tabs || []).some(tab => tab.id === String(args.tabId) && tab.sessionId === current.id)) {
+      throw new Error('标签不属于当前会话。');
+    }
     await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs/close`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-pilot-token': desktop.token },
