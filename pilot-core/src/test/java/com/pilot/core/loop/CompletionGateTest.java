@@ -130,6 +130,25 @@ class CompletionGateTest {
     }
 
     @Test
+    void pipedTestNeedsUnmaskedExitCodeBeforeItCanVerifyChanges() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "实现 CSV 解析并验证");
+        Set<String> changed = Set.of("src/csv.js");
+        CompletionGate.Nudge nudge = gate.evaluate(changed,
+            List.of("node --test | tail -12 → exit 0"), List.of(), List.of());
+
+        assertNotNull(nudge);
+        assertTrue(nudge.reason().contains("未验证"));
+        assertTrue(nudge.prompt().contains("管道"), nudge.prompt());
+        assertTrue(nudge.prompt().contains("command_logs"), nudge.prompt());
+        assertTrue(nudge.prompt().contains("node --test"), nudge.prompt());
+
+        CompletionGate.Nudge verified = gate.evaluate(changed,
+            List.of("node --test | tail -12 → exit 0", "node --test → exit 0"), List.of(), List.of());
+        assertNotNull(verified);
+        assertTrue(verified.reason().contains("自审"));
+    }
+
+    @Test
     void successfulBuildTestLintAndFormatChecksVerifyCodeChanges() {
         for (String check : List.of("mvnw -q test → exit 0", "gradlew :app:build → exit 0", "npm run lint → exit 0",
             "node --test → exit 0", "python3 -m pytest -q → exit 0", "cargo check → exit 0", "go vet ./... → exit 0",
