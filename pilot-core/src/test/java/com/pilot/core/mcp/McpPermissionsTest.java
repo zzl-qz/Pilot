@@ -180,4 +180,25 @@ class McpPermissionsTest {
         }
     }
 
+    @Test
+    void explicitApprovalReplacesAnEarlierReadOnlyDecisionForTheSameCall() throws Exception {
+        Path user = root.resolve("user.json");
+        write(user, Map.of("trustReadOnlyHints", true));
+        try (McpManager manager = new McpManager(mapper, user, null, null)) {
+            manager.tools(root, "fake");
+            var tool = new McpCallTool(manager, root);
+            var args = Map.<String, Object>of("server", "fake", "tool", "first");
+            assertTrue(tool.readOnly(args));
+            write(user, Map.of("requireApprovalTools", List.of("first")));
+            var registry = new ToolRegistry();
+            registry.register(tool);
+            var executor = new ToolExecutor(registry, new PolicyPermissionGate(PermissionMode.AUTO),
+                (id, name, summary) -> CompletableFuture.completedFuture(true));
+            var result = executor.execute(new ToolCall("approved", "mcp_call", args), event -> {
+            });
+            assertEquals("ok", result.result());
+            assertTrue(result.usableEvidence());
+        }
+    }
+
 }

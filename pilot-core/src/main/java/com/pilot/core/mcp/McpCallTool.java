@@ -79,6 +79,13 @@ public final class McpCallTool extends Prompted {
     }
 
     @Override
+    public String approvalDescription(Map<String, Object> args) {
+        // 明确审批是新的执行依据，不能沿用同一次调用先前的只读快照。
+        checked.remove();
+        return null;
+    }
+
+    @Override
     public Availability availability() {
         return manager.hasServers(workspace) ? Availability.ready()
             : Availability.unavailable("当前工作区没有配置 MCP 服务器（.mcp.json）");

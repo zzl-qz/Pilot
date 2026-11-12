@@ -188,6 +188,9 @@ public final class McpManager implements AutoCloseable {
                 return McpPermissionPolicy.UNTRUSTED;
             }
             JsonNode policy = root.path("mcpServers").path(server).path("pilotPermissions");
+            if (!policy.path("workspaces").isArray()) {
+                return McpPermissionPolicy.UNTRUSTED;
+            }
             boolean scoped = false;
             for (JsonNode item : policy.path("workspaces")) {
                 if (item.isString()) {
