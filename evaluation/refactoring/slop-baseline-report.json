@@ -1,0 +1,5847 @@
+{
+  "reportVersion": 4,
+  "tool": "slopanalyzer",
+  "root": ".",
+  "slopScore": 33,
+  "summary": {
+    "files": 1114,
+    "totalLines": 152920,
+    "monolithFiles": 68,
+    "oversizedFunctions": 110,
+    "complexFunctions": 107,
+    "deepNesting": 201,
+    "duplicateBlocks": 30,
+    "verboseCode": 0,
+    "longComments": 1,
+    "fragmentedConcerns": 0,
+    "centralizationBypasses": 52,
+    "debugLeftovers": 163,
+    "debugRuntime": 55,
+    "debugTooling": 108,
+    "todos": 0,
+    "commentedCodeBlocks": 0,
+    "heavyDependencies": 0,
+    "manifests": 5,
+    "deadCodeHints": 0,
+    "deadCodeSuggestions": 1,
+    "planFound": true
+  },
+  "monolithPolicy": "plan-aware: verify large files against the plan — they may be intentional",
+  "findings": {
+    "monolithFiles": [
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/AgentRunService.java",
+        "lines": 1714,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+        "lines": 1687,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/main/resources/browser/browser-sidecar.mjs",
+        "lines": 1549,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/types/server.ts",
+        "lines": 1465,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/loop/AgentLoop.java",
+        "lines": 1447,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/GoalExecutionPolicy.java",
+        "lines": 1387,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/multi/MultiAgentService.java",
+        "lines": 1233,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/thread-reducer.ts",
+        "lines": 1086,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/multi/SandboxStore.java",
+        "lines": 1070,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Thread.tsx",
+        "lines": 945,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/session/AgentRunServiceTest.java",
+        "lines": 943,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/RunCommandTool.java",
+        "lines": 940,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Composer.tsx",
+        "lines": 918,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/session/SessionService.java",
+        "lines": 902,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/controller/SessionController.java",
+        "lines": 882,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/session/GoalExecutionPolicyTest.java",
+        "lines": 879,
+        "area": "test"
+      },
+      {
+        "file": "pilot-desktop/main.mjs",
+        "lines": 866,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/runner.mjs",
+        "lines": 843,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/workspace/ChangeService.java",
+        "lines": 829,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/workspace/RunSnapshotService.java",
+        "lines": 817,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/CommandTaskManager.java",
+        "lines": 795,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Settings.tsx",
+        "lines": 786,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/session/AgentRunTaskControlTest.java",
+        "lines": 772,
+        "area": "test"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/markdown-render.ts",
+        "lines": 711,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/controller/SessionApiTest.java",
+        "lines": 708,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/loop/ContextCompactor.java",
+        "lines": 699,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store.ts",
+        "lines": 673,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/model/OpenAiCompatibleModelClient.java",
+        "lines": 667,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/search/LocalSearchRuntime.java",
+        "lines": 624,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/App.tsx",
+        "lines": 611,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/runner.test.mjs",
+        "lines": 599,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/model/OpenAiCompatibleModelClientTest.java",
+        "lines": 597,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/schedule/ScheduleServiceTest.java",
+        "lines": 597,
+        "area": "test"
+      },
+      {
+        "file": "pilot-mobile/app/src/main/java/com/pilot/mobile/PilotViewModel.kt",
+        "lines": 571,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Modals.tsx",
+        "lines": 570,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/OfficeTool.java",
+        "lines": 557,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/SkillInstallService.java",
+        "lines": 544,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/schedule/ScheduleService.java",
+        "lines": 536,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/ChangesPanel.tsx",
+        "lines": 532,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/multi/MultiAgentServiceTest.java",
+        "lines": 529,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/config/ModelCapabilityDiscoveryTest.java",
+        "lines": 528,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/workspace/ChangeServiceTest.java",
+        "lines": 527,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/TaskControlService.java",
+        "lines": 525,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/store-state.test.mjs",
+        "lines": 525,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/browser/BrowserRuntime.java",
+        "lines": 523,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/store/SqliteStore.java",
+        "lines": 521,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Schedules.tsx",
+        "lines": 514,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/work/FileWorkbenchService.java",
+        "lines": 506,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/browser/BrowserTool.java",
+        "lines": 496,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/streams.ts",
+        "lines": 490,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/ApplyPatchTool.java",
+        "lines": 489,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/maintenance/BackupService.java",
+        "lines": 485,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/browser/PlaywrightBackend.java",
+        "lines": 478,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-final.test.mjs",
+        "lines": 474,
+        "area": "test"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/BrowserPanel.tsx",
+        "lines": 468,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/AttachmentService.java",
+        "lines": 467,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/multi/AgentScope.java",
+        "lines": 452,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/store/JdbcSessionRepository.java",
+        "lines": 442,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/workspace/GitWorktrees.java",
+        "lines": 440,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/session/SkillInstallServiceTest.java",
+        "lines": 439,
+        "area": "test"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/interaction-smoke.mjs",
+        "lines": 435,
+        "area": "tooling"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-aware.test.mjs",
+        "lines": 432,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/ToolExecutor.java",
+        "lines": 423,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/session/SpawnAgentToolTest.java",
+        "lines": 413,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/workspace/RunSnapshotServiceTest.java",
+        "lines": 410,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/config/ModelCapabilityDiscovery.java",
+        "lines": 409,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/runtime/bootstrap/SourceEnvironment.java",
+        "lines": 406,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/SideChat.tsx",
+        "lines": 406,
+        "area": "runtime"
+      }
+    ],
+    "oversizedFunctions": [
+      {
+        "file": "pilot-web/frontend/src/components/Composer.tsx",
+        "name": "Composer",
+        "startLine": 38,
+        "lines": 625,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/thread-reducer.ts",
+        "name": "applyEvent",
+        "startLine": 350,
+        "lines": 605,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/streams.ts",
+        "name": "applyAttention",
+        "startLine": 22,
+        "lines": 468,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Schedules.tsx",
+        "name": "ScheduleDialog",
+        "startLine": 88,
+        "lines": 426,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/App.tsx",
+        "name": "Workbench",
+        "startLine": 38,
+        "lines": 389,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/composer-input.ts",
+        "name": "createComposerInput",
+        "startLine": 15,
+        "lines": 371,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/interaction-smoke.mjs",
+        "name": "run",
+        "startLine": 72,
+        "lines": 348,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/BrowserPanel.tsx",
+        "name": "DesktopBrowserPanel",
+        "startLine": 143,
+        "lines": 325,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/MobileConnection.tsx",
+        "name": "MobileConnectionContent",
+        "startLine": 21,
+        "lines": 314,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/model-discovery-smoke.mjs",
+        "name": "run",
+        "startLine": 80,
+        "lines": 300,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/history.ts",
+        "name": "createHistoryController",
+        "startLine": 10,
+        "lines": 294,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/FileWorkbench.tsx",
+        "name": "FileWorkbench",
+        "startLine": 18,
+        "lines": 285,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/ChangesPanel.tsx",
+        "name": "ChangesPanel",
+        "startLine": 15,
+        "lines": 285,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ThreadNavigator.tsx",
+        "name": "Navigation",
+        "startLine": 33,
+        "lines": 278,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/sessions.ts",
+        "name": "createSessionActions",
+        "startLine": 90,
+        "lines": 270,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/support/fault-proxy.mjs",
+        "name": "startFaultProxy",
+        "startLine": 92,
+        "lines": 253,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/MessageSearch.tsx",
+        "name": "MessageSearchDialog",
+        "startLine": 24,
+        "lines": 217,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Settings.tsx",
+        "name": "DiagnosticsSettings",
+        "startLine": 548,
+        "lines": 199,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/panels.ts",
+        "name": "createPanelActions",
+        "startLine": 10,
+        "lines": 199,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/results-smoke.mjs",
+        "name": "run",
+        "startLine": 48,
+        "lines": 196,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/run-state.ts",
+        "name": "createRunStateActions",
+        "startLine": 8,
+        "lines": 194,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/budget-proxy.executed.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 107,
+        "lines": 193,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/stage2/budget-proxy.executed.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 102,
+        "lines": 193,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/stage3/budget-proxy.executed.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 107,
+        "lines": 193,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-aware.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 103,
+        "lines": 193,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-final.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 107,
+        "lines": 193,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/SideChat.tsx",
+        "name": "SimpleSideChat",
+        "startLine": 127,
+        "lines": 177,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/stage1/budget-proxy.executed.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 45,
+        "lines": 176,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-throttled.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 45,
+        "lines": 176,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/workbench-cases.mjs",
+        "name": "checkWorkbench",
+        "startLine": 5,
+        "lines": 172,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/ChangesPanel.tsx",
+        "name": "DiffView",
+        "startLine": 361,
+        "lines": 171,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 44,
+        "lines": 159,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/calibration/budget-proxy.executed.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 30,
+        "lines": 156,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/runner.mjs",
+        "name": "runTask",
+        "startLine": 453,
+        "lines": 156,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Notifications.tsx",
+        "name": "NotificationDialog",
+        "startLine": 83,
+        "lines": 156,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/CommandsPanel.tsx",
+        "name": "CommandsPanel",
+        "startLine": 11,
+        "lines": 155,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/side-chats.ts",
+        "name": "createSideChatActions",
+        "startLine": 10,
+        "lines": 154,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/workbench-style-smoke.mjs",
+        "name": "run",
+        "startLine": 37,
+        "lines": 149,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/p1-smoke.mjs",
+        "name": "run",
+        "startLine": 83,
+        "lines": 143,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ModelPicker.tsx",
+        "name": "ModelPicker",
+        "startLine": 10,
+        "lines": 142,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/markdown-render.ts",
+        "name": "markdownBlockRecords",
+        "startLine": 110,
+        "lines": 142,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/review-cases.mjs",
+        "name": "checkReview",
+        "startLine": 120,
+        "lines": 141,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ModelRuntimeSettings.tsx",
+        "name": "ModelRuntimeSettings",
+        "startLine": 22,
+        "lines": 141,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/runner.mjs",
+        "name": "main",
+        "startLine": 703,
+        "lines": 135,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Sidebar.tsx",
+        "name": "Sidebar",
+        "startLine": 13,
+        "lines": 133,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Thread.tsx",
+        "name": "Thread",
+        "startLine": 47,
+        "lines": 132,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/work-products-smoke.mjs",
+        "name": "run",
+        "startLine": 28,
+        "lines": 131,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ResultInbox.tsx",
+        "name": "InboxDialog",
+        "startLine": 25,
+        "lines": 128,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/side-chat-cases.mjs",
+        "name": "checkSideChat",
+        "startLine": 4,
+        "lines": 126,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Settings.tsx",
+        "name": "SkillsInstall",
+        "startLine": 298,
+        "lines": 125,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ProjectEditor.tsx",
+        "name": "ProjectEditor",
+        "startLine": 18,
+        "lines": 123,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/CapabilitiesPanel.tsx",
+        "name": "CapabilitiesPanel",
+        "startLine": 15,
+        "lines": 122,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/shell-cases.mjs",
+        "name": "checkShell",
+        "startLine": 5,
+        "lines": 120,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/request-usage-smoke.mjs",
+        "name": "run",
+        "startLine": 56,
+        "lines": 116,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/input.ts",
+        "name": "createInputActions",
+        "startLine": 13,
+        "lines": 115,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Modals.tsx",
+        "name": "WorkspacePicker",
+        "startLine": 196,
+        "lines": 111,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/schedule-smoke.mjs",
+        "name": "run",
+        "startLine": 49,
+        "lines": 110,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/session-management-smoke.mjs",
+        "name": "run",
+        "startLine": 35,
+        "lines": 109,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/App.tsx",
+        "name": "WorkspaceDialog",
+        "startLine": 504,
+        "lines": 107,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/navigation-smoke.mjs",
+        "name": "run",
+        "startLine": 69,
+        "lines": 105,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/SideChat.tsx",
+        "name": "SideChatPanel",
+        "startLine": 22,
+        "lines": 104,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/PdfAttachmentPreview.tsx",
+        "name": "PdfAttachmentPreview",
+        "startLine": 11,
+        "lines": 102,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ReviewActions.tsx",
+        "name": "ReviewActions",
+        "startLine": 11,
+        "lines": 100,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/SessionMenu.tsx",
+        "name": "SessionMenu",
+        "startLine": 27,
+        "lines": 100,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Modals.tsx",
+        "name": "CheckpointDialog",
+        "startLine": 472,
+        "lines": 98,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/PreviewPanel.tsx",
+        "name": "PreviewPanel",
+        "startLine": 11,
+        "lines": 97,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/ActivityPanel.tsx",
+        "name": "ActivityPanel",
+        "startLine": 44,
+        "lines": 96,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/VoiceInput.tsx",
+        "name": "VoiceInput",
+        "startLine": 22,
+        "lines": 96,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Modals.tsx",
+        "name": "TaskContract",
+        "startLine": 35,
+        "lines": 94,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/RecurringPlans.tsx",
+        "name": "RecurringDialog",
+        "startLine": 27,
+        "lines": 94,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Modal.tsx",
+        "name": "Modal",
+        "startLine": 21,
+        "lines": 93,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/SessionMenu.tsx",
+        "name": "SessionActionDialog",
+        "startLine": 128,
+        "lines": 93,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/composer-smoke.mjs",
+        "name": "run",
+        "startLine": 81,
+        "lines": 90,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Inspector.tsx",
+        "name": "Inspector",
+        "startLine": 39,
+        "lines": 90,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/markdown-stream.ts",
+        "name": "createBlockStreamRenderer",
+        "startLine": 98,
+        "lines": 90,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ProjectEditor.tsx",
+        "name": "ProjectDirectoryBrowser",
+        "startLine": 143,
+        "lines": 89,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/run-controls.ts",
+        "name": "createRunControlActions",
+        "startLine": 7,
+        "lines": 88,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/voice-input.ts",
+        "name": "createVoiceInput",
+        "startLine": 65,
+        "lines": 86,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/submissions.ts",
+        "name": "createSubmissions",
+        "startLine": 16,
+        "lines": 85,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Thread.tsx",
+        "name": "AttachmentPreview",
+        "startLine": 385,
+        "lines": 84,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/runner.mjs",
+        "name": "parseArgs",
+        "startLine": 33,
+        "lines": 83,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/inspector-smoke.mjs",
+        "name": "run",
+        "startLine": 28,
+        "lines": 83,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/SideChat.tsx",
+        "name": "SelectionQuote",
+        "startLine": 324,
+        "lines": 82,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Sidebar.tsx",
+        "name": "ProjectGroup",
+        "startLine": 147,
+        "lines": 80,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/workbench-refresh-smoke.mjs",
+        "name": "run",
+        "startLine": 61,
+        "lines": 79,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/App.tsx",
+        "name": "onKey",
+        "startLine": 153,
+        "lines": 78,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/thread-scroll-smoke.mjs",
+        "name": "run",
+        "startLine": 72,
+        "lines": 77,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/agent-usage-smoke.mjs",
+        "name": "run",
+        "startLine": 44,
+        "lines": 76,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-desktop/main.mjs",
+        "name": "wire",
+        "startLine": 237,
+        "lines": 75,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/queue-cases.mjs",
+        "name": "checkQueue",
+        "startLine": 4,
+        "lines": 75,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Composer.tsx",
+        "name": "QueueRow",
+        "startLine": 783,
+        "lines": 75,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/markdown-render.ts",
+        "name": "inlineToken",
+        "startLine": 634,
+        "lines": 75,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/workbench-sync.ts",
+        "name": "createWorkbenchRefresher",
+        "startLine": 25,
+        "lines": 75,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/model-settings.ts",
+        "name": "createModelSettingsActions",
+        "startLine": 16,
+        "lines": 75,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Settings.tsx",
+        "name": "UsageSettings",
+        "startLine": 433,
+        "lines": 73,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-desktop/main.mjs",
+        "name": "startControl",
+        "startLine": 487,
+        "lines": 72,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/voice-cases.mjs",
+        "name": "checkVoice",
+        "startLine": 5,
+        "lines": 71,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/notification-smoke.mjs",
+        "name": "run",
+        "startLine": 35,
+        "lines": 69,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/RequestUsage.tsx",
+        "name": "ContextUsagePanel",
+        "startLine": 62,
+        "lines": 69,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Settings.tsx",
+        "name": "VoiceSettings",
+        "startLine": 156,
+        "lines": 69,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/workbench-sync.ts",
+        "name": "refreshWorkbench",
+        "startLine": 30,
+        "lines": 69,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/NavigationRail.tsx",
+        "name": "NavigationRail",
+        "startLine": 8,
+        "lines": 68,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Thread.tsx",
+        "name": "SandboxCard",
+        "startLine": 853,
+        "lines": 68,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/resources/browser/browser-sidecar.mjs",
+        "name": "attachPage",
+        "startLine": 220,
+        "lines": 65,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Thread.tsx",
+        "name": "EmptyState",
+        "startLine": 198,
+        "lines": 65,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/project-folders-smoke.mjs",
+        "name": "run",
+        "startLine": 33,
+        "lines": 64,
+        "area": "tooling"
+      },
+      {
+        "file": "evaluation/harness/metrics.mjs",
+        "name": "evaluateGate",
+        "startLine": 267,
+        "lines": 63,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/markdown-smoke.mjs",
+        "name": "run",
+        "startLine": 26,
+        "lines": 62,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/workbench-sync.ts",
+        "name": "flight",
+        "startLine": 36,
+        "lines": 61,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/WorkProductsPanel.tsx",
+        "name": "SessionProducts",
+        "startLine": 21,
+        "lines": 60,
+        "area": "runtime"
+      }
+    ],
+    "complexFunctions": [
+      {
+        "file": "pilot-web/frontend/src/thread-reducer.ts",
+        "name": "applyEvent",
+        "startLine": 350,
+        "complexity": 242,
+        "lines": 605,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/streams.ts",
+        "name": "applyAttention",
+        "startLine": 22,
+        "complexity": 160,
+        "lines": 468,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Composer.tsx",
+        "name": "Composer",
+        "startLine": 38,
+        "complexity": 157,
+        "lines": 625,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ThreadNavigator.tsx",
+        "name": "Navigation",
+        "startLine": 33,
+        "complexity": 120,
+        "lines": 278,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Schedules.tsx",
+        "name": "ScheduleDialog",
+        "startLine": 88,
+        "complexity": 109,
+        "lines": 426,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/App.tsx",
+        "name": "Workbench",
+        "startLine": 38,
+        "complexity": 108,
+        "lines": 389,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/MobileConnection.tsx",
+        "name": "MobileConnectionContent",
+        "startLine": 21,
+        "complexity": 108,
+        "lines": 314,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/ChangesPanel.tsx",
+        "name": "ChangesPanel",
+        "startLine": 15,
+        "complexity": 96,
+        "lines": 285,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/budget-proxy.executed.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 107,
+        "complexity": 95,
+        "lines": 193,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/stage2/budget-proxy.executed.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 102,
+        "complexity": 95,
+        "lines": 193,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/stage3/budget-proxy.executed.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 107,
+        "complexity": 95,
+        "lines": 193,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-aware.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 103,
+        "complexity": 95,
+        "lines": 193,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-final.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 107,
+        "complexity": 95,
+        "lines": 193,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ResultInbox.tsx",
+        "name": "InboxDialog",
+        "startLine": 25,
+        "complexity": 92,
+        "lines": 128,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/calibration/budget-proxy.executed.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 30,
+        "complexity": 90,
+        "lines": 156,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 44,
+        "complexity": 89,
+        "lines": 159,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/stage1/budget-proxy.executed.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 45,
+        "complexity": 88,
+        "lines": 176,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-throttled.mjs",
+        "name": "startBudgetProxy",
+        "startLine": 45,
+        "complexity": 88,
+        "lines": 176,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/FileWorkbench.tsx",
+        "name": "FileWorkbench",
+        "startLine": 18,
+        "complexity": 84,
+        "lines": 285,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/support/fault-proxy.mjs",
+        "name": "startFaultProxy",
+        "startLine": 92,
+        "complexity": 81,
+        "lines": 253,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/panels.ts",
+        "name": "createPanelActions",
+        "startLine": 10,
+        "complexity": 75,
+        "lines": 199,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/sessions.ts",
+        "name": "createSessionActions",
+        "startLine": 90,
+        "complexity": 72,
+        "lines": 270,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ReviewActions.tsx",
+        "name": "ReviewActions",
+        "startLine": 11,
+        "complexity": 67,
+        "lines": 100,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/history.ts",
+        "name": "createHistoryController",
+        "startLine": 10,
+        "complexity": 66,
+        "lines": 294,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ModelRuntimeSettings.tsx",
+        "name": "ModelRuntimeSettings",
+        "startLine": 22,
+        "complexity": 64,
+        "lines": 141,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/run-state.ts",
+        "name": "createRunStateActions",
+        "startLine": 8,
+        "complexity": 63,
+        "lines": 194,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/MessageSearch.tsx",
+        "name": "MessageSearchDialog",
+        "startLine": 24,
+        "complexity": 62,
+        "lines": 217,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/runner.mjs",
+        "name": "parseArgs",
+        "startLine": 33,
+        "complexity": 61,
+        "lines": 83,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/BrowserPanel.tsx",
+        "name": "DesktopBrowserPanel",
+        "startLine": 143,
+        "complexity": 60,
+        "lines": 325,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/SideChat.tsx",
+        "name": "SimpleSideChat",
+        "startLine": 127,
+        "complexity": 58,
+        "lines": 177,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/runner.mjs",
+        "name": "runTask",
+        "startLine": 453,
+        "complexity": 57,
+        "lines": 156,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Modals.tsx",
+        "name": "WorkspacePicker",
+        "startLine": 196,
+        "complexity": 53,
+        "lines": 111,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Settings.tsx",
+        "name": "DiagnosticsSettings",
+        "startLine": 548,
+        "complexity": 53,
+        "lines": 199,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/runner.mjs",
+        "name": "main",
+        "startLine": 703,
+        "complexity": 51,
+        "lines": 135,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/App.tsx",
+        "name": "onKey",
+        "startLine": 153,
+        "complexity": 49,
+        "lines": 78,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/composer-input.ts",
+        "name": "createComposerInput",
+        "startLine": 15,
+        "complexity": 49,
+        "lines": 371,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Notifications.tsx",
+        "name": "NotificationDialog",
+        "startLine": 83,
+        "complexity": 47,
+        "lines": 156,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/budget-proxy.executed.mjs",
+        "name": "reportedUsage",
+        "startLine": 38,
+        "complexity": 46,
+        "lines": 49,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/stage2/budget-proxy.executed.mjs",
+        "name": "reportedUsage",
+        "startLine": 36,
+        "complexity": 46,
+        "lines": 46,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/stage3/budget-proxy.executed.mjs",
+        "name": "reportedUsage",
+        "startLine": 38,
+        "complexity": 46,
+        "lines": 49,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-aware.mjs",
+        "name": "reportedUsage",
+        "startLine": 37,
+        "complexity": 46,
+        "lines": 46,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-final.mjs",
+        "name": "reportedUsage",
+        "startLine": 38,
+        "complexity": 46,
+        "lines": 49,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/input.ts",
+        "name": "createInputActions",
+        "startLine": 13,
+        "complexity": 45,
+        "lines": 115,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/ChangesPanel.tsx",
+        "name": "DiffView",
+        "startLine": 361,
+        "complexity": 44,
+        "lines": 171,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/metrics.mjs",
+        "name": "evaluateGate",
+        "startLine": 267,
+        "complexity": 43,
+        "lines": 63,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/side-chats.ts",
+        "name": "createSideChatActions",
+        "startLine": 10,
+        "complexity": 43,
+        "lines": 154,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Modals.tsx",
+        "name": "CheckpointDialog",
+        "startLine": 472,
+        "complexity": 41,
+        "lines": 98,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ProjectEditor.tsx",
+        "name": "ProjectDirectoryBrowser",
+        "startLine": 143,
+        "complexity": 39,
+        "lines": 89,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/workbench-sync.ts",
+        "name": "createWorkbenchRefresher",
+        "startLine": 25,
+        "complexity": 38,
+        "lines": 75,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/workbench-sync.ts",
+        "name": "refreshWorkbench",
+        "startLine": 30,
+        "complexity": 38,
+        "lines": 69,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/CommandsPanel.tsx",
+        "name": "CommandsPanel",
+        "startLine": 11,
+        "complexity": 37,
+        "lines": 155,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ProjectEditor.tsx",
+        "name": "ProjectEditor",
+        "startLine": 18,
+        "complexity": 37,
+        "lines": 123,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Thread.tsx",
+        "name": "AttachmentPreview",
+        "startLine": 385,
+        "complexity": 37,
+        "lines": 84,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Modal.tsx",
+        "name": "Modal",
+        "startLine": 21,
+        "complexity": 36,
+        "lines": 93,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/run-controls.ts",
+        "name": "createRunControlActions",
+        "startLine": 7,
+        "complexity": 36,
+        "lines": 88,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/voice-input.ts",
+        "name": "createVoiceInput",
+        "startLine": 65,
+        "complexity": 35,
+        "lines": 86,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ModelPicker.tsx",
+        "name": "ModelPicker",
+        "startLine": 10,
+        "complexity": 34,
+        "lines": 142,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/workbench-sync.ts",
+        "name": "flight",
+        "startLine": 36,
+        "complexity": 34,
+        "lines": 61,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/markdown-render.ts",
+        "name": "markdownBlockRecords",
+        "startLine": 110,
+        "complexity": 33,
+        "lines": 142,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/resources/browser/browser-sidecar.mjs",
+        "name": "interactive",
+        "startLine": 697,
+        "complexity": 32,
+        "lines": 31,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/submissions.ts",
+        "name": "createSubmissions",
+        "startLine": 16,
+        "complexity": 32,
+        "lines": 85,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/metrics.mjs",
+        "name": "comparisonIssues",
+        "startLine": 209,
+        "complexity": 31,
+        "lines": 48,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/interaction-smoke.mjs",
+        "name": "run",
+        "startLine": 72,
+        "complexity": 31,
+        "lines": 348,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Thread.tsx",
+        "name": "SandboxCard",
+        "startLine": 853,
+        "complexity": 30,
+        "lines": 68,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/WorkspaceTree.tsx",
+        "name": "WorkspaceFiles",
+        "startLine": 36,
+        "complexity": 30,
+        "lines": 58,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Settings.tsx",
+        "name": "SkillsInstall",
+        "startLine": 298,
+        "complexity": 29,
+        "lines": 125,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/resources/browser/browser-sidecar.mjs",
+        "name": "dispatch",
+        "startLine": 1449,
+        "complexity": 28,
+        "lines": 57,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/RecurringPlans.tsx",
+        "name": "RecurringDialog",
+        "startLine": 27,
+        "complexity": 28,
+        "lines": 94,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/metrics.mjs",
+        "name": "invalidRecordIssues",
+        "startLine": 170,
+        "complexity": 27,
+        "lines": 37,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Composer.tsx",
+        "name": "QueueRow",
+        "startLine": 783,
+        "complexity": 27,
+        "lines": 75,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Modals.tsx",
+        "name": "TaskContract",
+        "startLine": 35,
+        "complexity": 27,
+        "lines": 94,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/PdfAttachmentPreview.tsx",
+        "name": "PdfAttachmentPreview",
+        "startLine": 11,
+        "complexity": 27,
+        "lines": 102,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ReviewActions.tsx",
+        "name": "submit",
+        "startLine": 56,
+        "complexity": 27,
+        "lines": 30,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/SessionMenu.tsx",
+        "name": "SessionMenu",
+        "startLine": 27,
+        "complexity": 27,
+        "lines": 100,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/VoiceInput.tsx",
+        "name": "VoiceInput",
+        "startLine": 22,
+        "complexity": 27,
+        "lines": 96,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/workbench-sync.ts",
+        "name": "current",
+        "startLine": 46,
+        "complexity": 27,
+        "lines": 34,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-desktop/main.mjs",
+        "name": "wire",
+        "startLine": 237,
+        "complexity": 26,
+        "lines": 75,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/budget-plan.mjs",
+        "name": "percentile",
+        "startLine": 11,
+        "complexity": 25,
+        "lines": 36,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/budget-plan.mjs",
+        "name": "planBudget",
+        "startLine": 14,
+        "complexity": 25,
+        "lines": 33,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/resources/browser/browser-sidecar.mjs",
+        "name": "walk",
+        "startLine": 739,
+        "complexity": 25,
+        "lines": 42,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/work-products-smoke.mjs",
+        "name": "run",
+        "startLine": 28,
+        "complexity": 25,
+        "lines": 131,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Composer.tsx",
+        "name": "onComposerKeydown",
+        "startLine": 446,
+        "complexity": 25,
+        "lines": 40,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Inspector.tsx",
+        "name": "Inspector",
+        "startLine": 39,
+        "complexity": 25,
+        "lines": 90,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Settings.tsx",
+        "name": "VoiceSettings",
+        "startLine": 156,
+        "complexity": 25,
+        "lines": 69,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Thread.tsx",
+        "name": "Thread",
+        "startLine": 47,
+        "complexity": 25,
+        "lines": 132,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/resources/browser/browser-sidecar.mjs",
+        "name": "attrs",
+        "startLine": 701,
+        "complexity": 24,
+        "lines": 27,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-desktop/main.mjs",
+        "name": "startControl",
+        "startLine": 487,
+        "complexity": 24,
+        "lines": 72,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/CapabilitiesPanel.tsx",
+        "name": "CapabilitiesPanel",
+        "startLine": 15,
+        "complexity": 24,
+        "lines": 122,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/WorkProductsPanel.tsx",
+        "name": "SessionProducts",
+        "startLine": 21,
+        "complexity": 23,
+        "lines": 60,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/interaction.ts",
+        "name": "runPhase",
+        "startLine": 26,
+        "complexity": 23,
+        "lines": 28,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/resources/browser/browser-sidecar.mjs",
+        "name": "attachPage",
+        "startLine": 220,
+        "complexity": 22,
+        "lines": 65,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/resources/browser/browser-sidecar.mjs",
+        "name": "startScreencast",
+        "startLine": 530,
+        "complexity": 22,
+        "lines": 49,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/resources/browser/browser-sidecar.mjs",
+        "name": "wanted",
+        "startLine": 532,
+        "complexity": 22,
+        "lines": 46,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/PreviewPanel.tsx",
+        "name": "PreviewPanel",
+        "startLine": 11,
+        "complexity": 22,
+        "lines": 97,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/reference-verifier.mjs",
+        "name": "verifyReference",
+        "startLine": 95,
+        "complexity": 21,
+        "lines": 40,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/runner.mjs",
+        "name": "waitForTerminal",
+        "startLine": 246,
+        "complexity": 21,
+        "lines": 51,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/App.tsx",
+        "name": "WorkspaceDialog",
+        "startLine": 504,
+        "complexity": 21,
+        "lines": 107,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/SessionMenu.tsx",
+        "name": "SessionActionDialog",
+        "startLine": 128,
+        "complexity": 21,
+        "lines": 93,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ThreadNavigator.tsx",
+        "name": "jump",
+        "startLine": 181,
+        "complexity": 21,
+        "lines": 33,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/thread-reducer.ts",
+        "name": "record",
+        "startLine": 242,
+        "complexity": 21,
+        "lines": 38,
+        "area": "runtime"
+      },
+      {
+        "file": "tools/ask-frontend-deps.mjs",
+        "name": "dependencyIssue",
+        "startLine": 43,
+        "complexity": 21,
+        "lines": 36,
+        "area": "tooling"
+      },
+      {
+        "file": "evaluation/harness/runner.mjs",
+        "name": "resumePlan",
+        "startLine": 675,
+        "complexity": 20,
+        "lines": 27,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/resources/browser/browser-policy.mjs",
+        "name": "publicAddress",
+        "startLine": 4,
+        "complexity": 20,
+        "lines": 13,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/WorkspaceTree.tsx",
+        "name": "onKeyDown",
+        "startLine": 54,
+        "complexity": 20,
+        "lines": 25,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/bookmark-watch.ts",
+        "name": "watchBookmarks",
+        "startLine": 10,
+        "complexity": 20,
+        "lines": 39,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/voice-input.ts",
+        "name": "start",
+        "startLine": 104,
+        "complexity": 20,
+        "lines": 41,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/thread-reducer.ts",
+        "name": "same",
+        "startLine": 402,
+        "complexity": 20,
+        "lines": 23,
+        "area": "runtime"
+      }
+    ],
+    "deepNesting": [
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/budget-proxy.executed.mjs",
+        "line": 252,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/calibration/budget-proxy.executed.mjs",
+        "line": 136,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/stage1/budget-proxy.executed.mjs",
+        "line": 190,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/stage2/budget-proxy.executed.mjs",
+        "line": 247,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/stage3/budget-proxy.executed.mjs",
+        "line": 252,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-throttled.mjs",
+        "line": 190,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-throttled.test.mjs",
+        "line": 144,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-aware.mjs",
+        "line": 248,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-aware.test.mjs",
+        "line": 144,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-final.mjs",
+        "line": 252,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-final.test.mjs",
+        "line": 467,
+        "depth": 7,
+        "area": "test"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy.mjs",
+        "line": 152,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy.test.mjs",
+        "line": 296,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "evaluation/harness/recovery-smoke.mjs",
+        "line": 70,
+        "depth": 10,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/runner.mjs",
+        "line": 790,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "evaluation/harness/support/fault-proxy.mjs",
+        "line": 174,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/browser/BrowserTool.java",
+        "line": 305,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/browser/PlaywrightBackend.java",
+        "line": 427,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/exec/ContainerExecutionBackend.java",
+        "line": 284,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/exec/IsolatedWorkspace.java",
+        "line": 59,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/hook/Hooks.java",
+        "line": 172,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/http/BoundedHttp.java",
+        "line": 186,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/loop/AgentLoop.java",
+        "line": 565,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/loop/ContextCompactor.java",
+        "line": 628,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/loop/ContextPins.java",
+        "line": 29,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpCallTool.java",
+        "line": 121,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpClient.java",
+        "line": 207,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/model/AnthropicMessagesModelClient.java",
+        "line": 134,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/model/ContextComposition.java",
+        "line": 50,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/model/OpenAiCompatibleModelClient.java",
+        "line": 383,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/model/OpenAiResponsesModelClient.java",
+        "line": 134,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/model/RequestBudget.java",
+        "line": 72,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/multi/AgentFrontmatter.java",
+        "line": 74,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/multi/AgentScope.java",
+        "line": 338,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/multi/MergePrecheck.java",
+        "line": 113,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/multi/UnifiedDiff.java",
+        "line": 283,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/permission/PermissionRules.java",
+        "line": 188,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/prompt/PromptLibrary.java",
+        "line": 181,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/runtime/bootstrap/BootstrapLock.java",
+        "line": 30,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/runtime/bootstrap/RuntimeAssets.java",
+        "line": 251,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/runtime/bootstrap/SourceEnvironment.java",
+        "line": 373,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/session/SessionService.java",
+        "line": 791,
+        "depth": 9,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/ApplyPatchTool.java",
+        "line": 214,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/CommandChain.java",
+        "line": 59,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/CommandPolicy.java",
+        "line": 96,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/CommandTaskManager.java",
+        "line": 451,
+        "depth": 9,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/DocumentRenderer.java",
+        "line": 93,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/GlobFilesTool.java",
+        "line": 126,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/OfficeBlocks.java",
+        "line": 43,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/OfficeFonts.java",
+        "line": 106,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/OfficePdf.java",
+        "line": 94,
+        "depth": 9,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/OfficeSupport.java",
+        "line": 136,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/OfficeTool.java",
+        "line": 126,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/PrepareRuntimeTool.java",
+        "line": 191,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/ReadFileTool.java",
+        "line": 79,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/RunCommandTool.java",
+        "line": 484,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/SandboxCommandTool.java",
+        "line": 127,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/tool/SearchTool.java",
+        "line": 213,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/java/com/pilot/core/workspace/WorkspacePathIdentity.java",
+        "line": 77,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/main/resources/browser/browser-sidecar.mjs",
+        "line": 376,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/browser/BrowserToolTest.java",
+        "line": 289,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/hook/HooksTest.java",
+        "line": 94,
+        "depth": 7,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+        "line": 752,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/loop/CacheContextTest.java",
+        "line": 198,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/mcp/McpToolsTest.java",
+        "line": 182,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/model/CacheWireTest.java",
+        "line": 36,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/model/ModelTransportAcceptanceTest.java",
+        "line": 144,
+        "depth": 13,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/model/OpenAiCompatibleModelClientTest.java",
+        "line": 444,
+        "depth": 9,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/model/OpenAiResponsesModelClientTest.java",
+        "line": 34,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/prompt/PromptLibraryTest.java",
+        "line": 188,
+        "depth": 11,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/session/PreviewBenchmarkTest.java",
+        "line": 33,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/session/SessionServiceTest.java",
+        "line": 311,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-core/src/test/java/com/pilot/core/tool/CommandTaskManagerTest.java",
+        "line": 335,
+        "depth": 7,
+        "area": "test"
+      },
+      {
+        "file": "pilot-desktop/directory-picker.test.mjs",
+        "line": 26,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-desktop/mobile-bridge.mjs",
+        "line": 71,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/app/src/androidTest/java/com/pilot/mobile/MobileDesignTest.kt",
+        "line": 46,
+        "depth": 9,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/app/src/androidTest/java/com/pilot/mobile/MobileSmokeTest.kt",
+        "line": 188,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/app/src/main/java/com/pilot/mobile/MainActivity.kt",
+        "line": 134,
+        "depth": 9,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/app/src/main/java/com/pilot/mobile/MessageBody.kt",
+        "line": 70,
+        "depth": 9,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/app/src/main/java/com/pilot/mobile/PairingScannerActivity.kt",
+        "line": 150,
+        "depth": 11,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/app/src/main/java/com/pilot/mobile/PilotViewModel.kt",
+        "line": 144,
+        "depth": 10,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/app/src/main/java/com/pilot/mobile/TaskScreens.kt",
+        "line": 184,
+        "depth": 10,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/app/src/main/java/com/pilot/mobile/WorkbenchScreens.kt",
+        "line": 109,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/bridge/src/main/kotlin/com/pilot/mobile/bridge/Bridge.kt",
+        "line": 33,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/bridge/src/main/kotlin/com/pilot/mobile/bridge/PairingAdmin.kt",
+        "line": 67,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/bridge/src/main/kotlin/com/pilot/mobile/bridge/PairingNetwork.kt",
+        "line": 53,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/bridge/src/test/kotlin/com/pilot/mobile/bridge/BridgeIntegrationTest.kt",
+        "line": 74,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-mobile/bridge/src/test/kotlin/com/pilot/mobile/bridge/NetworkHealthSmoke.kt",
+        "line": 21,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-mobile/bridge/src/test/kotlin/com/pilot/mobile/bridge/PairingNetworkTest.kt",
+        "line": 60,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-mobile/scripts/DirectQrSmoke.java",
+        "line": 45,
+        "depth": 6,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-mobile/transport/src/main/kotlin/com/pilot/mobile/transport/Conversation.kt",
+        "line": 101,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/transport/src/main/kotlin/com/pilot/mobile/transport/RemoteClient.kt",
+        "line": 28,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-mobile/transport/src/test/kotlin/com/pilot/mobile/transport/DirectRoutingTest.kt",
+        "line": 12,
+        "depth": 7,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/browser/BrowserControlService.java",
+        "line": 222,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/capability/LocalCapabilityService.java",
+        "line": 96,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/config/ModelCapabilityDiscovery.java",
+        "line": 197,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/controller/CheckpointController.java",
+        "line": 123,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/controller/SessionFilesController.java",
+        "line": 117,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/desktop/DesktopShellInstaller.java",
+        "line": 113,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/desktop/DesktopWindowLauncher.java",
+        "line": 138,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+        "line": 128,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/maintenance/BackupService.java",
+        "line": 140,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/maintenance/MaintenanceCli.java",
+        "line": 57,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/maintenance/RestorePaths.java",
+        "line": 169,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/maintenance/RestoreService.java",
+        "line": 157,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/maintenance/RestoreSwap.java",
+        "line": 95,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/maintenance/RetentionService.java",
+        "line": 165,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/maintenance/WorkspaceArchive.java",
+        "line": 84,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/maintenance/WorkspaceRestore.java",
+        "line": 78,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/mobile/MobileConnectionService.java",
+        "line": 284,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/mobile/MobileRequestFilter.java",
+        "line": 81,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/multi/MultiAgentService.java",
+        "line": 279,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/multi/SandboxStore.java",
+        "line": 592,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/notifications/DeliveryService.java",
+        "line": 307,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/schedule/RecurringScheduleService.java",
+        "line": 223,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/search/LocalSearchRuntime.java",
+        "line": 338,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/AgentRunService.java",
+        "line": 696,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/AttachmentReferences.java",
+        "line": 71,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/AttachmentService.java",
+        "line": 350,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/GoalExecutionPolicy.java",
+        "line": 1293,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/HistoryEditCoordinator.java",
+        "line": 139,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/InstallSkillTool.java",
+        "line": 77,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/ProjectRuleLoader.java",
+        "line": 128,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/RunStateTracker.java",
+        "line": 241,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/SkillDownloader.java",
+        "line": 140,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/session/SkillInstallService.java",
+        "line": 481,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/store/JdbcSessionRepository.java",
+        "line": 354,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/store/MessageLibrary.java",
+        "line": 177,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/store/QueuedMessageRepository.java",
+        "line": 48,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/store/SqliteStore.java",
+        "line": 256,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/stream/AsyncEventStream.java",
+        "line": 193,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/validation/ValidationLedger.java",
+        "line": 192,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/work/FileWorkbenchService.java",
+        "line": 401,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/work/WorkProductService.java",
+        "line": 228,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/workspace/ChangeService.java",
+        "line": 393,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/workspace/GitWorktrees.java",
+        "line": 263,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/main/java/com/pilot/server/workspace/RunSnapshotService.java",
+        "line": 613,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/config/ModelCapabilityDiscoveryTest.java",
+        "line": 455,
+        "depth": 11,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/config/ModelRequestTimeoutTest.java",
+        "line": 85,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/controller/ModelSelectionIntegrationTest.java",
+        "line": 80,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/controller/SessionEventHttpTest.java",
+        "line": 169,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/maintenance/BackupServiceTest.java",
+        "line": 276,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/maintenance/DataMaintenanceTest.java",
+        "line": 23,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/mobile/MobileReceiptStoreTest.java",
+        "line": 216,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/multi/MultiAgentBudgetLedgerTest.java",
+        "line": 32,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/multi/SandboxStoreTest.java",
+        "line": 259,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/session/AgentRunServiceTest.java",
+        "line": 841,
+        "depth": 7,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/session/TaskControlServiceTest.java",
+        "line": 154,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/store/EventReplayBenchmarkTest.java",
+        "line": 39,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/store/SqliteStoreMigrationTest.java",
+        "line": 53,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-server/src/test/java/com/pilot/server/validation/ValidationLedgerTest.java",
+        "line": 118,
+        "depth": 7,
+        "area": "test"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/composer-smoke.mjs",
+        "line": 53,
+        "depth": 9,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/event-stream-smoke.mjs",
+        "line": 37,
+        "depth": 6,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/mobile-connection-smoke.mjs",
+        "line": 51,
+        "depth": 6,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/model-discovery-smoke.mjs",
+        "line": 59,
+        "depth": 7,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/navigation-smoke.mjs",
+        "line": 143,
+        "depth": 7,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/p1-smoke.mjs",
+        "line": 217,
+        "depth": 6,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/session-package-smoke.mjs",
+        "line": 19,
+        "depth": 6,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/shell-cases.mjs",
+        "line": 32,
+        "depth": 6,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/store-state.test.mjs",
+        "line": 381,
+        "depth": 7,
+        "area": "test"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/work-products-smoke.mjs",
+        "line": 53,
+        "depth": 6,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/workbench-refresh-smoke.mjs",
+        "line": 42,
+        "depth": 8,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/scripts/workbench-style-smoke.mjs",
+        "line": 93,
+        "depth": 6,
+        "area": "tooling"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/App.tsx",
+        "line": 593,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Composer.tsx",
+        "line": 764,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/FileWorkbench.tsx",
+        "line": 245,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/ChangesPanel.tsx",
+        "line": 127,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/CommandsPanel.tsx",
+        "line": 104,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/inspector/PreviewPanel.tsx",
+        "line": 96,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/MessageSearch.tsx",
+        "line": 112,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/MobileConnection.tsx",
+        "line": 313,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Modals.tsx",
+        "line": 442,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ModelDiscovery.tsx",
+        "line": 41,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Notifications.tsx",
+        "line": 57,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/RecurringPlans.tsx",
+        "line": 110,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/RequestUsage.tsx",
+        "line": 109,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ResearchPanel.tsx",
+        "line": 17,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ResultInbox.tsx",
+        "line": 130,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ReviewActions.tsx",
+        "line": 72,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Schedules.tsx",
+        "line": 379,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Settings.tsx",
+        "line": 729,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Sidebar.tsx",
+        "line": 200,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/SubmissionNotice.tsx",
+        "line": 41,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/Thread.tsx",
+        "line": 414,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/ThreadNavigator.tsx",
+        "line": 169,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/components/VoiceInput.tsx",
+        "line": 104,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/submissions.ts",
+        "line": 55,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/lib/workbench-sync.ts",
+        "line": 55,
+        "depth": 9,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store.ts",
+        "line": 348,
+        "depth": 8,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/history.ts",
+        "line": 68,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/input.ts",
+        "line": 85,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/model-settings.ts",
+        "line": 36,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/panels.ts",
+        "line": 74,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/run-controls.ts",
+        "line": 25,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/run-state.ts",
+        "line": 59,
+        "depth": 9,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/sessions.ts",
+        "line": 332,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/side-chats.ts",
+        "line": 61,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/store/streams.ts",
+        "line": 191,
+        "depth": 7,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/frontend/src/thread-reducer.ts",
+        "line": 544,
+        "depth": 6,
+        "area": "runtime"
+      },
+      {
+        "file": "pilot-web/src/test/js/interaction.test.js",
+        "line": 22,
+        "depth": 6,
+        "area": "test"
+      },
+      {
+        "file": "pilot-web/src/test/js/voice-input.test.js",
+        "line": 14,
+        "depth": 6,
+        "area": "test"
+      }
+    ],
+    "duplication": [
+      {
+        "occurrences": 32,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m01.js",
+            "startLine": 8,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m02.js",
+            "startLine": 8,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m03.js",
+            "startLine": 8,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m04.js",
+            "startLine": 8,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m05.js",
+            "startLine": 8,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m06.js",
+            "startLine": 8,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m07.js",
+            "startLine": 8,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m08.js",
+            "startLine": 8,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 32,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m01.js",
+            "startLine": 9,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m02.js",
+            "startLine": 9,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m03.js",
+            "startLine": 9,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m04.js",
+            "startLine": 9,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m05.js",
+            "startLine": 9,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m06.js",
+            "startLine": 9,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m07.js",
+            "startLine": 9,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m08.js",
+            "startLine": 9,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 30,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/model/AnthropicMessagesModelClientTest.java",
+            "startLine": 51,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/model/AnthropicMessagesModelClientTest.java",
+            "startLine": 77,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/model/CacheWireTest.java",
+            "startLine": 62,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/model/ModelCatalogTest.java",
+            "startLine": 77,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/model/ModelCatalogTest.java",
+            "startLine": 94,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/model/ModelCatalogTest.java",
+            "startLine": 105,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/model/ModelCatalogTest.java",
+            "startLine": 116,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/model/ModelCatalogTest.java",
+            "startLine": 131,
+            "area": "test"
+          }
+        ]
+      },
+      {
+        "occurrences": 24,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/browser/BrowserTool.java",
+            "startLine": 111,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/hook/HookCommandTool.java",
+            "startLine": 38,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpCallTool.java",
+            "startLine": 59,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpToolsTool.java",
+            "startLine": 49,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ApplyPatchTool.java",
+            "startLine": 68,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/CreateFileTool.java",
+            "startLine": 49,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/EditFileTool.java",
+            "startLine": 63,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/OfficeTool.java",
+            "startLine": 58,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 24,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/browser/BrowserTool.java",
+            "startLine": 112,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/hook/HookCommandTool.java",
+            "startLine": 39,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpCallTool.java",
+            "startLine": 60,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpToolsTool.java",
+            "startLine": 50,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ApplyPatchTool.java",
+            "startLine": 69,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/CreateFileTool.java",
+            "startLine": 50,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/EditFileTool.java",
+            "startLine": 64,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/OfficeTool.java",
+            "startLine": 59,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 24,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/browser/BrowserTool.java",
+            "startLine": 113,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/hook/HookCommandTool.java",
+            "startLine": 40,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpCallTool.java",
+            "startLine": 61,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ApplyPatchTool.java",
+            "startLine": 70,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/CreateFileTool.java",
+            "startLine": 51,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/EditFileTool.java",
+            "startLine": 65,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/OfficeTool.java",
+            "startLine": 60,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/PrepareRuntimeTool.java",
+            "startLine": 54,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 23,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/browser/BrowserTool.java",
+            "startLine": 69,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpCallTool.java",
+            "startLine": 45,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpToolsTool.java",
+            "startLine": 35,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ApplyPatchTool.java",
+            "startLine": 56,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/CreateFileTool.java",
+            "startLine": 36,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/EditFileTool.java",
+            "startLine": 40,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/GlobFilesTool.java",
+            "startLine": 39,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ListDirTool.java",
+            "startLine": 26,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 23,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/browser/BrowserTool.java",
+            "startLine": 70,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpCallTool.java",
+            "startLine": 46,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpToolsTool.java",
+            "startLine": 36,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ApplyPatchTool.java",
+            "startLine": 57,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/CreateFileTool.java",
+            "startLine": 37,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/EditFileTool.java",
+            "startLine": 41,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/GlobFilesTool.java",
+            "startLine": 40,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ListDirTool.java",
+            "startLine": 27,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 23,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/browser/BrowserTool.java",
+            "startLine": 71,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpCallTool.java",
+            "startLine": 47,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpToolsTool.java",
+            "startLine": 37,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ApplyPatchTool.java",
+            "startLine": 58,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/CreateFileTool.java",
+            "startLine": 38,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/EditFileTool.java",
+            "startLine": 42,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/GlobFilesTool.java",
+            "startLine": 41,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ListDirTool.java",
+            "startLine": 28,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 23,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/GlobFilesTool.java",
+            "startLine": 56,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ListDirTool.java",
+            "startLine": 40,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ReadFileTool.java",
+            "startLine": 61,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ReadToolOutputTool.java",
+            "startLine": 24,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/SearchTool.java",
+            "startLine": 59,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/UpdatePlanTool.java",
+            "startLine": 48,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/UseSkillTool.java",
+            "startLine": 55,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/WebFetchTool.java",
+            "startLine": 35,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 22,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/GlobFilesTool.java",
+            "startLine": 54,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ListDirTool.java",
+            "startLine": 38,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ReadFileTool.java",
+            "startLine": 59,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ReadToolOutputTool.java",
+            "startLine": 22,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/SearchTool.java",
+            "startLine": 57,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/UpdatePlanTool.java",
+            "startLine": 46,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/UseSkillTool.java",
+            "startLine": 53,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/WebFetchTool.java",
+            "startLine": 33,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 22,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/GlobFilesTool.java",
+            "startLine": 55,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ListDirTool.java",
+            "startLine": 39,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ReadFileTool.java",
+            "startLine": 60,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ReadToolOutputTool.java",
+            "startLine": 23,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/SearchTool.java",
+            "startLine": 58,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/UpdatePlanTool.java",
+            "startLine": 47,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/UseSkillTool.java",
+            "startLine": 54,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/WebFetchTool.java",
+            "startLine": 34,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 20,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/hook/HookCommandTool.java",
+            "startLine": 33,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 137,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 196,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 1581,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 1627,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 1664,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/StructuredToolResultTest.java",
+            "startLine": 73,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/ToolImageLoopTest.java",
+            "startLine": 95,
+            "area": "test"
+          }
+        ]
+      },
+      {
+        "occurrences": 20,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/hook/HookCommandTool.java",
+            "startLine": 34,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 138,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 197,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 1582,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 1628,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 1665,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/StructuredToolResultTest.java",
+            "startLine": 74,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/ToolImageLoopTest.java",
+            "startLine": 96,
+            "area": "test"
+          }
+        ]
+      },
+      {
+        "occurrences": 20,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/hook/HookCommandTool.java",
+            "startLine": 35,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 139,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 198,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 1583,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 1629,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 1666,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/StructuredToolResultTest.java",
+            "startLine": 75,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/ToolImageLoopTest.java",
+            "startLine": 97,
+            "area": "test"
+          }
+        ]
+      },
+      {
+        "occurrences": 19,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/hook/HookCommandTool.java",
+            "startLine": 36,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 140,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 199,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 1584,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 1630,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 1667,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/StructuredToolResultTest.java",
+            "startLine": 76,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/ToolImageLoopTest.java",
+            "startLine": 98,
+            "area": "test"
+          }
+        ]
+      },
+      {
+        "occurrences": 19,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/browser/BrowserToolTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/exec/IsolatedWorkspaceTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/model/ModelCapacityTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/prompt/PromptLibraryTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/session/RunCheckpointTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/skill/SkillCatalogTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/tool/ToolRegistryTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/browser/BrowserRuntimeTest.java",
+            "startLine": 2,
+            "area": "test"
+          }
+        ]
+      },
+      {
+        "occurrences": 17,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/browser/BrowserTool.java",
+            "startLine": 72,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpCallTool.java",
+            "startLine": 48,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/mcp/McpToolsTool.java",
+            "startLine": 38,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ApplyPatchTool.java",
+            "startLine": 59,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/CreateFileTool.java",
+            "startLine": 39,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/EditFileTool.java",
+            "startLine": 43,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/GlobFilesTool.java",
+            "startLine": 42,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ListDirTool.java",
+            "startLine": 29,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 16,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m01.js",
+            "startLine": 6,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m02.js",
+            "startLine": 6,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m03.js",
+            "startLine": 6,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m04.js",
+            "startLine": 6,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m05.js",
+            "startLine": 6,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m06.js",
+            "startLine": 6,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m07.js",
+            "startLine": 6,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m08.js",
+            "startLine": 6,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 16,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m01.js",
+            "startLine": 1,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m02.js",
+            "startLine": 1,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m03.js",
+            "startLine": 1,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m04.js",
+            "startLine": 1,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m05.js",
+            "startLine": 1,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m06.js",
+            "startLine": 1,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m07.js",
+            "startLine": 1,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m08.js",
+            "startLine": 1,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 16,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m01.js",
+            "startLine": 2,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m02.js",
+            "startLine": 2,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m03.js",
+            "startLine": 2,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m04.js",
+            "startLine": 2,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m05.js",
+            "startLine": 2,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m06.js",
+            "startLine": 2,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m07.js",
+            "startLine": 2,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m08.js",
+            "startLine": 2,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 16,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m01.js",
+            "startLine": 3,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m02.js",
+            "startLine": 3,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m03.js",
+            "startLine": 3,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m04.js",
+            "startLine": 3,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m05.js",
+            "startLine": 3,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m06.js",
+            "startLine": 3,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m07.js",
+            "startLine": 3,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m08.js",
+            "startLine": 3,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 16,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m01.js",
+            "startLine": 4,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m02.js",
+            "startLine": 4,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m03.js",
+            "startLine": 4,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m04.js",
+            "startLine": 4,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m05.js",
+            "startLine": 4,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m06.js",
+            "startLine": 4,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m07.js",
+            "startLine": 4,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m08.js",
+            "startLine": 4,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 16,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m01.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m02.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m03.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m04.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m05.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m06.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m07.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/references/long-chain/src/m08.js",
+            "startLine": 5,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 14,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/ApplyPatchTool.java",
+            "startLine": 71,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/CreateFileTool.java",
+            "startLine": 52,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/EditFileTool.java",
+            "startLine": 66,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/RememberTool.java",
+            "startLine": 67,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/SandboxCreateFileTool.java",
+            "startLine": 49,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/main/java/com/pilot/core/tool/SandboxEditFileTool.java",
+            "startLine": 51,
+            "area": "runtime"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+            "startLine": 1589,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/StructuredToolResultTest.java",
+            "startLine": 81,
+            "area": "test"
+          }
+        ]
+      },
+      {
+        "occurrences": 13,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/hook/HooksTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/ModelContractTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/loop/ModelRetryPolicyTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/model/AnthropicMessagesModelClientTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/model/OpenAiResponsesModelClientTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/multi/AgentProfileCatalogTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/tool/ApplyPatchToolTest.java",
+            "startLine": 2,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/tool/EditFileToolTest.java",
+            "startLine": 2,
+            "area": "test"
+          }
+        ]
+      },
+      {
+        "occurrences": 12,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/browser/BrowserToolTest.java",
+            "startLine": 3,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/exec/IsolatedWorkspaceTest.java",
+            "startLine": 3,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/prompt/PromptLibraryTest.java",
+            "startLine": 3,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/skill/SkillCatalogTest.java",
+            "startLine": 3,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/maintenance/RestoreServiceTest.java",
+            "startLine": 3,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/maintenance/WorkspaceBackupTest.java",
+            "startLine": 4,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/mobile/MobileEnvironmentTest.java",
+            "startLine": 3,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/mobile/MobileReceiptStoreTest.java",
+            "startLine": 3,
+            "area": "test"
+          }
+        ]
+      },
+      {
+        "occurrences": 12,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/browser/BrowserToolTest.java",
+            "startLine": 5,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/prompt/PromptLibraryTest.java",
+            "startLine": 5,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/skill/SkillCatalogTest.java",
+            "startLine": 5,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/tool/CommandTaskManagerTest.java",
+            "startLine": 7,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/tool/SandboxToolsTest.java",
+            "startLine": 6,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/maintenance/RestoreServiceTest.java",
+            "startLine": 5,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/maintenance/WorkspaceBackupTest.java",
+            "startLine": 6,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/mobile/MobileEnvironmentTest.java",
+            "startLine": 5,
+            "area": "test"
+          }
+        ]
+      },
+      {
+        "occurrences": 11,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m01.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m02.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m04.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m05.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m07.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m08.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m10.js",
+            "startLine": 5,
+            "area": "runtime"
+          },
+          {
+            "file": "evaluation/harness/scenarios/fixtures/long-chain/src/m11.js",
+            "startLine": 5,
+            "area": "runtime"
+          }
+        ]
+      },
+      {
+        "occurrences": 11,
+        "lines": 6,
+        "locations": [
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/session/SessionServiceTest.java",
+            "startLine": 215,
+            "area": "test"
+          },
+          {
+            "file": "pilot-core/src/test/java/com/pilot/core/session/SessionServiceTest.java",
+            "startLine": 289,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/session/AgentRunServiceTest.java",
+            "startLine": 140,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/session/AgentRunServiceTest.java",
+            "startLine": 740,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/session/AgentRunTaskControlTest.java",
+            "startLine": 122,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/session/AgentRunTaskControlTest.java",
+            "startLine": 302,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/session/AgentRunTaskControlTest.java",
+            "startLine": 361,
+            "area": "test"
+          },
+          {
+            "file": "pilot-server/src/test/java/com/pilot/server/session/AgentRunTaskControlTest.java",
+            "startLine": 417,
+            "area": "test"
+          }
+        ]
+      }
+    ],
+    "centralization": [
+      {
+        "id": "logger",
+        "label": "Logger",
+        "definitions": [],
+        "definitionCount": 0,
+        "fragmented": false,
+        "bypasses": [
+          {
+            "file": "evaluation/harness/budget-plan.mjs",
+            "line": 51
+          },
+          {
+            "file": "evaluation/harness/budget-plan.mjs",
+            "line": 54
+          },
+          {
+            "file": "evaluation/harness/recovery-smoke.mjs",
+            "line": 77
+          },
+          {
+            "file": "evaluation/harness/recovery-smoke.mjs",
+            "line": 210
+          },
+          {
+            "file": "evaluation/harness/recovery-smoke.mjs",
+            "line": 212
+          },
+          {
+            "file": "evaluation/harness/reference-verifier.mjs",
+            "line": 156
+          },
+          {
+            "file": "evaluation/harness/reference-verifier.mjs",
+            "line": 157
+          },
+          {
+            "file": "evaluation/harness/reference-verifier.mjs",
+            "line": 159
+          },
+          {
+            "file": "evaluation/harness/reference-verifier.mjs",
+            "line": 164
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 87
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 654
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 660
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 663
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 666
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 670
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 770
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 798
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 806
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 820
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 822
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 826
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 829
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 830
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 832
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 833
+          },
+          {
+            "file": "evaluation/harness/runner.mjs",
+            "line": 840
+          },
+          {
+            "file": "pilot-desktop/brand-host.mjs",
+            "line": 109
+          },
+          {
+            "file": "pilot-desktop/brand-host.mjs",
+            "line": 111
+          },
+          {
+            "file": "pilot-desktop/browser-viewport-smoke.mjs",
+            "line": 22
+          },
+          {
+            "file": "pilot-desktop/browser-viewport-smoke.mjs",
+            "line": 107
+          },
+          {
+            "file": "pilot-desktop/browser-viewport-smoke.mjs",
+            "line": 108
+          },
+          {
+            "file": "pilot-desktop/launcher-smoke.mjs",
+            "line": 44
+          },
+          {
+            "file": "pilot-desktop/prepare-runtime.mjs",
+            "line": 60
+          },
+          {
+            "file": "pilot-desktop/prepare-runtime.mjs",
+            "line": 68
+          },
+          {
+            "file": "pilot-desktop/security-smoke.mjs",
+            "line": 19
+          },
+          {
+            "file": "pilot-desktop/security-smoke.mjs",
+            "line": 155
+          },
+          {
+            "file": "pilot-desktop/security-smoke.mjs",
+            "line": 168
+          },
+          {
+            "file": "pilot-desktop/security-smoke.mjs",
+            "line": 169
+          },
+          {
+            "file": "pilot-desktop/security-smoke.mjs",
+            "line": 171
+          },
+          {
+            "file": "pilot-desktop/security-smoke.mjs",
+            "line": 172
+          },
+          {
+            "file": "pilot-desktop/smoke.mjs",
+            "line": 60
+          },
+          {
+            "file": "pilot-desktop/smoke.mjs",
+            "line": 99
+          },
+          {
+            "file": "pilot-desktop/start.mjs",
+            "line": 13
+          },
+          {
+            "file": "pilot-desktop/start.mjs",
+            "line": 17
+          },
+          {
+            "file": "pilot-desktop/ui-smoke.mjs",
+            "line": 46
+          },
+          {
+            "file": "pilot-desktop/ui-smoke.mjs",
+            "line": 47
+          },
+          {
+            "file": "pilot-web/frontend/src/components/ErrorBoundary.tsx",
+            "line": 29
+          },
+          {
+            "file": "pilot-web/frontend/src/store/sessions.ts",
+            "line": 104
+          },
+          {
+            "file": "pilot-web/frontend/src/store/sessions.ts",
+            "line": 130
+          },
+          {
+            "file": "pilot-web/frontend/src/store/streams.ts",
+            "line": 232
+          }
+        ],
+        "bypassCount": 52,
+        "bypassHint": "use the central logger instead of console.*"
+      },
+      {
+        "id": "validation",
+        "label": "Route/API input validation",
+        "definitions": [],
+        "definitionCount": 0,
+        "fragmented": false,
+        "bypasses": [],
+        "bypassCount": 0,
+        "bypassHint": "route reads raw req input — confirm it passes through the validator"
+      }
+    ],
+    "verbose": [],
+    "leftovers": {
+      "debug": [
+        {
+          "file": "evaluation/harness/budget-plan.mjs",
+          "line": 51,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/recovery-smoke.mjs",
+          "line": 210,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/reference-verifier.mjs",
+          "line": 156,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/reference-verifier.mjs",
+          "line": 157,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/reference-verifier.mjs",
+          "line": 159,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 87,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 654,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 660,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 663,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 666,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 670,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 770,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 798,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 820,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 822,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 826,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 829,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 830,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 832,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "evaluation/harness/runner.mjs",
+          "line": 833,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-core/src/main/java/com/pilot/core/runtime/bootstrap/SourceEnvironment.java",
+          "line": 54,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-core/src/main/java/com/pilot/core/tool/PrepareRuntimeTool.java",
+          "line": 149,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/brand-host.mjs",
+          "line": 109,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/browser-viewport-smoke.mjs",
+          "line": 107,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/browser-viewport-smoke.mjs",
+          "line": 108,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/launcher-smoke.mjs",
+          "line": 44,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/prepare-runtime.mjs",
+          "line": 60,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/prepare-runtime.mjs",
+          "line": 68,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/security-smoke.mjs",
+          "line": 19,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/security-smoke.mjs",
+          "line": 155,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/security-smoke.mjs",
+          "line": 168,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/security-smoke.mjs",
+          "line": 169,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/security-smoke.mjs",
+          "line": 171,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/security-smoke.mjs",
+          "line": 172,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/smoke.mjs",
+          "line": 60,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/smoke.mjs",
+          "line": 99,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/ui-smoke.mjs",
+          "line": 46,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-desktop/ui-smoke.mjs",
+          "line": 47,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-mobile/scripts/admin-smoke.mjs",
+          "line": 42,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/android-smoke.mjs",
+          "line": 161,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/android-smoke.mjs",
+          "line": 164,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/android-smoke.mjs",
+          "line": 168,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/android-smoke.mjs",
+          "line": 171,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/android-smoke.mjs",
+          "line": 174,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/android-smoke.mjs",
+          "line": 180,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/android-smoke.mjs",
+          "line": 190,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/android-smoke.mjs",
+          "line": 193,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/backend-smoke.mjs",
+          "line": 69,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/backend-smoke.mjs",
+          "line": 83,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/backend-smoke.mjs",
+          "line": 146,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/backend-smoke.mjs",
+          "line": 166,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/backend-smoke.mjs",
+          "line": 173,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/direct-qr-smoke.mjs",
+          "line": 13,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/direct-qr-smoke.mjs",
+          "line": 18,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/DirectQrSmoke.java",
+          "line": 72,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/environment-smoke.mjs",
+          "line": 43,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/network-health-smoke.mjs",
+          "line": 50,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/network-health-smoke.mjs",
+          "line": 51,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/network-health-smoke.mjs",
+          "line": 53,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/network-health-smoke.mjs",
+          "line": 57,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/relay-smoke.mjs",
+          "line": 27,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/scanner-smoke.mjs",
+          "line": 55,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/scanner-smoke.mjs",
+          "line": 60,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/scanner-smoke.mjs",
+          "line": 87,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-mobile/scripts/scanner-smoke.mjs",
+          "line": 88,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 59,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 76,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 81,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 89,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 94,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 99,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 100,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 101,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 102,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 103,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 104,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 105,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 108,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 166,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 170,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 173,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-server/src/main/java/com/pilot/server/frontend/FrontendDepsPrompt.java",
+          "line": 175,
+          "kind": "debug-output",
+          "area": "runtime"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/agent-usage-smoke.mjs",
+          "line": 118,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/agent-usage-smoke.mjs",
+          "line": 134,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/api-contract-package-smoke.mjs",
+          "line": 74,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/composer-smoke.mjs",
+          "line": 79,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/composer-smoke.mjs",
+          "line": 169,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/composer-smoke.mjs",
+          "line": 199,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/composer-smoke.mjs",
+          "line": 203,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/composer-smoke.mjs",
+          "line": 211,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/event-stream-smoke.mjs",
+          "line": 83,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/event-stream-smoke.mjs",
+          "line": 98,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/inspector-smoke.mjs",
+          "line": 109,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/inspector-smoke.mjs",
+          "line": 116,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/interaction-smoke.mjs",
+          "line": 418,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/interaction-smoke.mjs",
+          "line": 425,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/interaction-smoke.mjs",
+          "line": 433,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/local-security-package-smoke.mjs",
+          "line": 59,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/local-security-package-smoke.mjs",
+          "line": 60,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/markdown-smoke.mjs",
+          "line": 86,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/markdown-smoke.mjs",
+          "line": 97,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/mobile-connection-smoke.mjs",
+          "line": 294,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/mobile-connection-smoke.mjs",
+          "line": 295,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/mobile-connection-smoke.mjs",
+          "line": 298,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/model-discovery-smoke.mjs",
+          "line": 378,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/model-discovery-smoke.mjs",
+          "line": 387,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/navigation-smoke.mjs",
+          "line": 65,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/navigation-smoke.mjs",
+          "line": 172,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/navigation-smoke.mjs",
+          "line": 207,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/navigation-smoke.mjs",
+          "line": 214,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/navigation-smoke.mjs",
+          "line": 219,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/notification-smoke.mjs",
+          "line": 102,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/notification-smoke.mjs",
+          "line": 109,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/p1-smoke.mjs",
+          "line": 224,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/p1-smoke.mjs",
+          "line": 229,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/p1-smoke.mjs",
+          "line": 236,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/project-folders-smoke.mjs",
+          "line": 107,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/remote-login-package-smoke.mjs",
+          "line": 69,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/remote-login-package-smoke.mjs",
+          "line": 70,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/request-usage-smoke.mjs",
+          "line": 170,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/request-usage-smoke.mjs",
+          "line": 183,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/results-smoke.mjs",
+          "line": 177,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/results-smoke.mjs",
+          "line": 211,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/results-smoke.mjs",
+          "line": 237,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/results-smoke.mjs",
+          "line": 247,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/results-smoke.mjs",
+          "line": 252,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/review-cases.mjs",
+          "line": 259,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/sandbox-recovery-smoke.mjs",
+          "line": 65,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/sandbox-recovery-smoke.mjs",
+          "line": 75,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/schedule-smoke.mjs",
+          "line": 157,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/schedule-smoke.mjs",
+          "line": 161,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/schedule-smoke.mjs",
+          "line": 166,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/session-management-smoke.mjs",
+          "line": 142,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/session-management-smoke.mjs",
+          "line": 190,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/session-management-smoke.mjs",
+          "line": 195,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/session-management-smoke.mjs",
+          "line": 201,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/session-package-smoke.mjs",
+          "line": 80,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/shell-cases.mjs",
+          "line": 123,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/side-chat-cases.mjs",
+          "line": 128,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/thread-scroll-smoke.mjs",
+          "line": 147,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/thread-scroll-smoke.mjs",
+          "line": 150,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/thread-scroll-smoke.mjs",
+          "line": 157,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/verify-migration.mjs",
+          "line": 18,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/verify-migration.mjs",
+          "line": 30,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/verify-migration.mjs",
+          "line": 53,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/work-products-smoke.mjs",
+          "line": 156,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/work-products-smoke.mjs",
+          "line": 157,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/work-products-smoke.mjs",
+          "line": 167,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/workbench-cases.mjs",
+          "line": 175,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/workbench-refresh-smoke.mjs",
+          "line": 138,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/workbench-refresh-smoke.mjs",
+          "line": 205,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/workbench-refresh-smoke.mjs",
+          "line": 210,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/workbench-refresh-smoke.mjs",
+          "line": 211,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/workbench-style-smoke.mjs",
+          "line": 93,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/workbench-style-smoke.mjs",
+          "line": 184,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/workbench-style-smoke.mjs",
+          "line": 187,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "pilot-web/frontend/scripts/workbench-style-smoke.mjs",
+          "line": 206,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "scripts/package-mobile-host.mjs",
+          "line": 38,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "scripts/verify-desktop-host.mjs",
+          "line": 53,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "scripts/verify-desktop-host.mjs",
+          "line": 58,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "scripts/verify-model-capabilities.mjs",
+          "line": 74,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "scripts/verify-reliability.mjs",
+          "line": 12,
+          "kind": "debug-output",
+          "area": "tooling"
+        },
+        {
+          "file": "scripts/verify-reliability.mjs",
+          "line": 41,
+          "kind": "debug-output",
+          "area": "tooling"
+        }
+      ],
+      "todos": [],
+      "commentedCode": [],
+      "longComments": [
+        {
+          "file": "pilot-core/src/main/resources/browser/browser-sidecar.mjs",
+          "startLine": 1,
+          "lines": 15,
+          "kind": "block",
+          "area": "runtime"
+        }
+      ],
+      "narrative": []
+    },
+    "dependencies": {
+      "manifests": [
+        "evaluation/harness/fixtures/steer-constraint-hold/package.json",
+        "pilot-desktop/package.json",
+        "pilot-server/src/test/resources/build-fixtures/node/package.json",
+        "pilot-web/frontend/package.json",
+        "pilot-web/package.json"
+      ],
+      "totalDeclared": 19,
+      "heavy": [],
+      "sizeContext": {
+        "fileCount": 1114,
+        "totalLines": 152920
+      }
+    },
+    "deadCode": {
+      "ran": false,
+      "hints": [],
+      "suggestions": [
+        {
+          "tool": "knip",
+          "install": "npm i -D knip   (or run once with: npx knip)",
+          "why": "finds unused files, exports and dependencies in JS/TS projects"
+        }
+      ]
+    }
+  },
+  "plan": {
+    "found": true,
+    "files": [
+      {
+        "path": "AGENTS.md",
+        "bytes": 300
+      }
+    ]
+  }
+}
