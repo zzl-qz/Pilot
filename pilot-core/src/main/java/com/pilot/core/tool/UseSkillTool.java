@@ -3,6 +3,7 @@ package com.pilot.core.tool;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import com.pilot.core.skill.Skill;
@@ -21,10 +22,14 @@ import com.pilot.core.skill.SkillManifest;
  */
 public final class UseSkillTool implements Tool {
 
-    private final SkillCatalog catalog;
+    private final Supplier<SkillCatalog> catalogs;
 
     public UseSkillTool(SkillCatalog catalog) {
-        this.catalog = catalog;
+        this(() -> catalog);
+    }
+
+    public UseSkillTool(Supplier<SkillCatalog> catalogs) {
+        this.catalogs = catalogs;
     }
 
     @Override
@@ -40,7 +45,7 @@ public final class UseSkillTool implements Tool {
     @Override
     public Map<String, Object> parameters() {
         Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("name", Map.of("type", "string", "description", "系统提示词「技能」一节列出的技能名，必须完全一致"));
+        properties.put("name", Map.of("type", "string", "description", "技能目录或 install_skill 返回的技能名，必须完全一致"));
         properties.put("file",
             Map.of("type", "string", "description", "可选；技能目录内相对路径（如 references/api.md）。缺省返回 SKILL.md 正文"));
         return Map.of("type", "object", "properties", properties, "required", List.of("name"), "additionalProperties",
@@ -58,14 +63,15 @@ public final class UseSkillTool implements Tool {
         if (name == null) {
             return "ERROR: 缺少参数 name（技能名见系统提示词「技能」一节）";
         }
+        SkillCatalog catalog = catalogs.get();
         Skill skill = catalog.find(name).orElse(null);
         if (skill == null) {
-            return "ERROR: 未知技能 " + name + "；可用技能：" + availableNames();
+            return "ERROR: 未知技能 " + name + "；可用技能：" + availableNames(catalog);
         }
         String file = ToolSupport.stringArg(args, "file");
         if (file == null) {
-            // 正文上限在加载时校验过（500 行），这里不再截断，保证可预期
-            return skill.body() + filesFooter(skill);
+            // 正文上限已由目录校验；目录路径用于解析指引中的脚本、模板等相对引用。
+            return "技能目录：" + skill.manifest().directory() + "\n\n" + skill.body() + filesFooter(skill);
         }
         try {
             return catalog.readFile(skill, file);
@@ -75,7 +81,7 @@ public final class UseSkillTool implements Tool {
         }
     }
 
-    private String availableNames() {
+    private String availableNames(SkillCatalog catalog) {
         List<String> names = catalog.list().stream().map(SkillManifest::name).toList();
         return names.isEmpty() ? "（无）" : String.join(", ", names);
     }

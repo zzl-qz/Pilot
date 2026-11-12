@@ -145,6 +145,12 @@ public class AgentRunService implements RunStarter {
     private volatile com.pilot.server.desktop.DesktopViewportReset viewportReset;
     private com.pilot.server.work.WorkProductService workProducts;
     private com.pilot.server.work.SkillDraftService skillDrafts;
+    private SkillInstallService skillInstaller;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setSkillInstaller(SkillInstallService skillInstaller) {
+        this.skillInstaller = skillInstaller;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired
     public void setWorkProducts(com.pilot.server.work.WorkProductService workProducts,
@@ -1267,11 +1273,10 @@ public class AgentRunService implements RunStarter {
         ToolRegistry tools =
             review.active() ? reviewTools(workspace) : sessionTools(sessionId, runId, workspace, planSink);
         // 本地工具保留供同一轮自动降级；原生客户端只在请求序列化时隐藏对应定义。
-        // 技能目录：本 run 内工具注册与目录段共用同一份快照，避免两次扫描之间目录变化造成不一致
+        // 初始目录用于系统提示词；use_skill 每次读取当前目录，让本轮新安装的技能立即可用。
         SkillCatalog catalog = skills.catalogFor(workspace);
-        if (!review.active() && !catalog.list().isEmpty()) {
-            // 无技能时不注册 use_skill：system/skills 段因 requires 过滤自动消失，零 token 成本
-            tools.register(new UseSkillTool(catalog));
+        if (!review.active() && (!catalog.list().isEmpty() || (skills.enabled() && skillInstaller != null))) {
+            tools.register(new UseSkillTool(() -> skills.catalogFor(workspace)));
         }
         // 条件注册的 spawn_agent / dispatch_agents 位于 config 构造之后，先算出最终工具名，
         // 让 system prompt 只注入本轮真实可用的工具说明。
@@ -1653,6 +1658,9 @@ public class AgentRunService implements RunStarter {
         }
         if (skillDrafts != null && skills != null && skills.enabled()) {
             tools.register(new com.pilot.server.work.ProposeSkillTool(skillDrafts, objectMapper, sessionId, runId));
+        }
+        if (skillInstaller != null && skills != null && skills.enabled()) {
+            tools.register(new InstallSkillTool(skillInstaller, skills, objectMapper, workspace));
         }
         // 浏览器与 MCP：始终注册，是否可见由工具自己的 availability 在运行时决定。
         toolFactory.sessionExtras(sessionId, workspace).forEach(tools::register);

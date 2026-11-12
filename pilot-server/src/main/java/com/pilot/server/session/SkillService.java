@@ -22,7 +22,7 @@ import com.pilot.server.config.SkillProperties;
  * <p>技能是提示词不是代码：激活的全部效果是注入指引文本，动作仍走既有工具与权限模型。
  * 两级目录——项目级 {@code <workspace>/.pilot/skills}（随仓库走、可提交进项目 git）、
  * 用户级 {@code <pilot.data.dir>/skills}（本机个人库）——同名时项目级遮蔽用户级；
- * 每次 run 重新扫描，改技能文件随下次运行生效（与 {@code PromptLibrary} 外部目录同款热更新）。
+ * 每次 run 和 use_skill 重新扫描，安装和修改无需重开会话（与 {@code PromptLibrary} 外部目录同款热更新）。
  */
 @Component
 public class SkillService {

@@ -487,6 +487,46 @@ class AgentRunServiceTest {
     }
 
     @Test
+    void installsAndLoadsSkillInOneAgentRunFromAnInitiallyEmptyCatalog() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            assertTrue(tools.stream().anyMatch(tool -> tool.name().equals("install_skill")));
+            assertTrue(tools.stream().anyMatch(tool -> tool.name().equals("use_skill")));
+            int step = calls.getAndIncrement();
+            if (step == 0) {
+                return new ModelResponse(null,
+                    List.of(new ToolCall("install", "install_skill",
+                        Map.of("action", "install", "source", "https://github.com/team/repo/tree/main/skills/demo"))),
+                    null);
+            }
+            if (step == 1) {
+                assertTrue(messages.stream().anyMatch(
+                    message -> message.content() != null && message.content().contains("\"available\":true")));
+                return new ModelResponse(null, List.of(new ToolCall("load", "use_skill", Map.of("name", "demo"))),
+                    null);
+            }
+            assertTrue(messages.stream().anyMatch(
+                message -> message.content() != null && message.content().contains("Installed instruction marker")));
+            return done();
+        };
+        try (var fixture = new Fixture(model, 8, false, 1, PermissionMode.AUTO)) {
+            var dataDir = new PilotDataDir(dataRoot.toString());
+            var properties =
+                new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 1, 0, 60000, false);
+            var skillService = new SkillService(new SkillProperties(true, null), properties, dataDir);
+            fixture.service.setSkillInstaller(new SkillInstallService(skillService, dataDir, (url, target) -> {
+                Path directory = Files.createDirectories(target.resolve("skills/demo"));
+                Files.writeString(directory.resolve("SKILL.md"),
+                    "---\nname: demo\ndescription: Demo skill\n---\nInstalled instruction marker");
+            }, 600000, 2000, 67108864, 500, 20971520));
+            fixture.start();
+            fixture.awaitFinished("COMPLETED");
+            assertEquals(3, calls.get());
+            assertTrue(Files.exists(workspace.resolve(".pilot/skills/demo/SKILL.md")));
+        }
+    }
+
+    @Test
     void emptyWorkspaceHasNoSkillSurface() throws Exception {
         var requests = new CopyOnWriteArrayList<List<Message>>();
         var toolSets = new CopyOnWriteArrayList<List<ToolDefinition>>();
@@ -774,8 +814,12 @@ class AgentRunServiceTest {
         }
 
         Fixture(ModelClient model, int maxSteps, boolean goals, int runThreads) {
-            AgentProperties properties = new AgentProperties(workspace.toString(), PermissionMode.READ_ONLY, maxSteps,
-                3, 5, 300, runThreads, 0, 60_000, false, goals, null, null, null, null, null, null, null, null);
+            this(model, maxSteps, goals, runThreads, PermissionMode.READ_ONLY);
+        }
+
+        Fixture(ModelClient model, int maxSteps, boolean goals, int runThreads, PermissionMode mode) {
+            AgentProperties properties = new AgentProperties(workspace.toString(), mode, maxSteps, 3, 5, 300,
+                runThreads, 0, 60_000, false, goals, null, null, null, null, null, null, null, null);
             JsonMapper mapper = JsonMapper.builder().build();
             PilotDataDir dataDir = new PilotDataDir(dataRoot.toString());
             commandTasks = new com.pilot.core.tool.CommandTaskManager(dataDir.file("commands"), mapper);
@@ -834,7 +878,7 @@ class AgentRunServiceTest {
                     finished.add(status);
                 }
             };
-            service = new AgentRunService(sessions, model, factory, new PolicyPermissionGate(PermissionMode.READ_ONLY),
+            service = new AgentRunService(sessions, model, factory, new PolicyPermissionGate(mode),
                 ApprovalBroker.denyAll(), properties,
                 new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
                     new InMemorySettingsStore()),
