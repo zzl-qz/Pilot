@@ -2,9 +2,12 @@ import type * as S from '../types/server.js';
 import type { Update } from '../types/api.js';
 type RateKey = 'input' | 'cachedInput' | 'cacheWrite' | 'output';
 type PricingForm = Omit<S.ModelPricing, RateKey> & Record<RateKey, number | string | null>;
-type RuntimeOptions = Omit<S.ModelRuntimeSettingsOptions, 'pricing'> & { pricing: PricingForm };
+type RuntimeOptions = Omit<S.ModelRuntimeSettingsOptions, 'pricing' | 'timeoutSeconds' | 'idleTimeoutSeconds'> & {
+  pricing: PricingForm; timeoutSeconds: number | string | null; idleTimeoutSeconds: number | string | null;
+};
 type RuntimeView = Omit<S.ModelRuntimeSettingsView, 'options'> & { options: RuntimeOptions };
 import { errorInfo } from '../lib/errors.js';
+import { requestTimeoutOptions } from '../lib/model-settings.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Button } from '@astryxdesign/core/Button';
@@ -12,7 +15,7 @@ import './request-usage.css';
 
 function withPricing(data: S.ModelRuntimeSettingsView): RuntimeView {
   const pricing = data.options.pricing || { currency: 'USD', source: '', input: null, cachedInput: null, cacheWrite: null, output: null };
-  return { ...data, options: { ...data.options, pricing } };
+  return { ...data, options: { ...data.options, pricing, timeoutSeconds: data.options.timeoutSeconds ?? null, idleTimeoutSeconds: data.options.idleTimeoutSeconds ?? null } };
 }
 
 const RATE_FIELDS = [['input', '普通输入'], ['cachedInput', '缓存读取'], ['cacheWrite', '缓存写入'], ['output', '输出']] as const;
@@ -69,14 +72,14 @@ export function ModelRuntimeSettings({ model, endpoint }: { model: string; endpo
         pricing[key] = raw == null || String(raw).trim() === '' ? null : Number(raw);
         if (pricing[key] != null && (!Number.isFinite(pricing[key]) || pricing[key] < 0)) throw new Error('单价必须是非负数字，未知时请留空。');
       }
-      const saved = await api.saveModelRuntime({ model: value.model, endpoint: value.endpoint, options: { ...value.options, pricing } });
+      const saved = await api.saveModelRuntime({ model: value.model, endpoint: value.endpoint, options: { ...value.options, pricing, ...requestTimeoutOptions(value.options) } });
       if (!saved?.options || !saved.model || !saved.endpoint) throw new Error('服务端返回空模型配置，请重新加载后重试');
       if (revision === generation.current) { setValue(withPricing(saved)); setNotice('已保存，仅对该端点与模型的后续请求生效。'); }
     } catch (e) { if (revision === generation.current) setError(errorInfo(e).message || '操作失败'); }
     finally { if (revision === generation.current) setBusy(false); }
   }
   return <details className="request-runtime-settings settings-group settings-disclosure" open>
-    <summary>请求计价与缓存</summary>
+    <summary>请求时限、计价与缓存</summary>
     {!value && !error && <p className="settings-status" role="status">正在读取模型配置…</p>}
     {!value && error && <div className="settings-inline-actions">
       <p className="settings-status" role="alert">{error}</p>
@@ -86,6 +89,18 @@ export function ModelRuntimeSettings({ model, endpoint }: { model: string; endpo
       if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault();
     }}>
       <fieldset className="settings-runtime-form settings-form" disabled={busy} aria-busy={busy}>
+        {value.timeoutDefaults && value.timeouts && <>
+          <p className="settings-status">等待时限仅用于当前端点与模型。长推理可以增加时限，较短时限能更早发现无响应；模型提前完成会立即返回。</p>
+          <div className="settings-field-grid">
+            <label className="settings-native-field">单次请求总时限（秒）<input type="number" min="1" max="86400" step="1"
+              value={value.options.timeoutSeconds ?? ''} placeholder={`默认 ${value.timeoutDefaults.totalSeconds}`}
+              onChange={e => update('timeoutSeconds', e.target.value)} /></label>
+            <label className="settings-native-field">无数据等待时限（秒）<input type="number" min="0" max="86400" step="1"
+              value={value.options.idleTimeoutSeconds ?? ''} placeholder={value.timeoutDefaults.idleSeconds === 0 ? '默认跟随总时限' : `默认 ${value.timeoutDefaults.idleSeconds}`}
+              onChange={e => update('idleTimeoutSeconds', e.target.value)} /></label>
+          </div>
+          <p className="settings-status">留空继承服务端默认值；无数据等待填 0 表示跟随总时限，实际不超过总时限。已保存的有效时限：总计 {value.timeouts.totalSeconds} 秒，无数据 {value.timeouts.idleSeconds} 秒。保存后对后续请求生效。</p>
+        </>}
         <p className="settings-status">为已保存的 <strong>{value.model}</strong> 配置。单价单位为每百万 Token，留空表示未知，0 表示免费。</p>
         <div className="settings-field-grid">
           <label className="settings-native-field">币种<select value={value.options.pricing.currency || 'USD'} onChange={e => price('currency', e.target.value)}>
@@ -138,7 +153,7 @@ export function ModelRuntimeSettings({ model, endpoint }: { model: string; endpo
         </details>
         <p className="settings-status">端点的自动缓存不受“不附加缓存参数”选项控制。自定义能力需与网关协议一致。</p>
         <div className="settings-form-actions">
-          <Button label={busy ? '正在保存…' : '保存计价与缓存设置'} type="submit" isDisabled={busy} />
+          <Button label={busy ? '正在保存…' : '保存请求设置'} type="submit" isDisabled={busy} />
         </div>
       </fieldset>
       {(error || notice) && <p ref={feedback} className="settings-status runtime-feedback" role={error ? 'alert' : 'status'}>{error || notice}</p>}

@@ -8,6 +8,7 @@ import {
   describeModelSaved,
   describeModelsFetched,
   normalizeModelNames,
+  requestTimeoutOptions,
   errorText
 } from '../../../frontend/src/lib/model-settings.js';
 
@@ -60,7 +61,7 @@ test('401/403 提示去填密钥，并给出可点击的动作', () => {
   assert.equal(classifyModelError('Unauthorized').kind, 'auth');
 });
 
-test('404 指向端点/模型名，429 与超时只提示重试', () => {
+test('404 指向端点/模型名，429 提示重试，超时引导调整当前模型时限', () => {
   const endpoint = classifyModelError('模型接口返回 HTTP 404（12 ms, model=gpt）：not found');
   assert.equal(endpoint.kind, 'endpoint');
   assert.equal(endpoint.action, 'model-settings');
@@ -70,8 +71,17 @@ test('404 指向端点/模型名，429 与超时只提示重试', () => {
   assert.equal(quota.action, null);
 
   assert.equal(classifyModelError('模型请求超时（90000 ms）').kind, 'timeout');
+  assert.equal(classifyModelError('模型请求超时').action, 'model-settings');
   assert.equal(classifyModelError('请求被中断').kind, 'unknown');
   assert.equal(classifyModelError(null).hint, '');
+});
+
+test('请求时限支持留空继承和零值跟随，拒绝非整数与越界值', () => {
+  assert.deepEqual(requestTimeoutOptions({}), { timeoutSeconds: null, idleTimeoutSeconds: null });
+  assert.deepEqual(requestTimeoutOptions({ timeoutSeconds: '900', idleTimeoutSeconds: '0' }), { timeoutSeconds: 900, idleTimeoutSeconds: 0 });
+  assert.deepEqual(requestTimeoutOptions({ timeoutSeconds: '', idleTimeoutSeconds: ' ' }), { timeoutSeconds: null, idleTimeoutSeconds: null });
+  for (const timeoutSeconds of [0, -1, 1.5, 'invalid', 86401, Infinity]) assert.throws(() => requestTimeoutOptions({ timeoutSeconds }));
+  for (const idleTimeoutSeconds of [-1, 0.5, 86401, NaN]) assert.throws(() => requestTimeoutOptions({ idleTimeoutSeconds }));
 });
 
 test('探测请求体：两端空格去掉，留空交给服务端回退已保存值', () => {

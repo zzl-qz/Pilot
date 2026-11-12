@@ -25,7 +25,8 @@ import org.springframework.test.web.servlet.ResultActions;
 import com.sun.net.httpserver.HttpServer;
 
 /** 模型设置的对外契约：留空保持、明确清除、坏端点不落盘、可用模型探测只读。 */
-@SpringBootTest(properties = "pilot.store=memory")
+@SpringBootTest(
+    properties = {"pilot.store=memory", "pilot.model.timeout-seconds=120", "pilot.model.idle-timeout-seconds=60"})
 @AutoConfigureMockMvc
 class SettingsApiTest {
     private static final Path DATA = Path.of(System.getProperty("java.io.tmpdir"), "pilot-settings-api-test");
@@ -45,6 +46,33 @@ class SettingsApiTest {
             .andExpect(jsonPath("$.attachmentLimits.maxFileBytes").value(2 * 1024 * 1024))
             .andExpect(jsonPath("$.attachmentLimits.maxTotalBytes").value(25 * 1024 * 1024))
             .andExpect(jsonPath("$.attachmentLimits.maxRequestBytes").isNumber());
+    }
+
+    @Test
+    void runtimeTimeoutsRoundTripRejectInvalidInputAndFollowEnvironmentDefaults() throws Exception {
+        updateModel("{\"endpoint\":\"https://timeouts.test/v1\",\"model\":\"timeout-model\"}");
+        mvc.perform(get("/api/settings/model/runtime")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.timeoutDefaults.totalSeconds").value(120))
+            .andExpect(jsonPath("$.timeouts.idleSeconds").value(60));
+        String template = """
+            {"model":"timeout-model","endpoint":"https://timeouts.test/v1","options":{
+              "provider":"generic","cacheMode":"auto","compactionMode":"short","webSearchMode":"local",
+              "timeoutSeconds":%s,"idleTimeoutSeconds":0}}
+            """;
+        mvc.perform(put("/api/settings/model/runtime").contentType(MediaType.APPLICATION_JSON)
+            .content(template.formatted("180"))).andExpect(status().isOk())
+            .andExpect(jsonPath("$.options.idleTimeoutSeconds").value(0))
+            .andExpect(jsonPath("$.timeouts.totalSeconds").value(180))
+            .andExpect(jsonPath("$.timeouts.idleSeconds").value(180));
+        for (String invalid : new String[] {"0", "-1", "86401", "1.5"}) {
+            mvc.perform(put("/api/settings/model/runtime").contentType(MediaType.APPLICATION_JSON)
+                .content(template.formatted(invalid))).andExpect(status().isBadRequest());
+            mvc.perform(get("/api/settings/model/runtime")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.timeouts.totalSeconds").value(180));
+        }
+        mvc.perform(put("/api/settings/model/runtime").contentType(MediaType.APPLICATION_JSON)
+            .content(template.formatted("null"))).andExpect(status().isOk())
+            .andExpect(jsonPath("$.timeouts.totalSeconds").value(120));
     }
 
     @Test

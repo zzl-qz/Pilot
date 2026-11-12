@@ -492,6 +492,8 @@ export interface ModelRuntimeSettingsOptions {
   compactionMode: string;
   webSearchMode: string;
   pricing: ModelPricing;
+  timeoutSeconds?: number | null;
+  idleTimeoutSeconds?: number | null;
 }
 
 /** ModelRuntimeSettings.java / View */
@@ -503,6 +505,8 @@ export interface ModelRuntimeSettingsView {
   nativeCapabilities: (string)[];
   webSearchSource: string;
   capabilityDiscovery: ModelCapabilityDiscoveryReport;
+  timeoutDefaults?: { totalSeconds: number; idleSeconds: number };
+  timeouts?: { totalSeconds: number; idleSeconds: number };
 }
 
 /** ModelUsage.java / ModelUsage */

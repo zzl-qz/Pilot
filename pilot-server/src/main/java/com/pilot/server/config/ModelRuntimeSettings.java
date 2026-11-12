@@ -5,6 +5,8 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.model.MeteredModelClient;
@@ -13,13 +15,26 @@ import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.NativeCapability;
 import com.pilot.server.store.SettingsStore;
 
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.JsonToken;
+import tools.jackson.databind.DeserializationContext;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ValueDeserializer;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
-/** 缓存与报价按端点和模型存储；切换网关不会沿用另一家的价格或专有参数。 */
+/** 运行选项按端点和模型存储；切换网关不会沿用另一家的价格、专有参数或等待时限。 */
 @Component
 public final class ModelRuntimeSettings {
     public record Options(String provider, String cacheMode, String cacheTtl, Boolean instructionMessages,
-        Boolean streamUsage, String compactionMode, String webSearchMode, ModelPricing pricing) {
+        Boolean streamUsage, String compactionMode, String webSearchMode, ModelPricing pricing,
+        @JsonDeserialize(using = IntegerSeconds.class) Long timeoutSeconds,
+        @JsonDeserialize(using = IntegerSeconds.class) Long idleTimeoutSeconds) {
+        public Options(String provider, String cacheMode, String cacheTtl, Boolean instructionMessages,
+            Boolean streamUsage, String compactionMode, String webSearchMode, ModelPricing pricing) {
+            this(provider, cacheMode, cacheTtl, instructionMessages, streamUsage, compactionMode, webSearchMode,
+                pricing, null, null);
+        }
+
         public Options(String provider, String cacheMode, String cacheTtl, Boolean instructionMessages,
             Boolean streamUsage, String compactionMode, ModelPricing pricing) {
             this(provider, cacheMode, cacheTtl, instructionMessages, streamUsage, compactionMode, "auto", pricing);
@@ -30,13 +45,29 @@ public final class ModelRuntimeSettings {
         }
     }
 
+    /** 只约束这两个新字段，避免 JSON 小数被静默截断而改变实际等待行为。 */
+    public static final class IntegerSeconds extends ValueDeserializer<Long> {
+        @Override
+        public Long deserialize(JsonParser parser, DeserializationContext context) {
+            if (parser.currentToken() != JsonToken.VALUE_NUMBER_INT) {
+                return context.reportInputMismatch(Long.class, "请求时限必须为整数秒，留空请传 null");
+            }
+            return parser.getLongValue();
+        }
+    }
+
+    public record RequestTimeouts(long totalSeconds, long idleSeconds) {
+    }
+
     public record View(String model, String endpoint, Options options, ModelProfile effective,
-        Set<String> nativeCapabilities, String webSearchSource, ModelCapabilityDiscovery.Report capabilityDiscovery) {
+        Set<String> nativeCapabilities, String webSearchSource, ModelCapabilityDiscovery.Report capabilityDiscovery,
+        RequestTimeouts timeoutDefaults, RequestTimeouts timeouts) {
     }
 
     private final SettingsStore store;
     private final ModelSettings models;
     private final ObjectMapper mapper;
+    private final RequestTimeouts timeoutDefaults;
     private ModelCapabilityDiscovery discovery;
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -80,9 +111,37 @@ public final class ModelRuntimeSettings {
     }
 
     public ModelRuntimeSettings(SettingsStore store, ModelSettings models, ObjectMapper mapper) {
+        this(store, models, mapper, 900, 600);
+    }
+
+    @Autowired
+    public ModelRuntimeSettings(SettingsStore store, ModelSettings models, ObjectMapper mapper,
+        @Value("${pilot.model.timeout-seconds:900}") long timeoutSeconds,
+        @Value("${pilot.model.idle-timeout-seconds:600}") long idleTimeoutSeconds) {
+        if (timeoutSeconds <= 0 || idleTimeoutSeconds < 0) {
+            throw new IllegalArgumentException("模型总超时必须为正数，空闲超时不能为负数");
+        }
         this.store = store;
         this.models = models;
         this.mapper = mapper;
+        this.timeoutDefaults = new RequestTimeouts(timeoutSeconds, idleTimeoutSeconds);
+    }
+
+    public RequestTimeouts timeouts(ModelSettings.Snapshot model) {
+        return timeouts(options(model));
+    }
+
+    private RequestTimeouts timeouts(Options options) {
+        if (options.timeoutSeconds() != null && (options.timeoutSeconds() < 1 || options.timeoutSeconds() > 86400)) {
+            throw new IllegalArgumentException("单次模型请求总时限必须为 1 至 86400 秒，留空使用服务端默认值");
+        }
+        if (options.idleTimeoutSeconds() != null
+            && (options.idleTimeoutSeconds() < 0 || options.idleTimeoutSeconds() > 86400)) {
+            throw new IllegalArgumentException("模型无数据等待时限必须为 0 至 86400 秒，0 表示跟随总时限");
+        }
+        long total = options.timeoutSeconds() == null ? timeoutDefaults.totalSeconds() : options.timeoutSeconds();
+        long idle = options.idleTimeoutSeconds() == null ? timeoutDefaults.idleSeconds() : options.idleTimeoutSeconds();
+        return new RequestTimeouts(total, idle == 0 ? total : Math.min(idle, total));
     }
 
     private static String key(ModelSettings.Snapshot model) {
@@ -199,7 +258,8 @@ public final class ModelRuntimeSettings {
         if (report != null) {
             source = report.message();
         }
-        return new View(model.model(), model.endpoint(), options, profile(model, options), names, source, report);
+        return new View(model.model(), model.endpoint(), options, profile(model, options), names, source, report,
+            timeoutDefaults, timeouts(options));
     }
 
     public synchronized View update(String expectedModel, String expectedEndpoint, Options options) {
@@ -211,6 +271,7 @@ public final class ModelRuntimeSettings {
             throw new IllegalArgumentException("模型配置已变化，请刷新后再保存计价与缓存设置");
         }
         profile(model, options);
+        timeouts(options);
         store.save(key(model), mapper.writeValueAsString(options));
         return current();
     }

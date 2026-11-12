@@ -24,18 +24,21 @@ const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="view
       import {useStore} from '/src/store.js'; import {api} from '/src/api.js';
       import {applyEvent, initialThread, prependHistoryPage} from '/src/thread-reducer.js';
       import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
+      import '/src/components/settings.css';
       document.documentElement.dataset.theme='dark'; window.store=useStore; window.api=api; window.applyEvent=applyEvent; window.initialThread=initialThread;
       window.EventSource=class { constructor(){window.sse=this;this.handlers={};} addEventListener(type,handler){this.handlers[type]=handler;} close(){} };
       window.event=(event,live=true)=>{if(live) { window.sse.handlers[event.type]?.({data:JSON.stringify(event)}); useStore.getState().flushEvents(); } else useStore.setState(d=>applyEvent(d,event,{live:false}));};
       window.reset=()=>useStore.setState({sessionId:'usage-test',runId:null,running:false,cursor:0,requestReports:[],latestContextReport:null,runUsage:null,thread:initialThread(),pendingInputs:[],queue:[],contextStatus:{limitTokens:300000,usedTokens:61200,canCompact:true},settingsData:{model:'test-model',modelEndpoint:'https://example.test/v1'}});
       reset(); useStore.getState().setUi({themeMode:'dark'}); useStore.getState().connectSse('usage-test',0);
       api.context=async()=>{if(window.failContext) throw Error('测试上下文离线');return {usedTokens:61200,limitTokens:300000,canCompact:!useStore.getState().running};};
-      api.modelRuntime=async()=>({capabilityDiscovery:window.capabilityReport,webSearchSource:window.capabilityReport?.message,model:'test-model',endpoint:'https://example.test/v1',options:{provider:'auto',cacheMode:'auto',pricing:{currency:'USD'}},effective:{provider:'generic'}});
+      window.runtimeTarget={model:'test-model',endpoint:'https://example.test/v1'};window.runtimeValues={};
+      window.runtimeKey=()=>JSON.stringify(window.runtimeTarget);
+      api.modelRuntime=async()=>({timeoutDefaults:{totalSeconds:900,idleSeconds:600},timeouts:{totalSeconds:900,idleSeconds:600},...window.runtimeTarget,options:{provider:'auto',cacheMode:'auto',pricing:{currency:'USD'}},effective:{provider:'generic'},...window.runtimeValues[runtimeKey()],capabilityDiscovery:window.capabilityReport,webSearchSource:window.capabilityReport?.message});
       const realSaveModelRuntime=api.saveModelRuntime;
-      api.saveModelRuntime=async(value)=>{window.saved=value; if(window.failSave)throw Error('测试保存失败');return realSaveModelRuntime(value);};
+      api.saveModelRuntime=async(value)=>{window.saved=value; if(window.failSave)throw Error('测试保存失败');const result=await realSaveModelRuntime(value);window.runtimeValues[JSON.stringify({model:value.model,endpoint:value.endpoint})]=result;return result;};
       const mount=createRoot(document.getElementById('root'));
       window.settingsVersion=0;
-      window.renderSettings=()=>mount.render(React.createElement('div',{style:{maxWidth:620,margin:'24px auto',padding:16}},React.createElement(ModelRuntimeSettings,{key:++window.settingsVersion,model:'test-model',endpoint:'https://example.test/v1'})));
+      window.renderSettings=()=>mount.render(React.createElement(UiProvider,null,React.createElement('div',{id:'settings',style:{maxWidth:620,margin:'24px auto',padding:16}},React.createElement(ModelRuntimeSettings,{key:++window.settingsVersion,...window.runtimeTarget}))));
       mount.render(React.createElement(UiProvider,null,React.createElement('div',{style:{height:'100dvh',display:'flex',flexDirection:'column',justifyContent:'flex-end',padding:'20px'}},React.createElement(Composer))));
       if(new URL(location.href).searchParams.has('inspect')) {
         const report=${JSON.stringify(report)},details=${JSON.stringify(totals)};
@@ -55,7 +58,8 @@ async function run(page,name){
     assert.equal(route.request().method(),'PUT');
     assert.match(route.request().headers()['content-type'] || '',/application\/json/,'保存请求使用 JSON Content-Type');
     const body=route.request().postDataJSON();
-    await route.fulfill({contentType:'application/json',body:JSON.stringify({...body,effective:{provider:'generic'}})});
+    const total=body.options.timeoutSeconds??900,idle=body.options.idleTimeoutSeconds??600;
+    await route.fulfill({contentType:'application/json',body:JSON.stringify({...body,effective:{provider:'generic'},timeoutDefaults:{totalSeconds:900,idleSeconds:600},timeouts:{totalSeconds:total,idleSeconds:idle===0?total:Math.min(idle,total)}})});
   });
   const errors=[]; page.on('pageerror',e=>errors.push(e.message)); await page.goto(url); await page.locator('#context-chip').waitFor();
   assert.equal(await page.evaluate(()=>typeof sse.handlers['model.request']), 'function','真实 SSE 订阅包含明细');
@@ -120,11 +124,33 @@ async function run(page,name){
   await page.evaluate(()=>renderSettings());
   const input=page.getByLabel('普通输入每百万 token 单价'); await input.waitFor(); await input.fill('1.5');
   await page.getByLabel('缓存读取每百万 token 单价').fill('0');
-  await page.getByRole('button',{name:'保存计价与缓存设置'}).click();
+  const totalLimit=page.getByLabel('单次请求总时限（秒）'),idleLimit=page.getByLabel('无数据等待时限（秒）');
+  await totalLimit.fill('1200');await idleLimit.fill('0');
+  const save=page.getByRole('button',{name:'保存请求设置'});
+  await save.click();
   await page.getByText('已保存，仅对该端点与模型的后续请求生效。').waitFor();
   assert.equal(await page.evaluate(()=>saved.options.pricing.input),1.5); assert.equal(await page.evaluate(()=>saved.options.pricing.cachedInput),0);
   assert.equal(await page.evaluate(()=>saved.options.pricing.output),null);
-  await page.evaluate(()=>window.failSave=true); await page.getByRole('button',{name:'保存计价与缓存设置'}).click(); await page.getByRole('alert').waitFor();
+  assert.equal(await page.evaluate(()=>saved.options.timeoutSeconds),1200);assert.equal(await page.evaluate(()=>saved.options.idleTimeoutSeconds),0);
+  await page.getByText('已保存的有效时限：总计 1200 秒，无数据 1200 秒。',{exact:false}).waitFor();
+  for (const width of [1440,768,390]) {
+    await page.setViewportSize({width,height:900});
+    const settings=page.locator('.request-runtime-settings');
+    assert.equal(await settings.evaluate(el=>el.scrollWidth<=el.clientWidth+1),true,`${name} ${width}: request settings do not overflow`);
+    await page.screenshot({path:join(temp,`${name}-settings-${width}.png`),fullPage:true});
+  }
+  await page.evaluate(()=>{runtimeTarget.model='another-model';renderSettings();});
+  await totalLimit.waitFor();assert.equal(await totalLimit.inputValue(),'');assert.equal(await idleLimit.inputValue(),'');
+  await page.evaluate(()=>{runtimeTarget.model='test-model';runtimeTarget.endpoint='https://another.test/v1';renderSettings();});
+  await totalLimit.waitFor();assert.equal(await totalLimit.inputValue(),'');
+  await page.evaluate(()=>{runtimeTarget.endpoint='https://example.test/v1';renderSettings();});
+  await totalLimit.waitFor();assert.equal(await totalLimit.inputValue(),'1200');assert.equal(await idleLimit.inputValue(),'0');
+  await page.evaluate(()=>window.saved=null);await totalLimit.fill('1.5');await save.click();
+  assert.equal(await page.evaluate(()=>window.saved),null,'无效整数被表单拒绝');
+  await totalLimit.fill('');await idleLimit.fill('');await save.click();
+  await page.getByText('已保存的有效时限：总计 900 秒，无数据 600 秒。',{exact:false}).waitFor();
+  assert.equal(await page.evaluate(()=>saved.options.timeoutSeconds),null);assert.equal(await page.evaluate(()=>saved.options.idleTimeoutSeconds),null);
+  await page.evaluate(()=>window.failSave=true); await save.click(); await page.getByRole('alert').waitFor();
   assert.match(await page.getByRole('alert').innerText(),/测试保存失败/); assert.equal(await input.inputValue(),'1.5');
   await page.evaluate(()=>{
     window.failSave=false;
@@ -133,9 +159,11 @@ async function run(page,name){
   });
   await page.getByText('正在自动验证，无需手动配置。',{exact:false}).waitFor();
   await input.fill('7.25');
+  await totalLimit.fill('800');
   await page.evaluate(()=>{window.capabilityReport={state:'verified',message:'已自动验证服务端搜索',probeRequests:1,expiresAt:Date.now()+3600000};});
   await page.getByText('已自动验证服务端搜索',{exact:false}).waitFor();
   assert.equal(await input.inputValue(),'7.25','后台能力刷新不能覆盖未保存的报价');
+  assert.equal(await totalLimit.inputValue(),'800','后台能力刷新不能覆盖未保存的等待时限');
   await page.evaluate(()=>{api.modelRuntime=async()=>({});renderSettings();});
   await page.getByText('端点未提供完整的缓存与计价配置，请刷新或升级服务端。').waitFor();
   assert.equal(await page.getByRole('button',{name:'重试',exact:true}).count(),1);

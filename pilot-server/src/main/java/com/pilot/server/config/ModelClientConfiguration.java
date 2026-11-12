@@ -19,17 +19,13 @@ public class ModelClientConfiguration {
      */
     @Bean
     ModelClient modelClient(ModelSettings settings, ObjectMapper objectMapper, ModelRuntimeSettings runtime,
-        @Value("${pilot.model.timeout-seconds:900}") long timeoutSeconds,
-        @Value("${pilot.model.idle-timeout-seconds:600}") long idleTimeoutSeconds,
         @Value("${pilot.model.prompt-caching:false}") boolean promptCaching) {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-        if (timeoutSeconds <= 0 || idleTimeoutSeconds < 0) {
-            throw new IllegalArgumentException("模型总超时必须为正数，空闲超时不能为负数");
-        }
-        Duration timeout = Duration.ofSeconds(timeoutSeconds);
-        Duration idleTimeout = idleTimeoutSeconds == 0 ? timeout : Duration.ofSeconds(idleTimeoutSeconds);
         // 显式缓存标记只给支持 cache_control 的端点；OpenAI 官方端点自动缓存，保持默认关闭
-        return new ModelClientProvider(settings, snapshot -> new DiscoveredModelClient(snapshot, runtime, httpClient,
-            objectMapper, timeout, idleTimeout, promptCaching), runtime::revision);
+        return new ModelClientProvider(settings, snapshot -> {
+            var limits = runtime.timeouts(snapshot);
+            return new DiscoveredModelClient(snapshot, runtime, httpClient, objectMapper,
+                Duration.ofSeconds(limits.totalSeconds()), Duration.ofSeconds(limits.idleSeconds()), promptCaching);
+        }, runtime::revision);
     }
 }

@@ -114,9 +114,20 @@ export function classifyModelError(message: unknown) {
   if (/timeout|timed out|超时/i.test(text)) {
     return {
       kind: 'timeout',
-      hint: '模型请求超时：可以点「继续执行」重试，或换更快的模型。',
-      action: null
+      hint: '模型请求超时：请检查连接，或在模型设置中调整当前端点与模型的等待时限，再继续执行。',
+      action: 'model-settings'
     };
   }
   return { kind: 'unknown', hint: '', action: null };
+}
+
+/** 留空继承服务端默认值；0 仅用于让无数据等待跟随总时限。 */
+export function requestTimeoutOptions(value: { timeoutSeconds?: number | string | null; idleTimeoutSeconds?: number | string | null }) {
+  const parse = (raw: number | string | null | undefined, minimum: number, label: string) => {
+    if (raw == null || String(raw).trim() === '') return null;
+    const seconds = Number(raw);
+    if (!Number.isInteger(seconds) || seconds < minimum || seconds > 86400) throw new Error(`${label}必须为 ${minimum} 至 86400 的整数秒，留空使用服务端默认值。`);
+    return seconds;
+  };
+  return { timeoutSeconds: parse(value.timeoutSeconds, 1, '单次请求总时限'), idleTimeoutSeconds: parse(value.idleTimeoutSeconds, 0, '无数据等待时限') };
 }
