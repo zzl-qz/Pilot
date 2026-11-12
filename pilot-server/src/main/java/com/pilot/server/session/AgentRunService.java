@@ -1363,7 +1363,7 @@ public class AgentRunService implements RunStarter {
             .withLiveReasoning(
                 delta -> sessions.preview(sessionId, runId, new com.pilot.core.event.AssistantReasoning(delta)))
             .withTaskContext(() -> currentTaskContext(sessionId))
-            .withCompletionClaim(() -> claimCompletion(sessionId, handle))
+            .withCompletionClaim(() -> claimCompletion(sessionId, handle)).withRestoredPaths(snapshots::restoredPaths)
             // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力
             .withHooks(com.pilot.core.hook.Hooks.load(toolFactory.resolve(workspace)))
             .withHookExecution(toolFactory.executionSelection())

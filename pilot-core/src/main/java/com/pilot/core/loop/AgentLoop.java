@@ -209,6 +209,14 @@ public final class AgentLoop {
         return this;
     }
 
+    private Supplier<Set<String>> restoredPaths = Set::of;
+
+    /** 接入层用本轮写前快照确认已经还原的路径；历史调用记录仍保留。 */
+    public AgentLoop withRestoredPaths(Supplier<Set<String>> paths) {
+        restoredPaths = Objects.requireNonNull(paths);
+        return this;
+    }
+
     /** 工具调用幂等账本：重启接管后同一参数写文件调用不重复落盘。 */
     public AgentLoop withToolJournal(String runId, ToolCallJournal journal) {
         this.toolExecutor.withJournal(runId, journal);
@@ -394,7 +402,7 @@ public final class AgentLoop {
     /** 单轮运行共享的会话、检查结果与输出入口；每次 loop 都重新创建。 */
     private record LoopContext(List<Message> messages, Consumer<SessionEvent> events,
         Consumer<List<Message>> checkpoint, Set<String> changedFiles, List<String> checks,
-        RuntimeGuidance runtimeGuidance) {
+        RuntimeGuidance runtimeGuidance, Set<String> inheritedPaths) {
     }
 
     private record ParallelBatch(List<ToolExecutor.Outcome> outcomes, Message correction) {
@@ -422,7 +430,8 @@ public final class AgentLoop {
         UsageTracker usage = new UsageTracker(events);
         DynamicPollTracker dynamicPolls = new DynamicPollTracker(config.repeatRemindAt(), config.repeatAbortAt());
         RuntimeGuidance runtimeGuidance = new RuntimeGuidance();
-        LoopContext context = new LoopContext(messages, events, checkpoint, changedFiles, checks, runtimeGuidance);
+        LoopContext context = new LoopContext(messages, events, checkpoint, changedFiles, checks, runtimeGuidance,
+            Set.copyOf(changedFiles));
 
         try {
             for (int step = 1; step <= config.maxSteps(); step++) {
@@ -638,6 +647,16 @@ public final class AgentLoop {
         ToolCall reverification = executionPolicy == null ? null : executionPolicy.reverificationCall();
         if (reverification != null) {
             return reverifyCandidate(reverification, context);
+        }
+        // 只能用写前快照排除本轮已经还原的文件，不能相信模型声称撤销或 git status 为空。
+        // 续跑继承的修改无法由本轮基线证明还原，仍保留并要求验证。
+        try {
+            Set<String> restored = restoredPaths.get();
+            if (restored != null) {
+                changedFiles.removeIf(path -> restored.contains(path) && !context.inheritedPaths().contains(path));
+            }
+        } catch (RuntimeException ignored) {
+            // 无法核验时保守保留改动，继续走验证门。
         }
         // 通用验证先于模式级 reviewer；有独立审查时跳过重复的模型自审。
         CompletionGate.Nudge nudge = completionGate.evaluate(changedFiles, checks, plan, openSteps,

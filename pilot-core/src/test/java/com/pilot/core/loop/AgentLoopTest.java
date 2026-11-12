@@ -519,6 +519,27 @@ class AgentLoopTest {
     }
 
     @Test
+    void restoredCodeDoesNotTriggerBuildAndKeepsTheToolHistory() {
+        WritingTool write = new WritingTool("edit_file", "src/A.java", null);
+        ScriptedModelClient client =
+            new ScriptedModelClient(new ModelResponse("", List.of(new ToolCall("edit", "edit_file", Map.of()))),
+                new ModelResponse("", List.of(new ToolCall("restore", "edit_file", Map.of()))),
+                new ModelResponse("已还原，给出评估。", List.of()), new ModelResponse("评估和证据完整列在此处。", List.of()));
+        AgentLoop loop =
+            new AgentLoop(client, registry(write), new PolicyPermissionGate(PermissionMode.AUTO), config(8, 3))
+                .withRestoredPaths(() -> Set.of("src/A.java"));
+        AgentLoop.Result result = loop.run("只评估，不修改代码", List.of(), events::add);
+        assertNull(result.failureCode());
+        RunCompleted completed = events.stream().filter(RunCompleted.class::isInstance).map(RunCompleted.class::cast)
+            .findFirst().orElseThrow();
+        assertTrue(completed.changedFiles().isEmpty());
+        assertTrue(completed.checks().isEmpty());
+        assertEquals(2, events.stream().filter(ToolCompleted.class::isInstance).count());
+        assertFalse(client.requests.stream().flatMap(List::stream)
+            .anyMatch(m -> m.content() != null && m.content().contains("[收尾前验证]")));
+    }
+
+    @Test
     void reportsChangedFilesAndChecksOnCompletion() {
         WritingTool tool = new WritingTool("edit_file", "a.txt", "mvn -q test → exit 0");
         ScriptedModelClient client = new ScriptedModelClient(
@@ -1446,7 +1467,8 @@ class AgentLoopTest {
         };
         ScriptedModelClient client =
             new ScriptedModelClient(new ModelResponse("已经完成。", List.of()), new ModelResponse("复核后确认完成。", List.of()));
-        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), config(8, 3)).withExecutionPolicy(policy);
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), config(8, 3)).withExecutionPolicy(policy)
+            .withRestoredPaths(() -> Set.of("src/Persisted.java"));
 
         AgentLoop.Result result = loop.resume(List.of(Message.user("修复持久化问题")), events::add, messages -> {
         }, "修复持久化问题");

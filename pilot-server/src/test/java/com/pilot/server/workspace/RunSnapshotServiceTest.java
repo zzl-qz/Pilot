@@ -40,6 +40,29 @@ class RunSnapshotServiceTest {
     }
 
     @Test
+    void recognizesOnlyChangesRestoredToTheActualRunBaseline() throws IOException {
+        Path file = workspace.resolve("A.java");
+        // 工作区本来就有未提交内容；基线必须用原始字节，不是 Git HEAD。
+        Files.write(file, new byte[] {0, (byte)255, 10});
+        snapshots.bind("run_restore", workspace);
+        snapshots.beforeWrite(file);
+        Files.writeString(file, "temporary");
+        assertTrue(snapshots.restoredPaths().isEmpty());
+        Files.write(file, new byte[] {0, (byte)255, 10});
+        assertEquals(Set.of("A.java"), snapshots.restoredPaths());
+        Files.delete(file);
+        assertTrue(snapshots.restoredPaths().isEmpty(), "删除原文件不算还原");
+        Path created = workspace.resolve("new.java");
+        snapshots.beforeWrite(created);
+        Files.writeString(created, "new");
+        assertTrue(snapshots.restoredPaths().isEmpty());
+        Files.delete(created);
+        assertEquals(Set.of("new.java"), snapshots.restoredPaths());
+        snapshots.clear();
+        assertTrue(snapshots.restoredPaths().isEmpty(), "无本轮快照时不能排除任何改动");
+    }
+
+    @Test
     void restoresModifiedFileAndDeletesCreatedFile() throws IOException {
         Path existing = workspace.resolve("a.txt");
         Files.writeString(existing, "original");

@@ -165,6 +165,35 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         current.remove();
     }
 
+    /** 仅返回本轮写前快照与当前原始字节一致的文件；缺失或越界基线不能证明还原。 */
+    public synchronized Set<String> restoredPaths() {
+        Context context = current.get();
+        if (context == null) {
+            return Set.of();
+        }
+        Set<String> restored = new LinkedHashSet<>();
+        for (SnapshotEntry entry : context.entries) {
+            try {
+                Path file = context.workspace.resolve(entry.path()).normalize();
+                if (!file.startsWith(context.workspace) || Files.isSymbolicLink(file)) {
+                    continue;
+                }
+                if (!entry.existed()) {
+                    if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) {
+                        restored.add(entry.path());
+                    }
+                } else if (entry.originalHash() != null && Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+                    && file.toRealPath().startsWith(context.workspace.toRealPath())
+                    && entry.originalHash().equals(hashIfRegularFile(file))) {
+                    restored.add(entry.path());
+                }
+            } catch (IOException | RuntimeException ignored) {
+                // 检查失败的路径继续视为已改动。
+            }
+        }
+        return Set.copyOf(restored);
+    }
+
     @Override
     public synchronized CommandChangeTracker.Handle begin(Path workspace) {
         Context context = current.get();
