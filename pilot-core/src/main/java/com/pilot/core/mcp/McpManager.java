@@ -143,7 +143,7 @@ public final class McpManager implements AutoCloseable {
         }
         JsonNode root;
         try {
-            root = mapper.readTree(Files.readString(file));
+            root = McpJson.readConfig(file);
         } catch (IOException | RuntimeException e) {
             result.put("(" + file.getFileName() + ")", new McpServerConfig("(" + file.getFileName() + ")", null,
                 List.of(), Map.of(), "配置文件无法解析：" + e.getMessage()));

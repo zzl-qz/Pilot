@@ -1,14 +1,15 @@
 package com.pilot.core.mcp;
 
-import java.io.BufferedReader;
+import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -25,9 +26,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -36,7 +34,6 @@ import tools.jackson.databind.ObjectMapper;
  * 只实现 Pilot 用得到的部分：initialize、tools/list（含分页）、tools/call，并对服务器的 ping 应答。
  */
 final class McpClient implements AutoCloseable {
-    private static final Logger log = LoggerFactory.getLogger(McpClient.class);
     static final String PROTOCOL_VERSION = "2025-06-18";
     private static final int MAX_PAGES = 20;
 
@@ -126,14 +123,24 @@ final class McpClient implements AutoCloseable {
             return cached;
         }
         List<McpToolInfo> all = new ArrayList<>();
+        long deadline = deadline(timeout);
+        long bytes = 0;
+        var cursors = new HashSet<String>();
         String cursor = null;
         for (int page = 0; page < MAX_PAGES; page++) {
             Map<String, Object> params = new LinkedHashMap<>();
             if (cursor != null) {
                 params.put("cursor", cursor);
             }
-            JsonNode result = request("tools/list", params, timeout);
+            JsonNode result = request("tools/list", params, remainingDuration(deadline));
+            bytes += mapper.writeValueAsBytes(result).length;
+            if (bytes > McpJson.MAX_FRAME_BYTES) {
+                throw new McpException("MCP 工具发现累计数据超过大小上限，未缓存不完整列表");
+            }
             for (JsonNode item : result.path("tools")) {
+                if (all.size() >= 1000) {
+                    throw new McpException("MCP 工具数量超过上限（1000），未缓存不完整列表");
+                }
                 String toolName = item.path("name").asString("");
                 if (toolName.isBlank()) {
                     continue;
@@ -144,11 +151,14 @@ final class McpClient implements AutoCloseable {
             }
             cursor = result.path("nextCursor").asString("");
             if (cursor.isBlank()) {
-                break;
+                tools = List.copyOf(all);
+                return tools;
+            }
+            if (!cursors.add(cursor)) {
+                throw new McpException("MCP 工具分页游标重复，未缓存不完整列表");
             }
         }
-        tools = List.copyOf(all);
-        return tools;
+        throw new McpException("MCP 工具分页超过上限，未缓存不完整列表");
     }
 
     JsonNode call(String tool, Map<String, Object> arguments, Duration timeout) {
@@ -239,6 +249,9 @@ final class McpClient implements AutoCloseable {
                 }
                 try {
                     byte[] line = (mapper.writeValueAsString(message) + "\n").getBytes(StandardCharsets.UTF_8);
+                    if (line.length > McpJson.MAX_FRAME_BYTES) {
+                        throw new McpException("MCP 请求超过大小上限，尚未发送");
+                    }
                     if (written.isDone() || closed.get() || System.nanoTime() >= deadline) {
                         return;
                     }
@@ -273,18 +286,11 @@ final class McpClient implements AutoCloseable {
     }
 
     private void read(Process owner) {
-        try (BufferedReader reader =
-            new BufferedReader(new InputStreamReader(owner.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (line.isBlank()) {
-                    continue;
-                }
-                JsonNode node;
-                try {
-                    node = mapper.readTree(line);
-                } catch (RuntimeException e) {
-                    log.debug("MCP {} 输出了非 JSON 行：{}", name, line);
+        try (InputStream reader = new BufferedInputStream(owner.getInputStream())) {
+            byte[] line;
+            while ((line = McpJson.readFrame(reader, McpJson.MAX_FRAME_BYTES)) != null) {
+                JsonNode node = McpJson.parse(line);
+                if (node == null || node.isMissingNode()) {
                     continue;
                 }
                 boolean hasMethod = node.has("method");
@@ -297,8 +303,8 @@ final class McpClient implements AutoCloseable {
                     }
                 }
             }
-        } catch (IOException ignored) {
-            // 进程退出
+        } catch (IOException | McpException e) {
+            terminate(e instanceof McpException me ? me : new McpException("MCP 读取失败：" + e.getMessage()));
         } finally {
             terminate(new McpException("MCP 服务器 " + name + " 已退出或关闭输出"));
         }

@@ -38,8 +38,28 @@ public final class McpProcessFixture {
                 Files.writeString(marker, Long.toString(ProcessHandle.current().pid()));
                 Thread.sleep(3500);
                 return;
+            } else if (method.equals("tools/list")) {
+                var tool = Map.of("name", message.path("params").has("cursor") ? "second" : "first", "inputSchema",
+                    Map.of("type", "object"), "annotations", Map.of("readOnlyHint", true));
+                if (mode.equals("cycle") || mode.equals("pages") && !message.path("params").has("cursor")) {
+                    reply(mapper, message, Map.of("tools", List.of(tool), "nextCursor", "next"));
+                } else {
+                    reply(mapper, message, Map.of("tools", List.of(tool)));
+                }
             } else if (method.equals("tools/call")) {
                 Files.writeString(marker, Long.toString(ProcessHandle.current().pid()));
+                if (mode.equals("oversize")) {
+                    System.out.print("x".repeat(8 * 1024 * 1024 + 1));
+                    System.out.flush();
+                    Thread.sleep(2000);
+                    return;
+                }
+                if (mode.equals("deep")) {
+                    System.out.println("{\"jsonrpc\":\"2.0\",\"id\":" + message.path("id").asLong() + ",\"result\":"
+                        + "[".repeat(100) + "0" + "]".repeat(100) + "}");
+                    System.out.flush();
+                    continue;
+                }
                 if (mode.equals("hang")) {
                     Thread.sleep(3500);
                     return;

@@ -28,7 +28,8 @@ import tools.jackson.databind.JsonNode;
  */
 public final class McpCallTool extends Prompted {
     private static final int MAX_TEXT_CHARS = 30_000;
-    private static final long MAX_IMAGE_BYTES = 5L * 1024 * 1024;
+    static final long MAX_IMAGE_BYTES = 5L * 1024 * 1024;
+    private static final int MAX_IMAGES = 8;
 
     private final McpManager manager;
     private final Path workspace;
@@ -96,14 +97,15 @@ public final class McpCallTool extends Prompted {
         return render(server, result);
     }
 
-    private ToolResult render(String server, JsonNode result) {
+    ToolResult render(String server, JsonNode result) {
         StringBuilder text = new StringBuilder();
         List<Attachment> attachments = new ArrayList<>();
+        long[] imageBytes = {0};
         for (JsonNode block : result.path("content")) {
             switch (block.path("type").asString("")) {
                 case "text" -> append(text, block.path("text").asString(""));
                 case "image" -> {
-                    String note = saveImage(server, block, attachments);
+                    String note = saveImage(server, block, attachments, imageBytes);
                     if (note != null) {
                         append(text, note);
                     }
@@ -131,7 +133,10 @@ public final class McpCallTool extends Prompted {
         return attachments.isEmpty() ? ToolResult.text(body) : ToolResult.withImages(body, attachments);
     }
 
-    private String saveImage(String server, JsonNode block, List<Attachment> attachments) {
+    private String saveImage(String server, JsonNode block, List<Attachment> attachments, long[] imageBytes) {
+        if (attachments.size() >= MAX_IMAGES) {
+            return "[图片数量超过上限（8），已忽略]";
+        }
         String mime = block.path("mimeType").asString("image/png").toLowerCase(Locale.ROOT);
         String extension = switch (mime) {
             case "image/png" -> "png";
@@ -144,7 +149,11 @@ public final class McpCallTool extends Prompted {
             return "[不支持的图片类型 " + mime + "]";
         }
         try {
-            byte[] bytes = Base64.getDecoder().decode(block.path("data").asString(""));
+            String encoded = block.path("data").asString("");
+            if (decodedSize(encoded) > MAX_IMAGE_BYTES - imageBytes[0]) {
+                return "[图片超过单张或累计大小上限（5 MiB），已在解码前拒绝]";
+            }
+            byte[] bytes = Base64.getDecoder().decode(encoded);
             if (bytes.length == 0 || bytes.length > MAX_IMAGE_BYTES) {
                 return "[图片大小异常，已忽略]";
             }
@@ -152,12 +161,23 @@ public final class McpCallTool extends Prompted {
             Path file =
                 dir.resolve("image-" + System.currentTimeMillis() + "-" + images.incrementAndGet() + "." + extension);
             Files.write(file, bytes);
+            imageBytes[0] += bytes.length;
             attachments.add(new Attachment(file.getFileName().toString(),
                 mime.equals("image/jpg") ? "image/jpeg" : mime, file.toString()));
             return "[图片 " + file.getFileName() + "]";
         } catch (IllegalArgumentException | IOException e) {
             return "[图片无法保存：" + e.getMessage() + "]";
         }
+    }
+
+    static long decodedSize(String encoded) {
+        int length = encoded.length();
+        int padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+        return (long)(length / 4) * 3 + switch (length % 4) {
+            case 2 -> 1;
+            case 3 -> 2;
+            default -> 0;
+        } - padding;
     }
 
     private static void append(StringBuilder out, String piece) {

@@ -42,6 +42,45 @@ class McpClientTransportTest {
     }
 
     @Test
+    void paginatedDiscoveryReturnsTheCompleteList() {
+        try (McpClient client = client("pages")) {
+            assertEquals(List.of("first", "second"),
+                client.tools(Duration.ofSeconds(2)).stream().map(McpToolInfo::name).toList());
+        }
+    }
+
+    @Test
+    void repeatingPaginationIsRejectedInsteadOfCachingAnIncompleteList() {
+        try (McpClient client = client("cycle")) {
+            McpException error = assertThrows(McpException.class, () -> client.tools(Duration.ofSeconds(2)));
+            assertTrue(error.getMessage().contains("游标重复"));
+            assertThrows(McpException.class, () -> client.tools(Duration.ofSeconds(2)));
+        }
+    }
+
+    @Test
+    void rejectsAnOversizedLineBeforeWaitingForItsNewline() {
+        try (McpClient client = client("oversize")) {
+            long start = System.nanoTime();
+            McpException error =
+                assertThrows(McpException.class, () -> client.call("write", Map.of(), Duration.ofSeconds(3)));
+            assertTrue(error.getMessage().contains("大小上限"), error.getMessage());
+            assertTrue(error.outcomeUnknown());
+            assertTrue(Duration.ofNanos(System.nanoTime() - start).toMillis() < 1500);
+        }
+    }
+
+    @Test
+    void rejectsExcessiveJsonNestingBeforeBuildingTheTree() {
+        try (McpClient client = client("deep")) {
+            McpException error =
+                assertThrows(McpException.class, () -> client.call("write", Map.of(), Duration.ofSeconds(3)));
+            assertTrue(error.getMessage().contains("解析限制"), error.getMessage());
+            assertTrue(error.outcomeUnknown());
+        }
+    }
+
+    @Test
     void blockedPipeUsesTheSameDeadlineAsResponseWait() throws Exception {
         try (McpClient client = client("block")) {
             ready();
