@@ -69,7 +69,8 @@ public final class McpToolsTool implements Tool {
         }
         McpManager.Selection selected = manager.selection(workspace, server);
         boolean readOnly = selected.config() == null || selected.client() != null && selected.client().running()
-            && selected.client().matches(selected.config(), selected.extraPath());
+            && selected.client().matches(selected.config(), selected.extraPath())
+            && selected.client().matchesWorkspace(selected.workspace());
         checked.set(new Checked(args, selected, !readOnly));
         return readOnly;
     }

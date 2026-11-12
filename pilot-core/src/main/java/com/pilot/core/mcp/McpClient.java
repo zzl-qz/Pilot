@@ -63,7 +63,7 @@ final class McpClient implements AutoCloseable {
     McpClient(String name, McpServerConfig config, Path workdir, Path logFile, ObjectMapper mapper, String extraPath) {
         this.name = name;
         this.config = config;
-        this.workdir = workdir;
+        this.workdir = canonicalWorkspace(workdir);
         this.logFile = logFile;
         this.mapper = mapper;
         this.extraPath = extraPath == null ? "" : extraPath;
@@ -72,6 +72,18 @@ final class McpClient implements AutoCloseable {
     boolean running() {
         Process current = process;
         return !closed.get() && current != null && current.isAlive();
+    }
+
+    static Path canonicalWorkspace(Path workspace) {
+        try {
+            return workspace.toRealPath();
+        } catch (IOException e) {
+            return workspace.toAbsolutePath().normalize();
+        }
+    }
+
+    boolean matchesWorkspace(Path workspace) {
+        return workdir.equals(workspace);
     }
 
     boolean matches(McpServerConfig current, String path) {

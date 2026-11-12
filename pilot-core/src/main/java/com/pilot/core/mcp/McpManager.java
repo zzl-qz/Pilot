@@ -64,7 +64,7 @@ public final class McpManager implements AutoCloseable {
         return !servers(workspace).isEmpty();
     }
 
-    record Selection(McpServerConfig config, String extraPath, McpClient client) {
+    record Selection(McpServerConfig config, String extraPath, McpClient client, Path workspace) {
     }
 
     Selection selection(Path workspace, String server) {
@@ -74,12 +74,14 @@ public final class McpManager implements AutoCloseable {
             .anyMatch(value -> value.unsupported() != null && value.unsupported().startsWith("配置文件无法解析"))) {
             config = new McpServerConfig(server, null, List.of(), Map.of(), "配置文件无法解析，请先修复后再发现工具");
         }
-        return new Selection(config, Objects.toString(extraPath.get(), ""), clients.get(key(workspace, server)));
+        return new Selection(config, Objects.toString(extraPath.get(), ""), clients.get(key(workspace, server)),
+            McpClient.canonicalWorkspace(workspace));
     }
 
     private static boolean current(Selection selected) {
         return selected.client() != null && selected.config() != null && selected.config().usable()
-            && selected.client().matches(selected.config(), selected.extraPath());
+            && selected.client().matches(selected.config(), selected.extraPath())
+            && selected.client().matchesWorkspace(selected.workspace());
     }
 
     public boolean configurationChanged(Path workspace, String server) {
@@ -107,8 +109,8 @@ public final class McpManager implements AutoCloseable {
             throw new McpException("MCP 管理器已关闭");
         }
         Selection selected = selection(workspace, server);
-        if (!Objects.equals(selected.config(), expected.config())
-            || !selected.extraPath().equals(expected.extraPath())) {
+        if (!Objects.equals(selected.config(), expected.config()) || !selected.extraPath().equals(expected.extraPath())
+            || !selected.workspace().equals(expected.workspace())) {
             throw new McpException("MCP 配置在权限检查后已变化，请重新发现并确认启动配置");
         }
         McpServerConfig config = selected.config();
@@ -139,7 +141,8 @@ public final class McpManager implements AutoCloseable {
             fresh.start(START_TIMEOUT);
             fresh.tools(LIST_TIMEOUT);
             Selection after = selection(workspace, server);
-            if (!Objects.equals(after.config(), config) || !after.extraPath().equals(selected.extraPath())) {
+            if (!Objects.equals(after.config(), config) || !after.extraPath().equals(selected.extraPath())
+                || !after.workspace().equals(selected.workspace())) {
                 throw new McpException("MCP 配置在启动期间已变化，已关闭旧进程；请重新发现工具");
             }
         } catch (McpException e) {
@@ -184,7 +187,16 @@ public final class McpManager implements AutoCloseable {
             if (!Objects.equals(trusted, selected.config())) {
                 return McpPermissionPolicy.UNTRUSTED;
             }
-            return McpPermissionPolicy.from(root.path("mcpServers").path(server).path("pilotPermissions"));
+            JsonNode policy = root.path("mcpServers").path(server).path("pilotPermissions");
+            boolean scoped = false;
+            for (JsonNode item : policy.path("workspaces")) {
+                if (item.isString()) {
+                    Path allowed = Path.of(item.asString());
+                    scoped |=
+                        allowed.isAbsolute() && McpClient.canonicalWorkspace(allowed).equals(selected.workspace());
+                }
+            }
+            return scoped ? McpPermissionPolicy.from(policy) : McpPermissionPolicy.UNTRUSTED;
         } catch (IOException | RuntimeException e) {
             return McpPermissionPolicy.UNTRUSTED;
         }

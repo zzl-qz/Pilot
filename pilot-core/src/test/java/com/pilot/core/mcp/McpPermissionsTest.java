@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -37,7 +38,9 @@ class McpPermissionsTest {
     }
 
     private void write(Path file, Map<String, Object> permissions) throws Exception {
-        Files.writeString(file, mapper.writeValueAsString(Map.of("mcpServers", Map.of("fake", config(permissions)))));
+        var scoped = new HashMap<>(permissions);
+        scoped.put("workspaces", List.of(root.toRealPath().toString()));
+        Files.writeString(file, mapper.writeValueAsString(Map.of("mcpServers", Map.of("fake", config(scoped)))));
     }
 
     @Test
@@ -149,18 +152,31 @@ class McpPermissionsTest {
             var registry = new ToolRegistry();
             registry.register(new McpCallTool(manager, root));
             var executor = new ToolExecutor(registry, new PolicyPermissionGate(PermissionMode.READ_ONLY),
-                (id, name, summary) -> java.util.concurrent.CompletableFuture.completedFuture(false));
-            var result = executor.execute(new ToolCall("check", "mcp_call", Map.of("server", "fake", "tool", "first")), event -> {}, () -> {
-                try {
-                    write(user, Map.of());
-                } catch (Exception e) {
-                    throw new IllegalStateException(e);
-                }
-                return null;
-            });
+                (id, name, summary) -> CompletableFuture.completedFuture(false));
+            var result = executor.execute(new ToolCall("check", "mcp_call", Map.of("server", "fake", "tool", "first")),
+                event -> {
+                }, () -> {
+                    try {
+                        write(user, Map.of());
+                    } catch (Exception e) {
+                        throw new IllegalStateException(e);
+                    }
+                    return null;
+                });
             assertFalse(result.usableEvidence());
             assertTrue(result.result().contains("本地只读策略、连接或工具列表已变化"));
             assertFalse(Files.exists(root.resolve("ready")));
+        }
+    }
+
+    @Test
+    void sameCommandInAnotherWorkspaceCannotInheritLocalTrust() throws Exception {
+        Path user = root.resolve("user.json");
+        write(user, Map.of("trustReadOnlyHints", true));
+        Path other = Files.createDirectory(root.resolve("other-workspace"));
+        try (McpManager manager = new McpManager(mapper, user, null, null)) {
+            manager.tools(other, "fake");
+            assertFalse(new McpCallTool(manager, other).readOnly(Map.of("server", "fake", "tool", "first")));
         }
     }
 
