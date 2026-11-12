@@ -50,7 +50,7 @@ node evaluation/harness/runner.mjs --base http://127.0.0.1:8787 \
 - `--resume` 会重算轮换方案，与已记录的 `faultScenario/faultProfile/faultEvery` 不一致即拒绝续跑。
 - 代理计数是全局的：跑故障组期间，该 Pilot 服务不得有其他会话（其他会话的模型请求会混入计数，`injectedRequests` 就不再只属于本次尝试）。
 
-指标口径新增：`faultInjectionCoverage`（有注入观测的尝试中实际注入 ≥1 的比例）、`faultSurvivalRate`（带注入的尝试中“正常收尾+外部验收通过+场景覆盖”的比例）、`injectedFaultCount`、`faultProxyStops`；注入观测缺失保持 `null`，不当零。
+指标口径新增：`faultInjectionCoverage`（有注入观测的尝试中实际注入 ≥1 的比例）、`faultSurvivalRate`（确认实际注入的尝试中“正常收尾+外部验收通过+场景覆盖”的比例）、`faultScenarioSuccessRate`（全部故障尝试的通过率，未注入或未知覆盖不能计成功）、`injectedFaultCount`、`faultProxyStops`；注入观测缺失保持 `null`，不当零。
 
 ## 运行与对照
 
@@ -89,7 +89,7 @@ node evaluation/harness/runner.mjs --dry-run --repeat 3 --task fix-failing-unit-
 
 每次任务完成立即追加 JSONL；后续中断不会丢失先前记录。已有输出文件拒绝覆盖，summary 使用独立路径。错误记录保留失败事实，未知成本不填 0。超时尝试取消本执行器创建的运行，不会继续验收正在修改的工作区。现有固定 Node 验收使用 argv；自定义字符串验收仍交系统 shell 执行，需要按目标平台编写。
 
-故障代理控制接口配置了 `PILOT_FAULT_LOCAL_TOKEN` 时，执行器也从同名环境变量读取独立凭据，不复用 Pilot 的访问令牌。未传 `--fault-max-requests` 时保留代理启动上限；reset 只清当前试验窗口，不清代理生命周期累计请求、已观测用量及硬停状态。停顿时长、上限和 seed 纳入故障方案指纹，改变条件必须另开记录。费用阈值仍只是基于已观测 usage 的估算停止条件，缺失 usage 不能当零，也不是预付费硬保证。
+故障代理控制接口配置了 `PILOT_FAULT_LOCAL_TOKEN` 时，执行器也从同名环境变量读取独立凭据，不复用 Pilot 的访问令牌。未传 `--fault-max-requests` 时保留代理启动上限；reset 只清当前试验窗口，不清代理生命周期累计请求、已观测用量及硬停状态。停顿时长、上限和 seed 纳入故障方案指纹，改变条件必须另开记录，严格对照也核验该指纹。费用阈值仍只是基于已观测 usage 的估算停止条件，缺失 usage 不能当零，也不是预付费硬保证。
 
 ## 安全续跑与预算规划
 

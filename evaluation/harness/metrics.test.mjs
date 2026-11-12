@@ -228,14 +228,15 @@ test('故障注入聚合：覆盖、存活、注入次数与缺失观测的口�
   assert.equal(summary.faultScenarioRuns, 3);
   assert.equal(summary.faultInjectionCoverage, 0.5, '注入覆盖只统计有注入观测的样本');
   assert.equal(summary.injectedFaultCount, 2);
-  assert.equal(summary.faultSurvivalRate, 2 / 3, '注入观测缺失的样本不计入分母存活外的口径');
+  assert.equal(summary.faultSurvivalRate, 1, '只统计确认已注入的样本');
+  assert.equal(summary.faultScenarioSuccessRate, 1 / 3, '全部尝试保留在分母，未注入和未知覆盖都不冒充成功');
   const clean = summarize([record(), record()]);
   assert.equal(clean.faultScenarioRuns, 0);
   assert.equal(clean.faultInjectionCoverage, null, '无故障样本不能给出假覆盖');
 });
 
 test('干净基线与故障组不可比、故障方案不一致不可比、混杂方案与缺观测都拦下', () => {
-  const faultRows = tasks(20, { faultScenario: 'mid-eof', faultEvery: 3, faultRequestCount: 5, faultInjectedCount: 1, faultProxyStopped: false });
+  const faultRows = tasks(20, { faultScenario: 'mid-eof', faultPlanVersion: 'plan', faultEvery: 3, faultRequestCount: 5, faultInjectedCount: 1, faultProxyStopped: false });
   const clean = tasks(20);
   const cleanFault = gate(clean, faultRows);
   assert.equal(cleanFault.verdict, 'insufficient');
@@ -252,4 +253,22 @@ test('干净基线与故障组不可比、故障方案不一致不可比、混�
   const missing = faultRows.map(r => ({ ...r, faultRequestCount: null }));
   assert.ok(gate(missing, missing).reasons.some(r => r.includes('缺少请求数观测')));
   assert.equal(validateBaseline(faultRows).verdict, 'pass', '同方案故障组自身预检可通过');
+});
+
+test('严格对照不能忽略故障停顿和限额的完整方案指纹', () => {
+  const common = { faultScenario: 'stall', faultEvery: 3, faultRequestCount: 5, faultInjectedCount: 1, faultPlanVersion: 'plan-100ms' };
+  assert.equal(gate(tasks(20, common), tasks(20, common)).verdict, 'pass');
+  const changed = gate(tasks(20, common), tasks(20, { ...common, faultPlanVersion: 'plan-200ms' }));
+  assert.equal(changed.verdict, 'insufficient');
+  assert.ok(changed.reasons.some(reason => reason.includes('方案指纹不一致')));
+  assert.equal(validateBaseline(tasks(20, { ...common, faultPlanVersion: undefined })).verdict, 'insufficient');
+});
+
+test('故障覆盖未知或确认没有注入时不能制造存活成绩', () => {
+  for (const count of [null, 0]) {
+    const rows = tasks(20, { faultScenario: 'stall', faultPlanVersion: 'plan', faultRequestCount: 5, faultInjectedCount: count });
+    assert.equal(validateBaseline(rows).verdict, 'reject');
+    assert.equal(summarize(rows).faultSurvivalRate, null);
+    assert.equal(summarize(rows).faultScenarioSuccessRate, 0);
+  }
 });

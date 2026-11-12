@@ -74,8 +74,9 @@ function observations(rows) {
     faultInjectionCoverage: injectedObserved.length
       ? injectedObserved.filter(r => r.faultInjectedCount >= 1).length / injectedObserved.length : null,
     injectedFaultCount: injectedObserved.reduce((sum, r) => sum + r.faultInjectedCount, 0),
-    // 故障存活率：带故障注入的尝试里同时满足正常收尾+外部验收通过+场景覆盖的比例。
-    faultSurvivalRate: faultRows.length ? faultRows.filter(succeeded).length / faultRows.length : null,
+    // 只对确认实际注入的样本计算存活；另保留全部故障尝试的端到端通过率，未知覆盖不算成功。
+    faultSurvivalRate: rate(injectedObserved.filter(r => r.faultInjectedCount >= 1), succeeded),
+    faultScenarioSuccessRate: rate(faultRows, r => r.faultInjectedCount >= 1 && succeeded(r)),
     faultProxyStops: faultRows.filter(r => r.faultProxyStopped === true).length
   };
 }
@@ -196,6 +197,9 @@ function invalidRecordIssues(baseline, current) {
       if (typeof r.faultScenario === 'string' && r.faultScenario && !Number.isInteger(r.faultRequestCount)) {
         issues.push(`${label} ${r.taskId} 的故障注入记录缺少请求数观测`);
       }
+      if (r.faultScenario && r.scenarioCovered === true && !(Number.isInteger(r.faultInjectedCount) && r.faultInjectedCount >= 1)) {
+        issues.push(`${label} ${r.taskId} 未确认实际注入却报告故障场景已覆盖`);
+      }
     }
   }
   return [...new Set(issues)];
@@ -222,6 +226,12 @@ function comparisonIssues(baseline, current) {
     }
   }
   // 故障注入条件必须一致：故障组与干净对照、或不同故障方案之间都不可比。
+  const faultRows = all.filter(r => r.faultScenario);
+  if (faultRows.some(r => typeof r.faultPlanVersion !== 'string' || !r.faultPlanVersion.trim())) {
+    issues.push('故障记录缺少完整方案指纹，无法核对停顿时间、限额和轮换条件');
+  } else if (new Set(faultRows.map(r => r.faultPlanVersion)).size > 1) {
+    issues.push('故障方案指纹不一致，不能把不同停顿时间、限额或轮换条件作为同条件对照');
+  }
   const faultSet = list => new Set(list.filter(r => r.faultScenario).map(r => `${r.faultScenario}@${r.faultEvery ?? '?'}`));
   for (const [label, records] of [['基线', baseline], ['候选', current]]) {
     if (faultSet(records).size > 1) issues.push(`${label}混合了不同故障注入方案，应分别评估或分别报告`);
