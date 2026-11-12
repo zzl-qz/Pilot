@@ -155,7 +155,7 @@ class BrowserToolTest {
     void classifiesActionsForPermissions() {
         BrowserTool tool = tool();
         for (String action : List.of("navigate", "snapshot", "screenshot", "console", "network", "wait", "reload",
-            "back", "forward", "close", "text", "links", "tabs")) {
+            "back", "forward", "close", "text", "links", "tabs", "inspect", "resize")) {
             assertTrue(tool.readOnly(Map.of("action", action)), action);
             assertFalse(tool.localInteraction(Map.of("action", action)), action);
         }
@@ -179,7 +179,7 @@ class BrowserToolTest {
 
         for (String action : List.of("click", "dblclick", "right_click", "hover", "fill", "type", "press", "select",
             "upload", "download", "switch_tab", "close_tab", "navigate", "reload", "back", "forward", "close",
-            "evaluate")) {
+            "evaluate", "resize")) {
             String result = tool.execute(Map.of("action", action, "url", "http://localhost:1", "ref", "e1", "text", "x",
                 "key", "Enter", "values", List.of("a"), "files", List.of("a.txt"), "expression", "1"));
             assertTrue(result.startsWith("用户已接管浏览器"), action + " 应被拦截：" + result);
@@ -188,7 +188,7 @@ class BrowserToolTest {
         assertTrue(backend.commands.isEmpty(), "被拦截的动作不应触达浏览器");
 
         // 观察类放行：用户操作的进度正是智能体需要的上下文
-        for (String action : List.of("snapshot", "console", "network", "wait")) {
+        for (String action : List.of("snapshot", "console", "network", "wait", "inspect")) {
             String result = tool.execute(Map.of("action", action));
             assertFalse(result.startsWith("用户已接管"), action + " 观察动作不应被拦截：" + result);
         }
@@ -197,6 +197,25 @@ class BrowserToolTest {
         // 恢复后一切照常
         backend.paused = false;
         assertEquals("ok", tool.execute(Map.of("action", "click", "ref", "e1")));
+    }
+
+    @Test
+    void validatesViewportAndOffersFixedReadOnlyInspection() {
+        BrowserTool tool = tool();
+        assertEquals("ok", tool.execute(Map.of("action", "resize", "width", 1440, "height", 840)));
+        assertEquals(Map.of("op", "resize", "width", 1440, "height", 840), backend.commands.getLast());
+        for (Object width : List.of(0, 279, 1921, 390.5, "1440", Double.NaN)) {
+            assertTrue(tool.execute(Map.of("action", "resize", "width", width, "height", 840)).startsWith("ERROR:"));
+        }
+        for (int height : List.of(0, 219, 1601)) {
+            assertTrue(tool.execute(Map.of("action", "resize", "width", 390, "height", height)).startsWith("ERROR:"));
+        }
+        assertTrue(tool.execute(Map.of("action", "resize")).startsWith("ERROR:"));
+        assertEquals(1, backend.commands.size());
+        tool.execute(Map.of("action", "inspect", "selector", "#title", "expression", "document.body.remove()"));
+        assertEquals(Map.of("op", "inspect", "selector", "#title"), backend.commands.getLast());
+        assertFalse(tool.confirm(Map.of("action", "inspect")));
+        assertTrue(tool.confirm(Map.of("action", "evaluate")));
     }
 
     @Test

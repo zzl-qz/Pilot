@@ -1418,7 +1418,7 @@ public class AgentRunService implements RunStarter {
             }
             com.pilot.server.desktop.DesktopViewportReset reset = viewportReset;
             if (reset != null) {
-                reset.clear();
+                reset.clear(sessionId);
             }
         }
     }

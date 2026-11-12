@@ -10,6 +10,7 @@
     "test": "node --test *.test.mjs",
     "smoke": "node smoke.mjs",
     "test:ui": "node ui-smoke.mjs",
+    "test:browser": "node browser-viewport-smoke.mjs",
     "test:security": "node security-smoke.mjs",
     "test:host": "node ../scripts/verify-desktop-host.mjs"
   },

@@ -150,6 +150,25 @@ class BrowserIntegrationTest {
     }
 
     @Test
+    void readsLayoutAndVerifiesThreeViewportsWithoutArbitraryScripts() throws IOException {
+        run("navigate", "url", base);
+        ObjectMapper mapper = new ObjectMapper();
+        for (int width : List.of(1440, 768, 390)) {
+            assertTrue(run("resize", "width", width, "height", 840).contains(width + "×840"));
+            JsonNode info = mapper.readTree(run("inspect", "selector", "#title"));
+            assertEquals(width, info.path("viewport").path("width").asInt());
+            assertEquals(840, info.path("viewport").path("height").asInt());
+            assertTrue(info.path("element").path("rect").path("width").asDouble() > 0);
+            assertEquals("input", info.path("element").path("tag").asText());
+            ToolResult shot = tool.executeResult(Map.of("action", "screenshot"));
+            BufferedImage png = ImageIO.read(Path.of(shot.images().getFirst().path()).toFile());
+            assertEquals(width, png.getWidth());
+            assertEquals(840, png.getHeight());
+        }
+        assertTrue(run("inspect", "selector", "#missing").startsWith("ERROR:"));
+    }
+
+    @Test
     void verifiesAPageEndToEndWithEvidence() throws IOException {
         for (String name : List.of("one.png", "two.png")) {
             ImageIO.write(new BufferedImage(40, 40, BufferedImage.TYPE_INT_RGB), "png",

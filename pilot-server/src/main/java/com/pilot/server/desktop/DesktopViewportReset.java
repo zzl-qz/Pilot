@@ -5,11 +5,15 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
+
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 一轮智能体结束后，把桌面浏览器的设备模拟收回面板真实大小。
@@ -22,12 +26,22 @@ public final class DesktopViewportReset {
 
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofMillis(300)).build();
 
-    public void clear() {
+    public void clear(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return;
+        }
         var root = DesktopWindowLauncher.repositoryRoot();
         if (root == null) {
             return;
         }
         var file = root.resolve(".pilot").resolve("browser").resolve("desktop-browser.json");
+        clear(sessionId, file);
+    }
+
+    void clear(String sessionId, Path file) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return;
+        }
         if (!Files.isRegularFile(file)) {
             return;
         }
@@ -41,7 +55,9 @@ public final class DesktopViewportReset {
             HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port.group(1) + "/emulate"))
                 .timeout(Duration.ofMillis(400)).header("content-type", "application/json")
                 .header("x-pilot-token", token.group(1))
-                .POST(HttpRequest.BodyPublishers.ofString("{\"width\":0,\"height\":0}")).build();
+                .POST(HttpRequest.BodyPublishers.ofString(
+                    new ObjectMapper().writeValueAsString(Map.of("sessionId", sessionId, "width", 0, "height", 0))))
+                .build();
             client.send(request, HttpResponse.BodyHandlers.discarding());
         } catch (Exception ignored) {
             // 桌面壳不在，或这一轮根本没模拟过视口

@@ -323,7 +323,8 @@ function createTab({ url, sessionId }) {
   });
   view.setBackgroundColor('#111111');
   view.setVisible(false);
-  view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  // 隐藏标签也保留有效布局；0×0 会使首次截图与 DOM 可见性检查失败。
+  view.setBounds({ x: 0, y: 0, width: 1280, height: 800 });
   const tab = {
     id, view, sessionId: sessionId || null, bounds: null, detached: false, window: null,
     attached: false, cover: null, emulated: null, covering: false,
@@ -370,7 +371,7 @@ function emulate(tab, width, height) {
     tab.emulated = null;
   } else {
     contents.enableDeviceEmulation?.({
-      screenPosition: 'mobile',
+      screenPosition: 'desktop',
       screenSize: { width, height },
       viewSize: { width, height },
       deviceScaleFactor: 0,
@@ -522,7 +523,13 @@ function startControl() {
       }
       if (request.method === 'POST' && url.pathname === '/emulate') {
         const body = await readBody(request);
-        const tab = body.tabId ? tabs.get(body.tabId) : activeTab();
+        const tab = body.tabId ? tabs.get(body.tabId)
+          : body.sessionId ? tabs.get(sessionTabs.get(body.sessionId)) : activeTab();
+        if (!tab) {
+          response.writeHead(404);
+          response.end('浏览器标签不存在');
+          return;
+        }
         emulate(tab, Number(body.width) || 0, Number(body.height) || 0);
         response.writeHead(200, { 'content-type': 'application/json' });
         response.end(JSON.stringify({ ok: true, emulated: tab?.emulated || null }));

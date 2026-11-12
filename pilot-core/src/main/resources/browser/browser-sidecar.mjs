@@ -379,7 +379,7 @@ async function createDesktopSession(id, desktop) {
   const browser = await connectDesktop(desktop);
   const page = await waitForDesktopPage(browser, created.tabId);
   const session = {
-    id, context: page.context(), page, console: [], network: [], dead: false, desktop: true,
+    id, context: page.context(), page, console: [], network: [], dead: false, desktop: true, desktopTabId: created.tabId,
     mirror: false, capture: false, embed: true, frameOptions: '', mirrorWidth: 960, mirrorQuality: 55,
     cdp: null, cdpPage: null, lastFrameAt: 0, historyCdp: null, historyCdpPage: null
   };
@@ -387,6 +387,8 @@ async function createDesktopSession(id, desktop) {
   page.context().setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
   attachPage(session, page);
   sessions.set(id, session);
+  // Agent 的验证视口独立于右侧预览面板，隐藏标签也必须能截图。
+  await handlers.resize({ width: 1280, height: 800 }, session);
   return session;
 }
 
@@ -1044,18 +1046,19 @@ const handlers = {
     const width = Math.min(1920, Math.max(280, Math.round(Number(args.width) || 0)));
     const height = Math.min(1600, Math.max(220, Math.round(Number(args.height) || 0)));
     const existing = page.viewportSize();
-    if (existing && existing.width === width && existing.height === height) {
+    if (!current.desktop && existing && existing.width === width && existing.height === height) {
       return { text: '尺寸未变', url: page.url() };
     }
     await page.setViewportSize({ width, height });
     if (current.desktop) {
       const desktop = readDesktop();
       if (desktop) {
-        await fetch(`http://127.0.0.1:${desktop.controlPort}/emulate`, {
+        const response = await fetch(`http://127.0.0.1:${desktop.controlPort}/emulate`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-pilot-token': desktop.token },
-          body: JSON.stringify({ width, height })
-        }).catch(() => {});
+          body: JSON.stringify({ tabId: current.desktopTabId, width, height })
+        });
+        if (!response.ok) throw new Error(`桌面视口调整失败（HTTP ${response.status}）`);
       }
     }
     // 视口变化会让原来的 screencast 停在旧画面上：重开一次，并立刻补一帧
@@ -1097,6 +1100,25 @@ const handlers = {
 
   async snapshot(args, current) {
     return { text: await snapshot(current) };
+  },
+
+  // 固定的只读诊断，无任意表达式、事件触发、DOM 写入或网络请求。
+  async inspect(args, current) {
+    const page = pageOf(current);
+    const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight,
+      devicePixelRatio, scrollWidth: document.documentElement.scrollWidth,
+      scrollHeight: document.documentElement.scrollHeight }));
+    let element = null;
+    if (args.ref || args.selector) {
+      element = await locatorFor(current, args).evaluate(el => {
+        const rect = el.getBoundingClientRect(), style = getComputedStyle(el);
+        const properties = ['display', 'visibility', 'position', 'z-index', 'overflow-x', 'overflow-y',
+          'color', 'background-color', 'font-size', 'line-height', 'padding', 'margin', 'transform'];
+        return { tag: el.tagName.toLowerCase(), rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+          style: Object.fromEntries(properties.map(key => [key, style.getPropertyValue(key)])) };
+      });
+    }
+    return { text: JSON.stringify({ url: page.url(), title: await page.title(), viewport, element }) };
   },
 
   async click(args, current) {

@@ -38,16 +38,17 @@ import com.pilot.core.workspace.PathValidator;
  */
 public final class BrowserTool implements Tool, LocalInteraction {
     private static final Set<String> OBSERVATIONS = Set.of("navigate", "reload", "back", "forward", "snapshot",
-        "screenshot", "console", "network", "wait", "close", "text", "links", "tabs");
+        "screenshot", "console", "network", "wait", "close", "text", "links", "tabs", "inspect", "resize");
     private static final Set<String> INTERACTIONS = Set.of("click", "dblclick", "right_click", "hover", "fill", "type",
         "press", "select", "upload", "download", "switch_tab", "close_tab");
     /** 用户接管（paused）时拦截的动作：交互类 + 会打断用户的导航/关闭/脚本。观察类放行。 */
     private static final Set<String> PAUSED_BLOCKS =
         Set.of("navigate", "reload", "back", "forward", "close", "evaluate", "click", "dblclick", "right_click",
-            "hover", "fill", "type", "press", "select", "upload", "download", "switch_tab", "close_tab");
-    private static final List<String> ACTIONS = List.of("navigate", "reload", "back", "forward", "snapshot", "click",
-        "dblclick", "right_click", "hover", "fill", "type", "press", "select", "upload", "download", "screenshot",
-        "console", "network", "text", "links", "tabs", "switch_tab", "close_tab", "wait", "evaluate", "close");
+            "hover", "fill", "type", "press", "select", "upload", "download", "switch_tab", "close_tab", "resize");
+    private static final List<String> ACTIONS =
+        List.of("navigate", "reload", "back", "forward", "snapshot", "click", "dblclick", "right_click", "hover",
+            "fill", "type", "press", "select", "upload", "download", "screenshot", "console", "network", "text",
+            "links", "tabs", "switch_tab", "close_tab", "wait", "evaluate", "close", "inspect", "resize");
     private static final int MAX_SCREENSHOTS_KEPT = 40;
     private static final int MAX_UPLOAD_FILES = 10;
 
@@ -94,6 +95,10 @@ public final class BrowserTool implements Tool, LocalInteraction {
         properties.put("files", Map.of("type", "array", "items", Map.of("type", "string"), "description",
             "upload 的文件，工作区内的相对路径；ref 指向 <input type=file>"));
         properties.put("fullPage", Map.of("type", "boolean", "description", "screenshot 是否截取整页，默认只截可视区域"));
+        properties.put("width", Map.of("type", "integer", "minimum", 280, "maximum", 1920, "description",
+            "resize 的视口宽度（CSS 像素），如桌面 1440、平板 768、手机 390"));
+        properties.put("height",
+            Map.of("type", "integer", "minimum", 220, "maximum", 1600, "description", "resize 的视口高度（CSS 像素），例如 840"));
         properties.put("expression",
             Map.of("type", "string", "description", "evaluate 在页面内执行的 JavaScript 表达式，返回值会以 JSON 返回"));
         properties.put("filter", Map.of("type", "string", "description", "network 按 URL 子串过滤"));
@@ -307,7 +312,19 @@ public final class BrowserTool implements Tool, LocalInteraction {
                 }
                 command.put("files", resolved);
             }
-            case "screenshot" -> {
+            case "resize" -> {
+                for (String key : List.of("width", "height")) {
+                    int min = "width".equals(key) ? 280 : 220;
+                    int max = "width".equals(key) ? 1920 : 1600;
+                    if (!(args.get(key) instanceof Number n) || !Double.isFinite(n.doubleValue())
+                        || n.doubleValue() != Math.rint(n.doubleValue()) || n.doubleValue() < min
+                        || n.doubleValue() > max) {
+                        return "resize 的 " + key + " 必须是 " + min + "–" + max + " 的整数";
+                    }
+                    command.put(key, n.intValue());
+                }
+            }
+            case "screenshot", "inspect" -> {
                 if (args.get("ref") != null || args.get("selector") != null) {
                     String problem = target(args, command);
                     if (problem != null) {
