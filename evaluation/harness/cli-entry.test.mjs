@@ -4,13 +4,22 @@ import { execFile } from 'node:child_process';
 import { mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
 
 for (const script of ['runner.mjs', 'reference-verifier.mjs', 'budget-plan.mjs']) {
+  test(`${script} 可被带普通参数的内联脚本导入，不误执行 CLI`, async () => {
+    const url = pathToFileURL(join(here, script)).href;
+    const result = await exec(process.execPath,
+      ['--input-type=module', '--eval', `await import(${JSON.stringify(url)}); console.log('imported');`, 'not-a-script-file'],
+      { timeout: 15000 });
+    assert.equal(result.stdout.trim(), 'imported');
+    assert.equal(result.stderr, '');
+  });
+
   test(`${script} 经目录别名启动仍执行 CLI，不能空跑返回成功`, async t => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'pilot cli alias-')));
     t.after(() => rm(root, { recursive: true, force: true }));
