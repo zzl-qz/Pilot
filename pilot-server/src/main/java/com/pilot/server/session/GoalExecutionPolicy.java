@@ -830,6 +830,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (!sameRequirements(requirements, task())) {
             return "用户要求已变更，请重新核对目标。";
         }
+        // 核验调用本身也更新请求、token 与活动时长，决策不能把它们覆写成调用前的快照。
+        state = state();
         String decision = string(answer, "decision");
         String gap = string(answer, "gap");
         String nextAction = string(answer, "next_action");

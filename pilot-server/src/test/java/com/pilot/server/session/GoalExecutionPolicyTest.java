@@ -22,6 +22,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.pilot.core.loop.ExecutionPolicy;
 import com.pilot.core.loop.Message;
@@ -439,6 +441,42 @@ class GoalExecutionPolicyTest {
         assertEquals("VERIFICATION_FAILED", stop.code());
         assertEquals(2, calls.get());
         assertEquals("VERIFICATION_FAILED", tasks.load("s").execution().phase());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"COMPLETE", "CONTINUE", "WAIT"})
+    void reviewerConsumptionIsRetainedWhenPersistingItsDecision(String verdict) {
+        AtomicInteger calls = new AtomicInteger();
+        GoalExecutionPolicy policy = policy((messages, tools) -> {
+            if (calls.incrementAndGet() == 1) {
+                return new ModelResponse("执行", List.of(), new ModelUsage(100, 9, 0, true));
+            }
+            ModelResponse response = "COMPLETE".equals(verdict) ? complete() : decision(Map.of("decision", verdict,
+                "gap", "等待可验证的结果", "next_action", "检查结果", "expected_observation", "实际结果通过", "coverage", List.of()));
+            return new ModelResponse(response.content(), response.toolCalls(), new ModelUsage(900, 31, 0, true));
+        }, 2);
+        policy.beforeRequest(history);
+        policy.budgetedClient().chat(history, List.of());
+        policy.promotionTool().execute(Map.of("reason", "跨轮核验", "completion_conditions", List.of("结果可验证")));
+        observe(policy, "read_file", "result.txt", "实际结果", null);
+        if ("WAIT".equals(verdict)) {
+            assertEquals("WAITING",
+                assertThrows(ExecutionPolicy.Stop.class, () -> policy.review(history, Set.of(), List.of())).code());
+        } else if ("COMPLETE".equals(verdict)) {
+            assertNull(policy.review(history, Set.of(), List.of()));
+        } else {
+            assertNotNull(policy.review(history, Set.of(), List.of()));
+        }
+        TaskControlService.Execution state = tasks.load("s").execution();
+        assertEquals(2, calls.get());
+        assertEquals(2, state.requests());
+        assertEquals(1000, state.usage().inputTokens());
+        assertEquals(40, state.usage().outputTokens());
+        if ("CONTINUE".equals(verdict)) {
+            assertEquals("BUDGET_LIMITED",
+                assertThrows(ExecutionPolicy.Stop.class, () -> policy.beforeRequest(history)).code(),
+                "核验消耗必须占用下一轮的实际额度");
+        }
     }
 
     @Test
