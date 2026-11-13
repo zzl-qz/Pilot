@@ -40,6 +40,47 @@ test('成本缺失不冒充零成本或完整总成本；成功成本包含失�
 test('没有成功任务时成功成本未知，失败不是免费成功', () => {
   assert.equal(summarize([record({ success: false })]).costPerSuccessfulTaskUsd, null);
 });
+test('超时样本缺少 token 时保留未知总量并单列已观测小计', () => {
+  const rows = [record({ cachedInputTokens: 30, usageExact: true }),
+    record({ success: false, inputTokens: null, outputTokens: null, cachedInputTokens: null })];
+  for (const summary of [summarize(rows), aggregate(rows)[0]]) {
+    assert.equal(summary.inputTokens, null);
+    assert.equal(summary.outputTokens, null);
+    assert.equal(summary.cachedInputTokens, null);
+    assert.equal(summary.knownInputTokens, 1000);
+    assert.equal(summary.knownOutputTokens, 200);
+    assert.equal(summary.knownCachedInputTokens, 30);
+    assert.equal(summary.inputTokenObservedRuns, 1);
+    assert.equal(summary.outputTokenObservedRuns, 1);
+    assert.equal(summary.cachedInputTokenObservedRuns, 1);
+    assert.equal(summary.usageExact, false);
+  }
+});
+test('真实的零用量与没有观测保持区分', () => {
+  const zero = summarize([record({ inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, usageExact: true })]);
+  assert.equal(zero.inputTokens, 0);
+  assert.equal(zero.outputTokens, 0);
+  assert.equal(zero.cachedInputTokens, 0);
+  assert.equal(zero.inputTokenObservedRuns, 1);
+  assert.equal(zero.usageExact, true);
+  const empty = summarize([]);
+  assert.equal(empty.inputTokens, null);
+  assert.equal(empty.outputTokens, null);
+  assert.equal(empty.cachedInputTokens, null);
+  assert.equal(empty.knownInputTokens, 0);
+  assert.equal(empty.inputTokenObservedRuns, 0);
+  assert.equal(empty.usageExact, false);
+});
+test('各类 token 独立报告覆盖率，完整估算不标成精确用量', () => {
+  const summary = summarize([record({ inputTokens: null, outputTokens: 0, usageExact: false }),
+    record({ inputTokens: 2000, outputTokens: 300, usageExact: true })]);
+  assert.equal(summary.inputTokens, null);
+  assert.equal(summary.knownInputTokens, 2000);
+  assert.equal(summary.outputTokens, 300);
+  assert.equal(summary.outputTokenObservedRuns, 2);
+  assert.equal(summary.usageExact, false);
+  assert.equal(summarize([record({ inputTokens: null, usageExact: true })]).usageExact, false);
+});
 test('正常收尾但验收失败率仅使用正常收尾且执行了独立验收的样本，并报告覆盖率', () => {
   const summary = summarize([record({ success: false, acceptancePassed: false }),
     record({ reportedComplete: false, terminalStatus: 'CANCELLED', success: false }),

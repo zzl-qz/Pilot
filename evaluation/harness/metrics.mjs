@@ -10,6 +10,11 @@ const priced = r => r.costKnown === true && number(r.costUsd);
 const mean = values => values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
 const rate = (rows, predicate) => rows.length ? rows.filter(predicate).length / rows.length : null;
 const observedMean = (rows, key) => mean(rows.map(r => r[key]).filter(number));
+const tokenTotal = (rows, key) => {
+  const values = rows.map(r => r[key]).filter(number);
+  const known = values.reduce((sum, value) => sum + value, 0);
+  return { total: rows.length && values.length === rows.length ? known : null, known, observed: values.length };
+};
 const byTask = rows => {
   const groups = new Map();
   for (const row of rows) { const key = keyOf(row); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(row); }
@@ -39,6 +44,8 @@ function observations(rows) {
   // 故障注入观测：没有注入次数观测的尝试不算覆盖；注入次数为零也是有效观测。
   const faultRows = rows.filter(r => typeof r.faultScenario === 'string' && r.faultScenario);
   const injectedObserved = faultRows.filter(r => Number.isInteger(r.faultInjectedCount));
+  const input = tokenTotal(rows, 'inputTokens'), output = tokenTotal(rows, 'outputTokens');
+  const cached = tokenTotal(rows, 'cachedInputTokens');
   return {
     totalCostUsd,
     knownCostUsd: knownCosts.reduce((sum, r) => sum + r.costUsd, 0),
@@ -66,9 +73,10 @@ function observations(rows) {
     avgToolCalls: observedMean(rows, 'toolCallCount'),
     avgFailedCommands: observedMean(rows, 'failedCommandCount'),
     avgModelRetries: observedMean(rows, 'modelRetryCount'),
-    inputTokens: rows.reduce((sum, r) => sum + (number(r.inputTokens) ? r.inputTokens : 0), 0),
-    outputTokens: rows.reduce((sum, r) => sum + (number(r.outputTokens) ? r.outputTokens : 0), 0),
-    cachedInputTokens: rows.reduce((sum, r) => sum + (number(r.cachedInputTokens) ? r.cachedInputTokens : 0), 0),
+    inputTokens: input.total, knownInputTokens: input.known, inputTokenObservedRuns: input.observed,
+    outputTokens: output.total, knownOutputTokens: output.known, outputTokenObservedRuns: output.observed,
+    cachedInputTokens: cached.total, knownCachedInputTokens: cached.known, cachedInputTokenObservedRuns: cached.observed,
+    usageExact: input.total !== null && output.total !== null && rows.every(r => r.usageExact === true),
     cacheHitRate: cacheHitRate(rows),
     faultScenarioRuns: faultRows.length,
     faultInjectionCoverage: injectedObserved.length

@@ -141,6 +141,8 @@ node evaluation/harness/recovery-smoke.mjs pilot-server/target/pilot-server-0.0.
 
 金额全部可观测时才给总金额和成功成本；部分已知金额单独放 `knownCostUsd`，不能当总成本。没有价格时，门禁可使用完整输入 token 作为代理指标，明确它不等于账单成本。
 
+token 总量也要求每个样本都有对应观测；超时等失败导致缺失时，`inputTokens`、`outputTokens`、`cachedInputTokens` 分别保持 `null`，已观测小计放在对应的 `known*Tokens` 字段，并报告各类 `*TokenObservedRuns`。真实零用量仍计作有效观测。只有所有样本都明确提供精确用量时，汇总 `usageExact` 才为 `true`；完整的估算也不等于账单用量。
+
 ## 对照门禁
 
 严格门禁要求相同的任务合同、fixture、环境和模型配置指纹，每个任务两组至少 3 次独立运行、至少 20 个不同任务。重复 `attempt`、复用同一 `sessionId` 冒充独立运行、结果字段互相矛盾、混合版本、缺元数据的旧记录、样本不足、重复次数不一致、必需场景未触发均不能得到 `pass`。旧记录仍能汇总查看。
