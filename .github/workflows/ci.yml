@@ -60,8 +60,15 @@ jobs:
         working-directory: pilot-desktop
         run: npm test
 
-      - name: Evaluation metrics tests
-        run: node --test evaluation/harness/*.test.mjs
+      - name: Evaluation harness and fault proxy tests
+        run: node --test "evaluation/harness/*.test.mjs" "evaluation/harness/support/*.test.mjs"
+
+      - name: Interrupted multi-session recovery
+        env:
+          TMPDIR: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
+        run: node evaluation/harness/recovery-smoke.mjs pilot-server/target/pilot-server-0.0.1-SNAPSHOT.jar
 
       - name: Upload test reports
         if: always()
@@ -75,6 +82,8 @@ jobs:
             pilot-server/target/checkstyle-result.xml
             pilot-core/target/event-benchmarks/**
             pilot-server/target/event-benchmarks/**
+            ${{ runner.temp }}/pilot-recovery-smoke-*/report.json
+            ${{ runner.temp }}/pilot-recovery-smoke-*/server-*.log
           if-no-files-found: ignore
 
   isolated-builds:
