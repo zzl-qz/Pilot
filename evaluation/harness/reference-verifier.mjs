@@ -4,7 +4,8 @@ import { spawn } from 'node:child_process';
 import { lstat, readdir, readFile, mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { dirname, join, resolve, posix, win32 } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isCliEntry } from './cli-entry.mjs';
 
 const DEFAULT_ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -160,6 +161,6 @@ async function main(argv) {
   if (results.some(result => !result.ok)) process.exitCode = 1;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isCliEntry(import.meta.url)) {
   main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
 }

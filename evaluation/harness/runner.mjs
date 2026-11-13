@@ -24,7 +24,7 @@ import { createHash } from "node:crypto";
 import { platform, arch } from "node:os";
 import { appendFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
+import { isCliEntry } from "./cli-entry.mjs";
 import { aggregate, compare, gate, summarize, validateBaseline } from "./metrics.mjs";
 import { FAULT_MODES } from "./support/fault-proxy.mjs";
 
@@ -836,7 +836,7 @@ async function main() {
   } finally { await rm(lock, { force: true }); }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main().catch((error) => {
+if (isCliEntry(import.meta.url)) main().catch((error) => {
   console.error(error);
   process.exit(1);
 });

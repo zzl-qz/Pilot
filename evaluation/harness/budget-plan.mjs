@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Offline planning only. Observed discounts are never used to lower the spending guard.
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { isCliEntry } from './cli-entry.mjs';
 
 const quota = (value, label) => {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${label} 必须为非负安全整数`);
@@ -50,5 +49,5 @@ async function main() {
   if (files.length !== 1) throw new Error('用法：node budget-plan.mjs <plan-input.json>；输入含 state、latestUsed、records、价格及 additionalRuns');
   console.log(JSON.stringify(planBudget(JSON.parse(await readFile(files[0], 'utf8'))), null, 2));
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
+if (isCliEntry(import.meta.url))
   main().catch(error => { console.error(error.message); process.exitCode = 1; });
