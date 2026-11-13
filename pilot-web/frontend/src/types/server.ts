@@ -863,6 +863,7 @@ export interface ScheduleServiceCreate {
   skill: string;
   fullAccess: boolean;
   isolated: boolean;
+  requireResearch: boolean;
 }
 
 /** ScheduledTask.java / Invocation */

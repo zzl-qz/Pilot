@@ -20,7 +20,7 @@ api.scheduleTimes=async body=>{calls.push({kind:'time',...body});const at=new Da
 api.results=async()=>({items:[]});
 api.result=async id=>({item:{id, title:'核对文件同步的跨平台行为', summary:'需要查看独立工作区', read:true, checks:[], openSteps:[], changedFiles:[]}, verification:'PASSED',acceptance:[],research:[]});
 api.schedules=async()=>{if(window.fail)throw Error('模拟连接断开');if(nextRead){const read=nextRead;nextRead=null;const rows=await read;window.staleReadReturned=true;return rows;}return structuredClone(window.jobs);};
-api.createSchedule=async(body)=>{calls.push({kind:'create',...body});const row={...body,id:'schedule-'+calls.length,sessionId:'scheduled-session',state:'SCHEDULED',message:'等待执行',history:[]};jobs.unshift(row);if(failAfterCreate)window.fail=true;return row;};
+api.createSchedule=async(body)=>{calls.push({kind:'create',...body});const row={...body,requirements:{...body.requirements,automation:{fullAccess:body.fullAccess,requireResearch:body.requireResearch}},id:'schedule-'+calls.length,sessionId:'scheduled-session',state:'SCHEDULED',message:'等待执行',history:[]};jobs.unshift(row);if(failAfterCreate)window.fail=true;return row;};
 api.controlSchedule=async(id,body)=>{const row=jobs.find(j=>j.id===id);row.state={pause:'PAUSED',resume:'SCHEDULED',cancel:'CANCELLED'}[body.action]||row.state;if(body.runAt)row.runAt=body.runAt;return row;};
 api.sessions=async()=>[{sessionId:'source',title:'Pilot 调度开发',workspace:'/workspace/pilot'}];
 api.worktreeInfo=async()=>({});api.context=async()=>({});api.queue=async()=>({items:[]});api.filesFlat=async()=>({files:[]});
@@ -57,6 +57,8 @@ async function run(page, name, url) {
   await page.getByRole('textbox',{name:/^任务名称/}).fill('升级依赖并验证');
   await page.getByRole('textbox',{name:/^任务目标/}).fill('参考开源实现升级依赖，修复测试。');
   await page.getByLabel('验收条件',{exact:true}).fill('相关测试通过\n说明复用理由');
+  assert.equal(await page.getByRole('checkbox',{name:'执行前必须完成开源调研',exact:true}).isChecked(),false);
+  await page.getByRole('checkbox',{name:'执行前必须完成开源调研',exact:true}).check();
   await page.getByLabel('执行时区',{exact:true}).fill('UTC');
   await page.getByRole('button',{name:'10 分钟后'}).click();
   await page.evaluate(()=>{window.failAfterCreate=true;});
@@ -68,7 +70,7 @@ async function run(page, name, url) {
   await page.getByRole('button',{name:'重新加载',exact:true}).click();
   await page.getByRole('alert').filter({hasText:'模拟连接断开'}).waitFor({state:'hidden'});
   const request=await page.evaluate(()=>calls.find(call=>call.kind==='create'));
-  assert.equal(request.requirements.acceptance.length,2); assert.equal(request.fullAccess,true); assert.equal(request.isolated,true); assert.ok(new Date(request.runAt)>new Date());
+  assert.equal(request.requirements.acceptance.length,2); assert.equal(request.fullAccess,true); assert.equal(request.requireResearch,true); assert.equal(request.isolated,true); assert.ok(new Date(request.runAt)>new Date());
   const local = new Date(Date.now()+7200000).toISOString().slice(0,16);
   await page.getByText('时区 UTC',{exact:true}).waitFor();
   await page.getByLabel('修改执行时间',{exact:true}).fill(local);

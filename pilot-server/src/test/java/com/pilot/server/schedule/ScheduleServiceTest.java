@@ -72,7 +72,7 @@ class ScheduleServiceTest {
         return service.create(new ScheduleService.Create("修复依赖", source, "参考开源方案修复依赖", clock.instant().plusSeconds(60),
             "Asia/Shanghai", new TaskControlService.Requirements(List.of("保持接口"),
                 List.of(new TaskControlService.Acceptance("测试通过", false, ""))),
-            null, true));
+            null, true, false, true));
     }
 
     void due() {
@@ -108,6 +108,46 @@ class ScheduleServiceTest {
         var reopened =
             new ScheduleRepository(new SqliteStore(root.resolve("schedules.db")), JsonMapper.builder().build());
         assertEquals(service.get(job.id()), reopened.find(job.id()).orElseThrow());
+    }
+
+    @Test
+    void localScheduleDoesNotAcquireUnrequestedResearchRequirement() {
+        var job = service.create(new ScheduleService.Create("本地检查", source, "运行本地测试", clock.instant().plusSeconds(60),
+            "UTC", null, null, false, false));
+        assertFalse(job.requirements().automation().requireResearch());
+        due();
+        assertFalse(tasks.load(job.sessionId()).automation().requireResearch());
+    }
+
+    @Test
+    void explicitResearchOptOutOverridesLegacyRequirementWithoutCopyingAuthorization() {
+        var legacy = new TaskControlService.Requirements(List.of(), List.of(),
+            new TaskControlService.Automation("foreign-schedule", true, true));
+        var inherited = service.create(new ScheduleService.Create("旧模板", source, "检查", clock.instant().plusSeconds(60),
+            "UTC", legacy, null, false, false));
+        assertTrue(inherited.requirements().automation().requireResearch());
+        var optedOut = service.create(new ScheduleService.Create("关闭调研", source, "检查", clock.instant().plusSeconds(60),
+            "UTC", legacy, null, false, false, false));
+        assertFalse(optedOut.requirements().automation().requireResearch());
+        assertFalse(optedOut.requirements().automation().fullAccess());
+        assertEquals(optedOut.id(), optedOut.requirements().automation().scheduleId());
+    }
+
+    @Test
+    void explicitResearchSettingSurvivesTemplatesAndRecurringDispatch() {
+        for (boolean research : new boolean[] {true, false}) {
+            var task = new ScheduleService.Create("明确策略", source, "检查项目", clock.instant().plusSeconds(60), "UTC", null,
+                null, false, false, research);
+            var recurring = recurring();
+            var template = recurring.saveTemplate(null, 0, "策略模板", task);
+            assertEquals(research, recurring().templates().stream().filter(t -> t.id().equals(template.id()))
+                .findFirst().orElseThrow().task().requireResearch());
+            var series = recurring.create(new RecurringScheduleService.Create(task, "0 * * * * *", "ONCE"));
+            clock.at = clock.at.plusSeconds(61);
+            recurring.tick();
+            var occurrence = service.get(recurring.get(series.id()).activeId());
+            assertEquals(research, occurrence.requirements().automation().requireResearch());
+        }
     }
 
     @Test

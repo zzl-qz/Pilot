@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,9 +45,10 @@ class ScheduleApiTest {
             .content(mapper.writeValueAsString(Map.of("sourceSessionId", source, "isolated", false, "name", "定时检查",
                 "content", "检查仓库", "runAt", Instant.now().plusSeconds(86400).toString(), "timezone", "Asia/Shanghai"))))
             .andExpect(status().isOk()).andExpect(jsonPath("$.state").value("SCHEDULED"))
-            .andExpect(jsonPath("$.requirements.automation.requireResearch").value(true)).andReturn();
+            .andExpect(jsonPath("$.requirements.automation.requireResearch").value(false)).andReturn();
         String id = mapper.readTree(response.getResponse().getContentAsString()).get("id").asText();
-        mvc.perform(get("/api/schedules")).andExpect(status().isOk()).andExpect(jsonPath("$[0].id").value(id));
+        mvc.perform(get("/api/schedules")).andExpect(status().isOk())
+            .andExpect(jsonPath("$[*].id").value(Matchers.hasItem(id)));
         mvc.perform(
             post("/api/schedules/" + id + "/control").contentType("application/json").content("{\"action\":\"pause\"}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.state").value("PAUSED"));
@@ -58,6 +60,15 @@ class ScheduleApiTest {
             .andExpect(jsonPath("$.state").value("CANCELLED"));
         mvc.perform(post("/api/schedules").contentType("application/json").content("{\"content\":\"\"}"))
             .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void explicitResearchRequirementIsRetained() throws Exception {
+        String source = sessions.createSession("调研任务").id();
+        mvc.perform(post("/api/schedules").contentType("application/json")
+            .content(mapper.writeValueAsString(Map.of("sourceSessionId", source, "isolated", false, "content", "调研开源实现",
+                "runAt", Instant.now().plusSeconds(86400).toString(), "requireResearch", true))))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.requirements.automation.requireResearch").value(true));
     }
 
     @Test

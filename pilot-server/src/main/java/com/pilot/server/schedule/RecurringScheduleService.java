@@ -270,10 +270,9 @@ public class RecurringScheduleService {
         if (!Objects.equals(source.workspace(), row.sourceWorkspace())) {
             throw new IllegalArgumentException("来源工作区已改变，请核对后重建周期计划");
         }
-        var job = schedules.createOccurrence(
-            new ScheduleService.Create(task.name(), task.sourceSessionId(), task.content(), now.plusSeconds(1),
-                row.timezone(), task.requirements(), task.skill(), task.fullAccess(), task.isolated()),
-            key);
+        var job = schedules.createOccurrence(new ScheduleService.Create(task.name(), task.sourceSessionId(),
+            task.content(), now.plusSeconds(1), row.timezone(), task.requirements(), task.skill(), task.fullAccess(),
+            task.isolated(), task.requireResearch()), key);
         replace(row, "ACTIVE", next.toInstant(), job.id(), row.occurrences() + 1,
             "已创建第 " + (row.occurrences() + 1) + " 轮；同一计划不重叠执行");
     }
@@ -295,7 +294,7 @@ public class RecurringScheduleService {
         }
         // 模板只保存内容和策略，不绑定来源会话或旧执行时间。
         var payload = new ScheduleService.Create(task.name(), null, task.content(), null, task.timezone(),
-            task.requirements(), task.skill(), task.fullAccess(), task.isolated());
+            task.requirements(), task.skill(), task.fullAccess(), task.isolated(), task.requireResearch());
         var row = new Template(id, name, version + 1, payload, clock.instant());
         if (!store.put("template", id, version, mapper.writeValueAsString(row))) {
             throw new IllegalStateException("模板已更新，请刷新后重试");

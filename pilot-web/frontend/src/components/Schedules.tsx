@@ -110,6 +110,7 @@ function ScheduleDialog({ seed }: { seed?: string | null }) {
   const [templateStatus, setTemplateStatus] = useState('');
   const [isolated, setIsolated] = useState(true);
   const [fullAccess, setFullAccess] = useState(true);
+  const [requireResearch, setRequireResearch] = useState(false);
   const [changedTime, setChangedTime] = useState('');
 
   const alive = useRef(true);
@@ -205,7 +206,7 @@ function ScheduleDialog({ seed }: { seed?: string | null }) {
     return {
       name: name.trim() || content.trim().slice(0, 40), sourceSessionId, content, timezone: zone.trim(),
       requirements: { constraints: lines(constraints), acceptance: lines(acceptance).map(text => ({ text, checked: false, evidence: '' })) },
-      skill: skill.trim() || null, fullAccess, isolated
+      skill: skill.trim() || null, fullAccess, isolated, requireResearch
     };
   }
 
@@ -257,6 +258,7 @@ function ScheduleDialog({ seed }: { seed?: string | null }) {
     setAcceptance((row.task.requirements?.acceptance || []).map(item => item.text).join('\n'));
     setSkill(row.task.skill || '');
     setFullAccess(row.task.fullAccess !== false);
+    setRequireResearch(row.task.requireResearch ?? row.task.requirements?.automation?.requireResearch ?? false);
     setIsolated(row.task.isolated !== false);
   }
 
@@ -401,7 +403,9 @@ function ScheduleDialog({ seed }: { seed?: string | null }) {
               description={isolated ? `从${repeat === 'once' ? '创建计划' : '每轮触发'}时已提交的 Git HEAD 开始，未提交和忽略的文件留在原目录。需要已有提交的仓库，可从结果中预览并交回改动。` : '直接在原目录执行，任务改动会影响当前工作区。'} />
             <CheckboxInput label="自主执行，允许所有已提供的工具" value={fullAccess} onChange={setFullAccess} isDisabled={busy}
               description={fullAccess ? '此任务无需逐步审批，权限仅对本任务生效。' : '沿用当前权限规则，任务可能等待你处理审批。'} />
-            <p className="automation-meta schedule-policy-note">每轮先阅读开源项目并记录复用理由，完成前自动核验证据。最多运行 24 小时，预算耗尽或遇到阻塞时保留结果。</p>
+            <CheckboxInput label="执行前必须完成开源调研" value={requireResearch} onChange={setRequireResearch} isDisabled={busy}
+              description="需要阅读开源仓库并记录复用依据；检索不可用时暂停任务。本地检查或等待任务通常无需启用。" />
+            <p className="automation-meta schedule-policy-note">完成前自动核验证据。最多运行 24 小时，预算耗尽或遇到阻塞时保留结果。</p>
           </section>
         </form>
       ) : (
@@ -463,7 +467,7 @@ function ScheduleDialog({ seed }: { seed?: string | null }) {
                 <dl className="schedule-facts">
                   <dt>当前状态</dt><dd>{labels[job.state] || job.state}{job.message && ` · ${job.message}`}</dd>
                   <dt>执行时间</dt><dd><time dateTime={job.runAt}>{stamp(job.runAt, job.timezone)}</time> · {job.timezone || 'UTC'}</dd>
-                  <dt>执行策略</dt><dd>先调研开源 · 自动核验 · {job.requirements?.automation?.fullAccess ? '自主执行' : '沿用权限'}</dd>
+                  <dt>执行策略</dt><dd>{job.requirements?.automation?.requireResearch ? '先调研开源 · ' : ''}自动核验 · {job.requirements?.automation?.fullAccess ? '自主执行' : '沿用权限'}</dd>
                   {job.workspace && <>
                     <dt>{job.workspace.mode === 'ISOLATED' ? '独立工作区' : '原目录执行'}</dt><dd>{job.workspace.path || '默认工作区'}</dd>
                     {job.workspace.commit && <><dt>创建基线</dt><dd><code>{job.workspace.commit}</code></dd></>}

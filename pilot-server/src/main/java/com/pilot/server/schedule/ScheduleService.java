@@ -62,7 +62,13 @@ public class ScheduleService {
     private static final Set<String> TERMINAL = Set.of("COMPLETED", "CANCELLED", "NEEDS_ATTENTION");
 
     public record Create(String name, String sourceSessionId, String content, Instant runAt, String timezone,
-        TaskControlService.Requirements requirements, String skill, Boolean fullAccess, Boolean isolated) {
+        TaskControlService.Requirements requirements, String skill, Boolean fullAccess, Boolean isolated,
+        Boolean requireResearch) {
+        public Create(String name, String sourceSessionId, String content, Instant runAt, String timezone,
+            TaskControlService.Requirements requirements, String skill, Boolean fullAccess, Boolean isolated) {
+            this(name, sourceSessionId, content, runAt, timezone, requirements, skill, fullAccess, isolated, null);
+        }
+
         public Create(String name, String sourceSessionId, String content, Instant runAt, String timezone,
             TaskControlService.Requirements requirements, String skill, Boolean fullAccess) {
             this(name, sourceSessionId, content, runAt, timezone, requirements, skill, fullAccess, false);
@@ -158,7 +164,9 @@ public class ScheduleService {
             : request.requirements();
         var requirements = new TaskControlService.Requirements(req.constraints(),
             req.acceptance().stream().map(a -> new TaskControlService.Acceptance(a.text(), false, "")).toList(),
-            new TaskControlService.Automation(id, !Boolean.FALSE.equals(request.fullAccess()), true));
+            new TaskControlService.Automation(id, !Boolean.FALSE.equals(request.fullAccess()),
+                request.requireResearch() != null ? request.requireResearch()
+                    : req.automation() != null && req.automation().requireResearch()));
         // 独立会话已经有计划内容，不占普通「空白对话」名额。
         Created isolated = null;
         Session target = null;
