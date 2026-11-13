@@ -447,6 +447,11 @@ public final class AgentLoop {
                     runtimeGuidance.clear();
                 }
 
+                int remainingSteps = config.maxSteps() - step + 1;
+                if (remainingSteps <= Math.min(2, Math.max(1, config.maxSteps() / 4))) {
+                    runtimeGuidance.add(PROMPTS.render("loop/budget-approaching", Map.of()));
+                }
+
                 ModelTurn turn = callModel(messages, events, usage, runtimeGuidance);
                 if (turn.stop() != null) {
                     if ("CANCELLED".equals(turn.stop().failureCode())

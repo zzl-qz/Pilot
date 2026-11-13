@@ -475,6 +475,31 @@ class AgentLoopTest {
     }
 
     @Test
+    void warnsBeforeLastStepsWithoutExtendingBudgetOrPersistingTheReminder() {
+        CountingTool tool = new CountingTool("read_file", "content");
+        List<ModelResponse> replies = new ArrayList<>();
+        for (int index = 0; index < 8; index++) {
+            replies.add(new ModelResponse("",
+                List.of(new ToolCall("read_" + index, "read_file", Map.of("path", "file-" + index)))));
+        }
+        replies.add(new ModelResponse("仍有剩余工作，可继续。", List.of()));
+        ScriptedModelClient client = new ScriptedModelClient(replies.toArray(ModelResponse[]::new));
+        AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
+
+        AgentLoop.Result result = loop.run("逐个读取文件并保存要求的进度", List.of(), events::add);
+
+        for (int index = 0; index < 8; index++) {
+            assertEquals(index >= 6, client.requests.get(index).getFirst().content().contains("执行额度提醒"));
+        }
+        assertEquals("MAX_STEPS", result.failureCode());
+        assertEquals(8, tool.executions.get());
+        assertEquals(9, client.requests.size(), "提醒不额外消费模型调用，也不延长硬上限");
+        assertFalse(client.requests.getLast().getFirst().content().contains("执行额度提醒"));
+        assertTrue(client.toolDefinitions.getLast().isEmpty());
+        assertTrue(result.conversation().stream().noneMatch(message -> message.content().contains("执行额度提醒")));
+    }
+
+    @Test
     void unchangedNoProgressStopsWithoutAnotherModelRequest() {
         ScriptedModelClient client = new ScriptedModelClient();
         ExecutionPolicy policy = new ExecutionPolicy() {

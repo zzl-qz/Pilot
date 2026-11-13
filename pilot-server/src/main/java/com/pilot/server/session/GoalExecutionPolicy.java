@@ -193,6 +193,17 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     @Override
     public String requestGuidance() {
         TaskControlService.Execution state = state();
+        String guidance = taskGuidance(state);
+        long limit = "GOAL".equals(state.mode()) ? requestBudget : directMaxRequests;
+        long remaining = limit - (state.requests() - state.requestAllowance());
+        if (!finalizing && remaining > 0 && remaining <= Math.min(2, Math.max(1, limit / 4))) {
+            String reminder = prompts.render("loop/budget-approaching", Map.of()).strip();
+            return guidance == null ? reminder : reminder + "\n\n" + guidance;
+        }
+        return guidance;
+    }
+
+    private String taskGuidance(TaskControlService.Execution state) {
         if (needsResearch()) {
             return "本任务必须先参考开源产品。先用 web_search 查找相关仓库，再用 web_fetch 阅读源码或文档，"
                 + "然后调用 record_research 记录实际阅读的仓库链接、复用决定、许可证与不复用的原因。调研完成前不能修改文件、运行命令或派发子代理。";

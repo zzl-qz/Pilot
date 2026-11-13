@@ -287,6 +287,34 @@ class GoalExecutionPolicyTest {
     }
 
     @Test
+    void warnsNearRequestLimitWithoutExtraCallsAndClearsAfterExplicitExtension() {
+        AtomicInteger calls = new AtomicInteger();
+        GoalExecutionPolicy policy = policy((messages, tools) -> {
+            calls.incrementAndGet();
+            return new ModelResponse("继续", List.of(), new ModelUsage(10, 1, 0, true));
+        }, 120, 8, 50_000, 512);
+        for (int index = 0; index < 8; index++) {
+            policy.beforeRequest(history);
+            if (index < 6) {
+                assertNull(policy.requestGuidance(), "正常执行和半额度处不应提前收尾");
+            } else {
+                assertTrue(policy.requestGuidance().contains("执行额度提醒"));
+                assertTrue(policy.requestGuidance().contains("原有文件范围"));
+            }
+            policy.budgetedClient().chat(history, List.of());
+        }
+        assertEquals(8, calls.get());
+        assertEquals("BUDGET_LIMITED",
+            assertThrows(ExecutionPolicy.Stop.class, () -> policy.beforeRequest(history)).code());
+        tasks.status("s", "BUDGET_LIMITED");
+        tasks.extendBudget("s");
+        tasks.status("s", "ACTIVE");
+        policy.beforeRequest(history);
+        assertNull(policy.requestGuidance(), "新执行段不能继承旧段的临界提醒");
+        assertEquals(8, calls.get());
+    }
+
+    @Test
     void budgetBoundaryDoesNotRequestAnotherModelDecisionAfterProgress() throws Exception {
         Files.writeString(root.resolve("A.java"), "v1");
         AtomicInteger calls = new AtomicInteger();
