@@ -95,6 +95,40 @@ class StreamRepeatGuardTest {
     }
 
     @Test
+    void keepsDistinctExplanationsWithTheSameOpening() {
+        String[] lines = {"When parsing CSV, commas inside quoted fields are preserved.",
+            "When parsing CSV, a doubled quote represents one literal quote.",
+            "When parsing CSV, line breaks inside quotes belong to the field.",
+            "When parsing CSV, an empty trailing field must remain in the row."};
+        StreamRepeatGuard guard = new StreamRepeatGuard();
+        for (String line : lines) {
+            assertEquals(0, guard.accept(line + "\n"), "共同开头后描述不同规则，不是重复生成");
+        }
+    }
+
+    @Test
+    void keepsSimilarCodeLinesWithDifferentValues() {
+        StreamRepeatGuard guard = new StreamRepeatGuard();
+        for (int i = 0; i < 8; i++) {
+            assertEquals(0, guard.accept("assert.equal(parseCsvRecord(input).length, " + i + ");\n"),
+                "代码行仅末尾不同仍可能是有效的测试或数据，不能按共同前缀中止");
+        }
+    }
+
+    @Test
+    void waitsForTheSentenceBoundaryBeforeCountingARepeatedPrefix() {
+        String prefix = "The current result is pending validation";
+        String raw = (prefix + "\n").repeat(3) + prefix + " because a separate check is still running.\n";
+        for (int chunkSize : new int[] {1, 3, 64, raw.length()}) {
+            StreamRepeatGuard guard = new StreamRepeatGuard();
+            for (int offset = 0; offset < raw.length(); offset += chunkSize) {
+                assertEquals(0, guard.accept(raw.substring(offset, Math.min(raw.length(), offset + chunkSize))),
+                    "尚未生成完的一句不能仅因临时前缀等于上一句就计为重复");
+            }
+        }
+    }
+
+    @Test
     void keepsTablesAndCodeBlocks() {
         StreamRepeatGuard guard = new StreamRepeatGuard();
         int hits = 0;

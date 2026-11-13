@@ -25,9 +25,9 @@ final class StreamRepeatGuard {
     private static final int GROWING_LINES = 5;
     private static final int MIN_GROWING_CHARS = 8;
 
-    /** 近义复读：同一句开头反复出现的判定长度与次数。 */
-    private static final int SENTENCE_PREFIX_CHARS = 16;
-    private static final int REPEATED_PREFIXES = 4;
+    /** 完整长句反复出现；共同开头不足以判定两句话表达相同内容。 */
+    private static final int MIN_SENTENCE_CHARS = 24;
+    private static final int REPEATED_SENTENCES = 4;
     /** 只看最近这些句子，避免长文里隔很远的正常呼应被算成复读。 */
     private static final int SENTENCE_WINDOW = 16;
     private static final Pattern SENTENCE_END = Pattern.compile("[。！？\\n]");
@@ -59,7 +59,7 @@ final class StreamRepeatGuard {
             return lines;
         }
         int growing = growingLines();
-        return growing > 0 ? growing : repeatedSentencePrefix();
+        return growing > 0 ? growing : repeatedSentences();
     }
 
     /**
@@ -70,7 +70,8 @@ final class StreamRepeatGuard {
         String[] lines = tail.toString().split("\n", -1);
         String longer = null;
         int run = 0;
-        for (int index = lines.length - 1; index >= 0; index--) {
+        // 最后一段尚未遇到换行，后续增量可能让它成为另一条有效内容。
+        for (int index = lines.length - 2; index >= 0; index--) {
             String line = lines[index].strip();
             if (line.length() < MIN_GROWING_CHARS) {
                 continue;
@@ -91,24 +92,16 @@ final class StreamRepeatGuard {
         return 0;
     }
 
-    /** {@code longer} 以 {@code shorter} 为前缀，或两者前缀高度相同（仅结尾多写了几个字）。 */
+    /** 只识别完整保留上一行的逐行扩写；末尾不同的代码、数据和说明不能按相似度中止。 */
     private static boolean extendsLine(String shorter, String longer) {
-        if (longer.startsWith(shorter)) {
-            return true;
-        }
-        int limit = Math.min(shorter.length(), longer.length());
-        int common = 0;
-        while (common < limit && shorter.charAt(common) == longer.charAt(common)) {
-            common++;
-        }
-        return common >= Math.max(MIN_GROWING_CHARS * 2, (int)(limit * 0.85));
+        return longer.length() > shorter.length() && longer.startsWith(shorter);
     }
 
     private int repeatedLines() {
         String[] lines = tail.toString().split("\n", -1);
         String last = null;
         int run = 0;
-        for (int index = lines.length - 1; index >= 0; index--) {
+        for (int index = lines.length - 2; index >= 0; index--) {
             String line = lines[index].strip();
             if (line.length() < MIN_LINE_CHARS) {
                 continue;
@@ -128,19 +121,23 @@ final class StreamRepeatGuard {
         return 0;
     }
 
-    /** 逐句比较开头：同一句话被重写多遍时，前缀会一直相同、结尾越来越长。 */
-    private int repeatedSentencePrefix() {
-        String[] sentences = SENTENCE_END.split(tail.toString());
-        int from = Math.max(0, sentences.length - SENTENCE_WINDOW);
+    /** 只统计完整相同的长句，避免把列举同主题的不同规则误判成复读。 */
+    private int repeatedSentences() {
+        String[] sentences = SENTENCE_END.split(tail.toString(), -1);
         Map<String, Integer> counts = new HashMap<String, Integer>();
-        for (int index = from; index < sentences.length; index++) {
+        int observed = 0;
+        // 跳过未完成的句子与空行；空白排版不应改变相同正文的判断。
+        for (int index = sentences.length - 2; index >= 0 && observed < SENTENCE_WINDOW; index--) {
             String sentence = stripMarks(sentences[index]);
-            if (sentence.length() < SENTENCE_PREFIX_CHARS + 8) {
+            if (sentence.isEmpty()) {
                 continue;
             }
-            String key = sentence.substring(0, SENTENCE_PREFIX_CHARS);
-            int count = counts.merge(key, 1, Integer::sum);
-            if (count >= REPEATED_PREFIXES) {
+            observed++;
+            if (sentence.length() < MIN_SENTENCE_CHARS) {
+                continue;
+            }
+            int count = counts.merge(sentence, 1, Integer::sum);
+            if (count >= REPEATED_SENTENCES) {
                 return count;
             }
         }

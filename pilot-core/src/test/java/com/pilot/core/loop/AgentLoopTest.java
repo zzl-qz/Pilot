@@ -770,6 +770,41 @@ class AgentLoopTest {
     }
 
     @Test
+    void preservesDistinctRulesInBothReplyAndReasoningWithoutRetry() {
+        String explanation = "When parsing CSV, commas inside quoted fields are preserved.\n"
+            + "When parsing CSV, a doubled quote represents one literal quote.\n"
+            + "When parsing CSV, line breaks inside quotes belong to the field.\n"
+            + "When parsing CSV, an empty trailing field must remain in the row.\n";
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient client = new ModelClient() {
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
+                Consumer<String> reasoningDelta) {
+                calls.incrementAndGet();
+                for (String line : explanation.split("\\n")) {
+                    reasoningDelta.accept(line + "\n");
+                    textDelta.accept(line + "\n");
+                }
+                return new ModelResponse(explanation, List.of());
+            }
+        };
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(),
+            new AgentLoop.Config(8, 0, 3, "你是测试代理", List::of, 0, 120_000, false));
+
+        AgentLoop.Result result = loop.run("解释 CSV 解析规则", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals(explanation, result.finalText());
+        assertEquals(1, calls.get(), "共同前缀不能触发重新采样或丢弃有效回答");
+        assertFalse(events.stream().anyMatch(RunContinued.class::isInstance));
+    }
+
+    @Test
     void abortsScreenshotLikeGrowingNumberedItemsBeforeTheyBecomeTheReply() {
         String base = "3. 按产品方向建立 PO 真实任务评测。这比继续堆局部功能更能决定后续该优化什么：覆盖调研、Excel";
         String repeated = String.join("\n\n", base.substring(0, 30), base.substring(0, 35), base.substring(0, 40),
