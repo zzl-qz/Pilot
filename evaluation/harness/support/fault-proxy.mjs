@@ -27,6 +27,7 @@
  * 鉴权：PILOT_FAULT_API_KEY（缺省取 API_KEY）只用于上游，不写入任何日志或状态。
  */
 import http from 'node:http';
+import { isIP } from 'node:net';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { realpathSync } from 'node:fs';
 
@@ -51,6 +52,7 @@ export function configFromEnv(env = process.env) {
   const upstream = env.PILOT_FAULT_UPSTREAM ?? env.BASE_URL ?? '';
   return {
     upstream,
+    allowPrivateHttp: env.PILOT_FAULT_ALLOW_PRIVATE_HTTP === 'true',
     apiKey: env.PILOT_FAULT_API_KEY ?? env.API_KEY ?? '',
     localToken: env.PILOT_FAULT_LOCAL_TOKEN || '',
     port: finite(env.PILOT_FAULT_PROXY_PORT ?? 18086, 'port', 0, 65535),
@@ -92,8 +94,15 @@ export function validateConfigPatch(patch, current) {
 export async function startFaultProxy(config) {
   const upstream = new URL(config.upstream);
   if (upstream.username || upstream.password || !config.apiKey || /[\r\n]/.test(config.apiKey)) throw new Error('Invalid credentials');
-  if (upstream.protocol !== 'https:' && !(upstream.protocol === 'http:'
-      && ['127.0.0.1', '[::1]', 'localhost'].includes(upstream.hostname))) throw new Error('HTTPS required unless local');
+  const privateAddress = isIP(upstream.hostname) === 4 && (() => {
+    const [first, second] = upstream.hostname.split('.').map(Number);
+    return first === 10 || first === 172 && second >= 16 && second <= 31 || first === 192 && second === 168;
+  })();
+  const httpAllowed = ['127.0.0.1', '[::1]', 'localhost'].includes(upstream.hostname)
+    || config.allowPrivateHttp === true && privateAddress;
+  if (upstream.protocol !== 'https:' && !(upstream.protocol === 'http:' && httpAllowed)) {
+    throw new Error('HTTPS required unless loopback or explicitly enabled private IPv4');
+  }
   const origin = upstream.origin;
   const authorization = `Bearer ${config.apiKey}`;
   let requests = 0, lifetimeRequests = 0, stopped = false;

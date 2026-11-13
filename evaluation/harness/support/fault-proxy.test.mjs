@@ -80,6 +80,21 @@ function control(proxy, path, init = {}) {
 
 const stateOf = async proxy => (await control(proxy, '/fault/state')).body;
 
+test('局域网 HTTP 模型仅在显式启用时准入，公网、链路本地和域名不随之放行', async t => {
+  for (const host of ['10.1.2.3', '172.16.0.1', '172.31.255.254', '192.168.1.49']) {
+    await assert.rejects(startProxy(t, `http://${host}:8000`), /HTTPS required/);
+    const proxy = await startProxy(t, `http://${host}:8000`, { allowPrivateHttp: true });
+    assert.ok(proxy.port > 0);
+  }
+  for (const host of ['172.15.0.1', '172.32.0.1', '192.169.1.1', '169.254.169.254', '8.8.8.8', 'model.local']) {
+    await assert.rejects(startProxy(t, `http://${host}:8000`, { allowPrivateHttp: true }), /HTTPS required/);
+  }
+  assert.equal(configFromEnv({}).allowPrivateHttp, false);
+  assert.equal(configFromEnv({ PILOT_FAULT_ALLOW_PRIVATE_HTTP: 'false' }).allowPrivateHttp, false);
+  assert.equal(configFromEnv({ PILOT_FAULT_ALLOW_PRIVATE_HTTP: 'true' }).allowPrivateHttp, true);
+  await assert.rejects(startProxy(t, 'http://user:pass@192.168.1.49:8000', { allowPrivateHttp: true }), /credentials/);
+});
+
 test('shouldInject 只在每第 N 个请求触发，none 永不注入', () => {
   assert.equal(shouldInject(0, 3, 'mid-eof'), false);
   assert.equal(shouldInject(1, 3, 'mid-eof'), false);

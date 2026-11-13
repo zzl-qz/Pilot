@@ -32,6 +32,7 @@ node --test evaluation/harness/reference-verifier.test.mjs
 - 控制接口：`POST /fault/config`、`POST /fault/reset`（`stopped` 硬停粘滞不被清洗）、`GET /fault/state`（请求/注入/usage/花费估算）。
 - 硬停：`maxRequests`（请求数上限）与 `maxQuota`（按 usage 分片累计的全价估算）任一达到即 402 停机。
 - 启动：`PILOT_FAULT_UPSTREAM`（origin，缺省取 BASE_URL）、`PILOT_FAULT_API_KEY`（缺省取 API_KEY）只用于上游转发，绝不写日志或状态；`PILOT_FAULT_PROXY_PORT`、`PILOT_FAULT_LOCAL_TOKEN` 可选。
+- 局域网自部署模型只有 HTTP 时，可显式设置 `PILOT_FAULT_ALLOW_PRIVATE_HTTP=true`；仅对配置的 RFC 1918 IPv4 地址生效，不放行公网、链路本地地址或域名。默认仍要求 HTTPS 或回环地址，代理始终只监听本机。
 
 执行器侧：
 
