@@ -1,0 +1,12 @@
+--- a/src/pricing.js
++++ b/src/pricing.js
+@@ -0,0 +1,9 @@
++'use strict';
++
++// 计算单行账单金额（分）：单价 × 数量；quantity 缺省按 1，为 0 时结果为 0。
++function priceCents(item) {
++  const quantity = item.quantity ?? 1;
++  return item.priceCents * quantity;
++}
++
++module.exports = { priceCents };

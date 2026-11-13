@@ -1,0 +1,62 @@
+[
+  {
+    "sessionId": "ses_cdbb891c-972c-47c7-b970-0d2daf2a1ffa",
+    "taskId": "steer-constraint-hold",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 68,
+    "historySha256": "b1646d1cd7594e68c80f4e3734c3982cb7311c1b2a4152df261637eb7c841d9b",
+    "candidateDiffSha256": "42d381d8960365010875a5ca290dcbdaf2909122337bc0730691910b20ae2983",
+    "changedFiles": [
+      {
+        "path": "src/csv.js",
+        "beforeSha256": "aeccce5b27857ed6f9428c4d7f918bba12df2b1d66fe28c09e561e9870366624",
+        "afterSha256": "6ce6efb54db72e8c486fd259fccc36eb4609c1bd51c3f6a3c364841c68b7bd7b"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_aaf433b3-0ebe-4d15-8122-28d11a20f624",
+    "taskId": "steer-constraint-hold",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 63,
+    "historySha256": "962713b7ff8c247e39feea15bdc489d7665abfa3107f6f8eeabfd79c95204fae",
+    "candidateDiffSha256": "f63c7169250674f91b5c0f3837c37f897cb1d2101067a5bf6ed16e49b76eb040",
+    "changedFiles": [
+      {
+        "path": "src/csv.js",
+        "beforeSha256": "aeccce5b27857ed6f9428c4d7f918bba12df2b1d66fe28c09e561e9870366624",
+        "afterSha256": "1c5e38fb9e1b9632fb87546850fd6d6c70a5f4d03f04439f7f109fa75a8b3ced"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_51a8c1a4-c715-4459-b11f-e35313bbc514",
+    "taskId": "steer-constraint-hold",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 56,
+    "historySha256": "cb518d96a8d81c15ddda07e95138c489b61a5981638588f35fcdd707dec75b4c",
+    "candidateDiffSha256": "7ce4c4706dec4e0273a03d3fd7f885a0455b937d5d0079ba3adf86afb0343933",
+    "changedFiles": [
+      {
+        "path": "src/csv.js",
+        "beforeSha256": "aeccce5b27857ed6f9428c4d7f918bba12df2b1d66fe28c09e561e9870366624",
+        "afterSha256": "db7eb6a656c7f2efd94666dbd5f30562604368c528240fa3d05888093feab430"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  }
+]

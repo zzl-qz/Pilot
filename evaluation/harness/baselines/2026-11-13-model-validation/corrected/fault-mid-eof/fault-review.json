@@ -1,0 +1,215 @@
+[
+  {
+    "sessionId": "ses_349c5767-202d-43a8-ba28-3d5672729a08",
+    "attempt": 1,
+    "success": true,
+    "terminalStatus": "COMPLETED",
+    "injectedFaults": 3,
+    "injectionModes": {
+      "mid-eof": 3
+    },
+    "failedModelRequests": [
+      {
+        "id": "c3d6255d-0f30-4b6f-929e-238a6986b354",
+        "durationMs": 40,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "81f985bf-8390-4ee8-95da-d23acd756ccd",
+        "durationMs": 40,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "95ac1c86-d862-41e0-b780-d9dc97164b6a",
+        "durationMs": 42,
+        "firstTokenMs": null,
+        "purpose": "main"
+      }
+    ],
+    "retryEvents": [
+      {
+        "sequence": 17,
+        "timestamp": "2026-11-13T04:47:15.355542Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 882,
+          "reason": "模型流在有效 finish_reason 到达前结束，未提交本次输出或执行工具",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 39,
+        "timestamp": "2026-11-13T04:47:40.817561Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 839,
+          "reason": "模型流在有效 finish_reason 到达前结束，未提交本次输出或执行工具",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 58,
+        "timestamp": "2026-11-13T04:48:03.883941Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 502,
+          "reason": "模型流在有效 finish_reason 到达前结束，未提交本次输出或执行工具",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "duplicateStartedCallIdentities": [],
+    "toolsStartedAfterFailedMainRequestBeforeNextCompletedResponse": [],
+    "interpretation": "工具身份按 runId/agentId/callId 检查；没有重复身份不能证明模型以新 callId 发出的语义重复操作不存在。失败响应后的工具调用需单独核查是否为系统核验操作。"
+  },
+  {
+    "sessionId": "ses_47aaf0c9-2215-4114-af5c-b631e2a75ad2",
+    "attempt": 2,
+    "success": true,
+    "terminalStatus": "COMPLETED",
+    "injectedFaults": 3,
+    "injectionModes": {
+      "mid-eof": 3
+    },
+    "failedModelRequests": [
+      {
+        "id": "c3fea965-a308-4f8e-92c0-fec04b4243b7",
+        "durationMs": 35,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "6ede865f-854b-4da6-ba3d-09ab10b452ee",
+        "durationMs": 39,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "e3b2aa02-6de7-4762-81a4-fde843e505ae",
+        "durationMs": 40,
+        "firstTokenMs": null,
+        "purpose": "main"
+      }
+    ],
+    "retryEvents": [
+      {
+        "sequence": 26,
+        "timestamp": "2026-11-13T04:48:58.965229Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 847,
+          "reason": "模型流在有效 finish_reason 到达前结束，未提交本次输出或执行工具",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 46,
+        "timestamp": "2026-11-13T04:49:29.495918Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 895,
+          "reason": "模型流在有效 finish_reason 到达前结束，未提交本次输出或执行工具",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 65,
+        "timestamp": "2026-11-13T04:50:14.816690Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 589,
+          "reason": "模型流在有效 finish_reason 到达前结束，未提交本次输出或执行工具",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "duplicateStartedCallIdentities": [],
+    "toolsStartedAfterFailedMainRequestBeforeNextCompletedResponse": [],
+    "interpretation": "工具身份按 runId/agentId/callId 检查；没有重复身份不能证明模型以新 callId 发出的语义重复操作不存在。失败响应后的工具调用需单独核查是否为系统核验操作。"
+  },
+  {
+    "sessionId": "ses_044c28e6-24a9-40a5-86c0-9fa835e93f2e",
+    "attempt": 3,
+    "success": true,
+    "terminalStatus": "COMPLETED",
+    "injectedFaults": 3,
+    "injectionModes": {
+      "mid-eof": 3
+    },
+    "failedModelRequests": [
+      {
+        "id": "738faeb2-28ed-4360-94ca-c8b36baf4e57",
+        "durationMs": 36,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "3bab7841-83b7-4cbd-a768-fc8a6f615ac4",
+        "durationMs": 40,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "86e7d19c-76eb-49cf-b2a2-5feb6c384ecd",
+        "durationMs": 39,
+        "firstTokenMs": null,
+        "purpose": "main"
+      }
+    ],
+    "retryEvents": [
+      {
+        "sequence": 26,
+        "timestamp": "2026-11-13T04:51:13.399335Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 958,
+          "reason": "模型流在有效 finish_reason 到达前结束，未提交本次输出或执行工具",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 46,
+        "timestamp": "2026-11-13T04:51:36.302502Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 788,
+          "reason": "模型流在有效 finish_reason 到达前结束，未提交本次输出或执行工具",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 65,
+        "timestamp": "2026-11-13T04:52:04.960607Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 518,
+          "reason": "模型流在有效 finish_reason 到达前结束，未提交本次输出或执行工具",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "duplicateStartedCallIdentities": [],
+    "toolsStartedAfterFailedMainRequestBeforeNextCompletedResponse": [],
+    "interpretation": "工具身份按 runId/agentId/callId 检查；没有重复身份不能证明模型以新 callId 发出的语义重复操作不存在。失败响应后的工具调用需单独核查是否为系统核验操作。"
+  }
+]

@@ -1,0 +1,42 @@
+--- a/src/cursor.js
++++ b/src/cursor.js
+@@ -1,13 +1,34 @@
+ 'use strict';
+ 
+ /**
+- * 游标分页：返回 { items, nextCursor }。
+- * 游标必须能抵抗列表变化——翻页期间头部插入新项时，下一页不能重复也不能遗漏。
++ * 基于 id 的游标分页：返回 { items, nextCursor }。
++ *
++ * nextCursor 为本页最后一个元素的 id；续接时从该 id 之后继续取，
++ * 因此翻页期间列表头部插入新项不会导致重复或遗漏。
++ * 最后一页 nextCursor 为 null。
+  */
+ function page(items, cursor, limit) {
+-  const start = cursor ? Number(cursor) : 0;
+-  const slice = items.slice(start, start + limit);
+-  return { items: slice, nextCursor: String(start + limit) };
++  let startIndex = 0;
++  if (cursor != null) {
++    const idx = items.findIndex((item) => item.id === cursor);
++    if (idx === -1) {
++      // 游标 id 不在当前列表中（可能被删除），从头开始
++      startIndex = 0;
++    } else {
++      startIndex = idx + 1;
++    }
++  }
++
++  const slice = items.slice(startIndex, startIndex + limit);
++
++  // 取满了 limit 且后面还有数据 → 给出下一页游标（本页最后一项的 id）
++  // 否则是最后一页 → null
++  const nextCursor =
++    slice.length === limit && startIndex + limit < items.length
++      ? slice[slice.length - 1].id
++      : null;
++
++  return { items: slice, nextCursor };
+ }
+ 
+ module.exports = { page };

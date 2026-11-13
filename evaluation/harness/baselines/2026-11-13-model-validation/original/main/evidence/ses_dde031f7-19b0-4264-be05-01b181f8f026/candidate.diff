@@ -1,0 +1,68 @@
+--- a/src/csv.js
++++ b/src/csv.js
+@@ -1,8 +1,63 @@
+ 'use strict';
+ 
+-// CSV 解析。当前只做了最朴素的逗号切分，引号里的逗号会切错。
++// CSV 解析：单层状态机逐字符扫描。
++// - 双引号内的逗号不换列、不换行，整体算作一个字段；
++// - 字段内的 "" 还原为一个字面引号；
++// - 换行支持 \n、\r\n、\r；结尾的换行不产生空行。
+ function parse(text) {
+-  return text.trim().split('\n').map((line) => line.split(','));
++  const rows = [];
++  let row = [];
++  let field = '';
++  let inQuotes = false;
++  let atFieldStart = true; // 当前是否处于字段开头（决定引号是包裹引号还是字面引号）
++
++  const endField = () => {
++    row.push(field);
++    field = '';
++    atFieldStart = true;
++  };
++  const endRow = () => {
++    endField();
++    rows.push(row);
++    row = [];
++  };
++
++  for (let i = 0; i < text.length; i++) {
++    const ch = text[i];
++
++    if (inQuotes) {
++      if (ch === '"') {
++        if (text[i + 1] === '"') {
++          field += '"'; // 转义引号
++          i++;
++        } else {
++          inQuotes = false; // 闭合引号
++        }
++      } else {
++        field += ch; // 引号内的逗号与换行原样保留
++      }
++      continue;
++    }
++
++    if (ch === '"' && atFieldStart) {
++      inQuotes = true; // 字段开头的引号是包裹引号
++    } else if (ch === ',') {
++      endField();
++    } else if (ch === '\r' || ch === '\n') {
++      if (ch === '\r' && text[i + 1] === '\n') i++; // \r\n 算一个换行
++      endRow();
++    } else {
++      field += ch;
++      atFieldStart = false;
++    }
++  }
++
++  // 末行没有换行结尾时收尾；以换行结尾则不追加空行
++  if (!atFieldStart || row.length > 0) {
++    endField();
++    rows.push(row);
++  }
++  return rows;
+ }
+ 
+ module.exports = { parse };

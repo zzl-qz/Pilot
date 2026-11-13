@@ -1,0 +1,20 @@
+{
+  "sessionId": "ses_5c7b5b3b-49ca-4f9d-ae60-d21ceb78a536",
+  "taskId": "shared-state-pollution",
+  "attempt": 2,
+  "terminalStatus": "COMPLETED",
+  "originalRecordedTerminalStatus": "COMPLETED",
+  "afterEvaluationDeadline": false,
+  "success": true,
+  "historyEvents": 54,
+  "historySha256": "55e5734228303e0fac7b2d8eaad5911709dfddedd4d261c8d04950e474712ea9",
+  "candidateDiffSha256": "f4cd4332f5ec2b6000a87751ee62925e9165905196e34c656d030db5a81c3f4f",
+  "changedFiles": [
+    {
+      "path": "src/counter.js",
+      "beforeSha256": "bf2a22722bb7af86b73bb7371e78905074e4e05d7d69e797e8a77cd0fed04c87",
+      "afterSha256": "1770a04730aeadedae022a8bbbd3bd5af862829d4595ead0c978a864769de9e0"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

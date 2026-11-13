@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "model": "Qwen3.8-Flash-Next-oQ4e-mtp",
+  "requestLimitPerSegment": 8,
+  "maxSegments": 4,
+  "sourceCommit": "2145dbcc441318c5ef5ce1d9002b80904f631fff",
+  "context": {
+    "model": "Qwen3.8-Flash-Next-oQ4e-mtp",
+    "modelConfigHash": "9ee85535a939c001d6b01857a0f01c42735ef81b76a3b6cd3203f38ea188e7c3",
+    "schemaVersion": 2,
+    "promptHash": "bfd0cdab2e7fd3d84ee09d2ea9d7fe6bf1ec2cb86f6bab5846374bd4324617c7",
+    "runtimeHash": "0c87fd2469a0588a5109f4077516d6a90d5e4ab600ade2d3dc5e19c36f2e30d7",
+    "environmentVersion": "5062b9f238c9a20716be7161e4a3438ad5627a1e79b0ebd19183ba63215f9b90",
+    "environment": {
+      "label": "macos-arm64-java25-node22-budget8-maxsegments4-concurrency3",
+      "platform": "darwin",
+      "arch": "arm64",
+      "node": "v22.23.1"
+    }
+  },
+  "segments": [
+    {
+      "segment": 1,
+      "terminalStatus": "FAILED",
+      "originalTrialSuccess": false,
+      "acceptancePassed": false,
+      "modelRequests": 9,
+      "outputCount": 6,
+      "budgetStopObserved": true,
+      "outputs": {
+        "item-01.json": "ecd1badacf07944fab7fec6be74d66e0b55e6b49de737d9770fdcc8c1424b69f",
+        "item-02.json": "b38a0118339f1cfd1a0e747f5d47c0e3e8f8fbabd8cb72489100f1bb5df6e04c",
+        "item-03.json": "37e4436c7345c2bc96102812f2b0e9b12b280a313c8f47f3f1212f3f24c98d4b",
+        "item-04.json": "0f45062615f4a814619eed627ec1edaac95af7f91c759df83c00b4f0350382cf",
+        "item-05.json": "191405c3922474d544e9e1df065185e2ab5a7095c88716e94afd56693a14dc66",
+        "item-06.json": "600e11aad6eaf199278daa54c6d49787eb26d22479b42c8fcf6eae551605f35b"
+      }
+    }
+  ],
+  "completed": false,
+  "budgetStopObserved": true,
+  "sessionId": "ses_e150f196-c5ce-4bee-acc2-66625339356a",
+  "error": "Error: Owned evaluator API 409 /api/sessions/ses_e150f196-c5ce-4bee-acc2-66625339356a/continue",
+  "recoveryPassed": false,
+  "cancellationUnconfirmed": true
+}

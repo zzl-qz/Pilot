@@ -1,0 +1,13 @@
+--- a/src/ranking.js
++++ b/src/ranking.js
+@@ -5,7 +5,9 @@
+  * 不允许修改传入的数组。
+  */
+ function rank(players) {
+-  return players.sort((left, right) => right.score - left.score);
++  return [...players].sort(
++    (left, right) => right.score - left.score || left.name.localeCompare(right.name)
++  );
+ }
+ 
+ module.exports = { rank };

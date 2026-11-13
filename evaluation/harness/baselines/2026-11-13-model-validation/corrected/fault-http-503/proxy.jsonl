@@ -1,0 +1,34 @@
+{"status": "ready", "port": 61570, "upstream": "<local-model-endpoint>"}
+{"status": "reset"}
+{"status": "config", "config": {"mode": "http-503", "every": 3, "stallMs": 180000, "maxRequests": 200}}
+{"status": "upstream_error", "requestIndex": 0, "errorName": "AbortError", "causeCode": null}
+{"status": "complete", "requestIndex": 0, "mode": "none", "chunks": 10, "bytes": 2378, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 25237, "spendEstimate": null}
+{"status": "complete", "requestIndex": 1, "mode": "none", "chunks": 25, "bytes": 5336, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 7815, "spendEstimate": null}
+{"status": "injected", "requestIndex": 2, "mode": "http-503"}
+{"status": "complete", "requestIndex": 3, "mode": "none", "chunks": 39, "bytes": 7857, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 11381, "spendEstimate": null}
+{"status": "complete", "requestIndex": 4, "mode": "none", "chunks": 12, "bytes": 2268, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 8438, "spendEstimate": null}
+{"status": "injected", "requestIndex": 5, "mode": "http-503"}
+{"status": "complete", "requestIndex": 6, "mode": "none", "chunks": 91, "bytes": 16552, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 17441, "spendEstimate": null}
+{"status": "complete", "requestIndex": 7, "mode": "none", "chunks": 28, "bytes": 5778, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 16493, "spendEstimate": null}
+{"status": "reset"}
+{"status": "config", "config": {"mode": "http-503", "every": 3, "stallMs": 180000, "maxRequests": 200}}
+{"status": "complete", "requestIndex": 0, "mode": "none", "chunks": 14, "bytes": 2717, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 18124, "spendEstimate": null}
+{"status": "complete", "requestIndex": 1, "mode": "none", "chunks": 19, "bytes": 3880, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 7709, "spendEstimate": null}
+{"status": "injected", "requestIndex": 2, "mode": "http-503"}
+{"status": "complete", "requestIndex": 3, "mode": "none", "chunks": 30, "bytes": 5769, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 8124, "spendEstimate": null}
+{"status": "complete", "requestIndex": 4, "mode": "none", "chunks": 33, "bytes": 6582, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 14529, "spendEstimate": null}
+{"status": "injected", "requestIndex": 5, "mode": "http-503"}
+{"status": "complete", "requestIndex": 6, "mode": "none", "chunks": 11, "bytes": 2412, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 8035, "spendEstimate": null}
+{"status": "complete", "requestIndex": 7, "mode": "none", "chunks": 51, "bytes": 9447, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 18594, "spendEstimate": null}
+{"status": "injected", "requestIndex": 8, "mode": "http-503"}
+{"status": "complete", "requestIndex": 9, "mode": "none", "chunks": 108, "bytes": 19647, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 35145, "spendEstimate": null}
+{"status": "reset"}
+{"status": "config", "config": {"mode": "http-503", "every": 3, "stallMs": 180000, "maxRequests": 200}}
+{"status": "complete", "requestIndex": 0, "mode": "none", "chunks": 15, "bytes": 3140, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 16530, "spendEstimate": null}
+{"status": "complete", "requestIndex": 1, "mode": "none", "chunks": 32, "bytes": 6523, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 5462, "spendEstimate": null}
+{"status": "injected", "requestIndex": 2, "mode": "http-503"}
+{"status": "complete", "requestIndex": 3, "mode": "none", "chunks": 12, "bytes": 2495, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 12925, "spendEstimate": null}
+{"status": "complete", "requestIndex": 4, "mode": "none", "chunks": 11, "bytes": 2073, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 8773, "spendEstimate": null}
+{"status": "injected", "requestIndex": 5, "mode": "http-503"}
+{"status": "complete", "requestIndex": 6, "mode": "none", "chunks": 94, "bytes": 17137, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 17624, "spendEstimate": null}
+{"status": "complete", "requestIndex": 7, "mode": "none", "chunks": 94, "bytes": 17341, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 26197, "spendEstimate": null}

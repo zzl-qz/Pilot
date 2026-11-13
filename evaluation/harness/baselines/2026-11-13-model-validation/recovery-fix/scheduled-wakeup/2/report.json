@@ -1,0 +1,102 @@
+{
+  "attempt": 2,
+  "model": "Qwen3.8-Flash-Next-oQ4e-mtp",
+  "sourceCommit": "8dc383bac7d4f57a8d98a59b50c541580f882a8d",
+  "success": false,
+  "observations": [
+    {
+      "observedAt": "2026-11-13T05:32:34.993Z",
+      "state": "SCHEDULED",
+      "runId": null,
+      "runAt": "2026-11-13T05:32:37.958Z",
+      "attempts": 0
+    },
+    {
+      "observedAt": "2026-11-13T05:32:41.023Z",
+      "state": "RUNNING",
+      "runId": "run_afb7d456-f77b-4012-a0bb-08f1ce7a0646",
+      "runAt": "2026-11-13T05:32:37.958Z",
+      "attempts": 1
+    },
+    {
+      "observedAt": "2026-11-13T05:35:31.893Z",
+      "state": "NEEDS_ATTENTION",
+      "runId": "run_afb7d456-f77b-4012-a0bb-08f1ce7a0646",
+      "runAt": "2026-11-13T05:32:37.958Z",
+      "attempts": 1
+    }
+  ],
+  "scheduleId": "schedule_8a330d1f-4af5-46ae-a677-ae3ed741328b",
+  "sessionId": "ses_ad246990-59c9-4dba-8bea-702325356588",
+  "workspace": "<isolated-root>/.pilot-eval/wakeup-2S91rU",
+  "finalSchedule": {
+    "id": "schedule_8a330d1f-4af5-46ae-a677-ae3ed741328b",
+    "name": "eval:scheduled-wakeup:2",
+    "sessionId": "ses_ad246990-59c9-4dba-8bea-702325356588",
+    "taskId": "task_d0a0c9c7-f036-43de-88a2-b85ffd6d4e13",
+    "content": "这是一个受控的等待与自动唤醒验证，请实际完成：先运行 node scripts/status.mjs。若 ready 为 false，先把返回的 requestId 写入 src/checkpoint.json（形如 {\"requestId\":\"...\"}），然后使用 wait_until 工具，run_at 使用 status 返回的 wakeAt，reason 说明等待外部确认；调用后停止本轮，不要 sleep、轮询或自行创建 data/ready.json。若工具提示时间太早，重新运行 status 获取新的 wakeAt。调度器自动唤醒后，再运行 status；ready 为 true 时保留原 checkpoint 不改动，把 requestId 和 acknowledgement 写入 src/result.json，执行 node --test，确认通过后完成目标。所有数据、脚本和测试都是只读输入，不要改写；外部确认由评测器在观察到真实等待后提供。",
+    "requirements": {
+      "constraints": [
+        "保留 checkpoint，禁止改写 data、scripts 和 test"
+      ],
+      "acceptance": [
+        {
+          "text": "自动唤醒后写出包含真实外部确认的 src/result.json，并通过 node --test",
+          "checked": false,
+          "evidence": ""
+        }
+      ],
+      "automation": {
+        "scheduleId": "schedule_8a330d1f-4af5-46ae-a677-ae3ed741328b",
+        "fullAccess": true,
+        "requireResearch": true
+      }
+    },
+    "skill": null,
+    "runAt": "2026-11-13T05:32:37.958Z",
+    "timezone": "UTC",
+    "state": "NEEDS_ATTENTION",
+    "runId": "run_afb7d456-f77b-4012-a0bb-08f1ce7a0646",
+    "attempts": 1,
+    "recoveries": 0,
+    "deadline": "2026-11-14T05:32:39.535459Z",
+    "message": "任务停止：NEED_INPUT，请打开执行记录查看原因",
+    "history": [
+      {
+        "runId": "run_afb7d456-f77b-4012-a0bb-08f1ce7a0646",
+        "startedAt": "2026-11-13T05:32:39.535459Z",
+        "status": "NEEDS_ATTENTION"
+      }
+    ],
+    "version": 3,
+    "workspace": {
+      "mode": "SHARED",
+      "path": "<isolated-root>/.pilot-eval/wakeup-2S91rU",
+      "base": "<isolated-root>/.pilot-eval/wakeup-2S91rU",
+      "branch": "",
+      "commit": "",
+      "handedOffAt": null
+    },
+    "endedAt": "2026-11-13T05:35:30.917154Z"
+  },
+  "checkpointPreserved": false,
+  "confirmationPreserved": false,
+  "artifacts": {
+    "data/request.json": {
+      "requestId": "1a2336b8-bf82-4d84-97ef-5999e785e9ac"
+    },
+    "data/ready.json": null,
+    "src/checkpoint.json": null,
+    "src/result.json": null
+  },
+  "inputsPreserved": true,
+  "waitToolObserved": false,
+  "waitingStopObserved": false,
+  "newRunAfterWake": false,
+  "acceptance": {
+    "ran": true,
+    "ok": false,
+    "detail": "node --test → exit 1（0.1s）\nTAP version 13\n# Subtest: 外部确认与已保存进度共同进入最终结果\nnot ok 1 - 外部确认与已保存进度共同进入最终结果\n  ---\n  duration_ms: 0.729917\n  type: 'test'\n  location: '<isolated-root>/.pilot-eval/verify-CevDaK/test/wakeup.test.cjs:7:1'\n  failureType: 'testCodeFailure'\n  error: \"ENOENT: no such file or directory, open '<isolated-root>/.pilot-eval/verify-CevDaK/data/ready.json'\"\n  code: 'ENOENT'\n  stack: |-\n    Object.openSync (node:fs:560:18)\n    Object.readFileSync (node:fs:444:35)\n    read (<isolated-root>/.pilot-eval/verify-CevDaK/test/wakeup.test.cjs:6:36)\n    TestContext.<anonymous> (<isolated-root>/.pilot-eval/verify-CevDaK/test/wakeup.test.cjs:8:59)\n    Test.runInAsyncScope (node:async_hooks:214:14)\n    Test.run (node:internal/test_runner/test:1047:25)\n    Test.start (node:internal/test_runner/test:944:17)\n    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 0\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 58.410959\n"
+  },
+  "seconds": 177.034
+}

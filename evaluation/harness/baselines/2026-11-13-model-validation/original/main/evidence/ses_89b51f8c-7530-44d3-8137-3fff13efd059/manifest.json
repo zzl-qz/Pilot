@@ -1,0 +1,28 @@
+{
+  "sessionId": "ses_89b51f8c-7530-44d3-8137-3fff13efd059",
+  "taskId": "rename-across-files",
+  "attempt": 2,
+  "terminalStatus": "COMPLETED",
+  "success": true,
+  "historyEvents": 55,
+  "historySha256": "15ed44b45e6c4250911fbc221ed85cad4f37e31c7e9a73d006a167f711c89ffe",
+  "candidateDiffSha256": "64bd2b859a96527208755d2e101e757f7e28477fb23baef821424b006b1cc5eb",
+  "changedFiles": [
+    {
+      "path": "src/greeting.js",
+      "beforeSha256": "b924736d1e9958b98ba47dba80893a471d548a2c87b28b7a3e0c74c22dbea9d0",
+      "afterSha256": "a04e4bb3c3c8fa6b736dbbaabfebe06a5df39df298060cbb5434fc4c24a87be7"
+    },
+    {
+      "path": "src/report.js",
+      "beforeSha256": "1b73efd8806c28befaf5eb0304a1fa25c9c4ec2327dfab519fe749f09da18496",
+      "afterSha256": "33b8bdab9b9879801b91d2070d7468dc07d953fdfe40eb52bcf1c7313099a187"
+    },
+    {
+      "path": "src/userService.js",
+      "beforeSha256": "ef90710d57877279e5881f2fba98d8ca1d5672a5a5967a6c37172499bf9a60fe",
+      "afterSha256": "1e87b41c84c25236fd866db97f7f916e2ae0de4a50aad8474c186ddbc77fc514"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

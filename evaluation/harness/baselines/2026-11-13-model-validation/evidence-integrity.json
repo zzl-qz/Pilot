@@ -1,0 +1,11 @@
+{
+  "verifiedAt": "2026-11-13T07:31:13.294090+00:00",
+  "regularTaskManifests": 180,
+  "scheduledWakeManifests": 9,
+  "allRecordedEventAndCandidateHashesMatch": true,
+  "allJsonAndJsonlParse": true,
+  "allReproductionScriptsParse": true,
+  "credentialPatternScanPassed": true,
+  "pathRedaction": "隔离根目录及其 /private 别名替换为 <isolated-root>；夹具路径示例和模型编造的路径保留，不是用户目录读取结果。",
+  "noDatabaseOrJarIncluded": true
+}

@@ -1,0 +1,18 @@
+{
+  "sessionId": "ses_fc0d8e07-2282-40e2-a313-f9a5fffed218",
+  "taskId": "fix-failing-unit-test",
+  "attempt": 1,
+  "terminalStatus": "COMPLETED",
+  "success": true,
+  "historyEvents": 48,
+  "historySha256": "6dd15b0e778c28454c217eadfebd487a690d57e91441746b613df6dfb4abdcc1",
+  "candidateDiffSha256": "b2f571ac1cfaed2cdbebf6bdbb4155508023d1cf8fec9d03f838c529b7cd86b3",
+  "changedFiles": [
+    {
+      "path": "src/pricing.js",
+      "beforeSha256": "7b4b234db70f3066fea8d8b935f8fbc75343831f7679576f4181524dc696447a",
+      "afterSha256": "f9da76ba9d5810bdc674b7ec15d5fee40f41dea6c9a06df2ea1166ad507dec79"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

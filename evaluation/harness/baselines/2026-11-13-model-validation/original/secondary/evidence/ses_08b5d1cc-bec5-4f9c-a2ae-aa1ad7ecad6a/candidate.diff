@@ -1,0 +1,38 @@
+--- a/src/counter.js
++++ b/src/counter.js
+@@ -1,19 +1,20 @@
+ 'use strict';
+ 
+-// 模块级共享状态：一个测试改了它，下一个测试就受影响。
+-let count = 0;
+-
+-function bump() {
+-  count += 1;
+-  return count;
++// 工厂模式：每次调用都返回一个独立的计数器实例，实例之间互不影响。
++function createCounter(initial = 0) {
++  let count = initial;
++  return {
++    bump() {
++      count += 1;
++      return count;
++    },
++    value() {
++      return count;
++    },
++    reset() {
++      count = initial;
++    },
++  };
+ }
+ 
+-function value() {
+-  return count;
+-}
+-
+-function reset() {
+-  count = 0;
+-}
+-
+-module.exports = { bump, value, reset };
++module.exports = { createCounter };

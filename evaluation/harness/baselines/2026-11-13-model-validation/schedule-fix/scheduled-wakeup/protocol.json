@@ -1,0 +1,13 @@
+{
+  "sourceCommit": "43dd5bede739e1dc84ebeddc1345e6ca18849bd6",
+  "jarSha256": "086c451ab0df0a8dd021888f586ee3d1de6505797454571baf61e9441c842e87",
+  "model": "Qwen3.8-Flash-Next-oQ4e-mtp",
+  "repeat": 3,
+  "concurrency": 3,
+  "deadlineMinutes": 20,
+  "wakeDelaySeconds": 180,
+  "prompt": "这是一个受控的等待与自动唤醒验证，请实际完成：先运行 node scripts/status.mjs。若 ready 为 false，先把返回的 requestId 写入 src/checkpoint.json（形如 {\"requestId\":\"...\"}），然后使用 wait_until 工具，run_at 使用 status 返回的 wakeAt，reason 说明等待外部确认；调用后停止本轮，不要 sleep、轮询或自行创建 data/ready.json。若工具提示时间太早，重新运行 status 获取新的 wakeAt。调度器自动唤醒后，再运行 status；ready 为 true 时保留原 checkpoint 不改动，把 requestId 和 acknowledgement 写入 src/result.json，执行 node --test，确认通过后完成目标。所有数据、脚本和测试都是只读输入，不要改写；外部确认由评测器在观察到真实等待后提供。",
+  "scriptSha256": "6459cf1c8b800bf25864a88e3e61754f5b26ef43067fc4fe6ba67bf2b073e027",
+  "testSha256": "da6f7913353d01a4f90db52a67fd556e0d4a5fa558fda246b7789d564c7813ca",
+  "acceptance": "真实 WAITING 和两个不同 runId；按预约时间唤醒；checkpoint 未改；独立原始测试通过；计划 COMPLETED"
+}

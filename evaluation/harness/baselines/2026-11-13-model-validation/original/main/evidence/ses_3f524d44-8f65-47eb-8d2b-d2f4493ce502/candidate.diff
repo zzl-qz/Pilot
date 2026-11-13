@@ -1,0 +1,36 @@
+--- a/src/outline.js
++++ b/src/outline.js
+@@ -1,11 +1,28 @@
+ 'use strict';
+ 
+-// 从 Markdown 提取标题。当前只返回标题文字。
++// 从 Markdown 提取标题大纲，返回 { level, text, line } 对象数组。
++// level 是 # 的个数，line 是从 1 开始的行号；围栏代码块内的 # 不算标题。
+ function outline(markdown) {
+-  return markdown
+-    .split('\n')
+-    .filter((line) => /^#{1,6}\s/.test(line))
+-    .map((line) => line.replace(/^#{1,6}\s+/, '').trim());
++  const result = [];
++  let inFence = false;
++  const lines = markdown.split('\n');
++  for (let i = 0; i < lines.length; i++) {
++    const raw = lines[i];
++    if (/^\s*(```|~~~)/.test(raw)) {
++      inFence = !inFence;
++      continue;
++    }
++    if (inFence) continue;
++    const match = /^(#{1,6})\s+(.*)$/.exec(raw);
++    if (match) {
++      result.push({
++        level: match[1].length,
++        text: match[2].trim(),
++        line: i + 1
++      });
++    }
++  }
++  return result;
+ }
+ 
+ module.exports = { outline };

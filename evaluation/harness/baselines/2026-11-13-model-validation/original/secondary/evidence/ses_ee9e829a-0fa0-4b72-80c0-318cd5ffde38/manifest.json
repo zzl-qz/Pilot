@@ -1,0 +1,30 @@
+{
+  "sessionId": "ses_ee9e829a-0fa0-4b72-80c0-318cd5ffde38",
+  "taskId": "extract-shared-module",
+  "attempt": 3,
+  "terminalStatus": "COMPLETED",
+  "originalRecordedTerminalStatus": "COMPLETED",
+  "afterEvaluationDeadline": false,
+  "success": true,
+  "historyEvents": 91,
+  "historySha256": "3c77d4c0a458cdc6c92b9566d0a6b27c2ac19187490be1056f0ac9f185bd5ce0",
+  "candidateDiffSha256": "555aecaee40d95ad638c9f22cab696789154a4d89cbfb991250ba34a6db89e12",
+  "changedFiles": [
+    {
+      "path": "src/invoice.js",
+      "beforeSha256": "3a253f2a24b4862d8ba4270af725a57d5272757a4ca990f56f16648c0a2d59ed",
+      "afterSha256": "56cc6455d2b64411ecfae9fe0583bcb6aae2a2847bf20a74e38ceefc86eb6ca9"
+    },
+    {
+      "path": "src/money.js",
+      "beforeSha256": null,
+      "afterSha256": "1b223dc3d784660e5b7ca18f6dbf5afa1d8d8994e36d5d500d4c1ab5c081b4df"
+    },
+    {
+      "path": "src/receipt.js",
+      "beforeSha256": "7f4683f31ec39efcebbf3fa074bbf60380ac356cf7a2e6a6b5e5d51713313adb",
+      "afterSha256": "6fd8846461e3c4b43cdd3a8c886037eb0f54c29ba8a49f8533e84c2eac83fe11"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

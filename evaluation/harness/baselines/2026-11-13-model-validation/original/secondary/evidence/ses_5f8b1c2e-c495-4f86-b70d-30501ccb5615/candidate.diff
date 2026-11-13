@@ -1,0 +1,32 @@
+--- a/src/registry.js
++++ b/src/registry.js
+@@ -1,8 +1,27 @@
+ 'use strict';
+ 
+-// 注册用户。当前实现直接写入，没有做任何校验。
++const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
++
+ function register(users, payload) {
+-  const user = { id: users.length + 1, email: payload.email, name: payload.name };
++  const errors = [];
++  const email = (payload.email || '').trim();
++  const name = (payload.name || '').trim();
++
++  if (!EMAIL.test(email)) {
++    errors.push({ field: 'email', code: 'INVALID_EMAIL' });
++  }
++  if (!name) {
++    errors.push({ field: 'name', code: 'INVALID_NAME' });
++  }
++  if (users.some((user) => user.email === email)) {
++    errors.push({ field: 'email', code: 'DUPLICATE_EMAIL' });
++  }
++
++  if (errors.length > 0) {
++    return { ok: false, errors };
++  }
++
++  const user = { id: users.length + 1, email, name };
+   users.push(user);
+   return { ok: true, user };
+ }

@@ -1,0 +1,18 @@
+{
+  "sessionId": "ses_ccb083ab-eeb8-4903-8c57-d2cb6ecbdbe2",
+  "taskId": "path-safety-regression",
+  "attempt": 2,
+  "terminalStatus": "COMPLETED",
+  "success": true,
+  "historyEvents": 53,
+  "historySha256": "07c0504a9870cec35434aea90a979e5f8428d8a03cdd8012020a5de6eac91696",
+  "candidateDiffSha256": "70dff8478ea1cb96c62517672af0be7927a1182b1da233f05006ffa3ec0ea27f",
+  "changedFiles": [
+    {
+      "path": "src/workspace.js",
+      "beforeSha256": "420977d65403cff8f94708f489a44614d79d0053c015e700b61a20bfd1ea74a2",
+      "afterSha256": "6da376f74e52a67c87326bf8431de1b0c71e035073072b2d5b930accd8d4e941"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

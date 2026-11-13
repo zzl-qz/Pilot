@@ -1,0 +1,37 @@
+{
+  "sessions": [
+    {
+      "sessionId": "ses_898db20d-a94c-4448-bf02-7fcff18cd5d6",
+      "taskId": "budget-wind",
+      "attempt": 2,
+      "modelRequestsObserved": 17,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 16,
+        "finalization": 1
+      },
+      "firstContextTokens": 13068,
+      "maximumContextTokens": 26166,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    }
+  ],
+  "modelRequestsObserved": 17,
+  "duplicateModelReportIds": [],
+  "peakConcurrentModelRequestsByReportedIntervals": 1,
+  "topLevelConcurrencyLimit": 1,
+  "spawnAgentSessions": 0,
+  "toolCalls": {
+    "read_file": 43,
+    "list_dir": 2,
+    "create_file": 41,
+    "run_command": 2,
+    "edit_file": 2
+  },
+  "modelPurposes": {
+    "main": 16,
+    "finalization": 1
+  },
+  "interpretation": "并发峰值按请求 startedAt/durationMs 计算；主会话上限由实验组参数给出。multi.enabled=false 只关闭 dispatch_agents；spawn_agent 保持默认可用。输入上下文数为服务估算，不能当成计费 token。"
+}

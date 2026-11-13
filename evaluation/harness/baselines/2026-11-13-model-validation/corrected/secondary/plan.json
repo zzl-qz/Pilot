@@ -1,0 +1,30 @@
+{
+  "jobs": [
+    {
+      "task": "steer-constraint-hold",
+      "attempt": 1
+    },
+    {
+      "task": "steer-constraint-hold",
+      "attempt": 2
+    },
+    {
+      "task": "steer-constraint-hold",
+      "attempt": 3
+    }
+  ],
+  "context": {
+    "model": "Qwen3.8-27B-MTPLX-Optimized-Quality",
+    "modelConfigHash": "ae91533c0845c25eaf64895bf6f5b09215eb13fa250aca129c1a187e081095f2",
+    "schemaVersion": 2,
+    "promptHash": "bfd0cdab2e7fd3d84ee09d2ea9d7fe6bf1ec2cb86f6bab5846374bd4324617c7",
+    "runtimeHash": "0c87fd2469a0588a5109f4077516d6a90d5e4ab600ade2d3dc5e19c36f2e30d7",
+    "environmentVersion": "1bef99b692e2e983d09005a3602cacee87af6cc32dfa64618cc5f1036cf3596d",
+    "environment": {
+      "label": "macos-arm64-java25-node22-concurrency3-total900-idle600-direct1000",
+      "platform": "darwin",
+      "arch": "arm64",
+      "node": "v22.23.1"
+    }
+  }
+}

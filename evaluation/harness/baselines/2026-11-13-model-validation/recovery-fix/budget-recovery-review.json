@@ -1,0 +1,108 @@
+{
+  "sourceCommit": "8dc383bac7d4f57a8d98a59b50c541580f882a8d",
+  "initialBoundaryPassed": 2,
+  "eventualRecoveryPassed": 3,
+  "trials": [
+    {
+      "attempt": 1,
+      "sessionId": "ses_4432b867-9cbf-42b5-8f9a-3fa75a778d4a",
+      "initialBoundaryAcceptancePassed": true,
+      "allBoundariesHaveValidLedger": true,
+      "recoveryPassed": true,
+      "allFortyItemsCompleted": true,
+      "manualSegments": 2,
+      "distinctRuns": 2,
+      "runStartedEvents": 2,
+      "segments": [
+        {
+          "segment": 1,
+          "status": "FAILED",
+          "outputCount": 10,
+          "budgetStopObserved": true,
+          "hasLedger": true
+        },
+        {
+          "segment": 2,
+          "status": "COMPLETED",
+          "outputCount": 40,
+          "budgetStopObserved": true,
+          "hasLedger": true
+        }
+      ],
+      "runCommandSummaries": [
+        "{command=node --test,timeoutSeconds=300,workdir=test}",
+        "{command=node --test,timeoutSeconds=300,workdir=test}"
+      ]
+    },
+    {
+      "attempt": 2,
+      "sessionId": "ses_898db20d-a94c-4448-bf02-7fcff18cd5d6",
+      "initialBoundaryAcceptancePassed": true,
+      "allBoundariesHaveValidLedger": true,
+      "recoveryPassed": true,
+      "allFortyItemsCompleted": true,
+      "manualSegments": 2,
+      "distinctRuns": 2,
+      "runStartedEvents": 2,
+      "segments": [
+        {
+          "segment": 1,
+          "status": "FAILED",
+          "outputCount": 20,
+          "budgetStopObserved": true,
+          "hasLedger": true
+        },
+        {
+          "segment": 2,
+          "status": "COMPLETED",
+          "outputCount": 40,
+          "budgetStopObserved": true,
+          "hasLedger": true
+        }
+      ],
+      "runCommandSummaries": [
+        "{command=node --test,timeoutSeconds=300}",
+        "{command=node --test,timeoutSeconds=300}"
+      ]
+    },
+    {
+      "attempt": 3,
+      "sessionId": "ses_dc6c732e-d0af-4efd-ace0-1ef78fa05fda",
+      "initialBoundaryAcceptancePassed": false,
+      "allBoundariesHaveValidLedger": false,
+      "recoveryPassed": true,
+      "allFortyItemsCompleted": true,
+      "manualSegments": 3,
+      "distinctRuns": 3,
+      "runStartedEvents": 3,
+      "segments": [
+        {
+          "segment": 1,
+          "status": "COMPLETED",
+          "outputCount": 0,
+          "budgetStopObserved": false,
+          "hasLedger": false
+        },
+        {
+          "segment": 2,
+          "status": "FAILED",
+          "outputCount": 6,
+          "budgetStopObserved": true,
+          "hasLedger": true
+        },
+        {
+          "segment": 3,
+          "status": "COMPLETED",
+          "outputCount": 40,
+          "budgetStopObserved": true,
+          "hasLedger": true
+        }
+      ],
+      "runCommandSummaries": [
+        "{command=node --test test/wind-down.test.js,timeoutSeconds=300}"
+      ]
+    }
+  ],
+  "limitation": "第3次初次边界只返回计划文字而被 DIRECT 模式标为完成，产物为0、无台账，仍计初次失败；后续人工继续后的成功不替代此失败。未针对单个模型增加措辞匹配或放宽外部验收。",
+  "commandScopeVerified": "全部 run_command 只运行原始 Node 测试，未通过 shell 批量循环绕过逐项读写约束。"
+}

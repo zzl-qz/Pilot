@@ -1,0 +1,45 @@
+{"status": "ready", "port": 61552, "upstream": "<local-model-endpoint>"}
+{"status": "reset"}
+{"status": "config", "config": {"mode": "stall", "every": 3, "stallMs": 180000, "maxRequests": 200}}
+{"status": "upstream_error", "requestIndex": 0, "errorName": "AbortError", "causeCode": null}
+{"status": "complete", "requestIndex": 0, "mode": "none", "chunks": 17, "bytes": 3328, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 23228, "spendEstimate": null}
+{"status": "complete", "requestIndex": 1, "mode": "none", "chunks": 14, "bytes": 2915, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 9159, "spendEstimate": null}
+{"status": "injected", "requestIndex": 2, "mode": "stall", "stallMs": 180000, "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 3, "mode": "none", "chunks": 19, "bytes": 3849, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 6951, "spendEstimate": null}
+{"status": "complete", "requestIndex": 4, "mode": "none", "chunks": 50, "bytes": 10127, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 23138, "spendEstimate": null}
+{"status": "injected", "requestIndex": 5, "mode": "stall", "stallMs": 180000, "forwardedBytes": 213}
+{"status": "upstream_error", "requestIndex": 6, "errorName": "AbortError", "causeCode": null}
+{"status": "complete", "requestIndex": 7, "mode": "none", "chunks": 41, "bytes": 8212, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 8233, "spendEstimate": null}
+{"status": "injected", "requestIndex": 8, "mode": "stall", "stallMs": 180000, "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 9, "mode": "none", "chunks": 26, "bytes": 5139, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 2633, "spendEstimate": null}
+{"status": "complete", "requestIndex": 10, "mode": "none", "chunks": 33, "bytes": 7054, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 8195, "spendEstimate": null}
+{"status": "reset"}
+{"status": "config", "config": {"mode": "stall", "every": 3, "stallMs": 180000, "maxRequests": 200}}
+{"status": "complete", "requestIndex": 0, "mode": "none", "chunks": 8, "bytes": 1685, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 6235, "spendEstimate": null}
+{"status": "complete", "requestIndex": 1, "mode": "none", "chunks": 8, "bytes": 1688, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 873, "spendEstimate": null}
+{"status": "injected", "requestIndex": 2, "mode": "stall", "stallMs": 180000, "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 3, "mode": "none", "chunks": 9, "bytes": 1953, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 716, "spendEstimate": null}
+{"status": "complete", "requestIndex": 4, "mode": "none", "chunks": 9, "bytes": 1982, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 1800, "spendEstimate": null}
+{"status": "injected", "requestIndex": 5, "mode": "stall", "stallMs": 180000, "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 6, "mode": "none", "chunks": 1, "bytes": 1636, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 1197, "spendEstimate": null}
+{"status": "injection_upstream_error", "requestIndex": 8, "errorName": "Error", "causeCode": null}
+{"status": "complete", "requestIndex": 7, "mode": "none", "chunks": 37, "bytes": 7454, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 2881, "spendEstimate": null}
+{"status": "complete", "requestIndex": 9, "mode": "none", "chunks": 8, "bytes": 1690, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 3942, "spendEstimate": null}
+{"status": "complete", "requestIndex": 10, "mode": "none", "chunks": 20, "bytes": 3948, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 5783, "spendEstimate": null}
+{"status": "injected", "requestIndex": 11, "mode": "stall", "stallMs": 180000, "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 12, "mode": "none", "chunks": 30, "bytes": 6349, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 3275, "spendEstimate": null}
+{"status": "reset"}
+{"status": "config", "config": {"mode": "stall", "every": 3, "stallMs": 180000, "maxRequests": 200}}
+{"status": "complete", "requestIndex": 0, "mode": "none", "chunks": 10, "bytes": 2155, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 6571, "spendEstimate": null}
+{"status": "complete", "requestIndex": 1, "mode": "none", "chunks": 13, "bytes": 3210, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 1766, "spendEstimate": null}
+{"status": "injected", "requestIndex": 2, "mode": "stall", "stallMs": 180000, "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 3, "mode": "none", "chunks": 10, "bytes": 1962, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 763, "spendEstimate": null}
+{"status": "complete", "requestIndex": 4, "mode": "none", "chunks": 14, "bytes": 3146, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 4746, "spendEstimate": null}
+{"status": "injected", "requestIndex": 5, "mode": "stall", "stallMs": 180000, "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 6, "mode": "none", "chunks": 1, "bytes": 1304, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 715, "spendEstimate": null}
+{"status": "injection_upstream_error", "requestIndex": 8, "errorName": "Error", "causeCode": null}
+{"status": "complete", "requestIndex": 7, "mode": "none", "chunks": 16, "bytes": 3353, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 2339, "spendEstimate": null}
+{"status": "complete", "requestIndex": 9, "mode": "none", "chunks": 8, "bytes": 1511, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 4081, "spendEstimate": null}
+{"status": "complete", "requestIndex": 10, "mode": "none", "chunks": 23, "bytes": 4844, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 6497, "spendEstimate": null}
+{"status": "injected", "requestIndex": 11, "mode": "stall", "stallMs": 180000, "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 12, "mode": "none", "chunks": 45, "bytes": 9731, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 7058, "spendEstimate": null}

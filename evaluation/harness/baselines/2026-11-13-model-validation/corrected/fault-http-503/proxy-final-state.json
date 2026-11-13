@@ -1,0 +1,45 @@
+{
+  "requests": 8,
+  "lifetimeRequests": 27,
+  "lifetimeUsage": {
+    "observedRequests": 0,
+    "requestsWithoutUsage": 20,
+    "inputTokens": 0,
+    "outputTokens": 0
+  },
+  "lifetimeSpendEstimate": null,
+  "injectedRequests": 2,
+  "injected": [
+    {
+      "index": 2,
+      "mode": "http-503",
+      "at": "2026-11-13T04:50:56.279Z"
+    },
+    {
+      "index": 5,
+      "mode": "http-503",
+      "at": "2026-11-13T04:51:19.276Z"
+    }
+  ],
+  "faultsByMode": {
+    "http-503": 2
+  },
+  "usage": {
+    "observedRequests": 0,
+    "requestsWithoutUsage": 6,
+    "inputTokens": 0,
+    "outputTokens": 0
+  },
+  "spendEstimate": null,
+  "maxQuota": 0,
+  "stopped": false,
+  "config": {
+    "mode": "http-503",
+    "every": 3,
+    "stallMs": 180000,
+    "maxRequests": 200,
+    "maxQuota": 0,
+    "inputQuotaPerMillion": 0,
+    "outputQuotaPerMillion": 0
+  }
+}

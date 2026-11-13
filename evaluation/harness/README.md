@@ -50,6 +50,8 @@ node evaluation/harness/runner.mjs --base http://127.0.0.1:8787 \
 - **门控**：本次尝试没有任何实际注入 → `scenarioCovered=false`，不算成功；故障组与干净基线互不可比（门禁报 `insufficient`）；两组或组内混合不同 fault-profile/every 亦不可比；故障记录缺请求数观测直接拒绝。
 - `--resume` 会重算轮换方案，与已记录的 `faultScenario/faultProfile/faultEvery` 不一致即拒绝续跑。
 - 代理计数是全局的：跑故障组期间，该 Pilot 服务不得有其他会话（其他会话的模型请求会混入计数，`injectedRequests` 就不再只属于本次尝试）。
+- 后台能力探测也会请求模型。需要严格归因的专用评测服务可显式设置 `--pilot.model.capability-discovery.enabled=false`，并把该配置记入环境标签；已有样本不要中途改配置。保留探测时，必须结合会话内的失败请求与重试事件核对故障覆盖，不能仅凭代理总数判定。
+- 每次 reset 建立新计数窗口。在途请求保留开始时的窗口和故障配置，迟到结果不会混入下一次尝试；全生命周期请求数、用量和预算硬停继续保留。`windowId` 可用于关联代理状态与日志，它不表示上游已经停止运行。
 
 指标口径新增：`faultInjectionCoverage`（有注入观测的尝试中实际注入 ≥1 的比例）、`faultSurvivalRate`（确认实际注入的尝试中“正常收尾+外部验收通过+场景覆盖”的比例）、`faultScenarioSuccessRate`（全部故障尝试的通过率，未注入或未知覆盖不能计成功）、`injectedFaultCount`、`faultProxyStops`；注入观测缺失保持 `null`，不当零。
 
@@ -156,6 +158,6 @@ token 总量也要求每个样本都有对应观测；超时等失败导致缺�
 
 `--strict` 必须指定已满足完整版本与重复条件的基线，不能与 dry-run 同用；门禁非 pass 时进程非零退出。小规模试跑应不加 strict，结果明确为证据不足。
 
-本轮自动化测试在 macOS 运行；路径、命令调用和临时目录使用 Node 跨平台 API，Windows/Linux 尚未实机验证。
+2026-11-13 的模型与可靠性补充记录见 [验证报告](baselines/2026-11-13-model-validation/README.md)。真实模型实验在 macOS 实机执行；Linux 容器另做传输、重复保护、评测工具、进程重启和候选产物验收。路径、命令调用和临时目录使用 Node 跨平台 API；Linux 容器结果不能代替 Linux 桌面验证，Windows 仍无实机结果。
 
 > AI生成

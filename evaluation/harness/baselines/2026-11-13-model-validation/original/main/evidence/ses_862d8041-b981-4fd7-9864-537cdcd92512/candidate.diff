@@ -1,0 +1,15 @@
+--- a/src/profile.js
++++ b/src/profile.js
+@@ -7,9 +7,9 @@
+ function buildProfile(user) {
+   return {
+     name: user.name,
+-    city: user.address.city,
+-    recentOrders: user.orders.slice(0, 3),
+-    loyaltyPoints: user.loyalty ? user.loyalty.points : 0
++    city: user.address?.city ?? '未填写',
++    recentOrders: (user.orders ?? []).slice(0, 3),
++    loyaltyPoints: user.loyalty?.points ?? 0
+   };
+ }
+ 

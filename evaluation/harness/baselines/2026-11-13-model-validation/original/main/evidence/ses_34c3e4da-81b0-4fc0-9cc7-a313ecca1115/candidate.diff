@@ -1,0 +1,11 @@
+--- a/src/pricing.js
++++ b/src/pricing.js
+@@ -6,7 +6,7 @@
+ function orderTotalCents(items, memberDiscount) {
+   let subtotal = 0;
+   for (const item of items) {
+-    subtotal += item.priceCents;
++    subtotal += item.priceCents * item.quantity;
+   }
+   const discounted = subtotal * (1 - (memberDiscount ?? 0));
+   return Math.round(discounted * (1 + TAX_RATE));

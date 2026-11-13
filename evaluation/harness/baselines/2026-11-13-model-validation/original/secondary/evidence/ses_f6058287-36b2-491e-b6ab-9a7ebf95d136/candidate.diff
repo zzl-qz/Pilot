@@ -1,0 +1,18 @@
+--- a/src/dedupe.js
++++ b/src/dedupe.js
+@@ -5,7 +5,14 @@
+  * Windows 与 macOS 默认大小写不敏感，Linux 敏感，所以必须按平台判断。
+  */
+ function isSamePath(left, right, platform) {
+-  return left === right;
++  const sensitive = platform === 'linux';
++  const normalize = (p) => p.replace(/\\+/g, '/').replace(/\/+$/, '');
++  const a = normalize(left);
++  const b = normalize(right);
++  if (sensitive) {
++    return a === b;
++  }
++  return a.toLowerCase() === b.toLowerCase();
+ }
+ 
+ module.exports = { isSamePath };

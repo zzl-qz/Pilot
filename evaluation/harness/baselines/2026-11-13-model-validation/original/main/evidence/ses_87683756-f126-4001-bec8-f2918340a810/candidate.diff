@@ -1,0 +1,24 @@
+--- a/src/session.js
++++ b/src/session.js
+@@ -1,15 +1,15 @@
+ 'use strict';
+ 
+ /**
+- * 判断会话是否已过期。现在直接读全局时间，测试只能在「刚好」的时刻通过，
+- * 于是变成偶发失败。
++ * 判断会话是否已过期。当前时间由调用方显式传入（now，毫秒时间戳），
++ * 不在函数内部读全局时钟，同一组入参永远得到同样的结果。
+  */
+-function isExpired(session) {
+-  return Date.now() - session.createdAt > session.ttlMs;
++function isExpired(session, now) {
++  return now - session.createdAt > session.ttlMs;
+ }
+ 
+-function remainingMs(session) {
+-  return session.ttlMs - (Date.now() - session.createdAt);
++function remainingMs(session, now) {
++  return session.ttlMs - (now - session.createdAt);
+ }
+ 
+ module.exports = { isExpired, remainingMs };

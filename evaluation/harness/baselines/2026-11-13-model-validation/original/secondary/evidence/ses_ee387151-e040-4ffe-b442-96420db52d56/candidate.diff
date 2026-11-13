@@ -1,0 +1,11 @@
+--- a/src/paginate.js
++++ b/src/paginate.js
+@@ -8,7 +8,7 @@
+   if (page < 1 || pageSize < 1) {
+     return [];
+   }
+-  const start = page * pageSize;
++  const start = (page - 1) * pageSize;
+   const end = start + pageSize;
+   return items.slice(start, end);
+ }

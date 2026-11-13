@@ -1,0 +1,27 @@
+--- a/src/dedupe.js
++++ b/src/dedupe.js
+@@ -5,7 +5,23 @@
+  * Windows 与 macOS 默认大小写不敏感，Linux 敏感，所以必须按平台判断。
+  */
+ function isSamePath(left, right, platform) {
+-  return left === right;
++  const insensitive = platform === 'win32' || platform === 'darwin';
++  let a = normalize(left);
++  let b = normalize(right);
++  if (insensitive) {
++    a = a.toLowerCase();
++    b = b.toLowerCase();
++  }
++  return a === b;
++}
++
++// 去掉尾部斜杠（正斜杠与反斜杠均可），根路径保持原样
++function normalize(path) {
++  let end = path.length;
++  while (end > 1 && (path[end - 1] === '/' || path[end - 1] === '\\')) {
++    end--;
++  }
++  return path.slice(0, end);
+ }
+ 
+ module.exports = { isSamePath };

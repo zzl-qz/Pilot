@@ -1,0 +1,14 @@
+--- a/src/paths.js
++++ b/src/paths.js
+@@ -5,7 +5,10 @@
+  * 输出必须与输入风格一致，且不能出现混合分隔符。
+  */
+ function joinPath(root, relative) {
+-  return `${root}/${relative}`;
++  const separator = /\\/.test(root) || /\\/.test(relative) ? '\\' : '/';
++  const normalizedRoot = root.replace(/[\\/]+/g, separator);
++  const joiner = normalizedRoot.endsWith(separator) || normalizedRoot.length === 0 ? '' : separator;
++  return `${normalizedRoot}${joiner}${relative.split(/[\\/]+/).join(separator)}`;
+ }
+ 
+ module.exports = { joinPath };

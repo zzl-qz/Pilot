@@ -1,0 +1,20 @@
+{
+  "sessionId": "ses_947f91dd-100e-49d4-8c01-0b8412f89530",
+  "taskId": "add-cursor-pagination",
+  "attempt": 2,
+  "terminalStatus": "CANCELLED",
+  "originalRecordedTerminalStatus": null,
+  "afterEvaluationDeadline": true,
+  "success": false,
+  "historyEvents": 149,
+  "historySha256": "e71bf4db86ce19fcc6e44063bc7cfd1f8d61347d2a5d0bdbdfc9d16541dc32ea",
+  "candidateDiffSha256": "7ff98093a2188e7c44c32e95699eb0c52057a1e1ae13b12a6ea710be2b98b49f",
+  "changedFiles": [
+    {
+      "path": "src/cursor.js",
+      "beforeSha256": "b1b7073ab3bcfa69330b6af4a5708ce9b78ba31e01df4aa83677ff6e2cbbc951",
+      "afterSha256": "9479be6d25be732140a0209e02b5c2c6122919b73da93feea704055bcfb12f9e"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

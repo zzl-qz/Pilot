@@ -1,0 +1,116 @@
+{
+  "status": "recorded_complete",
+  "reason": "原等待 fixture 验证后台检查等待，不足以证明调度暂停与自动唤醒；原矩阵暴露重复保护相关风险后需独立构建复测。",
+  "correctedRuntime": "2145dbc",
+  "doNotReplaceOriginalFailures": true,
+  "followups": {
+    "steer-constraint-hold": {
+      "repeatPerModel": 3,
+      "models": [
+        "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "Qwen3.8-27B-MTPLX-Optimized-Quality"
+      ],
+      "concurrency": 3
+    },
+    "scheduled-wakeup": {
+      "repeatPrimaryModel": 3,
+      "concurrency": 3,
+      "wakeDelaySeconds": 180,
+      "maxMinutes": 20,
+      "acceptance": [
+        "原始 checkpoint 在等待前已保存且续跑后未改",
+        "观察到 wait_until 与 WAITING 停止",
+        "调度器按预约时间发起不同 runId",
+        "等待被观测后才提供外部随机确认",
+        "外部确认未被改写且最终结果与确认吻合",
+        "计划 COMPLETED 且独立原始测试通过"
+      ]
+    }
+  },
+  "actualToolPolicyClarification": {
+    "plannedLabel": "原计划 multiAgent=false 的表述不精确",
+    "actualFlag": "--pilot.multi.enabled=false",
+    "effect": "只禁用 dispatch_agents；spawn_agent 按当前产品设计保留可用",
+    "configurationChangedDuringTrials": false,
+    "topLevelSessionConcurrency": 4,
+    "modelRequestConcurrency": "主会话可调用子代理，因此模型请求并发不能直接等同于 4；在完整事件归档后测量",
+    "evidence": "AgentRunService.java 的工具注册条件、MultiAgentProperties.java 的参数定义，以及 secondary add-cursor-pagination attempt 2 的 tool.started/model.request 事件",
+    "originalPrimarySpawnAgentSessions": 0
+  },
+  "upcomingRecoveryGroups": {
+    "sourceCommit": "2145dbcc441318c5ef5ce1d9002b80904f631fff",
+    "jarSha256": "0fe2e646a0afa1e290ec3dbbb486eb83433a5a6a5a2c91261556fbaa1aa30e67",
+    "reason": "通用重复保护误判已修复；所有尚未派发的场景、故障和预算恢复组改用独立冻结的修复版。",
+    "originalMatrixRecordsUntouched": true,
+    "originalGroupsStartedBeforeAmendment": false,
+    "groups": [
+      "wait-condition × 3 × 2 models",
+      "long-chain × 3 × 2 models",
+      "four fault modes × 3 primary trials",
+      "budget 8 × 4 segments × 3 primary sessions",
+      "steer-constraint-hold × 3 × 2 models",
+      "scheduled-wakeup × 3 primary trials"
+    ]
+  },
+  "faultDeadlinePreflight": {
+    "decidedAt": "2026-11-13T04:33:44.054916+00:00",
+    "beforeAnyFaultAttempt": true,
+    "originalFixtureMinutes": 8,
+    "effectiveFaultMinutes": 30,
+    "reason": "runner 取命令行与任务时限的较小值；仅设置 --timeout-minutes 30 仍会被原任务 8 分钟限制。故障组多次注入 120 秒停顿，派发前建立独立 30 分钟任务合同。",
+    "promptAndFixtureChanged": false,
+    "originalMatrixRecordsUntouched": true,
+    "taskFileSha256": "fda4861a5476618d61cddeaf30210058c648a459473ac0b8c3e467256801fd89"
+  },
+  "budgetAndWakeFollowup": {
+    "decidedAt": "2026-11-13T05:30:30.234951+00:00",
+    "beforeAnyNewAttempt": true,
+    "sourceCommit": "8dc383b",
+    "reason": "原预算组 maxSteps=8 与请求上限同时触发，未完成计划会自动续跑；并发现续跑缺开始事件与评测过早验收。保留原组；新组明确只触发请求预算，增加通用临近额度提醒。",
+    "budget": {
+      "repeat": 3,
+      "concurrency": 3,
+      "requestLimitPerSegment": 8,
+      "maxSteps": 64,
+      "maxManualSegments": 8,
+      "deadlineMinutesPerSegment": 20,
+      "taskPromptAndTestsUnchanged": true,
+      "acceptance": "分别报告第一次边界的至少六项及真实台账、每段边界的台账一致性、最终全部40项及外部原始测试。失败不以最终成功覆盖。"
+    },
+    "scheduledWakeup": {
+      "repeat": 3,
+      "concurrency": 3,
+      "originalProtocolUnchanged": true,
+      "movedToNewBuildBeforeFirstAttempt": true
+    },
+    "oldBudgetFailuresPreserved": true
+  },
+  "researchPolicyFollowup": {
+    "decidedAt": "2026-11-13T05:41:50.057764+00:00",
+    "beforeAnyNewAttempt": true,
+    "reason": "8dc383b 的三次定时唤醒中两次被默认开源调研门禁阻塞，另一次虽正确唤醒且产物通过测试，但最终模型核验缺少必需条件证据引用。修复未经要求的强制调研；不放松最终核验。",
+    "repeat": 3,
+    "concurrency": 3,
+    "maxMinutes": 20,
+    "wakeDelaySeconds": 180,
+    "promptAndFixtureUnchanged": true,
+    "previousThreeFailuresPreserved": true,
+    "runtime": "43dd5bede739e1dc84ebeddc1345e6ca18849bd6",
+    "noPaidModelCalls": true,
+    "overlap": "三个唤醒会话与三个独立预算恢复会话共用主模型；各组并发3，本轮评测主会话并发上限6。时延受共享端点负载影响，不用于单会话速度比较。"
+  },
+  "reviewEvidenceFollowup": {
+    "decidedAt": "2026-11-13T06:14:30.070658+00:00",
+    "beforeAnyNewAttempt": true,
+    "sourceCommit": "bd6a69b5483b11745683b56200a6ed15022ede2a",
+    "reason": "核验调用用量被旧状态覆盖；成功等待在后续文件变化后不可引用。修复计数、历史操作证据范围及具体拒绝原因，不放宽当前文件证据要求。",
+    "repeat": 3,
+    "concurrency": 3,
+    "maxMinutes": 20,
+    "wakeDelaySeconds": 180,
+    "promptAndFixtureUnchanged": true,
+    "reviewSystemPromptChanged": true,
+    "oldSixFailuresPreserved": true,
+    "overlap": "其他评测模型组均已结束，本组主会话并发3。"
+  }
+}

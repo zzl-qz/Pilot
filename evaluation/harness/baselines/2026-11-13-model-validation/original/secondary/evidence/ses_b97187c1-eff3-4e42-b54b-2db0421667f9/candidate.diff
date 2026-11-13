@@ -1,0 +1,15 @@
+--- a/src/paths.js
++++ b/src/paths.js
+@@ -5,7 +5,11 @@
+  * 输出必须与输入风格一致，且不能出现混合分隔符。
+  */
+ function joinPath(root, relative) {
+-  return `${root}/${relative}`;
++  const isWin = root.includes('\\');
++  const sep = isWin ? '\\' : '/';
++  const clean = isWin ? relative.replaceAll('/', '\\') : relative.replaceAll('\\', '/');
++  const trimmed = isWin ? root.replace(/\\+$/, '') : root.replace(/\/+$/, '');
++  return `${trimmed}${sep}${clean}`;
+ }
+ 
+ module.exports = { joinPath };

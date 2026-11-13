@@ -1,0 +1,20 @@
+{
+  "sessionId": "ses_0cd95da9-71b3-4af0-b112-fddea975b4e3",
+  "taskId": "add-retry-backoff",
+  "attempt": 3,
+  "terminalStatus": "COMPLETED",
+  "originalRecordedTerminalStatus": "COMPLETED",
+  "afterEvaluationDeadline": false,
+  "success": true,
+  "historyEvents": 55,
+  "historySha256": "9d45ff74a01257ce445f23a6acc6c655abd3ec689f22915964822634433079a4",
+  "candidateDiffSha256": "52bdee0f41bd74c31bcc3b0eefb6c34025d90b944fdcd5d66bf13c100094616c",
+  "changedFiles": [
+    {
+      "path": "src/retry.js",
+      "beforeSha256": "7c229345c95d96dd15b03bf697185071e4d243a9ca640a63803ec432ea60e8f8",
+      "afterSha256": "bba9a9f3fe83eb286de7d7506ab993e76bda42a320264740ac91d0205973b81e"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

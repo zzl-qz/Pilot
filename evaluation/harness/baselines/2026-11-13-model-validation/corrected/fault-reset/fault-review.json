@@ -1,0 +1,215 @@
+[
+  {
+    "sessionId": "ses_805cfff6-f99c-40e8-9e1a-c950a67f0d1b",
+    "attempt": 1,
+    "success": true,
+    "terminalStatus": "COMPLETED",
+    "injectedFaults": 3,
+    "injectionModes": {
+      "reset": 3
+    },
+    "failedModelRequests": [
+      {
+        "id": "38badd5b-71d0-428d-a4de-33fe8ff8b7d8",
+        "durationMs": 12,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "f7fd62a4-7344-4995-aa39-196a1e7d4755",
+        "durationMs": 10,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "580e85c8-f672-434b-b191-d9bdbd2d6183",
+        "durationMs": 10,
+        "firstTokenMs": null,
+        "purpose": "main"
+      }
+    ],
+    "retryEvents": [
+      {
+        "sequence": 26,
+        "timestamp": "2026-11-13T04:47:47.098752Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 825,
+          "reason": "流式模型请求失败（1 ms）：HTTP/1.1 header parser received no bytes",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 46,
+        "timestamp": "2026-11-13T04:48:17.497745Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 981,
+          "reason": "流式模型请求失败（0 ms）：HTTP/1.1 header parser received no bytes",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 65,
+        "timestamp": "2026-11-13T04:48:53.110515Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 525,
+          "reason": "流式模型请求失败（0 ms）：HTTP/1.1 header parser received no bytes",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "duplicateStartedCallIdentities": [],
+    "toolsStartedAfterFailedMainRequestBeforeNextCompletedResponse": [],
+    "interpretation": "工具身份按 runId/agentId/callId 检查；没有重复身份不能证明模型以新 callId 发出的语义重复操作不存在。失败响应后的工具调用需单独核查是否为系统核验操作。"
+  },
+  {
+    "sessionId": "ses_f7219a7d-9caa-4f78-837f-f96909db6d0a",
+    "attempt": 2,
+    "success": true,
+    "terminalStatus": "COMPLETED",
+    "injectedFaults": 3,
+    "injectionModes": {
+      "reset": 3
+    },
+    "failedModelRequests": [
+      {
+        "id": "d4d411b1-a22e-4a51-8fea-8dd8621fa885",
+        "durationMs": 9,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "b7b55985-04e0-42eb-8e73-bebd842aa67a",
+        "durationMs": 9,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "7743dd37-61de-4d9c-8557-b69fc0951037",
+        "durationMs": 11,
+        "firstTokenMs": null,
+        "purpose": "main"
+      }
+    ],
+    "retryEvents": [
+      {
+        "sequence": 26,
+        "timestamp": "2026-11-13T04:49:46.083762Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 810,
+          "reason": "流式模型请求失败（0 ms）：HTTP/1.1 header parser received no bytes",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 46,
+        "timestamp": "2026-11-13T04:50:21.735999Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 660,
+          "reason": "流式模型请求失败（0 ms）：HTTP/1.1 header parser received no bytes",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 65,
+        "timestamp": "2026-11-13T04:50:59.826549Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 553,
+          "reason": "流式模型请求失败（0 ms）：HTTP/1.1 header parser received no bytes",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "duplicateStartedCallIdentities": [],
+    "toolsStartedAfterFailedMainRequestBeforeNextCompletedResponse": [],
+    "interpretation": "工具身份按 runId/agentId/callId 检查；没有重复身份不能证明模型以新 callId 发出的语义重复操作不存在。失败响应后的工具调用需单独核查是否为系统核验操作。"
+  },
+  {
+    "sessionId": "ses_d0e36e10-75e9-4c34-a078-374816214ad5",
+    "attempt": 3,
+    "success": true,
+    "terminalStatus": "COMPLETED",
+    "injectedFaults": 4,
+    "injectionModes": {
+      "reset": 4
+    },
+    "failedModelRequests": [
+      {
+        "id": "e6c780b4-af37-42d8-bc1b-4b6fcdb045df",
+        "durationMs": 8,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "d2acc8d9-bbc9-41d4-8b56-22a85706d224",
+        "durationMs": 8,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "827e8dfc-007d-46c9-b9d6-a57fd6555b12",
+        "durationMs": 9,
+        "firstTokenMs": null,
+        "purpose": "main"
+      }
+    ],
+    "retryEvents": [
+      {
+        "sequence": 22,
+        "timestamp": "2026-11-13T04:51:50.141113Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 862,
+          "reason": "流式模型请求失败（0 ms）：HTTP/1.1 header parser received no bytes",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 44,
+        "timestamp": "2026-11-13T04:52:04.491271Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 738,
+          "reason": "流式模型请求失败（0 ms）：HTTP/1.1 header parser received no bytes",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 57,
+        "timestamp": "2026-11-13T04:52:26.108954Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 769,
+          "reason": "流式模型请求失败（0 ms）：HTTP/1.1 header parser received no bytes",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "duplicateStartedCallIdentities": [],
+    "toolsStartedAfterFailedMainRequestBeforeNextCompletedResponse": [],
+    "interpretation": "工具身份按 runId/agentId/callId 检查；没有重复身份不能证明模型以新 callId 发出的语义重复操作不存在。失败响应后的工具调用需单独核查是否为系统核验操作。"
+  }
+]

@@ -1,0 +1,38 @@
+{"status": "ready", "port": 61525, "upstream": "<local-model-endpoint>"}
+{"status": "reset"}
+{"status": "config", "config": {"mode": "mid-eof", "every": 3, "stallMs": 180000, "maxRequests": 200}}
+{"status": "complete", "requestIndex": 0, "mode": "none", "chunks": 1, "bytes": 1644, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 1181, "spendEstimate": null}
+{"status": "complete", "requestIndex": 0, "mode": "none", "chunks": 8, "bytes": 1951, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 10844, "spendEstimate": null}
+{"status": "injected", "requestIndex": 2, "mode": "mid-eof", "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 1, "mode": "none", "chunks": 3, "bytes": 780, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 19522, "spendEstimate": null}
+{"status": "complete", "requestIndex": 3, "mode": "none", "chunks": 12, "bytes": 2523, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 13017, "spendEstimate": null}
+{"status": "complete", "requestIndex": 4, "mode": "none", "chunks": 13, "bytes": 2738, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 11307, "spendEstimate": null}
+{"status": "injected", "requestIndex": 5, "mode": "mid-eof", "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 6, "mode": "none", "chunks": 23, "bytes": 4437, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 9371, "spendEstimate": null}
+{"status": "complete", "requestIndex": 7, "mode": "none", "chunks": 41, "bytes": 7709, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 12424, "spendEstimate": null}
+{"status": "injected", "requestIndex": 8, "mode": "mid-eof", "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 9, "mode": "none", "chunks": 81, "bytes": 15225, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 21697, "spendEstimate": null}
+{"status": "reset"}
+{"status": "config", "config": {"mode": "mid-eof", "every": 3, "stallMs": 180000, "maxRequests": 200}}
+{"status": "complete", "requestIndex": 0, "mode": "none", "chunks": 15, "bytes": 3112, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 20603, "spendEstimate": null}
+{"status": "complete", "requestIndex": 1, "mode": "none", "chunks": 21, "bytes": 4285, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 9243, "spendEstimate": null}
+{"status": "injected", "requestIndex": 2, "mode": "mid-eof", "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 3, "mode": "none", "chunks": 33, "bytes": 6229, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 7683, "spendEstimate": null}
+{"status": "complete", "requestIndex": 4, "mode": "none", "chunks": 70, "bytes": 14087, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 21602, "spendEstimate": null}
+{"status": "injected", "requestIndex": 5, "mode": "mid-eof", "forwardedBytes": 213}
+{"status": "upstream_error", "requestIndex": 6, "errorName": "AbortError", "causeCode": null}
+{"status": "complete", "requestIndex": 7, "mode": "none", "chunks": 86, "bytes": 15751, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 30371, "spendEstimate": null}
+{"status": "injected", "requestIndex": 8, "mode": "mid-eof", "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 9, "mode": "none", "chunks": 116, "bytes": 22217, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 38275, "spendEstimate": null}
+{"status": "reset"}
+{"status": "config", "config": {"mode": "mid-eof", "every": 3, "stallMs": 180000, "maxRequests": 200}}
+{"status": "upstream_error", "requestIndex": 0, "errorName": "AbortError", "causeCode": null}
+{"status": "complete", "requestIndex": 1, "mode": "none", "chunks": 16, "bytes": 3371, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 8238, "spendEstimate": null}
+{"status": "injected", "requestIndex": 2, "mode": "mid-eof", "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 3, "mode": "none", "chunks": 27, "bytes": 5478, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 9384, "spendEstimate": null}
+{"status": "complete", "requestIndex": 4, "mode": "none", "chunks": 35, "bytes": 6964, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 12167, "spendEstimate": null}
+{"status": "injected", "requestIndex": 5, "mode": "mid-eof", "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 6, "mode": "none", "chunks": 13, "bytes": 2521, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 12625, "spendEstimate": null}
+{"status": "complete", "requestIndex": 7, "mode": "none", "chunks": 73, "bytes": 13307, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 14873, "spendEstimate": null}
+{"status": "injected", "requestIndex": 8, "mode": "mid-eof", "forwardedBytes": 213}
+{"status": "complete", "requestIndex": 9, "mode": "none", "chunks": 163, "bytes": 30176, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 31401, "spendEstimate": null}

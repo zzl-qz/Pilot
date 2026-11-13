@@ -1,0 +1,50 @@
+--- a/src/invoice.js
++++ b/src/invoice.js
+@@ -1,16 +1,14 @@
+ 'use strict';
+ 
+-function money(cents) {
+-  return `¥${(cents / 100).toFixed(2)}`;
+-}
++const { formatCents } = require('./money.js');
+ 
+ function invoiceLines(order) {
+-  return order.items.map((item) => `${item.name} ${money(item.priceCents * item.quantity)}`);
++  return order.items.map((item) => `${item.name} ${formatCents(item.priceCents * item.quantity)}`);
+ }
+ 
+ function invoiceTotal(order) {
+   const total = order.items.reduce((sum, item) => sum + item.priceCents * item.quantity, 0);
+-  return money(total);
++  return formatCents(total);
+ }
+ 
+ module.exports = { invoiceLines, invoiceTotal };
+--- a/src/money.js
++++ b/src/money.js
+@@ -0,0 +1,7 @@
++'use strict';
++
++function formatCents(cents) {
++  return `¥${(cents / 100).toFixed(2)}`;
++}
++
++module.exports = { formatCents };
+--- a/src/receipt.js
++++ b/src/receipt.js
+@@ -1,13 +1,10 @@
+ 'use strict';
+ 
+-// 与 invoice.js 里重复的一份金额格式化，且规则不一致（没有千分位、负数处理不同）。
+-function money(cents) {
+-  return `￥${cents / 100}`;
+-}
++const { formatCents } = require('./money.js');
+ 
+ function receiptTotal(order) {
+   const total = order.items.reduce((sum, item) => sum + item.priceCents * item.quantity, 0);
+-  return money(total);
++  return formatCents(total);
+ }
+ 
+ module.exports = { receiptTotal };

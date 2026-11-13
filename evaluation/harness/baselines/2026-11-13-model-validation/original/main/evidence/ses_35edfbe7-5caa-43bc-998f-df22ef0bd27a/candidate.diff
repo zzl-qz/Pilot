@@ -1,0 +1,22 @@
+--- a/src/cursor.js
++++ b/src/cursor.js
+@@ -5,9 +5,17 @@
+  * 游标必须能抵抗列表变化——翻页期间头部插入新项时，下一页不能重复也不能遗漏。
+  */
+ function page(items, cursor, limit) {
+-  const start = cursor ? Number(cursor) : 0;
++  let start = 0;
++  if (cursor) {
++    // 游标是上一页最后一条的 id：按 id 定位续接点，列表头部增删不影响位置
++    const idx = items.findIndex((item) => item.id === cursor);
++    // 游标指向的项已被删除时从头开始，宁可重叠也不遗漏
++    start = idx >= 0 ? idx + 1 : 0;
++  }
+   const slice = items.slice(start, start + limit);
+-  return { items: slice, nextCursor: String(start + limit) };
++  const hasMore = start + slice.length < items.length;
++  const nextCursor = hasMore && slice.length > 0 ? slice[slice.length - 1].id : null;
++  return { items: slice, nextCursor };
+ }
+ 
+ module.exports = { page };

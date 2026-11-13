@@ -1,0 +1,26 @@
+--- a/src/dedupe.js
++++ b/src/dedupe.js
+@@ -5,7 +5,22 @@
+  * Windows 与 macOS 默认大小写不敏感，Linux 敏感，所以必须按平台判断。
+  */
+ function isSamePath(left, right, platform) {
+-  return left === right;
++  // 去掉尾部斜杠（Windows 分隔符为 \，其余为 /）
++  let a = left;
++  let b = right;
++
++  if (platform === 'win32') {
++    while (a.endsWith('\\')) a = a.slice(0, -1);
++    while (b.endsWith('\\')) b = b.slice(0, -1);
++  } else {
++    while (a.endsWith('/')) a = a.slice(0, -1);
++    while (b.endsWith('/')) b = b.slice(0, -1);
++  }
++
++  if (platform === 'win32' || platform === 'darwin') {
++    return a.toLowerCase() === b.toLowerCase();
++  }
++  return a === b;
+ }
+ 
+ module.exports = { isSamePath };

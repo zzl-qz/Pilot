@@ -1,0 +1,42 @@
+{
+  "jobs": [
+    {
+      "task": "wait-condition",
+      "attempt": 1
+    },
+    {
+      "task": "long-chain",
+      "attempt": 1
+    },
+    {
+      "task": "wait-condition",
+      "attempt": 2
+    },
+    {
+      "task": "long-chain",
+      "attempt": 2
+    },
+    {
+      "task": "wait-condition",
+      "attempt": 3
+    },
+    {
+      "task": "long-chain",
+      "attempt": 3
+    }
+  ],
+  "context": {
+    "model": "Qwen3.8-Flash-Next-oQ4e-mtp",
+    "modelConfigHash": "9ee85535a939c001d6b01857a0f01c42735ef81b76a3b6cd3203f38ea188e7c3",
+    "schemaVersion": 2,
+    "promptHash": "bfd0cdab2e7fd3d84ee09d2ea9d7fe6bf1ec2cb86f6bab5846374bd4324617c7",
+    "runtimeHash": "0c87fd2469a0588a5109f4077516d6a90d5e4ab600ade2d3dc5e19c36f2e30d7",
+    "environmentVersion": "4c3799cedb69093545b698a435e323a49926762887501df17adfaaef840458e0",
+    "environment": {
+      "label": "macos-arm64-java25-node22-concurrency4-total900-idle600-direct1000",
+      "platform": "darwin",
+      "arch": "arm64",
+      "node": "v22.23.1"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "sessionId": "ses_53541679-c976-4d66-9133-f88a629a786a",
+  "taskId": "steer-mid-run",
+  "attempt": 2,
+  "terminalStatus": "COMPLETED",
+  "success": true,
+  "historyEvents": 61,
+  "historySha256": "211335bfd034e312478866b1cd970456ba830df7847d142a5d26c6853d5eac00",
+  "candidateDiffSha256": "2c3a07419ce9ec374c0d48f44e1c5f76656952f345795276352653f55dd0b172",
+  "changedFiles": [
+    {
+      "path": "src/outline.js",
+      "beforeSha256": "6332dc1028afd738492d35254cc576effb130a037cdd0de1907a67bf4a978345",
+      "afterSha256": "53787f37323ce45412b0f78ec5b83fd947e7c31f6e444cab7ca3e068c7836f78"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

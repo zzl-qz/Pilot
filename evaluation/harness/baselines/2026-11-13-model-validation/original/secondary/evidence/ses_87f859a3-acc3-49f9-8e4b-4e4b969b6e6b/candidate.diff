@@ -1,0 +1,14 @@
+--- a/src/pricing.js
++++ b/src/pricing.js
+@@ -0,0 +1,11 @@
++'use strict';
++
++// 计算一个条目的总价（分）：单价 * 数量。
++// 数量为 0（或缺省视为 0）时应返回 0。
++function priceCents(item) {
++  const price = Number(item.priceCents) || 0;
++  const quantity = Number(item.quantity) || 0;
++  return price * quantity;
++}
++
++module.exports = { priceCents };

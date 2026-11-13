@@ -1,0 +1,62 @@
+[
+  {
+    "sessionId": "ses_349c5767-202d-43a8-ba28-3d5672729a08",
+    "taskId": "fix-failing-unit-test",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 66,
+    "historySha256": "0b11c9449cd2b6b40c58d72dc9b2ac844242ab38b9da7afd1ffe58b357fe2ba8",
+    "candidateDiffSha256": "00c8b477b2715a701799ab5bdce19417a862d960a78c69dffcfc50e9d20758ae",
+    "changedFiles": [
+      {
+        "path": "src/pricing.js",
+        "beforeSha256": "7b4b234db70f3066fea8d8b935f8fbc75343831f7679576f4181524dc696447a",
+        "afterSha256": "5bf162b929b14434e267e542d25da34f429f2d9bca1ea7ea0b87571c1e5579c3"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_47aaf0c9-2215-4114-af5c-b631e2a75ad2",
+    "taskId": "fix-failing-unit-test",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 73,
+    "historySha256": "eca953a9a87c91692eedb9918fd03a7662df4534ea666a11c5b4cab5a375508d",
+    "candidateDiffSha256": "00c8b477b2715a701799ab5bdce19417a862d960a78c69dffcfc50e9d20758ae",
+    "changedFiles": [
+      {
+        "path": "src/pricing.js",
+        "beforeSha256": "7b4b234db70f3066fea8d8b935f8fbc75343831f7679576f4181524dc696447a",
+        "afterSha256": "5bf162b929b14434e267e542d25da34f429f2d9bca1ea7ea0b87571c1e5579c3"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_044c28e6-24a9-40a5-86c0-9fa835e93f2e",
+    "taskId": "fix-failing-unit-test",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 73,
+    "historySha256": "522097dd3ea859351a7f22de223e2970014ae1ed3c903cf86314affd9d253734",
+    "candidateDiffSha256": "00c8b477b2715a701799ab5bdce19417a862d960a78c69dffcfc50e9d20758ae",
+    "changedFiles": [
+      {
+        "path": "src/pricing.js",
+        "beforeSha256": "7b4b234db70f3066fea8d8b935f8fbc75343831f7679576f4181524dc696447a",
+        "afterSha256": "5bf162b929b14434e267e542d25da34f429f2d9bca1ea7ea0b87571c1e5579c3"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  }
+]

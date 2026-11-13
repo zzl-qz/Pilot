@@ -1,0 +1,20 @@
+{
+  "sessionId": "ses_4931e347-cb72-426e-8b90-f13487d766ea",
+  "taskId": "unstable-sort",
+  "attempt": 2,
+  "terminalStatus": "COMPLETED",
+  "originalRecordedTerminalStatus": "COMPLETED",
+  "afterEvaluationDeadline": false,
+  "success": true,
+  "historyEvents": 46,
+  "historySha256": "4e8e38da253b220d697753a69716932c8171465a97ea8ff8a58de10188ca6d8c",
+  "candidateDiffSha256": "485944d9891192fa4c46825cdd378ceb93dd8ac503cc132c03ac7633c64985fc",
+  "changedFiles": [
+    {
+      "path": "src/ranking.js",
+      "beforeSha256": "59fd3e247a2f05ba268abebcaf90528de61b0c0d6fddaf399b0bf452fb0a8862",
+      "afterSha256": "6b80099e7288a75bbfd89c73a50aebdd8c086acb00a2d062095d73b440bfd1fc"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

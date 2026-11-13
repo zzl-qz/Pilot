@@ -1,0 +1,86 @@
+{
+  "sourceCommit": "43dd5bede739e1dc84ebeddc1345e6ca18849bd6",
+  "trials": [
+    {
+      "attempt": 1,
+      "requestCounterDecreases": [
+        {
+          "previousSequence": 73,
+          "sequence": 76,
+          "from": 11,
+          "to": 10,
+          "phase": "EXECUTING"
+        },
+        {
+          "previousSequence": 101,
+          "sequence": 104,
+          "from": 14,
+          "to": 13,
+          "phase": "EXECUTING"
+        },
+        {
+          "previousSequence": 112,
+          "sequence": 115,
+          "from": 15,
+          "to": 14,
+          "phase": "EXECUTING"
+        }
+      ]
+    },
+    {
+      "attempt": 2,
+      "requestCounterDecreases": [
+        {
+          "previousSequence": 75,
+          "sequence": 78,
+          "from": 11,
+          "to": 10,
+          "phase": "EXECUTING"
+        },
+        {
+          "previousSequence": 95,
+          "sequence": 98,
+          "from": 13,
+          "to": 12,
+          "phase": "EXECUTING"
+        },
+        {
+          "previousSequence": 106,
+          "sequence": 109,
+          "from": 14,
+          "to": 13,
+          "phase": "EXECUTING"
+        }
+      ]
+    },
+    {
+      "attempt": 3,
+      "requestCounterDecreases": [
+        {
+          "previousSequence": 75,
+          "sequence": 78,
+          "from": 11,
+          "to": 10,
+          "phase": "EXECUTING"
+        },
+        {
+          "previousSequence": 86,
+          "sequence": 89,
+          "from": 12,
+          "to": 11,
+          "phase": "EXECUTING"
+        },
+        {
+          "previousSequence": 97,
+          "sequence": 100,
+          "from": 13,
+          "to": 12,
+          "phase": "EXECUTING"
+        }
+      ]
+    }
+  ],
+  "fixCommit": "0a37418",
+  "deterministicRegression": "COMPLETE、CONTINUE、WAIT 三种核验决定均保留核验调用产生的请求及输入输出用量；达到上限后下一真实请求被拒绝。",
+  "limitation": "旧执行状态计数存在回退，不能把旧计数作为精确累计用量；独立 model.request 轨迹保留。"
+}

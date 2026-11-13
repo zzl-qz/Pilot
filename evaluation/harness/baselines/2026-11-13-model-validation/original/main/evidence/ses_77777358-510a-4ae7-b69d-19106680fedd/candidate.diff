@@ -1,0 +1,33 @@
+--- a/src/dedupe.js
++++ b/src/dedupe.js
+@@ -5,7 +5,29 @@
+  * Windows 与 macOS 默认大小写不敏感，Linux 敏感，所以必须按平台判断。
+  */
+ function isSamePath(left, right, platform) {
+-  return left === right;
++  const caseInsensitive = platform === 'win32' || platform === 'darwin';
++  let a = normalizeTrailing(left);
++  let b = normalizeTrailing(right);
++  if (caseInsensitive) {
++    a = a.toLowerCase();
++    b = b.toLowerCase();
++  }
++  return a === b;
++}
++
++/**
++ * 去掉尾部多余的 / 或 \，使 '/repo/a' 与 '/repo/a/' 视为同一路径。
++ * 纯分隔符（如 '/'）和盘符根（如 'C:\'）保持原样，避免变成空串或 'C:'。
++ */
++function normalizeTrailing(path) {
++  let end = path.length;
++  while (end > 0 && (path[end - 1] === '/' || path[end - 1] === '\\')) {
++    end--;
++  }
++  if (end === 0) return path;
++  const trimmed = path.slice(0, end);
++  if (/^[A-Za-z]:$/.test(trimmed)) return path;
++  return trimmed;
+ }
+ 
+ module.exports = { isSamePath };

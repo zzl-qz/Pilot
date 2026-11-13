@@ -1,0 +1,36 @@
+--- a/src/invoice.js
++++ b/src/invoice.js
+@@ -1,8 +1,6 @@
+ 'use strict';
+ 
+-function money(cents) {
+-  return `¥${(cents / 100).toFixed(2)}`;
+-}
++const { formatCents: money } = require('./money.js');
+ 
+ function invoiceLines(order) {
+   return order.items.map((item) => `${item.name} ${money(item.priceCents * item.quantity)}`);
+--- a/src/money.js
++++ b/src/money.js
+@@ -0,0 +1,8 @@
++'use strict';
++
++// invoice 与 receipt 共用的金额格式化：半角 ¥ + 两位小数
++function formatCents(cents) {
++  return `¥${(cents / 100).toFixed(2)}`;
++}
++
++module.exports = { formatCents };
+--- a/src/receipt.js
++++ b/src/receipt.js
+@@ -1,9 +1,6 @@
+ 'use strict';
+ 
+-// 与 invoice.js 里重复的一份金额格式化，且规则不一致（没有千分位、负数处理不同）。
+-function money(cents) {
+-  return `￥${cents / 100}`;
+-}
++const { formatCents: money } = require('./money.js');
+ 
+ function receiptTotal(order) {
+   const total = order.items.reduce((sum, item) => sum + item.priceCents * item.quantity, 0);

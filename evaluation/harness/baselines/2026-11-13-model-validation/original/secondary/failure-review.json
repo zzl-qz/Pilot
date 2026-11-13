@@ -1,0 +1,56 @@
+[
+  {
+    "taskId": "long-file-targeted-edit",
+    "attempt": 1,
+    "sessionId": "ses_5352d543-8d10-4685-84a4-c271c9811925",
+    "originalSuccess": false,
+    "attribution": "固定任务期限内未取得终态；取消后已确认 FINISHED。原评测失败保留，不用事后通过覆盖。",
+    "deadlineSeconds": 720.053,
+    "evaluationInterrupted": false,
+    "postDeadlineLinuxAcceptance": true,
+    "terminalEvents": [
+      {
+        "sequence": 84,
+        "timestamp": "2026-11-13T02:51:42.527700Z",
+        "type": "run.cancelled",
+        "sessionId": "ses_5352d543-8d10-4685-84a4-c271c9811925",
+        "runId": "run_1c43f93a-04f3-4bf8-96e9-534a2f7eedba",
+        "payload": {
+          "reason": "运行已被用户取消。"
+        },
+        "version": 1,
+        "previewId": null,
+        "previewOffset": null
+      }
+    ],
+    "spawnAgentCalls": 0,
+    "modelRequestsObserved": 12
+  },
+  {
+    "taskId": "add-cursor-pagination",
+    "attempt": 2,
+    "sessionId": "ses_947f91dd-100e-49d4-8c01-0b8412f89530",
+    "originalSuccess": false,
+    "attribution": "固定任务期限内未取得终态；取消后已确认 FINISHED。原评测失败保留，不用事后通过覆盖。",
+    "deadlineSeconds": 720.037,
+    "evaluationInterrupted": false,
+    "postDeadlineLinuxAcceptance": false,
+    "terminalEvents": [
+      {
+        "sequence": 149,
+        "timestamp": "2026-11-13T03:17:10.560691Z",
+        "type": "run.cancelled",
+        "sessionId": "ses_947f91dd-100e-49d4-8c01-0b8412f89530",
+        "runId": "run_19c9aab0-ad8e-4dd7-94ee-f4ea74a9b5a2",
+        "payload": {
+          "reason": "运行已被用户取消。"
+        },
+        "version": 1,
+        "previewId": null,
+        "previewOffset": null
+      }
+    ],
+    "spawnAgentCalls": 1,
+    "modelRequestsObserved": 21
+  }
+]

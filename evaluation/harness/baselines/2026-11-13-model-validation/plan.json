@@ -1,0 +1,74 @@
+{
+  "date": "2026-11-13",
+  "sourceCommit": "8496d329d276e4a464a7902f09e55bd21b523dd0",
+  "harnessCommit": "73631d0b5fcdedd9a90b5f71187b07006ba7b3d5",
+  "jarSha256": "54afcbe4a31047c26db798ad2242da7f94f0511904352632d36f4a6a4dfb048a",
+  "modelNames": [
+    "Qwen3.8-Flash-Next-oQ4e-mtp",
+    "Qwen3.8-27B-MTPLX-Optimized-Quality"
+  ],
+  "identityLimit": "模型名称来自请求和端点报告，未独立核验上游权重。",
+  "matrix": {
+    "tasks": "evaluation/harness/tasks.json",
+    "uniqueTasks": 24,
+    "repeat": 3,
+    "runsPerModel": 72,
+    "concurrency": 4,
+    "totalTimeoutSeconds": 900,
+    "idleTimeoutSeconds": 600,
+    "directMaxRequests": 1000,
+    "permissionMode": "AUTO",
+    "completionChecks": true,
+    "browser": false,
+    "skills": false,
+    "multiAgent": false
+  },
+  "scenarios": {
+    "wait-condition": {
+      "repeatPerModel": 3
+    },
+    "long-chain": {
+      "repeatPerModel": 3
+    },
+    "budget-wind": {
+      "repeatPrimaryModel": 3,
+      "requestBudgetPerSegment": 8,
+      "maxSegments": 4
+    },
+    "faults": {
+      "repeatPerModePrimaryModel": 3,
+      "modes": [
+        "mid-eof",
+        "stall",
+        "http-503",
+        "reset"
+      ]
+    }
+  },
+  "restartRecovery": {
+    "repeatMacOS": 3,
+    "deterministicHttpModel": true,
+    "countAsRealModelScore": false
+  },
+  "rules": [
+    "固定构建和提示词；实现修改后另建批次，旧结果不覆盖。",
+    "每次任务使用独立 fixture，外部验收恢复原始测试。",
+    "全过程范围违规按失败记录，文件删除不消除违规。",
+    "超时和失败保留；恢复仅补尚未派发的 attempt。",
+    "主矩阵不同模型分阶段运行，不混合为单个成功率。",
+    "仅调用已授权的本地部署模型；不启动付费云端测试。"
+  ],
+  "preflight": {
+    "main": "普通回复预检成功",
+    "secondary": "普通回复预检成功",
+    "DeepSeek-V4-Flash-4bit": {
+      "httpStatus": 507,
+      "reason": "本地模型服务预计内存超过保护上限；未卸载用户模型或更改内存保护。"
+    }
+  },
+  "platformScope": {
+    "macOS": "实机执行",
+    "Linux": "检查容器是否可用后补针对性自动化回归",
+    "Windows": "无实机；跨平台代码与目录联接测试不能替代实机结论"
+  }
+}

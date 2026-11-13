@@ -1,0 +1,19 @@
+[
+  {
+    "sessionId": "ses_bc0bf4a3-41c6-4264-ba42-1c84780f947f",
+    "taskId": "long-chain",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "externalCodeAcceptance": true,
+    "overallSuccess": false,
+    "reason": "模型主动调用 remember，在明确只允许 src/ 与 test/ 的任务中创建 .pilot/memory-draft.md。不是评测器误计内部自动文件。",
+    "evidenceSequences": [
+      164,
+      165,
+      173
+    ],
+    "patchFailures": "首次缺少 Begin Patch；随后定位行不存在，或使用 function key 定位后又要求匹配其前面的注释。工具拒绝后没有部分写入；没有证据表明是中文匹配缺陷。",
+    "disposition": "保留约束遵守失败，不扩大允许范围、不忽略 remember 写入、不改提示词迎合单个样本。",
+    "candidateMemoryPreservedInDiff": true
+  }
+]

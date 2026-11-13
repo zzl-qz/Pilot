@@ -1,0 +1,69 @@
+{
+  "passed": true,
+  "platform": "linux",
+  "arch": "arm64",
+  "launches": 2,
+  "sessions": 2,
+  "assertions": [
+    "two concurrently active sessions",
+    "hard process termination",
+    "durable tool results included on resume",
+    "no repeated completed tool side effects",
+    "independent session resume",
+    "complete terminal diagnostics",
+    "unique persisted event cursors",
+    "SSE disconnect and cursor replay without missing or duplicate events"
+  ],
+  "model": "deterministic local HTTP fixture; not a real-model score",
+  "completionChecks": false,
+  "requests": [
+    {
+      "marker": "A",
+      "recovered": false,
+      "before": false,
+      "after": false
+    },
+    {
+      "marker": "B",
+      "recovered": false,
+      "before": false,
+      "after": false
+    },
+    {
+      "marker": "B",
+      "recovered": false,
+      "before": true,
+      "after": false
+    },
+    {
+      "marker": "A",
+      "recovered": false,
+      "before": true,
+      "after": false
+    },
+    {
+      "marker": "A",
+      "recovered": true,
+      "before": true,
+      "after": false
+    },
+    {
+      "marker": "A",
+      "recovered": true,
+      "before": true,
+      "after": true
+    },
+    {
+      "marker": "B",
+      "recovered": true,
+      "before": true,
+      "after": false
+    },
+    {
+      "marker": "B",
+      "recovered": true,
+      "before": true,
+      "after": true
+    }
+  ]
+}

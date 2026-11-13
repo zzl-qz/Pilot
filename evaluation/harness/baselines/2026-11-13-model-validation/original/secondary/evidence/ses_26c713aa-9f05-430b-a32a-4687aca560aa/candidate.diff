@@ -1,0 +1,65 @@
+--- a/src/csv.js
++++ b/src/csv.js
+@@ -1,8 +1,60 @@
+ 'use strict';
+ 
+-// CSV 解析。当前只做了最朴素的逗号切分，引号里的逗号会切错。
++// CSV 解析，支持引号包裹的字段：
++// - 引号内的逗号与换行属于字段内容，不切分
++// - 双引号 "" 表示字面量引号
++// - 记录以换行结束，字段以逗号分隔（RFC 4180 的常见子集）
+ function parse(text) {
+-  return text.trim().split('\n').map((line) => line.split(','));
++  const rows = [];
++  let row = [];
++  let field = '';
++  let inQuotes = false;
++  let i = 0;
++
++  while (i < text.length) {
++    const ch = text[i];
++
++    if (inQuotes) {
++      if (ch === '"') {
++        if (text[i + 1] === '"') {
++          field += '"';
++          i += 2;
++          continue;
++        }
++        inQuotes = false;
++      } else {
++        field += ch;
++      }
++    } else if (ch === '"') {
++      inQuotes = true;
++    } else if (ch === ',') {
++      row.push(field);
++      field = '';
++    } else if (ch === '\r' && text[i + 1] === '\n') {
++      row.push(field);
++      rows.push(row);
++      row = [];
++      field = '';
++      i += 2;
++      continue;
++    } else if (ch === '\n' || ch === '\r') {
++      row.push(field);
++      rows.push(row);
++      row = [];
++      field = '';
++    } else {
++      field += ch;
++    }
++    i += 1;
++  }
++
++  // 处理结尾没有换行符的最后一行
++  if (field !== '' || row.length > 0) {
++    row.push(field);
++    rows.push(row);
++  }
++
++  return rows;
+ }
+ 
+ module.exports = { parse };

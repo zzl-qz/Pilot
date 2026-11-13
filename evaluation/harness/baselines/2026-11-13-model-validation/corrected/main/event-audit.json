@@ -1,0 +1,65 @@
+{
+  "sessions": [
+    {
+      "sessionId": "ses_21efc909-88a4-4a4c-a55d-f2e746467c08",
+      "taskId": "steer-constraint-hold",
+      "attempt": 1,
+      "modelRequestsObserved": 13,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 13
+      },
+      "firstContextTokens": 12434,
+      "maximumContextTokens": 17938,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_3f5f7226-fa47-491f-a0dc-3815adad23d7",
+      "taskId": "steer-constraint-hold",
+      "attempt": 3,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12434,
+      "maximumContextTokens": 15974,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_c233fe6a-f924-4831-8ca5-80e0a84076a0",
+      "taskId": "steer-constraint-hold",
+      "attempt": 2,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12434,
+      "maximumContextTokens": 15763,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    }
+  ],
+  "modelRequestsObserved": 29,
+  "duplicateModelReportIds": [],
+  "peakConcurrentModelRequestsByReportedIntervals": 3,
+  "topLevelConcurrencyLimit": 3,
+  "spawnAgentSessions": 0,
+  "toolCalls": {
+    "list_dir": 6,
+    "read_file": 9,
+    "apply_patch": 4,
+    "run_command": 7,
+    "edit_file": 3
+  },
+  "modelPurposes": {
+    "main": 29
+  },
+  "interpretation": "并发峰值按请求 startedAt/durationMs 计算；主会话上限由实验组参数给出。multi.enabled=false 只关闭 dispatch_agents；spawn_agent 保持默认可用。输入上下文数为服务估算，不能当成计费 token。"
+}

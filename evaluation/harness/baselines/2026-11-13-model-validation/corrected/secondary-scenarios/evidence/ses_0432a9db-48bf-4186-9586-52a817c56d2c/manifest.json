@@ -1,0 +1,100 @@
+{
+  "sessionId": "ses_0432a9db-48bf-4186-9586-52a817c56d2c",
+  "taskId": "long-chain",
+  "attempt": 1,
+  "terminalStatus": "COMPLETED",
+  "originalRecordedTerminalStatus": "COMPLETED",
+  "afterEvaluationDeadline": false,
+  "success": true,
+  "historyEvents": 190,
+  "historySha256": "e368845caa6734cd6118157c4ecfaaee2b36d24fb1d37eda49032505f9eec6c5",
+  "candidateDiffSha256": "8f5e532d19d203289e318d81b4ecb4b413e16e901e7fffa29e7c8c453da02d43",
+  "changedFiles": [
+    {
+      "path": "src/common.js",
+      "beforeSha256": null,
+      "afterSha256": "fccab21b86573a3fe88df9d0907cfc4ca0d99eaf61c01c6fe56f85924673dc05"
+    },
+    {
+      "path": "src/m01.js",
+      "beforeSha256": "45477156e9d6832f8311e045f0daff9791d69bb0a1cc2a7e5dc23dcf1b40fe0c",
+      "afterSha256": "b17a974a7e142d92648aceb6bbe5724febffb0da2fa999d33f4c112b95eb2d43"
+    },
+    {
+      "path": "src/m02.js",
+      "beforeSha256": "d206148d45cf9c165b4d0e789b0a0e07720701054696a8f4171ec64ad3fa8346",
+      "afterSha256": "3daad0b91bd7fbda01b3a6736d2dc006646053fdea1a424d08c23a998030cdc9"
+    },
+    {
+      "path": "src/m03.js",
+      "beforeSha256": "5bde683a8636be13a92ac5e02822e6e9a2a9ea4361f5dfb4a9237fd35286b779",
+      "afterSha256": "60ce5c94cbff760089a5c56fa7a67a125703b850cbbd03fa3cf92d86573f0800"
+    },
+    {
+      "path": "src/m04.js",
+      "beforeSha256": "f09520fe0da8ad98e624c4eab893c05922ae0df5b088b3d8bcd344b7bbce333a",
+      "afterSha256": "0e0ad6b89414f86c0f8a2740652b9c77762e32de19c579c22980d0886bcd8ade"
+    },
+    {
+      "path": "src/m05.js",
+      "beforeSha256": "5a964041ffcb87105ce6d2e3b81e4d3929b2bcd2a57b914667b61bea995249d9",
+      "afterSha256": "a90c1ba41621c0bb4fd17a0d52aa361b47950f15efa258be3f6e063e49c25b1b"
+    },
+    {
+      "path": "src/m06.js",
+      "beforeSha256": "4ffe1d97b961c8fdf3b672147c6837b52fb233364c7ee0364f678404a5c89362",
+      "afterSha256": "f2c2ea43d31101405ad8b8cbfcd2f0932cd5a7af893ed20239ac10be469d43b1"
+    },
+    {
+      "path": "src/m07.js",
+      "beforeSha256": "941730dfdde2231a6d672c887bc31a183d012c5b7ed399645ab353d51f6f87e6",
+      "afterSha256": "16ebb2d6575ea425ed6acfca7a15ada0b7172cb2bc0e1a5906e1ae190a3a418e"
+    },
+    {
+      "path": "src/m08.js",
+      "beforeSha256": "6357cbc531b9bb459bdc5cab8fda81d1fd20e12651dd5952169778b051842115",
+      "afterSha256": "49eef3abc33f01b7776f4b85f489127ac1a1ba5b04ef1fdeed2010e56dcf9a1a"
+    },
+    {
+      "path": "src/m09.js",
+      "beforeSha256": "c7cef824c2512916e23a90eaddacb44176ec6913f2589c9157c011ca80e10ad2",
+      "afterSha256": "e4383f5dbf06f8d26287dd4a71cf91dd869eedebd48bec4579db9ef0bd1f9adf"
+    },
+    {
+      "path": "src/m10.js",
+      "beforeSha256": "a61acc7612dc61a78d7bdb95949e2fc6c0f97ac007c8090e9e7683ffb16da8f2",
+      "afterSha256": "06c874fe95d495d3c8c90da837de41bd369580696e4d099a1f03573c5c7395f6"
+    },
+    {
+      "path": "src/m11.js",
+      "beforeSha256": "b09f60dc1d09c28d7c517c9dd66fd05e3449d1a80ef1cbad8b7212ce599f33d3",
+      "afterSha256": "0a83088466c22bed370a643c590893dfb54fc4287bfb72aa03e7ab0104cb1dc2"
+    },
+    {
+      "path": "src/m12.js",
+      "beforeSha256": "3b8bdb620ca9b62236f444eb964113ab6c1c05772fd3df623035fc39f1aea4db",
+      "afterSha256": "e984b0114e0416f1139ce44c8e5fac06ad5e0f3566a9f9df7b370a04592f935c"
+    },
+    {
+      "path": "src/m13.js",
+      "beforeSha256": "04e5e23d9ff860f2821212643d7427edcff5ac24a63adcd04b473f57d0803626",
+      "afterSha256": "16f29532389386615d7e14e96bc1e3895dfd949957bc503d8123a1f7d6d6aad8"
+    },
+    {
+      "path": "src/m14.js",
+      "beforeSha256": "42c9085ce0af040183a4e7dde7984174b255edd5387c1924440aec994199bdae",
+      "afterSha256": "b87161f92eadf8e2ae28473cdc368bda4be0c539f2371f7d57996d216b75ee13"
+    },
+    {
+      "path": "src/m15.js",
+      "beforeSha256": "c2e45c384893f8408fc3a04ece426488ec0b5c823b86f67a636e1c9403244974",
+      "afterSha256": "af31c794443b12b8220c7af81345ebcaa6f419976d22b73443a6641c377a9866"
+    },
+    {
+      "path": "src/m16.js",
+      "beforeSha256": "19340afe8b3794ab93ae6cd1881411b6c4fd51455015800934633307857ad7fc",
+      "afterSha256": "4413b17804b3908a6f8b90acb18dac121c9837957652204a72f75810d9180f57"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

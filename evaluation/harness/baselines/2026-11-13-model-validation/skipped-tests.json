@@ -1,0 +1,98 @@
+[
+  {
+    "module": "pilot-core",
+    "class": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+    "test": "bindMountHandlesSpacesCommasAndUnicodeWithoutShellExpansion",
+    "reason": "System property [pilot.test.container.image] does not exist"
+  },
+  {
+    "module": "pilot-core",
+    "class": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+    "test": "timeoutRemovesTheContainerRatherThanOnlyKillingItsClient",
+    "reason": "System property [pilot.test.container.image] does not exist"
+  },
+  {
+    "module": "pilot-core",
+    "class": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+    "test": "cancellationRemovesContainerAndPreservesInterruption",
+    "reason": "System property [pilot.test.container.image] does not exist"
+  },
+  {
+    "module": "pilot-core",
+    "class": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+    "test": "rejectsSymlinkWorkdirOutsideTheMountAndMissingImagesWithoutFallback",
+    "reason": "System property [pilot.test.container.image] does not exist"
+  },
+  {
+    "module": "pilot-core",
+    "class": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+    "test": "scopedCommandRunsPosixWrapperAgainstTheProposalWithoutExecutableBit",
+    "reason": "System property [pilot.test.container.image] does not exist"
+  },
+  {
+    "module": "pilot-core",
+    "class": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+    "test": "argvRetainsEmptyArgumentsWhitespaceAndLiteralShellCharacters",
+    "reason": "System property [pilot.test.container.image] does not exist"
+  },
+  {
+    "module": "pilot-core",
+    "class": "com.pilot.core.exec.ContainerIsolationIntegrationTest",
+    "test": "enforcesFilesystemNetworkEnvironmentAndTemporaryProposalBoundary",
+    "reason": "System property [pilot.test.container.image] does not exist"
+  },
+  {
+    "module": "pilot-core",
+    "class": "com.pilot.core.session.PreviewBenchmarkTest",
+    "test": "compareMergeWindowsAndByteThresholds",
+    "reason": "System property [pilot.events.benchmark] does not exist"
+  },
+  {
+    "module": "pilot-core",
+    "class": "com.pilot.core.tool.RunCommandToolTest",
+    "test": "mapsMvnwToWorkspaceWrapper",
+    "reason": "org.opentest4j.TestAbortedException: Assumption failed: assumption is not true\n\tat org.junit.jupiter.api.Assumptions.throwAssumptionFailed(Assumptions.java:340)\n\tat org.junit.jupiter.api.Assumptions.assumeTrue(Assumptions.java:127)\n\tat org.junit.jupiter.api.Assumptions.assumeTrue(Assumptions.java:74)\n\tat com.pilot.core.tool.RunCommandToolTest.mapsMvnwToWorkspaceWrapper(RunCommandToolTest.java:138)\n"
+  },
+  {
+    "module": "pilot-server",
+    "class": "com.pilot.server.store.EventReplayBenchmarkTest",
+    "test": "replay100000FromSqlite",
+    "reason": "System property [pilot.events.benchmark] does not exist"
+  },
+  {
+    "module": "pilot-server",
+    "class": "com.pilot.server.multi.ProjectBuildIntegrationTest",
+    "test": "npmColdWarmOfflineAndFailingTests",
+    "reason": "System property [pilot.test.project-builds] does not exist"
+  },
+  {
+    "module": "pilot-server",
+    "class": "com.pilot.server.multi.ProjectBuildIntegrationTest",
+    "test": "missingToolchainAndMissingImageReportActionableFailure",
+    "reason": "System property [pilot.test.project-builds] does not exist"
+  },
+  {
+    "module": "pilot-server",
+    "class": "com.pilot.server.multi.ProjectBuildIntegrationTest",
+    "test": "mavenColdWarmOfflineAndFailingTests",
+    "reason": "System property [pilot.test.project-builds] does not exist"
+  },
+  {
+    "module": "pilot-server",
+    "class": "com.pilot.server.session.GoalModelEvaluationTest",
+    "test": "comparesLegacyAndGoalWithIndependentAcceptance",
+    "reason": "Environment variable [PILOT_EVAL_API_KEY] does not exist"
+  },
+  {
+    "module": "pilot-server",
+    "class": "com.pilot.server.session.GoalModelEvaluationTest",
+    "test": "measuresMainAgentGoalPromotionWithoutASeparateRuntimeClassifier",
+    "reason": "Environment variable [PILOT_EVAL_API_KEY] does not exist"
+  },
+  {
+    "module": "pilot-server",
+    "class": "com.pilot.server.controller.SessionEventLoadTest",
+    "test": "history100000WithOneTenAndFiftyReaders",
+    "reason": "System property [pilot.events.benchmark] does not exist"
+  }
+]

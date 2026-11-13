@@ -1,0 +1,179 @@
+[
+  {
+    "sessionId": "ses_b7b41bbe-a56e-43d0-ad54-66426205fa8e",
+    "attempt": 1,
+    "success": true,
+    "terminalStatus": "COMPLETED",
+    "injectedFaults": 2,
+    "injectionModes": {
+      "http-503": 2
+    },
+    "failedModelRequests": [
+      {
+        "id": "42dae0c1-9acf-418d-9171-17686051b01c",
+        "durationMs": 11,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "12134580-fb96-4e54-846d-4e33bd3649f3",
+        "durationMs": 10,
+        "firstTokenMs": null,
+        "purpose": "main"
+      }
+    ],
+    "retryEvents": [
+      {
+        "sequence": 26,
+        "timestamp": "2026-11-13T04:47:42.056459Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 632,
+          "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"fault_guard\",\"code\":\"injected_transient_error\",\"message\":\"injected_transient_error\"}}",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 46,
+        "timestamp": "2026-11-13T04:48:02.907926Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 628,
+          "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"fault_guard\",\"code\":\"injected_transient_error\",\"message\":\"injected_transient_error\"}}",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "duplicateStartedCallIdentities": [],
+    "toolsStartedAfterFailedMainRequestBeforeNextCompletedResponse": [],
+    "interpretation": "工具身份按 runId/agentId/callId 检查；没有重复身份不能证明模型以新 callId 发出的语义重复操作不存在。失败响应后的工具调用需单独核查是否为系统核验操作。"
+  },
+  {
+    "sessionId": "ses_b3403a9a-a495-4978-9f35-ca28d7ce5450",
+    "attempt": 2,
+    "success": true,
+    "terminalStatus": "COMPLETED",
+    "injectedFaults": 3,
+    "injectionModes": {
+      "http-503": 3
+    },
+    "failedModelRequests": [
+      {
+        "id": "27d0198b-ffeb-49c3-8cc7-0300c1d8fe4c",
+        "durationMs": 9,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "ea6f51c3-56a8-4088-8efe-1a6e70de3766",
+        "durationMs": 9,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "bfcdaf4b-e199-446d-a079-64cb7ddf6374",
+        "durationMs": 11,
+        "firstTokenMs": null,
+        "purpose": "main"
+      }
+    ],
+    "retryEvents": [
+      {
+        "sequence": 26,
+        "timestamp": "2026-11-13T04:49:05.388082Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 887,
+          "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"fault_guard\",\"code\":\"injected_transient_error\",\"message\":\"injected_transient_error\"}}",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 46,
+        "timestamp": "2026-11-13T04:49:29.305188Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 796,
+          "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"fault_guard\",\"code\":\"injected_transient_error\",\"message\":\"injected_transient_error\"}}",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 65,
+        "timestamp": "2026-11-13T04:49:57.096671Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 737,
+          "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"fault_guard\",\"code\":\"injected_transient_error\",\"message\":\"injected_transient_error\"}}",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "duplicateStartedCallIdentities": [],
+    "toolsStartedAfterFailedMainRequestBeforeNextCompletedResponse": [],
+    "interpretation": "工具身份按 runId/agentId/callId 检查；没有重复身份不能证明模型以新 callId 发出的语义重复操作不存在。失败响应后的工具调用需单独核查是否为系统核验操作。"
+  },
+  {
+    "sessionId": "ses_bdf40dfc-f6a5-4297-8c49-aa0332737c84",
+    "attempt": 3,
+    "success": true,
+    "terminalStatus": "COMPLETED",
+    "injectedFaults": 2,
+    "injectionModes": {
+      "http-503": 2
+    },
+    "failedModelRequests": [
+      {
+        "id": "94eb58a5-d09b-4cc9-b0b4-13c7248bebb5",
+        "durationMs": 9,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "b4cfe099-e620-4e2b-aaa4-e5bcb18460e8",
+        "durationMs": 9,
+        "firstTokenMs": null,
+        "purpose": "main"
+      }
+    ],
+    "retryEvents": [
+      {
+        "sequence": 26,
+        "timestamp": "2026-11-13T04:50:56.296826Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 931,
+          "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"fault_guard\",\"code\":\"injected_transient_error\",\"message\":\"injected_transient_error\"}}",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 46,
+        "timestamp": "2026-11-13T04:51:19.290937Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 504,
+          "reason": "模型接口返回 HTTP 503：{\"error\":{\"type\":\"fault_guard\",\"code\":\"injected_transient_error\",\"message\":\"injected_transient_error\"}}",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "duplicateStartedCallIdentities": [],
+    "toolsStartedAfterFailedMainRequestBeforeNextCompletedResponse": [],
+    "interpretation": "工具身份按 runId/agentId/callId 检查；没有重复身份不能证明模型以新 callId 发出的语义重复操作不存在。失败响应后的工具调用需单独核查是否为系统核验操作。"
+  }
+]

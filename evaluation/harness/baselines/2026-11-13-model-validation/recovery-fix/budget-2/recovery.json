@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 2,
+  "model": "Qwen3.8-Flash-Next-oQ4e-mtp",
+  "requestLimitPerSegment": 8,
+  "maxSegments": 8,
+  "maxSteps": 64,
+  "sourceCommit": "8dc383bac7d4f57a8d98a59b50c541580f882a8d",
+  "context": {
+    "model": "Qwen3.8-Flash-Next-oQ4e-mtp",
+    "modelConfigHash": "9ee85535a939c001d6b01857a0f01c42735ef81b76a3b6cd3203f38ea188e7c3",
+    "schemaVersion": 2,
+    "promptHash": "0724eb69930efb99ceddc5558a6af65c6c9f13b9dc9992564c528012c58b81e8",
+    "runtimeHash": "07b6f8fd0567c32bb1c18e58f7d8b881dd7733c423b8778e3c312e54a772417b",
+    "environmentVersion": "2970a1700e6a7f290abbfdcacaefad9a04742b024f9acde783056b2fe613b659",
+    "environment": {
+      "label": "macos-arm64-java25-node22-budget8-maxsteps64-maxsegments8-concurrency3",
+      "platform": "darwin",
+      "arch": "arm64",
+      "node": "v22.23.1"
+    }
+  },
+  "segments": [
+    {
+      "segment": 1,
+      "progressLedger": {
+        "raw": "{\n  \"done\": [\"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\"],\n  \"remaining\": [\"21\", \"22\", \"23\", \"24\", \"25\", \"26\", \"27\", \"28\", \"29\", \"30\", \"31\", \"32\", \"33\", \"34\", \"35\", \"36\", \"37\", \"38\", \"39\", \"40\"]\n}\n",
+        "sha256": "2bb4a667d79be976824b57a2a061e57ea278a2476b68f0bcb88b6b9095490499"
+      },
+      "terminalStatus": "FAILED",
+      "originalTrialSuccess": false,
+      "acceptancePassed": true,
+      "modelRequests": 9,
+      "outputCount": 20,
+      "budgetStopObserved": true,
+      "outputs": {
+        "item-01.json": "ecd1badacf07944fab7fec6be74d66e0b55e6b49de737d9770fdcc8c1424b69f",
+        "item-02.json": "b38a0118339f1cfd1a0e747f5d47c0e3e8f8fbabd8cb72489100f1bb5df6e04c",
+        "item-03.json": "37e4436c7345c2bc96102812f2b0e9b12b280a313c8f47f3f1212f3f24c98d4b",
+        "item-04.json": "0f45062615f4a814619eed627ec1edaac95af7f91c759df83c00b4f0350382cf",
+        "item-05.json": "191405c3922474d544e9e1df065185e2ab5a7095c88716e94afd56693a14dc66",
+        "item-06.json": "600e11aad6eaf199278daa54c6d49787eb26d22479b42c8fcf6eae551605f35b",
+        "item-07.json": "1ed830df0a861dc0b5a57d32a3135426ecccdacfd7d09b7f0aba7141b4d22c72",
+        "item-08.json": "42655fa86b445efd198fcbee86211e8a8d18afaec5c76c6ad993ee0b77c0b715",
+        "item-09.json": "3d1c01538b66557467064bdfeed8b126d46f527594854665ae25d25dc52d45c2",
+        "item-10.json": "6c54d25000b8d22790651d5d1596ebc4a4fb71faaeeb4fd0b036547e8388547a",
+        "item-11.json": "2e0702a236f14a2adbdee3f59a18db8803475c48f7fd64f07c5647ffe6159d53",
+        "item-12.json": "0fc00d5bfaa0061bb3ad8b371e2c5b6486776468b63381c4fbf7c12a1313ecea",
+        "item-13.json": "7cff4dbfd8e97cb18fd37e909b646ef69c21d7909373130692534f0760b44c59",
+        "item-14.json": "9fb54eb27141d2ea533603d141bd2d079faa012b92387120c865ef5c878bf97f",
+        "item-15.json": "429d58bb6247aec7c1e39ad815757b27c42703aa9cab57b2e11f985c9fdc37ac",
+        "item-16.json": "d20b764720fe207194ba8d315f87278be817004265da32b0fa147ab1f5b0b03a",
+        "item-17.json": "21e48b68856386715fdaefc13dbdb2f47d7d73f10ea8a891811d7d80971c1ffd",
+        "item-18.json": "4fe37041a6cea5eaa9f6e9ab8baeed6663eb714ff4c5276e4ddd867137e47663",
+        "item-19.json": "952a1302385ee6f42faed64c8a63188606ed1ab3240ab18594a1179f9268b2c6",
+        "item-20.json": "7d19e40477af5ada3de3d06c504064ea229cdd284b29f8a9e0c730bfcc81abd1"
+      }
+    },
+    {
+      "segment": 2,
+      "progressLedger": {
+        "raw": "{\n  \"done\": [\"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\", \"24\", \"25\", \"26\", \"27\", \"28\", \"29\", \"30\", \"31\", \"32\", \"33\", \"34\", \"35\", \"36\", \"37\", \"38\", \"39\", \"40\"],\n  \"remaining\": []\n}\n",
+        "sha256": "841a3febd57edffbf5ed71727cf3d8e64f52aa64245c9a516beb34ca0a81ab41"
+      },
+      "terminalStatus": "COMPLETED",
+      "seconds": 621.017,
+      "modelRequests": 8,
+      "budgetStopObserved": true,
+      "outputCount": 40,
+      "previouslyWrittenFilesChanged": [],
+      "outputs": {
+        "item-01.json": "ecd1badacf07944fab7fec6be74d66e0b55e6b49de737d9770fdcc8c1424b69f",
+        "item-02.json": "b38a0118339f1cfd1a0e747f5d47c0e3e8f8fbabd8cb72489100f1bb5df6e04c",
+        "item-03.json": "37e4436c7345c2bc96102812f2b0e9b12b280a313c8f47f3f1212f3f24c98d4b",
+        "item-04.json": "0f45062615f4a814619eed627ec1edaac95af7f91c759df83c00b4f0350382cf",
+        "item-05.json": "191405c3922474d544e9e1df065185e2ab5a7095c88716e94afd56693a14dc66",
+        "item-06.json": "600e11aad6eaf199278daa54c6d49787eb26d22479b42c8fcf6eae551605f35b",
+        "item-07.json": "1ed830df0a861dc0b5a57d32a3135426ecccdacfd7d09b7f0aba7141b4d22c72",
+        "item-08.json": "42655fa86b445efd198fcbee86211e8a8d18afaec5c76c6ad993ee0b77c0b715",
+        "item-09.json": "3d1c01538b66557467064bdfeed8b126d46f527594854665ae25d25dc52d45c2",
+        "item-10.json": "6c54d25000b8d22790651d5d1596ebc4a4fb71faaeeb4fd0b036547e8388547a",
+        "item-11.json": "2e0702a236f14a2adbdee3f59a18db8803475c48f7fd64f07c5647ffe6159d53",
+        "item-12.json": "0fc00d5bfaa0061bb3ad8b371e2c5b6486776468b63381c4fbf7c12a1313ecea",
+        "item-13.json": "7cff4dbfd8e97cb18fd37e909b646ef69c21d7909373130692534f0760b44c59",
+        "item-14.json": "9fb54eb27141d2ea533603d141bd2d079faa012b92387120c865ef5c878bf97f",
+        "item-15.json": "429d58bb6247aec7c1e39ad815757b27c42703aa9cab57b2e11f985c9fdc37ac",
+        "item-16.json": "d20b764720fe207194ba8d315f87278be817004265da32b0fa147ab1f5b0b03a",
+        "item-17.json": "21e48b68856386715fdaefc13dbdb2f47d7d73f10ea8a891811d7d80971c1ffd",
+        "item-18.json": "4fe37041a6cea5eaa9f6e9ab8baeed6663eb714ff4c5276e4ddd867137e47663",
+        "item-19.json": "952a1302385ee6f42faed64c8a63188606ed1ab3240ab18594a1179f9268b2c6",
+        "item-20.json": "7d19e40477af5ada3de3d06c504064ea229cdd284b29f8a9e0c730bfcc81abd1",
+        "item-21.json": "f2dc49707028881b5258cefcdf5c9409bac401246fe3f6227e52f64dbcad6765",
+        "item-22.json": "5eb523c6fd463613c155c7cd267a0aa8704b4dab0dc086e8d7af2aaee3960744",
+        "item-23.json": "5067dca1bd1b91ea4d5595d5aa980d807609f46137c19d5379a637214a217c0c",
+        "item-24.json": "5191a46b0d64df8a942ceb47fb0662117b612cd7ba3c20f64e0ac25f1ac2da7a",
+        "item-25.json": "cf42be1ac27789a37b82bb246bee92472f995d7fb01568cc63407845bae11819",
+        "item-26.json": "6cdf2f6c46c8c99110019d50934d8399f861c32585e5fe14efb94dcfbfe184d2",
+        "item-27.json": "516acc82dac4252722efbe878a2f9da5ae1586a371dfc790dd2af4e38cf5d130",
+        "item-28.json": "52d4ca9d34471d8a3a24897861e7eeed33aba1db12562d7f78a1201803f2ea04",
+        "item-29.json": "7afa6d362241fec6f4dafb04fa8602c584b298566139eea7febd4a9f58af1b49",
+        "item-30.json": "6ce201e6437a88c68358a8adc0ea20e188872af24f0dfff0fcb6a3340ba3cf37",
+        "item-31.json": "f0eff5ea6c5bee50406def67a1f7cbe145247d79d6375c19b8feb1d3cc725076",
+        "item-32.json": "637ebcb7fc64b9c394d835e2c66ef933b7e67232b2e738e99800fced4b573105",
+        "item-33.json": "12cea339daa52f1c51fb851099cfda633db976900ef76cb7fae5152f690656a7",
+        "item-34.json": "cb75e2eee743fb0e02ea1a73074b9b253e9bb49f20ef749c0e79d5494f5968ef",
+        "item-35.json": "b6ff3209806d9d56ef5aca00310646ce81a51e9e141abc6cb21516c0b13965a4",
+        "item-36.json": "55f5de704671af967d1805571f793d6bac3e545fe579eafdd6981220c1ce7cbc",
+        "item-37.json": "2051bfc7d2e5f37ed5d79badabf6a3827e4b8ed44b318bd66cf81f4991e09290",
+        "item-38.json": "82210160063263352266830948a1855b8975b3dc98991fb487da06df6ee4e5db",
+        "item-39.json": "928c270cb5b0a6fbe5da3a841a90588a8e5c9249c81edfd3ddaf18bc154bb35b",
+        "item-40.json": "0051871eef6292380c767048f4602d6ee7e8131972a1e301b6e2309d18d84df4"
+      },
+      "acceptance": {
+        "ran": true,
+        "ok": true,
+        "detail": "node --test → exit 0（0.1s）"
+      }
+    }
+  ],
+  "completed": true,
+  "budgetStopObserved": true,
+  "sessionId": "ses_898db20d-a94c-4448-bf02-7fcff18cd5d6",
+  "initialBoundaryAcceptancePassed": true,
+  "finalAcceptance": {
+    "ran": true,
+    "ok": true,
+    "detail": "node --test → exit 0（0.1s）"
+  },
+  "allFortyItemsCompleted": true,
+  "allBoundariesHaveValidLedger": true,
+  "recoveryPassed": true,
+  "originalBoundaryResultPreserved": true
+}

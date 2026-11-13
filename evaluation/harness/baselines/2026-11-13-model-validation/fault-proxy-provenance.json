@@ -1,0 +1,21 @@
+{
+  "experimentProxySourceCommit": "7b552ac",
+  "experimentProxySha256": "784b01fd7f51a49a2da50a1ac8ff06ef914922d0695515b54cfa3fecb338579c",
+  "windowAccountingFixCommit": "f26338c",
+  "currentProxySha256": "64ec402cd15248ceb4cc46434a56df7cb55947e56aa1ccd3dc09c7b6b95020aa",
+  "experimentProxyWasNotChangedDuringTrials": true,
+  "observedIssue": "Background capability probes may cross a reset boundary. Initial proxy request/usage counts are not strictly attributable to the evaluated session; reset injection counts can also exceed observed main-session retries.",
+  "evidencePolicy": "Preserve raw proxy counts. Verify coverage using each session failed model requests, retry reasons and independent acceptance. Do not infer per-task cost from global proxy usage.",
+  "fixedBehavior": "In-flight requests retain their starting window and fault configuration. Late usage still contributes to lifetime budget protection but not to the next trial.",
+  "regressionValidation": {
+    "beforeFix": {
+      "tests": 26,
+      "failed": 2
+    },
+    "atWindowFixMacOSHarnessPassed": 132,
+    "atWindowFixLinuxHarnessPassed": 132,
+    "finalMacOSHarnessPassed": 135,
+    "finalLinuxHarnessPassed": 135
+  },
+  "proxyLogRedaction": "Only the ready upstream address is replaced by <local-model-endpoint>."
+}

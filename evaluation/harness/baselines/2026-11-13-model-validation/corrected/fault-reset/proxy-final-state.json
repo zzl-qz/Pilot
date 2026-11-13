@@ -1,0 +1,55 @@
+{
+  "requests": 14,
+  "lifetimeRequests": 35,
+  "lifetimeUsage": {
+    "observedRequests": 0,
+    "requestsWithoutUsage": 25,
+    "inputTokens": 0,
+    "outputTokens": 0
+  },
+  "lifetimeSpendEstimate": null,
+  "injectedRequests": 4,
+  "injected": [
+    {
+      "index": 2,
+      "mode": "reset",
+      "at": "2026-11-13T04:51:50.126Z"
+    },
+    {
+      "index": 5,
+      "mode": "reset",
+      "at": "2026-11-13T04:52:04.477Z"
+    },
+    {
+      "index": 8,
+      "mode": "reset",
+      "at": "2026-11-13T04:52:26.093Z"
+    },
+    {
+      "index": 11,
+      "mode": "reset",
+      "at": "2026-11-13T04:52:34.755Z"
+    }
+  ],
+  "faultsByMode": {
+    "reset": 4
+  },
+  "usage": {
+    "observedRequests": 0,
+    "requestsWithoutUsage": 10,
+    "inputTokens": 0,
+    "outputTokens": 0
+  },
+  "spendEstimate": null,
+  "maxQuota": 0,
+  "stopped": false,
+  "config": {
+    "mode": "reset",
+    "every": 3,
+    "stallMs": 180000,
+    "maxRequests": 200,
+    "maxQuota": 0,
+    "inputQuotaPerMillion": 0,
+    "outputQuotaPerMillion": 0
+  }
+}

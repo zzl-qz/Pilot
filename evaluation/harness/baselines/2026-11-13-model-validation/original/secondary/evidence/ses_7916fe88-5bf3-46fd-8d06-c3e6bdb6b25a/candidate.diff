@@ -1,0 +1,15 @@
+--- a/src/pricing.js
++++ b/src/pricing.js
+@@ -0,0 +1,12 @@
++'use strict';
++
++/**
++ * 计算一个账单条目的金额（单位：分）。
++ * @param {{ priceCents: number, quantity: number }} item
++ * @returns {number}
++ */
++function priceCents(item) {
++  return item.priceCents * item.quantity;
++}
++
++module.exports = { priceCents };

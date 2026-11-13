@@ -1,0 +1,1447 @@
+[
+  {
+    "sessionId": "ses_fc0d8e07-2282-40e2-a313-f9a5fffed218",
+    "taskId": "fix-failing-unit-test",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "6dd15b0e778c28454c217eadfebd487a690d57e91441746b613df6dfb4abdcc1",
+    "candidateDiffSha256": "b2f571ac1cfaed2cdbebf6bdbb4155508023d1cf8fec9d03f838c529b7cd86b3",
+    "changedFiles": [
+      {
+        "path": "src/pricing.js",
+        "beforeSha256": "7b4b234db70f3066fea8d8b935f8fbc75343831f7679576f4181524dc696447a",
+        "afterSha256": "f9da76ba9d5810bdc674b7ec15d5fee40f41dea6c9a06df2ea1166ad507dec79"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_b966b204-fa37-4f7a-b8dd-0943e0301bcb",
+    "taskId": "unstable-sort",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 46,
+    "historySha256": "28c4a1706b31eb821831fad45c68b61f7a470b9b5731b16a899211bcb24f786e",
+    "candidateDiffSha256": "82ef660ead2b7d132aa636009932508e3b4d1f6228831332af2c56bba5aeb737",
+    "changedFiles": [
+      {
+        "path": "src/ranking.js",
+        "beforeSha256": "59fd3e247a2f05ba268abebcaf90528de61b0c0d6fddaf399b0bf452fb0a8862",
+        "afterSha256": "9b5aef9a8d82f4dfdb69ec4b5d74e6e63bd0f690bf185665a4fe93243b7ffdbc"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_cdb32c0c-d099-44b1-aee4-f0cad62eb8c0",
+    "taskId": "add-idempotency",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "bf37d4752d1f298347241ffcd1dc3e45ea68fe283673f24bd24c8d84459febc2",
+    "candidateDiffSha256": "a91914bf718eccc7301eb82e4969807e36b3046f437980775110000ca3aeb804",
+    "changedFiles": [
+      {
+        "path": "src/charges.js",
+        "beforeSha256": "3b734abadf94bef842caea7cf882258106157db44955858a49ae7bd6db491b0e",
+        "afterSha256": "c0edb8af80d497ce8634b3cde3537872757707ad23e75db4b7dd3b490e907e3e"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_e3d563c2-fd7a-4322-a694-8bb6c829234c",
+    "taskId": "rename-across-files",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 52,
+    "historySha256": "a965e8a9dc73b1fe0b5434e7ec2148d135b932079a6a763865053d796d366b74",
+    "candidateDiffSha256": "64bd2b859a96527208755d2e101e757f7e28477fb23baef821424b006b1cc5eb",
+    "changedFiles": [
+      {
+        "path": "src/greeting.js",
+        "beforeSha256": "b924736d1e9958b98ba47dba80893a471d548a2c87b28b7a3e0c74c22dbea9d0",
+        "afterSha256": "a04e4bb3c3c8fa6b736dbbaabfebe06a5df39df298060cbb5434fc4c24a87be7"
+      },
+      {
+        "path": "src/report.js",
+        "beforeSha256": "1b73efd8806c28befaf5eb0304a1fa25c9c4ec2327dfab519fe749f09da18496",
+        "afterSha256": "33b8bdab9b9879801b91d2070d7468dc07d953fdfe40eb52bcf1c7313099a187"
+      },
+      {
+        "path": "src/userService.js",
+        "beforeSha256": "ef90710d57877279e5881f2fba98d8ca1d5672a5a5967a6c37172499bf9a60fe",
+        "afterSha256": "1e87b41c84c25236fd866db97f7f916e2ae0de4a50aad8474c186ddbc77fc514"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_e6badab2-2bb3-4f5f-9131-6e3833f8acbc",
+    "taskId": "case-insensitive-path",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 46,
+    "historySha256": "8e68258fc05c9b0a02d051e02d76c2460e453df3ea6d791baa3e3ffba9261f9b",
+    "candidateDiffSha256": "daf10628007589e97fee8f965c7091242f0e6078789b7882704be037bd2a6287",
+    "changedFiles": [
+      {
+        "path": "src/dedupe.js",
+        "beforeSha256": "ea88996cd6446e9680d1c8bb3131b9770f044d5e7325bd13c7a156115e453770",
+        "afterSha256": "125730578a4464f0ba6de5b2ab65177adc7e5b73b0c0bb20a47e632e517856be"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_ce04103c-e376-4c16-98ef-871b8022fafc",
+    "taskId": "frontend-form-a11y",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 55,
+    "historySha256": "ffe5e440351ca9e7b258cc734b4d25ff7bfcc9068f33797f97f053275b9c44d9",
+    "candidateDiffSha256": "53c4cf759aabb43da83ff9ce08ada5e9e02ff1c3679924b5d137aac13caa1e03",
+    "changedFiles": [
+      {
+        "path": "src/form.js",
+        "beforeSha256": "8fbe6853a21eb69dade84d8f70c7114a6dfdd90018ad79723cfac48bfeb7fe42",
+        "afterSha256": "4e3c4e3b6df9cedc067862dacee03baf387bb5667ee52e874d9ac76c5e004c6f"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_0dffeaef-e95d-47b6-8a82-940acff34047",
+    "taskId": "fix-failing-unit-test",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "5d3e6e8cea87f6429e1e82fb936dd5bad3ff28aeca5f35a9a4c9591113f3c763",
+    "candidateDiffSha256": "b2f571ac1cfaed2cdbebf6bdbb4155508023d1cf8fec9d03f838c529b7cd86b3",
+    "changedFiles": [
+      {
+        "path": "src/pricing.js",
+        "beforeSha256": "7b4b234db70f3066fea8d8b935f8fbc75343831f7679576f4181524dc696447a",
+        "afterSha256": "f9da76ba9d5810bdc674b7ec15d5fee40f41dea6c9a06df2ea1166ad507dec79"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_b04c8932-91ab-4841-b3df-b22543e12622",
+    "taskId": "unstable-sort",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 46,
+    "historySha256": "c75b76de4f66c3835275b36e3daa46946a8cf1b27829f9a714e8aa054e289812",
+    "candidateDiffSha256": "82ef660ead2b7d132aa636009932508e3b4d1f6228831332af2c56bba5aeb737",
+    "changedFiles": [
+      {
+        "path": "src/ranking.js",
+        "beforeSha256": "59fd3e247a2f05ba268abebcaf90528de61b0c0d6fddaf399b0bf452fb0a8862",
+        "afterSha256": "9b5aef9a8d82f4dfdb69ec4b5d74e6e63bd0f690bf185665a4fe93243b7ffdbc"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_d09bae3f-c04e-4f14-9a54-56baea02c6ff",
+    "taskId": "add-idempotency",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "c0225cf818dde210fee1f90cf41063cf75feeb1a8136352dce82ac2f3245b91b",
+    "candidateDiffSha256": "a91914bf718eccc7301eb82e4969807e36b3046f437980775110000ca3aeb804",
+    "changedFiles": [
+      {
+        "path": "src/charges.js",
+        "beforeSha256": "3b734abadf94bef842caea7cf882258106157db44955858a49ae7bd6db491b0e",
+        "afterSha256": "c0edb8af80d497ce8634b3cde3537872757707ad23e75db4b7dd3b490e907e3e"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_89b51f8c-7530-44d3-8137-3fff13efd059",
+    "taskId": "rename-across-files",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 55,
+    "historySha256": "15ed44b45e6c4250911fbc221ed85cad4f37e31c7e9a73d006a167f711c89ffe",
+    "candidateDiffSha256": "64bd2b859a96527208755d2e101e757f7e28477fb23baef821424b006b1cc5eb",
+    "changedFiles": [
+      {
+        "path": "src/greeting.js",
+        "beforeSha256": "b924736d1e9958b98ba47dba80893a471d548a2c87b28b7a3e0c74c22dbea9d0",
+        "afterSha256": "a04e4bb3c3c8fa6b736dbbaabfebe06a5df39df298060cbb5434fc4c24a87be7"
+      },
+      {
+        "path": "src/report.js",
+        "beforeSha256": "1b73efd8806c28befaf5eb0304a1fa25c9c4ec2327dfab519fe749f09da18496",
+        "afterSha256": "33b8bdab9b9879801b91d2070d7468dc07d953fdfe40eb52bcf1c7313099a187"
+      },
+      {
+        "path": "src/userService.js",
+        "beforeSha256": "ef90710d57877279e5881f2fba98d8ca1d5672a5a5967a6c37172499bf9a60fe",
+        "afterSha256": "1e87b41c84c25236fd866db97f7f916e2ae0de4a50aad8474c186ddbc77fc514"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_c70a5449-d9c0-4721-9a7e-0ee5193d679a",
+    "taskId": "case-insensitive-path",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 46,
+    "historySha256": "28c5e009956d2a7f403e01c7d3fe0fb0bda19d9e106ac86c545839151bd2843b",
+    "candidateDiffSha256": "1351affc67906fb154747aefbb6ffa1b55e57f104d608c4f1ca51491e4dd755e",
+    "changedFiles": [
+      {
+        "path": "src/dedupe.js",
+        "beforeSha256": "ea88996cd6446e9680d1c8bb3131b9770f044d5e7325bd13c7a156115e453770",
+        "afterSha256": "fa23d51216a5301cc17698e030e2739e6f26b38b59973750ccd4633617248bf2"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_029d478b-06f0-404b-81ae-7836fe196fa2",
+    "taskId": "frontend-form-a11y",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 55,
+    "historySha256": "fa021cc1a02c2f870375f95904d08165489a0e2c26af910159a790c7d79cda8c",
+    "candidateDiffSha256": "6cecf8b3f16e845136b0670d5fc1b25372306f7bcddac76fa7c4bdb36a75571d",
+    "changedFiles": [
+      {
+        "path": "src/form.js",
+        "beforeSha256": "8fbe6853a21eb69dade84d8f70c7114a6dfdd90018ad79723cfac48bfeb7fe42",
+        "afterSha256": "e1c941d8e6041c05e7288195e1b54aa7edc06fcdff789838f82465d9e0f2d6c2"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_34c3e4da-81b0-4fc0-9cc7-a313ecca1115",
+    "taskId": "fix-failing-unit-test",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "46add0a814155171c5cb0d94ae300c84525e245e7c04f19b3966e083e157e568",
+    "candidateDiffSha256": "b2f571ac1cfaed2cdbebf6bdbb4155508023d1cf8fec9d03f838c529b7cd86b3",
+    "changedFiles": [
+      {
+        "path": "src/pricing.js",
+        "beforeSha256": "7b4b234db70f3066fea8d8b935f8fbc75343831f7679576f4181524dc696447a",
+        "afterSha256": "f9da76ba9d5810bdc674b7ec15d5fee40f41dea6c9a06df2ea1166ad507dec79"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_b47c8c94-843e-4b1b-9c80-d915ae6c2633",
+    "taskId": "unstable-sort",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 53,
+    "historySha256": "c149c780286f1cfcdd6978869eafb0d9fba05dfd875cd4ef609831968a44a408",
+    "candidateDiffSha256": "485944d9891192fa4c46825cdd378ceb93dd8ac503cc132c03ac7633c64985fc",
+    "changedFiles": [
+      {
+        "path": "src/ranking.js",
+        "beforeSha256": "59fd3e247a2f05ba268abebcaf90528de61b0c0d6fddaf399b0bf452fb0a8862",
+        "afterSha256": "6b80099e7288a75bbfd89c73a50aebdd8c086acb00a2d062095d73b440bfd1fc"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_60a23167-fb27-4dc9-b584-81b7ad549e76",
+    "taskId": "add-idempotency",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "3dc6d218f5ed05068fcf88f4701f1e68c145df404e17cbece1082e14606684f2",
+    "candidateDiffSha256": "a91914bf718eccc7301eb82e4969807e36b3046f437980775110000ca3aeb804",
+    "changedFiles": [
+      {
+        "path": "src/charges.js",
+        "beforeSha256": "3b734abadf94bef842caea7cf882258106157db44955858a49ae7bd6db491b0e",
+        "afterSha256": "c0edb8af80d497ce8634b3cde3537872757707ad23e75db4b7dd3b490e907e3e"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_69444c5a-139f-481d-b263-93ca74b83103",
+    "taskId": "rename-across-files",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 57,
+    "historySha256": "c48200fafe06a07abbe9c9bf5760d320b20c4b44e1ec7a06cc68dc0491512dfd",
+    "candidateDiffSha256": "64bd2b859a96527208755d2e101e757f7e28477fb23baef821424b006b1cc5eb",
+    "changedFiles": [
+      {
+        "path": "src/greeting.js",
+        "beforeSha256": "b924736d1e9958b98ba47dba80893a471d548a2c87b28b7a3e0c74c22dbea9d0",
+        "afterSha256": "a04e4bb3c3c8fa6b736dbbaabfebe06a5df39df298060cbb5434fc4c24a87be7"
+      },
+      {
+        "path": "src/report.js",
+        "beforeSha256": "1b73efd8806c28befaf5eb0304a1fa25c9c4ec2327dfab519fe749f09da18496",
+        "afterSha256": "33b8bdab9b9879801b91d2070d7468dc07d953fdfe40eb52bcf1c7313099a187"
+      },
+      {
+        "path": "src/userService.js",
+        "beforeSha256": "ef90710d57877279e5881f2fba98d8ca1d5672a5a5967a6c37172499bf9a60fe",
+        "afterSha256": "1e87b41c84c25236fd866db97f7f916e2ae0de4a50aad8474c186ddbc77fc514"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_77777358-510a-4ae7-b69d-19106680fedd",
+    "taskId": "case-insensitive-path",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 46,
+    "historySha256": "e1d2f80850dfd1c506ec4005a10a99307efda54d52aa2bcfa0a9e95ff1b35ee0",
+    "candidateDiffSha256": "2d1e040a6ecafeb421cafa0d9aa0e842a644add39e8c4793d08f5069def85053",
+    "changedFiles": [
+      {
+        "path": "src/dedupe.js",
+        "beforeSha256": "ea88996cd6446e9680d1c8bb3131b9770f044d5e7325bd13c7a156115e453770",
+        "afterSha256": "e5fe776bb0025ed368657f78e2c980f06160863430b762bb971f98abdb4d55fa"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_8b4804f1-b3d5-49dc-b988-ecb3af5bc3d5",
+    "taskId": "frontend-form-a11y",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "f0cc529832ea03f24c949fc3008b8ef6c6ebf963b19f434f47e9b5a01dadbf48",
+    "candidateDiffSha256": "e52776c62483bdbcce32d76c47b533a540353e9d2409c4b70d675d9a55b3c6b3",
+    "changedFiles": [
+      {
+        "path": "src/form.js",
+        "beforeSha256": "8fbe6853a21eb69dade84d8f70c7114a6dfdd90018ad79723cfac48bfeb7fe42",
+        "afterSha256": "208dfe813c9d6ccf05eff4e47f6095cbc7ec17f5c8f34f51f9dee9046ad93333"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_a95953d3-5fae-4de8-9bd0-4769cb41c702",
+    "taskId": "off-by-one-pagination",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "7b4a915309e83d975155281d2e8f9e8f7a4e0f917ae21c1d11ddb87ea9f7a293",
+    "candidateDiffSha256": "6e9ee16ae109e97abf7fb3c7f621738165bb3f5b94a60353449345e029b3dab0",
+    "changedFiles": [
+      {
+        "path": "src/paginate.js",
+        "beforeSha256": "e56f8e3a8e16397801a3d21bcb5843ef8b631c4a20e0e730bc0ffb53d7dfb79a",
+        "afterSha256": "9ebb169b9445bc107ec975b0b41a81070f85575ac9d2f27658a100151560a5f2"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_a69945c3-8305-4e20-a332-131e2062b406",
+    "taskId": "add-validation",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 57,
+    "historySha256": "664dcebaf11deaa01972727f5ed258e245365889da0015614ecfee4d928b818a",
+    "candidateDiffSha256": "498689ed859794fe0ec498f240db7ef770b35438b97ce192f15d84d6f0e5c5bd",
+    "changedFiles": [
+      {
+        "path": "src/registry.js",
+        "beforeSha256": "072de218bce80e907498e7631fce843a3b9ad33105c340d90ddb6d7b05842304",
+        "afterSha256": "0a4ca0d60d830efc81e0d45f1272ce6d6c22b315a758bf93ca3c2060b9036ff6"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_a416d6ef-ddf7-4a1c-be77-d4674b09a64f",
+    "taskId": "refactor-without-behavior-change",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 62,
+    "historySha256": "b9eb525dc16a60d71876c66b176dc2a05b950b9d1747ddf2b6cffded0cc35642",
+    "candidateDiffSha256": "cf33f0532fd3bbcfef9153ff36cf650e7bad1a9a5f9edb16b46126b730eb92b5",
+    "changedFiles": [
+      {
+        "path": "src/orderService.js",
+        "beforeSha256": "513c9056952273d6c1712aaca7fce26701cf80c316db5fdf216c4812f2500dcc",
+        "afterSha256": "edc68c59dc0cef7eba6b3572b7c0249d02a9d0fa6885feed129de89417332cb3"
+      },
+      {
+        "path": "src/pricingStrategies.js",
+        "beforeSha256": null,
+        "afterSha256": "b2c77ab065425ab9ee1b35dfe96413b3f1600370888172cb9c8a5eaa5d579767"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_2e64c279-4914-478b-8855-33021e08f51f",
+    "taskId": "move-file-update-imports",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 80,
+    "historySha256": "722d5e29ce56f119526419672cc0e3bb6d1665bfb3ce10284936f30920e0824f",
+    "candidateDiffSha256": "0df254783471a080e0760fd85225e95964f031824f9b2d3f67b4663b9bcb8121",
+    "changedFiles": [
+      {
+        "path": "src/api.js",
+        "beforeSha256": "0da8c265e88652033cf898c1ace4d78c5c99b057dd530f2fb1a936723b8839e2",
+        "afterSha256": "276b5d390d32973ceeed39b2b54d208469e0f0a0f09ef68e7ca9b9a1fa51b328"
+      },
+      {
+        "path": "src/cli.js",
+        "beforeSha256": "3f97602a528444a70d3e27b10205ca74f6f398f57e568827f5221049d901cad7",
+        "afterSha256": "05f23e4167723ff414168cdc4df924bc860705035cdf0279df4abd9a23a464d9"
+      },
+      {
+        "path": "src/shared/helpers.js",
+        "beforeSha256": null,
+        "afterSha256": "2fc44b338fb03b527bef5fe66b62e92aa2b102e3a1b6e129580cbcf253c4f894"
+      },
+      {
+        "path": "src/utils/helpers.js",
+        "beforeSha256": "2fc44b338fb03b527bef5fe66b62e92aa2b102e3a1b6e129580cbcf253c4f894",
+        "afterSha256": null
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_b6a0e40a-b2dd-4551-83ee-c7d14b684d73",
+    "taskId": "flaky-test-diagnosis",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 62,
+    "historySha256": "77bed3b610fd8f951b6e50c01ee351c4aed7e0ca87710b0c01d0c6fda02b4d2f",
+    "candidateDiffSha256": "ba2a3d238a4c3a3ff4947ec58747f4cb458eab05c1d6469789b74cc31a7c724a",
+    "changedFiles": [
+      {
+        "path": "src/session.js",
+        "beforeSha256": "db026f142099cb46d5c9468df5d972bb8e8cb712093cd9be4a7b618d899429f2",
+        "afterSha256": "464dad05f19b6ae9e218a22485636a7887d67db5ffd6b288ed1e48ee9d0f5c30"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_c8b3576c-42f4-4c82-aa2d-db42f74eafe9",
+    "taskId": "tool-failure-recovery",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "6a9feeb17e7d15f835587f0e9d09ef7dcd3a68a6963e8ab954b39053d5120f5a",
+    "candidateDiffSha256": "a73dae5b1793ef440a0010b7076ec493ba871f66d7794c34a752f8bd18f4bcc9",
+    "changedFiles": [
+      {
+        "path": "src/pricing.js",
+        "beforeSha256": null,
+        "afterSha256": "8f1c219a14e3d47ecf78503cee634c4efead5b1c6344a0ce51e4bb202ac634b6"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_e2af40ca-cd1c-4e48-b228-9301c8df50c2",
+    "taskId": "off-by-one-pagination",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "eac665b4919e4d2087f19dc5349bf0116e9766bb24e6e73a3fe5bc405ca35c9a",
+    "candidateDiffSha256": "6e9ee16ae109e97abf7fb3c7f621738165bb3f5b94a60353449345e029b3dab0",
+    "changedFiles": [
+      {
+        "path": "src/paginate.js",
+        "beforeSha256": "e56f8e3a8e16397801a3d21bcb5843ef8b631c4a20e0e730bc0ffb53d7dfb79a",
+        "afterSha256": "9ebb169b9445bc107ec975b0b41a81070f85575ac9d2f27658a100151560a5f2"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_e152c6d4-c01a-4070-abe8-4c9e688adc59",
+    "taskId": "add-validation",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "1fb5aa1ae9aa3e4bfe4b65cfef4b7592ce3066e7055f5e10b2e7403cc9369d66",
+    "candidateDiffSha256": "75e05711185a0ad8f274167cbde0eec40c64512182da143e3d6f87b20cac3d78",
+    "changedFiles": [
+      {
+        "path": "src/registry.js",
+        "beforeSha256": "072de218bce80e907498e7631fce843a3b9ad33105c340d90ddb6d7b05842304",
+        "afterSha256": "f55d0c44390d867d795e82260d30b8a5635ddbe0ea287109c5d7043ce0fb5aca"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_aa25c5d1-c831-4331-8d0f-39fd7ce96f67",
+    "taskId": "refactor-without-behavior-change",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 62,
+    "historySha256": "24939a231b547e104b67150ac0c320e631e4cc461275ee6e0a3dd4d019a94d36",
+    "candidateDiffSha256": "0571d471caff0a4b907bdfe7840cf5d25df25f736572e0f0310a946dee942b98",
+    "changedFiles": [
+      {
+        "path": "src/orderService.js",
+        "beforeSha256": "513c9056952273d6c1712aaca7fce26701cf80c316db5fdf216c4812f2500dcc",
+        "afterSha256": "46d8fc4a58273e69f40150fbce1f9c238e6366687ab1a6e15433fb7a43f00a53"
+      },
+      {
+        "path": "src/pricingStrategies.js",
+        "beforeSha256": null,
+        "afterSha256": "91c2b055e6ccc98c50350143b8a53956e9a541b68495e59cc1364d5d3c71ecdd"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_cf9b7de9-071f-41ed-bf26-83b3f653beec",
+    "taskId": "move-file-update-imports",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 101,
+    "historySha256": "da1710253825cb4c79a3fd633c8ab34027db6eab134f1f4ad437f14489e957f1",
+    "candidateDiffSha256": "0df254783471a080e0760fd85225e95964f031824f9b2d3f67b4663b9bcb8121",
+    "changedFiles": [
+      {
+        "path": "src/api.js",
+        "beforeSha256": "0da8c265e88652033cf898c1ace4d78c5c99b057dd530f2fb1a936723b8839e2",
+        "afterSha256": "276b5d390d32973ceeed39b2b54d208469e0f0a0f09ef68e7ca9b9a1fa51b328"
+      },
+      {
+        "path": "src/cli.js",
+        "beforeSha256": "3f97602a528444a70d3e27b10205ca74f6f398f57e568827f5221049d901cad7",
+        "afterSha256": "05f23e4167723ff414168cdc4df924bc860705035cdf0279df4abd9a23a464d9"
+      },
+      {
+        "path": "src/shared/helpers.js",
+        "beforeSha256": null,
+        "afterSha256": "2fc44b338fb03b527bef5fe66b62e92aa2b102e3a1b6e129580cbcf253c4f894"
+      },
+      {
+        "path": "src/utils/helpers.js",
+        "beforeSha256": "2fc44b338fb03b527bef5fe66b62e92aa2b102e3a1b6e129580cbcf253c4f894",
+        "afterSha256": null
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_87683756-f126-4001-bec8-f2918340a810",
+    "taskId": "flaky-test-diagnosis",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 69,
+    "historySha256": "a42afdcb544996ca621796729428c03af9f627d00ade2c45df584701cd6dc801",
+    "candidateDiffSha256": "5b417186082d89ba77b0d122e77b162ba47be55acf8ebbdcbbdcb715f149ae64",
+    "changedFiles": [
+      {
+        "path": "src/session.js",
+        "beforeSha256": "db026f142099cb46d5c9468df5d972bb8e8cb712093cd9be4a7b618d899429f2",
+        "afterSha256": "8555b161708e3de3cb111d56abbdfdca3cf635118fa36e79edd80f36c24076e0"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_4199ac10-0224-4fe0-a166-eae55f351fc8",
+    "taskId": "tool-failure-recovery",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "936d0e8da3de75fc3c70b0952cce0388c123fa797f88b7ac8384f72520eea48b",
+    "candidateDiffSha256": "89134a3267180e3fcaa6ee138435b1041015c0d97c8343ce634f32274c83a549",
+    "changedFiles": [
+      {
+        "path": "src/pricing.js",
+        "beforeSha256": null,
+        "afterSha256": "fa500df217b20a93f418f8dc31b7e6e4c1d89c00f392eb6d245da416d05646fe"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_fdc8bf27-d945-4e65-aacb-156ef2fb8832",
+    "taskId": "off-by-one-pagination",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "233ecfa3dff02287f966638cf2267324a75705e7df59bc4a3b92dd195a87b97e",
+    "candidateDiffSha256": "6e9ee16ae109e97abf7fb3c7f621738165bb3f5b94a60353449345e029b3dab0",
+    "changedFiles": [
+      {
+        "path": "src/paginate.js",
+        "beforeSha256": "e56f8e3a8e16397801a3d21bcb5843ef8b631c4a20e0e730bc0ffb53d7dfb79a",
+        "afterSha256": "9ebb169b9445bc107ec975b0b41a81070f85575ac9d2f27658a100151560a5f2"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_af825e18-eceb-482a-86c5-6de42e21b9c3",
+    "taskId": "add-validation",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "aa39270772bd7341a9e3632c1b1f5fe26059a16e001cb5da7cd75b9d309a3ddf",
+    "candidateDiffSha256": "3043ab0e3eba0519f691f05138157e4d35a0b1aaf58e4d0930c705d891ed42ea",
+    "changedFiles": [
+      {
+        "path": "src/registry.js",
+        "beforeSha256": "072de218bce80e907498e7631fce843a3b9ad33105c340d90ddb6d7b05842304",
+        "afterSha256": "d79ce6e44606838174e12e1765f4a63c947a28122cea9ab4fbac149ab87ff494"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_c62ea65f-16d9-403b-afb3-921d0d00378a",
+    "taskId": "refactor-without-behavior-change",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 62,
+    "historySha256": "2cd15b16c0a4c5001de57c5253798b1dc93f735dd65afc157f50e92af5a61d27",
+    "candidateDiffSha256": "9e38d977de5bd74e814d36996f72f30fa094616d1ad23ce621a847cf26b89450",
+    "changedFiles": [
+      {
+        "path": "src/orderService.js",
+        "beforeSha256": "513c9056952273d6c1712aaca7fce26701cf80c316db5fdf216c4812f2500dcc",
+        "afterSha256": "204445556e4305e3b189273c7705b598358eb0f703f98f4435b623b3e7e05913"
+      },
+      {
+        "path": "src/pricingStrategies.js",
+        "beforeSha256": null,
+        "afterSha256": "2a11c198b49b9e41c701adbc49528ced8394110fddf3f4cafb40bcab25213371"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_9e1e7694-e9df-408d-99bb-9e95d64b4995",
+    "taskId": "move-file-update-imports",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 103,
+    "historySha256": "c7157f56ed04a30fb4445c1776bb44334cdfc1e6af0d5237bd877ea190313c55",
+    "candidateDiffSha256": "f11dc6ec122cab9a24e1f405289598ebce43a4c019e611e380f8051a5f4faed2",
+    "changedFiles": [
+      {
+        "path": "src/api.js",
+        "beforeSha256": "0da8c265e88652033cf898c1ace4d78c5c99b057dd530f2fb1a936723b8839e2",
+        "afterSha256": "276b5d390d32973ceeed39b2b54d208469e0f0a0f09ef68e7ca9b9a1fa51b328"
+      },
+      {
+        "path": "src/cli.js",
+        "beforeSha256": "3f97602a528444a70d3e27b10205ca74f6f398f57e568827f5221049d901cad7",
+        "afterSha256": "05f23e4167723ff414168cdc4df924bc860705035cdf0279df4abd9a23a464d9"
+      },
+      {
+        "path": "src/shared/helpers.js",
+        "beforeSha256": null,
+        "afterSha256": "2c63b9c1fd4e1c29e07133b0f19baf5bae30aa5011abc0ca2ecd254cd576e1fd"
+      },
+      {
+        "path": "src/utils/helpers.js",
+        "beforeSha256": "2fc44b338fb03b527bef5fe66b62e92aa2b102e3a1b6e129580cbcf253c4f894",
+        "afterSha256": null
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_5c8500b1-5e25-45a7-9367-9fee9f4a13e6",
+    "taskId": "flaky-test-diagnosis",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 62,
+    "historySha256": "126f3f34cd1e8dc6628c84632eacaf41cf3b76f9f175e4460f2ecb39f95a7038",
+    "candidateDiffSha256": "d5ff8f3c3d290df3096a877deb57129f2b1e8e2968dacea5163cbdf9964a6451",
+    "changedFiles": [
+      {
+        "path": "src/session.js",
+        "beforeSha256": "db026f142099cb46d5c9468df5d972bb8e8cb712093cd9be4a7b618d899429f2",
+        "afterSha256": "dd6ed15053fedf82c0860abcf19cf4ca1059a59d93355012ebca24533bbdb59b"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_4e031cc0-0709-4ee2-972b-a52307f0ed82",
+    "taskId": "tool-failure-recovery",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "0a3a27b14b822033505cee36c758eb28fa06bdcaf3c58a10372d8f37dc96db39",
+    "candidateDiffSha256": "096fd1fd6869c5f45cac2a6235db7db3b25441f4b02e62e02c823a868819aaec",
+    "changedFiles": [
+      {
+        "path": "src/pricing.js",
+        "beforeSha256": null,
+        "afterSha256": "c0c6e3852090ba56b29468306248b50e1d290dee1870560082c1750c363cdba7"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_5076538f-cdcb-4d8f-b52c-e77d7fed3c0e",
+    "taskId": "null-guard-crash",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 60,
+    "historySha256": "59b3e9e394d3a263528940c079916012dd2059a96fee3e977564b642c1b3606d",
+    "candidateDiffSha256": "ecf4eb237c34738a5ee52711297d96d74f7e357c331c6d188037da1bf800c78b",
+    "changedFiles": [
+      {
+        "path": "src/profile.js",
+        "beforeSha256": "045b8c05a556957c6774ea028bc13b17811a211fc2594224ad50c6d487ac7130",
+        "afterSha256": "5ae09c44970dd0b5d524c4aa1df5c8b9434b31fc45afa75f0d364412858d5db5"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_87584e46-a3c8-4a14-82aa-d8122234796d",
+    "taskId": "add-retry-backoff",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 46,
+    "historySha256": "be1169807ffa60136dce3fda76a280eca1fdf9a035a984843c2c2efbe7a54826",
+    "candidateDiffSha256": "dcbc1c6c632abd30b2016446a999bff5c9404618c3e6d2fc6da3d138e3fe1c96",
+    "changedFiles": [
+      {
+        "path": "src/retry.js",
+        "beforeSha256": "7c229345c95d96dd15b03bf697185071e4d243a9ca640a63803ec432ea60e8f8",
+        "afterSha256": "32f6b970dcbf253634e5ef3343702ae2f24a752eea7534bc20ff5bc1aa2638c3"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_1300a15f-6687-4866-abb2-607976fcea55",
+    "taskId": "extract-shared-module",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 57,
+    "historySha256": "b44b4c21a3ec0672275e4e760f2d11858e6736ecde82be0f800189a5d96899a6",
+    "candidateDiffSha256": "f2d709d22a4a4707872065d7b2d08a000fd9b7afb4fc8c95d1a16b872e9500f0",
+    "changedFiles": [
+      {
+        "path": "src/invoice.js",
+        "beforeSha256": "3a253f2a24b4862d8ba4270af725a57d5272757a4ca990f56f16648c0a2d59ed",
+        "afterSha256": "56cc6455d2b64411ecfae9fe0583bcb6aae2a2847bf20a74e38ceefc86eb6ca9"
+      },
+      {
+        "path": "src/money.js",
+        "beforeSha256": null,
+        "afterSha256": "eb42ed05dcba42b19cca4eb7e3695e30479c79edab1b857f1e7753f02822fd9e"
+      },
+      {
+        "path": "src/receipt.js",
+        "beforeSha256": "7f4683f31ec39efcebbf3fa074bbf60380ac356cf7a2e6a6b5e5d51713313adb",
+        "afterSha256": "6fd8846461e3c4b43cdd3a8c886037eb0f54c29ba8a49f8533e84c2eac83fe11"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_9e7d428a-7ac6-45f2-8455-10a3464ff151",
+    "taskId": "path-safety-regression",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 60,
+    "historySha256": "62d830cbc6dfb1e21315d215a9475fc0519566b57a8901454cb1b9525ca1c26d",
+    "candidateDiffSha256": "a879dd14196e9976a63985b19558532aaa3ce1974c2a1e15aeede4bb0426eafb",
+    "changedFiles": [
+      {
+        "path": "src/workspace.js",
+        "beforeSha256": "420977d65403cff8f94708f489a44614d79d0053c015e700b61a20bfd1ea74a2",
+        "afterSha256": "86e1c011b0c53cb731766afef348dbe8df7aef05c085b348e2ce4f6a3ba7fe01"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_802d2565-8471-4160-b565-ae43dfb1b5a1",
+    "taskId": "shared-state-pollution",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 53,
+    "historySha256": "02476148863f38efe5aa762471b284f69b999b9f4bd2930a7cd62c61ca058043",
+    "candidateDiffSha256": "5bebb8bbebd010874bf6fcc3605cdd1115d56bf2fe1ccbcdf499a5d4c051d179",
+    "changedFiles": [
+      {
+        "path": "src/counter.js",
+        "beforeSha256": "bf2a22722bb7af86b73bb7371e78905074e4e05d7d69e797e8a77cd0fed04c87",
+        "afterSha256": "ca37b57ea90995097b61546674c7b864a4392fd71a5f855902a0cea98a5d0a6b"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_860229ad-ad68-40aa-a5e4-11a053528b28",
+    "taskId": "steer-mid-run",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 68,
+    "historySha256": "7ad381b077dea079f1481c85d15b5ded5b06a524967dab38723a0f417384b0e6",
+    "candidateDiffSha256": "92283bc175a3db4ff6cf0362231b8a020c10656b5cb80c9697a016d0400e875b",
+    "changedFiles": [
+      {
+        "path": "src/outline.js",
+        "beforeSha256": "6332dc1028afd738492d35254cc576effb130a037cdd0de1907a67bf4a978345",
+        "afterSha256": "1dc37b5cbc99a73e030e2a8a8f1d607ec1e71dfb0e59995f3e2bf91826b4c934"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_862d8041-b981-4fd7-9864-537cdcd92512",
+    "taskId": "null-guard-crash",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 57,
+    "historySha256": "c375d5055f0333fac08c4cb1a71143de6066362d4d1cc65c4e62d096eca1532d",
+    "candidateDiffSha256": "ae9f63cfe938dead0bd05b381402efebb5c3bb3674c9970398cc0f82255e9bbd",
+    "changedFiles": [
+      {
+        "path": "src/profile.js",
+        "beforeSha256": "045b8c05a556957c6774ea028bc13b17811a211fc2594224ad50c6d487ac7130",
+        "afterSha256": "75d330128de911de557621bf9c12dedacb1a6ecc64a1cd3478a529430b5030b2"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_a75fc662-d772-41af-b115-d92b3ae4fa21",
+    "taskId": "add-retry-backoff",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 46,
+    "historySha256": "a7710d0b7a925daf65db33e35d79a387c53a9e44fa9b3c8f16a198519cfe75a3",
+    "candidateDiffSha256": "52bdee0f41bd74c31bcc3b0eefb6c34025d90b944fdcd5d66bf13c100094616c",
+    "changedFiles": [
+      {
+        "path": "src/retry.js",
+        "beforeSha256": "7c229345c95d96dd15b03bf697185071e4d243a9ca640a63803ec432ea60e8f8",
+        "afterSha256": "bba9a9f3fe83eb286de7d7506ab993e76bda42a320264740ac91d0205973b81e"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_624fc183-3302-49dc-94a2-5af24fab3594",
+    "taskId": "extract-shared-module",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 70,
+    "historySha256": "5fe009bb45efbd9fa1c3cd9745fdc3458586bb510f8c91980744e7e6f87d891a",
+    "candidateDiffSha256": "2a1d309958475dabf3b21cad79b8c9e34c807e549eebe4d5d938b57a68b28617",
+    "changedFiles": [
+      {
+        "path": "src/invoice.js",
+        "beforeSha256": "3a253f2a24b4862d8ba4270af725a57d5272757a4ca990f56f16648c0a2d59ed",
+        "afterSha256": "3c9677304b13751dc3f4f2642e21cd6630cc04bb6706cd9621053305edda5e32"
+      },
+      {
+        "path": "src/money.js",
+        "beforeSha256": null,
+        "afterSha256": "ba2bd44a124ec67e49dbf90a2b36df9cd25a4b3b767cf2cbae1746a5bf16481e"
+      },
+      {
+        "path": "src/receipt.js",
+        "beforeSha256": "7f4683f31ec39efcebbf3fa074bbf60380ac356cf7a2e6a6b5e5d51713313adb",
+        "afterSha256": "027d1a077413d9f21d8566d78ed7ae09958c2e7b82f486089d40c6bc352eb355"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_ccb083ab-eeb8-4903-8c57-d2cb6ecbdbe2",
+    "taskId": "path-safety-regression",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 53,
+    "historySha256": "07c0504a9870cec35434aea90a979e5f8428d8a03cdd8012020a5de6eac91696",
+    "candidateDiffSha256": "70dff8478ea1cb96c62517672af0be7927a1182b1da233f05006ffa3ec0ea27f",
+    "changedFiles": [
+      {
+        "path": "src/workspace.js",
+        "beforeSha256": "420977d65403cff8f94708f489a44614d79d0053c015e700b61a20bfd1ea74a2",
+        "afterSha256": "6da376f74e52a67c87326bf8431de1b0c71e035073072b2d5b930accd8d4e941"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_63df9c91-301e-4465-9d23-96a975221974",
+    "taskId": "shared-state-pollution",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 67,
+    "historySha256": "3bfbfc551d6871c7e278c326d3f1650dac2d86bc05c1af0fc0c1c540c5be5c1e",
+    "candidateDiffSha256": "e9f00d9cca850f2825c93db344a7032a0c0525172d7d82bfa0f7e30a467017b2",
+    "changedFiles": [
+      {
+        "path": "src/counter.js",
+        "beforeSha256": "bf2a22722bb7af86b73bb7371e78905074e4e05d7d69e797e8a77cd0fed04c87",
+        "afterSha256": "eb94ed6b9f12286f8d95b30d0eebe1c3e28e6cc59c14ebe23781a2535c1fb4cb"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_53541679-c976-4d66-9133-f88a629a786a",
+    "taskId": "steer-mid-run",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 61,
+    "historySha256": "211335bfd034e312478866b1cd970456ba830df7847d142a5d26c6853d5eac00",
+    "candidateDiffSha256": "2c3a07419ce9ec374c0d48f44e1c5f76656952f345795276352653f55dd0b172",
+    "changedFiles": [
+      {
+        "path": "src/outline.js",
+        "beforeSha256": "6332dc1028afd738492d35254cc576effb130a037cdd0de1907a67bf4a978345",
+        "afterSha256": "53787f37323ce45412b0f78ec5b83fd947e7c31f6e444cab7ca3e068c7836f78"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_5f89ea35-8441-4537-8746-1e8f45b61f92",
+    "taskId": "null-guard-crash",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 46,
+    "historySha256": "79f0231fbc8bd0f4378b1086cd2d6ff7b7c5a0040563f4e96cfdf4f24244798b",
+    "candidateDiffSha256": "9876a3668a5a8f0d62e32b32675cd52514d66d661b43500f42124d981e6ba484",
+    "changedFiles": [
+      {
+        "path": "src/profile.js",
+        "beforeSha256": "045b8c05a556957c6774ea028bc13b17811a211fc2594224ad50c6d487ac7130",
+        "afterSha256": "da6666ae85d94b310ee218aefe96803bb19ced86791aff2ff1e042773267cf67"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_113a6ca7-117b-48c3-aebe-53223eb73eca",
+    "taskId": "add-retry-backoff",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 46,
+    "historySha256": "f9dc61cbc4166be992fd0893ba12343e2eeb8eed0c142638ec2de89a7ebebd76",
+    "candidateDiffSha256": "2d8fa29c9da5c245b7a0ad1c5f63ebcc3ce1ec7f9f06ab78b60f14c392e5e177",
+    "changedFiles": [
+      {
+        "path": "src/retry.js",
+        "beforeSha256": "7c229345c95d96dd15b03bf697185071e4d243a9ca640a63803ec432ea60e8f8",
+        "afterSha256": "71b44cc3383ae574f61a8076001ed06e1c1f5ce2a5214f11a98592778e7f79e2"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_a2ba0fc2-1c65-41df-88e1-f63444c999f2",
+    "taskId": "extract-shared-module",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 57,
+    "historySha256": "007bcd9d5a1a00caab7f7281d64d19d2bf04ab61b65efeda5dd386734886e29b",
+    "candidateDiffSha256": "7003318755447024414e5c75d196d16f99ca9b51aff2246536383b9d70326b29",
+    "changedFiles": [
+      {
+        "path": "src/invoice.js",
+        "beforeSha256": "3a253f2a24b4862d8ba4270af725a57d5272757a4ca990f56f16648c0a2d59ed",
+        "afterSha256": "56cc6455d2b64411ecfae9fe0583bcb6aae2a2847bf20a74e38ceefc86eb6ca9"
+      },
+      {
+        "path": "src/money.js",
+        "beforeSha256": null,
+        "afterSha256": "230c2fe16541165bcd7b0af725a89160622137f3fab7b21704b60e5f57a6eb71"
+      },
+      {
+        "path": "src/receipt.js",
+        "beforeSha256": "7f4683f31ec39efcebbf3fa074bbf60380ac356cf7a2e6a6b5e5d51713313adb",
+        "afterSha256": "6fd8846461e3c4b43cdd3a8c886037eb0f54c29ba8a49f8533e84c2eac83fe11"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_d9657897-1ca1-40a2-abac-c60cdf79e805",
+    "taskId": "path-safety-regression",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 46,
+    "historySha256": "3a81850058e750e67361567b4aa393f39053665144ece6a2f7d2fbb4e63a9475",
+    "candidateDiffSha256": "04850043a6f07ed5158eed93945a7e89287a1c22b37c1654c0771de5da7b27c1",
+    "changedFiles": [
+      {
+        "path": "src/workspace.js",
+        "beforeSha256": "420977d65403cff8f94708f489a44614d79d0053c015e700b61a20bfd1ea74a2",
+        "afterSha256": "12476c7e6c1d17de89d5705f9b5e58a402fe06411afe787c48dd4069b1ac76d8"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_bb6c1731-3f2b-4965-91ef-ddda7071cdcc",
+    "taskId": "shared-state-pollution",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 64,
+    "historySha256": "f836deacf5b7b541a42d29ba9daa4e15b0a56d2b7a2a13da2b55bd353cdabad5",
+    "candidateDiffSha256": "8b157e0836f100f731d9715038f6d471ad3431942bb60513d4303aa7c37579bb",
+    "changedFiles": [
+      {
+        "path": "src/counter.js",
+        "beforeSha256": "bf2a22722bb7af86b73bb7371e78905074e4e05d7d69e797e8a77cd0fed04c87",
+        "afterSha256": "3e903096979a56035e8d773a4847d2144bf62373ab091a14e075c0c577ad759e"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_3f524d44-8f65-47eb-8d2b-d2f4493ce502",
+    "taskId": "steer-mid-run",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 61,
+    "historySha256": "9046d76dffcb557012d32c4fc2fe16e6f1fe4c4e5ab293ae001987a162168f91",
+    "candidateDiffSha256": "0382fc821d1b76ea724ea017847121595407e2aa5c7a22d9c35e82f666a3a5f0",
+    "changedFiles": [
+      {
+        "path": "src/outline.js",
+        "beforeSha256": "6332dc1028afd738492d35254cc576effb130a037cdd0de1907a67bf4a978345",
+        "afterSha256": "195a752cd5a890bae56c9854aefd32e468eea07a733d8775b5722b3575a2d994"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_b0d9d19d-723d-40c5-9ed0-ad99d6f71096",
+    "taskId": "async-race-condition",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 46,
+    "historySha256": "d2837d50d32d9b6957df8b4af1cb445a34d2652ebeaca37f035dd2c07363c107",
+    "candidateDiffSha256": "134a08984c64609ac23e85f1845f6965bd3a5ce86b88b1c4d77e2e29e5b34c63",
+    "changedFiles": [
+      {
+        "path": "src/fetchAll.js",
+        "beforeSha256": "b278969cebeff9147042bdb5bbbb32718b8aa6ae162d682904e47603b3f78d09",
+        "afterSha256": "955fae31b535433f96e3090d3eecf17e547782c5e99d2d2fc9ef0763315cf59b"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_35edfbe7-5caa-43bc-998f-df22ef0bd27a",
+    "taskId": "add-cursor-pagination",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "887d1fcd4302b7943dcfdeb7a1509b9b80a1ec599abbd4035e608ef8eb8c7be7",
+    "candidateDiffSha256": "3bf15ffc531bc96ab00cbea6025992271f99cf002726c71cf7efc489a544abe1",
+    "changedFiles": [
+      {
+        "path": "src/cursor.js",
+        "beforeSha256": "b1b7073ab3bcfa69330b6af4a5708ce9b78ba31e01df4aa83677ff6e2cbbc951",
+        "afterSha256": "b0cfc43c45941cb1fb1d6a2d458787938e100c822968e27a2fe732ce9a493da3"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_88ee030d-3e89-43b6-bd56-bb3b91e5af57",
+    "taskId": "split-large-module",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 64,
+    "historySha256": "86c3dfaeff4712089203874bf66d8a8800a87ae360dfb0846516d04c43ec672d",
+    "candidateDiffSha256": "8afef745c6d63f9e160fb50e16b7b17abb01dd0c770901a8568c19fba02d7e61",
+    "changedFiles": [
+      {
+        "path": "src/orders.js",
+        "beforeSha256": null,
+        "afterSha256": "684f4b7181d1967088e42f831166d5899b08a70f9d63689d0156eae0fd6aa55f"
+      },
+      {
+        "path": "src/store.js",
+        "beforeSha256": "cb411fdb672b3bcfa982684ba6ce18e0c3e3efb3f9cd7ae6f4dbe71a3984157e",
+        "afterSha256": "73f2152ba01a6b42583502583be31d20a9322cec65f7198ae91839198aa9726b"
+      },
+      {
+        "path": "src/users.js",
+        "beforeSha256": null,
+        "afterSha256": "61b56f362746878d79fce099cf11a42c655ec4a074e7d07df29bbfea0db8c734"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_d015b73d-2373-459c-b074-99a1d851f4d7",
+    "taskId": "path-separator",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 53,
+    "historySha256": "44353282a1a7f33ceadcd063a91eca8291404a802c05d17f691cf0c0ae2fda17",
+    "candidateDiffSha256": "a72b6593de80629a222e4e3f5af25df5e342a2ecd512aff8c69c6d8fcc21c59a",
+    "changedFiles": [
+      {
+        "path": "src/paths.js",
+        "beforeSha256": "de3c7f248446ed1014e4702759be50d41a41bf9d9532532547cfe5da26589b5d",
+        "afterSha256": "78f8da158d5c1bda5669ac31545030d822f98c86a57c0c53832b9f7927a75e9f"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_30c98f05-e00d-4b5a-9bb5-b060d9191142",
+    "taskId": "long-file-targeted-edit",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 74,
+    "historySha256": "cd2746201fc5e321c9d97a3fe024032a00addbe929e9a10ebaf61853b12865d8",
+    "candidateDiffSha256": "82752f499324b483b7adb05af8ea90e7c81d34c6759e8810a792b448627ae2b7",
+    "changedFiles": [
+      {
+        "path": "src/ledger.js",
+        "beforeSha256": "d9ecf89a79bfa8e2ef318085ae440eca1fe31a87d10ccf6f4cffd1e249157f56",
+        "afterSha256": "5809483e2b36482b608470dbacaf9ff40e72b4c264bd29dd381915176a7a7476"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_06f78b5f-b6e1-4d65-91b6-0c715221a978",
+    "taskId": "steer-constraint-hold",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 77,
+    "historySha256": "548267b3514733c2c5be6875d2903be4f1a94f3b59a53a5544488a1c82aa4bab",
+    "candidateDiffSha256": "6a9c25e009385b0fcaee0e2782fa7fd6b4651b7b109c91945ebc8062e556a2fc",
+    "changedFiles": [
+      {
+        "path": "src/csv.js",
+        "beforeSha256": "aeccce5b27857ed6f9428c4d7f918bba12df2b1d66fe28c09e561e9870366624",
+        "afterSha256": "d6cda295953bef6e27608a497e7cdf37264f2dd4ac5e85e3903ba74f128779f6"
+      },
+      {
+        "path": "test/csv.test.js",
+        "beforeSha256": "b55f103132f12bd03923e242f97366c80b4ee05a71d392e9139c6b560e35f389",
+        "afterSha256": "bc72fee319def9214aa2827f0786b3e0daa713e3eaf0b476cb81a44308c9b288"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_a11c54ac-7202-4ee7-9c1f-78e199b0aaf5",
+    "taskId": "async-race-condition",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 65,
+    "historySha256": "40cc026d0c71045da22f65371e0ef2d61d5560f03ca06e69d4bb33833f46c650",
+    "candidateDiffSha256": "9e1c19bb9037a4802d5e5043ea6480c741bfba25e6aabac3857ff6dc6d5945d8",
+    "changedFiles": [
+      {
+        "path": "src/fetchAll.js",
+        "beforeSha256": "b278969cebeff9147042bdb5bbbb32718b8aa6ae162d682904e47603b3f78d09",
+        "afterSha256": "848df5dc151735b19c63a4eb49ea33d78a3a0d790f5dacea94a928cf44e66125"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_fec48a01-9937-4dc7-aaee-9eddebf7e10f",
+    "taskId": "add-cursor-pagination",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "393af8e0c6d0419fe24f59ef2de5afcf5e8dbc62ecf7a15acf9ac08dc4caf9a8",
+    "candidateDiffSha256": "6bbc01c6372cbb3c09a2f942d0f836fafe307ff7358903a2540d503d7f99e420",
+    "changedFiles": [
+      {
+        "path": "src/cursor.js",
+        "beforeSha256": "b1b7073ab3bcfa69330b6af4a5708ce9b78ba31e01df4aa83677ff6e2cbbc951",
+        "afterSha256": "e65588fe4df68894e1510e397b8e378f02d9de5703d6369ec5efb98c9d32c465"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_17aaf948-80d8-497b-aff4-9271e28d3280",
+    "taskId": "split-large-module",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 57,
+    "historySha256": "6691a4a493ff5984b8d3658a7eabc558a07cc768f70b6bccdab26b300edba6e2",
+    "candidateDiffSha256": "868e09d2ed7a5ddfd8188ef10927fb35120a2bf2b7934827da6b68cf5fa00cbc",
+    "changedFiles": [
+      {
+        "path": "src/orders.js",
+        "beforeSha256": null,
+        "afterSha256": "69815bb0c9c8941d94e80af84c0a9c125469611fe8bc71af38ce884b7c604d95"
+      },
+      {
+        "path": "src/store.js",
+        "beforeSha256": "cb411fdb672b3bcfa982684ba6ce18e0c3e3efb3f9cd7ae6f4dbe71a3984157e",
+        "afterSha256": "28412f9d085cea7c5942bb55faf6c75bb1ad94f8398d874ef1ce30e3dd419f30"
+      },
+      {
+        "path": "src/users.js",
+        "beforeSha256": null,
+        "afterSha256": "fcd21e712b4b6c13bb3cfbc1db8a5f62be2fbb8ed93876e126bca8d052d0fedf"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_0ade0f35-8846-4c8b-aadc-ee8af8136ca3",
+    "taskId": "path-separator",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 46,
+    "historySha256": "27cebfadd883aabaf50317853528b1444c6e22d1cb1f91b635e88b1b6bb10330",
+    "candidateDiffSha256": "48e81aa4acc1d935ffdc2ea64e088f3a9d241bc93205275b1770382573ab3cbc",
+    "changedFiles": [
+      {
+        "path": "src/paths.js",
+        "beforeSha256": "de3c7f248446ed1014e4702759be50d41a41bf9d9532532547cfe5da26589b5d",
+        "afterSha256": "06b3ba23652ec9460b275857113401376250a91e0679778ae90e70b3834fd01d"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_36bf526c-5347-4394-a475-dacaf04ff87e",
+    "taskId": "long-file-targeted-edit",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 79,
+    "historySha256": "0980bd6088567a1b8e3cecfb4b751306f6d9f9cb30385d5677ce4473e4c08912",
+    "candidateDiffSha256": "778a974b3af0e8521119d09b211078d2f13283a7537cf052ad9ae8c71ca136c8",
+    "changedFiles": [
+      {
+        "path": "src/ledger.js",
+        "beforeSha256": "d9ecf89a79bfa8e2ef318085ae440eca1fe31a87d10ccf6f4cffd1e249157f56",
+        "afterSha256": "026021f5b0476b4ac745c7c43b3aec9f715370b4a15cb6e489269990224e2005"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_dde031f7-19b0-4264-be05-01b181f8f026",
+    "taskId": "steer-constraint-hold",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 83,
+    "historySha256": "d979ba3ea326b30e2d16146f5323422714b5032cbf7699481bba995218dcb354",
+    "candidateDiffSha256": "bf649fcd9db3ae11cb94311e9325fb84e7ee10a7ed95b949f98b670b647dc0f7",
+    "changedFiles": [
+      {
+        "path": "src/csv.js",
+        "beforeSha256": "aeccce5b27857ed6f9428c4d7f918bba12df2b1d66fe28c09e561e9870366624",
+        "afterSha256": "526afde325906f8ada6fe14da1bf4024db71c45e599428aeabf18cb8a98420c7"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_2b90f193-4354-4619-8264-fe20b75097a5",
+    "taskId": "async-race-condition",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 53,
+    "historySha256": "5e48f6bdbc5c516581b7a6ea4999f706a8f3a8d42f0ebd9298ea6d8ff7806ff4",
+    "candidateDiffSha256": "4efa7ef7bac1c27db3fc7f9e3568f0224b16ba7f4457982a313770fa1c22ce74",
+    "changedFiles": [
+      {
+        "path": "src/fetchAll.js",
+        "beforeSha256": "b278969cebeff9147042bdb5bbbb32718b8aa6ae162d682904e47603b3f78d09",
+        "afterSha256": "9c243cae4ea9702627beee5ea25212325d6fe443b5d9f1ded6fb12196d879c1e"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_1e1060d5-0c86-4258-8e18-a8d866442ed5",
+    "taskId": "add-cursor-pagination",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 48,
+    "historySha256": "4fc804f132f078c39ca2f75c27a57e76fa76df48aaf306731c03ca2b3df1fb45",
+    "candidateDiffSha256": "f08ee01f2bec1e9be27f9c3d87b4bec736faebc86abeaee94f8ac67a49af2bde",
+    "changedFiles": [
+      {
+        "path": "src/cursor.js",
+        "beforeSha256": "b1b7073ab3bcfa69330b6af4a5708ce9b78ba31e01df4aa83677ff6e2cbbc951",
+        "afterSha256": "5812619aee0403d88daddbc4cd53689df4aa0a49d857548da170891fc7a4d934"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_e4921b16-c7cb-49e6-bd90-0cac1b491850",
+    "taskId": "split-large-module",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 64,
+    "historySha256": "6485b7bf9a90e2b1f6f1dbe782a14eb3f08239d8ec5bd5edaa9e041f53810081",
+    "candidateDiffSha256": "697f6c798e604eb4414bc1c0471b66c09f545cbc708d0f99c86f805e753f4906",
+    "changedFiles": [
+      {
+        "path": "src/orders.js",
+        "beforeSha256": null,
+        "afterSha256": "69815bb0c9c8941d94e80af84c0a9c125469611fe8bc71af38ce884b7c604d95"
+      },
+      {
+        "path": "src/store.js",
+        "beforeSha256": "cb411fdb672b3bcfa982684ba6ce18e0c3e3efb3f9cd7ae6f4dbe71a3984157e",
+        "afterSha256": "e294f7c854a1ead465edcd0ac8a76cd0d8572ff2481e176d1f6722964913aa7f"
+      },
+      {
+        "path": "src/users.js",
+        "beforeSha256": null,
+        "afterSha256": "fcd21e712b4b6c13bb3cfbc1db8a5f62be2fbb8ed93876e126bca8d052d0fedf"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_55feaf55-b7ce-454d-a533-9ed487b70ae8",
+    "taskId": "path-separator",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 81,
+    "historySha256": "6b0b21ebde32d63ad87795d068e0d832e08a3c63e1496854c4583a7e178892c8",
+    "candidateDiffSha256": "866743442a752ec800ebc8cb23ddf029270942752ae26e4135b76f378ea72104",
+    "changedFiles": [
+      {
+        "path": "src/paths.js",
+        "beforeSha256": "de3c7f248446ed1014e4702759be50d41a41bf9d9532532547cfe5da26589b5d",
+        "afterSha256": "d83c2de9af79e0a0013cef668062982e526b15b172dd7cc6f427d56e50902ce1"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_34034a17-b05a-444a-9afb-8389ca9ee615",
+    "taskId": "long-file-targeted-edit",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "success": true,
+    "historyEvents": 74,
+    "historySha256": "0b130dedefd3dda430310656c2615bfcf946296bf3ca2a3db93c5bd830ed6da0",
+    "candidateDiffSha256": "778a974b3af0e8521119d09b211078d2f13283a7537cf052ad9ae8c71ca136c8",
+    "changedFiles": [
+      {
+        "path": "src/ledger.js",
+        "beforeSha256": "d9ecf89a79bfa8e2ef318085ae440eca1fe31a87d10ccf6f4cffd1e249157f56",
+        "afterSha256": "026021f5b0476b4ac745c7c43b3aec9f715370b4a15cb6e489269990224e2005"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_d075ad7c-f7dd-45b6-87ea-6306fc8d863d",
+    "taskId": "steer-constraint-hold",
+    "attempt": 3,
+    "terminalStatus": "FAILED",
+    "success": false,
+    "historyEvents": 46,
+    "historySha256": "56ffb604f1bfd649a2883c0700867d7d260b1d9dc95daa7f5d9b90b476610d13",
+    "candidateDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedFiles": [],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  }
+]

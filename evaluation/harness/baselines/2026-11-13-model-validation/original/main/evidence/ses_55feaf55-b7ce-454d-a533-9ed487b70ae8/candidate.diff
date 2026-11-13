@@ -1,0 +1,20 @@
+--- a/src/paths.js
++++ b/src/paths.js
+@@ -5,7 +5,16 @@
+  * 输出必须与输入风格一致，且不能出现混合分隔符。
+  */
+ function joinPath(root, relative) {
+-  return `${root}/${relative}`;
++  // 任一段含反斜杠即视为 Windows 风格，统一用反斜杠；否则统一用正斜杠。
++  const windows = root.includes('\\') || relative.includes('\\');
++  const sep = windows ? '\\' : '/';
++  // 各段内部的分隔符归一为所选风格；root 末尾与 relative 开头的分隔符去重（root 仅为分隔符时保留）。
++  const normalize = (part) => part.replace(/[\\/]+/g, sep);
++  const sepRe = new RegExp(`\\${sep}`);
++  const left = normalize(root).replace(new RegExp(`(?<=[^\\\\/])\\${sep}$`), '');
++  const right = normalize(relative).replace(new RegExp(`^${sepRe.source}+`), '');
++  // root 本身就以分隔符结尾（如 "/"）时不再重复补分隔符。
++  return sepRe.test(left.slice(-1)) ? `${left}${right}` : `${left}${sep}${right}`;
+ }
+ 
+ module.exports = { joinPath };

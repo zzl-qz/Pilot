@@ -1,0 +1,20 @@
+--- a/src/cursor.js
++++ b/src/cursor.js
+@@ -5,9 +5,15 @@
+  * 游标必须能抵抗列表变化——翻页期间头部插入新项时，下一页不能重复也不能遗漏。
+  */
+ function page(items, cursor, limit) {
+-  const start = cursor ? Number(cursor) : 0;
++  let start = 0;
++  if (cursor) {
++    const idx = items.findIndex((item) => item.id === cursor);
++    // 游标指向的 id 不在当前列表中（已被删除），从头开始
++    start = idx >= 0 ? idx + 1 : 0;
++  }
+   const slice = items.slice(start, start + limit);
+-  return { items: slice, nextCursor: String(start + limit) };
++  const nextCursor = start + limit < items.length ? slice.slice(-1)[0].id : null;
++  return { items: slice, nextCursor };
+ }
+ 
+ module.exports = { page };

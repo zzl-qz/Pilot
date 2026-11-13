@@ -1,0 +1,24 @@
+--- a/src/workspace.js
++++ b/src/workspace.js
+@@ -1,13 +1,19 @@
+ 'use strict';
+ 
+-const { resolve } = require('node:path');
++const { isAbsolute, relative, resolve, sep } = require('node:path');
+ 
+ /**
+  * 把用户给出的相对路径解析成工作区内的绝对路径。
+  * 逃出工作区的路径必须返回 null（不抛异常），调用方自行处理。
+  */
+ function resolveInside(root, userPath) {
+-  return resolve(root, userPath);
++  const target = resolve(root, userPath);
++  const rel = relative(root, target);
++  // rel === '' 表示恰好等于根目录，放行
++  if (rel === '') return target;
++  // '../' 开头（含 'a/../..' 形式）或跨盘绝对路径都算越界
++  if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)) return null;
++  return target;
+ }
+ 
+ module.exports = { resolveInside };

@@ -1,0 +1,18 @@
+{
+  "sessionId": "ses_cdb32c0c-d099-44b1-aee4-f0cad62eb8c0",
+  "taskId": "add-idempotency",
+  "attempt": 1,
+  "terminalStatus": "COMPLETED",
+  "success": true,
+  "historyEvents": 48,
+  "historySha256": "bf37d4752d1f298347241ffcd1dc3e45ea68fe283673f24bd24c8d84459febc2",
+  "candidateDiffSha256": "a91914bf718eccc7301eb82e4969807e36b3046f437980775110000ca3aeb804",
+  "changedFiles": [
+    {
+      "path": "src/charges.js",
+      "beforeSha256": "3b734abadf94bef842caea7cf882258106157db44955858a49ae7bd6db491b0e",
+      "afterSha256": "c0edb8af80d497ce8634b3cde3537872757707ad23e75db4b7dd3b490e907e3e"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

@@ -1,0 +1,233 @@
+{
+  "findings": [
+    {
+      "attempt": 1,
+      "sessionId": "ses_89d222a1-52ed-45a8-a033-47f2b1ab05fd",
+      "sourceCommit": "43dd5bede739e1dc84ebeddc1345e6ca18849bd6",
+      "currentSourceVersion": "066f8cbd01f62cb360440cb0bd2517d2629132a162950471fc4fd71c3f862035",
+      "criteria": [
+        {
+          "outcome": "这是一个受控的等待与自动唤醒验证，请实际完成：先运行 node scripts/status.mjs。若 ready 为 false，先把返回的 requestId 写入 src/checkpoint.json（形如 {\"requestId\":\"...\"}），然后使用 wait_until 工具，run_at 使用 status 返回的 wakeAt，reason 说明等待外部确认；调用后停止本轮，不要 sleep、轮询或自行创建 data/ready.json。若工具提示时间太早，重新运行 status 获取新的 wakeAt。调度器自动唤醒后，再运行 status；ready 为 true 时保留原 checkpoint 不改动，把 requestId 和 acknowledgement 写入 src/result.json，执行 node --test，确认通过后完成目标。所有数据、脚本和测试都是只读输入，不要改写；外部确认由评测器在观察到真实等待后提供。",
+          "verification": "引用真实工具结果与当前版本验证证据",
+          "required": true
+        },
+        {
+          "outcome": "自动唤醒后写出包含真实外部确认的 src/result.json，并通过 node --test",
+          "verification": "引用真实工具结果与当前版本验证证据",
+          "required": true
+        },
+        {
+          "outcome": "保留 checkpoint，禁止改写 data、scripts 和 test",
+          "verification": "引用真实工具结果与当前版本验证证据",
+          "required": true
+        }
+      ],
+      "gap": "核验结论缺少可追溯的必需条件证据",
+      "requestsPersisted": 15,
+      "historicalWaitEvidence": [
+        {
+          "id": "5d0a892b-3f64-40ad-8c94-5629742efa51",
+          "tool": "wait_until",
+          "status": "SUCCESS",
+          "endVersion": "2cb755ceaa22f0197669d3bf459e4522a9ef923805bd82faad3e6738b7a1ecf8",
+          "rejectedAsStaleByCurrentRule": true
+        }
+      ],
+      "currentEvidence": [
+        {
+          "id": "4097d10c-c524-48d4-bd1c-898e8814d479",
+          "tool": "create_file",
+          "check": null,
+          "status": "SUCCESS"
+        },
+        {
+          "id": "7aa49c3c-dd97-4167-b2fd-f0789f0169b6",
+          "tool": "read_file",
+          "check": null,
+          "status": "SUCCESS"
+        },
+        {
+          "id": "c92dec85-2041-4573-ac7d-4541587f6d7d",
+          "tool": "run_command",
+          "check": null,
+          "status": "SUCCESS"
+        },
+        {
+          "id": "d681639b-f5a6-4e50-a88b-6d09543f5e82",
+          "tool": "run_command",
+          "check": "node --test → exit 0",
+          "status": "SUCCESS"
+        },
+        {
+          "id": "678ad283-0e4a-4e44-b344-bfbcd196a5f2",
+          "tool": "read_file",
+          "check": null,
+          "status": "SUCCESS"
+        },
+        {
+          "id": "83c74c0d-514f-4810-b251-c7330aa0b69c",
+          "tool": "command_status",
+          "check": null,
+          "status": "SUCCESS"
+        },
+        {
+          "id": "8014447e-4df0-4475-8943-91f9c21e60f1",
+          "tool": "command_status",
+          "check": "node --test → exit 0",
+          "status": "SUCCESS"
+        },
+        {
+          "id": "0bbbf9db-0b75-40b9-9243-2a195788b06e",
+          "tool": "update_plan",
+          "check": null,
+          "status": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "attempt": 2,
+      "sessionId": "ses_5085e272-b7d6-43f0-a307-4a1c64d5a35a",
+      "sourceCommit": "43dd5bede739e1dc84ebeddc1345e6ca18849bd6",
+      "currentSourceVersion": "7ac9618a5c4b50e974038ec4ef191a063f20870bdb9e414b9a0a363930745864",
+      "criteria": [
+        {
+          "outcome": "这是一个受控的等待与自动唤醒验证，请实际完成：先运行 node scripts/status.mjs。若 ready 为 false，先把返回的 requestId 写入 src/checkpoint.json（形如 {\"requestId\":\"...\"}），然后使用 wait_until 工具，run_at 使用 status 返回的 wakeAt，reason 说明等待外部确认；调用后停止本轮，不要 sleep、轮询或自行创建 data/ready.json。若工具提示时间太早，重新运行 status 获取新的 wakeAt。调度器自动唤醒后，再运行 status；ready 为 true 时保留原 checkpoint 不改动，把 requestId 和 acknowledgement 写入 src/result.json，执行 node --test，确认通过后完成目标。所有数据、脚本和测试都是只读输入，不要改写；外部确认由评测器在观察到真实等待后提供。",
+          "verification": "引用真实工具结果与当前版本验证证据",
+          "required": true
+        },
+        {
+          "outcome": "自动唤醒后写出包含真实外部确认的 src/result.json，并通过 node --test",
+          "verification": "引用真实工具结果与当前版本验证证据",
+          "required": true
+        },
+        {
+          "outcome": "保留 checkpoint，禁止改写 data、scripts 和 test",
+          "verification": "引用真实工具结果与当前版本验证证据",
+          "required": true
+        }
+      ],
+      "gap": "核验结论缺少可追溯的必需条件证据",
+      "requestsPersisted": 13,
+      "historicalWaitEvidence": [
+        {
+          "id": "9da2c9b8-0c18-483b-8c0c-b3fe62ade013",
+          "tool": "wait_until",
+          "status": "SUCCESS",
+          "endVersion": "4da0d00151e95ab57f1e66ad3cd3119cd1d62e8797e1ae61cbe41e7d6507498a",
+          "rejectedAsStaleByCurrentRule": true
+        }
+      ],
+      "currentEvidence": [
+        {
+          "id": "c20ae4bf-7007-4d65-919c-50316b459176",
+          "tool": "create_file",
+          "check": null,
+          "status": "SUCCESS"
+        },
+        {
+          "id": "8b073c0f-1a03-4029-b1d4-cd4294b3dc71",
+          "tool": "run_command",
+          "check": null,
+          "status": "SUCCESS"
+        },
+        {
+          "id": "d133ce78-05f3-4606-bc6e-926b9ad6ad2a",
+          "tool": "run_command",
+          "check": "node --test → exit 0",
+          "status": "SUCCESS"
+        },
+        {
+          "id": "c087acd7-037b-4c22-992c-6896107592ef",
+          "tool": "read_file",
+          "check": null,
+          "status": "SUCCESS"
+        },
+        {
+          "id": "36a7a026-467b-4535-b949-5c906618fff4",
+          "tool": "read_file",
+          "check": null,
+          "status": "SUCCESS"
+        },
+        {
+          "id": "75f5b67b-bccb-47f8-ba7b-a09b70b1d7cd",
+          "tool": "command_logs",
+          "check": null,
+          "status": "SUCCESS"
+        },
+        {
+          "id": "4bc8b5e0-596c-4ae6-af97-ddffbf1f0432",
+          "tool": "command_logs",
+          "check": null,
+          "status": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "attempt": 3,
+      "sessionId": "ses_a479e1b2-09f2-431f-8c4e-2bca9476d9b5",
+      "sourceCommit": "43dd5bede739e1dc84ebeddc1345e6ca18849bd6",
+      "currentSourceVersion": "c7ac1057fad8e7a10b7a346c4ed4bee00df61e0235d5b78d8b2c7a329fe2444c",
+      "criteria": [
+        {
+          "outcome": "这是一个受控的等待与自动唤醒验证，请实际完成：先运行 node scripts/status.mjs。若 ready 为 false，先把返回的 requestId 写入 src/checkpoint.json（形如 {\"requestId\":\"...\"}），然后使用 wait_until 工具，run_at 使用 status 返回的 wakeAt，reason 说明等待外部确认；调用后停止本轮，不要 sleep、轮询或自行创建 data/ready.json。若工具提示时间太早，重新运行 status 获取新的 wakeAt。调度器自动唤醒后，再运行 status；ready 为 true 时保留原 checkpoint 不改动，把 requestId 和 acknowledgement 写入 src/result.json，执行 node --test，确认通过后完成目标。所有数据、脚本和测试都是只读输入，不要改写；外部确认由评测器在观察到真实等待后提供。",
+          "verification": "引用真实工具结果与当前版本验证证据",
+          "required": true
+        },
+        {
+          "outcome": "自动唤醒后写出包含真实外部确认的 src/result.json，并通过 node --test",
+          "verification": "引用真实工具结果与当前版本验证证据",
+          "required": true
+        },
+        {
+          "outcome": "保留 checkpoint，禁止改写 data、scripts 和 test",
+          "verification": "引用真实工具结果与当前版本验证证据",
+          "required": true
+        }
+      ],
+      "gap": "核验结论缺少可追溯的必需条件证据",
+      "requestsPersisted": 12,
+      "historicalWaitEvidence": [
+        {
+          "id": "fe536112-670a-4102-82ab-e1b4079792c5",
+          "tool": "wait_until",
+          "status": "SUCCESS",
+          "endVersion": "39237d9c6fad1e40153ceaaaf69523d145e48a907fb661def4f575f43f376ad6",
+          "rejectedAsStaleByCurrentRule": true
+        }
+      ],
+      "currentEvidence": [
+        {
+          "id": "5355c573-bcf1-4963-b214-6a61c685a616",
+          "tool": "create_file",
+          "check": null,
+          "status": "SUCCESS"
+        },
+        {
+          "id": "ba057e8a-d03f-4ed1-ae61-93b89816c32e",
+          "tool": "run_command",
+          "check": null,
+          "status": "SUCCESS"
+        },
+        {
+          "id": "78a43702-b08e-46db-ab19-db776f89869e",
+          "tool": "run_command",
+          "check": "node --test → exit 0",
+          "status": "SUCCESS"
+        },
+        {
+          "id": "4898fed6-f676-483d-a43e-d0bfbd6398a7",
+          "tool": "read_file",
+          "check": null,
+          "status": "SUCCESS"
+        },
+        {
+          "id": "2181df9c-bd2d-4707-a023-b1209757fb13",
+          "tool": "read_file",
+          "check": null,
+          "status": "SUCCESS"
+        }
+      ]
+    }
+  ],
+  "limit": "原始 submit_decision 响应未持久化，不能据此断言每一次失败都引用了旧等待记录；确定性回归另行验证这种有效历史事实被拒绝的问题。"
+}

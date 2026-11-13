@@ -1,0 +1,70 @@
+--- a/src/csv.js
++++ b/src/csv.js
+@@ -1,8 +1,65 @@
+ 'use strict';
+ 
+-// CSV 解析。当前只做了最朴素的逗号切分，引号里的逗号会切错。
++// CSV 解析（RFC 4180 风格状态机）：
++// - 引号内的逗号与换行属于字段内容；
++// - 字段内 "" 表示一个字面双引号；
++// - 行结束符支持 \n、\r\n、\r；结尾换行不产生空行；
++// - 引号只出现在字段开头才启用引号模式，其余位置的引号按字面处理。
+ function parse(text) {
+-  return text.trim().split('\n').map((line) => line.split(','));
++  const rows = [];
++  let row = [];
++  let field = '';
++  let quoted = false; // 当前字段是否处于引号内
++  let fieldStarted = false; // 当前是否已经开始出现字段（用于区分空文本与空行）
++
++  const endField = () => {
++    row.push(field);
++    field = '';
++    fieldStarted = true;
++  };
++  const endRow = () => {
++    endField();
++    rows.push(row);
++    row = [];
++    fieldStarted = false; // 新一行尚未开始，避免结尾换行后再补一个空行
++  };
++
++  for (let i = 0; i < text.length; i += 1) {
++    const ch = text[i];
++
++    if (quoted) {
++      if (ch === '"') {
++        if (text[i + 1] === '"') {
++          field += '"'; // "" 转义
++          i += 1;
++        } else {
++          quoted = false; // 闭合引号
++        }
++      } else {
++        field += ch; // 引号内的逗号、换行都按字面保留
++      }
++      continue;
++    }
++
++    if (ch === '"' && field === '') {
++      quoted = true;
++      fieldStarted = true;
++    } else if (ch === ',') {
++      endField();
++    } else if (ch === '\r' || ch === '\n') {
++      if (ch === '\r' && text[i + 1] === '\n') i += 1;
++      endRow();
++    } else {
++      field += ch;
++      fieldStarted = true;
++    }
++  }
++
++  // 末尾还有未收尾的字段或字段已开始（如 "a,"），则补最后一行；
++  // 若文本以换行结束，循环里已 endRow，不会多出空行。
++  if (field !== '' || fieldStarted) endRow();
++
++  return rows;
+ }
+ 
+ module.exports = { parse };

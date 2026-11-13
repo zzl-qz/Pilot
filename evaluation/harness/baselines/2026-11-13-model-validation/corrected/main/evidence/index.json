@@ -1,0 +1,67 @@
+[
+  {
+    "sessionId": "ses_c233fe6a-f924-4831-8ca5-80e0a84076a0",
+    "taskId": "steer-constraint-hold",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 63,
+    "historySha256": "e5936984235d77fe9af67bd9820fe513c5b531da290a3329f6880325ade84423",
+    "candidateDiffSha256": "20b88e81b6d8683f47fc331dc8cbc8a3480f164e6f2e9afae2086047250f9364",
+    "changedFiles": [
+      {
+        "path": "src/csv.js",
+        "beforeSha256": "aeccce5b27857ed6f9428c4d7f918bba12df2b1d66fe28c09e561e9870366624",
+        "afterSha256": "bc50b621d60a72cab60c2b1c5f24ed2bede2d57046e5d6c697f2ee3b0a232005"
+      },
+      {
+        "path": "test/csv.test.js",
+        "beforeSha256": "b55f103132f12bd03923e242f97366c80b4ee05a71d392e9139c6b560e35f389",
+        "afterSha256": "5bf9919a2502992104ff3ca1ea89a83eaa620e209783a77d096104bec71b8d60"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_3f5f7226-fa47-491f-a0dc-3815adad23d7",
+    "taskId": "steer-constraint-hold",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 63,
+    "historySha256": "ec4b592be1d58f95d62cc8a5a168bd1572be3d8d4e5a2f8fa0a66ed872b5c258",
+    "candidateDiffSha256": "84b1827e830da5af81171985534bb00c8f734c693e5ad548ce21347e1a42b51d",
+    "changedFiles": [
+      {
+        "path": "src/csv.js",
+        "beforeSha256": "aeccce5b27857ed6f9428c4d7f918bba12df2b1d66fe28c09e561e9870366624",
+        "afterSha256": "efafac8f6a07048112c5e6ab8f9cf08b406d6430ec6421a04d28e8c30f1435ce"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_21efc909-88a4-4a4c-a55d-f2e746467c08",
+    "taskId": "steer-constraint-hold",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 98,
+    "historySha256": "9041591562aeb57f8d712fc08472a7389936568d1fa43601b9b6a9f31ea989b6",
+    "candidateDiffSha256": "f256b5b0df12162a626daa3cb5202b6019811652af34c5c08f06c60dc3ff4d58",
+    "changedFiles": [
+      {
+        "path": "src/csv.js",
+        "beforeSha256": "aeccce5b27857ed6f9428c4d7f918bba12df2b1d66fe28c09e561e9870366624",
+        "afterSha256": "33189001b0bac1e45c615e89e67e16b05b9ef673c575e1084cc303cada46ee1a"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  }
+]

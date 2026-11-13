@@ -1,0 +1,9 @@
+--- a/src/state.json
++++ b/src/state.json
+@@ -0,0 +1 @@
++{"threshold":65,"waitedMs":8000}
+--- a/src/threshold.js
++++ b/src/threshold.js
+@@ -1 +1 @@
+-module.exports = { THRESHOLD: 10 };
++module.exports = { THRESHOLD: 65 };

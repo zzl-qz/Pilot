@@ -1,0 +1,25 @@
+{
+  "sessionId": "ses_ccf6cfc6-3680-4a39-b118-483fb6ef0395",
+  "taskId": "wait-condition",
+  "attempt": 1,
+  "terminalStatus": "COMPLETED",
+  "originalRecordedTerminalStatus": "COMPLETED",
+  "afterEvaluationDeadline": false,
+  "success": true,
+  "historyEvents": 71,
+  "historySha256": "0e72e6e11354a797dfc16df62cfc8948605e8d607ad6fd95e6f3c94c534d1489",
+  "candidateDiffSha256": "b9f2c033a69a976e92f25c302aeb902beb41f69b53095966843edc3066c9c10f",
+  "changedFiles": [
+    {
+      "path": "src/state.json",
+      "beforeSha256": null,
+      "afterSha256": "685c6d7015c36d64c6a1711d386d1068a14b8e85218f40e5163982e0f58ac729"
+    },
+    {
+      "path": "src/threshold.js",
+      "beforeSha256": "9ddfa1e2199a7d5574f732ab5bc0a39aff5aa9600e0e9dec52ca8ebfbf768530",
+      "afterSha256": "3a8095cb1af42dac870744adbeb2eaa54bf6aec10b8b3723bf643da915ada048"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

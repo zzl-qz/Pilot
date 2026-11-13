@@ -1,0 +1,12 @@
+{
+  "sessionId": "ses_d075ad7c-f7dd-45b6-87ea-6306fc8d863d",
+  "taskId": "steer-constraint-hold",
+  "attempt": 3,
+  "terminalStatus": "FAILED",
+  "success": false,
+  "historyEvents": 46,
+  "historySha256": "56ffb604f1bfd649a2883c0700867d7d260b1d9dc95daa7f5d9b90b476610d13",
+  "candidateDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "changedFiles": [],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

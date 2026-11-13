@@ -1,0 +1,15 @@
+--- a/src/paths.js
++++ b/src/paths.js
+@@ -5,7 +5,11 @@
+  * 输出必须与输入风格一致，且不能出现混合分隔符。
+  */
+ function joinPath(root, relative) {
+-  return `${root}/${relative}`;
++  // 按 root 风格判定：Windows 风格（盘符 或 含反斜杠）用 \\，否则用 /
++  const isWindows = /^[A-Za-z]:$/.test(root) || /^[A-Za-z]:[/\\]/.test(root) || root.includes('\\');
++  const sep = isWindows ? '\\' : '/';
++  const rel = relative.split(/[\\/]+/).filter(Boolean).join(sep);
++  return root + sep + rel;
+ }
+ 
+ module.exports = { joinPath };

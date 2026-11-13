@@ -1,0 +1,25 @@
+{
+  "sessionId": "ses_8323a96d-117f-499d-be1d-4af05278bb56",
+  "taskId": "refactor-without-behavior-change",
+  "attempt": 1,
+  "terminalStatus": "COMPLETED",
+  "originalRecordedTerminalStatus": "COMPLETED",
+  "afterEvaluationDeadline": false,
+  "success": true,
+  "historyEvents": 91,
+  "historySha256": "b97b4ca432b8aa255417a06ecef0fefc5b0b868cd86e1aa6c4f01c390d7d9960",
+  "candidateDiffSha256": "600ac774e0b1c383b3fd06ee2bf5fd7e70a75a818e7acb574399583606ee6b7f",
+  "changedFiles": [
+    {
+      "path": "src/orderService.js",
+      "beforeSha256": "513c9056952273d6c1712aaca7fce26701cf80c316db5fdf216c4812f2500dcc",
+      "afterSha256": "a4f551e261c090195cb001d429a7a24709f533b34677cc46b9a6ab46046a2545"
+    },
+    {
+      "path": "src/pricingStrategies.js",
+      "beforeSha256": null,
+      "afterSha256": "c021c18fd11a19eef18709f663786cbb781db9ec20dbfd36a3a6d35bdbb3a66a"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

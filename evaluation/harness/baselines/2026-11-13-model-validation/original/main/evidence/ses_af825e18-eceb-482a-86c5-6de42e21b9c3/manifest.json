@@ -1,0 +1,18 @@
+{
+  "sessionId": "ses_af825e18-eceb-482a-86c5-6de42e21b9c3",
+  "taskId": "add-validation",
+  "attempt": 3,
+  "terminalStatus": "COMPLETED",
+  "success": true,
+  "historyEvents": 48,
+  "historySha256": "aa39270772bd7341a9e3632c1b1f5fe26059a16e001cb5da7cd75b9d309a3ddf",
+  "candidateDiffSha256": "3043ab0e3eba0519f691f05138157e4d35a0b1aaf58e4d0930c705d891ed42ea",
+  "changedFiles": [
+    {
+      "path": "src/registry.js",
+      "beforeSha256": "072de218bce80e907498e7631fce843a3b9ad33105c340d90ddb6d7b05842304",
+      "afterSha256": "d79ce6e44606838174e12e1765f4a63c947a28122cea9ab4fbac149ab87ff494"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

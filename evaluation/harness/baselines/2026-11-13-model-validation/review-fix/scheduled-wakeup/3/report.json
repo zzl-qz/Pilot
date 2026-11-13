@@ -1,0 +1,133 @@
+{
+  "attempt": 3,
+  "model": "Qwen3.8-Flash-Next-oQ4e-mtp",
+  "sourceCommit": "bd6a69b5483b11745683b56200a6ed15022ede2a",
+  "success": true,
+  "observations": [
+    {
+      "observedAt": "2026-11-13T06:14:44.567Z",
+      "state": "SCHEDULED",
+      "runId": null,
+      "runAt": "2026-11-13T06:14:47.542Z",
+      "attempts": 0
+    },
+    {
+      "observedAt": "2026-11-13T06:14:48.591Z",
+      "state": "RUNNING",
+      "runId": "run_691a1f6f-531e-40c0-94b1-6c5b938b2e74",
+      "runAt": "2026-11-13T06:14:47.542Z",
+      "attempts": 1
+    },
+    {
+      "observedAt": "2026-11-13T06:15:50.907Z",
+      "state": "WAITING",
+      "runId": "run_691a1f6f-531e-40c0-94b1-6c5b938b2e74",
+      "runAt": "2026-11-13T06:18:12.641Z",
+      "attempts": 1
+    },
+    {
+      "observedAt": "2026-11-13T06:18:13.613Z",
+      "state": "RUNNING",
+      "runId": "run_125a379c-2888-4ef1-b3b7-dd7691348a83",
+      "runAt": "2026-11-13T06:18:12.641Z",
+      "attempts": 2
+    },
+    {
+      "observedAt": "2026-11-13T06:21:20.405Z",
+      "state": "COMPLETED",
+      "runId": "run_125a379c-2888-4ef1-b3b7-dd7691348a83",
+      "runAt": "2026-11-13T06:18:12.641Z",
+      "attempts": 2
+    }
+  ],
+  "scheduleId": "schedule_e01f370c-dcad-45a1-bf41-c6c807d7c944",
+  "sessionId": "ses_3b47d0cb-34f7-4e17-9f1d-258ef60fd2ca",
+  "workspace": "<isolated-root>/.pilot-eval/wakeup-FmcbtP",
+  "waitingObserved": true,
+  "scheduledWakeAt": "2026-11-13T06:18:12.641Z",
+  "firstRunId": "run_691a1f6f-531e-40c0-94b1-6c5b938b2e74",
+  "confirmationSha256": "6b9aa986d9f3c7f92305832ee2043e9120f9745963e38c6fc663698b6bcfe68f",
+  "confirmationReleasedAt": "2026-11-13T06:15:50.909Z",
+  "finalSchedule": {
+    "id": "schedule_e01f370c-dcad-45a1-bf41-c6c807d7c944",
+    "name": "eval:scheduled-wakeup:3",
+    "sessionId": "ses_3b47d0cb-34f7-4e17-9f1d-258ef60fd2ca",
+    "taskId": "task_22fb7065-6965-4001-ac86-a1688392d8d8",
+    "content": "这是一个受控的等待与自动唤醒验证，请实际完成：先运行 node scripts/status.mjs。若 ready 为 false，先把返回的 requestId 写入 src/checkpoint.json（形如 {\"requestId\":\"...\"}），然后使用 wait_until 工具，run_at 使用 status 返回的 wakeAt，reason 说明等待外部确认；调用后停止本轮，不要 sleep、轮询或自行创建 data/ready.json。若工具提示时间太早，重新运行 status 获取新的 wakeAt。调度器自动唤醒后，再运行 status；ready 为 true 时保留原 checkpoint 不改动，把 requestId 和 acknowledgement 写入 src/result.json，执行 node --test，确认通过后完成目标。所有数据、脚本和测试都是只读输入，不要改写；外部确认由评测器在观察到真实等待后提供。",
+    "requirements": {
+      "constraints": [
+        "保留 checkpoint，禁止改写 data、scripts 和 test"
+      ],
+      "acceptance": [
+        {
+          "text": "自动唤醒后写出包含真实外部确认的 src/result.json，并通过 node --test",
+          "checked": false,
+          "evidence": ""
+        }
+      ],
+      "automation": {
+        "scheduleId": "schedule_e01f370c-dcad-45a1-bf41-c6c807d7c944",
+        "fullAccess": true,
+        "requireResearch": false
+      }
+    },
+    "skill": null,
+    "runAt": "2026-11-13T06:18:12.641Z",
+    "timezone": "UTC",
+    "state": "COMPLETED",
+    "runId": "run_125a379c-2888-4ef1-b3b7-dd7691348a83",
+    "attempts": 2,
+    "recoveries": 0,
+    "deadline": "2026-11-14T06:14:47.796772Z",
+    "message": "目标已核验完成",
+    "history": [
+      {
+        "runId": "run_691a1f6f-531e-40c0-94b1-6c5b938b2e74",
+        "startedAt": "2026-11-13T06:14:47.796772Z",
+        "status": "WAITING"
+      },
+      {
+        "runId": "run_125a379c-2888-4ef1-b3b7-dd7691348a83",
+        "startedAt": "2026-11-13T06:18:13.383233Z",
+        "status": "COMPLETED"
+      }
+    ],
+    "version": 6,
+    "workspace": {
+      "mode": "SHARED",
+      "path": "<isolated-root>/.pilot-eval/wakeup-FmcbtP",
+      "base": "<isolated-root>/.pilot-eval/wakeup-FmcbtP",
+      "branch": "",
+      "commit": "",
+      "handedOffAt": null
+    },
+    "endedAt": "2026-11-13T06:21:18.594671Z"
+  },
+  "checkpointPreserved": true,
+  "confirmationPreserved": true,
+  "artifacts": {
+    "data/request.json": {
+      "requestId": "9f158aab-86dd-45f0-9eed-f722f459afd6"
+    },
+    "data/ready.json": {
+      "acknowledgement": "ec91c203-e189-483a-a197-a87e1642ff64"
+    },
+    "src/checkpoint.json": {
+      "requestId": "9f158aab-86dd-45f0-9eed-f722f459afd6"
+    },
+    "src/result.json": {
+      "requestId": "9f158aab-86dd-45f0-9eed-f722f459afd6",
+      "acknowledgement": "ec91c203-e189-483a-a197-a87e1642ff64"
+    }
+  },
+  "inputsPreserved": true,
+  "waitToolObserved": true,
+  "waitingStopObserved": true,
+  "newRunAfterWake": true,
+  "acceptance": {
+    "ran": true,
+    "ok": true,
+    "detail": "node --test → exit 0（0.1s）"
+  },
+  "seconds": 395.982
+}

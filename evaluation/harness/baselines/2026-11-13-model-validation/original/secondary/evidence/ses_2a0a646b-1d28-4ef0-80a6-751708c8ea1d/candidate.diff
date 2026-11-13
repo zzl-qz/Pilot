@@ -1,0 +1,23 @@
+--- a/src/workspace.js
++++ b/src/workspace.js
+@@ -1,13 +1,18 @@
+ 'use strict';
+ 
+-const { resolve } = require('node:path');
++const { resolve, sep } = require('node:path');
+ 
+ /**
+  * 把用户给出的相对路径解析成工作区内的绝对路径。
+  * 逃出工作区的路径必须返回 null（不抛异常），调用方自行处理。
+  */
+ function resolveInside(root, userPath) {
+-  return resolve(root, userPath);
++  const resolved = resolve(root, userPath);
++  if (resolved === root) {
++    return resolved;
++  }
++  const prefix = root.endsWith(sep) ? root : root + sep;
++  return resolved.startsWith(prefix) ? resolved : null;
+ }
+ 
+ module.exports = { resolveInside };

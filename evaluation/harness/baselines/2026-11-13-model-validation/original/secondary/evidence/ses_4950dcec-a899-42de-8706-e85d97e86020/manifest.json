@@ -1,0 +1,20 @@
+{
+  "sessionId": "ses_4950dcec-a899-42de-8706-e85d97e86020",
+  "taskId": "async-race-condition",
+  "attempt": 3,
+  "terminalStatus": "COMPLETED",
+  "originalRecordedTerminalStatus": "COMPLETED",
+  "afterEvaluationDeadline": false,
+  "success": true,
+  "historyEvents": 46,
+  "historySha256": "3347cd5b3300e6e520fadd110b78ce15d615568092698301f9fa6b31868bdb9f",
+  "candidateDiffSha256": "12cac08fd9de2243d5f06170fb01d63b32e8744d32f34ce4a5faa86f9d23a6e8",
+  "changedFiles": [
+    {
+      "path": "src/fetchAll.js",
+      "beforeSha256": "b278969cebeff9147042bdb5bbbb32718b8aa6ae162d682904e47603b3f78d09",
+      "afterSha256": "6e158118b33502592c3030f228bcb40b194ed00bde8367e9c5214c0481b9bc3e"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

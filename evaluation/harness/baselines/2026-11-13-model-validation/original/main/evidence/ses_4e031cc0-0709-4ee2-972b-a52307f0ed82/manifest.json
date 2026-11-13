@@ -1,0 +1,18 @@
+{
+  "sessionId": "ses_4e031cc0-0709-4ee2-972b-a52307f0ed82",
+  "taskId": "tool-failure-recovery",
+  "attempt": 3,
+  "terminalStatus": "COMPLETED",
+  "success": true,
+  "historyEvents": 48,
+  "historySha256": "0a3a27b14b822033505cee36c758eb28fa06bdcaf3c58a10372d8f37dc96db39",
+  "candidateDiffSha256": "096fd1fd6869c5f45cac2a6235db7db3b25441f4b02e62e02c823a868819aaec",
+  "changedFiles": [
+    {
+      "path": "src/pricing.js",
+      "beforeSha256": null,
+      "afterSha256": "c0c6e3852090ba56b29468306248b50e1d290dee1870560082c1750c363cdba7"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

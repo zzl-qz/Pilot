@@ -1,0 +1,1107 @@
+{
+  "sessions": [
+    {
+      "sessionId": "ses_029d478b-06f0-404b-81ae-7836fe196fa2",
+      "taskId": "frontend-form-a11y",
+      "attempt": 2,
+      "modelRequestsObserved": 7,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 7
+      },
+      "firstContextTokens": 12381,
+      "maximumContextTokens": 15342,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_06f78b5f-b6e1-4d65-91b6-0c715221a978",
+      "taskId": "steer-constraint-hold",
+      "attempt": 1,
+      "modelRequestsObserved": 10,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 10
+      },
+      "firstContextTokens": 12434,
+      "maximumContextTokens": 16999,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_0ade0f35-8846-4c8b-aadc-ee8af8136ca3",
+      "taskId": "path-separator",
+      "attempt": 2,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12367,
+      "maximumContextTokens": 14619,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_0dffeaef-e95d-47b6-8a82-940acff34047",
+      "taskId": "fix-failing-unit-test",
+      "attempt": 2,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12364,
+      "maximumContextTokens": 14113,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_113a6ca7-117b-48c3-aebe-53223eb73eca",
+      "taskId": "add-retry-backoff",
+      "attempt": 3,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12371,
+      "maximumContextTokens": 14836,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_1300a15f-6687-4866-abb2-607976fcea55",
+      "taskId": "extract-shared-module",
+      "attempt": 1,
+      "modelRequestsObserved": 7,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 7
+      },
+      "firstContextTokens": 12367,
+      "maximumContextTokens": 15253,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_17aaf948-80d8-497b-aff4-9271e28d3280",
+      "taskId": "split-large-module",
+      "attempt": 2,
+      "modelRequestsObserved": 7,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 7
+      },
+      "firstContextTokens": 12353,
+      "maximumContextTokens": 15272,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_1e1060d5-0c86-4258-8e18-a8d866442ed5",
+      "taskId": "add-cursor-pagination",
+      "attempt": 3,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12381,
+      "maximumContextTokens": 14782,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_2b90f193-4354-4619-8264-fe20b75097a5",
+      "taskId": "async-race-condition",
+      "attempt": 3,
+      "modelRequestsObserved": 7,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 7
+      },
+      "firstContextTokens": 12377,
+      "maximumContextTokens": 14656,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_2e64c279-4914-478b-8855-33021e08f51f",
+      "taskId": "move-file-update-imports",
+      "attempt": 1,
+      "modelRequestsObserved": 10,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 10
+      },
+      "firstContextTokens": 12328,
+      "maximumContextTokens": 15625,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_30c98f05-e00d-4b5a-9bb5-b060d9191142",
+      "taskId": "long-file-targeted-edit",
+      "attempt": 1,
+      "modelRequestsObserved": 10,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 10
+      },
+      "firstContextTokens": 12371,
+      "maximumContextTokens": 16740,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_34034a17-b05a-444a-9afb-8389ca9ee615",
+      "taskId": "long-file-targeted-edit",
+      "attempt": 3,
+      "modelRequestsObserved": 10,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 10
+      },
+      "firstContextTokens": 12371,
+      "maximumContextTokens": 17391,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_34c3e4da-81b0-4fc0-9cc7-a313ecca1115",
+      "taskId": "fix-failing-unit-test",
+      "attempt": 3,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12364,
+      "maximumContextTokens": 14129,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_35edfbe7-5caa-43bc-998f-df22ef0bd27a",
+      "taskId": "add-cursor-pagination",
+      "attempt": 1,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12381,
+      "maximumContextTokens": 14871,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_36bf526c-5347-4394-a475-dacaf04ff87e",
+      "taskId": "long-file-targeted-edit",
+      "attempt": 2,
+      "modelRequestsObserved": 11,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 11
+      },
+      "firstContextTokens": 12371,
+      "maximumContextTokens": 17358,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_3f524d44-8f65-47eb-8d2b-d2f4493ce502",
+      "taskId": "steer-mid-run",
+      "attempt": 3,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12323,
+      "maximumContextTokens": 15190,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_4199ac10-0224-4fe0-a166-eae55f351fc8",
+      "taskId": "tool-failure-recovery",
+      "attempt": 2,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12371,
+      "maximumContextTokens": 14383,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_4e031cc0-0709-4ee2-972b-a52307f0ed82",
+      "taskId": "tool-failure-recovery",
+      "attempt": 3,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12371,
+      "maximumContextTokens": 14309,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_5076538f-cdcb-4d8f-b52c-e77d7fed3c0e",
+      "taskId": "null-guard-crash",
+      "attempt": 1,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12367,
+      "maximumContextTokens": 14918,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_53541679-c976-4d66-9133-f88a629a786a",
+      "taskId": "steer-mid-run",
+      "attempt": 2,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12323,
+      "maximumContextTokens": 15381,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_55feaf55-b7ce-454d-a533-9ed487b70ae8",
+      "taskId": "path-separator",
+      "attempt": 3,
+      "modelRequestsObserved": 11,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 11
+      },
+      "firstContextTokens": 12367,
+      "maximumContextTokens": 16482,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_5c8500b1-5e25-45a7-9367-9fee9f4a13e6",
+      "taskId": "flaky-test-diagnosis",
+      "attempt": 3,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12402,
+      "maximumContextTokens": 15103,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_5f89ea35-8441-4537-8746-1e8f45b61f92",
+      "taskId": "null-guard-crash",
+      "attempt": 3,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12367,
+      "maximumContextTokens": 14408,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_60a23167-fb27-4dc9-b584-81b7ad549e76",
+      "taskId": "add-idempotency",
+      "attempt": 3,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12370,
+      "maximumContextTokens": 14559,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_624fc183-3302-49dc-94a2-5af24fab3594",
+      "taskId": "extract-shared-module",
+      "attempt": 2,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12367,
+      "maximumContextTokens": 15093,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_63df9c91-301e-4465-9d23-96a975221974",
+      "taskId": "shared-state-pollution",
+      "attempt": 2,
+      "modelRequestsObserved": 9,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 9
+      },
+      "firstContextTokens": 12364,
+      "maximumContextTokens": 14829,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_69444c5a-139f-481d-b263-93ca74b83103",
+      "taskId": "rename-across-files",
+      "attempt": 3,
+      "modelRequestsObserved": 7,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 7
+      },
+      "firstContextTokens": 12357,
+      "maximumContextTokens": 15115,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_77777358-510a-4ae7-b69d-19106680fedd",
+      "taskId": "case-insensitive-path",
+      "attempt": 3,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12359,
+      "maximumContextTokens": 14674,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_802d2565-8471-4160-b565-ae43dfb1b5a1",
+      "taskId": "shared-state-pollution",
+      "attempt": 1,
+      "modelRequestsObserved": 7,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 7
+      },
+      "firstContextTokens": 12364,
+      "maximumContextTokens": 14627,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_860229ad-ad68-40aa-a5e4-11a053528b28",
+      "taskId": "steer-mid-run",
+      "attempt": 1,
+      "modelRequestsObserved": 9,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 9
+      },
+      "firstContextTokens": 12323,
+      "maximumContextTokens": 15495,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_862d8041-b981-4fd7-9864-537cdcd92512",
+      "taskId": "null-guard-crash",
+      "attempt": 2,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12367,
+      "maximumContextTokens": 14448,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_87584e46-a3c8-4a14-82aa-d8122234796d",
+      "taskId": "add-retry-backoff",
+      "attempt": 1,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12371,
+      "maximumContextTokens": 14952,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_87683756-f126-4001-bec8-f2918340a810",
+      "taskId": "flaky-test-diagnosis",
+      "attempt": 2,
+      "modelRequestsObserved": 9,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 9
+      },
+      "firstContextTokens": 12402,
+      "maximumContextTokens": 15303,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_88ee030d-3e89-43b6-bd56-bb3b91e5af57",
+      "taskId": "split-large-module",
+      "attempt": 1,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12353,
+      "maximumContextTokens": 15548,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_89b51f8c-7530-44d3-8137-3fff13efd059",
+      "taskId": "rename-across-files",
+      "attempt": 2,
+      "modelRequestsObserved": 7,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 7
+      },
+      "firstContextTokens": 12357,
+      "maximumContextTokens": 15087,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_8b4804f1-b3d5-49dc-b988-ecb3af5bc3d5",
+      "taskId": "frontend-form-a11y",
+      "attempt": 3,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12381,
+      "maximumContextTokens": 15125,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_9e1e7694-e9df-408d-99bb-9e95d64b4995",
+      "taskId": "move-file-update-imports",
+      "attempt": 3,
+      "modelRequestsObserved": 13,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 13
+      },
+      "firstContextTokens": 12328,
+      "maximumContextTokens": 15744,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_9e7d428a-7ac6-45f2-8455-10a3464ff151",
+      "taskId": "path-safety-regression",
+      "attempt": 1,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12379,
+      "maximumContextTokens": 15385,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_a11c54ac-7202-4ee7-9c1f-78e199b0aaf5",
+      "taskId": "async-race-condition",
+      "attempt": 2,
+      "modelRequestsObserved": 9,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 9
+      },
+      "firstContextTokens": 12377,
+      "maximumContextTokens": 14746,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_a2ba0fc2-1c65-41df-88e1-f63444c999f2",
+      "taskId": "extract-shared-module",
+      "attempt": 3,
+      "modelRequestsObserved": 7,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 7
+      },
+      "firstContextTokens": 12367,
+      "maximumContextTokens": 15096,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_a416d6ef-ddf7-4a1c-be77-d4674b09a64f",
+      "taskId": "refactor-without-behavior-change",
+      "attempt": 1,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12381,
+      "maximumContextTokens": 15654,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_a69945c3-8305-4e20-a332-131e2062b406",
+      "taskId": "add-validation",
+      "attempt": 1,
+      "modelRequestsObserved": 7,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 7
+      },
+      "firstContextTokens": 12385,
+      "maximumContextTokens": 15065,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_a75fc662-d772-41af-b115-d92b3ae4fa21",
+      "taskId": "add-retry-backoff",
+      "attempt": 2,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12371,
+      "maximumContextTokens": 14894,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_a95953d3-5fae-4de8-9bd0-4769cb41c702",
+      "taskId": "off-by-one-pagination",
+      "attempt": 1,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12361,
+      "maximumContextTokens": 14359,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_aa25c5d1-c831-4331-8d0f-39fd7ce96f67",
+      "taskId": "refactor-without-behavior-change",
+      "attempt": 2,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12381,
+      "maximumContextTokens": 15551,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_af825e18-eceb-482a-86c5-6de42e21b9c3",
+      "taskId": "add-validation",
+      "attempt": 3,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12385,
+      "maximumContextTokens": 15010,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_b04c8932-91ab-4841-b3df-b22543e12622",
+      "taskId": "unstable-sort",
+      "attempt": 2,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12365,
+      "maximumContextTokens": 14157,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_b0d9d19d-723d-40c5-9ed0-ad99d6f71096",
+      "taskId": "async-race-condition",
+      "attempt": 1,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12377,
+      "maximumContextTokens": 14586,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_b47c8c94-843e-4b1b-9c80-d915ae6c2633",
+      "taskId": "unstable-sort",
+      "attempt": 3,
+      "modelRequestsObserved": 7,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 7
+      },
+      "firstContextTokens": 12365,
+      "maximumContextTokens": 14197,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_b6a0e40a-b2dd-4551-83ee-c7d14b684d73",
+      "taskId": "flaky-test-diagnosis",
+      "attempt": 1,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12402,
+      "maximumContextTokens": 15111,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_b966b204-fa37-4f7a-b8dd-0943e0301bcb",
+      "taskId": "unstable-sort",
+      "attempt": 1,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12365,
+      "maximumContextTokens": 14178,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_bb6c1731-3f2b-4965-91ef-ddda7071cdcc",
+      "taskId": "shared-state-pollution",
+      "attempt": 3,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12364,
+      "maximumContextTokens": 14798,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_c62ea65f-16d9-403b-afb3-921d0d00378a",
+      "taskId": "refactor-without-behavior-change",
+      "attempt": 3,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12381,
+      "maximumContextTokens": 15695,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_c70a5449-d9c0-4721-9a7e-0ee5193d679a",
+      "taskId": "case-insensitive-path",
+      "attempt": 2,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12359,
+      "maximumContextTokens": 14603,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_c8b3576c-42f4-4c82-aa2d-db42f74eafe9",
+      "taskId": "tool-failure-recovery",
+      "attempt": 1,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12371,
+      "maximumContextTokens": 14343,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_ccb083ab-eeb8-4903-8c57-d2cb6ecbdbe2",
+      "taskId": "path-safety-regression",
+      "attempt": 2,
+      "modelRequestsObserved": 7,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 7
+      },
+      "firstContextTokens": 12379,
+      "maximumContextTokens": 14749,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_cdb32c0c-d099-44b1-aee4-f0cad62eb8c0",
+      "taskId": "add-idempotency",
+      "attempt": 1,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12370,
+      "maximumContextTokens": 14478,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_ce04103c-e376-4c16-98ef-871b8022fafc",
+      "taskId": "frontend-form-a11y",
+      "attempt": 1,
+      "modelRequestsObserved": 7,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 7
+      },
+      "firstContextTokens": 12381,
+      "maximumContextTokens": 15223,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_cf9b7de9-071f-41ed-bf26-83b3f653beec",
+      "taskId": "move-file-update-imports",
+      "attempt": 2,
+      "modelRequestsObserved": 13,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 13
+      },
+      "firstContextTokens": 12328,
+      "maximumContextTokens": 15742,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_d015b73d-2373-459c-b074-99a1d851f4d7",
+      "taskId": "path-separator",
+      "attempt": 1,
+      "modelRequestsObserved": 7,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 7
+      },
+      "firstContextTokens": 12367,
+      "maximumContextTokens": 14849,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_d075ad7c-f7dd-45b6-87ea-6306fc8d863d",
+      "taskId": "steer-constraint-hold",
+      "attempt": 3,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 2,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 5,
+        "finalization": 1
+      },
+      "firstContextTokens": 12434,
+      "maximumContextTokens": 13493,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_d09bae3f-c04e-4f14-9a54-56baea02c6ff",
+      "taskId": "add-idempotency",
+      "attempt": 2,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12370,
+      "maximumContextTokens": 14665,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_d9657897-1ca1-40a2-abac-c60cdf79e805",
+      "taskId": "path-safety-regression",
+      "attempt": 3,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12379,
+      "maximumContextTokens": 14881,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_dde031f7-19b0-4264-be05-01b181f8f026",
+      "taskId": "steer-constraint-hold",
+      "attempt": 2,
+      "modelRequestsObserved": 11,
+      "failedModelRequests": 1,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 11
+      },
+      "firstContextTokens": 12434,
+      "maximumContextTokens": 16357,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_e152c6d4-c01a-4070-abe8-4c9e688adc59",
+      "taskId": "add-validation",
+      "attempt": 2,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12385,
+      "maximumContextTokens": 14957,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_e2af40ca-cd1c-4e48-b228-9301c8df50c2",
+      "taskId": "off-by-one-pagination",
+      "attempt": 2,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12361,
+      "maximumContextTokens": 14366,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_e3d563c2-fd7a-4322-a694-8bb6c829234c",
+      "taskId": "rename-across-files",
+      "attempt": 1,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12357,
+      "maximumContextTokens": 15181,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_e4921b16-c7cb-49e6-bd90-0cac1b491850",
+      "taskId": "split-large-module",
+      "attempt": 3,
+      "modelRequestsObserved": 8,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 8
+      },
+      "firstContextTokens": 12353,
+      "maximumContextTokens": 15877,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_e6badab2-2bb3-4f5f-9131-6e3833f8acbc",
+      "taskId": "case-insensitive-path",
+      "attempt": 1,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12359,
+      "maximumContextTokens": 14574,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_fc0d8e07-2282-40e2-a313-f9a5fffed218",
+      "taskId": "fix-failing-unit-test",
+      "attempt": 1,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12364,
+      "maximumContextTokens": 14095,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_fdc8bf27-d945-4e65-aacb-156ef2fb8832",
+      "taskId": "off-by-one-pagination",
+      "attempt": 3,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12361,
+      "maximumContextTokens": 14311,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    },
+    {
+      "sessionId": "ses_fec48a01-9937-4dc7-aaee-9eddebf7e10f",
+      "taskId": "add-cursor-pagination",
+      "attempt": 2,
+      "modelRequestsObserved": 6,
+      "failedModelRequests": 0,
+      "spawnAgentCalls": 0,
+      "modelPurposes": {
+        "main": 6
+      },
+      "firstContextTokens": 12381,
+      "maximumContextTokens": 14748,
+      "contextCountsEstimated": true,
+      "duplicateStartedCallIdentities": []
+    }
+  ],
+  "modelRequestsObserved": 530,
+  "duplicateModelReportIds": [],
+  "peakConcurrentModelRequestsByReportedIntervals": 4,
+  "topLevelConcurrencyLimit": 4,
+  "spawnAgentSessions": 0,
+  "toolCalls": {
+    "list_dir": 67,
+    "read_file": 166,
+    "apply_patch": 30,
+    "edit_file": 69,
+    "run_command": 95,
+    "search_text": 44,
+    "create_file": 18,
+    "glob_files": 25,
+    "read_task_history": 1,
+    "finish_goal": 1
+  },
+  "modelPurposes": {
+    "main": 529,
+    "finalization": 1
+  },
+  "interpretation": "并发峰值按请求 startedAt/durationMs 计算；4 是主会话上限。multi.enabled=false 只关闭 dispatch_agents；spawn_agent 保持默认可用。输入上下文数为服务估算，不能当成计费 token。"
+}

@@ -1,0 +1,13 @@
+--- a/src/pricing.js
++++ b/src/pricing.js
+@@ -0,0 +1,10 @@
++'use strict';
++
++// 单项账单价格（分）：单价 × 数量；数量为 0 或缺失时按 0 计。
++function priceCents(item) {
++  const unit = Number(item.priceCents) || 0;
++  const quantity = Number(item.quantity) || 0;
++  return unit * quantity;
++}
++
++module.exports = { priceCents };

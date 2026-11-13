@@ -1,0 +1,26 @@
+--- a/src/retry.js
++++ b/src/retry.js
+@@ -5,14 +5,21 @@
+  * @param {object} options baseDelayMs 首次退避毫秒，maxAttempts 最多尝试次数，sleep 可注入的等待函数
+  */
+ async function withRetry(fn, options) {
+-  const { maxAttempts = 3, sleep = () => Promise.resolve() } = options ?? {};
++  const {
++    maxAttempts = 3,
++    baseDelayMs = 10,
++    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
++  } = options ?? {};
+   let lastError = null;
+   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+     try {
+       return await fn();
+     } catch (error) {
+       lastError = error;
+-      await sleep(0);
++      // 仅在下一次还会尝试时退避；最后一次失败直接抛出
++      if (attempt < maxAttempts) {
++        await sleep(baseDelayMs * 2 ** (attempt - 1));
++      }
+     }
+   }
+   throw lastError;

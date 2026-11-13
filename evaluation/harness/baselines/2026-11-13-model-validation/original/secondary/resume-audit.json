@@ -1,0 +1,20 @@
+[
+  {
+    "kind": "secondary",
+    "part": 4,
+    "at": "2026-11-13T02:54:06.238217+00:00",
+    "reason": "原任务达到固定 12 分钟上限；已确认 CANCELLED/FINISHED。仅补未派发 attempt，原失败保留。",
+    "failedSessionId": "ses_5352d543-8d10-4685-84a4-c271c9811925",
+    "observedStatus": "CANCELLED",
+    "observedPhase": "FINISHED"
+  },
+  {
+    "kind": "secondary",
+    "part": 4,
+    "at": "2026-11-13T03:19:22.156194+00:00",
+    "reason": "第二次期限超时已确认 CANCELLED/FINISHED；保留失败，仅补未派发轮次。",
+    "failedSessionId": "ses_947f91dd-100e-49d4-8c01-0b8412f89530",
+    "observedStatus": "CANCELLED",
+    "observedPhase": "FINISHED"
+  }
+]

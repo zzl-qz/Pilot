@@ -1,0 +1,30 @@
+{
+  "sessionId": "ses_337483b2-093a-486d-8bef-fab2befb40c4",
+  "taskId": "split-large-module",
+  "attempt": 1,
+  "terminalStatus": "COMPLETED",
+  "originalRecordedTerminalStatus": "COMPLETED",
+  "afterEvaluationDeadline": false,
+  "success": true,
+  "historyEvents": 68,
+  "historySha256": "b89f0351d7f6f4cfb0f83c3d688b1369dd3341edb44268780463c059d47feb94",
+  "candidateDiffSha256": "f785e7730cfdc1ded51d6d20ad03ec79e0fd0c85de4f3f3d541a7410ba4cbec7",
+  "changedFiles": [
+    {
+      "path": "src/orders.js",
+      "beforeSha256": null,
+      "afterSha256": "80685562ef8bae61b16afd40ea1911565c4c7c127e352bec1588d80aa0a17b87"
+    },
+    {
+      "path": "src/store.js",
+      "beforeSha256": "cb411fdb672b3bcfa982684ba6ce18e0c3e3efb3f9cd7ae6f4dbe71a3984157e",
+      "afterSha256": "df71744b97712631cf35d6be87d0302e97fa2e749cdae2792933ef930a1e7a2b"
+    },
+    {
+      "path": "src/users.js",
+      "beforeSha256": null,
+      "afterSha256": "9e9baac966bd2e698a31823df7150dad3ecfecc571ff3c83474e0a9a5f2684e3"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

@@ -1,0 +1,38 @@
+--- a/src/counter.js
++++ b/src/counter.js
+@@ -1,19 +1,21 @@
+ 'use strict';
+ 
+-// 模块级共享状态：一个测试改了它，下一个测试就受影响。
+-let count = 0;
++// 工厂函数：每次调用创建独立计数器，状态封闭在闭包内，实例之间互不影响。
++function createCounter(initial = 0) {
++  let count = initial;
+ 
+-function bump() {
+-  count += 1;
+-  return count;
++  return {
++    bump() {
++      count += 1;
++      return count;
++    },
++    value() {
++      return count;
++    },
++    reset() {
++      count = 0;
++    },
++  };
+ }
+ 
+-function value() {
+-  return count;
+-}
+-
+-function reset() {
+-  count = 0;
+-}
+-
+-module.exports = { bump, value, reset };
++module.exports = { createCounter };

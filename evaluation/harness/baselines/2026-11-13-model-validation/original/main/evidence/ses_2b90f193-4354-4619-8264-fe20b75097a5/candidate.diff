@@ -1,0 +1,25 @@
+--- a/src/fetchAll.js
++++ b/src/fetchAll.js
+@@ -5,12 +5,16 @@
+  * 任一请求失败时整体 reject，错误信息里带上失败的 url。
+  */
+ async function fetchAll(urls, fetcher) {
+-  const results = [];
+-  await Promise.all(urls.map(async (url) => {
+-    const value = await fetcher(url);
+-    results.push(value);
+-  }));
+-  return results;
++  return Promise.all(
++    urls.map(async (url) => {
++      try {
++        return await fetcher(url);
++      } catch (error) {
++        const message = error && error.message ? error.message : String(error);
++        throw new Error(`fetch failed for url: ${url} (${message})`);
++      }
++    })
++  );
+ }
+ 
+ module.exports = { fetchAll };

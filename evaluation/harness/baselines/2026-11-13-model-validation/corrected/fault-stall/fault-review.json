@@ -1,0 +1,215 @@
+[
+  {
+    "sessionId": "ses_46184952-d334-487c-9bcc-f0e409c3a99a",
+    "attempt": 1,
+    "success": true,
+    "terminalStatus": "COMPLETED",
+    "injectedFaults": 3,
+    "injectionModes": {
+      "stall": 3
+    },
+    "failedModelRequests": [
+      {
+        "id": "8d2d93d2-02fa-4c8a-b96d-8eefda3e3c06",
+        "durationMs": 120049,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "c7eb449e-aa17-460b-8aea-e349d0e12737",
+        "durationMs": 120056,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "a8c54682-060b-41c6-9ab8-9eea8f5f4bed",
+        "durationMs": 120042,
+        "firstTokenMs": null,
+        "purpose": "main"
+      }
+    ],
+    "retryEvents": [
+      {
+        "sequence": 26,
+        "timestamp": "2026-11-13T04:49:39.203313Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 932,
+          "reason": "流式模型请求失败（120037 ms）：HTTP 响应空闲超时",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 46,
+        "timestamp": "2026-11-13T04:52:10.693807Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 911,
+          "reason": "流式模型请求失败（120046 ms）：HTTP 响应空闲超时",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 59,
+        "timestamp": "2026-11-13T04:54:20.184493Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 736,
+          "reason": "流式模型请求失败（120032 ms）：HTTP 响应空闲超时",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "duplicateStartedCallIdentities": [],
+    "toolsStartedAfterFailedMainRequestBeforeNextCompletedResponse": [],
+    "interpretation": "工具身份按 runId/agentId/callId 检查；没有重复身份不能证明模型以新 callId 发出的语义重复操作不存在。失败响应后的工具调用需单独核查是否为系统核验操作。"
+  },
+  {
+    "sessionId": "ses_af9b298b-a268-4c1d-aee1-955e1d987ba4",
+    "attempt": 2,
+    "success": true,
+    "terminalStatus": "COMPLETED",
+    "injectedFaults": 3,
+    "injectionModes": {
+      "stall": 3
+    },
+    "failedModelRequests": [
+      {
+        "id": "4623704c-4be0-4a32-b548-6d5a25ddbdf0",
+        "durationMs": 120033,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "1513647e-c586-4ec2-92c2-7f8c2613a6b5",
+        "durationMs": 120068,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "6d64b9d0-6efd-48fb-8b1e-2bfcae6d4618",
+        "durationMs": 120043,
+        "firstTokenMs": null,
+        "purpose": "main"
+      }
+    ],
+    "retryEvents": [
+      {
+        "sequence": 22,
+        "timestamp": "2026-11-13T04:56:40.271987Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 818,
+          "reason": "流式模型请求失败（120022 ms）：HTTP 响应空闲超时",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 44,
+        "timestamp": "2026-11-13T04:58:44.057576Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 958,
+          "reason": "流式模型请求失败（120060 ms）：HTTP 响应空闲超时",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 70,
+        "timestamp": "2026-11-13T05:00:58.110037Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 531,
+          "reason": "流式模型请求失败（120036 ms）：HTTP 响应空闲超时",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "duplicateStartedCallIdentities": [],
+    "toolsStartedAfterFailedMainRequestBeforeNextCompletedResponse": [],
+    "interpretation": "工具身份按 runId/agentId/callId 检查；没有重复身份不能证明模型以新 callId 发出的语义重复操作不存在。失败响应后的工具调用需单独核查是否为系统核验操作。"
+  },
+  {
+    "sessionId": "ses_f113dee7-e06a-4ed2-a446-6b5384c8565c",
+    "attempt": 3,
+    "success": true,
+    "terminalStatus": "COMPLETED",
+    "injectedFaults": 3,
+    "injectionModes": {
+      "stall": 3
+    },
+    "failedModelRequests": [
+      {
+        "id": "cd96ee52-ca1d-4034-94d8-18c1d9165c23",
+        "durationMs": 120036,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "305d7bf5-1153-4886-9e05-f381ec435ff6",
+        "durationMs": 120041,
+        "firstTokenMs": null,
+        "purpose": "main"
+      },
+      {
+        "id": "fa997ee1-97a3-4541-b34b-0296ab0f067e",
+        "durationMs": 120053,
+        "firstTokenMs": null,
+        "purpose": "main"
+      }
+    ],
+    "retryEvents": [
+      {
+        "sequence": 26,
+        "timestamp": "2026-11-13T05:03:13.504462Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 624,
+          "reason": "流式模型请求失败（120027 ms）：HTTP 响应空闲超时",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 46,
+        "timestamp": "2026-11-13T05:05:20.029509Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 642,
+          "reason": "流式模型请求失败（120032 ms）：HTTP 响应空闲超时",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      },
+      {
+        "sequence": 72,
+        "timestamp": "2026-11-13T05:07:34.060438Z",
+        "payload": {
+          "attempt": 1,
+          "delayMs": 685,
+          "reason": "流式模型请求失败（120043 ms）：HTTP 响应空闲超时",
+          "elapsedMs": 0,
+          "remainingMs": 1800000,
+          "maxAttempts": 60
+        }
+      }
+    ],
+    "duplicateStartedCallIdentities": [],
+    "toolsStartedAfterFailedMainRequestBeforeNextCompletedResponse": [],
+    "interpretation": "工具身份按 runId/agentId/callId 检查；没有重复身份不能证明模型以新 callId 发出的语义重复操作不存在。失败响应后的工具调用需单独核查是否为系统核验操作。"
+  }
+]

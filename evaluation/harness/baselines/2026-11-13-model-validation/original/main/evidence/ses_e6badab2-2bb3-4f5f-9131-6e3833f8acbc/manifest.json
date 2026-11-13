@@ -1,0 +1,18 @@
+{
+  "sessionId": "ses_e6badab2-2bb3-4f5f-9131-6e3833f8acbc",
+  "taskId": "case-insensitive-path",
+  "attempt": 1,
+  "terminalStatus": "COMPLETED",
+  "success": true,
+  "historyEvents": 46,
+  "historySha256": "8e68258fc05c9b0a02d051e02d76c2460e453df3ea6d791baa3e3ffba9261f9b",
+  "candidateDiffSha256": "daf10628007589e97fee8f965c7091242f0e6078789b7882704be037bd2a6287",
+  "changedFiles": [
+    {
+      "path": "src/dedupe.js",
+      "beforeSha256": "ea88996cd6446e9680d1c8bb3131b9770f044d5e7325bd13c7a156115e453770",
+      "afterSha256": "125730578a4464f0ba6de5b2ab65177adc7e5b73b0c0bb20a47e632e517856be"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

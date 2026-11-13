@@ -1,0 +1,8 @@
+{
+  "kind": "wake",
+  "stopped": true,
+  "activeRunsConfirmedEmpty": 3,
+  "archivedBeforeStop": true,
+  "stoppedAt": "2026-11-13T06:22:46.057102+00:00",
+  "userLiveServiceStopped": false
+}

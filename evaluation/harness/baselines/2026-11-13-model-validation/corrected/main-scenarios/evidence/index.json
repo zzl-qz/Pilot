@@ -1,0 +1,383 @@
+[
+  {
+    "sessionId": "ses_cf061f4f-f51c-4f54-9fc5-6b19023d6c1c",
+    "taskId": "wait-condition",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 71,
+    "historySha256": "bacf351a8e8b38192020517dbfb2a1633e7bea47e9f4a299975ee71255763e91",
+    "candidateDiffSha256": "b9f2c033a69a976e92f25c302aeb902beb41f69b53095966843edc3066c9c10f",
+    "changedFiles": [
+      {
+        "path": "src/state.json",
+        "beforeSha256": null,
+        "afterSha256": "685c6d7015c36d64c6a1711d386d1068a14b8e85218f40e5163982e0f58ac729"
+      },
+      {
+        "path": "src/threshold.js",
+        "beforeSha256": "9ddfa1e2199a7d5574f732ab5bc0a39aff5aa9600e0e9dec52ca8ebfbf768530",
+        "afterSha256": "3a8095cb1af42dac870744adbeb2eaa54bf6aec10b8b3723bf643da915ada048"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_587519d6-28fb-4cce-bd52-4f103bd901bb",
+    "taskId": "wait-condition",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 71,
+    "historySha256": "1d2583628591b679cc9d436359e55c1cdf0a72af775714fbd37ec0d09bf46831",
+    "candidateDiffSha256": "b9f2c033a69a976e92f25c302aeb902beb41f69b53095966843edc3066c9c10f",
+    "changedFiles": [
+      {
+        "path": "src/state.json",
+        "beforeSha256": null,
+        "afterSha256": "685c6d7015c36d64c6a1711d386d1068a14b8e85218f40e5163982e0f58ac729"
+      },
+      {
+        "path": "src/threshold.js",
+        "beforeSha256": "9ddfa1e2199a7d5574f732ab5bc0a39aff5aa9600e0e9dec52ca8ebfbf768530",
+        "afterSha256": "3a8095cb1af42dac870744adbeb2eaa54bf6aec10b8b3723bf643da915ada048"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_d22574a0-008f-42ed-bed6-30337df9b353",
+    "taskId": "wait-condition",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 78,
+    "historySha256": "7ed0413daaec47ecb0a726af899513cf4aae9e704d096d220c4d80a451a5b876",
+    "candidateDiffSha256": "b9f2c033a69a976e92f25c302aeb902beb41f69b53095966843edc3066c9c10f",
+    "changedFiles": [
+      {
+        "path": "src/state.json",
+        "beforeSha256": null,
+        "afterSha256": "685c6d7015c36d64c6a1711d386d1068a14b8e85218f40e5163982e0f58ac729"
+      },
+      {
+        "path": "src/threshold.js",
+        "beforeSha256": "9ddfa1e2199a7d5574f732ab5bc0a39aff5aa9600e0e9dec52ca8ebfbf768530",
+        "afterSha256": "3a8095cb1af42dac870744adbeb2eaa54bf6aec10b8b3723bf643da915ada048"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_5bfbc44b-9016-4bd2-baa0-c4820cbf4012",
+    "taskId": "long-chain",
+    "attempt": 2,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 115,
+    "historySha256": "d2ba150c720485b46b07a402393f4baeef4f6c60a3ff3b86d56e3f782908d32d",
+    "candidateDiffSha256": "e78551813c094b66cd99c7a563704fbd672ca5ac38c7d049d31621e195edcd3a",
+    "changedFiles": [
+      {
+        "path": "src/common.js",
+        "beforeSha256": null,
+        "afterSha256": "c083cf7f3e41f1f83092e267c87d4f527524a28a6b731668ed1ac6eee904dafb"
+      },
+      {
+        "path": "src/m01.js",
+        "beforeSha256": "45477156e9d6832f8311e045f0daff9791d69bb0a1cc2a7e5dc23dcf1b40fe0c",
+        "afterSha256": "fd5e78c09142bcda00774ebc6d3c7c9946adc30d67048167170f3d6a52b944ae"
+      },
+      {
+        "path": "src/m02.js",
+        "beforeSha256": "d206148d45cf9c165b4d0e789b0a0e07720701054696a8f4171ec64ad3fa8346",
+        "afterSha256": "f6eace896df1973168cdb918a6db516e905e9251fd8d2b1688cd833ac96d29c8"
+      },
+      {
+        "path": "src/m03.js",
+        "beforeSha256": "5bde683a8636be13a92ac5e02822e6e9a2a9ea4361f5dfb4a9237fd35286b779",
+        "afterSha256": "51d99fab728d1ffe772c782649ed0c477dba8f2917f9ae5e29d559522185625c"
+      },
+      {
+        "path": "src/m04.js",
+        "beforeSha256": "f09520fe0da8ad98e624c4eab893c05922ae0df5b088b3d8bcd344b7bbce333a",
+        "afterSha256": "0c0c3a8a2d571894b5aa3673caafff156baaee704cd6558d1ca2423020f4844d"
+      },
+      {
+        "path": "src/m05.js",
+        "beforeSha256": "5a964041ffcb87105ce6d2e3b81e4d3929b2bcd2a57b914667b61bea995249d9",
+        "afterSha256": "3e0994e31647606e727b9f04475002b0a95d5fe7e37dc2b1fb51cf24de0c11f5"
+      },
+      {
+        "path": "src/m06.js",
+        "beforeSha256": "4ffe1d97b961c8fdf3b672147c6837b52fb233364c7ee0364f678404a5c89362",
+        "afterSha256": "a5e4212c099839b3866db35e1c5bc764da43614d70fb2c82367657e2d23986a5"
+      },
+      {
+        "path": "src/m07.js",
+        "beforeSha256": "941730dfdde2231a6d672c887bc31a183d012c5b7ed399645ab353d51f6f87e6",
+        "afterSha256": "701a45eb8eb1ad41b897a5328c5b23c800258ef63f001930ac3a6a4ad7bd44d8"
+      },
+      {
+        "path": "src/m08.js",
+        "beforeSha256": "6357cbc531b9bb459bdc5cab8fda81d1fd20e12651dd5952169778b051842115",
+        "afterSha256": "5fff8f8cd4a5a654ce4bb015d12fc5232b75029b93398cd946fee6a1f35f781c"
+      },
+      {
+        "path": "src/m09.js",
+        "beforeSha256": "c7cef824c2512916e23a90eaddacb44176ec6913f2589c9157c011ca80e10ad2",
+        "afterSha256": "0623e2e24240efd884bf224d2e076d2090033b546d87988843dfab4720277a47"
+      },
+      {
+        "path": "src/m10.js",
+        "beforeSha256": "a61acc7612dc61a78d7bdb95949e2fc6c0f97ac007c8090e9e7683ffb16da8f2",
+        "afterSha256": "f1ee7be6262bf6e9fd8180fa17cce0543ef5c3d0eb4794850ab426e357693bc3"
+      },
+      {
+        "path": "src/m11.js",
+        "beforeSha256": "b09f60dc1d09c28d7c517c9dd66fd05e3449d1a80ef1cbad8b7212ce599f33d3",
+        "afterSha256": "6b7d4f579ef1526be6686fbd54542faafb370458e19e9b19f002e62acba02eea"
+      },
+      {
+        "path": "src/m12.js",
+        "beforeSha256": "3b8bdb620ca9b62236f444eb964113ab6c1c05772fd3df623035fc39f1aea4db",
+        "afterSha256": "2e9ad750393a5f040eef64b9c5b6dd80b11a47c03f4811d76047e30fef264473"
+      },
+      {
+        "path": "src/m13.js",
+        "beforeSha256": "04e5e23d9ff860f2821212643d7427edcff5ac24a63adcd04b473f57d0803626",
+        "afterSha256": "60ef6680cf71147c6f91b3852ad76066bcf6df783077592ffde1ee3ecbc292da"
+      },
+      {
+        "path": "src/m14.js",
+        "beforeSha256": "42c9085ce0af040183a4e7dde7984174b255edd5387c1924440aec994199bdae",
+        "afterSha256": "8155ebbe0baf7fd8600f1aa0dc854fc2ec1922e73ede49b50489fa2db6e9f083"
+      },
+      {
+        "path": "src/m15.js",
+        "beforeSha256": "c2e45c384893f8408fc3a04ece426488ec0b5c823b86f67a636e1c9403244974",
+        "afterSha256": "fbe346058ed82ff4131c8fcc9de5ee016e2afdf569801509d6706eb92076b042"
+      },
+      {
+        "path": "src/m16.js",
+        "beforeSha256": "19340afe8b3794ab93ae6cd1881411b6c4fd51455015800934633307857ad7fc",
+        "afterSha256": "54b58b29dd0e732d667716dffa546541ad4e7db3684e9242d652d46a06a9baf4"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_36486bb6-9cb8-4916-ac7f-3f63e26009df",
+    "taskId": "long-chain",
+    "attempt": 3,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": true,
+    "historyEvents": 103,
+    "historySha256": "40d7eb79a4cdf005222449ef6a7d416e7326dd44c33d241d2e9efefdcb5391c7",
+    "candidateDiffSha256": "c828039f22ceee82b335d33f0bea0aef518875e1c33c96bf9581a86b76bc9ce7",
+    "changedFiles": [
+      {
+        "path": "src/common.js",
+        "beforeSha256": null,
+        "afterSha256": "8d0929bfa5628555f78eb3b6c2271b18ec009a219e74ef877e6e4d269bcb2e73"
+      },
+      {
+        "path": "src/m01.js",
+        "beforeSha256": "45477156e9d6832f8311e045f0daff9791d69bb0a1cc2a7e5dc23dcf1b40fe0c",
+        "afterSha256": "ef55f2520adea9e797cca05e2d3cb1ee7d400fbc26d8e1085e68244c66d339bf"
+      },
+      {
+        "path": "src/m02.js",
+        "beforeSha256": "d206148d45cf9c165b4d0e789b0a0e07720701054696a8f4171ec64ad3fa8346",
+        "afterSha256": "c950b23c5a3345daf67bbd8ef2a09cf8c0a4c7b4e867529e2355d1378cc4f4d3"
+      },
+      {
+        "path": "src/m03.js",
+        "beforeSha256": "5bde683a8636be13a92ac5e02822e6e9a2a9ea4361f5dfb4a9237fd35286b779",
+        "afterSha256": "1089e6636a3b722f7130077825bb7dae436e8ae06f34812cf244dee36537233f"
+      },
+      {
+        "path": "src/m04.js",
+        "beforeSha256": "f09520fe0da8ad98e624c4eab893c05922ae0df5b088b3d8bcd344b7bbce333a",
+        "afterSha256": "50558c8ddd942ffda205c6851e6474209f012713fbddf27e03f934b3d7e47805"
+      },
+      {
+        "path": "src/m05.js",
+        "beforeSha256": "5a964041ffcb87105ce6d2e3b81e4d3929b2bcd2a57b914667b61bea995249d9",
+        "afterSha256": "11b3362cba82bb74c77dbbe5f395938f139eef418ef7df766cf68f0d2ba2926c"
+      },
+      {
+        "path": "src/m06.js",
+        "beforeSha256": "4ffe1d97b961c8fdf3b672147c6837b52fb233364c7ee0364f678404a5c89362",
+        "afterSha256": "1fdff2c37c671b09565ff411d1ca3d2ac01f7e5f0c5820d5e36fe472687b24f2"
+      },
+      {
+        "path": "src/m07.js",
+        "beforeSha256": "941730dfdde2231a6d672c887bc31a183d012c5b7ed399645ab353d51f6f87e6",
+        "afterSha256": "8d80cb92fcb72d5c213f5eb93fa577eb3460a850be71caf6e8f9f195d6ced5e3"
+      },
+      {
+        "path": "src/m08.js",
+        "beforeSha256": "6357cbc531b9bb459bdc5cab8fda81d1fd20e12651dd5952169778b051842115",
+        "afterSha256": "a560de941de3667b9c8061aff6d95717930f8ed12c54f173b237e919bbf432ec"
+      },
+      {
+        "path": "src/m09.js",
+        "beforeSha256": "c7cef824c2512916e23a90eaddacb44176ec6913f2589c9157c011ca80e10ad2",
+        "afterSha256": "b9d81a3705bf86ace7a3c99beee9db7f0ec062cfe7b67c82d15b9120145b75fb"
+      },
+      {
+        "path": "src/m10.js",
+        "beforeSha256": "a61acc7612dc61a78d7bdb95949e2fc6c0f97ac007c8090e9e7683ffb16da8f2",
+        "afterSha256": "58072b52e4ca4371f9f9c69dd0f1049e31cc510b3467efab26921bd8fb5a1e24"
+      },
+      {
+        "path": "src/m11.js",
+        "beforeSha256": "b09f60dc1d09c28d7c517c9dd66fd05e3449d1a80ef1cbad8b7212ce599f33d3",
+        "afterSha256": "13a9cced50095b3444b8303892e8e13bbcaded360ba87cd2bb028b6faf76abaf"
+      },
+      {
+        "path": "src/m12.js",
+        "beforeSha256": "3b8bdb620ca9b62236f444eb964113ab6c1c05772fd3df623035fc39f1aea4db",
+        "afterSha256": "3c4c233f320bc87eb54257bd4a3063cb5a0143c543eaf2029667904d43ba95a7"
+      },
+      {
+        "path": "src/m13.js",
+        "beforeSha256": "04e5e23d9ff860f2821212643d7427edcff5ac24a63adcd04b473f57d0803626",
+        "afterSha256": "f8025b2a13f1351087629e277a1f7cf8c841a6b09e7082a65454ca2f153e39c3"
+      },
+      {
+        "path": "src/m14.js",
+        "beforeSha256": "42c9085ce0af040183a4e7dde7984174b255edd5387c1924440aec994199bdae",
+        "afterSha256": "eab0b02387ec4171a9a1680a0b2c08ab5c2cd8f3bf7d5dff7067a41717832e51"
+      },
+      {
+        "path": "src/m15.js",
+        "beforeSha256": "c2e45c384893f8408fc3a04ece426488ec0b5c823b86f67a636e1c9403244974",
+        "afterSha256": "640192ed406cc3b7469b71ed2b3a007d7c112c949a25c3b2539b402510ce6d4b"
+      },
+      {
+        "path": "src/m16.js",
+        "beforeSha256": "19340afe8b3794ab93ae6cd1881411b6c4fd51455015800934633307857ad7fc",
+        "afterSha256": "af832008bc2727d71356e78eabdc5c811810a31aa8619949ed990c020df9e460"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+  },
+  {
+    "sessionId": "ses_bc0bf4a3-41c6-4264-ba42-1c84780f947f",
+    "taskId": "long-chain",
+    "attempt": 1,
+    "terminalStatus": "COMPLETED",
+    "originalRecordedTerminalStatus": "COMPLETED",
+    "afterEvaluationDeadline": false,
+    "success": false,
+    "historyEvents": 173,
+    "historySha256": "4d125ccd58507347b459936bd1fd1f1ae5c7d8106ba19fcc81921f6a7066f507",
+    "candidateDiffSha256": "f9bed15a473aa8c8143bf8e66b3c81b3260ba22a997deaf369265809c639c8af",
+    "changedFiles": [
+      {
+        "path": "src/common.js",
+        "beforeSha256": null,
+        "afterSha256": "105afe279b458767e8a0fa809d8f2ce955b94d35bd1a9985f10de6478dbfa4ef"
+      },
+      {
+        "path": "src/m01.js",
+        "beforeSha256": "45477156e9d6832f8311e045f0daff9791d69bb0a1cc2a7e5dc23dcf1b40fe0c",
+        "afterSha256": "ef55f2520adea9e797cca05e2d3cb1ee7d400fbc26d8e1085e68244c66d339bf"
+      },
+      {
+        "path": "src/m02.js",
+        "beforeSha256": "d206148d45cf9c165b4d0e789b0a0e07720701054696a8f4171ec64ad3fa8346",
+        "afterSha256": "c950b23c5a3345daf67bbd8ef2a09cf8c0a4c7b4e867529e2355d1378cc4f4d3"
+      },
+      {
+        "path": "src/m03.js",
+        "beforeSha256": "5bde683a8636be13a92ac5e02822e6e9a2a9ea4361f5dfb4a9237fd35286b779",
+        "afterSha256": "1089e6636a3b722f7130077825bb7dae436e8ae06f34812cf244dee36537233f"
+      },
+      {
+        "path": "src/m04.js",
+        "beforeSha256": "f09520fe0da8ad98e624c4eab893c05922ae0df5b088b3d8bcd344b7bbce333a",
+        "afterSha256": "50558c8ddd942ffda205c6851e6474209f012713fbddf27e03f934b3d7e47805"
+      },
+      {
+        "path": "src/m05.js",
+        "beforeSha256": "5a964041ffcb87105ce6d2e3b81e4d3929b2bcd2a57b914667b61bea995249d9",
+        "afterSha256": "11b3362cba82bb74c77dbbe5f395938f139eef418ef7df766cf68f0d2ba2926c"
+      },
+      {
+        "path": "src/m06.js",
+        "beforeSha256": "4ffe1d97b961c8fdf3b672147c6837b52fb233364c7ee0364f678404a5c89362",
+        "afterSha256": "1fdff2c37c671b09565ff411d1ca3d2ac01f7e5f0c5820d5e36fe472687b24f2"
+      },
+      {
+        "path": "src/m07.js",
+        "beforeSha256": "941730dfdde2231a6d672c887bc31a183d012c5b7ed399645ab353d51f6f87e6",
+        "afterSha256": "8d80cb92fcb72d5c213f5eb93fa577eb3460a850be71caf6e8f9f195d6ced5e3"
+      },
+      {
+        "path": "src/m08.js",
+        "beforeSha256": "6357cbc531b9bb459bdc5cab8fda81d1fd20e12651dd5952169778b051842115",
+        "afterSha256": "a560de941de3667b9c8061aff6d95717930f8ed12c54f173b237e919bbf432ec"
+      },
+      {
+        "path": "src/m09.js",
+        "beforeSha256": "c7cef824c2512916e23a90eaddacb44176ec6913f2589c9157c011ca80e10ad2",
+        "afterSha256": "b9d81a3705bf86ace7a3c99beee9db7f0ec062cfe7b67c82d15b9120145b75fb"
+      },
+      {
+        "path": "src/m10.js",
+        "beforeSha256": "a61acc7612dc61a78d7bdb95949e2fc6c0f97ac007c8090e9e7683ffb16da8f2",
+        "afterSha256": "58072b52e4ca4371f9f9c69dd0f1049e31cc510b3467efab26921bd8fb5a1e24"
+      },
+      {
+        "path": "src/m11.js",
+        "beforeSha256": "b09f60dc1d09c28d7c517c9dd66fd05e3449d1a80ef1cbad8b7212ce599f33d3",
+        "afterSha256": "13a9cced50095b3444b8303892e8e13bbcaded360ba87cd2bb028b6faf76abaf"
+      },
+      {
+        "path": "src/m12.js",
+        "beforeSha256": "3b8bdb620ca9b62236f444eb964113ab6c1c05772fd3df623035fc39f1aea4db",
+        "afterSha256": "3c4c233f320bc87eb54257bd4a3063cb5a0143c543eaf2029667904d43ba95a7"
+      },
+      {
+        "path": "src/m13.js",
+        "beforeSha256": "04e5e23d9ff860f2821212643d7427edcff5ac24a63adcd04b473f57d0803626",
+        "afterSha256": "f8025b2a13f1351087629e277a1f7cf8c841a6b09e7082a65454ca2f153e39c3"
+      },
+      {
+        "path": "src/m14.js",
+        "beforeSha256": "42c9085ce0af040183a4e7dde7984174b255edd5387c1924440aec994199bdae",
+        "afterSha256": "eab0b02387ec4171a9a1680a0b2c08ab5c2cd8f3bf7d5dff7067a41717832e51"
+      },
+      {
+        "path": "src/m15.js",
+        "beforeSha256": "c2e45c384893f8408fc3a04ece426488ec0b5c823b86f67a636e1c9403244974",
+        "afterSha256": "640192ed406cc3b7469b71ed2b3a007d7c112c949a25c3b2539b402510ce6d4b"
+      },
+      {
+        "path": "src/m16.js",
+        "beforeSha256": "19340afe8b3794ab93ae6cd1881411b6c4fd51455015800934633307857ad7fc",
+        "afterSha256": "af832008bc2727d71356e78eabdc5c811810a31aa8619949ed990c020df9e460"
+      },
+      {
+        "path": ".pilot/memory-draft.md",
+        "beforeSha256": null,
+        "afterSha256": "10f3ed64b3d354eb3f837143ff6b90205008d8bdb6f580dea470a57367182ae9"
+      }
+    ],
+    "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。",
+    "archiveSupplement": "补入明确由 remember 工具创建的候选记忆；其他运行时 .pilot 数据仍不归档。"
+  }
+]

@@ -1,0 +1,18 @@
+{
+  "sessionId": "ses_d015b73d-2373-459c-b074-99a1d851f4d7",
+  "taskId": "path-separator",
+  "attempt": 1,
+  "terminalStatus": "COMPLETED",
+  "success": true,
+  "historyEvents": 53,
+  "historySha256": "44353282a1a7f33ceadcd063a91eca8291404a802c05d17f691cf0c0ae2fda17",
+  "candidateDiffSha256": "a72b6593de80629a222e4e3f5af25df5e342a2ecd512aff8c69c6d8fcc21c59a",
+  "changedFiles": [
+    {
+      "path": "src/paths.js",
+      "beforeSha256": "de3c7f248446ed1014e4702759be50d41a41bf9d9532532547cfe5da26589b5d",
+      "afterSha256": "78f8da158d5c1bda5669ac31545030d822f98c86a57c0c53832b9f7927a75e9f"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

@@ -1,0 +1,18 @@
+{
+  "sessionId": "ses_fdc8bf27-d945-4e65-aacb-156ef2fb8832",
+  "taskId": "off-by-one-pagination",
+  "attempt": 3,
+  "terminalStatus": "COMPLETED",
+  "success": true,
+  "historyEvents": 48,
+  "historySha256": "233ecfa3dff02287f966638cf2267324a75705e7df59bc4a3b92dd195a87b97e",
+  "candidateDiffSha256": "6e9ee16ae109e97abf7fb3c7f621738165bb3f5b94a60353449345e029b3dab0",
+  "changedFiles": [
+    {
+      "path": "src/paginate.js",
+      "beforeSha256": "e56f8e3a8e16397801a3d21bcb5843ef8b631c4a20e0e730bc0ffb53d7dfb79a",
+      "afterSha256": "9ebb169b9445bc107ec975b0b41a81070f85575ac9d2f27658a100151560a5f2"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

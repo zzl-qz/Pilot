@@ -1,0 +1,20 @@
+{
+  "sessionId": "ses_8f7462a0-547a-455e-8f01-c8a3c5079d4e",
+  "taskId": "null-guard-crash",
+  "attempt": 1,
+  "terminalStatus": "COMPLETED",
+  "originalRecordedTerminalStatus": "COMPLETED",
+  "afterEvaluationDeadline": false,
+  "success": true,
+  "historyEvents": 67,
+  "historySha256": "d3c60d3f8964e35f6a29cfbec72c5881e248680dcb2ea46d79ff659ee88d27f2",
+  "candidateDiffSha256": "618ed7e0690750e81ad80d89f61c8a10cb6b788c21a7848cf667afbfa3699d9e",
+  "changedFiles": [
+    {
+      "path": "src/profile.js",
+      "beforeSha256": "045b8c05a556957c6774ea028bc13b17811a211fc2594224ad50c6d487ac7130",
+      "afterSha256": "ffdaf84dcd482be0a990d0d6299e2fae407973d4cb4579fc3cd7dabfa226be3d"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

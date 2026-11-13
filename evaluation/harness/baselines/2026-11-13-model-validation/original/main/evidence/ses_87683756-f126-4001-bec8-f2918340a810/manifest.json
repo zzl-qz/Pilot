@@ -1,0 +1,18 @@
+{
+  "sessionId": "ses_87683756-f126-4001-bec8-f2918340a810",
+  "taskId": "flaky-test-diagnosis",
+  "attempt": 2,
+  "terminalStatus": "COMPLETED",
+  "success": true,
+  "historyEvents": 69,
+  "historySha256": "a42afdcb544996ca621796729428c03af9f627d00ade2c45df584701cd6dc801",
+  "candidateDiffSha256": "5b417186082d89ba77b0d122e77b162ba47be55acf8ebbdcbbdcb715f149ae64",
+  "changedFiles": [
+    {
+      "path": "src/session.js",
+      "beforeSha256": "db026f142099cb46d5c9468df5d972bb8e8cb712093cd9be4a7b618d899429f2",
+      "afterSha256": "8555b161708e3de3cb111d56abbdfdca3cf635118fa36e79edd80f36c24076e0"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

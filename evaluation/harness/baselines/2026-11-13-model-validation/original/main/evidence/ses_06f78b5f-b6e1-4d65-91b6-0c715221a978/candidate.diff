@@ -1,0 +1,95 @@
+--- a/src/csv.js
++++ b/src/csv.js
+@@ -1,8 +1,67 @@
+ 'use strict';
+ 
+-// CSV 解析。当前只做了最朴素的逗号切分，引号里的逗号会切错。
++// CSV 解析（RFC 4180 风格状态机）：
++// - 引号内的逗号不换列，引号内的换行不换行；
++// - "" 表示字段内的一个字面双引号；
++// - CRLF 统一归一化为 \n；末尾换行不产生空行。
+ function parse(text) {
+-  return text.trim().split('\n').map((line) => line.split(','));
++  if (typeof text !== 'string') {
++    throw new TypeError('parse 需要一个字符串参数');
++  }
++  const s = text.replace(/\r\n/g, '\n');
++  const rows = [];
++  let row = [];
++  let field = '';
++  let inQuotes = false; // 当前是否在引号段内
++  let started = false; // 当前字段是否已开始（区分空输入与一个空字段）
++  let i = 0;
++
++  while (i < s.length) {
++    const ch = s[i];
++    if (inQuotes) {
++      if (ch === '"') {
++        if (s[i + 1] === '"') {
++          field += '"'; // 转义的双引号
++          i += 2;
++        } else {
++          inQuotes = false; // 引号段结束
++          i += 1;
++        }
++      } else {
++        field += ch; // 引号内的逗号、换行原样保留
++        i += 1;
++      }
++      continue;
++    }
++    if (ch === ',') {
++      row.push(field);
++      field = '';
++      started = false;
++      i += 1;
++    } else if (ch === '\n') {
++      row.push(field);
++      rows.push(row);
++      row = [];
++      field = '';
++      started = false;
++      i += 1;
++    } else if (ch === '"' && !started) {
++      inQuotes = true;
++      started = true;
++      i += 1;
++    } else {
++      field += ch;
++      started = true;
++      i += 1;
++    }
++  }
++
++  // 收尾：只要最后一行有任何内容（或行内已有列），就补上未闭合的字段
++  if (started || field !== '' || row.length > 0) {
++    row.push(field);
++    rows.push(row);
++  }
++  return rows;
+ }
+ 
+ module.exports = { parse };
+--- a/test/csv.test.js
++++ b/test/csv.test.js
+@@ -17,6 +17,20 @@
+   assert.deepEqual(parse('a,"第一行\n第二行"'), [['a', '第一行\n第二行']]);
+ });
+ 
++test('连续两个双引号是转义的字面引号', () => {
++  // RFC 4180：字段 他说"你好" 的合法写法是 "他说""你好"""（末三个引号 = 转义一个 + 闭合一个）
++  assert.deepEqual(parse('a,"他说""你好""",b'), [['a', '他说"你好"', 'b']]);
++});
++
++test('CRLF 换行与末尾换行不产生空行', () => {
++  assert.deepEqual(parse('a,b\r\n1,2\r\n'), [['a', 'b'], ['1', '2']]);
++});
++
++test('空输入得到空结果，空字段保留', () => {
++  assert.deepEqual(parse(''), []);
++  assert.deepEqual(parse('a,,b'), [['a', '', 'b']]);
++});
++
+ test('没有引入任何第三方依赖', () => {
+   const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
+   assert.deepEqual(pkg.dependencies ?? {}, {}, '依赖必须保持为空');

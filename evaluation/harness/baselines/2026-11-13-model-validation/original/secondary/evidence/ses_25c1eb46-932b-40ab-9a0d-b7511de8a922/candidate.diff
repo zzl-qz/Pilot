@@ -1,0 +1,55 @@
+--- a/src/csv.js
++++ b/src/csv.js
+@@ -1,8 +1,50 @@
+ 'use strict';
+ 
+-// CSV 解析。当前只做了最朴素的逗号切分，引号里的逗号会切错。
++// 状态机版 CSV 解析：支持引号内的逗号、引号内的换行、以及双引号转义（""）。
+ function parse(text) {
+-  return text.trim().split('\n').map((line) => line.split(','));
++  const rows = [];
++  let row = [];
++  let field = '';
++  let inQuotes = false;
++
++  for (let i = 0; i < text.length; i++) {
++    const ch = text[i];
++
++    if (inQuotes) {
++      if (ch === '"') {
++        // 连续两个引号是转义的字面量引号，否则表示结束引号
++        if (text[i + 1] === '"') {
++          field += '"';
++          i++;
++        } else {
++          inQuotes = false;
++        }
++      } else {
++        field += ch;
++      }
++    } else if (ch === '"') {
++      inQuotes = true;
++    } else if (ch === ',') {
++      row.push(field);
++      field = '';
++    } else if (ch === '\n' || ch === '\r') {
++      if (ch === '\r' && text[i + 1] === '\n') i++; // CRLF 只算一次换行
++      row.push(field);
++      field = '';
++      rows.push(row);
++      row = [];
++    } else {
++      field += ch;
++    }
++  }
++
++  // 末尾还有未结束的字段/行（输入不以换行结尾时）
++  if (field !== '' || row.length > 0) {
++    row.push(field);
++    rows.push(row);
++  }
++
++  return rows;
+ }
+ 
+ module.exports = { parse };

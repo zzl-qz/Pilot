@@ -1,0 +1,20 @@
+{
+  "sessionId": "ses_52b98994-6a4c-4cae-b5c8-841adc906231",
+  "taskId": "long-file-targeted-edit",
+  "attempt": 2,
+  "terminalStatus": "COMPLETED",
+  "originalRecordedTerminalStatus": "COMPLETED",
+  "afterEvaluationDeadline": false,
+  "success": true,
+  "historyEvents": 93,
+  "historySha256": "f1011121c25db9a8c4ff8d314b9f2c2486474bb993a3a5d59f2398dd669c6a99",
+  "candidateDiffSha256": "805329bb167d43426649e06ea6a5a88461d8e172ef437f7ab13c5a8b2e703d55",
+  "changedFiles": [
+    {
+      "path": "src/ledger.js",
+      "beforeSha256": "d9ecf89a79bfa8e2ef318085ae440eca1fe31a87d10ccf6f4cffd1e249157f56",
+      "afterSha256": "75dcab425c328531c88c10f03c74fe8920bb0d4e1f1a1c6c5f6340bc0b7a7506"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

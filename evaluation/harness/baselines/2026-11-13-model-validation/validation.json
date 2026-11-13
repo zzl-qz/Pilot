@@ -1,0 +1,135 @@
+{
+  "status": "completed_with_recorded_failures",
+  "scope": "本次只补模型接入可靠性与评测证据，不代表 Agent 全部能力已达标",
+  "originalBuild": {
+    "sourceCommit": "8496d329d276e4a464a7902f09e55bd21b523dd0",
+    "jarSha256": "54afcbe4a31047c26db798ad2242da7f94f0511904352632d36f4a6a4dfb048a",
+    "runtimeHash": "f191aeb69f469f4ee0258a8e947b5a91e0e39a53165086e8e5f158b9ebc445d6",
+    "promptHash": "bfd0cdab2e7fd3d84ee09d2ea9d7fe6bf1ec2cb86f6bab5846374bd4324617c7"
+  },
+  "correctedBuild": {
+    "sourceCommit": "2145dbcc441318c5ef5ce1d9002b80904f631fff",
+    "jarSha256": "0fe2e646a0afa1e290ec3dbbb486eb83433a5a6a5a2c91261556fbaa1aa30e67",
+    "currentProductionSourceMatchesFrozenBuild": false,
+    "runtimeHash": "0c87fd2469a0588a5109f4077516d6a90d5e4ab600ade2d3dc5e19c36f2e30d7",
+    "promptHash": "bfd0cdab2e7fd3d84ee09d2ea9d7fe6bf1ec2cb86f6bab5846374bd4324617c7"
+  },
+  "automatedValidation": {
+    "macOSCurrentBackend": {
+      "tests": 1633,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 16,
+      "passed": 1617,
+      "mavenVerify": true
+    },
+    "macOSCurrentHarness": {
+      "passed": 135,
+      "failed": 0
+    },
+    "linuxTransportRegressionOriginalRuntime": {
+      "passed": 166,
+      "failed": 0
+    },
+    "linuxCorrectedRepeatGuardAndAgentLoop": {
+      "passed": 74,
+      "failed": 0
+    },
+    "linuxCurrentHarness": {
+      "passed": 135,
+      "failed": 0
+    },
+    "deterministicRestart": {
+      "macOS": 3,
+      "linuxContainer": 3,
+      "realModelCalls": 0
+    },
+    "budgetAndContinuationRegression": {
+      "macOS": 127,
+      "linuxContainer": 127,
+      "scope": "AgentLoopTest 63、GoalExecutionPolicyTest 40、AgentRunServiceTest 24；与完整后端验证重叠"
+    },
+    "explicitScheduleResearchPolicy": {
+      "macOS": 85,
+      "linuxContainer": 85,
+      "failed": 0,
+      "scope": "ScheduleServiceTest、ScheduleApiTest、GoalExecutionPolicyTest、RecurringTimeTest"
+    },
+    "scheduleUI": {
+      "macOSReal": [
+        "Chrome",
+        "Electron"
+      ],
+      "builds": [
+        "development",
+        "production"
+      ],
+      "widths": [
+        390,
+        768,
+        1440
+      ],
+      "themes": [
+        "dark",
+        "light"
+      ],
+      "typecheck": true,
+      "build": true,
+      "windowsReal": false,
+      "linuxDesktopReal": false
+    },
+    "reviewAccountingAndHistoricalEvidence": {
+      "macOS": 63,
+      "linuxContainer": 63,
+      "failed": 0,
+      "scope": "GoalExecutionPolicyTest 49、TaskControlServiceTest 14；包含核验调用计数及历史证据回归，与全量测试重叠"
+    }
+  },
+  "limits": [
+    "两款真实模型同属 Qwen 家族，模型身份仅由端点报告。",
+    "Windows 无实机；CI 配置已补齐但未在 Gitee 自动执行。",
+    "未调用付费 OpenAI/Anthropic 端点；其协议边界只做本地 HTTP 回归。",
+    "上下文增长是固定长链路任务，不是无限上下文或全天无人值守证明。",
+    "同一批次冻结代码与提示词，后续修复使用独立构建与记录。",
+    "已知失败不删除，也不以补跑成功替代。"
+  ],
+  "currentHarnessCommit": "8dc383bac7d4f57a8d98a59b50c541580f882a8d",
+  "budgetRecoveryBuild": {
+    "sourceCommit": "8dc383bac7d4f57a8d98a59b50c541580f882a8d",
+    "jarSha256": "e7f6aa448888de06cd1affb64ad0dbcc2f4a0f14c3e8b93c7a199f344ec1f841",
+    "currentProductionSourceMatchesFrozenBuild": false,
+    "runtimeHash": "07b6f8fd0567c32bb1c18e58f7d8b881dd7733c423b8778e3c312e54a772417b",
+    "promptHash": "0724eb69930efb99ceddc5558a6af65c6c9f13b9dc9992564c528012c58b81e8"
+  },
+  "schedulePolicyBuild": {
+    "sourceCommit": "43dd5bede739e1dc84ebeddc1345e6ca18849bd6",
+    "jarSha256": "086c451ab0df0a8dd021888f586ee3d1de6505797454571baf61e9441c842e87",
+    "currentProductionSourceMatchesFrozenBuild": false,
+    "runtimeHash": "b49038341dc8ef216736c577ffa1f2a088d99494638434a0673e14fa5ef6f6a5",
+    "promptHash": "0724eb69930efb99ceddc5558a6af65c6c9f13b9dc9992564c528012c58b81e8"
+  },
+  "finalBuild": {
+    "sourceCommit": "bd6a69b5483b11745683b56200a6ed15022ede2a",
+    "jarSha256": "40e03387f6fe5663ddc85ee4beda3b54d0dee38a6528eff28ecf2a021bb354aa",
+    "runtimeHash": "d8c71322b4dd82456961f944156d0e26661fad54c100aec77467fa7077252223",
+    "promptHash": "a430053a10d697c225f240fe26065914235715e6ef7bdc9d40eb42caef9d66e7",
+    "currentProductionSourceMatchesFrozenBuild": true
+  },
+  "completedAt": "2026-11-13T06:22:46.062502+00:00",
+  "realModelAttempts": {
+    "regularTaskAttempts": 180,
+    "scheduledWakeAttempts": 9,
+    "manualBudgetContinuationSegmentsCountedAsNewAttempts": false
+  },
+  "latestWakeupResults": {
+    "passed": 3,
+    "total": 3,
+    "priorFailedTrialsPreserved": 6,
+    "executionRequestCountersMonotonic": true
+  },
+  "remainingQualityRisks": [
+    "DIRECT 模式仍有只返回计划而标完成的失败样本；预算跟进初次边界2/3，后续人工继续3/3。",
+    "模型仍可能越出任务允许范围创建记忆草稿；该长链路样本按失败保留。",
+    "固定本地模型与三次重复不能推断所有模型、所有长任务或全天无人值守均达标。"
+  ]
+}

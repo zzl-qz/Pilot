@@ -1,0 +1,23 @@
+{
+  "sessionId": "ses_06f78b5f-b6e1-4d65-91b6-0c715221a978",
+  "taskId": "steer-constraint-hold",
+  "attempt": 1,
+  "terminalStatus": "COMPLETED",
+  "success": true,
+  "historyEvents": 77,
+  "historySha256": "548267b3514733c2c5be6875d2903be4f1a94f3b59a53a5544488a1c82aa4bab",
+  "candidateDiffSha256": "6a9c25e009385b0fcaee0e2782fa7fd6b4651b7b109c91945ebc8062e556a2fc",
+  "changedFiles": [
+    {
+      "path": "src/csv.js",
+      "beforeSha256": "aeccce5b27857ed6f9428c4d7f918bba12df2b1d66fe28c09e561e9870366624",
+      "afterSha256": "d6cda295953bef6e27608a497e7cdf37264f2dd4ac5e85e3903ba74f128779f6"
+    },
+    {
+      "path": "test/csv.test.js",
+      "beforeSha256": "b55f103132f12bd03923e242f97366c80b4ee05a71d392e9139c6b560e35f389",
+      "afterSha256": "bc72fee319def9214aa2827f0786b3e0daa713e3eaf0b476cb81a44308c9b288"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

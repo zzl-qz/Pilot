@@ -1,0 +1,253 @@
+--- a/src/common.js
++++ b/src/common.js
+@@ -0,0 +1,10 @@
++// 共享实现：统一的 key 规范化。去首尾空白、转小写、内部空白折叠成单个空格。
++function normalizeKey(input) {
++  let text = String(input);
++  text = text.trim();
++  text = text.toLowerCase();
++  text = text.replace(/\s+/g, ' ');
++  return text;
++}
++
++module.exports = { normalizeKey };
+--- a/src/m01.js
++++ b/src/m01.js
+@@ -1,9 +1,8 @@
+ // 模块 m01：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.toLowerCase();
+-  text = text.replace(/\s+/g, ' ');
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m02.js
++++ b/src/m02.js
+@@ -1,9 +1,8 @@
+ // 模块 m02：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.trim();
+-  text = text.replace(/\s+/g, ' ');
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m03.js
++++ b/src/m03.js
+@@ -1,9 +1,8 @@
+ // 模块 m03：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.trim();
+-  text = text.toLowerCase();
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m04.js
++++ b/src/m04.js
+@@ -1,9 +1,8 @@
+ // 模块 m04：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.toLowerCase();
+-  text = text.replace(/\s+/g, ' ');
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m05.js
++++ b/src/m05.js
+@@ -1,9 +1,8 @@
+ // 模块 m05：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.trim();
+-  text = text.replace(/\s+/g, ' ');
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m06.js
++++ b/src/m06.js
+@@ -1,9 +1,8 @@
+ // 模块 m06：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.trim();
+-  text = text.toLowerCase();
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m07.js
++++ b/src/m07.js
+@@ -1,9 +1,8 @@
+ // 模块 m07：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.toLowerCase();
+-  text = text.replace(/\s+/g, ' ');
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m08.js
++++ b/src/m08.js
+@@ -1,9 +1,8 @@
+ // 模块 m08：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.trim();
+-  text = text.replace(/\s+/g, ' ');
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m09.js
++++ b/src/m09.js
+@@ -1,9 +1,8 @@
+ // 模块 m09：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.trim();
+-  text = text.toLowerCase();
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m10.js
++++ b/src/m10.js
+@@ -1,9 +1,8 @@
+ // 模块 m10：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.toLowerCase();
+-  text = text.replace(/\s+/g, ' ');
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m11.js
++++ b/src/m11.js
+@@ -1,9 +1,8 @@
+ // 模块 m11：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.trim();
+-  text = text.replace(/\s+/g, ' ');
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m12.js
++++ b/src/m12.js
+@@ -1,9 +1,8 @@
+ // 模块 m12：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.trim();
+-  text = text.toLowerCase();
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m13.js
++++ b/src/m13.js
+@@ -1,9 +1,8 @@
+ // 模块 m13：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.toLowerCase();
+-  text = text.replace(/\s+/g, ' ');
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m14.js
++++ b/src/m14.js
+@@ -1,9 +1,8 @@
+ // 模块 m14：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.trim();
+-  text = text.replace(/\s+/g, ' ');
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m15.js
++++ b/src/m15.js
+@@ -1,9 +1,8 @@
+ // 模块 m15：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.trim();
+-  text = text.toLowerCase();
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {
+--- a/src/m16.js
++++ b/src/m16.js
+@@ -1,9 +1,8 @@
+ // 模块 m16：订单标签 key 的历史实现（含旧格式化函数；legacyFormatter 不得删除）。
++const { normalizeKey } = require('./common.js');
++
+ function key(input) {
+-  let text = String(input);
+-  text = text.toLowerCase();
+-  text = text.replace(/\s+/g, ' ');
+-  return text;
++  return normalizeKey(input);
+ }
+ 
+ function legacyFormatter(value) {

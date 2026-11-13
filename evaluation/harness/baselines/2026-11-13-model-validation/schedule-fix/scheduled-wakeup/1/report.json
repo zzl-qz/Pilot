@@ -1,0 +1,127 @@
+{
+  "attempt": 1,
+  "model": "Qwen3.8-Flash-Next-oQ4e-mtp",
+  "sourceCommit": "43dd5bede739e1dc84ebeddc1345e6ca18849bd6",
+  "success": false,
+  "observations": [
+    {
+      "observedAt": "2026-11-13T05:44:00.540Z",
+      "state": "SCHEDULED",
+      "runId": null,
+      "runAt": "2026-11-13T05:44:03.510Z",
+      "attempts": 0
+    },
+    {
+      "observedAt": "2026-11-13T05:44:04.563Z",
+      "state": "RUNNING",
+      "runId": "run_3364810d-e011-42d8-a2fe-033ab3398416",
+      "runAt": "2026-11-13T05:44:03.510Z",
+      "attempts": 1
+    },
+    {
+      "observedAt": "2026-11-13T05:45:59.157Z",
+      "state": "WAITING",
+      "runId": "run_3364810d-e011-42d8-a2fe-033ab3398416",
+      "runAt": "2026-11-13T05:48:13.394Z",
+      "attempts": 1
+    },
+    {
+      "observedAt": "2026-11-13T05:48:13.812Z",
+      "state": "RUNNING",
+      "runId": "run_18021363-557c-424d-b984-75cefd27f7cb",
+      "runAt": "2026-11-13T05:48:13.394Z",
+      "attempts": 2
+    }
+  ],
+  "scheduleId": "schedule_00d48701-cd64-4b37-a41b-1fb090e00003",
+  "sessionId": "ses_89d222a1-52ed-45a8-a033-47f2b1ab05fd",
+  "workspace": "<isolated-root>/.pilot-eval/wakeup-lx7o30",
+  "waitingObserved": true,
+  "scheduledWakeAt": "2026-11-13T05:48:13.394Z",
+  "firstRunId": "run_3364810d-e011-42d8-a2fe-033ab3398416",
+  "confirmationSha256": "47aa14b3eb319455f6ea332599c3292474e39b233e4d1f2c1ea6872c42cdc6cb",
+  "confirmationReleasedAt": "2026-11-13T05:45:59.158Z",
+  "finalSchedule": {
+    "id": "schedule_00d48701-cd64-4b37-a41b-1fb090e00003",
+    "name": "eval:scheduled-wakeup:1",
+    "sessionId": "ses_89d222a1-52ed-45a8-a033-47f2b1ab05fd",
+    "taskId": "task_ddb93412-675f-4b92-9bba-1bdd76a1851c",
+    "content": "这是一个受控的等待与自动唤醒验证，请实际完成：先运行 node scripts/status.mjs。若 ready 为 false，先把返回的 requestId 写入 src/checkpoint.json（形如 {\"requestId\":\"...\"}），然后使用 wait_until 工具，run_at 使用 status 返回的 wakeAt，reason 说明等待外部确认；调用后停止本轮，不要 sleep、轮询或自行创建 data/ready.json。若工具提示时间太早，重新运行 status 获取新的 wakeAt。调度器自动唤醒后，再运行 status；ready 为 true 时保留原 checkpoint 不改动，把 requestId 和 acknowledgement 写入 src/result.json，执行 node --test，确认通过后完成目标。所有数据、脚本和测试都是只读输入，不要改写；外部确认由评测器在观察到真实等待后提供。",
+    "requirements": {
+      "constraints": [
+        "保留 checkpoint，禁止改写 data、scripts 和 test"
+      ],
+      "acceptance": [
+        {
+          "text": "自动唤醒后写出包含真实外部确认的 src/result.json，并通过 node --test",
+          "checked": false,
+          "evidence": ""
+        }
+      ],
+      "automation": {
+        "scheduleId": "schedule_00d48701-cd64-4b37-a41b-1fb090e00003",
+        "fullAccess": true,
+        "requireResearch": false
+      }
+    },
+    "skill": null,
+    "runAt": "2026-11-13T05:48:13.394Z",
+    "timezone": "UTC",
+    "state": "RUNNING",
+    "runId": "run_18021363-557c-424d-b984-75cefd27f7cb",
+    "attempts": 2,
+    "recoveries": 0,
+    "deadline": "2026-11-14T05:44:03.755503Z",
+    "message": "正在执行",
+    "history": [
+      {
+        "runId": "run_3364810d-e011-42d8-a2fe-033ab3398416",
+        "startedAt": "2026-11-13T05:44:03.755503Z",
+        "status": "WAITING"
+      },
+      {
+        "runId": "run_18021363-557c-424d-b984-75cefd27f7cb",
+        "startedAt": "2026-11-13T05:48:13.725332Z",
+        "status": "RUNNING"
+      }
+    ],
+    "version": 5,
+    "workspace": {
+      "mode": "SHARED",
+      "path": "<isolated-root>/.pilot-eval/wakeup-lx7o30",
+      "base": "<isolated-root>/.pilot-eval/wakeup-lx7o30",
+      "branch": "",
+      "commit": "",
+      "handedOffAt": null
+    },
+    "endedAt": null
+  },
+  "checkpointPreserved": true,
+  "confirmationPreserved": true,
+  "artifacts": {
+    "data/request.json": {
+      "requestId": "e6ca86ff-59e7-4f7a-b805-8895e027e421"
+    },
+    "data/ready.json": {
+      "acknowledgement": "701336f4-3e17-4b91-a3be-720d69028d3e"
+    },
+    "src/checkpoint.json": {
+      "requestId": "e6ca86ff-59e7-4f7a-b805-8895e027e421"
+    },
+    "src/result.json": {
+      "requestId": "e6ca86ff-59e7-4f7a-b805-8895e027e421",
+      "acknowledgement": "701336f4-3e17-4b91-a3be-720d69028d3e"
+    }
+  },
+  "inputsPreserved": true,
+  "waitToolObserved": true,
+  "waitingStopObserved": true,
+  "newRunAfterWake": true,
+  "acceptance": {
+    "ran": true,
+    "ok": true,
+    "detail": "node --test → exit 0（0.1s）"
+  },
+  "seconds": 1201.18,
+  "cancelledAtDeadline": true
+}

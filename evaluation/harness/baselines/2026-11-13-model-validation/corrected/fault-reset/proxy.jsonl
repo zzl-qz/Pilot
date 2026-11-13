@@ -1,0 +1,42 @@
+{"status": "ready", "port": 61588, "upstream": "<local-model-endpoint>"}
+{"status": "reset"}
+{"status": "config", "config": {"mode": "reset", "every": 3, "stallMs": 180000, "maxRequests": 200}}
+{"status": "upstream_error", "requestIndex": 0, "errorName": "AbortError", "causeCode": null}
+{"status": "complete", "requestIndex": 0, "mode": "none", "chunks": 18, "bytes": 3719, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 28168, "spendEstimate": null}
+{"status": "complete", "requestIndex": 1, "mode": "none", "chunks": 14, "bytes": 2916, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 7699, "spendEstimate": null}
+{"status": "injected", "requestIndex": 2, "mode": "reset"}
+{"status": "complete", "requestIndex": 3, "mode": "none", "chunks": 36, "bytes": 6978, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 7291, "spendEstimate": null}
+{"status": "complete", "requestIndex": 4, "mode": "none", "chunks": 57, "bytes": 11612, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 21900, "spendEstimate": null}
+{"status": "injected", "requestIndex": 5, "mode": "reset"}
+{"status": "upstream_error", "requestIndex": 6, "errorName": "AbortError", "causeCode": null}
+{"status": "complete", "requestIndex": 7, "mode": "none", "chunks": 48, "bytes": 9002, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 21632, "spendEstimate": null}
+{"status": "injected", "requestIndex": 8, "mode": "reset"}
+{"status": "complete", "requestIndex": 9, "mode": "none", "chunks": 107, "bytes": 19935, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 21112, "spendEstimate": null}
+{"status": "reset"}
+{"status": "config", "config": {"mode": "reset", "every": 3, "stallMs": 180000, "maxRequests": 200}}
+{"status": "complete", "requestIndex": 0, "mode": "none", "chunks": 10, "bytes": 2390, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 15723, "spendEstimate": null}
+{"status": "complete", "requestIndex": 1, "mode": "none", "chunks": 16, "bytes": 3513, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 12347, "spendEstimate": null}
+{"status": "injected", "requestIndex": 2, "mode": "reset"}
+{"status": "complete", "requestIndex": 3, "mode": "none", "chunks": 18, "bytes": 3442, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 8422, "spendEstimate": null}
+{"status": "complete", "requestIndex": 4, "mode": "none", "chunks": 63, "bytes": 12297, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 26028, "spendEstimate": null}
+{"status": "injected", "requestIndex": 5, "mode": "reset"}
+{"status": "complete", "requestIndex": 6, "mode": "none", "chunks": 27, "bytes": 5258, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 19294, "spendEstimate": null}
+{"status": "complete", "requestIndex": 7, "mode": "none", "chunks": 58, "bytes": 10706, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 17776, "spendEstimate": null}
+{"status": "injected", "requestIndex": 8, "mode": "reset"}
+{"status": "complete", "requestIndex": 9, "mode": "none", "chunks": 129, "bytes": 24139, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 32757, "spendEstimate": null}
+{"status": "reset"}
+{"status": "config", "config": {"mode": "reset", "every": 3, "stallMs": 180000, "maxRequests": 200}}
+{"status": "complete", "requestIndex": 0, "mode": "none", "chunks": 11, "bytes": 2147, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 10642, "spendEstimate": null}
+{"status": "complete", "requestIndex": 1, "mode": "none", "chunks": 12, "bytes": 2226, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 5721, "spendEstimate": null}
+{"status": "injected", "requestIndex": 2, "mode": "reset"}
+{"status": "complete", "requestIndex": 3, "mode": "none", "chunks": 15, "bytes": 3082, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 5254, "spendEstimate": null}
+{"status": "complete", "requestIndex": 4, "mode": "none", "chunks": 37, "bytes": 6976, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 7874, "spendEstimate": null}
+{"status": "injected", "requestIndex": 5, "mode": "reset"}
+{"status": "complete", "requestIndex": 6, "mode": "none", "chunks": 89, "bytes": 17630, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 20752, "spendEstimate": null}
+{"status": "injected", "requestIndex": 8, "mode": "reset"}
+{"status": "complete", "requestIndex": 7, "mode": "none", "chunks": 2, "bytes": 1227, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 5594, "spendEstimate": null}
+{"status": "complete", "requestIndex": 10, "mode": "none", "chunks": 2, "bytes": 563, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 3061, "spendEstimate": null}
+{"status": "injected", "requestIndex": 11, "mode": "reset"}
+{"status": "complete", "requestIndex": 9, "mode": "none", "chunks": 52, "bytes": 10052, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 11202, "spendEstimate": null}
+{"status": "complete", "requestIndex": 12, "mode": "none", "chunks": 46, "bytes": 9587, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 9113, "spendEstimate": null}
+{"status": "complete", "requestIndex": 13, "mode": "none", "chunks": 83, "bytes": 18057, "inputTokens": 0, "outputTokens": 0, "elapsedMs": 13952, "spendEstimate": null}

@@ -1,0 +1,66 @@
+--- a/src/orderService.js
++++ b/src/orderService.js
+@@ -1,17 +1,15 @@
+ 'use strict';
+ 
+-// 价格计算直接写在下单服务里，每加一种会员就要改这个函数。
++// 价格计算已抽到 pricingStrategies 模块；下单服务只负责按类型取策略并计价。
++// 新增会员类型通过 registerStrategy 注册策略即可，不需要再改这个文件。
++const pricingStrategies = require('./pricingStrategies.js');
++
+ function priceFor(order) {
+-  if (order.type === 'vip') {
+-    return Math.round(order.base * 0.8);
+-  }
+-  if (order.type === 'member') {
+-    return Math.round(order.base * 0.9);
+-  }
+-  if (order.type === 'employee') {
+-    return Math.round(order.base * 0.5);
+-  }
+-  return Math.round(order.base);
++  return pricingStrategies.forType(order.type)(order);
+ }
+ 
+-module.exports = { priceFor };
++function registerStrategy(type, strategy) {
++  pricingStrategies.register(type, strategy);
++}
++
++module.exports = { priceFor, registerStrategy };
+--- a/src/pricingStrategies.js
++++ b/src/pricingStrategies.js
+@@ -0,0 +1,33 @@
++'use strict';
++
++// 价格策略注册表：每种会员类型对应一个 (order) => 价格 的函数。
++// 新增会员类型时只需在这里（或通过 register）注册策略，不需要改 orderService。
++
++// 未注册类型的兜底策略：按原价取整，与原 priceFor 行为一致。
++function defaultStrategy(order) {
++  return Math.round(order.base);
++}
++
++const strategies = new Map([
++  ['vip', (order) => Math.round(order.base * 0.8)],
++  ['member', (order) => Math.round(order.base * 0.9)],
++  ['employee', (order) => Math.round(order.base * 0.5)],
++]);
++
++// 注册/覆盖一种类型的价格策略
++function register(type, strategy) {
++  if (typeof type !== 'string' || type === '') {
++    throw new TypeError('strategy type must be a non-empty string');
++  }
++  if (typeof strategy !== 'function') {
++    throw new TypeError('strategy must be a function');
++  }
++  strategies.set(type, strategy);
++}
++
++// 取某类型的策略，未知类型退回原价策略
++function forType(type) {
++  return strategies.get(type) || defaultStrategy;
++}
++
++module.exports = { register, forType };

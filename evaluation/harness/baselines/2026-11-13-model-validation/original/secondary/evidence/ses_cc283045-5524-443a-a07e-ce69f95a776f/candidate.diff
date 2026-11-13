@@ -1,0 +1,46 @@
+--- a/src/outline.js
++++ b/src/outline.js
+@@ -1,11 +1,38 @@
+ 'use strict';
+ 
+-// 从 Markdown 提取标题。当前只返回标题文字。
++// 从 Markdown 提取标题大纲。
++// 返回对象数组：{ level（# 的个数）、text（标题文字）、line（从 1 开始的行号） }。
++// 代码块（``` 或 ~~~ 围栏）里的 # 不算标题。
+ function outline(markdown) {
+-  return markdown
+-    .split('\n')
+-    .filter((line) => /^#{1,6}\s/.test(line))
+-    .map((line) => line.replace(/^#{1,6}\s+/, '').trim());
++  const result = [];
++  let inFence = false;
++  let fenceMarker = '';
++
++  const lines = markdown.split('\n');
++  for (let i = 0; i < lines.length; i += 1) {
++    const line = lines[i];
++
++    const fence = line.match(/^\s{0,3}(`{3,}|~{3,})/);
++    if (fence) {
++      if (!inFence) {
++        inFence = true;
++        fenceMarker = fence[1][0];
++      } else if (fence[1][0] === fenceMarker) {
++        inFence = false;
++        fenceMarker = '';
++      }
++      continue;
++    }
++
++    if (inFence) continue;
++
++    const heading = line.match(/^(#{1,6})\s+(.*)$/);
++    if (heading) {
++      result.push({ level: heading[1].length, text: heading[2].trim(), line: i + 1 });
++    }
++  }
++
++  return result;
+ }
+ 
+ module.exports = { outline };

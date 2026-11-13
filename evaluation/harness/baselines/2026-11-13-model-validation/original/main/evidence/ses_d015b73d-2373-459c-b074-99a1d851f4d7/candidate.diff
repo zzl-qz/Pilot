@@ -1,0 +1,17 @@
+--- a/src/paths.js
++++ b/src/paths.js
+@@ -5,7 +5,13 @@
+  * 输出必须与输入风格一致，且不能出现混合分隔符。
+  */
+ function joinPath(root, relative) {
+-  return `${root}/${relative}`;
++  // 以 root 的分隔符风格为准：root 含反斜杠按 Windows 拼，否则按 POSIX 拼。
++  const separator = String(root).includes('\\') ? '\\' : '/';
++  const normalize = (part) => String(part).replace(/[\\/]/g, separator);
++  const left = normalize(root).replace(/[\\/]+$/, '');
++  const right = normalize(relative).replace(/^[\\/]+/, '');
++  if (right === '') return left;
++  return left === '' ? right : `${left}${separator}${right}`;
+ }
+ 
+ module.exports = { joinPath };

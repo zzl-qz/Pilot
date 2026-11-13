@@ -1,0 +1,66 @@
+{
+  "sourceCommit": "2145dbc",
+  "kind": "原始预算失败与后续结果并列保留",
+  "initialBoundaryPasses": 0,
+  "attempts": [
+    {
+      "group": "budget-1",
+      "sessionId": "ses_0a41c89c-5092-40cb-9f03-14a0f7e0937f",
+      "initialBoundaryAcceptancePassed": false,
+      "initialOutputs": 18,
+      "manualSegmentsRecorded": 4,
+      "recoveryPassed": true,
+      "error": null,
+      "runStartedCount": 4,
+      "runContinuedCount": 2,
+      "uniqueRunIds": 4,
+      "archiveTerminalStatus": "COMPLETED",
+      "commandSummaries": [
+        "{command=node --test test/wind-down.test.js,timeoutSeconds=120}",
+        "{command=node --test test/wind-down.test.js,timeoutSeconds=120}",
+        "{command=node --test test/wind-down.test.js,timeoutSeconds=120}",
+        "{command=node --test test/wind-down.test.js,timeoutSeconds=120}"
+      ],
+      "batchLoopObserved": false,
+      "automaticNewRunCount": 0
+    },
+    {
+      "group": "budget-2",
+      "sessionId": "ses_e150f196-c5ce-4bee-acc2-66625339356a",
+      "initialBoundaryAcceptancePassed": false,
+      "initialOutputs": 6,
+      "manualSegmentsRecorded": 1,
+      "recoveryPassed": false,
+      "error": "Error: Owned evaluator API 409 /api/sessions/ses_e150f196-c5ce-4bee-acc2-66625339356a/continue",
+      "runStartedCount": 1,
+      "runContinuedCount": 2,
+      "uniqueRunIds": 2,
+      "archiveTerminalStatus": "FAILED",
+      "commandSummaries": [
+        "{command=node --test,timeoutSeconds=300}"
+      ],
+      "batchLoopObserved": false,
+      "automaticNewRunCount": 1
+    },
+    {
+      "group": "budget-3",
+      "sessionId": "ses_bbfc28e4-887c-45c4-924c-61a357127590",
+      "initialBoundaryAcceptancePassed": false,
+      "initialOutputs": 5,
+      "manualSegmentsRecorded": 3,
+      "recoveryPassed": true,
+      "error": null,
+      "runStartedCount": 3,
+      "runContinuedCount": 2,
+      "uniqueRunIds": 3,
+      "archiveTerminalStatus": "COMPLETED",
+      "commandSummaries": [
+        "{command=node --test test/wind-down.test.js,timeoutSeconds=120}",
+        "{command=node --test test/wind-down.test.js,timeoutSeconds=120}"
+      ],
+      "batchLoopObserved": false,
+      "automaticNewRunCount": 0
+    }
+  ],
+  "interpretation": "初次边界三次均缺少有效进度台账；两次经手动继续最终完成，一次在自动续跑交接期收到409，评测流程失败。maxSteps=8 会与请求额度共同触发，自动续跑另开 runId 但旧实现没有 run.started，因此手动段数不等于真实运行数。命令轨迹均为原始测试命令，未观察到批处理循环。"
+}

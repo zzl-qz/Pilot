@@ -1,0 +1,10 @@
+--- a/src/pricing.js
++++ b/src/pricing.js
+@@ -0,0 +1,7 @@
++'use strict';
++
++function priceCents(item) {
++  return (item.priceCents || 0) * (item.quantity || 0);
++}
++
++module.exports = { priceCents };

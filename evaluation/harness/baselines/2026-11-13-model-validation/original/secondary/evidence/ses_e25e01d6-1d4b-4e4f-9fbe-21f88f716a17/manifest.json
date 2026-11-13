@@ -1,0 +1,20 @@
+{
+  "sessionId": "ses_e25e01d6-1d4b-4e4f-9fbe-21f88f716a17",
+  "taskId": "frontend-form-a11y",
+  "attempt": 3,
+  "terminalStatus": "COMPLETED",
+  "originalRecordedTerminalStatus": "COMPLETED",
+  "afterEvaluationDeadline": false,
+  "success": true,
+  "historyEvents": 62,
+  "historySha256": "7343b70e5cb518510410062ea736a36be45cd0044e23dcef9418a43f2a4f1f06",
+  "candidateDiffSha256": "8d833150941f74fcfb3347aa341ca50b289e0636b6e2dd431ed2669763f5f7b0",
+  "changedFiles": [
+    {
+      "path": "src/form.js",
+      "beforeSha256": "8fbe6853a21eb69dade84d8f70c7114a6dfdd90018ad79723cfac48bfeb7fe42",
+      "afterSha256": "ce76876ecca574b341962f46bb6486daea3cbc2fb58dea69a532da7465a99359"
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

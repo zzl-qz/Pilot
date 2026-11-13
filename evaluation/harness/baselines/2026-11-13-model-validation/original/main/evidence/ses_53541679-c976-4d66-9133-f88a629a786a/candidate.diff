@@ -1,0 +1,44 @@
+--- a/src/outline.js
++++ b/src/outline.js
+@@ -1,11 +1,36 @@
+ 'use strict';
+ 
+-// 从 Markdown 提取标题。当前只返回标题文字。
++// 从 Markdown 提取标题大纲，返回 { level, text, line } 对象数组。
++// level 是 # 的个数（1-6），line 是从 1 开始的原文行号；围栏代码块内的 # 不算标题。
+ function outline(markdown) {
+-  return markdown
+-    .split('\n')
+-    .filter((line) => /^#{1,6}\s/.test(line))
+-    .map((line) => line.replace(/^#{1,6}\s+/, '').trim());
++  const lines = String(markdown).split('\n');
++  const result = [];
++  let fence = null; // 当前围栏代码块的标记（'```' 或 '~~~'），null 表示不在代码块内
++
++  for (let i = 0; i < lines.length; i++) {
++    const raw = lines[i];
++    const fenceMatch = /^ {0,3}(`{3,}|~{3,})/.exec(raw);
++
++    if (fence) {
++      // 遇到同名且不更短的围栏则闭合代码块
++      if (fenceMatch && fenceMatch[1][0] === fence[0] && fenceMatch[1].length >= fence.length) {
++        fence = null;
++      }
++      continue;
++    }
++    if (fenceMatch) {
++      fence = fenceMatch[1];
++      continue;
++    }
++
++    const heading = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/.exec(raw);
++    if (!heading) continue;
++
++    const text = (heading[2] || '').trim();
++    result.push({ level: heading[1].length, text: text.replace(/[ \t]+#+[ \t]*$/, '').trim(), line: i + 1 });
++  }
++
++  return result;
+ }
+ 
+ module.exports = { outline };

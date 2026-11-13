@@ -1,0 +1,34 @@
+--- a/src/form.js
++++ b/src/form.js
+@@ -1,12 +1,18 @@
+ 'use strict';
+ 
+-// 设置页表单。当前实现只顾排版，没管可访问性与窄屏。
++// 设置页表单。label 通过 for/id 关联输入框，错误提示可被读屏软件读到，
++// 并通过 aria-describedby 挂到输入框上；样式用百分比宽度，窄屏不横向滚动。
+ function renderField(field) {
+   const value = field.value ?? '';
+-  const error = field.error ? `<div class="error">${field.error}</div>` : '';
++  const inputId = `field-${field.name}`;
++  const errorId = `field-${field.name}-error`;
++  const error = field.error
++    ? `<div class="error" id="${errorId}" role="alert">${field.error}</div>`
++    : '';
++  const describedBy = field.error ? ` aria-describedby="${errorId}"` : '';
+   return `<div class="field">
+-  <label>${field.label}</label>
+-  <input name="${field.name}" value="${value}" />
++  <label for="${inputId}">${field.label}</label>
++  <input id="${inputId}" name="${field.name}" value="${value}"${describedBy} />
+   ${error}
+ </div>`;
+ }
+@@ -17,7 +23,7 @@
+ }
+ 
+ function renderStyles() {
+-  return '.settings { width: 640px; } .field { display: flex; } .error { color: red; }';
++  return '.settings { width: 100%; max-width: 640px; } .field { display: flex; flex-direction: column; } .field input { max-width: 100%; box-sizing: border-box; } .error { color: red; }';
+ }
+ 
+ module.exports = { renderField, renderForm, renderStyles };

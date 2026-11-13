@@ -1,0 +1,84 @@
+[
+  {
+    "attempt": 1,
+    "sessionId": "ses_89d222a1-52ed-45a8-a033-47f2b1ab05fd",
+    "success": false,
+    "status": "RUNNING",
+    "waitMechanismObserved": true,
+    "acceptancePassed": true,
+    "failedEvents": [
+      {
+        "code": "WAITING",
+        "message": "已预约后续唤醒",
+        "retryable": true
+      }
+    ],
+    "historyEvents": 123,
+    "historySha256": "ddd3796ae4b9f20cc6bf413dd19f12d688177ef942edabefe149f62979e21fe9",
+    "reportSha256": "bda58c81de41d4910015c8aa7b28711a847a91ed161e164840b698701c7bc146",
+    "researchToolCalls": 0,
+    "cancelledAtDeadline": true,
+    "settledStatus": "CANCELLED",
+    "settledEventCount": 127,
+    "settledEventsSha256": "d5701a37c700de61db5df5b485a59b97c70afc46ead9d63b9ef9b00241febf77",
+    "settledEvidenceFormat": "只读不可变数据库事件行；payload 按原始存储 JSON 解码，createdAt 为数据库列；不替换原 API 历史快照。"
+  },
+  {
+    "attempt": 2,
+    "sessionId": "ses_5085e272-b7d6-43f0-a307-4a1c64d5a35a",
+    "success": false,
+    "status": "NEEDS_ATTENTION",
+    "waitMechanismObserved": true,
+    "acceptancePassed": true,
+    "failedEvents": [
+      {
+        "code": "WAITING",
+        "message": "已预约后续唤醒",
+        "retryable": true
+      },
+      {
+        "code": "NO_PROGRESS",
+        "message": "同一目标缺口连续多轮没有新增有效证据：核验结论缺少可追溯的必需条件证据\n\n【运行时停滞检查，不是新的用户要求】\n\n检测模式：核验结论缺少可追溯的必需条件证据\n重复次数：2\n未变化状态：dff03ae8108d67dfc73c3813cd72b7694b23bf70e12bcd43e9ea8503b2ee9a9a\n已经失败或等价的路径：\n补充与未覆盖条件直接相关的验证证据\n\n不要再次执行语义等价的动作，也不要用无意义编辑、换行号或换关键词重置计数。选择一种恢复方式：执行能产生不同状态的替代动作；等待已启动的外部结果；请求最小必要用户输入；或记录明确阻塞并暂停。\n\n下一动作必须说明成功后会改变什么。重新总结计划、重复读取相同区域和继续碰运气不算替代策略。\n\n> AI生成",
+        "retryable": true
+      }
+    ],
+    "historyEvents": 111,
+    "historySha256": "08a2d4c542c97b4b50cc4b39f9106e598fa9f11fe9ff9a02111391589de3ab69",
+    "reportSha256": "09d213b173f221d754cdb7508c2375af81febd70685b868ff3785119ab36f383",
+    "researchToolCalls": 0,
+    "cancelledAtDeadline": false,
+    "settledStatus": "NEEDS_ATTENTION",
+    "settledEventCount": 111,
+    "settledEventsSha256": "59c89636a598f67eb170f1366f74f5d456a47a1b7df6993befa9b63cd43ca353",
+    "settledEvidenceFormat": "只读不可变数据库事件行；payload 按原始存储 JSON 解码，createdAt 为数据库列；不替换原 API 历史快照。"
+  },
+  {
+    "attempt": 3,
+    "sessionId": "ses_a479e1b2-09f2-431f-8c4e-2bca9476d9b5",
+    "success": false,
+    "status": "NEEDS_ATTENTION",
+    "waitMechanismObserved": true,
+    "acceptancePassed": true,
+    "failedEvents": [
+      {
+        "code": "WAITING",
+        "message": "已预约后续唤醒",
+        "retryable": true
+      },
+      {
+        "code": "NO_PROGRESS",
+        "message": "同一目标缺口连续多轮没有新增有效证据：核验结论缺少可追溯的必需条件证据\n\n【运行时停滞检查，不是新的用户要求】\n\n检测模式：核验结论缺少可追溯的必需条件证据\n重复次数：2\n未变化状态：662566dc6b20f754b7351d5d51148e9edac85a4f8644dea6b24079b1ee1cc0fa\n已经失败或等价的路径：\n补充与未覆盖条件直接相关的验证证据\n\n不要再次执行语义等价的动作，也不要用无意义编辑、换行号或换关键词重置计数。选择一种恢复方式：执行能产生不同状态的替代动作；等待已启动的外部结果；请求最小必要用户输入；或记录明确阻塞并暂停。\n\n下一动作必须说明成功后会改变什么。重新总结计划、重复读取相同区域和继续碰运气不算替代策略。\n\n> AI生成",
+        "retryable": true
+      }
+    ],
+    "historyEvents": 102,
+    "historySha256": "ffe2641def7131b568a2f28ff8edd003feab2515debacf268ee770f9c8cc2c8e",
+    "reportSha256": "50df5bb0acc73c05a0800f36cd4589f28413540b1c1d5071f7e1285fa76f9d9d",
+    "researchToolCalls": 0,
+    "cancelledAtDeadline": false,
+    "settledStatus": "NEEDS_ATTENTION",
+    "settledEventCount": 102,
+    "settledEventsSha256": "9ebd654e2432acb3645fb8e9879f1a3035dd8f782b2b161852191b8e6d1c9b95",
+    "settledEvidenceFormat": "只读不可变数据库事件行；payload 按原始存储 JSON 解码，createdAt 为数据库列；不替换原 API 历史快照。"
+  }
+]

@@ -1,0 +1,71 @@
+[
+  {
+    "attempt": 1,
+    "cancelledAtDeadline": false,
+    "settledStatus": "COMPLETED",
+    "settledEventCount": 79,
+    "settledEventsSha256": "77f178aa1f06fb172bc7468932502f682cef2abeacf5f8d67ad8fd290b60d6f7",
+    "sessionId": "ses_ad2c85fe-91ac-4e80-a642-48b86bc5d3e5",
+    "success": true,
+    "status": "COMPLETED",
+    "waitMechanismObserved": true,
+    "acceptancePassed": true,
+    "failedEvents": [
+      {
+        "code": "WAITING",
+        "message": "已预约后续唤醒",
+        "retryable": true
+      }
+    ],
+    "historyEvents": 79,
+    "historySha256": "342fbfa6f1a7748947b51e01a89ff21b6644ac82613412a169d4420c9b2f6fb9",
+    "reportSha256": "fbe4dd4afe78557e7371a4bca539e680fbb41ec987a2ae749b7d844006bc48db",
+    "researchToolCalls": 0
+  },
+  {
+    "attempt": 2,
+    "cancelledAtDeadline": false,
+    "settledStatus": "COMPLETED",
+    "settledEventCount": 81,
+    "settledEventsSha256": "03a2c52e49bb57907af59582609f41baaac8fb4f2a91f7946bbda25c8936f662",
+    "sessionId": "ses_0506e5b0-d36f-45ab-8302-b14e4bd538f1",
+    "success": true,
+    "status": "COMPLETED",
+    "waitMechanismObserved": true,
+    "acceptancePassed": true,
+    "failedEvents": [
+      {
+        "code": "WAITING",
+        "message": "已预约后续唤醒",
+        "retryable": true
+      }
+    ],
+    "historyEvents": 81,
+    "historySha256": "92df04234f641fcabf06470b8a335b8d9cac6c9e0059d99823555bfd2c51ce61",
+    "reportSha256": "3dce525fae494d15824dddec530960bb079b6e7f86b23e5ec043c581d68af16c",
+    "researchToolCalls": 0
+  },
+  {
+    "attempt": 3,
+    "cancelledAtDeadline": false,
+    "settledStatus": "COMPLETED",
+    "settledEventCount": 97,
+    "settledEventsSha256": "6a516a4460b7739d63a74ed36fe5a3103dbee2667d9164cee211ca0e48e97df0",
+    "sessionId": "ses_3b47d0cb-34f7-4e17-9f1d-258ef60fd2ca",
+    "success": true,
+    "status": "COMPLETED",
+    "waitMechanismObserved": true,
+    "acceptancePassed": true,
+    "failedEvents": [
+      {
+        "code": "WAITING",
+        "message": "已预约后续唤醒",
+        "retryable": true
+      }
+    ],
+    "historyEvents": 97,
+    "historySha256": "1eacd54cc3613a1360cfb665f9c2c068f18b1e5ca4a70a992535bd8fac502114",
+    "reportSha256": "0a91542a8c3f649626074aaca85ca0db09828bf3efcb2649ee6e7b46c6fa0f13",
+    "researchToolCalls": 0
+  }
+]

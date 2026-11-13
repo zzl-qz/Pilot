@@ -1,0 +1,35 @@
+{
+  "sessionId": "ses_55f66fc3-20dc-4749-9c89-1a9a4af18861",
+  "taskId": "move-file-update-imports",
+  "attempt": 2,
+  "terminalStatus": "COMPLETED",
+  "originalRecordedTerminalStatus": "COMPLETED",
+  "afterEvaluationDeadline": false,
+  "success": true,
+  "historyEvents": 64,
+  "historySha256": "145c07ca545d25058500f342b83d4a31e28537e583bc61baff37e8716942a4c0",
+  "candidateDiffSha256": "008a1cb2ebc24c71f74f514466f5cfe953e6d528a28a65d7e59ca9da98b9c43a",
+  "changedFiles": [
+    {
+      "path": "src/api.js",
+      "beforeSha256": "0da8c265e88652033cf898c1ace4d78c5c99b057dd530f2fb1a936723b8839e2",
+      "afterSha256": "05ee0d94f859963e034c8c770a2204c21dcbfedd8828abad468d869c5d4299b9"
+    },
+    {
+      "path": "src/cli.js",
+      "beforeSha256": "3f97602a528444a70d3e27b10205ca74f6f398f57e568827f5221049d901cad7",
+      "afterSha256": "1fc7f1b5f29a5120b1ec9a956f55aa42ee7357a18df80b39a2167e7e0d698e4d"
+    },
+    {
+      "path": "src/shared/helpers.js",
+      "beforeSha256": null,
+      "afterSha256": "d891ac8372b8f5f08d350deec59e63892ee1e1ec058861c6ee63d3fc56e03a66"
+    },
+    {
+      "path": "src/utils/helpers.js",
+      "beforeSha256": "2fc44b338fb03b527bef5fe66b62e92aa2b102e3a1b6e129580cbcf253c4f894",
+      "afterSha256": null
+    }
+  ],
+  "pathRedaction": "仅替换隔离临时目录的绝对路径，模型内容与事件顺序保留。"
+}

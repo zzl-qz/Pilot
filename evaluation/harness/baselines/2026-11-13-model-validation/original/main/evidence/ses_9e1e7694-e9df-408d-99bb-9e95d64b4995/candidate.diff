@@ -1,0 +1,49 @@
+--- a/src/api.js
++++ b/src/api.js
+@@ -1,6 +1,6 @@
+ 'use strict';
+ 
+-const { slugify } = require('./utils/helpers.js');
++const { slugify } = require('./shared/helpers.js');
+ 
+ function apiPath(title) {
+   return `/posts/${slugify(title)}`;
+--- a/src/cli.js
++++ b/src/cli.js
+@@ -1,6 +1,6 @@
+ 'use strict';
+ 
+-const { truncate, slugify } = require('./utils/helpers.js');
++const { truncate, slugify } = require('./shared/helpers.js');
+ 
+ function cliLine(title) {
+   return `${truncate(title, 12)}  ${slugify(title)}`;
+--- a/src/shared/helpers.js
++++ b/src/shared/helpers.js
+@@ -0,0 +1,11 @@
++'use strict';
++
++function slugify(text) {
++  return String(text).trim().toLowerCase().replace(/\s+/g, '-');
++}
++
++function truncate(text, max) {
++  return text.length <= max ? text : `${text.slice(0, max)}…`;
++}
++
++module.exports = { slugify, truncate };
+--- a/src/utils/helpers.js
++++ b/src/utils/helpers.js
+@@ -1,12 +0,0 @@
+-'use strict';
+-
+-// 这个模块要挪到 src/shared/ 下，引用方都要跟着改。
+-function slugify(text) {
+-  return String(text).trim().toLowerCase().replace(/\s+/g, '-');
+-}
+-
+-function truncate(text, max) {
+-  return text.length <= max ? text : `${text.slice(0, max)}…`;
+-}
+-
+-module.exports = { slugify, truncate };

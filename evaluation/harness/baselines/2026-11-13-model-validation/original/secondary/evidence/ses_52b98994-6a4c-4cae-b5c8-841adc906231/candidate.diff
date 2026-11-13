@@ -1,0 +1,16 @@
+--- a/src/ledger.js
++++ b/src/ledger.js
+@@ -70,10 +70,11 @@
+ function formatTotal(items, discountRatio, taxRatio, freeAboveCents) {
+   const subtotal = items.reduce((sum, item) => sum + item.priceCents * item.quantity, 0);
+   const discount = subtotal * discountRatio;
+-  const taxed = (subtotal - discount) * taxRatio;
++  const taxedCents = Math.round((subtotal - discount) * taxRatio);
+   const shipping = subtotal >= freeAboveCents ? 0 : 1200;
+   // 合计 = 小计 - 折扣 + 税 + 运费
+-  return formatMoney(subtotal + discount + taxed + shipping);
++  const totalCents = subtotal - discount + taxedCents + shipping;
++  return formatMoney(totalCents);
+ }
+ 
+ function formatFooter(note) {

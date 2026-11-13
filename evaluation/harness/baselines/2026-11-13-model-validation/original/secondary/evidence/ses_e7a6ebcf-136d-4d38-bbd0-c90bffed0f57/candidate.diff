@@ -1,0 +1,30 @@
+--- a/src/form.js
++++ b/src/form.js
+@@ -3,10 +3,15 @@
+ // 设置页表单。当前实现只顾排版，没管可访问性与窄屏。
+ function renderField(field) {
+   const value = field.value ?? '';
+-  const error = field.error ? `<div class="error">${field.error}</div>` : '';
++  const id = `field-${field.name}`;
++  const errorId = `field-${field.name}-error`;
++  const error = field.error
++    ? `<div class="error" id="${errorId}" role="alert">${field.error}</div>`
++    : '';
++  const describedBy = field.error ? ` aria-describedby="${errorId}"` : '';
+   return `<div class="field">
+-  <label>${field.label}</label>
+-  <input name="${field.name}" value="${value}" />
++  <label for="${id}">${field.label}</label>
++  <input name="${field.name}" id="${id}"${describedBy} value="${value}" />
+   ${error}
+ </div>`;
+ }
+@@ -17,7 +22,7 @@
+ }
+ 
+ function renderStyles() {
+-  return '.settings { width: 640px; } .field { display: flex; } .error { color: red; }';
++  return '.settings { width: 100%; max-width: 640px; } .field { display: flex; flex-wrap: wrap; } .error { color: red; }';
+ }
+ 
+ module.exports = { renderField, renderForm, renderStyles };

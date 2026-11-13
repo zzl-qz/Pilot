@@ -1,0 +1,53 @@
+--- a/src/orderService.js
++++ b/src/orderService.js
+@@ -1,17 +1,14 @@
+ 'use strict';
+ 
+-// 价格计算直接写在下单服务里，每加一种会员就要改这个函数。
++const pricing = require('./pricingStrategies.js');
++
++// 价格计算委托给策略模块；新增类型通过 registerStrategy 注册，不再改这里。
+ function priceFor(order) {
+-  if (order.type === 'vip') {
+-    return Math.round(order.base * 0.8);
+-  }
+-  if (order.type === 'member') {
+-    return Math.round(order.base * 0.9);
+-  }
+-  if (order.type === 'employee') {
+-    return Math.round(order.base * 0.5);
+-  }
+-  return Math.round(order.base);
++  return pricing.forType(order.type)(order);
+ }
+ 
+-module.exports = { priceFor };
++function registerStrategy(type, fn) {
++  pricing.register(type, fn);
++}
++
++module.exports = { priceFor, registerStrategy };
+--- a/src/pricingStrategies.js
++++ b/src/pricingStrategies.js
+@@ -0,0 +1,21 @@
++'use strict';
++
++// 价格策略表：key 为订单 type，value 为 (order) => 价格。
++// 新增会员类型时在这里加一条，或运行时通过 orderService.registerStrategy 注册，
++// 都不需要再改 priceFor。
++const strategies = new Map([
++  ['vip', (order) => Math.round(order.base * 0.8)],
++  ['member', (order) => Math.round(order.base * 0.9)],
++  ['employee', (order) => Math.round(order.base * 0.5)],
++]);
++
++function register(type, fn) {
++  strategies.set(type, fn);
++  return strategies;
++}
++
++function forType(type) {
++  return strategies.get(type) || ((order) => Math.round(order.base));
++}
++
++module.exports = { strategies, register, forType };
