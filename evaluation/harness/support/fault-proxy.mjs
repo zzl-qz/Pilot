@@ -4,8 +4,8 @@
  *
  * 与预算代理不同，这里**不缓冲整包响应**：收到上游 SSE 分片立即原样转发，
  * 才能在流中途注入真实故障。注入模式（每个请求只注入一种）：
- *   mid-eof   转发首个分片后直接断开下游连接，不发 [DONE]——对准「流提前 EOF 被当成完成」。
- *   stall     转发响应头与首个分片后静默 stallMs 再断开——对准「收到响应头后 body 卡在半开连接」。
+ *   mid-eof   转发首个非终态 SSE 事件后结束响应，不发终止事件——对准「流提前 EOF 被当成完成」。
+ *   stall     响应头+非终态事件前缀后静默 stallMs——对准「收到响应头后 body 卡在半开连接」。
  *   http-503  不打上游，直接回 503（可重试服务端错误）。
  *   reset     收到请求后立刻销毁连接（连接重置）。
  *   none      干净转发（对照组）。
@@ -215,12 +215,49 @@ export async function startFaultProxy(config) {
     }
   }
 
-  /** mid-eof：转发首个分片后干净结束响应，但不发 [DONE]——客户端看到「流提前 EOF」。 */
+  // 网络分片可能合并整个回复；只转发首个完整非终态 SSE 事件，不能把终止标记一起送出。
+  function requireEventStream(response) {
+    if (!response.ok || !response.headers.get('content-type')?.toLowerCase().includes('text/event-stream')) {
+      throw new Error('Fault injection requires a successful SSE response');
+    }
+  }
+
+  async function incompletePrefix(response) {
+    if (!response.body) throw new Error('Missing SSE body');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = '', bytes = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error('Upstream ended before a complete SSE event');
+      bytes += value.byteLength;
+      if (bytes > 1024 * 1024) throw new Error('Injection prefix exceeds limit');
+      pending += decoder.decode(value, { stream: true });
+      const normalized = pending.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+      const boundary = normalized.indexOf('\n\n');
+      if (boundary < 0) continue;
+      const frame = normalized.slice(0, boundary + 2);
+      const data = frame.split('\n').filter(line => line.startsWith('data:'))
+        .map(line => line.slice(5).trimStart()).join('\n').trim();
+      if (!data) return Buffer.from(frame);
+      if (data === '[DONE]') return Buffer.alloc(0);
+      const payload = JSON.parse(data);
+      if (payload.error != null || payload.type === 'error') throw new Error('Upstream returned an SSE error');
+      const terminal = payload.choices?.some(choice => choice.finish_reason != null && choice.finish_reason !== '')
+        || ['response.completed', 'response.failed', 'response.incomplete', 'message_stop'].includes(payload.type)
+        || payload.delta?.stop_reason != null;
+      return terminal ? Buffer.alloc(0) : Buffer.from(frame);
+    }
+  }
+
+  /** mid-eof：转发非终态事件前缀后干净结束响应——客户端看到「流提前 EOF」。 */
   async function midEof(res, path, body, index) {
     const controller = new AbortController();
+    let accounted = false;
     res.once('close', () => { try { controller.abort(); } catch { /* 已结束 */ } });
     try {
       const upstreamResponse = await upstreamFetch(path, body, controller.signal);
+      requireEventStream(upstreamResponse);
       res.writeHead(upstreamResponse.status, {
         'content-type': upstreamResponse.headers.get('content-type') ?? 'text/event-stream',
         'cache-control': 'no-store'
@@ -228,17 +265,16 @@ export async function startFaultProxy(config) {
       // 先把响应头与首分片真正刷到 socket 再结束：destroy 不等缓冲冲刷，
       // 会连头部一起丢弃，变成另一种故障（突发重置由 reset 模式单独覆盖）。
       res.flushHeaders();
-      if (upstreamResponse.body) {
-        const reader = upstreamResponse.body.getReader();
-        const { done, value } = await reader.read();
-        if (!done && value) await new Promise(resolve => res.write(value, () => resolve()));
-      }
+      const prefix = await incompletePrefix(upstreamResponse);
+      if (prefix.length) await new Promise(resolve => res.write(prefix, () => resolve()));
       injected.push({ index, mode: 'mid-eof', at: new Date().toISOString() });
       faultsByMode['mid-eof'] = (faultsByMode['mid-eof'] ?? 0) + 1;
       unknownUsage();
-      log('injected', { requestIndex: index, mode: 'mid-eof', forwardedChunks: 1 });
+      accounted = true;
+      log('injected', { requestIndex: index, mode: 'mid-eof', forwardedBytes: prefix.length });
       res.end();
     } catch (error) {
+      if (!accounted) unknownUsage();
       if (!res.headersSent) reply(res, 502, 'upstream_error');
       else res.destroy();
       log('injection_upstream_error', { requestIndex: index, ...diagnostics(error) });
@@ -247,29 +283,30 @@ export async function startFaultProxy(config) {
     }
   }
 
-  /** stall：转发响应头与首个分片后静默 stallMs 再干净结束，制造半开连接后提前 EOF。 */
+  /** stall：转发响应头与非终态事件前缀后静默 stallMs，制造半开连接。 */
   async function stall(res, path, body, index) {
     const controller = new AbortController();
+    let accounted = false;
     res.once('close', () => { try { controller.abort(); } catch { /* 已结束 */ } });
     try {
       const upstreamResponse = await upstreamFetch(path, body, controller.signal);
+      requireEventStream(upstreamResponse);
       res.writeHead(upstreamResponse.status, {
         'content-type': upstreamResponse.headers.get('content-type') ?? 'text/event-stream',
         'cache-control': 'no-store'
       });
       res.flushHeaders();
-      if (upstreamResponse.body) {
-        const reader = upstreamResponse.body.getReader();
-        const { done, value } = await reader.read();
-        if (!done && value) await new Promise(resolve => res.write(value, () => resolve()));
-      }
+      const prefix = await incompletePrefix(upstreamResponse);
+      if (prefix.length) await new Promise(resolve => res.write(prefix, () => resolve()));
       injected.push({ index, mode: 'stall', at: new Date().toISOString() });
       faultsByMode['stall'] = (faultsByMode['stall'] ?? 0) + 1;
       unknownUsage();
-      log('injected', { requestIndex: index, mode: 'stall', stallMs: active.stallMs });
+      accounted = true;
+      log('injected', { requestIndex: index, mode: 'stall', stallMs: active.stallMs, forwardedBytes: prefix.length });
       await delay(active.stallMs);
       res.end();
     } catch (error) {
+      if (!accounted) unknownUsage();
       if (!res.headersSent) reply(res, 502, 'upstream_error');
       else res.destroy();
       log('injection_upstream_error', { requestIndex: index, ...diagnostics(error) });

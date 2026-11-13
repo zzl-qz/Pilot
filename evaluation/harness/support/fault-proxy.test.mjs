@@ -104,6 +104,65 @@ test('shouldInject 只在每第 N 个请求触发，none 永不注入', () => {
   assert.equal(shouldInject(0, 1, 'stall'), true);
 });
 
+for (const mode of ['mid-eof', 'stall']) {
+  test(`${mode} 不将合并在首个网络分片里的终止事件转发为成功`, async t => {
+    const upstream = createServer((req, res) => {
+      req.resume();
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.end(SSE_EVENTS.join(''));
+    });
+    await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise(resolve => { upstream.close(resolve); upstream.closeAllConnections(); }));
+    const proxy = await startProxy(t, `http://127.0.0.1:${upstream.address().port}`, { mode, stallMs: 20 });
+    const response = await call(proxy);
+    assert.match(response.text, /你/);
+    assert.doesNotMatch(response.text, /\[DONE\]|"finish_reason":"stop"/);
+    assert.equal((await stateOf(proxy)).injectedRequests, 1);
+  });
+
+  test(`${mode} 在首事件已经结束时只发送响应头，不泄漏完整终态`, async t => {
+    const upstream = createServer((req, res) => {
+      req.resume(); res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.end(SSE_EVENTS[1] + SSE_EVENTS.at(-1));
+    });
+    await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise(resolve => { upstream.close(resolve); upstream.closeAllConnections(); }));
+    const proxy = await startProxy(t, `http://127.0.0.1:${upstream.address().port}`, { mode, stallMs: 20 });
+    const result = await call(proxy);
+    assert.equal(result.status, 200);
+    assert.equal(result.text, '');
+    assert.equal((await stateOf(proxy)).injectedRequests, 1);
+  });
+}
+
+test('截断前缀正确拼接分片中的 UTF-8 和 CRLF，不发送半截 JSON', async t => {
+  const data = Buffer.from(SSE_EVENTS[0].replaceAll('\n', '\r\n'));
+  const cut = data.indexOf(Buffer.from('你')) + 1;
+  const upstream = createServer((req, res) => {
+    req.resume(); res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write(data.subarray(0, cut));
+    setTimeout(() => res.end(Buffer.concat([data.subarray(cut), Buffer.from(SSE_EVENTS[1])])), 30);
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => { upstream.close(resolve); upstream.closeAllConnections(); }));
+  const proxy = await startProxy(t, `http://127.0.0.1:${upstream.address().port}`, { mode: 'mid-eof' });
+  assert.equal((await call(proxy)).text, SSE_EVENTS[0]);
+});
+
+for (const [status, type, body] of [[503, 'text/event-stream', SSE_EVENTS[0]],
+  [200, 'application/json', '{"choices":[]}'], [200, 'text/event-stream', 'data: ' + 'x'.repeat(1024 * 1024)]]) {
+  test(`不将上游异常或无界事件误记为有效故障注入（${status}/${type}/${body.length}）`, async t => {
+    const upstream = createServer((req, res) => { req.resume(); res.writeHead(status, { 'content-type': type }); res.end(body); });
+    await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise(resolve => { upstream.close(resolve); upstream.closeAllConnections(); }));
+    const proxy = await startProxy(t, `http://127.0.0.1:${upstream.address().port}`, { mode: 'mid-eof' });
+    await call(proxy);
+    const state = await stateOf(proxy);
+    assert.equal(state.injectedRequests, 0);
+    assert.equal(state.usage.requestsWithoutUsage, 1);
+  });
+}
+
 test('config 校验：未知模式与未知字段都要拒绝', () => {
   assert.throws(() => validateConfigPatch({ mode: 'boom' }, { mode: 'none', every: 3, stallMs: 100, maxRequests: 0 }), /未知故障模式/);
   assert.throws(() => validateConfigPatch({ every: 0 }, { mode: 'none', every: 3, stallMs: 100, maxRequests: 0 }), /Invalid every/);

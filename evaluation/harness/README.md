@@ -27,7 +27,7 @@ node --test evaluation/harness/reference-verifier.test.mjs
 
 故障注入代理夹在 Pilot 服务与真实模型上游之间，**逐分片流式转发**（不像预算代理缓冲整包），因此能在流中途制造真实故障：
 
-- 模式：`mid-eof`（转发首分片后干净结束、不发 `[DONE]`，对准“流提前 EOF 被当成完成”）、`stall`（响应头+首分片后静默 `stallMs` 再结束，对准“收到响应头后 body 卡在半开连接”）、`http-503`（可重试 5xx，不打上游）、`reset`（直接销毁连接）、`none`（干净对照）。
+- 模式：`mid-eof`（转发首个非终态 SSE 事件后干净结束，抑制 `finish_reason` 和 `[DONE]` 等终止事件）、`stall`（响应头+非终态事件前缀后静默 `stallMs` 再结束）、`http-503`（可重试 5xx，不打上游）、`reset`（直接销毁连接）、`none`（干净对照）。首个网络分片即使包含整个回复也不会透传终态；事件前缀最多读取 1 MiB，上游非成功 SSE 或异常前缀不计为已注入。
 - 触发：每第 `every` 个请求注入一次，其余干净转发；客户端应把注入当可重试错误处理后继续完成任务。
 - 控制接口：`POST /fault/config`、`POST /fault/reset`（`stopped` 硬停粘滞不被清洗）、`GET /fault/state`（请求/注入/usage/花费估算）。
 - 硬停：`maxRequests`（请求数上限）与 `maxQuota`（按 usage 分片累计的全价估算）任一达到即 402 停机。
