@@ -105,19 +105,22 @@ export async function startFaultProxy(config) {
   }
   const origin = upstream.origin;
   const authorization = `Bearer ${config.apiKey}`;
-  let requests = 0, lifetimeRequests = 0, stopped = false;
+  let lifetimeRequests = 0, stopped = false, nextWindowId = 0;
   let active = { mode: config.mode, every: config.every, stallMs: config.stallMs, maxRequests: config.maxRequests };
-  let injected = [], faultsByMode = {};
-  let usage = { observedRequests: 0, requestsWithoutUsage: 0, inputTokens: 0, outputTokens: 0 };
+  const newWindow = () => ({ id: nextWindowId++, requests: 0, injected: [], faultsByMode: {},
+    usage: { observedRequests: 0, requestsWithoutUsage: 0, inputTokens: 0, outputTokens: 0 } });
+  let currentWindow = newWindow();
   const lifetimeUsage = { observedRequests: 0, requestsWithoutUsage: 0, inputTokens: 0, outputTokens: 0 };
-  const unknownUsage = () => { usage.requestsWithoutUsage++; lifetimeUsage.requestsWithoutUsage++; };
+  const unknownUsage = window => { window.usage.requestsWithoutUsage++; lifetimeUsage.requestsWithoutUsage++; };
   const log = (status, details = {}) => config.log?.({ status, ...details });
-  const spendEstimate = (sample = usage) => config.inputQuotaPerMillion > 0 || config.outputQuotaPerMillion > 0
+  const spendEstimate = (sample = currentWindow.usage) => config.inputQuotaPerMillion > 0 || config.outputQuotaPerMillion > 0
     ? (sample.inputTokens * config.inputQuotaPerMillion + sample.outputTokens * config.outputQuotaPerMillion) / 1_000_000
     : null;
   const state = () => ({
-    requests, lifetimeRequests, lifetimeUsage: { ...lifetimeUsage }, lifetimeSpendEstimate: spendEstimate(lifetimeUsage), injectedRequests: injected.length, injected, faultsByMode,
-    usage: { ...usage }, spendEstimate: spendEstimate(),
+    windowId: currentWindow.id, requests: currentWindow.requests, lifetimeRequests,
+    lifetimeUsage: { ...lifetimeUsage }, lifetimeSpendEstimate: spendEstimate(lifetimeUsage),
+    injectedRequests: currentWindow.injected.length, injected: currentWindow.injected, faultsByMode: currentWindow.faultsByMode,
+    usage: { ...currentWindow.usage }, spendEstimate: spendEstimate(),
     maxQuota: config.maxQuota, stopped,
     config: { ...active, maxQuota: config.maxQuota,
       inputQuotaPerMillion: config.inputQuotaPerMillion, outputQuotaPerMillion: config.outputQuotaPerMillion }
@@ -164,7 +167,7 @@ export async function startFaultProxy(config) {
   }
 
   /** 干净转发：流式逐分片回写，不做任何缓冲或改写。 */
-  async function passthrough(req, res, path, body, index) {
+  async function passthrough(req, res, path, body, index, window) {
     const controller = new AbortController();
     const onClose = () => { try { controller.abort(); } catch { /* 已结束 */ } };
     res.once('close', onClose);
@@ -190,14 +193,14 @@ export async function startFaultProxy(config) {
       }
       res.end();
       if (collect.inputTokens > 0 || collect.outputTokens > 0) {
-        for (const sample of [usage, lifetimeUsage]) {
+        for (const sample of [window.usage, lifetimeUsage]) {
           sample.observedRequests++;
           sample.inputTokens += collect.inputTokens;
           sample.outputTokens += collect.outputTokens;
         }
-      } else unknownUsage();
+      } else unknownUsage(window);
       const estimate = spendEstimate(lifetimeUsage);
-      log('complete', { requestIndex: index, mode: 'none', chunks, bytes,
+      log('complete', { windowId: window.id, requestIndex: index, mode: 'none', chunks, bytes,
         inputTokens: collect.inputTokens, outputTokens: collect.outputTokens,
         elapsedMs: Date.now() - started, spendEstimate: estimate });
       if (config.maxQuota > 0 && estimate !== null && estimate >= config.maxQuota) {
@@ -207,8 +210,8 @@ export async function startFaultProxy(config) {
     } catch (error) {
       if (!res.headersSent) reply(res, 502, 'upstream_error');
       else res.destroy();
-      unknownUsage();
-      log('upstream_error', { requestIndex: index, ...diagnostics(error) });
+      unknownUsage(window);
+      log('upstream_error', { windowId: window.id, requestIndex: index, ...diagnostics(error) });
     } finally {
       res.off('close', onClose);
       try { controller.abort(); } catch { /* 已结束 */ }
@@ -251,7 +254,7 @@ export async function startFaultProxy(config) {
   }
 
   /** mid-eof：转发非终态事件前缀后干净结束响应——客户端看到「流提前 EOF」。 */
-  async function midEof(res, path, body, index) {
+  async function midEof(res, path, body, index, window) {
     const controller = new AbortController();
     let accounted = false;
     res.once('close', () => { try { controller.abort(); } catch { /* 已结束 */ } });
@@ -267,24 +270,24 @@ export async function startFaultProxy(config) {
       res.flushHeaders();
       const prefix = await incompletePrefix(upstreamResponse);
       if (prefix.length) await new Promise(resolve => res.write(prefix, () => resolve()));
-      injected.push({ index, mode: 'mid-eof', at: new Date().toISOString() });
-      faultsByMode['mid-eof'] = (faultsByMode['mid-eof'] ?? 0) + 1;
-      unknownUsage();
+      window.injected.push({ index, mode: 'mid-eof', at: new Date().toISOString() });
+      window.faultsByMode['mid-eof'] = (window.faultsByMode['mid-eof'] ?? 0) + 1;
+      unknownUsage(window);
       accounted = true;
-      log('injected', { requestIndex: index, mode: 'mid-eof', forwardedBytes: prefix.length });
+      log('injected', { windowId: window.id, requestIndex: index, mode: 'mid-eof', forwardedBytes: prefix.length });
       res.end();
     } catch (error) {
-      if (!accounted) unknownUsage();
+      if (!accounted) unknownUsage(window);
       if (!res.headersSent) reply(res, 502, 'upstream_error');
       else res.destroy();
-      log('injection_upstream_error', { requestIndex: index, ...diagnostics(error) });
+      log('injection_upstream_error', { windowId: window.id, requestIndex: index, ...diagnostics(error) });
     } finally {
       try { controller.abort(); } catch { /* 已结束 */ }
     }
   }
 
   /** stall：转发响应头与非终态事件前缀后静默 stallMs，制造半开连接。 */
-  async function stall(res, path, body, index) {
+  async function stall(res, path, body, index, window, stallMs) {
     const controller = new AbortController();
     let accounted = false;
     res.once('close', () => { try { controller.abort(); } catch { /* 已结束 */ } });
@@ -298,18 +301,18 @@ export async function startFaultProxy(config) {
       res.flushHeaders();
       const prefix = await incompletePrefix(upstreamResponse);
       if (prefix.length) await new Promise(resolve => res.write(prefix, () => resolve()));
-      injected.push({ index, mode: 'stall', at: new Date().toISOString() });
-      faultsByMode['stall'] = (faultsByMode['stall'] ?? 0) + 1;
-      unknownUsage();
+      window.injected.push({ index, mode: 'stall', at: new Date().toISOString() });
+      window.faultsByMode['stall'] = (window.faultsByMode['stall'] ?? 0) + 1;
+      unknownUsage(window);
       accounted = true;
-      log('injected', { requestIndex: index, mode: 'stall', stallMs: active.stallMs, forwardedBytes: prefix.length });
-      await delay(active.stallMs);
+      log('injected', { windowId: window.id, requestIndex: index, mode: 'stall', stallMs, forwardedBytes: prefix.length });
+      await delay(stallMs);
       res.end();
     } catch (error) {
-      if (!accounted) unknownUsage();
+      if (!accounted) unknownUsage(window);
       if (!res.headersSent) reply(res, 502, 'upstream_error');
       else res.destroy();
-      log('injection_upstream_error', { requestIndex: index, ...diagnostics(error) });
+      log('injection_upstream_error', { windowId: window.id, requestIndex: index, ...diagnostics(error) });
     } finally {
       try { controller.abort(); } catch { /* 已结束 */ }
     }
@@ -345,9 +348,9 @@ export async function startFaultProxy(config) {
     if (req.url === '/fault/reset' && req.method === 'POST') {
       if (!authorized(req)) return reply(res, 401, 'local_auth_required');
       // 只清当前试验窗口；累计用量和硬停状态保留，不能在触顶前重置来洗掉额度。
-      requests = 0; injected = []; faultsByMode = {};
-      usage = { observedRequests: 0, requestsWithoutUsage: 0, inputTokens: 0, outputTokens: 0 };
-      log('reset');
+      // 在途请求继续记入开始时的窗口；迟到结果不能污染下一次尝试。
+      currentWindow = newWindow();
+      log('reset', { windowId: currentWindow.id });
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ requests: 0, stopped }));
       return;
@@ -355,32 +358,33 @@ export async function startFaultProxy(config) {
     if (req.url?.startsWith('/fault/')) return reply(res, 404, 'unsupported_route');
     if (req.method !== 'POST') return reply(res, 404, 'unsupported_route');
     if (stopped) { log('stopped_reject'); return reply(res, 402, 'fault_budget_stop'); }
-    if (active.maxRequests > 0 && lifetimeRequests >= active.maxRequests) {
-      stopped = true; log('budget_stop', { requestIndex: requests, lifetimeRequests, maxRequests: active.maxRequests });
+    const window = currentWindow, requestConfig = active;
+    if (requestConfig.maxRequests > 0 && lifetimeRequests >= requestConfig.maxRequests) {
+      stopped = true; log('budget_stop', { windowId: window.id, requestIndex: window.requests, lifetimeRequests, maxRequests: requestConfig.maxRequests });
       return reply(res, 402, 'fault_budget_stop');
     }
-    const index = requests++;
+    const index = window.requests++;
     lifetimeRequests++;
     const body = await readBody(req, res);
     if (body === null) return;
-    if (!shouldInject(index, active.every, active.mode)) {
-      await passthrough(req, res, req.url, body, index);
+    if (!shouldInject(index, requestConfig.every, requestConfig.mode)) {
+      await passthrough(req, res, req.url, body, index, window);
       return;
     }
-    if (active.mode === 'http-503') {
-      injected.push({ index, mode: 'http-503', at: new Date().toISOString() });
-      faultsByMode['http-503'] = (faultsByMode['http-503'] ?? 0) + 1;
-      log('injected', { requestIndex: index, mode: 'http-503' });
+    if (requestConfig.mode === 'http-503') {
+      window.injected.push({ index, mode: 'http-503', at: new Date().toISOString() });
+      window.faultsByMode['http-503'] = (window.faultsByMode['http-503'] ?? 0) + 1;
+      log('injected', { windowId: window.id, requestIndex: index, mode: 'http-503' });
       return reply(res, 503, 'injected_transient_error');
     }
-    if (active.mode === 'reset') {
-      injected.push({ index, mode: 'reset', at: new Date().toISOString() });
-      faultsByMode['reset'] = (faultsByMode['reset'] ?? 0) + 1;
-      log('injected', { requestIndex: index, mode: 'reset' });
+    if (requestConfig.mode === 'reset') {
+      window.injected.push({ index, mode: 'reset', at: new Date().toISOString() });
+      window.faultsByMode['reset'] = (window.faultsByMode['reset'] ?? 0) + 1;
+      log('injected', { windowId: window.id, requestIndex: index, mode: 'reset' });
       res.destroy(); return;
     }
-    if (active.mode === 'mid-eof') return midEof(res, req.url, body, index);
-    if (active.mode === 'stall') return stall(res, req.url, body, index);
+    if (requestConfig.mode === 'mid-eof') return midEof(res, req.url, body, index, window);
+    if (requestConfig.mode === 'stall') return stall(res, req.url, body, index, window, requestConfig.stallMs);
     reply(res, 500, 'unknown_fault_mode');
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(config.port, '127.0.0.1', resolve); });

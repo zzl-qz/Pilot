@@ -264,6 +264,81 @@ test('控制接口：config 生效、state 反映、reset 清零但保留配置'
   assert.equal(after.config.mode, 'http-503', 'reset 保留配置');
 });
 
+for (const mode of ['none', 'mid-eof']) {
+  test(`reset 后迟到的 ${mode} 请求不污染新窗口，累计用量仍保留`, async t => {
+    let release, started;
+    const released = new Promise(resolve => { release = resolve; });
+    const accepted = new Promise(resolve => { started = resolve; });
+    const upstream = createServer((req, res) => {
+      req.resume();
+      started();
+      released.then(() => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.end(SSE_EVENTS.join(''));
+      });
+    });
+    await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise(resolve => { upstream.close(resolve); upstream.closeAllConnections(); }));
+    const proxy = await startProxy(t, `http://127.0.0.1:${upstream.address().port}`, {
+      mode, inputQuotaPerMillion: 1_000_000, maxQuota: mode === 'none' ? 10 : 0
+    });
+    const pending = call(proxy);
+    await accepted;
+    try {
+      assert.equal((await stateOf(proxy)).requests, 1);
+      assert.equal((await control(proxy, '/fault/reset', { method: 'POST' })).status, 200);
+      await control(proxy, '/fault/config', { method: 'POST', body: JSON.stringify({ mode: 'http-503', every: 1 }) });
+      assert.equal((await call(proxy)).status, 503);
+    } finally {
+      release();
+      await pending;
+    }
+    const state = await stateOf(proxy);
+    assert.equal(state.requests, 1);
+    assert.equal(state.injectedRequests, 1, '上一窗口的迟到故障不能记为本轮注入');
+    assert.deepEqual(state.faultsByMode, { 'http-503': 1 });
+    assert.equal(state.usage.observedRequests, 0);
+    assert.equal(state.usage.requestsWithoutUsage, 0);
+    assert.equal(state.usage.inputTokens, 0);
+    assert.equal(state.lifetimeRequests, 2);
+    if (mode === 'none') {
+      assert.equal(state.lifetimeUsage.inputTokens, 11);
+      assert.equal(state.stopped, true, '迟到的真实用量仍触发累计预算保护');
+      assert.equal((await call(proxy)).status, 402);
+    } else assert.equal(state.lifetimeUsage.requestsWithoutUsage, 1);
+  });
+}
+
+test('请求体尚未收完时切换窗口与配置，不改变在途请求的故障方案', async t => {
+  const upstream = await mockUpstream(t);
+  const proxy = await startProxy(t, upstream.origin);
+  let request;
+  const pending = new Promise((resolve, reject) => {
+    request = http.request(`http://127.0.0.1:${proxy.port}/v1/chat/completions`, {
+      method: 'POST', agent: false, headers: { 'content-type': 'application/json' }
+    }, response => {
+      response.resume();
+      response.on('end', () => resolve(response.statusCode));
+    });
+    request.on('error', reject);
+    request.write('{"messages":[');
+  });
+  const deadline = Date.now() + 2000;
+  while ((await stateOf(proxy)).requests === 0 && Date.now() < deadline) await delay(5);
+  try {
+    assert.equal((await stateOf(proxy)).requests, 1);
+    await control(proxy, '/fault/reset', { method: 'POST' });
+    await control(proxy, '/fault/config', { method: 'POST', body: JSON.stringify({ mode: 'http-503', every: 1 }) });
+  } finally { request.end(']}'); }
+  assert.equal(await pending, 200, '旧请求继续使用开始时的配置');
+  assert.equal((await call(proxy)).status, 503, '新请求使用更新后的配置');
+  const state = await stateOf(proxy);
+  assert.equal(state.requests, 1);
+  assert.equal(state.usage.inputTokens, 0);
+  assert.equal(state.lifetimeUsage.inputTokens, 11);
+  assert.equal(upstream.hits(), 1);
+});
+
 test('maxRequests 硬停：超出后 402，stopped 粘滞且 reset 不清除', async t => {
   const upstream = await mockUpstream(t);
   const proxy = await startProxy(t, upstream.origin, { maxRequests: 2 });
