@@ -279,7 +279,12 @@ export async function waitForTerminal(args, sessionId, steer) {
   }
   while (Date.now() < deadline) {
     last = await beforeDeadline(`/api/sessions/${sessionId}/diagnostics`);
-    if (TERMINAL.has(last.sessionStatus)) return { ...last, steerDelivered: steer ? steered : null, steerRunId, steerAtStep, steerDeliveredAtSeconds };
+    if (TERMINAL.has(last.sessionStatus)) {
+      // A terminal event precedes worker cleanup and may be followed by automatic continuation.
+      const active = await beforeDeadline(`/api/sessions/${sessionId}/runs/active`);
+      if (!Object.hasOwn(active, 'runId')) throw new Error('服务未返回活动运行状态，不能确认终态');
+      if (active.runId === null) return { ...last, steerDelivered: steer ? steered : null, steerRunId, steerAtStep, steerDeliveredAtSeconds };
+    }
     // 引导必须进入当前运行；追加 messages 会排队成为下一项任务。
     if (steer && !steered && last.activeRunId && (Date.now() - started) / 1000 >= steer.afterSeconds) {
       await beforeDeadline(`/api/sessions/${sessionId}/steer`, {
@@ -478,15 +483,17 @@ export async function runTask(args, task) {
     error.sessionId = sessionId;
     // 只清理本次执行器创建的会话；超时或网络失败后不让模型继续悄悄运行。
     try {
-      const active = await api(args, `/api/sessions/${sessionId}/diagnostics`);
-      error.runId = active.activeRunId ?? null;
-      error.terminalStatus = TERMINAL.has(active.sessionStatus) ? active.sessionStatus : null;
-      if (active.activeRunId && !TERMINAL.has(active.sessionStatus)) {
-        await api(args, `/api/runs/${encodeURIComponent(active.activeRunId)}/cancel`, { method: "POST" });
+      const active = await api(args, `/api/sessions/${sessionId}/runs/active`);
+      if (!Object.hasOwn(active, 'runId')) throw new Error('服务未返回活动运行状态');
+      error.runId = active.runId ?? null;
+      if (active.runId) {
+        await api(args, `/api/runs/${encodeURIComponent(active.runId)}/cancel`, { method: "POST" });
         error.cancellationRequested = true;
-        const settled = await api(args, `/api/sessions/${sessionId}/diagnostics`);
-        error.terminalStatus = TERMINAL.has(settled.sessionStatus) ? settled.sessionStatus : null;
+        const settled = await api(args, `/api/sessions/${sessionId}/runs/active`);
+        if (settled.runId !== null) throw new Error('取消后仍有活动运行或未返回运行状态');
       }
+      const diagnostic = await api(args, `/api/sessions/${sessionId}/diagnostics`);
+      error.terminalStatus = TERMINAL.has(diagnostic.sessionStatus) ? diagnostic.sessionStatus : null;
     } catch (cancelError) {
       throw Object.assign(new Error(`${error.message}；取消状态未确认：${cancelError.message}（会话 ${sessionId}）`), {
         sessionId, runId: error.runId, cancellationRequested: error.cancellationRequested === true,

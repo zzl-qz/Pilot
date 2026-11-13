@@ -28,7 +28,11 @@ async function server(t, handle) {
     const body = raw ? JSON.parse(raw) : null;
     requests.push({ path: req.url, method: req.method, body });
     try {
-      const result = await handle(req.url, body, req.headers);
+      let result = await handle(req.url, body, req.headers);
+      // Older test fixtures describe session state; materialize the active-run endpoint explicitly.
+      if (req.url.endsWith('/runs/active') && !Object.hasOwn(result ?? {}, 'runId')) {
+        result = { runId: result?.sessionStatus === 'RUNNING' ? result.activeRunId ?? null : null };
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result ?? {}));
     } catch (error) {
@@ -255,8 +259,13 @@ for (const offset of [0, 1]) test(`响应在deadline${offset ? '之后' : '恰�
 test('deadline前1毫秒取得正常终态可以返回，不误伤临界成功', async t => {
   let now = 10_000;
   t.mock.method(Date, 'now', () => now);
-  const mock = await server(t, () => { now = 10_999; return { sessionStatus: 'COMPLETED' }; });
-  const result = await waitForTerminal({ base: mock.base, timeoutMinutes: 1 / 60 }, 's');
+  const paths = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    now = 10_999; paths.push(String(url));
+    return new Response(JSON.stringify(String(url).endsWith('/runs/active') ? { runId: null } : { sessionStatus: 'COMPLETED' }), { headers: { 'content-type': 'application/json' } });
+  });
+  const result = await waitForTerminal({ base: 'http://localhost', timeoutMinutes: 1 / 60 }, 's');
+  assert.equal(paths.length, 2);
   assert.equal(result.sessionStatus, 'COMPLETED');
 });
 
@@ -595,4 +604,37 @@ test('故障停顿时间或请求限额变化必须改变方案指纹，凭据�
   assert.notEqual(a.faultPlanVersion, (await recordMetadata({ ...fault, faultMaxRequests: 13 }, task)).faultPlanVersion);
   assert.equal(a.faultPlanVersion, (await recordMetadata({ ...fault, faultToken: 'secret-b' }, task)).faultPlanVersion);
   assert.ok(!JSON.stringify(a).includes('secret'));
+});
+
+
+test('终态与自动续跑重叠时等待活动运行释放后才验收', async t => {
+  let polls = 0;
+  const mock = await server(t, path => {
+    if (path.endsWith('/diagnostics')) return { sessionStatus: ++polls < 3 ? 'FAILED' : 'COMPLETED', activeRunId: polls < 2 ? 'old' : 'continued' };
+    if (path.endsWith('/runs/active')) return { runId: polls < 3 ? 'continued' : null };
+    return {};
+  });
+  const result = await waitForTerminal({ base: mock.base, timeoutMinutes: 1, pollMs: 1 }, 's');
+  assert.equal(result.sessionStatus, 'COMPLETED');
+  assert.equal(polls, 3);
+});
+
+test('异常清理取消实际活动续跑而不是诊断中的旧运行', async t => {
+  const { args, task } = await fixture(t);
+  let cancelled = false;
+  const mock = await server(t, path => {
+    if (path === '/api/sessions') return { sessionId: 'own' };
+    if (path.endsWith('/runs/active')) return { runId: cancelled ? null : 'continued' };
+    if (path === '/api/runs/continued/cancel') { cancelled = true; return {}; }
+    return { sessionStatus: 'FAILED', activeRunId: 'old' };
+  });
+  await assert.rejects(runTask({ ...args, base: mock.base, timeoutMinutes: 0.001 }, task), /任务超时/);
+  assert.equal(cancelled, true);
+  assert.equal(mock.requests.some(r => r.path === '/api/runs/old/cancel'), false);
+});
+
+
+test('缺少活动运行字段不能把终态当成已结束', async t => {
+  const mock = await server(t, path => path.endsWith('/runs/active') ? { runId: undefined } : { sessionStatus: 'COMPLETED' });
+  await assert.rejects(waitForTerminal({ base: mock.base, timeoutMinutes: 1 }, 's'), /不能确认终态/);
 });
