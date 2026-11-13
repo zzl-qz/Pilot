@@ -901,6 +901,7 @@ public class AgentRunService implements RunStarter {
 
         autoContinueSignature.put(sessionId, signature);
         String runId = "run_" + java.util.UUID.randomUUID();
+        publish(sessionId, runId, new RunStarted("（继续上一次未完成的任务）"));
         publish(sessionId, runId, new RunContinued(attempt, MAX_AUTO_CONTINUE, "步数触顶，按未完成计划继续"));
         launch(sessionId, runId, null, List.of(), true);
         return true;
