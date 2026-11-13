@@ -34,6 +34,7 @@ final class GoalEvidence {
                 || ("record_research".equals(e.tool()) && "SUCCESS".equals(e.status())) || isVerificationAttempt(e)
                 || ("run_command".equals(e.tool()) && isBackgroundLaunch(e) && !completedTasks.contains(taskId(e))))
             .forEach(e -> retained.put(e.id(), e));
+        recentHistoricalWaits(all).forEach(e -> retained.put(e.id(), e));
         int ordinaryStart = Math.max(0, all.size() - 120);
         all.subList(ordinaryStart, all.size()).forEach(e -> retained.put(e.id(), e));
         ArrayList<TaskControlService.Evidence> result = new ArrayList<>(retained.values());
@@ -49,10 +50,18 @@ final class GoalEvidence {
         latestChecks(all).values().forEach(e -> bounded.put(e.id(), e));
         result.stream().filter(e -> "record_research".equals(e.tool()) && "SUCCESS".equals(e.status()))
             .reduce((a, b) -> b).ifPresent(e -> bounded.put(e.id(), e));
+        recentHistoricalWaits(all).forEach(e -> bounded.put(e.id(), e));
         int remaining = Math.max(0, 220 - bounded.size());
         result.subList(Math.max(0, result.size() - remaining), result.size()).forEach(e -> bounded.put(e.id(), e));
         // 固定保留的检查仍按原始时间顺序输出，不能让旧失败在裁剪后覆盖较新的通过。
         return all.stream().filter(e -> bounded.containsKey(e.id())).collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    /** 有界保留最近的等待预约，避免续跑观察挤掉无法重新执行的历史事实。 */
+    static List<TaskControlService.Evidence> recentHistoricalWaits(List<TaskControlService.Evidence> all) {
+        List<TaskControlService.Evidence> waits =
+            all.stream().filter(e -> "wait_until".equals(e.tool()) && successfulEvidence(e)).toList();
+        return waits.subList(Math.max(0, waits.size() - 4), waits.size());
     }
 
     private static boolean isBackgroundLaunch(TaskControlService.Evidence evidence) {

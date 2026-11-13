@@ -838,10 +838,11 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         String expected = string(answer, "expected_observation");
         String progress = meaningfulProgress(state.evidence());
         int idle = progress.equals(state.progress()) ? state.idleReviews() + 1 : 0;
-        boolean complete = "COMPLETE".equals(decision) && validCoverage(answer, state);
+        String coverageIssue = "COMPLETE".equals(decision) ? coverageIssue(answer, state) : null;
+        boolean complete = "COMPLETE".equals(decision) && coverageIssue == null;
         if ("COMPLETE".equals(decision) && !complete) {
             decision = "CONTINUE";
-            gap = "核验结论缺少可追溯的必需条件证据";
+            gap = "核验结论缺少可追溯的必需条件证据：" + coverageIssue;
             nextAction = "补充与未覆盖条件直接相关的验证证据";
             expected = "每个必需条件都能引用实际成功证据";
         }
@@ -1032,8 +1033,10 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 .filter(e -> GoalEvidence.successfulEvidence(e) && Set.of("web_fetch", "read_file").contains(e.tool()))
                 .toList(),
             12);
-        List<Map<String, String>> rows = selected.values().stream().map(e -> {
-            Map<String, String> row = new LinkedHashMap<>();
+        addRecent(selected, GoalEvidence.recentHistoricalWaits(all), 4);
+        String currentVersion = sourceVersion();
+        List<Map<String, Object>> rows = selected.values().stream().map(e -> {
+            Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", e.id());
             row.put("tool", e.tool());
             row.put("target", oneLine(e.target(), 160));
@@ -1041,6 +1044,11 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             row.put("result", oneLine(e.result(), 250));
             row.put("check", oneLine(Objects.toString(e.check(), ""), 180));
             row.put("source_version", e.endVersion());
+            row.put("evidence_scope", "wait_until".equals(e.tool()) ? "historical_action"
+                : Set.of("web_search", "web_fetch").contains(e.tool()) ? "external_source" : "current_workspace");
+            String issue = evidenceIssue(e, currentVersion);
+            row.put("eligible_for_coverage", issue == null);
+            row.put("ineligible_reason", issue == null ? "" : issue);
             return row;
         }).toList();
         return mapper.writeValueAsString(rows);
@@ -1052,41 +1060,59 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             .forEach(item -> selected.putIfAbsent(item.id(), item));
     }
 
-    private boolean validCoverage(Map<String, Object> answer, TaskControlService.Execution state) {
+    private String coverageIssue(Map<String, Object> answer, TaskControlService.Execution state) {
         if (!(answer.get("coverage") instanceof List<?> rows)) {
-            return false;
+            return "coverage 必须是条件覆盖列表";
         }
         String version = sourceVersion();
-        Set<String> ids = state.evidence().stream().filter(GoalExecutionPolicy::coverageEligible)
-            .filter(e -> evidenceFreshForCoverage(e, version)).map(TaskControlService.Evidence::id)
-            .collect(Collectors.toSet());
+        Map<String, TaskControlService.Evidence> evidenceById = state.evidence().stream()
+            .collect(Collectors.toMap(TaskControlService.Evidence::id, e -> e, (first, last) -> last));
         Set<Integer> covered = new LinkedHashSet<>();
         for (Object item : rows) {
             if (!(item instanceof Map<?, ?> row) || !(row.get("criterion") instanceof Number number)) {
-                return false;
+                return "条件索引必须是整数";
             }
             int index = number.intValue();
-            if (index < 0 || index >= state.criteria().size() || !covered.add(index)) {
-                return false;
+            if (number.doubleValue() != index || index < 0 || index >= state.criteria().size()) {
+                return "条件索引越界或不是整数";
+            }
+            if (!covered.add(index)) {
+                return "条件 " + index + " 重复提交";
             }
             boolean satisfied = Boolean.TRUE.equals(row.get("satisfied"));
             List<String> refs = strings(row.get("evidence"));
             if (state.criteria().get(index).requiredValue() && (!satisfied || refs.isEmpty())) {
-                return false;
-            }
-            if (satisfied && !ids.containsAll(refs)) {
-                return false;
+                return "必需条件 " + index + " 未满足或没有证据引用";
             }
             if (!satisfied && !refs.isEmpty()) {
-                return false;
+                return "未满足的条件 " + index + " 不能提交完成证据";
+            }
+            for (String ref : refs) {
+                String issue = evidenceIssue(evidenceById.get(ref), version);
+                if (issue != null) {
+                    return "条件 " + index + " 的证据 " + oneLine(ref, 80) + " 不可引用：" + issue;
+                }
             }
         }
         for (int index = 0; index < state.criteria().size(); index++) {
             if (state.criteria().get(index).requiredValue() && !covered.contains(index)) {
-                return false;
+                return "缺少必需条件 " + index + " 的覆盖记录";
             }
         }
-        return true;
+        return null;
+    }
+
+    private static String evidenceIssue(TaskControlService.Evidence evidence, String currentVersion) {
+        if (evidence == null) {
+            return "证据 id 不存在";
+        }
+        if (!GoalEvidence.successfulEvidence(evidence)) {
+            return "工具未成功执行";
+        }
+        if (!coverageEligible(evidence)) {
+            return "计划声明或非验证命令的检查记录不能作为完成证据";
+        }
+        return evidenceFreshForCoverage(evidence, currentVersion) ? null : "证据对应旧文件版本，需当前版本的定向核验";
     }
 
     private boolean passingCurrentCheck(TaskControlService.Execution state) {
@@ -1130,8 +1156,9 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     }
 
     private static boolean evidenceFreshForCoverage(TaskControlService.Evidence evidence, String currentVersion) {
-        // 外部资料不依赖本地源码版本；所有本地实现、行为与验证证据都必须对应当前版本。
-        if (Set.of("web_search", "web_fetch").contains(evidence.tool())) {
+        // 等待预约是已发生的历史操作，后续文件写入不会使它失真；它不证明文件当前状态或唤醒结果。
+        // 外部资料同样不依赖本地源码；本地实现、行为与验证仍要求当前版本。
+        if (Set.of("web_search", "web_fetch", "wait_until").contains(evidence.tool())) {
             return true;
         }
         return Objects.equals(currentVersion, evidence.endVersion());

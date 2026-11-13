@@ -573,6 +573,81 @@ class GoalExecutionPolicyTest {
     }
 
     @Test
+    void successfulHistoricalWaitRemainsCitableAfterLaterArtifactChanges() throws Exception {
+        AtomicReference<String> waitEvidence = new AtomicReference<>();
+        GoalExecutionPolicy policy = policy((messages, tools) -> {
+            String context = messages.getLast().content();
+            assertTrue(context.contains("\"id\":\"" + waitEvidence.get() + "\""));
+            assertTrue(context.contains("\"evidence_scope\":\"historical_action\""));
+            assertTrue(context.contains("\"eligible_for_coverage\":true"));
+            return decision(
+                Map.of("decision", "COMPLETE", "gap", "", "next_action", "", "expected_observation", "", "coverage",
+                    List.of(Map.of("criterion", 0, "satisfied", true, "evidence", List.of(waitEvidence.get())))));
+        }, 20);
+        policy.beforeRequest(history);
+        policy.promotionTool().execute(Map.of("reason", "需要恢复", "completion_conditions", List.of("执行时已预约等待")));
+        observe(policy, "wait_until", "", "已保存，将在约定时间唤醒。停止本轮执行。", null);
+        var wait = tasks.load("s").execution().evidence().stream().filter(e -> e.tool().equals("wait_until"))
+            .findFirst().orElseThrow();
+        waitEvidence.set(wait.id());
+        Files.writeString(root.resolve("result.txt"), "唤醒后的结果");
+        observe(policy, "create_file", "result.txt", "已创建结果", null);
+        for (int index = 0; index < 240; index++) {
+            observe(policy, "read_file", "observation-" + index, "后续观察", null);
+        }
+        assertNull(policy.review(history, Set.of("result.txt"), List.of()), "写入后续结果不能抹去已经成功预约等待的历史事实");
+        assertEquals("VERIFIED", tasks.load("s").execution().phase());
+    }
+
+    @Test
+    void failedHistoricalWaitCannotSatisfyCoverage() {
+        AtomicReference<String> rejected = new AtomicReference<>();
+        GoalExecutionPolicy policy = policy((messages,
+            tools) -> decision(Map.of("decision", "COMPLETE", "gap", "", "next_action", "", "expected_observation", "",
+                "coverage", List.of(Map.of("criterion", 0, "satisfied", true, "evidence", List.of(rejected.get()))))),
+            20);
+        policy.beforeRequest(history);
+        policy.promotionTool().execute(Map.of("reason", "需要恢复", "completion_conditions", List.of("预约等待成功")));
+        var call = new ToolCall("failed-wait", "wait_until", Map.of());
+        policy.beforeTool(call);
+        policy.observed(call, new ToolExecutor.Outcome("wait_until", "ERROR: 无效时间", List.of(), List.of(),
+            ToolExecutor.OutcomeStatus.PERMANENT_FAILURE));
+        rejected.set(tasks.load("s").execution().evidence().stream().filter(e -> e.tool().equals("wait_until"))
+            .findFirst().orElseThrow().id());
+        assertNotNull(policy.review(history, Set.of(), List.of()));
+        assertTrue(tasks.load("s").execution().gap().contains("工具未成功执行"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"missing_id", "duplicate", "fraction", "missing_required"})
+    void invalidCoverageIdentifiesTheFailureWithoutAcceptingCompletion(String invalid) {
+        GoalExecutionPolicy policy = policy((messages, tools) -> {
+            var normal = complete().toolCalls().getFirst().args();
+            var row = ((List<?>)normal.get("coverage")).getFirst();
+            Object coverage = switch (invalid) {
+                case "missing_id" -> List.of(Map.of("criterion", 0, "satisfied", true, "evidence", List.of("unknown")));
+                case "duplicate" -> List.of(row, row);
+                case "fraction" -> List.of(Map.of("criterion", 0.5, "satisfied", true, "evidence", List.of()));
+                default -> List.of();
+            };
+            return decision(Map.of("decision", "COMPLETE", "gap", "", "next_action", "", "expected_observation", "",
+                "coverage", coverage));
+        }, 20);
+        policy.beforeRequest(history);
+        policy.promotionTool().execute(Map.of("reason", "闭环", "completion_conditions", List.of("实际结果正确")));
+        observe(policy, "read_file", "result.txt", "实际结果", null);
+        assertNotNull(policy.review(history, Set.of(), List.of()));
+        String reason = switch (invalid) {
+            case "missing_id" -> "证据 id 不存在";
+            case "duplicate" -> "重复提交";
+            case "fraction" -> "不是整数";
+            default -> "缺少必需条件 0";
+        };
+        assertTrue(tasks.load("s").execution().gap().contains(reason));
+        assertEquals("EXECUTING", tasks.load("s").execution().phase());
+    }
+
+    @Test
     void reviewerCannotUseEvidenceFromAnOlderSourceVersion() throws Exception {
         Files.writeString(root.resolve("A.java"), "v1");
         AtomicReference<String> staleEvidence = new AtomicReference<>();
@@ -595,7 +670,7 @@ class GoalExecutionPolicyTest {
         String continuation = policy.review(history, Set.of("A.java"), List.of());
         assertNotNull(continuation, "旧版本功能证据 + 当前版本任意构建不能通过 Goal");
         assertEquals("EXECUTING", tasks.load("s").execution().phase());
-        assertTrue(tasks.load("s").execution().gap().contains("可追溯"));
+        assertTrue(tasks.load("s").execution().gap().contains("旧文件版本"));
     }
 
     @Test
