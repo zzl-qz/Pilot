@@ -6,5 +6,3 @@ requires: [dispatch_agents]
 | 目的 | 工具 |
 | --- | --- |
 | 多任务并行、需要独立沙箱与硬校验 | dispatch_agents |
-
-> AI生成

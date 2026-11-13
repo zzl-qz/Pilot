@@ -74,5 +74,3 @@ node evaluation/harness/reference-verifier.mjs                                  
 node evaluation/harness/reference-verifier.mjs --tasks evaluation/harness/scenarios/tasks.json   # 场景集 3/3
 node --test evaluation/harness/*.test.mjs evaluation/harness/support/*.test.mjs   # 91 项：90 过 + 1 环境跳过
 ```
-
-> AI生成

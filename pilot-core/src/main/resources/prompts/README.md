@@ -69,5 +69,3 @@ classpath 版本，缺失文件回落；外部文件每次读盘，改完无需�
 [`evaluation/prompt-variants/p2-flow`](../../../../../evaluation/prompt-variants/p2-flow)，
 仅在对照评测或明确选择试用时，将 `PILOT_PROMPTS_DIR` 设为该目录的绝对路径。
 启用前提、回滚方法与评测报告见[候选说明](../../../../../evaluation/prompt-variants/README.md)。
-
-> AI生成

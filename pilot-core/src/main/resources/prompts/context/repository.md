@@ -8,5 +8,3 @@ Git：{{git}}
 构建：{{build}}
 
 这份快照可能落后于你自己的改动。要确认文件内容或结构时，重新用 list_dir / read_file / search_text 查，不要凭这份摘要推断代码。
-
-> AI生成

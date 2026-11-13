@@ -36,5 +36,3 @@
 - [Pi 系统提示词构造](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/system-prompt.ts)
 - [Pi 编辑工具](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/tools/edit.ts)
 - [Pi 压缩与文件操作跟踪](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/compaction/compaction.ts)
-
-> AI生成
