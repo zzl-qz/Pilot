@@ -62,6 +62,31 @@ class ScheduleApiTest {
             .andExpect(status().isBadRequest());
     }
 
+    /** 错误响应的状态码和 {"message": ...} 形状是前端契约。 */
+    @Test
+    void errorsKeepStatusAndMessageBody() throws Exception {
+        String source = sessions.createSession("错误契约").id();
+        mvc.perform(post("/api/schedules").contentType("application/json").content("{\"content\":\"\"}"))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.message").value("请填写任务目标"));
+        var response = mvc
+            .perform(post("/api/schedules").contentType("application/json")
+                .content(mapper.writeValueAsString(Map.of("sourceSessionId", source, "isolated", false, "content",
+                    "检查仓库", "runAt", Instant.now().plusSeconds(86400).toString()))))
+            .andExpect(status().isOk()).andReturn();
+        String id = mapper.readTree(response.getResponse().getContentAsString()).get("id").asText();
+        mvc.perform(
+            post("/api/schedules/" + id + "/control").contentType("application/json").content("{\"action\":\"Pause\"}"))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.message").value("不支持的操作"));
+        mvc.perform(post("/api/schedules/" + id + "/control").contentType("application/json").content("{}"))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.message").value("缺少操作"));
+        mvc.perform(
+            post("/api/schedules/" + id + "/handoff").contentType("application/json").content("{\"revision\":\"任意\"}"))
+            .andExpect(status().isConflict()).andExpect(jsonPath("$.message").value("任务还在运行或等待，请结束执行后交回"));
+        mvc.perform(post("/api/automation/times").contentType("application/json")
+            .content("{\"localTime\":\"2030-01-01T09:00\",\"timezone\":\"不存在/时区\"}")).andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").isNotEmpty());
+    }
+
     @Test
     void explicitResearchRequirementIsRetained() throws Exception {
         String source = sessions.createSession("调研任务").id();

@@ -1,7 +1,6 @@
 package com.pilot.server.schedule;
 
 import java.time.DateTimeException;
-import java.util.Map;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -13,6 +12,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import com.pilot.server.common.web.ApiErrors;
 
 @RestController
 @RequestMapping("/api/automation")
@@ -69,11 +70,11 @@ public class AutomationController {
 
     @ExceptionHandler({IllegalArgumentException.class, DateTimeException.class})
     public ResponseEntity<?> bad(RuntimeException e) {
-        return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        return ApiErrors.badRequest(e);
     }
 
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<?> conflict(RuntimeException e) {
-        return ResponseEntity.status(409).body(Map.of("message", e.getMessage()));
+        return ApiErrors.conflict(e);
     }
 }
