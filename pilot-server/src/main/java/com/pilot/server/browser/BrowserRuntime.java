@@ -8,13 +8,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.stream.Stream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +26,8 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.browser.BrowserBackend;
 import com.pilot.core.browser.BrowserEventListener;
 import com.pilot.core.browser.PlaywrightBackend;
+import com.pilot.core.runtime.ExecutablePath;
+import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.ProcessSupport;
 import com.pilot.server.runtime.NpmInstall;
@@ -439,55 +441,21 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
 
     /** 内置运行时优先，其次 PATH，最后常见安装位置。 */
     private static Path findNode() {
-        List<String> dirs = new ArrayList<>();
-        String bundled = System.getProperty("pilot.runtime.bin", "");
-        dirs.addAll(List.of(bundled.split(File.pathSeparator)));
-        String path = System.getenv("PATH");
-        if (path != null) {
-            dirs.addAll(List.of(path.split(File.pathSeparator)));
-        }
-        dirs.addAll(List.of("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"));
-        for (String dir : dirs) {
-            if (dir.isBlank()) {
-                continue;
-            }
-            Path found = executable(Path.of(dir), "node");
-            if (found != null) {
-                return found;
-            }
-        }
-        return null;
+        var bundled = ExecutablePath.directories(RuntimeEnvironment.bundledBinPath());
+        var inherited = ExecutablePath.directories(System.getenv("PATH"));
+        var fallback = Stream.of("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin").map(Path::of);
+        return executable(Stream.concat(Stream.concat(bundled, inherited), fallback), "node");
     }
 
     private static Path sibling(Path node, String name) {
-        Path found = executable(node.getParent(), name);
-        if (found != null) {
-            return found;
-        }
-        String path = System.getenv("PATH");
-        if (path == null) {
-            return null;
-        }
-        for (String dir : path.split(File.pathSeparator)) {
-            if (dir.isBlank()) {
-                continue;
-            }
-            found = executable(Path.of(dir), name);
-            if (found != null) {
-                return found;
-            }
-        }
-        return null;
+        return executable(Stream.concat(Stream.of(node.getParent()), ExecutablePath.directories(System.getenv("PATH"))),
+            name);
     }
 
-    private static Path executable(Path dir, String name) {
+    private static Path executable(Stream<Path> directories, String name) {
         boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-        for (String file : windows ? List.of(name + ".exe", name + ".cmd") : List.of(name)) {
-            Path candidate = dir.resolve(file);
-            if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
-                return candidate;
-            }
-        }
-        return null;
+        String[] names = windows ? new String[] {name + ".exe", name + ".cmd"} : new String[] {name};
+        return ExecutablePath.candidates(directories, names).filter(Files::isRegularFile).filter(Files::isExecutable)
+            .findFirst().orElse(null);
     }
 }

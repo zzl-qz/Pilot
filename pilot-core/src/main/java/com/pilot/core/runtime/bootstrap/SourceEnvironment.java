@@ -50,7 +50,7 @@ public final class SourceEnvironment {
         }
         Path root = Path.of(args[1]).toAbsolutePath().normalize();
         Path cache = cache(root);
-        boolean network = !"true".equalsIgnoreCase(System.getenv("PILOT_OFFLINE"));
+        boolean network = !RuntimeEnvironment.offline();
         var bootstrap = new SourceEnvironment(root, cache, network, message -> System.out.println("Pilot: " + message));
         Path node;
         try (var lock = bootstrap.lock()) {
@@ -63,7 +63,7 @@ public final class SourceEnvironment {
     }
 
     public static Path cache(Path root) {
-        String configured = System.getenv("PILOT_BOOTSTRAP_DIR");
+        String configured = System.getenv(RuntimeEnvironment.BOOTSTRAP_DIR);
         String data = System.getenv("PILOT_DATA_DIR");
         Path base = data == null || data.isBlank() ? root.resolve(".pilot") : Path.of(data);
         return configured == null || configured.isBlank() ? base.resolve("bootstrap")
@@ -267,7 +267,7 @@ public final class SourceEnvironment {
 
     private void launch(Path node, String[] args, boolean startServer) throws Exception {
         Map<String, String> env = childEnvironment(Path.of(System.getProperty("java.home")), node);
-        env.put("PILOT_BOOTSTRAP_NODE", node.toString());
+        env.put(RuntimeEnvironment.BOOTSTRAP_NODE, node.toString());
         try (var lock =
             BootstrapLock.acquire(cache.resolve("build-" + projectKey() + ".lock"), Duration.ofMinutes(35))) {
             build(node, env);
@@ -316,7 +316,7 @@ public final class SourceEnvironment {
         }
         env.put(key, prefix + env.getOrDefault(key, ""));
         env.put("JAVA_HOME", javaHome.toString());
-        env.put("PILOT_BOOTSTRAP_DIR", cache.toString());
+        env.put(RuntimeEnvironment.BOOTSTRAP_DIR, cache.toString());
         if (offline) {
             env.put("NPM_CONFIG_OFFLINE", "true");
             env.put("PILOT_RUNTIME_PROVISION", "false");

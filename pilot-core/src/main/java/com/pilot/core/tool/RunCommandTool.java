@@ -20,6 +20,7 @@ import com.pilot.core.exec.EnvironmentSanitizer;
 import com.pilot.core.exec.OsSandbox;
 import com.pilot.core.multi.AgentScope;
 import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.workspace.PathValidator;
 
 /**
@@ -684,7 +685,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             String current = env.getOrDefault(pathKey, "");
             env.put(pathKey, joinPath(bin.toString(), stripPrefix(current, bin.toString())));
         }
-        env.put(pathKey, joinPath(runtimeBins(), env.getOrDefault(pathKey, "")));
+        env.put(pathKey, joinPath(RuntimeEnvironment.bundledBinPath().strip(), env.getOrDefault(pathKey, "")));
     }
 
     private static String render(String displayCommand, List<String> actual, int exitCode, long latencyMs,
@@ -775,12 +776,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         if (javaHome != null && !javaHome.isBlank()) {
             base = joinPath(Path.of(javaHome, "bin").toString(), base);
         }
-        return joinPath(runtimeBins(), base);
-    }
-
-    static String runtimeBins() {
-        String extra = System.getProperty("pilot.runtime.bin");
-        return extra == null ? "" : extra.strip();
+        return joinPath(RuntimeEnvironment.bundledBinPath().strip(), base);
     }
 
     private static String joinPath(String front, String rest) {

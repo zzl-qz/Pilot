@@ -19,6 +19,8 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.runtime.ExecutablePath;
+import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.config.WebSearchProperties;
 import com.pilot.server.runtime.SourceLayout;
@@ -482,19 +484,9 @@ public class LocalSearchRuntime implements SmartLifecycle {
 
     private String findPython() {
         List<String> candidates = new ArrayList<>();
-        String runtime = System.getProperty("pilot.runtime.bin");
-        if (runtime != null) {
-            String file = isWindows() ? "python.exe" : "python3";
-            for (String dir : runtime.split(java.io.File.pathSeparator)) {
-                if (dir.isBlank()) {
-                    continue;
-                }
-                Path candidate = Path.of(dir).resolve(file);
-                if (Files.isRegularFile(candidate)) {
-                    candidates.add(candidate.toString());
-                }
-            }
-        }
+        String file = isWindows() ? "python.exe" : "python3";
+        ExecutablePath.candidates(ExecutablePath.directories(RuntimeEnvironment.bundledBinPath()), file)
+            .filter(Files::isRegularFile).map(Path::toString).forEach(candidates::add);
         if (!properties.python().isBlank()) {
             candidates.add(properties.python());
         }

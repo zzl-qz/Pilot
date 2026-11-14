@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.runtime.bootstrap.BootstrapPlatform;
 import com.pilot.core.runtime.bootstrap.RuntimeAssets;
+import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.runtime.bootstrap.SourceEnvironment;
 import com.pilot.core.tool.ProcessSupport;
 
@@ -30,7 +31,6 @@ import com.pilot.core.tool.ProcessSupport;
 @Component
 public class BundledRuntime implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(BundledRuntime.class);
-    static final String BIN_PROPERTY = "pilot.runtime.bin";
     private static final String PYTHON_RELEASE = "20261026";
     private static final String PYTHON_VERSION = "3.12.16";
 
@@ -142,13 +142,12 @@ public class BundledRuntime implements SmartLifecycle {
         if (bins.isEmpty()) {
             return;
         }
-        String value = String.join(java.io.File.pathSeparator, bins);
-        System.setProperty(BIN_PROPERTY, value);
+        String value = RuntimeEnvironment.publishBundledBins(bins);
         log.info("技能脚本使用内置运行环境：{}", value);
     }
 
     private static Path bootstrapNode() {
-        String value = System.getenv("PILOT_BOOTSTRAP_NODE");
+        String value = System.getenv(RuntimeEnvironment.BOOTSTRAP_NODE);
         return value != null && !value.isBlank() && Files.isRegularFile(Path.of(value)) ? Path.of(value) : null;
     }
 
@@ -158,8 +157,8 @@ public class BundledRuntime implements SmartLifecycle {
         Path root = source == null ? current : source;
         try {
             Path cache = SourceEnvironment.cache(root);
-            var assets = new RuntimeAssets(cache, RuntimeAssets.manifest(root),
-                !"true".equalsIgnoreCase(System.getenv("PILOT_OFFLINE")), message -> log.info("{}", message));
+            var assets = new RuntimeAssets(cache, RuntimeAssets.manifest(root), !RuntimeEnvironment.offline(),
+                message -> log.info("{}", message));
             var platform = BootstrapPlatform.current();
             var asset = assets.asset("node." + platform.key());
             Path installed = cache.resolve(asset.home());

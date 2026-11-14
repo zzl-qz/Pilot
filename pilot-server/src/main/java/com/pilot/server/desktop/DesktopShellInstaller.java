@@ -3,7 +3,6 @@ package com.pilot.server.desktop;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -12,6 +11,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Stream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,6 +19,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.runtime.ExecutablePath;
+import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.tool.ProcessSupport;
 import com.pilot.server.runtime.NpmInstall;
 import com.pilot.server.runtime.RuntimeMirrors;
@@ -161,7 +163,7 @@ public class DesktopShellInstaller {
         Map<String, String> environment = new LinkedHashMap<>(extra);
         List<String> bins = new ArrayList<>(
             List.of(npm.getParent().toString(), Path.of(System.getProperty("java.home"), "bin").toString()));
-        String mobileBin = System.getProperty("pilot.mobile.runtime.bin", "");
+        String mobileBin = RuntimeEnvironment.mobileBinPath();
         if (!mobileBin.isBlank()) {
             bins.add(mobileBin);
         }
@@ -186,7 +188,7 @@ public class DesktopShellInstaller {
 
     /** 本机 npm 的位置；测试可覆盖成固定值。 */
     Path npm(Path root) {
-        return npm(root, System.getProperty("pilot.runtime.bin", ""), inheritedPath(System.getenv()));
+        return npm(root, RuntimeEnvironment.bundledBinPath(), inheritedPath(System.getenv()));
     }
 
     /**
@@ -196,37 +198,14 @@ public class DesktopShellInstaller {
      * 用它装会只装包、不下载二进制（实测 node 20 + npm 10 装完没有 dist）。
      */
     static Path npm(Path root, String runtimeBin, String path) {
-        String name = isWindows() ? "npm.cmd" : "npm";
-        List<String> dirs = new ArrayList<>();
-        for (String dir : runtimeBin.split(File.pathSeparator)) {
-            if (!dir.isBlank()) {
-                dirs.add(dir);
-            }
-        }
-        dirs.add(SourceLayout.bundledRuntime(root).resolve("node").toString());
-        for (String entry : path.split(File.pathSeparator)) {
-            if (!entry.isBlank()) {
-                dirs.add(entry);
-            }
-        }
-        for (String dir : dirs) {
-            try {
-                Path candidate = Path.of(dir).resolve(name);
-                if (usable(candidate)) {
-                    return candidate;
-                }
-            } catch (InvalidPathException ignored) {
-                // PATH 里混进非法路径不稀奇，跳过即可
-            }
-        }
-        return null;
-    }
-
-    private static boolean usable(Path candidate) {
-        if (!Files.isRegularFile(candidate)) {
-            return false;
-        }
-        return isWindows() || Files.isExecutable(candidate);
+        boolean windows = isWindows();
+        var bundled = ExecutablePath.directories(runtimeBin);
+        var legacy = Stream.of(SourceLayout.bundledRuntime(root).resolve("node"));
+        var inherited = ExecutablePath.directories(path);
+        return ExecutablePath
+            .candidates(Stream.concat(Stream.concat(bundled, legacy), inherited), windows ? "npm.cmd" : "npm")
+            .filter(Files::isRegularFile).filter(candidate -> windows || Files.isExecutable(candidate)).findFirst()
+            .orElse(null);
     }
 
     private static Path logFile(Path browserHome) {

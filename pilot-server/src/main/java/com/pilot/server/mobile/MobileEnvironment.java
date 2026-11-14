@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.runtime.bootstrap.BootstrapPlatform;
+import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.runtime.bootstrap.SourceEnvironment;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.runtime.SourceLayout;
@@ -45,13 +46,12 @@ public final class MobileEnvironment {
         @Value("${pilot.mobile.libraries:}") String libraries) {
         this(data, enabled, libraries,
             (root, cache, configured,
-                progress) -> new SourceEnvironment(root, cache,
-                    !"true".equalsIgnoreCase(System.getenv("PILOT_OFFLINE")), progress)
+                progress) -> new SourceEnvironment(root, cache, !RuntimeEnvironment.offline(), progress)
                     .prepareMobile(configured.isBlank() ? null : Path.of(configured)));
     }
 
     MobileEnvironment(PilotDataDir data, boolean enabled, String libraries, Preparation preparation) {
-        String custom = System.getenv("PILOT_BOOTSTRAP_DIR");
+        String custom = System.getenv(RuntimeEnvironment.BOOTSTRAP_DIR);
         Path current = SourceLayout.workingDirectory();
         this.cache = custom == null || custom.isBlank() ? defaultCache(current, data.root()) : Path.of(custom);
         this.libraries = libraries;
@@ -99,7 +99,7 @@ public final class MobileEnvironment {
         prepared = result;
         if (result.ready() && result.javaHome() != null && BootstrapPlatform.current().windows()
             && "x64".equals(BootstrapPlatform.current().arch())) {
-            System.setProperty("pilot.mobile.runtime.bin", result.javaHome().resolve("bin").toString());
+            RuntimeEnvironment.publishMobileBin(result.javaHome().resolve("bin"));
         }
         preparing = false;
         status = new Status(result.ready() ? "ready" : "failed", result.message(), result.ready());
