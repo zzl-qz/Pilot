@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.pilot.core.prompt.PromptLibrary;
 
@@ -18,34 +19,15 @@ final class ProjectRuleLoader {
     private static final int MAX_FILE_CHARS = 8_000;
     private static final int MAX_TOTAL_CHARS = 24_000;
     /** 记忆与约定是两种内容：记忆是沉淀事实，预算独立，避免互相挤占。 */
-    private static final String MEMORY_NAME = "MEMORY.md";
+    private static final List<String> MEMORY_NAMES = List.of("MEMORY.md");
     private static final int MAX_MEMORY_CHARS = 4_000;
 
     private ProjectRuleLoader() {
     }
 
     static String load(Path workspace, PromptLibrary prompts) {
-        List<Rule> nearestFirst = new ArrayList<>();
-        int remaining = MAX_TOTAL_CHARS;
-        for (Path dir = workspace.toAbsolutePath().normalize(); dir != null && remaining > 0; dir = dir.getParent()) {
-            Rule rule = firstRule(dir, Math.min(MAX_FILE_CHARS, remaining));
-            if (rule == null) {
-                continue;
-            }
-            nearestFirst.add(rule);
-            remaining -= rule.content().length();
-        }
-        Collections.reverse(nearestFirst);
-        // 用户级全局约定（~/.pilot/）优先级最低，但保证任何项目都能带上个人偏好
-        Rule user = remaining > 0 ? firstRule(userHome(), Math.min(MAX_FILE_CHARS, remaining)) : null;
-        if (user != null) {
-            nearestFirst.add(0, user);
-        }
-        return nearestFirst.stream()
-            .map(rule -> prompts
-                .render("system/project-rules", Map.of("source", rule.path().toString(), "rules", rule.content()))
-                .strip())
-            .reduce((a, b) -> a + "\n\n" + b).orElse("");
+        return load(workspace, prompts, NAMES, MAX_TOTAL_CHARS, MAX_FILE_CHARS, "project-rules", "rules", "约定文件过长，已截断",
+            true);
     }
 
     /**
@@ -55,67 +37,41 @@ final class ProjectRuleLoader {
      * 超出预算截断），用户级 {@code ~/.pilot/MEMORY.md} 兜底。
      */
     static String loadMemory(Path workspace, PromptLibrary prompts) {
+        return load(workspace, prompts, MEMORY_NAMES, MAX_MEMORY_CHARS, MAX_MEMORY_CHARS, "memory", "memory",
+            "记忆文件过长，已截断", false);
+    }
+
+    private static String load(Path workspace, PromptLibrary prompts, List<String> names, int totalLimit, int fileLimit,
+        String template, String field, String truncated, boolean globalFirst) {
         List<Rule> nearestFirst = new ArrayList<>();
-        int remaining = MAX_MEMORY_CHARS;
+        int remaining = totalLimit;
         for (Path dir = workspace.toAbsolutePath().normalize(); dir != null && remaining > 0; dir = dir.getParent()) {
-            Rule memory = readMemory(dir, remaining);
-            if (memory == null) {
-                continue;
+            Rule rule = firstRule(dir, names, Math.min(fileLimit, remaining), truncated);
+            if (rule != null) {
+                nearestFirst.add(rule);
+                remaining -= rule.content().length();
             }
-            nearestFirst.add(memory);
-            remaining -= memory.content().length();
         }
-        Rule user = remaining > 0 ? readMemory(userHome(), remaining) : null;
-        if (user != null) {
-            nearestFirst.add(0, user);
-        }
-        // 与约定同序：上层在前、工作区在后（近处记忆是细化，覆盖语义在后）
         Collections.reverse(nearestFirst);
+        if (remaining > 0) {
+            Rule user = firstRule(userHome(), names, Math.min(fileLimit, remaining), truncated);
+            if (user != null) {
+                // 全局约定先注入，用户级记忆沿用末尾兜底顺序。
+                nearestFirst.add(globalFirst ? 0 : nearestFirst.size(), user);
+            }
+        }
         return nearestFirst.stream()
             .map(rule -> prompts
-                .render("system/memory", Map.of("source", rule.path().toString(), "memory", rule.content())).strip())
-            .reduce((a, b) -> a + "\n\n" + b).orElse("");
+                .render("system/" + template, Map.of("source", rule.path().toString(), field, rule.content())).strip())
+            .collect(Collectors.joining("\n\n"));
     }
 
     private static Path userHome() {
         return Path.of(System.getProperty("user.home", "."), ".pilot");
     }
 
-    private static Rule readMemory(Path dir, int limit) {
-        Path file = dir.resolve(MEMORY_NAME);
-        if (!Files.isRegularFile(file)) {
-            return null;
-        }
-        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            char[] buffer = new char[limit + 1];
-            int length = 0;
-            while (length < buffer.length) {
-                int count = reader.read(buffer, length, buffer.length - length);
-                if (count < 0) {
-                    break;
-                }
-                length += count;
-            }
-            String content = new String(buffer, 0, Math.min(length, limit));
-            if (content.startsWith("\uFEFF")) {
-                content = content.substring(1);
-            }
-            content = content.strip();
-            if (content.isEmpty()) {
-                return null;
-            }
-            if (length > limit) {
-                content += "\n…（记忆文件过长，已截断）";
-            }
-            return new Rule(file, content);
-        } catch (IOException ignored) {
-            // 一份记忆不可读时跳过它，不让整个提示词装配失败
-            return null;
-        }
-    }
-
-    private static Rule firstRule(Path dir, int limit) {
-        for (String name : NAMES) {
+    private static Rule firstRule(Path dir, List<String> names, int limit, String truncated) {
+        for (String name : names) {
             Path file = dir.resolve(name);
             if (!Files.isRegularFile(file)) {
                 continue;
@@ -139,7 +95,7 @@ final class ProjectRuleLoader {
                     continue;
                 }
                 if (length > limit) {
-                    content += "\n…（约定文件过长，已截断）";
+                    content += "\n…（" + truncated + "）";
                 }
                 return new Rule(file, content);
             } catch (IOException ignored) {
