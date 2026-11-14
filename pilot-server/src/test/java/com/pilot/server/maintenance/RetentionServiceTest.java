@@ -22,8 +22,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.ObjectProvider;
 
 import com.pilot.core.event.RunStarted;
-import com.pilot.core.loop.Attachment;
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Attachment;
+import com.pilot.core.message.Message;
 import com.pilot.core.session.InMemorySessionRepository;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.attachment.AttachmentLimits;

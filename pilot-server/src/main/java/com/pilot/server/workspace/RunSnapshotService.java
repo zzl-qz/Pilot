@@ -26,7 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.tool.SnapshotSink;
 import com.pilot.core.tool.command.CommandChangeTracker;

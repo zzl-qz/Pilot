@@ -11,8 +11,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.multi.DiffSandbox;
-import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolCallJournal;
 import com.pilot.core.util.Sha256;
 import com.pilot.server.common.data.StorageHealth;

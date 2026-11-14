@@ -4,6 +4,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
+import com.pilot.core.message.Message;
+
 import tools.jackson.databind.ObjectMapper;
 
 /** 压缩元数据由程序维护；用户原文及证据引用不交给摘要模型重写。 */

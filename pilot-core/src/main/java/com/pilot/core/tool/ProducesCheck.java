@@ -1,5 +1,7 @@
 package com.pilot.core.tool;
 
+import com.pilot.core.message.ToolCall;
+
 /**
  * 会产生「验证结果」的工具实现该接口，例如执行构建或测试的命令工具。
  * 摘要会汇总进 {@code run.completed.checks}，让用户看到这次运行到底验证了什么。

@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import org.junit.jupiter.api.Test;
 
+import com.pilot.core.loop.ToolExecutor;
+
 class ToolOutcomeUncertaintyTest {
     @Test
     void unknownExternalResultIsNotClassifiedAsRetryableTimeoutOrSuccessfulEvidence() {

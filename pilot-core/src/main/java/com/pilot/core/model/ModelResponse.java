@@ -3,7 +3,7 @@ package com.pilot.core.model;
 import java.util.List;
 import java.util.Locale;
 
-import com.pilot.core.tool.ToolCall;
+import com.pilot.core.message.ToolCall;
 
 public record ModelResponse(String content, List<ToolCall> toolCalls, ModelUsage usage, FinishReason finishReason) {
     public enum FinishReason {

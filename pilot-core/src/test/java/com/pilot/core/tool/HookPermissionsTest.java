@@ -24,6 +24,8 @@ import com.pilot.core.exec.ExecutionRequest;
 import com.pilot.core.exec.ExecutionResult;
 import com.pilot.core.exec.ExecutionSettings;
 import com.pilot.core.hook.Hooks;
+import com.pilot.core.loop.ToolExecutor;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PermissionResult;
 import com.pilot.core.permission.PolicyPermissionGate;

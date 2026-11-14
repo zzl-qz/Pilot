@@ -13,7 +13,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.event.RunStarted;
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;

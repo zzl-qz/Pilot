@@ -81,7 +81,7 @@ public final class ToolRegistry {
     }
 
     /** 能力探测抛异常按不可用处理：宁可少声明，也不能让注册表读取失败拖垮请求。 */
-    static Availability available(Tool tool) {
+    public static Availability available(Tool tool) {
         try {
             Availability availability = tool.availability();
             return availability == null ? Availability.ready() : availability;

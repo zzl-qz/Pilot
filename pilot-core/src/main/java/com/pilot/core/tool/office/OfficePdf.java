@@ -22,7 +22,7 @@ import org.apache.pdfbox.pdmodel.font.PDType0Font;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 
-import com.pilot.core.loop.Attachment;
+import com.pilot.core.message.Attachment;
 import com.pilot.core.tool.ToolArtifacts;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.util.Sha256;

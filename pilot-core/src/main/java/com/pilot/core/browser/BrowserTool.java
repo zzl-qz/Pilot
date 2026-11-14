@@ -13,12 +13,12 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 
-import com.pilot.core.loop.Attachment;
+import com.pilot.core.message.Attachment;
+import com.pilot.core.message.ToolNames;
 import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.LocalInteraction;
 import com.pilot.core.tool.PromptedTool;
 import com.pilot.core.tool.ToolArtifacts;
-import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;

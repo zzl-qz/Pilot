@@ -35,10 +35,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.permission.PermissionDecision;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
-import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.workspace.PathValidator;
 import com.sun.net.httpserver.HttpServer;

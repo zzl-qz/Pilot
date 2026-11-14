@@ -3,9 +3,9 @@ package com.pilot.core.permission;
 import java.util.Objects;
 import java.util.function.Supplier;
 
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.tool.LocalInteraction;
 import com.pilot.core.tool.Tool;
-import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.WritesFiles;
 
 /**

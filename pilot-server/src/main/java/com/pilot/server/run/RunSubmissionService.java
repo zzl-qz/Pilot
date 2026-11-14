@@ -5,7 +5,7 @@ import java.util.List;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunStarted;
-import com.pilot.core.loop.Attachment;
+import com.pilot.core.message.Attachment;
 import com.pilot.core.session.SessionService;
 
 /** HTTP 与定时器共用的已占位投递入口；调用前 claimRun，失败必释放。 */

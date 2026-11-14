@@ -11,9 +11,10 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.tool.ToolCall;
 
 class CompletionGateTest {
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();

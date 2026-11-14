@@ -14,11 +14,11 @@ import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.pilot.core.loop.ToolExecutor;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.permission.PermissionDecision;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
-import com.pilot.core.tool.ToolCall;
-import com.pilot.core.tool.ToolExecutor;
 import com.pilot.core.tool.ToolRegistry;
 
 import tools.jackson.databind.ObjectMapper;

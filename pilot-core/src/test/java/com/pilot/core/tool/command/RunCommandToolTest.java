@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import com.pilot.core.tool.ToolCall;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 

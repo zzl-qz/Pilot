@@ -7,9 +7,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.pilot.core.loop.ContextCompactor;
-import com.pilot.core.loop.Message;
-import com.pilot.core.tool.ToolNames;
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolNames;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -96,7 +95,6 @@ public record ContextComposition(long totalTokens, boolean estimated, int attach
     }
 
     private static void add(Map<String, Long> totals, String category, String text) {
-        totals.merge(LABELS.containsKey(category) ? category : "system", (long)ContextCompactor.estimateTokens(text),
-            Long::sum);
+        totals.merge(LABELS.containsKey(category) ? category : "system", (long)TokenEstimate.of(text), Long::sum);
     }
 }

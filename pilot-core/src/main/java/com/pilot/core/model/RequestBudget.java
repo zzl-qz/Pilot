@@ -4,7 +4,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 
 /** Conservative admission check for the complete visible model request. */
 public final class RequestBudget {

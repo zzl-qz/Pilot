@@ -2,7 +2,7 @@ package com.pilot.core.event;
 
 import java.util.List;
 
-import com.pilot.core.loop.Attachment;
+import com.pilot.core.message.Attachment;
 
 /** 当前运行在安全边界消费的引导消息，包含原始图片与位置。 */
 public record RunSteered(String input, List<Attachment> attachments,

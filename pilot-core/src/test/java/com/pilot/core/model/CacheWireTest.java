@@ -17,7 +17,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.json.JsonMapper;

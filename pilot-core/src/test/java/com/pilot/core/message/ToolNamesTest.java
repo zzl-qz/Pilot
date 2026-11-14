@@ -1,4 +1,4 @@
-package com.pilot.core.tool;
+package com.pilot.core.message;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

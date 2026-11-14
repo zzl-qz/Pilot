@@ -6,10 +6,10 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
+import com.pilot.core.message.ToolNames;
 import com.pilot.core.tool.PromptedTool;
 import com.pilot.core.tool.ReadGuard;
 import com.pilot.core.tool.SandboxSink;
-import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.workspace.PathValidator;
 

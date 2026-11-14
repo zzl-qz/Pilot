@@ -581,7 +581,7 @@ class ScheduleServiceTest {
             throw new AssertionError("必须保留完整投递配置");
         }
 
-        public void start(String session, String run, String input, List<com.pilot.core.loop.Attachment> attachments,
+        public void start(String session, String run, String input, List<com.pilot.core.message.Attachment> attachments,
             List<Integer> images, TaskControlService.Requirements req, String skill) {
             starts++;
             tasks.start(session, input, req.constraints(), req.acceptance());

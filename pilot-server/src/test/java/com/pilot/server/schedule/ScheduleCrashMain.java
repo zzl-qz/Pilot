@@ -15,7 +15,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.pilot.core.event.RunCompleted;
-import com.pilot.core.loop.Attachment;
+import com.pilot.core.message.Attachment;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.notifications.DeliveryChannel;

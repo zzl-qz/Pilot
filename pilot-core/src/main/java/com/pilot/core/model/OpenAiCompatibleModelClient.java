@@ -18,10 +18,9 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 import com.pilot.core.http.BoundedHttp;
-import com.pilot.core.loop.Attachment;
-import com.pilot.core.loop.ContextCompactor;
-import com.pilot.core.loop.Message;
-import com.pilot.core.tool.ToolCall;
+import com.pilot.core.message.Attachment;
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -525,13 +524,13 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     private ModelUsage estimatedUsage(List<Message> messages, String content, List<ToolCall> calls) {
-        long output = ContextCompactor.estimateTokens(content);
+        long output = TokenEstimate.of(content);
         for (ToolCall call : calls == null ? List.<ToolCall>of() : calls) {
-            output += ContextCompactor.estimateTokens(call.name());
-            output += ContextCompactor.estimateTokens(
+            output += TokenEstimate.of(call.name());
+            output += TokenEstimate.of(
                 objectMapper.writeValueAsString(CanonicalJson.ordered(call.args() == null ? Map.of() : call.args())));
         }
-        return new ModelUsage(ContextCompactor.estimateTokens(messages), output, 0, false);
+        return new ModelUsage(TokenEstimate.of(messages), output, 0, false);
     }
 
     private Map<String, Object> arguments(JsonNode node) {

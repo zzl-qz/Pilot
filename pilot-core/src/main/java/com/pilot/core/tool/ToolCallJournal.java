@@ -3,6 +3,7 @@ package com.pilot.core.tool;
 import java.util.List;
 import java.util.Optional;
 
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.util.Sha256;
 
 /**

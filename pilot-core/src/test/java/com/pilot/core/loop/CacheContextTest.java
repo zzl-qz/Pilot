@@ -14,6 +14,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelPricing;
@@ -25,7 +27,6 @@ import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.tool.Tool;
-import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolRegistry;
 
 class CacheContextTest {

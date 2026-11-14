@@ -213,7 +213,7 @@ ToolRegistry 是工具目录；ToolExecutor 是单次调用的执行流程。执
 
 工具参数定义帮助模型使用正确形状，后端仍必须校验输入。给模型看不到某个工具可以减少误用，但也应确认其他工具没有绕过相同边界的能力。
 
-源码：[Tool](pilot-core/src/main/java/com/pilot/core/tool/Tool.java)、[ToolRegistry](pilot-core/src/main/java/com/pilot/core/tool/ToolRegistry.java)、[ToolExecutor](pilot-core/src/main/java/com/pilot/core/tool/ToolExecutor.java)、[WorkspaceToolFactory](pilot-server/src/main/java/com/pilot/server/tool/WorkspaceToolFactory.java)。
+源码：[Tool](pilot-core/src/main/java/com/pilot/core/tool/Tool.java)、[ToolRegistry](pilot-core/src/main/java/com/pilot/core/tool/ToolRegistry.java)、[ToolExecutor](pilot-core/src/main/java/com/pilot/core/loop/ToolExecutor.java)、[WorkspaceToolFactory](pilot-server/src/main/java/com/pilot/server/tool/WorkspaceToolFactory.java)。
 
 ## 6 权限 文件边界和沙箱分别负责什么
 
@@ -468,7 +468,7 @@ Windows 原生方案可评估受限令牌、文件 ACL、Job Objects 和 AppCont
 1. [SessionController](pilot-server/src/main/java/com/pilot/server/session/SessionController.java)：先找 messages 和 events，理解页面输入如何进入、过程如何出来。
 2. [AgentRunService](pilot-server/src/main/java/com/pilot/server/agent/AgentRunService.java)：看 execute，理解本轮的历史、模型、工具、权限和事件出口如何装配。
 3. [AgentLoop](pilot-core/src/main/java/com/pilot/core/loop/AgentLoop.java)：看循环中模型回答、工具执行、结果回填和结束判断。
-4. [ToolExecutor](pilot-core/src/main/java/com/pilot/core/tool/ToolExecutor.java)：看允许、拒绝、审批和真正开始执行前的检查。
+4. [ToolExecutor](pilot-core/src/main/java/com/pilot/core/loop/ToolExecutor.java)：看允许、拒绝、审批和真正开始执行前的检查。
 5. [EditFileTool](pilot-core/src/main/java/com/pilot/core/tool/file/EditFileTool.java)：选一项具体工具，把路径检查、快照、写入和结果串起来。
 
 先把这五个位置连接起来，再读压缩、命令管理和多智能体，比从所有类的第一行依次阅读更省力。

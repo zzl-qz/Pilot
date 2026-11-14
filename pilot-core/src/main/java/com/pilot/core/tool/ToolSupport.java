@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.workspace.PathValidator;
 
 /** 工具实现的公共小工具：参数取值与参数签名。 */

@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 import com.pilot.core.util.Sha256;
 
 import tools.jackson.databind.ObjectMapper;

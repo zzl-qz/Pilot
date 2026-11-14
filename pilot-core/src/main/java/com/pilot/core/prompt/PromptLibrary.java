@@ -20,8 +20,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import com.pilot.core.message.ToolNames;
 import com.pilot.core.model.ContextComposition.Source;
-import com.pilot.core.tool.ToolNames;
 
 /**
  * 提示词仓库：喂给模型的指令性文本放在 {@code prompts/} 目录里维护，Java 代码只引用名字。

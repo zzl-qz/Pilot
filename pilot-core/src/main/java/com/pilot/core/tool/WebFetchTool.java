@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.pilot.core.http.BoundedHttp;
+import com.pilot.core.message.ToolNames;
 
 /** Fetches public HTTP(S) pages as bounded plain text, without following redirects. */
 public final class WebFetchTool implements Tool {

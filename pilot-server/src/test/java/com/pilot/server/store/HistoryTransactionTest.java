@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.core.event.RunCompleted;
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;

@@ -1,8 +1,6 @@
-package com.pilot.core.loop;
+package com.pilot.core.message;
 
 import java.util.List;
-
-import com.pilot.core.tool.ToolCall;
 
 /**
  * 模型对话消息，对应 OpenAI 兼容协议的 messages 元素。

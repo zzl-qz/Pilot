@@ -2,7 +2,7 @@ package com.pilot.core.model;
 
 import java.util.Set;
 
-import com.pilot.core.tool.ToolNames;
+import com.pilot.core.message.ToolNames;
 
 /** Maps local tool names to provider-managed capabilities hidden from the model's function-tool list. */
 public final class NativeToolNames {

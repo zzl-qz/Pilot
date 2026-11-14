@@ -9,9 +9,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolResults;
 import com.pilot.core.tool.VerificationCheck;
 import com.pilot.core.util.Texts;

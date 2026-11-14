@@ -2,7 +2,7 @@ package com.pilot.core.tool;
 
 import java.util.List;
 
-import com.pilot.core.loop.Attachment;
+import com.pilot.core.message.Attachment;
 
 /**
  * 工具的结构化执行结果。

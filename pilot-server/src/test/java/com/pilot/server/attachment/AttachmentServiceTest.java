@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import com.pilot.core.loop.Attachment;
+import com.pilot.core.message.Attachment;
 
 class AttachmentServiceTest {
     @TempDir

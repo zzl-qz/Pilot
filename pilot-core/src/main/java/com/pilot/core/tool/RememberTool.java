@@ -8,6 +8,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.workspace.PathValidator;
 
 /**

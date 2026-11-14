@@ -22,11 +22,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.SessionService;
-import com.pilot.core.tool.ToolCall;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.SkillProperties;

@@ -3,6 +3,8 @@ package com.pilot.core.tool;
 import java.util.List;
 import java.util.Map;
 
+import com.pilot.core.message.ToolNames;
+
 /** 会话作用域内分页恢复原始观察；永不重新执行工具。 */
 public final class ReadToolOutputTool implements Tool.ParallelReadOnly {
     private final ToolCallJournal journal;

@@ -30,7 +30,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.pilot.core.event.ModelRequestCompleted;
 import com.pilot.core.event.RunCompleted;
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.run.RunStarter;

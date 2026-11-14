@@ -5,6 +5,7 @@ import java.util.function.Consumer;
 
 import com.pilot.core.event.ContextCompacted;
 import com.pilot.core.event.SessionEvent;
+import com.pilot.core.message.Message;
 
 /**
  * 上下文预算：每次采样前按代价从低到高分四层收缩历史。

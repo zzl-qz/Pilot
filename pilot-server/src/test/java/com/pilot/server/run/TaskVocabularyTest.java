@@ -9,7 +9,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import com.pilot.core.tool.ToolExecutor;
+import com.pilot.core.loop.ToolExecutor;
 
 /** 任务文件和接口里的状态字符串由枚举名决定，这里钉住名字，改名就是改协议。 */
 class TaskVocabularyTest {

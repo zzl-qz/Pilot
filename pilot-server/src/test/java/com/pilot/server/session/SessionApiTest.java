@@ -41,7 +41,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
 import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunStarted;
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 import com.pilot.core.project.ProjectRepository;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.SessionService;

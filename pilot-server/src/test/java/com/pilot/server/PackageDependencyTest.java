@@ -33,10 +33,6 @@ class PackageDependencyTest {
     /** 文本块、字符串、字符、注释。这些地方出现的类名不算依赖，统一先去掉。 */
     private static final Pattern NOISE = Pattern
         .compile("(?s)\"\"\".*?\"\"\"|\"(?:\\\\.|[^\"\\\\\\n])*\"|'(?:\\\\.|[^'\\\\\\n])'|/\\*.*?\\*/|//[^\\n]*");
-    /** core 内核里目前互相依赖的 8 个包，是已知的历史欠账，见 coreKernelCycleDoesNotGrow。 */
-    private static final Set<String> CORE_KERNEL =
-        Set.of("event", "hook", "loop", "model", "permission", "prompt", "tool", "trace");
-
     /** 包 -> 它引用的其它包 -> 是哪些类引用的（报错时用）。包名去掉了 com.pilot.server 或 com.pilot.core 前缀。 */
     private static Map<String, Map<String, Set<String>>> server;
     private static Map<String, Map<String, Set<String>>> core;
@@ -89,16 +85,16 @@ class PackageDependencyTest {
     }
 
     @Test
-    void coreKernelCycleDoesNotGrow() {
-        // 内核 8 个包的互相依赖要拆得动模型消息和工具执行的归属，这次没有动。
-        // 这里只守两件事：别的包不能再被卷进这个环；环外不能出现新的环。
-        List<String> problems = cycleEdges(core, CORE_KERNEL);
-        assertTrue(problems.isEmpty(), "pilot-core 出现了新的循环依赖：\n" + String.join("\n", problems));
+    void corePackagesHaveNoCycles() {
+        List<String> problems = cycleEdges(core, Set.of());
+        assertTrue(problems.isEmpty(), "pilot-core 的包之间出现循环依赖：\n" + String.join("\n", problems));
     }
 
     @Test
     void coreBottomPackagesDependOnNothing() {
-        // util 是纯工具，workspace 是路径与权限范围的基础判断，都不能反过来依赖上层。
+        // message 是对话消息、附件和工具调用这几种数据结构；util 是纯工具；
+        // workspace 是路径与权限范围的基础判断。三者都不能反过来依赖上层。
+        assertOnlyDependsOn(core, "message", Set.of());
         assertOnlyDependsOn(core, "util", Set.of());
         assertOnlyDependsOn(core, "workspace", Set.of());
     }

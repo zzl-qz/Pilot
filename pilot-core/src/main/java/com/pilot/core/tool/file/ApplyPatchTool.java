@@ -14,11 +14,11 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.UnaryOperator;
 
+import com.pilot.core.message.ToolCall;
+import com.pilot.core.message.ToolNames;
 import com.pilot.core.tool.PromptedTool;
 import com.pilot.core.tool.ReadGuard;
 import com.pilot.core.tool.SnapshotSink;
-import com.pilot.core.tool.ToolCall;
-import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.WritesFiles;

@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
 
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 
 public interface ModelClient {
     /** 一次请求冻结端点、模型及计价配置，热更新从下一请求生效。 */

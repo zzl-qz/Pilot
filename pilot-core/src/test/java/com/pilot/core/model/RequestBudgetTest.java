@@ -8,8 +8,8 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
-import com.pilot.core.loop.Message;
-import com.pilot.core.tool.ToolCall;
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 
 class RequestBudgetTest {
     @Test

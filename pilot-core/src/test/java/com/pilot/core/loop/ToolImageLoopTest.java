@@ -13,6 +13,9 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import com.pilot.core.event.SessionEvent;
+import com.pilot.core.message.Attachment;
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ToolDefinition;
@@ -20,7 +23,6 @@ import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.Tool;
-import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolResult;
 

@@ -17,7 +17,7 @@ import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Test;
 
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelPricing;

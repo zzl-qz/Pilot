@@ -17,7 +17,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
 import com.pilot.core.event.RunStarted;
-import com.pilot.core.loop.Attachment;
+import com.pilot.core.message.Attachment;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.attachment.AttachmentLimits;
 import com.pilot.server.attachment.AttachmentService;

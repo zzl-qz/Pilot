@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Function;
 
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ToolDefinition;

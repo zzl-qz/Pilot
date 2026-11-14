@@ -2,7 +2,7 @@ package com.pilot.server.agent;
 
 import java.util.List;
 
-import com.pilot.core.loop.Attachment;
+import com.pilot.core.message.Attachment;
 
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;

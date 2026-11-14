@@ -13,16 +13,19 @@ import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.pilot.core.message.Attachment;
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
+import com.pilot.core.message.ToolNames;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelRequestScope;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.RequestBudget;
+import com.pilot.core.model.TokenEstimate;
 import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolCallJournal;
-import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolResults;
 import com.pilot.core.util.Sha256;
 
@@ -402,35 +405,14 @@ public final class ContextCompactor {
         return dropped;
     }
 
-    /**
-     * 估算 token：ASCII 按 4 字符 1 token，非 ASCII（中文等）按 1 字符 1 token。
-     *
-     * <p>纯 {@code chars / 4} 会显著低估中文上下文（一个汉字通常就接近一个 token），
-     * 压缩触发太晚，请求可能直接超出模型窗口。这里宁可保守。
-     */
+    /** 估算一批消息的 token。算法在 {@link TokenEstimate}，这里留着是原来的调用入口。 */
     public static int estimateTokens(List<Message> messages) {
-        int total = 0;
-        for (Message message : messages) {
-            total += estimateTokens(message.content());
-        }
-        return total;
+        return TokenEstimate.of(messages);
     }
 
-    /** 单段文本的 token 估算：ASCII 4 字符 1 个，非 ASCII 1 字符 1 个。 */
+    /** 估算一段文本的 token。算法在 {@link TokenEstimate}。 */
     public static int estimateTokens(String content) {
-        if (content == null || content.isEmpty()) {
-            return 0;
-        }
-        int ascii = 0;
-        int wide = 0;
-        for (int i = 0; i < content.length(); i++) {
-            if (content.charAt(i) < 0x80) {
-                ascii++;
-            } else {
-                wide++;
-            }
-        }
-        return (ascii + 3) / 4 + wide;
+        return TokenEstimate.of(content);
     }
 
     public static int totalChars(List<Message> messages) {

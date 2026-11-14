@@ -26,7 +26,7 @@ import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xslf.usermodel.XSLFTextShape;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
-import com.pilot.core.loop.Attachment;
+import com.pilot.core.message.Attachment;
 import com.pilot.core.tool.SnapshotSink;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolResult;

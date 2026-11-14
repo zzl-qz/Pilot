@@ -21,11 +21,11 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.stereotype.Service;
 
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolNames;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
-import com.pilot.core.tool.ToolNames;
 import com.pilot.core.util.FileNames;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;

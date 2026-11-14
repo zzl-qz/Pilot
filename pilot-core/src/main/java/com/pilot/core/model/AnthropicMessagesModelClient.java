@@ -9,8 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import com.pilot.core.loop.Message;
-import com.pilot.core.tool.ToolCall;
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;

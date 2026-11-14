@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.pilot.core.message.ToolNames;
 import com.pilot.core.skill.Skill;
 import com.pilot.core.skill.SkillCatalog;
 import com.pilot.core.skill.SkillManifest;

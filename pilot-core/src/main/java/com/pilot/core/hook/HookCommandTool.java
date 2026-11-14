@@ -9,8 +9,8 @@ import com.pilot.core.exec.ExecutionRequest;
 import com.pilot.core.exec.ExecutionResult;
 import com.pilot.core.exec.ExecutionSettings;
 import com.pilot.core.exec.OsSandbox;
+import com.pilot.core.message.ToolNames;
 import com.pilot.core.tool.Tool;
-import com.pilot.core.tool.ToolNames;
 
 /** 只由执行器内部构造；不注册为模型工具。权限规则使用同一个 run_command 名称。 */
 public final class HookCommandTool implements Tool {

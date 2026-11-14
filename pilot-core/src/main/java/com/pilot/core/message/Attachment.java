@@ -1,4 +1,4 @@
-package com.pilot.core.loop;
+package com.pilot.core.message;
 
 /**
  * 用户在消息里附带的文件。

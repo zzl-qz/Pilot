@@ -13,7 +13,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import com.pilot.core.tool.ToolCall;
+import com.pilot.core.message.ToolCall;
 
 class PermissionRulesTest {
     @TempDir

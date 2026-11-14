@@ -4,10 +4,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.pilot.core.loop.Attachment;
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Attachment;
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.session.ConversationRepository;
-import com.pilot.core.tool.ToolCall;
 
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;

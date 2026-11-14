@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
 
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 import com.pilot.core.model.AnthropicMessagesModelClient;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelProfile;

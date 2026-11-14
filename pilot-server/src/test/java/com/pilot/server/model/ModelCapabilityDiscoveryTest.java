@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 import com.pilot.core.loop.AgentLoop;
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.NativeCapability;
 import com.pilot.core.model.NativeToolRejectedException;

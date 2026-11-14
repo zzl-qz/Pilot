@@ -1,4 +1,4 @@
-package com.pilot.core.tool;
+package com.pilot.core.loop;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -26,10 +26,19 @@ import com.pilot.core.exec.ExecutionBackends;
 import com.pilot.core.hook.HookCommandTool;
 import com.pilot.core.hook.Hooks;
 import com.pilot.core.hook.Hooks.Result;
-import com.pilot.core.loop.Attachment;
+import com.pilot.core.message.Attachment;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.permission.PermissionDecision;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.permission.PermissionResult;
+import com.pilot.core.tool.Availability;
+import com.pilot.core.tool.ProducesCheck;
+import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolCallJournal;
+import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.ToolResult;
+import com.pilot.core.tool.ToolResults;
+import com.pilot.core.tool.WritesFiles;
 import com.pilot.core.trace.TraceRecorder;
 import com.pilot.core.util.Texts;
 

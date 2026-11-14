@@ -1,4 +1,4 @@
-package com.pilot.core.tool;
+package com.pilot.core.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,8 +15,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.core.hook.Hooks;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
+import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolRegistry;
 
 /** 钩子必须真的参与工具执行：PostToolUse 回注输出，PreToolUse 能拦住执行。 */
 class ToolExecutorHooksTest {

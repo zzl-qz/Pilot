@@ -1,4 +1,4 @@
-package com.pilot.core.tool;
+package com.pilot.core.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -16,8 +16,13 @@ import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.hook.Hooks;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
+import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolCallJournal;
+import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.WritesFiles;
 
 class ToolExecutorJournalTest {
 

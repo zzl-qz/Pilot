@@ -17,7 +17,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 import com.pilot.core.event.RunStarted;
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.store.EventCodec;
 import com.pilot.server.store.JdbcConversationRepository;

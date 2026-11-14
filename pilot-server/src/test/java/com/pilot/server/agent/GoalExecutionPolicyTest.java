@@ -26,13 +26,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import com.pilot.core.loop.ExecutionPolicy;
-import com.pilot.core.loop.Message;
+import com.pilot.core.loop.ToolExecutor;
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelClientException;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
-import com.pilot.core.tool.ToolCall;
-import com.pilot.core.tool.ToolExecutor;
 import com.pilot.core.tool.command.CommandTaskManager.Task;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.multi.SpawnAgentTool;

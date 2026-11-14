@@ -5,10 +5,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
+import com.pilot.core.message.ToolCall;
+import com.pilot.core.message.ToolNames;
 import com.pilot.core.tool.ProducesCheck;
 import com.pilot.core.tool.Tool;
-import com.pilot.core.tool.ToolCall;
-import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolResults;
 import com.pilot.core.tool.ToolSchemas;

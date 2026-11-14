@@ -8,8 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import com.pilot.core.tool.ToolCall;
-import com.pilot.core.tool.ToolNames;
+import com.pilot.core.message.ToolCall;
+import com.pilot.core.message.ToolNames;
 
 import tools.jackson.databind.ObjectMapper;
 

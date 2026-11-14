@@ -23,9 +23,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 import com.pilot.core.http.BoundedHttp;
-import com.pilot.core.loop.Attachment;
-import com.pilot.core.loop.Message;
-import com.pilot.core.tool.ToolCall;
+import com.pilot.core.message.Attachment;
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.JsonNode;

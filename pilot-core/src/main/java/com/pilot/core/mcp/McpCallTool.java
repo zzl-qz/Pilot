@@ -10,7 +10,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.pilot.core.loop.Attachment;
+import com.pilot.core.message.Attachment;
 import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.PromptedTool;
 import com.pilot.core.tool.ToolArtifacts;

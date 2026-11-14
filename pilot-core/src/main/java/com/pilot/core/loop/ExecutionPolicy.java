@@ -4,8 +4,8 @@ import java.util.List;
 import java.util.Set;
 
 import com.pilot.core.event.RunFailureCode;
-import com.pilot.core.tool.ToolCall;
-import com.pilot.core.tool.ToolExecutor;
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 
 /** Task-scoped assessment and evidence review, independent of session persistence. */
 public interface ExecutionPolicy {

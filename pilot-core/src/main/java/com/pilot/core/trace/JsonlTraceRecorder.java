@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Map;
 
-import com.pilot.core.tool.ToolCall;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.tool.ToolResults;
 import com.pilot.core.util.Texts;
 

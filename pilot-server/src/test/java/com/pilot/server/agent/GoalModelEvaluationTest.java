@@ -20,7 +20,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.Cancellation;
-import com.pilot.core.loop.Message;
+import com.pilot.core.message.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.OpenAiCompatibleModelClient;

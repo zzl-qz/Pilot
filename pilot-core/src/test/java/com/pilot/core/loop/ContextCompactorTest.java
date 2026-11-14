@@ -10,10 +10,12 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
+import com.pilot.core.message.Attachment;
+import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelClientException;
 import com.pilot.core.model.ModelResponse;
-import com.pilot.core.tool.ToolCall;
 
 class ContextCompactorTest {
 
