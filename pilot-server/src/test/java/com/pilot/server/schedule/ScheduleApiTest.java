@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.schedule;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;

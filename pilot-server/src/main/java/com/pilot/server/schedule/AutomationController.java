@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.schedule;
 
 import java.time.DateTimeException;
 import java.util.Map;
@@ -13,9 +13,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import com.pilot.server.schedule.RecurringScheduleService;
-import com.pilot.server.schedule.ScheduleService;
 
 @RestController
 @RequestMapping("/api/automation")

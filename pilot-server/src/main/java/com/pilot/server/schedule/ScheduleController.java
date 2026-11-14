@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.schedule;
 
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -14,9 +14,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import com.pilot.server.schedule.ScheduleService;
-import com.pilot.server.schedule.ScheduledTask;
 
 @RestController
 @RequestMapping("/api/schedules")

@@ -24,7 +24,6 @@ import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.session.TaskControlService;
 import com.pilot.server.store.AutomationStore;
-import com.pilot.server.store.ScheduleRepository;
 import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.json.JsonMapper;

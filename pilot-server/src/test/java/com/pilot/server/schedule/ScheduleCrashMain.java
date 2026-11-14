@@ -26,7 +26,6 @@ import com.pilot.server.store.AutomationStore;
 import com.pilot.server.store.EventCodec;
 import com.pilot.server.store.JdbcSessionRepository;
 import com.pilot.server.store.ResultInboxRepository;
-import com.pilot.server.store.ScheduleRepository;
 import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.json.JsonMapper;

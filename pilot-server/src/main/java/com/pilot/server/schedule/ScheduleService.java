@@ -30,7 +30,6 @@ import com.pilot.server.session.RunSubmissionService;
 import com.pilot.server.session.SkillService;
 import com.pilot.server.session.TaskControlService;
 import com.pilot.server.session.TaskControlStatus;
-import com.pilot.server.store.ScheduleRepository;
 import com.pilot.server.workspace.GitWorktrees;
 import com.pilot.server.workspace.GitWorktrees.Created;
 import com.pilot.server.workspace.GitWorktrees.Preview;
