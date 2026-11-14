@@ -77,9 +77,8 @@ public final class SourceEnvironment {
     }
 
     private Mobile prepareMobileUnlocked(Path configured) throws Exception {
-        Path libraries = configured != null ? configured.toAbsolutePath().normalize()
-            : Files.isDirectory(root.resolve("mobile-bridge/lib")) ? root.resolve("mobile-bridge/lib")
-                : root.resolve("pilot-mobile/bridge/build/install/bridge/lib");
+        Path libraries =
+            configured != null ? configured.toAbsolutePath().normalize() : MobileBridgeLayout.libraries(root);
         if (!Files.isRegularFile(libraries.resolve("bridge.jar"))) {
             return mobileResult(new Mobile(libraries, null, false, "手机连接组件尚未打包，请单独构建组件或使用完整安装包；电脑功能可正常使用"));
         }
@@ -117,8 +116,8 @@ public final class SourceEnvironment {
 
     private int probe(Path home, Path libraries) throws Exception {
         return execute(
-            List.of(java(home), "--enable-native-access=ALL-UNNAMED", "-cp", libraries + File.separator + "*",
-                "com.pilot.mobile.bridge.MainKt", "--check-runtime"),
+            List.of(java(home), "--enable-native-access=ALL-UNNAMED", "-cp", MobileBridgeLayout.classpath(libraries),
+                MobileBridgeLayout.MAIN_CLASS, "--check-runtime"),
             root, childEnvironment(home, null), Duration.ofSeconds(45), false).code();
     }
 

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.web.server.WebServer;
 import org.springframework.boot.web.server.context.WebServerInitializedEvent;
 
+import com.pilot.core.runtime.bootstrap.MobileBridgeLayout;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.security.SecurityProperties;
 
@@ -97,7 +98,7 @@ class MobileConnectionServiceTest {
     @Test
     void classpathWildcardIsJoinedAsTextBecauseWindowsRejectsStarInPaths() {
         // Path.resolve("*") 在 Windows 里是非法路径（InvalidPathException），通配符只能拼字符串。
-        String classpath = MobileConnectionService.classpath(directory);
+        String classpath = MobileBridgeLayout.classpath(directory);
         assertEquals(directory + File.separator + "*", classpath);
     }
 

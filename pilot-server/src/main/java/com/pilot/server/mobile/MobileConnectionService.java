@@ -1,7 +1,6 @@
 package com.pilot.server.mobile;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.ProxySelector;
@@ -15,7 +14,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -32,8 +30,11 @@ import org.springframework.boot.web.server.context.WebServerInitializedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
+import com.pilot.core.runtime.bootstrap.BootstrapPlatform;
+import com.pilot.core.runtime.bootstrap.MobileBridgeLayout;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.DataMaintenance;
+import com.pilot.server.runtime.SourceLayout;
 import com.pilot.server.security.SecurityProperties;
 
 import tools.jackson.databind.JsonNode;
@@ -226,8 +227,7 @@ public class MobileConnectionService {
         }
         Path libraries = libraries();
         Files.createDirectories(data);
-        String executable =
-            System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java";
+        String executable = BootstrapPlatform.current().executable("java");
         Path javaHome =
             environment != null && environment.prepared() != null && environment.prepared().javaHome() != null
                 ? environment.prepared().javaHome() : Path.of(System.getProperty("java.home"));
@@ -235,9 +235,9 @@ public class MobileConnectionService {
             System.getProperty("os.name", "unknown"), System.getProperty("os.arch", "unknown"),
             System.getProperty("java.version", "unknown"), connectionMode, !relay.isBlank());
         List<String> args = new ArrayList<>(List.of(javaHome.resolve("bin").resolve(executable).toString(),
-            "--enable-native-access=ALL-UNNAMED", "-cp", classpath(libraries), "com.pilot.mobile.bridge.MainKt",
-            "--pilot-port", Integer.toString(port), "--data-dir", data.toString(), "--no-open", "--parent-pid",
-            Long.toString(ProcessHandle.current().pid()), "--name", computerName()));
+            "--enable-native-access=ALL-UNNAMED", "-cp", MobileBridgeLayout.classpath(libraries),
+            MobileBridgeLayout.MAIN_CLASS, "--pilot-port", Integer.toString(port), "--data-dir", data.toString(),
+            "--no-open", "--parent-pid", Long.toString(ProcessHandle.current().pid()), "--name", computerName()));
         if (!relay.isBlank()) {
             args.addAll(List.of("--relay", relay));
         }
@@ -329,22 +329,8 @@ public class MobileConnectionService {
         return uri;
     }
 
-    /**
-     * classpath 通配符只能用字符串拼。{@code Path.resolve("*")} 在 Windows 上会抛
-     * {@link java.nio.file.InvalidPathException}（{@code *} 是非法路径字符），
-     * 导致「连接手机」在 Windows 上直接 500。
-     */
-    static String classpath(Path libraries) {
-        return libraries + File.separator + "*";
-    }
-
     static void requirePlatform(String os, String arch) {
-        String platform = os.toLowerCase(Locale.ROOT);
-        boolean arm = "aarch64".equals(arch) || "arm64".equals(arch);
-        boolean x64 = "amd64".equals(arch) || "x86_64".equals(arch);
-        boolean supported = platform.contains("mac") ? arm
-            : platform.contains("win") ? x64 : platform.contains("linux") && (arm || x64);
-        if (!supported) {
+        if (!BootstrapPlatform.detect(os, arch).mobileSupported()) {
             throw new IllegalStateException("当前连接组件支持 Apple Silicon、Windows x64、Linux x64/ARM64；此系统架构暂不支持");
         }
     }
@@ -360,14 +346,9 @@ public class MobileConnectionService {
             }
             throw new IllegalStateException("配置的手机连接组件目录不存在，请检查 pilot.mobile.libraries");
         }
-        Path current = Path.of(System.getProperty("user.dir")).toAbsolutePath();
-        for (int depth = 0; depth < 4 && current != null; depth++, current = current.getParent()) {
-            for (String candidate : List.of("mobile-bridge/lib", "pilot-mobile/bridge/build/install/bridge/lib")) {
-                Path path = current.resolve(candidate);
-                if (Files.isDirectory(path)) {
-                    return path;
-                }
-            }
+        Path found = SourceLayout.mobileLibraries(SourceLayout.workingDirectory());
+        if (found != null) {
+            return found;
         }
         throw new IllegalStateException("未找到手机连接组件，源码运行请先执行 node scripts/mobile.mjs build-bridge；安装版请更新完整安装包");
     }

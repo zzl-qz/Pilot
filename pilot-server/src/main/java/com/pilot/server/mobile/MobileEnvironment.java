@@ -1,6 +1,5 @@
 package com.pilot.server.mobile;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -15,6 +14,7 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.runtime.bootstrap.BootstrapPlatform;
 import com.pilot.core.runtime.bootstrap.SourceEnvironment;
 import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.runtime.SourceLayout;
 
 /** 仅在打开手机连接时检查已打包组件；不构建移动源码，原生修复不占用 HTTP 请求线程。 */
 @Component
@@ -52,7 +52,7 @@ public final class MobileEnvironment {
 
     MobileEnvironment(PilotDataDir data, boolean enabled, String libraries, Preparation preparation) {
         String custom = System.getenv("PILOT_BOOTSTRAP_DIR");
-        Path current = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+        Path current = SourceLayout.workingDirectory();
         this.cache = custom == null || custom.isBlank() ? defaultCache(current, data.root()) : Path.of(custom);
         this.libraries = libraries;
         this.enabled = enabled;
@@ -82,7 +82,7 @@ public final class MobileEnvironment {
         status = new Status("preparing", "正在检查与补全手机连接环境", false);
         worker.submit(() -> {
             try {
-                Path root = projectRoot(Path.of(System.getProperty("user.dir")));
+                Path root = SourceLayout.mobileRoot(SourceLayout.workingDirectory());
                 complete(preparation.prepare(root, cache, libraries,
                     message -> status = new Status("preparing", message, false)));
             } catch (InterruptedException e) {
@@ -110,21 +110,11 @@ public final class MobileEnvironment {
         status = new Status("failed", message, false);
     }
 
-    static Path projectRoot(Path initial) {
-        Path path = initial.toAbsolutePath().normalize();
-        for (int depth = 0; depth < 5 && path != null; depth++, path = path.getParent()) {
-            if (Files.isDirectory(path.resolve("pilot-mobile/bridge/src"))
-                || Files.isDirectory(path.resolve("mobile-bridge/lib"))) {
-                return path;
-            }
-        }
-        return initial.toAbsolutePath().normalize();
-    }
-
     static Path defaultCache(Path current, Path data) {
         Path root = current.toAbsolutePath().normalize();
-        return data.toAbsolutePath().normalize().equals(root.resolve(".pilot"))
-            ? projectRoot(root).resolve(".pilot/bootstrap") : data.resolve("bootstrap");
+        Path base = data.toAbsolutePath().normalize().equals(SourceLayout.localData(root))
+            ? SourceLayout.localData(SourceLayout.mobileRoot(root)) : data;
+        return base.resolve("bootstrap");
     }
 
     @PreDestroy

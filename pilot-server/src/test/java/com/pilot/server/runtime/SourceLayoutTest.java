@@ -44,4 +44,24 @@ class SourceLayoutTest {
         assertNull(SourceLayout.frontendRoot(directory));
         assertNull(SourceLayout.staticSource(directory));
     }
+
+    @Test
+    void distinguishesUnbuiltSourceAndPackagedMobileBridge() throws Exception {
+        Path root = Files.createDirectory(directory.resolve("Pilot 连接桥"));
+        Path module = Files.createDirectories(root.resolve("pilot-server"));
+        Files.createDirectories(root.resolve("pilot-mobile/bridge/src"));
+        assertEquals(root, SourceLayout.mobileRoot(module));
+        assertNull(SourceLayout.mobileLibraries(module));
+
+        Path built = Files.createDirectories(root.resolve("pilot-mobile/bridge/build/install/bridge/lib"));
+        assertEquals(built, SourceLayout.mobileLibraries(module));
+
+        Path packaged = Files.createDirectories(root.resolve("mobile-bridge/lib"));
+        assertEquals(packaged, SourceLayout.mobileLibraries(module));
+
+        Path standalone = Files.createDirectories(directory.resolve("安装包/mobile-bridge/lib"));
+        Path installRoot = standalone.getParent().getParent();
+        assertEquals(installRoot, SourceLayout.mobileRoot(installRoot));
+        assertEquals(standalone, SourceLayout.mobileLibraries(installRoot));
+    }
 }

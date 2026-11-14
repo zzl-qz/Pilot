@@ -2,12 +2,17 @@ package com.pilot.server.runtime;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.Function;
 import java.util.function.Predicate;
+
+import com.pilot.core.runtime.bootstrap.MobileBridgeLayout;
 
 /** 源码启动所用的仓库布局。各入口按实际所需模块查找，安装包继续使用自己的回退目录。 */
 public final class SourceLayout {
     private static final int SOURCE_SEARCH_LEVELS = 6;
     private static final int STATIC_SEARCH_LEVELS = 5;
+    private static final int MOBILE_ROOT_LEVELS = 5;
+    private static final int MOBILE_LIBRARY_LEVELS = 4;
     private static final Path FRONTEND = Path.of("pilot-web", "frontend");
     private static final Path STATIC_FILES = Path.of("pilot-web", "src", "main", "resources", "static");
 
@@ -41,6 +46,18 @@ public final class SourceLayout {
         return root == null ? null : root.resolve(STATIC_FILES);
     }
 
+    public static Path mobileRoot(Path start) {
+        Path root = find(start, MOBILE_ROOT_LEVELS, MobileBridgeLayout::hasBridge);
+        return root == null ? start.toAbsolutePath().normalize() : root;
+    }
+
+    public static Path mobileLibraries(Path start) {
+        return findPath(start, MOBILE_LIBRARY_LEVELS, path -> {
+            Path libraries = MobileBridgeLayout.libraries(path);
+            return Files.isDirectory(libraries) ? libraries : null;
+        });
+    }
+
     public static Path localData(Path root) {
         return root.resolve(".pilot");
     }
@@ -55,10 +72,15 @@ public final class SourceLayout {
     }
 
     private static Path find(Path start, int levels, Predicate<Path> matches) {
+        return findPath(start, levels, path -> matches.test(path) ? path : null);
+    }
+
+    private static Path findPath(Path start, int levels, Function<Path, Path> locate) {
         Path current = start.toAbsolutePath().normalize();
         for (int i = 0; i < levels && current != null; i++, current = current.getParent()) {
-            if (matches.test(current)) {
-                return current;
+            Path found = locate.apply(current);
+            if (found != null) {
+                return found;
             }
         }
         return null;
