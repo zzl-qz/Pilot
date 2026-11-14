@@ -18,6 +18,10 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 import com.pilot.core.browser.BrowserBackend;
 import com.pilot.core.mcp.McpManager;
@@ -37,6 +41,24 @@ import tools.jackson.databind.ObjectMapper;
 class BrowserRuntimeTest {
     @TempDir
     Path data;
+
+    @Test
+    void existingBrowserEnvironmentVariablesOverrideApplicationDefaults() {
+        new ApplicationContextRunner().withInitializer(new ConfigDataApplicationContextInitializer())
+            .withInitializer(context -> context.getEnvironment().getPropertySources().replace(
+                StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+                new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+                    Map.of("PILOT_BROWSER_ENABLED", "false", "PILOT_BROWSER_MIRROR_ENABLED", "false",
+                        "PILOT_BROWSER_HOME", data.resolve("浏览器 缓存").toString()))))
+            .withBean(PilotDataDir.class, () -> new PilotDataDir(data.toString()))
+            .withBean(ObjectMapper.class, ObjectMapper::new).withBean(RuntimeMirrors.class, RuntimeMirrors::defaults)
+            .withUserConfiguration(BrowserHome.class, BrowserRuntime.class, BrowserControlService.class)
+            .run(context -> {
+                assertEquals(data.resolve("浏览器 缓存"), context.getBean(BrowserHome.class).directory());
+                assertTrue(context.getBean(BrowserRuntime.class).availability().reason().contains("enabled=false"));
+                assertFalse(context.getBean(BrowserControlService.class).mirrorEnabled());
+            });
+    }
 
     @Test
     void installsBrowserDependenciesUsingTheConfiguredFallbackAfterFailure() throws Exception {

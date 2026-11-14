@@ -34,6 +34,8 @@ Python、Chromium 仍沿用既有组件准备机制。源码启动器和后台�
 
 后端自动安装浏览器与桌面依赖时，首次尝试沿用现有工具配置。失败后，两个安装器共用 `PILOT_RUNTIME_NPM_FALLBACK_REGISTRY` 指定的 npm 备用源，浏览器和桌面二进制分别读取 `PILOT_RUNTIME_CHROMIUM_FALLBACK_MIRROR` 与 `PILOT_RUNTIME_ELECTRON_FALLBACK_MIRROR`。未设置时沿用原有 npmmirror 地址。备用地址支持无凭据、查询参数和片段的 HTTP(S) URL。
 
+浏览器运行与镜像设置使用 `pilot.browser.*`，可用对应的 `PILOT_BROWSER_*` 环境变量覆盖。`ENABLED`、`PROVISION`、`DOWNLOAD_CHROMIUM` 分别控制功能启用、Playwright 依赖安装和 Chromium 下载。`HOME`、`BROWSERS_DIR` 指定运行目录和浏览器缓存，`HEADLESS`、`PREFER_BUNDLED`、`IDLE_SHUTDOWN_SECONDS` 控制窗口、浏览器选型和空闲回收。镜像使用 `MIRROR_ENABLED`、`MIRROR_MAX_WIDTH` 和 `MIRROR_QUALITY`。启动器在离线模式下设置 `PROVISION=false` 与 `DOWNLOAD_CHROMIUM=false`。
+
 新增运行时下载来自随源码固定的官方版本，SHA-256 保存在 `pilot-core/src/main/resources/bootstrap/runtime.properties`。下载使用临时文件，校验和解压完成后才发布；同一缓存有跨进程锁，同一项目构建也串行执行。重复启动不会同时安装，下载 / 进程有时间与大小上限，损坏的私有副本留存后再替换。Windows 安装器额外校验微软签名，不从随机网站获取单独 DLL。
 
 Windows VC++ 安装采用微软支持的 `/install /passive /norestart`。系统可能显示 UAC；拒绝授权、签名不可信或管理策略阻止时停止该修复，不自动重启、不关闭防护、不反复弹安装。手机连接可以降级，后台其他功能继续提供服务。微软流程参考 [官方部署说明](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files)。

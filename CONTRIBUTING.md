@@ -20,6 +20,19 @@
 
 通过 GitHub Pull Request 提交改动时，请在说明中附上关联问题、变更摘要、实际运行的命令，以及尚未验证的平台或边界。PR 是否合并由维护者决定。
 
+### 配置维护
+
+| 修改范围 | 默认值和校验入口 |
+| --- | --- |
+| 源码目录、打包回退与运行时缓存 | `SourceLayout`、`MobileBridgeLayout`、`SourceEnvironment` |
+| 私有 Java、Node 与安装器制品 | `pilot-core/src/main/resources/bootstrap/runtime.properties`，版本、平台制品与 SHA-256 一起更新 |
+| 会话事件与实时预览 | `EventStreamLimits`、`PreviewLimits`，服务端通过 `SessionConfiguration` 读取 `pilot.events.*` |
+| 命令执行镜像与资源 | `ExecutionSettings`、`ExecutionLimits`，服务端通过 `ExecutionConfiguration` 读取 `pilot.execution.*` |
+| 检查点租约与续租 | `RunCheckpoint` 定义租约，`RunStateTracker` 以此计算续租间隔 |
+| 浏览器运行与镜像 | `BrowserHome`、`BrowserRuntime`、`BrowserControlService` 提供服务端默认值，环境变量见 [源码环境自动准备](SOURCE_ENVIRONMENT.md) |
+
+同一含义的默认值由实际执行校验的模块提供。配置绑定要验证缺省、显式覆盖、非法输入以及已有环境变量名。协议字段、持久化格式和回环访问边界属于兼容性约定。
+
 ## 本地验证
 
 ### 服务端与完整 Maven 验证

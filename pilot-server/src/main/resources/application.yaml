@@ -58,33 +58,7 @@ pilot:
   attachments:
     dir: ${PILOT_ATTACHMENTS_DIR:}                    # 留空用数据目录下的 attachments
   # 浏览器（browser 工具 + 右侧「浏览器」面板）：内置 Chromium，默认无头。
-  # 画面实时镜像到右侧面板里，地址栏与点击/滚轮/键盘都在面板内完成，不再另外弹一个浏览器窗口。
-  browser:
-    # false 时 browser 工具不注册
-    enabled: true
-    # 首次使用时自动 npm 安装 playwright-core（固定 1.64.1，官方源失败换 npmmirror）
-    provision: true
-    # 本机没有任何可用浏览器时，自动下载内置 Chromium（完整版约 400MB，仅此一次）
-    download-chromium: true
-    # 默认无头：只在面板里看画面、在面板里操作，不弹独立窗口；
-    # 想在系统窗口里直接接管（调试用）可设 PILOT_BROWSER_HEADLESS=false
-    headless: ${PILOT_BROWSER_HEADLESS:true}
-    # 内置 Chromium 优先于系统 Chrome / Edge（版本配套、行为跨机器一致）；false = 系统浏览器优先
-    prefer-bundled: ${PILOT_BROWSER_PREFER_BUNDLED:true}
-    # 浏览器运行目录（含桌面控制端点和日志）；留空沿用仓库 .pilot/browser 或数据目录。
-    home: ${PILOT_BROWSER_HOME:}
-    # 内置 Chromium 落盘目录；留空使用浏览器运行目录下的 browsers
-    browsers-dir: ${PILOT_BROWSER_BROWSERS_DIR:}
-    # 空闲多少秒后关掉浏览器进程释放内存。-1 = 自动：无头 600 秒（面板正在显示这一页时不回收）
-    idle-shutdown-seconds: ${PILOT_BROWSER_IDLE_SHUTDOWN_SECONDS:-1}
-    # 页面侧边栏实时镜像（瞬态 SSE，不落库不落盘；CDP screencast，页面变化才推帧）
-    mirror:
-      # false 时镜像端点直接 204，前端不显示浏览器 tab
-      enabled: ${PILOT_BROWSER_MIRROR_ENABLED:true}
-      # 帧宽上限（像素）：面板可拖宽到 700+，1280 保证拉宽后仍然清晰
-      max-width: ${PILOT_BROWSER_MIRROR_MAX_WIDTH:1280}
-      # JPEG 质量（20-90）
-      quality: ${PILOT_BROWSER_MIRROR_QUALITY:55}
+  # pilot.browser.* 可按部署覆盖。默认值由 BrowserHome、BrowserRuntime 和 BrowserControlService 提供。
   # PILOT_VOICE_MAX_RECORDING_SECONDS 可覆盖 120 秒的录音时长，PILOT_VOICE_MODEL 可设置默认转写模型。
   model:
     # endpoint 可以写服务根地址，也可以写完整的 /v1/chat/completions

@@ -32,6 +32,9 @@ const MAX_SNAPSHOT_NODES = 600;
 const ACTION_TIMEOUT_MS = 8000;
 const NAVIGATION_TIMEOUT_MS = 30000;
 const MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024;
+const DEFAULT_VIEWPORT = Object.freeze({ width: 1280, height: 800 });
+const DEFAULT_MIRROR_WIDTH = 960;
+const DEFAULT_MIRROR_QUALITY = 55;
 
 let playwright;
 let browserPromise = null;
@@ -395,7 +398,8 @@ async function createDesktopSession(id, desktop) {
   const page = await waitForDesktopPage(browser, created.tabId, created.targetId);
   const session = {
     id, context: page.context(), page, console: [], network: [], dead: false, desktop: true, desktopTabId: created.tabId,
-    mirror: false, capture: false, embed: true, frameOptions: '', mirrorWidth: 960, mirrorQuality: 55,
+    mirror: false, capture: false, embed: true, frameOptions: '',
+    mirrorWidth: DEFAULT_MIRROR_WIDTH, mirrorQuality: DEFAULT_MIRROR_QUALITY,
     cdp: null, cdpPage: null, lastFrameAt: 0, historyCdp: null, historyCdpPage: null
   };
   page.context().setDefaultTimeout(ACTION_TIMEOUT_MS);
@@ -403,7 +407,7 @@ async function createDesktopSession(id, desktop) {
   attachPage(session, page);
   sessions.set(id, session);
   // Agent 的验证视口独立于右侧预览面板，隐藏标签也必须能截图。
-  await handlers.resize({ width: 1280, height: 800 }, session);
+  await handlers.resize(DEFAULT_VIEWPORT, session);
   return session;
 }
 
@@ -473,7 +477,7 @@ async function createSession(id) {
 
 async function createLocalSession(id, browser) {
   const context = await browser.newContext({
-    viewport: { width: 1280, height: 800 },
+    viewport: DEFAULT_VIEWPORT,
     acceptDownloads: false,
     serviceWorkers: 'block'
   });
@@ -481,7 +485,7 @@ async function createLocalSession(id, browser) {
   context.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
   const session = { id, context, page: null, console: [], network: [], dead: false,
     mirror: mirrorRequested.has(id), capture: mirrorCapture.get(id) !== false,
-    embed: true, frameOptions: '', mirrorWidth: 960, mirrorQuality: 55,
+    embed: true, frameOptions: '', mirrorWidth: DEFAULT_MIRROR_WIDTH, mirrorQuality: DEFAULT_MIRROR_QUALITY,
     cdp: null, cdpPage: null, lastFrameAt: 0, historyCdp: null, historyCdpPage: null };
   // 主框架导航只允许回环地址，页面里的链接也不能把它带去外网。
   await context.route('**/*', async (route) => {
@@ -562,7 +566,7 @@ async function startScreencast(session) {
         ts: now
       });
     });
-    const viewport = page.viewportSize() || { width: session.mirrorWidth, height: 800 };
+    const viewport = page.viewportSize() || { width: session.mirrorWidth, height: DEFAULT_VIEWPORT.height };
     await cdp.send('Page.startScreencast', {
       format: 'jpeg',
       quality: session.mirrorQuality,
@@ -588,7 +592,7 @@ async function publishSnapshot(session) {
   const page = session.page;
   if (!page || page.isClosed()) return;
   try {
-    const viewport = page.viewportSize() || { width: 1280, height: 800 };
+    const viewport = page.viewportSize() || DEFAULT_VIEWPORT;
     const shot = await page.screenshot({ type: 'jpeg', quality: session.mirrorQuality });
     if (!session.mirror || session.capture === false || session.dead || session.page !== page) return;
     session.lastFrameAt = Date.now();
@@ -913,7 +917,7 @@ const handlers = {
     const browser = await getHeadedBrowser();
     const pages = browser.contexts().flatMap((context) => context.pages());
     if (!pages.length) {
-      const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+      const context = await browser.newContext({ viewport: DEFAULT_VIEWPORT });
       await context.newPage();
     } else {
       await pages[0].bringToFront().catch(() => {});
@@ -974,7 +978,7 @@ const handlers = {
         if (opened.ok) {
           const created = await opened.json();
           const browser = await connectDesktop(desktop);
-          const viewport = page.viewportSize() || { width: 1280, height: 800 };
+          const viewport = page.viewportSize() || DEFAULT_VIEWPORT;
           page = await waitForDesktopPage(browser, created.tabId, created.targetId);
           current.desktopTabId = created.tabId;
           attachPage(current, page);
@@ -1424,8 +1428,8 @@ const handlers = {
 
   // ---- 镜像与窗口控制 -------------------------------------------------------------------
   async 'mirror-start'(args, current) {
-    current.mirrorWidth = Math.min(1920, Math.max(320, Math.round(Number(args.maxWidth) || 960)));
-    current.mirrorQuality = Math.min(90, Math.max(20, Math.round(Number(args.quality) || 55)));
+    current.mirrorWidth = Math.min(1920, Math.max(320, Math.round(Number(args.maxWidth) || DEFAULT_MIRROR_WIDTH)));
+    current.mirrorQuality = Math.min(90, Math.max(20, Math.round(Number(args.quality) || DEFAULT_MIRROR_QUALITY)));
     current.mirror = true;
     current.capture = args.capture !== false;
     if (current.capture) await ensureScreencast(current);
