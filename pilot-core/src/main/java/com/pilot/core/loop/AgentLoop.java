@@ -47,6 +47,7 @@ import com.pilot.core.tool.ToolCallJournal;
 import com.pilot.core.tool.ToolExecutor;
 import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.ToolResults;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.trace.TraceRecorder;
 import com.pilot.core.util.WireEnum;
@@ -567,7 +568,7 @@ public final class AgentLoop {
                         ToolExecutor.Outcome outcome;
                         if (executionPolicy != null && !executionPolicy.permits(call)) {
                             outcome = new ToolExecutor.Outcome(call.name(),
-                                "SKIPPED: " + executionPolicy.denialReason(call), null, null);
+                                ToolResults.skipped(executionPolicy.denialReason(call)), null, null);
                         } else {
                             if (executionPolicy != null) {
                                 executionPolicy.beforeTool(call);
@@ -724,7 +725,7 @@ public final class AgentLoop {
         ToolExecutor.Outcome outcome;
         if (!executionPolicy.permits(reverification)) {
             outcome = new ToolExecutor.Outcome(reverification.name(),
-                "SKIPPED: " + executionPolicy.denialReason(reverification), null, null);
+                ToolResults.skipped(executionPolicy.denialReason(reverification)), null, null);
         } else {
             executionPolicy.beforeTool(reverification);
             outcome = toolExecutor.execute(reverification, events, startGuard);
@@ -784,7 +785,7 @@ public final class AgentLoop {
                 ToolCall call = calls.get(index);
                 if (!permitted.get(index)) {
                     futures.add(CompletableFuture.completedFuture(new ToolExecutor.Outcome(call.name(),
-                        "SKIPPED: " + executionPolicy.denialReason(call), null, null)));
+                        ToolResults.skipped(executionPolicy.denialReason(call)), null, null)));
                 } else {
                     futures.add(CompletableFuture
                         .supplyAsync(() -> toolExecutor.execute(call, serializedEvents, parallelStartGuard), workers));
@@ -882,7 +883,7 @@ public final class AgentLoop {
 
     private void recordToolOutcome(ToolCall call, ToolExecutor.Outcome outcome, Set<String> changedFiles,
         List<String> checks, List<Message> messages) {
-        if (!outcome.result().startsWith("SKIPPED:")) {
+        if (!ToolResults.isSkipped(outcome.result())) {
             completionGate.recordTarget(call);
             completionGate.countToolCall();
         }
@@ -936,7 +937,7 @@ public final class AgentLoop {
     /** assistant 的每个 tool_call 都必须有对应结果，否则暂停后续跑会被模型协议拒绝。 */
     private static void skipCalls(List<Message> messages, List<ToolCall> calls, int from, String reason) {
         for (int index = from; index < calls.size(); index++) {
-            messages.add(Message.tool(calls.get(index).callId(), "SKIPPED: " + reason));
+            messages.add(Message.tool(calls.get(index).callId(), ToolResults.skipped(reason)));
         }
     }
 

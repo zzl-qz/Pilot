@@ -12,6 +12,7 @@ import java.util.stream.Collectors;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.ToolCall;
+import com.pilot.core.tool.ToolResults;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.tool.VerificationCheck;
 
@@ -123,7 +124,7 @@ final class CompletionGate {
             }
             for (ToolCall call : message.toolCalls()) {
                 String result = results.get(call.callId());
-                if (result != null && result.startsWith("SKIPPED:")) {
+                if (ToolResults.isSkipped(result)) {
                     continue;
                 }
                 countToolCall();

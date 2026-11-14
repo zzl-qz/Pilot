@@ -218,7 +218,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             result = new CommandChangeTracker.Result(List.of(), false, String.valueOf(e.getMessage()));
         }
         if (!result.complete()) {
-            text = "ERROR: 命令已结束，但无法完整确认其工作区变更；不得据此宣称验证通过：" + result.warning() + "\n" + text;
+            text = ToolResults.CHANGE_TRACKING_INCOMPLETE + "；不得据此宣称验证通过：" + result.warning() + "\n" + text;
         }
         return new ToolResult(text, result.changedPaths(), List.of());
     }
@@ -547,7 +547,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         String command =
             call == null || call.args() == null ? "" : String.valueOf(call.args().getOrDefault("command", ""));
-        if (result.startsWith("ERROR: 命令已结束，但无法完整确认其工作区变更")) {
+        if (ToolResults.isChangeTrackingIncomplete(result)) {
             return ToolSupport.oneLine(command, 90) + " → CHANGE_TRACKING_INCOMPLETE";
         }
         Matcher matcher = EXIT_CODE.matcher(result);
@@ -555,7 +555,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             return ToolSupport.oneLine(command, 90) + " → exit " + matcher.group(1);
         }
         // 超时、启动失败没有退出码，但同样是「验证没通过」，要留在记录里
-        if (result.startsWith("ERROR")) {
+        if (ToolResults.isError(result)) {
             return ToolSupport.oneLine(command, 90) + " → " + ToolSupport.oneLine(result, 80);
         }
         return null;

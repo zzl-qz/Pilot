@@ -65,7 +65,7 @@ final class CommandToolSupport {
             return null;
         }
         String command = ToolSupport.oneLine(task.command(), 90);
-        if (result.startsWith("ERROR: 命令已结束，但无法完整确认其工作区变更")) {
+        if (ToolResults.isChangeTrackingIncomplete(result)) {
             return command + " → CHANGE_TRACKING_INCOMPLETE";
         }
         if (WireEnum.in(task.status(), CommandTaskStatus.COMPLETED, CommandTaskStatus.FAILED)) {

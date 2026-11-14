@@ -23,6 +23,7 @@ import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolCallJournal;
 import com.pilot.core.tool.ToolNames;
+import com.pilot.core.tool.ToolResults;
 import com.pilot.core.util.Sha256;
 
 /**
@@ -615,7 +616,8 @@ public final class ContextCompactor {
                     continue;
                 }
                 String result = results.get(call.callId());
-                if (result == null || result.isBlank() || result.startsWith("ERROR") || result.startsWith("SKIPPED:")) {
+                if (result == null || result.isBlank() || ToolResults.isError(result)
+                    || ToolResults.isSkipped(result)) {
                     continue;
                 }
                 switch (call.name()) {

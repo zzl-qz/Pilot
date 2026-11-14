@@ -259,16 +259,16 @@ public final class ToolExecutor {
             return OutcomeStatus.EMPTY;
         }
         String value = result.strip();
-        if (value.startsWith("ERROR: 结果未确认")) {
+        if (ToolResults.isResultUnknown(value)) {
             return OutcomeStatus.RESULT_UNKNOWN;
         }
         if (value.contains("未找到网页结果") || value.contains("没有找到网页结果") || value.contains("无搜索结果")) {
             return OutcomeStatus.EMPTY;
         }
-        if (value.startsWith("SKIPPED:")) {
+        if (ToolResults.isSkipped(value)) {
             return OutcomeStatus.SKIPPED;
         }
-        if (value.startsWith("ERROR: 权限拒绝") || value.startsWith("ERROR: 用户拒绝")) {
+        if (ToolResults.isDenied(value)) {
             return OutcomeStatus.DENIED;
         }
         if (value.contains("状态: RUNNING") || value.contains("状态: STOPPING")) {
@@ -277,7 +277,7 @@ public final class ToolExecutor {
         if (value.contains("状态: CANCELLED") || value.contains("状态: TIMED_OUT")) {
             return OutcomeStatus.CANCELLED;
         }
-        if (value.startsWith("ERROR")) {
+        if (ToolResults.isError(value)) {
             String lower = value.toLowerCase(Locale.ROOT);
             if (lower.contains("timeout") || lower.contains("timed out") || lower.contains("超时")
                 || lower.contains("429") || lower.contains("502") || lower.contains("503") || lower.contains("504")
@@ -308,13 +308,12 @@ public final class ToolExecutor {
     }
 
     private static boolean succeeded(String result) {
-        return result != null && !result.startsWith("ERROR");
+        return result != null && !ToolResults.isError(result);
     }
 
     /** 权限拒绝、用户拒绝和控制信号跳过都属于「没执行」，既不算改动也不算验证结果。 */
     private static boolean blocked(String result) {
-        return result != null
-            && (result.startsWith("ERROR: 权限拒绝") || result.startsWith("ERROR: 用户拒绝") || result.startsWith("SKIPPED:"));
+        return ToolResults.isDenied(result) || ToolResults.isSkipped(result);
     }
 
     private ToolResult executeTool(ToolCall call, Tool tool, String argsSummary, Consumer<SessionEvent> events,
@@ -325,7 +324,7 @@ public final class ToolExecutor {
         }
         return switch (permission.decision()) {
             case ALLOW -> runIfCurrent(beforeStart, action);
-            case DENY -> ToolResult.text("ERROR: 权限拒绝：" + permission.reason());
+            case DENY -> ToolResult.text(ToolResults.PERMISSION_DENIED + "：" + permission.reason());
             case ASK -> awaitApproval(call, tool, argsSummary, events, beforeStart, action);
         };
     }
@@ -349,22 +348,22 @@ public final class ToolExecutor {
         events.accept(
             new ApprovalResolved(call.callId(), approved ? ApprovalDecision.APPROVED : ApprovalDecision.DENIED));
         return approved ? runWithCurrentPermission(call, tool, beforeStart, action)
-            : ToolResult.text("ERROR: 用户拒绝执行 " + tool.name() + "，文件未修改。");
+            : ToolResult.text(ToolResults.USER_DENIED + "执行 " + tool.name() + "，文件未修改。");
     }
 
     private ToolResult runWithCurrentPermission(ToolCall call, Tool tool, Supplier<String> guard,
         Supplier<ToolResult> action) {
         return runIfCurrent(guard, () -> {
             PermissionResult current = permissionGate.check(call, tool);
-            return current.decision() == PermissionDecision.DENY ? ToolResult.text("ERROR: 权限拒绝：" + current.reason())
-                : action.get();
+            return current.decision() == PermissionDecision.DENY
+                ? ToolResult.text(ToolResults.PERMISSION_DENIED + "：" + current.reason()) : action.get();
         });
     }
 
     private static ToolResult runIfCurrent(Supplier<String> beforeStart, Supplier<ToolResult> action) {
         String interruption = beforeStart.get();
         return interruption == null || interruption.isBlank() ? action.get()
-            : ToolResult.text("SKIPPED: " + interruption);
+            : ToolResult.text(ToolResults.skipped(interruption));
     }
 
     private Result runHooks(Hooks.Event event, ToolCall trigger, Consumer<SessionEvent> events,

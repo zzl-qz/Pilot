@@ -67,7 +67,7 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
                 result = new CommandChangeTracker.Result(List.of(), false, String.valueOf(e.getMessage()));
             }
             if (!result.complete()) {
-                rendered = "ERROR: 命令已结束，但无法完整确认其工作区变更；不得据此宣称验证通过：" + result.warning() + "\n" + rendered;
+                rendered = ToolResults.CHANGE_TRACKING_INCOMPLETE + "；不得据此宣称验证通过：" + result.warning() + "\n" + rendered;
             }
             return new ToolResult(rendered, result.changedPaths(), List.of());
         } catch (InterruptedException e) {

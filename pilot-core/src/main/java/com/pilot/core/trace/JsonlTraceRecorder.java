@@ -8,6 +8,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.Map;
 
 import com.pilot.core.tool.ToolCall;
+import com.pilot.core.tool.ToolResults;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -45,10 +46,10 @@ public final class JsonlTraceRecorder implements TraceRecorder {
         if (result == null) {
             return Decision.EXECUTED;
         }
-        if (result.startsWith("ERROR: 权限拒绝") || result.startsWith("ERROR: 用户拒绝")) {
+        if (ToolResults.isDenied(result)) {
             return Decision.DENIED;
         }
-        if (result.startsWith("ERROR")) {
+        if (ToolResults.isError(result)) {
             return Decision.FAILED;
         }
         return Decision.EXECUTED;
