@@ -23,13 +23,13 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 import org.springframework.stereotype.Service;
 
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.DocumentRenderer;
 import com.pilot.core.tool.FilePreviews;
+import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.browser.BrowserRuntime;
@@ -324,7 +324,10 @@ public class FileWorkbenchService {
             }
         }
         for (String folder : List.of("file-workbench", "file-versions")) {
-            deleteTree(dataDir.file(folder, sessionId));
+            Path cache = dataDir.file(folder, sessionId);
+            if (Files.exists(cache)) {
+                FileTrees.deleteBestEffort(cache);
+            }
         }
     }
 
@@ -457,22 +460,4 @@ public class FileWorkbenchService {
         }
         return "application/octet-stream";
     }
-
-    private static void deleteTree(Path path) {
-        if (path == null || !Files.exists(path)) {
-            return;
-        }
-        try (Stream<Path> stream = Files.walk(path)) {
-            stream.sorted(Comparator.reverseOrder()).forEach(item -> {
-                try {
-                    Files.deleteIfExists(item);
-                } catch (IOException ignored) {
-                    // 运行期缓存清理失败不影响会话删除
-                }
-            });
-        } catch (IOException ignored) {
-            // 同上
-        }
-    }
-
 }

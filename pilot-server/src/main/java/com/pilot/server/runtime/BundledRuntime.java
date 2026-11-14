@@ -5,7 +5,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeoutException;
@@ -22,6 +21,7 @@ import com.pilot.core.runtime.bootstrap.RuntimeAssets;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.runtime.bootstrap.SourceEnvironment;
 import com.pilot.core.tool.ProcessSupport;
+import com.pilot.core.util.FileTrees;
 
 /**
  * 给技能脚本准备 Python 3.12 和 Node 22。
@@ -93,7 +93,7 @@ public class BundledRuntime implements SmartLifecycle {
             return;
         }
         Path unpack = parent.resolve(dest.getFileName() + "-unpack");
-        deleteTree(unpack);
+        FileTrees.deleteBestEffort(unpack);
         try {
             Files.createDirectories(unpack);
         } catch (IOException e) {
@@ -109,14 +109,14 @@ public class BundledRuntime implements SmartLifecycle {
             log.warn("压缩包里没有 {}：{}", unixName, unpack);
             return;
         }
-        deleteTree(dest);
+        FileTrees.deleteBestEffort(dest);
         try {
             Files.move(extracted, dest);
         } catch (IOException e) {
             log.warn("放好 {} 失败：{}", archive.name(), e.toString());
             return;
         }
-        deleteTree(unpack);
+        FileTrees.deleteBestEffort(unpack);
         try {
             Files.deleteIfExists(tar);
         } catch (IOException ignored) {
@@ -281,23 +281,6 @@ public class BundledRuntime implements SmartLifecycle {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return -1;
-        }
-    }
-
-    private static void deleteTree(Path root) {
-        if (root == null || Files.notExists(root)) {
-            return;
-        }
-        try (Stream<Path> walk = Files.walk(root)) {
-            walk.sorted(Comparator.reverseOrder()).forEach(path -> {
-                try {
-                    Files.deleteIfExists(path);
-                } catch (IOException ignored) {
-                    // 下次启动再清理
-                }
-            });
-        } catch (IOException ignored) {
-            // 目录正在被占用
         }
     }
 

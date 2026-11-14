@@ -12,7 +12,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -27,6 +26,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.loop.Attachment;
+import com.pilot.core.util.FileTrees;
 import com.pilot.server.config.AttachmentLimits;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.StorageHealth;
@@ -295,9 +295,9 @@ public class AttachmentService {
                 .toList()) {
                 String dirName = sessionDir.getFileName().toString();
                 if (!live.contains(dirName) && Files.getLastModifiedTime(sessionDir).toInstant().isBefore(cutoff)) {
-                    PurgeStats removed = deleteTreeCounting(sessionDir);
+                    FileTrees.Deletion removed = deleteTree(sessionDir);
                     files += removed.files();
-                    dirs += removed.dirs();
+                    dirs += removed.directories();
                 }
             }
         } catch (IOException e) {
@@ -307,47 +307,11 @@ public class AttachmentService {
         return new PurgeStats(files, dirs);
     }
 
-    private static void deleteTree(Path dir) {
+    private static FileTrees.Deletion deleteTree(Path dir) {
         if (!Files.isDirectory(dir)) {
-            return;
+            return new FileTrees.Deletion(0, 0);
         }
-        try (Stream<Path> entries = Files.walk(dir)) {
-            entries.sorted(Comparator.reverseOrder()).forEach(path -> {
-                try {
-                    Files.deleteIfExists(path);
-                } catch (IOException e) {
-                    log.warn("清理附件 {} 失败", path, e);
-                }
-            });
-        } catch (IOException e) {
-            log.warn("遍历附件目录失败: {}", dir, e);
-        }
-    }
-
-    private static PurgeStats deleteTreeCounting(Path dir) {
-        if (!Files.isDirectory(dir)) {
-            return new PurgeStats(0, 0);
-        }
-        int files = 0;
-        int dirs = 0;
-        try (Stream<Path> entries = Files.walk(dir)) {
-            for (Path path : entries.sorted(Comparator.reverseOrder()).toList()) {
-                try {
-                    if (Files.isDirectory(path)) {
-                        if (Files.deleteIfExists(path)) {
-                            dirs++;
-                        }
-                    } else if (Files.deleteIfExists(path)) {
-                        files++;
-                    }
-                } catch (IOException e) {
-                    log.warn("清理附件 {} 失败", path, e);
-                }
-            }
-        } catch (IOException e) {
-            log.warn("遍历附件目录失败: {}", dir, e);
-        }
-        return new PurgeStats(files, dirs);
+        return FileTrees.deleteBestEffort(dir, (path, error) -> log.warn("清理附件 {} 失败", path, error));
     }
 
     private Attachment save(String sessionId, String name, String mime, byte[] bytes) {
