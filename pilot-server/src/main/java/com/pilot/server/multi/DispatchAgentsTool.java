@@ -11,12 +11,12 @@ import java.util.function.Consumer;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.multi.AgentProfile;
 import com.pilot.core.multi.AgentProfileCatalog;
-import com.pilot.core.multi.AgentScope;
 import com.pilot.core.multi.RiskLevel;
 import com.pilot.core.multi.TaskSpec;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolSchemas;
+import com.pilot.core.workspace.AgentScope;
 
 /**
  * {@code dispatch_agents}：父 Agent 把任务 DAG 交给调度器，由内核拉子 Agent 执行。

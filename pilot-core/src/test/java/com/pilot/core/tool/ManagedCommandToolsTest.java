@@ -27,10 +27,10 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.core.approval.InMemoryApprovalBroker;
-import com.pilot.core.multi.AgentScope;
 import com.pilot.core.permission.PermissionDecision;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
+import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 
 import tools.jackson.databind.json.JsonMapper;

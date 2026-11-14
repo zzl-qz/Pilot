@@ -16,10 +16,10 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import com.pilot.core.multi.AgentScope;
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.RiskLevel;
 import com.pilot.core.multi.SandboxChange;
+import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.core.workspace.WorkspaceViolationException;
 

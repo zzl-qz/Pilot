@@ -18,12 +18,13 @@ import java.util.regex.Pattern;
 
 import com.pilot.core.exec.EnvironmentSanitizer;
 import com.pilot.core.exec.OsSandbox;
-import com.pilot.core.multi.AgentScope;
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.util.HostOs;
 import com.pilot.core.util.Texts;
+import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 
 /**

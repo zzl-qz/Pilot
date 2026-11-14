@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.pilot.core.workspace.AgentScope;
+
 /** 自定义子代理目录：扫描遮蔽、坏文件排除、任务字段与 profile 的合并语义（不能放宽）。 */
 class AgentProfileCatalogTest {
     @TempDir

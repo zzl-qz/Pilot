@@ -18,8 +18,8 @@ import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.multi.UnifiedDiff;
-import com.pilot.core.tool.ProcessSupport;
 
 /**
  * 变更审阅：读取工作区的 git 状态与 diff，供界面展示「这次到底改了什么」。

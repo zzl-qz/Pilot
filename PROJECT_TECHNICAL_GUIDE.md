@@ -244,7 +244,7 @@ PathValidator 把路径规范化，比较工作区真实路径，并检查目标
 
 这些检查约束经过相应文件工具的操作。进程被启动后，它自己调用操作系统读写文件，并不会回调 PathValidator。因此“设置工作目录”和“检查命令名”都不能让子进程只看见那一个目录。
 
-源码：[PathValidator](pilot-core/src/main/java/com/pilot/core/workspace/PathValidator.java)、[EditFileTool](pilot-core/src/main/java/com/pilot/core/tool/EditFileTool.java)、[AgentScope](pilot-core/src/main/java/com/pilot/core/multi/AgentScope.java)。
+源码：[PathValidator](pilot-core/src/main/java/com/pilot/core/workspace/PathValidator.java)、[EditFileTool](pilot-core/src/main/java/com/pilot/core/tool/EditFileTool.java)、[AgentScope](pilot-core/src/main/java/com/pilot/core/workspace/AgentScope.java)。
 
 ### 当前的三种隔离不要混淆
 

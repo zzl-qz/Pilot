@@ -3,6 +3,8 @@ package com.pilot.core.multi;
 import java.util.List;
 import java.util.Objects;
 
+import com.pilot.core.workspace.AgentScope;
+
 /**
  * 一个子任务的完整定义：目标、验收依据、依赖、权限视图、风险等级。
  *

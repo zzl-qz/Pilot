@@ -21,7 +21,7 @@ import com.pilot.core.exec.ExecutionIsolation;
 import com.pilot.core.exec.ExecutionRequest;
 import com.pilot.core.exec.ExecutionResult;
 import com.pilot.core.exec.ExecutionSettings;
-import com.pilot.core.multi.AgentScope;
+import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 
 class SandboxCommandToolTest {

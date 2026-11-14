@@ -2,6 +2,8 @@ package com.pilot.core.multi;
 
 import java.util.List;
 
+import com.pilot.core.workspace.AgentScope;
+
 /**
  * 一个自定义子代理的角色定义（{@code .pilot/agents/<name>.md}）。
  *

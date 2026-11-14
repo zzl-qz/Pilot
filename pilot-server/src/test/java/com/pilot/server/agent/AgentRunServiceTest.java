@@ -839,7 +839,7 @@ class AgentRunServiceTest {
             commandTasks = new com.pilot.core.tool.CommandTaskManager(dataDir.file("commands"), mapper);
             WorkspaceToolFactory factory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
             when(factory.resolve(anyString())).thenReturn(workspace);
-            when(factory.registryForScope(anyString(), any(com.pilot.core.multi.AgentScope.class),
+            when(factory.registryForScope(anyString(), any(com.pilot.core.workspace.AgentScope.class),
                 any(com.pilot.core.tool.SandboxSink.class))).thenAnswer(invocation -> {
                     // /review 独立模式的只读工具表（真实实现里由 AgentScope 裁剪）：测试里至少提供读工具
                     ToolRegistry tools = new ToolRegistry();
