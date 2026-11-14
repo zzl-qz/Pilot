@@ -1,10 +1,27 @@
-/** 工作台与普通网页分开：窗口、主框架和 Chromium 实际 origin 必须同时可信。 */
-export function workbenchOrigin(value) {
-  const url = new URL(value);
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+const DEFAULT_WORKBENCH_PORT = '9999';
+
+export function workbenchAddress(value) {
+  let url;
+  try { url = new URL(value); } catch { /* 由下面的校验给出统一提示 */ }
+  if (!url || !['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
     throw new Error('Pilot 工作台地址必须是无用户名密码的 HTTP 或 HTTPS 地址');
   }
-  return url.origin;
+  return url;
+}
+
+/** 自动开窗传入实际 URL，独立启动时可沿用服务端端口。 */
+export function configuredWorkbenchUrl({ PILOT_URL, SERVER_PORT } = process.env) {
+  if (PILOT_URL?.trim()) return workbenchAddress(PILOT_URL).href;
+  const port = SERVER_PORT?.trim() || DEFAULT_WORKBENCH_PORT;
+  if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
+    throw new Error('独立启动 Pilot 桌面时，SERVER_PORT 必须为 1 至 65535，或通过 PILOT_URL 指定服务地址');
+  }
+  return workbenchAddress(`http://127.0.0.1:${port}`).href;
+}
+
+/** 工作台与普通网页分开：窗口、主框架和 Chromium 实际 origin 必须同时可信。 */
+export function workbenchOrigin(value) {
+  return workbenchAddress(value).origin;
 }
 
 export function isWorkbenchUrl(value, appUrl) {

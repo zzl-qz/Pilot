@@ -1,9 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { workbenchOrigin, isWorkbenchUrl, trustedWorkbench, workbenchIpc, installWorkbenchNavigation } from './workbench-security.mjs';
+import { configuredWorkbenchUrl, workbenchOrigin, isWorkbenchUrl, trustedWorkbench, workbenchIpc, installWorkbenchNavigation } from './workbench-security.mjs';
 
 const home = 'http://127.0.0.1:9999';
+
+test('独立启动读取服务端口，自动启动传入的完整地址优先', () => {
+  assert.equal(configuredWorkbenchUrl({}), home + '/');
+  assert.equal(configuredWorkbenchUrl({ PILOT_URL: ' ', SERVER_PORT: ' 12456 ' }), 'http://127.0.0.1:12456/');
+  assert.equal(configuredWorkbenchUrl({ PILOT_URL: 'https://[::1]:12800/app?q=1', SERVER_PORT: '0' }),
+    'https://[::1]:12800/app?q=1');
+  for (const SERVER_PORT of ['0', '65536', '-1', '4e3', '9999/path']) {
+    assert.throws(() => configuredWorkbenchUrl({ SERVER_PORT }), /SERVER_PORT/);
+  }
+  assert.throws(() => configuredWorkbenchUrl({ PILOT_URL: 'http://user:password@localhost' }), /无用户名密码/);
+});
+
 function fixture() {
   const frame = { origin: home, url: home+'/', detached:false };
   const contents = Object.assign(new EventEmitter(), { mainFrame:frame, isDestroyed:()=>false, getURL:()=>frame.url, send:()=>{}, loadURL:async()=>{} });

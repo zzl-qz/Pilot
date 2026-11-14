@@ -10,7 +10,7 @@ test('离线页显示实际服务并保留重试地址', () => {
 });
 
 test('无效和主动脚本地址回退，不能插入 HTML', () => {
-  for (const value of ['javascript:alert(1)', 'invalid', 'data:text/html,<script>']) {
+  for (const value of ['javascript:alert(1)', 'invalid', 'data:text/html,<script>', 'http://user:password@localhost']) {
     assert.match(offlinePage(value), /href="http:\/\/127.0.0.1:9999\/"/);
   }
   assert.doesNotMatch(offlinePage('http://localhost/?q="<script>'), /<script>/);

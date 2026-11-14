@@ -15,7 +15,8 @@ const server = createServer((_, res) => { res.writeHead(200, { 'content-type': '
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const port = server.address().port;
 await new Promise(resolve => server.close(resolve));
-const env = { ...process.env, PILOT_URL: `http://127.0.0.1:${port}`, PILOT_BROWSER_HOME: temp };
+const env = { ...process.env, SERVER_PORT: String(port), PILOT_BROWSER_HOME: temp };
+delete env.PILOT_URL;
 delete env.ELECTRON_RUN_AS_NODE; delete env.PILOT_DESKTOP_SMOKE;
 let desktop;
 try {

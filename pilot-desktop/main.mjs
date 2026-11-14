@@ -1,6 +1,6 @@
 import { selectProjectDirectories } from './directory-picker.mjs';
 import { installMicrophonePermissions } from './media-permission.mjs';
-import { workbenchOrigin, workbenchIpc, installWorkbenchNavigation } from './workbench-security.mjs';
+import { configuredWorkbenchUrl, workbenchOrigin, workbenchIpc, installWorkbenchNavigation } from './workbench-security.mjs';
 import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, nativeImage, systemPreferences, dialog, clipboard } from 'electron';
 import { startBrowserControl } from './browser-control.mjs';
 import { randomBytes } from 'node:crypto';
@@ -15,7 +15,7 @@ import { windowSizeMenuItem, workbenchMenuItems, workbenchShortcut } from './pla
 
 const here = dirname(fileURLToPath(import.meta.url));
 const smoke = process.env.PILOT_DESKTOP_SMOKE === '1';
-const workbenchUrl = process.env.PILOT_URL || 'http://127.0.0.1:9999';
+const workbenchUrl = configuredWorkbenchUrl();
 const origin = workbenchOrigin(workbenchUrl);
 app.setName('Pilot');
 process.on('uncaughtException', (error) => {

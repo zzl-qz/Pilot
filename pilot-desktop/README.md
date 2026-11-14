@@ -6,6 +6,8 @@
 
 ## 开发与单项回归
 
+后台自动开窗会传入实际工作台地址。单独运行 `npm --prefix pilot-desktop start` 时，设置 `PILOT_URL` 可指定完整 HTTP(S) 地址，也可用 `SERVER_PORT` 连接同一台机器上的自定义端口，默认端口为 9999。
+
 在仓库根目录执行：
 
 ```text

@@ -1,9 +1,10 @@
+import { configuredWorkbenchUrl, workbenchAddress } from './workbench-security.mjs';
+
 const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
 export function offlinePage(address) {
   let target;
-  try { target = new URL(address); } catch { target = new URL('http://127.0.0.1:9999'); }
-  if (!['http:', 'https:'].includes(target.protocol)) target = new URL('http://127.0.0.1:9999');
+  try { target = workbenchAddress(address); } catch { target = workbenchAddress(configuredWorkbenchUrl({})); }
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pilot · 连接服务</title>
 <style>
 :root {
