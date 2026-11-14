@@ -112,7 +112,8 @@ class ModelRequestTimeoutTest {
                 var runtime = new ModelRuntimeSettings(store, models, JSON);
                 String provider = protocol.equals("messages") ? "anthropic" : "generic";
                 runtime.update("arbitrary-model", endpoint, options(provider, 4L, 1L));
-                var client = new ModelClientConfiguration().modelClient(models, JSON, runtime, false);
+                var configuration = new ModelClientConfiguration();
+                var client = configuration.modelClient(models, JSON, runtime, false, configuration.modelHttpClient(10));
                 var pinned = client.snapshot();
                 var input = List.of(Message.user("hi"));
                 assertEquals("ok", client.chat(input, List.of()).content());

@@ -1,5 +1,6 @@
 package com.pilot.server.controller;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -9,11 +10,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -26,7 +30,8 @@ import com.sun.net.httpserver.HttpServer;
 
 /** 模型设置的对外契约：留空保持、明确清除、坏端点不落盘、可用模型探测只读。 */
 @SpringBootTest(
-    properties = {"pilot.store=memory", "pilot.model.timeout-seconds=120", "pilot.model.idle-timeout-seconds=60"})
+    properties = {"pilot.store=memory", "pilot.model.timeout-seconds=120", "pilot.model.idle-timeout-seconds=60",
+        "pilot.model.connect-timeout-seconds=4", "pilot.model.options=primary-test,alternate-test"})
 @AutoConfigureMockMvc
 class SettingsApiTest {
     private static final Path DATA = Path.of(System.getProperty("java.io.tmpdir"), "pilot-settings-api-test");
@@ -38,6 +43,18 @@ class SettingsApiTest {
 
     @Autowired
     private MockMvc mvc;
+
+    @Autowired
+    @Qualifier("modelHttpClient")
+    private HttpClient modelHttpClient;
+
+    @Test
+    void exposesConfiguredModelChoicesAndUsesConfiguredConnectionTimeout() throws Exception {
+        mvc.perform(get("/api/settings")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.modelOptions[0]").value("primary-test"))
+            .andExpect(jsonPath("$.modelOptions[1]").value("alternate-test"));
+        assertEquals(Duration.ofSeconds(4), modelHttpClient.connectTimeout().orElseThrow());
+    }
 
     @Test
     void exposesAttachmentBudgetFromServerConfiguration() throws Exception {

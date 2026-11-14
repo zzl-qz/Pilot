@@ -2,9 +2,9 @@ package com.pilot.server.config;
 
 import java.net.URI;
 import java.net.http.HttpClient;
-import java.time.Duration;
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.model.ModelCatalog;
@@ -24,11 +24,13 @@ import tools.jackson.databind.ObjectMapper;
 public class ModelCatalogService {
     private final ModelSettings settings;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    private final HttpClient httpClient;
 
-    public ModelCatalogService(ModelSettings settings, ObjectMapper objectMapper) {
+    public ModelCatalogService(ModelSettings settings, ObjectMapper objectMapper,
+        @Qualifier("modelHttpClient") HttpClient httpClient) {
         this.settings = settings;
         this.objectMapper = objectMapper;
+        this.httpClient = httpClient;
     }
 
     /** @throws IllegalArgumentException 端点不是合法的 http(s) 地址 */

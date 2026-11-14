@@ -95,9 +95,8 @@ pilot:
     # 不要把密钥写进会提交的文件。用 application-local.yaml，或环境变量 PILOT_MODEL_API_KEY
     api-key: ${PILOT_MODEL_API_KEY:}
     # 单次模型请求默认总超时（秒），包含响应头及完整响应体；模型设置页可按端点与模型覆盖。
-    timeout-seconds: ${PILOT_MODEL_TIMEOUT_SECONDS:900}
-    # 默认连续无数据时限（秒）；0 表示沿用当前请求总超时，不能用心跳延长总时限。
-    idle-timeout-seconds: ${PILOT_MODEL_IDLE_TIMEOUT_SECONDS:600}
+    # PILOT_MODEL_TIMEOUT_SECONDS 默认 900；PILOT_MODEL_IDLE_TIMEOUT_SECONDS 默认 600，0 表示跟随总时限。
+    # PILOT_MODEL_CONNECT_TIMEOUT_SECONDS 默认 10，供聊天和模型列表共用。
     # 给 system 提示词打 cache_control 显式缓存标记：只对支持该字段的端点（Anthropic 兼容网关）开启。
     # OpenAI 官方端点按前缀自动缓存，保持 false 即可，避免第三方端点拒绝未知字段。
     prompt-caching: ${PILOT_MODEL_PROMPT_CACHING:false}

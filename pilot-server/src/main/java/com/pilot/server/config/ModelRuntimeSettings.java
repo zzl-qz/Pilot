@@ -25,6 +25,9 @@ import tools.jackson.databind.annotation.JsonDeserialize;
 /** 运行选项按端点和模型存储；切换网关不会沿用另一家的价格、专有参数或等待时限。 */
 @Component
 public final class ModelRuntimeSettings {
+    private static final long DEFAULT_TIMEOUT_SECONDS = 900;
+    private static final long DEFAULT_IDLE_TIMEOUT_SECONDS = 600;
+
     public record Options(String provider, String cacheMode, String cacheTtl, Boolean instructionMessages,
         Boolean streamUsage, String compactionMode, String webSearchMode, ModelPricing pricing,
         @JsonDeserialize(using = IntegerSeconds.class) Long timeoutSeconds,
@@ -111,13 +114,13 @@ public final class ModelRuntimeSettings {
     }
 
     public ModelRuntimeSettings(SettingsStore store, ModelSettings models, ObjectMapper mapper) {
-        this(store, models, mapper, 900, 600);
+        this(store, models, mapper, DEFAULT_TIMEOUT_SECONDS, DEFAULT_IDLE_TIMEOUT_SECONDS);
     }
 
     @Autowired
     public ModelRuntimeSettings(SettingsStore store, ModelSettings models, ObjectMapper mapper,
-        @Value("${pilot.model.timeout-seconds:900}") long timeoutSeconds,
-        @Value("${pilot.model.idle-timeout-seconds:600}") long idleTimeoutSeconds) {
+        @Value("${pilot.model.timeout-seconds:" + DEFAULT_TIMEOUT_SECONDS + "}") long timeoutSeconds,
+        @Value("${pilot.model.idle-timeout-seconds:" + DEFAULT_IDLE_TIMEOUT_SECONDS + "}") long idleTimeoutSeconds) {
         if (timeoutSeconds <= 0 || idleTimeoutSeconds < 0) {
             throw new IllegalArgumentException("模型总超时必须为正数，空闲超时不能为负数");
         }
