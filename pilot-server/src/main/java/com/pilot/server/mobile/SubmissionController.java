@@ -17,16 +17,14 @@ import org.springframework.web.bind.annotation.RestController;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+
 /** Web/桌面提交凭据。复用受备份保护的持久回执，查询永远不会调用原写操作。 */
 @RestController
+@RequiredArgsConstructor
 public class SubmissionController {
     private final MobileReceiptStore receipts;
     private final ObjectMapper mapper;
-
-    public SubmissionController(MobileReceiptStore receipts, ObjectMapper mapper) {
-        this.receipts = receipts;
-        this.mapper = mapper;
-    }
 
     @GetMapping("/api/submissions/token")
     public ResponseEntity<?> token() throws IOException {

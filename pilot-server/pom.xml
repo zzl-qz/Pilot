@@ -37,6 +37,12 @@
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
         </dependency>
+        <!-- server 直接编译 core 源码，@Slf4j 的注解处理器这里也要有。 -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>com.pilot</groupId>
             <artifactId>pilot-core</artifactId>

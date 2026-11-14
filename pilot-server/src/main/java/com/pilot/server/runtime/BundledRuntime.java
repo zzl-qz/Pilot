@@ -10,8 +10,6 @@ import java.util.Locale;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
@@ -24,14 +22,16 @@ import com.pilot.core.runtime.bootstrap.SourceEnvironment;
 import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.HostOs;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 给技能脚本准备 Python 3.12 和 Node 22。
  * Python 继续使用 .pilot/runtime，Node 新安装共用源码启动器的校验缓存。
  * 不进 git，打包 exe 时把这个目录一起拷走即可。
  */
 @Component
+@Slf4j
 public class BundledRuntime implements SmartLifecycle {
-    private static final Logger log = LoggerFactory.getLogger(BundledRuntime.class);
     private static final Duration DOWNLOAD_TIMEOUT = Duration.ofMinutes(5);
     private static final Duration EXTRACT_TIMEOUT = Duration.ofMinutes(2);
     private static final String PYTHON_RELEASE = "20261026";

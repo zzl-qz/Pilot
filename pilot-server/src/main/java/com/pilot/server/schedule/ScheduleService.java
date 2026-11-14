@@ -13,7 +13,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -36,8 +35,11 @@ import com.pilot.server.run.TaskControlStatus;
 import com.pilot.server.skill.SkillService;
 import com.pilot.server.tool.WorkspaceToolFactory;
 
+import lombok.extern.slf4j.Slf4j;
+
 /** 持久计划只负责投递；所有模型工作仍由 RunStarter 执行。服务就绪后才收敛/调度。 */
 @Service
+@Slf4j
 public class ScheduleService {
     private final ScheduleRepository repository;
     private final SessionService sessions;
@@ -271,7 +273,7 @@ public class ScheduleService {
             try {
                 advance(job);
             } catch (RuntimeException e) {
-                LoggerFactory.getLogger(getClass()).warn("定时任务 {} 调度失败，保留状态", job.id(), e);
+                log.warn("定时任务 {} 调度失败，保留状态", job.id(), e);
             }
         }
     }

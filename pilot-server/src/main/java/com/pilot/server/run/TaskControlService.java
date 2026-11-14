@@ -22,16 +22,14 @@ import com.pilot.server.workspace.HistoryFileChange;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+
 /** 独立于压缩后的对话记忆保存任务目标、边界、验收证据和纠正记录。 */
 @Component
+@RequiredArgsConstructor
 public class TaskControlService {
     private final ObjectMapper mapper;
     private final PilotDataDir data;
-
-    public TaskControlService(ObjectMapper mapper, PilotDataDir data) {
-        this.mapper = mapper;
-        this.data = data;
-    }
 
     public record Acceptance(String text, Boolean checked, String evidence) {
         public Acceptance {

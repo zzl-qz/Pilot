@@ -10,18 +10,17 @@ import java.util.Optional;
 import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunCheckpointRepository;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 运行检查点落库。
  *
  * <p>租约抢占用一条带条件的 UPDATE 完成：条件里同时接受「没有持有者」「自己续租」
  * 「上一个租约已经过期」，因此不需要额外的分布式锁，也不会出现两个实例同时接管。
  */
+@RequiredArgsConstructor
 public final class JdbcRunCheckpointRepository implements RunCheckpointRepository {
     private final SqliteStore store;
-
-    public JdbcRunCheckpointRepository(SqliteStore store) {
-        this.store = store;
-    }
 
     @Override
     public void save(RunCheckpoint checkpoint) {

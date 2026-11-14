@@ -18,15 +18,14 @@ import com.pilot.server.security.AccessControl;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 
+import lombok.RequiredArgsConstructor;
+
 /** 本机管理入口。远程配对手机不能转授其他设备；禁止跨来源网页创建配对凭证。 */
 @RestController
 @RequestMapping("/api/mobile/connection")
+@RequiredArgsConstructor
 public class MobileConnectionController {
     private final MobileConnectionService service;
-
-    public MobileConnectionController(MobileConnectionService service) {
-        this.service = service;
-    }
 
     @GetMapping
     public ResponseEntity<JsonNode> status(HttpServletRequest request) {

@@ -14,19 +14,16 @@ import com.pilot.server.common.web.SessionLookup;
 
 import tools.jackson.databind.node.NullNode;
 
+import lombok.RequiredArgsConstructor;
+
 /** 用户可随时查看任务依据，空闲时编辑约束和验收证据。 */
 @RestController
 @RequestMapping("/api/sessions/{id}/task")
+@RequiredArgsConstructor
 public class TaskControlController {
     private final SessionService sessions;
     private final RunStarter runs;
     private final TaskControlService tasks;
-
-    public TaskControlController(SessionService sessions, RunStarter runs, TaskControlService tasks) {
-        this.sessions = sessions;
-        this.runs = runs;
-        this.tasks = tasks;
-    }
 
     @GetMapping
     public Object get(@PathVariable String id) {

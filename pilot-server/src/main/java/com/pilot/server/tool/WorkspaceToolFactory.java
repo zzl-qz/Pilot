@@ -54,6 +54,8 @@ import com.pilot.server.config.WebSearchProperties;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 按工作区构建工具集。
  *
@@ -61,6 +63,7 @@ import tools.jackson.databind.ObjectMapper;
  * 不能做成全局单例，否则会话会互相越界。构建结果按规范化路径缓存。
  */
 @Component
+@RequiredArgsConstructor
 public class WorkspaceToolFactory {
     private static final Duration WEB_CONNECT_TIMEOUT = Duration.ofSeconds(5);
 
@@ -84,14 +87,6 @@ public class WorkspaceToolFactory {
 
     public Selection executionSelection() {
         return execution;
-    }
-
-    public WorkspaceToolFactory(AgentProperties properties, WebSearchProperties webSearchProperties,
-        SnapshotSink snapshots, ObjectMapper mapper) {
-        this.properties = properties;
-        this.webSearchProperties = webSearchProperties;
-        this.snapshots = snapshots;
-        this.mapper = mapper;
     }
 
     @Autowired(required = false)

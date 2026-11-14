@@ -6,17 +6,15 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.server.maintenance.RetentionService;
 
+import lombok.RequiredArgsConstructor;
+
 /** 进程内运行指标：运行成功率、失败码分布、压缩与工具调用次数。 */
 @RestController
 @RequestMapping("/api/metrics")
+@RequiredArgsConstructor
 public class MetricsController {
     private final RunMetrics metrics;
     private final RetentionService retention;
-
-    public MetricsController(RunMetrics metrics, RetentionService retention) {
-        this.metrics = metrics;
-        this.retention = retention;
-    }
 
     @GetMapping
     public MetricsResponse metrics() {

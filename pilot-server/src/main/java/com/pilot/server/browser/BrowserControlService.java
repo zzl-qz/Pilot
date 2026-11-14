@@ -12,8 +12,6 @@ import java.util.concurrent.Executors;
 
 import jakarta.annotation.PreDestroy;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -24,6 +22,8 @@ import com.pilot.core.tool.Availability;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 浏览器镜像的订阅分发与上行动作入口（瞬态通道，与持久化事件流完全分开）。
@@ -41,8 +41,8 @@ import tools.jackson.databind.ObjectMapper;
  * mirrorControl / focus 等控制动作统一交给单线程 executor，不阻塞请求与事件线程。
  */
 @Service
+@Slf4j
 public class BrowserControlService implements BrowserEventListener {
-    private static final Logger log = LoggerFactory.getLogger(BrowserControlService.class);
     /** 用户在界面上手动操作浏览器时，单条指令的等待上限。 */
     private static final Duration USER_COMMAND_TIMEOUT = Duration.ofSeconds(45);
 

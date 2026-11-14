@@ -35,6 +35,8 @@ import com.pilot.core.workspace.WorkspaceViolationException;
 import com.pilot.server.common.web.ApiErrors;
 import com.pilot.server.common.web.SessionLookup;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 工作区文件浏览：给左侧文件树和右侧只读预览用。
  *
@@ -42,6 +44,7 @@ import com.pilot.server.common.web.SessionLookup;
  */
 @RestController
 @RequestMapping("/api/sessions")
+@RequiredArgsConstructor
 public class SessionFilesController {
     /** 构建产物与运行期噪音目录，不进文件树。 */
     private static final Set<String> NOISY = Set.copyOf(List.of(".git", ".gradle", ".idea", ".vscode", "node_modules",
@@ -54,10 +57,6 @@ public class SessionFilesController {
     private static final int MAX_FLAT_DEPTH = 12;
 
     private final SessionService sessions;
-
-    public SessionFilesController(SessionService sessions) {
-        this.sessions = sessions;
-    }
 
     /** 目录树的一层：目录在前、文件在后，按名称排序。 */
     @GetMapping("/{id}/files")

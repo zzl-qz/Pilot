@@ -11,8 +11,6 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.stream.Stream;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -30,6 +28,8 @@ import com.pilot.server.store.SqliteStore;
 import com.pilot.server.validation.ValidationLedger;
 import com.pilot.server.workspace.RunSnapshotService;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 运行期数据的保留策略：事件、快照和 trace 都是只增不减的，跑久了会持续占盘。
  *
@@ -37,8 +37,8 @@ import com.pilot.server.workspace.RunSnapshotService;
  * 早于保留期的数据。会话本身不删，只是不再保留那么久的事件审计。
  */
 @Component
+@Slf4j
 public class RetentionService {
-    private static final Logger log = LoggerFactory.getLogger(RetentionService.class);
     /** 抢不到维护锁说明正在备份或恢复，稍等一下就放弃这一轮清理。 */
     private static final Duration MAINTENANCE_LOCK_WAIT = Duration.ofSeconds(2);
 

@@ -11,6 +11,8 @@ import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.skill.SkillService;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 自定义子代理目录的装配点（两级目录，语义与 {@link SkillService} 同构）。
  *
@@ -20,15 +22,11 @@ import com.pilot.server.skill.SkillService;
  * 激活全部走既有工具与权限模型，不引入新的执行路径。
  */
 @Component
+@RequiredArgsConstructor
 public class AgentProfileService {
 
     private final AgentProperties agentProperties;
     private final PilotDataDir dataDir;
-
-    public AgentProfileService(AgentProperties agentProperties, PilotDataDir dataDir) {
-        this.agentProperties = agentProperties;
-        this.dataDir = dataDir;
-    }
 
     /** 按工作区扫描两级代理目录。 */
     public AgentProfileCatalog catalogFor(String workspace) {

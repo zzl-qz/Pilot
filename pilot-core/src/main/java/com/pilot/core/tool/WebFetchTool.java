@@ -13,17 +13,16 @@ import java.util.Map;
 import com.pilot.core.http.BoundedHttp;
 import com.pilot.core.message.ToolNames;
 
+import lombok.RequiredArgsConstructor;
+
 /** Fetches public HTTP(S) pages as bounded plain text, without following redirects. */
+@RequiredArgsConstructor
 public final class WebFetchTool implements Tool {
     private static final int MAX_BYTES = 512 * 1024;
     private static final int MAX_CHARS = 20_000;
     /** 整个请求的上限，也是中途没有数据时的断开时间。 */
     private static final Duration FETCH_TIMEOUT = Duration.ofSeconds(15);
     private final HttpClient client;
-
-    public WebFetchTool(HttpClient client) {
-        this.client = client;
-    }
 
     @Override
     public String name() {

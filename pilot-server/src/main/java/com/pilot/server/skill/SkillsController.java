@@ -22,6 +22,8 @@ import com.pilot.core.skill.SkillProblem;
 import com.pilot.server.common.web.ApiErrors;
 import com.pilot.server.common.web.SessionLookup;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 技能目录查询：前端 `/` 快捷命令菜单与设置页从这里拉取清单。
  *
@@ -31,16 +33,11 @@ import com.pilot.server.common.web.SessionLookup;
  */
 @RestController
 @RequestMapping("/api/skills")
+@RequiredArgsConstructor
 public class SkillsController {
     private final SkillService skills;
     private final SkillInstallService installer;
     private final SessionService sessions;
-
-    public SkillsController(SkillService skills, SkillInstallService installer, SessionService sessions) {
-        this.skills = skills;
-        this.installer = installer;
-        this.sessions = sessions;
-    }
 
     /**
      * 技能清单。技能目录按工作区解析（项目级技能随仓库走），因此以会话为锚点；

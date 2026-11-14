@@ -22,13 +22,12 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.pilot.core.tool.Availability;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 用 Node 子进程驱动 Playwright Chromium 的 {@link BrowserBackend}。
@@ -45,8 +44,8 @@ import tools.jackson.databind.ObjectMapper;
  * {@code PLAYWRIGHT_BROWSERS_PATH}、{@code PILOT_BROWSER_HEADLESS}），
  * 让 Java 配置驱动浏览器选型与有头/无头，sidecar 自己不读任何配置文件。
  */
+@Slf4j
 public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
-    private static final Logger log = LoggerFactory.getLogger(PlaywrightBackend.class);
     private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(60);
     private static final Duration START_TIMEOUT = Duration.ofSeconds(15);
     /** 关页面只是尽力而为，等太久没意义。 */

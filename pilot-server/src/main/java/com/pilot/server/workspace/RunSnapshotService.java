@@ -22,8 +22,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.message.Message;
@@ -37,6 +35,8 @@ import com.pilot.server.workspace.ChangeService.RunChangeReport;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 运行级文件快照：写工具落盘前备份原文件，支持按 runId 回滚。
  *
@@ -44,8 +44,8 @@ import tools.jackson.databind.ObjectMapper;
  * 运行上下文通过 ThreadLocal 绑定，因为工具实例按工作区缓存、跨运行复用。
  */
 @Component
+@Slf4j
 public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
-    private static final Logger log = LoggerFactory.getLogger(RunSnapshotService.class);
     private static final String META_FILE = "meta.json";
     private static final String CHANGES_FILE = "changes.json";
     /**

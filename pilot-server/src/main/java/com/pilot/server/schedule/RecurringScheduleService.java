@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
@@ -24,8 +23,11 @@ import com.pilot.server.store.AutomationStore;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.extern.slf4j.Slf4j;
+
 /** 周期只产生一次性任务；隔离、唤醒、预算和核验仍由 ScheduleService 负责。 */
 @Service
+@Slf4j
 public class RecurringScheduleService {
     public record Series(String id, String name, ScheduleService.Create task, String cron, String timezone,
         String misfire, String state, Instant nextAt, String activeId, int occurrences, String message, long version,
@@ -234,11 +236,11 @@ public class RecurringScheduleService {
                             "创建轮次失败：" + e.getMessage());
                     }
                 } catch (RuntimeException failure) {
-                    LoggerFactory.getLogger(getClass()).warn("周期计划 {} 无法保存错误状态，稍后重试", row.id(), failure);
+                    log.warn("周期计划 {} 无法保存错误状态，稍后重试", row.id(), failure);
                 }
             } catch (RuntimeException e) {
                 // 轮次可能已经落库。保留稳定 ID，下一次扫描恢复该轮，不能把暂时故障变成永久停调。
-                LoggerFactory.getLogger(getClass()).warn("周期计划 {} 暂时不可用，保留轮次后重试", row.id(), e);
+                log.warn("周期计划 {} 暂时不可用，保留轮次后重试", row.id(), e);
             }
         }
     }

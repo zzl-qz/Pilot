@@ -18,6 +18,8 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionRepository;
 import com.pilot.core.session.SessionService;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 用量聚合：把落库的 {@code run.usage} 累计快照聚成日/会话两个视角，供设置页成本面板展示。
  *
@@ -28,6 +30,7 @@ import com.pilot.core.session.SessionService;
  * 中断 run 的最后快照也计入（已发生的成本不该因为中断就消失）。
  */
 @Service
+@RequiredArgsConstructor
 public class UsageService {
 
     /** 单个 run 的末值快照。 */
@@ -51,11 +54,6 @@ public class UsageService {
 
     private final SessionRepository repository;
     private final SessionService sessions;
-
-    public UsageService(SessionRepository repository, SessionService sessions) {
-        this.repository = repository;
-        this.sessions = sessions;
-    }
 
     /**
      * @param days 聚合窗口天数；夹在 1-90，超大窗口会拖慢启动页

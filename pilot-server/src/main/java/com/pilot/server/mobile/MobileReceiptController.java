@@ -11,14 +11,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
+import lombok.RequiredArgsConstructor;
+
 /** 设备身份由已认证的连接桥注入；维护接口不在移动代理白名单内。 */
 @RestController
+@RequiredArgsConstructor
 public class MobileReceiptController {
     private final MobileReceiptStore receipts;
-
-    public MobileReceiptController(MobileReceiptStore receipts) {
-        this.receipts = receipts;
-    }
 
     @GetMapping("/api/mobile/receipts/token")
     public ResponseEntity<?> token(@RequestHeader("X-Pilot-Device-Id") String peer) throws IOException {

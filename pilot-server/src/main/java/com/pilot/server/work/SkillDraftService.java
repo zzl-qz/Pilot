@@ -28,8 +28,11 @@ import com.pilot.server.tool.WorkspaceToolFactory;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+
 /** 模型只提出草稿。人工接受/撤回先记意图再写文件，重启后根据内容指纹收敛状态。 */
 @Service
+@RequiredArgsConstructor
 public class SkillDraftService {
     private static final String KIND = "skill-draft";
     private static final String ID_PREFIX = "skill_";
@@ -72,15 +75,6 @@ public class SkillDraftService {
     private final SessionService sessions;
     private final WorkspaceToolFactory workspaces;
     private final SkillService skills;
-
-    public SkillDraftService(AutomationStore store, ObjectMapper mapper, SessionService sessions,
-        WorkspaceToolFactory workspaces, SkillService skills) {
-        this.store = store;
-        this.mapper = mapper;
-        this.sessions = sessions;
-        this.workspaces = workspaces;
-        this.skills = skills;
-    }
 
     public synchronized Draft propose(String sessionId, String runId, String name, String description, String body,
         String evidence) {

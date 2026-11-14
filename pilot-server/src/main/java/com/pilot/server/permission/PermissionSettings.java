@@ -3,13 +3,13 @@ package com.pilot.server.permission;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.store.SettingsStore;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 当前生效的权限档位。默认与 Codex / OpenCode 一致：完全放行（{@code AUTO}）。
@@ -19,8 +19,8 @@ import com.pilot.server.store.SettingsStore;
  * 想回到配置文件的值，删除 {@code settings} 表里的 {@code agent.permission-mode} 行即可。
  */
 @Component
+@Slf4j
 public class PermissionSettings {
-    private static final Logger log = LoggerFactory.getLogger(PermissionSettings.class);
     private static final String KEY = "agent.permission-mode";
 
     private final SettingsStore store;

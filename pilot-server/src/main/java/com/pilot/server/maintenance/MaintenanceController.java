@@ -11,6 +11,8 @@ import com.pilot.core.exec.ExecutionBackends;
 import com.pilot.server.common.data.DataMaintenance;
 import com.pilot.server.common.data.StorageHealth;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 运维接口：备份、保留策略、存储与隔离状态。
  *
@@ -18,17 +20,11 @@ import com.pilot.server.common.data.StorageHealth;
  */
 @RestController
 @RequestMapping("/api/maintenance")
+@RequiredArgsConstructor
 public class MaintenanceController {
     private final BackupService backups;
     private final RetentionService retention;
     private final ExecutionBackends.Selection execution;
-
-    public MaintenanceController(BackupService backups, RetentionService retention,
-        ExecutionBackends.Selection execution) {
-        this.backups = backups;
-        this.retention = retention;
-        this.execution = execution;
-    }
 
     @GetMapping("/status")
     public Status status() {

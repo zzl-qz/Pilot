@@ -11,13 +11,12 @@ import java.util.List;
 import com.pilot.core.session.InterruptedRun;
 import com.pilot.core.session.RunRepository;
 
+import lombok.RequiredArgsConstructor;
+
 /** 运行记录落库，供状态校准与后续断点续跑使用。 */
+@RequiredArgsConstructor
 public final class JdbcRunRepository implements RunRepository {
     private final SqliteStore store;
-
-    public JdbcRunRepository(SqliteStore store) {
-        this.store = store;
-    }
 
     @Override
     public void started(String runId, String sessionId, Instant at) {

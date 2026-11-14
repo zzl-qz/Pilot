@@ -14,15 +14,14 @@ import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.workspace.PathValidator;
 
+import lombok.RequiredArgsConstructor;
+
 /** 列出工作区内的一个目录，标记子目录与文件大小。 */
+@RequiredArgsConstructor
 public final class ListDirTool implements Tool.ParallelReadOnly {
     private static final int MAX_ENTRIES = 300;
 
     private final PathValidator paths;
-
-    public ListDirTool(PathValidator paths) {
-        this.paths = paths;
-    }
 
     @Override
     public String name() {

@@ -6,16 +6,15 @@ import java.util.List;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.session.PlanRepository;
 
+import lombok.RequiredArgsConstructor;
+
 /** SQLite 版计划存储：每次 update_plan 整体替换该会话的清单。 */
+@RequiredArgsConstructor
 public final class JdbcPlanRepository implements PlanRepository {
     private static final String DELETE = "DELETE FROM plan_items WHERE session_id = ?";
     private static final String INSERT = "INSERT INTO plan_items (session_id, ord, step, status) VALUES (?, ?, ?, ?)";
 
     private final SqliteStore store;
-
-    public JdbcPlanRepository(SqliteStore store) {
-        this.store = store;
-    }
 
     @Override
     public List<PlanItem> load(String sessionId) {

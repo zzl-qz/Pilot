@@ -6,11 +6,11 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.pilot.server.store.SettingsStore;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 当前生效的模型配置（端点 / 模型名 / API Key）。
@@ -22,8 +22,8 @@ import com.pilot.server.store.SettingsStore;
  * 避免浏览器或日志里出现明文密钥。
  */
 @Component
+@Slf4j
 public class ModelSettings {
-    private static final Logger log = LoggerFactory.getLogger(ModelSettings.class);
     private static final String KEY_ENDPOINT = "model.endpoint";
     private static final String KEY_MODEL = "model.name";
     private static final String KEY_API_KEY = "model.api-key";

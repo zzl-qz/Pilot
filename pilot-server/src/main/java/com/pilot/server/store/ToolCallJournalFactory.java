@@ -9,6 +9,8 @@ import com.pilot.core.tool.ToolCallJournal;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 按运行的工作区创建幂等账本。
  *
@@ -16,14 +18,10 @@ import tools.jackson.databind.ObjectMapper;
  * 所以不能做成全局单例。内存存储模式返回空实现（没有跨重启的账本）。
  */
 @Component
+@RequiredArgsConstructor
 public class ToolCallJournalFactory {
     private final ObjectProvider<SqliteStore> store;
     private final ObjectMapper mapper;
-
-    public ToolCallJournalFactory(ObjectProvider<SqliteStore> store, ObjectMapper mapper) {
-        this.store = store;
-        this.mapper = mapper;
-    }
 
     /** 删除会话时清掉其幂等账本；没有持久化存储时什么都不做。 */
     public int deleteSession(String sessionId) {

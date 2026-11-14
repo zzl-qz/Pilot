@@ -33,6 +33,8 @@ import com.pilot.core.event.ToolStarted;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 事件 <-> 数据库行的编解码。
  *
@@ -40,12 +42,9 @@ import tools.jackson.databind.ObjectMapper;
  * 避免依赖 Jackson 多态注解，也让表结构对 SSE 协议本身无感知。
  */
 @Component
+@RequiredArgsConstructor
 public class EventCodec {
     private final ObjectMapper mapper;
-
-    public EventCodec(ObjectMapper mapper) {
-        this.mapper = mapper;
-    }
 
     public String encode(SessionEvent event) {
         return mapper.writeValueAsString(event);

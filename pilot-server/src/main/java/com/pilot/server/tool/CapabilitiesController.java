@@ -27,6 +27,8 @@ import com.pilot.server.config.AgentProperties;
 import com.pilot.server.model.ModelSettings;
 import com.pilot.server.permission.PermissionSettings;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 能力清单：这个会话现在能用哪些工具、哪些 MCP 服务器、跑在什么模型与权限档位下。
  *
@@ -36,6 +38,7 @@ import com.pilot.server.permission.PermissionSettings;
  */
 @RestController
 @RequestMapping("/api/sessions/{id}")
+@RequiredArgsConstructor
 public class CapabilitiesController {
     private static final int MAX_DESCRIPTION_CHARS = 180;
 
@@ -47,20 +50,6 @@ public class CapabilitiesController {
     private final ObjectProvider<WorkspaceToolFactory> toolFactory;
     private final ObjectProvider<McpManager> mcpManager;
     private final LocalCapabilityService localCapabilities;
-
-    public CapabilitiesController(SessionService sessions, AgentProperties agentProperties,
-        PermissionSettings permissionSettings, ModelSettings modelSettings, ObjectProvider<ToolRegistry> toolRegistry,
-        ObjectProvider<WorkspaceToolFactory> toolFactory, ObjectProvider<McpManager> mcpManager,
-        LocalCapabilityService localCapabilities) {
-        this.sessions = sessions;
-        this.agentProperties = agentProperties;
-        this.permissionSettings = permissionSettings;
-        this.modelSettings = modelSettings;
-        this.toolRegistry = toolRegistry;
-        this.toolFactory = toolFactory;
-        this.mcpManager = mcpManager;
-        this.localCapabilities = localCapabilities;
-    }
 
     @GetMapping("/capabilities")
     public CapabilitiesResponse capabilities(@PathVariable String id) {

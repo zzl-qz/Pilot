@@ -15,19 +15,16 @@ import org.springframework.web.server.ResponseStatusException;
 import com.pilot.server.workspace.ChangeService;
 import com.pilot.server.workspace.RunSnapshotService;
 
+import lombok.RequiredArgsConstructor;
+
 /** 运行控制：取消执行、回滚改动与查看本轮改动。 */
 @RestController
 @RequestMapping("/api/runs")
+@RequiredArgsConstructor
 public class RunController {
     private final RunStarter runStarter;
     private final RunSnapshotService snapshots;
     private final ChangeService changes;
-
-    public RunController(RunStarter runStarter, RunSnapshotService snapshots, ChangeService changes) {
-        this.runStarter = runStarter;
-        this.snapshots = snapshots;
-        this.changes = changes;
-    }
 
     @PostMapping("/{runId}/cancel")
     public CancelResponse cancel(@PathVariable String runId) {

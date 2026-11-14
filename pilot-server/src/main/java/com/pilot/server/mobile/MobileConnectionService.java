@@ -22,8 +22,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import jakarta.annotation.PreDestroy;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.server.context.WebServerInitializedEvent;
@@ -42,10 +40,12 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 
+import lombok.extern.slf4j.Slf4j;
+
 /** 连接桥随后台服务存活，Web 与桌面共用设备身份和授权。管理令牌不传给前端。 */
 @Service
+@Slf4j
 public class MobileConnectionService {
-    private static final Logger log = LoggerFactory.getLogger(MobileConnectionService.class);
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
     /** 调连接桥管理接口的上限。 */
     private static final Duration ADMIN_REQUEST_TIMEOUT = Duration.ofSeconds(30);

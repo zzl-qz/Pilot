@@ -17,8 +17,6 @@ import java.util.concurrent.ConcurrentMap;
 
 import jakarta.annotation.PostConstruct;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -28,6 +26,8 @@ import com.pilot.server.common.data.StorageHealth;
 import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.ObjectMapper;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 会话级校验证据账本。
@@ -39,8 +39,8 @@ import tools.jackson.databind.ObjectMapper;
  * 写盘失败只降级为「本次会话诊断不可复核」，不阻断任务。
  */
 @Component
+@Slf4j
 public class ValidationLedger {
-    private static final Logger log = LoggerFactory.getLogger(ValidationLedger.class);
     static final int MAX_ENTRIES = 50;
 
     /**

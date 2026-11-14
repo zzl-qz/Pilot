@@ -24,9 +24,12 @@ import com.pilot.server.session.SessionController;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+
 /** 应用级移动快照；无须打开某条任务即可发现其他任务的审批和结果。 */
 @RestController
 @RequestMapping("/api/mobile/workbench")
+@RequiredArgsConstructor
 public class MobileWorkbenchController {
     private final SessionController sessions;
     private final ProjectController projects;
@@ -35,17 +38,6 @@ public class MobileWorkbenchController {
     private final ResultInboxService results;
     private final ObjectMapper mapper;
     private final AttachmentLimits limits;
-
-    public MobileWorkbenchController(SessionController sessions, ProjectController projects, ApprovalBroker approvals,
-        SessionRepository repository, ResultInboxService results, ObjectMapper mapper, AttachmentLimits limits) {
-        this.sessions = sessions;
-        this.projects = projects;
-        this.approvals = approvals;
-        this.repository = repository;
-        this.results = results;
-        this.mapper = mapper;
-        this.limits = limits;
-    }
 
     @GetMapping
     public Map<String, Object> snapshot(@RequestParam(required = false) String revision) {

@@ -16,14 +16,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.server.common.web.ApiErrors;
 
+import lombok.RequiredArgsConstructor;
+
 @RestController
 @RequestMapping("/api/library")
+@RequiredArgsConstructor
 public class MessageLibraryController {
     private final MessageLibrary library;
-
-    public MessageLibraryController(MessageLibrary library) {
-        this.library = library;
-    }
 
     @GetMapping("/search")
     public Object search(@RequestParam(defaultValue = "") String q, @RequestParam(required = false) String sessionId,

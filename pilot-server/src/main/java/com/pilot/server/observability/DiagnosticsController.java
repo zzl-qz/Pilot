@@ -17,6 +17,8 @@ import com.pilot.server.validation.ValidationEvidence;
 import com.pilot.server.validation.ValidationLedger;
 import com.pilot.server.validation.WorkspaceFingerprint;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 任务诊断与校验证据接口。
  *
@@ -25,21 +27,13 @@ import com.pilot.server.validation.WorkspaceFingerprint;
  */
 @RestController
 @RequestMapping("/api")
+@RequiredArgsConstructor
 public class DiagnosticsController {
     private final SessionService sessions;
     private final TaskDiagnosticsService diagnostics;
     private final ValidationLedger validations;
     private final RecoveryReportService recovery;
     private final RunStateTracker runStates;
-
-    public DiagnosticsController(SessionService sessions, TaskDiagnosticsService diagnostics,
-        ValidationLedger validations, RecoveryReportService recovery, RunStateTracker runStates) {
-        this.sessions = sessions;
-        this.diagnostics = diagnostics;
-        this.validations = validations;
-        this.recovery = recovery;
-        this.runStates = runStates;
-    }
 
     @GetMapping("/sessions/{id}/diagnostics")
     public TaskDiagnosticsService.Diagnostics diagnose(@PathVariable String id) {

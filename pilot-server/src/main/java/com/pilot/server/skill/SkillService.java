@@ -16,6 +16,8 @@ import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.SkillProperties;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 会话与技能目录的装配点。
  *
@@ -25,18 +27,13 @@ import com.pilot.server.config.SkillProperties;
  * 每次 run 和 use_skill 重新扫描，安装和修改无需重开会话（与 {@code PromptLibrary} 外部目录同款热更新）。
  */
 @Component
+@RequiredArgsConstructor
 public class SkillService {
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
 
     private final SkillProperties properties;
     private final AgentProperties agentProperties;
     private final PilotDataDir dataDir;
-
-    public SkillService(SkillProperties properties, AgentProperties agentProperties, PilotDataDir dataDir) {
-        this.properties = properties;
-        this.agentProperties = agentProperties;
-        this.dataDir = dataDir;
-    }
 
     /** 技能体系总开关（安装器同样受它约束）。 */
     public boolean enabled() {

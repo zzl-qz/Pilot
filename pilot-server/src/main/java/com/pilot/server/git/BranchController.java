@@ -21,9 +21,12 @@ import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.run.RunStarter;
 
+import lombok.RequiredArgsConstructor;
+
 /** 在当前工作区创建并切换 Git 分支；未提交改动仍在当前工作区。 */
 @RestController
 @RequestMapping("/api/sessions/{id}/branch")
+@RequiredArgsConstructor
 public class BranchController {
     private static final Duration GIT_TIMEOUT = Duration.ofSeconds(10);
     private static final int MAX_GIT_OUTPUT_BYTES = 16_384;
@@ -31,12 +34,6 @@ public class BranchController {
     private final SessionService sessions;
     private final AgentProperties properties;
     private final RunStarter runs;
-
-    public BranchController(SessionService sessions, AgentProperties properties, RunStarter runs) {
-        this.sessions = sessions;
-        this.properties = properties;
-        this.runs = runs;
-    }
 
     @PostMapping
     public BranchResponse create(@PathVariable String id, @RequestBody BranchRequest request) {

@@ -21,8 +21,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -31,6 +29,8 @@ import com.pilot.core.skill.SkillManifest;
 import com.pilot.core.skill.SkillProblem;
 import com.pilot.core.util.FileTrees;
 import com.pilot.server.common.data.PilotDataDir;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 技能安装器：把 git 仓库或本机目录里的技能装进项目级/用户级技能目录。
@@ -47,8 +47,8 @@ import com.pilot.server.common.data.PilotDataDir;
  * git pull 更新，更新 = 重新安装）。同名冲突默认拒绝，用户显式覆盖后才替换旧版本。
  */
 @Component
+@Slf4j
 public class SkillInstallService {
-    private static final Logger log = LoggerFactory.getLogger(SkillInstallService.class);
     private static final SecureRandom RANDOM = new SecureRandom();
     /** 暂存目录名：仓库名/来源目录名只能是安全段（防穿越），不必满足技能名规则。 */
     private static final Pattern REPO_NAME = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");

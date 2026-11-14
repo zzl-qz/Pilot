@@ -33,11 +33,14 @@ import com.pilot.server.validation.ValidationEvidence;
 import com.pilot.server.validation.ValidationLedger;
 import com.pilot.server.validation.WorkspaceFingerprint;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 任务诊断视图：把「卡在哪、上次成功是什么、正在重试什么、花了多少、重启后能否接续」
  * 从多个存储里汇总成一份可直接读的回答，并对密钥类文本脱敏。
  */
 @Component
+@RequiredArgsConstructor
 public class TaskDiagnosticsService {
 
     /**
@@ -69,15 +72,6 @@ public class TaskDiagnosticsService {
     private final ValidationLedger validations;
     private final RecoveryReportService recovery;
     private final ObjectProvider<CommandTaskManager> commandTasks;
-
-    public TaskDiagnosticsService(SessionService sessions, RunStateTracker runStates, ValidationLedger validations,
-        RecoveryReportService recovery, ObjectProvider<CommandTaskManager> commandTasks) {
-        this.sessions = sessions;
-        this.runStates = runStates;
-        this.validations = validations;
-        this.recovery = recovery;
-        this.commandTasks = commandTasks;
-    }
 
     public Diagnostics diagnose(String sessionId) {
         Session session = sessions.find(sessionId).orElse(null);

@@ -5,13 +5,12 @@ import java.util.Map;
 
 import com.pilot.core.message.ToolNames;
 
+import lombok.RequiredArgsConstructor;
+
 /** 会话作用域内分页恢复原始观察；永不重新执行工具。 */
+@RequiredArgsConstructor
 public final class ReadToolOutputTool implements Tool.ParallelReadOnly {
     private final ToolCallJournal journal;
-
-    public ReadToolOutputTool(ToolCallJournal journal) {
-        this.journal = journal;
-    }
 
     @Override
     public String name() {

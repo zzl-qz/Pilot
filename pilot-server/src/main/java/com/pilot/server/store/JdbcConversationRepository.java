@@ -12,12 +12,15 @@ import com.pilot.core.session.ConversationRepository;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * SQLite 版对话记忆：一条消息一行，按 seq 排序读回。
  *
  * <p>整表替换而不是增量追加：一次运行的消息量在几十到几百条，替换的确定性更高，
  * 也避免压缩后「删一半」时出现残留。
  */
+@RequiredArgsConstructor
 public final class JdbcConversationRepository implements ConversationRepository {
     private static final TypeReference<List<ToolCall>> TOOL_CALLS = new TypeReference<>() {};
     private static final TypeReference<List<Attachment>> ATTACHMENTS = new TypeReference<>() {};
@@ -25,11 +28,6 @@ public final class JdbcConversationRepository implements ConversationRepository 
 
     private final SqliteStore store;
     private final ObjectMapper mapper;
-
-    public JdbcConversationRepository(SqliteStore store, ObjectMapper mapper) {
-        this.store = store;
-        this.mapper = mapper;
-    }
 
     @Override
     public List<Message> load(String sessionId) {

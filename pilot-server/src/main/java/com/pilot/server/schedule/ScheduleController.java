@@ -16,14 +16,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.server.common.web.ApiErrors;
 
+import lombok.RequiredArgsConstructor;
+
 @RestController
 @RequestMapping("/api/schedules")
+@RequiredArgsConstructor
 public class ScheduleController {
     private final ScheduleService schedules;
-
-    public ScheduleController(ScheduleService schedules) {
-        this.schedules = schedules;
-    }
 
     @GetMapping
     public List<ScheduledTask> list() {

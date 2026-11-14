@@ -18,7 +18,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 
-import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -29,8 +28,11 @@ import com.pilot.server.store.AutomationStore;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.extern.slf4j.Slf4j;
+
 /** 持久 outbox；通知失败只重试投递，绝不触发模型执行。对外提供稳定幂等键。 */
 @Service
+@Slf4j
 public class DeliveryService {
     private static final String DELIVERY_KIND = "delivery";
     private static final String SETTINGS_KIND = "delivery-settings";
@@ -345,7 +347,7 @@ public class DeliveryService {
                 }
             }
         } catch (RuntimeException e) {
-            LoggerFactory.getLogger(getClass()).warn("通知投递暂不可用，稍后重试", e);
+            log.warn("通知投递暂不可用，稍后重试", e);
         }
     }
 

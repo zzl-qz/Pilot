@@ -23,6 +23,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.common.web.SessionLookup;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 浏览器镜像面板的 HTTP 入口：瞬态 SSE 帧流 + 置前等上行动作。
  *
@@ -32,6 +34,7 @@ import com.pilot.server.common.web.SessionLookup;
  */
 @RestController
 @RequestMapping("/api/sessions")
+@RequiredArgsConstructor
 public class BrowserControlController {
     /** SSE 心跳：空闲也要定期写，对端早已断开时下一次写失败才能把订阅清掉。 */
     private static final ScheduledExecutorService HEARTBEAT = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -43,11 +46,6 @@ public class BrowserControlController {
 
     private final SessionService sessions;
     private final BrowserControlService browser;
-
-    public BrowserControlController(SessionService sessions, BrowserControlService browser) {
-        this.sessions = sessions;
-        this.browser = browser;
-    }
 
     /** 镜像面板状态；前端据此决定 tab 显隐与是否连流。 */
     @GetMapping("/{id}/browser/status")

@@ -17,11 +17,14 @@ import com.pilot.server.browser.BrowserHome;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 一轮智能体结束后，把桌面浏览器的设备模拟收回面板真实大小。
  * 桌面壳没开时什么都不做。
  */
 @Component
+@RequiredArgsConstructor
 public final class DesktopViewportReset {
     /** 只连本机的浏览器控制端口，连不上就立刻放弃，不拖慢窗口启动。 */
     private static final Duration CONNECT_TIMEOUT = Duration.ofMillis(300);
@@ -31,10 +34,6 @@ public final class DesktopViewportReset {
 
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     private final BrowserHome browserHome;
-
-    public DesktopViewportReset(BrowserHome browserHome) {
-        this.browserHome = browserHome;
-    }
 
     public void clear(String sessionId) {
         if (sessionId == null || sessionId.isBlank()) {

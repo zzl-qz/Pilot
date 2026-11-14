@@ -33,17 +33,16 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.pilot.core.util.HostOs;
 import com.pilot.core.util.WireEnum;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.extern.slf4j.Slf4j;
+
 /** Owns command processes and their durable, append-only, redacted logs. */
+@Slf4j
 public final class CommandTaskManager implements AutoCloseable {
-    private static final Logger log = LoggerFactory.getLogger(CommandTaskManager.class);
     /** Windows 中文控制台的默认编码，作为非 UTF-8 输出的回退。 */
     private static final Charset GBK = Charset.forName("GBK");
 

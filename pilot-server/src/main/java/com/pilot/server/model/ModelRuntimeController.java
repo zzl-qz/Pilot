@@ -8,14 +8,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import lombok.RequiredArgsConstructor;
+
 @RestController
 @RequestMapping("/api/settings/model/runtime")
+@RequiredArgsConstructor
 public final class ModelRuntimeController {
     private final ModelRuntimeSettings settings;
-
-    public ModelRuntimeController(ModelRuntimeSettings settings) {
-        this.settings = settings;
-    }
 
     @GetMapping
     public ModelRuntimeSettings.View current() {

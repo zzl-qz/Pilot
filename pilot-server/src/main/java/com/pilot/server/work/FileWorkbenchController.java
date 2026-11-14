@@ -21,16 +21,15 @@ import com.pilot.server.common.web.ApiErrors;
 
 import tools.jackson.databind.JsonNode;
 
+import lombok.RequiredArgsConstructor;
+
 /** 文件工作台：所有操作都指向会话工作区里的真实文件，不维护第二套可编辑源。 */
 @RestController
 /** 单独命名空间，避免与 {@code SessionFilesController} 的工作区文件树 /files 撞路由。 */
 @RequestMapping("/api/sessions/{sessionId}/workbench/files")
+@RequiredArgsConstructor
 public class FileWorkbenchController {
     private final FileWorkbenchService files;
-
-    public FileWorkbenchController(FileWorkbenchService files) {
-        this.files = files;
-    }
 
     @GetMapping
     public ResponseEntity<?> list(@PathVariable String sessionId) throws IOException {

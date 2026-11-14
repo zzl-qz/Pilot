@@ -14,8 +14,6 @@ import java.util.function.LongFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.env.Environment;
@@ -26,6 +24,9 @@ import com.pilot.server.browser.BrowserHome;
 import com.pilot.server.browser.BrowserRuntime;
 import com.pilot.server.runtime.SourceLayout;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 服务起来后打开桌面窗口（Electron），浏览器访问同一个端口仍然是同一个 Web 工作台。
  * 桌面壳没装时交给 {@link DesktopShellInstaller} 后台安装，装好自动开窗。
@@ -34,8 +35,9 @@ import com.pilot.server.runtime.SourceLayout;
  * 不再按 code source 路径区分；只有确实没有图形桌面会话时才明确降级到 Web 工作台。
  */
 @Component
+@Slf4j
+@RequiredArgsConstructor
 public class DesktopWindowLauncher {
-    private static final Logger log = LoggerFactory.getLogger(DesktopWindowLauncher.class);
     private static final Pattern PID = Pattern.compile("\"pid\"\\s*:\\s*(\\d+)");
     private static final Pattern CONTROL_PORT = Pattern.compile("\"controlPort\"\\s*:\\s*(\\d+)");
     private static final Pattern TOKEN = Pattern.compile("\"token\"\\s*:\\s*\"([^\"]+)\"");
@@ -47,12 +49,6 @@ public class DesktopWindowLauncher {
     private final Environment environment;
     private final DesktopShellInstaller installer;
     private final BrowserHome browserHome;
-
-    public DesktopWindowLauncher(Environment environment, DesktopShellInstaller installer, BrowserHome browserHome) {
-        this.environment = environment;
-        this.installer = installer;
-        this.browserHome = browserHome;
-    }
 
     @EventListener(ApplicationReadyEvent.class)
     public void open() {

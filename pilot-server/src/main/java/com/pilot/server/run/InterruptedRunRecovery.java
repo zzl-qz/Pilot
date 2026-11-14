@@ -6,8 +6,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -22,6 +20,8 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 启动时的状态收敛：进程重启后，上一次运行不可能继续，必须把「运行」和「会话」一起收敛。
  *
@@ -35,6 +35,7 @@ import com.pilot.core.session.SessionStatus;
  */
 @Component
 @org.springframework.context.annotation.DependsOn("historyEditCoordinator")
+@Slf4j
 public class InterruptedRunRecovery implements ApplicationRunner {
     private com.pilot.server.common.data.DataMaintenance maintenance =
         new com.pilot.server.common.data.DataMaintenance();
@@ -44,7 +45,6 @@ public class InterruptedRunRecovery implements ApplicationRunner {
         this.maintenance = dataDir.maintenance();
     }
 
-    private static final Logger log = LoggerFactory.getLogger(InterruptedRunRecovery.class);
     private static final String MESSAGE = "服务重启导致本次运行中断，对话记忆已保留，可点「继续执行」接着跑。";
 
     private final RunRepository runs;

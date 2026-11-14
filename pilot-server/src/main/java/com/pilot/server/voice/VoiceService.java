@@ -13,8 +13,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -23,10 +21,12 @@ import com.pilot.server.store.SettingsStore;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.extern.slf4j.Slf4j;
+
 /** 只在用户完成录音后上传；密钥留在服务端，音频不持久保存、不写日志。 */
 @Service
+@Slf4j
 public class VoiceService {
-    private static final Logger log = LoggerFactory.getLogger(VoiceService.class);
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     /** 上传音频并等转写结果的上限。 */
     private static final Duration TRANSCRIBE_TIMEOUT = Duration.ofSeconds(60);

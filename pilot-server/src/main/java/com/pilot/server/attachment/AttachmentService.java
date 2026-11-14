@@ -19,8 +19,6 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -29,6 +27,8 @@ import com.pilot.core.message.Attachment;
 import com.pilot.core.util.FileTrees;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.common.data.StorageHealth;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 把用户随消息粘贴的文件变成模型能看懂的上下文。
@@ -43,8 +43,8 @@ import com.pilot.server.common.data.StorageHealth;
  * <p>落盘位置默认 {@code ~/.pilot/attachments/{sessionId}/}，避免把 base64 塞进对话记忆。
  */
 @Component
+@Slf4j
 public class AttachmentService {
-    private static final Logger log = LoggerFactory.getLogger(AttachmentService.class);
 
     private static final Set<String> IMAGE_TYPES = Set.of("image/png", "image/jpeg", "image/webp", "image/gif");
     private static final Set<String> TEXT_TYPES =

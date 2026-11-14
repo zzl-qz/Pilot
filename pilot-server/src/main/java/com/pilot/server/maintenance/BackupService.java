@@ -25,8 +25,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -43,6 +41,9 @@ import com.pilot.server.store.SqliteStore;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 数据备份与恢复演练支持。
  *
@@ -54,8 +55,9 @@ import tools.jackson.databind.ObjectMapper;
  * 这里提供清单与校验和，让恢复后能核对内容是否完整。
  */
 @Component
+@Slf4j
+@RequiredArgsConstructor
 public class BackupService {
-    private static final Logger log = LoggerFactory.getLogger(BackupService.class);
     private static final List<String> DIRECTORIES =
         List.of("multi", "validation", "commands", "traces", "snapshots", "work-products", "file-versions", "studio",
             "apply-journal", "history-edits", "agents", "skills", "tasks", "mobile", "artifacts");
@@ -99,14 +101,6 @@ public class BackupService {
     @Autowired
     void useCommandTasks(ObjectProvider<CommandTaskManager> tasks) {
         this.commandTasks = tasks;
-    }
-
-    public BackupService(ObjectProvider<SqliteStore> store, PilotDataDir dataDir, ObjectMapper mapper,
-        AttachmentService attachments) {
-        this.store = store;
-        this.dataDir = dataDir;
-        this.mapper = mapper;
-        this.attachments = attachments;
     }
 
     public BackupReport backup() {

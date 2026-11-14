@@ -18,19 +18,16 @@ import com.pilot.core.session.SessionService;
 import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
 
+import lombok.RequiredArgsConstructor;
+
 /** 会话改动审阅：读取该会话工作区的 git 状态与 diff，并按文件撤销改动。 */
 @RestController
 @RequestMapping("/api/sessions/{id}")
+@RequiredArgsConstructor
 public class ChangeController {
     private final SessionService sessions;
     private final ChangeService changes;
     private final AgentProperties properties;
-
-    public ChangeController(SessionService sessions, ChangeService changes, AgentProperties properties) {
-        this.sessions = sessions;
-        this.changes = changes;
-        this.properties = properties;
-    }
 
     @GetMapping("/diff")
     public ChangeService.ChangeReport diff(@PathVariable String id) {

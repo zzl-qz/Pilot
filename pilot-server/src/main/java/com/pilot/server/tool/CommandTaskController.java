@@ -15,17 +15,15 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.common.web.SessionLookup;
 
+import lombok.RequiredArgsConstructor;
+
 /** 命令的运行状态独立于模型回合；查询和停止只能操作当前会话所属的任务。 */
 @RestController
 @RequestMapping("/api/sessions/{id}/commands")
+@RequiredArgsConstructor
 public class CommandTaskController {
     private final SessionService sessions;
     private final CommandTaskManager commands;
-
-    public CommandTaskController(SessionService sessions, CommandTaskManager commands) {
-        this.sessions = sessions;
-        this.commands = commands;
-    }
 
     @GetMapping
     public Tasks list(@PathVariable String id) {

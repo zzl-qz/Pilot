@@ -7,8 +7,11 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 
+import lombok.RequiredArgsConstructor;
+
 /** 重启后只有目标记录仍处于执行中才标记中断；用户暂停的任务继续保持暂停。 */
 @Component
+@RequiredArgsConstructor
 public class TaskControlRecovery implements ApplicationRunner {
     private com.pilot.server.common.data.DataMaintenance maintenance =
         new com.pilot.server.common.data.DataMaintenance();
@@ -20,11 +23,6 @@ public class TaskControlRecovery implements ApplicationRunner {
 
     private final SessionService sessions;
     private final TaskControlService tasks;
-
-    public TaskControlRecovery(SessionService sessions, TaskControlService tasks) {
-        this.sessions = sessions;
-        this.tasks = tasks;
-    }
 
     @Override
     public void run(ApplicationArguments args) {

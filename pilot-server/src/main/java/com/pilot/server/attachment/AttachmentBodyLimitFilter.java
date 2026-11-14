@@ -20,6 +20,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.server.ResponseStatusException;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 消息入口的请求体总量预检：附件以 base64 内联在 JSON 里（约放大 4/3），
  * 在 Jackson 读取前按 Content-Length 早拒，同时对实际读取的字节计数。
@@ -29,12 +31,9 @@ import org.springframework.web.server.ResponseStatusException;
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 19)
+@RequiredArgsConstructor
 public class AttachmentBodyLimitFilter extends OncePerRequestFilter {
     private final AttachmentLimits limits;
-
-    public AttachmentBodyLimitFilter(AttachmentLimits limits) {
-        this.limits = limits;
-    }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {

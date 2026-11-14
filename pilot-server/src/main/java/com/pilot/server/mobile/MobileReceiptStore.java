@@ -21,7 +21,6 @@ import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -34,11 +33,14 @@ import com.pilot.server.common.data.PilotDataDir;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 持久回执与设备绑定的限时请求标识。所有访问（包括过滤器执行）共用此对象锁。
  * 删除前持久化时间下限，时钟回拨或重启不能使已清理的请求重新生效。
  */
 @Component
+@Slf4j
 public class MobileReceiptStore {
     public static final String TOKEN_PATTERN = "r3\\.[0-9]{1,16}\\.[a-f0-9-]{36}\\.[a-f0-9]{64}";
     private static final long RESPONSE_RESERVE = 24L * 1024 * 1024;
@@ -300,7 +302,7 @@ public class MobileReceiptStore {
                 cleanup();
             } catch (RuntimeException | IOException e) {
                 maintenanceError = "回执清理失败，记录已保留，请检查数据目录与磁盘状态";
-                LoggerFactory.getLogger(MobileReceiptStore.class).warn(maintenanceError);
+                log.warn(maintenanceError);
             }
         });
     }

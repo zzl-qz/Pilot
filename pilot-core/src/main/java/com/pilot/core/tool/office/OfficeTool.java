@@ -37,18 +37,16 @@ import com.pilot.core.workspace.PathValidator;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+
 /** 内置 Office 路径：真实 OOXML/PDF、公式计算、读回检查和页面图片。无 shell/外部 Office 依赖。 */
+@RequiredArgsConstructor
 public final class OfficeTool implements Tool {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final List<String> ACTIONS = List.of("create_xlsx", "create_pptx", "create_docx", "create_pdf",
         "edit_xlsx", "edit_docx", "edit_pptx", "inspect", "render_pptx", "render_pdf");
     private final PathValidator paths;
     private final SnapshotSink snapshots;
-
-    public OfficeTool(PathValidator paths, SnapshotSink snapshots) {
-        this.paths = paths;
-        this.snapshots = snapshots;
-    }
 
     @Override
     public String name() {

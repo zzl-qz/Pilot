@@ -11,14 +11,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.server.common.web.ApiErrors;
 
+import lombok.RequiredArgsConstructor;
+
 @RestController
 @RequestMapping("/api/results")
+@RequiredArgsConstructor
 public class ResultInboxController {
     private final ResultInboxService service;
-
-    public ResultInboxController(ResultInboxService service) {
-        this.service = service;
-    }
 
     @GetMapping
     public ResultInboxService.Page list() {

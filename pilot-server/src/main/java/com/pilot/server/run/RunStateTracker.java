@@ -10,8 +10,6 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -35,6 +33,8 @@ import com.pilot.server.common.data.DataMaintenance;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.common.data.StorageHealth;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 把运行推进过程写成可恢复的调度状态，并用租约防止重复接管。
  *
@@ -47,6 +47,7 @@ import com.pilot.server.common.data.StorageHealth;
  * 此时停止在本实例上继续把状态当成权威，避免两边同时写同一会话。
  */
 @Component
+@Slf4j
 public class RunStateTracker {
     private DataMaintenance maintenance = new DataMaintenance();
 
@@ -55,7 +56,6 @@ public class RunStateTracker {
         this.maintenance = dataDir.maintenance();
     }
 
-    private static final Logger log = LoggerFactory.getLogger(RunStateTracker.class);
     public static final long LEASE_SECONDS = RunCheckpoint.DEFAULT_LEASE_SECONDS;
     private static final long HEARTBEAT_DELAY_MS = LEASE_SECONDS * 1_000L / 3;
     private static final long INITIAL_HEARTBEAT_DELAY_MS = LEASE_SECONDS * 1_000L / 2;

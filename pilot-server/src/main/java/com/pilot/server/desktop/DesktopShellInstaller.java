@@ -12,8 +12,6 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -25,6 +23,8 @@ import com.pilot.core.util.HostOs;
 import com.pilot.server.runtime.NpmInstall;
 import com.pilot.server.runtime.RuntimeMirrors;
 import com.pilot.server.runtime.SourceLayout;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 桌面壳（{@code pilot-desktop} 的 Electron）没装时自动安装，装好再打开窗口。
@@ -40,8 +40,8 @@ import com.pilot.server.runtime.SourceLayout;
  * <p>首次安装失败后换备用 npm 与 Electron 镜像。{@code pilot.desktop.provision=false} 可关闭自动安装。
  */
 @Component
+@Slf4j
 public class DesktopShellInstaller {
-    private static final Logger log = LoggerFactory.getLogger(DesktopShellInstaller.class);
     /** Electron 比 npm 包大得多，给足一次下载的时间。 */
     static final Duration INSTALL_TIMEOUT = Duration.ofMinutes(15);
     /**

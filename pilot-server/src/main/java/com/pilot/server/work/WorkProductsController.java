@@ -21,17 +21,15 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.server.common.web.ApiErrors;
 
+import lombok.RequiredArgsConstructor;
+
 /** 成果读取与人工技能审核；沿用服务统一的远程访问认证。 */
 @RestController
 @RequestMapping("/api/sessions/{sessionId}")
+@RequiredArgsConstructor
 public class WorkProductsController {
     private final WorkProductService products;
     private final SkillDraftService drafts;
-
-    public WorkProductsController(WorkProductService products, SkillDraftService drafts) {
-        this.products = products;
-        this.drafts = drafts;
-    }
 
     @GetMapping("/products")
     public List<WorkProductService.Product> products(@PathVariable String sessionId) {

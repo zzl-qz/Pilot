@@ -20,8 +20,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.approval.ApprovalBroker;
@@ -86,6 +84,8 @@ import com.pilot.server.tool.WorkspaceToolFactory;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 父调度 Agent 的执行内核：按 DAG 拉子 Agent、收沙箱改动、做合并预检与硬校验。
  *
@@ -93,8 +93,8 @@ import tools.jackson.databind.ObjectMapper;
  * 所有子 Agent 共享同一份只读工作区视图，写入只进各自沙箱。
  */
 @Component
+@Slf4j
 public class MultiAgentService {
-    private static final Logger log = LoggerFactory.getLogger(MultiAgentService.class);
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
     private static final int MAX_REPORT_CHARS = 8_000;
     private static final int MAX_CONCLUSION_CHARS = 400;

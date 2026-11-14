@@ -31,22 +31,16 @@ import com.pilot.server.schedule.ScheduledTask;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+
 @Service
+@RequiredArgsConstructor
 public class ResultInboxService {
     private final ResultInboxRepository repository;
     private final SessionService sessions;
     private final ScheduleService schedules;
     private final TaskControlService tasks;
     private final ObjectMapper mapper;
-
-    public ResultInboxService(ResultInboxRepository repository, SessionService sessions, ScheduleService schedules,
-        TaskControlService tasks, ObjectMapper mapper) {
-        this.repository = repository;
-        this.sessions = sessions;
-        this.schedules = schedules;
-        this.tasks = tasks;
-        this.mapper = mapper;
-    }
 
     /** 条目来源，名字就是接口里的 source。 */
     private enum Source {

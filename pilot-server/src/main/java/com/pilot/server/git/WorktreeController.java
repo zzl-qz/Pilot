@@ -17,21 +17,18 @@ import com.pilot.core.session.SessionService;
 import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.workspace.WorkspaceService;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 平行检出：人选定分支后另开一个 worktree 对话，做完再把未提交改动交回原来的目录。
  */
 @RestController
 @RequestMapping("/api/worktrees")
+@RequiredArgsConstructor
 public class WorktreeController {
     private final GitWorktrees worktrees;
     private final SessionService sessions;
     private final WorkspaceService workspaces;
-
-    public WorktreeController(GitWorktrees worktrees, SessionService sessions, WorkspaceService workspaces) {
-        this.worktrees = worktrees;
-        this.sessions = sessions;
-        this.workspaces = workspaces;
-    }
 
     @PostMapping
     public Opened create(@RequestBody CreateRequest request) {

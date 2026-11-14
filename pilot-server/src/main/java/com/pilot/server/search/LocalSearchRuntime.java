@@ -13,8 +13,6 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
@@ -26,13 +24,17 @@ import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.WebSearchProperties;
 import com.pilot.server.runtime.SourceLayout;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Pilot 启动时在本机拉起 SearXNG。
  * 不使用 Docker。源码和虚拟环境放在数据目录，打包时也可以改指到安装目录里的副本。
  */
 @Component
+@Slf4j
+@RequiredArgsConstructor
 public class LocalSearchRuntime implements SmartLifecycle {
-    private static final Logger log = LoggerFactory.getLogger(LocalSearchRuntime.class);
     /** 进程拉起后等端口可用的上限。 */
     private static final Duration STARTUP_WAIT = Duration.ofSeconds(60);
     /** 拉源码：git clone 或下载压缩包。 */
@@ -60,11 +62,6 @@ public class LocalSearchRuntime implements SmartLifecycle {
     private final PilotDataDir dataDir;
     private volatile Process process;
     private volatile boolean running;
-
-    public LocalSearchRuntime(WebSearchProperties properties, PilotDataDir dataDir) {
-        this.properties = properties;
-        this.dataDir = dataDir;
-    }
 
     @Override
     public void start() {

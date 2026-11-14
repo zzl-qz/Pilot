@@ -12,15 +12,14 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.workspace.WorkspaceViolationException;
 
+import lombok.RequiredArgsConstructor;
+
 /** 本地目录浏览：让用户在新建会话时选择工作区，而不是依赖服务端固定的 workspace。 */
 @RestController
 @RequestMapping("/api/workspaces")
+@RequiredArgsConstructor
 public class WorkspaceController {
     private final WorkspaceService workspaces;
-
-    public WorkspaceController(WorkspaceService workspaces) {
-        this.workspaces = workspaces;
-    }
 
     @GetMapping("/roots")
     public List<WorkspaceService.RootEntry> roots() {

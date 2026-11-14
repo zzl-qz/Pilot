@@ -17,7 +17,10 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionRepository;
 import com.pilot.core.session.SessionStatus;
 
+import lombok.RequiredArgsConstructor;
+
 /** SQLite 版会话存储：会话与事件两张表，事件序号在事务内自增。 */
+@RequiredArgsConstructor
 public final class JdbcSessionRepository implements SessionRepository {
     private static final int WRITE_ATTEMPTS = 3;
     private static final String COLUMNS =
@@ -27,11 +30,6 @@ public final class JdbcSessionRepository implements SessionRepository {
 
     private final SqliteStore store;
     private final EventCodec codec;
-
-    public JdbcSessionRepository(SqliteStore store, EventCodec codec) {
-        this.store = store;
-        this.codec = codec;
-    }
 
     @Override
     public <T> T transaction(String sessionId, java.util.function.Supplier<T> work) {

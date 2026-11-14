@@ -29,9 +29,12 @@ import com.pilot.server.run.TaskControlService;
 import com.pilot.server.workspace.HistoryFileChange;
 import com.pilot.server.workspace.RunSnapshotService;
 
+import lombok.RequiredArgsConstructor;
+
 /** 按用户消息回到发送前；分支保留原对话，使用当前工作区文件。 */
 @RestController
 @RequestMapping("/api/sessions/{id}/checkpoints")
+@RequiredArgsConstructor
 public class CheckpointController {
     private final SessionService sessions;
     private final RunStarter runs;
@@ -42,20 +45,6 @@ public class CheckpointController {
     private final TaskControlService tasks;
     private final AttachmentReferences attachmentReferences;
     private final HistoryEditCoordinator historyEdits;
-
-    public CheckpointController(SessionService sessions, RunStarter runs, RunSnapshotService snapshots,
-        ConversationRepository conversations, PlanRepository plans, AgentProperties properties,
-        TaskControlService tasks, AttachmentReferences attachmentReferences, HistoryEditCoordinator historyEdits) {
-        this.sessions = sessions;
-        this.runs = runs;
-        this.snapshots = snapshots;
-        this.conversations = conversations;
-        this.plans = plans;
-        this.properties = properties;
-        this.tasks = tasks;
-        this.attachmentReferences = attachmentReferences;
-        this.historyEdits = historyEdits;
-    }
 
     @GetMapping
     public Preview preview(@PathVariable String id, @RequestParam long sequence) {

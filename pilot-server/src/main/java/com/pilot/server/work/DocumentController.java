@@ -19,15 +19,14 @@ import com.pilot.server.common.web.ApiErrors;
 
 import tools.jackson.databind.JsonNode;
 
+import lombok.RequiredArgsConstructor;
+
 /** 产物工作台：人直接读写可编辑源并导出，不经过模型。 */
 @RestController
 @RequestMapping("/api/sessions/{sessionId}/studio")
+@RequiredArgsConstructor
 public class DocumentController {
     private final DocumentService documents;
-
-    public DocumentController(DocumentService documents) {
-        this.documents = documents;
-    }
 
     @GetMapping("/documents")
     public ResponseEntity<?> list(@PathVariable String sessionId) {

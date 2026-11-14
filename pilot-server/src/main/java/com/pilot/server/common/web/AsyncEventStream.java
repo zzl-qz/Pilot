@@ -20,9 +20,11 @@ import jakarta.servlet.WriteListener;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import lombok.extern.slf4j.Slf4j;
+
 /** Servlet 非阻塞 SSE：只在容器允许写时发送，等待中的字节和最长等待均有界。 */
+@Slf4j
 public final class AsyncEventStream implements AutoCloseable {
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AsyncEventStream.class);
     /** 这么久没有事件就发一次心跳，防止代理把空闲连接掐掉。 */
     private static final long HEARTBEAT_INTERVAL_NANOS = Duration.ofSeconds(20).toNanos();
     private static final java.util.concurrent.ScheduledExecutorService TIMER =

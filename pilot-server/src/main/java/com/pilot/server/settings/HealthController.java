@@ -13,22 +13,17 @@ import com.pilot.server.config.AgentProperties;
 import com.pilot.server.model.ModelSettings;
 import com.pilot.server.permission.PermissionSettings;
 
+import lombok.RequiredArgsConstructor;
+
 /** 运行状态：当前模型、权限档位和可用工具。 */
 @RestController
 @RequestMapping("/api/health")
+@RequiredArgsConstructor
 public class HealthController {
     private final AgentProperties agentProperties;
     private final ModelSettings modelSettings;
     private final PermissionSettings permissionSettings;
     private final ObjectProvider<ToolRegistry> toolRegistry;
-
-    public HealthController(AgentProperties agentProperties, ModelSettings modelSettings,
-        PermissionSettings permissionSettings, ObjectProvider<ToolRegistry> toolRegistry) {
-        this.agentProperties = agentProperties;
-        this.modelSettings = modelSettings;
-        this.permissionSettings = permissionSettings;
-        this.toolRegistry = toolRegistry;
-    }
 
     @GetMapping
     public HealthResponse health() {

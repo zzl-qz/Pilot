@@ -20,10 +20,13 @@ import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.workspace.PathValidator;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 按 glob 在整个子树里找文件，一次调用替代逐层 list_dir。
  * 跳过依赖与构建产物目录；结果按修改时间从新到旧排列，最近改过的文件最先出现。
  */
+@RequiredArgsConstructor
 public final class GlobFilesTool implements Tool.ParallelReadOnly {
     private static final int DEFAULT_LIMIT = 200;
     private static final int MAX_LIMIT = 1000;
@@ -32,10 +35,6 @@ public final class GlobFilesTool implements Tool.ParallelReadOnly {
         "__pycache__", "target", "build", "node_modules", "out", "dist");
 
     private final PathValidator paths;
-
-    public GlobFilesTool(PathValidator paths) {
-        this.paths = paths;
-    }
 
     @Override
     public String name() {

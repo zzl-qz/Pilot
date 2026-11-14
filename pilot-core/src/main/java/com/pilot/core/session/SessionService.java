@@ -23,9 +23,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.EventEnvelope;
@@ -34,6 +31,8 @@ import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.SessionEvent;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 会话服务：负责 id 生成、状态推进与事件订阅，数据读写委托给 {@link SessionRepository}。
@@ -44,8 +43,8 @@ import com.pilot.core.event.SessionEvent;
  * <p>推送不在锁内直接写连接：每个订阅者有一个有界队列和独立投递线程。慢客户端只会把自己
  * 的队列填满并被断开（断线后按游标重连即可补齐），不会拖住会话的发布线程和 Agent 循环。
  */
+@Slf4j
 public final class SessionService {
-    private static final Logger log = LoggerFactory.getLogger(SessionService.class);
     /** 单个订阅者允许积压的事件数。超过即视为客户端跟不上，直接断开。 */
     private static final ScheduledExecutorService MONITOR = Executors.newSingleThreadScheduledExecutor(task -> {
         Thread thread = new Thread(task, "pilot-event-monitor");

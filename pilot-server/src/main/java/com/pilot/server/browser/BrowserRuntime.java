@@ -15,8 +15,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Stream;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.core.io.ClassPathResource;
@@ -34,6 +32,8 @@ import com.pilot.server.runtime.NpmInstall;
 import com.pilot.server.runtime.RuntimeMirrors;
 
 import tools.jackson.databind.ObjectMapper;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 浏览器运行时的装配与生命周期。
@@ -56,8 +56,8 @@ import tools.jackson.databind.ObjectMapper;
  * <p>运行时目录放在仓库的 {@code .pilot/browser}（与内置 Node/Python 同处，不进 git），找不到仓库根则用数据目录。
  */
 @Component
+@Slf4j
 public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
-    private static final Logger log = LoggerFactory.getLogger(BrowserRuntime.class);
     private static final Duration NPM_INSTALL_TIMEOUT = Duration.ofMinutes(5);
     /** 下载 Chromium，体积大，官方源和镜像各试一次。 */
     private static final Duration CHROMIUM_INSTALL_TIMEOUT = Duration.ofMinutes(15);

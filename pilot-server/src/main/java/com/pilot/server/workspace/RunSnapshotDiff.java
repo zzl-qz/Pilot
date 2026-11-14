@@ -13,9 +13,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.pilot.core.multi.UnifiedDiff;
 import com.pilot.server.workspace.ChangeService.RunChangeReport;
 import com.pilot.server.workspace.ChangeService.RunDiffBudget;
@@ -23,9 +20,11 @@ import com.pilot.server.workspace.ChangeService.RunFileChange;
 import com.pilot.server.workspace.RunSnapshotService.SnapshotEntry;
 import com.pilot.server.workspace.RunSnapshotService.SnapshotMeta;
 
+import lombok.extern.slf4j.Slf4j;
+
 /** 用写前备份和完成态文件生成可持久保存的审阅差异。 */
+@Slf4j
 final class RunSnapshotDiff {
-    private static final Logger log = LoggerFactory.getLogger(RunSnapshotDiff.class);
     private static final String CHANGED_EXTERNALLY = "文件在本轮结束前被外部修改，无法确认逐行差异。";
     private static final String MISSING_BACKUP = "缺少可用的改前快照，无法显示逐行差异。";
     private static final String NON_TEXT = "文件是二进制或非 UTF-8 文本，无法显示逐行差异。";

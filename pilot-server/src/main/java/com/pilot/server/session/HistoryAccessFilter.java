@@ -12,15 +12,14 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import lombok.RequiredArgsConstructor;
+
 /** 回退时排空同会话 API 读取，防止任务文件与数据库之间的中间状态被展示。 */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 16)
+@RequiredArgsConstructor
 public class HistoryAccessFilter extends OncePerRequestFilter {
     private final HistoryEditCoordinator history;
-
-    public HistoryAccessFilter(HistoryEditCoordinator history) {
-        this.history = history;
-    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)

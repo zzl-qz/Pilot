@@ -23,10 +23,13 @@ import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.PathValidator;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 在工作区内按正则搜索文本，返回 {@code 路径:行号: 内容}。
  * 跳过构建产物、依赖目录与二进制文件，结果数量有上限。
  */
+@RequiredArgsConstructor
 public final class SearchTool implements Tool.ParallelReadOnly {
     private static final int MAX_MATCHES = 200;
     private static final long MAX_FILE_BYTES = 1024 * 1024;
@@ -37,10 +40,6 @@ public final class SearchTool implements Tool.ParallelReadOnly {
         Set.of(".git", ".idea", ".gradle", "target", "build", "node_modules", "out", "dist");
 
     private final PathValidator paths;
-
-    public SearchTool(PathValidator paths) {
-        this.paths = paths;
-    }
 
     @Override
     public String name() {

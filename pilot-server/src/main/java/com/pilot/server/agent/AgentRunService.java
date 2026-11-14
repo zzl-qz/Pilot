@@ -27,8 +27,6 @@ import java.util.stream.Stream;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.approval.ApprovalBroker;
@@ -103,6 +101,8 @@ import com.pilot.server.workspace.RunSnapshotService;
 
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 在独立线程上执行 {@link AgentLoop}，把循环产生的事件写入会话。
  *
@@ -112,8 +112,8 @@ import tools.jackson.databind.ObjectMapper;
  */
 @Component
 @org.springframework.context.annotation.DependsOn("historyEditCoordinator")
+@Slf4j
 public class AgentRunService implements RunStarter {
-    private static final Logger log = LoggerFactory.getLogger(AgentRunService.class);
     private static final int MAX_AUTO_CONTINUE = 3;
     /** 这些失败码与任务状态同名：运行停下后任务直接记为同名状态，不归并成 INTERRUPTED。 */
     private static final Set<TaskControlStatus> PRESERVED_FAILURE_STATUSES =

@@ -14,15 +14,14 @@ import org.springframework.web.server.ResponseStatusException;
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.approval.PendingApproval;
 
+import lombok.RequiredArgsConstructor;
+
 /** 客户端 → 服务端的审批入口：唤醒在 callId 上阻塞的 Agent 线程。 */
 @RestController
 @RequestMapping("/api/approvals")
+@RequiredArgsConstructor
 public class ApprovalController {
     private final ApprovalBroker approvals;
-
-    public ApprovalController(ApprovalBroker approvals) {
-        this.approvals = approvals;
-    }
 
     @PostMapping("/{callId}")
     public ApprovalResponse resolve(@PathVariable String callId,

@@ -12,14 +12,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.server.common.web.ApiErrors;
 
+import lombok.RequiredArgsConstructor;
+
 @RestController
 @RequestMapping("/api/deliveries")
+@RequiredArgsConstructor
 public class DeliveryController {
     private final DeliveryService service;
-
-    public DeliveryController(DeliveryService service) {
-        this.service = service;
-    }
 
     @GetMapping
     public Object list() {

@@ -29,8 +29,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.multi.ArtifactDiff;
@@ -48,6 +46,8 @@ import com.pilot.server.common.data.PilotDataDir;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 会话级的沙箱与任务看板存储。
  *
@@ -55,8 +55,8 @@ import tools.jackson.databind.ObjectMapper;
  * 持久化或恢复失败会阻止操作；重启不会自动重放命令。
  */
 @Component
+@Slf4j
 public class SandboxStore {
-    private static final Logger log = LoggerFactory.getLogger(SandboxStore.class);
 
     /** 界面展示用的改动视图：不含完整文件内容，避免大文件把 SSE / JSON 拖垮。 */
     public record DiffView(String sandboxId, String agentId, String taskId, String path, String diff, int added,

@@ -15,14 +15,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.server.common.web.ApiErrors;
 
+import lombok.RequiredArgsConstructor;
+
 @RestController
 @RequestMapping("/api/automation")
+@RequiredArgsConstructor
 public class AutomationController {
     private final RecurringScheduleService service;
-
-    public AutomationController(RecurringScheduleService service) {
-        this.service = service;
-    }
 
     @GetMapping("/series")
     public Object list() {

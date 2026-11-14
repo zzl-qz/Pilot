@@ -41,6 +41,8 @@ import com.pilot.server.tool.WorkspaceToolFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 文件工作台：工作区里的真实 Office 文件就是唯一源，这里只做索引、预览、批注与交付。
  *
@@ -48,6 +50,7 @@ import tools.jackson.databind.ObjectMapper;
  * 用户可以随时用本机应用改同一个文件，工作台通过 sha256 感知改动。
  */
 @Service
+@RequiredArgsConstructor
 public class FileWorkbenchService {
     private static final String ANNOTATION_KIND = "file-annotation";
     private static final String VERSION_KIND = "file-version";
@@ -86,16 +89,6 @@ public class FileWorkbenchService {
     private final SessionService sessions;
     private final PilotDataDir dataDir;
     private final WorkProductService products;
-
-    public FileWorkbenchService(AutomationStore store, ObjectMapper mapper, WorkspaceToolFactory workspaces,
-        SessionService sessions, PilotDataDir dataDir, WorkProductService products) {
-        this.store = store;
-        this.mapper = mapper;
-        this.workspaces = workspaces;
-        this.sessions = sessions;
-        this.dataDir = dataDir;
-        this.products = products;
-    }
 
     /** 扫描会话工作区里的真实产物文件；不做任何复制，也不把内容存进数据库。 */
     public List<FileAsset> list(String sessionId) throws IOException {

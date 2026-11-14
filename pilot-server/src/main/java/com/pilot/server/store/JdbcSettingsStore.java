@@ -7,13 +7,12 @@ import java.sql.SQLException;
 import java.util.Map;
 import java.util.Optional;
 
+import lombok.RequiredArgsConstructor;
+
 /** SQLite 版设置存储，与其它表共用同一个库文件。 */
+@RequiredArgsConstructor
 public final class JdbcSettingsStore implements SettingsStore {
     private final SqliteStore store;
-
-    public JdbcSettingsStore(SqliteStore store) {
-        this.store = store;
-    }
 
     @Override
     public Optional<String> find(String key) {

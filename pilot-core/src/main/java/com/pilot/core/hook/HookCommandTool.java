@@ -12,16 +12,14 @@ import com.pilot.core.exec.OsSandbox;
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.tool.Tool;
 
+import lombok.RequiredArgsConstructor;
+
 /** 只由执行器内部构造；不注册为模型工具。权限规则使用同一个 run_command 名称。 */
+@RequiredArgsConstructor
 public final class HookCommandTool implements Tool {
     private final Hooks.Command command;
     private final ExecutionBackends.Selection selection;
     private Hooks.CommandResult result;
-
-    public HookCommandTool(Hooks.Command command, ExecutionBackends.Selection selection) {
-        this.command = command;
-        this.selection = selection;
-    }
 
     @Override
     public String name() {

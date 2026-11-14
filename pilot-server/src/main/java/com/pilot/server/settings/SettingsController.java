@@ -21,6 +21,8 @@ import com.pilot.server.model.ModelSettings;
 import com.pilot.server.permission.PermissionSettings;
 import com.pilot.server.voice.VoiceLimits;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 运行时设置：权限档位与模型配置。
  *
@@ -29,21 +31,13 @@ import com.pilot.server.voice.VoiceLimits;
  */
 @RestController
 @RequestMapping("/api/settings")
+@RequiredArgsConstructor
 public class SettingsController {
     private final PermissionSettings permissions;
     private final ModelSettings models;
     private final ModelCatalogService catalog;
     private final AttachmentLimits attachmentLimits;
     private final VoiceLimits voiceLimits;
-
-    public SettingsController(PermissionSettings permissions, ModelSettings models, ModelCatalogService catalog,
-        AttachmentLimits attachmentLimits, VoiceLimits voiceLimits) {
-        this.permissions = permissions;
-        this.models = models;
-        this.catalog = catalog;
-        this.attachmentLimits = attachmentLimits;
-        this.voiceLimits = voiceLimits;
-    }
 
     @GetMapping
     public SettingsResponse get() {

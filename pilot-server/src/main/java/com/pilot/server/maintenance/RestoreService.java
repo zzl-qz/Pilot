@@ -13,14 +13,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import org.slf4j.LoggerFactory;
-
 import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.extern.slf4j.Slf4j;
+
 /** 先验证备份，在目标同卷建立副本，最后通过可回滚的切换发布。 */
+@Slf4j
 final class RestoreService {
     record Options(Path data, Path database, Path attachments, Map<String, Path> workspaces) {
     }
@@ -159,7 +160,7 @@ final class RestoreService {
                         }
                     }
                 } catch (IOException cleanup) {
-                    LoggerFactory.getLogger(RestoreService.class).warn("保留恢复暂存文件", cleanup);
+                    log.warn("保留恢复暂存文件", cleanup);
                 }
             }
         }

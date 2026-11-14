@@ -10,16 +10,15 @@ import java.util.Optional;
 import com.pilot.core.project.Project;
 import com.pilot.core.project.ProjectRepository;
 
+import lombok.RequiredArgsConstructor;
+
 /** SQLite 版项目存储：项目头一张表，绑定文件夹一张表。 */
+@RequiredArgsConstructor
 public final class JdbcProjectRepository implements ProjectRepository {
     private static final String INSERT_FOLDER =
         "INSERT INTO project_folders (project_id, position, path) VALUES (?, ?, ?)";
 
     private final SqliteStore store;
-
-    public JdbcProjectRepository(SqliteStore store) {
-        this.store = store;
-    }
 
     @Override
     public Project create(String id, String name, List<String> folders, String baseCommit, Instant now) {

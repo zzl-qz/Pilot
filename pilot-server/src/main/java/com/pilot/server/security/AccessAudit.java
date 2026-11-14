@@ -7,11 +7,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.pilot.server.common.data.PilotDataDir;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 访问审计：只记录拒绝、限流和令牌缺失，成功请求不逐条落盘。
@@ -20,8 +20,8 @@ import com.pilot.server.common.data.PilotDataDir;
  * 日志不写令牌本身，只写令牌是否存在。
  */
 @Component
+@Slf4j
 public class AccessAudit {
-    private static final Logger log = LoggerFactory.getLogger(AccessAudit.class);
     private final Path file;
     private final boolean enabled;
 

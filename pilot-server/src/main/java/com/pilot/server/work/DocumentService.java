@@ -26,11 +26,14 @@ import com.pilot.server.store.AutomationStore;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 产物工作台的可编辑源：版本化 Document 与派生产物 Artifact 分离。
  * 生成不经过模型，直接调用 {@link DocumentRenderer}，与 office 工具同源。
  */
 @Service
+@RequiredArgsConstructor
 public class DocumentService {
     private static final String KIND = "studio-document";
     private static final String VERSION_KIND = "studio-version";
@@ -61,12 +64,6 @@ public class DocumentService {
     private final PilotDataDir dataDir;
     private final WorkProductService products;
     private final ObjectMapper json = new ObjectMapper();
-
-    public DocumentService(AutomationStore store, PilotDataDir dataDir, WorkProductService products) {
-        this.store = store;
-        this.dataDir = dataDir;
-        this.products = products;
-    }
 
     public List<Document> list(String sessionId) {
         return store.list(KIND).stream().map(this::parse).filter(doc -> doc.sessionId().equals(sessionId))

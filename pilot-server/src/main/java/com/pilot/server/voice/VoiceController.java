@@ -18,14 +18,13 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.server.common.web.ApiErrors;
 
+import lombok.RequiredArgsConstructor;
+
 @RestController
 @RequestMapping("/api/voice")
+@RequiredArgsConstructor
 public class VoiceController {
     private final VoiceService voice;
-
-    public VoiceController(VoiceService voice) {
-        this.voice = voice;
-    }
 
     @GetMapping("/settings")
     public VoiceService.Settings settings() {
