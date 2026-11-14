@@ -1,6 +1,7 @@
 package com.pilot.server.session;
 
-import java.time.Duration;
+import static com.pilot.core.session.RunCheckpoint.DEFAULT_LEASE;
+
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,7 +39,8 @@ import com.pilot.server.maintenance.StorageHealth;
  * 每次工具开始/结束、等待审批、重试都会更新检查点；运行结束时释放租约但保留记录，
  * 便于诊断「上次成功步骤」。
  *
- * <p>租约每 {@value #LEASE_SECONDS} 秒续一次。续租失败说明另一个实例已经接管或数据库不可写，
+ * <p>租约有效期为 {@value RunCheckpoint#DEFAULT_LEASE_SECONDS} 秒，每 {@value #HEARTBEAT_DELAY_MS} 毫秒续租。
+ * 续租失败说明另一个实例已经接管或数据库不可写，
  * 此时停止在本实例上继续把状态当成权威，避免两边同时写同一会话。
  */
 @Component
@@ -51,8 +53,9 @@ public class RunStateTracker {
     }
 
     private static final Logger log = LoggerFactory.getLogger(RunStateTracker.class);
-    public static final long LEASE_SECONDS = 30L;
-    private static final Duration LEASE = Duration.ofSeconds(LEASE_SECONDS);
+    public static final long LEASE_SECONDS = RunCheckpoint.DEFAULT_LEASE_SECONDS;
+    private static final long HEARTBEAT_DELAY_MS = LEASE_SECONDS * 1_000L / 3;
+    private static final long INITIAL_HEARTBEAT_DELAY_MS = LEASE_SECONDS * 1_000L / 2;
 
     /** 启动恢复时展示给用户的一条接管信息。 */
     public record RecoveryEntry(String runId, String sessionId, String step, String lastSuccessfulStep,
@@ -79,8 +82,8 @@ public class RunStateTracker {
     public void begin(String sessionId, String runId, String workspace) {
         Instant now = Instant.now();
         try {
-            repository.save(RunCheckpoint.start(runId, sessionId, workspace, instanceId, now, LEASE));
-            if (!repository.claimLease(runId, instanceId, now, LEASE)) {
+            repository.save(RunCheckpoint.start(runId, sessionId, workspace, instanceId, now, DEFAULT_LEASE));
+            if (!repository.claimLease(runId, instanceId, now, DEFAULT_LEASE)) {
                 lostLeases.put(runId, "运行租约已由其他实例持有");
                 log.warn("运行 {} 的租约被其他实例持有，本实例不会把它当成独占运行", runId);
                 return;
@@ -99,7 +102,7 @@ public class RunStateTracker {
         }
         try {
             RunCheckpoint current = repository.find(runId)
-                .orElseGet(() -> RunCheckpoint.start(runId, sessionId, null, instanceId, Instant.now(), LEASE));
+                .orElseGet(() -> RunCheckpoint.start(runId, sessionId, null, instanceId, Instant.now(), DEFAULT_LEASE));
             Instant now = Instant.now();
             RunCheckpoint updated = switch (event) {
                 case RunStarted ignored -> current.advance(current.step(), current.lastToolCallId(), "收到任务输入",
@@ -223,7 +226,7 @@ public class RunStateTracker {
     }
 
     /** 定期续租；失去租约时记录并停止把它当成独占运行。 */
-    @Scheduled(fixedDelay = 10_000L, initialDelay = 15_000L)
+    @Scheduled(fixedDelay = HEARTBEAT_DELAY_MS, initialDelay = INITIAL_HEARTBEAT_DELAY_MS)
     public void heartbeat() {
         maintenance.whenAvailable(this::renewLeases);
     }
@@ -236,7 +239,7 @@ public class RunStateTracker {
         for (var entry : activeRuns.entrySet()) {
             String runId = entry.getKey();
             try {
-                if (!repository.renewLease(runId, instanceId, now, LEASE)) {
+                if (!repository.renewLease(runId, instanceId, now, DEFAULT_LEASE)) {
                     lostLeases.put(runId, "租约已被其他实例接管或已过期");
                     log.error("运行 {} 的租约已丢失，停止把本实例状态当成权威", runId);
                 }

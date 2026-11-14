@@ -13,7 +13,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.pilot.core.session.InMemoryRunCheckpointRepository;
 import com.pilot.core.session.RunCheckpoint;
+import com.pilot.core.session.RunCheckpointRepository;
 
 /**
  * 租约语义必须由真实 SQL 验证：条件更新写错一个字，就会出现两个实例同时推进。
@@ -90,6 +92,22 @@ class JdbcRunCheckpointRepositoryTest {
 
         assertFalse(repository.renewLease("run_1", "b", now, Duration.ofSeconds(30)));
         assertTrue(repository.renewLease("run_1", "a", now.plusSeconds(10), Duration.ofSeconds(30)));
+    }
+
+    @Test
+    void bothRepositoriesApplyTheDefaultToStartClaimAndRenew() {
+        Instant start = Instant.parse("2026-01-01T00:00:00Z");
+        Instant expires = start.plusSeconds(30);
+        for (RunCheckpointRepository repository : List.of(repository(), new InMemoryRunCheckpointRepository())) {
+            repository.save(checkpoint("run", "session", "a", start, null));
+            assertEquals(expires, repository.find("run").orElseThrow().leaseExpiresAt());
+            assertFalse(repository.claimLease("run", "b", expires.minusNanos(1), null));
+            assertTrue(repository.claimLease("run", "b", expires, null));
+            assertEquals(expires.plusSeconds(30), repository.find("run").orElseThrow().leaseExpiresAt());
+            assertFalse(repository.renewLease("run", "a", expires, null));
+            assertTrue(repository.renewLease("run", "b", expires.plusSeconds(1), null));
+            assertEquals(expires.plusSeconds(31), repository.find("run").orElseThrow().leaseExpiresAt());
+        }
     }
 
     @Test

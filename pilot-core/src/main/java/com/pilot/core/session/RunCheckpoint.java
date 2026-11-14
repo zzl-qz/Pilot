@@ -37,6 +37,9 @@ public record RunCheckpoint(String runId, String sessionId, String phase, int st
     public static final String STATUS_COMPLETED = "COMPLETED";
     public static final String STATUS_FAILED = "FAILED";
 
+    public static final long DEFAULT_LEASE_SECONDS = 30;
+    public static final Duration DEFAULT_LEASE = Duration.ofSeconds(DEFAULT_LEASE_SECONDS);
+
     public RunCheckpoint {
         runId = requireText(runId, "runId");
         sessionId = requireText(sessionId, "sessionId");
@@ -60,7 +63,12 @@ public record RunCheckpoint(String runId, String sessionId, String phase, int st
         Duration lease) {
         Instant at = now == null ? Instant.now() : now;
         return new RunCheckpoint(runId, sessionId, PHASE_STARTING, 0, null, null, "读取任务要求并开始下一步", workspace,
-            STATUS_RUNNING, owner, at.plus(lease == null ? Duration.ofSeconds(30) : lease), at, at);
+            STATUS_RUNNING, owner, leaseExpiry(at, lease), at, at);
+    }
+
+    /** 从检查点时间计算租约截止时刻，未指定时长时使用默认租约。 */
+    public static Instant leaseExpiry(Instant at, Duration lease) {
+        return at.plus(lease == null ? DEFAULT_LEASE : lease);
     }
 
     /** 租约有效 = 有人持有 + 尚未过期。释放后 owner 为空，即使时间未到也不算活跃。 */
@@ -79,9 +87,8 @@ public record RunCheckpoint(String runId, String sessionId, String phase, int st
 
     public RunCheckpoint heartbeat(String newOwner, Instant now, Duration lease) {
         Instant at = now == null ? Instant.now() : now;
-        Duration span = lease == null ? Duration.ofSeconds(30) : lease;
         return new RunCheckpoint(runId, sessionId, phase, step, lastToolCallId, lastSuccessfulStep, nextAction,
-            workspace, status, newOwner == null ? owner : newOwner, at.plus(span), at, at);
+            workspace, status, newOwner == null ? owner : newOwner, leaseExpiry(at, lease), at, at);
     }
 
     public RunCheckpoint status(String newStatus, Instant now) {

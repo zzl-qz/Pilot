@@ -24,13 +24,13 @@ public interface RunCheckpointRepository {
     List<RunCheckpoint> resumable();
 
     /**
-     * 原子抢占租约。
+     * 原子抢占租约。未指定时长时使用 {@link RunCheckpoint#DEFAULT_LEASE}。
      *
      * @return true 表示调用方现在持有租约；false 表示另一个实例持有未过期租约
      */
     boolean claimLease(String runId, String owner, Instant now, Duration lease);
 
-    /** 续租；只有当前持有者能续。返回 false 表示租约已丢失，调用方应停止推进。 */
+    /** 续租。时长默认值与抢占相同，返回 false 表示租约已丢失，调用方应停止推进。 */
     boolean renewLease(String runId, String owner, Instant now, Duration lease);
 
     /** 主动释放租约（正常结束时），保留检查点用于诊断。 */

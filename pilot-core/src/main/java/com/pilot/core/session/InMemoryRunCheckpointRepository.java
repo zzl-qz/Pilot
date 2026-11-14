@@ -47,11 +47,11 @@ public final class InMemoryRunCheckpointRepository implements RunCheckpointRepos
         if (checkpoint.leasedByOther(owner, at)) {
             return false;
         }
-        Duration span = lease == null ? Duration.ofSeconds(30) : lease;
         checkpoints.put(runId,
             new RunCheckpoint(checkpoint.runId(), checkpoint.sessionId(), checkpoint.phase(), checkpoint.step(),
                 checkpoint.lastToolCallId(), checkpoint.lastSuccessfulStep(), checkpoint.nextAction(),
-                checkpoint.workspace(), checkpoint.status(), owner, at.plus(span), checkpoint.heartbeatAt(), at));
+                checkpoint.workspace(), checkpoint.status(), owner, RunCheckpoint.leaseExpiry(at, lease),
+                checkpoint.heartbeatAt(), at));
         return true;
     }
 
@@ -61,9 +61,7 @@ public final class InMemoryRunCheckpointRepository implements RunCheckpointRepos
         if (checkpoint == null || checkpoint.owner() == null || !checkpoint.owner().equals(owner)) {
             return false;
         }
-        Duration span = lease == null ? Duration.ofSeconds(30) : lease;
-        Instant at = now == null ? Instant.now() : now;
-        checkpoints.put(runId, checkpoint.heartbeat(owner, at, span));
+        checkpoints.put(runId, checkpoint.heartbeat(owner, now, lease));
         return true;
     }
 

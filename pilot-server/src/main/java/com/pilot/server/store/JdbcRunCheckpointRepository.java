@@ -85,7 +85,6 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
     @Override
     public boolean claimLease(String runId, String owner, Instant now, Duration lease) {
         Instant at = now == null ? Instant.now() : now;
-        Duration span = lease == null ? Duration.ofSeconds(30) : lease;
         String leaseExpiry = SqliteStore.normalizedInstantSql("lease_expires_at");
         int updated = JdbcSupport.update(store, """
             UPDATE run_checkpoints
@@ -94,7 +93,7 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
                AND (owner IS NULL OR owner = ? OR lease_expires_at IS NULL OR %s <= ?)
             """.formatted(leaseExpiry), statement -> {
             statement.setString(1, owner);
-            statement.setString(2, at.plus(span).toString());
+            statement.setString(2, RunCheckpoint.leaseExpiry(at, lease).toString());
             statement.setString(3, at.toString());
             statement.setString(4, at.toString());
             statement.setString(5, runId);
@@ -107,12 +106,11 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
     @Override
     public boolean renewLease(String runId, String owner, Instant now, Duration lease) {
         Instant at = now == null ? Instant.now() : now;
-        Duration span = lease == null ? Duration.ofSeconds(30) : lease;
         int updated = JdbcSupport.update(store, """
             UPDATE run_checkpoints SET lease_expires_at = ?, heartbeat_at = ?, updated_at = ?
              WHERE run_id = ? AND owner = ?
             """, statement -> {
-            statement.setString(1, at.plus(span).toString());
+            statement.setString(1, RunCheckpoint.leaseExpiry(at, lease).toString());
             statement.setString(2, at.toString());
             statement.setString(3, at.toString());
             statement.setString(4, runId);
