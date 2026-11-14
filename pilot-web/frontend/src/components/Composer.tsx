@@ -708,23 +708,46 @@ function ResumeBar() {
 function ApprovalDock() {
   const pending = useStore((state) => state.pendingApprovals);
   const resolve = useStore((state) => state.resolveApproval);
+  const resolveWithTrust = useStore((state) => state.resolveApprovalWithTrust);
+  const mcpServers = useStore((state) => state.capabilities?.mcpServers);
   const entries = Object.values(pending || {});
   if (!entries.length) {
     return null;
   }
   return (
     <section id="approval-dock" className="approval-dock" aria-label="待审批操作">
-      {entries.map(item => (
-        <article key={item.callId} className="approval-card" aria-busy={item.busy}>
-          <h3 className="approval-title"><StatusDot variant="warning" label="待审批" aria-hidden="true" />需要你批准：{item.name}</h3>
-          <pre className="approval-args" tabIndex={0} aria-label="操作参数">{item.args}</pre>
-          <div className="approval-actions">
-            {item.busy && <span role="status">正在确认审批…</span>}
-            <Button label="拒绝" size="sm" variant="ghost" isDisabled={item.busy} onClick={() => resolve(item.callId, false)} />
-            <Button label="批准" size="sm" isDisabled={item.busy} onClick={() => resolve(item.callId, true)} />
-          </div>
-        </article>
-      ))}
+      {entries.map(item => {
+        // MCP 的信任快捷键：从结构化参数取服务器（与工具）名；旧事件没有 args 时不显示
+        const server = typeof item.structuredArgs?.server === 'string' ? item.structuredArgs.server as string : '';
+        const tool = typeof item.structuredArgs?.tool === 'string' ? item.structuredArgs.tool as string : '';
+        const isMcpTool = item.name === 'mcp_call' && Boolean(server && tool);
+        const isMcpServer = item.name === 'mcp_tools' && Boolean(server);
+        // 服务器运行状态来自能力清单；清单未加载（null）时保守显示按钮，后端 409 会给出引导
+        const known = mcpServers || [];
+        const serverKnown = known.some(entry => entry.name === server);
+        const mcpRunning = known.some(entry => entry.name === server && entry.running);
+        return (
+          <article key={item.callId} className="approval-card" aria-busy={item.busy}>
+            <h3 className="approval-title"><StatusDot variant="warning" label="待审批" aria-hidden="true" />需要你批准：{item.name}</h3>
+            <pre className="approval-args" tabIndex={0} aria-label="操作参数">{item.args}</pre>
+            <div className="approval-actions">
+              {item.busy && <span role="status">正在确认审批…</span>}
+              <Button label="拒绝" size="sm" variant="ghost" isDisabled={item.busy} onClick={() => resolve(item.callId, false)} />
+              <Button label="批准" size="sm" isDisabled={item.busy} onClick={() => resolve(item.callId, true)} />
+              {isMcpServer && !mcpRunning && (
+                <Button label="批准并信任服务器" size="sm" variant="ghost" isDisabled={item.busy}
+                  aria-label={`记住 ${server} 的启动命令，之后再启动不再询问`}
+                  onClick={() => resolveWithTrust(item.callId, true, { action: 'trust', server })} />
+              )}
+              {isMcpTool && (mcpRunning || !serverKnown) && (
+                <Button label="始终允许此工具" size="sm" variant="ghost" isDisabled={item.busy}
+                  aria-label={`记住 ${server}.${tool}（以当前定义为准），之后自动放行`}
+                  onClick={() => resolveWithTrust(item.callId, true, { action: 'allow-tool', server, tool })} />
+              )}
+            </div>
+          </article>
+        );
+      })}
     </section>
   );
 }

@@ -35,7 +35,7 @@ export interface ThreadHistory { hasMore: boolean; hasNewer: boolean; loading: b
 export interface ThreadState { previewId?: string; previewOffset?: number; rows: ThreadRow[]; windowEvents: EventEnvelope[]; cursor: number; replaying: boolean; history: ThreadHistory; activityCount: number }
 export interface TimelineInput { kind: string; tone: string; status: string; title?: string | null; detail?: string | null; foot?: string | null; actions?: boolean; callId?: string | null; dispatchId?: string | null }
 export interface TimelineItem extends TimelineInput { key: string; sequence: number; type: string; timestamp?: string | number; _stream?: string }
-export interface PendingApproval { callId: string; agent: string | null; name: string; args: string; busy?: boolean }
+export interface PendingApproval { callId: string; agent: string | null; name: string; args: string; busy?: boolean; structuredArgs?: Record<string, unknown> | null }
 export interface Notice { text: string; at: number }
 export type TaskView = Partial<S.TaskControlServiceTaskContract> & Partial<S.TaskUpdated> & { goal?: string };
 /** reducer 在历史重放时也使用这组最小状态，不能依赖 Store 的 UI 或网络动作。 */

@@ -5,6 +5,7 @@ export interface ApprovalRequired {
   callId: string;
   name: string;
   argsSummary: string;
+  args?: Record<string, unknown> | null;
 }
 
 /** ApprovalResolved.java / ApprovalResolved */

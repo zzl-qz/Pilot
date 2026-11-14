@@ -634,7 +634,8 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         callId: event.payload.callId,
         agent: event.payload.agentId || null,
         name: event.payload.name,
-        args: event.payload.argsSummary
+        args: event.payload.argsSummary,
+        structuredArgs: event.payload.args || null
       };
       syncToolRow(turn, row);
       record(draft, event, {
