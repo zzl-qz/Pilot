@@ -210,6 +210,7 @@ export const api = {
   /** MCP：合并视图只读、写用户级配置、信任管理。 */
   mcpServers: (id: string) => apiJson<ApiResults['mcpServers']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers`),
   mcpAddServer: (id: string, body: Update<S.McpConfigControllerAddRequest>) => apiJson<ApiResults['mcpAddServer']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers`, jsonBody('POST', body)),
+  mcpImportServers: (id: string, body: Update<S.McpConfigControllerImportRequest>) => apiJson<ApiResults['mcpImportServers']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers/import`, jsonBody('POST', body)),
   mcpDeleteServer: (id: string, name: string) => apiJson<ApiResults['mcpDeleteServer']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   mcpTrust: (id: string, body: Update<S.McpTrustControllerTrustRequest>) => apiJson<ApiResults['mcpTrust']>(`/api/sessions/${encodeURIComponent(id)}/mcp/trust`, jsonBody('POST', body)),
   mcpTrustView: (id: string) => apiJson<ApiResults['mcpTrustView']>(`/api/sessions/${encodeURIComponent(id)}/mcp/trust`),

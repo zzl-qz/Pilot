@@ -100,6 +100,7 @@ export interface ApiResults {
   capabilities: S.CapabilitiesControllerCapabilitiesResponse;
   mcpServers: S.McpConfigControllerServerPayload[];
   mcpAddServer: S.McpConfigControllerServerPayload;
+  mcpImportServers: S.McpConfigControllerImportResponse;
   mcpDeleteServer: null;
   mcpTrust: S.McpTrustControllerTrustResponse;
   mcpTrustView: S.McpTrustControllerTrustedServer[];

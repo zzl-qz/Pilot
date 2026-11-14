@@ -179,6 +179,17 @@ export interface McpConfigControllerAddRequest {
   env?: Record<string, string>;
 }
 
+/** McpConfigController.java / ImportRequest */
+export interface McpConfigControllerImportRequest {
+  config: string;
+}
+
+/** McpConfigController.java / ImportResponse */
+export interface McpConfigControllerImportResponse {
+  imported: (string)[];
+  overwritten: (string)[];
+}
+
 /** McpTrustController.java / TrustRequest */
 export interface McpTrustControllerTrustRequest {
   action: string;

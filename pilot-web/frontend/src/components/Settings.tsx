@@ -548,8 +548,27 @@ function McpSettings() {
   </section>;
 }
 
-/** 添加表单：args 支持空格简写（含引号）与 JSON 数组两种写法，后端负责解析。 */
+const MCP_IMPORT_PLACEHOLDER = `{
+  "my-mcp-server": {
+    "command": "npx",
+    "args": ["-y", "@scope/server"]
+  }
+}`;
+
+/** 添加表单：双模式。「表单」按字段填写（args 支持空格简写或 JSON 数组）；「粘贴 JSON」直接导入现成配置。 */
 function McpAddServer({ onDone }: { onDone: () => void }) {
+  const [mode, setMode] = useState<'form' | 'json'>('form');
+  return <div className="mcp-add-wrap">
+    <SegmentedControl id="mcp-add-mode" label="添加方式" value={mode} onChange={value => setMode(value as 'form' | 'json')}>
+      <SegmentedControlItem value="form" label="表单填写" />
+      <SegmentedControlItem value="json" label="粘贴 JSON" />
+    </SegmentedControl>
+    {mode === 'form' ? <McpAddForm onDone={onDone} /> : <McpImportForm onDone={onDone} />}
+  </div>;
+}
+
+/** 表单模式：字段逐项填写，解析与校验在后端。 */
+function McpAddForm({ onDone }: { onDone: () => void }) {
   const sessionId = useStore(state => state.sessionId);
   const [name, setName] = useState('');
   const [command, setCommand] = useState('');
@@ -612,6 +631,53 @@ function McpAddServer({ onDone }: { onDone: () => void }) {
     <div className="settings-inline-actions">
       <Button id="mcp-add-submit" variant="primary" label={busy ? '保存中…' : '保存服务器'}
         isDisabled={busy || !name.trim() || !command.trim()} onClick={() => void submit()} />
+    </div>
+    <p className="settings-status" role={hasError ? 'alert' : 'status'}>{hint}</p>
+  </form>;
+}
+
+/** 粘贴 JSON 模式：支持 {"服务器名": {…}} 或 {"mcpServers": {"服务器名": {…}}}，可以一次导入多个。 */
+function McpImportForm({ onDone }: { onDone: () => void }) {
+  const sessionId = useStore(state => state.sessionId);
+  const [config, setConfig] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [hint, setHint] = useState('把现成配置直接粘贴进来；与用户级同名的条目会被覆盖。');
+  const [hasError, setHasError] = useState(false);
+
+  async function submit() {
+    if (!sessionId || busy) return;
+    setBusy(true);
+    setHasError(false);
+    setHint('正在导入…');
+    try {
+      const result = await api.mcpImportServers(sessionId, { config });
+      const imported = result?.imported || [];
+      const overwritten = result?.overwritten || [];
+      const parts = [`已导入 ${imported.join('、')}`];
+      if (overwritten.length) parts.push(`其中覆盖了同名项 ${overwritten.join('、')}`);
+      setHint(parts.join('，') + '；首次启动时仍会请求批准。');
+      setConfig('');
+      onDone();
+    } catch (failure) {
+      setHasError(true);
+      setHint('导入失败。' + errorInfo(failure).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <form className="settings-form mcp-add-form" id="mcp-import-form" onSubmit={event => {
+    event.preventDefault();
+    if (config.trim() && !busy) void submit();
+  }}>
+    <label className="mcp-env-label" htmlFor="mcp-import-config">完整配置</label>
+    <textarea id="mcp-import-config" className="mcp-json-input" value={config} placeholder={MCP_IMPORT_PLACEHOLDER}
+      spellCheck={false} aria-label="MCP 完整配置 JSON" disabled={busy} rows={8}
+      onChange={event => setConfig(event.target.value)} />
+    <p className="mcp-import-hint">支持直接粘贴 {"{"}"服务器名": {"{"}…{"}"}{"}"} 或 {"{"}"mcpServers": {"{"}"服务器名": {"{"}…{"}"}{"}"}{"}"}；仅支持 stdio（command + args）。</p>
+    <div className="settings-inline-actions">
+      <Button id="mcp-import-submit" variant="primary" label={busy ? '导入中…' : '导入'}
+        isDisabled={busy || !config.trim()} onClick={() => void submit()} />
     </div>
     <p className="settings-status" role={hasError ? 'alert' : 'status'}>{hint}</p>
   </form>;
