@@ -43,11 +43,6 @@ public final class SearchTool implements Tool {
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
         return Map.of("type", "object", "properties",
             Map.of("pattern", Map.of("type", "string", "description", "正则表达式；先精确定位符号再用宽松模式，避免一次命中过多"), "path",

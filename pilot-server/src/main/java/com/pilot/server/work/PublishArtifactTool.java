@@ -17,11 +17,6 @@ public record PublishArtifactTool(WorkProductService products, ObjectMapper mapp
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public boolean readOnly() {
         return false;
     }

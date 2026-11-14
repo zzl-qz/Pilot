@@ -44,11 +44,6 @@ public final class ReadFileTool implements Tool {
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
         return Map.of("type", "object", "properties",
             Map.of("path", Map.of("type", "string", "description", "工作区内的相对文件路径"), "start_line",

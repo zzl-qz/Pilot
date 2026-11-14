@@ -10,7 +10,9 @@ import com.pilot.core.prompt.PromptLibrary;
 public interface Tool {
     String name();
 
-    String description();
+    default String description() {
+        return promptDescription();
+    }
 
     /**
      * 从 {@code prompts/tools/<name>.md} 读取工具描述。

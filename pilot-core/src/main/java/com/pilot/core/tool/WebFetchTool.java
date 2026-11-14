@@ -28,11 +28,6 @@ public final class WebFetchTool implements Tool {
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public boolean readOnly() {
         return true;
     }

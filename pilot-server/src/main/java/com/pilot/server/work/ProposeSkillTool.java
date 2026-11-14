@@ -17,11 +17,6 @@ public record ProposeSkillTool(SkillDraftService drafts, ObjectMapper mapper, St
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public boolean readOnly() {
         return false;
     }

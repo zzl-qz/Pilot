@@ -26,11 +26,6 @@ public final class ListDirTool implements Tool {
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
         return Map.of("type", "object", "properties",
             Map.of("path", Map.of("type", "string", "description", "工作区内的相对目录路径，省略表示根目录")), "required", List.of(),

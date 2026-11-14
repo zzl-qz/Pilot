@@ -41,11 +41,6 @@ public final class McpToolsTool implements Tool {
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
         return Map.of("type", "object", "properties",
             Map.of("server", Map.of("type", "string", "description", "MCP 服务器名；省略则列出所有已配置的服务器"), "query",

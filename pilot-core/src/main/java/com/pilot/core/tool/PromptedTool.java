@@ -17,11 +17,6 @@ public abstract class PromptedTool implements Tool {
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public boolean readOnly() {
         return false;
     }

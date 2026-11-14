@@ -18,10 +18,6 @@ public final class StopCommandTool implements Tool {
         return "stop_command";
     }
 
-    public String description() {
-        return promptDescription();
-    }
-
     public boolean readOnly() {
         return false;
     }

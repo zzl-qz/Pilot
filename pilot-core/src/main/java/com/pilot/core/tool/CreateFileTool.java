@@ -33,6 +33,10 @@ public final class CreateFileTool extends PromptedTool implements WritesFiles {
 
     @Override
     public Map<String, Object> parameters() {
+        return schema();
+    }
+
+    static Map<String, Object> schema() {
         return objectSchema(
             Map.of("path", Map.of("type", "string", "description", "工作区内的相对文件路径；文件不能已存在，改已有文件请用 edit_file"), "content",
                 Map.of("type", "string", "description", "文件的完整内容")),

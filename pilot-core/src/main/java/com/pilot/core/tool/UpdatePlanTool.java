@@ -29,11 +29,6 @@ public final class UpdatePlanTool implements Tool {
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
         return Map.of("type", "object", "properties", Map.of("explanation",
             Map.of("type", "string", "description", "本次更新的原因（可选）"), "plan",

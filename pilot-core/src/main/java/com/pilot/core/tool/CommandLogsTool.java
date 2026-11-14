@@ -18,10 +18,6 @@ public final class CommandLogsTool implements Tool {
         return "command_logs";
     }
 
-    public String description() {
-        return promptDescription();
-    }
-
     public boolean readOnly() {
         return true;
     }

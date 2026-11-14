@@ -25,10 +25,6 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
         return "command_status";
     }
 
-    public String description() {
-        return promptDescription();
-    }
-
     public boolean readOnly() {
         return true;
     }

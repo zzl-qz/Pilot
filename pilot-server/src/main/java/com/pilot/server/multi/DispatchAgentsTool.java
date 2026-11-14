@@ -81,11 +81,6 @@ public final class DispatchAgentsTool implements Tool {
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
         Map<String,
             Object> fields = Map.ofEntries(Map.entry("id", Map.of("type", "string", "description", "任务编号，会话内唯一，例如 T1")),

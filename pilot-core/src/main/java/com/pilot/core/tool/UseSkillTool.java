@@ -38,11 +38,6 @@ public final class UseSkillTool implements Tool {
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("name", Map.of("type", "string", "description", "技能目录或 install_skill 返回的技能名，必须完全一致"));

@@ -15,7 +15,7 @@ import com.pilot.core.workspace.PathValidator;
  *
  * <p>工具名保持不变，子 Agent 的行为与主 Agent 对齐；隔离靠「写不进去」而不是「提示词要求别写」。
  */
-public final class SandboxEditFileTool implements Tool {
+public final class SandboxEditFileTool extends PromptedTool {
     private static final long MAX_BYTES = 32L * 1024 * 1024;
 
     private final PathValidator paths;
@@ -27,29 +27,15 @@ public final class SandboxEditFileTool implements Tool {
     }
 
     public SandboxEditFileTool(PathValidator paths, SandboxSink sandbox, ReadGuard reads) {
+        super("edit_file");
         this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
         this.sandbox = java.util.Objects.requireNonNull(sandbox, "sandbox must not be null");
         this.reads = reads == null ? ReadGuard.allowAll() : reads;
     }
 
     @Override
-    public String name() {
-        return "edit_file";
-    }
-
-    @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
         return EditFileTool.schema();
-    }
-
-    @Override
-    public boolean readOnly() {
-        return false;
     }
 
     @Override

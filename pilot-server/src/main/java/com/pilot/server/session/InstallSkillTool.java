@@ -20,11 +20,6 @@ public record InstallSkillTool(SkillInstallService installer, SkillService skill
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public boolean readOnly() {
         return false;
     }

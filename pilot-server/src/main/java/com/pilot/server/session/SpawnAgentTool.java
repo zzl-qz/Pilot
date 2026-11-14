@@ -121,11 +121,6 @@ public final class SpawnAgentTool implements Tool {
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
         return Map.of(
             "type", "object", "properties", Map

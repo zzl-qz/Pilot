@@ -51,11 +51,6 @@ public final class RememberTool implements Tool, WritesFiles {
     }
 
     @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
         return Map.of("type", "object", "properties",
             Map.of("note", Map.of("type", "string", "description", "要沉淀的一条经验/惯例/踩坑，一行以内；写成用户日后能直接执行的口令式条目")),

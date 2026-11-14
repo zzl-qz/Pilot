@@ -2,7 +2,6 @@ package com.pilot.core.tool;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Map;
 
 import com.pilot.core.workspace.PathValidator;
@@ -12,7 +11,7 @@ import com.pilot.core.workspace.PathValidator;
  *
  * <p>已存在的文件仍然拒绝创建，提示改用 {@code edit_file}，与真实写工具保持一致。
  */
-public final class SandboxCreateFileTool implements Tool {
+public final class SandboxCreateFileTool extends PromptedTool {
     private final PathValidator paths;
     private final SandboxSink sandbox;
     private final ReadGuard reads;
@@ -22,32 +21,15 @@ public final class SandboxCreateFileTool implements Tool {
     }
 
     public SandboxCreateFileTool(PathValidator paths, SandboxSink sandbox, ReadGuard reads) {
+        super("create_file");
         this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
         this.sandbox = java.util.Objects.requireNonNull(sandbox, "sandbox must not be null");
         this.reads = reads == null ? ReadGuard.allowAll() : reads;
     }
 
     @Override
-    public String name() {
-        return "create_file";
-    }
-
-    @Override
-    public String description() {
-        return promptDescription();
-    }
-
-    @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("path", Map.of("type", "string", "description", "工作区内的相对文件路径；文件不能已存在，改已有文件请用 edit_file"), "content",
-                Map.of("type", "string", "description", "文件的完整内容")),
-            "required", List.of("path", "content"), "additionalProperties", false);
-    }
-
-    @Override
-    public boolean readOnly() {
-        return false;
+        return CreateFileTool.schema();
     }
 
     @Override
