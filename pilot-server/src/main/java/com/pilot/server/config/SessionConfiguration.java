@@ -4,6 +4,7 @@ import java.time.Clock;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 
 import com.pilot.core.session.EventStreamLimits;
 import com.pilot.core.session.PreviewLimits;
@@ -13,24 +14,37 @@ import com.pilot.core.session.SessionService;
 @Configuration(proxyBeanMethods = false)
 public class SessionConfiguration {
     @Bean
-    SessionService sessionService(SessionRepository repository,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.queue-items:4096}") int items,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.queue-bytes:8388608}") long bytes,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.total-bytes:134217728}") long total,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.connections:256}") int connections,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.session-connections:32}") int perSession,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.page-size:256}") int page,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.queue-wait-ms:30000}") long wait,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.send-timeout-ms:30000}") long send,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.replay-timeout-ms:300000}") long replay,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.reference-bytes:262144}") long reference,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.merge-ms:50}") long merge,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.merge-bytes:8192}") int mergeBytes,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.preview-bytes:131072}") int previewBytes,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.total-preview-bytes:16777216}") long previewTotal,
-        @org.springframework.beans.factory.annotation.Value("${pilot.events.preview-sessions:256}") int previewSessions) {
-        return new SessionService(Clock.systemUTC(), repository,
-            new EventStreamLimits(items, bytes, total, connections, perSession, page, wait, send, replay, reference),
-            new PreviewLimits(merge, mergeBytes, previewBytes, previewTotal, previewSessions));
+    SessionService sessionService(SessionRepository repository, EventStreamLimits eventLimits,
+        PreviewLimits previewLimits) {
+        return new SessionService(Clock.systemUTC(), repository, eventLimits, previewLimits);
+    }
+
+    @Bean
+    EventStreamLimits eventStreamLimits(Environment environment) {
+        EventStreamLimits defaults = EventStreamLimits.defaults();
+        return new EventStreamLimits(limit(environment, "queue-items", Integer.class, defaults.queueItems()),
+            limit(environment, "queue-bytes", Long.class, defaults.queueBytes()),
+            limit(environment, "total-bytes", Long.class, defaults.totalBytes()),
+            limit(environment, "connections", Integer.class, defaults.subscribers()),
+            limit(environment, "session-connections", Integer.class, defaults.subscribersPerSession()),
+            limit(environment, "page-size", Integer.class, defaults.pageSize()),
+            limit(environment, "queue-wait-ms", Long.class, defaults.queueWaitMillis()),
+            limit(environment, "send-timeout-ms", Long.class, defaults.sendMillis()),
+            limit(environment, "replay-timeout-ms", Long.class, defaults.replayMillis()),
+            limit(environment, "reference-bytes", Long.class, defaults.referenceBytes()));
+    }
+
+    @Bean
+    PreviewLimits previewLimits(Environment environment) {
+        PreviewLimits defaults = PreviewLimits.defaults();
+        return new PreviewLimits(limit(environment, "merge-ms", Long.class, defaults.mergeMillis()),
+            limit(environment, "merge-bytes", Integer.class, defaults.mergeBytes()),
+            limit(environment, "preview-bytes", Integer.class, defaults.snapshotBytes()),
+            limit(environment, "total-preview-bytes", Long.class, defaults.totalSnapshotBytes()),
+            limit(environment, "preview-sessions", Integer.class, defaults.sessions()));
+    }
+
+    private static <T> T limit(Environment environment, String name, Class<T> type, T fallback) {
+        return environment.getProperty("pilot.events." + name, type, fallback);
     }
 }
