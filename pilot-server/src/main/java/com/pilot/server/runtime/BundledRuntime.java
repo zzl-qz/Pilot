@@ -22,6 +22,7 @@ import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.runtime.bootstrap.SourceEnvironment;
 import com.pilot.core.tool.ProcessSupport;
 import com.pilot.core.util.FileTrees;
+import com.pilot.core.util.HostOs;
 
 /**
  * 给技能脚本准备 Python 3.12 和 Node 22。
@@ -229,7 +230,7 @@ public class BundledRuntime implements SmartLifecycle {
     }
 
     private static void linkPython(Path dest) {
-        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+        if (HostOs.isWindows()) {
             return;
         }
         Path python3 = dest.resolve("bin").resolve("python3");
@@ -261,13 +262,12 @@ public class BundledRuntime implements SmartLifecycle {
     }
 
     private static String pythonTriple() {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
         boolean arm = arch.contains("aarch64") || arch.contains("arm64");
-        if (os.contains("win")) {
+        if (HostOs.isWindows()) {
             return arm ? "aarch64-pc-windows-msvc" : "x86_64-pc-windows-msvc";
         }
-        if (os.contains("mac")) {
+        if (HostOs.isMac()) {
             return arm ? "aarch64-apple-darwin" : "x86_64-apple-darwin";
         }
         return arm ? "aarch64-unknown-linux-gnu" : "x86_64-unknown-linux-gnu";

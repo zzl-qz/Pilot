@@ -21,6 +21,7 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
+import com.pilot.core.util.HostOs;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.config.WebSearchProperties;
 import com.pilot.server.runtime.SourceLayout;
@@ -164,7 +165,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
             }
         }
         deleteTree(source);
-        if (isWindows()) {
+        if (HostOs.isWindows()) {
             // 仓库里有 "...conf:socket" 这种 NTFS 不认的文件名，git checkout 必然失败，别浪费时间
             log.info("Windows 上跳过 git clone（SearXNG 仓库含非法文件名），直接用压缩包");
         } else if (gitClone(source)) {
@@ -397,7 +398,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
      * 把主题产物再放一份到 static 根目录，正好接住这条回退路径。
      */
     private void syncThemeStatic(Path source) {
-        if (!isWindows()) {
+        if (!HostOs.isWindows()) {
             return;
         }
         Path staticRoot = source.resolve("searx").resolve("static");
@@ -436,7 +437,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
      * 放在 site-packages 里，pip 升级依赖也不会清掉。
      */
     private void ensureWindowsShim(Path venv) {
-        if (!isWindows()) {
+        if (!HostOs.isWindows()) {
             return;
         }
         Path sitePackages = venv.resolve("Lib").resolve("site-packages");
@@ -484,14 +485,14 @@ public class LocalSearchRuntime implements SmartLifecycle {
 
     private String findPython() {
         List<String> candidates = new ArrayList<>();
-        String file = isWindows() ? "python.exe" : "python3";
+        String file = HostOs.isWindows() ? "python.exe" : "python3";
         ExecutablePath.candidates(ExecutablePath.directories(RuntimeEnvironment.bundledBinPath()), file)
             .filter(Files::isRegularFile).map(Path::toString).forEach(candidates::add);
         if (!properties.python().isBlank()) {
             candidates.add(properties.python());
         }
         candidates.addAll(PYTHON_CANDIDATES);
-        if (!isWindows()) {
+        if (!HostOs.isWindows()) {
             candidates.addAll(POSIX_PYTHON_CANDIDATES);
         }
         for (String candidate : candidates) {
@@ -500,10 +501,6 @@ public class LocalSearchRuntime implements SmartLifecycle {
             }
         }
         return null;
-    }
-
-    private static boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
     }
 
     private static boolean supported(String python) {

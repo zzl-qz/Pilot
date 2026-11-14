@@ -32,6 +32,7 @@ import org.springframework.stereotype.Service;
 
 import com.pilot.core.runtime.bootstrap.BootstrapPlatform;
 import com.pilot.core.runtime.bootstrap.MobileBridgeLayout;
+import com.pilot.core.util.HostOs;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.DataMaintenance;
 import com.pilot.server.runtime.SourceLayout;
@@ -223,7 +224,7 @@ public class MobileConnectionService {
             throw new IllegalStateException("Pilot 正在启动，请稍后重试");
         }
         if (environment == null || environment.prepared() == null) {
-            requirePlatform(System.getProperty("os.name", ""), System.getProperty("os.arch", ""));
+            requirePlatform(HostOs.name(), System.getProperty("os.arch", ""));
         }
         Path libraries = libraries();
         Files.createDirectories(data);
@@ -257,7 +258,7 @@ public class MobileConnectionService {
         }
         process = child;
         log.info("手机连接诊断：连接桥子进程已启动，PID={}", child.pid());
-        BridgeStartupDiagnostics diagnostics = new BridgeStartupDiagnostics(System.getProperty("os.name", ""));
+        BridgeStartupDiagnostics diagnostics = new BridgeStartupDiagnostics(HostOs.name());
         CompletableFuture<Void> errorsRead = new CompletableFuture<>();
         AtomicBoolean buildMarkerSeen = new AtomicBoolean();
         Thread.startVirtualThread(() -> {

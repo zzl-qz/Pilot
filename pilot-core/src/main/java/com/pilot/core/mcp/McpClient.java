@@ -26,6 +26,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import com.pilot.core.util.HostOs;
+
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -401,7 +403,7 @@ final class McpClient implements AutoCloseable {
 
     /** Windows 上 npx、npm 等是 .cmd 脚本，ProcessBuilder 不会自动补扩展名。 */
     private static String resolveCommand(String command) {
-        if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+        if (!HostOs.isWindows()) {
             return command;
         }
         String lower = command.toLowerCase(Locale.ROOT);

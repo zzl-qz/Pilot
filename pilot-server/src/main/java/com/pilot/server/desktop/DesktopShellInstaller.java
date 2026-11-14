@@ -8,7 +8,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
@@ -22,6 +21,7 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.tool.ProcessSupport;
+import com.pilot.core.util.HostOs;
 import com.pilot.server.runtime.NpmInstall;
 import com.pilot.server.runtime.RuntimeMirrors;
 import com.pilot.server.runtime.SourceLayout;
@@ -177,7 +177,7 @@ public class DesktopShellInstaller {
 
     /** 与 npm 同目录的 node（Electron 只接受 Node 22+，就用装它的那个 Node 补二进制）。 */
     private static Path sibling(Path npm, String name) {
-        Path candidate = npm.getParent().resolve(isWindows() ? name + ".exe" : name);
+        Path candidate = npm.getParent().resolve(HostOs.isWindows() ? name + ".exe" : name);
         return Files.isRegularFile(candidate) ? candidate : null;
     }
 
@@ -193,7 +193,7 @@ public class DesktopShellInstaller {
      * 用它装会只装包、不下载二进制（实测 node 20 + npm 10 装完没有 dist）。
      */
     static Path npm(Path root, String runtimeBin, String path) {
-        boolean windows = isWindows();
+        boolean windows = HostOs.isWindows();
         var bundled = ExecutablePath.directories(runtimeBin);
         var legacy = Stream.of(SourceLayout.bundledRuntime(root).resolve("node"));
         var inherited = ExecutablePath.directories(path);
@@ -223,7 +223,4 @@ public class DesktopShellInstaller {
         return ProcessSupport.runLogged(builder, logFile, timeout, log);
     }
 
-    private static boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-    }
 }

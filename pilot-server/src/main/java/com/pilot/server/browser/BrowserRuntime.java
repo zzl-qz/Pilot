@@ -10,7 +10,6 @@ import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -30,6 +29,7 @@ import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.ProcessSupport;
+import com.pilot.core.util.HostOs;
 import com.pilot.server.runtime.NpmInstall;
 import com.pilot.server.runtime.RuntimeMirrors;
 
@@ -338,7 +338,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
 
     /** 桌面开窗与浏览器运行时共用同一套会话判定，避免各平台各写一份。 */
     public static boolean desktopAvailable() {
-        return desktopAvailable(System.getProperty("os.name"), System.getenv("SESSIONNAME"), System.getenv("DISPLAY"),
+        return desktopAvailable(HostOs.name(), System.getenv("SESSIONNAME"), System.getenv("DISPLAY"),
             System.getenv("WAYLAND_DISPLAY"));
     }
 
@@ -356,11 +356,10 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
      * macOS 本地运行常在桌面，不额外探测。
      */
     static boolean desktopAvailable(String osName, String sessionName, String display, String waylandDisplay) {
-        String os = osName == null ? "" : osName.toLowerCase(Locale.ROOT);
-        if (os.contains("win")) {
+        if (HostOs.isWindows(osName)) {
             return !"Service".equalsIgnoreCase(sessionName);
         }
-        if (os.contains("mac") || os.contains("darwin")) {
+        if (HostOs.isMac(osName)) {
             return true;
         }
         return display != null || waylandDisplay != null;
@@ -453,7 +452,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     }
 
     private static Path executable(Stream<Path> directories, String name) {
-        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        boolean windows = HostOs.isWindows();
         String[] names = windows ? new String[] {name + ".exe", name + ".cmd"} : new String[] {name};
         return ExecutablePath.candidates(directories, names).filter(Files::isRegularFile).filter(Files::isExecutable)
             .findFirst().orElse(null);

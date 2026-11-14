@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Locale;
 
 import com.pilot.core.multi.DiffSandbox;
+import com.pilot.core.util.HostOs;
 
 /** 服务器和离线维护共用的进程间锁。锁文件放在要切换的目录之外。 */
 public final class DataDirectoryLock implements AutoCloseable {
@@ -71,7 +72,7 @@ public final class DataDirectoryLock implements AutoCloseable {
             throw new IOException("文件系统根目录不能用作维护目标");
         }
         String identity = canonical.toString();
-        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+        if (HostOs.isWindows()) {
             identity = identity.toLowerCase(Locale.ROOT);
         }
         return canonical.getParent().resolve(".pilot-maintenance").resolve(DiffSandbox.fingerprint(identity));

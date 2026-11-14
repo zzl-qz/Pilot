@@ -6,13 +6,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
+import com.pilot.core.util.HostOs;
+
 /** 优先用 Node 执行 npm CLI，让包含空格的路径由进程参数处理。 */
 public final class NpmInstall {
     private NpmInstall() {
     }
 
     public static List<String> command(Path npm, List<String> flags) {
-        return command(npm, flags, System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
+        return command(npm, flags, HostOs.isWindows());
     }
 
     static List<String> command(Path npm, List<String> flags, boolean windows) {

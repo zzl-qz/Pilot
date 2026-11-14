@@ -36,6 +36,7 @@ import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.pilot.core.util.HostOs;
 import com.pilot.core.util.WireEnum;
 
 import tools.jackson.databind.ObjectMapper;
@@ -666,7 +667,7 @@ public final class CommandTaskManager implements AutoCloseable {
         if (!handle.isAlive()) {
             return false;
         }
-        if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("linux")) {
+        if (HostOs.isLinux()) {
             try {
                 // 内核状态定义：https://docs.kernel.org/filesystems/proc.html
                 String status = Files.readString(Path.of("/proc", Long.toString(handle.pid()), "status"));

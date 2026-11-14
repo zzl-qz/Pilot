@@ -10,13 +10,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.slf4j.Logger;
+
+import com.pilot.core.util.HostOs;
 
 /**
  * 子进程执行的公共细节：跨平台 shell 包装与输出解码。
@@ -27,8 +28,7 @@ import org.slf4j.Logger;
 public final class ProcessSupport {
     /** Windows 中文环境的默认编码，作为非 UTF-8 输出的回退。 */
     private static final Charset GBK = Charset.forName("GBK");
-    private static final boolean WINDOWS =
-        System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows");
+    private static final boolean WINDOWS = HostOs.isWindows();
 
     private ProcessSupport() {
     }

@@ -8,8 +8,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
+
+import com.pilot.core.util.HostOs;
 
 /**
  * 把一条命令放进当前操作系统能提供的文件系统沙箱。
@@ -30,11 +31,10 @@ public final class OsSandbox {
         MAC, LINUX, WINDOWS;
 
         static Family current() {
-            String name = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-            if (name.contains("mac") || name.contains("darwin")) {
+            if (HostOs.isMac()) {
                 return MAC;
             }
-            if (name.contains("win")) {
+            if (HostOs.isWindows()) {
                 return WINDOWS;
             }
             return LINUX;

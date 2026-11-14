@@ -17,6 +17,7 @@ import java.util.Locale;
 import java.util.stream.Stream;
 
 import com.pilot.core.runtime.ExecutablePath;
+import com.pilot.core.util.HostOs;
 import com.pilot.server.runtime.SourceLayout;
 
 /**
@@ -158,8 +159,8 @@ public final class FrontendDepsPrompt {
     }
 
     private static boolean install(Path root, Path frontend) {
-        List<String> command =
-            isWindows() ? List.of("cmd.exe", "/d", "/c", "npm install") : List.of("/bin/sh", "-c", "npm install");
+        List<String> command = HostOs.isWindows() ? List.of("cmd.exe", "/d", "/c", "npm install")
+            : List.of("/bin/sh", "-c", "npm install");
         ProcessBuilder builder = new ProcessBuilder(command).directory(frontend.toFile()).inheritIO();
         Path npmHome = npmHome(root);
         if (npmHome != null) {
@@ -184,7 +185,7 @@ public final class FrontendDepsPrompt {
 
     /** 优先用 PATH 上的 npm（Maven 的 frontend-build 用的就是它），没有才退回项目内置 Node。 */
     static Path npmHome(Path root) {
-        String name = isWindows() ? "npm.cmd" : "npm";
+        String name = HostOs.isWindows() ? "npm.cmd" : "npm";
         var directories = ExecutablePath.directories(System.getenv("PATH"));
         var bundled = SourceLayout.bundledRuntime(root).resolve("node");
         return ExecutablePath.candidates(Stream.concat(directories, Stream.of(bundled)), name)
@@ -262,7 +263,4 @@ public final class FrontendDepsPrompt {
         }
     }
 
-    private static boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-    }
 }

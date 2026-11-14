@@ -13,6 +13,8 @@ import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 
+import com.pilot.core.util.HostOs;
+
 /** Read-only discovery of common local task runtimes. Never launches discovered programs. */
 @Service
 public class LocalCapabilityService {
@@ -31,7 +33,7 @@ public class LocalCapabilityService {
             new CapabilitySpec("docker", "Docker", List.of("docker", "docker.exe"), "在容器中运行可隔离的任务依赖"));
 
     public List<LocalCapability> discover() {
-        boolean windows = isWindows();
+        boolean windows = HostOs.isWindows();
         String pathValue = System.getenv("PATH");
         List<Path> pathEntries = new ArrayList<>();
         if (pathValue != null) {
@@ -50,7 +52,7 @@ public class LocalCapabilityService {
             if (found.available()) {
                 return found;
             }
-            for (Path candidate : applicationCandidates(spec.id(), System.getProperty("os.name", ""), System.getenv(),
+            for (Path candidate : applicationCandidates(spec.id(), HostOs.name(), System.getenv(),
                 Path.of(System.getProperty("user.home", ".")))) {
                 if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
                     return new LocalCapability(spec.id(), spec.label(), true, candidate.toString(),
@@ -63,8 +65,7 @@ public class LocalCapabilityService {
 
     static List<Path> applicationCandidates(String id, String os, Map<String, String> environment, Path home) {
         List<Path> result = new ArrayList<>();
-        String platform = os.toLowerCase(Locale.ROOT);
-        if (platform.startsWith("mac") || platform.equals("darwin")) {
+        if (HostOs.isMac(os)) {
             List<String> names = switch (id) {
                 case "browser" -> List.of("Google Chrome.app/Contents/MacOS/Google Chrome",
                     "Microsoft Edge.app/Contents/MacOS/Microsoft Edge", "Firefox.app/Contents/MacOS/firefox");
@@ -79,7 +80,7 @@ public class LocalCapabilityService {
                     result.add(root.resolve(name));
                 }
             }
-        } else if (platform.startsWith("windows")) {
+        } else if (HostOs.isWindows(os)) {
             List<String> names = switch (id) {
                 case "browser" -> List.of("Google/Chrome/Application/chrome.exe",
                     "Microsoft/Edge/Application/msedge.exe", "Mozilla Firefox/firefox.exe");
@@ -152,10 +153,6 @@ public class LocalCapabilityService {
                 "可在任务目录创建隔离虚拟环境替代；容器能力不可用时不要假设任务已获得 OS 级隔离。");
         String platform = windows ? "Windows" : System.getProperty("os.name", "本机");
         return platform + "：" + advice.getOrDefault(id, "检查任务是否可使用已安装工具替代；安装前需用户授权。");
-    }
-
-    private static boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows");
     }
 
     private record CapabilitySpec(String id, String label, List<String> commands, String purpose) {

@@ -12,7 +12,6 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,6 +26,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.util.HostOs;
 import com.pilot.core.util.Sha256;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.DataMaintenance;
@@ -302,7 +302,7 @@ public class HistoryEditCoordinator {
 
     private static void forceDirectory(Path directory) throws IOException {
         // Windows 不允许打开目录 FileChannel；原子文件替换仍使用标准 NIO。
-        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+        if (HostOs.isWindows()) {
             return;
         }
         try (var channel = FileChannel.open(directory, StandardOpenOption.READ)) {

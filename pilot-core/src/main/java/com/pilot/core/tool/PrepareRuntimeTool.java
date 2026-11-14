@@ -5,13 +5,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.util.FileTrees;
+import com.pilot.core.util.HostOs;
 import com.pilot.core.workspace.PathValidator;
 
 import tools.jackson.databind.ObjectMapper;
@@ -37,7 +37,7 @@ public final class PrepareRuntimeTool implements Tool {
     }
 
     public PrepareRuntimeTool(PathValidator paths) {
-        this(paths, System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows"));
+        this(paths, HostOs.isWindows());
     }
 
     private PrepareRuntimeTool(PathValidator paths, boolean windows) {

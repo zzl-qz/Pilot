@@ -21,6 +21,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.util.HostOs;
 import com.pilot.server.browser.BrowserHome;
 import com.pilot.server.browser.BrowserRuntime;
 import com.pilot.server.runtime.SourceLayout;
@@ -191,11 +192,10 @@ public class DesktopWindowLauncher {
 
     static Path electronBinary(Path root) {
         Path dist = root.resolve("pilot-desktop").resolve("node_modules").resolve("electron").resolve("dist");
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        if (os.contains("mac")) {
+        if (HostOs.isMac()) {
             return dist.resolve("Electron.app").resolve("Contents").resolve("MacOS").resolve("Electron");
         }
-        if (os.contains("win")) {
+        if (HostOs.isWindows()) {
             return dist.resolve("electron.exe");
         }
         return dist.resolve("electron");
@@ -203,7 +203,7 @@ public class DesktopWindowLauncher {
 
     /** 使用 Electron 自带的 Node 准备开发壳，IDEA 不需要额外配置 node 的 PATH。 */
     static Path prepareDesktopBinary(Path root, Path electron, Path logFile) throws IOException {
-        if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac")) {
+        if (!HostOs.isMac()) {
             return electron;
         }
         ProcessBuilder prepare =

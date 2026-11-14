@@ -22,6 +22,7 @@ import com.pilot.core.multi.AgentScope;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
+import com.pilot.core.util.HostOs;
 import com.pilot.core.workspace.PathValidator;
 
 /**
@@ -45,7 +46,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     private static final Pattern SECRET_KEY = Pattern.compile("(?i)(key|token|secret|password|credential|passwd)");
     private static final Pattern EXIT_CODE = Pattern.compile("^退出码: (-?\\d+)", Pattern.MULTILINE);
 
-    private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    private static final boolean WINDOWS = HostOs.isWindows();
     private static final int MAX_TOKENS = 64;
     private static final int MAX_OUTPUT_CHARS = 12_000;
     private static final int HEAD_CHARS = 4_000;
@@ -716,7 +717,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         if (wrapper != null) {
             // Git 检出或打包可能丢失执行位；只为已识别的构建 wrapper 加解释器，绝不执行 shell -c。
-            boolean unix = !System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+            boolean unix = !HostOs.isWindows();
             if (unix && !Files.isExecutable(wrapper)) {
                 command.add("/bin/sh");
             }
@@ -744,7 +745,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     /** 在 PATH 中查找可执行文件；Windows 需要补全 .exe/.cmd/.bat 后缀。 */
     static Path resolveOnPath(String name) {
-        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        boolean windows = HostOs.isWindows();
         return resolveOnPath(name, effectivePath(), windows);
     }
 
@@ -786,7 +787,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     }
 
     private Path findWrapper(String baseName) {
-        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        boolean windows = HostOs.isWindows();
         List<String> names = windows ? List.of(baseName + ".cmd", baseName + ".bat") : List.of(baseName);
         for (String name : names) {
             Path candidate = paths.root().resolve(name);

@@ -2,6 +2,8 @@ package com.pilot.server.mobile;
 
 import java.util.Locale;
 
+import com.pilot.core.util.HostOs;
+
 /** 只保留已知故障类别，不保存可能包含本机路径、令牌或配对凭证的子进程输出。 */
 final class BridgeStartupDiagnostics {
     private enum Failure {
@@ -12,7 +14,7 @@ final class BridgeStartupDiagnostics {
     private Failure failure = Failure.UNKNOWN;
 
     BridgeStartupDiagnostics(String os) {
-        windows = os.toLowerCase(Locale.ROOT).contains("win");
+        windows = HostOs.isWindows(os);
     }
 
     synchronized void accept(String line) {

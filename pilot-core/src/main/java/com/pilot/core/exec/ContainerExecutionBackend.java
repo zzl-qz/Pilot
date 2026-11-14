@@ -4,9 +4,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+
+import com.pilot.core.util.HostOs;
 
 /**
  * 容器执行后端。
@@ -275,9 +276,8 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
         if (path == null || path.isBlank()) {
             return false;
         }
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         List<String> names =
-            os.contains("win") ? List.of(executable + ".exe", executable + ".cmd", executable) : List.of(executable);
+            HostOs.isWindows() ? List.of(executable + ".exe", executable + ".cmd", executable) : List.of(executable);
         for (String directory : path.split(java.io.File.pathSeparator)) {
             for (String name : names) {
                 try {

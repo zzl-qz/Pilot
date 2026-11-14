@@ -41,6 +41,7 @@ import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.SandboxChange;
 import com.pilot.core.multi.TaskStatus;
 import com.pilot.core.util.FileTrees;
+import com.pilot.core.util.HostOs;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.PilotDataDir;
 
@@ -1030,8 +1031,7 @@ public class SandboxStore {
 
     /** 校验结论可复现的环境标识：操作系统、架构、JVM 版本。 */
     public static String environmentFingerprint() {
-        return System.getProperty("os.name", "") + "|" + System.getProperty("os.arch", "") + "|java"
-            + Runtime.version().feature();
+        return HostOs.name() + "|" + System.getProperty("os.arch", "") + "|java" + Runtime.version().feature();
     }
 
     private static String sanitize(String value) {
