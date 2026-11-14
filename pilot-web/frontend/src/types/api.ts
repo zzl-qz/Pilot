@@ -48,6 +48,10 @@ export interface ApiResults {
   saveBookmark: S.MessageLibraryBookmark;
   deleteBookmark: null;
   importBookmarks: S.MessageLibraryImportResult;
+  notes: S.SessionNotesNote[];
+  createNote: S.SessionNotesNote;
+  updateNote: S.SessionNotesNote;
+  deleteNote: null;
   deliverySettings: S.DeliveryServiceSettings;
   saveDeliverySettings: S.DeliveryServiceSettings;
   deliveries: S.DeliveryServiceDelivery[];

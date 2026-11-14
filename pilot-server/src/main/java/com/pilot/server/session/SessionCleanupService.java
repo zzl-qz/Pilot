@@ -50,6 +50,7 @@ public class SessionCleanupService {
     private final FileWorkbenchService fileWorkbench;
     private final AttachmentService attachments;
     private final AttachmentReferences attachmentReferences;
+    private final SessionNotes notes;
     private final DataMaintenance maintenance;
 
     public SessionCleanupService(SessionService sessions, ConversationRepository conversations, PlanRepository plans,
@@ -57,7 +58,7 @@ public class SessionCleanupService {
         CommandTaskManager commandTasks, ObjectProvider<BrowserBackend> browser, ValidationLedger validations,
         ToolCallJournalFactory journals, RunCheckpointRepository checkpoints, WorkProductService products,
         SkillDraftService skillDrafts, FileWorkbenchService fileWorkbench, AttachmentService attachments,
-        PilotDataDir dataDir, AttachmentReferences attachmentReferences) {
+        PilotDataDir dataDir, AttachmentReferences attachmentReferences, SessionNotes notes) {
         this.fileWorkbench = fileWorkbench;
         this.products = products;
         this.skillDrafts = skillDrafts;
@@ -75,6 +76,7 @@ public class SessionCleanupService {
         this.browser = browser;
         this.attachments = attachments;
         this.attachmentReferences = attachmentReferences;
+        this.notes = notes;
         this.maintenance = dataDir.maintenance();
     }
 
@@ -105,6 +107,7 @@ public class SessionCleanupService {
         boolean removed = sessions.delete(sessionId);
         products.deleteBySession(sessionId);
         skillDrafts.deleteBySession(sessionId);
+        notes.deleteBySession(sessionId);
         // 文件工作台的批注、快照索引与预览缓存都属于会话；工作区里的真实文件保留给用户。
         fileWorkbench.deleteBySession(sessionId);
         conversations.delete(sessionId);

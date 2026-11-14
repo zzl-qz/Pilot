@@ -85,14 +85,20 @@ function resetSessionState(draft: StoreState) {
   draft.commandDetail = null;
   draft.commandLog = null;
   draft.commandLogTaskId = null;
+  // 想法属于具体会话：切走时先清空，等目标会话加载回来，避免串台
+  draft.notes = [];
+  draft.notesState = 'idle';
+  draft.notesError = '';
+  draft.notesSaving = '';
 }
 
 /** 会话生命周期拥有列表请求和创建请求；连接由调用方提供，避免反向依赖全局 store。 */
-export function createSessionActions({ set, get }: StoreContext, { closeStreams, connectMirror, connectCommandTasks }: SessionConnections): StoreSlice<'loadProjects' | 'loadSessions' | 'startNewSession' | 'ensureSession' | 'activate' | 'renameSession' | 'updateSessionPreferences' | 'archiveSession' | 'deleteSession'> {
+export function createSessionActions({ set, get }: StoreContext, { closeStreams, connectMirror, connectCommandTasks }: SessionConnections): StoreSlice<'loadProjects' | 'loadSessions' | 'loadNotes' | 'addNote' | 'editNote' | 'removeNote' | 'startNewSession' | 'ensureSession' | 'activate' | 'renameSession' | 'updateSessionPreferences' | 'archiveSession' | 'deleteSession'> {
   let activationSequence = 0;
   let sessionCreation: { epoch: number; promise: Promise<string> } | null = null;
   let projectLoadSequence = 0;
   let sessionLoadSequence = 0;
+  let notesLoadSequence = 0;
   return {
     async loadProjects({ strict = false } = {}) {
       const request = ++projectLoadSequence;
@@ -130,6 +136,111 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
         if (strict) throw error;
         console.warn('[sessions]', error);
         return [];
+      }
+    },
+
+    /**
+     * 读取当前会话的想法。失败只停在面板里，不影响对话本身。
+     */
+    async loadNotes() {
+      const sessionId = get().sessionId;
+      const request = ++notesLoadSequence;
+      if (!sessionId) {
+        set((draft) => {
+          draft.notes = [];
+          draft.notesState = 'idle';
+          draft.notesError = '';
+        });
+        return;
+      }
+      set((draft) => { draft.notesState = 'loading'; });
+      try {
+        const notes = await api.notes(sessionId);
+        if (request !== notesLoadSequence || get().sessionId !== sessionId) return;
+        set((draft) => {
+          draft.notes = Array.isArray(notes) ? notes : [];
+          draft.notesState = 'ready';
+          draft.notesError = '';
+        });
+      } catch (error) {
+        if (request !== notesLoadSequence || get().sessionId !== sessionId) return;
+        set((draft) => {
+          draft.notesState = 'error';
+          draft.notesError = errorInfo(error).message || '读取想法失败，请重试。';
+        });
+      }
+    },
+
+    /** 保存想法：只写想法列表，不发消息、不进队列。 */
+    async addNote(content) {
+      const sessionId = get().sessionId;
+      if (!sessionId) {
+        get().showNotice('发送第一条消息后就能记录想法');
+        return false;
+      }
+      set((draft) => { draft.notesSaving = 'create'; draft.notesError = ''; });
+      try {
+        const note = await api.createNote(sessionId, content);
+        if (!note || typeof note.id !== 'string') throw new Error('服务端没有返回想法内容，请重试。');
+        if (get().sessionId === sessionId) {
+          set((draft) => {
+            draft.notes = [note, ...draft.notes];
+            draft.notesState = 'ready';
+          });
+        }
+        return true;
+      } catch (error) {
+        if (get().sessionId === sessionId) {
+          set((draft) => { draft.notesError = errorInfo(error).message || '保存想法失败，请重试。'; });
+        }
+        return false;
+      } finally {
+        if (get().sessionId === sessionId) set((draft) => { draft.notesSaving = ''; });
+      }
+    },
+
+    /** 修改想法：原想法保留在服务端，只是内容更新；不会把它带进输入框。 */
+    async editNote(id, content) {
+      const sessionId = get().sessionId;
+      if (!sessionId) return false;
+      set((draft) => { draft.notesSaving = id; draft.notesError = ''; });
+      try {
+        const note = await api.updateNote(sessionId, id, content);
+        if (!note || typeof note.id !== 'string') throw new Error('服务端没有返回想法内容，请重试。');
+        if (get().sessionId === sessionId) {
+          set((draft) => {
+            draft.notes = draft.notes.map((item) => item.id === id ? note : item);
+          });
+        }
+        return true;
+      } catch (error) {
+        if (get().sessionId === sessionId) {
+          set((draft) => { draft.notesError = errorInfo(error).message || '修改想法失败，请重试。'; });
+        }
+        return false;
+      } finally {
+        if (get().sessionId === sessionId) set((draft) => { draft.notesSaving = ''; });
+      }
+    },
+
+    /** 删除想法：服务端删除成功后才从列表移除，刷新不会让它回来。 */
+    async removeNote(id) {
+      const sessionId = get().sessionId;
+      if (!sessionId) return false;
+      set((draft) => { draft.notesSaving = id; draft.notesError = ''; });
+      try {
+        await api.deleteNote(sessionId, id);
+        if (get().sessionId === sessionId) {
+          set((draft) => { draft.notes = draft.notes.filter((item) => item.id !== id); });
+        }
+        return true;
+      } catch (error) {
+        if (get().sessionId === sessionId) {
+          set((draft) => { draft.notesError = errorInfo(error).message || '删除想法失败，请重试。'; });
+        }
+        return false;
+      } finally {
+        if (get().sessionId === sessionId) set((draft) => { draft.notesSaving = ''; });
       }
     },
 
@@ -202,6 +313,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
         get().loadPlan();
         get().loadQueue();
         get().loadTask();
+        get().loadNotes();
         get().refreshContext();
         get().refreshActiveRun();
         return id;
@@ -247,7 +359,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
       // 历史窗口就绪后再按当前游标续订，避免事件落在重建窗口之前被覆盖
       get().connectSse(sessionId, get().thread.cursor);
       await Promise.all([
-        get().loadPlan(), get().loadQueue(), get().loadTask(), get().refreshContext(),
+        get().loadPlan(), get().loadQueue(), get().loadTask(), get().loadNotes(), get().refreshContext(),
         // 技能按工作区解析（项目级技能随仓库走），换会话后 / 菜单必须跟着换
         get().loadSkills()
       ]);

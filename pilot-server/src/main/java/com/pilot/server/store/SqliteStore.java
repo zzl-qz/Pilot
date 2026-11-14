@@ -109,6 +109,16 @@ public final class SqliteStore {
         "CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session_id, status)",
         // idx_sessions_project 依赖 migrate() 补的 project_id 列，不能在补列之前建
         "CREATE TABLE IF NOT EXISTS queued_messages (session_id TEXT NOT NULL, position INTEGER NOT NULL, content TEXT NOT NULL, PRIMARY KEY (session_id, position))",
+        // 会话想法：只属于用户和当前会话，不进入事件与执行队列，按 seq 记录写入先后
+        """
+            CREATE TABLE IF NOT EXISTS session_notes (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""", "CREATE INDEX IF NOT EXISTS idx_session_notes_session ON session_notes(session_id, seq)",
         // 可恢复调度状态：重启后靠它判断「做到哪一步、下一步做什么、谁持有租约」。
         // 事件与消息历史只记录发生过什么，不能替代这份最小接管状态。
         """

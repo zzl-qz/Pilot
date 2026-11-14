@@ -15,6 +15,7 @@ import { Icon } from './Icon.jsx';
 import { VoiceInput } from './VoiceInput.jsx';
 import { SubmissionNotice } from './SubmissionNotice.jsx';
 import { MessageQueue } from './MessageQueue.jsx';
+import { SessionNotes } from './SessionNotes.jsx';
 import { createComposerInput } from '../lib/composer-input.js';
 import { resolveComposerAction } from '../lib/composer-state.js';
 import { rankFileMatches } from '../lib/mention.js';
@@ -60,6 +61,7 @@ export function Composer() {
   const latestContextReport = useStore((state) => state.latestContextReport);
   const runUsage = useStore((state) => state.runUsage);
   const editTarget = useStore((state) => state._editTarget);
+  const noteCount = useStore((state) => state.notes.length);
 
   const flowRef = useRef<HTMLDivElement>(null);
   const voiceFeedbackRef = useRef<HTMLDivElement>(null);
@@ -70,10 +72,11 @@ export function Composer() {
   const inputRef = useRef<ReturnType<typeof createComposerInput> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [sendAction, setSendAction] = useState({ mode: 'send', stop: false, disabled: true, label: '发送', ariaLabel: '发送任务', title: '发送任务 (Enter)' });
-  const [toolbarPanel, setToolbarPanel] = useState<'perm' | 'model' | 'context' | null>(null);
+  const [toolbarPanel, setToolbarPanel] = useState<'perm' | 'model' | 'context' | 'notes' | null>(null);
   const permOpen = toolbarPanel === 'perm';
   const modelOpen = toolbarPanel === 'model';
   const contextOpen = toolbarPanel === 'context';
+  const notesOpen = toolbarPanel === 'notes';
   const [refMenu, setRefMenu] = useState<ReferenceMenu | null>(null);
   const [slashMenu, setSlashMenu] = useState<{ items: QuickCommand[]; query: string } | null>(null);
   const [menuIndex, setMenuIndex] = useState(0);
@@ -579,6 +582,18 @@ export function Composer() {
                 label="添加文件或图片" isDisabled={submitting} onClick={() => fileRef.current?.click()}
                 icon={<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 7.4 8.1 12.5a3.1 3.1 0 0 1-4.4-4.4l5.3-5.3a2.1 2.1 0 0 1 3 3L6.9 11a1.1 1.1 0 0 1-1.6-1.6l4.8-4.8" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
             </span>
+            <div className="perm-picker composer-notes-picker">
+              <span title={sessionId ? '想法：记下暂时不发送的内容，需要时点一下带回输入框' : '发送第一条消息后就能记录想法'}>
+                <Button id="notes-chip" className="composer-choice" size="sm" variant="ghost"
+                  label={noteCount > 0 ? `想法 ${noteCount}` : '想法'} icon={<Icon name="note" />}
+                  aria-haspopup="dialog" aria-expanded={notesOpen} aria-controls={notesOpen ? 'notes-menu' : undefined}
+                  isDisabled={!sessionId} onClick={() => toggleToolbarPanel('notes')} />
+              </span>
+              {notesOpen && <SessionNotes onClose={() => {
+                setToolbarPanel(null);
+                document.getElementById('notes-chip')?.focus({ preventScroll: true });
+              }} />}
+            </div>
             <div className="perm-picker">
               <Button id="perm-chip" ref={permTriggerRef} className="composer-choice" size="sm" variant="ghost"
                 label={permissionLabel(permissionMode)} icon={<Icon name="shield" />}

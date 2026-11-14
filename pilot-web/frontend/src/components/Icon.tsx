@@ -21,6 +21,7 @@ const paths: Record<string, string> = {
   folder: 'M2 4h4l2 2h6v7H2Z M2 4V3h4l2 2h6v1',
   folderOpen: 'M2 6V3h4l2 2h6v2 M2 7h13l-2 6H2Z',
   file: 'M4 2h5l3 3v9H4Z M9 2v4h3',
+  note: 'M3 2h10v8l-4 4H3Z M13 10H9v4 M5.5 5h5 M5.5 7.5h3',
   code: 'm5 5-3 3 3 3 m6-6 3 3-3 3 M9 3 7 13',
   image: 'M2 2h12v12H2Z m0 9 4-4 3 3 2-2 3 3 M10 5h.01',
   refresh: 'M13 7a5 5 0 1 0 0 3 M13 2v5H8',

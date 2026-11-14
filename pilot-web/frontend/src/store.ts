@@ -127,6 +127,10 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   sessions: [],
   projects: [],
   currentProjectId: null,
+  notes: [],
+  notesState: 'idle',
+  notesError: '',
+  notesSaving: '',
   /** 侧边对话标签页：{ items: [{ id, title, workspace, projectId }], activeId }。 */
   sideChats: readSideChats(),
   /** 选中文本要贴进侧边对话时暂存一句，面板取走后清空。 */

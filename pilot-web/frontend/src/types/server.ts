@@ -974,6 +974,14 @@ export interface SessionFilesControllerTreeResponse {
   truncated: boolean;
 }
 
+/** SessionNotes.java / Note */
+export interface SessionNotesNote {
+  id: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** SettingsController.java / ModelRequest */
 export interface SettingsControllerModelRequest {
   endpoint: string;

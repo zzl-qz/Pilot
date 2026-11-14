@@ -1,0 +1,118 @@
+/* ---------- 会话想法：执行期间随手记，点一下带回输入框 ---------- */
+
+.notes-flyout {
+  width: min(380px, calc(100vw - 24px));
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.notes-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 8px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.notes-head strong { font-size: 13px; color: var(--ink); }
+.notes-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+.notes-close { margin-inline-start: auto; }
+
+.notes-form {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.notes-form textarea,
+.note-edit textarea {
+  width: 100%;
+  min-height: 64px;
+  max-height: 180px;
+  resize: vertical;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--ui-field, var(--panel-2));
+  color: var(--ink);
+  font: 12.5px/1.55 var(--sans);
+}
+.notes-form textarea:focus-visible,
+.note-edit textarea:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 1px; }
+.notes-form-foot { display: flex; align-items: center; gap: 8px; }
+.notes-hint { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+.notes-form-foot > button { margin-inline-start: auto; flex: none; }
+
+.notes-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 4px 6px 8px;
+  list-style: none;
+  max-height: min(320px, 40vh);
+  max-height: min(320px, 40dvh);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.note-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 7px;
+  border-radius: 8px;
+}
+.note-row:hover { background: var(--ui-hover, rgba(255, 255, 255, 0.045)); }
+
+.note-content {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: 12.5px/1.55 var(--sans);
+  text-align: start;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  max-height: 7.5em;
+  overflow: auto;
+}
+.note-content:hover { color: var(--ink); }
+.note-content:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; border-radius: 4px; }
+
+.note-actions { display: flex; flex: none; opacity: 0; transition: opacity 0.12s ease; }
+.note-row:hover .note-actions,
+.note-row:focus-within .note-actions { opacity: 1; }
+
+.note-edit { flex: 1; display: grid; gap: 6px; min-width: 0; }
+.note-edit-actions { display: flex; justify-content: flex-end; gap: 6px; }
+
+.notes-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.notes-status.is-error { color: var(--err); }
+.notes-empty { padding: 10px 8px 14px; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+
+@media (pointer: coarse) {
+  .note-actions { opacity: 1; }
+  .notes-form textarea, .note-edit textarea { font-size: 16px; }
+}
