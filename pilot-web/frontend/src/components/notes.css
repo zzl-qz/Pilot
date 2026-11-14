@@ -28,6 +28,14 @@
   text-align: center;
 }
 .notes-close { margin-inline-start: auto; }
+.notes-draft-hint {
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
 
 .notes-form {
   display: grid;

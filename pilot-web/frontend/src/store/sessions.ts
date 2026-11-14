@@ -7,6 +7,7 @@ import { loadInputHistory } from '../lib/input-history.js';
 import { readDraft, writeDraft, dropDraft } from '../lib/drafts.js';
 import { normalizePermission } from '../lib/permission.js';
 import { sortSessions } from '../lib/projects.js';
+import { NOTE_COUNT_LIMIT, createDraftNote, noteContentError, readDraftNotes, uploadDraftNotes, writeDraftNotes } from '../lib/notes.js';
 import { sideChatsFor, writeSideChats } from '../lib/side-chat.js';
 
 interface SessionConnections {
@@ -140,15 +141,15 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
     },
 
     /**
-     * 读取当前会话的想法。失败只停在面板里，不影响对话本身。
+     * 读取当前会话的想法。还没有会话记录时读本机草稿，失败只停在面板里，不影响对话。
      */
     async loadNotes() {
       const sessionId = get().sessionId;
       const request = ++notesLoadSequence;
       if (!sessionId) {
         set((draft) => {
-          draft.notes = [];
-          draft.notesState = 'idle';
+          draft.notes = readDraftNotes(localStorage);
+          draft.notesState = 'ready';
           draft.notesError = '';
         });
         return;
@@ -171,12 +172,32 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
       }
     },
 
-    /** 保存想法：只写想法列表，不发消息、不进队列。 */
+    /** 保存想法：只写想法列表，不发消息、不进队列；还没建会话时先存在本机。 */
     async addNote(content) {
       const sessionId = get().sessionId;
       if (!sessionId) {
-        get().showNotice('发送第一条消息后就能记录想法');
-        return false;
+        const invalid = noteContentError(content);
+        if (invalid) {
+          set((draft) => { draft.notesError = invalid; });
+          return false;
+        }
+        if (get().notes.length >= NOTE_COUNT_LIMIT) {
+          set((draft) => { draft.notesError = `每个对话最多 ${NOTE_COUNT_LIMIT} 条想法，请先删除一些`; });
+          return false;
+        }
+        const note = createDraftNote(content);
+        if (!note) {
+          set((draft) => { draft.notesError = '想法内容无法保存，请重试。'; });
+          return false;
+        }
+        const next = [note, ...get().notes];
+        writeDraftNotes(localStorage, next);
+        set((draft) => {
+          draft.notes = next;
+          draft.notesState = 'ready';
+          draft.notesError = '';
+        });
+        return true;
       }
       set((draft) => { draft.notesSaving = 'create'; draft.notesError = ''; });
       try {
@@ -199,10 +220,26 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
       }
     },
 
-    /** 修改想法：原想法保留在服务端，只是内容更新；不会把它带进输入框。 */
+    /** 修改想法：原想法保留在服务端，只是内容更新；不会把它带进输入框。没建会话时改本机草稿。 */
     async editNote(id, content) {
       const sessionId = get().sessionId;
-      if (!sessionId) return false;
+      if (!sessionId) {
+        const invalid = noteContentError(content);
+        if (invalid) {
+          set((draft) => { draft.notesError = invalid; });
+          return false;
+        }
+        if (!get().notes.some((note) => note.id === id)) {
+          set((draft) => { draft.notesError = '想法不存在或已删除'; });
+          return false;
+        }
+        const next = get().notes.map((note) => note.id === id
+          ? { ...note, content, updatedAt: new Date().toISOString() }
+          : note);
+        writeDraftNotes(localStorage, next);
+        set((draft) => { draft.notes = next; draft.notesError = ''; });
+        return true;
+      }
       set((draft) => { draft.notesSaving = id; draft.notesError = ''; });
       try {
         const note = await api.updateNote(sessionId, id, content);
@@ -223,10 +260,15 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
       }
     },
 
-    /** 删除想法：服务端删除成功后才从列表移除，刷新不会让它回来。 */
+    /** 删除想法：服务端删除成功后才从列表移除，刷新不会让它回来；草稿直接删本机记录。 */
     async removeNote(id) {
       const sessionId = get().sessionId;
-      if (!sessionId) return false;
+      if (!sessionId) {
+        const next = get().notes.filter((note) => note.id !== id);
+        writeDraftNotes(localStorage, next);
+        set((draft) => { draft.notes = next; draft.notesError = ''; });
+        return true;
+      }
       set((draft) => { draft.notesSaving = id; draft.notesError = ''; });
       try {
         await api.deleteNote(sessionId, id);
@@ -266,6 +308,8 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
         // 新任务还没有会话，也就没有可归属的侧边对话；面板留着空态等第一条消息
         draft.sideChats.activeId = null;
       });
+      // 还没开始任务时也可以先记想法：这里读回本机草稿，建成会话时再自动并入
+      void get().loadNotes();
       return null;
     },
 
@@ -306,6 +350,15 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
         });
         writeDraft(localStorage, id, readDraft(localStorage, null));
         dropDraft(localStorage, null);
+        // 先把草稿里的想法并入这条新会话，再让列表读取服务端结果；失败时保留本地副本并提示
+        const draftNotes = readDraftNotes(localStorage);
+        if (draftNotes.length) {
+          const { remaining } = await uploadDraftNotes(draftNotes, (content) => api.createNote(id, content));
+          writeDraftNotes(localStorage, remaining);
+          if (remaining.length) {
+            get().showNotice(`有 ${remaining.length} 条想法没能并入会话，仍保存在本地草稿`);
+          }
+        }
         get().loadSessions();
         get().connectSse(id, 0);
         connectMirror();
