@@ -24,6 +24,17 @@ test('204 响应返回 null，而不是抛 JSON 解析错误', async () => {
   assert.equal(await apiJson('/api/sessions/x', { method: 'DELETE' }), null);
 });
 
+test('无正文状态即使暴露空流也保留原响应', async () => {
+  for (const status of [204, 205, 304]) {
+    const response = new Response(null, { status });
+    Object.defineProperty(response, 'body', { value: new Blob().stream() });
+    handler = async () => response;
+    assert.equal(await apiFetch('/api/x'), response);
+    if (status === 304) await assert.rejects(apiJson('/api/x'), { status });
+    else assert.equal(await apiJson('/api/x'), null);
+  }
+});
+
 test('200 但空正文也返回 null', async () => {
   handler = async () => new Response('', { status: 200 });
   assert.equal(await apiJson('/api/x'), null);

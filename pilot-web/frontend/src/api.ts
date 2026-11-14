@@ -18,7 +18,8 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {},
   try {
     controller.signal.throwIfAborted();
     const response = await NATIVE_FETCH(input, { ...init, signal: controller.signal });
-    if (!response.body) return response;
+    // Chromium 可能为无正文状态提供空流，Response 构造器仍要求正文为 null。
+    if (!response.body || [204, 205, 304].includes(response.status)) return response;
     // fetch 收到响应头就会返回；在清理信号前读取正文，避免慢正文永久挂起。
     // Blob 可供后续 json/text/blob 调用读取；SSE 使用独立的流式连接。
     const body = await response.blob();
