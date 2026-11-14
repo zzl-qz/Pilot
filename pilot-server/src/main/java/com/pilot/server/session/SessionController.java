@@ -47,7 +47,7 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
 import com.pilot.core.skill.SkillProblem;
-import com.pilot.core.tool.DocumentRenderer;
+import com.pilot.core.tool.office.DocumentRenderer;
 import com.pilot.server.attachment.AttachmentReferences;
 import com.pilot.server.attachment.AttachmentService;
 import com.pilot.server.common.web.AsyncEventStream;

@@ -32,7 +32,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import com.pilot.core.tool.CommandTaskManager;
+import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.attachment.AttachmentService;
 import com.pilot.server.common.data.DataMaintenance;
 import com.pilot.server.common.data.PilotDataDir;

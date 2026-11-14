@@ -7,6 +7,8 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
+import com.pilot.core.tool.file.ListDirTool;
+
 /** 生成的参数说明要和原来手写的 Map.of 完全一样，模型看到的工具定义不能变。 */
 class ToolSchemasTest {
 

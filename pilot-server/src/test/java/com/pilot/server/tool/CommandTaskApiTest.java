@@ -25,7 +25,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.pilot.core.session.SessionService;
-import com.pilot.core.tool.CommandTaskManager;
+import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.run.RunStarter;
 
 @SpringBootTest(properties = {"pilot.store=memory", "pilot.runtime.provision=false", "pilot.web-search.local=false"})

@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 
-import com.pilot.core.tool.CommandTaskManager;
+import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.run.RunRegistry;
 

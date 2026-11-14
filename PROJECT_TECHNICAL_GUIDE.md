@@ -244,7 +244,7 @@ PathValidator 把路径规范化，比较工作区真实路径，并检查目标
 
 这些检查约束经过相应文件工具的操作。进程被启动后，它自己调用操作系统读写文件，并不会回调 PathValidator。因此“设置工作目录”和“检查命令名”都不能让子进程只看见那一个目录。
 
-源码：[PathValidator](pilot-core/src/main/java/com/pilot/core/workspace/PathValidator.java)、[EditFileTool](pilot-core/src/main/java/com/pilot/core/tool/EditFileTool.java)、[AgentScope](pilot-core/src/main/java/com/pilot/core/workspace/AgentScope.java)。
+源码：[PathValidator](pilot-core/src/main/java/com/pilot/core/workspace/PathValidator.java)、[EditFileTool](pilot-core/src/main/java/com/pilot/core/tool/file/EditFileTool.java)、[AgentScope](pilot-core/src/main/java/com/pilot/core/workspace/AgentScope.java)。
 
 ### 当前的三种隔离不要混淆
 
@@ -307,7 +307,7 @@ RUNNING 和 STOPPING 不能算验证成功；检查摘要需要匹配实际任�
 
 恢复记录不代表恢复进程所有权。重启时，旧 RUNNING 或 STOPPING 命令会标记为 INTERRUPTED，不会按旧 PID 操作进程。当前基于 ProcessHandle 的追踪也无法可靠兜住所有已经脱离父进程的后台程序，这正是原生进程管理和隔离后端后续要加强的部分。
 
-源码：[CommandTaskManager](pilot-core/src/main/java/com/pilot/core/tool/CommandTaskManager.java)、[RunCommandTool](pilot-core/src/main/java/com/pilot/core/tool/RunCommandTool.java)、[CommandToolSupport](pilot-core/src/main/java/com/pilot/core/tool/CommandToolSupport.java)、[CommandTaskController](pilot-server/src/main/java/com/pilot/server/tool/CommandTaskController.java)、[前端命令逻辑](pilot-web/src/main/resources/static/lib/command-tasks.js)。
+源码：[CommandTaskManager](pilot-core/src/main/java/com/pilot/core/tool/command/CommandTaskManager.java)、[RunCommandTool](pilot-core/src/main/java/com/pilot/core/tool/command/RunCommandTool.java)、[CommandToolSupport](pilot-core/src/main/java/com/pilot/core/tool/command/CommandToolSupport.java)、[CommandTaskController](pilot-server/src/main/java/com/pilot/server/tool/CommandTaskController.java)、[前端命令逻辑](pilot-web/src/main/resources/static/lib/command-tasks.js)。
 
 ## 8 记忆 历史和本地存储各保存什么
 
@@ -407,7 +407,7 @@ DiffSandbox 保存子任务提交的 unified diff 和目标内容。MergePrechec
 
 其他需要完成的环节包括：有代码改动时跳过验证仍可能算整批通过；接受接口没有完整验证门控；仲裁选择缺少状态恢复；内存沙箱没有自动从审计 JSON 重建。当前的“校验”和“仲裁”已有组件，但不能据此宣称生产交付闭环已经完成。
 
-源码：[SpawnAgentTool](pilot-server/src/main/java/com/pilot/server/multi/SpawnAgentTool.java)、[DispatchAgentsTool](pilot-server/src/main/java/com/pilot/server/multi/DispatchAgentsTool.java)、[MultiAgentService](pilot-server/src/main/java/com/pilot/server/multi/MultiAgentService.java)、[TaskGraph](pilot-core/src/main/java/com/pilot/core/multi/TaskGraph.java)、[SandboxEditFileTool](pilot-core/src/main/java/com/pilot/core/tool/SandboxEditFileTool.java)、[CommandVerificationGate](pilot-server/src/main/java/com/pilot/server/multi/CommandVerificationGate.java)、[SandboxStore](pilot-server/src/main/java/com/pilot/server/multi/SandboxStore.java)。
+源码：[SpawnAgentTool](pilot-server/src/main/java/com/pilot/server/multi/SpawnAgentTool.java)、[DispatchAgentsTool](pilot-server/src/main/java/com/pilot/server/multi/DispatchAgentsTool.java)、[MultiAgentService](pilot-server/src/main/java/com/pilot/server/multi/MultiAgentService.java)、[TaskGraph](pilot-core/src/main/java/com/pilot/core/multi/TaskGraph.java)、[SandboxEditFileTool](pilot-core/src/main/java/com/pilot/core/tool/file/SandboxEditFileTool.java)、[CommandVerificationGate](pilot-server/src/main/java/com/pilot/server/multi/CommandVerificationGate.java)、[SandboxStore](pilot-server/src/main/java/com/pilot/server/multi/SandboxStore.java)。
 
 ## 12 辅助能力也有各自的问题边界
 
@@ -469,7 +469,7 @@ Windows 原生方案可评估受限令牌、文件 ACL、Job Objects 和 AppCont
 2. [AgentRunService](pilot-server/src/main/java/com/pilot/server/agent/AgentRunService.java)：看 execute，理解本轮的历史、模型、工具、权限和事件出口如何装配。
 3. [AgentLoop](pilot-core/src/main/java/com/pilot/core/loop/AgentLoop.java)：看循环中模型回答、工具执行、结果回填和结束判断。
 4. [ToolExecutor](pilot-core/src/main/java/com/pilot/core/tool/ToolExecutor.java)：看允许、拒绝、审批和真正开始执行前的检查。
-5. [EditFileTool](pilot-core/src/main/java/com/pilot/core/tool/EditFileTool.java)：选一项具体工具，把路径检查、快照、写入和结果串起来。
+5. [EditFileTool](pilot-core/src/main/java/com/pilot/core/tool/file/EditFileTool.java)：选一项具体工具，把路径检查、快照、写入和结果串起来。
 
 先把这五个位置连接起来，再读压缩、命令管理和多智能体，比从所有类的第一行依次阅读更省力。
 

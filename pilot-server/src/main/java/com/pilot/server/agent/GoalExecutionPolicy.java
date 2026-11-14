@@ -96,7 +96,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private Set<String> availableTools;
     private final Map<String, String> toolStartVersions = new LinkedHashMap<>();
     private final Map<String, TaskControlService.TaskContract> toolStartRequirements = new LinkedHashMap<>();
-    private java.util.function.Function<String, com.pilot.core.tool.CommandTaskManager.Task> commandLookup =
+    private java.util.function.Function<String, com.pilot.core.tool.command.CommandTaskManager.Task> commandLookup =
         ignored -> null;
     private java.util.function.Consumer<TaskControlService.Execution> updates = ignored -> {
     };
@@ -158,8 +158,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         return this;
     }
 
-    GoalExecutionPolicy
-        withCommandLookup(java.util.function.Function<String, com.pilot.core.tool.CommandTaskManager.Task> lookup) {
+    GoalExecutionPolicy withCommandLookup(
+        java.util.function.Function<String, com.pilot.core.tool.command.CommandTaskManager.Task> lookup) {
         this.commandLookup = lookup == null ? ignored -> null : lookup;
         return this;
     }
@@ -767,7 +767,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             .orElse("");
     }
 
-    private com.pilot.core.tool.CommandTaskManager.Task commandMetadata(ToolCall call, String result) {
+    private com.pilot.core.tool.command.CommandTaskManager.Task commandMetadata(ToolCall call, String result) {
         if (!COMMAND_TOOLS.contains(call.name())) {
             return null;
         }

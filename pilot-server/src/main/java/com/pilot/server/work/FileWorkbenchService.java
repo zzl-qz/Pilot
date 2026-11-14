@@ -27,8 +27,8 @@ import java.util.stream.IntStream;
 import org.springframework.stereotype.Service;
 
 import com.pilot.core.session.SessionService;
-import com.pilot.core.tool.DocumentRenderer;
-import com.pilot.core.tool.FilePreviews;
+import com.pilot.core.tool.office.DocumentRenderer;
+import com.pilot.core.tool.office.FilePreviews;
 import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;

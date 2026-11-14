@@ -21,8 +21,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
 
-import com.pilot.core.tool.SandboxCommandTool;
 import com.pilot.core.tool.SandboxSink;
+import com.pilot.core.tool.command.SandboxCommandTool;
 import com.pilot.core.workspace.PathValidator;
 
 /** 显式启用真实 Docker/Podman 验证；只用已拉取镜像，不访问模型、不下载依赖。 */

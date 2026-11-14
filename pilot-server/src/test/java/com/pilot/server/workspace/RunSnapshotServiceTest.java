@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.core.loop.Message;
-import com.pilot.core.tool.CommandChangeTracker;
+import com.pilot.core.tool.command.CommandChangeTracker;
 
 import tools.jackson.databind.json.JsonMapper;
 

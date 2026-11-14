@@ -28,8 +28,8 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.loop.Message;
 import com.pilot.core.plan.PlanItem;
-import com.pilot.core.tool.CommandChangeTracker;
 import com.pilot.core.tool.SnapshotSink;
+import com.pilot.core.tool.command.CommandChangeTracker;
 import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.Sha256;
 import com.pilot.server.common.data.PilotDataDir;

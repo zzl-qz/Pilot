@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.session.SessionService;
-import com.pilot.core.tool.CommandTaskManager;
+import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.common.web.SessionLookup;
 
 /** 命令的运行状态独立于模型回合；查询和停止只能操作当前会话所属的任务。 */

@@ -4,8 +4,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import com.pilot.core.tool.CommandTaskManager;
 import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.WebSearchProperties;
 

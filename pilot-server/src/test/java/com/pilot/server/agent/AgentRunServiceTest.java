@@ -51,9 +51,9 @@ import com.pilot.core.session.InMemoryPlanRepository;
 import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
-import com.pilot.core.tool.ReadFileTool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.file.ReadFileTool;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
@@ -816,7 +816,7 @@ class AgentRunServiceTest {
         final String sessionId = sessions.createSession("test", workspace.toString()).id();
         final RunMetrics metrics;
         final AgentRunService service;
-        final com.pilot.core.tool.CommandTaskManager commandTasks;
+        final com.pilot.core.tool.command.CommandTaskManager commandTasks;
         String runId;
 
         Fixture(ModelClient model, int maxSteps) {
@@ -836,7 +836,7 @@ class AgentRunServiceTest {
                 runThreads, 0, 60_000, false, goals, null, null, null, null, null, null, null, null);
             JsonMapper mapper = JsonMapper.builder().build();
             PilotDataDir dataDir = new PilotDataDir(dataRoot.toString());
-            commandTasks = new com.pilot.core.tool.CommandTaskManager(dataDir.file("commands"), mapper);
+            commandTasks = new com.pilot.core.tool.command.CommandTaskManager(dataDir.file("commands"), mapper);
             WorkspaceToolFactory factory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
             when(factory.resolve(anyString())).thenReturn(workspace);
             when(factory.registryForScope(anyString(), any(com.pilot.core.workspace.AgentScope.class),

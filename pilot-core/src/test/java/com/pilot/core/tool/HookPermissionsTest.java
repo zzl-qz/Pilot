@@ -27,6 +27,8 @@ import com.pilot.core.hook.Hooks;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PermissionResult;
 import com.pilot.core.permission.PolicyPermissionGate;
+import com.pilot.core.tool.file.CreateFileTool;
+import com.pilot.core.tool.file.ReadFileTool;
 import com.pilot.core.workspace.PathValidator;
 
 class HookPermissionsTest {

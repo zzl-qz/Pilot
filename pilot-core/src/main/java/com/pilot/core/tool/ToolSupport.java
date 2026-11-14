@@ -25,7 +25,7 @@ public final class ToolSupport {
     }
 
     /** 解析单文件工具用于记录改动的工作区路径。 */
-    static String changedWorkspacePath(PathValidator paths, ToolCall call) {
+    public static String changedWorkspacePath(PathValidator paths, ToolCall call) {
         String rawPath = ToolSupport.stringArg(call == null ? null : call.args(), "path");
         if (rawPath == null) {
             return null;

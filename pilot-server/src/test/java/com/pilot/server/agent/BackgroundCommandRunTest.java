@@ -29,8 +29,8 @@ import com.pilot.core.event.RunCompleted;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.session.SessionService;
-import com.pilot.core.tool.CommandTaskManager;
 import com.pilot.core.tool.ToolCall;
+import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.run.RunStarter;
 
 @SpringBootTest(properties = {"pilot.store=memory", "pilot.runtime.provision=false", "pilot.web-search.local=false",

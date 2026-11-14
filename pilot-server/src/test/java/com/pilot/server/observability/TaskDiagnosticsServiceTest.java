@@ -19,7 +19,7 @@ import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
 import com.pilot.core.session.InMemoryRunCheckpointRepository;
 import com.pilot.core.session.SessionService;
-import com.pilot.core.tool.CommandTaskManager;
+import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.run.RecoveryReportService;
 import com.pilot.server.run.RunStateTracker;

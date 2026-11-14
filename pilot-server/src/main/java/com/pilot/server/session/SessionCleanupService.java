@@ -10,7 +10,7 @@ import com.pilot.core.session.RunCheckpointRepository;
 import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
-import com.pilot.core.tool.CommandTaskManager;
+import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.attachment.AttachmentReferences;
 import com.pilot.server.attachment.AttachmentService;
 import com.pilot.server.common.data.DataMaintenance;

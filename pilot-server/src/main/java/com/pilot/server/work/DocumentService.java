@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 
-import com.pilot.core.tool.DocumentRenderer;
+import com.pilot.core.tool.office.DocumentRenderer;
 import com.pilot.core.util.FileNames;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;

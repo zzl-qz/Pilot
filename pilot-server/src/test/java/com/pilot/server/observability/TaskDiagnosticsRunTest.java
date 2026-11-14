@@ -18,7 +18,7 @@ import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.session.InMemoryRunCheckpointRepository;
 import com.pilot.core.session.SessionService;
-import com.pilot.core.tool.CommandTaskManager;
+import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.run.RecoveryReportService;
 import com.pilot.server.run.RunStateTracker;
