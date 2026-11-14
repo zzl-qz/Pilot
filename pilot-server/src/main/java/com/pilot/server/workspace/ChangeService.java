@@ -19,6 +19,8 @@ import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.multi.UnifiedDiff;
+
 /**
  * 变更审阅：读取工作区的 git 状态与 diff，供界面展示「这次到底改了什么」。
  * 只读操作，不修改仓库；工作区不是 git 仓库时返回 {@code gitRepository=false}。
@@ -206,7 +208,7 @@ public class ChangeService {
             }
             int[] stat;
             if (chunk != null) {
-                stat = countLines(chunk);
+                stat = UnifiedDiff.countChanges(chunk);
             } else if ("??".equals(status) || (!head && "A".equals(status))) {
                 // 新增文件不在 git diff 里（或仓库还没有 HEAD 可比），按当前内容合成一份「全新增」的 diff
                 SyntheticDiff synthetic = untrackedDiff(root.resolve(path), path);
@@ -307,7 +309,7 @@ public class ChangeService {
         boolean truncated = false;
         int[] stat;
         if (chunk != null) {
-            stat = countLines(chunk);
+            stat = UnifiedDiff.countChanges(chunk);
         } else if ("??".equals(status) || "A".equals(status) || (!head && status == null)) {
             // 未跟踪/新增文件不在 git diff 里，按当前内容合成一份全新增补丁
             SyntheticDiff synthetic = untrackedDiff(root.resolve(relative), relative);
@@ -717,35 +719,6 @@ public class ChangeService {
             out.append("… 已省略 ").append(lines.size() - shown.size()).append(" 行 …\n");
         }
         return new SyntheticDiff(out.toString(), lines.size(), truncated);
-    }
-
-    /** 只数 hunk 内的增删行：{@code ---}/{@code +++} 是文件头，源码里以 {@code --} 开头的内容不能被当成头。 */
-    private static int[] countLines(String diff) {
-        int added = 0;
-        int removed = 0;
-        if (diff == null || diff.isEmpty()) {
-            return new int[] {0, 0};
-        }
-        boolean inHunk = false;
-        for (String line : diff.split("\n", -1)) {
-            if (line.startsWith("diff --git ")) {
-                inHunk = false;
-                continue;
-            }
-            if (line.startsWith("@@")) {
-                inHunk = true;
-                continue;
-            }
-            if (!inHunk) {
-                continue;
-            }
-            if (line.startsWith("+")) {
-                added++;
-            } else if (line.startsWith("-")) {
-                removed++;
-            }
-        }
-        return new int[] {added, removed};
     }
 
     /** 去掉 git 输出里与 diff 无关的告警行（例如 Windows 的 LF/CRLF 提示）。 */
