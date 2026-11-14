@@ -150,6 +150,53 @@ export interface CapabilitiesControllerMcpServerPayload {
   failure: string;
   unsupported: string;
   tools: (string)[];
+  source: string;
+  trustState: string;
+}
+
+/** McpConfigController.java / ServerPayload */
+export interface McpConfigControllerServerPayload {
+  name: string;
+  source: string;
+  command: string;
+  commandOnly: string;
+  usable: boolean;
+  running: boolean;
+  failure: string;
+  unsupported: string;
+  toolCount: number;
+  tools: (string)[];
+  trustState: string;
+  trustNote: string;
+}
+
+/** McpConfigController.java / AddRequest */
+export interface McpConfigControllerAddRequest {
+  name: string;
+  command: string;
+  args?: string;
+  env?: Record<string, string>;
+}
+
+/** McpTrustController.java / TrustRequest */
+export interface McpTrustControllerTrustRequest {
+  action: string;
+  server: string;
+  tool?: string;
+}
+
+/** McpTrustController.java / TrustResponse */
+export interface McpTrustControllerTrustResponse {
+  action: string;
+  server: string;
+  state: string;
+}
+
+/** McpTrustController.java / TrustedServer */
+export interface McpTrustControllerTrustedServer {
+  server: string;
+  state: string;
+  note: string;
 }
 
 /** CapabilitiesController.java / ToolPayload */

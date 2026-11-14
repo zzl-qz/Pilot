@@ -98,6 +98,11 @@ export interface ApiResults {
   fileDiff: S.ChangeServiceFilePatch;
   restoreChanges: S.ChangeServiceRestoreReport;
   capabilities: S.CapabilitiesControllerCapabilitiesResponse;
+  mcpServers: S.McpConfigControllerServerPayload[];
+  mcpAddServer: S.McpConfigControllerServerPayload;
+  mcpDeleteServer: null;
+  mcpTrust: S.McpTrustControllerTrustResponse;
+  mcpTrustView: S.McpTrustControllerTrustedServer[];
   browserStatus: BrowserStatus;
   stopCommand: S.CommandTaskManagerTask;
   runChanges: S.ChangeServiceRunChangeReport & { summary?: string };
