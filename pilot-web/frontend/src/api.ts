@@ -213,7 +213,6 @@ export const api = {
   mcpImportServers: (id: string, body: Update<S.McpConfigControllerImportRequest>) => apiJson<ApiResults['mcpImportServers']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers/import`, jsonBody('POST', body)),
   mcpDeleteServer: (id: string, name: string) => apiJson<ApiResults['mcpDeleteServer']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   mcpTrust: (id: string, body: Update<S.McpTrustControllerTrustRequest>) => apiJson<ApiResults['mcpTrust']>(`/api/sessions/${encodeURIComponent(id)}/mcp/trust`, jsonBody('POST', body)),
-  mcpTrustView: (id: string) => apiJson<ApiResults['mcpTrustView']>(`/api/sessions/${encodeURIComponent(id)}/mcp/trust`),
   browserStatus: (id: string) => apiJson<ApiResults['browserStatus']>(`/api/sessions/${encodeURIComponent(id)}/browser/status`),
   stopCommand: (id: string, taskId: string) => apiJson<ApiResults['stopCommand']>(`/api/sessions/${encodeURIComponent(id)}/commands/${encodeURIComponent(taskId)}/stop`, { method: 'POST' }),
   runChanges: (runId: string) => apiJson<ApiResults['runChanges']>(`/api/runs/${encodeURIComponent(runId)}/changes`),

@@ -4,7 +4,7 @@ import java.nio.file.Path;
 import java.util.Optional;
 
 /**
- * MCP 权限决策矩阵（见 docs/DESIGN-mcp-trust.md §2.1）。核心原则：
+ * MCP 权限决策矩阵（见 docs-public/design-mcp-trust.md）。核心原则：
  * <strong>信任是服务器的属性，不是工具的自我声明</strong>——{@code readOnlyHint}
  * 只有在「用户已显式信任该服务器 + 配置哈希未变 + 工具哈希已钉住且匹配」时才参与免审批。
  *
@@ -132,13 +132,11 @@ final class McpTrustPolicy {
             return false;
         }
         McpServerConfig config = manager.servers(workspace).get(server);
-        return config != null && config.usable()
-            && record.get().configHash().equals(McpTrustStore.hash(config));
+        return config != null && config.usable() && record.get().configHash().equals(McpTrustStore.hash(config));
     }
 
     /** 记录存在、配置哈希匹配、工具已钉住（S2）。 */
-    private static Optional<McpTrustStore.ServerTrust> pinnedRecord(McpManager manager, Path workspace,
-        String server) {
+    private static Optional<McpTrustStore.ServerTrust> pinnedRecord(McpManager manager, Path workspace, String server) {
         McpTrustStore store = manager.trustStore();
         if (store == null) {
             return Optional.empty();
@@ -148,7 +146,7 @@ final class McpTrustPolicy {
             return Optional.empty();
         }
         McpServerConfig config = manager.servers(workspace).get(server);
-        return config != null && config.usable()
-            && record.get().configHash().equals(McpTrustStore.hash(config)) ? record : Optional.empty();
+        return config != null && config.usable() && record.get().configHash().equals(McpTrustStore.hash(config))
+            ? record : Optional.empty();
     }
 }

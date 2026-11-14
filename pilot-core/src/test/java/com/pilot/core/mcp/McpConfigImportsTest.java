@@ -26,6 +26,13 @@ class McpConfigImportsTest {
     }
 
     @Test
+    void rejectsOversizedDocumentBeforeParsing() {
+        String huge = "x".repeat(1024 * 1024 + 1);
+        McpException error = assertThrows(McpException.class, () -> McpConfigImports.parse(huge));
+        assertTrue(error.getMessage().contains("1 MiB"), error.getMessage());
+    }
+
+    @Test
     void multipleEntriesKeepInputOrderAndUnknownFieldsArePreserved() {
         var entries = McpConfigImports.parse("""
             {"a": {"command": "node", "type": "stdio"}, "b": {"command": "uvx", "env": {"K": "v"}}}
@@ -49,12 +56,11 @@ class McpConfigImportsTest {
 
     @Test
     void nonObjectEntryAndEmptyMappingsAreRejected() {
-        McpException scalar = assertThrows(McpException.class,
-            () -> McpConfigImports.parse("{\"a\": \"npx\"}"));
+        McpException scalar = assertThrows(McpException.class, () -> McpConfigImports.parse("{\"a\": \"npx\"}"));
         assertTrue(scalar.getMessage().contains("必须是对象"), scalar.getMessage());
 
-        McpException emptyWrapped = assertThrows(McpException.class,
-            () -> McpConfigImports.parse("{\"mcpServers\": {}}"));
+        McpException emptyWrapped =
+            assertThrows(McpException.class, () -> McpConfigImports.parse("{\"mcpServers\": {}}"));
         assertTrue(emptyWrapped.getMessage().contains("没有可导入"), emptyWrapped.getMessage());
 
         McpException emptyTop = assertThrows(McpException.class, () -> McpConfigImports.parse("{}"));

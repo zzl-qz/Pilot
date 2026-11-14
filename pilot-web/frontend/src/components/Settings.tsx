@@ -11,6 +11,7 @@ import { shortcut } from '../lib/interaction.js';
 import { PERMISSION_MODES, permissionLabel } from '../lib/permission.js';
 import { emptySkillsHint, parseInstallSource, summarizeInstallResults, gitUrlProblem } from '../lib/skills.js';
 import { useStore } from '../store.js';
+import { MCP_TRUST_LABELS, mcpSourceLabel } from '../lib/mcp.js';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
 import { Modal } from './Modal.jsx';
@@ -424,13 +425,6 @@ function SkillsInstall({ onDone }: { onDone: () => void }) {
 
 /* ---------- MCP 服务器与信任管理 ---------- */
 
-const MCP_TRUST_LABELS: Record<string, string> = {
-  UNTRUSTED: '未信任',
-  TRUSTED_UNPINNED: '已信任',
-  TRUSTED: '已信任 · 已钉住工具',
-  STALE: '信任失效：配置已变化'
-};
-
 function McpSettings() {
   const sessionId = useStore(state => state.sessionId);
   const [servers, setServers] = useState<S.McpConfigControllerServerPayload[] | null>(null);
@@ -467,13 +461,35 @@ function McpSettings() {
     if (!sessionId || busy) return;
     setBusy(server);
     setHint('正在撤销信任…');
+    setHasError(false);
     try {
       await api.mcpTrust(sessionId, { action: 'revoke', server });
       setHint(`已撤销 ${server} 的信任；它的启动与调用会回到逐次审批。`);
       await load();
+      void useStore.getState().loadCapabilities();
     } catch (failure) {
       setHasError(true);
       setHint('撤销失败。' + errorInfo(failure).message);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function trust(server: S.McpConfigControllerServerPayload) {
+    if (!sessionId || busy) return;
+    setBusy(server.name);
+    setHint('正在记住信任…');
+    setHasError(false);
+    try {
+      await api.mcpTrust(sessionId, { action: 'trust', server: server.name, configHash: server.configHash });
+      setHint(server.trustState === 'STALE'
+        ? `已按当前命令重新信任 ${server.name}；首次启动后钉住工具定义。`
+        : `已信任 ${server.name}；首次启动后钉住工具定义，声明只读的工具不再逐次询问。`);
+      await load();
+      void useStore.getState().loadCapabilities();
+    } catch (failure) {
+      setHasError(true);
+      setHint('信任失败。' + errorInfo(failure).message);
     } finally {
       setBusy('');
     }
@@ -483,11 +499,12 @@ function McpSettings() {
     if (!sessionId || busy) return;
     setBusy(server);
     setHint('正在删除…');
+    setHasError(false);
     try {
       await api.mcpDeleteServer(sessionId, server);
-      setHint(`已从用户级配置删除 ${server}。`);
-      setHasError(false);
+      setHint(`已从用户级配置删除 ${server}，它的信任记录也已撤销。`);
       await load();
+      void useStore.getState().loadCapabilities();
     } catch (failure) {
       setHasError(true);
       setHint('删除失败。' + errorInfo(failure).message);
@@ -512,11 +529,11 @@ function McpSettings() {
       <p className="settings-status" role="alert">读取失败。{error}</p>
       <Button label="重新加载" onClick={() => void load()} />
     </div>}
-    {sessionId && !loading && servers && <ul className="mcp-server-list" id="settings-mcp-list">
-      {servers.map(server => <li key={server.name} className="mcp-server-item" data-source={server.source}>
+    {sessionId && !loading && servers && <ul className="mcp-server-list" aria-busy={loading}>
+      {servers.map(server => <li key={server.name} className="mcp-server-item">
         <div className="mcp-server-head">
           <code className="mcp-server-name">{server.name}</code>
-          <span className={`mcp-source-tag is-${server.source}`}>{server.source === 'user' ? '用户级' : '工作区'}</span>
+          <span className={`mcp-source-tag is-${server.source}`}>{mcpSourceLabel(server.source)}</span>
           <span className={`cap-tag${server.running ? ' is-on' : server.usable ? '' : ' is-off'}`}>
             {server.running ? `运行中 · ${server.toolCount} 个工具` : (server.usable ? '未启动' : '不可用')}
           </span>
@@ -529,6 +546,9 @@ function McpSettings() {
         {server.usable && !server.running && server.failure && <p className="cap-reason">上次启动失败：{server.failure}</p>}
         {server.trustNote && <p className="cap-reason">{server.trustNote}</p>}
         <div className="mcp-server-actions">
+          {server.usable && (server.trustState === 'UNTRUSTED' || server.trustState === 'STALE') && <Button
+            label={busy === server.name ? '处理中…' : server.trustState === 'STALE' ? '重新信任' : '信任此服务器'}
+            variant="ghost" isDisabled={Boolean(busy)} onClick={() => void trust(server)} />}
           {server.trustState !== 'UNTRUSTED' && <Button
             label={busy === server.name ? '处理中…' : '撤销信任'} variant="ghost" className="settings-danger"
             isDisabled={Boolean(busy)} onClick={() => void revoke(server.name)} />}
@@ -536,15 +556,15 @@ function McpSettings() {
             label={busy === server.name ? '处理中…' : '删除'} variant="ghost"
             isDisabled={Boolean(busy)}
             onClick={() => useStore.getState().askConfirm({
-              title: '删除 MCP 服务器', message: `从用户级配置删除 ${server.name}；已建立的服务器进程会在下次启动时停用。`, confirmText: '删除', danger: true,
+              title: '删除 MCP 服务器', message: `从用户级配置删除 ${server.name}，并撤销它的信任记录；已启动的连接会在下次启动时停用。`, confirmText: '删除', danger: true,
               onConfirm: () => void remove(server.name)
             })} />}
         </div>
       </li>)}
       {!servers.length && <li className="panel-empty">还没有配置 MCP 服务器。点「添加服务器」接入外部工具，或在项目根放一个 .mcp.json。</li>}
     </ul>}
-    {sessionId && adding && <McpAddServer onDone={() => { setAdding(false); void load(); }} />}
-    {hint && <p id="mcp-settings-hint" className="settings-status" role={hasError ? 'alert' : 'status'}>{hint}</p>}
+    {sessionId && adding && <McpAddServer onDone={(message) => { setAdding(false); if (message) { setHint(message); setHasError(false); } void load(); }} />}
+    {hint && <p className="settings-status" role={hasError ? 'alert' : 'status'}>{hint}</p>}
   </section>;
 }
 
@@ -556,9 +576,9 @@ const MCP_IMPORT_PLACEHOLDER = `{
 }`;
 
 /** 添加表单：双模式。「表单」按字段填写（args 支持空格简写或 JSON 数组）；「粘贴 JSON」直接导入现成配置。 */
-function McpAddServer({ onDone }: { onDone: () => void }) {
+function McpAddServer({ onDone }: { onDone: (message?: string) => void }) {
   const [mode, setMode] = useState<'form' | 'json'>('form');
-  return <div className="mcp-add-wrap">
+  return <div className="mcp-add-wrap" id="mcp-add-form">
     <SegmentedControl id="mcp-add-mode" label="添加方式" value={mode} onChange={value => setMode(value as 'form' | 'json')}>
       <SegmentedControlItem value="form" label="表单填写" />
       <SegmentedControlItem value="json" label="粘贴 JSON" />
@@ -568,7 +588,7 @@ function McpAddServer({ onDone }: { onDone: () => void }) {
 }
 
 /** 表单模式：字段逐项填写，解析与校验在后端。 */
-function McpAddForm({ onDone }: { onDone: () => void }) {
+function McpAddForm({ onDone }: { onDone: (message?: string) => void }) {
   const sessionId = useStore(state => state.sessionId);
   const [name, setName] = useState('');
   const [command, setCommand] = useState('');
@@ -589,9 +609,8 @@ function McpAddForm({ onDone }: { onDone: () => void }) {
     }
     try {
       const created = await api.mcpAddServer(sessionId, { name: name.trim(), command: command.trim(), args, env });
-      setHint(`已保存 ${created?.name || name.trim()}；在对话里让模型用它，首次启动时会请求批准。`);
       setName(''); setCommand(''); setArgs(''); setEnvRows([]);
-      onDone();
+      onDone(`已保存 ${created?.name || name.trim()}；在对话里让模型用它，首次启动时会请求批准。`);
     } catch (failure) {
       setHasError(true);
       setHint('保存失败。' + errorInfo(failure).message);
@@ -600,7 +619,7 @@ function McpAddForm({ onDone }: { onDone: () => void }) {
     }
   }
 
-  return <form className="settings-form mcp-add-form" id="mcp-add-form" onSubmit={event => {
+  return <form className="settings-form mcp-add-form" aria-label="添加 MCP 服务器" onSubmit={event => {
     event.preventDefault();
     if (name.trim() && command.trim() && !busy) void submit();
   }} onKeyDown={event => {
@@ -618,11 +637,11 @@ function McpAddForm({ onDone }: { onDone: () => void }) {
     <div className="mcp-env-editor">
       <p className="mcp-env-label">环境变量（可选）</p>
       {envRows.map((row, index) => <div key={index} className="mcp-env-row">
-        <TextInput label="名称" value={row.key} isDisabled={busy} hasSpellCheck={false}
+        <TextInput label={`名称（变量 ${index + 1}）`} value={row.key} isDisabled={busy} hasSpellCheck={false}
           onChange={value => setEnvRows(rows => rows.map((item, i) => i === index ? { ...item, key: value } : item))} />
-        <TextInput label="值" value={row.value} isDisabled={busy}
+        <TextInput label={`值（变量 ${index + 1}）`} value={row.value} isDisabled={busy}
           onChange={value => setEnvRows(rows => rows.map((item, i) => i === index ? { ...item, value } : item))} />
-        <Button type="button" label="移除" variant="ghost" isDisabled={busy}
+        <Button type="button" label={`移除变量 ${index + 1}`} variant="ghost" isDisabled={busy}
           onClick={() => setEnvRows(rows => rows.filter((_, i) => i !== index))} />
       </div>)}
       <Button type="button" label="添加变量" variant="ghost" isDisabled={busy}
@@ -637,30 +656,42 @@ function McpAddForm({ onDone }: { onDone: () => void }) {
 }
 
 /** 粘贴 JSON 模式：支持 {"服务器名": {…}} 或 {"mcpServers": {"服务器名": {…}}}，可以一次导入多个。 */
-function McpImportForm({ onDone }: { onDone: () => void }) {
+function McpImportForm({ onDone }: { onDone: (message?: string) => void }) {
   const sessionId = useStore(state => state.sessionId);
   const [config, setConfig] = useState('');
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState('把现成配置直接粘贴进来；与用户级同名的条目会被覆盖。');
   const [hasError, setHasError] = useState(false);
 
-  async function submit() {
+  async function submit(confirmed = false) {
     if (!sessionId || busy) return;
     setBusy(true);
     setHasError(false);
     setHint('正在导入…');
     try {
-      const result = await api.mcpImportServers(sessionId, { config });
+      const result = await api.mcpImportServers(sessionId, { config, confirmOverwrite: confirmed });
       const imported = result?.imported || [];
       const overwritten = result?.overwritten || [];
       const parts = [`已导入 ${imported.join('、')}`];
       if (overwritten.length) parts.push(`其中覆盖了同名项 ${overwritten.join('、')}`);
-      setHint(parts.join('，') + '；首次启动时仍会请求批准。');
       setConfig('');
-      onDone();
+      onDone(parts.join('，') + '；首次启动时仍会请求批准。');
     } catch (failure) {
+      const message = errorInfo(failure).message || '';
+      if (!confirmed && message.includes('覆盖同名')) {
+        setBusy(false);
+        setHint('等待确认是否覆盖同名配置…');
+        useStore.getState().askConfirm({
+          title: '覆盖同名 MCP 配置',
+          message,
+          confirmText: '覆盖并导入',
+          danger: true,
+          onConfirm: () => void submit(true)
+        });
+        return;
+      }
       setHasError(true);
-      setHint('导入失败。' + errorInfo(failure).message);
+      setHint('导入失败。' + message);
     } finally {
       setBusy(false);
     }
@@ -674,7 +705,7 @@ function McpImportForm({ onDone }: { onDone: () => void }) {
     <textarea id="mcp-import-config" className="mcp-json-input" value={config} placeholder={MCP_IMPORT_PLACEHOLDER}
       spellCheck={false} aria-label="MCP 完整配置 JSON" disabled={busy} rows={8}
       onChange={event => setConfig(event.target.value)} />
-    <p className="mcp-import-hint">支持直接粘贴 {"{"}"服务器名": {"{"}…{"}"}{"}"} 或 {"{"}"mcpServers": {"{"}"服务器名": {"{"}…{"}"}{"}"}{"}"}；仅支持 stdio（command + args）。</p>
+    <p className="mcp-import-hint">支持直接粘贴 {"{"}"服务器名": {"{"}…{"}"}{"}"} 或 {"{"}"mcpServers": {"{"}"服务器名": {"{"}…{"}"}{"}"}{"}"}；只导入 stdio 的 command/args/env/type，pilotPermissions 等本地授权字段会被拒绝。</p>
     <div className="settings-inline-actions">
       <Button id="mcp-import-submit" variant="primary" label={busy ? '导入中…' : '导入'}
         isDisabled={busy || !config.trim()} onClick={() => void submit()} />

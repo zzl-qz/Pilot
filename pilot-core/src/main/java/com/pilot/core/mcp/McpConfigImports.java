@@ -1,5 +1,6 @@
 package com.pilot.core.mcp;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -28,19 +29,21 @@ public final class McpConfigImports {
     public static Map<String, JsonNode> parse(String json) {
         String text = json == null ? "" : json.strip();
         if (text.isEmpty()) {
-            throw new McpException("配置内容不能为空。支持直接粘贴 {\"服务器名\": {…}} "
-                + "或 {\"mcpServers\": {\"服务器名\": {…}}}。");
+            throw new McpException("配置内容不能为空。支持直接粘贴 {\"服务器名\": {…}} " + "或 {\"mcpServers\": {\"服务器名\": {…}}}。");
+        }
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length > McpJson.MAX_CONFIG_BYTES) {
+            throw new McpException("配置超过 1 MiB 上限，请精简后重试；本次未导入");
         }
         JsonNode root;
         try {
-            root = McpJson.parse(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            root = McpJson.parse(bytes);
         } catch (RuntimeException e) {
-            throw new McpException("JSON 解析失败（" + e.getMessage() + "）。支持直接粘贴 "
-                + "{\"服务器名\": {…}} 或 {\"mcpServers\": {\"服务器名\": {…}}}。");
+            throw new McpException(
+                "JSON 解析失败（" + e.getMessage() + "）。支持直接粘贴 " + "{\"服务器名\": {…}} 或 {\"mcpServers\": {\"服务器名\": {…}}}。");
         }
         if (!root.isObject()) {
-            throw new McpException("配置必须是 JSON 对象。支持直接粘贴 {\"服务器名\": {…}} "
-                + "或 {\"mcpServers\": {\"服务器名\": {…}}}。");
+            throw new McpException("配置必须是 JSON 对象。支持直接粘贴 {\"服务器名\": {…}} " + "或 {\"mcpServers\": {\"服务器名\": {…}}}。");
         }
         // 有 mcpServers 字段且为对象 → 标准包裹格式；否则顶层按服务器映射处理
         JsonNode wrapped = root.path("mcpServers");
@@ -49,14 +52,13 @@ public final class McpConfigImports {
         for (String name : entries.propertyNames()) {
             JsonNode entry = entries.path(name);
             if (!entry.isObject()) {
-                throw new McpException("服务器 " + name + " 的配置必须是对象：\""
-                    + name + "\": {\"command\": \"…\", \"args\": […]}。");
+                throw new McpException(
+                    "服务器 " + name + " 的配置必须是对象：\"" + name + "\": {\"command\": \"…\", \"args\": […]}。");
             }
             servers.put(name, entry);
         }
         if (servers.isEmpty()) {
-            throw new McpException("没有可导入的服务器。支持直接粘贴 {\"服务器名\": {…}} "
-                + "或 {\"mcpServers\": {\"服务器名\": {…}}}。");
+            throw new McpException("没有可导入的服务器。支持直接粘贴 {\"服务器名\": {…}} " + "或 {\"mcpServers\": {\"服务器名\": {…}}}。");
         }
         return servers;
     }

@@ -1,5 +1,6 @@
 package com.pilot.core.mcp;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -39,27 +40,25 @@ public final class McpArgsParser {
     private static List<String> parseJson(String text) {
         JsonNode root;
         try {
-            root = McpJson.parse(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            root = McpJson.parse(text.getBytes(StandardCharsets.UTF_8));
         } catch (RuntimeException e) {
-            throw new McpException("args 看起来是 JSON 数组但解析失败（" + e.getMessage() + "）；"
-                + "示例：[\"-y\", \"@scope/server\"]，或改用空格分隔的简写。");
+            throw new McpException(
+                "args 看起来是 JSON 数组但解析失败（" + e.getMessage() + "）；" + "示例：[\"-y\", \"@scope/server\"]，或改用空格分隔的简写。");
         }
         if (!root.isArray()) {
-            throw new McpException("args 的 JSON 格式必须是字符串数组；示例：[\"-y\", \"@scope/server\"]，"
-                + "或改用空格分隔的简写。");
+            throw new McpException("args 的 JSON 格式必须是字符串数组；示例：[\"-y\", \"@scope/server\"]，" + "或改用空格分隔的简写。");
         }
         List<String> args = new ArrayList<>();
         for (JsonNode item : root) {
             if (!item.isString()) {
-                throw new McpException("args 的 JSON 数组里每个元素都必须是字符串；"
-                    + "示例：[\"-y\", \"@scope/server\"]");
+                throw new McpException("args 的 JSON 数组里每个元素都必须是字符串；" + "示例：[\"-y\", \"@scope/server\"]");
             }
             args.add(item.asString());
         }
         return List.copyOf(args);
     }
 
-    /** 简写格式：空白分隔；双引号/单引号包裹的部分作为整体，支持包含空格与已转义的同款引号。 */
+    /** 简写格式：空白分隔；双引号/单引号包裹作为整体，引号内可用 \\ 转义同款引号或反斜杠。 */
     private static List<String> shellSplit(String text) {
         List<String> args = new ArrayList<>();
         StringBuilder current = new StringBuilder();
@@ -68,7 +67,10 @@ public final class McpArgsParser {
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (quote != 0) {
-                if (c == quote) {
+                // 只把 \" 与 \\ 当作转义；Windows 路径里的普通反斜杠原样保留
+                if (c == '\\' && i + 1 < text.length() && (text.charAt(i + 1) == quote || text.charAt(i + 1) == '\\')) {
+                    current.append(text.charAt(++i));
+                } else if (c == quote) {
                     quote = 0;
                 } else {
                     current.append(c);
@@ -92,8 +94,7 @@ public final class McpArgsParser {
             hasToken = true;
         }
         if (quote != 0) {
-            throw new McpException("args 里的引号没有成对；包含空格的参数用引号包住，"
-                + "示例：-y @scope/server \"D:\\my dir\"，或改用 JSON 数组格式。");
+            throw new McpException("args 里的引号没有成对；包含空格的参数用引号包住，" + "示例：-y @scope/server \"D:\\my dir\"，或改用 JSON 数组格式。");
         }
         if (hasToken) {
             args.add(current.toString());

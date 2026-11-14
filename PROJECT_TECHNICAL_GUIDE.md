@@ -201,7 +201,7 @@ ToolRegistry 是工具目录；ToolExecutor 是单次调用的执行流程。执
 | `edit_file`、`create_file`、`apply_patch` | 精确替换、创建文件，或用一份补丁跨文件修改（含重命名、删除） | 主会话直接写工作区，补丁要么全部生效要么全部不落盘；调度子任务使用另外的沙箱版本 |
 | `run_command` | 编译、测试、lint、启动服务或检查 Git；支持 `&& \|\| ; \|` 串联，每一段独立校验 | 查看类命令只读放行，构建与写入类按权限档位审批；启动真实进程 |
 | `browser` | 在隔离浏览器里验证本机 Web 应用：快照、点击、输入、上传、截图、控制台与网络记录 | 浏览器握手成功后才对模型声明；点击等本机交互在 AUTO_EDIT 放行，执行任意脚本需审批 |
-| `mcp_tools`、`mcp_call` | 按需发现并调用 `.mcp.json` 里配置的 MCP 服务器工具 | 每次请求只带这两个定义；启动服务器需审批，声明 `readOnlyHint` 的工具免审批 |
+| `mcp_tools`、`mcp_call` | 按需发现并调用 `.mcp.json` 里配置的 MCP 服务器工具 | 每次请求只带这两个定义；未信任服务器启动需审批，已信任服务器按配置哈希与工具哈希钉住，声明 `readOnlyHint` 的工具只有在钉住记录匹配时才免审批。见 [MCP 信任模型](docs-public/design-mcp-trust.md) |
 | `command_status`、`command_logs`、`stop_command` | 跟踪已经启动的长命令 | 查询状态、增量日志或发出终止请求 |
 | `update_plan` | 保存步骤和完成状态 | 更新计划并发出事件 |
 | `web_search`、`web_fetch` | 搜索资料和读取网页 | 发起网络请求，返回资料 |

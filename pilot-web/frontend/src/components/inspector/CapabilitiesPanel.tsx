@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useStore } from '../../store.js';
+import { MCP_TRUST_LABELS, mcpSourceLabel } from '../../lib/mcp.js';
 
 /* ---------- 能力清单 ---------- */
 
@@ -10,13 +11,6 @@ const PERMISSION_LABELS: Record<string, string> = {
   AUTO_EDIT: '自动改文件',
   ASK: '每次确认',
   READ_ONLY: '只读'
-};
-
-const MCP_TRUST_LABELS: Record<string, string> = {
-  UNTRUSTED: '未信任',
-  TRUSTED_UNPINNED: '已信任',
-  TRUSTED: '已信任 · 已钉住工具',
-  STALE: '信任失效：配置已变化'
 };
 
 export function CapabilitiesPanel() {
@@ -107,7 +101,7 @@ export function CapabilitiesPanel() {
                 <li key={server.name} className="cap-item">
                   <div className="cap-item-head">
                     <code className="cap-name">{server.name}</code>
-                    <span className="cap-tag">{server.source === 'user' ? '用户级' : '工作区'}</span>
+                    <span className="cap-tag">{mcpSourceLabel(server.source)}</span>
                     <span className={`cap-tag${server.running ? ' is-on' : ''}`}>{server.running ? '运行中' : (server.usable ? '未启动' : '不可用')}</span>
                     {server.running && <span className="cap-tag is-readonly">{server.tools?.length || 0} 个工具</span>}
                     {server.usable && server.trustState !== 'UNTRUSTED' && (

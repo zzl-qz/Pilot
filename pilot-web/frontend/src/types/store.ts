@@ -85,7 +85,7 @@ export interface StoreActions {
   submitInput(text: string, attachments?: DraftAttachment[], imagePositions?: number[]): Promise<boolean>;
   steer(text: string, attachments?: DraftAttachment[]): Promise<boolean>; pauseRun(): Promise<void>; cancelRun(): Promise<void>;
   continueRun(): Promise<false | void>; resendMessage(sequence: number, text: string, attachments?: DraftAttachment[]): Promise<boolean>;
-  resolveApproval(id: string, approved: boolean): Promise<void>; resolveApprovalWithTrust(id: string, approved: boolean, trust: { action: string; server: string; tool?: string }): Promise<void>; resolveArbitration(id: string, choice: string): Promise<void>;
+  resolveApproval(id: string, approved: boolean): Promise<void>; resolveApprovalWithTrust(id: string, approved: boolean, trust: { action: string; server: string; tool?: string; configHash?: string; toolHash?: string }): Promise<void>; resolveArbitration(id: string, choice: string): Promise<void>;
   loadPlan(options?: StrictOptions): Promise<void>; loadQueue(options?: StrictOptions): Promise<void>;
   mutateQueue(operation: (id: string, revision: string | null) => Promise<unknown>, failure: string): Promise<boolean>;
   steerQueueItem(index: number): Promise<boolean>; saveQueueItem(index: number, text: string): Promise<boolean>;

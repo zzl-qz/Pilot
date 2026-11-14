@@ -103,7 +103,6 @@ export interface ApiResults {
   mcpImportServers: S.McpConfigControllerImportResponse;
   mcpDeleteServer: null;
   mcpTrust: S.McpTrustControllerTrustResponse;
-  mcpTrustView: S.McpTrustControllerTrustedServer[];
   browserStatus: BrowserStatus;
   stopCommand: S.CommandTaskManagerTask;
   runChanges: S.ChangeServiceRunChangeReport & { summary?: string };

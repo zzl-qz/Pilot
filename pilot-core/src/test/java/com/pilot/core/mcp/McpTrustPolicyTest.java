@@ -9,13 +9,13 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * 决策矩阵 golden test（docs/DESIGN-mcp-trust.md §2.1 的行 1–4、9 与状态迁移）。
+ * 决策矩阵 golden test（docs-public/design-mcp-trust.md 的行 1–4、9 与状态迁移）。
  * 不启动进程，只覆盖「配置 + 信任记录」可决定的行；依赖运行态的行 5–8 见 McpToolsTest。
  */
 class McpTrustPolicyTest {
@@ -92,7 +92,7 @@ class McpTrustPolicyTest {
     }
 
     private void writeConfig(List<String> args) throws IOException {
-        Files.writeString(workspace.resolve(".mcp.json"), mapper.writeValueAsString(
-            Map.of("mcpServers", Map.of("fake", Map.of("command", "some-command", "args", args)))));
+        Files.writeString(workspace.resolve(".mcp.json"), mapper
+            .writeValueAsString(Map.of("mcpServers", Map.of("fake", Map.of("command", "some-command", "args", args)))));
     }
 }

@@ -63,10 +63,11 @@ class HookPermissionsTest {
     void readOnlyCannotWriteThroughWorkspaceOrUserHook() throws Exception {
         for (boolean user : List.of(false, true)) {
             var approvals = new AtomicInteger();
-            var result = read(executor(new PolicyPermissionGate(PermissionMode.READ_ONLY), (id, name, args, structured) -> {
-                approvals.incrementAndGet();
-                return CompletableFuture.completedFuture(true);
-            }, hooks("PostToolUse", user)));
+            var result =
+                read(executor(new PolicyPermissionGate(PermissionMode.READ_ONLY), (id, name, args, structured) -> {
+                    approvals.incrementAndGet();
+                    return CompletableFuture.completedFuture(true);
+                }, hooks("PostToolUse", user)));
             assertTrue(result.result().contains("read-only input"));
             assertTrue(result.result().contains("READ_ONLY"));
             assertEquals(0, approvals.get());
@@ -175,10 +176,11 @@ class HookPermissionsTest {
         var tools = new ToolRegistry();
         tools.register(new CreateFileTool(new PathValidator(workspace)));
         var approvals = new AtomicInteger();
-        var executor = new ToolExecutor(tools, new PolicyPermissionGate(PermissionMode.ASK), (id, name, args, structured) -> {
-            approvals.incrementAndGet();
-            return CompletableFuture.completedFuture(true);
-        }).withHooks(Hooks.load(workspace, userHome));
+        var executor =
+            new ToolExecutor(tools, new PolicyPermissionGate(PermissionMode.ASK), (id, name, args, structured) -> {
+                approvals.incrementAndGet();
+                return CompletableFuture.completedFuture(true);
+            }).withHooks(Hooks.load(workspace, userHome));
         var result = executor
             .execute(new ToolCall("write", "create_file", Map.of("path", "output.txt", "content", "x")), event -> {
             });

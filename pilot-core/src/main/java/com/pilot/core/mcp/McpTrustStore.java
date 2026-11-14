@@ -1,6 +1,8 @@
 package com.pilot.core.mcp;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -41,8 +43,7 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>记录是纯 JSON 文件。缺失、损坏或版本不识别时按「全部未信任」处理并告警——
  * 退化方向永远是多问一次，不会放大权限。变更方法在锁内「先落盘再提交内存」；
- * 后台钉住（{@link #pinTools}）例外：它失败时仅告警，内存先行让本会话继续工作，
- * 重启后回到未钉住状态（更保守）。
+ * 后台钉住（{@link #pinTools}）失败时只告警并返回 false，内存不更新，保持未钉住状态。
  */
 public final class McpTrustStore {
     static final int FORMAT_VERSION = 1;
@@ -91,8 +92,8 @@ public final class McpTrustStore {
     public synchronized void trust(Path workspace, String server, String configHash) {
         String ws = workspaceKey(workspace);
         ServerTrust existing = servers.getOrDefault(ws, Map.of()).get(server);
-        Map<String, ToolPin> keep = existing != null && existing.configHash().equals(configHash)
-            ? existing.tools() : Map.of();
+        Map<String, ToolPin> keep =
+            existing != null && existing.configHash().equals(configHash) ? existing.tools() : Map.of();
         commit(ws, server, new ServerTrust(configHash, Instant.now(), keep));
     }
 
@@ -116,7 +117,8 @@ public final class McpTrustStore {
             try {
                 commit(ws, server, updated);
             } catch (RuntimeException e) {
-                log.warn("MCP 工具钉住记录未能落盘（{}）：{}；本会话内仍生效，重启后按未钉住处理", ws, e.getMessage());
+                log.warn("MCP 工具钉住记录未能落盘（{}）：{}；本次按未钉住处理", ws, e.getMessage());
+                return false;
             }
             return true;
         }
@@ -161,7 +163,7 @@ public final class McpTrustStore {
     /** 服务器启动命令的指纹：command + args + env（env 按 key 排序）。 */
     public static String hash(McpServerConfig config) {
         StringBuilder canonical = new StringBuilder("mcp-config-v1\n");
-        canonical.append("command=").append(String.valueOf(config.command())).append('\n');
+        canonical.append("command=").append(escape(String.valueOf(config.command()))).append('\n');
         canonical.append("args=").append(config.args().size()).append('\n');
         for (String arg : config.args()) {
             canonical.append("arg=").append(escape(arg)).append('\n');
@@ -172,8 +174,8 @@ public final class McpTrustStore {
         }
         canonical.append("env=").append(env.size()).append('\n');
         for (Map.Entry<String, String> entry : env.entrySet()) {
-            canonical.append("env.").append(escape(entry.getKey())).append('=')
-                .append(escape(entry.getValue())).append('\n');
+            canonical.append("env.").append(escape(entry.getKey())).append('=').append(escape(entry.getValue()))
+                .append('\n');
         }
         return sha256(canonical.toString());
     }
@@ -191,11 +193,6 @@ public final class McpTrustStore {
         canonical.append("\nannotations=");
         canonical(tool.annotations(), canonical);
         return sha256(canonical.toString());
-    }
-
-    /** 展示用短哈希：保留前缀 + 前 12 位十六进制。 */
-    public static String abbreviate(String hash) {
-        return hash == null ? "" : hash.substring(0, Math.min(hash.length(), "sha256:".length() + 12));
     }
 
     // ————— 内部 —————
@@ -246,7 +243,7 @@ public final class McpTrustStore {
             Files.writeString(tmp, mapper.writeValueAsString(root));
             try {
                 Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+            } catch (AtomicMoveNotSupportedException e) {
                 Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException e) {
@@ -271,6 +268,15 @@ public final class McpTrustStore {
 
     private void load() {
         if (file == null || !Files.isRegularFile(file)) {
+            return;
+        }
+        try {
+            if (Files.size(file) > McpJson.MAX_CONFIG_BYTES) {
+                log.warn("MCP 信任记录 {} 超过大小上限，所有服务器按未信任处理", file);
+                return;
+            }
+        } catch (IOException e) {
+            log.warn("MCP 信任记录 {} 无法读取大小，按未信任处理: {}", file, e.getMessage());
             return;
         }
         JsonNode root;
@@ -381,8 +387,8 @@ public final class McpTrustStore {
     private static String sha256(String text) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            StringBuilder hex = new StringBuilder("sha256:").append(HexFormat.of().formatHex(digest.digest(
-                text.getBytes(java.nio.charset.StandardCharsets.UTF_8))));
+            StringBuilder hex = new StringBuilder("sha256:")
+                .append(HexFormat.of().formatHex(digest.digest(text.getBytes(StandardCharsets.UTF_8))));
             return hex.toString();
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 摘要不可用", e);

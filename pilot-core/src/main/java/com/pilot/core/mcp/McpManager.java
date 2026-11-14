@@ -16,6 +16,7 @@ import java.util.function.Supplier;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * MCP 服务器的配置与生命周期。
@@ -120,44 +121,80 @@ public final class McpManager implements AutoCloseable {
     }
 
     /**
-     * 服务器是否定义在用户级配置（数据目录 mcp.json）中。同名时工作区会覆盖用户级，
-     * 但定义本身在哪儿是这个判断；设置页签的「来源」徽标与写保护都依赖它。
-     */
-    public boolean definedInUserConfig(String server) {
-        return readUserConfig().path("mcpServers").has(server);
-    }
-
-    /**
-     * 用户级配置的整体树（只读快照）：没有文件或解析失败时返回空对象——
-     * 让上层在损坏时仍能展示配置不可用，而不是抛错或被悄悄覆盖。
+     * 用户级配置的整体树（只读快照）：没有文件或解析失败时返回空对象。
+     * 写入口必须先调用 {@link #userConfigReadable()} 或 {@link #updateUserConfig}，避免把损坏文件覆盖掉。
      */
     public JsonNode readUserConfig() {
         if (userConfig == null || !Files.isRegularFile(userConfig)) {
             return mapper.createObjectNode();
         }
         try {
-            return McpJson.readConfig(userConfig);
+            JsonNode root = McpJson.readConfig(userConfig);
+            return root.isObject() ? root : mapper.createObjectNode();
         } catch (IOException | RuntimeException e) {
             return mapper.createObjectNode();
         }
     }
 
-    /** 写回用户级配置：先落在临时文件再原子替换，避免读者看到半截 JSON。 */
-    public void saveUserConfig(JsonNode root) throws IOException {
+    /** 用户级配置存在、可解析且是对象；损坏时写入口应拒绝写入而不是覆盖。 */
+    public boolean userConfigReadable() {
+        if (userConfig == null || !Files.isRegularFile(userConfig)) {
+            return true;
+        }
+        try {
+            return McpJson.readConfig(userConfig).isObject();
+        } catch (IOException | RuntimeException e) {
+            return false;
+        }
+    }
+
+    /**
+     * 在管理器内串行地读—改—写用户级配置，避免并发 add/import 互相覆盖。
+     * 配置损坏时拒绝写入，返回的异常由调用方转成可见错误。
+     */
+    public synchronized <T> T updateUserConfig(java.util.function.Function<ObjectNode, T> mutation) throws IOException {
+        if (!userConfigReadable()) {
+            throw new IOException("用户级 MCP 配置无法解析，请先修复或备份后重试；本次未写入");
+        }
+        ObjectNode root = (ObjectNode)readUserConfig();
+        T result = mutation.apply(root);
+        saveUserConfig(root);
+        return result;
+    }
+
+    /** 用户级配置里是否有某个服务器（同名时工作区会覆盖它）。 */
+    public boolean definedInUserConfig(String server) {
+        return readUserConfig().path("mcpServers").has(server);
+    }
+
+    /** 工作区 .mcp.json 里是否有某个服务器；同名时它才是生效来源。 */
+    public boolean definedInWorkspaceConfig(Path workspace, String server) {
+        return load(workspace.resolve(".mcp.json")).containsKey(server);
+    }
+
+    /** 写回用户级配置：先落唯一临时文件再原子替换；写前检查大小，避免写出读不回来的文件。 */
+    public synchronized void saveUserConfig(JsonNode root) throws IOException {
         Objects.requireNonNull(root, "root must not be null");
         if (userConfig == null) {
             throw new IOException("没有配置用户级 mcp.json 的路径");
         }
         Path absolute = userConfig.toAbsolutePath();
-        if (absolute.getParent() != null) {
-            Files.createDirectories(absolute.getParent());
+        byte[] bytes = mapper.writeValueAsBytes(root);
+        if (bytes.length > McpJson.MAX_CONFIG_BYTES) {
+            throw new McpException("MCP 用户级配置超过 1 MiB 上限，请精简后重试；本次未写入");
         }
-        Path tmp = absolute.resolveSibling(absolute.getFileName() + ".tmp");
-        Files.writeString(tmp, mapper.writeValueAsString(root));
+        Path parent = absolute.getParent() == null ? Path.of(".").toAbsolutePath() : absolute.getParent();
+        Files.createDirectories(parent);
+        Path tmp = Files.createTempFile(parent, "mcp-config-", ".tmp");
         try {
-            Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING);
+            Files.write(tmp, bytes);
+            try {
+                Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(tmp);
         }
     }
 
@@ -184,8 +221,7 @@ public final class McpManager implements AutoCloseable {
             return "UNTRUSTED";
         }
         return record.configHash().equals(McpTrustStore.hash(config))
-            ? (record.tools().isEmpty() ? "TRUSTED_UNPINNED" : "TRUSTED")
-            : "STALE";
+            ? (record.tools().isEmpty() ? "TRUSTED_UNPINNED" : "TRUSTED") : "STALE";
     }
 
     /**
@@ -222,7 +258,7 @@ public final class McpManager implements AutoCloseable {
             return false;
         }
         trustStore.pinTools(workspace, server, currentHash, pins(observed));
-        return true;
+        return trustStore.record(workspace, server).map(saved -> !saved.tools().isEmpty()).orElse(false);
     }
 
     /** 只有工具发现入口可以启动进程；实际调用不隐式启动或重新连接。 */

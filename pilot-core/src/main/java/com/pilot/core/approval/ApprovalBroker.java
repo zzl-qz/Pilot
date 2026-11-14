@@ -15,8 +15,7 @@ public interface ApprovalBroker {
      *
      * @param args 结构化参数（仅短标量值），供前端展示与「批准并信任」等次级决策
      */
-    CompletableFuture<Boolean> register(String callId, String toolName, String argsSummary,
-        Map<String, Object> args);
+    CompletableFuture<Boolean> register(String callId, String toolName, String argsSummary, Map<String, Object> args);
 
     /** @return 是否成功唤醒了一个等待中的审批（找不到或已超时返回 false） */
     default boolean resolve(String callId, boolean approved) {

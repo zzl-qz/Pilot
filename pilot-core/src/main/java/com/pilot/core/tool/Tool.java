@@ -52,6 +52,16 @@ public interface Tool {
         return null;
     }
 
+    /**
+     * 审批时一并外发的绑定信息（如 MCP 配置/工具哈希），只允许短标量。
+     *
+     * <p>界面会把它原样带回信任接口，服务端据此确认「用户批准的就是当前这一版」；
+     * 默认无绑定，普通工具不需要实现。
+     */
+    default Map<String, Object> approvalBinding(Map<String, Object> args) {
+        return Map.of();
+    }
+
     /** 运行时能力。依赖外部进程的工具覆盖；不可用时不向模型声明。 */
     default Availability availability() {
         return Availability.ready();

@@ -25,8 +25,10 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
     },
 
     /**
-     * 「批准并信任」/「始终允许此工具」：先落信任再批准本次调用（串行，信任失败不批准）。
-     * 信任写入失败时本次调用保持待审批状态，用户可单独点批准。
+     * 「批准并信任」/「始终允许此工具」：先批准本次调用，再写信任。
+     *
+     * <p>批准失败就不写信任；批准成功但信任失败时，本次调用照常执行，只提示信任没有保存，
+     * 不会出现“提示信任未生效、实际已落库”的误导。
      */
     async resolveApprovalWithTrust(callId, approved, trust) {
       const { sessionId, sessionEpoch, pendingApprovals } = get();
@@ -35,12 +37,24 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
       const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
       set((draft) => { draft.pendingApprovals[callId].busy = true; });
       try {
-        await api.mcpTrust(sessionId, trust);
         await api.approval(callId, approved);
       } catch (error) {
         if (!current()) return;
-        get().showNotice('信任未生效，未批准本次调用：' + errorInfo(error).message);
+        get().showNotice('提交审批失败：' + errorInfo(error).message);
         set((draft) => { if (draft.pendingApprovals[callId]) draft.pendingApprovals[callId].busy = false; });
+        return;
+      }
+      if (!current()) return;
+      try {
+        await api.mcpTrust(sessionId, trust);
+        if (current()) {
+          get().showNotice('已批准本次调用，并记住该 MCP 信任');
+          void get().loadCapabilities();
+        }
+      } catch (error) {
+        if (!current()) return;
+        get().showNotice('已批准本次调用，但信任没有保存：' + errorInfo(error).message);
+        void get().loadCapabilities();
       }
     },
 

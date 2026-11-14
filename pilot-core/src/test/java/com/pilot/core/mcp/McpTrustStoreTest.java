@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /** 信任库的哈希、状态迁移与落盘行为；不需要 Node。 */
 class McpTrustStoreTest {
@@ -40,29 +41,29 @@ class McpTrustStoreTest {
 
         assertNotEquals(McpTrustStore.hash(first),
             McpTrustStore.hash(new McpServerConfig("fake", "node", List.of("a", "c"), env, null)));
-        assertNotEquals(McpTrustStore.hash(first),
-            McpTrustStore.hash(new McpServerConfig("fake", "node", List.of("a", "b"),
-                Map.of("A_KEY", "1", "B_KEY", "9"), null)));
+        assertNotEquals(McpTrustStore.hash(first), McpTrustStore
+            .hash(new McpServerConfig("fake", "node", List.of("a", "b"), Map.of("A_KEY", "1", "B_KEY", "9"), null)));
         assertNotEquals(McpTrustStore.hash(first),
             McpTrustStore.hash(new McpServerConfig("fake", "node.exe", List.of("a", "b"), env, null)));
     }
 
     @Test
     void toolHashIgnoresSchemaKeyOrderAndTracksAnnotationsAndDescription() throws Exception {
-        McpToolInfo first = tool(mapper.readTree(
-            "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"]}"),
+        McpToolInfo first = tool(
+            mapper.readTree(
+                "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"]}"),
             mapper.readTree("{\"readOnlyHint\":true,\"destructiveHint\":false}"));
         // schema 与 annotations 都是内容相同、字段顺序不同 → 规范化后哈希一致
-        McpToolInfo reordered = tool(mapper.readTree(
-            "{\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}},\"type\":\"object\"}"),
+        McpToolInfo reordered = tool(
+            mapper.readTree(
+                "{\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}},\"type\":\"object\"}"),
             mapper.readTree("{\"destructiveHint\":false,\"readOnlyHint\":true}"));
         assertEquals(McpTrustStore.hash(first), McpTrustStore.hash(reordered));
 
+        assertNotEquals(McpTrustStore.hash(first), McpTrustStore.hash(new McpToolInfo("echo", first.description(),
+            first.inputSchema(), true, mapper.readTree("{\"readOnlyHint\":false}"))));
         assertNotEquals(McpTrustStore.hash(first),
-            McpTrustStore.hash(new McpToolInfo("echo", first.description(), first.inputSchema(), true,
-                mapper.readTree("{\"readOnlyHint\":false}"))));
-        assertNotEquals(McpTrustStore.hash(first), McpTrustStore.hash(new McpToolInfo("echo", "改写过的说明",
-            first.inputSchema(), true, first.annotations())));
+            McpTrustStore.hash(new McpToolInfo("echo", "改写过的说明", first.inputSchema(), true, first.annotations())));
     }
 
     @Test
@@ -77,8 +78,7 @@ class McpTrustStoreTest {
         assertTrue(trusted.tools().isEmpty());
 
         // 配置哈希不匹配的钉住被拒绝
-        Map<String, McpTrustStore.ToolPin> pins =
-            Map.of("echo", new McpTrustStore.ToolPin("sha256:x", false));
+        Map<String, McpTrustStore.ToolPin> pins = Map.of("echo", new McpTrustStore.ToolPin("sha256:x", false));
         assertFalse(store.pinTools(workspace, "fake", "sha256:other", pins));
         // 未信任的服务器不钉
         assertFalse(store.pinTools(workspace, "ghost", hash, pins));
@@ -106,8 +106,7 @@ class McpTrustStoreTest {
     @Test
     void retrustingSameCommandKeepsPinsButNewCommandResetsThem() {
         McpTrustStore store = new McpTrustStore(mapper, dir.resolve("trust.json"));
-        String hash = McpTrustStore.hash(
-            new McpServerConfig("fake", "node", List.of("s.mjs"), Map.of(), null));
+        String hash = McpTrustStore.hash(new McpServerConfig("fake", "node", List.of("s.mjs"), Map.of(), null));
         store.trust(workspace, "fake", hash);
         store.pinTools(workspace, "fake", hash, Map.of("echo", new McpTrustStore.ToolPin("sha256:x", false)));
 
@@ -157,9 +156,12 @@ class McpTrustStoreTest {
     @Test
     void unknownVersionDegradesToEmpty() throws Exception {
         Path file = dir.resolve("mcp-trust.json");
-        Files.writeString(file, "{\"version\":99,\"servers\":{\"x\":{\"fake\":{\"configHash\":\"sha256:y\"}}}}");
+        new McpTrustStore(mapper, file).trust(workspace, "fake", "sha256:y");
+        var root = (ObjectNode)mapper.readTree(Files.readString(file));
+        root.put("version", 99);
+        Files.writeString(file, mapper.writeValueAsString(root));
         McpTrustStore store = new McpTrustStore(mapper, file);
-        assertTrue(store.record(dir.resolve("x"), "fake").isEmpty());
+        assertTrue(store.record(workspace, "fake").isEmpty());
     }
 
     @Test
@@ -174,16 +176,8 @@ class McpTrustStoreTest {
         assertTrue(store.record(workspace, "fake").isEmpty());
     }
 
-    @Test
-    void abbreviateKeepsPrefixAndFirstTwelveHexChars() {
-        String hash = "sha256:0123456789abcdef0123";
-        assertEquals("sha256:0123456789ab", McpTrustStore.abbreviate(hash));
-        assertEquals("", McpTrustStore.abbreviate(null));
-    }
-
     private McpToolInfo tool(Object schema, Object annotations) throws Exception {
-        return new McpToolInfo("echo", "Echo the given text back",
-            mapper.readTree(mapper.writeValueAsString(schema)), true,
-            mapper.readTree(mapper.writeValueAsString(annotations)));
+        return new McpToolInfo("echo", "Echo the given text back", mapper.readTree(mapper.writeValueAsString(schema)),
+            true, mapper.readTree(mapper.writeValueAsString(annotations)));
     }
 }

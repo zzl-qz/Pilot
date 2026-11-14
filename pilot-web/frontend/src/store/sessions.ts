@@ -91,6 +91,9 @@ function resetSessionState(draft: StoreState) {
   draft.notesState = 'idle';
   draft.notesError = '';
   draft.notesSaving = '';
+  // 能力清单按会话/工作区解析：切走后不能拿上一会话的 MCP 运行状态展示审批按钮
+  draft.capabilities = null;
+  draft.capabilitiesState = '';
 }
 
 /** 会话生命周期拥有列表请求和创建请求；连接由调用方提供，避免反向依赖全局 store。 */

@@ -14,6 +14,7 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -43,18 +44,22 @@ class McpTrustControllerTest {
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() throws IOException {
-        Files.writeString(workspace.resolve(".mcp.json"), mapper.writeValueAsString(Map.of("mcpServers",
-            Map.of("fake", Map.of("command", "node", "args", List.of("s.mjs")),
-                "remote", Map.of("url", "https://example.com")))));
+        Files.writeString(workspace.resolve(".mcp.json"), mapper.writeValueAsString(Map.of("mcpServers", Map.of("fake",
+            Map.of("command", "node", "args", List.of("s.mjs")), "remote", Map.of("url", "https://example.com")))));
         sessions = new SessionService();
         sessionId = sessions.createSession("MCP 信任", workspace.toString()).id();
         McpTrustStore store = new McpTrustStore(mapper, dataDir.resolve("mcp-trust.json"));
         manager = new McpManager(mapper, null, null, () -> "", store);
-        ObjectProvider<McpManager> provider = org.mockito.Mockito.mock(ObjectProvider.class);
+        ObjectProvider<McpManager> provider = Mockito.mock(ObjectProvider.class);
         lenient().when(provider.getIfAvailable()).thenReturn(manager);
         controller = new McpTrustController(sessions,
-            new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 1, 0, 60000, false),
-            provider);
+            new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 1, 0, 60000, false), provider);
+    }
+
+    private McpTrustController.TrustRequest trustRequest(String action, String server, String tool) {
+        var config = manager.servers(workspace).get(server);
+        String hash = config == null ? "" : McpTrustStore.hash(config);
+        return new McpTrustController.TrustRequest(action, server, tool, hash, "sha256:tool");
     }
 
     @Test
@@ -68,8 +73,7 @@ class McpTrustControllerTest {
 
     @Test
     void trustComputesHashOnServerSideAndPersists() {
-        McpTrustController.TrustResponse response =
-            controller.resolve(sessionId, new McpTrustController.TrustRequest("trust", "fake", null));
+        McpTrustController.TrustResponse response = controller.resolve(sessionId, trustRequest("trust", "fake", null));
         // 没启动进程，钉住留待下次启动时观测；配置哈希已由后端计算入库
         assertEquals("TRUSTED_UNPINNED", response.state());
 
@@ -81,49 +85,63 @@ class McpTrustControllerTest {
     @Test
     void allowToolRequiresRunningServerAndTrustRecord() {
         ResponseStatusException conflict = assertThrows(ResponseStatusException.class,
-            () -> controller.resolve(sessionId, new McpTrustController.TrustRequest("allow-tool", "fake", "echo")));
+            () -> controller.resolve(sessionId, trustRequest("allow-tool", "fake", "echo")));
         assertEquals(HttpStatus.CONFLICT, conflict.getStatusCode());
 
         // 信任后仍未运行——一样不能钉
-        controller.resolve(sessionId, new McpTrustController.TrustRequest("trust", "fake", null));
+        controller.resolve(sessionId, trustRequest("trust", "fake", null));
         ResponseStatusException stillNotRunning = assertThrows(ResponseStatusException.class,
-            () -> controller.resolve(sessionId, new McpTrustController.TrustRequest("allow-tool", "fake", "echo")));
+            () -> controller.resolve(sessionId, trustRequest("allow-tool", "fake", "echo")));
         assertEquals(HttpStatus.CONFLICT, stillNotRunning.getStatusCode());
         assertTrue(stillNotRunning.getReason().contains("未在运行"));
 
         ResponseStatusException unknownTool = assertThrows(ResponseStatusException.class,
-            () -> controller.resolve(sessionId, new McpTrustController.TrustRequest("allow-tool", "ghost", "x")));
+            () -> controller.resolve(sessionId, trustRequest("allow-tool", "ghost", "x")));
         assertEquals(HttpStatus.NOT_FOUND, unknownTool.getStatusCode());
     }
 
     @Test
     void revokeRemovesRecordAndInvalidInputsAreRejected() {
-        controller.resolve(sessionId, new McpTrustController.TrustRequest("trust", "fake", null));
-        assertEquals("UNTRUSTED",
-            controller.resolve(sessionId, new McpTrustController.TrustRequest("revoke", "fake", null)).state());
+        controller.resolve(sessionId, trustRequest("trust", "fake", null));
+        assertEquals("UNTRUSTED", controller.resolve(sessionId, trustRequest("revoke", "fake", null)).state());
         assertTrue(manager.trustStore().record(workspace, "fake").isEmpty());
 
         assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
-            () -> controller.resolve(sessionId, new McpTrustController.TrustRequest(null, "fake", null)))
-            .getStatusCode());
+            () -> controller.resolve(sessionId, trustRequest(null, "fake", null))).getStatusCode());
         assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
-            () -> controller.resolve(sessionId, new McpTrustController.TrustRequest("trust", "", null)))
-            .getStatusCode());
+            () -> controller.resolve(sessionId, trustRequest("trust", "", null))).getStatusCode());
         assertEquals(HttpStatus.NOT_FOUND, assertThrows(ResponseStatusException.class,
-            () -> controller.resolve(sessionId, new McpTrustController.TrustRequest("trust", "ghost", null)))
-            .getStatusCode());
+            () -> controller.resolve(sessionId, trustRequest("trust", "ghost", null))).getStatusCode());
         assertEquals(HttpStatus.CONFLICT, assertThrows(ResponseStatusException.class,
-            () -> controller.resolve(sessionId, new McpTrustController.TrustRequest("trust", "remote", null)))
-            .getStatusCode());
+            () -> controller.resolve(sessionId, trustRequest("trust", "remote", null))).getStatusCode());
         assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
-            () -> controller.resolve(sessionId, new McpTrustController.TrustRequest("unknown-action", "fake", null)))
+            () -> controller.resolve(sessionId, trustRequest("unknown-action", "fake", null))).getStatusCode());
+    }
+
+    @Test
+    void trustRejectsStaleOrMissingApprovalHash() {
+        String current = McpTrustStore.hash(manager.servers(workspace).get("fake"));
+        ResponseStatusException mismatch = assertThrows(ResponseStatusException.class, () -> controller
+            .resolve(sessionId, new McpTrustController.TrustRequest("trust", "fake", null, "sha256:old", null)));
+        assertEquals(HttpStatus.CONFLICT, mismatch.getStatusCode());
+        assertTrue(mismatch.getReason().contains("已变化"), mismatch.getReason());
+        assertTrue(manager.trustStore().record(workspace, "fake").isEmpty());
+
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+            () -> controller.resolve(sessionId, new McpTrustController.TrustRequest("trust", "fake", null, null, null)))
             .getStatusCode());
+
+        // 已有不匹配的旧记录时，allow-tool 不能把工具钉到旧配置上
+        manager.trustStore().trust(workspace, "fake", "sha256:old");
+        ResponseStatusException stale = assertThrows(ResponseStatusException.class, () -> controller.resolve(sessionId,
+            new McpTrustController.TrustRequest("allow-tool", "fake", "echo", current, "sha256:tool")));
+        assertEquals(HttpStatus.CONFLICT, stale.getStatusCode());
+        assertTrue(stale.getReason().contains("不一致"), stale.getReason());
     }
 
     @Test
     void unknownSessionIsFortyFour() {
         assertEquals(HttpStatus.NOT_FOUND, assertThrows(ResponseStatusException.class,
-            () -> controller.resolve("missing", new McpTrustController.TrustRequest("trust", "fake", null)))
-            .getStatusCode());
+            () -> controller.resolve("missing", trustRequest("trust", "fake", null))).getStatusCode());
     }
 }

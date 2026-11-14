@@ -103,7 +103,7 @@ public class CapabilitiesController {
             result.add(new McpServerPayload(config.name(), commandLine(config), config.usable(), running,
                 manager.failure(workspace, config.name()), config.unsupported(),
                 known.stream().map(McpToolInfo::name).toList(),
-                manager.definedInUserConfig(config.name()) ? "user" : "workspace",
+                manager.definedInWorkspaceConfig(workspace, config.name()) ? "workspace" : "user",
                 manager.trustState(workspace, config.name())));
         }
         return List.copyOf(result);

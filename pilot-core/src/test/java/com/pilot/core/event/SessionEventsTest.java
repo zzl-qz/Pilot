@@ -3,6 +3,7 @@ package com.pilot.core.event;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -49,9 +50,11 @@ class SessionEventsTest {
     void approvalRequired() {
         assertSerialized(new ApprovalRequired("call_2", "write_file", "+18 -4"), "approval.required", """
             {"callId":"call_2","name":"write_file","argsSummary":"+18 -4","args":null}""");
-        assertSerialized(new ApprovalRequired("call_3", "mcp_call", "server=fake", java.util.Map.of("server",
-            "fake", "tool", "echo")), "approval.required", """
-            {"callId":"call_3","name":"mcp_call","argsSummary":"server=fake","args":{"server":"fake","tool":"echo"}}""");
+        assertSerialized(
+            new ApprovalRequired("call_3", "mcp_call", "server=fake", Map.of("server", "fake", "tool", "echo")),
+            "approval.required",
+            """
+                {"callId":"call_3","name":"mcp_call","argsSummary":"server=fake","args":{"server":"fake","tool":"echo"}}""");
     }
 
     @Test

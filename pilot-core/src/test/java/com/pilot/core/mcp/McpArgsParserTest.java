@@ -19,9 +19,16 @@ class McpArgsParserTest {
     }
 
     @Test
-    void plainSplittingKeepsEmptyArguments() {
+    void plainSplittingSkipsWhitespaceBetweenArguments() {
         assertEquals(List.of("-y", "@scope/server", "--port", "3000"),
             McpArgsParser.parse("  -y  @scope/server --port 3000 "));
+    }
+
+    @Test
+    void escapedQuotesInsideQuotesAreUnescaped() {
+        assertEquals(List.of("say \"hi\" now"), McpArgsParser.parse("\"say \\\"hi\\\" now\""));
+        // Windows 路径里的普通反斜杠原样保留
+        assertEquals(List.of("D:\\my dir"), McpArgsParser.parse("\"D:\\my dir\""));
     }
 
     @Test
@@ -63,6 +70,7 @@ class McpArgsParserTest {
         McpException nonString = assertThrows(McpException.class, () -> McpArgsParser.parse("[\"-y\", 300]"));
         assertTrue(nonString.getMessage().contains("字符串"), nonString.getMessage());
     }
+
     @Test
     void jsonEmptyArrayIsAccepted() {
         assertEquals(List.of(), McpArgsParser.parse("[]"));

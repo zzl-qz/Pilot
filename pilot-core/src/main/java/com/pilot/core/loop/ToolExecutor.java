@@ -346,7 +346,14 @@ public final class ToolExecutor {
         if (detail != null && !detail.isBlank()) {
             argsSummary = detail;
         }
-        Map<String, Object> structured = approvalArgs(call);
+        Map<String, Object> structured = new LinkedHashMap<>(approvalArgs(call));
+        // 工具声明的绑定信息（如 MCP 配置哈希）优先于同名参数，供信任接口复核用户批准的是哪一版
+        for (Map.Entry<String, Object> entry : tool.approvalBinding(call.args()).entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof String || value instanceof Boolean || value instanceof Number) {
+                structured.put(entry.getKey(), value);
+            }
+        }
         CompletableFuture<Boolean> decision = approvals.register(call.callId(), tool.name(), argsSummary, structured);
         events.accept(new ApprovalRequired(call.callId(), tool.name(), argsSummary, structured));
 

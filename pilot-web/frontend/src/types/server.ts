@@ -169,6 +169,7 @@ export interface McpConfigControllerServerPayload {
   tools: (string)[];
   trustState: string;
   trustNote: string;
+  configHash: string;
 }
 
 /** McpConfigController.java / AddRequest */
@@ -182,6 +183,8 @@ export interface McpConfigControllerAddRequest {
 /** McpConfigController.java / ImportRequest */
 export interface McpConfigControllerImportRequest {
   config: string;
+  /** 已知会覆盖同名用户级条目时为 true；服务端首次返回 409 让界面确认 */
+  confirmOverwrite?: boolean;
 }
 
 /** McpConfigController.java / ImportResponse */
@@ -195,6 +198,10 @@ export interface McpTrustControllerTrustRequest {
   action: string;
   server: string;
   tool?: string;
+  /** 审批卡展示的配置哈希；trust/allow-tool 必填，服务端据此拒绝展示后已变化的配置 */
+  configHash?: string;
+  /** allow-tool 必填：审批卡展示的工具定义哈希 */
+  toolHash?: string;
 }
 
 /** McpTrustController.java / TrustResponse */
@@ -204,12 +211,6 @@ export interface McpTrustControllerTrustResponse {
   state: string;
 }
 
-/** McpTrustController.java / TrustedServer */
-export interface McpTrustControllerTrustedServer {
-  server: string;
-  state: string;
-  note: string;
-}
 
 /** CapabilitiesController.java / ToolPayload */
 export interface CapabilitiesControllerToolPayload {
