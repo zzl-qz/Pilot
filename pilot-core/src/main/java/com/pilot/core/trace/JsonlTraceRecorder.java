@@ -28,7 +28,7 @@ public final class JsonlTraceRecorder implements TraceRecorder {
             String args = mapper.writeValueAsString(call.args() == null ? Map.of() : call.args());
             String line = mapper.writeValueAsString(
                 Map.of("callId", call.callId(), "name", call.name(), "argsSummary", oneLine(args, 300), "resultSummary",
-                    oneLine(result, 300), "latencyMs", latencyMs, "decision", decision(result)));
+                    oneLine(result, 300), "latencyMs", latencyMs, "decision", decision(result).name()));
             Files.writeString(file, line + "\n", StandardCharsets.UTF_8, StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE, StandardOpenOption.APPEND);
         } catch (IOException e) {
@@ -36,17 +36,22 @@ public final class JsonlTraceRecorder implements TraceRecorder {
         }
     }
 
-    private static String decision(String result) {
+    /** 写进 trace 的 decision 字段；名字就是落盘的字符串。 */
+    private enum Decision {
+        EXECUTED, DENIED, FAILED
+    }
+
+    private static Decision decision(String result) {
         if (result == null) {
-            return "EXECUTED";
+            return Decision.EXECUTED;
         }
         if (result.startsWith("ERROR: 权限拒绝") || result.startsWith("ERROR: 用户拒绝")) {
-            return "DENIED";
+            return Decision.DENIED;
         }
         if (result.startsWith("ERROR")) {
-            return "FAILED";
+            return Decision.FAILED;
         }
-        return "EXECUTED";
+        return Decision.EXECUTED;
     }
 
     private static String oneLine(String value, int max) {

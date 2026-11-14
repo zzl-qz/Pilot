@@ -3,6 +3,7 @@ package com.pilot.core.loop;
 import java.util.List;
 import java.util.Set;
 
+import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolExecutor;
 
@@ -67,6 +68,10 @@ public interface ExecutionPolicy {
 
     final class Stop extends RuntimeException {
         private final String code;
+
+        public Stop(RunFailureCode code, String message) {
+            this(code.name(), message);
+        }
 
         public Stop(String code, String message) {
             super(message);

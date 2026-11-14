@@ -31,6 +31,7 @@ import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.EventType;
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.SessionEvent;
 
@@ -615,10 +616,10 @@ public final class SessionService {
 
     private static SessionStatus failedStatus(SessionEvent event) {
         if (event instanceof RunFailed failed) {
-            if ("PAUSED".equals(failed.code())) {
+            if (RunFailureCode.PAUSED.is(failed.code())) {
                 return SessionStatus.PAUSED;
             }
-            if ("INTERRUPTED".equals(failed.code())) {
+            if (RunFailureCode.INTERRUPTED.is(failed.code())) {
                 return SessionStatus.INTERRUPTED;
             }
         }

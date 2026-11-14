@@ -24,6 +24,7 @@ import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.RunSteered;
 import com.pilot.core.event.RunUsageUpdated;
@@ -47,6 +48,7 @@ import com.pilot.core.tool.ToolExecutor;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.trace.TraceRecorder;
+import com.pilot.core.util.WireEnum;
 
 /**
  * 单 Agent 循环：请求模型 → 解析工具调用 → 执行工具 → 回填结果 → 继续，直到模型给出纯文本答复。
@@ -454,14 +456,14 @@ public final class AgentLoop {
 
                 ModelTurn turn = callModel(messages, events, usage, runtimeGuidance);
                 if (turn.stop() != null) {
-                    if ("CANCELLED".equals(turn.stop().failureCode())
-                        || "BUDGET_EXHAUSTED".equals(turn.stop().failureCode())) {
+                    if (RunFailureCode.CANCELLED.is(turn.stop().failureCode())
+                        || RunFailureCode.BUDGET_EXHAUSTED.is(turn.stop().failureCode())) {
                         return turn.stop();
                     }
-                    if ("CONTEXT_TOO_LARGE".equals(turn.stop().failureCode())) {
+                    if (RunFailureCode.CONTEXT_TOO_LARGE.is(turn.stop().failureCode())) {
                         messages.add(Message.assistant(turn.stop().finalText(), List.of()));
                         events.accept(new AssistantDelta(turn.stop().finalText()));
-                        events.accept(new RunFailed("CONTEXT_TOO_LARGE", turn.stop().finalText(), false));
+                        events.accept(new RunFailed(RunFailureCode.CONTEXT_TOO_LARGE, turn.stop().finalText(), false));
                         return new Result(turn.stop().finalText(), turn.stop().failureCode(), conversation(messages));
                     }
                     return finalizeFailure(messages, events, usage, turn.stop().failureCode(), "模型请求未能完成；已有进度保留。",
@@ -475,7 +477,7 @@ public final class AgentLoop {
                 if (response.finishReason() == ModelResponse.FinishReason.CONTENT_FILTER
                     || response.finishReason() == ModelResponse.FinishReason.ERROR
                     || response.finishReason() == ModelResponse.FinishReason.UNKNOWN) {
-                    throw new ExecutionPolicy.Stop("MODEL_INCOMPLETE",
+                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_INCOMPLETE,
                         "模型未正常结束（" + response.finishReason() + "），现有进度已保留。");
                 }
                 String content = response.content() == null ? "" : response.content();
@@ -497,7 +499,7 @@ public final class AgentLoop {
                     messages.add(Message.assistant(content, calls));
                     skipCalls(messages, calls, 0, "模型输出在工具参数完整返回前达到长度上限，本次调用未执行。");
                     if (outputLimitStreak >= 3) {
-                        throw new ExecutionPolicy.Stop("OUTPUT_LIMIT", "模型连续 3 次达到输出长度上限，已停止自动续写以避免重复消耗。");
+                        throw new ExecutionPolicy.Stop(RunFailureCode.OUTPUT_LIMIT, "模型连续 3 次达到输出长度上限，已停止自动续写以避免重复消耗。");
                     }
                     // 被截断的中间稿作废：留着会和下一轮重新生成的内容拼成重复段落。
                     events.accept(AssistantPreview.discarded());
@@ -609,7 +611,7 @@ public final class AgentLoop {
                         events.accept(new RunContinued(1, 1, "后台状态连续 " + decision.unchangedCount() + " 次未变化，提示换路或等待"));
                     }
                     if (decision.abort()) {
-                        throw new ExecutionPolicy.Stop("WAITING", "后台任务连续 " + decision.unchangedCount()
+                        throw new ExecutionPolicy.Stop(RunFailureCode.WAITING, "后台任务连续 " + decision.unchangedCount()
                             + " 次有界观察都没有新状态，已暂停高频轮询；稍后使用原 taskId 继续查询，" + "观察状态或日志是否发生变化。");
                     }
                 }
@@ -620,7 +622,7 @@ public final class AgentLoop {
                 }
             }
 
-            return finalizeFailure(messages, events, usage, "MAX_STEPS",
+            return finalizeFailure(messages, events, usage, RunFailureCode.MAX_STEPS.name(),
                 "已达到本轮步数上限 " + config.maxSteps() + "，历史已保留，可以继续执行。", true);
         } catch (ExecutionPolicy.Stop stop) {
             if (cancellation.cancelled()) {
@@ -697,8 +699,8 @@ public final class AgentLoop {
             String partial = content + "\n\n本轮为部分交付，尚未完成：" + String.join("；", openSteps);
             messages.set(messages.size() - 1, Message.assistant(partial, List.of()));
             events.accept(new AssistantDelta(partial));
-            events.accept(new RunFailed("TASK_INCOMPLETE", "计划仍有未完成项；已保存进度，可继续执行。", false));
-            return new Result(partial, "TASK_INCOMPLETE", conversation(messages));
+            events.accept(new RunFailed(RunFailureCode.TASK_INCOMPLETE, "计划仍有未完成项；已保存进度，可继续执行。", false));
+            return new Result(partial, RunFailureCode.TASK_INCOMPLETE.name(), conversation(messages));
         }
         // 仅在剩余计划与验收检查通过后发出完成事件。
         if (!content.isBlank()) {
@@ -799,10 +801,12 @@ public final class AgentLoop {
     /** 非模型故障可请求一次禁用工具的收尾；端点失败或预算耗尽时直接保留本地说明。 */
     private Result finalizeFailure(List<Message> messages, Consumer<SessionEvent> events, UsageTracker usage,
         String code, String reason, boolean emitFailure) {
-        String fallback = "本轮未能完整结束（" + code + "）：" + ToolSupport.oneLine(reason, 500) + ("NO_PROGRESS".equals(code)
-            ? "\n\n已有进度已保存。可以先继续一次推进未完成步骤，或直接补充要执行的命令与资料后重新发送。" : "\n\n已有进度已保存。请根据上面的原因补充条件或选择继续执行。");
+        String fallback =
+            "本轮未能完整结束（" + code + "）：" + ToolSupport.oneLine(reason, 500) + (RunFailureCode.NO_PROGRESS.is(code)
+                ? "\n\n已有进度已保存。可以先继续一次推进未完成步骤，或直接补充要执行的命令与资料后重新发送。" : "\n\n已有进度已保存。请根据上面的原因补充条件或选择继续执行。");
         String finalText = fallback;
-        if (!cancellation.cancelled() && !Set.of("NO_PROGRESS", "MODEL_ERROR", "MODEL_INCOMPLETE").contains(code)) {
+        if (!cancellation.cancelled() && !WireEnum.in(code, RunFailureCode.NO_PROGRESS, RunFailureCode.MODEL_ERROR,
+            RunFailureCode.MODEL_INCOMPLETE)) {
             try {
                 if (executionPolicy != null) {
                     executionPolicy.beginFinalization();
@@ -1057,8 +1061,9 @@ public final class AgentLoop {
                     admission = RequestBudget.assessRequest(request, tools.definitions(), contextLimit());
                 }
                 if (!admission.fits()) {
-                    throw new ExecutionPolicy.Stop("CONTEXT_TOO_LARGE", "完整模型请求估算为 " + admission.estimatedInputTokens()
-                        + " token，安全输入预算为 " + admission.inputLimit() + "；未发送请求。请缩小输入或拆分任务后继续。");
+                    throw new ExecutionPolicy.Stop(RunFailureCode.CONTEXT_TOO_LARGE,
+                        "完整模型请求估算为 " + admission.estimatedInputTokens() + " token，安全输入预算为 " + admission.inputLimit()
+                            + "；未发送请求。请缩小输入或拆分任务后继续。");
                 }
                 // 每次真正发请求前都作废上一段预览：工具调用、策略催办或重试都会开启新一轮生成，
                 // 上一轮的字如果留着，会和这次从头输出的内容拼成重复段落。
@@ -1111,7 +1116,7 @@ public final class AgentLoop {
                 return new ModelTurn(response, null);
             } catch (ExecutionPolicy.Stop stop) {
                 usage.abort();
-                if ("CONTEXT_TOO_LARGE".equals(stop.code())) {
+                if (RunFailureCode.CONTEXT_TOO_LARGE.is(stop.code())) {
                     return new ModelTurn(null, new Result(stop.getMessage(), stop.code(), conversation(messages)));
                 }
                 throw stop;
@@ -1125,7 +1130,7 @@ public final class AgentLoop {
                     events.accept(AssistantReasoning.discarded());
                 }
                 if (repeatAborts >= MAX_REPEAT_ABORTS) {
-                    throw new ExecutionPolicy.Stop("MODEL_REPEATED",
+                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_REPEATED,
                         "模型连续 " + repeatAborts + " 次陷入逐行重复，已中止本轮生成；已有进度已保存。可以继续执行，或把问题拆小后重新发送。");
                 }
                 runtimeGuidance.add(REPEAT_GUIDANCE);
@@ -1134,7 +1139,8 @@ public final class AgentLoop {
             } catch (RuntimeException e) {
                 usage.abort();
                 if (e instanceof RequestBudget.BudgetExceeded) {
-                    return new ModelTurn(null, new Result(e.getMessage(), "CONTEXT_TOO_LARGE", conversation(messages)));
+                    return new ModelTurn(null,
+                        new Result(e.getMessage(), RunFailureCode.CONTEXT_TOO_LARGE.name(), conversation(messages)));
                 }
                 // 客户端抛错时会重新设置中断位；不清掉的话，后续每次请求都会立刻失败。
                 Thread.interrupted();
@@ -1155,13 +1161,14 @@ public final class AgentLoop {
                 String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
                 // 永久错误（鉴权、余额、模型不支持、结构非法）重试不会变好，立刻失败
                 if (!kind.retryable()) {
-                    throw new ExecutionPolicy.Stop("MODEL_ERROR", "模型调用失败：" + ToolSupport.oneLine(reason, 300));
+                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR,
+                        "模型调用失败：" + ToolSupport.oneLine(reason, 300));
                 }
                 RetryBudget.Decision decision = retryBudget.afterFailure(reason);
                 if (!decision.retry()) {
                     // 预算耗尽或熔断：明确停下并说明可以继续，而不是无声地一直重试
-                    throw new ExecutionPolicy.Stop("MODEL_ERROR", "模型调用重试已停止：" + decision.reason() + "。已等待 "
-                        + Math.max(0, decision.elapsedMs() / 1000) + " 秒，" + "进度与对话已保存；确认模型服务恢复后可继续执行。");
+                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR, "模型调用重试已停止：" + decision.reason()
+                        + "。已等待 " + Math.max(0, decision.elapsedMs() / 1000) + " 秒，" + "进度与对话已保存；确认模型服务恢复后可继续执行。");
                 }
                 attempt = decision.attempt();
                 events.accept(new RunRetrying(attempt, decision.delayMs(), ToolSupport.oneLine(reason, 300),
@@ -1196,15 +1203,15 @@ public final class AgentLoop {
 
     private Result stopForCancellation(List<Message> messages, Consumer<SessionEvent> events) {
         String reason = cancellation.reason();
-        if (reason != null && reason.startsWith("BUDGET_EXHAUSTED")) {
-            return new Result(null, "BUDGET_EXHAUSTED", conversation(messages));
+        if (reason != null && reason.startsWith(RunFailureCode.BUDGET_EXHAUSTED.name())) {
+            return new Result(null, RunFailureCode.BUDGET_EXHAUSTED.name(), conversation(messages));
         }
         return cancel(messages, events);
     }
 
     private Result cancel(List<Message> messages, Consumer<SessionEvent> events) {
         events.accept(new RunCancelled("运行已被用户取消。"));
-        return new Result(null, "CANCELLED", conversation(messages));
+        return new Result(null, RunFailureCode.CANCELLED.name(), conversation(messages));
     }
 
     private int contextLimit() {
