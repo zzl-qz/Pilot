@@ -157,7 +157,8 @@ pilot:
   # /api/maintenance/status 会显示降级原因。
   execution:
     isolation: ${PILOT_EXECUTION_ISOLATION:local}
-    image: ${PILOT_EXECUTION_IMAGE:eclipse-temurin:25-jdk}
+    # 镜像和资源默认值由 ExecutionSettings / ExecutionLimits 提供。
+    # 可用 PILOT_EXECUTION_IMAGE、PILOT_EXECUTION_MEMORY_MB、PILOT_EXECUTION_CPUS、PILOT_EXECUTION_PIDS_LIMIT 覆盖。
     runtime: ${PILOT_CONTAINER_RUNTIME:}
     # 网络关闭时依赖仅从本项目缓存读取；打开后整个校验流程均能联网，不是仅允许下载依赖。
     # 项目缓存位于 pilot.data.dir/build-cache，按工作区、实际镜像 ID 和依赖清单分区。
@@ -165,9 +166,6 @@ pilot:
     # 主会话 run_command 的网络。文件系统沙箱默认开；域名级放行需要代理，所以这里默认允许出网。
     # 设为 false 时，macOS Seatbelt / Linux bubblewrap 会关掉命令的网络。
     command-network: ${PILOT_EXECUTION_COMMAND_NETWORK:true}
-    memory-mb: ${PILOT_EXECUTION_MEMORY_MB:2048}
-    cpus: ${PILOT_EXECUTION_CPUS:2}
-    pids-limit: ${PILOT_EXECUTION_PIDS_LIMIT:512}
   # 远程访问边界。local 只允许本机回环；token 允许远程，但必须带访问令牌。
   # SSE 的 EventSource 不能加请求头，因此令牌也接受 ?token=，务必配合来源校验与限流使用。
   security:

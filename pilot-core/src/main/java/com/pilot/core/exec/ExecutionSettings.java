@@ -12,6 +12,8 @@ import java.nio.file.Path;
  */
 public record ExecutionSettings(ExecutionIsolation isolation, String image, String containerRuntime, boolean network,
     ExecutionLimits limits, Path cacheRoot) {
+    public static final String DEFAULT_CONTAINER_IMAGE = "eclipse-temurin:25-jdk";
+
     public ExecutionSettings {
         isolation = isolation == null ? ExecutionIsolation.LOCAL : isolation;
         image = image == null ? "" : image.strip();

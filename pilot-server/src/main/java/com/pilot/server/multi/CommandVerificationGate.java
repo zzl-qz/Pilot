@@ -14,7 +14,6 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.exec.DependencyCache;
 import com.pilot.core.exec.ExecutionBackends;
-import com.pilot.core.exec.ExecutionLimits;
 import com.pilot.core.exec.ExecutionRequest;
 import com.pilot.core.exec.ExecutionResult;
 import com.pilot.core.exec.IsolatedWorkspace;
@@ -187,9 +186,7 @@ public class CommandVerificationGate implements VerificationGate {
     }
 
     private ExecutionResult execBuild(Path directory, Path cache, String command) {
-        var base = execution.settings().limits();
-        var limits = new ExecutionLimits(properties.verifyTimeoutSeconds(), base.maxOutputBytes(), base.memoryMb(),
-            base.cpus(), base.pidsLimit());
+        var limits = execution.settings().limits().withTimeoutSeconds(properties.verifyTimeoutSeconds());
         return execution.backend()
             .run(ExecutionRequest
                 .shell(command, directory, directory, Map.of("CI", "true"), execution.settings().network(), limits)

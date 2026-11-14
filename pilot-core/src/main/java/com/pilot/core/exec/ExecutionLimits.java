@@ -13,23 +13,30 @@ package com.pilot.core.exec;
  * @param pidsLimit      容器进程数上限
  */
 public record ExecutionLimits(long timeoutSeconds, int maxOutputBytes, int memoryMb, double cpus, int pidsLimit) {
+    public static final int DEFAULT_TIMEOUT_SECONDS = 600;
+    public static final int DEFAULT_MEMORY_MB = 2_048;
+    public static final double DEFAULT_CPUS = 2.0;
+    public static final int DEFAULT_PIDS = 512;
+    public static final int MIN_MEMORY_MB = 64;
+    public static final int MIN_PIDS = 8;
+
     public ExecutionLimits {
         if (maxOutputBytes < 1_024) {
             throw new IllegalArgumentException("maxOutputBytes must be >= 1024");
         }
-        if (memoryMb < 64) {
-            throw new IllegalArgumentException("memoryMb must be >= 64");
+        if (memoryMb < MIN_MEMORY_MB) {
+            throw new IllegalArgumentException("memoryMb must be >= " + MIN_MEMORY_MB);
         }
         if (cpus <= 0) {
             throw new IllegalArgumentException("cpus must be > 0");
         }
-        if (pidsLimit < 8) {
-            throw new IllegalArgumentException("pidsLimit must be >= 8");
+        if (pidsLimit < MIN_PIDS) {
+            throw new IllegalArgumentException("pidsLimit must be >= " + MIN_PIDS);
         }
     }
 
     public static ExecutionLimits defaults() {
-        return new ExecutionLimits(600, 200_000, 2_048, 2.0, 512);
+        return new ExecutionLimits(DEFAULT_TIMEOUT_SECONDS, 200_000, DEFAULT_MEMORY_MB, DEFAULT_CPUS, DEFAULT_PIDS);
     }
 
     public ExecutionLimits withTimeoutSeconds(long seconds) {

@@ -20,18 +20,22 @@ public class ExecutionConfiguration {
 
     @Bean
     ExecutionSettings executionSettings(PilotDataDir dataDir,
-        @Value("${pilot.execution.isolation:local}") String isolation, @Value("${pilot.execution.image:}") String image,
+        @Value("${pilot.execution.isolation:local}") String isolation,
+        @Value("${pilot.execution.image:" + ExecutionSettings.DEFAULT_CONTAINER_IMAGE + "}") String image,
         @Value("${pilot.execution.runtime:}") String runtime,
         @Value("${pilot.execution.network:false}") boolean network,
         @Value("${pilot.execution.command-network:true}") boolean commandNetwork,
-        @Value("${pilot.execution.memory-mb:2048}") int memoryMb, @Value("${pilot.execution.cpus:2}") double cpus,
-        @Value("${pilot.execution.pids-limit:512}") int pidsLimit,
-        @Value("${pilot.multi.verify-timeout-seconds:600}") int timeoutSeconds) {
+        @Value("${pilot.execution.memory-mb:" + ExecutionLimits.DEFAULT_MEMORY_MB + "}") int memoryMb,
+        @Value("${pilot.execution.cpus:" + ExecutionLimits.DEFAULT_CPUS + "}") double cpus,
+        @Value("${pilot.execution.pids-limit:" + ExecutionLimits.DEFAULT_PIDS + "}") int pidsLimit,
+        @Value("${pilot.multi.verify-timeout-seconds:" + ExecutionLimits.DEFAULT_TIMEOUT_SECONDS
+            + "}") int timeoutSeconds) {
         if (System.getProperty("pilot.execution.command-network") == null) {
             System.setProperty("pilot.execution.command-network", Boolean.toString(commandNetwork));
         }
-        ExecutionLimits limits = new ExecutionLimits(timeoutSeconds, 200_000, Math.max(64, memoryMb),
-            Math.max(0.1, cpus), Math.max(8, pidsLimit));
+        var limits = new ExecutionLimits(timeoutSeconds, ExecutionLimits.defaults().maxOutputBytes(),
+            Math.max(ExecutionLimits.MIN_MEMORY_MB, memoryMb), Math.max(0.1, cpus),
+            Math.max(ExecutionLimits.MIN_PIDS, pidsLimit));
         return new ExecutionSettings(ExecutionIsolation.parse(isolation), image, runtime, network, limits,
             dataDir.file("build-cache"));
     }

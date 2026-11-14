@@ -4,6 +4,8 @@ import java.util.List;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import com.pilot.core.exec.ExecutionLimits;
+
 /**
  * 多智能体调度配置。
  *
@@ -22,8 +24,8 @@ public record MultiAgentProperties(Boolean enabled, Integer maxParallel, Integer
         maxParallel = maxParallel == null || maxParallel < 1 ? 2 : Math.min(maxParallel, 6);
         maxAttempts = maxAttempts == null || maxAttempts < 1 ? 3 : Math.min(maxAttempts, 5);
         maxSteps = maxSteps == null || maxSteps < 5 ? 40 : Math.min(maxSteps, 200);
-        verifyTimeoutSeconds =
-            verifyTimeoutSeconds == null || verifyTimeoutSeconds < 10 ? 600 : Math.min(verifyTimeoutSeconds, 3_600);
+        verifyTimeoutSeconds = verifyTimeoutSeconds == null || verifyTimeoutSeconds < 10
+            ? ExecutionLimits.DEFAULT_TIMEOUT_SECONDS : Math.min(verifyTimeoutSeconds, 3_600);
         verifyCommands = verifyCommands == null ? List.of() : verifyCommands.stream()
             .filter(command -> command != null && !command.isBlank()).map(String::strip).toList();
     }

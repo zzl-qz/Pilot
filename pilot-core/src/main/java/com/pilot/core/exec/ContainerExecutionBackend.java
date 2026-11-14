@@ -31,7 +31,7 @@ public final class ContainerExecutionBackend implements ExecutionBackend {
 
     public ContainerExecutionBackend(String runtime, String image, String containerWorkspace, String containerUser) {
         this.runtime = runtime == null || runtime.isBlank() ? detectRuntime() : runtime.strip();
-        this.image = image == null || image.isBlank() ? "eclipse-temurin:25-jdk" : image.strip();
+        this.image = image == null || image.isBlank() ? ExecutionSettings.DEFAULT_CONTAINER_IMAGE : image.strip();
         this.containerWorkspace =
             containerWorkspace == null || containerWorkspace.isBlank() ? "/workspace" : containerWorkspace.strip();
         this.containerUser = containerUser == null ? "" : containerUser.strip();
