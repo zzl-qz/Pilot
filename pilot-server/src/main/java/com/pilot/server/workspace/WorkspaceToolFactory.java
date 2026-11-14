@@ -62,12 +62,14 @@ import tools.jackson.databind.ObjectMapper;
  */
 @Component
 public class WorkspaceToolFactory {
+    private static final Duration WEB_CONNECT_TIMEOUT = Duration.ofSeconds(5);
+
     private final AgentProperties properties;
     private final WebSearchProperties webSearchProperties;
     private final SnapshotSink snapshots;
     private final ObjectMapper mapper;
-    private final HttpClient webClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5))
-        .followRedirects(HttpClient.Redirect.NEVER).build();
+    private final HttpClient webClient =
+        HttpClient.newBuilder().connectTimeout(WEB_CONNECT_TIMEOUT).followRedirects(HttpClient.Redirect.NEVER).build();
     private final ConcurrentMap<String, ToolRegistry> cache = new ConcurrentHashMap<>();
     /** 可选能力：测试里手工构造本工厂时不注入，对应工具就不存在。 */
     private BrowserBackend browser;

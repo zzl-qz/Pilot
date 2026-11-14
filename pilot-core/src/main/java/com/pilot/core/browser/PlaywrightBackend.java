@@ -49,6 +49,10 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(PlaywrightBackend.class);
     private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(60);
     private static final Duration START_TIMEOUT = Duration.ofSeconds(15);
+    /** 关页面只是尽力而为，等太久没意义。 */
+    private static final Duration CLOSE_TIMEOUT = Duration.ofSeconds(5);
+    /** 开关画面镜像、把页面切到前台这类轻量指令的等待上限。 */
+    private static final Duration PAGE_SIGNAL_TIMEOUT = Duration.ofSeconds(10);
     private static final long REPROBE_INTERVAL_MS = 60_000L;
     private static final long IDLE_SHUTDOWN_MS = 10 * 60_000L;
 
@@ -187,7 +191,7 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
             }
         }
         try {
-            request(sessionId, "close", Map.of(), Duration.ofSeconds(5));
+            request(sessionId, "close", Map.of(), CLOSE_TIMEOUT);
         } catch (BrowserException ignored) {
             // 进程已退出时，会话本来就不存在了
         }
@@ -233,7 +237,7 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
         arguments.put("quality", quality);
         arguments.put("capture", capture);
         try {
-            request(sessionId, start ? "mirror-start" : "mirror-stop", arguments, Duration.ofSeconds(10));
+            request(sessionId, start ? "mirror-start" : "mirror-stop", arguments, PAGE_SIGNAL_TIMEOUT);
         } catch (BrowserException ignored) {
             // 运行时未就绪或无活动页面：sidecar 已登记镜像请求，浏览器启动后自然生效。
         }
@@ -242,7 +246,7 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     @Override
     public void focusPage(String sessionId) {
         try {
-            request(sessionId, "focus", Map.of(), Duration.ofSeconds(10));
+            request(sessionId, "focus", Map.of(), PAGE_SIGNAL_TIMEOUT);
         } catch (BrowserException ignored) {
             // 没有活动页面，无窗可置
         }

@@ -13,6 +13,9 @@ import com.pilot.server.browser.BrowserRuntime;
 @RestController
 @RequestMapping("/api/desktop")
 public class DesktopWindowController {
+    /** 第一次开窗口可能要先装浏览器，所以给得比较宽。 */
+    private static final Duration OPEN_WINDOW_TIMEOUT = Duration.ofSeconds(60);
+
     private final BrowserRuntime browser;
 
     public DesktopWindowController(BrowserRuntime browser) {
@@ -23,7 +26,7 @@ public class DesktopWindowController {
     @PostMapping("/browser-window")
     public Map<String, Object> browserWindow() {
         try {
-            var reply = browser.execute("user-window", Map.of("op", "open_window"), Duration.ofSeconds(60));
+            var reply = browser.execute("user-window", Map.of("op", "open_window"), OPEN_WINDOW_TIMEOUT);
             String text = reply.text() == null ? "已打开浏览器窗口。" : reply.text();
             return Map.of("ok", true, "message", text);
         } catch (RuntimeException e) {

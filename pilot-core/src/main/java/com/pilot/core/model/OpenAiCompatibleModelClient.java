@@ -35,6 +35,8 @@ import tools.jackson.databind.ObjectMapper;
  * 并把增量文本实时回调给调用方。AgentLoop 走的是流式路径。
  */
 public final class OpenAiCompatibleModelClient implements ModelClient {
+    /** 调用方没指定时，单次模型请求最多等这么久。 */
+    private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(90);
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -51,7 +53,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
 
     public OpenAiCompatibleModelClient(HttpClient httpClient, ObjectMapper objectMapper, URI endpoint, String apiKey,
         String model) {
-        this(httpClient, objectMapper, endpoint, apiKey, model, Duration.ofSeconds(90));
+        this(httpClient, objectMapper, endpoint, apiKey, model, DEFAULT_REQUEST_TIMEOUT);
     }
 
     public OpenAiCompatibleModelClient(HttpClient httpClient, ObjectMapper objectMapper, URI endpoint, String apiKey,

@@ -17,6 +17,11 @@ import com.pilot.core.http.BoundedHttp;
 
 /** GitHub 公共技能优先使用有界归档下载；网络或鉴权失败时使用本机 Git。 */
 final class SkillDownloader implements SkillInstallService.Cloner {
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    /** 整个下载的上限。 */
+    private static final Duration DOWNLOAD_TIMEOUT = Duration.ofSeconds(60);
+    /** 下载途中这么久没有新数据就断开。 */
+    private static final Duration IDLE_TIMEOUT = Duration.ofSeconds(20);
     static final int MAX_BYTES = 64 * 1024 * 1024;
     private final SkillInstallService.Cloner git;
     private final ArchiveDownload download;
@@ -69,10 +74,10 @@ final class SkillDownloader implements SkillInstallService.Cloner {
 
     private static void fetch(URI url, Path target) throws Exception {
         try (var http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL)
-            .connectTimeout(Duration.ofSeconds(10)).build()) {
-            var request = HttpRequest.newBuilder(url).timeout(Duration.ofSeconds(60))
+            .connectTimeout(CONNECT_TIMEOUT).build()) {
+            var request = HttpRequest.newBuilder(url).timeout(DOWNLOAD_TIMEOUT)
                 .header("User-Agent", "Pilot-Skill-Installer").GET().build();
-            try (var response = BoundedHttp.open(http, request, Duration.ofSeconds(20), MAX_BYTES)) {
+            try (var response = BoundedHttp.open(http, request, IDLE_TIMEOUT, MAX_BYTES)) {
                 if (response.statusCode() != 200) {
                     throw new IOException("技能归档 HTTP " + response.statusCode());
                 }

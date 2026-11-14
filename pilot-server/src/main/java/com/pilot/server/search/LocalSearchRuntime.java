@@ -33,6 +33,18 @@ import com.pilot.server.runtime.SourceLayout;
 @Component
 public class LocalSearchRuntime implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(LocalSearchRuntime.class);
+    /** 进程拉起后等端口可用的上限。 */
+    private static final Duration STARTUP_WAIT = Duration.ofSeconds(60);
+    /** 拉源码：git clone 或下载压缩包。 */
+    private static final Duration SOURCE_FETCH_TIMEOUT = Duration.ofMinutes(10);
+    private static final Duration EXTRACT_TIMEOUT = Duration.ofMinutes(2);
+    private static final Duration VENV_CREATE_TIMEOUT = Duration.ofMinutes(2);
+    private static final Duration BUILD_TOOLS_INSTALL_TIMEOUT = Duration.ofMinutes(5);
+    /** 装 requirements.txt 里的全部依赖，网络慢时很久。 */
+    private static final Duration DEPENDENCIES_INSTALL_TIMEOUT = Duration.ofMinutes(30);
+    private static final Duration PACKAGE_INSTALL_TIMEOUT = Duration.ofMinutes(10);
+    private static final Duration IMPORT_CHECK_TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration PYTHON_VERSION_CHECK_TIMEOUT = Duration.ofSeconds(15);
     private static final String SETTINGS_RESOURCE = "searxng/settings.yml";
     private static final String WINDOWS_SHIM_RESOURCE = "searxng/pwd.py";
     private static final String ARCHIVE_NAME = "searxng.tar.gz";
@@ -99,7 +111,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
             builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
             builder.redirectErrorStream(true);
             process = builder.start();
-            if (!waitUntilUp(address, Duration.ofSeconds(60)) || !process.isAlive()) {
+            if (!waitUntilUp(address, STARTUP_WAIT) || !process.isAlive()) {
                 log.warn("SearXNG 没有在 {} 起来，日志：{}", properties.endpoint(), logFile);
                 stopProcess();
                 return;
@@ -191,7 +203,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
     private boolean gitClone(Path source) {
         Path temp = source.getParent().resolve("clone");
         deleteTree(temp);
-        int code = run(Path.of(System.getProperty("user.dir", ".")), Duration.ofMinutes(10), "git", "-c",
+        int code = run(Path.of(System.getProperty("user.dir", ".")), SOURCE_FETCH_TIMEOUT, "git", "-c",
             "http.version=HTTP/1.1", "clone", "--depth", "1", "https://github.com/searxng/searxng.git",
             temp.toString());
         boolean ok = code == 0 && Files.isRegularFile(temp.resolve("searx").resolve("webapp.py"));
@@ -223,7 +235,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
         if (usableArchive(tar)) {
             log.info("复用已下载的压缩包 {}", tar);
         } else {
-            int code = run(parent, Duration.ofMinutes(10), "curl", "-fL", "--retry", "2", "--connect-timeout", "20",
+            int code = run(parent, SOURCE_FETCH_TIMEOUT, "curl", "-fL", "--retry", "2", "--connect-timeout", "20",
                 "--max-time", "300", "-o", tar.toString(), url);
             if (code != 0 || !usableArchive(tar)) {
                 // 半截文件留着只会让下一次误以为是下载好了
@@ -243,7 +255,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
         }
         // 仓库里 utils/templates 下的 httpd/nginx 站点模板含 "xxx:socket"，NTFS 建不出来，
         // 而且这些模板跟运行无关，直接跳过
-        int code = run(parent, Duration.ofMinutes(2), "tar", "-xzf", tar.toString(), "-C", unpack.toString(),
+        int code = run(parent, EXTRACT_TIMEOUT, "tar", "-xzf", tar.toString(), "-C", unpack.toString(),
             "--exclude=*sites-available*", "--exclude=*sites-enabled*");
         // 少数文件解不出来不影响运行，只要 webapp.py 在就继续
         if (!Files.isRegularFile(extracted.resolve("searx").resolve("webapp.py"))) {
@@ -360,7 +372,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
                 return false;
             }
             log.info("第一次使用，正在用 {} 创建虚拟环境，随后安装依赖，可能要几分钟", python);
-            if (run(source, Duration.ofMinutes(2), python, "-m", "venv", venv.toString()) != 0) {
+            if (run(source, VENV_CREATE_TIMEOUT, python, "-m", "venv", venv.toString()) != 0) {
                 log.warn("创建虚拟环境失败");
                 return false;
             }
@@ -369,22 +381,23 @@ public class LocalSearchRuntime implements SmartLifecycle {
         }
         String pip = venvPython(venv).toString();
         // Python 3.12 的 venv 不再自带 setuptools，缺了它 --no-build-isolation 直接报错
-        if (run(source, Duration.ofMinutes(5), pip, "-m", "pip", "install", "--upgrade", "setuptools", "wheel") != 0) {
+        if (run(source, BUILD_TOOLS_INSTALL_TIMEOUT, pip, "-m", "pip", "install", "--upgrade", "setuptools",
+            "wheel") != 0) {
             log.warn("安装 setuptools/wheel 失败");
             return false;
         }
-        if (run(source, Duration.ofMinutes(30), pip, "-m", "pip", "install", "-r", "requirements.txt") != 0) {
+        if (run(source, DEPENDENCIES_INSTALL_TIMEOUT, pip, "-m", "pip", "install", "-r", "requirements.txt") != 0) {
             log.warn("安装 SearXNG 依赖失败");
             return false;
         }
-        if (run(source, Duration.ofMinutes(10), pip, "-m", "pip", "install", "--use-pep517", "--no-build-isolation",
+        if (run(source, PACKAGE_INSTALL_TIMEOUT, pip, "-m", "pip", "install", "--use-pep517", "--no-build-isolation",
             "-e", ".") != 0
             // 构建隔离模式下 pip 会自己拉构建依赖，再给一次机会
-            && run(source, Duration.ofMinutes(10), pip, "-m", "pip", "install", "-e", ".") != 0) {
+            && run(source, PACKAGE_INSTALL_TIMEOUT, pip, "-m", "pip", "install", "-e", ".") != 0) {
             log.warn("安装 SearXNG 失败");
             return false;
         }
-        if (run(source, Duration.ofSeconds(60), pip, "-c", "import searx") != 0) {
+        if (run(source, IMPORT_CHECK_TIMEOUT, pip, "-c", "import searx") != 0) {
             log.warn("SearXNG 装上了但导入不了，等下次启动重装");
             return false;
         }
@@ -504,7 +517,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
     }
 
     private static boolean supported(String python) {
-        return run(Path.of(System.getProperty("user.dir", ".")), Duration.ofSeconds(15), python, "-c",
+        return run(Path.of(System.getProperty("user.dir", ".")), PYTHON_VERSION_CHECK_TIMEOUT, python, "-c",
             "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)") == 0;
     }
 

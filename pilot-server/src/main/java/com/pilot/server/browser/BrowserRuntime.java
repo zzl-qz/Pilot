@@ -58,6 +58,9 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(BrowserRuntime.class);
+    private static final Duration NPM_INSTALL_TIMEOUT = Duration.ofMinutes(5);
+    /** 下载 Chromium，体积大，官方源和镜像各试一次。 */
+    private static final Duration CHROMIUM_INSTALL_TIMEOUT = Duration.ofMinutes(15);
     /** 固定版本：sidecar 协议与快照脚本只针对这个版本验证过。 */
     static final String PLAYWRIGHT_VERSION = "1.64.1";
     private static final String SCRIPT_RESOURCE = "browser/browser-sidecar.mjs";
@@ -275,7 +278,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         log.info("第一次使用浏览器验证，正在安装 playwright-core@{}", PLAYWRIGHT_VERSION);
         List<String> command = NpmInstall.command(npm, List.of("--omit=dev"));
         for (Map<String, String> environment : mirrors.npmAttempts(Map.of())) {
-            if (run(home, node, Duration.ofMinutes(5), command, environment) == 0
+            if (run(home, node, NPM_INSTALL_TIMEOUT, command, environment) == 0
                 && Files.isDirectory(home.resolve("node_modules").resolve("playwright-core"))) {
                 return true;
             }
@@ -298,13 +301,13 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         // 首次下载失败后使用配置的备用镜像。
         List<String> command = List.of(node.toString(), cli.toString(), "install", "chromium", "--no-shell");
         Map<String, String> base = chromiumDownloadEnvironment(browsers);
-        if (run(home, node, Duration.ofMinutes(15), command, base) == 0 && hasChromium(browsers)) {
+        if (run(home, node, CHROMIUM_INSTALL_TIMEOUT, command, base) == 0 && hasChromium(browsers)) {
             return true;
         }
         log.info("首次下载未成功，使用备用 Chromium 镜像重试");
         Map<String, String> mirror = new LinkedHashMap<>(base);
         mirror.putAll(mirrors.chromiumEnvironment());
-        return run(home, node, Duration.ofMinutes(15), command, mirror) == 0 && hasChromium(browsers);
+        return run(home, node, CHROMIUM_INSTALL_TIMEOUT, command, mirror) == 0 && hasChromium(browsers);
     }
 
     /** Chromium 下载/安装命令的环境变量：落盘目录收进 .pilot，不污染全局缓存。 */

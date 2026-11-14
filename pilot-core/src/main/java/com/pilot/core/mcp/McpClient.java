@@ -38,6 +38,10 @@ import tools.jackson.databind.ObjectMapper;
 final class McpClient implements AutoCloseable {
     static final String PROTOCOL_VERSION = "2025-06-18";
     private static final int MAX_PAGES = 20;
+    /** 单次等待的硬上限，防止配置里填了离谱的超时导致纳秒计算溢出。 */
+    private static final Duration MAX_WAIT = Duration.ofHours(1);
+    /** 回应服务端主动发来的请求时，写回执最多等这么久。 */
+    private static final Duration REPLY_WRITE_TIMEOUT = Duration.ofSeconds(20);
 
     private final String name;
     private final McpServerConfig config;
@@ -310,7 +314,7 @@ final class McpClient implements AutoCloseable {
     }
 
     private static long deadline(Duration timeout) {
-        return System.nanoTime() + Math.max(1, Math.min(Duration.ofHours(1).toNanos(), timeout.toNanos()));
+        return System.nanoTime() + Math.max(1, Math.min(MAX_WAIT.toNanos(), timeout.toNanos()));
     }
 
     private static long remaining(long deadline) {
@@ -365,7 +369,7 @@ final class McpClient implements AutoCloseable {
         } else {
             reply.put("error", Map.of("code", -32601, "message", "Pilot 不支持该方法"));
         }
-        write(reply, deadline(Duration.ofSeconds(20)), new AtomicBoolean());
+        write(reply, deadline(REPLY_WRITE_TIMEOUT), new AtomicBoolean());
     }
 
     @Override

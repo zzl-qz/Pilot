@@ -43,6 +43,8 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class BrowserControlService implements BrowserEventListener {
     private static final Logger log = LoggerFactory.getLogger(BrowserControlService.class);
+    /** 用户在界面上手动操作浏览器时，单条指令的等待上限。 */
+    private static final Duration USER_COMMAND_TIMEOUT = Duration.ofSeconds(45);
 
     private final BrowserRuntime runtime;
     private final ObjectMapper mapper;
@@ -184,7 +186,7 @@ public class BrowserControlService implements BrowserEventListener {
         command.put("op", op);
         command.put("userInitiated", true);
         try {
-            BrowserBackend.Reply reply = runtime.execute(sessionId, command, Duration.ofSeconds(45));
+            BrowserBackend.Reply reply = runtime.execute(sessionId, command, USER_COMMAND_TIMEOUT);
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("ok", true);
             result.put("text", reply.text() == null ? "" : reply.text());

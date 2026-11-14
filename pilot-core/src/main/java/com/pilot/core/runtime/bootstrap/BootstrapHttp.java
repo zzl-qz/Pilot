@@ -18,9 +18,11 @@ import java.util.Map;
 
 /** 使用既有代理与系统证书，不降低 TLS 校验，也不把代理密码写入命令行。 */
 final class BootstrapHttp {
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(20);
+
     static HttpClient client(Map<String, String> env) {
         var builder =
-            HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).followRedirects(HttpClient.Redirect.NORMAL);
+            HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).followRedirects(HttpClient.Redirect.NORMAL);
         String value = variable(env, "HTTPS_PROXY");
         if (value.isBlank()) {
             value = variable(env, "HTTP_PROXY");

@@ -2,7 +2,6 @@ package com.pilot.server.security;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.UUID;
 
 import jakarta.servlet.FilterChain;
@@ -43,7 +42,8 @@ public class RemoteAccessFilter extends OncePerRequestFilter {
         this.control = new AccessControl(properties);
         this.audit = audit;
         this.limiter = properties.tokenMode() && properties.rateLimitPerMinute() > 0
-            ? new SlidingWindowRateLimiter(properties.rateLimitPerMinute(), Duration.ofMinutes(1)) : null;
+            ? new SlidingWindowRateLimiter(properties.rateLimitPerMinute(), SlidingWindowRateLimiter.DEFAULT_WINDOW)
+            : null;
     }
 
     @Override

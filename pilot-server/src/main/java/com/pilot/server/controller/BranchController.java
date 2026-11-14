@@ -25,6 +25,9 @@ import com.pilot.server.session.RunStarter;
 @RestController
 @RequestMapping("/api/sessions/{id}/branch")
 public class BranchController {
+    private static final Duration GIT_TIMEOUT = Duration.ofSeconds(10);
+    private static final int MAX_GIT_OUTPUT_BYTES = 16_384;
+
     private final SessionService sessions;
     private final AgentProperties properties;
     private final RunStarter runs;
@@ -59,7 +62,7 @@ public class BranchController {
             if (!runs.lockWorkspace(slot, root)) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "同一工作区有任务正在运行或回退，请稍后重试");
             }
-            var result = ProcessSupport.captureUtf8(new ProcessBuilder(command), Duration.ofSeconds(10), 16_384);
+            var result = ProcessSupport.captureUtf8(new ProcessBuilder(command), GIT_TIMEOUT, MAX_GIT_OUTPUT_BYTES);
             if (result.exitCode() != 0) {
                 String message = result.output().strip();
                 throw new ResponseStatusException(HttpStatus.CONFLICT,

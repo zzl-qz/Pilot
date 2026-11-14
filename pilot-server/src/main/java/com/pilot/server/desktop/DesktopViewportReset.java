@@ -23,10 +23,13 @@ import tools.jackson.databind.ObjectMapper;
  */
 @Component
 public final class DesktopViewportReset {
+    /** 只连本机的浏览器控制端口，连不上就立刻放弃，不拖慢窗口启动。 */
+    private static final Duration CONNECT_TIMEOUT = Duration.ofMillis(300);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofMillis(400);
     private static final Pattern PORT = Pattern.compile("\"controlPort\"\\s*:\\s*(\\d+)");
     private static final Pattern TOKEN = Pattern.compile("\"token\"\\s*:\\s*\"([^\"]+)\"");
 
-    private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofMillis(300)).build();
+    private final HttpClient client = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     private final BrowserHome browserHome;
 
     public DesktopViewportReset(BrowserHome browserHome) {
@@ -49,7 +52,7 @@ public final class DesktopViewportReset {
                 return;
             }
             HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port.group(1) + "/emulate"))
-                .timeout(Duration.ofMillis(400)).header("content-type", "application/json")
+                .timeout(REQUEST_TIMEOUT).header("content-type", "application/json")
                 .header("x-pilot-token", token.group(1))
                 .POST(HttpRequest.BodyPublishers.ofString(
                     new ObjectMapper().writeValueAsString(Map.of("sessionId", sessionId, "width", 0, "height", 0))))

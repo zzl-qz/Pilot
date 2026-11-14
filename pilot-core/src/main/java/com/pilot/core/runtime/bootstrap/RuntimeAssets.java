@@ -42,6 +42,12 @@ public final class RuntimeAssets {
     private static final long MAX_DOWNLOAD = 512L * 1024 * 1024;
     private static final long MAX_UNPACKED = 2L * 1024 * 1024 * 1024;
     private static final URI NODE_DISTRIBUTION = URI.create("https://nodejs.org/dist/");
+    /** 下载一个运行时压缩包的默认上限。 */
+    private static final Duration DOWNLOAD_TIMEOUT = Duration.ofMinutes(5);
+    /** 另一个进程正在装同一个组件时，最多等它这么久。 */
+    private static final Duration INSTALL_LOCK_WAIT = Duration.ofMinutes(15);
+    private static final Duration ARCHIVE_LIST_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration ARCHIVE_EXTRACT_TIMEOUT = Duration.ofMinutes(3);
     private final Path root;
     private final Properties manifest;
     private final boolean network;
@@ -51,7 +57,7 @@ public final class RuntimeAssets {
     private final boolean localTests;
 
     public RuntimeAssets(Path root, Properties manifest, boolean network, Consumer<String> progress) {
-        this(root, manifest, network, progress, null, Duration.ofMinutes(5), false);
+        this(root, manifest, network, progress, null, DOWNLOAD_TIMEOUT, false);
     }
 
     RuntimeAssets(Path root, Properties manifest, boolean network, Consumer<String> progress, HttpClient http,
@@ -100,7 +106,7 @@ public final class RuntimeAssets {
 
     public Path install(Asset asset, boolean replaceInvalid) throws Exception {
         Files.createDirectories(root);
-        try (var lock = BootstrapLock.acquire(root.resolve(asset.home() + ".lock"), Duration.ofMinutes(15))) {
+        try (var lock = BootstrapLock.acquire(root.resolve(asset.home() + ".lock"), INSTALL_LOCK_WAIT)) {
             return installUnlocked(asset, replaceInvalid);
         }
     }
@@ -120,7 +126,7 @@ public final class RuntimeAssets {
             } else {
                 // 压缩包已由随源码固定的哈希验证，仍检查条目路径，防止越出私有目录。
                 var listing = SourceEnvironment.execute(List.of("tar", "-tzf", archive.toString()), root,
-                    System.getenv(), Duration.ofSeconds(30), false);
+                    System.getenv(), ARCHIVE_LIST_TIMEOUT, false);
                 if (listing.code() != 0) {
                     throw new IOException("运行环境压缩包无法读取，请检查系统 tar 工具");
                 }
@@ -128,7 +134,7 @@ public final class RuntimeAssets {
                     safeEntry(staging, line);
                 }
                 SourceEnvironment.run(List.of("tar", "-xzf", archive.toString(), "-C", staging.toString()), root,
-                    System.getenv(), Duration.ofMinutes(3));
+                    System.getenv(), ARCHIVE_EXTRACT_TIMEOUT);
             }
             Path extracted;
             try (var files = Files.list(staging)) {

@@ -48,6 +48,12 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
             "fill", "type", "press", "select", "upload", "download", "screenshot", "console", "network", "text",
             "links", "tabs", "switch_tab", "close_tab", "wait", "evaluate", "close", "inspect", "resize");
     private static final int MAX_SCREENSHOTS_KEPT = 40;
+    /** 打开、刷新、后退要等页面加载，给得最宽。 */
+    private static final Duration NAVIGATION_TIMEOUT = Duration.ofSeconds(45);
+    /** 截图和显式等待。 */
+    private static final Duration CAPTURE_TIMEOUT = Duration.ofSeconds(30);
+    /** 其余点击、输入等普通操作。 */
+    private static final Duration ACTION_TIMEOUT = Duration.ofSeconds(25);
 
     private final BrowserBackend backend;
     private final String sessionId;
@@ -177,9 +183,9 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
 
     private static Duration timeout(String action) {
         return switch (action) {
-            case "navigate", "reload", "back" -> Duration.ofSeconds(45);
-            case "screenshot", "wait" -> Duration.ofSeconds(30);
-            default -> Duration.ofSeconds(25);
+            case "navigate", "reload", "back" -> NAVIGATION_TIMEOUT;
+            case "screenshot", "wait" -> CAPTURE_TIMEOUT;
+            default -> ACTION_TIMEOUT;
         };
     }
 

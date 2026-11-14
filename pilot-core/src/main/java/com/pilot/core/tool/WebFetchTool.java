@@ -16,6 +16,8 @@ import com.pilot.core.http.BoundedHttp;
 public final class WebFetchTool implements Tool {
     private static final int MAX_BYTES = 512 * 1024;
     private static final int MAX_CHARS = 20_000;
+    /** 整个请求的上限，也是中途没有数据时的断开时间。 */
+    private static final Duration FETCH_TIMEOUT = Duration.ofSeconds(15);
     private final HttpClient client;
 
     public WebFetchTool(HttpClient client) {
@@ -49,9 +51,9 @@ public final class WebFetchTool implements Tool {
             URI uri = URI.create(raw.strip()).normalize();
             validate(uri);
             HttpRequest request =
-                HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(15)).header("User-Agent", "Pilot-WebFetch/1.0")
+                HttpRequest.newBuilder(uri).timeout(FETCH_TIMEOUT).header("User-Agent", "Pilot-WebFetch/1.0")
                     .header("Accept", "text/html,text/plain,application/xhtml+xml").GET().build();
-            try (var response = BoundedHttp.open(client, request, Duration.ofSeconds(15), MAX_BYTES)) {
+            try (var response = BoundedHttp.open(client, request, FETCH_TIMEOUT, MAX_BYTES)) {
                 if (response.statusCode() >= 300 && response.statusCode() < 400) {
                     return "ERROR: 网页重定向未跟随；请检查并显式确认目标 URL";
                 }

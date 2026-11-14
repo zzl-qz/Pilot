@@ -23,6 +23,8 @@ import jakarta.servlet.http.HttpServletResponse;
 /** Servlet 非阻塞 SSE：只在容器允许写时发送，等待中的字节和最长等待均有界。 */
 public final class AsyncEventStream implements AutoCloseable {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AsyncEventStream.class);
+    /** 这么久没有事件就发一次心跳，防止代理把空闲连接掐掉。 */
+    private static final long HEARTBEAT_INTERVAL_NANOS = Duration.ofSeconds(20).toNanos();
     private static final java.util.concurrent.ScheduledExecutorService TIMER =
         Executors.newSingleThreadScheduledExecutor(task -> {
             Thread thread = new Thread(task, "pilot-stream-monitor");
@@ -235,7 +237,7 @@ public final class AsyncEventStream implements AutoCloseable {
             terminate("send_timeout");
             return;
         }
-        if (!closed.get() && now - heartbeatAt >= Duration.ofSeconds(20).toNanos()
+        if (!closed.get() && now - heartbeatAt >= HEARTBEAT_INTERVAL_NANOS
             && heartbeatRunning.compareAndSet(false, true)) {
             heartbeatAt = now;
             Thread.ofVirtual().name("pilot-stream-heartbeat").start(() -> {

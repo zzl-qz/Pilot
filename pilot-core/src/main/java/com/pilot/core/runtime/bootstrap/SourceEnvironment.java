@@ -25,6 +25,21 @@ public final class SourceEnvironment {
     public record Mobile(Path libraries, Path javaHome, boolean ready, String message) {
     }
 
+    /** 试跑一次手机连接桥，确认本机库能加载。 */
+    private static final Duration BRIDGE_CHECK_TIMEOUT = Duration.ofSeconds(45);
+    /** Windows 上静默安装 VC++ 运行库。 */
+    private static final Duration VC_RUNTIME_INSTALL_TIMEOUT = Duration.ofMinutes(8);
+    /** 问一句版本号这类秒回的探测命令。 */
+    private static final Duration VERSION_PROBE_TIMEOUT = Duration.ofSeconds(8);
+    private static final Duration SYSCTL_TIMEOUT = Duration.ofSeconds(5);
+    /** 各把启动锁的等待上限：都比被等的那一步略长，等不到就说明对方卡死了。 */
+    private static final Duration PREPARE_LOCK_WAIT = Duration.ofMinutes(20);
+    private static final Duration BUILD_LOCK_WAIT = Duration.ofMinutes(35);
+    private static final Duration FRONTEND_DEPS_TIMEOUT = Duration.ofMinutes(15);
+    private static final Duration BUILD_TIMEOUT = Duration.ofMinutes(30);
+    /** 服务进程本身要一直跑，这里只是给一个不会触发的上限。 */
+    private static final Duration SERVER_RUN_LIMIT = Duration.ofDays(365);
+
     private final Path root;
     private final Path cache;
     private final BootstrapPlatform platform;
@@ -119,7 +134,7 @@ public final class SourceEnvironment {
         return execute(
             List.of(java(home), "--enable-native-access=ALL-UNNAMED", "-cp", MobileBridgeLayout.classpath(libraries),
                 MobileBridgeLayout.MAIN_CLASS, "--check-runtime"),
-            root, childEnvironment(home, null), Duration.ofSeconds(45), false).code();
+            root, childEnvironment(home, null), BRIDGE_CHECK_TIMEOUT, false).code();
     }
 
     private void installWindowsRuntime() throws Exception {
@@ -135,8 +150,9 @@ public final class SourceEnvironment {
                     StandardCopyOption.REPLACE_EXISTING);
             }
         }
-        var result = execute(List.of("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-            script.toString(), "-Installer", installer.toString()), root, environment, Duration.ofMinutes(8), true);
+        var result =
+            execute(List.of("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.toString(),
+                "-Installer", installer.toString()), root, environment, VC_RUNTIME_INSTALL_TIMEOUT, true);
         if (!List.of(0, 3010, 1638).contains(result.code())) {
             throw new IOException("VC++ 自动安装未完成，可能需要管理员授权；手机连接暂不可用，其他功能可继续使用");
         }
@@ -161,7 +177,7 @@ public final class SourceEnvironment {
         }
         try {
             var result = execute(List.of(java(home), "-XshowSettings:properties", "-version"), root, environment,
-                Duration.ofSeconds(8), false);
+                VERSION_PROBE_TIMEOUT, false);
             var arch = Pattern.compile("os.arch\\s*=\\s*(\\S+)").matcher(result.output());
             return result.code() == 0
                 && result.output().matches("(?s).*java.specification.version\\s*=\\s*(2[5-9]|[3-9][0-9])\\s.*")
@@ -178,7 +194,7 @@ public final class SourceEnvironment {
         }
         try {
             var result = execute(List.of("/usr/sbin/sysctl", "-n", "hw.optional.arm64"), root, System.getenv(),
-                Duration.ofSeconds(5), false);
+                SYSCTL_TIMEOUT, false);
             return result.code() == 0 && result.output().trim().equals("1");
         } catch (Exception e) {
             return false;
@@ -213,10 +229,10 @@ public final class SourceEnvironment {
             }
             var result =
                 execute(List.of(node.toString(), "-p", "'PILOT_NODE_RUNTIME '+process.versions.node+' '+process.arch"),
-                    root, environment, Duration.ofSeconds(8), false);
+                    root, environment, VERSION_PROBE_TIMEOUT, false);
             return result.code() == 0 && nodeVersionMatches(result.output(), platform)
                 && execute(List.of(node.toString(), npm.toString(), "--version"), root, environment,
-                    Duration.ofSeconds(8), false).code() == 0;
+                    VERSION_PROBE_TIMEOUT, false).code() == 0;
         } catch (Exception e) {
             return false;
         }
@@ -267,8 +283,7 @@ public final class SourceEnvironment {
     private void launch(Path node, String[] args, boolean startServer) throws Exception {
         Map<String, String> env = childEnvironment(Path.of(System.getProperty("java.home")), node);
         env.put(RuntimeEnvironment.BOOTSTRAP_NODE, node.toString());
-        try (var lock =
-            BootstrapLock.acquire(cache.resolve("build-" + projectKey() + ".lock"), Duration.ofMinutes(35))) {
+        try (var lock = BootstrapLock.acquire(cache.resolve("build-" + projectKey() + ".lock"), BUILD_LOCK_WAIT)) {
             build(node, env);
         }
         if (!startServer) {
@@ -278,7 +293,7 @@ public final class SourceEnvironment {
             List.of(java(Path.of(System.getProperty("java.home"))), "--enable-native-access=ALL-UNNAMED", "-jar",
                 root.resolve("pilot-server/target/pilot-server-0.0.1-SNAPSHOT.jar").toString()));
         server.addAll(List.of(args));
-        run(server, root, env, Duration.ofDays(365));
+        run(server, root, env, SERVER_RUN_LIMIT);
     }
 
     private void build(Path node, Map<String, String> env) throws Exception {
@@ -287,7 +302,7 @@ public final class SourceEnvironment {
             throw new IOException("Node 安装缺少 npm，请重新准备运行环境");
         }
         run(List.of(node.toString(), root.resolve("tools/ask-frontend-deps.mjs").toString(), npm.toString()), root, env,
-            Duration.ofMinutes(15));
+            FRONTEND_DEPS_TIMEOUT);
         Path maven = assets.install(assets.asset("maven"));
         Path boot;
         try (var jars = Files.list(maven.resolve("boot"))) {
@@ -303,7 +318,7 @@ public final class SourceEnvironment {
         if (offline) {
             build.add("-o");
         }
-        run(build, root, env, Duration.ofMinutes(30));
+        run(build, root, env, BUILD_TIMEOUT);
     }
 
     private Map<String, String> childEnvironment(Path javaHome, Path node) {
@@ -330,7 +345,7 @@ public final class SourceEnvironment {
 
     private BootstrapLock lock() throws Exception {
         progress.accept("正在检查本机依赖；若已有启动进程正在准备，将复用其结果");
-        return BootstrapLock.acquire(cache.resolve("prepare.lock"), Duration.ofMinutes(20));
+        return BootstrapLock.acquire(cache.resolve("prepare.lock"), PREPARE_LOCK_WAIT);
     }
 
     public record Execution(int code, String output) {

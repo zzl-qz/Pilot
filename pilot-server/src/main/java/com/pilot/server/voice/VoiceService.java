@@ -27,6 +27,9 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class VoiceService {
     private static final Logger log = LoggerFactory.getLogger(VoiceService.class);
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    /** 上传音频并等转写结果的上限。 */
+    private static final Duration TRANSCRIBE_TIMEOUT = Duration.ofSeconds(60);
     private final ModelSettings models;
     private final SettingsStore store;
     private final ObjectMapper mapper;
@@ -41,8 +44,8 @@ public class VoiceService {
         this.mapper = mapper;
         this.defaultModel = defaultModel;
         this.limits = limits;
-        client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(HttpClient.Redirect.NEVER).build();
+        client =
+            HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).followRedirects(HttpClient.Redirect.NEVER).build();
     }
 
     VoiceLimits limits() {
@@ -155,7 +158,7 @@ public class VoiceService {
                 + extension + "\"\r\n" + "Content-Type: " + mime + "\r\n\r\n").getBytes(StandardCharsets.UTF_8));
             body.write(audio);
             body.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
-            var request = HttpRequest.newBuilder(endpoint).timeout(Duration.ofSeconds(60)).header("Content-Type",
+            var request = HttpRequest.newBuilder(endpoint).timeout(TRANSCRIBE_TIMEOUT).header("Content-Type",
                 "multipart/form-data; boundary=" + boundary);
             if (apiKey != null && !apiKey.isBlank()) {
                 request.header("Authorization", "Bearer " + apiKey);

@@ -14,18 +14,21 @@ import java.util.function.LongSupplier;
  * 只在单进程内生效，多实例部署时需要换成共享存储。
  */
 public final class SlidingWindowRateLimiter {
+    /** 没指定窗口时按每分钟限流。 */
+    public static final Duration DEFAULT_WINDOW = Duration.ofMinutes(1);
+
     private final int limit;
     private final long windowMillis;
     private final LongSupplier clock;
     private final Map<String, Deque<Long>> hits = new ConcurrentHashMap<>();
 
     public SlidingWindowRateLimiter(int limitPerWindow, Duration window) {
-        this(limitPerWindow, window == null ? Duration.ofMinutes(1) : window, System::currentTimeMillis);
+        this(limitPerWindow, window == null ? DEFAULT_WINDOW : window, System::currentTimeMillis);
     }
 
     public SlidingWindowRateLimiter(int limitPerWindow, Duration window, LongSupplier clock) {
         this.limit = Math.max(1, limitPerWindow);
-        this.windowMillis = Math.max(1L, (window == null ? Duration.ofMinutes(1) : window).toMillis());
+        this.windowMillis = Math.max(1L, (window == null ? DEFAULT_WINDOW : window).toMillis());
         this.clock = clock;
     }
 

@@ -37,6 +37,8 @@ import com.pilot.server.workspace.RunSnapshotService;
 @Component
 public class RetentionService {
     private static final Logger log = LoggerFactory.getLogger(RetentionService.class);
+    /** 抢不到维护锁说明正在备份或恢复，稍等一下就放弃这一轮清理。 */
+    private static final Duration MAINTENANCE_LOCK_WAIT = Duration.ofSeconds(2);
 
     private final int retentionDays;
     private final int backupDays;
@@ -90,7 +92,7 @@ public class RetentionService {
 
     /** 立即按配置的保留期清理一次；未开启时什么都不做。 */
     public PurgeReport purgeNow() {
-        try (var maintenance = dataDir.maintenance().exclusive(Duration.ofSeconds(2))) {
+        try (var maintenance = dataDir.maintenance().exclusive(MAINTENANCE_LOCK_WAIT)) {
             return purge();
         }
     }

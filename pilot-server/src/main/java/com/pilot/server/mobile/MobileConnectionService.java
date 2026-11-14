@@ -46,6 +46,9 @@ import tools.jackson.databind.node.JsonNodeFactory;
 @Service
 public class MobileConnectionService {
     private static final Logger log = LoggerFactory.getLogger(MobileConnectionService.class);
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
+    /** 调连接桥管理接口的上限。 */
+    private static final Duration ADMIN_REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private final Path data;
     private final DataMaintenance maintenance;
     private final String configuredLibraries;
@@ -53,7 +56,7 @@ public class MobileConnectionService {
     private final SecurityProperties security;
     private final ObjectMapper mapper;
     private final HttpClient http =
-        HttpClient.newBuilder().proxy(ProxySelector.of(null)).connectTimeout(Duration.ofSeconds(5)).build();
+        HttpClient.newBuilder().proxy(ProxySelector.of(null)).connectTimeout(CONNECT_TIMEOUT).build();
     private final ScheduledExecutorService supervisor = Executors
         .newSingleThreadScheduledExecutor(Thread.ofPlatform().daemon().name("pilot-mobile-supervisor").factory());
     private Process process;
@@ -152,7 +155,7 @@ public class MobileConnectionService {
         };
         try {
             start();
-            HttpRequest.Builder request = HttpRequest.newBuilder(admin.resolve(path)).timeout(Duration.ofSeconds(30))
+            HttpRequest.Builder request = HttpRequest.newBuilder(admin.resolve(path)).timeout(ADMIN_REQUEST_TIMEOUT)
                 .header("X-Pilot-Pairing", token);
             if ("status".equals(operation)) {
                 request.GET();

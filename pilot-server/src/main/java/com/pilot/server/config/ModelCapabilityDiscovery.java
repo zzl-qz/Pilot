@@ -36,6 +36,9 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
     private static final String CACHE_KEY = "model.capability-cache.v1";
     private static final int MAX_ENTRIES = 64;
     private static final int MAX_BODY_BYTES = 1_048_576;
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(3);
+    /** 单次探测请求的上限；探测在后台跑，宁可放弃也不长时间占着名额。 */
+    private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(6);
     private static final long VERIFIED_TTL_MS = Duration.ofHours(6).toMillis();
     private static final long UNSUPPORTED_TTL_MS = Duration.ofMinutes(30).toMillis();
     private static final long UNKNOWN_TTL_MS = Duration.ofMinutes(5).toMillis();
@@ -73,8 +76,9 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
 
     @org.springframework.beans.factory.annotation.Autowired
     public ModelCapabilityDiscovery(SettingsStore store, ObjectMapper mapper) {
-        this(store, mapper, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3))
-            .followRedirects(HttpClient.Redirect.NEVER).build(), Clock.systemUTC(), Duration.ofSeconds(6));
+        this(store, mapper,
+            HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).followRedirects(HttpClient.Redirect.NEVER).build(),
+            Clock.systemUTC(), PROBE_TIMEOUT);
     }
 
     ModelCapabilityDiscovery(SettingsStore store, ObjectMapper mapper, HttpClient http, Clock clock, Duration timeout) {

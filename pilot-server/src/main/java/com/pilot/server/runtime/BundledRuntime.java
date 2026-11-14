@@ -32,6 +32,8 @@ import com.pilot.core.util.HostOs;
 @Component
 public class BundledRuntime implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(BundledRuntime.class);
+    private static final Duration DOWNLOAD_TIMEOUT = Duration.ofMinutes(5);
+    private static final Duration EXTRACT_TIMEOUT = Duration.ofMinutes(2);
     private static final String PYTHON_RELEASE = "20261026";
     private static final String PYTHON_VERSION = "3.12.16";
 
@@ -82,8 +84,8 @@ public class BundledRuntime implements SmartLifecycle {
         Path tar = parent.resolve(dest.getFileName() + ".download");
         boolean fetched = false;
         for (String url : archive.urls()) {
-            if (run(parent, Duration.ofMinutes(5), "curl", "-fL", "--retry", "2", "--max-time", "180", "-o",
-                tar.toString(), url) == 0 && Files.isRegularFile(tar)) {
+            if (run(parent, DOWNLOAD_TIMEOUT, "curl", "-fL", "--retry", "2", "--max-time", "180", "-o", tar.toString(),
+                url) == 0 && Files.isRegularFile(tar)) {
                 fetched = true;
                 break;
             }
@@ -101,7 +103,7 @@ public class BundledRuntime implements SmartLifecycle {
             log.warn("解压目录创建失败：{}", e.toString());
             return;
         }
-        if (run(parent, Duration.ofMinutes(2), "tar", "-xf", tar.toString(), "-C", unpack.toString()) != 0) {
+        if (run(parent, EXTRACT_TIMEOUT, "tar", "-xf", tar.toString(), "-C", unpack.toString()) != 0) {
             log.warn("解压 {} 失败", archive.name());
             return;
         }
