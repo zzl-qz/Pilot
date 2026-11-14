@@ -7,6 +7,8 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 
@@ -19,45 +21,73 @@ public final class FileTrees {
     }
 
     public static void delete(Path root) throws IOException {
-        Files.walkFileTree(root, new DeleteVisitor(root, false, null));
+        Files.walkFileTree(root, new DeleteVisitor(root, false, null, Files::deleteIfExists));
     }
 
     public static void deleteIfExists(Path root) throws IOException {
-        Files.walkFileTree(root, new DeleteVisitor(root, true, null));
+        Files.walkFileTree(root, new DeleteVisitor(root, true, null, Files::deleteIfExists));
     }
 
     public static void deleteBestEffort(Path root) {
-        deleteBestEffort(root, (path, error) -> {
-        });
+        walkBestEffort(root, (path, error) -> {
+        }, Files::deleteIfExists);
     }
 
-    /** 逐项报告清理失败并继续遍历，统计实际删除的条目。指向目录的链接计入目录数。 */
+    /** 按附件清理原有的逆序统计实际删除的条目。符号链接按删除时的目标类型计数。 */
     public static Deletion deleteBestEffort(Path root, BiConsumer<Path, IOException> onFailure) {
-        var visitor = new DeleteVisitor(root, true, Objects.requireNonNull(onFailure));
+        Objects.requireNonNull(onFailure);
+        var entries = new ArrayList<Path>();
+        walkBestEffort(root, onFailure, entries::add);
+        entries.sort(Comparator.reverseOrder());
+        int files = 0;
+        int directories = 0;
+        for (Path entry : entries) {
+            try {
+                boolean directory = Files.isDirectory(entry);
+                if (Files.deleteIfExists(entry)) {
+                    if (directory) {
+                        directories++;
+                    } else {
+                        files++;
+                    }
+                }
+            } catch (IOException error) {
+                onFailure.accept(entry, error);
+            }
+        }
+        return new Deletion(files, directories);
+    }
+
+    private static void walkBestEffort(Path root, BiConsumer<Path, IOException> onFailure, PathAction action) {
         try {
-            Files.walkFileTree(root, visitor);
+            Files.walkFileTree(root, new DeleteVisitor(root, true, onFailure, action));
         } catch (IOException error) {
             onFailure.accept(root, error);
         }
-        return new Deletion(visitor.files, visitor.directories);
+    }
+
+    @FunctionalInterface
+    private interface PathAction {
+        void accept(Path path) throws IOException;
     }
 
     private static final class DeleteVisitor extends SimpleFileVisitor<Path> {
         private final Path root;
         private final boolean allowMissingRoot;
         private final BiConsumer<Path, IOException> onFailure;
-        private int files;
-        private int directories;
+        private final PathAction action;
 
-        private DeleteVisitor(Path root, boolean allowMissingRoot, BiConsumer<Path, IOException> onFailure) {
+        private DeleteVisitor(Path root, boolean allowMissingRoot, BiConsumer<Path, IOException> onFailure,
+            PathAction action) {
             this.root = root;
             this.allowMissingRoot = allowMissingRoot;
             this.onFailure = onFailure;
+            this.action = action;
         }
 
         @Override
         public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-            return remove(file, onFailure != null && attrs.isSymbolicLink() && Files.isDirectory(file));
+            return process(file);
         }
 
         @Override
@@ -70,18 +100,12 @@ public final class FileTrees {
 
         @Override
         public FileVisitResult postVisitDirectory(Path dir, IOException error) throws IOException {
-            return error == null ? remove(dir, true) : handleFailure(dir, error);
+            return error == null ? process(dir) : handleFailure(dir, error);
         }
 
-        private FileVisitResult remove(Path path, boolean directory) throws IOException {
+        private FileVisitResult process(Path path) throws IOException {
             try {
-                if (Files.deleteIfExists(path)) {
-                    if (directory) {
-                        directories++;
-                    } else {
-                        files++;
-                    }
-                }
+                action.accept(path);
                 return FileVisitResult.CONTINUE;
             } catch (IOException error) {
                 return handleFailure(path, error);

@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
@@ -17,6 +18,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -280,6 +282,24 @@ class AttachmentServiceTest {
         assertFalse(Files.exists(orphan), "孤儿整目录回收");
         assertTrue(Files.exists(liveOld), "在册会话的历史消息可能仍引用旧附件");
         assertTrue(Files.exists(liveNew), "未过期文件保留");
+    }
+
+    @Test
+    void purgePreservesCountsWhenLinksPointToDirectoriesBeingPurged() throws IOException {
+        AttachmentService service = new AttachmentService(root);
+        Path orphan = Files.createDirectory(root.resolve("ses_gone"));
+        Path target = Files.createDirectory(orphan.resolve("z-target"));
+        try {
+            for (int i = 0; i < 12; i++) {
+                Files.createSymbolicLink(orphan.resolve("a-link-" + i), target);
+            }
+            Files.createSymbolicLink(orphan.resolve("zz-link"), target);
+        } catch (IOException | UnsupportedOperationException e) {
+            Assumptions.abort("此系统或当前用户不能创建符号链接");
+        }
+
+        assertEquals(new AttachmentService.PurgeStats(12, 3), service.purge(List.of()));
+        assertFalse(Files.exists(orphan, LinkOption.NOFOLLOW_LINKS));
     }
 
     private static Path attachment(Path dir, String name) throws IOException {
