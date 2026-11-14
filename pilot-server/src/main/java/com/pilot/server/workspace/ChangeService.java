@@ -1,25 +1,25 @@
 package com.pilot.server.workspace;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.multi.UnifiedDiff;
+import com.pilot.core.tool.ProcessSupport;
 
 /**
  * 变更审阅：读取工作区的 git 状态与 diff，供界面展示「这次到底改了什么」。
@@ -739,15 +739,6 @@ public class ChangeService {
         return out.toString();
     }
 
-    /**
-     * 跑一个 git 子进程并收集输出。
-     *
-     * <p>边读边限量：{@code readAllBytes} 会先把整份输出读进内存再截断，仓库很大时
-     * 一次 {@code git diff} 就能把堆撑爆。超过上限后继续消费但不存储，避免管道写满卡死子进程。
-     *
-     * <p>超时由独立的看门狗线程负责杀进程：读流本身是阻塞的，只在读完之后再 {@code waitFor}
-     * 会让超时形同虚设。
-     */
     /** @param exitCode 超时或启动失败时为 -1，{@code output} 可能为空 */
     private record CommandResult(int exitCode, String output) {
     }
@@ -757,41 +748,11 @@ public class ChangeService {
     }
 
     private static CommandResult run(Path workspace, List<String> command) {
-        ProcessBuilder builder = new ProcessBuilder(command);
-        builder.directory(workspace.toFile());
-        builder.redirectErrorStream(true);
+        var builder = new ProcessBuilder(command).directory(workspace.toFile());
         try {
-            Process process = builder.start();
-            process.getOutputStream().close();
-            AtomicBoolean timedOut = new AtomicBoolean(false);
-            Thread watchdog = Thread.ofVirtual().name("pilot-git-watchdog").start(() -> {
-                try {
-                    if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                        timedOut.set(true);
-                        process.destroyForcibly();
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            });
-
-            ByteArrayOutputStream collected = new ByteArrayOutputStream();
-            byte[] buffer = new byte[8192];
-            try (InputStream stream = process.getInputStream()) {
-                int read;
-                while ((read = stream.read(buffer)) > 0) {
-                    if (collected.size() < MAX_OUTPUT_BYTES) {
-                        collected.write(buffer, 0, Math.min(read, MAX_OUTPUT_BYTES - collected.size()));
-                    }
-                }
-            }
-            watchdog.interrupt();
-            process.waitFor(1, TimeUnit.SECONDS);
-            if (timedOut.get()) {
-                return new CommandResult(-1, "");
-            }
-            return new CommandResult(process.exitValue(), collected.toString(StandardCharsets.UTF_8));
-        } catch (IOException e) {
+            var result = ProcessSupport.captureUtf8(builder, Duration.ofSeconds(TIMEOUT_SECONDS), MAX_OUTPUT_BYTES);
+            return new CommandResult(result.exitCode(), result.output());
+        } catch (IOException | TimeoutException e) {
             return new CommandResult(-1, "");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

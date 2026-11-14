@@ -1,10 +1,10 @@
 package com.pilot.server.controller;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,6 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.tool.ProcessSupport;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.RunStarter;
 
@@ -58,18 +59,15 @@ public class BranchController {
             if (!runs.lockWorkspace(slot, root)) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "同一工作区有任务正在运行或回退，请稍后重试");
             }
-            Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-            if (!process.waitFor(10, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT, "git branch creation timed out");
-            }
-            byte[] output = process.getInputStream().readNBytes(16_384);
-            if (process.exitValue() != 0) {
-                String message = new String(output, StandardCharsets.UTF_8).strip();
+            var result = ProcessSupport.captureUtf8(new ProcessBuilder(command), Duration.ofSeconds(10), 16_384);
+            if (result.exitCode() != 0) {
+                String message = result.output().strip();
                 throw new ResponseStatusException(HttpStatus.CONFLICT,
                     message.isBlank() ? "unable to create branch" : message);
             }
             return new BranchResponse(name, root.toString());
+        } catch (TimeoutException e) {
+            throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT, "git branch creation timed out", e);
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "workspace is not a usable git repository", e);
         } catch (InterruptedException e) {

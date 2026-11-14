@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
 import org.slf4j.Logger;
@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.runtime.bootstrap.BootstrapPlatform;
 import com.pilot.core.runtime.bootstrap.RuntimeAssets;
 import com.pilot.core.runtime.bootstrap.SourceEnvironment;
+import com.pilot.core.tool.ProcessSupport;
 
 /**
  * 给技能脚本准备 Python 3.12 和 Node 22。
@@ -274,19 +275,9 @@ public class BundledRuntime implements SmartLifecycle {
     }
 
     private static int run(Path directory, Duration timeout, String... command) {
-        ProcessBuilder builder = new ProcessBuilder(command);
-        builder.directory(directory.toFile());
-        builder.redirectErrorStream(true);
         try {
-            Process process = builder.start();
-            process.getOutputStream().close();
-            process.getInputStream().readAllBytes();
-            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                process.destroyForcibly();
-                return -1;
-            }
-            return process.exitValue();
-        } catch (IOException e) {
+            return ProcessSupport.runDiscarded(new ProcessBuilder(command).directory(directory.toFile()), timeout);
+        } catch (IOException | TimeoutException e) {
             return -1;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

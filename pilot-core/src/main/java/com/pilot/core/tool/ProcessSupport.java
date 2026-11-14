@@ -1,5 +1,6 @@
 package com.pilot.core.tool;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -10,7 +11,10 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.slf4j.Logger;
 
@@ -36,24 +40,88 @@ public final class ProcessSupport {
 
     /** 执行安装命令，将合并后的输出写入日志。 */
     public static int runLogged(ProcessBuilder builder, Path logFile, Duration timeout, Logger log) {
-        builder.redirectErrorStream(true);
-        builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
         try {
-            Process process = builder.start();
-            process.getOutputStream().close();
-            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                process.descendants().forEach(ProcessHandle::destroyForcibly);
-                process.destroyForcibly();
-                log.warn("命令超时：{}", String.join(" ", builder.command()));
-                return -1;
-            }
-            return process.exitValue();
+            return runRedirected(builder, ProcessBuilder.Redirect.appendTo(logFile.toFile()), timeout);
+        } catch (TimeoutException e) {
+            log.warn("命令超时：{}", String.join(" ", builder.command()));
+            return -1;
         } catch (IOException e) {
             log.warn("命令无法执行：{}（{}）", String.join(" ", builder.command()), e.getMessage());
             return -1;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return -1;
+        }
+    }
+
+    /** 不需要输出的命令直接重定向，避免创建输出管道。 */
+    public static int runDiscarded(ProcessBuilder builder, Duration timeout)
+        throws IOException, InterruptedException, TimeoutException {
+        return runRedirected(builder, ProcessBuilder.Redirect.DISCARD, timeout);
+    }
+
+    private static int runRedirected(ProcessBuilder builder, ProcessBuilder.Redirect output, Duration timeout)
+        throws IOException, InterruptedException, TimeoutException {
+        Process process = builder.redirectErrorStream(true).redirectOutput(output).start();
+        try {
+            process.getOutputStream().close();
+            if (!process.waitFor(timeout)) {
+                throw new TimeoutException();
+            }
+            return process.exitValue();
+        } finally {
+            if (process.isAlive()) {
+                terminate(process);
+            }
+        }
+    }
+
+    public record CapturedOutput(int exitCode, String output) {
+    }
+
+    /** 捕获合并输出的开头，超出上限的字节仍继续消费。退出与读完输出共享同一个期限。 */
+    public static CapturedOutput captureUtf8(ProcessBuilder builder, Duration timeout, int maxBytes)
+        throws IOException, InterruptedException, TimeoutException {
+        if (maxBytes < 0) {
+            throw new IllegalArgumentException("maxBytes must be nonnegative");
+        }
+        long budget = timeout.toNanos();
+        Process process = builder.redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.PIPE).start();
+        long deadline = System.nanoTime() + budget;
+        var output = new FutureTask<>(() -> capturePrefix(process.getInputStream(), maxBytes));
+        try {
+            process.getOutputStream().close();
+            Thread.startVirtualThread(output);
+            if (!process.waitFor(Duration.ofNanos(deadline - System.nanoTime()))) {
+                throw new TimeoutException();
+            }
+            return new CapturedOutput(process.exitValue(),
+                output.get(deadline - System.nanoTime(), TimeUnit.NANOSECONDS));
+        } catch (ExecutionException e) {
+            throw new IOException("无法读取命令输出", e.getCause());
+        } finally {
+            if (process.isAlive()) {
+                terminate(process);
+            }
+            output.cancel(true);
+        }
+    }
+
+    private static void terminate(Process process) {
+        var descendants = process.descendants().toList();
+        process.destroyForcibly();
+        descendants.forEach(ProcessHandle::destroyForcibly);
+    }
+
+    private static String capturePrefix(InputStream input, int maxBytes) throws IOException {
+        try (input) {
+            byte[] buffer = new byte[8192];
+            var output = new ByteArrayOutputStream(Math.min(maxBytes, buffer.length));
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                output.write(buffer, 0, Math.min(count, maxBytes - output.size()));
+            }
+            return output.toString(StandardCharsets.UTF_8);
         }
     }
 
