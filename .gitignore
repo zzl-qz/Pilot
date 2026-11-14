@@ -97,3 +97,9 @@ pilot-mobile/.kotlin/
 
 # Per-task managed Python environments and installation receipts
 .pilot-task-envs/
+
+### 本地分析与验证产物：截图、报告、临时脚本，都只在本机用 ###
+.analysis/
+
+### 本地工具克隆（只有 .git，供 understand 技能使用） ###
+Understand-Anything/
