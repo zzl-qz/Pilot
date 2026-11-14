@@ -30,6 +30,7 @@ import com.pilot.core.loop.Message;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.tool.CommandChangeTracker;
 import com.pilot.core.tool.SnapshotSink;
+import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.Sha256;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.workspace.ChangeService.RunChangeReport;
@@ -214,7 +215,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             return new CommandChangeTracker.Handle(context.runId, id);
         } catch (IOException | RuntimeException e) {
             try {
-                deleteRecursively(directory);
+                FileTrees.delete(directory);
             } catch (IOException ignored) {
             }
             if (e instanceof RuntimeException runtime) {
@@ -730,7 +731,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                         : directory.getFileName().toString();
                     if (!protectedRunIds.contains(runId)
                         && Files.getLastModifiedTime(directory).toInstant().isBefore(cutoff)) {
-                        deleteRecursively(directory);
+                        FileTrees.delete(directory);
                         removed++;
                     }
                 } catch (IOException | RuntimeException e) {
@@ -741,14 +742,6 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             log.warn("遍历快照目录失败: {}", root, e);
         }
         return removed;
-    }
-
-    private static void deleteRecursively(Path directory) throws IOException {
-        try (Stream<Path> entries = Files.walk(directory)) {
-            for (Path path : entries.sorted(java.util.Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(path);
-            }
-        }
     }
 
     private SnapshotMeta persist(Context context) {

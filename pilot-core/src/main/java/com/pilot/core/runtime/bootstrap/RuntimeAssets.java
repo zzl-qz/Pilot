@@ -11,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
@@ -23,6 +22,7 @@ import java.util.function.Consumer;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.Sha256;
 
 /** 所有下载写入项目私有目录，校验通过后原子发布；不覆盖系统工具链。 */
@@ -255,13 +255,8 @@ public final class RuntimeAssets {
     }
 
     static void deleteTree(Path directory) throws IOException {
-        if (Files.notExists(directory)) {
-            return;
-        }
-        try (var files = Files.walk(directory)) {
-            for (Path file : files.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(file);
-            }
+        if (!Files.notExists(directory)) {
+            FileTrees.delete(directory);
         }
     }
 }
