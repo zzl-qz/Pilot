@@ -27,6 +27,7 @@ import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.SandboxChange;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.multi.SandboxStore;
 import com.pilot.server.multi.VerificationGate;
@@ -266,8 +267,7 @@ public class MultiAgentController {
     }
 
     private Session requireSession(String id) {
-        return sessions.find(id)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
+        return SessionLookup.require(sessions, id);
     }
 
     private Path workspaceOf(Session session) {

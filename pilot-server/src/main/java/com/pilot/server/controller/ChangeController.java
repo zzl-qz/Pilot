@@ -15,6 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.workspace.ChangeService;
 
@@ -67,8 +68,7 @@ public class ChangeController {
     }
 
     private Path workspace(String id) {
-        Session session = sessions.find(id)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
+        Session session = SessionLookup.require(sessions, id);
         String workspace =
             session.workspace() == null || session.workspace().isBlank() ? properties.workspace() : session.workspace();
         return Path.of(workspace);

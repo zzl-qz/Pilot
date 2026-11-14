@@ -8,6 +8,7 @@ import java.util.NoSuchElementException;
 
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.pilot.server.common.web.ApiErrors;
 import com.pilot.server.work.SkillDraftService;
 import com.pilot.server.work.WorkProductService;
 
@@ -72,25 +74,25 @@ public class WorkProductsController {
 
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<Map<String, String>> missing(NoSuchElementException e) {
-        return failure(404, e.getMessage());
+        return failure(HttpStatus.NOT_FOUND, e.getMessage());
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> invalid(IllegalArgumentException e) {
-        return failure(400, e.getMessage());
+        return failure(HttpStatus.BAD_REQUEST, e.getMessage());
     }
 
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<Map<String, String>> conflict(IllegalStateException e) {
-        return failure(409, e.getMessage());
+        return failure(HttpStatus.CONFLICT, e.getMessage());
     }
 
     @ExceptionHandler(UncheckedIOException.class)
     public ResponseEntity<Map<String, String>> ioFailure(UncheckedIOException e) {
-        return failure(503, e.getMessage());
+        return failure(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
     }
 
-    private ResponseEntity<Map<String, String>> failure(int status, String message) {
-        return ResponseEntity.status(status).body(Map.of("message", message == null ? "操作失败，请刷新后重试" : message));
+    private ResponseEntity<Map<String, String>> failure(HttpStatus status, String message) {
+        return ApiErrors.message(status, message == null ? "操作失败，请刷新后重试" : message);
     }
 }

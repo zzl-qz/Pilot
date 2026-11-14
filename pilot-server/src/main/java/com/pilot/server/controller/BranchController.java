@@ -17,6 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.ProcessSupport;
+import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.RunStarter;
 
@@ -36,8 +37,7 @@ public class BranchController {
 
     @PostMapping
     public BranchResponse create(@PathVariable String id, @RequestBody BranchRequest request) {
-        Session session = sessions.find(id)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
+        Session session = SessionLookup.require(sessions, id);
         String name = request == null ? null : request.name();
         if (name == null || name.isBlank() || name.length() > 200 || name.startsWith("-")
             || name.chars().anyMatch(Character::isISOControl)) {

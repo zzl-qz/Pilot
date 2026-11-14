@@ -1,7 +1,5 @@
 package com.pilot.server.controller;
 
-import java.util.Map;
-
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -11,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.pilot.server.common.web.ApiErrors;
 import com.pilot.server.results.ResultInboxService;
 
 @RestController
@@ -50,11 +49,11 @@ public class ResultInboxController {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<?> invalid(IllegalArgumentException e) {
-        return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        return ApiErrors.badRequest(e);
     }
 
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<?> conflict(IllegalStateException e) {
-        return ResponseEntity.status(409).body(Map.of("message", e.getMessage()));
+        return ApiErrors.conflict(e);
     }
 }

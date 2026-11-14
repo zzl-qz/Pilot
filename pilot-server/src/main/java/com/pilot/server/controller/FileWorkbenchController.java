@@ -3,10 +3,10 @@ package com.pilot.server.controller;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.pilot.server.common.web.ApiErrors;
 import com.pilot.server.work.FileWorkbenchService;
 
 import tools.jackson.databind.JsonNode;
@@ -127,9 +128,8 @@ public class FileWorkbenchController {
     }
 
     @ExceptionHandler({IllegalArgumentException.class, IOException.class, SecurityException.class})
-    public ResponseEntity<Map<String, Object>> failure(Exception error) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("error", error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
-        return ResponseEntity.badRequest().body(body);
+    public ResponseEntity<Map<String, String>> failure(Exception error) {
+        return ApiErrors.error(HttpStatus.BAD_REQUEST,
+            error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
     }
 }

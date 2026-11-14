@@ -3,15 +3,14 @@ package com.pilot.server.controller;
 import java.nio.file.Path;
 import java.util.List;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.observability.TaskDiagnosticsService;
 import com.pilot.server.session.RecoveryReportService;
 import com.pilot.server.session.RunStateTracker;
@@ -71,8 +70,7 @@ public class DiagnosticsController {
     }
 
     private Session requireSession(String id) {
-        return sessions.find(id)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
+        return SessionLookup.require(sessions, id);
     }
 
     private static Path workspaceOf(Session session) {

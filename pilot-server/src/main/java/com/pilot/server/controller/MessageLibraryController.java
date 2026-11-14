@@ -1,7 +1,6 @@
 package com.pilot.server.controller;
 
 import java.util.List;
-import java.util.Map;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -15,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.pilot.server.common.web.ApiErrors;
 import com.pilot.server.store.MessageLibrary;
 
 @RestController
@@ -57,6 +57,6 @@ public class MessageLibraryController {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<?> bad(RuntimeException e) {
-        return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        return ApiErrors.badRequest(e);
     }
 }

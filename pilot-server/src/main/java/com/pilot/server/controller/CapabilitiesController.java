@@ -8,12 +8,10 @@ import java.util.Map;
 import java.util.Set;
 
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.mcp.McpManager;
 import com.pilot.core.mcp.McpServerConfig;
@@ -24,6 +22,7 @@ import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.capability.LocalCapabilityService;
+import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.ModelSettings;
 import com.pilot.server.config.PermissionSettings;
@@ -66,8 +65,7 @@ public class CapabilitiesController {
 
     @GetMapping("/capabilities")
     public CapabilitiesResponse capabilities(@PathVariable String id) {
-        Session session = sessions.find(id)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
+        Session session = SessionLookup.require(sessions, id);
         String workspace = session.workspace() == null || session.workspace().isBlank() ? agentProperties.workspace()
             : session.workspace();
         Path root = Path.of(workspace);

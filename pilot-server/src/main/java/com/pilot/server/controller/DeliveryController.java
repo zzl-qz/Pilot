@@ -1,7 +1,5 @@
 package com.pilot.server.controller;
 
-import java.util.Map;
-
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.pilot.server.common.web.ApiErrors;
 import com.pilot.server.notifications.DeliveryService;
 
 @RestController
@@ -65,11 +64,11 @@ public class DeliveryController {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<?> bad(RuntimeException e) {
-        return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        return ApiErrors.badRequest(e);
     }
 
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<?> conflict(RuntimeException e) {
-        return ResponseEntity.status(409).body(Map.of("message", e.getMessage()));
+        return ApiErrors.conflict(e);
     }
 }

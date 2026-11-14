@@ -19,6 +19,8 @@ import org.springframework.web.server.ResponseStatusException;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.skill.SkillManifest;
 import com.pilot.core.skill.SkillProblem;
+import com.pilot.server.common.web.ApiErrors;
+import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.session.SkillInstallService;
 import com.pilot.server.session.SkillService;
 
@@ -51,9 +53,7 @@ public class SkillsController {
     public SkillsResponse list(@RequestParam(name = "sessionId", required = false) String sessionId) {
         String workspace = null;
         if (sessionId != null && !sessionId.isBlank()) {
-            workspace = sessions.find(sessionId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + sessionId))
-                .workspace();
+            workspace = SessionLookup.require(sessions, sessionId).workspace();
         }
         var catalog = skills.catalogFor(workspace);
         List<SkillPayload> available = catalog.list().stream().map(SkillPayload::of).toList();
@@ -117,7 +117,7 @@ public class SkillsController {
     /** 安装器失败统一 400 带中文原因（include-message: always，前端直接展示）。 */
     @ExceptionHandler(SkillInstallService.InstallException.class)
     public ResponseEntity<Map<String, String>> onInstallFailure(SkillInstallService.InstallException e) {
-        return ResponseEntity.badRequest().body(Map.of("message", Objects.requireNonNullElse(e.getMessage(), "安装失败")));
+        return ApiErrors.message(HttpStatus.BAD_REQUEST, Objects.requireNonNullElse(e.getMessage(), "安装失败"));
     }
 
     /** sessionId 非空时必须存在（与 GET 同口径）；缺省按默认工作区解析。 */
@@ -125,9 +125,7 @@ public class SkillsController {
         if (sessionId == null || sessionId.isBlank()) {
             return null;
         }
-        return sessions.find(sessionId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + sessionId))
-            .workspace();
+        return SessionLookup.require(sessions, sessionId).workspace();
     }
 
     public record PreviewRequest(String source, String sessionId, String ref, String path) {

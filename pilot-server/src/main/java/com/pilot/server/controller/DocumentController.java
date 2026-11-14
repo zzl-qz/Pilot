@@ -1,10 +1,10 @@
 package com.pilot.server.controller;
 
 import java.nio.file.Files;
-import java.util.Map;
 import java.util.function.Supplier;
 
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.pilot.server.common.web.ApiErrors;
 import com.pilot.server.work.DocumentService;
 
 import tools.jackson.databind.JsonNode;
@@ -91,10 +92,9 @@ public class DocumentController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + download.filename() + "\"")
                 .contentType(MediaType.parseMediaType(download.mediaType())).body(bytes);
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            return ApiErrors.error(HttpStatus.BAD_REQUEST, e.getMessage());
         } catch (Exception e) {
-            return ResponseEntity.internalServerError()
-                .body(Map.of("error", e.getMessage() == null ? "下载失败" : e.getMessage()));
+            return ApiErrors.error(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage() == null ? "下载失败" : e.getMessage());
         }
     }
 
@@ -112,10 +112,9 @@ public class DocumentController {
         try {
             return ResponseEntity.ok(action.get());
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            return ApiErrors.error(HttpStatus.BAD_REQUEST, e.getMessage());
         } catch (Exception e) {
-            return ResponseEntity.internalServerError()
-                .body(Map.of("error", e.getMessage() == null ? "操作失败" : e.getMessage()));
+            return ApiErrors.error(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage() == null ? "操作失败" : e.getMessage());
         }
     }
 }

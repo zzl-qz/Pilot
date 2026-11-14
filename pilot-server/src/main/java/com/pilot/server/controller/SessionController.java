@@ -48,6 +48,7 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
 import com.pilot.core.skill.SkillProblem;
 import com.pilot.core.tool.DocumentRenderer;
+import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.AttachmentReferences;
 import com.pilot.server.session.AttachmentService;
@@ -310,7 +311,7 @@ public class SessionController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable String id) {
         if (!cleanup.delete(id)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id);
+            throw SessionLookup.notFound(id);
         }
         return ResponseEntity.noContent().build();
     }
@@ -825,8 +826,7 @@ public class SessionController {
     }
 
     private Session requireSession(String id) {
-        return sessions.find(id)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
+        return SessionLookup.require(sessions, id);
     }
 
     public record CreateSessionRequest(String title, String workspace, String projectId, Boolean replaceBlank) {

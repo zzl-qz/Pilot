@@ -21,6 +21,7 @@ import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.AttachmentReferences;
 import com.pilot.server.session.HistoryEditCoordinator;
@@ -240,8 +241,7 @@ public class CheckpointController {
     }
 
     private Session requireSession(String id) {
-        return sessions.find(id)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id));
+        return SessionLookup.require(sessions, id);
     }
 
     private record Selection(Session session, EventEnvelope event, List<EventEnvelope> events, List<String> runIds,

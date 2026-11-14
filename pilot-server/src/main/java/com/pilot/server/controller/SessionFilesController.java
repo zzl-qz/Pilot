@@ -31,6 +31,7 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.core.workspace.WorkspaceViolationException;
+import com.pilot.server.common.web.ApiErrors;
 
 /**
  * 工作区文件浏览：给左侧文件树和右侧只读预览用。
@@ -179,7 +180,7 @@ public class SessionFilesController {
     /** 越界路径属于调用方错误，返回 400 而不是 500。 */
     @ExceptionHandler({WorkspaceViolationException.class, IllegalArgumentException.class})
     public ResponseEntity<Map<String, String>> onInvalidPath(RuntimeException e) {
-        return ResponseEntity.badRequest().body(Map.of("error", e.getMessage() == null ? "非法路径" : e.getMessage()));
+        return ApiErrors.error(HttpStatus.BAD_REQUEST, e.getMessage() == null ? "非法路径" : e.getMessage());
     }
 
     private PathValidator paths(String sessionId) {

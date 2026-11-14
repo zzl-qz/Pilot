@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.session.SessionService;
+import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.session.TaskControlService;
 
@@ -66,8 +67,6 @@ public class TaskControlController {
     }
 
     private void requireSession(String id) {
-        if (sessions.find(id).isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id);
-        }
+        SessionLookup.require(sessions, id);
     }
 }

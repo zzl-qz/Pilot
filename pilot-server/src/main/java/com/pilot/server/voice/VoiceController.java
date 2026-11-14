@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.pilot.server.common.web.ApiErrors;
+
 @RestController
 @RequestMapping("/api/voice")
 public class VoiceController {
@@ -42,8 +44,7 @@ public class VoiceController {
     @PostMapping(value = "/transcriptions", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Map<String, String>> transcribe(@RequestParam("file") MultipartFile file) throws IOException {
         if (voice.limits().exceedsUploadLimit(file.getSize())) {
-            return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-                .body(Map.of("message", voice.limits().uploadLimitMessage()));
+            return ApiErrors.message(HttpStatus.PAYLOAD_TOO_LARGE, voice.limits().uploadLimitMessage());
         }
         try {
             return ResponseEntity.ok(Map.of("text", voice.transcribe(file.getBytes(), file.getContentType())));

@@ -24,6 +24,20 @@ class ApiErrorsTest {
         assertEquals(Map.of("message", "太大"), custom.getBody());
     }
 
+    @Test
+    void fileEndpointsKeepLegacyErrorField() {
+        var failure = ApiErrors.error(HttpStatus.BAD_REQUEST, "非法路径");
+        assertEquals(HttpStatus.BAD_REQUEST, failure.getStatusCode());
+        assertEquals(Map.of("error", "非法路径"), failure.getBody());
+    }
+
+    @Test
+    void missingSessionKeepsHistoricalNotFoundText() {
+        var missing = SessionLookup.notFound("s1");
+        assertEquals(HttpStatus.NOT_FOUND, missing.getStatusCode());
+        assertEquals("session not found: s1", missing.getReason());
+    }
+
     /** 抽取前各控制器就是这样：没有提示语时抛空指针，最终表现为 500。行为保持不变。 */
     @Test
     void missingMessageStillFailsLikeBefore() {

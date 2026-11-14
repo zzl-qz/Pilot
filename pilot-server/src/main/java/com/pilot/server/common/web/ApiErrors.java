@@ -14,6 +14,9 @@ public final class ApiErrors {
     /** 提示语字段名，前端按它取文案，不能改。 */
     public static final String MESSAGE = "message";
 
+    /** 文件、文档类接口沿用的旧字段名：{"error": "提示语"}。前端按它取文案，不能和 message 混用。 */
+    public static final String ERROR = "error";
+
     private ApiErrors() {
     }
 
@@ -34,5 +37,10 @@ public final class ApiErrors {
      */
     public static ResponseEntity<Map<String, String>> message(HttpStatusCode status, String message) {
         return ResponseEntity.status(status).body(Map.of(MESSAGE, message));
+    }
+
+    /** 旧字段名 error 的错误体；只给已经在用它的文件、文档类接口。提示语同样不能为 null。 */
+    public static ResponseEntity<Map<String, String>> error(HttpStatusCode status, String message) {
+        return ResponseEntity.status(status).body(Map.of(ERROR, message));
     }
 }

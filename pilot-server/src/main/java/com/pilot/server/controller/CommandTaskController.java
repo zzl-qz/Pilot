@@ -13,6 +13,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.CommandTaskManager;
+import com.pilot.server.common.web.SessionLookup;
 
 /** 命令的运行状态独立于模型回合；查询和停止只能操作当前会话所属的任务。 */
 @RestController
@@ -59,9 +60,7 @@ public class CommandTaskController {
     }
 
     private void requireSession(String id) {
-        if (sessions.find(id).isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found: " + id);
-        }
+        SessionLookup.require(sessions, id);
     }
 
     private static CommandTaskManager.Task requireTask(CommandTaskManager.Task task) {
