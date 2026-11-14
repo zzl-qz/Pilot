@@ -332,6 +332,10 @@ public class BackupService {
         if (Files.exists(mcp, LinkOption.NOFOLLOW_LINKS)) {
             addSource(result, mcp, "mcp.json", sqlite);
         }
+        Path mcpTrust = dataDir.file("mcp-trust.json");
+        if (Files.exists(mcpTrust, LinkOption.NOFOLLOW_LINKS)) {
+            addSource(result, mcpTrust, "mcp-trust.json", sqlite);
+        }
         return result;
     }
 
