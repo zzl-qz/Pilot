@@ -1,4 +1,5 @@
 import type { MarkdownBlock } from '../types/content.js';
+import DOMPurify from 'dompurify';
 /**
  * Markdown 渲染引擎：从旧版原生实现原样搬运（块级流式解析 + 代码块复制按钮 + katex + mermaid）。
  * katex / mermaid 依旧从 /vendor 下的静态脚本加载，行为与旧版一致。
@@ -286,17 +287,12 @@ function safeSvg(source: string) {
   if (!svg || svg.nodeName.toLowerCase() !== 'svg' || doc.querySelector('parsererror')) {
     return null;
   }
-  svg.querySelectorAll('script, foreignObject, iframe, object, embed, audio, video').forEach((node) => node.remove());
-  svg.querySelectorAll('*').forEach((el) => {
-    [...el.attributes].forEach((attr) => {
-      const name = attr.name.toLowerCase();
-      const value = attr.value.trim().toLowerCase();
-      if (name.startsWith('on') || value.startsWith('javascript:') || (name === 'href' && value.startsWith('javascript:'))) {
-        el.removeAttribute(attr.name);
-      }
-    });
+  // XML 解析保留原有的格式检查，并接受省略 xmlns 的常见模型输出。
+  const cleaned = DOMPurify.sanitize(source, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    RETURN_DOM_FRAGMENT: true
   });
-  return document.importNode(svg, true);
+  return cleaned.firstElementChild instanceof SVGSVGElement ? cleaned.firstElementChild : null;
 }
 
 function codeBlock(code: string, language: string) {

@@ -48,6 +48,14 @@ async function run(page, name, url) {
   await page.waitForFunction(() => notices.includes('复制失败'));
   await page.evaluate(() => render('```svg\n<svg xmlns="http://www.w3.org/2000/svg"><script>bad()</script><foreignObject>bad</foreignObject><rect onclick="bad()" width="10" height="10"/></svg>\n```'));
   assert.equal(await page.locator('.md-preview script,.md-preview foreignObject,.md-preview [onclick]').count(), 0);
+  assert.equal(await page.locator('.md-preview svg rect').count(), 1);
+  await page.evaluate(() => render('```svg\n<svg onload="bad()" viewBox="0 0 10 10"><defs><linearGradient id="paint"><stop offset="0" stop-color="red"/></linearGradient></defs><rect width="10" height="10" fill="url(#paint)"/></svg>\n```'));
+  assert.equal(await page.locator('.md-preview svg').getAttribute('onload'), null);
+  assert.equal(await page.locator('.md-preview svg rect').getAttribute('fill'), 'url(#paint)');
+  assert.equal(await page.locator('.md-preview svg linearGradient').count(), 1);
+  await page.evaluate(() => render('```svg\n<svg><rect></svg>\n```'));
+  assert.equal(await page.locator('.md-preview svg').count(), 0);
+  assert.equal(await page.locator('#target pre').isVisible(), true);
   await page.evaluate(() => render('```html\n<html><body><script>parent.__escaped = true</script>预览</body></html>\n```'));
   assert.equal(await page.locator('iframe').getAttribute('sandbox'), '');
   assert.equal(await page.evaluate(() => window.__escaped), undefined);

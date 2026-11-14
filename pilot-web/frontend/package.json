@@ -34,6 +34,7 @@
     "@astryxdesign/core": "0.7.11",
     "@astryxdesign/theme-neutral": "0.7.11",
     "@stylexjs/stylex": "0.19.1",
+    "dompurify": "3.4.17",
     "immer": "^10.1.1",
     "pdfjs-dist": "^6.5.438",
     "react": "19.3.1",
