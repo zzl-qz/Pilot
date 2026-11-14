@@ -10,17 +10,6 @@ import type { AttachmentMarker, MessagePart } from '../types/input.js';
  * 这里按同一套标记把它们拆出来，队列和对话气泡都复用。
  */
 
-// 单条消息允许批量附加图片或文件，避免截图类任务被过早截断。
-export const MAX_ATTACHMENTS = 64;
-export const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
-// 默认值仅供纯函数与旧数据测试；实际上传使用服务端下发的预算。
-export const MAX_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024;
-
-const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimitsBudget = {
-  maxFiles: MAX_ATTACHMENTS, maxFileBytes: MAX_ATTACHMENT_BYTES, maxTotalBytes: MAX_ATTACHMENT_TOTAL_BYTES,
-  maxRequestBytes: Math.ceil(MAX_ATTACHMENT_TOTAL_BYTES / 3) * 4 + MAX_ATTACHMENTS * 1024 + 2_000_000
-};
-
 export function requireAttachmentLimits(value: AttachmentLimitsBudget | null | undefined): AttachmentLimitsBudget {
   if (!value || !['maxFiles', 'maxFileBytes', 'maxTotalBytes', 'maxRequestBytes']
     .every(key => Number.isSafeInteger(value[key as keyof AttachmentLimitsBudget]) && value[key as keyof AttachmentLimitsBudget] > 0)) {
@@ -102,7 +91,7 @@ export function formatBytes(bytes: unknown) {
  * 判断一个新文件能不能加入当前草稿。
  * 重复（同名同大小）直接静默忽略，其余情况返回一句能直接展示给用户的原因。
  */
-export function checkIncomingFile(existing: readonly MessageAttachment[] | null | undefined, file: { name?: string; size: number; mimeType?: string; type?: string }, limits: AttachmentLimitsBudget = DEFAULT_ATTACHMENT_LIMITS): { ok: boolean; silent?: boolean; reason: string } {
+export function checkIncomingFile(existing: readonly MessageAttachment[] | null | undefined, file: { name?: string; size: number; mimeType?: string; type?: string }, limits: AttachmentLimitsBudget): { ok: boolean; silent?: boolean; reason: string } {
   const name = (file && file.name) || '未命名文件';
   const list = Array.isArray(existing) ? existing : [];
   const mime = String((file && (file.mimeType || file.type)) || '').toLowerCase();

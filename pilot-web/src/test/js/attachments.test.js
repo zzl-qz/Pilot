@@ -2,8 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  MAX_ATTACHMENTS,
-  MAX_ATTACHMENT_BYTES,
   attachmentBatchError,
   requireAttachmentLimits,
   attachmentUrl,
@@ -42,31 +40,30 @@ test('图片判断兼容 MIME 缺失的拖入文件', () => {
 });
 
 test('新文件校验：重复静默忽略，超限与超大给出原因', () => {
+  const limits = { maxFiles: 4, maxFileBytes: 100, maxTotalBytes: 300, maxRequestBytes: 1000 };
   const existing = [{ name: 'a.txt', size: 10 }];
-  assert.deepEqual(checkIncomingFile(existing, { name: 'a.txt', size: 10 }), { ok: false, silent: true, reason: '' });
+  assert.deepEqual(checkIncomingFile(existing, { name: 'a.txt', size: 10 }, limits), { ok: false, silent: true, reason: '' });
   assert.equal(checkIncomingFile(
     [{ name: 'image.png', size: 10, mimeType: 'image/png' }],
-    { name: 'image.png', size: 10, mimeType: 'image/png' }
+    { name: 'image.png', size: 10, mimeType: 'image/png' }, limits
   ).ok, true, '剪贴板图片即使同名同大小也应允许再次添加');
-  assert.equal(checkIncomingFile(existing, { name: 'b.txt', size: 10 }).ok, true);
-  assert.match(checkIncomingFile(existing, { name: 'big.bin', size: MAX_ATTACHMENT_BYTES + 1 }).reason, /big\.bin.*上限/);
-  assert.match(checkIncomingFile(existing, { name: 'empty.txt', size: 0 }).reason, /空文件/);
-  const belowLimit = Array.from({ length: MAX_ATTACHMENTS - 1 }, (_, i) => ({ name: `f${i}`, size: i + 1 }));
-  assert.equal(belowLimit.length, 63);
-  assert.equal(checkIncomingFile(belowLimit, { name: 'x', size: 65 }).ok, true);
-  const full = [...belowLimit, { name: 'f63', size: 64 }];
-  assert.equal(full.length, MAX_ATTACHMENTS);
-  assert.match(checkIncomingFile(full, { name: 'x', size: 66 }).reason, /最多附加 64 个/);
+  assert.equal(checkIncomingFile(existing, { name: 'b.txt', size: 100 }, limits).ok, true);
+  assert.match(checkIncomingFile(existing, { name: 'big.bin', size: 101 }, limits).reason, /big\.bin.*上限/);
+  assert.match(checkIncomingFile(existing, { name: 'empty.txt', size: 0 }, limits).reason, /空文件/);
+  const belowLimit = Array.from({ length: 3 }, (_, i) => ({ name: `f${i}`, size: i + 1 }));
+  assert.equal(checkIncomingFile(belowLimit, { name: 'x', size: 5 }, limits).ok, true);
+  const full = [...belowLimit, { name: 'f3', size: 4 }];
+  assert.match(checkIncomingFile(full, { name: 'x', size: 5 }, limits).reason, /最多附加 4 个/);
 });
 
 test('附件总量预算：累计超限给出原因', () => {
-  const twoMb = 2 * 1024 * 1024;
-  const existing = Array.from({ length: 12 }, (_, i) => ({ name: `f${i}.bin`, size: twoMb }));
-  const incoming = { name: 'more.bin', size: twoMb };
-  const result = checkIncomingFile(existing, incoming);
+  const limits = { maxFiles: 5, maxFileBytes: 100, maxTotalBytes: 300, maxRequestBytes: 1000 };
+  const existing = Array.from({ length: 3 }, (_, i) => ({ name: `f${i}.bin`, size: 100 }));
+  const incoming = { name: 'more.bin', size: 100 };
+  const result = checkIncomingFile(existing, incoming, limits);
   assert.equal(result.ok, false);
   assert.match(result.reason, /预算/);
-  assert.equal(checkIncomingFile(existing.slice(0, 11), incoming).ok, true, '11×2MB + 2MB 未超 25MB 预算');
+  assert.equal(checkIncomingFile(existing.slice(0, 2), incoming, limits).ok, true);
 });
 
 test('服务端自定义预算同时约束新增文件和恢复的草稿', () => {

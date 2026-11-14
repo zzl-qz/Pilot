@@ -13,15 +13,20 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class AttachmentLimits {
+    private static final int DEFAULT_MAX_FILES = 64;
+    private static final int DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
+    private static final int DEFAULT_MAX_TOTAL_BYTES = 25 * 1024 * 1024;
+    private static final int DEFAULT_INLINE_MAX_CHARS = 20_000;
+
     private final int maxFiles;
     private final int maxFileBytes;
     private final int maxTotalBytes;
     private final int inlineMaxChars;
 
-    public AttachmentLimits(@Value("${pilot.attachments.max-files:64}") int maxFiles,
-        @Value("${pilot.attachments.max-file-bytes:2097152}") int maxFileBytes,
-        @Value("${pilot.attachments.max-total-bytes:26214400}") int maxTotalBytes,
-        @Value("${pilot.attachments.inline-max-chars:20000}") int inlineMaxChars) {
+    public AttachmentLimits(@Value("${pilot.attachments.max-files:" + DEFAULT_MAX_FILES + "}") int maxFiles,
+        @Value("${pilot.attachments.max-file-bytes:" + DEFAULT_MAX_FILE_BYTES + "}") int maxFileBytes,
+        @Value("${pilot.attachments.max-total-bytes:" + DEFAULT_MAX_TOTAL_BYTES + "}") int maxTotalBytes,
+        @Value("${pilot.attachments.inline-max-chars:" + DEFAULT_INLINE_MAX_CHARS + "}") int inlineMaxChars) {
         if (maxFiles < 1 || maxFileBytes < 1 || maxTotalBytes < 1 || inlineMaxChars < 1) {
             throw new IllegalArgumentException("附件数量、字节和内联预算必须大于 0");
         }
@@ -70,6 +75,7 @@ public class AttachmentLimits {
     }
 
     public static AttachmentLimits defaults() {
-        return new AttachmentLimits(64, 2 * 1024 * 1024, 25 * 1024 * 1024, 20_000);
+        return new AttachmentLimits(DEFAULT_MAX_FILES, DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_TOTAL_BYTES,
+            DEFAULT_INLINE_MAX_CHARS);
     }
 }

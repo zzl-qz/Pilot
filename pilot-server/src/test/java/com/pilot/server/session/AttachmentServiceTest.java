@@ -121,7 +121,7 @@ class AttachmentServiceTest {
     void rejectsTooManyAttachments() {
         AttachmentService service = new AttachmentService(root);
         List<AttachmentService.Inbound> many = new ArrayList<>();
-        for (int i = 0; i < AttachmentService.MAX_FILES + 1; i++) {
+        for (int i = 0; i < AttachmentLimits.defaults().maxFiles() + 1; i++) {
             many.add(new AttachmentService.Inbound("f" + i + ".png", "image/png", base64("png")));
         }
 
@@ -134,7 +134,7 @@ class AttachmentServiceTest {
     void acceptsSixtyFourImageAttachments() {
         AttachmentService service = new AttachmentService(root);
         List<AttachmentService.Inbound> many = new ArrayList<>();
-        for (int i = 0; i < AttachmentService.MAX_FILES; i++) {
+        for (int i = 0; i < 64; i++) {
             many.add(new AttachmentService.Inbound("f" + i + ".png", "image/png", base64("png")));
         }
 
@@ -146,7 +146,7 @@ class AttachmentServiceTest {
     @Test
     void rejectsOversizeAttachment() {
         AttachmentService service = new AttachmentService(root);
-        byte[] big = new byte[AttachmentService.MAX_BYTES + 1];
+        byte[] big = new byte[AttachmentLimits.defaults().maxFileBytes() + 1];
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> service.prepare("ses_1",
             "hi",

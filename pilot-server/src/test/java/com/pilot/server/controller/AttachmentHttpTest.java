@@ -21,6 +21,8 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import com.pilot.server.config.AttachmentLimits;
 
+import tools.jackson.databind.ObjectMapper;
+
 /** 经过真实 Tomcat、分块传输和 Jackson 的入口限流验证，不连接模型。 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"pilot.store=memory",
     "pilot.attachments.max-files=2", "pilot.attachments.max-file-bytes=3", "pilot.attachments.max-total-bytes=4"})
@@ -29,11 +31,27 @@ class AttachmentHttpTest {
     int port;
     @Autowired
     AttachmentLimits limits;
+    @Autowired
+    ObjectMapper mapper;
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         Path data = Path.of(System.getProperty("java.io.tmpdir"), "pilot-attachment-http-" + UUID.randomUUID());
         registry.add("pilot.data.dir", data::toString);
+    }
+
+    @Test
+    void settingsAdvertiseTheSameConfiguredBudgetAsTheRequestFilter() throws Exception {
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/settings")).build();
+            var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, response.statusCode());
+            var budget = mapper.readTree(response.body()).path("attachmentLimits");
+            assertEquals(2, budget.path("maxFiles").asInt());
+            assertEquals(3, budget.path("maxFileBytes").asInt());
+            assertEquals(4, budget.path("maxTotalBytes").asInt());
+            assertEquals(limits.maxRequestBytes(), budget.path("maxRequestBytes").asLong());
+        }
     }
 
     @Test

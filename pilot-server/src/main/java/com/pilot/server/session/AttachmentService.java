@@ -47,10 +47,6 @@ import com.pilot.server.maintenance.StorageHealth;
 public class AttachmentService {
     private static final Logger log = LoggerFactory.getLogger(AttachmentService.class);
 
-    static final int MAX_FILES = 64;
-    static final int MAX_BYTES = 2 * 1024 * 1024;
-    static final int MAX_TOTAL_BYTES = 25 * 1024 * 1024;
-
     private static final Set<String> IMAGE_TYPES = Set.of("image/png", "image/jpeg", "image/webp", "image/gif");
     private static final Set<String> TEXT_TYPES =
         Set.of("application/json", "application/xml", "application/yaml", "application/x-yaml",
@@ -61,11 +57,6 @@ public class AttachmentService {
         ".toml", ".ini", ".cfg", ".conf", ".log", ".diff", ".patch", ".pom");
 
     private final AttachmentLimits limits;
-    private final int maxFiles;
-    private final int maxFileBytes;
-    private final int maxTotalBytes;
-    private final int inlineMaxChars;
-    private final long maxEncodedFileChars;
     private final Path root;
 
     @Autowired
@@ -81,11 +72,6 @@ public class AttachmentService {
     AttachmentService(Path root, AttachmentLimits limits) {
         this.root = root.toAbsolutePath().normalize();
         this.limits = limits;
-        this.maxFiles = limits.maxFiles();
-        this.maxFileBytes = limits.maxFileBytes();
-        this.maxTotalBytes = limits.maxTotalBytes();
-        this.inlineMaxChars = limits.inlineMaxChars();
-        this.maxEncodedFileChars = limits.maxEncodedFileChars();
     }
 
     private record PendingAttachment(String name, String mime, byte[] bytes, boolean inlineText) {
@@ -117,8 +103,8 @@ public class AttachmentService {
         if (inbound == null || inbound.isEmpty()) {
             return new Prepared(body, List.of(), List.of());
         }
-        if (inbound.size() > maxFiles) {
-            throw new IllegalArgumentException("一次最多附加 " + maxFiles + " 个文件");
+        if (inbound.size() > limits.maxFiles()) {
+            throw new IllegalArgumentException("一次最多附加 " + limits.maxFiles() + " 个文件");
         }
         List<Integer> imagePositions = positions == null ? List.of() : List.copyOf(positions);
         long imageCount = inbound.stream()
@@ -185,7 +171,7 @@ public class AttachmentService {
                 throw new IllegalArgumentException("附件缺少文件内容");
             }
             String raw = item.dataBase64();
-            if (raw.length() > maxEncodedFileChars) {
+            if (raw.length() > limits.maxEncodedFileChars()) {
                 throw new IllegalArgumentException("附件「" + item.name() + "」超过单文件编码长度预算");
             }
             raw = raw.strip();
@@ -213,12 +199,13 @@ public class AttachmentService {
                 }
             }
             long bytes = symbols * 6L / 8L;
-            if (bytes == 0 || bytes > maxFileBytes) {
-                throw new IllegalArgumentException("附件「" + item.name() + "」需大于 0 且不超过 " + maxFileBytes + " 字节");
+            if (bytes == 0 || bytes > limits.maxFileBytes()) {
+                throw new IllegalArgumentException(
+                    "附件「" + item.name() + "」需大于 0 且不超过 " + limits.maxFileBytes() + " 字节");
             }
             total += bytes;
-            if (total > maxTotalBytes) {
-                throw new IllegalArgumentException("附件总大小超过 " + maxTotalBytes + " 字节");
+            if (total > limits.maxTotalBytes()) {
+                throw new IllegalArgumentException("附件总大小超过 " + limits.maxTotalBytes() + " 字节");
             }
             encoded.add(new EncodedAttachment(item, raw));
         }
@@ -381,6 +368,7 @@ public class AttachmentService {
      */
     private String inline(String name, String mime, byte[] bytes, String savedPath) {
         String text = new String(bytes, StandardCharsets.UTF_8);
+        int inlineMaxChars = limits.inlineMaxChars();
         if (text.length() <= inlineMaxChars) {
             return "[附件 " + name + " (" + mime + ")]\n" + text + "\n[附件结束 " + name + "]";
         }
