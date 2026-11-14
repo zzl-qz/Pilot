@@ -128,7 +128,7 @@ public class MobileReceiptStore {
 
     static void validatePeer(String peer) {
         if (peer == null || !peer.matches("[a-f0-9]{64}")) {
-            throw new Rejected(400, "INVALID_DEVICE", "设备标识无效，请更新电脑连接组件", true);
+            throw new Rejected(Rejection.INVALID_DEVICE);
         }
     }
 
@@ -137,7 +137,7 @@ public class MobileReceiptStore {
         checkpoint();
         long expiry = Long.parseLong(id.split(":", 2)[1].split("\\.")[1]);
         if (expiry <= now()) {
-            throw new Rejected(410, "REQUEST_EXPIRED", "请求已过期，请查看任务记录核对结果；不会重新执行", true);
+            throw new Rejected(Rejection.REQUEST_EXPIRED);
         }
         checkCapacity();
         return expiry;
@@ -147,14 +147,14 @@ public class MobileReceiptStore {
         initialize();
         String[] parts = id == null ? new String[0] : id.split(":", 2);
         if (parts.length != 2 || !parts[0].matches("[a-f0-9]{64}") || !parts[1].matches(TOKEN_PATTERN)) {
-            throw new Rejected(426, "RECEIPT_UPGRADE_REQUIRED", "请更新手机和电脑连接组件；旧请求只能核对已有回执", true);
+            throw new Rejected(Rejection.RECEIPT_UPGRADE_REQUIRED);
         }
         String token = parts[1];
         int separator = token.lastIndexOf('.');
         String unsigned = token.substring(0, separator);
         if (!MessageDigest.isEqual(sign(parts[0], unsigned).getBytes(StandardCharsets.US_ASCII),
             token.substring(separator + 1).getBytes(StandardCharsets.US_ASCII))) {
-            throw new Rejected(400, "INVALID_REQUEST_TOKEN", "请求标识签名无效，请核对原请求", true);
+            throw new Rejected(Rejection.INVALID_REQUEST_TOKEN);
         }
     }
 
@@ -191,7 +191,7 @@ public class MobileReceiptStore {
 
     private void checkCapacity() {
         if (count >= maxCount || bytes > maxBytes - RESPONSE_RESERVE) {
-            throw new Rejected(507, "RECEIPT_CAPACITY", "移动回执空间不足，请在电脑端核对待确认记录并清理；读取和结果核对仍可使用", true);
+            throw new Rejected(Rejection.RECEIPT_CAPACITY);
         }
     }
 
@@ -220,7 +220,7 @@ public class MobileReceiptStore {
     public synchronized void acknowledge(String peer, String token) throws IOException {
         validatePeer(peer);
         if (token == null || !(token.matches(TOKEN_PATTERN) || token.matches("[a-f0-9-]{36}"))) {
-            throw new Rejected(400, "INVALID_REQUEST_ID", "无效的回执标识", true);
+            throw new Rejected(Rejection.INVALID_REQUEST_ID);
         }
         String id = peer + ":" + token;
         Receipt receipt = get(id);
@@ -229,7 +229,7 @@ public class MobileReceiptStore {
             return;
         }
         if (receipt.status() == 0 || receipt.status() >= 500) {
-            throw new Rejected(409, "RESULT_UNCERTAIN", "结果仍待核实，不能确认或清理", true);
+            throw new Rejected(Rejection.RESULT_UNCERTAIN);
         }
         if (receipt.acknowledgedAt() == 0) {
             save(id, new Receipt(receipt.fingerprint(), receipt.status(), receipt.contentType(), receipt.body(),
@@ -365,16 +365,33 @@ public class MobileReceiptStore {
         long lastCleanupAt, int lastRemoved, String maintenanceError) {
     }
 
+    /** 回执请求被拒绝的原因：HTTP 状态和给用户的提示放在一处，枚举名就是返回的错误码。 */
+    public enum Rejection {
+        INVALID_DEVICE(400, "设备标识无效，请更新电脑连接组件"), REQUEST_EXPIRED(410, "请求已过期，请查看任务记录核对结果；不会重新执行"),
+        RECEIPT_UPGRADE_REQUIRED(426, "请更新手机和电脑连接组件；旧请求只能核对已有回执"), INVALID_REQUEST_TOKEN(400, "请求标识签名无效，请核对原请求"),
+        RECEIPT_CAPACITY(507, "移动回执空间不足，请在电脑端核对待确认记录并清理；读取和结果核对仍可使用"), INVALID_REQUEST_ID(400, "无效的回执标识"),
+        RESULT_UNCERTAIN(409, "结果仍待核实，不能确认或清理");
+
+        private final int status;
+        private final String message;
+
+        Rejection(int status, String message) {
+            this.status = status;
+            this.message = message;
+        }
+    }
+
     public static class Rejected extends RuntimeException {
         private final int status;
         private final String code;
         private final boolean uncertain;
 
-        public Rejected(int status, String code, String message, boolean uncertain) {
-            super(message);
-            this.status = status;
-            this.code = code;
-            this.uncertain = uncertain;
+        /** 被拒绝的请求一律按「结果不确定」返回，客户端只核对、不重放。 */
+        public Rejected(Rejection reason) {
+            super(reason.message);
+            this.status = reason.status;
+            this.code = reason.name();
+            this.uncertain = true;
         }
 
         public int status() {

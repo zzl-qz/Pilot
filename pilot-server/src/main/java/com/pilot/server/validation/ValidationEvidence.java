@@ -15,16 +15,20 @@ import java.util.List;
  */
 public record ValidationEvidence(String id, String sessionId, String runId, String candidateHash, List<String> files,
     List<String> checks, String status, String environmentFingerprint, String source, Instant recordedAt) {
+    public static final String PASSED = "passed";
+    public static final String FAILED = "failed";
+    public static final String SKIPPED = "skipped";
+
     public ValidationEvidence {
         files = files == null ? List.of() : List.copyOf(files);
         checks = checks == null ? List.of() : List.copyOf(checks);
-        status = status == null || status.isBlank() ? "skipped" : status.strip();
+        status = status == null || status.isBlank() ? SKIPPED : status.strip();
         environmentFingerprint = environmentFingerprint == null ? "" : environmentFingerprint;
         source = source == null ? "" : source;
         recordedAt = recordedAt == null ? Instant.EPOCH : recordedAt;
     }
 
     public boolean passed() {
-        return "passed".equals(status);
+        return PASSED.equals(status);
     }
 }

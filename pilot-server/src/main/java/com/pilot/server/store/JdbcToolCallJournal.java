@@ -29,6 +29,8 @@ import tools.jackson.databind.ObjectMapper;
  */
 public final class JdbcToolCallJournal implements ToolCallJournal {
     private static final int MAX_OBSERVATION_CHARS = 200_000;
+    /** 现状指纹里代替内容哈希的标记：文件已经不在了。 */
+    private static final String DELETED = "DELETED";
     private final SqliteStore store;
     private final ObjectMapper mapper;
     private final String sessionId;
@@ -154,7 +156,7 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
                 throw new IOException("文件路径越出工作区");
             }
             if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) {
-                return "DELETED";
+                return DELETED;
             }
             if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
                 || !file.toRealPath().startsWith(workspace.toRealPath())) {

@@ -18,6 +18,12 @@ import tools.jackson.databind.ObjectMapper;
 
 /** 在明确批准后准备工作区私有 Python 环境；固定来源/配方，不接受任意安装命令。 */
 public final class PrepareRuntimeTool implements Tool {
+    private static final String STATUS_FILE = "status.txt";
+    /** 写进状态文件的标记，只给人排查环境问题用，程序不回读。 */
+    private static final String STATUS_PREPARING = "PREPARING";
+    private static final String STATUS_READY = "READY";
+    private static final String STATUS_CLEANED = "CLEANED";
+    private static final String STATUS_FAILED_PREFIX = "FAILED: ";
     private static final Map<String, String> PACKAGES =
         Map.of("excel", "openpyxl==3.1.5", "slides", "python-pptx==1.0.2", "documents", "python-docx==1.2.0");
     private final PathValidator paths;
@@ -119,7 +125,7 @@ public final class PrepareRuntimeTool implements Tool {
                     throw new IllegalArgumentException("找不到该环境的准备记录");
                 }
                 FileTrees.deleteIfExists(bucket.resolve("venv"));
-                Files.writeString(bucket.resolve("status.txt"), "CLEANED");
+                mark(bucket, STATUS_CLEANED);
                 return "已清理 " + id + "，保留准备记录与日志";
             }
             if (!"prepare".equals(action)) {
@@ -134,7 +140,7 @@ public final class PrepareRuntimeTool implements Tool {
             Files.createDirectories(bucket);
             Files.writeString(bucket.resolve("manifest.json"),
                 new ObjectMapper().writeValueAsString(Map.of("env_id", id, "recipe", recipe, "plan", details)));
-            Files.writeString(bucket.resolve("status.txt"), "PREPARING");
+            mark(bucket, STATUS_PREPARING);
             Path environment = bucket.resolve("venv");
             List<String> create = new ArrayList<>(python);
             create.addAll(List.of("-I", "-m", "venv", "--copies", environment.toString()));
@@ -154,14 +160,14 @@ public final class PrepareRuntimeTool implements Tool {
                 paths.root(), bucket.resolve("verify.log")) != 0) {
                 throw new IOException("依赖导入验证失败");
             }
-            Files.writeString(bucket.resolve("status.txt"), "READY");
+            mark(bucket, STATUS_READY);
             return "环境准备并导入验证通过：env_id=" + id + "\nPython=" + executable + "\n记录=" + paths.display(bucket)
                 + "；仅验证环境可用，尚未验证任务产物。";
         } catch (Exception e) {
             if (bucket != null && !"cleanup".equals(args.get("action"))) {
                 try {
                     FileTrees.deleteIfExists(bucket.resolve("venv"));
-                    Files.writeString(bucket.resolve("status.txt"), "FAILED: " + e.getMessage());
+                    mark(bucket, STATUS_FAILED_PREFIX + e.getMessage());
                 } catch (Exception cleanup) {
                     return "ERROR: " + e.getMessage() + "；清理未成功：" + cleanup.getMessage() + "；检查 " + bucket;
                 }
@@ -191,6 +197,10 @@ public final class PrepareRuntimeTool implements Tool {
             .map(candidate -> windows && candidate.getFileName().toString().equals(fallback)
                 ? List.of(candidate.toString(), "-3") : List.of(candidate.toString()))
             .orElseGet(List::of);
+    }
+
+    private static void mark(Path bucket, String status) throws IOException {
+        Files.writeString(bucket.resolve(STATUS_FILE), status);
     }
 
     private static int runProcess(List<String> command, Path root, Path log) throws Exception {

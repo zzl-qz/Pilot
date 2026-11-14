@@ -14,6 +14,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -285,6 +287,20 @@ class MobileReceiptStoreTest {
             Files.write(state, saved);
         }
         assertEquals(1, store.cleanup().lastRemoved());
+    }
+
+    @Test
+    void rejectionsKeepHttpStatusCodeAndMessage() {
+        var invalid = assertThrows(MobileReceiptStore.Rejected.class, () -> MobileReceiptStore.validatePeer("bad"));
+        assertEquals(400, invalid.status());
+        assertEquals("INVALID_DEVICE", invalid.code());
+        assertEquals("设备标识无效，请更新电脑连接组件", invalid.getMessage());
+        assertTrue(invalid.uncertain());
+        // 枚举名就是返回给客户端的错误码
+        assertEquals(
+            List.of("INVALID_DEVICE", "REQUEST_EXPIRED", "RECEIPT_UPGRADE_REQUIRED", "INVALID_REQUEST_TOKEN",
+                "RECEIPT_CAPACITY", "INVALID_REQUEST_ID", "RESULT_UNCERTAIN"),
+            Arrays.stream(MobileReceiptStore.Rejection.values()).map(Enum::name).toList());
     }
 
     @Test

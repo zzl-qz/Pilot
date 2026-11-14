@@ -83,6 +83,7 @@ import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.multi.DispatchAgentsTool;
 import com.pilot.server.multi.MultiAgentService;
+import com.pilot.server.validation.ValidationEvidence;
 import com.pilot.server.workspace.RunSnapshotService;
 import com.pilot.server.workspace.WorkspaceToolFactory;
 
@@ -1551,12 +1552,12 @@ public class AgentRunService implements RunStarter {
             // 使用已绑定当前源码版本的账本判断，不能把旧检查或普通 exit 0 重新包装成通过。
             boolean qualifying =
                 checks.stream().anyMatch(check -> com.pilot.core.tool.VerificationCheck.passingKind(check).qualifies());
-            String status = ExecutionPhase.CHECKS_FAILED.is(phase) ? "failed"
-                : qualifying && WireEnum.in(phase, ExecutionPhase.CHECKS_PASSED, ExecutionPhase.VERIFIED) ? "passed"
-                    : "skipped";
-            validations.record(new com.pilot.server.validation.ValidationEvidence("val_" + java.util.UUID.randomUUID(),
-                sessionId, runId, candidate, files, checks, status,
-                com.pilot.server.multi.SandboxStore.environmentFingerprint(), "run", java.time.Instant.now()));
+            String status = ExecutionPhase.CHECKS_FAILED.is(phase) ? ValidationEvidence.FAILED
+                : qualifying && WireEnum.in(phase, ExecutionPhase.CHECKS_PASSED, ExecutionPhase.VERIFIED)
+                    ? ValidationEvidence.PASSED : ValidationEvidence.SKIPPED;
+            validations.record(new ValidationEvidence("val_" + java.util.UUID.randomUUID(), sessionId, runId, candidate,
+                files, checks, status, com.pilot.server.multi.SandboxStore.environmentFingerprint(), "run",
+                java.time.Instant.now()));
         } catch (RuntimeException e) {
             log.debug("记录校验证据失败：session={}, run={}", sessionId, runId, e);
         }
