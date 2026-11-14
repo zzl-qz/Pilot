@@ -1,4 +1,4 @@
-package com.pilot.server.maintenance;
+package com.pilot.server.common.data;
 
 import java.time.Instant;
 import java.util.List;

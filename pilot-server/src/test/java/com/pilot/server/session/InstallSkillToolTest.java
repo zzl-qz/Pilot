@@ -17,8 +17,8 @@ import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.UseSkillTool;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
-import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.config.SkillProperties;
 
 import tools.jackson.databind.json.JsonMapper;

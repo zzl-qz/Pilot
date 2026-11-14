@@ -32,8 +32,8 @@ import com.pilot.core.exec.ExecutionSettings;
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.RiskLevel;
 import com.pilot.core.multi.SandboxChange;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.MultiAgentProperties;
-import com.pilot.server.config.PilotDataDir;
 
 class CommandVerificationGateTest {
     @TempDir

@@ -20,7 +20,7 @@ import com.pilot.core.tool.DocumentRenderer;
 import com.pilot.core.util.FileNames;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.store.AutomationStore;
 
 import tools.jackson.databind.JsonNode;

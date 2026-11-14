@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.runtime.bootstrap.BootstrapPlatform;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.runtime.bootstrap.SourceEnvironment;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.runtime.SourceLayout;
 
 /** 仅在打开手机连接时检查已打包组件；不构建移动源码，原生修复不占用 HTTP 请求线程。 */

@@ -22,7 +22,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.schedule.ScheduleService;
 import com.pilot.server.schedule.ScheduledTask;
 import com.pilot.server.session.TaskControlService;

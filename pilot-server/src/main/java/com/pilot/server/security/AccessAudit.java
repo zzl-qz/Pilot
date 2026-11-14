@@ -11,7 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 
 /**
  * 访问审计：只记录拒绝、限流和令牌缺失，成功请求不逐条落盘。

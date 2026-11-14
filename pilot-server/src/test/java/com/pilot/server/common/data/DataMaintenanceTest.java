@@ -1,4 +1,4 @@
-package com.pilot.server.maintenance;
+package com.pilot.server.common.data;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;

@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Configuration;
 
 import com.pilot.core.tool.CommandTaskManager;
 import com.pilot.core.tool.ToolRegistry;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.workspace.WorkspaceToolFactory;
 
 import tools.jackson.databind.ObjectMapper;

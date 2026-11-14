@@ -19,7 +19,7 @@ import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.session.InMemoryRunCheckpointRepository;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.CommandTaskManager;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.session.RecoveryReportService;
 import com.pilot.server.session.RunStateTracker;
 import com.pilot.server.validation.ValidationLedger;

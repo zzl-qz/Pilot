@@ -31,9 +31,9 @@ import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunCheckpointRepository;
 import com.pilot.core.util.Texts;
 import com.pilot.core.util.WireEnum;
-import com.pilot.server.config.PilotDataDir;
-import com.pilot.server.maintenance.DataMaintenance;
-import com.pilot.server.maintenance.StorageHealth;
+import com.pilot.server.common.data.DataMaintenance;
+import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.common.data.StorageHealth;
 
 /**
  * 把运行推进过程写成可恢复的调度状态，并用租约防止重复接管。

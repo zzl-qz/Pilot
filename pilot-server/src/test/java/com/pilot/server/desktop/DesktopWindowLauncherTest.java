@@ -21,7 +21,7 @@ import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
 
 import com.pilot.server.browser.BrowserHome;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.desktop.DesktopWindowLauncher.LaunchResult;
 import com.pilot.server.runtime.RuntimeMirrors;
 

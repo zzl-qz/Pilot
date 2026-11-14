@@ -12,8 +12,8 @@ import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.skill.Skill;
 import com.pilot.core.skill.SkillCatalog;
 import com.pilot.core.skill.SkillSource;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
-import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.config.SkillProperties;
 
 /**

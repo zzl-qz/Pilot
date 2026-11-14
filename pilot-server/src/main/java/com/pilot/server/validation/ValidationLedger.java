@@ -23,8 +23,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import com.pilot.server.config.PilotDataDir;
-import com.pilot.server.maintenance.StorageHealth;
+import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.common.data.StorageHealth;
 import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.ObjectMapper;

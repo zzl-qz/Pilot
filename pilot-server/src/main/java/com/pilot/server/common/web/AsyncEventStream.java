@@ -1,4 +1,4 @@
-package com.pilot.server.stream;
+package com.pilot.server.common.web;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

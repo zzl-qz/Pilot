@@ -19,7 +19,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 
 import com.pilot.core.tool.CommandTaskManager;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.session.RunRegistry;
 
 class GitWorktreesTest {

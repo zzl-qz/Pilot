@@ -21,7 +21,7 @@ import com.pilot.core.event.ToolStarted;
 import com.pilot.core.session.InMemoryRunCheckpointRepository;
 import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunCheckpointRepository;
-import com.pilot.server.maintenance.StorageHealth;
+import com.pilot.server.common.data.StorageHealth;
 
 class RunStateTrackerTest {
 

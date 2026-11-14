@@ -1,11 +1,9 @@
-package com.pilot.server.config;
+package com.pilot.server.common.data;
 
 import java.nio.file.Path;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-
-import com.pilot.server.maintenance.DataMaintenance;
 
 /**
  * 运行期数据的根目录：会话库、快照、trace、附件都放在这里。

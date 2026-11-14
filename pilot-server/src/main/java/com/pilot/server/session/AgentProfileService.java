@@ -7,8 +7,8 @@ import java.util.List;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.multi.AgentProfileCatalog;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
-import com.pilot.server.config.PilotDataDir;
 
 /**
  * 自定义子代理目录的装配点（两级目录，语义与 {@link SkillService} 同构）。

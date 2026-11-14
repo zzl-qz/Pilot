@@ -31,7 +31,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.stream.AsyncEventStream;
+import com.pilot.server.common.web.AsyncEventStream;
 
 /** 真实 Tomcat/Socket 验证非阻塞发送，MockMvc 的输出流不支持 WriteListener。 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,

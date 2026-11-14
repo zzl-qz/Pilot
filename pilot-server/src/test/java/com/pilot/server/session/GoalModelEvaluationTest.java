@@ -37,7 +37,7 @@ import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.UpdatePlanTool;
 import com.pilot.core.workspace.PathValidator;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;

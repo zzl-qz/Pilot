@@ -32,7 +32,7 @@ import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.session.SessionRepository;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
-import com.pilot.server.stream.AsyncEventStream;
+import com.pilot.server.common.web.AsyncEventStream;
 
 import tools.jackson.databind.ObjectMapper;
 

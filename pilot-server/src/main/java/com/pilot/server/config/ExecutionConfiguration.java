@@ -8,6 +8,7 @@ import com.pilot.core.exec.ExecutionBackends;
 import com.pilot.core.exec.ExecutionIsolation;
 import com.pilot.core.exec.ExecutionLimits;
 import com.pilot.core.exec.ExecutionSettings;
+import com.pilot.server.common.data.PilotDataDir;
 
 /**
  * 命令执行隔离装配。

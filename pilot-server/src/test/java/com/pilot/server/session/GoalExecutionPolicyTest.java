@@ -34,7 +34,7 @@ import com.pilot.core.model.ModelUsage;
 import com.pilot.core.tool.CommandTaskManager.Task;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolExecutor;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 
 import tools.jackson.databind.json.JsonMapper;
 

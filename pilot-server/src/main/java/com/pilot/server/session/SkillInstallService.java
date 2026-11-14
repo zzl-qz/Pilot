@@ -30,7 +30,7 @@ import com.pilot.core.skill.SkillCatalog;
 import com.pilot.core.skill.SkillManifest;
 import com.pilot.core.skill.SkillProblem;
 import com.pilot.core.util.FileTrees;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 
 /**
  * 技能安装器：把 git 仓库或本机目录里的技能装进项目级/用户级技能目录。

@@ -12,7 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.RiskLevel;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 
 import tools.jackson.databind.json.JsonMapper;
 

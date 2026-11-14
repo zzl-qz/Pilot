@@ -22,7 +22,7 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.util.HostOs;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.WebSearchProperties;
 import com.pilot.server.runtime.SourceLayout;
 

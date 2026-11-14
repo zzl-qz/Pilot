@@ -23,7 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.store.EventCodec;
 import com.pilot.server.store.JdbcSessionRepository;
 import com.pilot.server.store.SqliteStore;

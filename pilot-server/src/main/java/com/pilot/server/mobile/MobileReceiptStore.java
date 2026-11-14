@@ -28,8 +28,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.util.Sha256;
-import com.pilot.server.config.PilotDataDir;
-import com.pilot.server.maintenance.DataMaintenance;
+import com.pilot.server.common.data.DataMaintenance;
+import com.pilot.server.common.data.PilotDataDir;
 
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;

@@ -15,7 +15,7 @@ import org.springframework.boot.web.server.WebServer;
 import org.springframework.boot.web.server.context.WebServerInitializedEvent;
 
 import com.pilot.core.runtime.bootstrap.MobileBridgeLayout;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.security.SecurityProperties;
 
 import tools.jackson.databind.ObjectMapper;

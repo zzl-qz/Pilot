@@ -27,9 +27,9 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.loop.Attachment;
 import com.pilot.core.util.FileTrees;
+import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.common.data.StorageHealth;
 import com.pilot.server.config.AttachmentLimits;
-import com.pilot.server.config.PilotDataDir;
-import com.pilot.server.maintenance.StorageHealth;
 
 /**
  * 把用户随消息粘贴的文件变成模型能看懂的上下文。

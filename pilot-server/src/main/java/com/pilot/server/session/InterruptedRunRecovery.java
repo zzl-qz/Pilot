@@ -36,11 +36,11 @@ import com.pilot.core.session.SessionStatus;
 @Component
 @org.springframework.context.annotation.DependsOn("historyEditCoordinator")
 public class InterruptedRunRecovery implements ApplicationRunner {
-    private com.pilot.server.maintenance.DataMaintenance maintenance =
-        new com.pilot.server.maintenance.DataMaintenance();
+    private com.pilot.server.common.data.DataMaintenance maintenance =
+        new com.pilot.server.common.data.DataMaintenance();
 
     @org.springframework.beans.factory.annotation.Autowired
-    void useMaintenance(com.pilot.server.config.PilotDataDir dataDir) {
+    void useMaintenance(com.pilot.server.common.data.PilotDataDir dataDir) {
         this.maintenance = dataDir.maintenance();
     }
 

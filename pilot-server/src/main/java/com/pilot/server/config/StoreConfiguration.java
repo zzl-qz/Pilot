@@ -18,6 +18,7 @@ import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.RunCheckpointRepository;
 import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.SessionRepository;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.store.EventCodec;
 import com.pilot.server.store.InMemorySettingsStore;
 import com.pilot.server.store.JdbcConversationRepository;

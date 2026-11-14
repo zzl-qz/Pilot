@@ -20,8 +20,8 @@ import com.pilot.core.exec.IsolatedWorkspace;
 import com.pilot.core.multi.ChangeStatus;
 import com.pilot.core.multi.SandboxChange;
 import com.pilot.core.workspace.PathValidator;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.MultiAgentProperties;
-import com.pilot.server.config.PilotDataDir;
 
 import tools.jackson.databind.json.JsonMapper;
 

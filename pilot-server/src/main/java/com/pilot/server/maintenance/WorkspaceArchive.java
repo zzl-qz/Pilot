@@ -20,7 +20,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.workspace.GitWorktrees;
 
 import tools.jackson.databind.JsonNode;

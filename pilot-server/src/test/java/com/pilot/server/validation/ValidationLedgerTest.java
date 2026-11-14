@@ -18,8 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
-import com.pilot.server.config.PilotDataDir;
-import com.pilot.server.maintenance.StorageHealth;
+import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.common.data.StorageHealth;
 import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.json.JsonMapper;

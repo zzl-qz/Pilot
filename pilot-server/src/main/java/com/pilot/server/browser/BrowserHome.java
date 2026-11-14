@@ -5,7 +5,7 @@ import java.nio.file.Path;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.runtime.SourceLayout;
 
 /** 浏览器进程、桌面端点和安装日志共用的运行目录。 */

@@ -15,8 +15,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.core.permission.PermissionMode;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
-import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.config.SkillProperties;
 
 /** 安装器单测：全部走本机目录来源或假 Cloner，永不依赖网络与真实 git。 */

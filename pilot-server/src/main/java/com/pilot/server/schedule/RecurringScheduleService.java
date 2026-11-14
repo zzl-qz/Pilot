@@ -18,8 +18,8 @@ import org.springframework.stereotype.Service;
 
 import com.pilot.core.session.SessionService;
 import com.pilot.core.util.WireEnum;
-import com.pilot.server.config.PilotDataDir;
-import com.pilot.server.maintenance.DataMaintenance;
+import com.pilot.server.common.data.DataMaintenance;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.store.AutomationStore;
 
 import tools.jackson.databind.ObjectMapper;

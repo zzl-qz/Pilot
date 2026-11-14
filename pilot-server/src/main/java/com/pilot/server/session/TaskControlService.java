@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.util.WireEnum;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.workspace.HistoryFileChange;
 
 import tools.jackson.databind.ObjectMapper;

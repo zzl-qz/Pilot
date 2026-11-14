@@ -18,8 +18,8 @@ import com.pilot.core.exec.ExecutionLimits;
 import com.pilot.core.exec.ExecutionSettings;
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.RiskLevel;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.MultiAgentProperties;
-import com.pilot.server.config.PilotDataDir;
 
 /** 需显式启用并准备镜像；网络下载和真实编译，不调用模型 API。 */
 @EnabledIfSystemProperty(named = "pilot.test.project-builds", matches = "true")

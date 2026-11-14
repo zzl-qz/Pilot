@@ -8,10 +8,10 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.exec.ExecutionBackends;
+import com.pilot.server.common.data.DataMaintenance;
+import com.pilot.server.common.data.StorageHealth;
 import com.pilot.server.maintenance.BackupService;
-import com.pilot.server.maintenance.DataMaintenance;
 import com.pilot.server.maintenance.RetentionService;
-import com.pilot.server.maintenance.StorageHealth;
 
 /**
  * 运维接口：备份、保留策略、存储与隔离状态。

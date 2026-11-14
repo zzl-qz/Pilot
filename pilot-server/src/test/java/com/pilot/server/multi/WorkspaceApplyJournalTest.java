@@ -29,7 +29,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.RiskLevel;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;

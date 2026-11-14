@@ -28,8 +28,8 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.util.HostOs;
 import com.pilot.core.util.Sha256;
-import com.pilot.server.config.PilotDataDir;
-import com.pilot.server.maintenance.DataMaintenance;
+import com.pilot.server.common.data.DataMaintenance;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.store.SqliteStore;
 import com.pilot.server.workspace.HistoryFileChange;
 import com.pilot.server.workspace.RunSnapshotService;

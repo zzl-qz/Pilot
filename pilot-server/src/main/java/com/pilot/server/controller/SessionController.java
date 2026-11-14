@@ -48,6 +48,7 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
 import com.pilot.core.skill.SkillProblem;
 import com.pilot.core.tool.DocumentRenderer;
+import com.pilot.server.common.web.AsyncEventStream;
 import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.AttachmentReferences;
@@ -57,7 +58,6 @@ import com.pilot.server.session.RunSubmissionService;
 import com.pilot.server.session.SessionCleanupService;
 import com.pilot.server.session.SkillService;
 import com.pilot.server.session.TaskControlService;
-import com.pilot.server.stream.AsyncEventStream;
 import com.pilot.server.workspace.WorkspaceService;
 
 import tools.jackson.databind.ObjectMapper;

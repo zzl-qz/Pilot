@@ -22,7 +22,7 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.tool.CommandTaskManager;
 import com.pilot.core.util.Sha256;
-import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.session.RunRegistry;
 
 /**
