@@ -22,6 +22,7 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.tool.ProcessSupport;
 import com.pilot.server.runtime.NpmInstall;
 import com.pilot.server.runtime.RuntimeMirrors;
+import com.pilot.server.runtime.SourceLayout;
 
 /**
  * 桌面壳（{@code pilot-desktop} 的 Electron）没装时自动安装，装好再打开窗口。
@@ -202,7 +203,7 @@ public class DesktopShellInstaller {
                 dirs.add(dir);
             }
         }
-        dirs.add(root.resolve(".pilot").resolve("runtime").resolve("node").toString());
+        dirs.add(SourceLayout.bundledRuntime(root).resolve("node").toString());
         for (String entry : path.split(File.pathSeparator)) {
             if (!entry.isBlank()) {
                 dirs.add(entry);

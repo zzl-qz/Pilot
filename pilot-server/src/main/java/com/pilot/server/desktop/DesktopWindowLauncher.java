@@ -23,6 +23,7 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.server.browser.BrowserHome;
 import com.pilot.server.browser.BrowserRuntime;
+import com.pilot.server.runtime.SourceLayout;
 
 /**
  * 服务起来后打开桌面窗口（Electron），浏览器访问同一个端口仍然是同一个 Web 工作台。
@@ -185,16 +186,7 @@ public class DesktopWindowLauncher {
     }
 
     static Path repositoryRoot() {
-        Path dir = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath();
-        for (int i = 0; i < 6 && dir != null; i++) {
-            if (Files.isRegularFile(dir.resolve("pom.xml"))
-                && Files.isRegularFile(dir.resolve("pilot-server").resolve("pom.xml"))
-                && Files.isDirectory(dir.resolve("pilot-desktop"))) {
-                return dir;
-            }
-            dir = dir.getParent();
-        }
-        return null;
+        return SourceLayout.desktopRoot(SourceLayout.workingDirectory());
     }
 
     static Path electronBinary(Path root) {

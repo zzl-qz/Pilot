@@ -16,6 +16,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 
+import com.pilot.server.runtime.SourceLayout;
+
 /**
  * 开发期启动检查：在启动日志里询问要不要重新拉取前端依赖（{@code pilot-web/frontend}）。
  *
@@ -68,7 +70,7 @@ public final class FrontendDepsPrompt {
         if (root == null) {
             return;
         }
-        Path frontend = root.resolve("pilot-web").resolve("frontend");
+        Path frontend = SourceLayout.frontendDirectory(root);
         if (!Files.isRegularFile(frontend.resolve("package.json")) || skipRequested()) {
             return;
         }
@@ -196,7 +198,7 @@ public final class FrontendDepsPrompt {
                 // PATH 里混进非法路径不稀奇，跳过即可
             }
         }
-        Path bundled = root.resolve(".pilot").resolve("runtime").resolve("node").resolve(name);
+        Path bundled = SourceLayout.bundledRuntime(root).resolve("node").resolve(name);
         return Files.isRegularFile(bundled) ? bundled.getParent() : null;
     }
 
@@ -213,17 +215,8 @@ public final class FrontendDepsPrompt {
         }
     }
 
-    /** 向上找源码根目录（与 BrowserRuntime / BundledRuntime 的判定方式一致）。 */
     static Path repositoryRoot() {
-        Path dir = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath();
-        for (int i = 0; i < 6 && dir != null; i++) {
-            if (Files.isRegularFile(dir.resolve("pom.xml"))
-                && Files.isRegularFile(dir.resolve("pilot-web").resolve("frontend").resolve("package.json"))) {
-                return dir;
-            }
-            dir = dir.getParent();
-        }
-        return null;
+        return SourceLayout.frontendRoot(SourceLayout.workingDirectory());
     }
 
     static boolean skipRequested() {
@@ -252,7 +245,7 @@ public final class FrontendDepsPrompt {
     }
 
     private static Path stampFile(Path root) {
-        return root.resolve(".pilot").resolve(STAMP_NAME);
+        return SourceLayout.localData(root).resolve(STAMP_NAME);
     }
 
     private static boolean askedRecently(Path root) {

@@ -21,6 +21,7 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.config.WebSearchProperties;
+import com.pilot.server.runtime.SourceLayout;
 
 /**
  * Pilot 启动时在本机拉起 SearXNG。
@@ -137,23 +138,11 @@ public class LocalSearchRuntime implements SmartLifecycle {
 
     /** 不管 IDE 的工作目录是仓库根还是 pilot-server，都把 SearXNG 放在仓库下的 .pilot。 */
     private Path managedRoot() {
-        Path repo = repoRoot();
+        Path repo = SourceLayout.serverRoot(SourceLayout.workingDirectory());
         if (repo != null) {
-            return repo.resolve(".pilot").resolve("searxng");
+            return SourceLayout.localData(repo).resolve("searxng");
         }
         return dataDir.file("searxng");
-    }
-
-    private static Path repoRoot() {
-        Path dir = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath();
-        for (int i = 0; i < 6 && dir != null; i++) {
-            if (Files.isRegularFile(dir.resolve("pom.xml"))
-                && Files.isRegularFile(dir.resolve("pilot-server").resolve("pom.xml"))) {
-                return dir;
-            }
-            dir = dir.getParent();
-        }
-        return null;
     }
 
     private static void copySettings(Path target) throws IOException {

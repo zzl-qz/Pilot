@@ -1,6 +1,5 @@
 package com.pilot.server.config;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
@@ -9,6 +8,8 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
+
+import com.pilot.server.runtime.SourceLayout;
 
 /**
  * 开发时直接读 pilot-web 源码里的页面，改 HTML/JS/CSS 保存后刷新浏览器即可。
@@ -19,6 +20,9 @@ public class LiveStaticEnvironment implements EnvironmentPostProcessor, Ordered 
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
+        if (environment.containsProperty(LOCATIONS_KEY) || environment.containsProperty(LOCATIONS_KEY + "[0]")) {
+            return;
+        }
         Path source = findStaticSource();
         if (source == null) {
             return;
@@ -36,15 +40,7 @@ public class LiveStaticEnvironment implements EnvironmentPostProcessor, Ordered 
 
     /** 从工作目录往上找几层。IDEA 的工作目录有时是仓库根，有时是 pilot-server。 */
     static Path findStaticSource() {
-        Path dir = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
-        for (int i = 0; i < 5 && dir != null; i++) {
-            Path candidate = dir.resolve("pilot-web/src/main/resources/static");
-            if (Files.isDirectory(candidate)) {
-                return candidate;
-            }
-            dir = dir.getParent();
-        }
-        return null;
+        return SourceLayout.staticSource(SourceLayout.workingDirectory());
     }
 
     @Override

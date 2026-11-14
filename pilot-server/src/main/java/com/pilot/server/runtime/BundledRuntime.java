@@ -201,15 +201,9 @@ public class BundledRuntime implements SmartLifecycle {
     }
 
     private static Path runtimeRoot() {
-        Path dir = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath();
-        for (int i = 0; i < 6 && dir != null; i++) {
-            if (Files.isRegularFile(dir.resolve("pom.xml"))
-                && Files.isRegularFile(dir.resolve("pilot-server").resolve("pom.xml"))) {
-                return dir.resolve(".pilot").resolve("runtime");
-            }
-            dir = dir.getParent();
-        }
-        return Path.of(System.getProperty("user.dir", "."), ".pilot", "runtime");
+        Path current = SourceLayout.workingDirectory();
+        Path root = SourceLayout.serverRoot(current);
+        return SourceLayout.bundledRuntime(root == null ? current : root);
     }
 
     private static Archive pythonArchive() {
