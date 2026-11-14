@@ -3,7 +3,6 @@ package com.pilot.server.schedule;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -23,12 +22,14 @@ import org.springframework.stereotype.Service;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.Tool;
+import com.pilot.core.util.WireEnum;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.DataMaintenance;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.session.RunSubmissionService;
 import com.pilot.server.session.SkillService;
 import com.pilot.server.session.TaskControlService;
+import com.pilot.server.session.TaskControlStatus;
 import com.pilot.server.store.ScheduleRepository;
 import com.pilot.server.workspace.GitWorktrees;
 import com.pilot.server.workspace.GitWorktrees.Created;
@@ -54,12 +55,15 @@ public class ScheduleService {
     private final GitWorktrees worktrees;
     private final WorkspaceToolFactory toolFactory;
     private volatile boolean ready;
-    private static final int MAX_WAKE_ATTEMPTS = 100;
-    private static final int MAX_RECOVERY_ATTEMPTS = 3;
-    private static final long RECOVERY_DELAY_SECONDS = 30L;
-    private static final long WAITING_DELAY_SECONDS = 60;
-    private static final Duration TOTAL_EXECUTION_LIMIT = Duration.ofHours(24);
-    private static final Set<String> TERMINAL = Set.of("COMPLETED", "CANCELLED", "NEEDS_ATTENTION");
+    /** wait_until 工具名；模型按这个名字调用，改名等于改协议。 */
+    private static final String WAKE_TOOL = "wait_until";
+    private static final String ID_PREFIX = "schedule_";
+    /** 进入这些状态时，把历史里还在 RUNNING 的那次调用收尾。 */
+    private static final Set<ScheduleState> ENDS_INVOCATION = Set.of(ScheduleState.COMPLETED, ScheduleState.CANCELLED,
+        ScheduleState.PAUSED, ScheduleState.NEEDS_ATTENTION, ScheduleState.WAITING);
+    /** 只有还没开始跑的计划可以改时间。 */
+    private static final Set<ScheduleState> RESCHEDULABLE =
+        Set.of(ScheduleState.SCHEDULED, ScheduleState.PAUSED, ScheduleState.WAITING);
 
     public record Create(String name, String sourceSessionId, String content, Instant runAt, String timezone,
         TaskControlService.Requirements requirements, String skill, Boolean fullAccess, Boolean isolated,
@@ -119,11 +123,11 @@ public class ScheduleService {
     /** 取消和超时先写终态，再请求异步停止；旧运行退出前不能启动下一轮。 */
     synchronized boolean occurrenceFinished(String id) {
         var job = get(id);
-        return TERMINAL.contains(job.state()) && runs.activeRun(job.sessionId()).isEmpty();
+        return ScheduleState.terminal(job.state()) && runs.activeRun(job.sessionId()).isEmpty();
     }
 
     public synchronized ScheduledTask create(Create request) {
-        return createOccurrence(request, "schedule_" + UUID.randomUUID());
+        return createOccurrence(request, ID_PREFIX + UUID.randomUUID());
     }
 
     /** 周期触发使用稳定的实例 ID；重启后重复投递只返回原任务。 */
@@ -135,14 +139,14 @@ public class ScheduleService {
         if (request == null || request.content() == null || request.content().isBlank()) {
             throw new IllegalArgumentException("请填写任务目标");
         }
-        if (request.content().length() > 100_000) {
+        if (request.content().length() > ScheduleLimits.MAX_CONTENT_CHARS) {
             throw new IllegalArgumentException("任务目标过长");
         }
         Instant now = clock.instant();
         if (request.runAt() == null || !request.runAt().isAfter(now)) {
             throw new IllegalArgumentException("执行时间必须在未来");
         }
-        String zone = request.timezone() == null ? "UTC" : request.timezone();
+        String zone = request.timezone() == null ? ScheduleLimits.DEFAULT_TIMEZONE : request.timezone();
         ZoneId.of(zone);
         Session source = sessions.find(request.sourceSessionId() == null ? "" : request.sourceSessionId())
             .orElseThrow(() -> new IllegalArgumentException("请先选择任务所属的对话和工作区"));
@@ -150,10 +154,11 @@ public class ScheduleService {
             throw new IllegalArgumentException("请从主对话创建定时任务");
         }
         String name = request.name() == null || request.name().isBlank()
-            ? request.content().strip().substring(0, Math.min(40, request.content().strip().length()))
+            ? request.content().strip().substring(0,
+                Math.min(ScheduleLimits.DEFAULT_NAME_CHARS, request.content().strip().length()))
             : request.name().strip();
-        if (name.length() > 120) {
-            throw new IllegalArgumentException("任务名称最多 120 个字符");
+        if (name.length() > ScheduleLimits.MAX_NAME_CHARS) {
+            throw new IllegalArgumentException("任务名称最多 " + ScheduleLimits.MAX_NAME_CHARS + " 个字符");
         }
         String skill = request.skill() == null || request.skill().isBlank() ? null : request.skill().strip();
         if (skill != null && skills.catalogFor(source.workspace()).find(skill).isEmpty()) {
@@ -182,14 +187,15 @@ public class ScheduleService {
                 if (skill != null && skills.catalogFor(path).find(skill).isEmpty()) {
                     throw new IllegalArgumentException("独立工作区缺少所选技能；请先将项目技能提交到 Git，或改用原目录执行");
                 }
-                executionWorkspace = new ScheduledTask.Workspace("ISOLATED", path, isolated.base(), isolated.branch(),
-                    isolated.commit(), null);
+                executionWorkspace = new ScheduledTask.Workspace(WorkspaceMode.ISOLATED.name(), path, isolated.base(),
+                    isolated.branch(), isolated.commit(), null);
             } else {
-                executionWorkspace = new ScheduledTask.Workspace("SHARED", path, path, "", "", null);
+                executionWorkspace = new ScheduledTask.Workspace(WorkspaceMode.SHARED.name(), path, path, "", "", null);
             }
             target = sessions.createSession(name, path, source.projectId(), false);
             var task = new ScheduledTask(id, name, target.id(), null, request.content().strip(), requirements, skill,
-                request.runAt(), zone, "SCHEDULED", null, 0, 0, null, "等待执行", List.of(), 0, executionWorkspace);
+                request.runAt(), zone, ScheduleState.SCHEDULED.name(), null, 0, 0, null, "等待执行", List.of(), 0,
+                executionWorkspace);
             repository.insert(task);
             return task;
         } catch (RuntimeException e) {
@@ -209,46 +215,51 @@ public class ScheduleService {
 
     public synchronized ScheduledTask control(String id, String action, Instant runAt) {
         var job = get(id);
-        if ("cancel".equals(action)) {
-            if ("COMPLETED".equals(job.state())) {
-                throw new IllegalArgumentException("已完成的任务不能取消");
+        switch (ScheduleAction.parse(action)) {
+            case CANCEL -> {
+                if (ScheduleState.COMPLETED.is(job.state())) {
+                    throw new IllegalArgumentException("已完成的任务不能取消");
+                }
+                change(job, ScheduleState.CANCELLED, "已取消；正在执行的步骤将在安全边界停止", job.runAt());
+                ownedActive(job).ifPresent(runs::cancel);
             }
-            change(job, "CANCELLED", "已取消；正在执行的步骤将在安全边界停止", job.runAt());
-            ownedActive(job).ifPresent(runs::cancel);
-        } else if ("pause".equals(action)) {
-            if (TERMINAL.contains(job.state())) {
-                throw new IllegalArgumentException("任务已结束");
+            case PAUSE -> {
+                if (ScheduleState.terminal(job.state())) {
+                    throw new IllegalArgumentException("任务已结束");
+                }
+                change(job, ScheduleState.PAUSED, "已暂停", job.runAt());
+                ownedActive(job).ifPresent(runs::pause);
             }
-            change(job, "PAUSED", "已暂停", job.runAt());
-            ownedActive(job).ifPresent(runs::pause);
-        } else if ("resume".equals(action)) {
-            if (!"PAUSED".equals(job.state())) {
-                throw new IllegalArgumentException("只有暂停的计划可以恢复");
+            case RESUME -> {
+                if (!ScheduleState.PAUSED.is(job.state())) {
+                    throw new IllegalArgumentException("只有暂停的计划可以恢复");
+                }
+                if (runs.activeRun(job.sessionId()).isPresent()) {
+                    throw new IllegalArgumentException("当前步骤正在暂停，请稍后恢复");
+                }
+                var task = tasks.load(job.sessionId());
+                if (task != null && Objects.equals(task.taskId(), job.taskId())
+                    && TaskControlStatus.PAUSED.is(task.status())) {
+                    tasks.status(job.sessionId(), TaskControlStatus.INTERRUPTED);
+                }
+                change(job, job.taskId() == null ? ScheduleState.SCHEDULED : ScheduleState.WAITING, "等待执行",
+                    clock.instant());
             }
-            if (runs.activeRun(job.sessionId()).isPresent()) {
-                throw new IllegalArgumentException("当前步骤正在暂停，请稍后恢复");
+            case RESCHEDULE -> {
+                var state = WireEnum.parse(ScheduleState.class, job.state()).filter(RESCHEDULABLE::contains);
+                if (state.isEmpty() || runs.activeRun(job.sessionId()).isPresent()) {
+                    throw new IllegalArgumentException("执行中的任务不能修改时间");
+                }
+                if (runAt == null || !runAt.isAfter(clock.instant())) {
+                    throw new IllegalArgumentException("执行时间必须在未来");
+                }
+                change(job, state.get(), "执行时间已更新", runAt);
             }
-            var task = tasks.load(job.sessionId());
-            if (task != null && Objects.equals(task.taskId(), job.taskId()) && "PAUSED".equals(task.status())) {
-                tasks.status(job.sessionId(), "INTERRUPTED");
-            }
-            change(job, job.taskId() == null ? "SCHEDULED" : "WAITING", "等待执行", clock.instant());
-        } else if ("reschedule".equals(action)) {
-            if (!Set.of("SCHEDULED", "PAUSED", "WAITING").contains(job.state())
-                || runs.activeRun(job.sessionId()).isPresent()) {
-                throw new IllegalArgumentException("执行中的任务不能修改时间");
-            }
-            if (runAt == null || !runAt.isAfter(clock.instant())) {
-                throw new IllegalArgumentException("执行时间必须在未来");
-            }
-            change(job, job.state(), "执行时间已更新", runAt);
-        } else {
-            throw new IllegalArgumentException("不支持的操作");
         }
         return get(id);
     }
 
-    @Scheduled(fixedDelayString = "${pilot.schedules.poll-ms:2000}")
+    @Scheduled(fixedDelayString = ScheduleLimits.POLL_DELAY)
     public void poll() {
         if (ready) {
             maintenance.whenAvailable(this::tick);
@@ -273,41 +284,42 @@ public class ScheduleService {
     }
 
     private void advance(ScheduledTask job) {
-        if (TERMINAL.contains(job.state()) || "PAUSED".equals(job.state())) {
+        if (ScheduleState.terminal(job.state()) || ScheduleState.PAUSED.is(job.state())) {
             return;
         }
         if (sessions.find(job.sessionId()).isEmpty()) {
-            change(job, "CANCELLED", "目标对话已删除", job.runAt());
+            change(job, ScheduleState.CANCELLED, "目标对话已删除", job.runAt());
             return;
         }
-        if (job.workspace() != null && "ISOLATED".equals(job.workspace().mode())) {
+        if (job.workspace() != null && WorkspaceMode.ISOLATED.is(job.workspace().mode())) {
             String path = sessions.find(job.sessionId()).orElseThrow().workspace();
             if (!Objects.equals(path, job.workspace().path()) || !Files.isDirectory(Path.of(path))
                 || !Files.isRegularFile(Path.of(path).resolve(".git"))) {
-                change(job, "NEEDS_ATTENTION", "独立工作区已移动或缺失，未切回原目录执行", job.runAt());
+                change(job, ScheduleState.NEEDS_ATTENTION, "独立工作区已移动或缺失，未切回原目录执行", job.runAt());
                 return;
             }
         }
         Instant now = clock.instant();
         if (job.deadline() != null && !now.isBefore(job.deadline())) {
-            change(job, "NEEDS_ATTENTION", "已达 24 小时总执行时限，进度已保存", job.runAt());
+            change(job, ScheduleState.NEEDS_ATTENTION,
+                "已达 " + ScheduleLimits.TOTAL_EXECUTION_LIMIT.toHours() + " 小时总执行时限，进度已保存", job.runAt());
             ownedActive(job).ifPresent(runs::pause);
             return;
         }
         var task = tasks.load(job.sessionId());
         boolean owned = task != null && task.automation() != null && job.id().equals(task.automation().scheduleId());
         if (job.taskId() != null && (!owned || !job.taskId().equals(task.taskId()))) {
-            change(job, "NEEDS_ATTENTION", "会话目标已变化，未续跑其他任务", job.runAt());
+            change(job, ScheduleState.NEEDS_ATTENTION, "会话目标已变化，未续跑其他任务", job.runAt());
             return;
         }
         if (job.taskId() == null && task != null && !owned) {
-            change(job, "NEEDS_ATTENTION", "计划对话中已有其他目标，未覆盖该任务", job.runAt());
+            change(job, ScheduleState.NEEDS_ATTENTION, "计划对话中已有其他目标，未覆盖该任务", job.runAt());
             return;
         }
         if (runs.activeRun(job.sessionId()).isPresent()) {
             return;
         }
-        if (Set.of("RUNNING", "DISPATCHING").contains(job.state())) {
+        if (ScheduleState.dispatched(job.state())) {
             recoverDispatchedTask(job, task, owned, now);
             return;
         }
@@ -322,7 +334,8 @@ public class ScheduleService {
             String expectedRun = job.runId();
             boolean started =
                 sessions.events(job.sessionId()).stream().anyMatch(e -> Objects.equals(e.runId(), expectedRun));
-            change(job, started ? "NEEDS_ATTENTION" : "SCHEDULED", started ? "上次投递未完整启动，请检查执行记录" : "恢复未投递的计划", now);
+            change(job, started ? ScheduleState.NEEDS_ATTENTION : ScheduleState.SCHEDULED,
+                started ? "上次投递未完整启动，请检查执行记录" : "恢复未投递的计划", now);
             return;
         }
         if (job.taskId() == null) {
@@ -334,50 +347,54 @@ public class ScheduleService {
             job = bound;
         }
         String status = task.status();
-        if ("COMPLETED".equals(status)) {
-            change(job, "COMPLETED", "目标已核验完成", job.runAt());
+        if (TaskControlStatus.COMPLETED.is(status)) {
+            change(job, ScheduleState.COMPLETED, "目标已核验完成", job.runAt());
             return;
         }
-        if ("PAUSED".equals(status)) {
-            change(job, "PAUSED", "执行已暂停", job.runAt());
+        if (TaskControlStatus.PAUSED.is(status)) {
+            change(job, ScheduleState.PAUSED, "执行已暂停", job.runAt());
             return;
         }
-        if ("WAITING".equals(status)) {
-            change(job, "WAITING", "等待外部条件，稍后再次检查", now.plusSeconds(WAITING_DELAY_SECONDS));
+        if (TaskControlStatus.WAITING.is(status)) {
+            change(job, ScheduleState.WAITING, "等待外部条件，稍后再次检查", now.plusSeconds(ScheduleLimits.WAITING_DELAY_SECONDS));
             return;
         }
-        if ("INTERRUPTED".equals(status) && job.recoveries() < MAX_RECOVERY_ATTEMPTS
+        if (TaskControlStatus.INTERRUPTED.is(status) && job.recoveries() < ScheduleLimits.MAX_RECOVERY_ATTEMPTS
             && runs.resumable(job.sessionId())) {
-            var next = job.change("WAITING", job.taskId(), job.runId(),
-                now.plusSeconds(RECOVERY_DELAY_SECONDS << job.recoveries()), job.deadline(), job.attempts(),
-                job.recoveries() + 1, "执行中断，保留进度后重试", finishHistory(job, "INTERRUPTED"));
+            var next = job.change(ScheduleState.WAITING, job.taskId(), job.runId(),
+                now.plusSeconds(ScheduleLimits.RECOVERY_DELAY_SECONDS << job.recoveries()), job.deadline(),
+                job.attempts(), job.recoveries() + 1, "执行中断，保留进度后重试",
+                finishHistory(job, TaskControlStatus.INTERRUPTED));
             repository.replace(job, next);
             return;
         }
-        change(job, "NEEDS_ATTENTION", "任务停止：" + status + "，请打开执行记录查看原因", job.runAt());
+        change(job, ScheduleState.NEEDS_ATTENTION, "任务停止：" + status + "，请打开执行记录查看原因", job.runAt());
     }
 
     private void advanceDueTask(ScheduledTask job, TaskControlService.TaskContract task, boolean owned, Instant now) {
         if (job.runAt().isAfter(now)) {
             return;
         }
-        if (owned && "PAUSED".equals(task.status())) {
-            change(job, "PAUSED", "执行已暂停", job.runAt());
+        if (owned && TaskControlStatus.PAUSED.is(task.status())) {
+            change(job, ScheduleState.PAUSED, "执行已暂停", job.runAt());
             return;
         }
-        if (owned
-            && Set.of("BUDGET_LIMITED", "NEED_INPUT", "BLOCKED", "COMPLETED", "NO_PROGRESS", "VERIFICATION_FAILED")
-                .contains(task.status())) {
-            change(job, "COMPLETED".equals(task.status()) ? "COMPLETED" : "NEEDS_ATTENTION", "任务状态：" + task.status(),
-                job.runAt());
+        // 任务自己已经停下：完成就收尾，其余交给人处理，不再唤醒。
+        if (owned && WireEnum.in(task.status(), TaskControlStatus.BUDGET_LIMITED, TaskControlStatus.NEED_INPUT,
+            TaskControlStatus.BLOCKED, TaskControlStatus.COMPLETED, TaskControlStatus.NO_PROGRESS,
+            TaskControlStatus.VERIFICATION_FAILED)) {
+            change(job,
+                TaskControlStatus.COMPLETED.is(task.status()) ? ScheduleState.COMPLETED : ScheduleState.NEEDS_ATTENTION,
+                "任务状态：" + task.status(), job.runAt());
             return;
         }
         if (job.taskId() != null && !runs.resumable(job.sessionId())) {
-            change(job, "NEEDS_ATTENTION", "没有可续跑的对话记忆", job.runAt());
+            change(job, ScheduleState.NEEDS_ATTENTION, "没有可续跑的对话记忆", job.runAt());
             return;
         }
-        if (job.attempts() >= MAX_WAKE_ATTEMPTS) {
-            change(job, "NEEDS_ATTENTION", "已达到 100 次唤醒上限", job.runAt());
+        if (job.attempts() >= ScheduleLimits.MAX_WAKE_ATTEMPTS) {
+            change(job, ScheduleState.NEEDS_ATTENTION, "已达到 " + ScheduleLimits.MAX_WAKE_ATTEMPTS + " 次唤醒上限",
+                job.runAt());
             return;
         }
         dispatchTask(job, now);
@@ -389,11 +406,11 @@ public class ScheduleService {
         if (runId == null) {
             return;
         }
-        List<ScheduledTask.Invocation> history = new ArrayList<>(finishHistory(job, "WAITING"));
-        history.add(new ScheduledTask.Invocation(runId, now, "RUNNING"));
-        var claimed = job.change("DISPATCHING", job.taskId(), runId, job.runAt(),
-            job.deadline() == null ? now.plus(TOTAL_EXECUTION_LIMIT) : job.deadline(), job.attempts() + 1,
-            job.recoveries(), "正在执行", history);
+        List<ScheduledTask.Invocation> history = new ArrayList<>(finishHistory(job, ScheduleState.WAITING));
+        history.add(new ScheduledTask.Invocation(runId, now, ScheduleState.RUNNING.name()));
+        var claimed = job.change(ScheduleState.DISPATCHING, job.taskId(), runId, job.runAt(),
+            job.deadline() == null ? now.plus(ScheduleLimits.TOTAL_EXECUTION_LIMIT) : job.deadline(),
+            job.attempts() + 1, job.recoveries(), "正在执行", history);
         try {
             if (!repository.replace(job, claimed)) {
                 runs.abandon(runId);
@@ -415,12 +432,12 @@ public class ScheduleService {
             current = tasks.load(job.sessionId());
             // wakeTool 可能已更新版本；CAS 失败时保留模型设置的等待状态。
             repository.replace(claimed,
-                claimed.change("RUNNING", current == null ? null : current.taskId(), runId, claimed.runAt(),
+                claimed.change(ScheduleState.RUNNING, current == null ? null : current.taskId(), runId, claimed.runAt(),
                     claimed.deadline(), claimed.attempts(), claimed.recoveries(), "正在执行", claimed.history()));
         } catch (RuntimeException e) {
             runs.abandon(runId);
             var latest = get(job.id());
-            change(latest, "NEEDS_ATTENTION", "投递失败：" + e.getMessage(), latest.runAt());
+            change(latest, ScheduleState.NEEDS_ATTENTION, "投递失败：" + e.getMessage(), latest.runAt());
         }
     }
 
@@ -440,11 +457,11 @@ public class ScheduleService {
 
     private ScheduledTask handoffJob(String id) {
         var job = get(id);
-        if (!Set.of("COMPLETED", "NEEDS_ATTENTION").contains(job.state())
+        if (!WireEnum.in(job.state(), ScheduleState.COMPLETED, ScheduleState.NEEDS_ATTENTION)
             || runs.activeRun(job.sessionId()).isPresent()) {
             throw new IllegalStateException("任务还在运行或等待，请结束执行后交回");
         }
-        if (worktrees == null || job.workspace() == null || !"ISOLATED".equals(job.workspace().mode())) {
+        if (worktrees == null || job.workspace() == null || !WorkspaceMode.ISOLATED.is(job.workspace().mode())) {
             throw new IllegalArgumentException("该任务未使用独立工作区");
         }
         if (job.workspace().handedOffAt() != null) {
@@ -471,18 +488,17 @@ public class ScheduleService {
         return next;
     }
 
-    private List<ScheduledTask.Invocation> finishHistory(ScheduledTask job, String status) {
-        return job.history().stream()
-            .map(h -> "RUNNING".equals(h.status()) ? new ScheduledTask.Invocation(h.runId(), h.startedAt(), status) : h)
-            .toList();
+    /** 把还在 RUNNING 的调用记成 status；status 可以是计划状态，也可以是任务的 INTERRUPTED。 */
+    private List<ScheduledTask.Invocation> finishHistory(ScheduledTask job, WireEnum status) {
+        return job.history().stream().map(h -> ScheduleState.RUNNING.is(h.status())
+            ? new ScheduledTask.Invocation(h.runId(), h.startedAt(), status.name()) : h).toList();
     }
 
-    private void change(ScheduledTask job, String state, String message, Instant at) {
-        var history = Set.of("COMPLETED", "CANCELLED", "PAUSED", "NEEDS_ATTENTION", "WAITING").contains(state)
-            ? finishHistory(job, state) : job.history();
+    private void change(ScheduledTask job, ScheduleState state, String message, Instant at) {
+        var history = ENDS_INVOCATION.contains(state) ? finishHistory(job, state) : job.history();
         var next = job.change(state, job.taskId(), job.runId(), at, job.deadline(), job.attempts(), job.recoveries(),
             message, history);
-        if (TERMINAL.contains(state)) {
+        if (state.terminal()) {
             next = next.ended(clock.instant());
         }
         if (!repository.replace(job, next)) {
@@ -493,7 +509,7 @@ public class ScheduleService {
     public Tool wakeTool(String sessionId) {
         return new Tool() {
             public String name() {
-                return "wait_until";
+                return WAKE_TOOL;
             }
 
             public boolean readOnly() {
@@ -501,7 +517,8 @@ public class ScheduleService {
             }
 
             public String description() {
-                return "外部条件尚未就绪时，保存进度并预约下次唤醒。调用后本轮停止，不要 sleep 或反复轮询。时间为带时区的 ISO 8601；最少等待 30 秒。";
+                return "外部条件尚未就绪时，保存进度并预约下次唤醒。调用后本轮停止，不要 sleep 或反复轮询。时间为带时区的 ISO 8601；最少等待 "
+                    + ScheduleLimits.MIN_WAIT_SECONDS + " 秒。";
             }
 
             public Map<String, Object> parameters() {
@@ -526,18 +543,19 @@ public class ScheduleService {
         if (!job.sessionId().equals(sessionId) || (job.taskId() != null && !job.taskId().equals(task.taskId()))) {
             throw new IllegalStateException("计划与当前任务不匹配");
         }
-        if (!Set.of("RUNNING", "DISPATCHING").contains(job.state())) {
+        if (!ScheduleState.dispatched(job.state())) {
             throw new IllegalStateException("计划已暂停或结束");
         }
-        if (at.isBefore(clock.instant().plusSeconds(30)) || (job.deadline() != null && !at.isBefore(job.deadline()))) {
-            throw new IllegalArgumentException("唤醒时间须在 30 秒以后且不超过总执行期限");
+        if (at.isBefore(clock.instant().plusSeconds(ScheduleLimits.MIN_WAIT_SECONDS))
+            || (job.deadline() != null && !at.isBefore(job.deadline()))) {
+            throw new IllegalArgumentException("唤醒时间须在 " + ScheduleLimits.MIN_WAIT_SECONDS + " 秒以后且不超过总执行期限");
         }
-        var next = job.change("WAITING", task.taskId(), job.runId(), at, job.deadline(), job.attempts(),
-            job.recoveries(), reason, finishHistory(job, "WAITING"));
+        var next = job.change(ScheduleState.WAITING, task.taskId(), job.runId(), at, job.deadline(), job.attempts(),
+            job.recoveries(), reason, finishHistory(job, ScheduleState.WAITING));
         if (!repository.replace(job, next)) {
             throw new IllegalStateException("计划已变化");
         }
-        tasks.status(sessionId, "WAITING");
+        tasks.status(sessionId, TaskControlStatus.WAITING);
         return "已保存，将在 " + at + " 唤醒。停止本轮执行。";
     }
 }

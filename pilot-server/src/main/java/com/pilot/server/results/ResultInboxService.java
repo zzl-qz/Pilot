@@ -19,7 +19,9 @@ import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.util.WireEnum;
 import com.pilot.server.schedule.ScheduleService;
+import com.pilot.server.schedule.ScheduleState;
 import com.pilot.server.schedule.ScheduledTask;
 import com.pilot.server.session.TaskControlService;
 import com.pilot.server.store.ResultInboxRepository;
@@ -83,7 +85,7 @@ public class ResultInboxService {
             : repository.receipts(receiptIds);
         for (var job : jobs) {
             scheduledSessions.add(job.sessionId());
-            if (!Set.of("COMPLETED", "NEEDS_ATTENTION").contains(job.state())
+            if (!WireEnum.in(job.state(), ScheduleState.COMPLETED, ScheduleState.NEEDS_ATTENTION)
                 || !sessionIndex.containsKey(job.sessionId())) {
                 continue;
             }
@@ -154,7 +156,7 @@ public class ResultInboxService {
         if (result == null || result.isBlank()) {
             return job.message();
         }
-        return "NEEDS_ATTENTION".equals(job.state()) ? job.message() + "\n\n最近运行：" + result : result;
+        return ScheduleState.NEEDS_ATTENTION.is(job.state()) ? job.message() + "\n\n最近运行：" + result : result;
     }
 
     private static ResultInboxRepository.Receipt receipt(Map<String, ResultInboxRepository.Receipt> receipts, String id,

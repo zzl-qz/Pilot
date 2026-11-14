@@ -46,6 +46,11 @@ public record ScheduledTask(String id, String name, String sessionId, String tas
         history = history == null ? List.of() : List.copyOf(history);
     }
 
+    public ScheduledTask change(ScheduleState state, String taskId, String runId, Instant at, Instant deadline,
+        int attempts, int recoveries, String message, List<Invocation> history) {
+        return change(state.name(), taskId, runId, at, deadline, attempts, recoveries, message, history);
+    }
+
     public ScheduledTask change(String state, String taskId, String runId, Instant at, Instant deadline, int attempts,
         int recoveries, String message, List<Invocation> history) {
         return new ScheduledTask(id, name, sessionId, taskId, content, requirements, skill, at, timezone, state, runId,

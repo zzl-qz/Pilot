@@ -9,7 +9,6 @@ import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 
 import org.slf4j.LoggerFactory;
@@ -18,6 +17,7 @@ import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 
 import com.pilot.core.session.SessionService;
+import com.pilot.core.util.WireEnum;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.DataMaintenance;
 import com.pilot.server.store.AutomationStore;
@@ -40,6 +40,12 @@ public class RecurringScheduleService {
 
     public record Times(Instant runAt, List<Instant> next, String timezone) {
     }
+
+    /** AutomationStore 里两类文档的分类名，已落库，不能改。 */
+    private static final String SERIES_KIND = "series";
+    private static final String TEMPLATE_KIND = "template";
+    private static final String SERIES_ID_PREFIX = "series_";
+    private static final String TEMPLATE_ID_PREFIX = "template_";
 
     private final AutomationStore store;
     private final ObjectMapper mapper;
@@ -69,11 +75,11 @@ public class RecurringScheduleService {
     }
 
     public List<Series> list() {
-        return store.list("series").stream().map(d -> mapper.readValue(d.payload(), Series.class)).toList();
+        return store.list(SERIES_KIND).stream().map(d -> mapper.readValue(d.payload(), Series.class)).toList();
     }
 
     public Series get(String id) {
-        return store.get("series", id).map(d -> mapper.readValue(d.payload(), Series.class))
+        return store.get(SERIES_KIND, id).map(d -> mapper.readValue(d.payload(), Series.class))
             .orElseThrow(() -> new IllegalArgumentException("周期计划不存在"));
     }
 
@@ -85,40 +91,42 @@ public class RecurringScheduleService {
         if (input.task().runAt() == null || !input.task().runAt().isAfter(clock.instant())) {
             throw new IllegalArgumentException("首次时间必须在未来");
         }
-        ZoneId zone = ZoneId.of(input.task().timezone() == null ? "UTC" : input.task().timezone());
+        ZoneId zone =
+            ZoneId.of(input.task().timezone() == null ? ScheduleLimits.DEFAULT_TIMEZONE : input.task().timezone());
         if (repeatedTime(input.task().runAt().atZone(zone))) {
             throw new IllegalArgumentException("夏令时重复时刻只执行第一次，请重新预览首次时间");
         }
         String cron = validateCron(input.cron(), input.task().runAt(), zone);
-        if (!Set.of("ONCE", "SKIP").contains(input.misfire())) {
+        if (!WireEnum.in(input.misfire(), MisfirePolicy.values())) {
             throw new IllegalArgumentException("请选择错过执行策略");
         }
-        Series row = new Series("series_" + UUID.randomUUID(), input.task().name(), input.task(), cron, zone.getId(),
-            input.misfire(), "ACTIVE", input.task().runAt(), null, 0, "等待首次执行", 1,
+        Series row = new Series(SERIES_ID_PREFIX + UUID.randomUUID(), input.task().name(), input.task(), cron,
+            zone.getId(), input.misfire(), SeriesState.ACTIVE.name(), input.task().runAt(), null, 0, "等待首次执行", 1,
             sessions.find(input.task().sourceSessionId()).orElseThrow().workspace());
-        if (!store.put("series", row.id(), 0, mapper.writeValueAsString(row))) {
+        if (!store.put(SERIES_KIND, row.id(), 0, mapper.writeValueAsString(row))) {
             throw new IllegalStateException("周期计划已存在");
         }
         return row;
     }
 
     private void validateTask(ScheduleService.Create task) {
-        if (task == null || task.content() == null || task.content().isBlank() || task.content().length() > 100000) {
+        if (task == null || task.content() == null || task.content().isBlank()
+            || task.content().length() > ScheduleLimits.MAX_CONTENT_CHARS) {
             throw new IllegalArgumentException("请填写有效任务目标");
         }
-        if (task.name() == null || task.name().isBlank() || task.name().length() > 120) {
-            throw new IllegalArgumentException("任务名称为 1–120 字");
+        if (task.name() == null || task.name().isBlank() || task.name().length() > ScheduleLimits.MAX_NAME_CHARS) {
+            throw new IllegalArgumentException("任务名称为 1–" + ScheduleLimits.MAX_NAME_CHARS + " 字");
         }
         var source = sessions.find(Objects.toString(task.sourceSessionId(), ""))
             .orElseThrow(() -> new IllegalArgumentException("来源对话不存在"));
         if (source.isSide()) {
             throw new IllegalArgumentException("请从主对话创建计划");
         }
-        ZoneId.of(task.timezone() == null ? "UTC" : task.timezone());
+        ZoneId.of(task.timezone() == null ? ScheduleLimits.DEFAULT_TIMEZONE : task.timezone());
     }
 
     static String validateCron(String cron, Instant start, ZoneId zone) {
-        if (cron == null || cron.length() > 200) {
+        if (cron == null || cron.length() > ScheduleLimits.MAX_CRON_CHARS) {
             throw new IllegalArgumentException("请填写六段 cron 表达式");
         }
         var expression = CronExpression.parse(cron);
@@ -127,7 +135,7 @@ public class RecurringScheduleService {
         if (first == null || second == null) {
             throw new IllegalArgumentException("表达式没有后续执行时间");
         }
-        if (Duration.between(first, second).getSeconds() < 60) {
+        if (Duration.between(first, second).getSeconds() < ScheduleLimits.MIN_PERIOD_SECONDS) {
             throw new IllegalArgumentException("周期不能短于一分钟");
         }
         // 限制秒字段，避免复杂表达式局部出现每秒触发。
@@ -166,7 +174,7 @@ public class RecurringScheduleService {
         if (cron != null && !cron.isBlank()) {
             var expr = CronExpression.parse(validateCron(cron, first, zone));
             var at = first.atZone(zone);
-            for (int i = 0; i < 4; i++) {
+            for (int i = 0; i < ScheduleLimits.PREVIEW_OCCURRENCES; i++) {
                 at = nextTime(expr, at);
                 if (at == null) {
                     break;
@@ -182,33 +190,34 @@ public class RecurringScheduleService {
         if (old.version() != version) {
             throw new IllegalStateException("周期计划已变化，请刷新");
         }
-        if ("CANCELLED".equals(old.state())) {
+        if (SeriesState.CANCELLED.is(old.state())) {
             throw new IllegalStateException("计划已取消");
         }
         if (action == null) {
             throw new IllegalArgumentException("缺少操作");
         }
-        String state = switch (action) {
-            case "pause" -> "PAUSED";
-            case "resume" -> "ACTIVE";
-            case "cancel" -> "CANCELLED";
-            default -> throw new IllegalArgumentException("不支持的操作");
+        SeriesState state = switch (ScheduleAction.parse(action)) {
+            case PAUSE -> SeriesState.PAUSED;
+            case RESUME -> SeriesState.ACTIVE;
+            case CANCEL -> SeriesState.CANCELLED;
+            // 周期计划不支持改时间，和不认识的操作一样拒绝。
+            case RESCHEDULE -> throw new IllegalArgumentException("不支持的操作");
         };
         // 控制未来轮次，不中止当前任务；当前轮次在定时任务列表单独暂停/取消。
         return replace(old, state, old.nextAt(), old.activeId(), old.occurrences(),
-            "resume".equals(action) ? "已恢复；按错过策略继续" : "未来轮次已" + (state.equals("PAUSED") ? "暂停" : "取消"));
+            state == SeriesState.ACTIVE ? "已恢复；按错过策略继续" : "未来轮次已" + (state == SeriesState.PAUSED ? "暂停" : "取消"));
     }
 
-    private Series replace(Series old, String state, Instant next, String active, int count, String message) {
-        var row = new Series(old.id(), old.name(), old.task(), old.cron(), old.timezone(), old.misfire(), state, next,
-            active, count, message, old.version() + 1, old.sourceWorkspace());
-        if (!store.put("series", row.id(), old.version(), mapper.writeValueAsString(row))) {
+    private Series replace(Series old, SeriesState state, Instant next, String active, int count, String message) {
+        var row = new Series(old.id(), old.name(), old.task(), old.cron(), old.timezone(), old.misfire(), state.name(),
+            next, active, count, message, old.version() + 1, old.sourceWorkspace());
+        if (!store.put(SERIES_KIND, row.id(), old.version(), mapper.writeValueAsString(row))) {
             throw new IllegalStateException("周期计划已变化，请刷新");
         }
         return row;
     }
 
-    @Scheduled(fixedDelayString = "${pilot.schedules.poll-ms:2000}")
+    @Scheduled(fixedDelayString = ScheduleLimits.POLL_DELAY)
     public void poll() {
         maintenance.whenAvailable(this::tick);
     }
@@ -221,7 +230,7 @@ public class RecurringScheduleService {
                 try {
                     var latest = get(row.id());
                     if (latest.version() == row.version()) {
-                        replace(latest, "ERROR", latest.nextAt(), latest.activeId(), latest.occurrences(),
+                        replace(latest, SeriesState.ERROR, latest.nextAt(), latest.activeId(), latest.occurrences(),
                             "创建轮次失败：" + e.getMessage());
                     }
                 } catch (RuntimeException failure) {
@@ -235,7 +244,7 @@ public class RecurringScheduleService {
     }
 
     private void advance(Series row) {
-        if (!"ACTIVE".equals(row.state())) {
+        if (!SeriesState.ACTIVE.is(row.state())) {
             return;
         }
         Instant now = clock.instant();
@@ -248,21 +257,22 @@ public class RecurringScheduleService {
         ZoneId zone = ZoneId.of(row.timezone());
         var next = nextTime(CronExpression.parse(row.cron()), now.atZone(zone));
         if (next == null) {
-            replace(row, "ERROR", row.nextAt(), row.activeId(), row.occurrences(), "没有后续执行时间");
+            replace(row, SeriesState.ERROR, row.nextAt(), row.activeId(), row.occurrences(), "没有后续执行时间");
             return;
         }
         String key = row.id() + "_" + row.nextAt().toEpochMilli();
         var existing = schedules.findOccurrence(key);
         if (existing.isPresent()) {
-            replace(row, "ACTIVE", next.toInstant(), key, row.occurrences() + 1, "已恢复已创建的轮次，未重复投递");
+            replace(row, SeriesState.ACTIVE, next.toInstant(), key, row.occurrences() + 1, "已恢复已创建的轮次，未重复投递");
             return;
         }
         if (repeatedTime(row.nextAt().atZone(zone))) {
-            replace(row, "ACTIVE", next.toInstant(), row.activeId(), row.occurrences(), "已跳过夏令时重复时刻");
+            replace(row, SeriesState.ACTIVE, next.toInstant(), row.activeId(), row.occurrences(), "已跳过夏令时重复时刻");
             return;
         }
-        if ("SKIP".equals(row.misfire()) && Duration.between(row.nextAt(), now).getSeconds() > 60) {
-            replace(row, "ACTIVE", next.toInstant(), row.activeId(), row.occurrences(), "已跳过错过的轮次");
+        if (MisfirePolicy.SKIP.is(row.misfire())
+            && Duration.between(row.nextAt(), now).getSeconds() > ScheduleLimits.MISFIRE_GRACE_SECONDS) {
+            replace(row, SeriesState.ACTIVE, next.toInstant(), row.activeId(), row.occurrences(), "已跳过错过的轮次");
             return;
         }
         var task = row.task();
@@ -273,37 +283,38 @@ public class RecurringScheduleService {
         var job = schedules.createOccurrence(new ScheduleService.Create(task.name(), task.sourceSessionId(),
             task.content(), now.plusSeconds(1), row.timezone(), task.requirements(), task.skill(), task.fullAccess(),
             task.isolated(), task.requireResearch()), key);
-        replace(row, "ACTIVE", next.toInstant(), job.id(), row.occurrences() + 1,
+        replace(row, SeriesState.ACTIVE, next.toInstant(), job.id(), row.occurrences() + 1,
             "已创建第 " + (row.occurrences() + 1) + " 轮；同一计划不重叠执行");
     }
 
     public List<Template> templates() {
-        return store.list("template").stream().map(d -> mapper.readValue(d.payload(), Template.class)).toList();
+        return store.list(TEMPLATE_KIND).stream().map(d -> mapper.readValue(d.payload(), Template.class)).toList();
     }
 
     public synchronized Template saveTemplate(String id, long version, String name, ScheduleService.Create task) {
-        if (task == null || task.content() == null || task.content().isBlank() || task.content().length() > 100000
-            || name == null || name.isBlank() || name.length() > 120) {
+        if (task == null || task.content() == null || task.content().isBlank()
+            || task.content().length() > ScheduleLimits.MAX_CONTENT_CHARS || name == null || name.isBlank()
+            || name.length() > ScheduleLimits.MAX_NAME_CHARS) {
             throw new IllegalArgumentException("请填写模板名称和目标");
         }
         if (id == null) {
             if (version != 0) {
                 throw new IllegalArgumentException("新模板版本应为 0");
             }
-            id = "template_" + UUID.randomUUID();
+            id = TEMPLATE_ID_PREFIX + UUID.randomUUID();
         }
         // 模板只保存内容和策略，不绑定来源会话或旧执行时间。
         var payload = new ScheduleService.Create(task.name(), null, task.content(), null, task.timezone(),
             task.requirements(), task.skill(), task.fullAccess(), task.isolated(), task.requireResearch());
         var row = new Template(id, name, version + 1, payload, clock.instant());
-        if (!store.put("template", id, version, mapper.writeValueAsString(row))) {
+        if (!store.put(TEMPLATE_KIND, id, version, mapper.writeValueAsString(row))) {
             throw new IllegalStateException("模板已更新，请刷新后重试");
         }
         return row;
     }
 
     public void deleteTemplate(String id, long version) {
-        if (!store.delete("template", id, version)) {
+        if (!store.delete(TEMPLATE_KIND, id, version)) {
             throw new IllegalStateException("模板已变化，请刷新");
         }
     }

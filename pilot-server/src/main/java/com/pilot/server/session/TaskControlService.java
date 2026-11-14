@@ -17,6 +17,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.util.WireEnum;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.workspace.HistoryFileChange;
 
@@ -27,9 +28,6 @@ import tools.jackson.databind.ObjectMapper;
 public class TaskControlService {
     private static final Set<String> DIRECT_FINISHED_PHASES =
         Set.of("CHECKS_PASSED", "CHECKS_FAILED", "CHECKS_STALE", "UNVERIFIED");
-    private static final Set<String> STATUSES =
-        Set.of("ACTIVE", "PAUSED", "INTERRUPTED", "AWAITING_REVIEW", "COMPLETED", "FAILED", "BLOCKED", "BUDGET_LIMITED",
-            "WAITING", "NEED_INPUT", "UNVERIFIED", "NO_PROGRESS", "REVIEW_UNAVAILABLE", "VERIFICATION_FAILED");
     private final ObjectMapper mapper;
     private final PilotDataDir data;
 
@@ -200,7 +198,8 @@ public class TaskControlService {
             constraints = normalizeConstraints(constraints);
             acceptance = acceptance == null ? List.of() : List.copyOf(acceptance);
             corrections = corrections == null ? List.of() : List.copyOf(corrections);
-            if (!STATUSES.contains(status)) {
+            // 合法状态以 TaskControlStatus 为准，不再另外维护一份字符串清单。
+            if (WireEnum.parse(TaskControlStatus.class, status).isEmpty()) {
                 throw new IllegalArgumentException("未知任务状态: " + status);
             }
         }
@@ -257,6 +256,10 @@ public class TaskControlService {
             task.automation());
         save(sessionId, updated);
         return updated;
+    }
+
+    public synchronized TaskContract status(String sessionId, TaskControlStatus status) {
+        return status(sessionId, status.name());
     }
 
     public synchronized TaskContract status(String sessionId, String status) {
