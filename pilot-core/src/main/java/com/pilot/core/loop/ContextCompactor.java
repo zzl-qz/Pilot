@@ -2,11 +2,8 @@ package com.pilot.core.loop;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -24,6 +21,7 @@ import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolCallJournal;
+import com.pilot.core.util.Sha256;
 
 /**
  * 上下文压缩，分四层，先做不花钱的，再动模型：
@@ -287,27 +285,23 @@ public final class ContextCompactor {
     }
 
     private static String sourceFingerprint(List<Message> messages) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            for (Message message : messages) {
-                digest.update(message.role().getBytes(StandardCharsets.UTF_8));
-                digest.update((byte)0);
-                digest.update(message.content().getBytes(StandardCharsets.UTF_8));
-                digest.update(String.valueOf(message.toolCallId()).getBytes(StandardCharsets.UTF_8));
-                digest.update(message.imagePositions().toString().getBytes(StandardCharsets.UTF_8));
-                digest.update((byte)0);
-                for (ToolCall call : message.toolCalls()) {
-                    digest.update(call.callId().getBytes(StandardCharsets.UTF_8));
-                    digest.update(ToolCallJournal.fingerprint(call).getBytes(StandardCharsets.UTF_8));
-                }
-                for (Attachment attachment : message.attachments()) {
-                    digest.update(attachment.path().getBytes(StandardCharsets.UTF_8));
-                }
+        var digest = Sha256.newDigest();
+        for (Message message : messages) {
+            digest.update(message.role().getBytes(StandardCharsets.UTF_8));
+            digest.update((byte)0);
+            digest.update(message.content().getBytes(StandardCharsets.UTF_8));
+            digest.update(String.valueOf(message.toolCallId()).getBytes(StandardCharsets.UTF_8));
+            digest.update(message.imagePositions().toString().getBytes(StandardCharsets.UTF_8));
+            digest.update((byte)0);
+            for (ToolCall call : message.toolCalls()) {
+                digest.update(call.callId().getBytes(StandardCharsets.UTF_8));
+                digest.update(ToolCallJournal.fingerprint(call).getBytes(StandardCharsets.UTF_8));
             }
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 unavailable", e);
+            for (Attachment attachment : message.attachments()) {
+                digest.update(attachment.path().getBytes(StandardCharsets.UTF_8));
+            }
         }
+        return Sha256.finishHex(digest);
     }
 
     /**

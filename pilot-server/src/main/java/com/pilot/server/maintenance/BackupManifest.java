@@ -10,12 +10,9 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.DigestOutputStream;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -193,17 +190,13 @@ final class BackupManifest {
     }
 
     private static String legacySha256(Path file) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (var reader = new InputStreamReader(Files.newInputStream(file), StandardCharsets.ISO_8859_1);
-                var writer = new OutputStreamWriter(new DigestOutputStream(OutputStream.nullOutputStream(), digest),
-                    StandardCharsets.UTF_8)) {
-                reader.transferTo(writer);
-            }
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 不可用", e);
+        var digest = Sha256.newDigest();
+        try (var reader = new InputStreamReader(Files.newInputStream(file), StandardCharsets.ISO_8859_1);
+            var writer = new OutputStreamWriter(new DigestOutputStream(OutputStream.nullOutputStream(), digest),
+                StandardCharsets.UTF_8)) {
+            reader.transferTo(writer);
         }
+        return Sha256.finishHex(digest);
     }
 
     static void deleteTree(Path root) throws IOException {

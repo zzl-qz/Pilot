@@ -1,11 +1,8 @@
 package com.pilot.server.session;
 
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -32,6 +29,7 @@ import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolExecutor;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.tool.VerificationCheck;
+import com.pilot.core.util.Sha256;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -1213,7 +1211,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     /** 只哈希本任务实际写过的文件；展示截断和工作区其他脏文件不会改变版本。 */
     private String sourceVersion() {
         try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            var digest = Sha256.newDigest();
             for (String name : changedPaths) {
                 Path file = root.resolve(name).normalize();
                 digest.update(name.getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -1225,16 +1223,9 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 if (!real.startsWith(root.toRealPath()) || !Files.isRegularFile(real)) {
                     continue;
                 }
-                try (InputStream input = Files.newInputStream(real)) {
-                    byte[] buffer = new byte[16 * 1024];
-                    for (int read; (read = input.read(buffer)) >= 0;) {
-                        if (read > 0) {
-                            digest.update(buffer, 0, read);
-                        }
-                    }
-                }
+                Sha256.update(digest, real);
             }
-            return HexFormat.of().formatHex(digest.digest());
+            return Sha256.finishHex(digest);
         } catch (Exception e) {
             return GoalEvidence.hash("unavailable:" + e.getClass().getSimpleName() + ":" + changedPaths);
         }

@@ -6,11 +6,8 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 import javax.imageio.ImageIO;
@@ -26,6 +23,7 @@ import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 
 import com.pilot.core.loop.Attachment;
+import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
 
 import tools.jackson.databind.JsonNode;
@@ -187,19 +185,11 @@ final class OfficePdf {
     }
 
     private static String digest(Path file, int pages) throws IOException {
-        try {
-            MessageDigest sha = MessageDigest.getInstance("SHA-256");
-            sha.update(file.toAbsolutePath().toString().getBytes(StandardCharsets.UTF_8));
-            sha.update(Long.toString(Files.size(file)).getBytes(StandardCharsets.UTF_8));
-            sha.update(Integer.toString(pages).getBytes(StandardCharsets.UTF_8));
-            StringBuilder out = new StringBuilder();
-            for (byte b : sha.digest()) {
-                out.append(String.format(Locale.ROOT, "%02x", b));
-            }
-            return out.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+        var sha = Sha256.newDigest();
+        sha.update(file.toAbsolutePath().toString().getBytes(StandardCharsets.UTF_8));
+        sha.update(Long.toString(Files.size(file)).getBytes(StandardCharsets.UTF_8));
+        sha.update(Integer.toString(pages).getBytes(StandardCharsets.UTF_8));
+        return Sha256.finishHex(sha);
     }
 
     /** 简单 A4 垂直排版：按字体实际宽度折行，超出下边距自动翻页。 */

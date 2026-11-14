@@ -5,10 +5,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -22,6 +19,7 @@ import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 
 import com.pilot.core.loop.Attachment;
+import com.pilot.core.util.Sha256;
 
 /**
  * {@code read_file} 的图片与 PDF 分支：图片原样交给模型，PDF 抽取文本，扫描件按页渲染成图片。
@@ -148,16 +146,12 @@ final class MediaFileReader {
 
     /** 同一份文件内容得到同一个目录，重复读取不会堆积产物。 */
     private static String digest(Path source, int pages) throws IOException {
-        try {
-            MessageDigest sha = MessageDigest.getInstance("SHA-256");
-            sha.update(source.toAbsolutePath().toString().getBytes(StandardCharsets.UTF_8));
-            sha.update(Long.toString(Files.size(source)).getBytes(StandardCharsets.UTF_8));
-            sha.update(Long.toString(Files.getLastModifiedTime(source).toMillis()).getBytes(StandardCharsets.UTF_8));
-            sha.update((byte)pages);
-            return HexFormat.of().formatHex(sha.digest()).substring(0, 16);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+        var sha = Sha256.newDigest();
+        sha.update(source.toAbsolutePath().toString().getBytes(StandardCharsets.UTF_8));
+        sha.update(Long.toString(Files.size(source)).getBytes(StandardCharsets.UTF_8));
+        sha.update(Long.toString(Files.getLastModifiedTime(source).toMillis()).getBytes(StandardCharsets.UTF_8));
+        sha.update((byte)pages);
+        return Sha256.finishHex(sha).substring(0, 16);
     }
 
     /** 解析 {@code "3"}、{@code "2-5"}；缺省读前 10 页，单次最多 30 页。 */

@@ -8,8 +8,6 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -17,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.pilot.core.util.FileTrees;
+import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
 
 /** 物化可见文件与提案；不挂载真实工作区、Git 管理目录或 Pilot 数据目录。 */
@@ -168,7 +167,7 @@ public final class IsolatedWorkspace implements AutoCloseable {
 
     private static byte[] hash(Path file) throws IOException {
         try (var input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            var digest = Sha256.newDigest();
             byte[] buffer = new byte[8192];
             int count;
             long bytes = 0;
@@ -179,8 +178,6 @@ public final class IsolatedWorkspace implements AutoCloseable {
                 digest.update(buffer, 0, count);
             }
             return digest.digest();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
         }
     }
 

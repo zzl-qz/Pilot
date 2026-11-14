@@ -7,11 +7,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -24,6 +21,7 @@ import java.util.stream.Stream;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.tool.CommandTaskManager;
+import com.pilot.core.util.Sha256;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.session.RunRegistry;
 
@@ -234,7 +232,7 @@ public class GitWorktrees {
             String names =
                 checked(command(copy, env, null, "diff", "--cached", "--name-only", "-z", meta.commit, "--"));
             List<String> files = Arrays.stream(names.split("\\u0000")).filter(n -> !n.isEmpty()).toList();
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            var digest = Sha256.newDigest();
             digest.update(diff.getBytes(StandardCharsets.UTF_8));
             digest.update(checked(git(base, "rev-parse", "HEAD")).getBytes(StandardCharsets.UTF_8));
             for (String name : files) {
@@ -256,22 +254,16 @@ public class GitWorktrees {
                 digest.update((byte)0);
                 if (Files.isRegularFile(destination)) {
                     digest.update((byte)1);
-                    try (var stream = Files.newInputStream(destination)) {
-                        byte[] bytes = new byte[8192];
-                        int size;
-                        while ((size = stream.read(bytes)) >= 0) {
-                            digest.update(bytes, 0, size);
-                        }
-                    }
+                    Sha256.update(digest, destination);
                 } else {
                     digest.update((byte)(Files.exists(destination) ? 2 : 3));
                 }
             }
             Exec check = diff.isBlank() ? new Exec(0, "")
                 : command(base, Map.of(), diff, "apply", "--check", "--binary", "--whitespace=nowarn");
-            return new Patch(meta, files, diff, HexFormat.of().formatHex(digest.digest()),
+            return new Patch(meta, files, diff, Sha256.finishHex(digest),
                 check.exit == 0 ? "" : "原目录存在冲突，尚未交回任何改动：" + check.output.strip());
-        } catch (IOException | NoSuchAlgorithmException e) {
+        } catch (IOException e) {
             throw new IllegalArgumentException("无法准备交回预览：" + e.getMessage(), e);
         } finally {
             if (index != null) {

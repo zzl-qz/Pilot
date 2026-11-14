@@ -21,18 +21,27 @@ public final class Sha256 {
     }
 
     public static String hex(byte[] bytes) {
-        return HexFormat.of().formatHex(digest().digest(bytes));
+        return HexFormat.of().formatHex(newDigest().digest(bytes));
     }
 
     public static String hex(Path file, OpenOption... options) throws IOException {
-        MessageDigest hash = digest();
+        MessageDigest hash = newDigest();
+        update(hash, file, options);
+        return finishHex(hash);
+    }
+
+    /** 将文件原始字节追加到现有摘要，适用于按顺序组合文件与元数据的指纹。 */
+    public static void update(MessageDigest hash, Path file, OpenOption... options) throws IOException {
         try (var input = new DigestInputStream(Files.newInputStream(file, options), hash)) {
             input.transferTo(OutputStream.nullOutputStream());
         }
+    }
+
+    public static String finishHex(MessageDigest hash) {
         return HexFormat.of().formatHex(hash.digest());
     }
 
-    private static MessageDigest digest() {
+    public static MessageDigest newDigest() {
         try {
             return MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
