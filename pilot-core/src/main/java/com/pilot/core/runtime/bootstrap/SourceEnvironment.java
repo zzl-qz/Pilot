@@ -7,17 +7,17 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
+
+import com.pilot.core.util.Sha256;
 
 /** 启动器与 IDE 共用的环境准备逻辑；仅依赖 JDK，也可直接作为多文件 Java 源码程序启动。 */
 public final class SourceEnvironment {
@@ -112,9 +112,7 @@ public final class SourceEnvironment {
     }
 
     private String projectKey() throws Exception {
-        return HexFormat.of().formatHex(
-            MessageDigest.getInstance("SHA-256").digest(root.toRealPath().toString().getBytes(StandardCharsets.UTF_8)))
-            .substring(0, 16);
+        return Sha256.hex(root.toRealPath().toString()).substring(0, 16);
     }
 
     private int probe(Path home, Path libraries) throws Exception {

@@ -1,17 +1,12 @@
 package com.pilot.server.store;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.security.DigestInputStream;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -19,6 +14,7 @@ import java.util.Optional;
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolCallJournal;
+import com.pilot.core.util.Sha256;
 import com.pilot.server.maintenance.StorageHealth;
 
 import tools.jackson.databind.ObjectMapper;
@@ -164,12 +160,8 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
                 || !file.toRealPath().startsWith(workspace.toRealPath())) {
                 throw new IOException("文件无法可靠读取");
             }
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (var input = new DigestInputStream(Files.newInputStream(file), digest)) {
-                input.transferTo(OutputStream.nullOutputStream());
-            }
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (IOException | NoSuchAlgorithmException | RuntimeException e) {
+            return Sha256.hex(file);
+        } catch (IOException | RuntimeException e) {
             throw unavailable("无法核对工具调用涉及的文件", e);
         }
     }

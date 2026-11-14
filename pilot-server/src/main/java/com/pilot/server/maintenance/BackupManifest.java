@@ -9,7 +9,6 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.security.DigestInputStream;
 import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -25,6 +24,7 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import com.pilot.core.util.FileTrees;
+import com.pilot.core.util.Sha256;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -123,7 +123,7 @@ final class BackupManifest {
                 failures.add("文件大小不匹配: " + name);
                 continue;
             }
-            if (!item.path("sha256").asText("").equals(sha256(file, "2".equals(version(manifest))))) {
+            if (!item.path("sha256").asText("").equals(sha256(file, version(manifest)))) {
                 failures.add("SHA-256 不匹配: " + name);
             }
         }
@@ -180,27 +180,25 @@ final class BackupManifest {
     }
 
     static String sha256(Path file) throws IOException {
-        return sha256(file, false);
+        return Sha256.hex(file);
     }
 
     static boolean matches(Path file, JsonNode entry, String version) throws IOException {
         return Files.size(file) == entry.path("bytes").asLong(-1)
-            && entry.path("sha256").asText("").equals(sha256(file, "2".equals(version)));
+            && entry.path("sha256").asText("").equals(sha256(file, version));
     }
 
-    private static String sha256(Path file, boolean legacy) throws IOException {
+    private static String sha256(Path file, String version) throws IOException {
+        return "2".equals(version) ? legacySha256(file) : sha256(file);
+    }
+
+    private static String legacySha256(Path file) throws IOException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            if (legacy) {
-                try (var reader = new InputStreamReader(Files.newInputStream(file), StandardCharsets.ISO_8859_1);
-                    var writer = new OutputStreamWriter(new DigestOutputStream(OutputStream.nullOutputStream(), digest),
-                        StandardCharsets.UTF_8)) {
-                    reader.transferTo(writer);
-                }
-            } else {
-                try (var input = new DigestInputStream(Files.newInputStream(file), digest)) {
-                    input.transferTo(OutputStream.nullOutputStream());
-                }
+            try (var reader = new InputStreamReader(Files.newInputStream(file), StandardCharsets.ISO_8859_1);
+                var writer = new OutputStreamWriter(new DigestOutputStream(OutputStream.nullOutputStream(), digest),
+                    StandardCharsets.UTF_8)) {
+                reader.transferTo(writer);
             }
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException e) {

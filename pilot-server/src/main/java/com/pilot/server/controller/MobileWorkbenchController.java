@@ -1,11 +1,7 @@
 package com.pilot.server.controller;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +16,7 @@ import com.pilot.core.approval.PendingApproval;
 import com.pilot.core.event.ApprovalRequired;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.session.SessionRepository;
+import com.pilot.core.util.Sha256;
 import com.pilot.server.config.AttachmentLimits;
 import com.pilot.server.results.ResultInboxService;
 
@@ -74,12 +71,7 @@ public class MobileWorkbenchController {
     }
 
     private String revision(Map<String, Object> snapshot) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                .digest(mapper.writeValueAsString(snapshot).getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("无法计算移动快照版本", e);
-        }
+        return Sha256.hex(mapper.writeValueAsString(snapshot));
     }
 
     private static String abbreviate(String text) {
