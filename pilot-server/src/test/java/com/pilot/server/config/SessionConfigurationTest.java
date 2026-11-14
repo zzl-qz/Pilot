@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.core.convert.ConversionFailedException;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.mock.env.MockEnvironment;
@@ -48,5 +49,13 @@ class SessionConfigurationTest {
             .previewLimits(new MockEnvironment().withProperty("pilot.events.total-preview-bytes", "100")));
         assertThrows(RuntimeException.class, () -> configuration
             .eventStreamLimits(new MockEnvironment().withProperty("pilot.events.queue-items", "unknown")));
+    }
+
+    @Test
+    void rejectsExplicitEmptyValuesForIntegerAndLongLimits() {
+        assertThrows(ConversionFailedException.class,
+            () -> configuration.eventStreamLimits(new MockEnvironment().withProperty("pilot.events.page-size", "")));
+        assertThrows(ConversionFailedException.class,
+            () -> configuration.previewLimits(new MockEnvironment().withProperty("pilot.events.merge-ms", "")));
     }
 }
