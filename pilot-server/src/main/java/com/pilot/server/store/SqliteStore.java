@@ -338,31 +338,18 @@ public final class SqliteStore {
     }
 
     public Set<String> activeRunIds() {
-        try (Connection connection = open(); Statement statement = connection.createStatement();
-            ResultSet rows = statement.executeQuery(
-                "SELECT run_id FROM run_checkpoints WHERE status IN ('RUNNING','INTERRUPTED','PAUSED')")) {
-            Set<String> ids = new HashSet<>();
-            while (rows.next()) {
-                ids.add(rows.getString(1));
-            }
-            return Set.copyOf(ids);
-        } catch (SQLException e) {
-            throw new IllegalStateException("读取可恢复运行失败", e);
-        }
+        return recoverableIds("run_id", "读取可恢复运行失败");
     }
 
     public Set<String> activeSessionIds() {
-        try (Connection connection = open(); Statement statement = connection.createStatement();
-            ResultSet rows = statement.executeQuery(
-                "SELECT DISTINCT session_id FROM run_checkpoints WHERE status IN ('RUNNING','INTERRUPTED','PAUSED')")) {
-            Set<String> ids = new HashSet<>();
-            while (rows.next()) {
-                ids.add(rows.getString(1));
-            }
-            return Set.copyOf(ids);
-        } catch (SQLException e) {
-            throw new IllegalStateException("读取可恢复会话失败", e);
-        }
+        return recoverableIds("session_id", "读取可恢复会话失败");
+    }
+
+    private Set<String> recoverableIds(String column, String failure) {
+        return Set.copyOf(JdbcSupport.query(this,
+            "SELECT DISTINCT " + column + " FROM run_checkpoints WHERE status IN ('RUNNING','INTERRUPTED','PAUSED')",
+            statement -> {
+            }, rows -> rows.getString(1), failure));
     }
 
     public record EventReferences(Set<String> runs, Set<String> sessions) {
